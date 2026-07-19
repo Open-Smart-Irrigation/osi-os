@@ -276,6 +276,8 @@ test('HISTORICAL_V2_DISPOSITION zero/factory-baseline forbids deployment-backup 
     imageBaselineOperationId: OP_A,
     imageBaselineGeneration: 0,
     allRootAbsenceIntentSha256: 'a1'.repeat(32),
+    factoryCommandActivityAnchor: { generation: 0, entrySha256: 'b1'.repeat(32) },
+    factoryCommandActivityAnchorSha256: codecs.canonicalSha256({ generation: 0, entrySha256: 'b1'.repeat(32) }),
   });
   assert.doesNotThrow(() => codecs.validateGeneration(gen));
   gen.state.backupSha256 = 'b2'.repeat(32); // forbidden deployment-backup field

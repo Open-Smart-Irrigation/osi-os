@@ -66,6 +66,53 @@ test('recordHistoricalV2Disposition appends a receipt-bound deployment zero/CLEA
   assert.match(current.state.historicalV2DispositionReceiptSha256, /^[0-9a-f]{64}$/);
 });
 
+test('recordHistoricalV2Disposition rejects replay of an older operation before writing an orphan generation', (t) => {
+  const { tmp, opts } = makeRoots();
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  protocol.initialize({ ...opts, operationId: GENESIS_OPERATION, createdAt: '2026-07-19T00:00:00.000Z' });
+  const first = protocol.loadProtocolState(opts);
+  const base = {
+    ...opts, operationId: DISPOSITION_OPERATION, createdAt: '2026-07-19T00:01:00.000Z',
+    expectedHeadSha256: first.capability.head.generationSha256,
+    expectedWitnessSha256: first.capability.head.witnessSha256,
+    expectedActivityGeneration: first.activity.externalHead.generation,
+    expectedActivityHeadSha256: protocol.canonicalSha256(first.activity.externalHead),
+    source: {
+      sourceKind: 'zero', sourceAuthorityKind: 'deployment-backup', dispositionReceiptSha256: SHA_A,
+      auditSha256: SHA_B, databaseSha256: SHA_C, backupSha256: SHA_D, identitySha256: SHA_E,
+      historicalV2Disposition: 'CLEAR',
+    },
+  };
+  transitions.recordHistoricalV2Disposition(base);
+  const second = protocol.loadProtocolState(opts);
+  transitions.recordHistoricalV2Disposition({
+    ...base,
+    operationId: '33333333-3333-4333-8333-333333333333',
+    expectedHeadSha256: second.capability.head.generationSha256,
+    expectedWitnessSha256: second.capability.head.witnessSha256,
+    expectedActivityGeneration: second.activity.externalHead.generation,
+    expectedActivityHeadSha256: protocol.canonicalSha256(second.activity.externalHead),
+    source: {
+      sourceKind: 'rebind',
+      dispositionReceiptSha256: SHA_A,
+      auditSha256: SHA_B,
+      databaseSha256: SHA_C,
+      backupSha256: SHA_D,
+      identitySha256: SHA_E,
+      historicalV2Disposition: 'CLEAR',
+    },
+  });
+  const beforeReplay = protocol.loadProtocolState(opts);
+  assert.throws(() => transitions.recordHistoricalV2Disposition({
+    ...base,
+    expectedHeadSha256: beforeReplay.capability.head.generationSha256,
+    expectedWitnessSha256: beforeReplay.capability.head.witnessSha256,
+    expectedActivityGeneration: beforeReplay.activity.externalHead.generation,
+    expectedActivityHeadSha256: protocol.canonicalSha256(beforeReplay.activity.externalHead),
+  }), { code: 'operation_id_replayed' });
+  assert.equal(protocol.loadProtocolState(opts).capability.generations.length, 3);
+});
+
 test('load fails closed when a committed transition receipt is removed or rewritten', (t) => {
   const { tmp, opts } = makeRoots();
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -393,6 +440,51 @@ test('prepareDatabaseRestore returns NO_POST_BACKUP_DATABASE_DELTA without advan
   );
 });
 
+test('prepareDatabaseRestore rejects an unreadable current database without snapshot or invalidation', (t) => {
+  const { tmp, opts } = makeRoots();
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  protocol.initialize({ ...opts, operationId: GENESIS_OPERATION, createdAt: '2026-07-19T00:00:00.000Z' });
+  const loaded = protocol.loadProtocolState(opts);
+  const commandAudit = { format: 1, commandStateSha256: SHA_A, commandOwnedTables: ['applied_commands'] };
+  const wholeAudit = farmingAudit(SHA_B, SHA_C);
+  const backupManifest = { format: 1, databaseSha256: SHA_D };
+  const baseline = {
+    format: 1, kind: 'DATABASE_RESTORE_BASELINE',
+    backupCommandAuditSha256: protocol.canonicalSha256(commandAudit),
+    backupFarmingAuditSha256: protocol.canonicalSha256(wholeAudit),
+    baselineCommandAuditSha256: protocol.canonicalSha256(commandAudit),
+    baselineFarmingAuditSha256: protocol.canonicalSha256(wholeAudit),
+    expectedMutationDeltaSha256: SHA_E, writerGeneration: 4,
+  };
+  const dir = path.join(tmp, 'general-restore-unreadable');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const unreadable = {
+    format: 1, evidenceKind: 'CURRENT_DATABASE_UNREADABLE', databasePath: '/data/db/farming.db',
+    observedDatabaseIdentitySha256: null, quickCheckResult: 'unreadable', errorCode: 'SQLITE_OPEN_FAILED',
+    createdAt: '2026-07-19T00:04:00.000Z',
+  };
+  const result = transitions.prepareDatabaseRestore({
+    ...opts, deploymentId: 'dep-1', parentGeneration: 9,
+    recoveryOperationId: '55555555-5555-4555-8555-555555555555',
+    backupManifest, restoreBaseline: baseline,
+    reverseMergeAdapterInventory: { format: 1, kind: 'DATABASE_RESTORE_REVERSE_ADAPTER_INVENTORY', adapters: [] },
+    backupCommandAudit: commandAudit, backupFarmingAudit: wholeAudit,
+    currentCommandAudit: unreadable, currentFarmingAudit: unreadable,
+    currentDatabaseUnreadable: true,
+    databaseLineageInvalidationReceiptSha256: null,
+    expectedHeadSha256: loaded.capability.head.generationSha256,
+    expectedWitnessSha256: loaded.capability.head.witnessSha256,
+    expectedActivityGeneration: loaded.activity.externalHead.generation,
+    expectedActivityHeadSha256: protocol.canonicalSha256(loaded.activity.externalHead),
+    prepareIntentOut: path.join(dir, 'intent.json'), resultOut: path.join(dir, 'result.json'),
+    currentSnapshot: null,
+  });
+  assert.equal(result.result, 'REJECTED');
+  assert.equal(result.reason, 'CURRENT_DATABASE_UNREADABLE');
+  assert.equal(protocol.status(opts).capabilityGeneration, 0);
+  assert.equal(fs.existsSync(path.join(dir, 'current-command-state.snapshot.sqlite')), false);
+});
+
 test('completeDatabaseRestoreReconciliation clears only the exact invalidated restore epoch', (t) => {
   const { tmp, opts } = makeRoots();
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -515,6 +607,42 @@ test('prepareIntegrityRecovery appends the exact existing-root integrity invalid
 
   assert.equal(result.result, 'BACKUP_REPLACEMENT_PREPARED');
   const loaded = protocol.loadProtocolState(opts);
+  assert.equal(loaded.capability.generations.at(-1).generation.kind, 'DATABASE_INTEGRITY_INVALIDATION');
+  assert.equal(loaded.capability.generations.at(-1).generation.state.databaseRestore.status, 'RECONCILIATION_REQUIRED');
+});
+
+test('prepareIntegrityRecovery initializes exact all-root absence before integrity invalidation', (t) => {
+  const { tmp, opts } = makeRoots();
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const request = { format: 1, requestId: 'request-absence', recoveryRequestSha256: SHA_A };
+  const observedEvidence = {
+    format: 1, kind: 'DATABASE_INTEGRITY_OBSERVATION', requestId: 'request-absence',
+    recoveryRequestSha256: protocol.canonicalSha256(request), databasePath: '/data/db/farming.db',
+    observedDatabaseIdentitySha256: SHA_B, quickCheckResult: 'missing', sqliteMembers: [
+      { name: 'journal', path: '/data/db/farming.db-journal', status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null },
+      { name: 'main', path: '/data/db/farming.db', status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null },
+      { name: 'shm', path: '/data/db/farming.db-shm', status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null },
+      { name: 'wal', path: '/data/db/farming.db-wal', status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null },
+    ], bootIdSha256: SHA_C, createdAt: '2026-07-19T00:07:00.000Z',
+  };
+  const backupManifest = { format: 1, databaseSha256: SHA_D, commandAuditSha256: SHA_A, farmingAuditSha256: SHA_B };
+  const recoveryOperationId = 'abababab-abab-4bab-8bab-abababababab';
+  const authority = {
+    format: 1, kind: 'DATABASE_INTEGRITY_RECOVERY_AUTHORITY', requestId: request.requestId, recoveryOperationId,
+    recoveryRequestSha256: protocol.canonicalSha256(request), backupManifestSha256: protocol.canonicalSha256(backupManifest),
+    backupDatabaseSha256: SHA_D, observedEvidenceSha256: protocol.canonicalSha256(observedEvidence),
+    possibleDataLossAcknowledgementSha256: SHA_E, databaseLineageInvalidationReceiptSha256: null,
+    disposition: 'RESTORE_TRUSTED_BACKUP_AND_RECONCILE', createdAt: observedEvidence.createdAt,
+  };
+  const result = transitions.prepareIntegrityRecovery({
+    ...opts, recoveryRequest: request, authority, observedEvidence, backupManifest,
+    integrityAllRootsAbsent: true, databaseLineageInvalidationReceiptSha256: null,
+    forensicDestination: path.join(tmp, 'forensic', request.requestId),
+    resultOut: path.join(tmp, 'integrity', 'prepare-result.json'), createdAt: observedEvidence.createdAt,
+  });
+  assert.equal(result.protocolInitialization, 'ALL_ROOT_ABSENCE');
+  const loaded = protocol.loadProtocolState(opts);
+  assert.equal(loaded.capability.generations[0].generation.state.historicalV2Disposition, 'UNASSESSED');
   assert.equal(loaded.capability.generations.at(-1).generation.kind, 'DATABASE_INTEGRITY_INVALIDATION');
   assert.equal(loaded.capability.generations.at(-1).generation.state.databaseRestore.status, 'RECONCILIATION_REQUIRED');
 });
@@ -661,6 +789,8 @@ function makeResetFixture() {
     format: 1, capabilityGeneration: active.capability.head.generation,
     capabilityHeadSha256: active.capability.head.generationSha256,
     capabilityWitnessSha256: active.capability.head.witnessSha256,
+    activityGeneration: active.activity.externalHead.generation,
+    activityExternalHeadSha256: protocol.canonicalSha256(active.activity.externalHead),
     ackAuditSha256: protocol.canonicalSha256(ackAudit), fromIdentitySha256: fromIdentity,
     guardEvidence: { nodeRedAbsent: true, identitydAbsent: true, oneShotChildrenAbsent: true,
       rcLinksQuarantined: true, identitydLockAbsent: true, terminalFactsReconciled: true },

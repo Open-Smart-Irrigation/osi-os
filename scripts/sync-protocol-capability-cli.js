@@ -26,20 +26,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const childProcess = require('node:child_process');
-const protocolState = require(
-  path.join(
-    __dirname,
-    '..',
-    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state'
-  )
-);
-const capabilityTransitions = require(
-  path.join(
-    __dirname,
-    '..',
-    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state/capability-transitions.js'
-  )
-);
 
 function cliError(code, message, extra) {
   const err = new Error(message);
@@ -47,6 +33,29 @@ function cliError(code, message, extra) {
   if (extra) Object.assign(err, extra);
   return err;
 }
+
+function resolveProtocolStateRoot() {
+  // Source checkout and ROM resident copies have different adjacent roots.
+  // Keep one executable byte-identical across both profiles while resolving
+  // only the canonical source-tree or /usr/share/node-red helper location.
+  const candidates = [
+    path.join(__dirname, '..', 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state'),
+    path.join(__dirname, '..', 'share/node-red/osi-sync-protocol-state'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const stat = fs.lstatSync(candidate);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) return candidate;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  throw cliError('protocol_state_helper_missing', 'osi-sync-protocol-state helper is not available at a trusted location');
+}
+
+const protocolStateRoot = resolveProtocolStateRoot();
+const protocolState = require(protocolStateRoot);
+const capabilityTransitions = require(path.join(protocolStateRoot, 'capability-transitions.js'));
 
 // Flag type -> validator. `path` flags must be absolute and their existing
 // components must not be symlinks (enforced by the shared helper's own
@@ -193,9 +202,9 @@ const VERB_FLAGS = {
     '--reverse-merge-adapter-inventory': 'path',
     '--backup-command-audit-report': 'path',
     '--backup-farming-audit-report': 'path',
-    '--current-command-audit-report': 'path',
-    '--current-farming-audit-report': 'path',
-    '--current-snapshot': 'path',
+    '--current-command-audit-report': FLAG_TYPES.pathOrLiteral('current-database-unreadable-json'),
+    '--current-farming-audit-report': FLAG_TYPES.pathOrLiteral('current-database-unreadable-json'),
+    '--current-snapshot': FLAG_TYPES.pathOrLiteral('snapshot-unavailable-json'),
     '--database-lineage-invalidation-receipt': FLAG_TYPES.pathOrLiteral('not-applicable'),
     '--expected-head-sha256': 'sha256',
     '--expected-witness-sha256': 'sha256',
@@ -328,6 +337,21 @@ function readOptionalJson(value, options) {
   return value === 'not-applicable' ? null : readJsonFile(value, options);
 }
 
+function readCurrentDatabaseEvidence(value, label) {
+  if (value === 'current-database-unreadable-json') {
+    return {
+      format: 1,
+      evidenceKind: 'CURRENT_DATABASE_UNREADABLE',
+      databasePath: '/data/db/farming.db',
+      observedDatabaseIdentitySha256: null,
+      quickCheckResult: 'unreadable',
+      errorCode: 'SQLITE_OPEN_FAILED',
+      createdAt: new Date().toISOString(),
+    };
+  }
+  return readJsonFile(value, { label });
+}
+
 function canonicalSha256(value) {
   return protocolState.canonicalSha256(value);
 }
@@ -374,12 +398,32 @@ function printTransitionResult(opts, result, fallback) {
 
 function runInitialize(values) {
   const opts = rootOptionsFrom(values);
+  if (values['--expected-phase'] !== 'protocol-initializing') {
+    throw cliError('initialize_phase_invalid', 'initialize requires the exact protocol-initializing phase');
+  }
   protocolState.requireDeploymentPhase(values['--deployment-state'], {
     expectedDeploymentId: values['--expected-deployment-id'],
     expectedPhase: values['--expected-phase'],
     expectedParentGeneration: values['--expected-parent-generation'],
   });
-  const result = protocolState.initialize(Object.assign({}, opts, { operationId: values['--operation-id'] }));
+  const ackAuditReport = readJsonFile(values['--ack-audit-report']);
+  if (ackAuditReport.format !== 1 || ackAuditReport.writersStopped !== true) {
+    throw cliError('initialize_ack_audit_invalid', 'initialize requires a format-1 stopped-writer audit report');
+  }
+  const backupManifest = readJsonFile(values['--backup-manifest']);
+  const expectedCapabilityHead = values['--expected-capability-head-sha256'];
+  const expectedWitnessHead = values['--expected-witness-head-sha256'];
+  if (
+    backupManifest.format !== 1 ||
+    backupManifest.capabilityHeadSha256 !== expectedCapabilityHead ||
+    backupManifest.capabilityWitnessSha256 !== expectedWitnessHead
+  ) {
+    throw cliError('initialize_backup_head_mismatch', 'initialize backup evidence does not bind the expected capability heads');
+  }
+  const result = protocolState.initialize(Object.assign({}, opts, {
+    operationId: values['--operation-id'],
+    sourceKind: 'deployment',
+  }));
   const st = protocolState.status(opts);
   printBoundedResult({
     capabilityGeneration: st.capabilityGeneration,
@@ -414,6 +458,9 @@ function runStatus(values) {
 
 function runFactoryZero(values) {
   const opts = rootOptionsFrom(values);
+  if (values['--expected-phase'] !== 'image-baseline-initializing') {
+    throw cliError('factory_phase_invalid', 'initialize-factory-zero requires the exact image-baseline-initializing phase');
+  }
   protocolState.requireFactoryBaselinePhase(values['--deployment-state'], {
     expectedBaselineId: values['--expected-baseline-id'],
     expectedPhase: values['--expected-phase'],
@@ -422,8 +469,27 @@ function runFactoryZero(values) {
     operationId: values['--operation-id'],
   });
   const databaseStat = fs.lstatSync(values['--database']);
-  if (!databaseStat.isFile() || databaseStat.isSymbolicLink()) {
+  if (!databaseStat.isFile() || databaseStat.isSymbolicLink() || (databaseStat.mode & 0o777) !== 0o600) {
     throw cliError('factory_database_invalid', '--database must be a regular nonsymlink file');
+  }
+  for (const suffix of ['-wal', '-shm', '-journal']) {
+    if (fs.existsSync(`${values['--database']}${suffix}`)) {
+      throw cliError('factory_database_sidecar_present', `factory database SQLite set must be absent of sidecars: ${suffix || 'main'}`);
+    }
+  }
+  const quickCheck = childProcess.spawnSync('/usr/bin/sqlite3', ['-readonly', values['--database'], 'PRAGMA quick_check;'], {
+    encoding: 'utf8',
+    timeout: 30000,
+  });
+  if (quickCheck.status !== 0 || quickCheck.stdout.trim() !== 'ok') {
+    throw cliError('factory_database_quick_check_failed', 'factory database failed SQLite quick_check');
+  }
+  const ackAuditReport = readJsonFile(values['--ack-audit-report']);
+  const observedIdentitySha256 = crypto.createHash('sha256')
+    .update(protocolState.canonicalJson({ device: databaseStat.dev, inode: databaseStat.ino }))
+    .digest('hex');
+  if (ackAuditReport.databaseIdentitySha256 !== observedIdentitySha256) {
+    throw cliError('factory_database_identity_mismatch', 'factory database inode identity does not match the stopped-writer audit');
   }
   const result = capabilityTransitions.initializeFactoryZero({
     ...opts,
@@ -433,7 +499,7 @@ function runFactoryZero(values) {
     factoryProvenance: readJsonFile(values['--factory-provenance'], { artifactOwned: true }),
     imageGuardManifest: readJsonFile(values['--image-guard-manifest'], { artifactOwned: true }),
     factorySeedReceipt: readJsonFile(values['--factory-seed-receipt']),
-    ackAuditReport: readJsonFile(values['--ack-audit-report']),
+    ackAuditReport,
     factoryIntentOut: values['--factory-intent-out'],
     factoryZeroSourceReceiptOut: values['--factory-zero-source-receipt-out'],
   });
@@ -455,6 +521,19 @@ function runRecordDisposition(values) {
     requireRecovery(values, disposition.recoveryOperationId, 'integrity-historical-dispositioning', disposition.requestId);
   } else {
     throw cliError('record_disposition_phase_invalid', 'record-v2-disposition requires protocol-dispositioning or integrity-historical-dispositioning');
+  }
+  if (audit.format !== 1 || !/^[0-9a-f]{64}$/.test(audit.databaseIdentitySha256 || '')) {
+    throw cliError('disposition_audit_invalid', 'record-v2-disposition requires a format-1 audit with a database identity hash');
+  }
+  if (
+    backup.format !== 1 ||
+    backup.capabilityHeadSha256 !== values['--expected-head-sha256'] ||
+    backup.capabilityWitnessSha256 !== values['--expected-witness-sha256'] ||
+    !Number.isSafeInteger(backup.activityGeneration) ||
+    !/^[0-9a-f]{64}$/.test(backup.activityExternalHeadSha256 || '') ||
+    !/^[0-9a-f]{64}$/.test(backup.activityEntrySha256 || '')
+  ) {
+    throw cliError('disposition_backup_invalid', 'record-v2-disposition backup must bind capability and activity heads');
   }
   requireHash(disposition, values['--expected-disposition-receipt-sha256'], 'disposition receipt');
   if (disposition.identitySha256 != null && disposition.identitySha256 !== values['--expected-identity-sha256']) {
@@ -487,6 +566,9 @@ function runRecordDisposition(values) {
     expectedHeadSha256: values['--expected-head-sha256'],
     expectedWitnessSha256: values['--expected-witness-sha256'],
     ...activityExpectations(backup),
+    ...(values['--expected-phase'] === 'integrity-historical-dispositioning'
+      ? { integrityRecoveryOperationId: disposition.recoveryOperationId }
+      : {}),
     source,
   });
   printTransitionResult(opts, result, historicalV2Disposition);
@@ -505,9 +587,16 @@ function requireRecovery(values, recoveryOperationId, expectedRecoveryPhase, req
   });
 }
 
+function requirePinnedRecovery(values, recoveryOperationId, expectedPhase, requestId) {
+  if (values['--expected-recovery-phase'] !== expectedPhase) {
+    throw cliError('recovery_phase_invalid', `this verb requires the exact ${expectedPhase} recovery phase`);
+  }
+  return requireRecovery(values, recoveryOperationId, expectedPhase, requestId);
+}
+
 function runPrepareDispositionRestore(values) {
   const opts = rootOptionsFrom(values);
-  requireRecovery(values, values['--recovery-operation-id'], values['--expected-recovery-phase']);
+  requirePinnedRecovery(values, values['--recovery-operation-id'], 'disposition-restore-preparing');
   const audit = readJsonFile(values['--ack-audit-report']);
   const backup = readJsonFile(values['--backup-manifest']);
   const result = capabilityTransitions.prepareDispositionRestore({
@@ -533,7 +622,7 @@ function runPrepareDispositionRestore(values) {
 
 function runInvalidateDisposition(values) {
   const opts = rootOptionsFrom(values);
-  requireRecovery(values, values['--recovery-operation-id'], values['--expected-recovery-phase']);
+  requirePinnedRecovery(values, values['--recovery-operation-id'], 'disposition-restoring');
   const preparation = readJsonFile(values['--restore-preparation-result']);
   const restoreReceipt = readJsonFile(values['--restore-receipt']);
   const restoredAudit = readJsonFile(values['--ack-audit-report']);
@@ -623,14 +712,14 @@ function sqliteSnapshotAdapter(sourcePath) {
 
 function runPrepareDatabaseRestore(values) {
   const opts = rootOptionsFrom(values);
-  requireRecovery(values, values['--recovery-operation-id'], values['--expected-recovery-phase']);
+  requirePinnedRecovery(values, values['--recovery-operation-id'], 'database-restore-preparing');
   const backupManifest = readJsonFile(values['--backup-manifest']);
   const restoreBaseline = readJsonFile(values['--restore-baseline']);
   const reverseInventory = readJsonFile(values['--reverse-merge-adapter-inventory'], { artifactOwned: true });
   const backupCommandAudit = readJsonFile(values['--backup-command-audit-report']);
   const backupFarmingAudit = readJsonFile(values['--backup-farming-audit-report']);
-  const currentCommandAudit = readJsonFile(values['--current-command-audit-report']);
-  const currentFarmingAudit = readJsonFile(values['--current-farming-audit-report']);
+  const currentCommandAudit = readCurrentDatabaseEvidence(values['--current-command-audit-report'], 'current command audit');
+  const currentFarmingAudit = readCurrentDatabaseEvidence(values['--current-farming-audit-report'], 'current farming audit');
   const lineageReceipt = readOptionalJson(values['--database-lineage-invalidation-receipt']);
   const result = capabilityTransitions.prepareDatabaseRestore({
     ...opts,
@@ -644,7 +733,7 @@ function runPrepareDatabaseRestore(values) {
     backupFarmingAudit,
     currentCommandAudit,
     currentFarmingAudit,
-    currentSnapshot: values['--current-snapshot'],
+    currentSnapshot: values['--current-snapshot'] === 'snapshot-unavailable-json' ? null : values['--current-snapshot'],
     databaseLineageInvalidationReceiptSha256: lineageReceipt ? canonicalSha256(lineageReceipt) : null,
     expectedHeadSha256: values['--expected-head-sha256'],
     expectedWitnessSha256: values['--expected-witness-sha256'],
@@ -662,7 +751,7 @@ function runPrepareDatabaseRestore(values) {
 
 function runCompleteDatabaseRestore(values) {
   const opts = rootOptionsFrom(values);
-  requireRecovery(values, values['--recovery-operation-id'], values['--expected-recovery-phase']);
+  requirePinnedRecovery(values, values['--recovery-operation-id'], 'database-restore-reconciling');
   const result = capabilityTransitions.completeDatabaseRestoreReconciliation({
     ...opts,
     deploymentId: values['--expected-deployment-id'],
@@ -688,6 +777,7 @@ function runPrepareIntegrity(values) {
   const observedEvidence = readJsonFile(path.join(path.dirname(values['--authority']), 'observed-evidence.json'));
   const lineageReceipt = readOptionalJson(values['--database-lineage-invalidation-receipt']);
   const backupManifest = readJsonFile(values['--backup-manifest']);
+  const protocolStatus = protocolState.status(opts);
   const result = capabilityTransitions.prepareIntegrityRecovery({
     ...opts,
     recoveryRequest,
@@ -701,6 +791,7 @@ function runPrepareIntegrity(values) {
     expectedWitnessSha256: backupManifest.capabilityWitnessSha256,
     expectedActivityGeneration: backupManifest.activityGeneration,
     expectedActivityHeadSha256: backupManifest.activityExternalHeadSha256,
+    integrityAllRootsAbsent: !protocolStatus.initialized && !protocolStatus.midFlight,
   });
   if (result.result === 'REJECTED' || result.result === 'FORWARD_REPAIR_REQUIRED') {
     throw cliError('integrity_recovery_rejected', `integrity recovery preparation did not authorize replacement: ${result.result}`);
@@ -712,7 +803,7 @@ function runCompleteIntegrity(values) {
   const opts = rootOptionsFrom(values);
   const recoveryRequest = readJsonFile(values['--recovery-request']);
   const authority = readJsonFile(values['--reconciliation-authority']);
-  requireRecovery(values, authority.recoveryOperationId, 'integrity-reconciliation-required', recoveryRequest.requestId);
+  requirePinnedRecovery(values, authority.recoveryOperationId, 'integrity-reconciliation-required', recoveryRequest.requestId);
   const recoveredRowsManifest = readOptionalJson(values['--recovered-rows-manifest']);
   const offlineImportManifest = readOptionalJson(values['--offline-import-manifest']);
   let offlineImportReceiptSha256 = null;
@@ -749,14 +840,24 @@ function runCompleteIntegrity(values) {
 function runAuthorizeReset(values) {
   const opts = rootOptionsFrom(values);
   const confirmation = readJsonFile(values['--confirmation']);
+  const backupManifest = readJsonFile(values['--backup-manifest']);
+  if (
+    backupManifest.format !== 1 ||
+    !Number.isSafeInteger(backupManifest.activityGeneration) ||
+    !/^[0-9a-f]{64}$/.test(backupManifest.activityExternalHeadSha256 || '')
+  ) {
+    throw cliError('reset_backup_activity_invalid', 'reset backup must bind the command-activity generation and external head');
+  }
   const result = capabilityTransitions.authorizeReset({
     ...opts,
     confirmation,
     confirmationPath: values['--confirmation'],
-    backupManifest: readJsonFile(values['--backup-manifest']),
+    backupManifest,
     ackAuditReport: readJsonFile(values['--ack-audit-report']),
     expectedHeadSha256: confirmation.expectedHeadSha256,
     expectedWitnessSha256: confirmation.expectedWitnessSha256,
+    expectedActivityGeneration: backupManifest.activityGeneration,
+    expectedActivityHeadSha256: backupManifest.activityExternalHeadSha256,
   });
   printTransitionResult(opts, result, 'RESET_AUTHORIZED');
 }

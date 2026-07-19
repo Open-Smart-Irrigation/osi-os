@@ -345,6 +345,15 @@ function dispositionStateFields(state) {
         imageBaselineOperationId: { check: isOperationId },
         imageBaselineGeneration: { check: isNonNegInt },
         allRootAbsenceIntentSha256: { check: isSha256Hex },
+        factoryCommandActivityAnchor: { check: (value) => {
+          if (!value || typeof value !== 'object' || Array.isArray(value) ||
+              Object.keys(value).sort().join(',') !== 'entrySha256,generation' ||
+              value.generation !== 0 || !isSha256Hex(value.entrySha256)) {
+            throw codecError('schema_invalid_field', 'factory command-activity anchor is invalid', { field: 'factoryCommandActivityAnchor' });
+          }
+          return true;
+        } },
+        factoryCommandActivityAnchorSha256: { check: isSha256Hex },
       });
     }
   } else if (sourceKind === 'rebind' || sourceKind === 'quarantine') {
@@ -386,7 +395,14 @@ function validateDispositionState(state) {
   if (state.historicalV2Disposition !== expectedDisposition) {
     throw codecError('schema_invalid_field', `sourceKind "${sourceKind}" requires historicalV2Disposition "${expectedDisposition}"`, { field: 'historicalV2Disposition' });
   }
-  return validateClosedObject(state, dispositionStateFields(state), 'HISTORICAL_V2_DISPOSITION state');
+  const validated = validateClosedObject(state, dispositionStateFields(state), 'HISTORICAL_V2_DISPOSITION state');
+  if (sourceKind === 'zero' && state.sourceAuthorityKind === 'factory-baseline' &&
+      canonicalSha256(state.factoryCommandActivityAnchor) !== state.factoryCommandActivityAnchorSha256) {
+    throw codecError('schema_invalid_field', 'factory command-activity anchor hash does not match its canonical anchor', {
+      field: 'factoryCommandActivityAnchorSha256',
+    });
+  }
+  return validated;
 }
 
 // --- NEGOTIATED --------------------------------------------------------

@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
+const crypto = require('node:crypto');
 
 const CLI_PATH = path.join(__dirname, 'sync-protocol-capability-cli.js');
 const cli = require('./sync-protocol-capability-cli');
@@ -63,6 +64,15 @@ function initializeFlags(tmp, overrides) {
     activeSubOperation: o.activeSubOperation !== undefined ? o.activeSubOperation : null,
   };
   const statePath = writeDeploymentState(tmp, stateObj);
+  writePrivateJson(path.join(tmp, 'ack.json'), {
+    format: 1,
+    writersStopped: true,
+  });
+  writePrivateJson(path.join(tmp, 'backup.json'), {
+    format: 1,
+    capabilityHeadSha256: 'absent',
+    capabilityWitnessSha256: 'absent',
+  });
   return [
     'initialize',
     ...rootFlags(tmp),
@@ -138,6 +148,20 @@ test('CLI initialize: deployment/expected id mismatch is rejected', () => {
   const result = runCli(initializeFlags(tmp, { expectedDeploymentId: 'dep-other' }));
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /deployment_state_wrong_deployment_id/);
+});
+
+test('CLI initialize: expected capability and witness heads are bound to the backup evidence', () => {
+  const tmp = tmpDir();
+  const flags = initializeFlags(tmp);
+  writePrivateJson(path.join(tmp, 'backup.json'), {
+    format: 1,
+    capabilityHeadSha256: 'b'.repeat(64),
+    capabilityWitnessSha256: 'c'.repeat(64),
+  });
+  const result = runCli(flags);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /initialize_backup_head_mismatch/);
+  assert.equal(fs.existsSync(path.join(tmp, 'osi-sync')), false);
 });
 
 test('CLI status: healthy roots report HEALTHY', () => {
@@ -236,6 +260,8 @@ test('CLI record-v2-disposition commits a deployment-bound CLEAR transition', ()
   const audit = { format: 1, databaseIdentitySha256: 'c'.repeat(64) };
   const backup = {
     format: 1,
+    capabilityHeadSha256: loaded.capability.head.generationSha256,
+    capabilityWitnessSha256: loaded.capability.head.witnessSha256,
     activityGeneration: loaded.activity.externalHead.generation,
     activityEntrySha256: loaded.activity.externalHead.entrySha256,
     activityExternalHeadSha256: protocol.canonicalSha256(loaded.activity.externalHead),
@@ -288,16 +314,24 @@ test('CLI initialize-factory-zero commits factory genesis and CLEAR only in the 
   const evidenceDir = path.join(tmp, 'factory-evidence');
   const provenance = writePrivateJson(path.join(evidenceDir, 'provenance.json'), { format: 2, profile: 'bcm2712' });
   const imageManifest = writePrivateJson(path.join(evidenceDir, 'image-manifest.json'), { format: 2, profile: 'bcm2712' });
+  const database = path.join(tmp, 'farming.db');
+  cp.execFileSync('/usr/bin/sqlite3', [database, 'CREATE TABLE factory_marker (id INTEGER PRIMARY KEY);']);
+  fs.chmodSync(database, 0o600);
+  const databaseStat = fs.lstatSync(database);
+  const databaseIdentitySha256 = crypto.createHash('sha256')
+    .update(require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state').canonicalJson({
+      device: databaseStat.dev,
+      inode: databaseStat.ino,
+    }))
+    .digest('hex');
   const seed = writePrivateJson(path.join(evidenceDir, 'seed.json'), {
     format: 1, receiptKind: 'factory-seed', seedSha256: 'a'.repeat(64),
-    databaseIdentitySha256: 'b'.repeat(64), databaseLineageSha256: 'c'.repeat(64),
+    databaseIdentitySha256, databaseLineageSha256: 'c'.repeat(64),
   });
   const audit = writePrivateJson(path.join(evidenceDir, 'audit.json'), {
-    format: 1, factorySeedEligible: true, databaseIdentitySha256: 'b'.repeat(64),
+    format: 1, factorySeedEligible: true, databaseIdentitySha256,
     databaseLineageSha256: 'c'.repeat(64), allCountersZero: true,
   });
-  const database = path.join(tmp, 'farming.db');
-  fs.writeFileSync(database, 'factory-test');
   const result = runCli([
     'initialize-factory-zero', ...rootFlags(tmp),
     '--deployment-state', deploymentState,
@@ -316,6 +350,53 @@ test('CLI initialize-factory-zero commits factory genesis and CLEAR only in the 
   ]);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).capabilityGeneration, 1);
+});
+
+test('resident protocol CLI dispatches status through its adjacent ROM helper', () => {
+  const tmp = tmpDir();
+  const rom = path.join(tmp, 'rom');
+  const residentCli = path.join(rom, 'usr', 'libexec', 'osi-sync-protocol-capability-cli.js');
+  const residentHelper = path.join(rom, 'usr', 'share', 'node-red', 'osi-sync-protocol-state');
+  fs.mkdirSync(path.dirname(residentCli), { recursive: true });
+  fs.mkdirSync(path.dirname(residentHelper), { recursive: true });
+  fs.copyFileSync(
+    path.join(__dirname, '..', 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-sync-protocol-capability-cli.js'),
+    residentCli,
+  );
+  fs.cpSync(
+    path.join(__dirname, '..', 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state'),
+    residentHelper,
+    { recursive: true },
+  );
+  fs.chmodSync(residentCli, 0o755);
+  const result = cp.spawnSync(process.execPath, [residentCli, 'status',
+    '--root', path.join(tmp, 'data', 'osi-sync'),
+    '--witness-root', path.join(tmp, 'data', 'osi-sync-witness', 'protocol-capability-witnesses'),
+    '--activity-witness-root', path.join(tmp, 'data', 'osi-sync-witness', 'command-activity-witnesses'),
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout.trim()).operationResult, 'UNINITIALIZED');
+  assert.doesNotMatch(result.stderr, /NOT_IMPLEMENTED_IN_THIS_SLICE/);
+});
+
+test('restore preparation parser accepts the plan sentinel literals', () => {
+  const spec = cli.VERB_FLAGS['prepare-database-restore'];
+  const argv = [];
+  for (const [flag, type] of Object.entries(spec)) {
+    argv.push(flag);
+    if (flag === '--current-snapshot') argv.push('snapshot-unavailable-json');
+    else if (flag === '--current-command-audit-report' || flag === '--current-farming-audit-report') {
+      argv.push('current-database-unreadable-json');
+    } else if (type === 'path') argv.push(path.join(tmpDir(), `${flag.slice(2)}.json`));
+    else if (type === 'generation') argv.push('0');
+    else if (type === 'sha256') argv.push('a'.repeat(64));
+    else if (type === 'string') argv.push('x');
+    else argv.push('not-applicable');
+  }
+  const parsed = cli.parseVerbArgs('prepare-database-restore', argv);
+  assert.equal(parsed['--current-snapshot'], 'snapshot-unavailable-json');
+  assert.equal(parsed['--current-command-audit-report'], 'current-database-unreadable-json');
+  assert.equal(parsed['--current-farming-audit-report'], 'current-database-unreadable-json');
 });
 
 test('CLI: an unknown verb exits nonzero', () => {

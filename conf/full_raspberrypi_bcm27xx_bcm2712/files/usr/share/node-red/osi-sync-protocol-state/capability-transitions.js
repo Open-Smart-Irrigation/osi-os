@@ -6,6 +6,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 const codecs = require('./codecs');
 const paths = require('./paths');
@@ -40,6 +41,11 @@ function assertOperationId(value, label) {
   if (!codecs.isOperationId(value)) {
     throw transitionError('transition_invalid_operation_id', `${label} must be a valid operation ID`);
   }
+}
+
+function derivedOperationId(seed) {
+  const hex = crypto.createHash('sha256').update(seed).digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 function publishImmutableJson(filePath, value, ownershipAdapter) {
@@ -153,7 +159,7 @@ function appendTransition(options, { kind, state, receipt, receiptPath }) {
   const roots = paths.resolveRoots(opts);
   const ownershipAdapter = opts.ownershipAdapter || paths.defaultOwnershipAdapter;
   paths.ensureFourRootDirsForLocking(roots, ownershipAdapter);
-  const lock = locks.acquireFourRootLocks(
+  const lock = opts.lockAlreadyHeld ? { release() {} } : locks.acquireFourRootLocks(
     roots,
     {
       operationId: opts.operationId,
@@ -271,6 +277,9 @@ function appendTransition(options, { kind, state, receipt, receiptPath }) {
         state: predecessor.generation.state,
         resumed: true,
       };
+    }
+    if (loaded.capability.generations.some((entry) => entry.generation.operationId === opts.operationId)) {
+      throw transitionError('operation_id_replayed', 'operationId is already committed earlier in the capability chain');
     }
     assertExpectedHeads(loaded, opts);
     const previousWitness = loaded.capability.witnessByGeneration.get(predecessor.generation.generation);
@@ -393,6 +402,25 @@ function recordHistoricalV2Disposition(options) {
   if (priorState.activeIdentitySha256 !== null || priorState.mode !== 'UNNEGOTIATED') {
     throw transitionError('disposition_after_negotiation', 'historical disposition cannot run after negotiation');
   }
+  const integrityHistorical = opts.integrityRecoveryOperationId != null;
+  if (integrityHistorical) {
+    assertOperationId(opts.integrityRecoveryOperationId, 'integrityRecoveryOperationId');
+    if (
+      !['rebind', 'quarantine'].includes(source.sourceKind) ||
+      priorState.historicalV2Disposition !== 'UNASSESSED' ||
+      priorState.databaseRestore.status !== 'RECONCILIATION_REQUIRED' ||
+      priorState.recoveryOperationId !== opts.integrityRecoveryOperationId
+    ) {
+      throw transitionError('integrity_disposition_authority_mismatch', 'integrity historical disposition requires the exact recovery invalidation state');
+    }
+  } else {
+    if (priorState.historicalV2Disposition === 'RECONCILIATION_REQUIRED') {
+      throw transitionError('disposition_reconciliation_required', 'historical disposition cannot clear an unreconciled quarantine');
+    }
+    if (priorState.databaseRestore.status !== 'CLEAR') {
+      throw transitionError('disposition_database_restore_blocked', 'historical disposition requires a clear database-restore state');
+    }
+  }
   const receipt = {
     format: 1,
     receiptKind: 'historical-v2-disposition',
@@ -425,7 +453,11 @@ function recordHistoricalV2Disposition(options) {
     backupSha256: source.backupSha256,
     identitySha256: source.identitySha256,
   };
-  return appendTransition({ ...opts, createdAt }, {
+  return appendTransition({
+    ...opts,
+    createdAt,
+    sourceAuthority: opts.integrityRecoveryOperationId ? 'integrity-recovery' : 'deployment-backup',
+  }, {
     kind: 'HISTORICAL_V2_DISPOSITION',
     state,
     receipt,
@@ -663,10 +695,17 @@ function prepareDispositionRestore(options) {
     } else {
       const top = loaded.capability.generations.at(-1).generation;
       observedDispositionReceiptSha256 = top.state.historicalV2DispositionReceiptSha256;
-      if (top.kind === 'NEGOTIATED') {
+      if (top.state.activeIdentitySha256 !== null || top.state.mode !== 'UNNEGOTIATED') {
         branch = 'REJECTED';
         reason = 'DEPENDENT_NEGOTIATED';
-      } else if (top.state.historicalV2Disposition === 'CLEAR') {
+      } else if (top.state.databaseRestore.status !== 'CLEAR') {
+        branch = 'REJECTED';
+        reason = 'DATABASE_RESTORE_BLOCKED';
+      } else if (
+        top.kind === 'HISTORICAL_V2_DISPOSITION' &&
+        ['zero', 'rebind'].includes(top.state.sourceKind) &&
+        top.state.historicalV2Disposition === 'CLEAR'
+      ) {
         branch = 'COMMITTED_CLEAR';
       } else {
         branch = 'NO_CLEAR';
@@ -784,7 +823,13 @@ function invalidateHistoricalV2Disposition(options) {
   }
   assertExpectedHeads(loaded, opts);
   const prior = transitionPredecessor(loaded, opts.operationId, 'HISTORICAL_V2_DISPOSITION');
-  if (prior.generation.state.historicalV2Disposition !== 'CLEAR') {
+  if (
+    prior.generation.state.historicalV2Disposition !== 'CLEAR' ||
+    prior.generation.state.activeIdentitySha256 !== null ||
+    prior.generation.state.mode !== 'UNNEGOTIATED' ||
+    prior.generation.state.databaseRestore.status !== 'CLEAR' ||
+    !['zero', 'rebind'].includes(prior.generation.state.sourceKind)
+  ) {
     throw transitionError('disposition_clear_required', 'disposition invalidation requires a committed prior CLEAR');
   }
   const createdAt = transitionCreatedAt(loaded, opts.operationId, 'HISTORICAL_V2_DISPOSITION', opts.createdAt);
@@ -825,7 +870,7 @@ function invalidateHistoricalV2Disposition(options) {
     identitySha256: opts.identitySha256,
   };
   const roots = paths.resolveRoots(opts);
-  return appendTransition({ ...opts, createdAt }, {
+  return appendTransition({ ...opts, createdAt, sourceAuthority: 'linked-recovery' }, {
     kind: 'HISTORICAL_V2_DISPOSITION',
     state,
     receipt,
@@ -880,6 +925,81 @@ function prepareDatabaseRestore(options) {
   const opts = options || {};
   assertOperationId(opts.recoveryOperationId, 'recoveryOperationId');
   validateWholeDatabaseAudit(opts.backupFarmingAudit, 'backup farming audit');
+  if (opts.currentDatabaseUnreadable === true) {
+    const loaded = load.loadProtocolState(opts);
+    if (!loaded.initialized || loaded.resumePending) {
+      throw transitionError('protocol_state_not_ready', 'unreadable database evidence requires complete protocol roots');
+    }
+    assertExpectedHeads(loaded, opts);
+    const unreadablePriorState = loaded.capability.generations.at(-1).generation.state;
+    if (unreadablePriorState.databaseRestore.status !== 'CLEAR') {
+      throw transitionError('database_restore_already_blocked', 'database restore preparation cannot layer over an existing reconciliation-required epoch');
+    }
+    const unreadable = opts.currentFarmingAudit;
+    assertExactKeys(unreadable, [
+      'format', 'evidenceKind', 'databasePath', 'observedDatabaseIdentitySha256',
+      'quickCheckResult', 'errorCode', 'createdAt',
+    ], 'current database unreadable evidence');
+    if (
+      unreadable.format !== 1 || unreadable.evidenceKind !== 'CURRENT_DATABASE_UNREADABLE' ||
+      unreadable.databasePath !== '/data/db/farming.db' || unreadable.observedDatabaseIdentitySha256 !== null ||
+      !['failed', 'timeout', 'unreadable'].includes(unreadable.quickCheckResult) ||
+      !['SQLITE_CHECK_FAILED', 'SQLITE_TIMEOUT', 'SQLITE_OPEN_FAILED'].includes(unreadable.errorCode)
+    ) throw transitionError('current_database_unreadable_invalid', 'current database unreadable evidence is malformed');
+    const backupManifestSha256 = codecs.canonicalSha256(opts.backupManifest);
+    const restoreBaselineSha256 = codecs.canonicalSha256(opts.restoreBaseline);
+    const reverseMergeAdapterInventorySha256 = codecs.canonicalSha256(opts.reverseMergeAdapterInventory);
+    const currentEvidenceSha256 = codecs.canonicalSha256(unreadable);
+    const createdAt = opts.createdAt || new Date().toISOString();
+    const intent = publishImmutableJson(
+      opts.prepareIntentOut,
+      {
+        format: 1,
+        kind: 'DATABASE_RESTORE_PREPARATION_INTENT',
+        deploymentId: opts.deploymentId,
+        parentGeneration: opts.parentGeneration,
+        recoveryOperationId: opts.recoveryOperationId,
+        restoreEpochCandidate: loaded.capability.generations.at(-1).generation.state.databaseRestore.restoreEpoch + 1,
+        backupManifestSha256,
+        backupDatabaseSha256: opts.backupManifest.databaseSha256,
+        restoreBaselineSha256,
+        expectedMutationDeltaSha256: opts.restoreBaseline.expectedMutationDeltaSha256,
+        reverseMergeAdapterInventorySha256,
+        currentEvidenceSha256,
+        capabilityGeneration: loaded.capability.head.generation,
+        capabilityHeadSha256: loaded.capability.head.generationSha256,
+        capabilityWitnessSha256: loaded.capability.head.witnessSha256,
+        activityGeneration: loaded.activity.externalHead.generation,
+        activityEntrySha256: loaded.activity.externalHead.entrySha256,
+        activityExternalHeadSha256: codecs.canonicalSha256(loaded.activity.externalHead),
+        writerGeneration: opts.restoreBaseline.writerGeneration,
+        databaseLineageInvalidationReceiptSha256: opts.databaseLineageInvalidationReceiptSha256,
+        createdAt,
+      },
+      opts.ownershipAdapter || paths.defaultOwnershipAdapter,
+    );
+    return publishImmutableJson(
+      opts.resultOut,
+      {
+        format: 1,
+        kind: 'DATABASE_RESTORE_PREPARATION_RESULT',
+        deploymentId: opts.deploymentId,
+        parentGeneration: opts.parentGeneration,
+        recoveryOperationId: opts.recoveryOperationId,
+        intentSha256: codecs.canonicalSha256(intent),
+        backupManifestSha256,
+        restoreBaselineSha256,
+        expectedMutationDeltaSha256: opts.restoreBaseline.expectedMutationDeltaSha256,
+        currentEvidenceSha256,
+        result: 'REJECTED',
+        reason: 'CURRENT_DATABASE_UNREADABLE',
+        changedNonCommandTables: [],
+        evidenceSha256: currentEvidenceSha256,
+        createdAt,
+      },
+      opts.ownershipAdapter || paths.defaultOwnershipAdapter,
+    );
+  }
   validateWholeDatabaseAudit(opts.currentFarmingAudit, 'current farming audit');
   const loaded = load.loadProtocolState(opts);
   if (!loaded.initialized || loaded.resumePending) {
@@ -894,6 +1014,9 @@ function prepareDatabaseRestore(options) {
   if (!sameCommittedTransition) assertExpectedHeads(loaded, opts);
   const predecessor = transitionPredecessor(loaded, opts.recoveryOperationId, 'DATABASE_RESTORE_INVALIDATION');
   const priorState = predecessor.generation.state;
+  if (priorState.databaseRestore.status !== 'CLEAR' && !sameCommittedTransition) {
+    throw transitionError('database_restore_already_blocked', 'database restore preparation cannot layer over an existing reconciliation-required epoch');
+  }
   const transitionTime = transitionCreatedAt(loaded, opts.recoveryOperationId, 'DATABASE_RESTORE_INVALIDATION', opts.createdAt);
   const createdAt = fs.existsSync(opts.prepareIntentOut)
     ? JSON.parse(fs.readFileSync(opts.prepareIntentOut, 'utf8')).createdAt
@@ -1088,6 +1211,7 @@ function prepareDatabaseRestore(options) {
       expectedActivityGeneration: loaded.activity.externalHead.generation,
       expectedActivityHeadSha256: codecs.canonicalSha256(loaded.activity.externalHead),
       createdAt,
+      sourceAuthority: 'linked-recovery',
     },
     {
       kind: 'DATABASE_RESTORE_INVALIDATION',
@@ -1207,7 +1331,7 @@ function completeDatabaseRestoreReconciliation(options) {
   };
   const roots = paths.resolveRoots(opts);
   return appendTransition(
-    { ...opts, operationId, createdAt },
+    { ...opts, operationId, createdAt, sourceAuthority: 'linked-recovery' },
     {
       kind: 'DATABASE_RESTORE_RECONCILED',
       state: {
@@ -1285,8 +1409,37 @@ function prepareIntegrityRecovery(options) {
   ) throw transitionError('integrity_authority_mismatch', 'database-integrity authority graph does not close over the supplied evidence');
   paths.assertNoSymlinkComponents(opts.forensicDestination);
   const forensicDestinationExists = fs.existsSync(opts.forensicDestination);
-  const loaded = load.loadProtocolState(opts);
-  if (!loaded.initialized || (loaded.resumePending && !pendingTransition(
+  let loaded = load.loadProtocolState(opts);
+  const allRootsAbsent = !loaded.initialized && opts.integrityAllRootsAbsent === true;
+  let protocolInitialization = 'EXISTING';
+  if (allRootsAbsent) {
+    const roots = paths.resolveRoots(opts);
+    const ownershipAdapter = opts.ownershipAdapter || paths.defaultOwnershipAdapter;
+    paths.ensureFourRootDirsForLocking(roots, ownershipAdapter);
+    const absenceLock = locks.acquireFourRootLocks(
+      roots,
+      {
+        operationId: authority.recoveryOperationId,
+        sourceKind: 'integrity-initialization',
+        sourceAuthority: 'integrity-recovery',
+        headIdentities: {},
+        typedReceiptSha256: null,
+      },
+      { bootId: opts.bootId, ownershipAdapter, isProcessAlive: opts.isProcessAlive }
+    );
+    try {
+      require('./index').initializeUnlocked({
+        ...opts,
+        operationId: derivedOperationId(`integrity-genesis:${authority.recoveryOperationId}`),
+        sourceKind: 'integrity-recovery',
+      });
+    } finally {
+      absenceLock.release();
+    }
+    loaded = load.loadProtocolState(opts);
+    protocolInitialization = 'ALL_ROOT_ABSENCE';
+  }
+  if ((!loaded.initialized && !allRootsAbsent) || (loaded.resumePending && !pendingTransition(
     loaded,
     authority.recoveryOperationId,
     'DATABASE_INTEGRITY_INVALIDATION'
@@ -1320,12 +1473,12 @@ function prepareIntegrityRecovery(options) {
   if (forensicDestinationExists) {
     throw transitionError('forensic_destination_not_absent', 'forensic destination must be absent before invalidation');
   }
-  if (!sameCommittedTransition) assertExpectedHeads(loaded, opts);
-  if (
+  if (!sameCommittedTransition && !allRootsAbsent) assertExpectedHeads(loaded, opts);
+  if (!allRootsAbsent && (
     loaded.activity.externalHead.generation !== opts.backupManifest.activityGeneration ||
     loaded.activity.externalHead.entrySha256 !== opts.backupManifest.activityEntrySha256 ||
     codecs.canonicalSha256(loaded.activity.externalHead) !== opts.backupManifest.activityExternalHeadSha256
-  ) throw transitionError('integrity_activity_backup_mismatch', 'trusted backup does not bind the current activity roots');
+  )) throw transitionError('integrity_activity_backup_mismatch', 'trusted backup does not bind the current activity roots');
   const predecessor = transitionPredecessor(loaded, authority.recoveryOperationId, 'DATABASE_INTEGRITY_INVALIDATION');
   const priorState = predecessor.generation.state;
   const restoreEpoch = priorState.databaseRestore.restoreEpoch + 1;
@@ -1349,7 +1502,7 @@ function prepareIntegrityRecovery(options) {
     backupCommandAuditSha256: opts.backupManifest.commandAuditSha256,
     backupFarmingAuditSha256: opts.backupManifest.farmingAuditSha256,
     forensicDestination: opts.forensicDestination,
-    protocolInitialization: 'EXISTING',
+    protocolInitialization,
     predecessorGeneration: predecessor.generation.generation,
     predecessorHeadSha256: predecessor.generationSha256,
     predecessorWitnessSha256: loaded.capability.witnessByGeneration.get(predecessor.generation.generation).witnessSha256,
@@ -1359,7 +1512,16 @@ function prepareIntegrityRecovery(options) {
     createdAt,
   };
   const transition = appendTransition(
-    { ...opts, operationId, createdAt },
+    {
+      ...opts,
+      operationId,
+      createdAt,
+      expectedHeadSha256: loaded.capability.head.generationSha256,
+      expectedWitnessSha256: loaded.capability.head.witnessSha256,
+      expectedActivityGeneration: loaded.activity.externalHead.generation,
+      expectedActivityHeadSha256: codecs.canonicalSha256(loaded.activity.externalHead),
+      sourceAuthority: 'integrity-recovery',
+    },
     {
       kind: 'DATABASE_INTEGRITY_INVALIDATION',
       state: {
@@ -1392,7 +1554,7 @@ function prepareIntegrityRecovery(options) {
       observedEvidenceSha256,
       databaseLineageInvalidationReceiptSha256: opts.databaseLineageInvalidationReceiptSha256,
       result: 'BACKUP_REPLACEMENT_PREPARED',
-      protocolInitialization: 'EXISTING',
+      protocolInitialization,
       restoreEpoch,
       backupManifestSha256,
       backupDatabaseSha256: opts.backupManifest.databaseSha256,
@@ -1520,7 +1682,7 @@ function completeIntegrityRecovery(options) {
     createdAt,
   };
   return appendTransition(
-    { ...opts, operationId, createdAt },
+    { ...opts, operationId, createdAt, sourceAuthority: 'integrity-recovery' },
     {
       kind: 'DATABASE_INTEGRITY_RECONCILED',
       state: {
@@ -1640,6 +1802,12 @@ function authorizeReset(options) {
     opts.backupManifest.ackAuditSha256 !== ackAuditSha256 ||
     opts.backupManifest.fromIdentitySha256 !== confirmation.fromIdentitySha256
   ) throw transitionError('reset_backup_mismatch', 'backup manifest does not bind the live head, identity, and ACK audit');
+  if (
+    opts.backupManifest.activityGeneration !== loaded.activity.externalHead.generation ||
+    opts.backupManifest.activityExternalHeadSha256 !== codecs.canonicalSha256(loaded.activity.externalHead)
+  ) {
+    throw transitionError('reset_backup_activity_mismatch', 'backup manifest does not bind the live command-activity head');
+  }
   const previousResetEpoch = loaded.capability.generations.reduce(
     (max, entry) => (
       entry.generation.generation <= predecessor.generation.generation && entry.generation.kind === 'RESET_AUTHORIZATION'
@@ -1670,7 +1838,7 @@ function authorizeReset(options) {
     createdAt,
   };
   const result = appendTransition(
-    { ...opts, operationId, createdAt },
+    { ...opts, operationId, createdAt, sourceAuthority: 'deployment-backup' },
     {
       kind: 'RESET_AUTHORIZATION',
       state: {
@@ -1697,7 +1865,7 @@ function authorizeReset(options) {
   return result;
 }
 
-function initializeFactoryZero(options) {
+function initializeFactoryZeroUnlocked(options) {
   const opts = options || {};
   assertOperationId(opts.operationId, 'operationId');
   let before;
@@ -1741,6 +1909,23 @@ function initializeFactoryZero(options) {
   const imageGuardManifestSha256 = codecs.canonicalSha256(opts.imageGuardManifest);
   const factorySeedReceiptSha256 = codecs.canonicalSha256(opts.factorySeedReceipt);
   const factoryZeroAuditSha256 = codecs.canonicalSha256(opts.ackAuditReport);
+  let intentCreatedAt = opts.createdAt || new Date().toISOString();
+  if (fs.existsSync(opts.factoryIntentOut)) {
+    const existingIntent = JSON.parse(fs.readFileSync(opts.factoryIntentOut, 'utf8'));
+    if (existingIntent && typeof existingIntent.createdAt === 'string') intentCreatedAt = existingIntent.createdAt;
+  }
+  const anticipatedActivityGenesis = activityDb.buildGenesisActivityRow({
+    operationId: opts.operationId,
+    createdAt: intentCreatedAt,
+    sourceKind: 'factory-baseline',
+  });
+  const factoryActivityAnchor = {
+    generation: 0,
+    entrySha256: anticipatedActivityGenesis.entrySha256,
+  };
+  const factoryCommandActivityAnchorSha256 = activityDb.computeFactoryCommandActivityAnchorSha256(
+    anticipatedActivityGenesis.entrySha256
+  );
   const intent = publishImmutableJson(
     opts.factoryIntentOut,
     {
@@ -1755,8 +1940,10 @@ function initializeFactoryZero(options) {
       factorySeedIdentitySha256: opts.factorySeedReceipt.databaseIdentitySha256,
       databaseLineageSha256: opts.factorySeedReceipt.databaseLineageSha256,
       factoryZeroAuditSha256,
+      factoryCommandActivityAnchor: factoryActivityAnchor,
+      factoryCommandActivityAnchorSha256,
       protocolRootsAbsent: true,
-      createdAt: opts.createdAt || new Date().toISOString(),
+      createdAt: intentCreatedAt,
     },
     opts.ownershipAdapter || paths.defaultOwnershipAdapter
   );
@@ -1777,6 +1964,8 @@ function initializeFactoryZero(options) {
       liveDatabaseIdentitySha256: opts.ackAuditReport.databaseIdentitySha256,
       databaseLineageSha256: opts.factorySeedReceipt.databaseLineageSha256,
       factoryZeroAuditSha256,
+      factoryCommandActivityAnchor: factoryActivityAnchor,
+      factoryCommandActivityAnchorSha256,
       createdAt,
     },
     opts.ownershipAdapter || paths.defaultOwnershipAdapter
@@ -1788,7 +1977,7 @@ function initializeFactoryZero(options) {
     before.capability && before.capability.generations.length === 1
   );
   if (needsGenesisResume) {
-    require('./index').initialize({
+    require('./index').initializeUnlocked({
       ...opts,
       operationId: opts.operationId,
       sourceKind: 'factory-baseline',
@@ -1815,6 +2004,8 @@ function initializeFactoryZero(options) {
     liveDatabaseIdentitySha256: opts.ackAuditReport.databaseIdentitySha256,
     factoryZeroAuditSha256,
     factoryZeroSourceReceiptSha256: codecs.canonicalSha256(sourceReceipt),
+    factoryCommandActivityAnchor: factoryActivityAnchor,
+    factoryCommandActivityAnchorSha256,
     imageBaselineOperationId: opts.operationId,
     imageBaselineGeneration: opts.parentGeneration,
     allRootAbsenceIntentSha256: codecs.canonicalSha256(intent),
@@ -1838,6 +2029,8 @@ function initializeFactoryZero(options) {
     liveDatabaseIdentitySha256: opts.ackAuditReport.databaseIdentitySha256,
     factoryZeroAuditSha256,
     factoryZeroSourceReceiptSha256: codecs.canonicalSha256(sourceReceipt),
+    factoryCommandActivityAnchor: factoryActivityAnchor,
+    factoryCommandActivityAnchorSha256,
     imageBaselineOperationId: opts.operationId,
     imageBaselineGeneration: opts.parentGeneration,
     allRootAbsenceIntentSha256: codecs.canonicalSha256(intent),
@@ -1857,6 +2050,8 @@ function initializeFactoryZero(options) {
       expectedWitnessSha256: initialized.capability.head.witnessSha256,
       expectedActivityGeneration: initialized.activity.externalHead.generation,
       expectedActivityHeadSha256: codecs.canonicalSha256(initialized.activity.externalHead),
+      lockAlreadyHeld: true,
+      sourceAuthority: 'factory-baseline',
     },
     {
       kind: 'HISTORICAL_V2_DISPOSITION',
@@ -1866,14 +2061,58 @@ function initializeFactoryZero(options) {
     }
   );
   const after = load.loadProtocolState(opts);
+  const actualFactoryAnchor = {
+    generation: 0,
+    entrySha256: after.activity.genesisRow.entry_sha256,
+  };
+  if (codecs.canonicalJson(actualFactoryAnchor) !== codecs.canonicalJson(factoryActivityAnchor)) {
+    throw transitionError('factory_activity_anchor_mismatch', 'factory command-activity genesis does not match the immutable factory anchor');
+  }
   return {
     ...result,
-    factoryCommandActivityAnchorSha256: activityDb.computeFactoryCommandActivityAnchorSha256(
-      after.activity.genesisRow.entry_sha256
-    ),
+    factoryCommandActivityAnchorSha256,
     activityGeneration: after.activity.externalHead.generation,
     activityEntrySha256: after.activity.externalHead.entrySha256,
   };
+}
+
+function initializeFactoryZero(options) {
+  const opts = options || {};
+  const roots = paths.resolveRoots(opts);
+  const ownershipAdapter = opts.ownershipAdapter || paths.defaultOwnershipAdapter;
+  paths.ensureFourRootDirsForLocking(roots, ownershipAdapter);
+  const lock = locks.acquireFourRootLocks(
+    roots,
+    {
+      operationId: opts.operationId,
+      sourceKind: 'initialize-factory-zero',
+      sourceAuthority: 'factory-baseline',
+      headIdentities: {},
+      typedReceiptSha256: null,
+    },
+    {
+      bootId: opts.bootId,
+      ownershipAdapter,
+      isProcessAlive: opts.isProcessAlive,
+      reconcile: {
+        verifyChain: () => {
+          try {
+            load.loadProtocolState({ ...opts, ownershipAdapter, repair: false });
+          } catch (error) {
+            // A factory crash is allowed to leave a verified, same-operation
+            // partial root set; initializeUnlocked performs the exact resume
+            // validation after the stale lock is removed.
+            if (error.code !== 'protocol_state_partial_root_set') throw error;
+          }
+        },
+      },
+    }
+  );
+  try {
+    return initializeFactoryZeroUnlocked(opts);
+  } finally {
+    lock.release();
+  }
 }
 
 module.exports = {
