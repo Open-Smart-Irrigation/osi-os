@@ -32,6 +32,7 @@ const CATALOG_MIGRATIONS = [
   { version: 1, name: '0019__journal_catalog_v1.sql' },
   { version: 2, name: '0022__journal_catalog_v2.sql' },
   { version: 3, name: '0023__journal_catalog_v3.sql' },
+  { version: 4, name: '0026__journal_catalog_v4.sql' },
 ];
 
 const TABLE_ORDER = [

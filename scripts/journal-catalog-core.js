@@ -201,6 +201,17 @@ const attributes = [
   scalarAttribute('attr.method', 'Method', 'text', { maxlength: 300 }),
   scalarAttribute('attr.target', 'Target', 'text', { maxlength: 300 }),
   scalarAttribute('attr.observation_text', 'Observation', 'text', { maxlength: 4000 }),
+
+  // Slice D (crop-cycle lifecycle, catalog v4): free-text variety, scoped to
+  // the entry's crop via a client-side autocomplete hint (distinct variety
+  // suggestions are drawn from journal_crop_cycles.variety for that crop_code
+  // on this gateway; nothing about that lookup lives in the catalog itself).
+  // Appended at the very end of this array — not sorted next to attr.crop
+  // above — so its arrival does not shift attributeSort for any since=1
+  // attribute already baked byte-for-byte into the frozen 0019/0022/0023
+  // migrations (attributeSort is a running counter over array order in
+  // generate-journal-catalog.js's buildRows, independent of since_version).
+  { ...scalarAttribute('attr.variety', 'Variety', 'text', { maxlength: 120, autocomplete: 'variety_by_crop' }), since_version: 4 },
 ];
 
 function unit(code, label, quantity_kind, basis, dimension, canonical_unit_code, scale = 1, offset = 0, extra = {}) {
@@ -326,6 +337,21 @@ const choices = [
   choice('choice.measurement.manual', 'attr.measurement_source', 'Manual', 10),
   choice('choice.measurement.sensor', 'attr.measurement_source', 'Sensor', 20),
   choice('choice.measurement.controller', 'attr.measurement_source', 'Controller', 30),
+
+  // Slice D (crop-cycle lifecycle, catalog v4): farmer-facing attr.crop
+  // additions alongside the 26 Agroscope-aligned crop choices generated in
+  // buildAgroscope() (generate-journal-catalog.js, agroscope.crop.* codes,
+  // sort_order 3000+). These five cover categories the Agroscope export list
+  // has no code for at all (spec §9) — sort_order starts well above the
+  // Agroscope range so they display after it. 'ley, temporary' already
+  // covers cover-crop leys generically; 'Green manure / cover crop' is for
+  // non-ley cover crops (owner-confirmed, spec §9: no clover-grass qualifier
+  // on temporary ley).
+  { ...choice('choice.crop.permanent_grassland', 'attr.crop', 'Permanent grassland', 4000), since_version: 4 },
+  { ...choice('choice.crop.field_vegetable', 'attr.crop', 'Field vegetable', 4010), since_version: 4 },
+  { ...choice('choice.crop.green_manure_cover', 'attr.crop', 'Green manure / cover crop', 4020), since_version: 4 },
+  { ...choice('choice.crop.fallow', 'attr.crop', 'Fallow', 4030), since_version: 4 },
+  { ...choice('choice.crop.other', 'attr.crop', 'Other', 4040), since_version: 4 },
 ];
 
 const CORE_ACTIVITY_CODES = activities.map((activity) => activity.code);
