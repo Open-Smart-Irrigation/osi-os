@@ -110,22 +110,19 @@ body {
    still reaches the column's right edge. The red block bleeds left and is
    clipped by the crown wrapper's overflow-hidden. Put this on the <img>
    inside a box whose left edge is the content-left. */
-/* Agroscope Balken crown. Scaled by height so it keeps its natural aspect
-   (no horizontal object-cover crop that shifts the wordmark on narrow
-   screens), then translated left so the "Agroscope" wordmark lands exactly on
-   the content column's left edge (16px inside a max-w-7xl px-4 column) at any
-   viewport width (the column is now max-w-[1600px], matching the cards, the nav
-   and the journal workspace). The wordmark begins at 16.16% of the asset; at
-   3rem height the asset is ~1427px wide, so the wordmark sits ~230.7px from the
-   image's own left and the red band spans most of the column, dissolving to
-   white toward the right. The floor -214.7px = 16 - 230.7 holds up to 1600px;
-   past that the calc tracks the centered column (50% - (800 + 214.7)). */
+/* Agroscope Balken crown. Scaled by height so it keeps its natural aspect,
+   then translated so the crown's LEFT EDGE (the start of the red block) lands
+   exactly on the content column's left edge (16px inside the max-w-[1600px]
+   px-4 column, matching the cards below). No left full-bleed any more: the
+   balken now begins where the cards begin. margin-left is the content-left
+   itself — 16px until the 1600px column starts centering (viewport > 1600px),
+   then tracking the centered column's left edge (50% - (800 - 16)). */
 .balken-crown {
   display: block;
   height: 3rem;
   width: auto;
   max-width: none;
-  margin-left: max(-214.7px, calc(50% - 1014.7px));
+  margin-left: max(16px, calc(50% - 784px));
 }
 
 /* Brand typography: Noto Sans on brand surfaces (header, login card) — the
