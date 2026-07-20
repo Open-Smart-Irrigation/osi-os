@@ -51,7 +51,10 @@ function valueAtPath(value: unknown, path: string): unknown {
 const LAYOUT_KEYS = ['capture.confirm.layout', 'capture.form.layout', 'capture.where.layout', 'plot.layout'];
 // The summary is a locale-neutral interpolation template; its inserted labels
 // carry the grammar, so this structural value is intentionally shared.
-const SHARED_STRUCTURE_KEYS = ['where.rangeSummary'];
+// capture.cycle.bannerCropVariety (Slice D Phase 3) is the same kind of
+// value: "{{crop}} · {{variety}}" carries no words of its own, only the
+// interpolated crop/variety labels, so it is identical in every locale.
+const SHARED_STRUCTURE_KEYS = ['where.rangeSummary', 'capture.cycle.bannerCropVariety'];
 
 const SHARED_WITH_ENGLISH: Record<string, readonly string[]> = {
   // Task 24 group-resolution and plural values are translated in every
@@ -120,6 +123,32 @@ const REQUIRED_CAPTURE_KEYS = [
   'capture.confirm.saveSeparately',
   'capture.confirm.title',
   'capture.confirm.values',
+  'capture.cycle.bannerCropVariety',
+  'capture.cycle.bannerSeeded',
+  'capture.cycle.continueCycle',
+  'capture.cycle.correctCancel',
+  'capture.cycle.correctDesynced',
+  'capture.cycle.correctError',
+  'capture.cycle.correctSave',
+  'capture.cycle.correctSaving',
+  'capture.cycle.correctStale',
+  'capture.cycle.correctTitle',
+  'capture.cycle.cropLabel',
+  'capture.cycle.cropRequired',
+  'capture.cycle.cycleActionRequired',
+  'capture.cycle.disambiguationBody',
+  'capture.cycle.disambiguationTitle',
+  'capture.cycle.manualCloseHint',
+  'capture.cycle.manualCloseLabel',
+  'capture.cycle.sameCropTitle',
+  'capture.cycle.selectCrop',
+  'capture.cycle.startNewCycle',
+  'capture.cycle.varietyLabel',
+  'capture.cycle.varietyPlaceholder',
+  'capture.cycle.voidDependentsBody',
+  'capture.cycle.voidDependentsCancel',
+  'capture.cycle.voidDependentsConfirm',
+  'capture.cycle.voidDependentsTitle',
   'capture.finish',
   'capture.form.add',
   'capture.form.booleanNo',

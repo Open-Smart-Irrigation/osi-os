@@ -38,6 +38,15 @@ import {
 import { useCaptureDraft } from '../../../journal/useCaptureDraft';
 import { buildFinalBatchPayload } from '../../../journal/buildFinalBatchPayload';
 import { matchingActiveHarvestGroups } from '../../../journal/groupResolutionNudge';
+import {
+  MANUAL_CLOSE_ACTIVITY_CODES,
+  SEEDING_ACTIVITY_CODES,
+  currentCropInfoForPlot,
+  cycleDisambiguationFromError,
+  findSeedingEntryFor,
+  varietySuggestionsFor,
+  type CycleOption,
+} from '../../../journal/cropCycle';
 import type {
   JournalPlotGroupResourceActions,
 } from '../../../journal/useJournalPlotGroups';
@@ -74,8 +83,11 @@ import { PlotForm } from '../where/PlotForm';
 import { parsePlotContextJson } from '../where/PlotContextFields';
 import { HarvestGroupNudge } from '../where/HarvestGroupNudge';
 import { PlotPicker } from '../where/PlotPicker';
+import { CycleDisambiguationSheet } from './CycleDisambiguationSheet';
+import { InheritedCropBanner } from './InheritedCropBanner';
 import { RepeatTreatmentCard } from './RepeatTreatmentCard';
 import { SaveState } from './SaveState';
+import { SeedingCropFields } from './SeedingCropFields';
 import { randomUuid } from '../../../utils/uuid';
 import { useDisplayPreferences } from '../../../utils/displayPreferences';
 
@@ -111,6 +123,18 @@ interface DuplicateCandidateGroup {
   key: string;
   label: string;
   candidates: DuplicateCandidate[];
+}
+
+interface CropCycleOverlap {
+  crop_code: string;
+  variety: string | null;
+}
+
+interface InheritedCropBannerInfo {
+  crop_code: string;
+  variety: string | null;
+  seededDate: string;
+  seedingEntryUuid: string;
 }
 
 interface AcceptedRepeatSnapshot {
@@ -670,6 +694,39 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const [plotEditor, setPlotEditor] = useState<{ mode: 'create' | 'update'; plot?: JournalPlot } | null>(null);
   const [preparingConfirm, setPreparingConfirm] = useState(false);
   const [batchAttemptPending, setBatchAttemptPending] = useState(false);
+  // Slice D Phase 3 (crop-cycle GUI, D3.1-D3.4b): `variety` is the seeding-
+  // only counterpart to the existing `crop` state (D3.1) — both are injected
+  // into payloadValues below the same way. `cycleAction` answers the D3.2
+  // same-crop reseed prompt; `endsCropCycle` is the D3.4b manual-close
+  // toggle. `cycleUuid` disambiguates an intercropped plot (R7) and is only
+  // ever set reactively, after the edge refuses a save with
+  // cycle_uuid_required/cycle_not_found (see cycleDisambiguationOptions
+  // below) — never guessed proactively.
+  const [variety, setVariety] = useState('');
+  const [cycleAction, setCycleAction] = useState<'continue' | 'new' | null>(null);
+  const [endsCropCycle, setEndsCropCycle] = useState(false);
+  const [cycleUuid, setCycleUuid] = useState<string | null>(null);
+  const [cycleDisambiguationOptions, setCycleDisambiguationOptions] = useState<CycleOption[] | null>(null);
+  const [pendingCycleRetry, setPendingCycleRetry] = useState(false);
+  // D3.2 (review fix, B1): an open cycle already covering EACH target plot,
+  // one entry per selected plot that has a single resolvable covering crop
+  // (best-effort, client-side detection — see journal/cropCycle.ts). Collected
+  // across ALL selected plots, not just the first that resolves — a same-
+  // crop+variety match on ANY plot (not only the first) must make the
+  // continue/new prompt load-bearing, otherwise a multi-plot seeding can
+  // silently merge into a non-first plot's open cycle with no cycle_action
+  // sent at all. An intercropped plot (>1 open cycle) legitimately yields no
+  // entry here (currentCropInfoForPlot returns null) and falls through to the
+  // reactive cycle_uuid_required disambiguation instead.
+  const [seedingOverlaps, setSeedingOverlaps] = useState<readonly CropCycleOverlap[]>([]);
+  // N3 (TOCTOU fix): true while the fetch above is in flight for the current
+  // seeding plot/activity selection. Must gate both `next()` out of details
+  // and Finalize (via cycleActionSatisfied below) — otherwise a same-crop
+  // overlap that hasn't resolved yet reads as "no overlap", cycleActionRequired
+  // is false, and the batch finalizes with cycle_action silently omitted.
+  const [seedingOverlapPending, setSeedingOverlapPending] = useState(false);
+  // D3.3: the inherited-crop banner's content for the single selected plot.
+  const [bannerInfo, setBannerInfo] = useState<InheritedCropBannerInfo | null>(null);
   // Layout-transition review gate (Task 32): values a plot/layout switch would
   // otherwise silently sanitize away (a hidden field, an invalid choice) sit
   // here pending explicit user resolution instead. Never mutated directly.
@@ -765,6 +822,51 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     [layout, leaf, model, selections, template],
   );
   const formOwnsCrop = fieldStates.some((state) => state.code === 'attr.crop' && state.visible);
+  // Slice D Phase 3: crop-cycle GUI derived state (see journal/cropCycle.ts
+  // for the rationale behind each best-effort/reasoned signal).
+  const isSeedingLeaf = Boolean(leaf && SEEDING_ACTIVITY_CODES.has(leaf.activity_code));
+  const isManualCloseLeaf = Boolean(leaf && MANUAL_CLOSE_ACTIVITY_CODES.has(leaf.activity_code));
+  // The real catalog's farmer_quick@3 quick_fields DOES declare attr.crop for
+  // seeding/planting_transplanting (journal-catalog-core.js), so formOwnsCrop
+  // is true there and EntryForm already renders its own attr.crop choice
+  // control bound through `values`/`formPayload`. SeedingCropFields must
+  // never show a SECOND, independently-stated crop control in that case —
+  // review fix: it previously always rendered its own dropdown bound to the
+  // separate `crop` state, which payloadValues (below) never actually
+  // persisted when formOwnsCrop is true (`if (cropValue && !formOwnsCrop)`),
+  // so the visibly-selected crop silently diverged from the saved one.
+  // effectiveSeedingCrop reads whichever path is authoritative for THIS
+  // template/layout, so cycle detection/validation/variety-suggestions
+  // always agree with what actually gets submitted.
+  const formCropValue = useMemo(() => {
+    if (!formOwnsCrop) return '';
+    const match = values.find((value) => value.attribute_code === 'attr.crop');
+    return typeof match?.value === 'string' ? match.value : '';
+  }, [formOwnsCrop, values]);
+  const effectiveSeedingCrop = formOwnsCrop ? formCropValue : cropValue;
+  const varietySuggestions = useMemo(
+    () => varietySuggestionsFor(effectiveSeedingCrop, recentEntries),
+    [effectiveSeedingCrop, recentEntries],
+  );
+  // D3.2 (R4, review fix B1): the same-crop reseed prompt is load-bearing
+  // when the crop+variety being entered EXACTLY matches an open cycle
+  // already covering ANY target plot — a differing crop/variety always
+  // auto-reseeds server-side regardless of cycle_action, so no
+  // prompt/gating applies there. `matchingSeedingOverlap` also doubles as
+  // the single overlap SeedingCropFields' prompt needs (its own
+  // "overlapping" check is redundant with this one but harmless: at most one
+  // element of seedingOverlaps can match a given crop+variety pair at a
+  // time).
+  const matchingSeedingOverlap = seedingOverlaps.find((overlap) =>
+    overlap.crop_code === effectiveSeedingCrop && (overlap.variety ?? '') === variety.trim()) ?? null;
+  const cycleActionRequired = isSeedingLeaf && matchingSeedingOverlap != null;
+  // N3 (TOCTOU fix): while the overlap fetch is still in flight for a seeding
+  // activity, whether ANY plot overlaps the entered crop+variety is simply
+  // unknown yet — never treat that as "not required" just because the list
+  // hasn't populated. Gates both `next()` out of details (below) and
+  // Finalize (via finalizeDisabled on ConfirmStrip).
+  const cycleActionSatisfied = !isSeedingLeaf ||
+    (!seedingOverlapPending && (!cycleActionRequired || cycleAction != null));
   // Slice BC (R1 Part 2): read-only plot-context display for the Quick
   // template only — full_record/research still render these as normal
   // editable EntryForm fields (unchanged by this slice), so a redundant
@@ -806,6 +908,19 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         value: cropValue,
       });
     }
+    // D3.1: attr.variety has no visible_if rule in any template/layout (it is
+    // never form-owned — see journal-catalog-core.js, attr.variety is
+    // registered but absent from every quick_fields/activity_requirements/
+    // conditional_groups entry), so it is injected the same way attr.crop is
+    // above whenever this is a seeding activity with a variety entered.
+    const trimmedVariety = variety.trim();
+    if (isSeedingLeaf && trimmedVariety) {
+      combined.push({
+        attribute_code: 'attr.variety',
+        value_status: 'observed',
+        value: trimmedVariety,
+      });
+    }
     if (model && leaf) {
       try {
         combined.push(...buildEntryValues(model, activityDependencyInputs(leaf))
@@ -844,7 +959,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       valuesByKey.set(`${value.attribute_code}:${value.group_index ?? 0}`, value);
     }
     return [...valuesByKey.values()];
-  }, [cropValue, formOwnsCrop, formPayload, keptTransitionValues, layout, leaf, model, selectedPlot]);
+  }, [cropValue, formOwnsCrop, formPayload, isSeedingLeaf, keptTransitionValues, layout, leaf, model, selectedPlot, variety]);
   const validateTransition = useCallback((
     nextLayout: JournalLayoutDefinition | undefined,
     nextTemplate: JournalTemplateDefinition | undefined,
@@ -915,6 +1030,19 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     return source?.season_crop?.trim() ?? '';
   }, [crop, recentEntries, selectedPlot, selectedPlotUuid, zoneLinked]);
 
+  // Slice D Phase 3: the three cascade-control fields osi-journal/
+  // lifecycle.js reads directly off the create/correct entry body (see
+  // types/journal.ts's JournalEntryWriteFields doc comment). Shared between
+  // the single-entry and batch payload builders below since a batch shares
+  // one activity/cascade context across all its member plots.
+  const cycleCascadeFields = useCallback((): Pick<
+    CreateEntryPayload, 'cycle_action' | 'cycle_uuid' | 'ends_crop_cycle'
+  > => ({
+    ...(isSeedingLeaf && cycleAction ? { cycle_action: cycleAction } : {}),
+    ...(cycleUuid ? { cycle_uuid: cycleUuid } : {}),
+    ...(isManualCloseLeaf && endsCropCycle ? { ends_crop_cycle: true } : {}),
+  }), [cycleAction, cycleUuid, endsCropCycle, isManualCloseLeaf, isSeedingLeaf]);
+
   const buildPayload = useCallback((status: 'draft' | 'final', ack?: string | null): CreateEntryPayload => ({
     entry_uuid: draft.entryUuid ?? undefined,
     base_sync_version: 0,
@@ -934,7 +1062,8 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     occurred_end_utc_offset_minutes: endResolvedRef.current?.offsetMinutes ?? endResolved?.offsetMinutes ?? endUtcOffset,
     duplicate_guard_ack_entry_uuid: ack ?? null,
     values: payloadValues,
-  }), [draft.entryUuid, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlot, template, timezone, utcOffset]);
+    ...cycleCascadeFields(),
+  }), [cycleCascadeFields, draft.entryUuid, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlot, template, timezone, utcOffset]);
 
   const buildBatchInput = useCallback((acknowledgements: readonly string[] = []) => ({
     members: selectedPlotUuids.map((plotUuid) => {
@@ -958,7 +1087,8 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     ...(acknowledgements.length > 0
       ? { duplicate_guard_ack_entry_uuids: acknowledgements }
       : {}),
-  }), [endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlotUuids, template, timezone, utcOffset]);
+    ...cycleCascadeFields(),
+  }), [cycleCascadeFields, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlotUuids, template, timezone, utcOffset]);
 
   const commitValues = useCallback((next: CaptureEntryValueInput[]) => {
     const validation = validateTransition(
@@ -1115,6 +1245,64 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     void list();
     return () => { cancelled = true; };
   }, [draft.entryUuid, leaf, layout, model, resolved, selectedPlot]);
+
+  // Slice D Phase 3 (D3.2/D3.3): plot-scoped, best-effort crop-cycle
+  // detection. Deliberately a fresh fetch per target plot rather than the
+  // farm-wide `recentEntries` prop (that list is scoped to the journal
+  // page's own filters, not to whatever plot(s) this flow currently has
+  // selected — see journal/cropCycle.ts's currentCropInfoForPlot doc
+  // comment). Seeding activities check EVERY selected plot and collect an
+  // overlap entry for each one that resolves (review fix, B1: a same-crop
+  // match on any non-first plot must be caught too, not just the first plot
+  // that happens to resolve a covering crop — see cycleActionRequired
+  // above); the inherited-crop banner is scoped to a single selected plot,
+  // matching D8's singular "🌱 crop · variety · seeded date" framing.
+  useEffect(() => {
+    setSeedingOverlaps([]);
+    setBannerInfo(null);
+    const willFetchSeedingOverlap = isSeedingLeaf && selectedPlotUuids.length > 0;
+    setSeedingOverlapPending(willFetchSeedingOverlap);
+    if (selectedPlotUuids.length === 0) return undefined;
+    let cancelled = false;
+    const load = async () => {
+      if (isSeedingLeaf) {
+        try {
+          const perPlot = await Promise.all(selectedPlotUuids.map((plotUuid) =>
+            journalApi.listEntries({ plot_uuid: plotUuid, status: 'final', limit: 50 })
+              .then((response) => response.entries)
+              .catch(() => [] as EntryAggregate[])));
+          if (cancelled) return;
+          const overlaps = perPlot
+            .map((entries) => currentCropInfoForPlot(entries))
+            .filter((info): info is NonNullable<typeof info> => info != null)
+            .map((info) => ({ crop_code: info.crop_code, variety: info.variety }));
+          setSeedingOverlaps(overlaps);
+        } finally {
+          if (!cancelled) setSeedingOverlapPending(false);
+        }
+        return;
+      }
+      if (isMultiPlot || !selectedPlot) return;
+      try {
+        const response = await journalApi.listEntries({ plot_uuid: selectedPlot.plot_uuid, status: 'final', limit: 50 });
+        if (cancelled) return;
+        const info = currentCropInfoForPlot(response.entries);
+        if (!info) return;
+        const seedingRef = findSeedingEntryFor(response.entries, info.crop_code, info.variety);
+        if (!seedingRef) return;
+        setBannerInfo({
+          crop_code: info.crop_code,
+          variety: info.variety,
+          seededDate: seedingRef.occurredDate,
+          seedingEntryUuid: seedingRef.entry_uuid,
+        });
+      } catch {
+        if (!cancelled) setBannerInfo(null);
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [isMultiPlot, isSeedingLeaf, selectedPlot, selectedPlotUuids]);
 
   // Task 32: replaces the unconditional sanitizeValues() call at a plot/layout
   // transition with an explicit review gate. Values sanitizeValues would hide or
@@ -1288,6 +1476,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     setCarryForwardCandidate(null);
     setSafePrefill([]);
     setWhereError(null);
+    setVariety('');
+    setCycleAction(null);
+    setEndsCropCycle(false);
+    setCycleUuid(null);
+    setCycleDisambiguationOptions(null);
+    setPendingCycleRetry(false);
   };
 
   const handlePlotSelection = (selection: {
@@ -1341,6 +1535,14 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     const contextValues = chosen.activity_code !== leaf?.activity_code
       ? clearOwnedCarryForward(values)
       : values;
+    if (chosen.activity_code !== leaf?.activity_code) {
+      setVariety('');
+      setCycleAction(null);
+      setEndsCropCycle(false);
+      setCycleUuid(null);
+      setCycleDisambiguationOptions(null);
+      setPendingCycleRetry(false);
+    }
     setLeaf(chosen);
     const previousDependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code));
     const retainedValues = sanitizeValues(model!, layout, template, chosen, crop, contextValues, previousDependencyCodes);
@@ -1434,7 +1636,9 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       const endOccurrenceValid = resolveEndOccurrence();
       setShowValidation(true);
       const requiredValid = requiredFieldsSatisfied(fieldStates, values);
-      if (!occurrenceValid || !endOccurrenceValid || !formValid || !requiredValid || !template || !layout) return;
+      const seedingCropValid = !isSeedingLeaf || effectiveSeedingCrop !== '';
+      if (!occurrenceValid || !endOccurrenceValid || !formValid || !requiredValid || !template || !layout ||
+          !seedingCropValid || !cycleActionSatisfied) return;
       if (isMultiPlot) {
         setStep('confirm');
         return;
@@ -1512,6 +1716,21 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         setFinalReceipt(receipt);
         return receipt;
       } catch (error) {
+        const cycleOptions = cycleDisambiguationFromError(error);
+        if (cycleOptions) {
+          batchPayloadSnapshotRef.current = null;
+          // Review fix: always clear the previously chosen cycle_uuid here,
+          // including on a RETRY that fails again with this same error (a
+          // concurrently-closed cycle, or a stale pick). The retry effect
+          // below only fires once cycleUuid is (re-)set, so leaving the old
+          // value in place would make it fire immediately with the same
+          // already-refused value instead of waiting for a fresh choice.
+          setCycleUuid(null);
+          setCycleDisambiguationOptions(cycleOptions);
+          setPendingCycleRetry(true);
+          setStickyLossWarning(false);
+          throw error;
+        }
         const candidates = duplicateCandidatesFromError(error);
         if (candidates.length > 0) {
           setDuplicateCandidates(candidates);
@@ -1564,6 +1783,15 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         setFinalReceipt(receipt);
         return receipt;
       } catch (error) {
+        const cycleOptions = cycleDisambiguationFromError(error);
+        if (cycleOptions) {
+          // See the matching comment in finalizeBatch's catch above.
+          setCycleUuid(null);
+          setCycleDisambiguationOptions(cycleOptions);
+          setPendingCycleRetry(true);
+          setStickyLossWarning(false);
+          throw error;
+        }
         const candidate = duplicateFromError(error);
         if (candidate) {
           let values = candidate.values;
@@ -1596,6 +1824,22 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     savePromiseRef.current = promise.then(() => undefined, () => undefined);
     return promise;
   }, [buildPayload, duplicateAck, duplicateAckEntryUuids, duplicateCandidate, draft, finalizeBatch, isMultiPlot, pendingTransitionItems.length, payloadValues]);
+
+  // R7: once the user picks which cycle_uuid an intercrop-disambiguation
+  // error named (see cycleDisambiguationFromError above), retry the same
+  // save automatically. This waits for a render to commit rather than
+  // retrying inline in the picker's onClick, so buildPayload/buildBatchInput
+  // (both depend on `cycleUuid`) have already been rebuilt with the fresh
+  // value — the same reason duplicate-guard acknowledgements are threaded as
+  // explicit call arguments elsewhere in this file rather than read back
+  // from state synchronously after a setState.
+  useEffect(() => {
+    if (!pendingCycleRetry || cycleUuid == null) return;
+    setPendingCycleRetry(false);
+    setCycleDisambiguationOptions(null);
+    if (isMultiPlot) void finalizeBatch().catch(() => undefined);
+    else void finalize().catch(() => undefined);
+  }, [cycleUuid, finalize, finalizeBatch, isMultiPlot, pendingCycleRetry]);
 
   const retry = useCallback(async () => {
     if (savePromiseRef.current) return savePromiseRef.current;
@@ -1959,6 +2203,50 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
           {occurrenceError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t(`capture.validation.${occurrenceError.code === 'ambiguous_local_time' ? 'ambiguousLocalTime' : occurrenceError.code === 'nonexistent_local_time' ? 'nonexistentLocalTime' : occurrenceError.code === 'invalid_timezone' ? 'invalidTimezone' : 'invalidLocalTime'}`)}</p>}
           {endOccurrenceError?.code === 'ambiguous_local_time' && <label className="block text-sm font-bold text-[var(--text)]">{endOffsetLabel}<select aria-label={endOffsetLabel} value={endUtcOffset ?? ''} onChange={(event) => setEndUtcOffset(Number(event.target.value))} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3"><option value="">{t('capture.form.select')}</option>{endOccurrenceError.availableOffsets.map((offset) => <option key={offset} value={offset}>{offset}</option>)}</select></label>}
           {endOccurrenceError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t(`capture.validation.${endOccurrenceError.code === 'ambiguous_local_time' ? 'ambiguousLocalTime' : endOccurrenceError.code === 'nonexistent_local_time' ? 'nonexistentLocalTime' : endOccurrenceError.code === 'invalid_timezone' ? 'invalidTimezone' : 'invalidLocalTime'}`)}</p>}
+          {isSeedingLeaf && (
+            <SeedingCropFields
+              model={model}
+              locale={locale}
+              crop={effectiveSeedingCrop}
+              showCropField={!formOwnsCrop}
+              variety={variety}
+              onCropChange={setCrop}
+              onVarietyChange={setVariety}
+              varietySuggestions={varietySuggestions}
+              overlap={matchingSeedingOverlap}
+              cycleAction={cycleAction}
+              onCycleActionChange={setCycleAction}
+              showValidation={showValidation}
+            />
+          )}
+          {!isSeedingLeaf && bannerInfo && (
+            <InheritedCropBanner
+              model={model}
+              locale={locale}
+              cropCode={bannerInfo.crop_code}
+              variety={bannerInfo.variety}
+              seededDate={bannerInfo.seededDate}
+              seedingEntryUuid={bannerInfo.seedingEntryUuid}
+              onOpenSeedingEntry={onOpenExisting}
+              onCorrected={() => setBannerInfo(null)}
+            />
+          )}
+          {isManualCloseLeaf && (
+            <label className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm font-bold text-[var(--text)]">
+              <input
+                type="checkbox"
+                checked={endsCropCycle}
+                onChange={(event) => setEndsCropCycle(event.target.checked)}
+                className={`h-5 w-5 ${FOCUS_RING}`}
+              />
+              <span>
+                {t('capture.cycle.manualCloseLabel')}
+                <span className="mt-1 block text-xs font-semibold text-[var(--text-secondary)]">
+                  {t('capture.cycle.manualCloseHint')}
+                </span>
+              </span>
+            </label>
+          )}
           {plotContextDisplay.length > 0 && (
             <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
               <h3 className="text-sm font-bold text-[var(--text)]">{t('capture.form.plotContext', { defaultValue: 'Plot context' })}</h3>
@@ -2001,8 +2289,37 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         {batchError && <p role="alert" className="mb-4 text-sm font-semibold text-[var(--error-text)]">{batchError}</p>}
         {duplicateCandidates.length > 0 && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('batch.duplicateTitle', { defaultValue: 'Duplicate entries found' })}</h2><p className="text-sm text-[var(--text-secondary)]">{t('batch.duplicateBody', { defaultValue: 'Review every duplicate candidate before saving this batch.' })}</p><ul className="space-y-3 text-sm text-[var(--text)]">{duplicateCandidateGroups.map((group) => <li key={group.key}><h3 className="font-bold">{group.label}</h3><ul className="ml-4 list-disc space-y-1">{group.candidates.map((candidate) => <li key={candidate.entry_uuid}><span>{occurrenceLabel(candidate.occurred_start, timezone, locale)} · {duplicateActivity(candidate)}</span>{' '}<span className="text-xs text-[var(--text-secondary)]">{candidate.entry_uuid}</span></li>)}</ul></li>)}</ul><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`} onClick={acknowledgeBatchDuplicates}>{t('batch.duplicateAcknowledge', { defaultValue: 'Acknowledge all and retry' })}</button></section>}
         {duplicateCandidate && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('capture.confirm.duplicateTitle')}</h2><p className="text-sm text-[var(--text-secondary)]">{occurrenceLabel(duplicateCandidate.occurred_start, timezone, locale)} · {duplicateActivityLabel}</p>{duplicateCandidate.values.length > 0 && <ul className="space-y-1 text-sm text-[var(--text)]">{duplicateCandidate.values.map((value, index) => { const label = duplicateValueLabel(value, model, locale); return label ? <li key={`${value.attribute_code}:${value.group_index ?? index}`}>{label}</li> : null; })}</ul>}<div className="flex flex-wrap gap-2"><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl border border-[var(--primary)] px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`} onClick={() => { if (!saving && !finalReceipt) onOpenExisting(duplicateCandidate.entry_uuid); }}>{t('capture.confirm.openExisting')}</button><button type="button" className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`} onClick={saveSeparately} disabled={saving || Boolean(finalReceipt)}>{t('capture.confirm.saveSeparately')}</button></div>{duplicateWarningShown && <p role="status" className="text-sm font-semibold text-[var(--text-secondary)]">{t('capture.confirm.duplicateBody')}</p>}</section>}
+        {/* Review fix: the plot-scoped crop-cycle overlap fetch (effect above)
+            is asynchronous and, for a multi-plot batch, `next()` advances
+            details -> confirm synchronously with no in-flight gate on it —
+            so the same-crop prompt can resolve to "required" only AFTER the
+            user has already reached Confirm. Without this, Finalize would go
+            silently disabled (via cycleActionSatisfied in finalizeDisabled
+            below) with no visible explanation. Mirrors how a duplicate
+            candidate is also surfaced here rather than only on Details. */}
+        {cycleActionRequired && cycleAction == null && (
+          <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4">
+            <h2 className="font-bold text-[var(--text)]">{t('capture.cycle.sameCropTitle')}</h2>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setCycleAction('continue')}
+                className={`min-h-11 rounded-xl border border-[var(--primary)] px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`}
+              >
+                {t('capture.cycle.continueCycle')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCycleAction('new')}
+                className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`}
+              >
+                {t('capture.cycle.startNewCycle')}
+              </button>
+            </div>
+          </section>
+        )}
         {isMultiPlot && <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]">{t('batch.confirmCount', { count: selectedPlotUuids.length, defaultValue: `${selectedPlotUuids.length} plots` })}</p>}
-        <ConfirmStrip activity={{ label: t('capture.confirm.activity'), value: leaf ? catalogLabel(catalog.vocab.find((row) => row.code === leaf.activity_code) ?? { code: leaf?.activity_code ?? '' }, locale) : '', step: 'activity' }} plot={{ label: t('capture.confirm.plot'), value: selectedPlotLabel, step: 'where' }} layout={{ label: t('capture.confirm.layout'), value: `${catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v${layout?.version}`, step: 'where' }} occurrence={{ label: t('capture.confirm.occurrence'), value: resolved ? occurrenceLabel(resolved.instant, timezone, locale) : occurredLocal, timezone, endTimezone: occurredEndLocal ? timezone : null, step: 'details' }} values={confirmValues} onEdit={edit} onFinalize={() => { void finalize().catch(() => undefined); }} validationInFlight={showValidation && !formValid} duplicateInFlight={duplicateInFlight} saveInFlight={saving} editDisabled={interactionLocked} readOnly={Boolean(finalReceipt)} finalizeDisabled={Boolean(duplicateCandidate && duplicateAck !== duplicateCandidate.entry_uuid) || duplicateCandidates.length > 0 || pendingTransitionItems.length > 0} />
+        <ConfirmStrip activity={{ label: t('capture.confirm.activity'), value: leaf ? catalogLabel(catalog.vocab.find((row) => row.code === leaf.activity_code) ?? { code: leaf?.activity_code ?? '' }, locale) : '', step: 'activity' }} plot={{ label: t('capture.confirm.plot'), value: selectedPlotLabel, step: 'where' }} layout={{ label: t('capture.confirm.layout'), value: `${catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v${layout?.version}`, step: 'where' }} occurrence={{ label: t('capture.confirm.occurrence'), value: resolved ? occurrenceLabel(resolved.instant, timezone, locale) : occurredLocal, timezone, endTimezone: occurredEndLocal ? timezone : null, step: 'details' }} values={confirmValues} onEdit={edit} onFinalize={() => { void finalize().catch(() => undefined); }} validationInFlight={showValidation && !formValid} duplicateInFlight={duplicateInFlight} saveInFlight={saving} editDisabled={interactionLocked} readOnly={Boolean(finalReceipt)} finalizeDisabled={Boolean(duplicateCandidate && duplicateAck !== duplicateCandidate.entry_uuid) || duplicateCandidates.length > 0 || pendingTransitionItems.length > 0 || !cycleActionSatisfied || Boolean(cycleDisambiguationOptions)} />
       </>
     );
   };
@@ -2024,6 +2341,15 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
               {t('capture.transition.reviewAction', { defaultValue: 'Review changed values' })}
             </button>
           </section>
+        )}
+        {cycleDisambiguationOptions && (
+          <CycleDisambiguationSheet
+            model={model}
+            locale={locale}
+            options={cycleDisambiguationOptions}
+            onChoose={(chosen) => setCycleUuid(chosen)}
+            onCancel={() => { setCycleDisambiguationOptions(null); setPendingCycleRetry(false); }}
+          />
         )}
         {body()}
         {receiptHarvestGroups.length > 0 && (

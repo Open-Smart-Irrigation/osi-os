@@ -125,6 +125,26 @@ export interface JournalEntryWriteFields {
   occurred_end_utc_offset_minutes?: number | null;
   values: EntryValueInput[];
   note?: string | null;
+  // Slice D (crop-cycle lifecycle, Phase 3 GUI): top-level cascade-control
+  // fields the edge (osi-journal/lifecycle.js applyActivityCycleCascade)
+  // reads directly off the create/correct entry body — never persisted as
+  // their own entry column, so they are write-only inputs, not part of
+  // EntryAggregate.
+  //
+  // - cycle_action: seeding/planting_transplanting only. Disambiguates a
+  //   same-crop+variety overlap with an already-open cycle covering the
+  //   target plot ("continue" the existing cycle vs. start a "new" one). The
+  //   edge defaults to "continue" when omitted, but the GUI must always send
+  //   this explicitly whenever it detects that overlap (R4).
+  // - cycle_uuid: seeding, harvest, and manual-close all require this when
+  //   more than one open crop cycle covers the target plot (intercropping,
+  //   R7) — it names which cycle the action applies to.
+  // - ends_crop_cycle: tillage_soil_work/mowing/plant_protection_application
+  //   only. Closes the covering cycle membership with close_reason='manual'
+  //   (R3).
+  cycle_action?: 'continue' | 'new';
+  cycle_uuid?: string | null;
+  ends_crop_cycle?: boolean;
 }
 
 export interface CreateFinalBatchPayload

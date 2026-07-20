@@ -92,15 +92,21 @@ export const journalApi = {
       )
     ).data,
 
+  // cascade_ack (Slice D, R7): voiding a seeding whose crop cycle has
+  // dependent entries is refused by the edge (cycle_has_dependents, 409)
+  // unless this is explicitly set — see journal/cropCycle.ts's
+  // cycleDependentsFromError, which parses that refusal's
+  // details.dependentEntryUuids for the caller to confirm before retrying.
   voidEntry: async (
     uuid: string,
     void_reason: string,
     base_sync_version: number,
+    cascade_ack?: boolean,
   ): Promise<EntryFinalMutationReceipt> =>
     (
       await api.post<EntryFinalMutationReceipt>(
         `/api/journal/entries/${encodeURIComponent(uuid)}/void`,
-        { void_reason, base_sync_version },
+        { void_reason, base_sync_version, ...(cascade_ack ? { cascade_ack: true } : {}) },
       )
     ).data,
 
