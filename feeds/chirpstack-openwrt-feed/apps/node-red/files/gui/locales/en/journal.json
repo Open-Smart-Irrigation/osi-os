@@ -120,7 +120,15 @@
     "unresolvedGroup": "Resolve the plot group before deactivating this plot.",
     "loading": "Saving…",
     "error": "Could not save the plot.",
-    "retry": "Retry"
+    "retry": "Retry",
+    "context": "Plot context",
+    "contextHint": "Set once per plot and carried onto every entry made here.",
+    "applyToStation": "Apply to all plots in this station",
+    "applyToStationLoading": "Applying…",
+    "applyToStationNeedsStation": "Set a station to enable this.",
+    "applyToStationSuccess": "Applied to {{count}} other plot(s) in this station.",
+    "applyToStationNone": "No other plots share this station.",
+    "applyToStationError": "Could not apply this context to the station."
   },
   "batch": {
     "saving": "Saving…",
@@ -315,7 +323,8 @@
       "noProducts": "No active products are available",
       "note": "Note",
       "booleanYes": "Yes",
-      "booleanNo": "No"
+      "booleanNo": "No",
+      "plotContext": "Plot context"
     },
     "validation": {
       "required": "Complete this field",

@@ -120,7 +120,15 @@
     "unresolvedGroup": "Dissolva o grupo de parcelas antes de desativar esta parcela.",
     "loading": "A guardar…",
     "error": "Não foi possível guardar a parcela.",
-    "retry": "Tentar novamente"
+    "retry": "Tentar novamente",
+    "context": "Contexto da parcela",
+    "contextHint": "Definido uma vez por parcela e transportado para cada registo feito aqui.",
+    "applyToStation": "Aplicar a todas as parcelas desta estação",
+    "applyToStationLoading": "A aplicar…",
+    "applyToStationNeedsStation": "Defina uma estação para ativar esta ação.",
+    "applyToStationSuccess": "Aplicado a {{count}} outra(s) parcela(s) desta estação.",
+    "applyToStationNone": "Nenhuma outra parcela partilha esta estação.",
+    "applyToStationError": "Não foi possível aplicar este contexto à estação."
   },
   "batch": {
     "saving": "A guardar…",
@@ -315,7 +323,8 @@
       "noProducts": "Não há produtos ativos disponíveis",
       "note": "Nota",
       "booleanYes": "Sim",
-      "booleanNo": "Não"
+      "booleanNo": "Não",
+      "plotContext": "Contexto da parcela"
     },
     "validation": {
       "required": "Preencha este campo",

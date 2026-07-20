@@ -120,7 +120,15 @@
     "unresolvedGroup": "Lösen Sie die Parzellengruppe auf, bevor Sie diese Parzelle deaktivieren.",
     "loading": "Wird gespeichert…",
     "error": "Die Parzelle konnte nicht gespeichert werden.",
-    "retry": "Erneut versuchen"
+    "retry": "Erneut versuchen",
+    "context": "Parzellenkontext",
+    "contextHint": "Wird einmal pro Parzelle festgelegt und in jeden hier erfassten Eintrag übernommen.",
+    "applyToStation": "Auf alle Parzellen dieser Station anwenden",
+    "applyToStationLoading": "Wird angewendet…",
+    "applyToStationNeedsStation": "Legen Sie eine Station fest, um dies zu aktivieren.",
+    "applyToStationSuccess": "Auf {{count}} weitere Parzelle(n) dieser Station angewendet.",
+    "applyToStationNone": "Keine weiteren Parzellen teilen diese Station.",
+    "applyToStationError": "Der Kontext konnte nicht auf die Station angewendet werden."
   },
   "batch": {
     "saving": "Wird gespeichert…",
@@ -315,7 +323,8 @@
       "noProducts": "Keine aktiven Produkte verfügbar",
       "note": "Notiz",
       "booleanYes": "Ja",
-      "booleanNo": "Nein"
+      "booleanNo": "Nein",
+      "plotContext": "Parzellenkontext"
     },
     "validation": {
       "required": "Füllen Sie dieses Feld aus.",
