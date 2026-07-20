@@ -16,6 +16,7 @@ import type {
 import {
   applyThemePreference,
   type DisplayPreferences,
+  type JournalDetailLevel,
   type ModulePreferences,
   type ThemePreference,
   useDisplayPreferences,
@@ -264,6 +265,14 @@ export function SettingsPage() {
     ],
     [t],
   );
+  const journalDetailOptions = useMemo<Array<Option<JournalDetailLevel>>>(
+    () => [
+      { value: 'farmer_quick', label: t('journalDetailQuick') },
+      { value: 'full_record', label: t('journalDetailFull') },
+      { value: 'research_observation', label: t('journalDetailResearch') },
+    ],
+    [t],
+  );
 
   const updateTheme = (theme: ThemePreference) => {
     writeDisplayPreferences({ theme });
@@ -271,6 +280,8 @@ export function SettingsPage() {
   };
 
   const updateSwtUnit = (swtUnit: SwtUnit) => writeDisplayPreferences({ swtUnit });
+  const updateJournalDetailLevel = (journalDetailLevel: JournalDetailLevel) =>
+    writeDisplayPreferences({ journalDetailLevel });
   const updateRefresh = (dashboardAutoRefresh: AutoRefreshPreference) => writeDisplayPreferences({ dashboardAutoRefresh });
   const writeModules = (modules: ModulePreferences) => writeDisplayPreferences({ modules });
   const updateModule = (key: keyof ModulePreferences, enabled: boolean) => {
@@ -560,6 +571,18 @@ export function SettingsPage() {
             options={refreshOptions}
             onChange={updateRefresh}
           />
+        </Section>
+
+        <Section title={t('journalTitle')}>
+          <SegmentedControl
+            label={t('journalDetailLevel')}
+            value={preferences.journalDetailLevel}
+            options={journalDetailOptions}
+            onChange={updateJournalDetailLevel}
+          />
+          <p className="mt-3 max-w-prose text-sm text-[var(--text-secondary)]">
+            {t('journalDetailLevelHelp')}
+          </p>
         </Section>
 
         <Section title={t('userRequestTitle')}>

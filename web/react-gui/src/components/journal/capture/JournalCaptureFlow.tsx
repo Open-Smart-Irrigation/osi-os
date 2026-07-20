@@ -76,6 +76,7 @@ import { PlotPicker } from '../where/PlotPicker';
 import { RepeatTreatmentCard } from './RepeatTreatmentCard';
 import { SaveState } from './SaveState';
 import { randomUuid } from '../../../utils/uuid';
+import { useDisplayPreferences } from '../../../utils/displayPreferences';
 
 export interface JournalCaptureFlowProps {
   catalog: JournalCatalog;
@@ -369,11 +370,19 @@ function duplicateValueLabel(
   return `${label}: ${displayRaw}${unit ? ` ${catalogLabel(unit, locale)}` : ''}`;
 }
 
-function templateLabel(code: string, fallback: string): string {
-  if (code === 'farmer_quick') return fallback;
-  if (code === 'full_record') return fallback;
-  if (code === 'research_observation') return fallback;
-  return code;
+const DETAIL_LEVEL_ORDER = ['farmer_quick', 'full_record', 'research_observation'];
+
+// Effective capture template = the user's global detail-level preference when
+// the plot's layout supports it, otherwise the layout's lowest supported
+// template (U4: a researcher-only layout like agroscope_open_field floors a
+// Quick user to Research). Slice A: detail level is chosen in Settings, never
+// per entry.
+function effectiveTemplateCode(supportedTemplates: string[], preferred: string): string {
+  if (supportedTemplates.includes(preferred)) return preferred;
+  const ordered = [...supportedTemplates].sort(
+    (a, b) => DETAIL_LEVEL_ORDER.indexOf(a) - DETAIL_LEVEL_ORDER.indexOf(b),
+  );
+  return ordered[0] ?? '';
 }
 
 function activityDependencyInputs(leaf: ActivityLeafSelection | null): CaptureEntryValueInput[] {
@@ -561,6 +570,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const locale = i18n.resolvedLanguage || i18n.language || 'en';
   const modelResult = useMemo(() => buildCatalogModel(catalog), [catalog]);
   const model = modelResult.ok ? modelResult.model : null;
+  const { journalDetailLevel } = useDisplayPreferences();
   const usableInitialPlot = initialPlot && initialPlot.active === 1 && initialPlot.deleted_at === null
     ? initialPlot
     : undefined;
@@ -569,7 +579,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     usableInitialPlot ? [usableInitialPlot.plot_uuid] : [],
   );
   const [layoutCode, setLayoutCode] = useState(usableInitialPlot?.settings.layout_code ?? '');
-  const [templateCode, setTemplateCode] = useState('farmer_quick');
+  const [templateCode, setTemplateCode] = useState(() => {
+    const initialLayout = model?.layouts.get(usableInitialPlot?.settings.layout_code ?? '');
+    return initialLayout
+      ? effectiveTemplateCode(initialLayout.supported_templates, journalDetailLevel)
+      : journalDetailLevel;
+  });
   const [leaf, setLeaf] = useState<ActivityLeafSelection | null>(null);
   const initialCrop = cropForPlot(usableInitialPlot, zoneCrops);
   const [crop, setCrop] = useState(initialCrop);
@@ -1126,9 +1141,9 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     const nextPlot = plots.find(({ plot_uuid: plotUuid }) => plotUuid === uuid);
     const nextLayoutCode = nextPlot?.settings.layout_code ?? '';
     const nextLayout = model?.layouts.get(nextLayoutCode);
-    const nextTemplate = nextLayout?.supported_templates.includes('farmer_quick')
-      ? 'farmer_quick'
-      : nextLayout?.supported_templates[0] ?? '';
+    const nextTemplate = nextLayout
+      ? effectiveTemplateCode(nextLayout.supported_templates, journalDetailLevel)
+      : '';
     const plotContextChanged = requestedSelection.length !== selectedPlotUuids.length ||
       requestedSelection.some((plotUuid, index) => plotUuid !== selectedPlotUuids[index]);
     const layoutContextChanged = nextLayoutCode !== layoutCode;
@@ -1217,9 +1232,9 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       : values;
     setLayoutCode(code);
     const nextLayout = model?.layouts.get(code);
-    const nextTemplate = nextLayout?.supported_templates.includes('farmer_quick')
-      ? 'farmer_quick'
-      : nextLayout?.supported_templates[0] ?? '';
+    const nextTemplate = nextLayout
+      ? effectiveTemplateCode(nextLayout.supported_templates, journalDetailLevel)
+      : '';
     setTemplateCode(nextTemplate);
     const previousDependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code));
     const retainedValues = contextValues.filter((value) => !previousDependencyCodes.has(value.attribute_code));
@@ -1641,27 +1656,6 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     if (JSON.stringify(nextValues) !== JSON.stringify(values)) commitValues(nextValues);
   }, [commitValues, interactionLocked, storeAcceptedRepeat, values]);
 
-  const chooseTemplate = useCallback((code: string) => {
-    if (interactionLocked) return;
-    const nextTemplate = templates.find((candidate) => candidate.code === code);
-    if (!nextTemplate || !layout || !model) return;
-    const nextValues = sanitizeValues(model, layout, nextTemplate, leaf, crop, values);
-    const validation = validateTransition(
-      layout,
-      nextTemplate,
-      leaf,
-      crop,
-      nextValues,
-      numberInputErrors,
-    );
-    setTemplateCode(code);
-    setValues(nextValues);
-    setFormPayload(validation.payload);
-    setFormValid(validation.valid);
-    setNumberInputErrors(validation.numberInputErrors);
-    setShowValidation(false);
-  }, [crop, interactionLocked, layout, leaf, model, numberInputErrors, templates, validateTransition, values]);
-
   const formChanged = useCallback((
     next: CaptureEntryValueInput[],
     payload: CaptureEntryValueOutput[],
@@ -1718,12 +1712,6 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const activePlotGroups = plotGroups.filter((group) => group.resolved_at === null);
   const resolvedPlotGroups = plotGroups.filter((group) => group.resolved_at !== null);
   const activityRows = catalog.vocab.filter((row) => row.active === 1 && row.deleted_at == null);
-  const templateOptions = templates.map((candidate) => ({
-    value: candidate.code,
-    label: templateLabel(candidate.code, candidate.code === 'farmer_quick'
-      ? t('capture.form.quick')
-      : candidate.code === 'full_record' ? t('capture.form.full') : t('capture.form.research')),
-  }));
   const valueTokens: ConfirmValueToken[] = payloadValues.map((value) => {
     const attribute = model.vocabByCode.get(value.attribute_code);
     const unitCode = value.entered_unit_code ?? value.unit_code;
@@ -1832,12 +1820,6 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
           <h2 id="capture-form-title" className="text-xl font-bold text-[var(--text)]">{t('capture.form.title')}</h2>
           <fieldset disabled={interactionLocked} className="m-0 min-w-0 space-y-4 border-0 p-0">
           <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]">{catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v{layout?.version}</p>
-          <label className="block text-sm font-bold text-[var(--text)]">
-            {t('capture.form.detailLevel')}
-            <select aria-label={t('capture.form.detailLevel')} value={template?.code ?? templateCode} onChange={(event) => chooseTemplate(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]">
-              {templateOptions.map((option) => <option key={option.value} value={option.value}>{option.label} · v{model.templates.get(option.value)?.version}</option>)}
-            </select>
-          </label>
           <label className="block text-sm font-bold text-[var(--text)]">
             {t('capture.where.timezone')}
             <input aria-label={t('capture.where.timezone')} value={timezone} onChange={(event) => { setTimezone(event.target.value); setResolved(null); resolvedRef.current = null; setEndResolved(null); endResolvedRef.current = null; setUtcOffset(null); setEndUtcOffset(null); }} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]" />
