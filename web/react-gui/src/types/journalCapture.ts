@@ -65,6 +65,11 @@ export interface JournalTemplateDefinition {
   activity_requirements: Record<string, JournalRequirement>;
   conditional_groups: JournalConditionalGroup[];
   requirements: JournalRequirement;
+  // Slice BC (farmer_quick@3, R1): activity_code -> field-code list. When
+  // present, deriveFieldStates resolves Quick visibility per activity from
+  // this map instead of force-adding the layout's minimum_fields to every
+  // entry regardless of activity. Absent on every other template/version.
+  quick_fields?: Record<string, string[]>;
 }
 
 export interface JournalDependencyCondition {
@@ -98,6 +103,16 @@ export interface JournalLayoutDefinition {
   conditional_fields: Record<string, string[]>;
   denominator_contract: string[];
   option_dependencies: JournalOptionDependency[];
+  // Slice BC (layout v3, R1/BC3): plot-static facts split out of
+  // minimum_fields — carried in journal_plot_settings.context_json and
+  // rendered read-only on the capture form instead of as a per-entry input.
+  // Optional so pre-BC fixtures/tests that build a layout literal without it
+  // keep compiling; deriveFieldStates treats an absent list as empty.
+  static_context_fields?: string[];
+  // Slice BC (layout v3, R1/BC3): per-measurement reading fields split out of
+  // minimum_fields — visible only on the `sampling` Quick activity, not on
+  // every entry regardless of activity.
+  reading_fields?: string[];
 }
 
 export interface JournalCaptureCatalogModel {

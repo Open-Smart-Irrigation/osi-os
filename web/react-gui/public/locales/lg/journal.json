@@ -120,7 +120,15 @@
     "unresolvedGroup": "Saasaanya ekibinja ky'omusiri nga tonnakiremesa.",
     "loading": "Tikutereka…",
     "error": "Twayisiddwa okutereka omusiri.",
-    "retry": "Gezaako nate"
+    "retry": "Gezaako nate",
+    "context": "Ebikwata ku musiri",
+    "contextHint": "Kiterekebwa omulundi gumu ku buli musiri ne kigenda mu buli kyewandiiko ekikoleddwa wano.",
+    "applyToStation": "Kozesa ku misiri gyonna egy'omu siteegi eno",
+    "applyToStationLoading": "Kikozesebwa…",
+    "applyToStationNeedsStation": "Teekawo siteegi okusobola kino.",
+    "applyToStationSuccess": "Kikoseddwa ku misiri {{count}} emirala mu siteegi eno.",
+    "applyToStationNone": "Tewali musiri mulala guli mu siteegi eno.",
+    "applyToStationError": "Tetusobodde kukozesa bino ku siteegi."
   },
   "batch": {
     "saving": "Tikutereka…",
@@ -315,7 +323,8 @@
       "noProducts": "Tewali byakozesebwa ebiriwo kati",
       "note": "Akawandiiko",
       "booleanYes": "Yee",
-      "booleanNo": "Nedda"
+      "booleanNo": "Nedda",
+      "plotContext": "Ebikwata ku musiri"
     },
     "validation": {
       "required": "Jjuzaamu ekifo kino",

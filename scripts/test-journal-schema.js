@@ -74,7 +74,8 @@ const NUTRIENT_UNIT_CODES = [
   'unit.kg_s_per_ha_nutrient',
 ];
 
-const EXPECTED_LAYOUT_MINIMUMS = {
+// v1 (frozen) minimum_fields, before Slice BC's static/reading split.
+const EXPECTED_LAYOUT_MINIMUMS_V1 = {
   open_field: [
     'attr.block_bed_row',
     'attr.treated_area',
@@ -102,6 +103,32 @@ const EXPECTED_LAYOUT_MINIMUMS = {
     'attr.mass_end',
     'attr.tare_mass',
     'attr.mass_method',
+  ],
+};
+
+// v3 (Slice BC / R1): minimum_fields is reduced to just the plot-static
+// context fields; the removed measurement readings move to `reading_fields`
+// (consumed only by the `sampling` Quick activity). open_field keeps
+// attr.treated_area in minimum_fields (full_record/research parity) even
+// though it is excluded from static_context_fields.
+const EXPECTED_LAYOUT_MINIMUMS_V3 = {
+  open_field: EXPECTED_LAYOUT_MINIMUMS_V1.open_field,
+  greenhouse: ['attr.structure_compartment', 'attr.root_zone_system', 'attr.plant_area'],
+  lysimeter: ['attr.experimental_unit', 'attr.replicate', 'attr.treatment', 'attr.surface_area'],
+};
+
+const EXPECTED_LAYOUT_STATIC_CONTEXT_V3 = {
+  open_field: ['attr.block_bed_row', 'attr.cover_type', 'attr.denominator'],
+  greenhouse: EXPECTED_LAYOUT_MINIMUMS_V3.greenhouse,
+  lysimeter: EXPECTED_LAYOUT_MINIMUMS_V3.lysimeter,
+};
+
+const EXPECTED_LAYOUT_READING_FIELDS_V3 = {
+  open_field: [],
+  greenhouse: ['attr.wetted_area', 'attr.drainage_volume', 'attr.recirculation'],
+  lysimeter: [
+    'attr.interval_minutes', 'attr.water_input', 'attr.rain_input', 'attr.drainage_volume',
+    'attr.mass_start', 'attr.mass_end', 'attr.tare_mass', 'attr.mass_method',
   ],
 };
 
@@ -930,10 +957,11 @@ try {
     [
       ['farmer_quick', 1],
       ['farmer_quick', 2],
+      ['farmer_quick', 3],
       ['full_record', 1],
       ['research_observation', 1],
     ],
-    'seed must contain the three template codes, with farmer_quick published at v1 (frozen, historical) and v2 (current)'
+    'seed must contain the three template codes, with farmer_quick published at v1/v2 (frozen, historical) and v3 (current, Slice BC quick_fields)'
   );
   const templateDefinitions = new Map(
     templates.map((template) => [template.code, JSON.parse(template.definition_json)])
@@ -1034,20 +1062,57 @@ try {
     [
       ['agroscope_open_field', 1],
       ['greenhouse', 1],
+      ['greenhouse', 3],
       ['lysimeter', 1],
+      ['lysimeter', 3],
       ['open_field', 1],
+      ['open_field', 3],
     ],
-    'seed must contain exactly the four v1 layouts'
+    'seed must contain the four generic layout codes, with open_field/greenhouse/lysimeter ' +
+      'published at v1 (frozen, historical) and v3 (current, Slice BC static/reading split)'
   );
+  const parsedLayoutsByVersion = new Map(
+    layouts.map((layout) => [`${layout.code}:${layout.version}`, JSON.parse(layout.definition_json)])
+  );
+  // `parsedLayouts` resolves each code to its latest (currently-served)
+  // version, matching what buildCatalogModel/activeDefinition pick at
+  // runtime — i.e. v3 for open_field/greenhouse/lysimeter.
   const parsedLayouts = new Map(
     layouts.map((layout) => [layout.code, JSON.parse(layout.definition_json)])
   );
-  for (const [layoutCode, minimumFields] of Object.entries(EXPECTED_LAYOUT_MINIMUMS)) {
+  for (const [layoutCode, minimumFields] of Object.entries(EXPECTED_LAYOUT_MINIMUMS_V1)) {
+    assert.deepEqual(
+      parsedLayoutsByVersion.get(`${layoutCode}:1`).minimum_fields,
+      minimumFields,
+      `${layoutCode}@1 minimum-field contract (frozen)`
+    );
+  }
+  for (const [layoutCode, minimumFields] of Object.entries(EXPECTED_LAYOUT_MINIMUMS_V3)) {
     assert.deepEqual(
       parsedLayouts.get(layoutCode).minimum_fields,
       minimumFields,
-      `${layoutCode} minimum-field contract`
+      `${layoutCode}@3 (current) minimum-field contract`
     );
+  }
+  for (const [layoutCode, staticFields] of Object.entries(EXPECTED_LAYOUT_STATIC_CONTEXT_V3)) {
+    assert.deepEqual(
+      parsedLayouts.get(layoutCode).static_context_fields,
+      staticFields,
+      `${layoutCode}@3 static_context_fields contract`
+    );
+  }
+  for (const [layoutCode, readingFields] of Object.entries(EXPECTED_LAYOUT_READING_FIELDS_V3)) {
+    assert.deepEqual(
+      parsedLayouts.get(layoutCode).reading_fields,
+      readingFields,
+      `${layoutCode}@3 reading_fields contract`
+    );
+    for (const field of readingFields) {
+      assert.ok(
+        !parsedLayouts.get(layoutCode).minimum_fields.includes(field),
+        `${layoutCode}@3 minimum_fields must not retain reading field ${field}`
+      );
+    }
   }
   verifyAgroscopeDependencies(parsedLayouts.get('agroscope_open_field'));
 
@@ -1086,7 +1151,7 @@ try {
     'SELECT id, catalog_version, catalog_hash FROM journal_catalog_state WHERE id = 1;'
   );
   assert.equal(catalogState.length, 1, 'catalog state row id=1 must exist');
-  assert.equal(catalogState[0].catalog_version, 2, 'seed-built catalog version must be the current version (2, since farmer_quick@2 / Task 27)');
+  assert.equal(catalogState[0].catalog_version, 3, 'seed-built catalog version must be the current version (3, since Slice BC / farmer_quick@3 + layout v3)');
   assert.match(catalogState[0].catalog_hash, /^[0-9a-f]{64}$/, 'catalog hash must be SHA-256');
 
   const seedText = fs.readFileSync(seedPath, 'utf8');

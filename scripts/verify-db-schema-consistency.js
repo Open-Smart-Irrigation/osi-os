@@ -674,6 +674,7 @@ const schemaContract = {
     'updated_at',
     'updated_by_principal_uuid',
     'sync_version',
+    'context_json',
   ],
   journal_products: [
     'product_uuid',

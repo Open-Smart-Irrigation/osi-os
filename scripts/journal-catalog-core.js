@@ -331,6 +331,50 @@ const choices = [
 const CORE_ACTIVITY_CODES = activities.map((activity) => activity.code);
 const ALL_TEMPLATES = ['farmer_quick', 'full_record', 'research_observation'];
 
+// v3 (Slice BC / R1): per-activity field sets for the Quick template. Every
+// one of the 16 activities must have an entry (enforced by
+// generate-journal-catalog.js's validateCore) so deriveFieldStates never
+// falls through to an unmapped-activity default in normal operation. 'note'
+// is a top-level field, not a catalog attribute, and is valid everywhere.
+// Measurement readings are NOT listed under `sampling` here — they come from
+// the plot's active layout `reading_fields` (see the layout v3 rows below),
+// because the same catalog-wide template cannot hard-code a layout-specific
+// field list. This covers the lysimeter water-balance set. NOTE: greenhouse
+// EC/pH live in the greenhouse layout's `conditional_fields.solution_managed`,
+// NOT `reading_fields`, so they surface only via Full/Research with that
+// condition set — Quick `sampling` does not reach them (unchanged from pre-BC).
+const FARMER_QUICK_V3_QUICK_FIELDS = {
+  irrigation: ['attr.irrigation_depth', 'note'],
+  fertilization: [
+    'attr.product_uuid', 'attr.product',
+    'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
+    'note',
+  ],
+  fertigation: [
+    'attr.product_uuid', 'attr.product',
+    'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
+    'note',
+  ],
+  plant_protection_application: [
+    'attr.product_uuid', 'attr.product',
+    'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_biological_count_area',
+    'attr.target', 'attr.waiting_period_days',
+    'note',
+  ],
+  weed_control_nonchemical: ['note'],
+  seeding: ['attr.crop', 'attr.amount_mass_area_product', 'attr.amount_count_area', 'note'],
+  planting_transplanting: ['attr.crop', 'attr.amount_count_area', 'note'],
+  pruning: ['note'],
+  crop_care: ['note'],
+  tillage_soil_work: ['attr.amount_operation_depth', 'note'],
+  mowing: ['note'],
+  harvest: ['attr.harvest_yield_area', 'note'],
+  sampling: ['note'],
+  general_observation: ['attr.observation_text', 'note'],
+  pest_disease_observation: ['attr.observation_text', 'note'],
+  equipment_maintenance: ['note'],
+};
+
 const templates = [
   {
     code: 'farmer_quick',
@@ -361,6 +405,31 @@ const templates = [
         { code: 'key_values', fields: ['attr.irrigation_depth', 'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'note'] },
         { code: 'carried_forward_details', fields: ['attr.operator', 'attr.equipment', 'attr.method'] },
       ],
+      max_primary_fields: 5,
+      carry_forward: ['attr.operator', 'attr.equipment', 'attr.method'],
+    },
+  },
+  // v3 (Slice BC / R1): replaces the flat, activity-blind `key_values`
+  // section with `quick_fields`, an activity_code -> field-code map resolved
+  // at render time by templateEngine.deriveFieldStates. There is no
+  // `key_values` section on this row at all — the per-activity set IS the
+  // Quick form's substantive content, so nothing generic needs to be listed
+  // in `sections` to be validated. Plot-static context (block/bed/row,
+  // structure/compartment, experimental unit, ...) is deliberately absent
+  // from every quick_fields entry: it now comes from the plot's own
+  // `journal_plot_settings.context_json` and renders read-only (Part 2 of
+  // this slice), not as a per-entry required input. v1/v2 stay byte-identical
+  // above so historical entries still resolve.
+  {
+    code: 'farmer_quick',
+    version: 3,
+    label: 'Quick',
+    definition: {
+      sections: [
+        { code: 'what_where_when', fields: ['activity_code', 'plot_uuid', 'occurred_start'] },
+        { code: 'carried_forward_details', fields: ['attr.operator', 'attr.equipment', 'attr.method'] },
+      ],
+      quick_fields: FARMER_QUICK_V3_QUICK_FIELDS,
       max_primary_fields: 5,
       carry_forward: ['attr.operator', 'attr.equipment', 'attr.method'],
     },
@@ -531,6 +600,63 @@ const layouts = [
       activity_codes: CORE_ACTIVITY_CODES,
       supported_templates: ALL_TEMPLATES,
       minimum_fields: ['attr.experimental_unit', 'attr.replicate', 'attr.treatment', 'attr.surface_area', 'attr.interval_minutes', 'attr.water_input', 'attr.rain_input', 'attr.drainage_volume', 'attr.mass_start', 'attr.mass_end', 'attr.tare_mass', 'attr.mass_method'],
+      option_dependencies: [],
+    },
+  },
+  // v3 (Slice BC / R1): `minimum_fields` on these three rows is unchanged in
+  // *meaning* from v1 — full_record/research_observation still resolve the
+  // exact same forced field set they always have (templateEngine.ts
+  // reconstructs it from minimum_fields + reading_fields for any template
+  // other than farmer_quick@3, so their resolution is provably unaffected by
+  // this bump). What is new: `static_context_fields` (plot-level facts that
+  // now live in journal_plot_settings.context_json and render read-only —
+  // Part 2 of this slice) and `reading_fields` (per-measurement readings that
+  // now appear only on the `sampling` Quick activity, not on every entry).
+  // open_field.minimum_fields keeps attr.treated_area (full_record parity);
+  // it is intentionally excluded from static_context_fields because it is
+  // activity-variable, not a plot-static fact (R1/BC3) — farmer_quick@3's
+  // fertilization/plant_protection_application quick_fields reference the
+  // amount attributes directly instead.
+  {
+    code: 'open_field',
+    version: 3,
+    label: 'Open field',
+    definition: {
+      activity_codes: CORE_ACTIVITY_CODES,
+      supported_templates: ALL_TEMPLATES,
+      minimum_fields: ['attr.block_bed_row', 'attr.treated_area', 'attr.cover_type', 'attr.denominator'],
+      static_context_fields: ['attr.block_bed_row', 'attr.cover_type', 'attr.denominator'],
+      reading_fields: [],
+      denominator_contract: ['area', 'plant', 'row'],
+      option_dependencies: [],
+    },
+  },
+  {
+    code: 'greenhouse',
+    version: 3,
+    label: 'Greenhouse',
+    definition: {
+      activity_codes: CORE_ACTIVITY_CODES,
+      supported_templates: ALL_TEMPLATES,
+      minimum_fields: ['attr.structure_compartment', 'attr.root_zone_system', 'attr.plant_area'],
+      static_context_fields: ['attr.structure_compartment', 'attr.root_zone_system', 'attr.plant_area'],
+      reading_fields: ['attr.wetted_area', 'attr.drainage_volume', 'attr.recirculation'],
+      conditional_fields: {
+        solution_managed: ['attr.ec', 'attr.ph'],
+      },
+      option_dependencies: [],
+    },
+  },
+  {
+    code: 'lysimeter',
+    version: 3,
+    label: 'Lysimeter',
+    definition: {
+      activity_codes: CORE_ACTIVITY_CODES,
+      supported_templates: ALL_TEMPLATES,
+      minimum_fields: ['attr.experimental_unit', 'attr.replicate', 'attr.treatment', 'attr.surface_area'],
+      static_context_fields: ['attr.experimental_unit', 'attr.replicate', 'attr.treatment', 'attr.surface_area'],
+      reading_fields: ['attr.interval_minutes', 'attr.water_input', 'attr.rain_input', 'attr.drainage_volume', 'attr.mass_start', 'attr.mass_end', 'attr.tare_mass', 'attr.mass_method'],
       option_dependencies: [],
     },
   },

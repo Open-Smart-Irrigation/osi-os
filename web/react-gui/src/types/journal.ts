@@ -164,6 +164,10 @@ export interface JournalPlotWritePayload {
   active: 0 | 1;
   layout_code: string;
   layout_version: number;
+  // Slice BC (R1 Part 2): the layout's static-context field values (JSON
+  // object keyed by attribute code), rendered read-only on the capture form
+  // and snapshotted onto each saved entry. `null`/omitted clears it.
+  context_json?: string | null;
 }
 
 export interface JournalPlotGroupWritePayload {
@@ -265,6 +269,12 @@ export interface JournalPlotSettings {
   updated_at: string;
   updated_by_principal_uuid: string;
   sync_version: number;
+  // Slice BC (R1 Part 2): raw JSON text of the plot-static context values
+  // (journal_plot_settings.context_json). Optional/`null` when never set —
+  // kept optional (not required) so the many existing test fixtures that
+  // build a JournalPlot literal without it keep compiling; treat an absent
+  // value the same as `null` (no context).
+  context_json?: string | null;
 }
 
 export interface JournalPlot {

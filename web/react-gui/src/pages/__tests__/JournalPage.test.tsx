@@ -183,10 +183,14 @@ if (!compiledFarmerQuick || !compiledOpenField) {
   throw new Error('compiled SLA catalog is missing farmer_quick or open_field');
 }
 
-const captureCatalog: JournalCatalog = {
-  catalog_version: 1,
-  catalog_hash: 'catalog-hash',
-  vocab: [
+// Slice BC: farmer_quick@3's quick_fields references far more attribute
+// codes than this suite's hand-curated vocab list ever needed (v1/v2 only
+// touched a handful). Rather than hand-author every one (and re-rot the next
+// time quick_fields grows), curated rows below are treated as overrides on
+// top of the full, real compiled vocab — every code the current catalog
+// defines, so "always take the latest farmer_quick" (see the comment above)
+// keeps working without maintaining a second, drifting attribute list here.
+const curatedVocabOverrides: JournalVocabRow[] = [
     ...openFieldActivityCodes.map((code, index) => catalogVocabRow(code, 'activity', {
       icon_key: code === 'irrigation' ? 'water' : null,
       labels: { en: code === 'irrigation' ? 'Irrigation' : code },
@@ -310,6 +314,16 @@ const captureCatalog: JournalCatalog = {
     catalogVocabRow('choice.denominator.row', 'choice', {
       parent_code: 'attr.denominator', labels: { en: 'Per row length' }, sort_order: 30,
     }),
+];
+
+const curatedVocabCodes = new Set(curatedVocabOverrides.map((row) => row.code));
+
+const captureCatalog: JournalCatalog = {
+  catalog_version: 1,
+  catalog_hash: 'catalog-hash',
+  vocab: [
+    ...curatedVocabOverrides,
+    ...compiledSla.vocab.filter((row) => !curatedVocabCodes.has(row.code)),
   ],
   templates: [{
     code: 'farmer_quick',
@@ -1404,34 +1418,30 @@ describe('JournalPage', () => {
     expect(captureNavigation).toHaveClass('flex', 'flex-wrap');
     expect(captureNavigation).not.toHaveClass('flex-nowrap', 'overflow-x-auto');
     primaryActivate(() => fireEvent.click(screen.getByRole('button', { name: 'capture.next' })));
-    expect(screen.getByLabelText(/Block \/ bed \/ row/)).toHaveValue('');
-    expect(screen.getByLabelText(/Treated area/)).toHaveValue('');
-    expect(screen.getByLabelText(/Cover type/)).toHaveValue('');
-    expect(screen.getByLabelText(/Application denominator/)).toHaveValue('');
-    primaryActivate(() => fireEvent.change(
-      screen.getByLabelText(/Block \/ bed \/ row/),
-      { target: { value: 'B-12' } },
-    ));
-    primaryActivate(() => fireEvent.change(
-      screen.getByLabelText(/Treated area/),
-      { target: { value: '1200' } },
-    ));
-    primaryActivate(() => fireEvent.change(
-      screen.getByLabelText(/Cover type/),
-      { target: { value: 'choice.cover.crop' } },
-    ));
-    primaryActivate(() => fireEvent.change(
-      screen.getByLabelText(/Application denominator/),
-      { target: { value: 'choice.denominator.area' } },
-    ));
+    // Slice BC (R1): irrigation Quick shows only the irrigation amount + note
+    // now — the layout's plot-static fields (block/bed/row, cover type,
+    // application denominator) and the activity-variable treated area no
+    // longer force-render as per-entry inputs on Quick (this was the "wall"
+    // the slice removes; see spec audit case 1). Asserting their absence here
+    // keeps this SLA test honest about what actually changed.
+    expect(screen.getByLabelText(/Irrigation depth/)).toHaveValue('');
+    expect(screen.queryByLabelText(/Block \/ bed \/ row/)).toBeNull();
+    expect(screen.queryByLabelText(/Treated area/)).toBeNull();
+    expect(screen.queryByLabelText(/Cover type/)).toBeNull();
+    expect(screen.queryByLabelText(/Application denominator/)).toBeNull();
+    // None of the four are force-required on Quick anymore, so the form is
+    // already valid — no dead-end "Next" click is needed before it advances.
     primaryActivate(() => fireEvent.click(screen.getByRole('button', { name: 'capture.next' })));
     await screen.findByRole('heading', { name: 'capture.confirm.title' });
     expect(screen.getAllByRole('main')).toHaveLength(1);
     primaryActivate(() => fireEvent.click(screen.getByRole('button', { name: 'capture.finish' })));
 
     await waitFor(() => expect(screen.getByText('Saved on farm gateway')).toBeInTheDocument());
-    expect(primaryActivations).toBe(9);
-    expect(primaryActivations).toBeLessThanOrEqual(9);
+    // Interaction budget dropped from 9 to 5 (Slice BC removed four
+    // now-unnecessary layout-forced field activations: open capture, pick
+    // Irrigation, advance to details, advance to confirm, finish).
+    expect(primaryActivations).toBe(5);
+    expect(primaryActivations).toBeLessThanOrEqual(5);
     expect(mocks.journalApi.updateEntry).toHaveBeenCalledTimes(1);
     const finalPayload = mocks.journalApi.updateEntry.mock.calls[0][1] as UpdateEntryPayload;
     expect(finalPayload).toEqual(expect.objectContaining({
@@ -1444,36 +1454,18 @@ describe('JournalPage', () => {
         }),
       ]),
     }));
-    const requiredCodes = new Set([
+    // The plot-static/activity-variable layout fields are no longer part of
+    // the quick-entry payload at all (no context_json was set on this test's
+    // plot for the read-only-context snapshot in Part 2 of this slice to
+    // carry forward).
+    const formerlyForcedCodes = new Set([
       'attr.block_bed_row',
       'attr.treated_area',
       'attr.cover_type',
       'attr.denominator',
     ]);
-    const requiredValues = finalPayload.values
-      .filter(({ attribute_code }) => requiredCodes.has(attribute_code))
-      .sort((left, right) => left.attribute_code.localeCompare(right.attribute_code));
-    expect(requiredValues).toEqual([
-      {
-        attribute_code: 'attr.block_bed_row',
-        value: 'B-12',
-      },
-      {
-        attribute_code: 'attr.cover_type',
-        value: 'choice.cover.crop',
-      },
-      {
-        attribute_code: 'attr.denominator',
-        value: 'choice.denominator.area',
-      },
-      {
-        attribute_code: 'attr.treated_area',
-        entered_unit_code: 'unit.m2_area',
-        entered_value_num: 1200,
-        unit_code: 'unit.m2_area',
-        value_num: 1200,
-      },
-    ]);
+    expect(finalPayload.values.some(({ attribute_code }) => formerlyForcedCodes.has(attribute_code)))
+      .toBe(false);
     const confirmation = screen.getByRole('heading', { name: 'capture.confirm.title' }).closest('section');
     expect(confirmation?.querySelector(':scope > .grid')).toHaveClass('grid', 'grid-cols-1', 'sm:grid-cols-2');
     expect(confirmation?.querySelector(':scope > .flex.flex-nowrap, :scope > .overflow-x-auto')).toBeNull();

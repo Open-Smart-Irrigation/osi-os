@@ -286,6 +286,85 @@ const baseProps = {
   onSaved: vi.fn(),
 };
 
+// Slice BC (R1 Part 2): a farmer_quick@3-shaped template (quick_fields) paired
+// with an open_field layout carrying static_context_fields, to prove
+// end-to-end that Quick renders only the activity's own fields, the plot's
+// static context renders read-only (not as an input), and the saved entry
+// still carries the context values via the payload snapshot.
+const plotContextCatalog: JournalCatalog = {
+  catalog_version: 3,
+  catalog_hash: 'plot-context-catalog',
+  vocab: [
+    row('fertilization', 'activity'),
+    row('attr.crop', 'attribute'),
+    { ...row('attr.block_bed_row', 'attribute'), labels: { en: 'Block / bed / row' } },
+    { ...row('attr.product', 'attribute'), labels: { en: 'Product' } },
+    numericAttribute('attr.amount_mass_area_product', 'Amount'),
+    unitRow('unit.kg', 'kg/ha', 1),
+  ],
+  templates: [
+    {
+      code: 'farmer_quick',
+      version: 3,
+      active: 1,
+      catalog_errors: [],
+      labels: { en: 'Quick' },
+      definition: {
+        sections: [{ code: 'what_where_when', fields: ['activity_code', 'plot_uuid', 'occurred_start'] }],
+        quick_fields: {
+          fertilization: ['attr.product', 'attr.amount_mass_area_product', 'note'],
+        },
+        carry_forward: [],
+        require_explicit_choices: false,
+        show_standard_mappings: false,
+        activity_requirements: {},
+        conditional_groups: [],
+        requirements: { required: [], optional: [], required_any: [] },
+      },
+    },
+    definition('full_record', ['attr.crop'], 2),
+    definition('research_observation', ['attr.crop'], 9),
+  ],
+  layouts: [{
+    code: 'open_field',
+    version: 3,
+    active: 1,
+    catalog_errors: [],
+    labels: { en: 'Open field' },
+    definition: {
+      activity_codes: ['fertilization'],
+      supported_templates: ['farmer_quick', 'full_record', 'research_observation'],
+      fields: [],
+      minimum_fields: ['attr.block_bed_row'],
+      static_context_fields: ['attr.block_bed_row'],
+      reading_fields: [],
+      conditional_fields: {},
+      denominator_contract: [],
+      option_dependencies: [],
+    },
+  }],
+  products: [],
+  mappings: [],
+};
+
+const plotWithContext: JournalPlot = {
+  ...plot,
+  plot_uuid: 'plot-context-1',
+  plot_code: 'CTX-1',
+  // Sensorless (no zone_uuid) like `sensorlessPlot`, but keeps crop_hint so
+  // `inferredCrop` is non-empty and the activity -> details step transition
+  // isn't blocked by the "sensorless plot needs an explicit crop" gate.
+  zone_uuid: null,
+  crop_hint: 'Wheat',
+  settings: {
+    layout_code: 'open_field',
+    updated_at: timestamp,
+    updated_by_principal_uuid: 'author',
+    sync_version: 1,
+    context_json: JSON.stringify({ 'attr.block_bed_row': 'B-7' }),
+  },
+};
+
 function entry(overrides: Partial<EntryAggregate> = {}): EntryAggregate {
   return {
     contract_version: 1,
@@ -3974,5 +4053,66 @@ describe('JournalCaptureFlow', () => {
     fireEvent.click(screen.getByRole('button', { name: /resolve.*north pair/i }));
     await waitFor(() => expect(updatePlotGroup).toHaveBeenCalledOnce());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  describe('Slice BC: activity-scoped Quick + plot-static context (R1)', () => {
+    it('renders only the activity Quick fields plus read-only plot context, never block/bed/row as an input, and snapshots the context onto the saved entry', async () => {
+      const props = {
+        ...baseProps,
+        catalog: plotContextCatalog,
+        plots: [plotWithContext],
+      };
+      render(<JournalCaptureFlow {...props} initialPlot={plotWithContext} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'fertilization' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+      // The activity's own quick_fields render as inputs...
+      const productInput = screen.getByRole('textbox', { name: 'Product' });
+      expect(screen.getByRole('textbox', { name: 'Amount' })).toBeInTheDocument();
+      // ...but the plot-static context field never renders as an input.
+      expect(screen.queryByLabelText(/Block \/ bed \/ row/i)).toBeNull();
+      expect(screen.queryByRole('textbox', { name: /block/i })).toBeNull();
+      // It does render, read-only, with its plot-context value.
+      expect(screen.getByText(/capture\.form\.plotContext/)).toBeInTheDocument();
+      expect(screen.getByText('B-7')).toBeInTheDocument();
+
+      fireEvent.change(productInput, { target: { value: 'Compost' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Amount' }), { target: { value: '12' } });
+
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).not.toBeDisabled());
+      fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+      await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalled());
+      const payload = apiMocks.updateEntry.mock.calls[0][1];
+      expect(payload.values).toEqual(expect.arrayContaining([
+        expect.objectContaining({ attribute_code: 'attr.product', value: 'Compost' }),
+        expect.objectContaining({ attribute_code: 'attr.block_bed_row', value: 'B-7' }),
+      ]));
+    });
+
+    it('leaves full_record resolution unaffected: block/bed/row still renders as a required field there', async () => {
+      // Slice BC's regression guard, checked directly against the resolution
+      // engine (deriveFieldStates) rather than round-tripping the capture
+      // UI's in-flow detail-level switcher, which this minimal fixture does
+      // not exercise: full_record has no quick_fields, so it must keep
+      // force-requiring the layout's plot-static field exactly as before.
+      const { buildCatalogModel } = await import('../../../../journal/catalogModel');
+      const { deriveFieldStates } = await import('../../../../journal/templateEngine');
+      const result = buildCatalogModel(plotContextCatalog);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const fullRecord = result.model.templates.get('full_record');
+      const layout = result.model.layouts.get('open_field');
+      expect(fullRecord).toBeDefined();
+      expect(layout).toBeDefined();
+      if (!fullRecord || !layout) return;
+      const states = deriveFieldStates(fullRecord, layout, { activity_code: 'fertilization' });
+      expect(states.find((state) => state.code === 'attr.block_bed_row')).toMatchObject({
+        visible: true,
+        required: true,
+      });
+    });
   });
 });
