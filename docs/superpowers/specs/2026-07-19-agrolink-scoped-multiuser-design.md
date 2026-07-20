@@ -45,7 +45,7 @@ Per-aggregate behavior under scoped mode:
 |---|---|---|---|
 | `irrigation_zones` | `user_id` (legacy, single) | Owner plus zone grantees | All grantees may operate; delete restricted by R3 |
 | `devices` | `user_id`, zone via `irrigation_zone_id` | Inherits zone scope; weather-class readable by all (D4) | Device follows its zone, never independently granted |
-| `irrigation_schedules` | zone-bound, creator user | Zone scope; creator tracked for §8 scheduler authority | Schedule survives grant revocation only per §8 rule |
+| `irrigation_schedules` | zone-bound, one per zone (`UNIQUE(irrigation_zone_id)`) | Zone scope; no per-creator concept | Shared by all zone grantees; §8 governs mutation and execution |
 | `journal_plots` | `owner_user_uuid` (0020) | Owner plus plot grantees | R4 governs zone-link removal |
 | `journal_plot_groups`, entries, values, vocabulary | `owner_user_uuid` chain via plot | Follows the plot's scope | Entries keep original author attribution |
 | Zone env/recommendations, history, exports | zone-bound queries | Filtered to principal's zone set | Shared env exception per D4 |
@@ -103,11 +103,27 @@ CREATE INDEX idx_user_plot_by_plot
   ON user_plot_assignments(plot_uuid) WHERE deleted_at IS NULL;
 ```
 
-The reverse indexes answer "who holds this zone/plot" (needed by R3 sole-assignee checks and admin screens) without scanning by user. New migration-owned outbox triggers fire on insert and on tombstone update for both assignment tables, and on `role`/`disabled_at` change for the `USER` aggregate. Every mutation bumps `sync_version` inside the trigger, matching the established trigger pattern from migration 0003.
+The reverse indexes answer "who holds this zone/plot" (needed by R3 sole-assignee checks and admin screens) without scanning by user. New migration-owned outbox triggers fire on insert and on tombstone update for both assignment tables. Every mutation bumps `sync_version` inside the trigger, matching the established trigger pattern from migration 0003.
+
+The `USER` aggregate needs three trigger arms, because of a verified SQLite behavior: a sibling trigger's UPDATE during the same INSERT is not visible to another AFTER INSERT trigger (reproduced: the shipped `trg_sync_users_uuid_ai` fills `user_uuid` on insert, yet a second AFTER INSERT trigger reads NULL through both `NEW.user_uuid` and a fresh SELECT). A bare INSERT trigger would therefore emit `USER_UPSERTED` with a null uuid. Instead:
+
+```sql
+-- Arm 1: uuid assigned by the shipped trigger (the common account-creation path)
+CREATE TRIGGER trg_dp_users_outbox_uuid_au AFTER UPDATE OF user_uuid ON users
+FOR EACH ROW WHEN NEW.user_uuid IS NOT NULL BEGIN … emit USER_UPSERTED … END;
+-- Arm 2: caller supplied the uuid directly at insert
+CREATE TRIGGER trg_dp_users_outbox_ai AFTER INSERT ON users
+FOR EACH ROW WHEN NEW.user_uuid IS NOT NULL AND NEW.user_uuid != '' BEGIN … emit USER_UPSERTED … END;
+-- Arm 3: role/disable mutations
+CREATE TRIGGER trg_dp_users_outbox_role_au AFTER UPDATE OF role, disabled_at ON users
+FOR EACH ROW BEGIN … emit USER_UPSERTED … END;
+```
+
+Every emitted payload carries a non-null `user_uuid`, so a user event always precedes any grant event that references it; the cloud never resolves membership for an unknown `local_user_uuid`. §14 adds a test asserting the emitted payload's uuid is non-null on the trigger-assigned path.
 
 ### 5.3 `0023__scoped_access_backfill.sql` (data)
 
-Idempotent backfill for **in-place upgrades only**: on a hub that already has users, the operator names the bootstrap admin via a migration input (or, absent input, the lowest-`id` active account is promoted and the runbook tells the operator to verify). This migration does nothing on a fresh image, where the users table is empty; the fresh-hub path is the registration-time rule in §13.
+Two idempotent jobs. First, `user_uuid` backfill: any legacy user row with a null uuid gets one assigned (the shipped `trg_sync_users_uuid_ai` covers inserts, so this closes the pre-trigger era), giving the §8 identifier bridge a total function to work with. Second, admin promotion for **in-place upgrades only**: on a hub that already has users, the operator names the bootstrap admin via a migration input (or, absent input, the lowest-`id` active account is promoted and the runbook tells the operator to verify). On a fresh image the users table is empty and both jobs are no-ops; the fresh-hub path is the registration-time rule in §13.
 
 ### 5.4 Verification strategy
 
@@ -154,9 +170,11 @@ isAdmin(userUuid)
 
 **Cache policy.** Read paths resolve scope from a 30 s per-user cache in Node-RED global context; the epoch bumps on grant writes, role changes, and disables, so routine revocation propagates within seconds. **Physical-effect and privilege paths never use the cache**: valve commands, schedule mutation, zone config writes, device claim/assign, account and grant management, and `/download/database` run `assertFresh*` — direct indexed SELECTs against the assignment and users tables — and read `disabled_at` synchronously. A disabled account loses actuation on the next request, not within 30 s. Status-code rule: out-of-scope resources answer 404 (anti-enumeration, R5), authenticated-but-wrong-role actions answer 403.
 
+**Identifier bridge.** `resolveScope` takes the text `user_uuid` and internally joins `users.user_uuid → users.id`, because zone and device ownership is keyed by the integer `users.id` while plots, grants, and the journal use the text uuid. Migration 0023 backfills `user_uuid` for any legacy rows where it is null (the shipped `trg_sync_users_uuid_ai` already assigns it on insert, so new accounts always have one). The resolver treats a null uuid as a hard error, never as an empty scope.
+
 **Hook point.** Every protected handler already validates the Bearer token. Handlers extend that step: resolve the principal's `user_uuid`, then apply the cached or fresh check as the path demands. Read endpoints (zone/device lists, history queries, CSV exports, dendro/chameleon reads, zone environment and recommendations) filter through `filterZoneUuids`; shared-env reads (D4) bypass the zone filter but still require an enabled account. Admin-only endpoints check `assertRole`.
 
-**Scheduler authority.** The actuation path is reachable from scheduler nodes that run without a user. Scheduler origin is established inside the flow (an internal marker set by the scheduler node itself), never from request metadata, so a crafted request cannot impersonate it. Schedules are owned by their creator's `user_uuid`; when an account is disabled or loses its zone grant, its schedules in that zone are disabled in the same transaction (the row stays for audit; `enabled` clears). An admin can re-enable or reassign them. Scheduler-originated actuation re-checks that the owning account is enabled and still in scope at execution time — cheap, because schedule firings are rare relative to sensor traffic.
+**Scheduler authority.** The actuation path is reachable from scheduler nodes that run without a user. Scheduler origin is established inside the flow (an internal marker set by the scheduler node itself), never from request metadata, so a crafted request cannot impersonate it. Schedules are zone resources, one per zone, shared by all grantees; there is no per-creator ownership and no creator column is added. Schedule mutation requires fresh zone scope (`assertFreshZoneAccess`). At execution time the scheduler checks that the zone still has at least one enabled account in scope, evaluated on the union of owners and grantees, not on any single row: when a disable, a grant revocation, or a de-provision empties that set, the schedule's `enabled` flag clears and the zone is flagged for admin review. An admin can re-enable it. **Stated policy:** a schedule is collective zone infrastructure — it keeps actuating as long as any one enabled account holds the zone in scope, authorized by whoever currently holds scope, not by its original creator. Because no creator column exists, per-creator tracking is impossible by design; instead, any scope change on a zone (grant revoked, account disabled) flags that zone's schedule for admin re-confirmation in the GUI while it keeps running, so unattended actuation always has a visible review prompt. For user-originated actuation, the membership re-assertion repeats inside the same queue write step that enqueues the downlink, closing the check-to-enqueue race on the serialized writer; the residual window is one already-queued command and is documented.
 
 ## 9. Audit
 
@@ -165,8 +183,8 @@ isAdmin(userUuid)
 ## 10. API surface changes
 
 - `GET /api/me` — returns `{ username, user_uuid, role, zone_uuids, plot_uuids, features }`. Drives GUI rendering.
-- **Bootstrap registration (§13).** `POST /auth/register` is currently unauthenticated. In scoped mode it accepts a registration only while zero admin accounts exist; that first registration becomes admin inside one transaction (insert user, set role, verified by a follow-up SELECT). After an admin exists, public registration closes and account creation moves to the admin endpoints. Legacy mode keeps current behavior.
-- Account management (admin): list users, create user, reset password (admin-set temporary password; no email flow), set role, disable/enable. Disable sets `disabled_at`, bumps the scope-cache epoch, and disables the account's schedules per §8.
+- **Bootstrap registration (§13).** `POST /auth/register` is currently unauthenticated. In scoped mode it accepts a registration only while no admin row exists in any state (enabled or disabled), evaluated as a single conditional write on the serialized queue: `INSERT … SELECT … WHERE NOT EXISTS (SELECT 1 FROM users WHERE role='admin')`. Two concurrent first registrations cannot both succeed; the loser gets 409. Counting disabled rows keeps bootstrap closed after a sole admin is disabled — the recovery path for that case is the CLI break-glass below, not self-registration. After an admin exists, public registration closes and account creation moves to the admin endpoints. Legacy mode keeps current behavior.
+- Account management (admin): list users, create user, reset password (admin-set temporary password; no email flow), set role, disable/enable. Disable sets `disabled_at` and bumps the scope-cache epoch. The last-enabled-admin guard is a single conditional write on the serialized queue, not a check-then-act — e.g. `UPDATE users SET disabled_at=… WHERE user_uuid=? AND (SELECT COUNT(*) FROM users WHERE role='admin' AND disabled_at IS NULL) > 1`, zero rows affected → 409. Two admins concurrently disabling each other cannot both succeed. The same conditional shape covers de-roling and account deletion/tombstone. A hub with no enabled admin is recovered by an operator on the hub CLI (`sqlite3` role reset, documented in the runbook), never by reopening registration.
 - Grant management (admin): grant/revoke zone or plot. Writes go to the assignment tables, bump `sync_version`, and sync per §11.
 - `GET /api/system/features` gains `scoped_access`.
 
@@ -188,6 +206,8 @@ The contract is designed and deployed before any edge producer emits. "Schema in
 
 **Sequencing.** The osi-server PR (Flyway mirror tables, membership columns, event handlers, scoped query enforcement) merges and deploys first. Only then does an edge image enable the producers; without that ordering the cloud rejects unknown aggregates and events accumulate in `rejected_at`. A paired osi-server spec is produced in Phase E before any contract edit.
 
+**Contract governance (folded in from Train A, Phase F).** The Phase F work ([`2026-07-15-cross-repo-sync-contract-ci.md`](../plans/2026-07-15-cross-repo-sync-contract-ci.md)) turns the implicit edge↔cloud HTTP contract into an explicit, versioned, edge-owned artifact with byte-compared vendored copies and CI on both repos. Once Phase F lands, this section's aggregates become governed schema rather than a handshake: adding `USER_UPSERTED` and the two assignment aggregates to `events.schema.json` follows Phase F's compatibility rule — additive edge schema/fixture first, additive server acceptance second, producer enablement only after capability proof. The `scoped_access_emit` gate (§5.2) is the SQL-level flip that the enablement step turns on. Two identity notions meet here and stay distinct: the protocol identity (`server-base + cloud-user + gateway-EUI`, hashed as `identitySha256` by the Phase G machinery) is a transport-scoped negotiation key, while scoped-access membership (`local_user_uuid` ↔ cloud user, per gateway) is an authorization fact; the `LinkedGatewayAccount` row is where they meet. Phase C's gate includes regenerating the Phase F producer fixture, because scoped provisioning (R2) changes the claim/register producer graph that the fixture inventories.
+
 ## 12. GUI changes
 
 The React GUI reads `/api/me` at login and stores the scope profile alongside the token. Zone and plot pickers, dashboards, and history views render only in-scope resources; mutation controls (valve buttons, schedule editors, claim flows) render only where role and scope allow, and disappear for viewers. New admin screens: user list with role/disable controls, grant editor pairing users with zones and plots. When `scoped_access` is off the GUI renders as today. i18n keys go through the existing workflow (#47 covers the backlog).
@@ -201,7 +221,10 @@ The AgroLink hub image sets the flag at provisioning. Fresh-hub bootstrap: the f
 ## 14. Testing
 
 - Unit tests for `osi-scope-helper`: union rule (owner + grant), tombstoned grants, cache TTL, epoch invalidation on grant/role/disable writes, flag-off wildcard, fresh-vs-cached assert paths.
-- Migration rehearsal: production-shaped DB copy with users, zones, plots, devices; apply 0022–0023; assert idempotent re-run. Fresh-image rehearsal: zero users, register first account, assert it becomes admin in one transaction.
+- Migration rehearsal: production-shaped DB copy with users, zones, plots, devices; apply 0022–0023; assert idempotent re-run. Fresh-image rehearsal: zero users, register first account, assert it becomes admin in one conditional write.
+- Bootstrap adversarial tests: two concurrent first registrations on a fresh scoped hub produce exactly one admin (loser gets 409); disabling or de-roling the last enabled admin returns 409, including the two-admins-disable-each-other race; the CLI break-glass recovery is documented and rehearsed. Identifier-space test: the resolver maps `user_uuid → users.id` correctly, and legacy null-uuid rows are backfilled by 0023.
+- USER-trigger ordering test: create an account through the trigger-assigned-uuid path and assert the emitted `USER_UPSERTED` payload's `user_uuid` is non-null (guards the three-arm shape in §5.2 against the sibling-trigger invisibility reproduced during review).
+- Scheduler-authority tests: schedule mutation rejected for out-of-scope users; execution clears `enabled` when the zone's in-scope enabled-account set empties (disable, revocation, de-provision), and only then.
 - **Restart-reversion test:** apply migrations, restart the flow runtime, assert all migration-owned triggers still exist with their migration bodies (guards the §5.1 invariant against regression).
 - Behavioral matrix, mandatory per write endpoint: admin / researcher / viewer / disabled × own scope / foreign scope × flag on/off, plus every R1–R6 rule, especially R5 foreign-enumeration denial and §8 scheduler-origin forgery attempts.
 - Concurrency smoke: cold-cache `resolveScope` under a dozen concurrent dashboard readers, timed on Pi-class hardware (validates app-level enforcement overhead before Phase C).
@@ -214,9 +237,17 @@ The AgroLink hub image sets the flag at provisioning. Fresh-hub bootstrap: the f
 |---|---|---|
 | A | Migrations 0022–0023, `osi-scope-helper`, flag, `/api/me`, bootstrap registration, verifiers incl. `MIGRATION_OWNED_TRIGGERS` | Migration gates green; fresh-image and in-place rehearsals pass; restart-reversion test green |
 | B | Read-path enforcement (lists, history, exports, shared-env exception) | Behavioral matrix green for read endpoints |
-| C | Write-path enforcement, scheduler authority, audit attribution, R1–R6 | Crafted-request tests green; `applied_commands.originator` populated; revocation measured immediate on actuation |
+| C | Write-path enforcement, scheduler authority, audit attribution, R1–R6 | Crafted-request tests green; `applied_commands.originator` populated; revocation measured immediate on actuation; Phase F producer fixture regenerated for the scoped claim graph |
 | D | GUI scoping, admin screens, viewer mode | GUI unit tests; build green |
-| E | Paired osi-server spec + PR (mirror tables, membership, event handlers, cloud enforcement); contract schema updates; then edge producers enabled | Cloud accepts aggregates; scoped remote login verified |
+| F | Edge-owned sync HTTP contract + cross-repo CI (folded Train-A hardening; source plan [`2026-07-15-cross-repo-sync-contract-ci.md`](../plans/2026-07-15-cross-repo-sync-contract-ci.md)) | Edge fixture + vendored-byte CI green on both repos; zero live-host access |
+| E | Paired osi-server spec + PR (mirror tables, membership, event handlers, cloud enforcement); governed contract schema updates per Phase F's compatibility rule; then edge producers enabled | Cloud accepts aggregates; scoped remote login verified |
+| G | Witnessed-ledger / sync-protocol activation (folded Train-A hardening; source plan [`2026-07-15-sync-delivery-stop-loss.md`](../plans/2026-07-15-sync-delivery-stop-loss.md) Tasks 3–4 + `osi-sync-protocol-state` machinery) | Derived sub-plan passes its own adversarial review; v2 no-regression proof |
+
+Dependencies: A → B → C → D is the edge spine. F follows A, runs in parallel with B–D, and must complete before E (E's aggregates enter the contract F governs). G is last and hard-ordered after F: its v3 capability proof hashes F's fixture bytes, and its witness registry inventories the producer graph only after C has finalized it. F has one external prerequisite: the Train A integration branch merged to main (its fixture derives from the shipped post-Train-A function graph).
+
+**Phase G scope summary** (the reverted "giant," narrowed to what remains after Train A's shipped fail-closed delivery and `applied_commands` dedup): the append-only command-activity audit ledger (own `activity.sqlite`, never `farming.db`), v2/v3 negotiation with the per-linked-identity capability state machine, database-restore reconciliation, and the `INTENT_PERSISTED` crash-safety boundary (`persistExternalIntent` / `completeIdempotentExternalEffect` / `queueExternalIntentRetry` / `db.durableTransaction`) around external effects such as ChirpStack registration. Audit layering stays as §9 defines it: `applied_commands.originator` remains the queryable attribution surface, the activity ledger is the tamper-evident witness, and scoped mode supplies real actor uuids to the ledger's local-principal hashes. G's negotiation gate (command polling) and this design's emit gate (event emission, §5.2) are independent and must not be conflated.
+
+**Out of scope for both folded phases:** deploy.sh activation wiring, CI workflow unions, factory-image provenance, the deployment-state machine and Train-A artifact builders, image builds and tags, live deploys and any live-host access (Kaba100, test server, `osicloud.ch`), v2 retirement, MQTT path changes (`MqttPublisherService` stays deprecated), and cloud-originated grant commands (§11's extension note stands).
 
 Phases A–D are edge-only and ship behind the flag with producers disabled. Phase E is cross-repo and sequenced cloud-first per §11.
 
@@ -228,5 +259,8 @@ Phases A–D are edge-only and ship behind the flag with producers disabled. Pha
 
 ## 17. Revision history
 
+- **v5 (2026-07-19):** folded in the two deferred Train-A hardening efforts as Phases F and G (§15) with dedupe against this design: §11's hand-rolled coordination language superseded by Phase F's contract compatibility rule; audit layering stated against the witness ledger; protocol identity vs membership identity disambiguated; Phase C gate gains producer-fixture regeneration; emit gate vs negotiation gate kept independent. Out-of-scope boundaries recorded (§15). Phase A is unaffected.
+- **v4 (2026-07-19):** folded in the fourth external review. Changes: `USER` aggregate rebuilt as a three-arm trigger — a bare INSERT arm would emit a null `user_uuid` because sibling-trigger UPDATEs are invisible to other AFTER INSERT triggers (reproduced against SQLite); the uuid-filled arm fires on AFTER UPDATE OF user_uuid (§5.2). Last-enabled-admin guard is a single conditional write covering disable, de-role, and deletion (§10). Schedule policy stated explicitly: collective zone infrastructure, flagged for admin re-confirmation on any scope change (§8). Migration 0023's dual purpose (uuid backfill + admin promotion) stated once (§5.3).
+- **v3 (2026-07-19):** folded in the third external review (first content review of the v2 additions). Changes: scheduler authority rebuilt on zone scope — the v2 text keyed on a creator column that does not exist (§4, §8); `USER` aggregate fires on INSERT so users precede grants (§5.2); bootstrap is a single conditional write and the last enabled admin cannot be disabled, with a CLI break-glass (§10); schedule-disable triggers on loss of scope, not loss of a grant row (§8); the resolver's `user_uuid → users.id` bridge and the 0023 uuid backfill are explicit (§8); check-to-enqueue race narrowed to the serialized writer (§8).
 - **v2 (2026-07-19):** folded in two external reviews. Changes: ownership/grant union model (§4); trigger invariant and migration-owned-trigger strategy (§5.1); registration-time bootstrap replacing the lowest-id heuristic (§10, §13); uncached physical-effect checks and scheduler authority (§8); contract-first sync with per-gateway cloud membership (§11); reverse indexes, R4 implementation detail, R6; ratchet demoted to necessary-not-sufficient (§5.4, §14); flag-off claim narrowed (§13).
 - v1 (2026-07-19): initial approved direction.
