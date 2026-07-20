@@ -548,8 +548,19 @@ async function listEntriesInSnapshot(db, rawFilters, principal) {
       valuesByEntry.get(value.entry_uuid).push(value);
     }
   }
+  // D2.2/§6: while a plot's covering cycle is open, the crop is resolved
+  // live rather than trusting the (possibly deferred/stale) stored columns.
+  // Purely additive: entries on a plot with no open journal_crop_cycle_plots
+  // membership -- every entry before this feature, and the overwhelming
+  // majority after -- get back an empty Map and are unaffected.
+  const liveCropOverrides = await require('./lifecycle').resolveLiveCropOverrides(
+    function(sql, params) { return dbAll(db, sql, params); },
+    rows
+  );
   const entries = rows.map(function(row) {
-    return buildAggregate(Object.assign({ contract_version: 1 }, row), valuesByEntry.get(row.entry_uuid) || []);
+    const liveCrop = liveCropOverrides.get(row.entry_uuid);
+    const projected = liveCrop ? Object.assign({}, row, liveCrop) : row;
+    return buildAggregate(Object.assign({ contract_version: 1 }, projected), valuesByEntry.get(row.entry_uuid) || []);
   });
   return {
     entries,
@@ -1046,7 +1057,13 @@ async function voidEntry(db, entryUuid, input, principal) {
     throw apiError(409, 'stale_version', 'Void requires the current base_sync_version');
   }
   const reason = boundedText(input.reason || input.void_reason, 'reason', { required: true, maxBytes: 4000 });
-  return require('./lifecycle').void_(db, null, pathUuid, input.base_sync_version, reason, principal);
+  // D13/R7: an explicit, caller-supplied acknowledgement that voiding a
+  // seeding may orphan entries that inherit its (now soft-deleted) crop
+  // cycle. Anything other than a literal true is treated as no ack.
+  const cascadeAck = input.cascade_ack === true;
+  return require('./lifecycle').void_(
+    db, null, pathUuid, input.base_sync_version, reason, principal, { cascade_ack: cascadeAck }
+  );
 }
 
 async function discardEntry(db, entryUuid, input, principal) {
@@ -1620,7 +1637,17 @@ async function loadCurrentAggregateInSnapshot(db, type, key, principal) {
       'SELECT * FROM journal_entry_values WHERE entry_uuid=? ORDER BY group_index,attribute_code',
       [key]
     );
-    return buildAggregate(Object.assign({ contract_version: 1 }, row), values);
+    // S1 (review fix): apply the same live-crop resolution listEntriesInSnapshot
+    // uses (resolveLiveCropOverrides) so a single-entry fetch also shows a
+    // deferred entry's live crop instead of the stored (possibly still-null)
+    // columns -- see the D2.2/§6 comment on listEntriesInSnapshot above.
+    const liveCropOverrides = await require('./lifecycle').resolveLiveCropOverrides(
+      function(sql, params) { return dbAll(db, sql, params); },
+      [row]
+    );
+    const liveCrop = liveCropOverrides.get(row.entry_uuid);
+    const projected = liveCrop ? Object.assign({}, row, liveCrop) : row;
+    return buildAggregate(Object.assign({ contract_version: 1 }, projected), values);
   }
   if (type === 'UPSERT_JOURNAL_CUSTOM_VOCAB') {
     const row = await dbGet(
