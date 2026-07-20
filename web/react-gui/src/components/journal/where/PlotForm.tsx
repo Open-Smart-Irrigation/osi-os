@@ -2,18 +2,38 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { JournalPlot, JournalPlotWritePayload } from '../../../types/journal';
+import type { JournalCaptureCatalogModel } from '../../../types/journalCapture';
 import { randomUuid } from '../../../utils/uuid';
+import {
+  parsePlotContextJson,
+  PlotContextFields,
+  serializePlotContext,
+  type PlotContextValues,
+} from './PlotContextFields';
 
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--card)]';
 const TOUCH_CONTROL = 'min-h-[56px]';
 
+export interface ApplyContextToStationResult {
+  appliedCount: number;
+}
+
 export interface PlotFormProps {
   mode: 'create' | 'update';
   initialPlot?: JournalPlot;
   layoutOptions: readonly { code: string; version: number; label: string }[];
+  // Slice BC (R1 Part 2): optional so every pre-existing caller/test that
+  // doesn't pass a catalog model keeps working unchanged — without it, the
+  // plot-context section and "apply to station" action simply don't render.
+  model?: JournalCaptureCatalogModel;
   onSubmit: (payload: JournalPlotWritePayload) => Promise<JournalPlot>;
   onAfterSave?: (plot: JournalPlot) => void | Promise<void>;
+  onApplyToStation?: (
+    stationCode: string,
+    contextJson: string | null,
+    sourcePlotUuid: string | null,
+  ) => Promise<ApplyContextToStationResult>;
   onCancel: () => void;
 }
 
@@ -75,8 +95,10 @@ function PlotFormState({
   mode,
   initialPlot,
   layoutOptions,
+  model,
   onSubmit,
   onAfterSave,
+  onApplyToStation,
   onCancel,
 }: PlotFormProps) {
   const { t } = useTranslation('journal');
@@ -105,16 +127,25 @@ function PlotFormState({
   );
   const [active, setActive] = useState(initialPlot?.active !== 0);
   const [layoutCode, setLayoutCode] = useState(() => plotLayoutCode(initialPlot, layoutOptions));
+  const [context, setContext] = useState<PlotContextValues>(
+    () => parsePlotContextJson(initialPlot?.settings.context_json),
+  );
   const [error, setError] = useState<unknown | null>(null);
   const [validation, setValidation] = useState<ValidationState>(VALID_FIELDS);
   const [submitting, setSubmitting] = useState(false);
   const [committed, setCommitted] = useState(false);
+  const [applyingToStation, setApplyingToStation] = useState(false);
+  const [applyToStationResult, setApplyToStationResult] = useState<
+    { kind: 'success'; count: number } | { kind: 'error' } | null
+  >(null);
   const plotCodeRef = useRef<HTMLInputElement>(null);
   const areaRef = useRef<HTMLInputElement>(null);
   const layoutRef = useRef<HTMLSelectElement>(null);
   const submittingRef = useRef(false);
   const mountedRef = useRef(true);
   const attemptRef = useRef(0);
+  const contextLayout = model?.layouts.get(layoutCode);
+  const contextFieldCodes = contextLayout?.static_context_fields ?? [];
 
   useEffect(() => {
     mountedRef.current = true;
@@ -189,6 +220,11 @@ function PlotFormState({
     setSubmitting(true);
     setError(null);
     const attempt = attemptRef.current;
+    // Slice BC (R1 Part 2): the CURRENT (`layoutCode`) selection's
+    // static_context_fields, not the just-resolved `selectedLayout` option —
+    // both name the same layout at submit time, but only the model-derived
+    // one carries static_context_fields.
+    const contextJsonValue = serializePlotContext(context, contextFieldCodes);
     const payload: JournalPlotWritePayload = {
       plot_uuid: plotUuid,
       base_sync_version: mode === 'create' ? 0 : (initialPlot?.sync_version ?? 0),
@@ -201,6 +237,7 @@ function PlotFormState({
       active: active ? 1 : 0,
       layout_code: selectedLayout.code,
       layout_version: selectedLayout.version,
+      ...(contextJsonValue === undefined ? {} : { context_json: contextJsonValue }),
     };
 
     try {
@@ -370,6 +407,70 @@ function PlotFormState({
           </label>
         </div>
       </div>
+
+      {model && contextFieldCodes.length > 0 && (
+        <PlotContextFields
+          model={model}
+          layout={contextLayout}
+          value={context}
+          onChange={setContext}
+          disabled={controlsDisabled}
+        />
+      )}
+
+      {model && contextFieldCodes.length > 0 && onApplyToStation && (
+        <div className="min-w-0 space-y-2 rounded-xl border border-[var(--border)] bg-[var(--secondary-bg)] p-3">
+          <button
+            type="button"
+            disabled={controlsDisabled || applyingToStation || nullableText(stationCode) === null}
+            onClick={async () => {
+              const targetStation = nullableText(stationCode);
+              if (!targetStation) return;
+              setApplyingToStation(true);
+              setApplyToStationResult(null);
+              try {
+                const result = await onApplyToStation(
+                  targetStation,
+                  serializePlotContext(context, contextFieldCodes) ?? null,
+                  mode === 'update' ? plotUuid : null,
+                );
+                if (!mountedRef.current) return;
+                setApplyToStationResult({ kind: 'success', count: result.appliedCount });
+              } catch {
+                if (!mountedRef.current) return;
+                setApplyToStationResult({ kind: 'error' });
+              } finally {
+                if (mountedRef.current) setApplyingToStation(false);
+              }
+            }}
+            className={`min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 font-bold text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-60 ${FOCUS_RING}`}
+          >
+            {applyingToStation
+              ? t('plot.applyToStationLoading', { defaultValue: 'Applying…' })
+              : t('plot.applyToStation', { defaultValue: 'Apply to all plots in this station' })}
+          </button>
+          {nullableText(stationCode) === null && (
+            <p className="text-xs text-[var(--text-secondary)]">
+              {t('plot.applyToStationNeedsStation', { defaultValue: 'Set a station to enable this.' })}
+            </p>
+          )}
+          {applyToStationResult?.kind === 'success' && (
+            <p role="status" className="text-sm font-semibold text-[var(--text-secondary)]">
+              {applyToStationResult.count > 0
+                ? t('plot.applyToStationSuccess', {
+                  count: applyToStationResult.count,
+                  defaultValue: `Applied to ${applyToStationResult.count} other plot(s) in this station.`,
+                })
+                : t('plot.applyToStationNone', { defaultValue: 'No other plots share this station.' })}
+            </p>
+          )}
+          {applyToStationResult?.kind === 'error' && (
+            <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">
+              {t('plot.applyToStationError', { defaultValue: 'Could not apply this context to the station.' })}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="flex min-w-0 flex-wrap gap-3 pt-2">
         <button type="button" onClick={onCancel} disabled={submitting} className={`flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2 font-bold text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-60 ${TOUCH_CONTROL} ${FOCUS_RING}`}>

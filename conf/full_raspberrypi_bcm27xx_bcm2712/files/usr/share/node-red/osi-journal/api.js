@@ -104,6 +104,30 @@ function nullable(value) {
   return value == null ? null : value;
 }
 
+// Slice BC (R1 Part 2): journal_plot_settings.context_json carries the
+// plot's static-context values (block/bed/row, structure/compartment,
+// experimental unit, ... per the active layout's static_context_fields) as a
+// JSON object, serialized by the caller. Mirrors the size/shape guard the
+// entry-level context/context_json fields already use (index.js), scoped
+// down to the one field this table has.
+function validatedContextJson(value) {
+  if (value == null) return null;
+  if (typeof value !== 'string') semanticError('invalid_type', 'context_json must be a JSON string', { field: 'context_json' });
+  if (Buffer.byteLength(value, 'utf8') > 64 * 1024) {
+    semanticError('limit_exceeded', 'context_json exceeds the 64 KiB limit', { field: 'context_json' });
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch (_) {
+    semanticError('invalid_json', 'context_json must contain valid JSON', { field: 'context_json' });
+  }
+  if (!isObject(parsed)) {
+    semanticError('invalid_type', 'context_json must be a JSON object', { field: 'context_json' });
+  }
+  return value;
+}
+
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -638,6 +662,7 @@ function plotAggregate(row, settings) {
       updated_at: settings.updated_at,
       updated_by_principal_uuid: settings.updated_by_principal_uuid,
       sync_version: Number(settings.sync_version),
+      context_json: nullable(settings.context_json),
     },
   };
 }
@@ -783,6 +808,7 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
     }
     const layoutVersion = input.layout_version == null ? null : Number(input.layout_version);
     const layout = await activeLayout(tx, input.layout_code, layoutVersion);
+    const contextJson = validatedContextJson(input.context_json);
     if (existing && Number(existing.sync_version) !== input.base_sync_version) {
       throw apiError(409, 'stale_version', 'Plot version is stale');
     }
@@ -836,9 +862,9 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
         await dbRun(
           tx,
           'INSERT INTO journal_plot_settings (' +
-            'plot_uuid,layout_code,updated_at,updated_by_principal_uuid,sync_version' +
-          ') VALUES (?,?,?,?,?)',
-          [plotUuid, layout.code, now, principal.author_principal_uuid, nextVersion]
+            'plot_uuid,layout_code,updated_at,updated_by_principal_uuid,sync_version,context_json' +
+          ') VALUES (?,?,?,?,?,?)',
+          [plotUuid, layout.code, now, principal.author_principal_uuid, nextVersion, contextJson]
         );
       } else {
         await dbRun(
@@ -852,8 +878,8 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
         await dbRun(
           tx,
           'UPDATE journal_plot_settings SET layout_code=?,updated_at=?,updated_by_principal_uuid=?,' +
-            'sync_version=? WHERE plot_uuid=?',
-          [layout.code, now, principal.author_principal_uuid, nextVersion, plotUuid]
+            'sync_version=?,context_json=? WHERE plot_uuid=?',
+          [layout.code, now, principal.author_principal_uuid, nextVersion, contextJson, plotUuid]
         );
       }
     } catch (error) {
@@ -1035,7 +1061,7 @@ async function discardEntry(db, entryUuid, input, principal) {
 async function listPlots(db, principal) {
   const rows = await dbAll(
     db,
-    'SELECT p.*,s.layout_code,s.updated_at AS settings_updated_at,' +
+    'SELECT p.*,s.layout_code,s.context_json,s.updated_at AS settings_updated_at,' +
       's.updated_by_principal_uuid,s.sync_version AS settings_sync_version ' +
     'FROM journal_plots AS p JOIN journal_plot_settings AS s ON s.plot_uuid=p.plot_uuid ' +
       'LEFT JOIN irrigation_zones AS z ON z.zone_uuid=p.zone_uuid AND z.deleted_at IS NULL ' +
@@ -1048,6 +1074,7 @@ async function listPlots(db, principal) {
     plots: rows.map(function(row) {
       return plotAggregate(row, {
         layout_code: row.layout_code,
+        context_json: row.context_json,
         updated_at: row.settings_updated_at,
         updated_by_principal_uuid: row.updated_by_principal_uuid,
         sync_version: row.settings_sync_version,

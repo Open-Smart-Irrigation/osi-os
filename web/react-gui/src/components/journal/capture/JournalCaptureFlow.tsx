@@ -71,6 +71,7 @@ import { ConfirmStrip, type CaptureEditStep, type ConfirmValueToken } from './Co
 import { EntryForm, validateEntryForm } from './EntryForm';
 import { LayoutTransitionReviewSheet } from './LayoutTransitionReviewSheet';
 import { PlotForm } from '../where/PlotForm';
+import { parsePlotContextJson } from '../where/PlotContextFields';
 import { HarvestGroupNudge } from '../where/HarvestGroupNudge';
 import { PlotPicker } from '../where/PlotPicker';
 import { RepeatTreatmentCard } from './RepeatTreatmentCard';
@@ -391,6 +392,43 @@ function activityDependencyInputs(leaf: ActivityLeafSelection | null): CaptureEn
     value_status: 'observed' as const,
     value,
   })) ?? [];
+}
+
+// Slice BC (R1 Part 2): snapshot the plot's static-context values (carried
+// from journal_plot_settings.context_json, read-only on the capture form —
+// PlotContextFields stores number fields already canonicalized in the
+// attribute's default unit, see PlotForm.tsx) onto the entry so record
+// integrity survives a later plot-context edit. Unconditional — not gated on
+// the template having quick_fields — but harmless for full_record/research:
+// payloadValues below pushes this BEFORE formPayload, so a real typed edit to
+// the same attribute (still possible there; it stays a normal editable field
+// for those templates) always wins the same-key merge.
+function plotContextInputs(
+  model: JournalCaptureCatalogModel | null,
+  layout: JournalLayoutDefinition | undefined,
+  plot: JournalPlot | null,
+): CaptureEntryValueInput[] {
+  if (!model || !layout || !plot?.settings.context_json) return [];
+  const parsed = parsePlotContextJson(plot.settings.context_json);
+  const inputs: CaptureEntryValueInput[] = [];
+  for (const code of layout.static_context_fields ?? []) {
+    const raw = parsed[code];
+    if (raw === undefined || raw === null || raw === '') continue;
+    const attribute = model.vocabByCode.get(code);
+    if (!attribute || attribute.kind !== 'attribute') continue;
+    if (attribute.value_type === 'number') {
+      if (typeof raw !== 'number' || !attribute.default_unit_code) continue;
+      inputs.push({
+        attribute_code: code,
+        value_status: 'observed',
+        entered_value_num: raw,
+        entered_unit_code: attribute.default_unit_code,
+      });
+      continue;
+    }
+    inputs.push({ attribute_code: code, value_status: 'observed', value: raw });
+  }
+  return inputs;
 }
 
 function captureSelections(
@@ -727,6 +765,38 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     [layout, leaf, model, selections, template],
   );
   const formOwnsCrop = fieldStates.some((state) => state.code === 'attr.crop' && state.visible);
+  // Slice BC (R1 Part 2): read-only plot-context display for the Quick
+  // template only — full_record/research still render these as normal
+  // editable EntryForm fields (unchanged by this slice), so a redundant
+  // read-only echo there would just be confusing duplication.
+  const plotContextDisplay = useMemo(() => {
+    if (!model || !layout || !template?.quick_fields) return [];
+    const fieldCodes = layout.static_context_fields ?? [];
+    if (fieldCodes.length === 0) return [];
+    const parsed = parsePlotContextJson(selectedPlot?.settings.context_json);
+    const entries: { code: string; label: string; value: string }[] = [];
+    for (const code of fieldCodes) {
+      const raw = parsed[code];
+      if (raw === undefined || raw === null || raw === '') continue;
+      const attribute = model.vocabByCode.get(code);
+      if (!attribute) continue;
+      const label = catalogLabel(attribute, locale);
+      let displayValue: string;
+      if (attribute.value_type === 'choice' && typeof raw === 'string') {
+        const choice = model.vocabByCode.get(raw);
+        displayValue = choice ? catalogLabel(choice, locale) : raw;
+      } else if (attribute.value_type === 'number' && typeof raw === 'number') {
+        const unit = attribute.default_unit_code ? model.vocabByCode.get(attribute.default_unit_code) : undefined;
+        displayValue = unit ? `${localizedNumber(raw, locale)} ${catalogLabel(unit, locale)}` : localizedNumber(raw, locale);
+      } else if (attribute.value_type === 'boolean' && typeof raw === 'boolean') {
+        displayValue = raw ? t('capture.form.booleanYes') : t('capture.form.booleanNo');
+      } else {
+        displayValue = String(raw);
+      }
+      entries.push({ code, label, value: displayValue });
+    }
+    return entries;
+  }, [layout, locale, model, selectedPlot, t, template]);
   const payloadValues = useMemo(() => {
     const combined: CaptureEntryValueOutput[] = [];
     if (cropValue && !formOwnsCrop) {
@@ -756,13 +826,25 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         // state only, never silently reintroduced.
       }
     }
+    if (model && layout) {
+      try {
+        // Pushed before formPayload so a real typed edit to the same
+        // attribute (full_record/research, where these stay normal editable
+        // fields) always wins the same-key merge below.
+        combined.push(...buildEntryValues(model, plotContextInputs(model, layout, selectedPlot)));
+      } catch {
+        // A stale/malformed plot-context snapshot must never corrupt the
+        // payload; leave it out rather than surface a confusing form error
+        // for a value the user never typed.
+      }
+    }
     combined.push(...formPayload);
     const valuesByKey = new Map<string, CaptureEntryValueOutput>();
     for (const value of combined) {
       valuesByKey.set(`${value.attribute_code}:${value.group_index ?? 0}`, value);
     }
     return [...valuesByKey.values()];
-  }, [cropValue, formOwnsCrop, formPayload, keptTransitionValues, leaf, model]);
+  }, [cropValue, formOwnsCrop, formPayload, keptTransitionValues, layout, leaf, model, selectedPlot]);
   const validateTransition = useCallback((
     nextLayout: JournalLayoutDefinition | undefined,
     nextTemplate: JournalTemplateDefinition | undefined,
@@ -1610,6 +1692,45 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     void finalizeBatch(acknowledgements).catch(() => undefined);
   };
 
+  // Slice BC (R1 Part 2): "apply to all plots in this station" writes the
+  // same plot-static context to every other active plot sharing
+  // `station_code`, sequentially (the edge DB is single-writer; a batch of
+  // concurrent plot upserts would just contend the same lock). A station is
+  // expected to be layout-homogeneous in practice (a heterogeneous station is
+  // already flagged elsewhere in this flow), so the context blob is applied
+  // as-is; a target plot only ever renders the subset of keys its own
+  // layout's static_context_fields recognizes.
+  const applyContextToStation = async (
+    stationCode: string,
+    contextJson: string | null,
+    sourcePlotUuid: string | null,
+  ): Promise<{ appliedCount: number }> => {
+    const targets = plots.filter((candidate) =>
+      candidate.station_code === stationCode &&
+      candidate.plot_uuid !== sourcePlotUuid &&
+      candidate.active === 1 && candidate.deleted_at === null);
+    let appliedCount = 0;
+    for (const target of targets) {
+      const targetLayout = model?.layouts.get(target.settings.layout_code);
+      await plotState.updatePlot(target.plot_uuid, {
+        plot_uuid: target.plot_uuid,
+        base_sync_version: target.sync_version,
+        plot_code: target.plot_code,
+        name: target.name,
+        zone_uuid: target.zone_uuid,
+        station_code: target.station_code,
+        crop_hint: target.crop_hint,
+        area_m2: target.area_m2,
+        active: target.active === 0 ? 0 : 1,
+        layout_code: target.settings.layout_code,
+        layout_version: targetLayout?.version ?? 1,
+        context_json: contextJson,
+      });
+      appliedCount += 1;
+    }
+    return { appliedCount };
+  };
+
   const carryForwardContext = useMemo<CarryForwardContext | null>(() => {
     if (!leaf || !layout || !resolved || !selectedPlot?.plot_uuid || !shortlist.currentSeasonUuid) return null;
     return {
@@ -1776,6 +1897,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
               mode={plotEditor.mode}
               initialPlot={plotEditor.plot}
               layoutOptions={plotLayoutOptions}
+              model={model}
               onSubmit={(payload) => plotEditor.mode === 'create'
                 ? plotState.createPlot(payload)
                 : plotState.updatePlot(payload.plot_uuid, payload)}
@@ -1783,6 +1905,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
                 selectPlot(savedPlot.plot_uuid);
                 setPlotEditor(null);
               }}
+              onApplyToStation={applyContextToStation}
               onCancel={() => setPlotEditor(null)}
             />
           ) : (
@@ -1836,6 +1959,19 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
           {occurrenceError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t(`capture.validation.${occurrenceError.code === 'ambiguous_local_time' ? 'ambiguousLocalTime' : occurrenceError.code === 'nonexistent_local_time' ? 'nonexistentLocalTime' : occurrenceError.code === 'invalid_timezone' ? 'invalidTimezone' : 'invalidLocalTime'}`)}</p>}
           {endOccurrenceError?.code === 'ambiguous_local_time' && <label className="block text-sm font-bold text-[var(--text)]">{endOffsetLabel}<select aria-label={endOffsetLabel} value={endUtcOffset ?? ''} onChange={(event) => setEndUtcOffset(Number(event.target.value))} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3"><option value="">{t('capture.form.select')}</option>{endOccurrenceError.availableOffsets.map((offset) => <option key={offset} value={offset}>{offset}</option>)}</select></label>}
           {endOccurrenceError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t(`capture.validation.${endOccurrenceError.code === 'ambiguous_local_time' ? 'ambiguousLocalTime' : endOccurrenceError.code === 'nonexistent_local_time' ? 'nonexistentLocalTime' : endOccurrenceError.code === 'invalid_timezone' ? 'invalidTimezone' : 'invalidLocalTime'}`)}</p>}
+          {plotContextDisplay.length > 0 && (
+            <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+              <h3 className="text-sm font-bold text-[var(--text)]">{t('capture.form.plotContext', { defaultValue: 'Plot context' })}</h3>
+              <dl className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+                {plotContextDisplay.map((entry) => (
+                  <div key={entry.code} className="min-w-0">
+                    <dt className="text-xs font-semibold text-[var(--text-secondary)]">{entry.label}</dt>
+                    <dd className="truncate text-sm text-[var(--text)]">{entry.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
           {template && layout && leaf && <EntryForm model={model} layout={layout} fieldStates={fieldStates} values={values} onChange={formChanged} selections={selections} products={catalog.products} locale={locale} showValidation={showValidation} />}
           {safePrefill.length > 0 && <p role="status" className="text-sm font-semibold text-[var(--text-secondary)]">{t('capture.carry.prefilled')}</p>}
           {carryForwardCandidate?.repeatTreatment && carryForwardContext && (

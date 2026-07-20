@@ -120,7 +120,15 @@
     "unresolvedGroup": "Dissolvez le groupe de parcelles avant de désactiver cette parcelle.",
     "loading": "Enregistrement…",
     "error": "Impossible d'enregistrer la parcelle.",
-    "retry": "Réessayer"
+    "retry": "Réessayer",
+    "context": "Contexte de la parcelle",
+    "contextHint": "Défini une fois par parcelle et repris sur chaque saisie effectuée ici.",
+    "applyToStation": "Appliquer à toutes les parcelles de cette station",
+    "applyToStationLoading": "Application en cours…",
+    "applyToStationNeedsStation": "Définissez une station pour activer cette action.",
+    "applyToStationSuccess": "Appliqué à {{count}} autre(s) parcelle(s) de cette station.",
+    "applyToStationNone": "Aucune autre parcelle ne partage cette station.",
+    "applyToStationError": "Impossible d'appliquer ce contexte à la station."
   },
   "batch": {
     "saving": "Enregistrement…",
@@ -315,7 +323,8 @@
       "noProducts": "Aucun produit actif n'est disponible",
       "note": "Remarque",
       "booleanYes": "Oui",
-      "booleanNo": "Non"
+      "booleanNo": "Non",
+      "plotContext": "Contexte de la parcelle"
     },
     "validation": {
       "required": "Complétez ce champ",

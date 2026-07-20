@@ -4,6 +4,8 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { JournalPlot, JournalPlotWritePayload } from '../../../../types/journal';
+import { buildCatalogModel } from '../../../../journal/catalogModel';
+import { compiledSlaCatalog } from '../../../../journal/__tests__/slaFixture';
 import { PlotForm } from '../../where/PlotForm';
 
 const translationMock = vi.hoisted(() => vi.fn());
@@ -784,5 +786,153 @@ describe('PlotForm', () => {
     expect(events).toEqual(['submit', 'after:saved-plot']);
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+  });
+
+  describe('Slice BC: plot-static context fields', () => {
+    function realModel() {
+      const compiled = compiledSlaCatalog();
+      const result = buildCatalogModel({
+        catalog_version: 1,
+        catalog_hash: 'fixture',
+        vocab: compiled.vocab,
+        templates: compiled.templates,
+        layouts: compiled.layouts,
+        products: [],
+        mappings: [],
+      });
+      if (!result.ok) throw new Error(result.errors.join('; '));
+      return result.model;
+    }
+
+    function realLayoutOptions() {
+      const model = realModel();
+      const openField = model.layouts.get('open_field');
+      if (!openField) throw new Error('open_field layout missing from real catalog fixture');
+      return [{ code: 'open_field', version: openField.version, label: 'Open field' }] as const;
+    }
+
+    it('renders no context section for a layout without static_context_fields (empty state)', () => {
+      renderForm({ model: realModel() });
+      selectLayout('grid');
+      expect(screen.queryByText('Plot context')).toBeNull();
+    });
+
+    it('renders the layout\'s static context fields and includes them in the create payload', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(plot({ plot_uuid: 'plot-context-create' }));
+      renderForm({ model: realModel(), layoutOptions: realLayoutOptions(), onSubmit });
+      fillCompleteCreateForm();
+      selectLayout('open_field');
+
+      expect(screen.getByText('Plot context')).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('textbox', { name: 'Block / bed / row' }), {
+        target: { value: 'B-12' },
+      });
+      fireEvent.change(screen.getByRole('combobox', { name: 'Cover type' }), {
+        target: { value: 'choice.cover.crop' },
+      });
+
+      submit();
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      const payload = onSubmit.mock.calls[0][0] as JournalPlotWritePayload;
+      expect(payload.context_json).toBe(JSON.stringify({
+        'attr.block_bed_row': 'B-12',
+        'attr.cover_type': 'choice.cover.crop',
+      }));
+    });
+
+    it('loads existing context onto the form and persists edits on update', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(plot());
+      const existingContext = JSON.stringify({ 'attr.block_bed_row': 'B-1' });
+      renderForm({
+        model: realModel(),
+        layoutOptions: realLayoutOptions(),
+        mode: 'update',
+        initialPlot: plot({
+          settings: {
+            layout_code: 'open_field',
+            updated_at: timestamp,
+            updated_by_principal_uuid: 'owner-1',
+            sync_version: 9,
+            context_json: existingContext,
+          },
+        }),
+        onSubmit,
+      });
+
+      expect(screen.getByRole('textbox', { name: 'Block / bed / row' })).toHaveValue('B-1');
+      fireEvent.change(screen.getByRole('textbox', { name: 'Block / bed / row' }), {
+        target: { value: 'B-2' },
+      });
+      submit();
+
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      const payload = onSubmit.mock.calls[0][0] as JournalPlotWritePayload;
+      expect(payload.context_json).toBe(JSON.stringify({ 'attr.block_bed_row': 'B-2' }));
+    });
+
+    it('omits context_json entirely when the model is absent (backward compatible)', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(plot({ plot_uuid: 'plot-no-model' }));
+      renderForm({ onSubmit });
+      fillCompleteCreateForm();
+      submit();
+
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      const payload = onSubmit.mock.calls[0][0] as JournalPlotWritePayload;
+      expect(payload).not.toHaveProperty('context_json');
+    });
+
+    it('applies context to every other plot in the station and reports the count', async () => {
+      const onApplyToStation = vi.fn().mockResolvedValue({ appliedCount: 3 });
+      renderForm({
+        model: realModel(),
+        layoutOptions: realLayoutOptions(),
+        onApplyToStation,
+      });
+      fillCompleteCreateForm();
+      selectLayout('open_field');
+      fireEvent.change(screen.getByRole('textbox', { name: 'Block / bed / row' }), {
+        target: { value: 'B-12' },
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Apply to all plots in this station' }));
+      await waitFor(() => expect(onApplyToStation).toHaveBeenCalledTimes(1));
+      expect(onApplyToStation).toHaveBeenCalledWith(
+        'B',
+        JSON.stringify({ 'attr.block_bed_row': 'B-12' }),
+        null,
+      );
+      await screen.findByText(/Applied to 3 other plot\(s\) in this station\./);
+    });
+
+    it('surfaces an error state when applying to the station fails', async () => {
+      const onApplyToStation = vi.fn().mockRejectedValue(new Error('network'));
+      renderForm({
+        model: realModel(),
+        layoutOptions: realLayoutOptions(),
+        onApplyToStation,
+      });
+      fillCompleteCreateForm();
+      selectLayout('open_field');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Apply to all plots in this station' }));
+      await waitFor(() => expect(onApplyToStation).toHaveBeenCalledTimes(1));
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('Could not apply this context to the station.');
+    });
+
+    it('disables the apply-to-station action when the plot has no station', () => {
+      const onApplyToStation = vi.fn();
+      renderForm({
+        model: realModel(),
+        layoutOptions: realLayoutOptions(),
+        onApplyToStation,
+      });
+      fillCompleteCreateForm();
+      selectLayout('open_field');
+      fireEvent.change(screen.getByRole('textbox', { name: 'Station' }), { target: { value: '' } });
+
+      expect(screen.getByRole('button', { name: 'Apply to all plots in this station' })).toBeDisabled();
+      expect(screen.getByText('Set a station to enable this.')).toBeInTheDocument();
+    });
   });
 });

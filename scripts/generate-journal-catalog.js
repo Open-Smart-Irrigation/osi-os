@@ -31,6 +31,7 @@ const FIXED_TIMESTAMP = '2026-07-12T00:00:00.000Z';
 const CATALOG_MIGRATIONS = [
   { version: 1, name: '0019__journal_catalog_v1.sql' },
   { version: 2, name: '0022__journal_catalog_v2.sql' },
+  { version: 3, name: '0023__journal_catalog_v3.sql' },
 ];
 
 const TABLE_ORDER = [
@@ -217,7 +218,10 @@ function validateCore(coreDef) {
     new Set(coreDef.templates.map((row) => row.code)).size === 3,
     'core must define exactly three distinct template codes (any number of versions each)'
   );
-  assert(coreDef.layouts.length === 3, 'core must define exactly three generic layouts');
+  assert(
+    new Set(coreDef.layouts.map((row) => row.code)).size === 3,
+    'core must define exactly three distinct generic layout codes (any number of versions each)'
+  );
 
   const templateVersionsByCode = new Map();
   for (const template of coreDef.templates) {
@@ -228,6 +232,16 @@ function validateCore(coreDef) {
       `duplicate template version ${template.code}@${template.version}`);
     seenVersions.add(template.version);
     templateVersionsByCode.set(template.code, seenVersions);
+  }
+  const layoutVersionsByCode = new Map();
+  for (const layout of coreDef.layouts) {
+    assert(Number.isInteger(layout.version) && layout.version >= 1,
+      `${layout.code} has an invalid version`);
+    const seenVersions = layoutVersionsByCode.get(layout.code) || new Set();
+    assert(!seenVersions.has(layout.version),
+      `duplicate layout version ${layout.code}@${layout.version}`);
+    seenVersions.add(layout.version);
+    layoutVersionsByCode.set(layout.code, seenVersions);
   }
 
   const unitByCode = new Map(coreDef.units.map((row) => [row.code, row]));
@@ -300,6 +314,63 @@ function validateCore(coreDef) {
       assert(mapping.external_id && mapping.mapping_relation && mapping.source_uri,
         `${activity.code} has an incomplete standard mapping target`);
     }
+  }
+  validateQuickFieldsAndReadings(coreDef);
+}
+
+// Slice BC (journal-catalog v3): a template's `quick_fields` is an
+// activity_code -> field-code map consumed by templateEngine.deriveFieldStates
+// to scope the Quick capture form per activity (R1). Every core activity must
+// be covered so the model never silently falls through to a bare default at
+// render time, and every referenced field code must be a real attribute (or
+// the top-level `note` field) — a typo here would otherwise only surface as a
+// runtime GUI bug. Layout `reading_fields`/`static_context_fields` get the
+// analogous check: every referenced field must be a real attribute, no
+// `reading_fields` entry may remain in that same layout's `minimum_fields`
+// (BC3's whole point — readings move to the `sampling` Quick set instead of
+// being forced onto every entry), and `static_context_fields` must be a
+// subset of `minimum_fields` (it is the same forced set full_record/research
+// still see, just also exposed for read-only plot-context rendering).
+function validateQuickFieldsAndReadings(coreDef) {
+  const attributeCodes = new Set(coreDef.attributes.map((row) => row.code));
+  const activityCodes = new Set(coreDef.activities.map((row) => row.code));
+  const knownQuickField = (code) => code === 'note' || attributeCodes.has(code);
+
+  for (const template of coreDef.templates) {
+    const quickFields = template.definition && template.definition.quick_fields;
+    if (quickFields == null) continue;
+    assert(template.code === 'farmer_quick',
+      `only farmer_quick may declare quick_fields (found on ${template.code}@${template.version})`);
+    const declared = Object.keys(quickFields);
+    assert(
+      declared.length === activityCodes.size && declared.every((code) => activityCodes.has(code)),
+      `${template.code}@${template.version} quick_fields must cover exactly every core activity`
+    );
+    for (const [activityCode, fields] of Object.entries(quickFields)) {
+      assert(Array.isArray(fields) && fields.length > 0,
+        `${template.code}@${template.version} quick_fields.${activityCode} must be a nonempty array`);
+      for (const field of fields) {
+        assert(knownQuickField(field),
+          `${template.code}@${template.version} quick_fields.${activityCode} references unknown field ${field}`);
+      }
+    }
+  }
+
+  for (const layout of coreDef.layouts) {
+    const definition = layout.definition || {};
+    const readingFields = definition.reading_fields || [];
+    const staticFields = definition.static_context_fields || [];
+    const minimumFields = definition.minimum_fields || [];
+    for (const field of [...readingFields, ...staticFields]) {
+      assert(attributeCodes.has(field),
+        `${layout.code}@${layout.version} references unknown field ${field}`);
+    }
+    const readingsStillMinimum = readingFields.filter((field) => minimumFields.includes(field));
+    assert(readingsStillMinimum.length === 0,
+      `${layout.code}@${layout.version} minimum_fields must not retain reading field(s) ${readingsStillMinimum.join(', ')}`);
+    const staticNotMinimum = staticFields.filter((field) => !minimumFields.includes(field));
+    assert(staticNotMinimum.length === 0,
+      `${layout.code}@${layout.version} static_context_fields must be a subset of minimum_fields (missing ${staticNotMinimum.join(', ')})`);
   }
 }
 

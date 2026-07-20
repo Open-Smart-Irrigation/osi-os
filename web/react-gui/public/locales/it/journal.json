@@ -120,7 +120,15 @@
     "unresolvedGroup": "Sciogli il gruppo di particelle prima di disattivare questa particella.",
     "loading": "Salvataggio…",
     "error": "Impossibile salvare la particella.",
-    "retry": "Riprova"
+    "retry": "Riprova",
+    "context": "Contesto della particella",
+    "contextHint": "Impostato una volta per particella e riportato su ogni voce registrata qui.",
+    "applyToStation": "Applica a tutte le particelle di questa stazione",
+    "applyToStationLoading": "Applicazione in corso…",
+    "applyToStationNeedsStation": "Imposta una stazione per attivare questa azione.",
+    "applyToStationSuccess": "Applicato a {{count}} altra/e particella/e di questa stazione.",
+    "applyToStationNone": "Nessun'altra particella condivide questa stazione.",
+    "applyToStationError": "Impossibile applicare questo contesto alla stazione."
   },
   "batch": {
     "saving": "Salvataggio…",
@@ -315,7 +323,8 @@
       "noProducts": "Nessun prodotto attivo disponibile",
       "note": "Note",
       "booleanYes": "Sì",
-      "booleanNo": "No"
+      "booleanNo": "No",
+      "plotContext": "Contesto della particella"
     },
     "validation": {
       "required": "Completa questo campo",

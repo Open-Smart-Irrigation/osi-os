@@ -136,10 +136,40 @@ export function deriveFieldStates(
   }
   const rawLayout = layout as Partial<JournalLayoutDefinition>;
   for (const field of rawLayout.fields ?? []) addField(field);
-  for (const field of rawLayout.minimum_fields ?? []) addField(field, true);
+
+  const selectedActivity = activityCode(selections);
+  // Slice BC (R1): `quick_fields` is a genuine new resolution axis, not a
+  // variant of the old unconditional force-add below. When a template
+  // declares it (farmer_quick@3+), the layout's minimum_fields/reading_fields
+  // are NOT force-added — Quick visibility comes entirely from the
+  // activity's own quick_fields entry (falling back to a minimal ['note']
+  // set for an activity with no mapping), plus the current layout's
+  // reading_fields when the activity is a measurement activity (`sampling`).
+  // Plot-static context (the rest of minimum_fields) is deliberately never
+  // added here for a quick_fields template: it renders read-only from the
+  // plot's own settings instead of as a per-entry required input (Part 2 of
+  // this slice).
+  //
+  // Every other template (full_record, research_observation, and any
+  // template/version without quick_fields) keeps the exact pre-BC behavior:
+  // minimum_fields force-added unconditionally, reunited with reading_fields
+  // so the *effective* forced set is unchanged even though the raw
+  // minimum_fields catalog row is now smaller (BC3 moved reading fields out
+  // of minimum_fields at the catalog layer, not out of what these templates
+  // resolve to) — this is the regression guard this slice requires.
+  const quickFields = rawTemplate.quick_fields;
+  if (quickFields) {
+    const quickActivityFields = selectedActivity ? (quickFields[selectedActivity] ?? ['note']) : [];
+    for (const field of quickActivityFields) addField(field);
+    if (selectedActivity === 'sampling') {
+      for (const field of rawLayout.reading_fields ?? []) addField(field);
+    }
+  } else {
+    for (const field of rawLayout.minimum_fields ?? []) addField(field, true);
+    for (const field of rawLayout.reading_fields ?? []) addField(field, true);
+  }
 
   addRequirement(rawTemplate.requirements);
-  const selectedActivity = activityCode(selections);
   if (selectedActivity) addRequirement(rawTemplate.activity_requirements?.[selectedActivity]);
   for (const group of rawTemplate.conditional_groups ?? []) {
     if (selectedActivity && group.activity_codes.includes(selectedActivity)) addRequirement(group);

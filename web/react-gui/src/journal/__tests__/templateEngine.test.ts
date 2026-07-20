@@ -173,6 +173,90 @@ describe('template engine', () => {
       .find(({ code }) => code === 'attr.flag')?.visible).toBe(false);
   });
 
+  describe('Slice BC: quick_fields activity-scoping (R1)', () => {
+    const quickTemplate = {
+      code: 'farmer_quick',
+      version: 3,
+      sections: [
+        { code: 'what_where_when', fields: ['activity_code', 'plot_uuid'] },
+      ],
+      quick_fields: {
+        irrigation: ['attr.irrigation_depth', 'note'],
+        fertilization: ['attr.product_uuid', 'attr.amount_mass_area_product', 'note'],
+        sampling: ['note'],
+      },
+    };
+    const fullRecordTemplate = {
+      code: 'full_record',
+      version: 1,
+      fields: ['activity_code'],
+    };
+    const layoutV1 = {
+      code: 'lysimeter',
+      version: 1,
+      activity_codes: ['irrigation', 'fertilization', 'sampling'],
+      supported_templates: ['farmer_quick', 'full_record'],
+      minimum_fields: ['attr.block_bed_row', 'attr.mass_start', 'attr.mass_end'],
+      conditional_fields: {},
+      option_dependencies: [],
+    };
+    const layoutV3 = {
+      ...layoutV1,
+      version: 3,
+      minimum_fields: ['attr.block_bed_row'],
+      static_context_fields: ['attr.block_bed_row'],
+      reading_fields: ['attr.mass_start', 'attr.mass_end'],
+    };
+
+    it('scopes Quick visibility to only the selected activity\'s quick_fields', () => {
+      const irrigationStates = deriveFieldStates(quickTemplate, layoutV3, { activity_code: 'irrigation' });
+      expect(irrigationStates.filter((s) => s.visible).map((s) => s.code).sort()).toEqual(
+        ['activity_code', 'attr.irrigation_depth', 'note', 'plot_uuid'].sort(),
+      );
+      expect(irrigationStates.find((s) => s.code === 'attr.irrigation_depth')?.required).toBe(false);
+      expect(irrigationStates.some((s) => s.code === 'attr.block_bed_row')).toBe(false);
+
+      const fertilizationStates = deriveFieldStates(quickTemplate, layoutV3, { activity_code: 'fertilization' });
+      expect(fertilizationStates.filter((s) => s.visible).map((s) => s.code).sort()).toEqual(
+        ['activity_code', 'attr.amount_mass_area_product', 'attr.product_uuid', 'note', 'plot_uuid'].sort(),
+      );
+      expect(fertilizationStates.some((s) => s.code === 'attr.irrigation_depth')).toBe(false);
+      expect(fertilizationStates.some((s) => s.code === 'attr.block_bed_row')).toBe(false);
+    });
+
+    it('adds the layout\'s reading_fields only for the sampling activity', () => {
+      const fertilizationStates = deriveFieldStates(quickTemplate, layoutV3, { activity_code: 'fertilization' });
+      expect(fertilizationStates.some((s) => s.code === 'attr.mass_start')).toBe(false);
+      expect(fertilizationStates.some((s) => s.code === 'attr.mass_end')).toBe(false);
+
+      const samplingStates = deriveFieldStates(quickTemplate, layoutV3, { activity_code: 'sampling' });
+      const visibleCodes = samplingStates.filter((s) => s.visible).map((s) => s.code);
+      expect(visibleCodes).toEqual(expect.arrayContaining(['attr.mass_start', 'attr.mass_end', 'note']));
+      expect(visibleCodes).not.toContain('attr.block_bed_row');
+    });
+
+    it('falls back to a minimal field set for an activity with no quick_fields entry', () => {
+      const states = deriveFieldStates(quickTemplate, layoutV3, { activity_code: 'unmapped_activity' });
+      const visibleAttributeOrNoteCodes = states
+        .filter((s) => s.visible && (s.code === 'note' || s.code.startsWith('attr.')))
+        .map((s) => s.code);
+      expect(visibleAttributeOrNoteCodes).toEqual(['note']);
+    });
+
+    it('leaves full_record/research (no quick_fields) resolution unaffected by the v1 -> v3 layout bump', () => {
+      const selections = { activity_code: 'fertilization' };
+      const statesAgainstV1 = deriveFieldStates(fullRecordTemplate, layoutV1, selections);
+      const statesAgainstV3 = deriveFieldStates(fullRecordTemplate, layoutV3, selections);
+      expect(statesAgainstV3).toEqual(statesAgainstV1);
+      // And the reading fields the v1 minimum_fields used to force directly
+      // are still forced-visible+required via v3's reading_fields reunion.
+      expect(statesAgainstV3.find((s) => s.code === 'attr.mass_start')).toMatchObject({
+        visible: true,
+        required: true,
+      });
+    });
+  });
+
   it('builds exact canonical and entered numeric facts without generic value', () => {
     const result = buildCatalogModel(valueCatalog());
     expect(result.ok).toBe(true);

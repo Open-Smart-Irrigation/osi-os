@@ -91,6 +91,7 @@ assert.deepEqual(
   [
     { version: 1, name: '0019__journal_catalog_v1.sql' },
     { version: 2, name: '0022__journal_catalog_v2.sql' },
+    { version: 3, name: '0023__journal_catalog_v3.sql' },
   ],
   'compileCatalog must emit exactly the registered catalog migrations, in version order',
 );
@@ -154,51 +155,162 @@ assert.equal(
 const mappingRows = compiled.rows.filter((row) => row.table === 'journal_vocab_mappings');
 assert.equal(mappingRows.length, 7, 'compiled row content must include seven standard mappings');
 
-// --- v-next extensibility: a hypothetical v3 must be a pure delta ---------
+// --- v-next extensibility: a hypothetical v4 must be a pure delta ---------
+// (v3 is now real — farmer_quick@3 / the layout v3 rows, Slice BC — so the
+// extensibility probe moves to a hypothetical v4 on top of it.)
 
-const v2Definition = core.templates.find(
-  (template) => template.code === 'farmer_quick' && template.version === 2,
+const v3Definition = core.templates.find(
+  (template) => template.code === 'farmer_quick' && template.version === 3,
 ).definition;
-const coreWithV3 = {
+const coreWithV4 = {
   ...core,
   templates: [
     ...core.templates,
     {
       code: 'farmer_quick',
-      version: 3,
+      version: 4,
       label: 'Quick',
-      definition: { ...v2Definition, max_primary_fields: 6 },
+      definition: { ...v3Definition, max_primary_fields: 6 },
     },
   ],
 };
-const registryWithV3 = [...generator.CATALOG_MIGRATIONS, { version: 3, name: 'test-only-v3.sql' }];
-const compiledWithV3 = generator.compileCatalog(coreWithV3, source, registryWithV3);
+const registryWithV4 = [...generator.CATALOG_MIGRATIONS, { version: 4, name: 'test-only-v4.sql' }];
+const compiledWithV4 = generator.compileCatalog(coreWithV4, source, registryWithV4);
 assert.equal(
-  compiledWithV3.migrations.length,
-  3,
+  compiledWithV4.migrations.length,
+  4,
   'adding a v-next row must add exactly one new delta migration',
 );
 assert.equal(
-  compiledWithV3.migrations[0].content,
+  compiledWithV4.migrations[0].content,
   compiled.migrations[0].content,
   'adding a v-next row must leave the v1 migration byte-identical',
 );
 assert.equal(
-  compiledWithV3.migrations[1].content,
+  compiledWithV4.migrations[1].content,
   compiled.migrations[1].content,
   'adding a v-next row must leave the v2 migration byte-identical',
 );
-assert.equal(compiledWithV3.migrations[2].name, 'test-only-v3.sql');
 assert.equal(
-  (compiledWithV3.migrations[2].content.match(/INSERT INTO journal_templates\(/g) || []).length,
+  compiledWithV4.migrations[2].content,
+  compiled.migrations[2].content,
+  'adding a v-next row must leave the v3 migration byte-identical',
+);
+assert.equal(compiledWithV4.migrations[3].name, 'test-only-v4.sql');
+assert.equal(
+  (compiledWithV4.migrations[3].content.match(/INSERT INTO journal_templates\(/g) || []).length,
   1,
-  'the v3 delta must contain exactly its own new row, nothing carried over from v1/v2',
+  'the v4 delta must contain exactly its own new row, nothing carried over from v1/v2/v3',
 );
 
 assert.throws(
-  () => generator.compileCatalog(coreWithV3, source, generator.CATALOG_MIGRATIONS),
-  /no CATALOG_MIGRATIONS entry|catalog version 3/i,
+  () => generator.compileCatalog(coreWithV4, source, generator.CATALOG_MIGRATIONS),
+  /no CATALOG_MIGRATIONS entry|catalog version 4/i,
   'compileCatalog must refuse to silently drop a catalog version with no registered migration file',
+);
+
+// --- Slice BC / Task BC1: farmer_quick@3 quick_fields completeness -------
+
+const quickTemplateV3 = core.templates.find(
+  (template) => template.code === 'farmer_quick' && template.version === 3,
+);
+assert.ok(quickTemplateV3, 'core must define farmer_quick@3');
+const quickFields = quickTemplateV3.definition.quick_fields;
+assert.ok(quickFields && typeof quickFields === 'object' && !Array.isArray(quickFields),
+  'farmer_quick@3 must declare a quick_fields object');
+const coreActivityCodes = core.activities.map((activity) => activity.code);
+assert.equal(coreActivityCodes.length, 16, 'core must define exactly 16 activities');
+assert.deepEqual(
+  Object.keys(quickFields).sort(),
+  [...coreActivityCodes].sort(),
+  'farmer_quick@3 quick_fields must cover exactly every core activity, no more, no less',
+);
+const knownAttributeCodes = new Set(core.attributes.map((attribute) => attribute.code));
+for (const [activityCode, fields] of Object.entries(quickFields)) {
+  assert.ok(Array.isArray(fields) && fields.length > 0,
+    `quick_fields.${activityCode} must be a nonempty array`);
+  for (const field of fields) {
+    assert.ok(
+      field === 'note' || knownAttributeCodes.has(field),
+      `quick_fields.${activityCode} references unknown field ${field}`,
+    );
+  }
+}
+// Negative test: an unmapped activity or an unknown field code must be
+// rejected by compileCatalog's validation (validateQuickFieldsAndReadings),
+// not silently accepted.
+const coreWithIncompleteQuickFields = {
+  ...core,
+  templates: core.templates.map((template) => template.code === 'farmer_quick' && template.version === 3
+    ? { ...template, definition: { ...template.definition, quick_fields: { irrigation: ['note'] } } }
+    : template),
+};
+assert.throws(
+  () => generator.compileCatalog(coreWithIncompleteQuickFields, source),
+  /quick_fields must cover exactly every core activity/,
+  'compileCatalog must reject quick_fields that do not cover every activity',
+);
+const coreWithBadQuickFieldCode = {
+  ...core,
+  templates: core.templates.map((template) => template.code === 'farmer_quick' && template.version === 3
+    ? {
+      ...template,
+      definition: {
+        ...template.definition,
+        quick_fields: { ...quickFields, irrigation: ['attr.does_not_exist'] },
+      },
+    }
+    : template),
+};
+assert.throws(
+  () => generator.compileCatalog(coreWithBadQuickFieldCode, source),
+  /references unknown field/,
+  'compileCatalog must reject a quick_fields entry referencing an unknown field',
+);
+
+// --- Slice BC / Task BC3: layout v3 static/reading field split -----------
+
+const v3Layouts = core.layouts.filter((layout) => layout.version === 3);
+assert.deepEqual(
+  v3Layouts.map((layout) => layout.code).sort(),
+  ['greenhouse', 'lysimeter', 'open_field'],
+  'core must publish a v3 row for every generic layout',
+);
+for (const layout of v3Layouts) {
+  const readingFields = layout.definition.reading_fields || [];
+  const staticFields = layout.definition.static_context_fields || [];
+  const minimumFields = layout.definition.minimum_fields || [];
+  assert.deepEqual(
+    readingFields.filter((field) => minimumFields.includes(field)),
+    [],
+    `${layout.code}@3 must not retain a reading field in minimum_fields`,
+  );
+  assert.deepEqual(
+    staticFields.filter((field) => !minimumFields.includes(field)),
+    [],
+    `${layout.code}@3 static_context_fields must be a subset of minimum_fields`,
+  );
+}
+const lysimeterV3 = v3Layouts.find((layout) => layout.code === 'lysimeter');
+assert.deepEqual(
+  lysimeterV3.definition.reading_fields.slice().sort(),
+  [
+    'attr.drainage_volume', 'attr.interval_minutes', 'attr.mass_end', 'attr.mass_method',
+    'attr.mass_start', 'attr.rain_input', 'attr.tare_mass', 'attr.water_input',
+  ].sort(),
+  'lysimeter@3 must move all 8 water-balance reading fields out of minimum_fields',
+);
+const openFieldV1 = core.layouts.find((layout) => layout.code === 'open_field' && layout.version === 1);
+const openFieldV3 = core.layouts.find((layout) => layout.code === 'open_field' && layout.version === 3);
+assert.deepEqual(
+  openFieldV1.definition.minimum_fields,
+  openFieldV3.definition.minimum_fields,
+  'open_field@1 minimum_fields bytes must stay untouched, and @3 must keep the identical set ' +
+    '(full_record/research parity) even though @3 also exposes static_context_fields',
+);
+assert.ok(
+  !openFieldV3.definition.static_context_fields.includes('attr.treated_area'),
+  'open_field@3 static_context_fields must exclude attr.treated_area (activity-variable, not plot-static)',
 );
 
 const changedCore = {

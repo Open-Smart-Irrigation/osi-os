@@ -339,6 +339,31 @@ describe('catalog model', () => {
     expect(layout).toBeDefined();
     if (!layout) return;
 
+    // Slice BC: the resolved (latest-version) farmer_quick is v3 and must
+    // carry a quick_fields entry for every one of the 16 core activities.
+    expect(farmer?.version).toBe(3);
+    expect(Object.keys(farmer?.quick_fields ?? {})).toHaveLength(16);
+    expect(farmer?.quick_fields?.irrigation).toEqual(['attr.irrigation_depth', 'note']);
+    expect(farmer?.quick_fields?.irrigation).not.toContain('attr.amount_mass_area_product');
+    expect(farmer?.quick_fields?.fertilization).toEqual(expect.arrayContaining([
+      'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+    ]));
+    expect(farmer?.quick_fields?.fertilization).not.toContain('attr.irrigation_depth');
+    for (const layoutCode of ['open_field', 'greenhouse', 'lysimeter']) {
+      const resolved = result.model.layouts.get(layoutCode);
+      expect(resolved?.version, `${layoutCode} resolves to its latest version`).toBe(3);
+      expect((resolved?.static_context_fields ?? []).length, `${layoutCode} static_context_fields`)
+        .toBeGreaterThan(0);
+      for (const field of resolved?.reading_fields ?? []) {
+        expect(resolved?.minimum_fields, `${layoutCode} minimum_fields must exclude reading field ${field}`)
+          .not.toContain(field);
+      }
+    }
+    expect(result.model.layouts.get('lysimeter')?.reading_fields).toEqual([
+      'attr.interval_minutes', 'attr.water_input', 'attr.rain_input', 'attr.drainage_volume',
+      'attr.mass_start', 'attr.mass_end', 'attr.tare_mass', 'attr.mass_method',
+    ]);
+
     const unitRule = layout.option_dependencies.find((dependency) =>
       'units' in dependency.restrict && dependency.when.attribute_code === 'attr.agroscope.device');
     const deviceRule = unitRule && layout.option_dependencies.find((dependency) =>
@@ -378,6 +403,80 @@ describe('catalog model', () => {
         { attribute_code: 'attr.agroscope.device', value: device },
       ],
     });
+  });
+
+  it('Slice BC: resolves activity-scoped Quick visibility against the real shipped catalog', () => {
+    const fixture = shippedCatalog();
+    const result = buildCatalogModel(fixture);
+    expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
+    if (!result.ok) return;
+    const quick = result.model.templates.get('farmer_quick');
+    const fullRecord = result.model.templates.get('full_record');
+    const openField = result.model.layouts.get('open_field');
+    const lysimeter = result.model.layouts.get('lysimeter');
+    expect(quick).toBeDefined();
+    expect(fullRecord).toBeDefined();
+    expect(openField).toBeDefined();
+    expect(lysimeter).toBeDefined();
+    if (!quick || !fullRecord || !openField || !lysimeter) return;
+
+    // irrigation Quick shows only the irrigation amount + note as its
+    // activity-scoped content (operator/equipment/method are the separate,
+    // always-visible carried_forward_details section, not part of this
+    // activity's quick_fields, so they're excluded from this check).
+    const irrigationStates = deriveFieldStates(quick, openField, { activity_code: 'irrigation' });
+    const carryForwardCodes = new Set(quick.carry_forward);
+    const irrigationAttributeCodes = irrigationStates
+      .filter((state) => state.visible && state.code.startsWith('attr.') && !carryForwardCodes.has(state.code))
+      .map((state) => state.code);
+    expect(irrigationAttributeCodes).toEqual(['attr.irrigation_depth']);
+
+    // fertilization Quick shows product + amount, never irrigation depth.
+    const fertilizationStates = deriveFieldStates(quick, openField, { activity_code: 'fertilization' });
+    const fertilizationAttributeCodes = fertilizationStates
+      .filter((state) => state.visible && state.code.startsWith('attr.'))
+      .map((state) => state.code);
+    expect(fertilizationAttributeCodes).toEqual(expect.arrayContaining([
+      'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+    ]));
+    expect(fertilizationAttributeCodes).not.toContain('attr.irrigation_depth');
+    expect(fertilizationAttributeCodes).not.toContain('attr.block_bed_row');
+
+    // lysimeter fertilization Quick no longer shows the 8 reading fields.
+    const lysimeterFertilization = deriveFieldStates(quick, lysimeter, { activity_code: 'fertilization' });
+    const lysimeterReadingCodes = lysimeter.reading_fields ?? [];
+    for (const readingCode of lysimeterReadingCodes) {
+      expect(lysimeterFertilization.some((state) => state.code === readingCode && state.visible))
+        .toBe(false);
+    }
+    // ...but they do show up for the sampling activity on that same layout.
+    const lysimeterSampling = deriveFieldStates(quick, lysimeter, { activity_code: 'sampling' });
+    for (const readingCode of lysimeterReadingCodes) {
+      expect(lysimeterFertilization === lysimeterSampling).toBe(false);
+      expect(lysimeterSampling.some((state) => state.code === readingCode && state.visible)).toBe(true);
+    }
+
+    // Regression: full_record resolution is unaffected by the v3 layout bump
+    // — it must resolve to the exact same field codes/required flags it
+    // would have against the frozen v1 layout definitions.
+    const rows = fixture.layouts.filter((row) => row.code === 'lysimeter' && row.version === 1);
+    expect(rows).toHaveLength(1);
+    // Re-parse the frozen v1 row directly (bypassing activeDefinition's
+    // "latest version wins" resolution) so this is a true v1-vs-v3 diff.
+    const v1Layout = (() => {
+      const parsed = buildCatalogModel({
+        ...fixture,
+        layouts: fixture.layouts.filter((row) => !(row.code === 'lysimeter' && row.version === 3)),
+      });
+      return parsed.ok ? parsed.model.layouts.get('lysimeter') : undefined;
+    })();
+    expect(v1Layout?.version).toBe(1);
+    for (const activityCode of ['irrigation', 'fertilization', 'sampling']) {
+      const selections = { activity_code: activityCode };
+      const againstV1 = deriveFieldStates(fullRecord, v1Layout!, selections);
+      const againstV3 = deriveFieldStates(fullRecord, lysimeter, selections);
+      expect(againstV3).toEqual(againstV1);
+    }
   });
 
   it('labels by locale fallback and picks the highest active definition', () => {
@@ -488,7 +587,15 @@ describe('catalog model', () => {
   });
 
   it('accepts the shipped farmer_quick@2 carry_forward, since operator/equipment/method are visible there (P4 fix)', () => {
-    const fixture = shippedCatalog();
+    // v3 (Slice BC) is now the latest version and would otherwise shadow v2
+    // here (activeDefinition picks the highest version), so this historical
+    // P4-fix regression test isolates v1+v2 explicitly to keep proving what
+    // it always proved: v2 itself carries a valid, visible carry_forward.
+    const fixture: JournalCatalog = {
+      ...shippedCatalog(),
+      templates: shippedCatalog().templates.filter((row) =>
+        !(row.code === 'farmer_quick' && row.version === 3)),
+    };
     const result = buildCatalogModel(fixture);
     expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
     if (!result.ok) return;
@@ -508,6 +615,18 @@ describe('catalog model', () => {
     const t = ((key: string) => key) as TFunction<'journal'>;
     const fullFixture = shippedCatalog();
 
+    // v3 (Slice BC) is the current latest farmer_quick version and would
+    // otherwise become the active definition once v2 is removed below,
+    // silently defeating this historical guard (v3 also carries a valid,
+    // visible carry_forward — the point being tested here is specifically
+    // about v1 vs v2). Isolate v1+v2 explicitly so this keeps proving the P4
+    // fix regardless of how many newer versions the catalog gains.
+    const v1v2OnlyFixture: JournalCatalog = {
+      ...fullFixture,
+      templates: fullFixture.templates.filter((row) =>
+        !(row.code === 'farmer_quick' && row.version === 3)),
+    };
+
     // If farmer_quick@2 were ever missing (the pre-Task-27 world), @1 would
     // become the active definition again — and the parseTemplate guard
     // (catalogModel.ts) now correctly fails the whole model closed rather
@@ -516,8 +635,8 @@ describe('catalog model', () => {
     // catalog content on every run, so it keeps proving the fix forever
     // instead of only at the moment this test was written.
     const v1OnlyFixture: JournalCatalog = {
-      ...fullFixture,
-      templates: fullFixture.templates.filter((row) =>
+      ...v1v2OnlyFixture,
+      templates: v1v2OnlyFixture.templates.filter((row) =>
         !(row.code === 'farmer_quick' && row.version === 2)),
     };
     const v1OnlyResult = buildCatalogModel(v1OnlyFixture);
@@ -525,10 +644,10 @@ describe('catalog model', () => {
     if (v1OnlyResult.ok) return;
     expect(v1OnlyResult.errors.join('; ')).toMatch(/farmer_quick/);
 
-    // With the real, current catalog (v1 frozen + v2 active), the pipeline
+    // With the real v1+v2 catalog (v1 frozen + v2 active), the pipeline
     // must visibly mark operator/equipment/method as carried-forward fields
     // and include all three in the final submitted payload.
-    const result = buildCatalogModel(fullFixture);
+    const result = buildCatalogModel(v1v2OnlyFixture);
     expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
     if (!result.ok) return;
     const template = result.model.templates.get('farmer_quick');

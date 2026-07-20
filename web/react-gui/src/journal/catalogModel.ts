@@ -208,6 +208,29 @@ function visibleFieldCodes(
   return codes;
 }
 
+// Slice BC (farmer_quick@3): `quick_fields` is an activity_code -> field-code
+// map. Returns `undefined` when the definition simply doesn't declare it
+// (every template/version before v3), and `null` when it is present but
+// malformed — the caller must treat `null` as "reject this definition",
+// matching every other parse* helper in this file.
+function parseQuickFields(
+  value: unknown,
+  domain: DefinitionDomain,
+): Record<string, string[]> | null | undefined {
+  if (value == null) return undefined;
+  if (!isRecord(value)) return null;
+  const result: Record<string, string[]> = {};
+  for (const [activityCode, rawFields] of Object.entries(value)) {
+    if (domain.vocabByCode.get(activityCode)?.kind !== 'activity') return null;
+    const fields = stringArray(rawFields);
+    if (!fields || fields.length === 0 || fields.some((code) => !knownField(domain.vocabByCode, code))) {
+      return null;
+    }
+    result[activityCode] = fields;
+  }
+  return result;
+}
+
 function parseTemplate(
   row: JournalDefinitionRow,
   domain: DefinitionDomain,
@@ -268,6 +291,8 @@ function parseTemplate(
       conditionalGroups.push({ code: raw.code, activity_codes: activities, ...requirement });
     }
   }
+  const quickFields = parseQuickFields(definition.quick_fields, domain);
+  if (quickFields === null) return null;
   return {
     code: row.code,
     version: row.version,
@@ -275,6 +300,7 @@ function parseTemplate(
     sections,
     carry_forward: carryForward,
     ...(typeof maxPrimaryFields === 'number' ? { max_primary_fields: maxPrimaryFields } : {}),
+    ...(quickFields ? { quick_fields: quickFields } : {}),
     require_explicit_choices: requireExplicitChoices,
     show_standard_mappings: showStandardMappings,
     activity_requirements: activityRequirements,
@@ -505,9 +531,21 @@ function parseLayout(
     definition.conditional_fields,
     domain.vocabByCode,
   );
+  // Slice BC (layout v3): both lists are additive metadata on top of the
+  // unchanged minimum_fields/conditional_fields above — absent on v1/v2
+  // layout rows, so `null` here (not `[]`) means "malformed", matching the
+  // convention already used for minimum_fields.
+  const staticContextFields = definition.static_context_fields == null
+    ? []
+    : stringArray(definition.static_context_fields);
+  const readingFields = definition.reading_fields == null
+    ? []
+    : stringArray(definition.reading_fields);
   if (!validFields(fields, domain) || !minimumFields || !denominatorContract ||
       minimumFields.some((code) => !knownField(domain.vocabByCode, code)) ||
-      !conditionalFields) return null;
+      !conditionalFields || !staticContextFields || !readingFields ||
+      staticContextFields.some((code) => !knownField(domain.vocabByCode, code)) ||
+      readingFields.some((code) => !knownField(domain.vocabByCode, code))) return null;
   return {
     code: row.code,
     version: row.version,
@@ -517,6 +555,8 @@ function parseLayout(
     minimum_fields: minimumFields,
     conditional_fields: conditionalFields,
     denominator_contract: denominatorContract,
+    static_context_fields: staticContextFields,
+    reading_fields: readingFields,
     option_dependencies: dependencies,
   };
 }

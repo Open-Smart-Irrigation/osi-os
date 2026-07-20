@@ -13,6 +13,7 @@ const {
   allowedUnits,
   assertJournalEntryEffectKey,
   convertToCanonical,
+  listPlots,
   saveEntry,
   upsertPlot,
   validateEntry,
@@ -113,6 +114,100 @@ function validIrrigation(overrides) {
     note: 'Morning irrigation',
   }, overrides || {});
 }
+
+test('upsertPlot persists and round-trips context_json, and clears it when omitted (Slice BC R1 Part 2)', async () => {
+  const db = createJournalDb('plot-context-json');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plotUuid = '99990000-0000-4000-8000-000000000001';
+  const contextJson = JSON.stringify({ 'attr.block_bed_row': 'B-12' });
+  const created = await upsertPlot(db, {
+    plot_uuid: plotUuid,
+    base_sync_version: 0,
+    plot_code: 'context-json-plot',
+    name: 'Context JSON plot',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: 'barley',
+    area_m2: 100,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    context_json: contextJson,
+  }, principal);
+  assert.equal(created.plot.settings.context_json, contextJson);
+  assert.equal(
+    db.prepare('SELECT context_json FROM journal_plot_settings WHERE plot_uuid=?').get(plotUuid).context_json,
+    contextJson,
+  );
+
+  const updated = await upsertPlot(db, {
+    plot_uuid: plotUuid,
+    base_sync_version: created.plot.sync_version,
+    plot_code: 'context-json-plot',
+    name: 'Context JSON plot',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: 'barley',
+    area_m2: 100,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    context_json: null,
+  }, principal);
+  assert.equal(updated.plot.settings.context_json, null);
+});
+
+test('listPlots round-trips context_json (Slice BC R1 Part 2 — read path)', async () => {
+  const db = createJournalDb('plot-context-json-list');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plotUuid = '99990000-0000-4000-8000-000000000002';
+  const contextJson = JSON.stringify({ 'attr.block_bed_row': 'B-19' });
+  await upsertPlot(db, {
+    plot_uuid: plotUuid,
+    base_sync_version: 0,
+    plot_code: 'context-json-list-plot',
+    name: 'Context JSON list plot',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: 'barley',
+    area_m2: 100,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    context_json: contextJson,
+  }, principal);
+
+  // listPlots is the GUI's plot-fetch path; it must project context_json or the
+  // read-only display + entry snapshot no-op after reload and the next edit wipes it.
+  const { plots } = await listPlots(db, principal);
+  assert.equal(plots.length, 1, 'exactly the one seeded plot is listed');
+  assert.equal(plots[0].settings.context_json, contextJson);
+});
+
+test('upsertPlot rejects malformed context_json', async () => {
+  const db = createJournalDb('plot-context-json-invalid');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  await assert.rejects(
+    upsertPlot(db, {
+      plot_uuid: '99990000-0000-4000-8000-000000000002',
+      base_sync_version: 0,
+      plot_code: 'context-json-invalid',
+      name: 'Invalid',
+      zone_uuid: null,
+      station_code: null,
+      crop_hint: null,
+      area_m2: null,
+      active: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+      context_json: '{not-json',
+    }, principal),
+    (error) => error && error.code === 'invalid_json' && error.statusCode === 422,
+  );
+});
 
 test('saveEntry batch retry returns original receipts without entry or outbox writes', async () => {
   const db = createJournalDb('batch-retry-noop');
@@ -578,7 +673,9 @@ test('assertJournalEntryEffectKey binds UUID and prior version exactly', () => {
 test('loadCatalog reads the seeded catalog into code-indexed maps', async () => {
   const catalog = await loadCatalog(createTestDb('load'));
 
-  assert.equal(catalog.version, 2);
+  // Slice BC: the seeded catalog is now at v3 (farmer_quick@3 quick_fields +
+  // layout v3 static/reading split).
+  assert.equal(catalog.version, 3);
   assert.match(catalog.hash, /^[a-f0-9]{64}$/);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
   assert.equal(catalog.templates.get('farmer_quick').get(1).definition.max_primary_fields, 5);
@@ -638,7 +735,7 @@ test('loadCatalog supports the callback sqlite API used by Node-RED', async () =
 
   const catalog = await loadCatalog(callbackDb);
 
-  assert.equal(catalog.version, 2);
+  assert.equal(catalog.version, 3);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
 });
 
