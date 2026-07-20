@@ -543,15 +543,22 @@ class ChirpStackClient {
     // invocation verified. Check every fence before making any compensating
     // mutation so a concurrent registrar cannot have one half overwritten.
     if (ctx.deviceCreated || ctx.deviceMutated || ctx.keysCreatedNew || ctx.keysMutated) {
+      // Fetch only the components this invocation actually mutated. A
+      // device-only repair makes no key RPC here, and a key-only repair
+      // makes no device RPC -- an unscoped fetch of the untouched half
+      // would either throw needlessly or fence against state this call
+      // never wrote to.
+      const needsDeviceFence = ctx.deviceCreated || ctx.deviceMutated;
+      const needsKeysFence = ctx.keysCreatedNew || ctx.keysMutated;
       try {
         const [fenceDevice, fenceKeys] = await Promise.all([
-          this.getDevice(ctx.devEui),
-          this.getKeys(ctx.devEui),
+          needsDeviceFence ? this.getDevice(ctx.devEui) : Promise.resolve(null),
+          needsKeysFence ? this.getKeys(ctx.devEui) : Promise.resolve(null),
         ]);
-        const deviceFenceHolds = !(ctx.deviceCreated || ctx.deviceMutated) || Boolean(
+        const deviceFenceHolds = !needsDeviceFence || Boolean(
           fenceDevice && ctx.desiredSnapshot && deviceMatches(fenceDevice, ctx.desiredSnapshot)
         );
-        const keysFenceHolds = !(ctx.keysCreatedNew || ctx.keysMutated) || Boolean(
+        const keysFenceHolds = !needsKeysFence || Boolean(
           fenceKeys
           && ctx.desiredKeysSnapshot
           && constantTimeEqual(normalizeHexKey(fenceKeys.getNwkKey()), ctx.desiredKeysSnapshot.nwkKey)
@@ -703,6 +710,12 @@ class ChirpStackClient {
       let expectedGenAppKey = '';
       const existingKeys = await this.getKeys(devEui);
       if (!existingKeys) {
+        // Record the expected post-write key tuple BEFORE the mutating
+        // RPC below. If the device reread that follows fails, compensation
+        // still has a key snapshot to fence against -- without this, a
+        // failed reread would leave ctx.desiredKeysSnapshot null and the
+        // aggregate fence would treat a successful key write as unfenced.
+        ctx.desiredKeysSnapshot = { nwkKey, appKey: expectedAppKey, genAppKey: expectedGenAppKey };
         await this.createKeys({ devEui, nwkKey });
         ctx.keysCreatedNew = true;
         keysAction = 'created';
@@ -715,6 +728,8 @@ class ChirpStackClient {
         ctx.originalKeysSnapshot = originalKeys;
         expectedAppKey = originalKeys.appKey;
         expectedGenAppKey = originalKeys.genAppKey;
+        // Same before-the-RPC ordering guarantee as the create branch above.
+        ctx.desiredKeysSnapshot = { nwkKey, appKey: expectedAppKey, genAppKey: expectedGenAppKey };
         if (!constantTimeEqual(originalKeys.nwkKey, nwkKey)) {
           await this.updateKeys({
             devEui,
@@ -736,11 +751,6 @@ class ChirpStackClient {
       }
 
       const finalKeys = await this.getKeys(devEui);
-      ctx.desiredKeysSnapshot = {
-        nwkKey,
-        appKey: expectedAppKey,
-        genAppKey: expectedGenAppKey,
-      };
       const keysOk = Boolean(finalKeys)
         && constantTimeEqual(normalizeHexKey(finalKeys.getNwkKey()), nwkKey)
         && constantTimeEqual(normalizeHexKey(finalKeys.getAppKey()), expectedAppKey)
