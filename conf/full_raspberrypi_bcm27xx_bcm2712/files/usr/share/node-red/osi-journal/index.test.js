@@ -13,10 +13,15 @@ const {
   allowedUnits,
   assertJournalEntryEffectKey,
   convertToCanonical,
+  finalize,
+  finalizeBatch,
+  listEntries,
   listPlots,
+  loadCurrentAggregate,
   saveEntry,
   upsertPlot,
   validateEntry,
+  void_,
 } = require('./index');
 const { numericAttributePreflight } = require('./units');
 const { usableUnitPath } = require('./unit-family');
@@ -113,6 +118,142 @@ function validIrrigation(overrides) {
     }],
     note: 'Morning irrigation',
   }, overrides || {});
+}
+
+// --- Slice D Phase 2 (crop-cycle lifecycle) test helpers -----------------
+// Fixtures below deliberately use their own dedicated UUID/zone-id namespace
+// ("cc..." prefixes / zone ids 900+) so these tests never collide with plot,
+// zone, or entry fixtures created elsewhere in this file.
+
+function cropCyclePlotUuid(number) {
+  return 'cc000000-0000-4000-8000-' + String(number).padStart(12, '0');
+}
+
+function cropCycleEntryUuid(number) {
+  return 'cc100000-0000-4000-8000-' + String(number).padStart(12, '0');
+}
+
+function cropCycleZoneUuid(number) {
+  return 'cc200000-0000-4000-8000-' + String(number).padStart(12, '0');
+}
+
+async function makeCropCyclePlot(db, principal, plotUuid, overrides) {
+  return upsertPlot(db, Object.assign({
+    plot_uuid: plotUuid,
+    base_sync_version: 0,
+    plot_code: 'plot-' + plotUuid.slice(-8),
+    name: 'Plot ' + plotUuid.slice(-8),
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: null,
+    area_m2: 100,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 3,
+    context_json: null,
+  }, overrides || {}), principal);
+}
+
+// Direct SQL: zone + a single zone_seasons row, mirroring the live-gateway
+// shape confirmed in the brief (scripts/repair-pi-schema.js backfills a
+// NULL-crop default season per zone). cropType null reproduces exactly that.
+function makeZoneWithSeason(db, zoneId, zoneUuid, seasonUuid, cropType, variety) {
+  db.prepare(
+    'INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui) VALUES (?,?,?,?,?,?)'
+  ).run(zoneId, 'Crop cycle zone ' + zoneId, 1, 'Europe/Zurich', zoneUuid, JOURNAL_TEST_GATEWAY_EUI);
+  db.prepare(
+    'INSERT INTO zone_seasons(zone_id,season_uuid,name,starts_on,ends_on,crop_type,variety) ' +
+    'VALUES (?,?,?,?,?,?,?)'
+  ).run(zoneId, seasonUuid, 'Season ' + zoneId, '2026-01-01', '2026-12-31', cropType, variety || null);
+}
+
+function seedingInput(overrides) {
+  return Object.assign({
+    status: 'final',
+    base_sync_version: 0,
+    activity_code: 'seeding',
+    template_code: 'farmer_quick',
+    template_version: 3,
+    layout_code: 'open_field',
+    layout_version: 3,
+    occurred_timezone: 'Europe/Zurich',
+    values: [
+      { attribute_code: 'attr.crop', group_index: 0, value: 'agroscope.crop.wheat_winter', value_status: 'observed' },
+      { attribute_code: 'attr.variety', group_index: 0, value: 'Runal', value_status: 'observed' },
+    ],
+    note: 'Seeded',
+  }, overrides || {});
+}
+
+function harvestInput(overrides) {
+  return Object.assign({
+    status: 'final',
+    base_sync_version: 0,
+    activity_code: 'harvest',
+    template_code: 'farmer_quick',
+    template_version: 3,
+    layout_code: 'open_field',
+    layout_version: 3,
+    occurred_timezone: 'Europe/Zurich',
+    values: [],
+    note: 'Harvest',
+  }, overrides || {});
+}
+
+function tillageInput(overrides) {
+  return Object.assign({
+    status: 'final',
+    base_sync_version: 0,
+    activity_code: 'tillage_soil_work',
+    template_code: 'farmer_quick',
+    template_version: 3,
+    layout_code: 'open_field',
+    layout_version: 3,
+    occurred_timezone: 'Europe/Zurich',
+    values: [],
+    note: 'Tillage',
+  }, overrides || {});
+}
+
+function irrigationInput(overrides) {
+  return Object.assign({
+    status: 'final',
+    base_sync_version: 0,
+    activity_code: 'irrigation',
+    template_code: 'farmer_quick',
+    template_version: 3,
+    layout_code: 'open_field',
+    layout_version: 3,
+    occurred_timezone: 'Europe/Zurich',
+    values: [{
+      attribute_code: 'attr.irrigation_depth',
+      group_index: 0,
+      value: 5,
+      unit_code: 'unit.mm_water',
+      value_status: 'observed',
+    }],
+    note: 'Irrigated',
+  }, overrides || {});
+}
+
+function readJournalEntryRow(db, entryUuid) {
+  return db.prepare(
+    'SELECT entry_uuid,plot_uuid,season_uuid,season_crop,season_variety,sync_version,occurred_start ' +
+    'FROM journal_entries WHERE entry_uuid=?'
+  ).get(entryUuid);
+}
+
+function readCycleMemberships(db, plotUuid) {
+  return db.prepare(
+    'SELECT ccp.plot_uuid,ccp.ends_on,ccp.close_reason,ccp.closed_by_entry_uuid,' +
+      'cc.cycle_uuid,cc.crop_code,cc.variety,cc.starts_on,cc.deleted_at AS cycle_deleted_at ' +
+    'FROM journal_crop_cycle_plots AS ccp JOIN journal_crop_cycles AS cc ON cc.cycle_uuid=ccp.cycle_uuid ' +
+    'WHERE ccp.plot_uuid=? ORDER BY cc.starts_on,cc.cycle_uuid'
+  ).all(plotUuid);
+}
+
+function currentSyncVersion(db, entryUuid) {
+  return db.prepare('SELECT sync_version FROM journal_entries WHERE entry_uuid=?').get(entryUuid).sync_version;
 }
 
 test('upsertPlot persists and round-trips context_json, and clears it when omitted (Slice BC R1 Part 2)', async () => {
@@ -3745,4 +3886,978 @@ test('timestamp canonicalization rejects precision the Java runtime cannot parse
     () => aggregateHash({ recorded_at: '2026-05-03T12:00:00.1234567890Z' }),
     invalidAggregateCode
   );
+});
+
+// ===========================================================================
+// Slice D Phase 2 — crop-cycle lifecycle + resolution (D0.1, D2.1, D2.2)
+// ===========================================================================
+
+// --- D0.1: precedence + the no-cycle / NULL-crop-zone_season invariant ---
+
+test('(D0.1 invariant a) a real-crop covering zone_seasons row resolves a final entry exactly as before, with no crop cycle involved', async () => {
+  const db = createJournalDb('cc-invariant-real-crop-season');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  makeZoneWithSeason(db, 901, cropCycleZoneUuid(1), '30000000-0000-4000-8000-000000000001', 'maize', 'Pioneer P9241');
+  const plot = cropCyclePlotUuid(1);
+  await makeCropCyclePlot(db, principal, plot, { zone_uuid: cropCycleZoneUuid(1) });
+
+  const result = await saveEntry(db, irrigationInput({
+    entry_uuid: cropCycleEntryUuid(1),
+    plot_uuid: plot,
+    occurred_start_local: '2026-07-05T09:00:00',
+  }), principal, { mode: 'create' });
+  assert.equal(result.sync_version, 1);
+
+  const entry = readJournalEntryRow(db, cropCycleEntryUuid(1));
+  assert.equal(entry.season_uuid, '30000000-0000-4000-8000-000000000001');
+  assert.equal(entry.season_crop, 'maize');
+  assert.equal(entry.season_variety, 'Pioneer P9241');
+});
+
+test('(D0.1 invariant b, part 1) a NULL-crop covering zone_seasons row no longer shadows an explicit input crop', async () => {
+  const db = createJournalDb('cc-invariant-null-season-explicit');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  makeZoneWithSeason(db, 902, cropCycleZoneUuid(2), '30000000-0000-4000-8000-000000000002', null, null);
+  const plot = cropCyclePlotUuid(2);
+  await makeCropCyclePlot(db, principal, plot, { zone_uuid: cropCycleZoneUuid(2) });
+
+  const result = await saveEntry(db, irrigationInput({
+    entry_uuid: cropCycleEntryUuid(2),
+    plot_uuid: plot,
+    occurred_start_local: '2026-07-05T09:00:00',
+    season_crop: 'ExplicitCrop',
+    season_variety: 'ExplicitVariety',
+  }), principal, { mode: 'create' });
+  assert.equal(result.sync_version, 1);
+
+  const entry = readJournalEntryRow(db, cropCycleEntryUuid(2));
+  assert.equal(entry.season_uuid, null, 'the NULL-crop season no longer attaches once an explicit crop is given');
+  assert.equal(entry.season_crop, 'ExplicitCrop');
+  assert.equal(entry.season_variety, 'ExplicitVariety');
+});
+
+test('(D0.1 invariant b, part 2) a NULL-crop covering zone_seasons row no longer shadows an open crop cycle', async () => {
+  const db = createJournalDb('cc-invariant-null-season-cycle');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  makeZoneWithSeason(db, 903, cropCycleZoneUuid(3), '30000000-0000-4000-8000-000000000003', null, null);
+  const plot = cropCyclePlotUuid(3);
+  await makeCropCyclePlot(db, principal, plot, { zone_uuid: cropCycleZoneUuid(3) });
+
+  const result = await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(3),
+    plot_uuid: plot,
+    occurred_start_local: '2026-07-06T09:00:00',
+  }), principal, { mode: 'create' });
+  assert.equal(result.sync_version, 1);
+
+  // Deferred at write time (an open cycle covers, so season_crop is NOT
+  // stamped from the NULL-crop season -- it used to be, unconditionally).
+  const stored = readJournalEntryRow(db, cropCycleEntryUuid(3));
+  assert.equal(stored.season_uuid, null);
+  assert.equal(stored.season_crop, null);
+
+  // Live read confirms the cycle -- not the NULL season -- is authoritative.
+  const listed = await listEntries(db, { plot_uuid: plot, status: 'final' }, principal);
+  const liveEntry = listed.entries.find((entry) => entry.entry_uuid === cropCycleEntryUuid(3));
+  assert.equal(liveEntry.season_crop, 'agroscope.crop.wheat_winter');
+  assert.equal(liveEntry.season_variety, 'Runal');
+});
+
+test('(D0.1, legacy parity) a NULL-crop covering zone_seasons row still attaches season_uuid when nothing else resolves a crop', async () => {
+  const db = createJournalDb('cc-null-season-legacy-attach');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  makeZoneWithSeason(db, 904, cropCycleZoneUuid(4), '30000000-0000-4000-8000-000000000004', null, null);
+  const plot = cropCyclePlotUuid(4);
+  await makeCropCyclePlot(db, principal, plot, { zone_uuid: cropCycleZoneUuid(4) });
+
+  const result = await saveEntry(db, irrigationInput({
+    entry_uuid: cropCycleEntryUuid(4),
+    plot_uuid: plot,
+    occurred_start_local: '2026-07-05T09:00:00',
+  }), principal, { mode: 'create' });
+  assert.equal(result.sync_version, 1);
+
+  const entry = readJournalEntryRow(db, cropCycleEntryUuid(4));
+  assert.equal(entry.season_uuid, '30000000-0000-4000-8000-000000000004', 'season_uuid attachment preserved exactly as before');
+  assert.equal(entry.season_crop, null);
+  assert.equal(entry.season_variety, null);
+});
+
+test('(D0.1, tier 4) journal_plots.crop_hint resolves a season when no zone, cycle, or explicit crop is available', async () => {
+  const db = createJournalDb('cc-crop-hint-tier');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(5);
+  await makeCropCyclePlot(db, principal, plot, { crop_hint: 'HintedCrop' });
+
+  const result = await saveEntry(db, irrigationInput({
+    entry_uuid: cropCycleEntryUuid(5),
+    plot_uuid: plot,
+    occurred_start_local: '2026-07-05T09:00:00',
+  }), principal, { mode: 'create' });
+  assert.equal(result.sync_version, 1);
+
+  const entry = readJournalEntryRow(db, cropCycleEntryUuid(5));
+  assert.equal(entry.season_uuid, null);
+  assert.equal(entry.season_crop, 'HintedCrop');
+  assert.equal(entry.season_variety, null);
+});
+
+// --- D2.1: seeding opens/continues/reseeds a cycle -----------------------
+
+test('a final seeding entry opens a crop cycle and defers its own season_crop/variety', async () => {
+  const db = createJournalDb('cc-seeding-opens-cycle');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(10);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(10),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  const memberships = readCycleMemberships(db, plot);
+  assert.equal(memberships.length, 1);
+  assert.equal(memberships[0].crop_code, 'agroscope.crop.wheat_winter');
+  assert.equal(memberships[0].variety, 'Runal');
+  assert.equal(memberships[0].ends_on, null);
+  assert.equal(readJournalEntryRow(db, cropCycleEntryUuid(10)).season_crop, null, 'deferred, not stamped');
+});
+
+test('a second same-crop-and-variety seeding with no cycle_action defaults to continuing the open cycle', async () => {
+  const db = createJournalDb('cc-seeding-default-continue');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(11);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(11),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  const openCycleUuid = readCycleMemberships(db, plot)[0].cycle_uuid;
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(12),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-15T09:00:00',
+  }), principal, { mode: 'create' });
+
+  const memberships = readCycleMemberships(db, plot);
+  assert.equal(memberships.length, 1, 'no second cycle was opened');
+  assert.equal(memberships[0].cycle_uuid, openCycleUuid, 'the same cycle continues');
+  assert.equal(memberships[0].ends_on, null);
+});
+
+test('cycle_action=new opens a fresh cycle even when the seeded crop and variety match the open one', async () => {
+  const db = createJournalDb('cc-seeding-cycle-action-new');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(13);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(13),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  const priorCycleUuid = readCycleMemberships(db, plot)[0].cycle_uuid;
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(14),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-20T09:00:00',
+    cycle_action: 'new',
+  }), principal, { mode: 'create' });
+
+  const memberships = readCycleMemberships(db, plot);
+  assert.equal(memberships.length, 2);
+  const prior = memberships.find((row) => row.cycle_uuid === priorCycleUuid);
+  const fresh = memberships.find((row) => row.cycle_uuid !== priorCycleUuid);
+  assert.equal(prior.ends_on, '2026-04-20');
+  assert.equal(prior.close_reason, 'reseed');
+  assert.equal(fresh.ends_on, null, 'the explicit new cycle is open');
+});
+
+test('a differing-crop seeding auto-closes the prior open cycle as a reseed and opens a new one', async () => {
+  const db = createJournalDb('cc-seeding-reseed-differing-crop');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(15);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(15),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(16),
+    plot_uuid: plot,
+    occurred_start_local: '2026-06-01T09:00:00',
+    values: [
+      { attribute_code: 'attr.crop', group_index: 0, value: 'agroscope.crop.soybean', value_status: 'observed' },
+      { attribute_code: 'attr.variety', group_index: 0, value: 'Asgrow', value_status: 'observed' },
+    ],
+  }), principal, { mode: 'create' });
+
+  const memberships = readCycleMemberships(db, plot);
+  assert.equal(memberships.length, 2);
+  const wheat = memberships.find((row) => row.crop_code === 'agroscope.crop.wheat_winter');
+  const soy = memberships.find((row) => row.crop_code === 'agroscope.crop.soybean');
+  assert.equal(wheat.ends_on, '2026-06-01');
+  assert.equal(wheat.close_reason, 'reseed');
+  assert.equal(soy.ends_on, null);
+});
+
+// --- D2.1/D10/R7: harvest closes only the covering (or named) cycle -----
+
+test('harvest closes only the covering cycle and freezes every deferred entry in its span', async () => {
+  const db = createJournalDb('cc-harvest-closes-and-freezes');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(20);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(20),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, irrigationInput({
+    entry_uuid: cropCycleEntryUuid(21),
+    plot_uuid: plot,
+    occurred_start_local: '2026-05-01T09:00:00',
+  }), principal, { mode: 'create' });
+  assert.equal(readJournalEntryRow(db, cropCycleEntryUuid(21)).season_crop, null, 'deferred while open');
+
+  const beforeVersion = currentSyncVersion(db, cropCycleEntryUuid(21));
+  await saveEntry(db, harvestInput({
+    entry_uuid: cropCycleEntryUuid(22),
+    plot_uuid: plot,
+    occurred_start_local: '2026-08-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  const membership = readCycleMemberships(db, plot)[0];
+  assert.equal(membership.ends_on, '2026-08-01');
+  assert.equal(membership.close_reason, 'harvest');
+  assert.equal(membership.closed_by_entry_uuid, cropCycleEntryUuid(22));
+
+  const irrigation = readJournalEntryRow(db, cropCycleEntryUuid(21));
+  assert.equal(irrigation.season_crop, 'agroscope.crop.wheat_winter', 'frozen at harvest close');
+  assert.equal(irrigation.season_variety, 'Runal');
+  assert.ok(irrigation.sync_version > beforeVersion, 'freezing bumps sync_version so the frozen value syncs');
+
+  const seeding = readJournalEntryRow(db, cropCycleEntryUuid(20));
+  assert.equal(seeding.season_crop, 'agroscope.crop.wheat_winter', 'the seeding entry itself is frozen too');
+});
+
+test('harvest on a plot with no open cycle is a no-op, not an error', async () => {
+  const db = createJournalDb('cc-harvest-no-cycle');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(23);
+  await makeCropCyclePlot(db, principal, plot, { crop_hint: 'PerennialGrassland' });
+
+  const result = await saveEntry(db, harvestInput({
+    entry_uuid: cropCycleEntryUuid(23),
+    plot_uuid: plot,
+    occurred_start_local: '2026-08-01T09:00:00',
+  }), principal, { mode: 'create' });
+  assert.equal(result.sync_version, 1);
+  assert.equal(readCycleMemberships(db, plot).length, 0);
+});
+
+test('harvest on an intercropped plot requires cycle_uuid to disambiguate, and names one to close', async () => {
+  const db = createJournalDb('cc-harvest-intercrop-disambiguation');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(24);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(24),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  // Simulate a genuinely intercropped plot: a second concurrently open cycle
+  // covering the same plot, inserted directly (normal seeding always closes
+  // a differing-crop cycle, so this schema state can't arise via seeding
+  // alone -- but the schema explicitly allows it, per spec D12).
+  const secondCycleUuid = '80000000-0000-4000-8000-000000000001';
+  db.prepare(
+    'INSERT INTO journal_crop_cycles(cycle_uuid,crop_code,variety,group_uuid,opened_by_entry_uuid,starts_on,' +
+      'gateway_device_eui,created_by_principal_uuid,sync_version,created_at,updated_at,deleted_at) ' +
+    'VALUES (?,?,?,NULL,?,?,?,?,0,?,?,NULL)'
+  ).run(
+    secondCycleUuid, 'agroscope.crop.soybean', 'Asgrow', cropCycleEntryUuid(24), '2026-04-01',
+    JOURNAL_TEST_GATEWAY_EUI, JOURNAL_TEST_OWNER_UUID, '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z'
+  );
+  db.prepare(
+    'INSERT INTO journal_crop_cycle_plots(cycle_uuid,plot_uuid,ends_on,closed_by_entry_uuid,close_reason) ' +
+    'VALUES (?,?,NULL,NULL,NULL)'
+  ).run(secondCycleUuid, plot);
+
+  await assert.rejects(
+    saveEntry(db, harvestInput({
+      entry_uuid: cropCycleEntryUuid(25),
+      plot_uuid: plot,
+      occurred_start_local: '2026-08-01T09:00:00',
+    }), principal, { mode: 'create' }),
+    (error) => error && error.code === 'cycle_uuid_required'
+  );
+  assert.equal(readCycleMemberships(db, plot).filter((row) => row.ends_on == null).length, 2, 'nothing closed');
+
+  await saveEntry(db, harvestInput({
+    entry_uuid: cropCycleEntryUuid(26),
+    plot_uuid: plot,
+    occurred_start_local: '2026-08-01T09:00:00',
+    cycle_uuid: secondCycleUuid,
+  }), principal, { mode: 'create' });
+
+  const memberships = readCycleMemberships(db, plot);
+  const closed = memberships.find((row) => row.cycle_uuid === secondCycleUuid);
+  const stillOpen = memberships.find((row) => row.cycle_uuid !== secondCycleUuid);
+  assert.equal(closed.ends_on, '2026-08-01');
+  assert.equal(closed.close_reason, 'harvest');
+  assert.equal(stillOpen.ends_on, null, 'the un-named cycle stays open');
+});
+
+// --- R3: manual close -----------------------------------------------------
+
+test('a tillage_soil_work entry with ends_crop_cycle:true closes the covering cycle', async () => {
+  const db = createJournalDb('cc-manual-close');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(30);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(30),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  await saveEntry(db, tillageInput({
+    entry_uuid: cropCycleEntryUuid(31),
+    plot_uuid: plot,
+    occurred_start_local: '2026-05-15T09:00:00',
+    ends_crop_cycle: true,
+  }), principal, { mode: 'create' });
+
+  const membership = readCycleMemberships(db, plot)[0];
+  assert.equal(membership.ends_on, '2026-05-15');
+  assert.equal(membership.close_reason, 'manual');
+  assert.equal(membership.closed_by_entry_uuid, cropCycleEntryUuid(31));
+});
+
+test('ends_crop_cycle:true throws a clear error when no open crop cycle covers the plot', async () => {
+  const db = createJournalDb('cc-manual-close-no-cycle');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(32);
+  await makeCropCyclePlot(db, principal, plot, { crop_hint: 'CoverCrop' });
+
+  await assert.rejects(
+    saveEntry(db, tillageInput({
+      entry_uuid: cropCycleEntryUuid(32),
+      plot_uuid: plot,
+      occurred_start_local: '2026-05-15T09:00:00',
+      ends_crop_cycle: true,
+    }), principal, { mode: 'create' }),
+    (error) => error && error.code === 'no_open_cycle'
+  );
+});
+
+// --- D2.2: live-vs-frozen resolution --------------------------------------
+
+test('a backdated seeding retroactively covers an earlier entry in the live read path', async () => {
+  const db = createJournalDb('cc-backdated-seeding-retroactive');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(40);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, irrigationInput({
+    entry_uuid: cropCycleEntryUuid(40),
+    plot_uuid: plot,
+    occurred_start_local: '2026-07-15T09:00:00',
+    season_crop: 'OldCropFallback',
+  }), principal, { mode: 'create' });
+  assert.equal(readJournalEntryRow(db, cropCycleEntryUuid(40)).season_crop, 'OldCropFallback');
+
+  // Backdated: starts_on precedes the already-logged irrigation entry above.
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(41),
+    plot_uuid: plot,
+    occurred_start_local: '2026-07-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  assert.equal(
+    readJournalEntryRow(db, cropCycleEntryUuid(40)).season_crop,
+    'OldCropFallback',
+    'the stored column is untouched -- retroactivity is a read-time effect, not a rewrite'
+  );
+
+  const listed = await listEntries(db, { plot_uuid: plot, status: 'final' }, principal);
+  const liveEarlier = listed.entries.find((entry) => entry.entry_uuid === cropCycleEntryUuid(40));
+  assert.equal(liveEarlier.season_crop, 'agroscope.crop.wheat_winter', 'now resolves live from the backdated cycle');
+  assert.equal(liveEarlier.season_variety, 'Runal');
+});
+
+test('correcting a seeding crop/variety updates the open cycle and propagates live with no per-entry rewrite', async () => {
+  const db = createJournalDb('cc-correction-propagates');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(42);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(42),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, irrigationInput({
+    entry_uuid: cropCycleEntryUuid(43),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-10T09:00:00',
+  }), principal, { mode: 'create' });
+
+  await saveEntry(db, seedingInput({
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+    base_sync_version: 1,
+    values: [
+      { attribute_code: 'attr.crop', group_index: 0, value: 'agroscope.crop.rye_winter', value_status: 'observed' },
+      { attribute_code: 'attr.variety', group_index: 0, value: 'Corrected', value_status: 'observed' },
+    ],
+  }), principal, { mode: 'update', entryUuid: cropCycleEntryUuid(42) });
+
+  const membership = readCycleMemberships(db, plot)[0];
+  assert.equal(membership.crop_code, 'agroscope.crop.rye_winter');
+  assert.equal(membership.variety, 'Corrected');
+
+  const listed = await listEntries(db, { plot_uuid: plot, status: 'final' }, principal);
+  const liveIrrigation = listed.entries.find((entry) => entry.entry_uuid === cropCycleEntryUuid(43));
+  assert.equal(liveIrrigation.season_crop, 'agroscope.crop.rye_winter');
+  assert.equal(liveIrrigation.season_variety, 'Corrected');
+});
+
+// --- D13/R7: void cascades -------------------------------------------------
+
+test('voiding a seeding with dependent entries requires cascade_ack, then soft-deletes the cycle', async () => {
+  const db = createJournalDb('cc-void-seeding-dependents');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(50);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(50),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, irrigationInput({
+    entry_uuid: cropCycleEntryUuid(51),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-10T09:00:00',
+  }), principal, { mode: 'create' });
+
+  await assert.rejects(
+    void_(db, null, cropCycleEntryUuid(50), 1, 'testing void without ack', principal),
+    (error) => error && error.code === 'cycle_has_dependents' &&
+      error.details.dependentEntryUuids.includes(cropCycleEntryUuid(51))
+  );
+  assert.equal(readCycleMemberships(db, plot)[0].cycle_deleted_at, null, 'nothing changed on the rejected attempt');
+
+  await void_(db, null, cropCycleEntryUuid(50), 1, 'testing void with ack', principal, { cascade_ack: true });
+  assert.ok(readCycleMemberships(db, plot)[0].cycle_deleted_at, 'cycle soft-deleted once acknowledged');
+});
+
+test('voidEntry (api.js) passes cascade_ack through to the void cascade', async () => {
+  const db = createJournalDb('cc-void-entry-api-cascade-ack');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(52);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(52),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, irrigationInput({
+    entry_uuid: cropCycleEntryUuid(53),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-10T09:00:00',
+  }), principal, { mode: 'create' });
+
+  const { voidEntry } = require('./index');
+  await assert.rejects(
+    voidEntry(db, cropCycleEntryUuid(52), { base_sync_version: 1, reason: 'no ack' }, principal),
+    (error) => error && error.code === 'cycle_has_dependents'
+  );
+  await voidEntry(
+    db, cropCycleEntryUuid(52), { base_sync_version: 1, reason: 'with ack', cascade_ack: true }, principal
+  );
+  assert.ok(readCycleMemberships(db, plot)[0].cycle_deleted_at);
+});
+
+test('voiding a harvest reopens the cycle and un-freezes the entries it froze', async () => {
+  const db = createJournalDb('cc-void-harvest-reopens');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(60);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(60),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, irrigationInput({
+    entry_uuid: cropCycleEntryUuid(61),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-10T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, harvestInput({
+    entry_uuid: cropCycleEntryUuid(62),
+    plot_uuid: plot,
+    occurred_start_local: '2026-07-01T09:00:00',
+  }), principal, { mode: 'create' });
+  assert.equal(readJournalEntryRow(db, cropCycleEntryUuid(61)).season_crop, 'agroscope.crop.wheat_winter');
+
+  const harvestVersion = currentSyncVersion(db, cropCycleEntryUuid(62));
+  await void_(db, null, cropCycleEntryUuid(62), harvestVersion, 'undo the harvest', principal);
+
+  const membership = readCycleMemberships(db, plot)[0];
+  assert.equal(membership.ends_on, null, 'reopened');
+  assert.equal(membership.close_reason, null);
+  assert.equal(membership.closed_by_entry_uuid, null);
+  assert.equal(readJournalEntryRow(db, cropCycleEntryUuid(61)).season_crop, null, 'un-frozen back to deferred/live');
+});
+
+test('voiding a harvest refuses with a clear error when a reseed already opened a new cycle on the plot', async () => {
+  const db = createJournalDb('cc-void-harvest-collision');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(63);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(63),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, harvestInput({
+    entry_uuid: cropCycleEntryUuid(64),
+    plot_uuid: plot,
+    occurred_start_local: '2026-07-01T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(65),
+    plot_uuid: plot,
+    occurred_start_local: '2026-07-05T09:00:00',
+    values: [
+      { attribute_code: 'attr.crop', group_index: 0, value: 'agroscope.crop.barley_spring', value_status: 'observed' },
+      { attribute_code: 'attr.variety', group_index: 0, value: 'Golden', value_status: 'observed' },
+    ],
+  }), principal, { mode: 'create' });
+
+  const harvestVersion = currentSyncVersion(db, cropCycleEntryUuid(64));
+  await assert.rejects(
+    void_(db, null, cropCycleEntryUuid(64), harvestVersion, 'undo after reseed', principal),
+    (error) => error && error.code === 'reopen_collision'
+  );
+  assert.equal(readCycleMemberships(db, plot).find((row) => row.close_reason === 'harvest').ends_on, '2026-07-01');
+});
+
+// --- Review fixes (B1/B2/S1/S2) -------------------------------------------
+//
+// B1: the entry that closes/opens a cycle (harvest, manual-close, or a
+// reseeding seeding) must never be frozen behind its own back by its own
+// cascade -- freezeClosedSpan now excludes that triggering entry_uuid
+// unconditionally (see closeCycleMembership), and createFinalInTransaction/
+// promoteDraftInTransaction/void_ all re-read sync_version after the
+// cascade runs so the returned/ACK'd version always matches the DB.
+
+test(
+  'a cycle-closing harvest returns the entry\'s true post-cascade sync_version and emits one coherent outbox event',
+  async () => {
+    const db = createJournalDb('cc-b1-harvest-self-freeze-fix');
+    seedJournalTestIdentity(db);
+    const principal = journalTestPrincipal();
+    const plot = cropCyclePlotUuid(100);
+    await makeCropCyclePlot(db, principal, plot);
+
+    await saveEntry(db, seedingInput({
+      entry_uuid: cropCycleEntryUuid(100),
+      plot_uuid: plot,
+      occurred_start_local: '2026-04-01T09:00:00',
+    }), principal, { mode: 'create' });
+
+    const harvestUuid = cropCycleEntryUuid(101);
+    const result = await saveEntry(db, harvestInput({
+      entry_uuid: harvestUuid,
+      plot_uuid: plot,
+      occurred_start_local: '2026-08-01T09:00:00',
+    }), principal, { mode: 'create' });
+
+    assert.equal(
+      result.sync_version,
+      currentSyncVersion(db, harvestUuid),
+      'the returned version must match the DB after the close cascade ran'
+    );
+    assert.equal(result.sync_version, 1, 'closing its own covering cycle must not bump the harvest entry\'s own version');
+
+    const outboxRows = db.prepare(
+      "SELECT sync_version FROM sync_outbox WHERE aggregate_key=? AND op='JOURNAL_ENTRY_UPSERTED'"
+    ).all(harvestUuid);
+    assert.equal(outboxRows.length, 1, 'exactly one outbox event for the harvest entry itself (no missing-v1/duplicate-v2 pair)');
+    assert.equal(outboxRows[0].sync_version, 1);
+
+    const membership = readCycleMemberships(db, plot)[0];
+    assert.equal(membership.ends_on, '2026-08-01');
+    assert.equal(membership.close_reason, 'harvest');
+  }
+);
+
+test('a batch harvest that closes cycles is idempotently retryable (B1)', async () => {
+  const db = createJournalDb('cc-b1-batch-harvest-retry');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plotA = cropCyclePlotUuid(102);
+  const plotB = cropCyclePlotUuid(103);
+  await makeCropCyclePlot(db, principal, plotA);
+  await makeCropCyclePlot(db, principal, plotB);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(102),
+    plot_uuid: plotA,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(103),
+    plot_uuid: plotB,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  const batch = {
+    status: 'final',
+    base_sync_version: 0,
+    members: [
+      { plot_uuid: plotA, entry_uuid: cropCycleEntryUuid(104) },
+      { plot_uuid: plotB, entry_uuid: cropCycleEntryUuid(105) },
+    ],
+    activity_code: 'harvest',
+    template_code: 'farmer_quick',
+    template_version: 3,
+    layout_code: 'open_field',
+    layout_version: 3,
+    occurred_start_local: '2026-08-01T09:00:00',
+    occurred_timezone: 'Europe/Zurich',
+    values: [],
+  };
+
+  const first = await saveEntry(db, batch, principal, { mode: 'create' });
+  assert.ok(
+    first.entries.every((entry) => entry.sync_version === 1),
+    'each closing entry keeps its own version 1 (existingBatchRetry requires exactly this)'
+  );
+
+  const entriesBeforeRetry = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const outboxBeforeRetry = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+  const retry = await saveEntry(db, batch, principal, { mode: 'create' });
+
+  assert.deepEqual(retry.entries, first.entries, 'the retry returns the original receipts unchanged');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entriesBeforeRetry, 'no new entry rows');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxBeforeRetry, 'no new outbox rows');
+
+  assert.equal(readCycleMemberships(db, plotA)[0].ends_on, '2026-08-01');
+  assert.equal(readCycleMemberships(db, plotB)[0].ends_on, '2026-08-01');
+});
+
+test(
+  'a differing-crop reseed leaves the new seeding entry\'s stored season_crop NULL, not the old crop (B1)',
+  async () => {
+    const db = createJournalDb('cc-b1-reseed-no-mis-stamp');
+    seedJournalTestIdentity(db);
+    const principal = journalTestPrincipal();
+    const plot = cropCyclePlotUuid(106);
+    await makeCropCyclePlot(db, principal, plot);
+
+    await saveEntry(db, seedingInput({
+      entry_uuid: cropCycleEntryUuid(106),
+      plot_uuid: plot,
+      occurred_start_local: '2026-04-01T09:00:00',
+    }), principal, { mode: 'create' });
+
+    const reseedUuid = cropCycleEntryUuid(107);
+    const result = await saveEntry(db, seedingInput({
+      entry_uuid: reseedUuid,
+      plot_uuid: plot,
+      occurred_start_local: '2026-06-01T09:00:00',
+      values: [
+        { attribute_code: 'attr.crop', group_index: 0, value: 'agroscope.crop.soybean', value_status: 'observed' },
+        { attribute_code: 'attr.variety', group_index: 0, value: 'Asgrow', value_status: 'observed' },
+      ],
+    }), principal, { mode: 'create' });
+
+    assert.equal(result.sync_version, 1, 'the reseeding entry keeps its own version 1');
+    const reseedRow = readJournalEntryRow(db, reseedUuid);
+    assert.equal(reseedRow.season_crop, null, 'deferred -- NOT mis-stamped with the closing (old) crop');
+    assert.equal(reseedRow.season_variety, null);
+
+    const memberships = readCycleMemberships(db, plot);
+    const wheat = memberships.find((row) => row.crop_code === 'agroscope.crop.wheat_winter');
+    const soy = memberships.find((row) => row.crop_code === 'agroscope.crop.soybean');
+    assert.equal(wheat.ends_on, '2026-06-01');
+    assert.equal(wheat.close_reason, 'reseed');
+    assert.equal(soy.ends_on, null);
+  }
+);
+
+// B2: an intercropped plot (>1 open cycle) must never have a seeding/reseed
+// blanket-close every open cycle, or (for a same-crop continue) close
+// whichever OTHER co-cropped cycle also covers the plot -- it must demand an
+// explicit cycle_uuid, exactly like harvest/manual-close.
+
+test(
+  'a seeding on an intercropped plot requires cycle_uuid, and closes only the named cycle (B2)',
+  async () => {
+    const db = createJournalDb('cc-b2-seeding-intercrop-disambiguation');
+    seedJournalTestIdentity(db);
+    const principal = journalTestPrincipal();
+    const plot = cropCyclePlotUuid(110);
+    await makeCropCyclePlot(db, principal, plot);
+
+    await saveEntry(db, seedingInput({
+      entry_uuid: cropCycleEntryUuid(110),
+      plot_uuid: plot,
+      occurred_start_local: '2026-04-01T09:00:00',
+    }), principal, { mode: 'create' });
+    // Simulate a genuinely intercropped plot the same way the harvest
+    // disambiguation test does: direct-insert a second concurrently open
+    // cycle (normal seeding always collapses to a single membership, so
+    // this state can't arise via seeding alone -- but the schema allows it).
+    const secondCycleUuid = '80000000-0000-4000-8000-000000000010';
+    db.prepare(
+      'INSERT INTO journal_crop_cycles(cycle_uuid,crop_code,variety,group_uuid,opened_by_entry_uuid,starts_on,' +
+        'gateway_device_eui,created_by_principal_uuid,sync_version,created_at,updated_at,deleted_at) ' +
+      'VALUES (?,?,?,NULL,?,?,?,?,0,?,?,NULL)'
+    ).run(
+      secondCycleUuid, 'agroscope.crop.soybean', 'Asgrow', cropCycleEntryUuid(110), '2026-04-01',
+      JOURNAL_TEST_GATEWAY_EUI, JOURNAL_TEST_OWNER_UUID, '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z'
+    );
+    db.prepare(
+      'INSERT INTO journal_crop_cycle_plots(cycle_uuid,plot_uuid,ends_on,closed_by_entry_uuid,close_reason) ' +
+      'VALUES (?,?,NULL,NULL,NULL)'
+    ).run(secondCycleUuid, plot);
+
+    await assert.rejects(
+      saveEntry(db, seedingInput({
+        entry_uuid: cropCycleEntryUuid(111),
+        plot_uuid: plot,
+        occurred_start_local: '2026-06-01T09:00:00',
+        values: [
+          { attribute_code: 'attr.crop', group_index: 0, value: 'agroscope.crop.maize_grain', value_status: 'observed' },
+          { attribute_code: 'attr.variety', group_index: 0, value: 'Pioneer', value_status: 'observed' },
+        ],
+      }), principal, { mode: 'create' }),
+      (error) => error && error.code === 'cycle_uuid_required'
+    );
+    assert.equal(
+      readCycleMemberships(db, plot).filter((row) => row.ends_on == null).length,
+      2,
+      'nothing closed -- no blanket-close'
+    );
+
+    await saveEntry(db, seedingInput({
+      entry_uuid: cropCycleEntryUuid(112),
+      plot_uuid: plot,
+      occurred_start_local: '2026-06-01T09:00:00',
+      cycle_uuid: secondCycleUuid,
+      values: [
+        { attribute_code: 'attr.crop', group_index: 0, value: 'agroscope.crop.maize_grain', value_status: 'observed' },
+        { attribute_code: 'attr.variety', group_index: 0, value: 'Pioneer', value_status: 'observed' },
+      ],
+    }), principal, { mode: 'create' });
+
+    const memberships = readCycleMemberships(db, plot);
+    const closed = memberships.find((row) => row.cycle_uuid === secondCycleUuid);
+    const untouchedWheat = memberships.find((row) => row.crop_code === 'agroscope.crop.wheat_winter');
+    const maize = memberships.find((row) => row.crop_code === 'agroscope.crop.maize_grain');
+    assert.equal(closed.ends_on, '2026-06-01');
+    assert.equal(closed.close_reason, 'reseed');
+    assert.equal(untouchedWheat.ends_on, null, 'the un-named wheat cycle stays open, untouched');
+    assert.ok(maize && maize.ends_on == null, 'the new maize cycle opened');
+  }
+);
+
+// S1: the single-entry aggregate load must live-resolve a deferred crop just
+// like the list path does, instead of returning the stored (blank) columns.
+
+test('a single-entry aggregate fetch live-resolves a deferred crop (S1)', async () => {
+  const db = createJournalDb('cc-s1-single-fetch-live-crop');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(120);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(120),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  const irrigationUuid = cropCycleEntryUuid(121);
+  await saveEntry(db, irrigationInput({
+    entry_uuid: irrigationUuid,
+    plot_uuid: plot,
+    occurred_start_local: '2026-05-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  assert.equal(readJournalEntryRow(db, irrigationUuid).season_crop, null, 'deferred in storage');
+
+  const aggregate = await loadCurrentAggregate(db, 'UPSERT_JOURNAL_ENTRY', irrigationUuid, principal);
+  assert.equal(aggregate.season_crop, 'agroscope.crop.wheat_winter', 'single fetch live-resolves the deferred crop');
+  assert.equal(aggregate.season_variety, 'Runal');
+});
+
+// S2: correcting an entry that opened or closed a crop cycle must be
+// rejected outright when it would leave cycle state inconsistent, rather
+// than silently desyncing journal_crop_cycle(_plots).
+
+test('correcting a harvest\'s occurred date is rejected when it closed a cycle (S2)', async () => {
+  const db = createJournalDb('cc-s2-harvest-date-desync');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(130);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(130),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  const harvestUuid = cropCycleEntryUuid(131);
+  await saveEntry(db, harvestInput({
+    entry_uuid: harvestUuid,
+    plot_uuid: plot,
+    occurred_start_local: '2026-08-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  await assert.rejects(
+    saveEntry(db, harvestInput({
+      plot_uuid: plot,
+      occurred_start_local: '2026-08-05T09:00:00',
+      base_sync_version: currentSyncVersion(db, harvestUuid),
+    }), principal, { mode: 'update', entryUuid: harvestUuid }),
+    (error) => error && error.code === 'correction_would_desync_cycle'
+  );
+  assert.equal(readCycleMemberships(db, plot)[0].ends_on, '2026-08-01', 'ends_on is untouched');
+  assert.equal(currentSyncVersion(db, harvestUuid), 1, 'the rejected correction did not write anything');
+});
+
+test('correcting a seeding\'s occurred date is rejected because it would move starts_on (S2)', async () => {
+  const db = createJournalDb('cc-s2-seeding-date-desync');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(132);
+  await makeCropCyclePlot(db, principal, plot);
+
+  const seedUuid = cropCycleEntryUuid(132);
+  await saveEntry(db, seedingInput({
+    entry_uuid: seedUuid,
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  await assert.rejects(
+    saveEntry(db, seedingInput({
+      plot_uuid: plot,
+      occurred_start_local: '2026-04-05T09:00:00',
+      base_sync_version: currentSyncVersion(db, seedUuid),
+    }), principal, { mode: 'update', entryUuid: seedUuid }),
+    (error) => error && error.code === 'correction_would_desync_cycle'
+  );
+  assert.equal(readCycleMemberships(db, plot)[0].starts_on, '2026-04-01', 'starts_on is untouched');
+});
+
+test(
+  'correcting a seeding\'s crop after its cycle already closed is rejected (S2, split-brain guard)',
+  async () => {
+    const db = createJournalDb('cc-s2-seeding-crop-after-close');
+    seedJournalTestIdentity(db);
+    const principal = journalTestPrincipal();
+    const plot = cropCyclePlotUuid(134);
+    await makeCropCyclePlot(db, principal, plot);
+
+    const seedUuid = cropCycleEntryUuid(134);
+    await saveEntry(db, seedingInput({
+      entry_uuid: seedUuid,
+      plot_uuid: plot,
+      occurred_start_local: '2026-04-01T09:00:00',
+    }), principal, { mode: 'create' });
+    await saveEntry(db, harvestInput({
+      entry_uuid: cropCycleEntryUuid(135),
+      plot_uuid: plot,
+      occurred_start_local: '2026-08-01T09:00:00',
+    }), principal, { mode: 'create' });
+
+    await assert.rejects(
+      saveEntry(db, seedingInput({
+        plot_uuid: plot,
+        occurred_start_local: '2026-04-01T09:00:00',
+        base_sync_version: currentSyncVersion(db, seedUuid),
+        values: [
+          { attribute_code: 'attr.crop', group_index: 0, value: 'agroscope.crop.rye_winter', value_status: 'observed' },
+          { attribute_code: 'attr.variety', group_index: 0, value: 'Corrected', value_status: 'observed' },
+        ],
+      }), principal, { mode: 'update', entryUuid: seedUuid }),
+      (error) => error && error.code === 'correction_would_desync_cycle'
+    );
+    const membership = readCycleMemberships(db, plot)[0];
+    assert.equal(
+      membership.crop_code,
+      'agroscope.crop.wheat_winter',
+      'the closed cycle keeps its original crop -- the rejected correction never wrote anything'
+    );
+  }
+);
+
+test('correcting a seeding\'s crop/variety while its cycle is STILL open remains allowed (S2 scope check)', async () => {
+  const db = createJournalDb('cc-s2-still-open-allowed');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(136);
+  await makeCropCyclePlot(db, principal, plot);
+
+  const seedUuid = cropCycleEntryUuid(136);
+  await saveEntry(db, seedingInput({
+    entry_uuid: seedUuid,
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  await saveEntry(db, seedingInput({
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+    base_sync_version: currentSyncVersion(db, seedUuid),
+    values: [
+      { attribute_code: 'attr.crop', group_index: 0, value: 'agroscope.crop.rye_winter', value_status: 'observed' },
+      { attribute_code: 'attr.variety', group_index: 0, value: 'Corrected', value_status: 'observed' },
+    ],
+  }), principal, { mode: 'update', entryUuid: seedUuid });
+
+  const membership = readCycleMemberships(db, plot)[0];
+  assert.equal(membership.crop_code, 'agroscope.crop.rye_winter');
+  assert.equal(membership.variety, 'Corrected');
 });

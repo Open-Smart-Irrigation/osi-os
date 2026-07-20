@@ -64,7 +64,9 @@ const CORRECTION_COLUMNS = ENTRY_COLUMNS.filter(function(column) {
 });
 const UUID = /^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$/;
 const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const INPUT_UUID_FIELDS = ['entry_uuid', 'plot_uuid', 'campaign_uuid', 'pass_uuid', 'batch_uuid'];
+const INPUT_UUID_FIELDS = [
+  'entry_uuid', 'plot_uuid', 'campaign_uuid', 'pass_uuid', 'batch_uuid', 'cycle_uuid',
+];
 const EUI64 = /^[0-9a-fA-F]{16}$/;
 const LOCAL_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
 const formatterCache = new Map();
@@ -316,6 +318,7 @@ async function resolvePlotContext(tx, plotUuid, principal) {
       zone_id: null,
       zone_uuid: null,
       zone_timezone: null,
+      crop_hint: null,
       user_id: principal.user_id,
       owner_user_uuid: principal.owner_user_uuid,
       gateway_device_eui: principal.gateway_device_eui,
@@ -323,7 +326,7 @@ async function resolvePlotContext(tx, plotUuid, principal) {
   }
   const plot = await tx.get(
     'SELECT p.plot_uuid,p.owner_user_uuid AS plot_owner_user_uuid,p.gateway_device_eui,' +
-      'p.zone_uuid AS plot_zone_uuid,' +
+      'p.zone_uuid AS plot_zone_uuid,p.crop_hint,' +
       'z.id AS zone_id,z.zone_uuid,z.user_id AS zone_user_id,z.timezone AS zone_timezone,' +
       'u.user_uuid AS zone_owner_user_uuid ' +
     'FROM journal_plots AS p ' +
@@ -355,6 +358,7 @@ async function resolvePlotContext(tx, plotUuid, principal) {
     zone_id: linked ? Number(plot.zone_id) : null,
     zone_uuid: linked ? plot.zone_uuid : null,
     zone_timezone: linked ? plot.zone_timezone : null,
+    crop_hint: nullable(plot.crop_hint),
     user_id: Number(userId),
     owner_user_uuid: ownerUserUuid,
     gateway_device_eui: plot.gateway_device_eui,
@@ -487,9 +491,83 @@ async function coveringSeason(tx, zoneId, localDate) {
   );
 }
 
+// D0.1 precedence: crop-cycle helpers -----------------------------------
+//
+// journal_crop_cycles / journal_crop_cycle_plots (Phase 1, migration 0025)
+// track an explicit per-plot crop lifecycle: open on seeding, closed by
+// harvest/reseed/manual. openCyclesCoveringPlot() is the single query every
+// resolution/cascade path uses to find the OPEN membership(s) covering a
+// plot at a given local date (ends_on IS NULL, starts_on<=localDate).
+async function openCyclesCoveringPlot(tx, plotUuid, localDate) {
+  if (plotUuid == null) return [];
+  return tx.all(
+    'SELECT cc.cycle_uuid,cc.crop_code,cc.variety,cc.starts_on FROM journal_crop_cycle_plots AS ccp ' +
+    'JOIN journal_crop_cycles AS cc ON cc.cycle_uuid=ccp.cycle_uuid AND cc.deleted_at IS NULL ' +
+    'WHERE ccp.plot_uuid=? AND ccp.ends_on IS NULL AND cc.starts_on<=? ' +
+    'ORDER BY cc.starts_on DESC,cc.cycle_uuid',
+    [plotUuid, localDate]
+  );
+}
+
+// Recover the exact local calendar date used at write time from a stored
+// UTC instant + its recorded offset (avoids re-resolving the IANA timezone,
+// which is both unnecessary and DST-fragile at read time).
+function localDateFromInstant(instant, offsetMinutes) {
+  const epoch = Date.parse(instant) + Number(offsetMinutes) * 60000;
+  return new Date(epoch).toISOString().slice(0, 10);
+}
+
+// D0.1 precedence (spec §5.1/§6, owner brief 2026-07-20). Order, most to
+// least authoritative:
+//   1. An OPEN journal_crop_cycle_plots membership covering plot+date. Wins
+//      over EVERYTHING, including an explicit input crop -- a correction to
+//      the running crop identity is meant to go through the seeding entry
+//      (D13), not by typing a crop on an unrelated activity. We deliberately
+//      return null here (defer): season_crop/season_variety are NOT stamped
+//      on the entry while the cycle is open. The live crop is resolved at
+//      read time by joining the still-open cycle (see resolveLiveCropOverrides
+//      below) so a later correction to the cycle or an auto-close/reseed
+//      propagates without rewriting history. Freezing happens exactly once,
+//      when the covering membership closes (see freezeClosedSpan).
+//   2. Explicit input crop (input.season_crop) -- NEW: previously any
+//      covering zone_seasons row (even a NULL-crop one) was checked first
+//      and returned unconditionally, silently shadowing an explicit crop.
+//   3. A REAL-crop covering zone_seasons row (crop_type IS NOT NULL).
+//   4. journal_plots.crop_hint -- legacy plot metadata (D0 decision: kept,
+//      not deleted). Ranked above a merely-null-crop zone_seasons row since
+//      it is actual information the null row does not carry.
+//   5. A covering zone_seasons row even with a NULL crop_type. This tier
+//      exists ONLY to keep season_uuid attachment byte-identical to the
+//      pre-existing behaviour when nothing better is available (kaba100
+//      confirmed live zone_seasons rows with NULL crop from the default-
+//      season repair backfill) -- it must never outrank tiers 1-4, which is
+//      the bug this change fixes: a NULL-crop row no longer counts as a
+//      covering match for precedence purposes, only as a last-resort
+//      season_uuid carrier.
+//   6. None -- throws season_required for a final entry on a real plot,
+//      exactly as before.
+const SEEDING_ACTIVITY_CODES = new Set(['seeding', 'planting_transplanting']);
+const MANUAL_CLOSE_ACTIVITY_CODES = new Set([
+  'tillage_soil_work', 'mowing', 'plant_protection_application',
+]);
+
 async function resolveSeason(tx, plot, localDate, input, requireExplicit) {
-  const covering = await coveringSeason(tx, plot.zone_id, localDate);
-  if (covering) return covering;
+  const cycleCovered = await openCyclesCoveringPlot(tx, plot.plot_uuid, localDate);
+  if (cycleCovered.length) return null; // tier 1: defer to live resolution
+  // Tier 1.5: a seeding/planting entry that itself records attr.crop is
+  // about to open (or join) a cycle for this exact plot+date the moment it
+  // is persisted (applyActivityCycleCascade runs right after insert -- the
+  // NOT NULL FK from journal_crop_cycles.opened_by_entry_uuid requires the
+  // entry to exist first, so the cascade cannot run before resolveSeason
+  // does). Defer here too rather than demanding a redundant top-level
+  // season_crop: this entry will resolve live from its own (about to exist)
+  // cycle exactly like every other activity on the plot. A seeding entry
+  // that records no attr.crop falls through to the normal tiers below (and
+  // the cascade itself will refuse it with crop_required_for_seeding).
+  if (SEEDING_ACTIVITY_CODES.has(input.activity_code) &&
+      findAttributeValue(input.values, 'attr.crop') != null) {
+    return null;
+  }
   const explicitCrop = typeof input.season_crop === 'string' && input.season_crop.trim();
   if (explicitCrop) {
     return {
@@ -498,10 +576,547 @@ async function resolveSeason(tx, plot, localDate, input, requireExplicit) {
       variety: nullable(input.season_variety),
     };
   }
+  const covering = await coveringSeason(tx, plot.zone_id, localDate);
+  if (covering && covering.crop_type != null) return covering; // tier 3
+  const cropHint = typeof plot.crop_hint === 'string' && plot.crop_hint.trim();
+  if (cropHint) {
+    return { season_uuid: null, crop_type: plot.crop_hint, variety: null }; // tier 4
+  }
+  if (covering) return covering; // tier 5: legacy NULL-crop attach
   if (requireExplicit && plot.plot_uuid != null) {
     throw lifecycleError('season_required', 'A crop is required when no covering season exists');
   }
-  return null;
+  return null; // tier 6
+}
+
+// Live-vs-frozen read path (D2.2/§6). For a page of journal_entries rows,
+// returns a Map<entry_uuid, {season_uuid,season_crop,season_variety}>
+// overriding the STORED columns with the LIVE crop wherever the plot is
+// currently covered by exactly one open cycle. Entries whose plot has no
+// open cycle (the overwhelming majority, and every entry that predates this
+// feature) are left untouched -- this is purely additive. An intercropped
+// plot (>1 open cycle) is left to the stored value too: disambiguating which
+// crop applies to a given activity is a capture-form (Phase 3) concern.
+// `queryAll(sql, params)` lets callers (api.js) supply their own DB/snapshot
+// handle wrapper.
+async function resolveLiveCropOverrides(queryAll, rows) {
+  const plotUuids = Array.from(new Set(
+    (rows || []).map(function(row) { return row.plot_uuid; }).filter(function(value) { return value != null; })
+  ));
+  const overrides = new Map();
+  if (!plotUuids.length) return overrides;
+  const placeholders = plotUuids.map(function() { return '?'; }).join(',');
+  const openRows = await queryAll(
+    'SELECT ccp.plot_uuid,cc.cycle_uuid,cc.crop_code,cc.variety,cc.starts_on ' +
+    'FROM journal_crop_cycle_plots AS ccp ' +
+    'JOIN journal_crop_cycles AS cc ON cc.cycle_uuid=ccp.cycle_uuid AND cc.deleted_at IS NULL ' +
+    'WHERE ccp.ends_on IS NULL AND ccp.plot_uuid IN (' + placeholders + ')',
+    plotUuids
+  );
+  const byPlot = new Map();
+  for (const cycle of openRows) {
+    if (!byPlot.has(cycle.plot_uuid)) byPlot.set(cycle.plot_uuid, []);
+    byPlot.get(cycle.plot_uuid).push(cycle);
+  }
+  for (const row of rows) {
+    if (row.plot_uuid == null || row.occurred_start == null) continue;
+    const candidates = byPlot.get(row.plot_uuid);
+    if (!candidates || !candidates.length) continue;
+    const localDate = localDateFromInstant(row.occurred_start, row.occurred_utc_offset_minutes);
+    const covering = candidates.filter(function(cycle) { return cycle.starts_on <= localDate; });
+    if (covering.length !== 1) continue; // no cover, or ambiguous intercrop: leave stored value
+    overrides.set(row.entry_uuid, {
+      season_uuid: null,
+      season_crop: covering[0].crop_code,
+      season_variety: nullable(covering[0].variety),
+    });
+  }
+  return overrides;
+}
+
+// Extract the semantic value an entry recorded for a given catalog
+// attribute (e.g. attr.crop, attr.variety) from its NORMALIZED value array,
+// i.e. before storedValue()'s number/text column split. Used only to learn
+// the crop/variety a seeding/planting entry just recorded, for opening or
+// updating a crop cycle.
+function findAttributeValue(values, attributeCode) {
+  const match = (Array.isArray(values) ? values : []).find(function(value) {
+    return value.attribute_code === attributeCode && (value.group_index || 0) === 0 &&
+      (value.value_status == null || value.value_status === 'observed');
+  });
+  if (!match) return null;
+  const semantic = match.value != null ? match.value : (match.value_text != null ? match.value_text : null);
+  return semantic == null ? null : String(semantic);
+}
+
+// Stamp (freeze) or clear (unfreeze) the season_crop/season_variety of one
+// already-persisted final entry, bumping its sync_version and emitting a
+// JOURNAL_ENTRY_UPSERTED outbox event exactly like a correction would. This
+// is a background consistency side effect of a DIFFERENT entry's harvest/
+// manual-close/reseed (or its void), not itself a command target, so it
+// never touches the command/effect-key ledger.
+async function stampSeasonSnapshot(tx, entryUuid, cropCode, variety) {
+  const entry = await tx.get('SELECT sync_version FROM journal_entries WHERE entry_uuid=?', [entryUuid]);
+  if (!entry) return;
+  const nextVersion = Number(entry.sync_version) + 1;
+  const now = new Date().toISOString();
+  await tx.run(
+    'UPDATE journal_entries SET season_crop=?,season_variety=?,season_uuid=NULL,sync_version=?,updated_at=? ' +
+    'WHERE entry_uuid=? AND sync_version=?',
+    [nullable(cropCode), nullable(variety), nextVersion, now, entryUuid, entry.sync_version]
+  );
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED');
+}
+
+// Freeze (D2.2/§6 point 3): once a membership closes (harvest, reseed, OR
+// manual -- the spec calls out harvest explicitly, but the same "stop
+// deferring" step is required whenever a membership stops being open, or a
+// deferred entry would permanently lose its crop the moment the cycle it was
+// relying on closes), stamp season_crop/season_variety on every final entry
+// on that plot whose occurred local date falls in [startsOn,endsOn]. This
+// OVERWRITES whatever was stored (even a real zone_seasons-derived crop),
+// because tier 1 precedence means the cycle was already the authoritative
+// LIVE answer for that entry the entire time the membership was open.
+// Entries still covered by a DIFFERENT, still-open cycle on the same plot
+// (true intercropping) are skipped -- they remain deferred/live until their
+// own ambiguity resolves.
+//
+// excludeEntryUuid (review fix): the entry whose OWN persistence is driving
+// this close (a harvest/manual-close entry closing its own covering cycle,
+// or a seeding/reseed entry closing the cycle it supersedes) must never be
+// frozen by its own cascade. That entry's sync_version/outbox row is still
+// being assembled by its caller (createFinalInTransaction et al.) at this
+// point -- stamping it here would bump its sync_version and emit an outbox
+// event behind the caller's back, leaving the returned/ACK'd version stale
+// (DB ahead of what was reported), producing a missing-v1/duplicate-v2
+// outbox pair, breaking `entry.sync_version === 1` batch-retry idempotency,
+// and -- for a differing-crop reseed specifically -- mis-stamping the NEW
+// seeding entry with the OLD (closing) crop before the new cycle even
+// exists. The excluded entry's own season_crop simply stays deferred
+// (NULL); it no longer has an open cycle to live-resolve from once this
+// close commits, which is an accepted, deliberate trade-off (see the
+// review notes) in exchange for correct sync_version accounting.
+async function freezeClosedSpan(tx, plotUuid, startsOn, endsOn, cropCode, variety, excludeEntryUuid) {
+  const rows = await tx.all(
+    "SELECT entry_uuid,occurred_start,occurred_utc_offset_minutes FROM journal_entries " +
+    "WHERE plot_uuid=? AND status='final' AND deleted_at IS NULL AND entry_uuid<>?",
+    [plotUuid, excludeEntryUuid]
+  );
+  if (!rows.length) return;
+  const stillOpen = await openCyclesCoveringPlot(tx, plotUuid, endsOn);
+  for (const row of rows) {
+    const localDate = localDateFromInstant(row.occurred_start, row.occurred_utc_offset_minutes);
+    if (localDate < startsOn || localDate > endsOn) continue;
+    const ambiguous = stillOpen.some(function(other) { return other.starts_on <= localDate; });
+    if (ambiguous) continue;
+    await stampSeasonSnapshot(tx, row.entry_uuid, cropCode, variety);
+  }
+}
+
+// Un-freeze (D13/R7): voiding the harvest/manual-close that froze a span
+// must undo exactly what freezeClosedSpan wrote. There is no column
+// recording which entries a given freeze touched, so this matches the
+// freeze postcondition instead: every final entry in [startsOn,endsOn] on
+// the plot whose season_uuid is NULL and season_crop/variety equal the
+// closing cycle's crop/variety. Resetting them to NULL is correct (not just
+// "best effort"): the membership is being reopened, so those entries should
+// resume live/deferred resolution from it, regardless of what they showed
+// before the freeze.
+async function unfreezeClosedSpan(tx, plotUuid, startsOn, endsOn, cropCode, variety) {
+  if (endsOn == null) return;
+  const normalizedVariety = nullable(variety);
+  const rows = await tx.all(
+    "SELECT entry_uuid,occurred_start,occurred_utc_offset_minutes,season_variety,sync_version " +
+    "FROM journal_entries WHERE plot_uuid=? AND status='final' AND deleted_at IS NULL " +
+      "AND season_uuid IS NULL AND season_crop=?",
+    [plotUuid, cropCode]
+  );
+  for (const row of rows) {
+    if (nullable(row.season_variety) !== normalizedVariety) continue;
+    const localDate = localDateFromInstant(row.occurred_start, row.occurred_utc_offset_minutes);
+    if (localDate < startsOn || localDate > endsOn) continue;
+    const nextVersion = Number(row.sync_version) + 1;
+    const now = new Date().toISOString();
+    await tx.run(
+      'UPDATE journal_entries SET season_crop=NULL,season_variety=NULL,season_uuid=NULL,' +
+        'sync_version=?,updated_at=? WHERE entry_uuid=? AND sync_version=?',
+      [nextVersion, now, row.entry_uuid, row.sync_version]
+    );
+    await emitJournalOutbox(tx, row.entry_uuid, 'JOURNAL_ENTRY_UPSERTED');
+  }
+}
+
+// Close one open membership row (harvest, reseed, or manual close) and
+// freeze its now-closed span in the same step -- the two are inseparable
+// (see freezeClosedSpan's comment on why every close reason freezes).
+async function closeCycleMembership(tx, cycle, plotUuid, endsOn, closingEntryUuid, closeReason) {
+  await tx.run(
+    'UPDATE journal_crop_cycle_plots SET ends_on=?,closed_by_entry_uuid=?,close_reason=? ' +
+    'WHERE cycle_uuid=? AND plot_uuid=? AND ends_on IS NULL',
+    [endsOn, closingEntryUuid, closeReason, cycle.cycle_uuid, plotUuid]
+  );
+  await freezeClosedSpan(
+    tx, plotUuid, cycle.starts_on, endsOn, cycle.crop_code, nullable(cycle.variety), closingEntryUuid
+  );
+}
+
+function cycleDisambiguationError(code, message, covering) {
+  const error = lifecycleError(code, message);
+  error.statusCode = 422;
+  error.details = {
+    openCycles: covering.map(function(cycle) {
+      return { cycle_uuid: cycle.cycle_uuid, crop_code: cycle.crop_code, variety: nullable(cycle.variety) };
+    }),
+  };
+  return error;
+}
+
+// R7: harvest/manual-close on an intercropped plot (>1 open cycle covering
+// it) must name which cycle it closes via input.cycle_uuid.
+function selectTargetCycle(covering, input, missingCode, missingMessage) {
+  if (covering.length === 1) return covering[0];
+  const cycleUuid = nullable(input.cycle_uuid);
+  if (cycleUuid) {
+    const match = covering.find(function(cycle) { return cycle.cycle_uuid === cycleUuid; });
+    if (match) return match;
+    throw cycleDisambiguationError(
+      'cycle_not_found',
+      'cycle_uuid does not match an open crop cycle covering this plot',
+      covering
+    );
+  }
+  throw cycleDisambiguationError(missingCode, missingMessage, covering);
+}
+
+// D2.1/R4: a final seeding/planting_transplanting entry opens a cycle (or
+// joins/supersedes the one already covering the plot).
+//
+// cycle_action default decision (documented per the owner brief): when the
+// seeded crop+variety exactly match an already-open covering cycle and the
+// caller does not send cycle_action, we default to 'continue' (leave the
+// existing cycle open, attach nothing new) rather than 'new'. Rationale: an
+// unmarked same-crop-and-variety seeding is far more likely to be an
+// infill/gap-fill log for the crop already growing than a deliberate
+// decision to fragment history into a second identical cycle; 'new' is an
+// explicit, deliberate override the capture form sends when the operator
+// really means "start over". A DIFFERING crop or variety is never
+// ambiguous: it always auto-closes the prior membership (close_reason=
+// 'reseed') and opens a fresh cycle, regardless of cycle_action.
+async function applySeedingCycleEffect(tx, plot, localDate, entryUuid, principal, input, cropCode, variety) {
+  const covering = await openCyclesCoveringPlot(tx, plot.plot_uuid, localDate);
+  const normalizedVariety = nullable(variety);
+  const rawAction = input.cycle_action;
+  if (rawAction != null && rawAction !== 'continue' && rawAction !== 'new') {
+    throw lifecycleError('invalid_cycle_action', 'cycle_action must be "continue" or "new"');
+  }
+  const effectiveAction = rawAction || 'continue';
+
+  // R7 parity (review fix): an intercropped plot (>1 open cycle covering it)
+  // must never have its seeding/reseed effect inferred. selectTargetCycle
+  // auto-picks the sole cycle when there is exactly one -- single-open-cycle
+  // behavior is unchanged -- and otherwise demands an explicit cycle_uuid,
+  // exactly like harvest/manual-close, instead of blanket-closing every open
+  // cycle (the old differing-crop behavior) or closing whichever OTHER
+  // co-cropped cycle also happened to cover the plot (the old same-crop
+  // continue behavior).
+  const target = covering.length
+    ? selectTargetCycle(
+        covering,
+        input,
+        'cycle_uuid_required',
+        'Multiple open crop cycles cover this plot; specify cycle_uuid to select which one this seeding affects'
+      )
+    : null;
+  const isMatch = target != null && target.crop_code === cropCode && nullable(target.variety) === normalizedVariety;
+  const continuing = isMatch && effectiveAction === 'continue';
+  const toClose = target != null && !continuing ? [target] : [];
+
+  if (continuing) return;
+  if (cropCode == null) {
+    throw lifecycleError(
+      'crop_required_for_seeding',
+      'A seeding/planting entry must record attr.crop to open a crop cycle'
+    );
+  }
+
+  // Open the new cycle BEFORE closing whatever this reseed supersedes
+  // (review fix, reversed from a naive close-then-open): freezeClosedSpan's
+  // still-open ambiguity check (see closeCycleMembership) must be able to
+  // see the just-opened cycle so any OTHER final entry dated exactly on the
+  // reseed boundary is correctly left deferred/live (truly ambiguous between
+  // the closing and opening crop) rather than wrongly frozen to the closing
+  // crop. The triggering entry itself is unconditionally excluded from
+  // freezing regardless of this ordering (see freezeClosedSpan) -- it must
+  // never be stamped with a crop other than the one it is itself seeding.
+  const now = new Date().toISOString();
+  const cycleUuid = crypto.randomUUID();
+  await tx.run(
+    'INSERT INTO journal_crop_cycles(' +
+      'cycle_uuid,crop_code,variety,group_uuid,opened_by_entry_uuid,starts_on,gateway_device_eui,' +
+      'created_by_principal_uuid,sync_version,created_at,updated_at,deleted_at' +
+    ') VALUES (?,?,?,NULL,?,?,?,?,0,?,?,NULL)',
+    [
+      cycleUuid, cropCode, normalizedVariety, entryUuid, localDate,
+      plot.gateway_device_eui, principal.author_principal_uuid, now, now,
+    ]
+  );
+  await tx.run(
+    'INSERT INTO journal_crop_cycle_plots(cycle_uuid,plot_uuid,ends_on,closed_by_entry_uuid,close_reason) ' +
+    'VALUES (?,?,NULL,NULL,NULL)',
+    [cycleUuid, plot.plot_uuid]
+  );
+  for (const cycle of toClose) {
+    await closeCycleMembership(tx, cycle, plot.plot_uuid, localDate, entryUuid, 'reseed');
+  }
+}
+
+// D2.1/D10/R7: a final harvest entry closes the covering membership for its
+// own (single) target plot only -- partial harvest across a group falls out
+// for free, since each plot is its own journal_entries row (a batch submits
+// one final harvest entry per selected plot). A plot with NO open cycle is
+// a legacy/perennial no-op, not an error (R7 explicitly anticipates
+// harvesting cycle-less plots until the "assign crop" flow exists).
+async function applyHarvestCycleEffect(tx, plot, localDate, entryUuid, input) {
+  const covering = await openCyclesCoveringPlot(tx, plot.plot_uuid, localDate);
+  if (!covering.length) return;
+  const target = selectTargetCycle(
+    covering,
+    input,
+    'cycle_uuid_required',
+    'Multiple open crop cycles cover this plot; specify cycle_uuid to select which one this harvest closes'
+  );
+  await closeCycleMembership(tx, target, plot.plot_uuid, localDate, entryUuid, 'harvest');
+}
+
+// R3: a tillage_soil_work/mowing/plant_protection_application entry carrying
+// ends_crop_cycle:true closes the covering membership (close_reason=
+// 'manual'). Unlike harvest, this is an explicit caller intent, so an
+// absent covering cycle is a clear user/agent error, not a silent no-op.
+async function applyManualCloseCycleEffect(tx, plot, localDate, entryUuid, input) {
+  const covering = await openCyclesCoveringPlot(tx, plot.plot_uuid, localDate);
+  if (!covering.length) {
+    throw lifecycleError('no_open_cycle', 'ends_crop_cycle was set but no open crop cycle covers this plot');
+  }
+  const target = selectTargetCycle(
+    covering,
+    input,
+    'cycle_uuid_required',
+    'Multiple open crop cycles cover this plot; specify cycle_uuid to select which one this closes'
+  );
+  await closeCycleMembership(tx, target, plot.plot_uuid, localDate, entryUuid, 'manual');
+}
+
+// Single dispatch point called after a final entry (create or draft
+// promotion) is persisted: routes to the seeding/harvest/manual-close cycle
+// effect for its activity, or does nothing for every other activity code.
+async function applyActivityCycleCascade(tx, principal, plot, occurrence, entryUuid, activityCode, input, values) {
+  if (plot.plot_uuid == null) return;
+  const localDate = occurrence.start.localDate;
+  if (SEEDING_ACTIVITY_CODES.has(activityCode)) {
+    await applySeedingCycleEffect(
+      tx, plot, localDate, entryUuid, principal, input,
+      findAttributeValue(values, 'attr.crop'),
+      findAttributeValue(values, 'attr.variety')
+    );
+  } else if (activityCode === 'harvest') {
+    await applyHarvestCycleEffect(tx, plot, localDate, entryUuid, input);
+  } else if (MANUAL_CLOSE_ACTIVITY_CODES.has(activityCode) && input.ends_crop_cycle === true) {
+    await applyManualCloseCycleEffect(tx, plot, localDate, entryUuid, input);
+  }
+}
+
+// S2 (review fix -- a minimum guard, NOT a full correction-cascade): there
+// is no per-entry rewrite of ends_on/starts_on/frozen spans when a
+// close/open entry is corrected (that full cascade is explicitly deferred,
+// see the plan notes), so a correction that would leave crop-cycle state
+// inconsistent must be rejected outright rather than silently desyncing it:
+//   - correcting the OCCURRED DATE of an entry that closed a cycle (harvest
+//     or manual-close) would leave that cycle's ends_on/frozen span stale.
+//   - correcting the OCCURRED DATE of a seeding/planting entry that opened a
+//     cycle would leave that cycle's starts_on stale.
+//   - correcting the CROP/VARIETY of a seeding/planting entry whose cycle
+//     has ALREADY CLOSED would update only the (now historical) cycle row,
+//     not the entries that already froze from it -- split-brain.
+// A crop/variety correction on a seeding whose cycle is STILL open (and
+// whose plot+date are unchanged) is deliberately left alone here: that is
+// the one case applySeedingCorrectionCascade already keeps correct without
+// a rewrite, since live reads join the still-open cycle.
+async function assertCorrectionWontDesyncCycle(tx, existing, occurrence, normalized) {
+  const originalLocalDate = localDateFromInstant(existing.occurred_start, existing.occurred_utc_offset_minutes);
+  const dateChanged = occurrence.start.localDate !== originalLocalDate;
+
+  if (dateChanged) {
+    const closedMembership = await tx.get(
+      "SELECT ccp.cycle_uuid FROM journal_crop_cycle_plots AS ccp " +
+      "JOIN journal_crop_cycles AS cc ON cc.cycle_uuid=ccp.cycle_uuid AND cc.deleted_at IS NULL " +
+      "WHERE ccp.closed_by_entry_uuid=?",
+      [existing.entry_uuid]
+    );
+    if (closedMembership) {
+      throw lifecycleError(
+        'correction_would_desync_cycle',
+        "Correcting this entry's occurred date would leave the crop cycle it closed inconsistent"
+      );
+    }
+  }
+
+  if (!SEEDING_ACTIVITY_CODES.has(existing.activity_code)) return;
+  const openedCycle = await tx.get(
+    'SELECT cc.cycle_uuid,cc.crop_code,cc.variety,ccp.ends_on FROM journal_crop_cycles AS cc ' +
+    'JOIN journal_crop_cycle_plots AS ccp ON ccp.cycle_uuid=cc.cycle_uuid ' +
+    'WHERE cc.opened_by_entry_uuid=? AND cc.deleted_at IS NULL',
+    [existing.entry_uuid]
+  );
+  if (!openedCycle) return;
+  if (dateChanged) {
+    throw lifecycleError(
+      'correction_would_desync_cycle',
+      "Correcting this seeding's occurred date would leave the crop cycle it opened inconsistent"
+    );
+  }
+  if (openedCycle.ends_on == null) return; // still open: the narrow crop/variety cascade stays correct
+  const cropCode = findAttributeValue(normalized.values, 'attr.crop');
+  const variety = findAttributeValue(normalized.values, 'attr.variety');
+  const cropChanged = cropCode != null &&
+    (cropCode !== openedCycle.crop_code || nullable(variety) !== nullable(openedCycle.variety));
+  if (cropChanged) {
+    throw lifecycleError(
+      'correction_would_desync_cycle',
+      "Correcting this seeding's crop after its crop cycle closed would desync already-frozen entries"
+    );
+  }
+}
+
+// D13 (narrow scope): correcting a seeding/planting entry's crop or variety
+// updates the crop_code/variety of the cycle IT opened, in place -- since
+// live reads join the cycle rather than a stored column, this is the entire
+// propagation mechanism (no per-entry rewrite needed). Scoped deliberately
+// narrow: only fires when the corrected entry's plot is unchanged from the
+// original (a correction that also relocates the entry to a different plot
+// does not attempt to move/re-link the cycle -- out of scope for this
+// phase) and only ever updates crop_code/variety, never starts_on or
+// membership. A correction that clears the crop entirely is ignored rather
+// than blanking a tracked cycle's crop_code (which is NOT NULL).
+async function applySeedingCorrectionCascade(tx, existing, plot, normalized) {
+  if (!SEEDING_ACTIVITY_CODES.has(existing.activity_code)) return;
+  if (nullable(plot.plot_uuid) !== nullable(existing.plot_uuid)) return;
+  const cycle = await tx.get(
+    'SELECT cycle_uuid,crop_code,variety FROM journal_crop_cycles ' +
+    'WHERE opened_by_entry_uuid=? AND deleted_at IS NULL',
+    [existing.entry_uuid]
+  );
+  if (!cycle) return;
+  const cropCode = findAttributeValue(normalized.values, 'attr.crop');
+  const variety = findAttributeValue(normalized.values, 'attr.variety');
+  if (cropCode == null) return;
+  if (cropCode === cycle.crop_code && nullable(variety) === nullable(cycle.variety)) return;
+  const now = new Date().toISOString();
+  await tx.run(
+    'UPDATE journal_crop_cycles SET crop_code=?,variety=?,updated_at=?,sync_version=sync_version+1 ' +
+    'WHERE cycle_uuid=?',
+    [cropCode, nullable(variety), now, cycle.cycle_uuid]
+  );
+}
+
+// D13/R7 void cascades:
+//   - voiding a seeding soft-deletes the cycle IT opened (deleted_at set;
+//     the CASCADE FK on journal_crop_cycle_plots is irrelevant here since
+//     this is a soft delete, and resolution/read queries already filter
+//     cc.deleted_at IS NULL). Refuses with a clear, catchable error if the
+//     cycle has dependent final entries (other entries currently relying on
+//     it live, or already frozen by it) UNLESS the caller sets
+//     options.cascade_ack.
+//   - voiding a harvest/manual-close entry reopens the membership(s) IT
+//     closed and un-freezes what it froze, UNLESS another cycle is already
+//     open on the same plot (a reseed that assumed the plot was free) --
+//     that is a collision, refused with a clear error rather than silently
+//     creating an unintended second open membership.
+async function findCycleDependents(tx, membership, cycle, excludeEntryUuid) {
+  const rows = await tx.all(
+    "SELECT entry_uuid,occurred_start,occurred_utc_offset_minutes,season_crop,season_variety,season_uuid " +
+    "FROM journal_entries WHERE plot_uuid=? AND status='final' AND deleted_at IS NULL AND entry_uuid<>?",
+    [membership.plot_uuid, excludeEntryUuid]
+  );
+  const dependents = [];
+  for (const row of rows) {
+    const localDate = localDateFromInstant(row.occurred_start, row.occurred_utc_offset_minutes);
+    if (localDate < cycle.starts_on) continue;
+    if (membership.ends_on == null) {
+      dependents.push(row.entry_uuid); // still open: every later entry currently resolves from it live
+      continue;
+    }
+    if (localDate > membership.ends_on) continue;
+    if (row.season_crop === cycle.crop_code && nullable(row.season_variety) === nullable(cycle.variety) &&
+        row.season_uuid == null) {
+      dependents.push(row.entry_uuid); // frozen by this (now-closed) cycle
+    }
+  }
+  return dependents;
+}
+
+async function applyVoidCycleCascade(tx, entry, principal, options) {
+  const opened = await tx.get(
+    'SELECT * FROM journal_crop_cycles WHERE opened_by_entry_uuid=? AND deleted_at IS NULL',
+    [entry.entry_uuid]
+  );
+  if (opened) {
+    const membership = await tx.get(
+      'SELECT * FROM journal_crop_cycle_plots WHERE cycle_uuid=?',
+      [opened.cycle_uuid]
+    );
+    const dependents = membership
+      ? await findCycleDependents(tx, membership, opened, entry.entry_uuid)
+      : [];
+    if (dependents.length && !options.cascade_ack) {
+      const error = lifecycleError(
+        'cycle_has_dependents',
+        'Voiding this seeding would orphan entries that inherit its crop cycle'
+      );
+      error.statusCode = 409;
+      error.details = { dependentEntryUuids: dependents };
+      throw error;
+    }
+    const now = new Date().toISOString();
+    await tx.run(
+      'UPDATE journal_crop_cycles SET deleted_at=?,updated_at=?,sync_version=sync_version+1 WHERE cycle_uuid=?',
+      [now, now, opened.cycle_uuid]
+    );
+  }
+
+  const closedMemberships = await tx.all(
+    'SELECT ccp.cycle_uuid,ccp.plot_uuid,ccp.ends_on,cc.crop_code,cc.variety,cc.starts_on,' +
+      'cc.deleted_at AS cycle_deleted_at ' +
+    'FROM journal_crop_cycle_plots AS ccp JOIN journal_crop_cycles AS cc ON cc.cycle_uuid=ccp.cycle_uuid ' +
+    'WHERE ccp.closed_by_entry_uuid=?',
+    [entry.entry_uuid]
+  );
+  for (const membership of closedMemberships) {
+    if (membership.cycle_deleted_at != null) continue;
+    const collision = await tx.get(
+      'SELECT ccp2.cycle_uuid FROM journal_crop_cycle_plots AS ccp2 ' +
+      'JOIN journal_crop_cycles AS cc2 ON cc2.cycle_uuid=ccp2.cycle_uuid AND cc2.deleted_at IS NULL ' +
+      'WHERE ccp2.plot_uuid=? AND ccp2.ends_on IS NULL AND ccp2.cycle_uuid<>?',
+      [membership.plot_uuid, membership.cycle_uuid]
+    );
+    if (collision) {
+      const error = lifecycleError(
+        'reopen_collision',
+        'Another crop cycle is already open on this plot; resolve it before reopening the voided closure'
+      );
+      error.statusCode = 409;
+      error.details = { collidingCycleUuid: collision.cycle_uuid };
+      throw error;
+    }
+    await tx.run(
+      'UPDATE journal_crop_cycle_plots SET ends_on=NULL,closed_by_entry_uuid=NULL,close_reason=NULL ' +
+      'WHERE cycle_uuid=? AND plot_uuid=?',
+      [membership.cycle_uuid, membership.plot_uuid]
+    );
+    await unfreezeClosedSpan(
+      tx, membership.plot_uuid, membership.starts_on, membership.ends_on,
+      membership.crop_code, nullable(membership.variety)
+    );
+  }
 }
 
 function parsedDefinition(row) {
@@ -1260,6 +1875,10 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
     throw entryValidationError('Journal correction validation failed', validation);
   }
   const normalized = validation.normalized;
+  // S2 (review fix): reject a correction that would leave crop-cycle state
+  // inconsistent (see assertCorrectionWontDesyncCycle) BEFORE writing
+  // anything, rather than silently desyncing journal_crop_cycle(_plots).
+  await assertCorrectionWontDesyncCycle(tx, existing, occurrence, normalized);
   const frozenSeason = frozenSeasonForCorrection(existing, plot, occurrence);
   const season = frozenSeason && frozenSeason.preserve
     ? frozenSeason.season
@@ -1269,7 +1888,7 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
     ? nullable(existing.context_json)
     : await generatedContextJson(tx, plot, deviceEui, occurrence);
   const nextVersion = Number(existing.sync_version) + 1;
-  return replaceExistingWithFinal(
+  const result = await replaceExistingWithFinal(
     tx,
     catalog,
     existing,
@@ -1283,6 +1902,10 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
     contextJson,
     nextVersion
   );
+  // D13 (narrow scope, see applySeedingCorrectionCascade): propagate a
+  // corrected seeding's crop/variety into the cycle it opened.
+  await applySeedingCorrectionCascade(tx, existing, plot, normalized);
+  return result;
 }
 
 async function promoteDraftInTransaction(tx, catalog, input, principal, entryIndex, existing) {
@@ -1329,7 +1952,7 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
   const season = await resolveSeason(tx, plot, occurrence.start.localDate, normalized, true);
   const catalogVersion = await currentCatalogVersion(tx, catalog);
   const contextJson = await generatedContextJson(tx, plot, deviceEui, occurrence);
-  return replaceExistingWithFinal(
+  const result = await replaceExistingWithFinal(
     tx,
     catalog,
     existing,
@@ -1343,6 +1966,24 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
     contextJson,
     1
   );
+  // A draft's first finalization is functionally a create: run the same
+  // seeding/harvest/manual-close cascade createFinalInTransaction runs.
+  await applyActivityCycleCascade(
+    tx, principal, plot, occurrence, existing.entry_uuid, normalized.activity_code, input, normalized.values
+  );
+  // B1(c) (review fix): replaceExistingWithFinal already emitted the outbox
+  // event and recorded the terminal command BEFORE the cascade above ran, so
+  // re-read the entry's sync_version now and make the RETURNED payload agree
+  // with the DB. freezeClosedSpan's excludeEntryUuid guard means this
+  // entry's own row is never touched by its own cascade, so this is
+  // defensive (matches createFinalInTransaction's equivalent re-read) rather
+  // than expected to change anything today.
+  const refreshed = await tx.get(
+    'SELECT sync_version FROM journal_entries WHERE entry_uuid=?',
+    [existing.entry_uuid]
+  );
+  result.sync_version = Number(refreshed.sync_version);
+  return result;
 }
 
 async function createFinalInTransaction(tx, catalog, input, principal, entryIndex, contextCache, options) {
@@ -1421,6 +2062,9 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
     batch_uuid: row.batch_uuid,
     sync_version: row.sync_version,
   });
+  await applyActivityCycleCascade(
+    tx, principal, plot, occurrence, row.entry_uuid, normalized.activity_code, input, normalized.values
+  );
   const emission = await emitJournalOutbox(
     tx,
     options && options.outbox_event_uuid
@@ -1428,10 +2072,16 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
       : row.entry_uuid,
     'JOURNAL_ENTRY_UPSERTED'
   );
+  // B1(c) (review fix): re-read the post-cascade sync_version from the row
+  // emitJournalOutbox just fetched (rather than trusting the in-memory `row`
+  // captured before the cascade ran) so the terminal command record and the
+  // returned/ACK payload always agree with the DB, even if a future cascade
+  // path ever legitimately touches this entry's own version.
+  const finalSyncVersion = Number(emission.entry.sync_version);
   const terminal = {
     aggregate: emission.aggregate,
     entry_uuid: row.entry_uuid,
-    sync_version: row.sync_version,
+    sync_version: finalSyncVersion,
     gateway_device_eui: row.gateway_device_eui,
   };
   assertCommandJournalEntryEffectKey(principal, terminal);
@@ -1439,7 +2089,7 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
   return {
     entry_uuid: row.entry_uuid,
     outbox_event_uuid: emission.event_uuid,
-    sync_version: row.sync_version,
+    sync_version: finalSyncVersion,
   };
 }
 
@@ -1619,8 +2269,9 @@ async function finalizeBatch(db, catalog, input, members, principal) {
   });
 }
 
-async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal) {
+async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal, options) {
   entryUuid = normalizeUuid(entryUuid, 'entry_uuid', true);
+  options = options || {};
   return db.transaction(async function(tx) {
     await validatePrincipal(tx, principal);
     const entry = await tx.get(
@@ -1636,8 +2287,24 @@ async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal
     if (typeof reason !== 'string' || !reason.trim() || Array.from(reason).length > 4000) {
       throw lifecycleError('invalid_reason', 'Void reason must contain between 1 and 4000 characters');
     }
+    // D13/R7: void cascades for a seeding (soft-delete its cycle, guarded by
+    // dependents) or a harvest/manual-close (reopen + un-freeze, guarded by
+    // a reopen collision). Runs before the status flip so either guard abort
+    // rolls back the whole transaction, leaving nothing changed.
+    await applyVoidCycleCascade(tx, entry, principal, options);
+    // B1(c) (review fix): re-read the sync_version AFTER the cascade rather
+    // than trusting `entry` as fetched before it ran. findCycleDependents
+    // already excludes this entry_uuid from its own dependents, and (for a
+    // closing entry) unfreezeClosedSpan can only match entries whose stored
+    // season_crop equals the reopened cycle's crop -- which this entry's own
+    // row never carries, since freezeClosedSpan excludes the entry that
+    // closed a cycle from ever being frozen by it (see closeCycleMembership).
+    // So this entry's own version should not change here, but re-reading
+    // keeps the WHERE-clause optimistic check and the returned/ACK payload
+    // honest against the DB regardless.
+    const refreshed = await tx.get('SELECT sync_version FROM journal_entries WHERE entry_uuid=?', [entryUuid]);
     const now = new Date().toISOString();
-    const nextVersion = Number(entry.sync_version) + 1;
+    const nextVersion = Number(refreshed.sync_version) + 1;
     await tx.run(
       'UPDATE journal_entries SET ' +
         'status=?,voided_at=?,voided_by_principal_uuid=?,void_reason=?,sync_version=?,updated_at=? ' +
@@ -1650,7 +2317,7 @@ async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal
         nextVersion,
         now,
         entryUuid,
-        entry.sync_version,
+        refreshed.sync_version,
       ]
     );
     const emission = await emitJournalOutbox(
@@ -1711,6 +2378,7 @@ module.exports = {
   finalize,
   finalizeCreate,
   finalizeBatch,
+  resolveLiveCropOverrides,
   saveDraft,
   void_,
 };
