@@ -245,13 +245,14 @@ test('[reconcile] ALREADY_EXISTS create race: rereads, reconciles the assignment
   assert.equal(countCalls(client, 'createKeys'), 1);
 });
 
-test('[reconcile] update succeeds but reread remains wrong: rejects at verifyDevice and restores original device', async () => {
+test('[reconcile] update succeeds but reread remains wrong: RECONCILIATION_REQUIRED, no restore attempted', async () => {
+  // The helper cannot prove it still owns the device when its own update
+  // never reads back as the requested assignment, so it must not overwrite
+  // the mismatching state -- it reports RECONCILIATION_REQUIRED instead.
   const wrong = fakeDevice({ devEui: DEVEUI, name: 'Dendro 3', applicationId: 'stale-app', deviceProfileId: PROFILE_ID, isDisabled: false });
-  let restoreArgs = null;
   const client = makeReconcileClient({
     getDevice: sequence([wrong, wrong, wrong, wrong]),
     updateDevice: async () => {},
-    restoreDevice: async (device, snapshot) => { restoreArgs = { device, snapshot }; },
     getKeys: alwaysFails('getKeys'),
   });
 
@@ -259,15 +260,17 @@ test('[reconcile] update succeeds but reread remains wrong: rejects at verifyDev
     client.ensureDeviceProvisioned(baseInput()),
     (error) => {
       assert.equal(error.step, 'verifyDevice');
-      assert.equal(error.code, 'FAILED_PRECONDITION');
-      assert.deepEqual(Object.keys(error).sort(), ['code', 'step']);
+      assert.equal(error.code, 'RECONCILIATION_REQUIRED');
+      assert.equal(error.resourceKind, 'device');
+      assert.deepEqual(Object.keys(error).sort(), ['code', 'resourceKind', 'step']);
       return true;
     }
   );
-  assert.equal(countCalls(client, 'restoreDevice'), 1);
-  assert.equal(restoreArgs.snapshot.applicationId, 'stale-app');
+  assert.equal(countCalls(client, 'restoreDevice'), 0);
+  assert.equal(countCalls(client, 'deleteDevice'), 0);
   assert.equal(countCalls(client, 'createKeys'), 0);
   assert.equal(countCalls(client, 'updateKeys'), 0);
+  assert.equal(countCalls(client, 'getKeys'), 0, 'a device-only fence must not make an unrelated key RPC');
 });
 
 test('[reconcile] key mutation fails after an existing-device update: restores the original device fields', async () => {
@@ -331,7 +334,9 @@ test('[reconcile] later failure after keys were created on an existing device: d
     getDevice: sequence([wrong, wrong, corrected, fakeFailure('getDevice', 'UNAVAILABLE'), corrected]),
     updateDevice: async () => {},
     restoreDevice: async (device, snapshot) => { restoreArgs = snapshot; },
-    getKeys: sequence([null]),
+    // Pre-write: no key row yet. Post-write (fence re-fetch): the row this
+    // call's own createKeys just verified, proving the fence holds.
+    getKeys: sequence([null, fakeKeys({ nwkKey: NWK_KEY })]),
     createKeys: async () => {},
     deleteKeys: async (devEui) => { deletedKeysDevEui = devEui; },
   });
@@ -356,7 +361,13 @@ test('[reconcile] later failure after keys were updated: restores the original k
   let restoreArgs = null;
   const client = makeReconcileClient({
     getDevice: sequence([matching, matching, matching, fakeFailure('getDevice', 'UNAVAILABLE')]),
-    getKeys: sequence([fakeKeys({ nwkKey: OLD_NWK_KEY, appKey: PRESERVED_APP_KEY, genAppKey: PRESERVED_GEN_APP_KEY })]),
+    // Pre-write: the old nwkKey. Post-write (fence re-fetch): the verified
+    // new nwkKey with the preserved appKey/genAppKey this call's own
+    // updateKeys just wrote, proving the fence holds.
+    getKeys: sequence([
+      fakeKeys({ nwkKey: OLD_NWK_KEY, appKey: PRESERVED_APP_KEY, genAppKey: PRESERVED_GEN_APP_KEY }),
+      fakeKeys({ nwkKey: NWK_KEY, appKey: PRESERVED_APP_KEY, genAppKey: PRESERVED_GEN_APP_KEY }),
+    ]),
     updateKeys: async () => {},
     restoreKeys: async (devEui, snapshot) => { restoreArgs = snapshot; },
   });
