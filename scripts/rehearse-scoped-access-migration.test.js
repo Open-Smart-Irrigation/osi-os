@@ -35,6 +35,9 @@ function freshDb() {
   const db = new DatabaseSync(':memory:');
   db.exec(USERS_DDL);
   db.exec(UUID_TRIGGER);
+  db.exec(`CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, aggregate_type TEXT, aggregate_key TEXT,
+    op TEXT, payload_json TEXT, sync_version INTEGER, occurred_at TEXT, gateway_device_eui TEXT)`);
+  db.exec(`CREATE TABLE sync_link_state (peer_node TEXT, gateway_device_eui TEXT)`);
   db.exec(MIG_0022);
   return db;
 }
@@ -55,14 +58,12 @@ test('0022 creates assignment tables, indexes, gate table, 7 triggers', () => {
     'trg_dp_user_plot_assign_outbox_ai', 'trg_dp_user_plot_assign_outbox_au',
     'trg_dp_users_outbox_uuid_au', 'trg_dp_users_outbox_ai', 'trg_dp_users_outbox_role_au',
   ]) assert.ok(triggers.includes(tr), `missing trigger ${tr}`);
-  assert.deepEqual(db.prepare('SELECT enabled FROM scoped_access_emit WHERE id=1').get(), { enabled: 0 });
+  assert.equal(db.prepare('SELECT enabled FROM scoped_access_emit WHERE id=1').get().enabled, 0);
   db.close();
 });
 
 test('emit gate default off: no outbox rows until enabled', () => {
   const db = freshDb();
-  db.exec(`CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, aggregate_type TEXT, aggregate_key TEXT,
-    op TEXT, payload_json TEXT, sync_version INTEGER, occurred_at TEXT, gateway_device_eui TEXT)`);
   db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('a','h','2026-01-01')`);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM sync_outbox').get().n, 0);
   db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');
@@ -74,8 +75,6 @@ test('emit gate default off: no outbox rows until enabled', () => {
 
 test('USER trigger arms: uuid assigned by sibling trigger still emits non-null uuid', () => {
   const db = freshDb();
-  db.exec(`CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, aggregate_type TEXT, aggregate_key TEXT,
-    op TEXT, payload_json TEXT, sync_version INTEGER, occurred_at TEXT, gateway_device_eui TEXT)`);
   db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');
   // Path 1: null uuid at insert -> uuid trigger fills -> uuid_au arm must emit non-null.
   db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('carol','h','2026-01-01')`);
@@ -92,8 +91,6 @@ test('USER trigger arms: uuid assigned by sibling trigger still emits non-null u
 
 test('assignment triggers emit upsert on grant and delete on tombstone', () => {
   const db = freshDb();
-  db.exec(`CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, aggregate_type TEXT, aggregate_key TEXT,
-    op TEXT, payload_json TEXT, sync_version INTEGER, occurred_at TEXT, gateway_device_eui TEXT)`);
   db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');
   db.exec(`INSERT INTO user_zone_assignments (assignment_uuid, user_uuid, zone_uuid, created_at)
            VALUES ('as1','u1','z1','2026-01-01')`);
