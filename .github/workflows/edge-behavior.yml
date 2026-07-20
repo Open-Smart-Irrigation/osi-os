@@ -1,0 +1,54 @@
+name: Edge behavior gates
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+jobs:
+  edge-behavior:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Sync delivery fail-closed (delivery + ack + commands)
+        run: node scripts/test-sync-delivery-fail-closed.js
+      - name: Device integration (writer + normalizer round-trip)
+        run: node scripts/verify-device-integration.js
+      - name: Device writer module (bcm2712)
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-writer/index.test.js
+      - name: Device writer module (bcm2709)
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-device-writer/index.test.js
+      - name: LSN50 normalizer module (bcm2712)
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lsn50-normalize/index.test.js
+      - name: LSN50 normalizer module (bcm2709)
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-lsn50-normalize/index.test.js
+      - name: ChirpStack helper module (bcm2712)
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.test.js
+      - name: ChirpStack helper module (bcm2709)
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-chirpstack-helper/index.test.js
+      - name: Flow wiring guards (STREGA + osiDb close + ChirpStack client close)
+        run: node scripts/test-flows-wiring.js
+      - name: OSI server UCI defaults (LSN50_WRITER_DISABLE + retention)
+        run: bash scripts/test-osi-server-uci-defaults.sh
+  deploy-pipeline:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pytest
+        run: pip install pytest
+      - name: Deploy pipeline checks (ingest correlation + false-pass guards)
+        working-directory: scripts/pipeline
+        run: python -m pytest tests -q

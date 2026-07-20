@@ -1,0 +1,2821 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const cp = require('node:child_process');
+const crypto = require('node:crypto');
+
+const mod = require('./index');
+const codecs = require('./codecs');
+const pathsMod = require('./paths');
+const activityDb = require('./activity-db');
+const activityAppend = require('./activity-append');
+const locksMod = require('./locks');
+const initMod = require('./init');
+const loadMod = require('./load');
+const deploymentGate = require('./deployment-state-gate');
+
+const OP_A = '11111111-1111-4111-8111-111111111111';
+const OP_B = '22222222-2222-4222-8222-222222222222';
+const CREATED_AT = '2026-07-16T00:00:00.000Z';
+
+const tempRoots = [];
+function makeRoots() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-sync-protocol-state-test-'));
+  tempRoots.push(tmp);
+  return {
+    tmp,
+    opts: {
+      root: path.join(tmp, 'osi-sync'),
+      witnessRoot: path.join(tmp, 'osi-sync-witness', 'protocol-capability-witnesses'),
+      activityWitnessRoot: path.join(tmp, 'osi-sync-witness', 'command-activity-witnesses'),
+    },
+  };
+}
+
+test.after(() => {
+  for (const tmp of tempRoots) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ===========================================================================
+// codecs: canonicalJson / hashing
+// ===========================================================================
+
+test('canonicalJson sorts object keys deterministically', () => {
+  const a = codecs.canonicalJson({ b: 1, a: 2, c: { z: 1, y: 2 } });
+  const b = codecs.canonicalJson({ c: { y: 2, z: 1 }, a: 2, b: 1 });
+  assert.equal(a, b);
+  assert.equal(a, '{"a":2,"b":1,"c":{"y":2,"z":1}}');
+});
+
+test('canonicalJson rejects undefined at top level and nested', () => {
+  assert.throws(() => codecs.canonicalJson(undefined), { code: 'canonical_json_undefined' });
+  assert.throws(() => codecs.canonicalJson({ a: undefined }), { code: 'canonical_json_undefined' });
+});
+
+test('canonicalJson encodes arrays and primitives', () => {
+  assert.equal(codecs.canonicalJson([1, 'a', true, false, null]), '[1,"a",true,false,null]');
+});
+
+test('sha256Hex / canonicalSha256 are deterministic', () => {
+  const h1 = codecs.canonicalSha256({ a: 1, b: 2 });
+  const h2 = codecs.canonicalSha256({ b: 2, a: 1 });
+  assert.equal(h1, h2);
+  assert.match(h1, /^[0-9a-f]{64}$/);
+});
+
+// ===========================================================================
+// codecs: GENESIS byte-exact schema
+// ===========================================================================
+
+test('buildGenesisGeneration produces the exact literal plan schema', () => {
+  const gen = codecs.buildGenesisGeneration({ operationId: OP_A, createdAt: CREATED_AT });
+  assert.deepEqual(gen, {
+    format: 1,
+    generation: 0,
+    previousGeneration: null,
+    previousSha256: null,
+    operationId: OP_A,
+    kind: 'GENESIS',
+    createdAt: CREATED_AT,
+    state: {
+      activeIdentitySha256: null,
+      mode: 'UNNEGOTIATED',
+      historicalV2Disposition: 'UNASSESSED',
+      historicalV2DispositionReceiptSha256: null,
+      databaseRestore: { status: 'CLEAR', restoreEpoch: 0 },
+    },
+  });
+});
+
+test('buildGenesisWitness / buildCapabilityHead produce the exact literal schema', () => {
+  const gen = codecs.buildGenesisGeneration({ operationId: OP_A, createdAt: CREATED_AT });
+  const generationSha256 = codecs.canonicalSha256(gen);
+  const witness = codecs.buildGenesisWitness({ generationSha256, operationId: OP_A });
+  assert.deepEqual(witness, {
+    format: 1,
+    generation: 0,
+    generationSha256,
+    previousWitnessSha256: null,
+    operationId: OP_A,
+  });
+  const witnessSha256 = codecs.canonicalSha256(witness);
+  const head = codecs.buildCapabilityHead({ generation: 0, generationSha256, witnessSha256 });
+  assert.deepEqual(head, { format: 1, generation: 0, generationSha256, witnessSha256 });
+});
+
+test('GENESIS generation rejects an unknown field', () => {
+  const gen = codecs.buildGenesisGeneration({ operationId: OP_A, createdAt: CREATED_AT });
+  gen.extra = 'nope';
+  assert.throws(() => codecs.validateGenesisGeneration(gen), { code: 'schema_unknown_field' });
+});
+
+test('GENESIS state rejects each field mutated away from its exact literal', () => {
+  const base = () => codecs.buildGenesisGeneration({ operationId: OP_A, createdAt: CREATED_AT });
+  const mutations = [
+    (g) => { g.state.activeIdentitySha256 = 'x'.repeat(64); },
+    (g) => { g.state.mode = 'LEGACY_V2'; },
+    (g) => { g.state.historicalV2Disposition = 'CLEAR'; },
+    (g) => { g.state.historicalV2DispositionReceiptSha256 = 'x'.repeat(64); },
+    (g) => { g.state.databaseRestore.status = 'RECONCILIATION_REQUIRED'; },
+    (g) => { g.state.databaseRestore.restoreEpoch = 1; },
+    (g) => { g.generation = 1; },
+    (g) => { g.previousGeneration = 0; },
+    (g) => { g.kind = 'NEGOTIATED'; },
+  ];
+  for (const mutate of mutations) {
+    const gen = base();
+    mutate(gen);
+    assert.throws(() => codecs.validateGeneration(gen), Error, `mutation should have been rejected: ${mutate}`);
+  }
+});
+
+// ===========================================================================
+// codecs: full closed kind union (non-GENESIS) — validation only
+// ===========================================================================
+
+function validNegotiatedGeneration() {
+  return {
+    format: 1,
+    generation: 1,
+    previousGeneration: 0,
+    previousSha256: 'a'.repeat(64),
+    operationId: OP_B,
+    kind: 'NEGOTIATED',
+    createdAt: CREATED_AT,
+    state: {
+      activeIdentitySha256: 'b'.repeat(64),
+      mode: 'V3_PINNED',
+      historicalV2Disposition: 'CLEAR',
+      historicalV2DispositionReceiptSha256: 'c'.repeat(64),
+      databaseRestore: { status: 'CLEAR', restoreEpoch: 0 },
+      identitySha256: 'b'.repeat(64),
+      normalizedServerBase: 'https://cloud.example.com',
+      gatewayDeviceEui: '0016C001F11715E2',
+      capabilityProofSha256: null,
+    },
+  };
+}
+
+test('NEGOTIATED generation validates when well-formed', () => {
+  assert.doesNotThrow(() => codecs.validateGeneration(validNegotiatedGeneration()));
+});
+
+test('NEGOTIATED generation rejects an unknown field', () => {
+  const gen = validNegotiatedGeneration();
+  gen.state.extraField = 'nope';
+  assert.throws(() => codecs.validateGeneration(gen), { code: 'schema_unknown_field' });
+});
+
+test('NEGOTIATED generation requires activeIdentitySha256 === identitySha256', () => {
+  const gen = validNegotiatedGeneration();
+  gen.state.activeIdentitySha256 = 'd'.repeat(64);
+  assert.throws(() => codecs.validateGeneration(gen), { code: 'schema_invalid_field' });
+});
+
+test('NEGOTIATED generation rejects RESET_AUTHORIZATION-only fields (cross-kind rejection)', () => {
+  const gen = validNegotiatedGeneration();
+  gen.state.authorizationId = OP_A;
+  gen.state.toIdentitySha256 = 'e'.repeat(64);
+  assert.throws(() => codecs.validateGeneration(gen), { code: 'schema_unknown_field' });
+});
+
+function validResetGeneration() {
+  return {
+    format: 1,
+    generation: 1,
+    previousGeneration: 0,
+    previousSha256: 'a'.repeat(64),
+    operationId: OP_B,
+    kind: 'RESET_AUTHORIZATION',
+    createdAt: CREATED_AT,
+    state: {
+      activeIdentitySha256: 'f'.repeat(64),
+      mode: 'RESET_AUTHORIZED',
+      historicalV2Disposition: 'CLEAR',
+      historicalV2DispositionReceiptSha256: 'c'.repeat(64),
+      databaseRestore: { status: 'CLEAR', restoreEpoch: 0 },
+      authorizationId: OP_A,
+      confirmationSha256: 'a1'.repeat(32),
+      fromIdentitySha256: 'b'.repeat(64),
+      toIdentitySha256: 'f'.repeat(64),
+      resetEpoch: 1,
+      resetAuthorizedAt: CREATED_AT,
+      resetReasonSha256: 'b2'.repeat(32),
+    },
+  };
+}
+
+test('RESET_AUTHORIZATION generation validates when well-formed', () => {
+  assert.doesNotThrow(() => codecs.validateGeneration(validResetGeneration()));
+});
+
+test('RESET_AUTHORIZATION generation requires activeIdentitySha256 === toIdentitySha256', () => {
+  const gen = validResetGeneration();
+  gen.state.activeIdentitySha256 = 'z'.repeat(64);
+  assert.throws(() => codecs.validateGeneration(gen), { code: 'schema_invalid_field' });
+});
+
+test('RESET_AUTHORIZATION generation rejects NEGOTIATED-only fields (cross-kind rejection)', () => {
+  const gen = validResetGeneration();
+  gen.state.normalizedServerBase = 'https://cloud.example.com';
+  assert.throws(() => codecs.validateGeneration(gen), { code: 'schema_unknown_field' });
+});
+
+function validDispositionGeneration(sourceKind, extra) {
+  const base = {
+    format: 1,
+    generation: 1,
+    previousGeneration: 0,
+    previousSha256: 'a'.repeat(64),
+    operationId: OP_B,
+    kind: 'HISTORICAL_V2_DISPOSITION',
+    createdAt: CREATED_AT,
+    state: Object.assign(
+      {
+        activeIdentitySha256: null,
+        mode: 'UNNEGOTIATED',
+        historicalV2Disposition: sourceKind === 'zero' || sourceKind === 'rebind' ? 'CLEAR' : 'RECONCILIATION_REQUIRED',
+        historicalV2DispositionReceiptSha256: 'c'.repeat(64),
+        databaseRestore: { status: 'CLEAR', restoreEpoch: 0 },
+        sourceKind,
+      },
+      extra
+    ),
+  };
+  return base;
+}
+
+test('HISTORICAL_V2_DISPOSITION zero/deployment-backup validates when well-formed', () => {
+  const gen = validDispositionGeneration('zero', {
+    sourceAuthorityKind: 'deployment-backup',
+    dispositionReceiptSha256: 'a'.repeat(64),
+    auditSha256: 'b'.repeat(64),
+    databaseSha256: 'c'.repeat(64),
+    backupSha256: 'd'.repeat(64),
+    identitySha256: null,
+  });
+  assert.doesNotThrow(() => codecs.validateGeneration(gen));
+});
+
+test('HISTORICAL_V2_DISPOSITION zero/factory-baseline forbids deployment-backup fields', () => {
+  const gen = validDispositionGeneration('zero', {
+    sourceAuthorityKind: 'factory-baseline',
+    romProvenanceSha256: 'a'.repeat(64),
+    imageManifestSha256: 'b'.repeat(64),
+    factorySeedIdentitySha256: 'c'.repeat(64),
+    liveDatabaseIdentitySha256: 'd'.repeat(64),
+    factoryZeroAuditSha256: 'e'.repeat(64),
+    factoryZeroSourceReceiptSha256: 'f'.repeat(64),
+    imageBaselineOperationId: OP_A,
+    imageBaselineGeneration: 0,
+    allRootAbsenceIntentSha256: 'a1'.repeat(32),
+  });
+  assert.doesNotThrow(() => codecs.validateGeneration(gen));
+  gen.state.backupSha256 = 'b2'.repeat(32); // forbidden deployment-backup field
+  assert.throws(() => codecs.validateGeneration(gen), { code: 'schema_unknown_field' });
+});
+
+test('HISTORICAL_V2_DISPOSITION quarantine requires RECONCILIATION_REQUIRED', () => {
+  const gen = validDispositionGeneration('quarantine', {
+    dispositionReceiptSha256: 'a'.repeat(64),
+    auditSha256: 'b'.repeat(64),
+    databaseSha256: 'c'.repeat(64),
+    backupSha256: 'd'.repeat(64),
+    identitySha256: null,
+  });
+  assert.doesNotThrow(() => codecs.validateGeneration(gen));
+  gen.state.historicalV2Disposition = 'CLEAR';
+  assert.throws(() => codecs.validateGeneration(gen), { code: 'schema_invalid_field' });
+});
+
+test('HISTORICAL_V2_DISPOSITION rejects an invalid sourceKind', () => {
+  const gen = validDispositionGeneration('bogus', {});
+  assert.throws(() => codecs.validateGeneration(gen), { code: 'schema_invalid_field' });
+});
+
+test('DATABASE_RESTORE_INVALIDATION / _RECONCILED validate and enforce their status', () => {
+  const invalidation = {
+    format: 1,
+    generation: 1,
+    previousGeneration: 0,
+    previousSha256: 'a'.repeat(64),
+    operationId: OP_B,
+    kind: 'DATABASE_RESTORE_INVALIDATION',
+    createdAt: CREATED_AT,
+    state: {
+      activeIdentitySha256: null,
+      mode: 'UNNEGOTIATED',
+      historicalV2Disposition: 'CLEAR',
+      historicalV2DispositionReceiptSha256: 'c'.repeat(64),
+      databaseRestore: { status: 'RECONCILIATION_REQUIRED', restoreEpoch: 1 },
+      invalidationReceiptSha256: 'd'.repeat(64),
+      recoveryOperationId: OP_A,
+    },
+  };
+  assert.doesNotThrow(() => codecs.validateGeneration(invalidation));
+  const wrongStatus = JSON.parse(JSON.stringify(invalidation));
+  wrongStatus.state.databaseRestore.status = 'CLEAR';
+  assert.throws(() => codecs.validateGeneration(wrongStatus), { code: 'schema_invalid_field' });
+
+  const reconciled = JSON.parse(JSON.stringify(invalidation));
+  reconciled.kind = 'DATABASE_RESTORE_RECONCILED';
+  delete reconciled.state.invalidationReceiptSha256;
+  reconciled.state.databaseRestore.status = 'CLEAR';
+  reconciled.state.reconciledReceiptSha256 = 'e'.repeat(64);
+  assert.doesNotThrow(() => codecs.validateGeneration(reconciled));
+});
+
+test('DATABASE_INTEGRITY_INVALIDATION / _RECONCILED validate and enforce their status', () => {
+  const invalidation = {
+    format: 1,
+    generation: 1,
+    previousGeneration: 0,
+    previousSha256: 'a'.repeat(64),
+    operationId: OP_B,
+    kind: 'DATABASE_INTEGRITY_INVALIDATION',
+    createdAt: CREATED_AT,
+    state: {
+      activeIdentitySha256: null,
+      mode: 'UNNEGOTIATED',
+      historicalV2Disposition: 'UNASSESSED',
+      historicalV2DispositionReceiptSha256: null,
+      databaseRestore: { status: 'RECONCILIATION_REQUIRED', restoreEpoch: 1 },
+      latchObservationSha256: 'a'.repeat(64),
+      trustedBackupSha256: 'b'.repeat(64),
+      forensicDestinationSha256: 'c'.repeat(64),
+      activityRootsSha256: 'd'.repeat(64),
+      manualLossAcknowledgementSha256: 'e'.repeat(64),
+      recoveryOperationId: OP_A,
+    },
+  };
+  assert.doesNotThrow(() => codecs.validateGeneration(invalidation));
+
+  const reconciled = JSON.parse(JSON.stringify(invalidation));
+  reconciled.kind = 'DATABASE_INTEGRITY_RECONCILED';
+  delete reconciled.state.latchObservationSha256;
+  delete reconciled.state.trustedBackupSha256;
+  delete reconciled.state.forensicDestinationSha256;
+  delete reconciled.state.activityRootsSha256;
+  delete reconciled.state.manualLossAcknowledgementSha256;
+  reconciled.state.databaseRestore.status = 'CLEAR';
+  Object.assign(reconciled.state, {
+    importOrCutoffAuthoritySha256: 'f'.repeat(64),
+    restoredOrFinalAuditSha256: 'a1'.repeat(32),
+    forensicInventorySha256: 'b2'.repeat(32),
+    zeroEffectReceiptSha256: 'c3'.repeat(32),
+  });
+  assert.doesNotThrow(() => codecs.validateGeneration(reconciled));
+});
+
+test('validateGeneration rejects an unknown kind outright', () => {
+  const gen = validNegotiatedGeneration();
+  gen.kind = 'SOMETHING_ELSE';
+  assert.throws(() => codecs.validateGeneration(gen), { code: 'schema_invalid_field' });
+});
+
+test('validateGeneration requires generation === previousGeneration + 1', () => {
+  const gen = validNegotiatedGeneration();
+  gen.generation = 5;
+  assert.throws(() => codecs.validateGeneration(gen), { code: 'schema_invalid_field' });
+});
+
+// ===========================================================================
+// codecs: normalizedServerBase / identitySha256
+// ===========================================================================
+
+test('normalizedServerBase enforces https and lowercases the hostname', () => {
+  assert.equal(codecs.normalizedServerBase('https://Cloud.Example.com'), 'https://cloud.example.com/');
+  assert.throws(() => codecs.normalizedServerBase('http://cloud.example.com'), { code: 'server_base_requires_https' });
+});
+
+test('normalizedServerBase forbids userinfo, query, and fragment', () => {
+  assert.throws(() => codecs.normalizedServerBase('https://user:pass@cloud.example.com'), { code: 'server_base_forbids_userinfo' });
+  assert.throws(() => codecs.normalizedServerBase('https://cloud.example.com/?x=1'), { code: 'server_base_forbids_query' });
+  assert.throws(() => codecs.normalizedServerBase('https://cloud.example.com/#frag'), { code: 'server_base_forbids_fragment' });
+});
+
+test('normalizedServerBase omits the default port 443 but retains a non-default port', () => {
+  assert.equal(codecs.normalizedServerBase('https://cloud.example.com:443/api'), 'https://cloud.example.com/api');
+  assert.equal(codecs.normalizedServerBase('https://cloud.example.com:8443/api'), 'https://cloud.example.com:8443/api');
+});
+
+test('normalizedServerBase normalizes a trailing slash on a non-root path', () => {
+  assert.equal(codecs.normalizedServerBase('https://cloud.example.com/api/'), 'https://cloud.example.com/api');
+  assert.equal(codecs.normalizedServerBase('https://cloud.example.com/'), 'https://cloud.example.com/');
+});
+
+test('normalizedServerBase rejects a malformed URL', () => {
+  assert.throws(() => codecs.normalizedServerBase('not-a-url'), { code: 'server_base_invalid' });
+});
+
+test('identitySha256 is deterministic and uppercases the gateway EUI', () => {
+  const args = { peerNode: 'peer-1', serverBase: 'https://cloud.example.com', cloudUserId: 'user-1', gatewayDeviceEui: '0016c001f11715e2' };
+  const h1 = codecs.identitySha256(args);
+  const h2 = codecs.identitySha256(Object.assign({}, args, { gatewayDeviceEui: '0016C001F11715E2' }));
+  assert.equal(h1, h2);
+  assert.match(h1, /^[0-9a-f]{64}$/);
+});
+
+test('identitySha256 rejects a malformed gateway EUI', () => {
+  assert.throws(() => codecs.identitySha256({ peerNode: 'p', serverBase: 'https://c', cloudUserId: 'u', gatewayDeviceEui: 'not-hex' }), { code: 'identity_invalid_gateway_eui' });
+});
+
+// ===========================================================================
+// paths: symlink/mode/exclusive-write discipline
+// ===========================================================================
+
+test('assertNoSymlinkComponents rejects a symlinked directory component', () => {
+  const { tmp } = makeRoots();
+  const real = path.join(tmp, 'real');
+  fs.mkdirSync(real);
+  const link = path.join(tmp, 'link');
+  fs.symlinkSync(real, link);
+  assert.throws(() => pathsMod.assertNoSymlinkComponents(path.join(link, 'child.json')), { code: 'symlink_component' });
+});
+
+test('ensureModeDirRecursive creates mode-0700 directories at every level', () => {
+  const { tmp } = makeRoots();
+  const deep = path.join(tmp, 'a', 'b', 'c');
+  pathsMod.ensureModeDirRecursive(deep, pathsMod.defaultOwnershipAdapter);
+  for (const p of [path.join(tmp, 'a'), path.join(tmp, 'a', 'b'), deep]) {
+    const stat = fs.lstatSync(p);
+    assert.equal(stat.mode & 0o777, 0o700);
+  }
+});
+
+test('writeExclusiveFile refuses to overwrite an existing file', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const p = path.join(tmp, 'f.json');
+  pathsMod.writeExclusiveFile(p, Buffer.from('{}'), pathsMod.defaultOwnershipAdapter);
+  assert.equal(fs.lstatSync(p).mode & 0o777, 0o600);
+  assert.throws(() => pathsMod.writeExclusiveFile(p, Buffer.from('{}'), pathsMod.defaultOwnershipAdapter), { code: 'EEXIST' });
+});
+
+test('writeExclusiveOrVerify creates on absence, is a no-op on byte-identical presence, and throws on mismatch', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const p = path.join(tmp, 'f.json');
+  const buf = Buffer.from('{"a":1}');
+  const r1 = pathsMod.writeExclusiveOrVerify(p, buf, pathsMod.defaultOwnershipAdapter, 'mismatch');
+  assert.equal(r1.created, true);
+  const r2 = pathsMod.writeExclusiveOrVerify(p, buf, pathsMod.defaultOwnershipAdapter, 'mismatch');
+  assert.equal(r2.created, false);
+  assert.throws(() => pathsMod.writeExclusiveOrVerify(p, Buffer.from('{"a":2}'), pathsMod.defaultOwnershipAdapter, 'mismatch_code'), { code: 'mismatch_code' });
+});
+
+test('listRegularEntries rejects a symlink masquerading as a chain entry', () => {
+  const { tmp } = makeRoots();
+  const dir = path.join(tmp, 'chain');
+  fs.mkdirSync(dir, { recursive: true });
+  const real = path.join(tmp, 'real.json');
+  fs.writeFileSync(real, '{}');
+  fs.symlinkSync(real, path.join(dir, '0000000000000000.json'));
+  assert.throws(() => pathsMod.listRegularEntries(dir, /^\d{16}\.json$/), { code: 'chain_entry_not_regular_file' });
+});
+
+test('deriveActivityHeadWitnessRoot requires the fixed sibling leaf name', () => {
+  assert.throws(() => pathsMod.deriveActivityHeadWitnessRoot('/data/osi-sync-witness/wrong-leaf-name'), { code: 'activity_witness_root_leaf_mismatch' });
+  assert.equal(
+    pathsMod.deriveActivityHeadWitnessRoot('/data/osi-sync-witness/command-activity-witnesses'),
+    '/data/osi-sync-witness/command-activity-head-witnesses'
+  );
+});
+
+// ===========================================================================
+// activity-db: schema / pragmas / genesis row / hot-journal recovery
+// ===========================================================================
+
+test('createActivityDatabase produces the fixed schema, pragmas, and a hash-consistent genesis row', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  const { genesisRow, headRow, checkpoint } = activityDb.createActivityDatabase({
+    finalPath,
+    operationId: OP_A,
+    createdAt: CREATED_AT,
+    sourceKind: 'deployment',
+  });
+  assert.equal(genesisRow.kind, 'GENESIS');
+  assert.equal(genesisRow.principalKind, 'system');
+  assert.equal(genesisRow.commandKeySha256, null);
+  assert.equal(genesisRow.adapterId, null);
+  assert.equal(headRow.generation, 0);
+  assert.equal(checkpoint.checkpointGeneration, 0);
+  assert.equal(fs.lstatSync(finalPath).mode & 0o777, 0o600);
+
+  const db = activityDb.openReadOnly(finalPath);
+  try {
+    activityDb.verifyFixedSchema(db);
+    assert.equal(activityDb.quickCheck(db), true);
+  } finally {
+    db.close();
+  }
+});
+
+test('createActivityDatabase refuses to overwrite an existing file', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  activityDb.createActivityDatabase({ finalPath, operationId: OP_A, createdAt: CREATED_AT, sourceKind: 'deployment' });
+  assert.throws(
+    () => activityDb.createActivityDatabase({ finalPath, operationId: OP_B, createdAt: CREATED_AT, sourceKind: 'deployment' }),
+    { code: 'activity_db_already_exists' }
+  );
+});
+
+test('verifyFixedSchema rejects an extra table', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  activityDb.createActivityDatabase({ finalPath, operationId: OP_A, createdAt: CREATED_AT, sourceKind: 'deployment' });
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(finalPath);
+  db.exec('CREATE TABLE extra_table (id INTEGER PRIMARY KEY)');
+  assert.throws(() => activityDb.verifyFixedSchema(db), { code: 'activity_schema_table_mismatch' });
+  db.close();
+});
+
+test('verifyFixedSchema rejects an extra view/trigger', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  activityDb.createActivityDatabase({ finalPath, operationId: OP_A, createdAt: CREATED_AT, sourceKind: 'deployment' });
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(finalPath);
+  db.exec('CREATE VIEW extra_view AS SELECT * FROM activity_chain');
+  assert.throws(() => activityDb.verifyFixedSchema(db), { code: 'activity_schema_extra_objects' });
+  db.close();
+});
+
+test('recoverHotJournalIfPresent recovers a real crash-induced hot journal and leaves it absent', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  activityDb.createActivityDatabase({ finalPath, operationId: OP_A, createdAt: CREATED_AT, sourceKind: 'deployment' });
+
+  const childScript = `
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(${JSON.stringify(finalPath)});
+    db.exec('BEGIN IMMEDIATE');
+    db.prepare('UPDATE activity_head SET segment_count = segment_count + 1 WHERE id=1').run();
+    process.exit(137);
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137);
+  assert.equal(fs.existsSync(`${finalPath}-journal`), true);
+
+  const result = activityDb.recoverHotJournalIfPresent({ dbPath: finalPath, ownershipAdapter: pathsMod.defaultOwnershipAdapter });
+  assert.equal(result.recovered, true);
+  assert.equal(fs.existsSync(`${finalPath}-journal`), false);
+
+  const db = activityDb.openReadOnly(finalPath);
+  const head = db.prepare('SELECT segment_count FROM activity_head WHERE id=1').get();
+  assert.equal(head.segment_count, 1); // the uncommitted increment was rolled back
+  db.close();
+});
+
+test('recoverHotJournalIfPresent rejects a -wal sidecar', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  fs.writeFileSync(finalPath, '');
+  fs.writeFileSync(`${finalPath}-wal`, '');
+  assert.throws(
+    () => activityDb.recoverHotJournalIfPresent({ dbPath: finalPath, ownershipAdapter: pathsMod.defaultOwnershipAdapter }),
+    { code: 'activity_db_unsupported_sidecar' }
+  );
+});
+
+test('recoverHotJournalIfPresent rejects a symlinked journal', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  fs.writeFileSync(finalPath, '');
+  const real = path.join(tmp, 'real-journal');
+  fs.writeFileSync(real, '', { mode: 0o600 });
+  fs.symlinkSync(real, `${finalPath}-journal`);
+  assert.throws(
+    () => activityDb.recoverHotJournalIfPresent({ dbPath: finalPath, ownershipAdapter: pathsMod.defaultOwnershipAdapter }),
+    { code: 'activity_db_journal_symlink' }
+  );
+});
+
+test('recoverHotJournalIfPresent rejects a wrong-mode journal', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  fs.writeFileSync(finalPath, '');
+  fs.writeFileSync(`${finalPath}-journal`, '', { mode: 0o644 });
+  assert.throws(
+    () => activityDb.recoverHotJournalIfPresent({ dbPath: finalPath, ownershipAdapter: pathsMod.defaultOwnershipAdapter }),
+    { code: 'activity_db_journal_wrong_mode' }
+  );
+});
+
+test('recoverHotJournalIfPresent rejects a directory where the journal should be', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  fs.writeFileSync(finalPath, '');
+  fs.mkdirSync(`${finalPath}-journal`, { mode: 0o700 });
+  assert.throws(
+    () => activityDb.recoverHotJournalIfPresent({ dbPath: finalPath, ownershipAdapter: pathsMod.defaultOwnershipAdapter }),
+    (err) => err.code === 'activity_db_journal_wrong_mode' || err.code === 'activity_db_journal_wrong_type'
+  );
+});
+
+test('recoverHotJournalIfPresent rejects an extra unexpected sidecar', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  fs.writeFileSync(finalPath, '');
+  fs.writeFileSync(`${finalPath}-something-else`, '');
+  assert.throws(
+    () => activityDb.recoverHotJournalIfPresent({ dbPath: finalPath, ownershipAdapter: pathsMod.defaultOwnershipAdapter }),
+    { code: 'activity_db_extra_sidecar' }
+  );
+});
+
+test('recoveryOnlyHandle rejects a mutating statement even if the injected adapter tries one', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  activityDb.createActivityDatabase({ finalPath, operationId: OP_A, createdAt: CREATED_AT, sourceKind: 'deployment' });
+  fs.writeFileSync(`${finalPath}-journal`, '', { mode: 0o600 });
+  const maliciousAdapter = (dbPath) => {
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(dbPath);
+    try {
+      const handle = activityDb.recoveryOnlyHandle(db);
+      handle.exec('DELETE FROM activity_chain');
+    } finally {
+      db.close();
+    }
+  };
+  assert.throws(
+    () =>
+      activityDb.recoverHotJournalIfPresent({
+        dbPath: finalPath,
+        ownershipAdapter: pathsMod.defaultOwnershipAdapter,
+        recoveryOnlyAdapter: maliciousAdapter,
+      }),
+    { code: 'activity_db_recovery_failed' }
+  );
+});
+
+// ===========================================================================
+// locks: four-root lock protocol
+// ===========================================================================
+
+test('acquireFourRootLocks acquires in fixed order and writes the documented fields', () => {
+  const { tmp, opts } = makeRoots();
+  const roots = pathsMod.resolveRoots(opts);
+  pathsMod.ensureFourRootDirsForLocking(roots, pathsMod.defaultOwnershipAdapter);
+  const lock = locksMod.acquireFourRootLocks(
+    roots,
+    { operationId: OP_A, sourceKind: 'test', sourceAuthority: 'deployment', headIdentities: { x: 1 }, typedReceiptSha256: null },
+    { bootId: 'boot-x' }
+  );
+  const order = pathsMod.fourRootsInLockOrder(roots).map((r) => path.join(r.dir, 'lock.json'));
+  assert.deepEqual(lock.lockPaths, order);
+  const payload = JSON.parse(fs.readFileSync(lock.lockPaths[0], 'utf8'));
+  assert.equal(payload.format, 1);
+  assert.equal(payload.pid, process.pid);
+  assert.equal(payload.bootId, 'boot-x');
+  assert.equal(payload.operationId, OP_A);
+  assert.equal(payload.sourceKind, 'test');
+  assert.equal(payload.sourceAuthority, 'deployment');
+  assert.deepEqual(payload.headIdentities, { x: 1 });
+  lock.release();
+  for (const p of lock.lockPaths) assert.equal(fs.existsSync(p), false);
+});
+
+test('a live same-boot lock owner blocks a second acquisition', () => {
+  const { opts } = makeRoots();
+  const roots = pathsMod.resolveRoots(opts);
+  pathsMod.ensureFourRootDirsForLocking(roots, pathsMod.defaultOwnershipAdapter);
+  const held = locksMod.acquireFourRootLocks(roots, { operationId: OP_A, sourceKind: 'test' }, { bootId: 'boot-x' });
+  assert.throws(
+    () => locksMod.acquireFourRootLocks(roots, { operationId: OP_B, sourceKind: 'test' }, { bootId: 'boot-x' }),
+    { code: 'lock_live_same_boot_owner' }
+  );
+  held.release();
+});
+
+test('a stale same-boot lock (dead PID) is reconciled and replaced', () => {
+  const { opts } = makeRoots();
+  const roots = pathsMod.resolveRoots(opts);
+  pathsMod.ensureFourRootDirsForLocking(roots, pathsMod.defaultOwnershipAdapter);
+  const deadPid = 999999; // treated as dead via a fake isProcessAlive below
+  const stalePath = path.join(roots.activityHeadWitnessRoot, 'lock.json');
+  fs.writeFileSync(
+    stalePath,
+    JSON.stringify({ format: 1, pid: deadPid, bootId: 'boot-x', operationId: OP_A, sourceKind: 'test', sourceAuthority: null, headIdentities: {}, typedReceiptSha256: null, createdAt: CREATED_AT }),
+    { mode: 0o600 }
+  );
+  let verifyCalled = false;
+  const lock = locksMod.acquireFourRootLocks(
+    roots,
+    { operationId: OP_B, sourceKind: 'test' },
+    {
+      bootId: 'boot-x',
+      isProcessAlive: () => false,
+      reconcile: {
+        verifyChain: () => { verifyCalled = true; },
+        findProposalForOperation: () => null,
+      },
+    }
+  );
+  assert.equal(verifyCalled, true);
+  lock.release();
+});
+
+test('a stale lock naming a still-pending proposal blocks a different operationId', () => {
+  const { opts } = makeRoots();
+  const roots = pathsMod.resolveRoots(opts);
+  pathsMod.ensureFourRootDirsForLocking(roots, pathsMod.defaultOwnershipAdapter);
+  const stalePath = path.join(roots.activityHeadWitnessRoot, 'lock.json');
+  fs.writeFileSync(
+    stalePath,
+    JSON.stringify({ format: 1, pid: 999999, bootId: 'boot-old', operationId: OP_A, sourceKind: 'test', sourceAuthority: null, headIdentities: {}, typedReceiptSha256: null, createdAt: CREATED_AT }),
+    { mode: 0o600 }
+  );
+  assert.throws(
+    () =>
+      locksMod.acquireFourRootLocks(
+        roots,
+        { operationId: OP_B, sourceKind: 'test' },
+        {
+          bootId: 'boot-new',
+          reconcile: {
+            verifyChain: () => {},
+            findProposalForOperation: (staleOpId) => (staleOpId === OP_A ? { operationId: OP_A } : null),
+          },
+        }
+      ),
+    { code: 'lock_stale_proposal_pending' }
+  );
+});
+
+// ===========================================================================
+// init: four-root initialization primitive (strict "any partial blocks")
+// ===========================================================================
+
+test('initializeFourRoots creates all four roots with correct modes and a healthy load', () => {
+  const { opts } = makeRoots();
+  const created = initMod.initializeFourRoots(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT }));
+  assert.equal(created.capabilityGeneration.generation, 0);
+  const roots = pathsMod.resolveRoots(opts);
+  assert.equal(fs.lstatSync(roots.root).mode & 0o777, 0o700);
+  assert.equal(fs.lstatSync(roots.capabilityRoot).mode & 0o777, 0o700);
+  assert.equal(fs.lstatSync(roots.capabilityHeadPath).mode & 0o777, 0o600);
+  assert.equal(fs.lstatSync(roots.activityDbPath).mode & 0o777, 0o600);
+  const loaded = loadMod.loadProtocolState(Object.assign({}, opts, { repair: false }));
+  assert.equal(loaded.initialized, true);
+  assert.equal(loaded.resumePending, false);
+});
+
+test('initializeFourRoots blocks a second call against an already-initialized root set', () => {
+  const { opts } = makeRoots();
+  initMod.initializeFourRoots(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT }));
+  assert.throws(
+    () => initMod.initializeFourRoots(Object.assign({}, opts, { operationId: OP_B, createdAt: CREATED_AT })),
+    { code: 'partial_or_existing_root_set' }
+  );
+});
+
+test('a crash after intent but before the first root entry resumes cleanly from all-absent', () => {
+  const { opts } = makeRoots();
+  const roots = pathsMod.resolveRoots(opts);
+  // Simulate "intent" with nothing on disk yet — a fresh call must simply succeed.
+  assert.equal(initMod.probeAnyRootEntry(roots).length, 0);
+  const created = initMod.initializeFourRoots(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT }));
+  assert.equal(created.capabilityGeneration.generation, 0);
+});
+
+const INIT_STEP_PATH = path.join(__dirname, 'init.js');
+
+function crashAtStep(opts, step, operationId, createdAt) {
+  const childScript = `
+    const mod = require(${JSON.stringify(INIT_STEP_PATH)});
+    mod.initializeFourRoots(${JSON.stringify(Object.assign({}, opts, { crashAfter: step, operationId, createdAt }))});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137, `expected a simulated crash (exit 137) at step "${step}", got ${child.status}: ${child.stderr}`);
+}
+
+test('crash-injection: every initialization boundary is independently crash-safe and fully resumable', () => {
+  for (const step of initMod.STEPS) {
+    const { opts } = makeRoots();
+    crashAtStep(opts, step, OP_A, CREATED_AT);
+    // status() must never throw an unhandled corruption error for any of
+    // these boundaries — it's either uninitialized, mid-flight, or a
+    // healthy resumable state.
+    const st = mod.status(opts);
+    assert.ok(st, `status() should return for crash at ${step}`);
+    // A same-operationId, same-createdAt retry through the public
+    // initialize() verb must always converge on a fully healthy state
+    // without throwing, whether that means creating from scratch, resuming
+    // a GENESIS-adjacent/activity one-ahead gap, or discovering the
+    // operation had already fully completed before the crash (e.g. a
+    // crash immediately after the final head publish, with nothing left
+    // to do).
+    const result = mod.initialize(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT }));
+    assert.ok(result, `initialize() should return for crash at ${step}`);
+    const finalStatus = mod.status(opts);
+    assert.equal(finalStatus.initialized, true, `final status should be healthy after crash at ${step}`);
+    assert.equal(finalStatus.resumePending, false, `final status should have no pending resume after crash at ${step}`);
+  }
+});
+
+test('a genuinely different operationId is blocked from barging in on an unfinished operation', () => {
+  const { opts } = makeRoots();
+  crashAtStep(opts, 'capability_genesis_written', OP_A, CREATED_AT);
+  assert.throws(() => mod.initialize(Object.assign({}, opts, { operationId: OP_B })), { code: 'lock_stale_proposal_pending' });
+});
+
+// ===========================================================================
+// load: chain-walking corruption/rollback/fork/gap/replay detection
+// (hand-constructed multi-generation fixtures, per brief scope)
+// ===========================================================================
+
+function initHealthy(opts) {
+  return initMod.initializeFourRoots(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT }));
+}
+
+function appendHandCraftedGeneration(roots, priorGenerationSha256, generationObj, witnessObj) {
+  pathsMod.writeExclusiveFile(
+    path.join(roots.generationsDir, pathsMod.generationFilename(generationObj.generation)),
+    Buffer.from(codecs.canonicalJson(generationObj), 'utf8'),
+    pathsMod.defaultOwnershipAdapter
+  );
+  pathsMod.writeExclusiveFile(
+    path.join(roots.witnessRoot, pathsMod.generationFilename(witnessObj.generation)),
+    Buffer.from(codecs.canonicalJson(witnessObj), 'utf8'),
+    pathsMod.defaultOwnershipAdapter
+  );
+  const generationSha256 = codecs.canonicalSha256(generationObj);
+  const witnessSha256 = codecs.canonicalSha256(witnessObj);
+  const head = codecs.buildCapabilityHead({ generation: generationObj.generation, generationSha256, witnessSha256 });
+  pathsMod.atomicReplaceFile(roots.capabilityHeadPath, Buffer.from(codecs.canonicalJson(head), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  return { generationSha256, witnessSha256 };
+}
+
+function buildGen1(previousSha256, overrides) {
+  return Object.assign(
+    {
+      format: 1,
+      generation: 1,
+      previousGeneration: 0,
+      previousSha256,
+      operationId: OP_B,
+      kind: 'NEGOTIATED',
+      createdAt: CREATED_AT,
+      state: {
+        activeIdentitySha256: 'b'.repeat(64),
+        mode: 'V3_PINNED',
+        historicalV2Disposition: 'CLEAR',
+        historicalV2DispositionReceiptSha256: 'c'.repeat(64),
+        databaseRestore: { status: 'CLEAR', restoreEpoch: 0 },
+        identitySha256: 'b'.repeat(64),
+        normalizedServerBase: 'https://cloud.example.com',
+        gatewayDeviceEui: '0016C001F11715E2',
+        capabilityProofSha256: null,
+      },
+    },
+    overrides || {}
+  );
+}
+
+test('load: a valid multi-generation chain (hand-crafted gen 1) verifies cleanly', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const genesisSha256 = codecs.canonicalSha256(created.capabilityGeneration);
+  const gen1 = buildGen1(genesisSha256);
+  const witness1 = { format: 1, generation: 1, generationSha256: codecs.canonicalSha256(gen1), previousWitnessSha256: codecs.canonicalSha256(created.capabilityWitness), operationId: OP_B };
+  appendHandCraftedGeneration(roots, genesisSha256, gen1, witness1);
+  const result = loadMod.verifyCapabilityChain(roots, { ownershipAdapter: pathsMod.defaultOwnershipAdapter });
+  assert.equal(result.maxGeneration, 1);
+  assert.equal(result.resumable, null);
+});
+
+test('load: detects a fork (previousSha256 does not match the actual predecessor hash)', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const gen1 = buildGen1('f'.repeat(64)); // wrong previousSha256
+  const witness1 = { format: 1, generation: 1, generationSha256: codecs.canonicalSha256(gen1), previousWitnessSha256: codecs.canonicalSha256(created.capabilityWitness), operationId: OP_B };
+  appendHandCraftedGeneration(roots, 'f'.repeat(64), gen1, witness1);
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_generation_fork' });
+});
+
+test('load: detects a replayed operationId across two generations', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const genesisSha256 = codecs.canonicalSha256(created.capabilityGeneration);
+  const gen1 = buildGen1(genesisSha256, { operationId: OP_A }); // reuses genesis operationId
+  const witness1 = { format: 1, generation: 1, generationSha256: codecs.canonicalSha256(gen1), previousWitnessSha256: codecs.canonicalSha256(created.capabilityWitness), operationId: OP_A };
+  appendHandCraftedGeneration(roots, genesisSha256, gen1, witness1);
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_generation_replay' });
+});
+
+test('load: detects a generation-number gap', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const genesisSha256 = codecs.canonicalSha256(created.capabilityGeneration);
+  const gen2 = buildGen1(genesisSha256, { generation: 2, previousGeneration: 1 });
+  pathsMod.writeExclusiveFile(
+    path.join(roots.generationsDir, pathsMod.generationFilename(2)),
+    Buffer.from(codecs.canonicalJson(gen2), 'utf8'),
+    pathsMod.defaultOwnershipAdapter
+  );
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_generation_gap' });
+});
+
+test('load: detects a witness hash mismatch', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const genesisSha256 = codecs.canonicalSha256(created.capabilityGeneration);
+  const gen1 = buildGen1(genesisSha256);
+  const badWitness = { format: 1, generation: 1, generationSha256: 'a'.repeat(64), previousWitnessSha256: codecs.canonicalSha256(created.capabilityWitness), operationId: OP_B };
+  pathsMod.writeExclusiveFile(path.join(roots.generationsDir, pathsMod.generationFilename(1)), Buffer.from(codecs.canonicalJson(gen1), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  pathsMod.writeExclusiveFile(path.join(roots.witnessRoot, pathsMod.generationFilename(1)), Buffer.from(codecs.canonicalJson(badWitness), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_witness_hash_mismatch' });
+});
+
+test('load: detects a capability head rollback (older valid pointer with a fully witnessed newer state)', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const genesisSha256 = codecs.canonicalSha256(created.capabilityGeneration);
+  const gen1 = buildGen1(genesisSha256);
+  const witness1 = { format: 1, generation: 1, generationSha256: codecs.canonicalSha256(gen1), previousWitnessSha256: codecs.canonicalSha256(created.capabilityWitness), operationId: OP_B };
+  appendHandCraftedGeneration(roots, genesisSha256, gen1, witness1);
+  // Now hand-craft generation 2 (also fully witnessed) so generation 1's
+  // head is a "stale but valid" rollback, not the legitimate one-step
+  // resume case.
+  const gen1Sha256 = codecs.canonicalSha256(gen1);
+  const gen2 = buildGen1(gen1Sha256, { generation: 2, previousGeneration: 1, operationId: crypto.randomUUID() });
+  const witness2 = { format: 1, generation: 2, generationSha256: codecs.canonicalSha256(gen2), previousWitnessSha256: codecs.canonicalSha256(witness1), operationId: gen2.operationId };
+  pathsMod.writeExclusiveFile(path.join(roots.generationsDir, pathsMod.generationFilename(2)), Buffer.from(codecs.canonicalJson(gen2), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  pathsMod.writeExclusiveFile(path.join(roots.witnessRoot, pathsMod.generationFilename(2)), Buffer.from(codecs.canonicalJson(witness2), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  // Roll the head back to generation 1 (a stale-but-previously-valid head).
+  const rolledBackHead = codecs.buildCapabilityHead({ generation: 1, generationSha256: gen1Sha256, witnessSha256: codecs.canonicalSha256(witness1) });
+  fs.rmSync(roots.capabilityHeadPath, { force: true });
+  pathsMod.writeExclusiveFile(roots.capabilityHeadPath, Buffer.from(codecs.canonicalJson(rolledBackHead), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_head_rollback' });
+});
+
+test('load: GENESIS-adjacent resume — witness missing is detected and (with repair) completed', () => {
+  const { opts } = makeRoots();
+  const roots = pathsMod.resolveRoots(opts);
+  crashAtStep(opts, 'capability_genesis_written', OP_A, CREATED_AT);
+  const before = loadMod.verifyCapabilityChain(roots, {});
+  assert.equal(before.resumable && before.resumable.kind, 'WITNESS_CREATION');
+  const repaired = loadMod.repairCapabilityChain(roots, before, {});
+  assert.equal(fs.existsSync(path.join(roots.witnessRoot, '0000000000000000.json')), true);
+  // Repair completes exactly the missing witness (per line 353: "after
+  // generation/receipt it resumes the missing witness; after witness it
+  // resumes the exact head" — two separate resume points). Having just
+  // created the witness, head.json is still absent, so the chain now
+  // reports the next resume point rather than a fully healthy state.
+  assert.equal(repaired.resumable && repaired.resumable.kind, 'HEAD_PUBLICATION');
+  const fullyRepaired = loadMod.repairCapabilityChain(roots, repaired, {});
+  assert.equal(fullyRepaired.resumable, null);
+  assert.equal(fs.existsSync(roots.capabilityHeadPath), true);
+});
+
+test('load: GENESIS-adjacent resume — head missing is detected and (with repair) completed', () => {
+  const { opts } = makeRoots();
+  const roots = pathsMod.resolveRoots(opts);
+  crashAtStep(opts, 'capability_witness_written', OP_A, CREATED_AT);
+  const before = loadMod.verifyCapabilityChain(roots, {});
+  assert.equal(before.resumable && before.resumable.kind, 'HEAD_PUBLICATION');
+  const repaired = loadMod.repairCapabilityChain(roots, before, {});
+  assert.equal(repaired.resumable, null);
+  assert.equal(fs.existsSync(roots.capabilityHeadPath), true);
+});
+
+test('load: a non-GENESIS resumable-shaped gap validates-and-blocks rather than auto-repairing', () => {
+  // Brief scope: "Single-valid-unheaded-proposal resume rules implemented
+  // for GENESIS-adjacent states... disposition/reset/restore resume
+  // branches validate-and-block (their creating verbs are out of scope)."
+  // A generation-1-written-but-unwitnessed shape is byte-for-byte
+  // identical to the legitimate GENESIS-adjacent resume case except that
+  // it starts from generation 0 -> 1, which IS the GENESIS-adjacent case
+  // — so this fixture instead proves the boundary one step further out:
+  // once a witnessed generation 1 exists, an unwitnessed generation 2
+  // cannot be auto-resumed and is indistinguishable from a rollback.
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const genesisSha256 = codecs.canonicalSha256(created.capabilityGeneration);
+  const gen1 = buildGen1(genesisSha256);
+  const witness1 = { format: 1, generation: 1, generationSha256: codecs.canonicalSha256(gen1), previousWitnessSha256: codecs.canonicalSha256(created.capabilityWitness), operationId: OP_B };
+  appendHandCraftedGeneration(roots, genesisSha256, gen1, witness1);
+  const gen2 = buildGen1(codecs.canonicalSha256(gen1), { generation: 2, previousGeneration: 1, operationId: crypto.randomUUID() });
+  // generation 2 written, witness NOT written, head still at generation 1.
+  // Since the IMPORTANT-1 fix, this blocks at the bidirectional
+  // set-equality check (an orphan generation above the witness chain is
+  // indistinguishable from a witness-root rollback) rather than falling
+  // through to the head comparison — same block, stricter classification.
+  pathsMod.writeExclusiveFile(path.join(roots.generationsDir, pathsMod.generationFilename(2)), Buffer.from(codecs.canonicalJson(gen2), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_witness_missing' });
+});
+
+test('load: activity database rollback against a newer external head is detected', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  // Craft an external head claiming a higher generation than the database has.
+  const forged = { format: 1, generation: 1, entrySha256: 'a'.repeat(64), checkpointGeneration: 0, checkpointSha256: codecs.canonicalSha256(created.activityCheckpoint) };
+  fs.rmSync(roots.activityHeadPath, { force: true });
+  pathsMod.writeExclusiveFile(roots.activityHeadPath, Buffer.from(codecs.canonicalJson(forged), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), { code: 'activity_database_rollback' });
+});
+
+test('load: an orphan newer checkpoint than the external head is detected (external-head-only rollback)', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const previousCheckpointSha256 = codecs.canonicalSha256(created.activityCheckpoint);
+  const entrySha256 = 'a'.repeat(64);
+  const cumulativeSha256 = activityDb.checkpointCumulativeSha256(created.activityCheckpoint.cumulativeSha256, entrySha256);
+  const orphanCheckpoint = { format: 1, checkpointGeneration: 1, entrySha256, previousCheckpointSha256, cumulativeSha256, createdAt: CREATED_AT };
+  pathsMod.writeExclusiveFile(path.join(roots.checkpointsDir, pathsMod.generationFilename(1)), Buffer.from(codecs.canonicalJson(orphanCheckpoint), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  // The checkpoint chain itself is well-formed; the external head.json
+  // still points at checkpointGeneration 0 even though a newer, validly
+  // chained checkpoint 1 exists on disk — exactly the "external-head-only
+  // rollback" shape (a newer checkpoint exists but the published head was
+  // replaced with an older valid pointer).
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), { code: 'activity_external_head_rollback' });
+});
+
+test('load: activity one-ahead crash is resumable and completed by repair', () => {
+  const { opts } = makeRoots();
+  const roots = pathsMod.resolveRoots(opts);
+  crashAtStep(opts, 'activity_database_created', OP_A, CREATED_AT);
+  const before = loadMod.verifyActivityRoots(roots, {});
+  assert.equal(before.resumable && before.resumable.kind, 'EXTERNAL_HEAD_PUBLICATION');
+  const repaired = loadMod.repairActivityRoots(roots, before, {});
+  assert.equal(repaired.resumable, null);
+  assert.equal(fs.existsSync(roots.activityHeadPath), true);
+});
+
+// ===========================================================================
+// deployment-state-gate
+// ===========================================================================
+
+function writeDeploymentState(tmp, obj) {
+  const p = path.join(tmp, 'deployment-state.json');
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(obj));
+  return p;
+}
+
+// The real envelope (repair-program plan line 160, implemented by the
+// sibling deployment-state slice): {format:2, parentDeployment,
+// activeSubOperation}, with the deployment identity/phase/generation
+// nested under parentDeployment. parentDeployment additionally carries
+// lease/hash/stamp/receipt fields owned by the sibling library; the gate
+// must tolerate those while gating strictly on the fields it checks.
+function format2State(overrides) {
+  const o = overrides || {};
+  return {
+    format: o.format !== undefined ? o.format : 2,
+    parentDeployment: Object.assign(
+      {
+        deploymentId: 'dep-1',
+        phase: 'protocol-initializing',
+        generation: 3,
+        leaseActive: true,
+        artifactSha256: 'a'.repeat(64),
+      },
+      o.parentDeployment
+    ),
+    activeSubOperation: o.activeSubOperation !== undefined ? o.activeSubOperation : null,
+  };
+}
+
+test('requireDeploymentPhase accepts an exact format-2 match and rejects a phase/id/generation mismatch', () => {
+  const { tmp } = makeRoots();
+  const p = writeDeploymentState(tmp, format2State());
+  assert.doesNotThrow(() =>
+    deploymentGate.requireDeploymentPhase(p, { expectedDeploymentId: 'dep-1', expectedPhase: 'protocol-initializing', expectedParentGeneration: 3 })
+  );
+  assert.throws(
+    () => deploymentGate.requireDeploymentPhase(p, { expectedDeploymentId: 'dep-1', expectedPhase: 'protocol-dispositioning', expectedParentGeneration: 3 }),
+    { code: 'deployment_state_wrong_phase' }
+  );
+  assert.throws(
+    () => deploymentGate.requireDeploymentPhase(p, { expectedDeploymentId: 'dep-2', expectedPhase: 'protocol-initializing', expectedParentGeneration: 3 }),
+    { code: 'deployment_state_wrong_deployment_id' }
+  );
+  assert.throws(
+    () => deploymentGate.requireDeploymentPhase(p, { expectedDeploymentId: 'dep-1', expectedPhase: 'protocol-initializing', expectedParentGeneration: 4 }),
+    { code: 'deployment_state_wrong_parent_generation' }
+  );
+});
+
+test('requireDeploymentPhase rejects a non-null activeSubOperation', () => {
+  const { tmp } = makeRoots();
+  const p = writeDeploymentState(
+    tmp,
+    format2State({ activeSubOperation: { kind: 'recovery', operationId: OP_B, phase: 'recovering' } })
+  );
+  assert.throws(
+    () => deploymentGate.requireDeploymentPhase(p, { expectedDeploymentId: 'dep-1', expectedPhase: 'protocol-initializing', expectedParentGeneration: 3 }),
+    { code: 'deployment_state_active_sub_operation' }
+  );
+});
+
+test('readDeploymentStateFile rejects format 1 and any other non-2 format', () => {
+  const { tmp } = makeRoots();
+  const p = writeDeploymentState(tmp, format2State({ format: 1 }));
+  assert.throws(() => deploymentGate.readDeploymentStateFile(p), { code: 'schema_invalid_field' });
+});
+
+test('readDeploymentStateFile rejects the legacy flat (invented) shape outright', () => {
+  const { tmp } = makeRoots();
+  const p = writeDeploymentState(tmp, { format: 2, deploymentId: 'dep-1', phase: 'protocol-initializing', parentGeneration: 0 });
+  assert.throws(() => deploymentGate.readDeploymentStateFile(p), Error);
+});
+
+test('readDeploymentStateFile rejects unknown top-level fields and a missing file', () => {
+  const { tmp } = makeRoots();
+  const p = writeDeploymentState(tmp, Object.assign(format2State(), { extra: 'nope' }));
+  assert.throws(() => deploymentGate.readDeploymentStateFile(p), { code: 'schema_unknown_field' });
+  assert.throws(() => deploymentGate.readDeploymentStateFile(path.join(tmp, 'absent.json')), { code: 'deployment_state_missing' });
+});
+
+test('readDeploymentStateFile tolerates extra parentDeployment fields but requires its gated fields', () => {
+  const { tmp } = makeRoots();
+  // extra sibling-library-owned fields are fine...
+  const ok = writeDeploymentState(tmp, format2State({ parentDeployment: { controlManifestSha256: 'b'.repeat(64) } }));
+  assert.doesNotThrow(() => deploymentGate.readDeploymentStateFile(ok));
+  // ...but a missing gated field is not.
+  const missing = format2State();
+  delete missing.parentDeployment.phase;
+  const bad = writeDeploymentState(path.join(tmp, 'sub'), missing);
+  assert.throws(() => deploymentGate.readDeploymentStateFile(bad), { code: 'deployment_state_parent_invalid' });
+});
+
+test('readDeploymentStateFile rejects a symlinked path', () => {
+  const { tmp } = makeRoots();
+  const real = writeDeploymentState(tmp, format2State());
+  const link = path.join(tmp, 'link.json');
+  fs.symlinkSync(real, link);
+  assert.throws(() => deploymentGate.readDeploymentStateFile(link), { code: 'symlink_component' });
+});
+
+// ===========================================================================
+// integration: index.js public surface (initialize / status)
+// ===========================================================================
+
+test('index.initialize / index.status: fresh happy path is idempotent', () => {
+  const { opts } = makeRoots();
+  const created = mod.initialize(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT }));
+  assert.equal(created.created, true);
+  const again = mod.initialize(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT }));
+  assert.equal(again.created, false);
+  const st = mod.status(opts);
+  assert.equal(st.initialized, true);
+  assert.equal(st.mode, 'UNNEGOTIATED');
+  assert.equal(st.activeIdentitySha256, null);
+});
+
+test('index.status never writes to disk (read-only)', () => {
+  const { opts } = makeRoots();
+  mod.initialize(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT }));
+  const roots = pathsMod.resolveRoots(opts);
+  const before = fs.readFileSync(roots.capabilityHeadPath, 'utf8');
+  mod.status(opts);
+  mod.status(opts);
+  const after = fs.readFileSync(roots.capabilityHeadPath, 'utf8');
+  assert.equal(before, after);
+});
+
+// ===========================================================================
+// Fix wave (review IMPORTANT 1): single-root tail-deletion rollback
+// detection — bidirectional generation/witness set equality.
+// ===========================================================================
+
+// Builds a healthy, fully committed 2-generation chain (genesis + a
+// hand-crafted NEGOTIATED generation 1 with its witness and head at 1) and
+// returns everything needed to surgically damage single roots afterwards.
+function buildHealthyTwoGenerationChain() {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const genesisSha256 = codecs.canonicalSha256(created.capabilityGeneration);
+  const genesisWitnessSha256 = codecs.canonicalSha256(created.capabilityWitness);
+  const gen1 = buildGen1(genesisSha256);
+  const witness1 = {
+    format: 1,
+    generation: 1,
+    generationSha256: codecs.canonicalSha256(gen1),
+    previousWitnessSha256: genesisWitnessSha256,
+    operationId: OP_B,
+  };
+  appendHandCraftedGeneration(roots, genesisSha256, gen1, witness1);
+  // sanity: healthy before the attack
+  const healthy = loadMod.verifyCapabilityChain(roots, {});
+  assert.equal(healthy.maxGeneration, 1);
+  assert.equal(healthy.resumable, null);
+  return { roots, created, genesisSha256, genesisWitnessSha256, gen1, witness1 };
+}
+
+function rewindHeadToGenesis(roots, genesisSha256, genesisWitnessSha256) {
+  const rolledBackHead = codecs.buildCapabilityHead({
+    generation: 0,
+    generationSha256: genesisSha256,
+    witnessSha256: genesisWitnessSha256,
+  });
+  pathsMod.atomicReplaceFile(
+    roots.capabilityHeadPath,
+    Buffer.from(codecs.canonicalJson(rolledBackHead), 'utf8'),
+    pathsMod.defaultOwnershipAdapter
+  );
+}
+
+test('load: tail generation deleted + head rewound, witness root intact -> BLOCKED (single-root rollback)', () => {
+  const { roots, genesisSha256, genesisWitnessSha256 } = buildHealthyTwoGenerationChain();
+  fs.rmSync(path.join(roots.generationsDir, pathsMod.generationFilename(1)));
+  rewindHeadToGenesis(roots, genesisSha256, genesisWitnessSha256);
+  // witness 1 survives in the independent witness root: an orphan witness
+  // above the head proves the generation root was rolled back alone.
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_witness_orphan' });
+});
+
+test('load: tail witness deleted + head rewound, generation root intact -> BLOCKED (single-root rollback)', () => {
+  const { roots, genesisSha256, genesisWitnessSha256 } = buildHealthyTwoGenerationChain();
+  fs.rmSync(path.join(roots.witnessRoot, pathsMod.generationFilename(1)));
+  rewindHeadToGenesis(roots, genesisSha256, genesisWitnessSha256);
+  // generation 1 survives in the generation root: an orphan generation
+  // above the witness chain proves the witness root was rolled back alone.
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_witness_missing' });
+});
+
+test('load: CONSISTENT both-roots tail deletion + head rewind is NOT detected (documented threat-model boundary)', () => {
+  // Adjudicated against plan line 352: "A privileged actor that
+  // consistently rolls back all independent roots is outside the
+  // software-only threat model and requires a hardware monotonic counter
+  // or external witness; the plan states this limit rather than claiming
+  // tamper resistance." Deleting the tail generation AND its same-number
+  // witness AND rewinding the head is byte-for-byte indistinguishable from
+  // a chain that legitimately never advanced past genesis, so the verifier
+  // accepts it BY DESIGN. This test pins that stance so any future change
+  // to it is deliberate, not accidental.
+  const { roots, genesisSha256, genesisWitnessSha256 } = buildHealthyTwoGenerationChain();
+  fs.rmSync(path.join(roots.generationsDir, pathsMod.generationFilename(1)));
+  fs.rmSync(path.join(roots.witnessRoot, pathsMod.generationFilename(1)));
+  rewindHeadToGenesis(roots, genesisSha256, genesisWitnessSha256);
+  const result = loadMod.verifyCapabilityChain(roots, {});
+  assert.equal(result.maxGeneration, 0);
+  assert.equal(result.resumable, null);
+  assert.equal(result.head.generation, 0);
+});
+
+// ===========================================================================
+// Fix wave (review IMPORTANT 3): mode/ownership enforcement gaps.
+// ===========================================================================
+
+test('initialize rejects a pre-existing wrong-mode (0755) module root before any chain write', () => {
+  const { tmp, opts } = makeRoots();
+  // Pre-create the capability outer root at 0755 — plan line 351 requires
+  // /data/osi-sync at mode 0700; a pre-existing wrong-mode directory must
+  // fail closed, not be silently accepted.
+  fs.mkdirSync(opts.root, { recursive: true, mode: 0o755 });
+  fs.chmodSync(opts.root, 0o755);
+  assert.throws(
+    () => mod.initialize(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT })),
+    { code: 'dir_wrong_mode' }
+  );
+  // No capability chain content may have been written under the bad root.
+  const roots = pathsMod.resolveRoots(opts);
+  assert.equal(fs.existsSync(roots.generationsDir), false);
+  assert.equal(fs.existsSync(roots.capabilityHeadPath), false);
+});
+
+test('initialize rejects a pre-existing module root with wrong ownership (adapter-reported)', () => {
+  const { opts } = makeRoots();
+  fs.mkdirSync(opts.root, { recursive: true, mode: 0o700 });
+  const foreignAdapter = {
+    claimOwner() {},
+    verifyOwner() { return false; }, // every pre-existing path reads as foreign-owned
+  };
+  assert.throws(
+    () => mod.initialize(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT, ownershipAdapter: foreignAdapter })),
+    { code: 'dir_wrong_owner' }
+  );
+});
+
+test('load blocks when activity.sqlite has the wrong mode (0644)', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  fs.chmodSync(roots.activityDbPath, 0o644);
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), { code: 'activity_db_wrong_mode' });
+  // status() goes through the same verification and must block too.
+  assert.throws(() => mod.status(opts), { code: 'activity_db_wrong_mode' });
+});
+
+test('load blocks when activity.sqlite is not owned by the service identity (adapter-reported)', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const foreignDbAdapter = {
+    claimOwner() {},
+    verifyOwner(stat) { return !stat.isFile(); }, // regular files read as foreign-owned
+  };
+  assert.throws(
+    () => loadMod.verifyActivityRoots(roots, { ownershipAdapter: foreignDbAdapter }),
+    { code: 'activity_db_wrong_owner' }
+  );
+});
+
+// ===========================================================================
+// Fix wave (review MINORS 1-3).
+// ===========================================================================
+
+// MINOR 1: PRAGMA synchronous is per-connection state, not file state, so
+// it is enforced-at-open on every connection this module creates (and
+// asserted by verifyFixedSchema against the CURRENT connection). Note:
+// this build's SQLite defaults to synchronous=FULL already, so the
+// openReadOnly assertion below was green even before the explicit set —
+// the explicit set + connection-level assert guard against builds
+// compiled with a different SQLITE_DEFAULT_SYNCHRONOUS.
+test('every module-opened connection carries synchronous=FULL', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  activityDb.createActivityDatabase({ finalPath, operationId: OP_A, createdAt: CREATED_AT, sourceKind: 'deployment' });
+  const db = activityDb.openReadOnly(finalPath);
+  try {
+    assert.equal(db.prepare('PRAGMA synchronous').get().synchronous, 2); // 2 === FULL
+  } finally {
+    db.close();
+  }
+});
+
+test('verifyFixedSchema rejects a connection whose synchronous mode is not FULL', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  activityDb.createActivityDatabase({ finalPath, operationId: OP_A, createdAt: CREATED_AT, sourceKind: 'deployment' });
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(finalPath);
+  db.exec('PRAGMA synchronous=OFF');
+  try {
+    assert.throws(() => activityDb.verifyFixedSchema(db), { code: 'activity_schema_pragma_mismatch' });
+  } finally {
+    db.close();
+  }
+});
+
+// MINOR 2: plan line 351 binds a purpose-specific restore-invalidation
+// proposal to "the unchanged linked recovery operation/`disposition-
+// restoring` phase" — the codec must carry the recovery phase, not just
+// the recovery operation ID.
+function validRestoreInvalidationDisposition() {
+  return {
+    format: 1,
+    generation: 1,
+    previousGeneration: 0,
+    previousSha256: 'a'.repeat(64),
+    operationId: OP_B,
+    kind: 'HISTORICAL_V2_DISPOSITION',
+    createdAt: CREATED_AT,
+    state: {
+      activeIdentitySha256: null,
+      mode: 'UNNEGOTIATED',
+      historicalV2Disposition: 'RECONCILIATION_REQUIRED',
+      historicalV2DispositionReceiptSha256: 'c'.repeat(64),
+      databaseRestore: { status: 'CLEAR', restoreEpoch: 0 },
+      sourceKind: 'restore-invalidation',
+      recoveryOperationId: OP_A,
+      recoveryPhase: 'disposition-restoring',
+      restorePreparationResultSha256: 'd'.repeat(64),
+      restoreReceiptSha256: 'e'.repeat(64),
+      restoredDatabaseAuditSha256: 'f'.repeat(64),
+      priorClearGenerationSha256: 'a1'.repeat(32),
+      identitySha256: 'b2'.repeat(32),
+    },
+  };
+}
+
+test('restore-invalidation disposition carries the linked recovery phase and requires its exact value', () => {
+  const gen = validRestoreInvalidationDisposition();
+  assert.doesNotThrow(() => codecs.validateGeneration(gen));
+  const missingPhase = validRestoreInvalidationDisposition();
+  delete missingPhase.state.recoveryPhase;
+  assert.throws(() => codecs.validateGeneration(missingPhase), { code: 'schema_missing_field' });
+  const wrongPhase = validRestoreInvalidationDisposition();
+  wrongPhase.state.recoveryPhase = 'database-restore-preparing';
+  assert.throws(() => codecs.validateGeneration(wrongPhase), { code: 'schema_invalid_field' });
+});
+
+// MINOR 3: plan line 333 — "The immutable factory anchor is exactly
+// {generation:0,entrySha256:<canonical genesis entry hash>};
+// factoryCommandActivityAnchorSha256 hashes those canonical bytes and
+// never hashes mutable activity_head or external head.json bytes."
+// Consumed by the future initialize-factory-zero verb (out of scope this
+// slice); the codec is pinned now so that slice inherits it rather than
+// re-inventing it.
+test('computeFactoryCommandActivityAnchorSha256 hashes the exact canonical anchor bytes', () => {
+  const entrySha256 = 'ab'.repeat(32);
+  const expected = codecs.sha256Hex(codecs.canonicalJson({ generation: 0, entrySha256 }));
+  assert.equal(activityDb.computeFactoryCommandActivityAnchorSha256(entrySha256), expected);
+  assert.equal(mod.computeFactoryCommandActivityAnchorSha256(entrySha256), expected);
+  // deterministic
+  assert.equal(
+    activityDb.computeFactoryCommandActivityAnchorSha256(entrySha256),
+    activityDb.computeFactoryCommandActivityAnchorSha256(entrySha256)
+  );
+  assert.throws(() => activityDb.computeFactoryCommandActivityAnchorSha256('not-a-sha'), { code: 'factory_anchor_invalid_entry_sha256' });
+});
+
+// ===========================================================================
+// activity-append: entry codec, principal hashing, durable append discipline
+// (plan lines 335-341; slice 2 of the protocol-state module)
+// ===========================================================================
+
+const OP_C = '33333333-3333-4333-8333-333333333333';
+const OP_D = '44444444-4444-4444-8444-444444444444';
+const APPEND_AT = '2026-07-16T00:00:01.000Z';
+
+function validAppendEntryFields(overrides) {
+  return Object.assign(
+    {
+      generation: 1,
+      previousGeneration: 0,
+      previousSha256: 'a'.repeat(64),
+      operationId: OP_C,
+      kind: 'COMMAND_LIFECYCLE_MUTATION',
+      createdAt: APPEND_AT,
+      principalKind: 'local',
+      principalSha256: 'b'.repeat(64),
+      commandKeySha256: 'c'.repeat(64),
+      adapterId: 'db.command-lifecycle',
+      activitySha256: 'd'.repeat(64),
+    },
+    overrides || {}
+  );
+}
+
+function initializedRoots() {
+  const { opts } = makeRoots();
+  initMod.initializeFourRoots(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT }));
+  const roots = pathsMod.resolveRoots(opts);
+  return { opts, roots };
+}
+
+function appendArgs(roots, overrides) {
+  return Object.assign(
+    {
+      dbPath: roots.activityDbPath,
+      operationId: OP_C,
+      kind: 'COMMAND_LIFECYCLE_MUTATION',
+      createdAt: APPEND_AT,
+      principalKind: 'local',
+      principalSha256: 'b'.repeat(64),
+      commandKeySha256: 'c'.repeat(64),
+      adapterId: 'db.command-lifecycle',
+      activitySha256: 'd'.repeat(64),
+    },
+    overrides || {}
+  );
+}
+
+test('activity entry codec: buildActivityEntry produces the exact closed 12-field logical entry', () => {
+  const entry = activityAppend.buildActivityEntry(validAppendEntryFields());
+  assert.deepEqual(Object.keys(entry).sort(), [
+    'activitySha256',
+    'adapterId',
+    'commandKeySha256',
+    'createdAt',
+    'entrySha256',
+    'generation',
+    'kind',
+    'operationId',
+    'previousGeneration',
+    'previousSha256',
+    'principalKind',
+    'principalSha256',
+  ]);
+  // entrySha256 is the canonical hash of the other 11 fields (same codec as genesis)
+  assert.equal(entry.entrySha256, activityDb.entrySha256For(entry));
+  assert.doesNotThrow(() => activityAppend.validateActivityEntry(entry));
+});
+
+test('activity entry codec rejects token/payload/credential/actor/detail fields', () => {
+  for (const field of ['token', 'payload', 'credential', 'actorId', 'detail', 'leaseToken', 'result', 'deviceSecret']) {
+    const entry = activityAppend.buildActivityEntry(validAppendEntryFields());
+    entry[field] = 'x';
+    assert.throws(() => activityAppend.validateActivityEntry(entry), { code: 'schema_unknown_field' }, `field "${field}" must be rejected`);
+  }
+});
+
+test('activity entry codec: closed kind union (no GENESIS on the append path)', () => {
+  for (const kind of ['COMMAND_LIFECYCLE_MUTATION', 'EXTERNAL_EFFECT_ATTEMPT', 'ACK_TRANSPORT_MUTATION']) {
+    assert.doesNotThrow(() => activityAppend.buildActivityEntry(validAppendEntryFields({ kind })));
+  }
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ kind: 'GENESIS' })), { code: 'schema_invalid_field' });
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ kind: 'SOMETHING_ELSE' })), { code: 'schema_invalid_field' });
+});
+
+test('activity entry codec: closed principalKind union cloud|local (no system on the append path)', () => {
+  for (const principalKind of ['cloud', 'local']) {
+    assert.doesNotThrow(() => activityAppend.buildActivityEntry(validAppendEntryFields({ principalKind })));
+  }
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ principalKind: 'system' })), { code: 'schema_invalid_field' });
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ principalKind: 'operator' })), { code: 'schema_invalid_field' });
+});
+
+test('activity entry codec: null command/adapter/activity fields are rejected on the append path', () => {
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ commandKeySha256: null })), { code: 'schema_invalid_field' });
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ adapterId: null })), { code: 'schema_invalid_field' });
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ activitySha256: null })), { code: 'schema_invalid_field' });
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ principalSha256: 'not-hex' })), { code: 'schema_invalid_field' });
+});
+
+test('principal hashing: local grammar is exactly local:<actor-uuid|system>:<producer-id>, actor never returned', () => {
+  assert.equal(activityAppend.localPrincipalSha256('system', 'scheduler'), codecs.sha256Hex('local:system:scheduler'));
+  const uuid = '55555555-5555-4555-8555-555555555555';
+  assert.equal(activityAppend.localPrincipalSha256(uuid, 'valve-api'), codecs.sha256Hex(`local:${uuid}:valve-api`));
+  assert.throws(() => activityAppend.localPrincipalSha256('not a uuid', 'x'), { code: 'principal_invalid_actor' });
+  assert.throws(() => activityAppend.localPrincipalSha256('', 'x'), { code: 'principal_invalid_actor' });
+  assert.throws(() => activityAppend.localPrincipalSha256(uuid, ''), { code: 'principal_invalid_producer' });
+  assert.throws(() => activityAppend.localPrincipalSha256(uuid, 'bad producer'), { code: 'principal_invalid_producer' });
+});
+
+test('principal hashing: cloud form hashes the protected capability identity', () => {
+  const idHash = 'e'.repeat(64);
+  assert.equal(activityAppend.cloudPrincipalSha256(idHash), codecs.sha256Hex(`cloud:${idHash}`));
+  assert.throws(() => activityAppend.cloudPrincipalSha256('nope'), { code: 'principal_invalid_identity' });
+  assert.throws(() => activityAppend.cloudPrincipalSha256(null), { code: 'principal_invalid_identity' });
+});
+
+test('appendCommandActivity commits generation 1 with the full BEGIN IMMEDIATE discipline and rereads it', () => {
+  const { roots } = initializedRoots();
+  const res = activityAppend.appendCommandActivity(appendArgs(roots));
+  assert.equal(res.row.generation, 1);
+  assert.equal(res.row.kind, 'COMMAND_LIFECYCLE_MUTATION');
+  assert.equal(res.row.operation_id, OP_C);
+
+  const dbRo = activityDb.openReadOnly(roots.activityDbPath);
+  const genesis = dbRo.prepare('SELECT * FROM activity_chain WHERE generation=0').get();
+  const head = dbRo.prepare('SELECT * FROM activity_head WHERE id=1').get();
+  dbRo.close();
+
+  // chain links to the committed genesis row
+  assert.equal(res.row.previous_generation, 0);
+  assert.equal(res.row.previous_sha256, genesis.entry_sha256);
+  // entry hash is the canonical hash of the row's own logical fields
+  assert.equal(
+    res.row.entry_sha256,
+    activityDb.entrySha256For({
+      generation: 1,
+      previousGeneration: 0,
+      previousSha256: genesis.entry_sha256,
+      operationId: OP_C,
+      kind: 'COMMAND_LIFECYCLE_MUTATION',
+      createdAt: APPEND_AT,
+      principalKind: 'local',
+      principalSha256: 'b'.repeat(64),
+      commandKeySha256: 'c'.repeat(64),
+      adapterId: 'db.command-lifecycle',
+      activitySha256: 'd'.repeat(64),
+    })
+  );
+  // singleton head updated in the same transaction
+  assert.equal(head.generation, 1);
+  assert.equal(head.entry_sha256, res.row.entry_sha256);
+  assert.equal(head.segment_count, 2);
+  const acc0 = activityDb.checkpointCumulativeSha256(null, genesis.entry_sha256);
+  assert.equal(head.segment_accumulator_sha256, activityDb.checkpointCumulativeSha256(acc0, res.row.entry_sha256));
+  // checkpoint binding unchanged off-boundary
+  assert.equal(head.checkpoint_generation, 0);
+  // the reread head is returned too
+  assert.equal(res.headRow.generation, 1);
+  assert.equal(res.headRow.entry_sha256, res.row.entry_sha256);
+});
+
+test('appendCommandActivity chains a second append onto the first', () => {
+  const { roots } = initializedRoots();
+  const first = activityAppend.appendCommandActivity(appendArgs(roots));
+  const second = activityAppend.appendCommandActivity(
+    appendArgs(roots, { operationId: OP_D, kind: 'ACK_TRANSPORT_MUTATION', createdAt: '2026-07-16T00:00:02.000Z' })
+  );
+  assert.equal(second.row.generation, 2);
+  assert.equal(second.row.previous_sha256, first.row.entry_sha256);
+  assert.equal(second.headRow.generation, 2);
+  assert.equal(second.headRow.segment_count, 3);
+});
+
+test('appendCommandActivity refuses a replayed operationId and leaves the first entry intact (no second attempt)', () => {
+  const { roots } = initializedRoots();
+  const first = activityAppend.appendCommandActivity(appendArgs(roots));
+  assert.throws(
+    () => activityAppend.appendCommandActivity(appendArgs(roots, { createdAt: '2026-07-16T00:00:02.000Z' })),
+    { code: 'activity_append_operation_replayed' }
+  );
+  const dbRo = activityDb.openReadOnly(roots.activityDbPath);
+  const rows = dbRo.prepare('SELECT COUNT(*) AS n FROM activity_chain').get();
+  const row1 = dbRo.prepare('SELECT * FROM activity_chain WHERE generation=1').get();
+  const head = dbRo.prepare('SELECT * FROM activity_head WHERE id=1').get();
+  dbRo.close();
+  assert.equal(rows.n, 2); // genesis + the one successful append
+  assert.equal(row1.entry_sha256, first.row.entry_sha256);
+  assert.equal(head.generation, 1);
+});
+
+test('appendCommandActivity revalidates the singleton head inside the transaction: a tampered head blocks', () => {
+  const { roots } = initializedRoots();
+  const { DatabaseSync } = require('node:sqlite');
+  const rw = new DatabaseSync(roots.activityDbPath);
+  rw.prepare("UPDATE activity_head SET entry_sha256 = ? WHERE id=1").run('f'.repeat(64));
+  rw.close();
+  assert.throws(() => activityAppend.appendCommandActivity(appendArgs(roots)), { code: 'activity_append_head_invalid' });
+  // nothing appended
+  const dbRo = activityDb.openReadOnly(roots.activityDbPath);
+  const rows = dbRo.prepare('SELECT COUNT(*) AS n FROM activity_chain').get();
+  dbRo.close();
+  assert.equal(rows.n, 1);
+});
+
+test('appendCommandActivity revalidates the singleton head: a head behind the chain max blocks', () => {
+  const { roots } = initializedRoots();
+  activityAppend.appendCommandActivity(appendArgs(roots));
+  const { DatabaseSync } = require('node:sqlite');
+  const rw = new DatabaseSync(roots.activityDbPath);
+  const genesis = rw.prepare('SELECT * FROM activity_chain WHERE generation=0').get();
+  rw.prepare('UPDATE activity_head SET generation = 0, entry_sha256 = ? WHERE id=1').run(genesis.entry_sha256);
+  rw.close();
+  assert.throws(
+    () => activityAppend.appendCommandActivity(appendArgs(roots, { operationId: OP_D })),
+    { code: 'activity_append_head_invalid' }
+  );
+});
+
+test('appendCommandActivity revalidates the fixed schema inside the transaction: an extra view blocks', () => {
+  const { roots } = initializedRoots();
+  const { DatabaseSync } = require('node:sqlite');
+  const rw = new DatabaseSync(roots.activityDbPath);
+  rw.exec('CREATE VIEW sneaky AS SELECT 1');
+  rw.close();
+  assert.throws(() => activityAppend.appendCommandActivity(appendArgs(roots)), { code: 'activity_schema_extra_objects' });
+});
+
+test('appendCommandActivity rejects invalid descriptor fields without writing anything', () => {
+  const { roots } = initializedRoots();
+  const cases = [
+    { operationId: 'no' },
+    { kind: 'GENESIS' },
+    { principalKind: 'system' },
+    { principalSha256: 'not-hex' },
+    { commandKeySha256: null },
+    { adapterId: '' },
+    { activitySha256: 'not-hex' },
+    { createdAt: 'not-a-date' },
+  ];
+  for (const bad of cases) {
+    assert.throws(() => activityAppend.appendCommandActivity(appendArgs(roots, bad)), Error, `should reject ${JSON.stringify(bad)}`);
+  }
+  const dbRo = activityDb.openReadOnly(roots.activityDbPath);
+  const rows = dbRo.prepare('SELECT COUNT(*) AS n FROM activity_chain').get();
+  dbRo.close();
+  assert.equal(rows.n, 1); // only genesis
+});
+
+// ===========================================================================
+// external activity-head witness update after commit (plan line 339)
+// ===========================================================================
+
+const ACTIVITY_APPEND_PATH = path.join(__dirname, 'activity-append.js');
+
+function readExternalHead(roots) {
+  return JSON.parse(fs.readFileSync(roots.activityHeadPath, 'utf8'));
+}
+
+test('runExclusiveActivityAppend publishes the external head witness after every commit', () => {
+  const { opts, roots } = initializedRoots();
+  const first = activityAppend.runExclusiveActivityAppend(Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots)));
+  const head1 = readExternalHead(roots);
+  assert.deepEqual(head1, {
+    format: 1,
+    generation: 1,
+    entrySha256: first.row.entry_sha256,
+    checkpointGeneration: 0,
+    checkpointSha256: first.headRow.checkpoint_sha256,
+  });
+  const second = activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: OP_D, createdAt: '2026-07-16T00:00:02.000Z' }))
+  );
+  const head2 = readExternalHead(roots);
+  assert.equal(head2.generation, 2);
+  assert.equal(head2.entrySha256, second.row.entry_sha256);
+  // the whole root set still verifies cleanly
+  const loaded = loadMod.loadProtocolState(Object.assign({}, opts, { repair: false }));
+  assert.equal(loaded.initialized, true);
+  assert.equal(loaded.resumePending, false);
+});
+
+test('a crash between DB commit and external head publish is a resumable one-ahead state', () => {
+  const { opts, roots } = initializedRoots();
+  const childScript = `
+    const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+    activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+      Object.assign({ opts, bootId: 'boot-x', crashAfter: 'append_db_commit' }, appendArgs(pathsMod.resolveRoots(opts)))
+    )});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137, `expected simulated crash, got ${child.status}: ${child.stderr}`);
+  // On disk: DB at generation 1, external head still at generation 0.
+  assert.equal(readExternalHead(roots).generation, 0);
+  const verified = loadMod.verifyActivityRoots(roots, {});
+  assert.deepEqual(verified.resumable, { kind: 'EXTERNAL_HEAD_PUBLICATION', targetGeneration: 1 });
+  // status() must not throw on this documented crash state
+  assert.ok(mod.status(opts));
+  // reconcile under the activity lock heals it deterministically
+  activityAppend.reconcileExternalActivityHead(roots, {});
+  assert.equal(readExternalHead(roots).generation, 1);
+  const healed = loadMod.verifyActivityRoots(roots, {});
+  assert.equal(healed.resumable, null);
+});
+
+test('a crashed hot journal on the append path is recovered before the next locked append', () => {
+  const { opts, roots } = initializedRoots();
+  const childScript = `
+    const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+    activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+      Object.assign({ opts, bootId: 'boot-x', crashAfter: 'append_mid_transaction' }, appendArgs(pathsMod.resolveRoots(opts)))
+    )});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137);
+  assert.equal(fs.existsSync(`${roots.activityDbPath}-journal`), true);
+  // The uncommitted transaction is rolled back; the next locked append
+  // recovers the journal and proceeds from generation 0.
+  const res = activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-y' }, appendArgs(roots, { operationId: OP_D }))
+  );
+  assert.equal(res.row.generation, 1);
+  assert.equal(fs.existsSync(`${roots.activityDbPath}-journal`), false);
+  assert.equal(readExternalHead(roots).generation, 1);
+});
+
+test('one-ahead recovery verifies the predecessor equals the external head (tampered head blocks)', () => {
+  const { opts, roots } = initializedRoots();
+  activityAppend.runExclusiveActivityAppend(Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots)));
+  // Crash the next append after commit: DB at 2, external head at 1.
+  const childScript = `
+    const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+    activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+      Object.assign(
+        { opts, bootId: 'boot-x', crashAfter: 'append_db_commit' },
+        appendArgs(pathsMod.resolveRoots(opts), { operationId: OP_D, createdAt: '2026-07-16T00:00:02.000Z' })
+      )
+    )});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137);
+  // Tamper the external head's entrySha256 (shape stays valid).
+  const tampered = readExternalHead(roots);
+  tampered.entrySha256 = 'f'.repeat(64);
+  fs.writeFileSync(roots.activityHeadPath, JSON.stringify(tampered));
+  assert.throws(() => activityAppend.reconcileExternalActivityHead(roots, {}), (err) =>
+    ['activity_external_head_predecessor_mismatch', 'activity_external_head_hash_mismatch'].includes(err.code)
+  );
+});
+
+test('one-ahead recovery recomputes that one row: a corrupted pending row blocks', () => {
+  const { opts, roots } = initializedRoots();
+  const childScript = `
+    const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+    activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+      Object.assign({ opts, bootId: 'boot-x', crashAfter: 'append_db_commit' }, appendArgs(pathsMod.resolveRoots(opts)))
+    )});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137);
+  // Corrupt the committed-but-unpublished row's stored kind so its stored
+  // entry hash no longer matches its canonical bytes. The pending row IS
+  // the database head row, so the line-339 "recomputes that one row" step
+  // is revalidateHead's canonical-bytes recompute, which blocks with
+  // activity_append_head_invalid before any head is published.
+  const { DatabaseSync } = require('node:sqlite');
+  const rw = new DatabaseSync(roots.activityDbPath);
+  rw.prepare("UPDATE activity_chain SET kind='ACK_TRANSPORT_MUTATION' WHERE generation=1").run();
+  rw.close();
+  assert.throws(() => activityAppend.reconcileExternalActivityHead(roots, {}), { code: 'activity_append_head_invalid' });
+});
+
+test('a gap larger than one between DB and external head blocks (no multi-step catch-up)', () => {
+  const { opts, roots } = initializedRoots();
+  activityAppend.runExclusiveActivityAppend(Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots)));
+  activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: OP_D, createdAt: '2026-07-16T00:00:02.000Z' }))
+  );
+  // Rewind the external head to generation 0 (the genesis head content).
+  const genesisCheckpoint = JSON.parse(fs.readFileSync(path.join(roots.checkpointsDir, '0000000000000000.json'), 'utf8'));
+  const dbRo = activityDb.openReadOnly(roots.activityDbPath);
+  const genesis = dbRo.prepare('SELECT * FROM activity_chain WHERE generation=0').get();
+  dbRo.close();
+  fs.writeFileSync(
+    roots.activityHeadPath,
+    JSON.stringify({
+      format: 1,
+      generation: 0,
+      entrySha256: genesis.entry_sha256,
+      checkpointGeneration: 0,
+      checkpointSha256: codecs.sha256Hex(codecs.canonicalJson(genesisCheckpoint)),
+    })
+  );
+  assert.throws(() => activityAppend.reconcileExternalActivityHead(roots, {}), { code: 'activity_head_gap_too_large' });
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), { code: 'activity_head_gap_too_large' });
+});
+
+test('an external head ahead of the database blocks the append path', () => {
+  const { opts, roots } = initializedRoots();
+  activityAppend.runExclusiveActivityAppend(Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots)));
+  const head = readExternalHead(roots);
+  head.generation = 5;
+  fs.writeFileSync(roots.activityHeadPath, JSON.stringify(head));
+  assert.throws(() => activityAppend.reconcileExternalActivityHead(roots, {}), { code: 'activity_database_rollback' });
+  assert.throws(
+    () => activityAppend.runExclusiveActivityAppend(Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: OP_D }))),
+    { code: 'activity_database_rollback' }
+  );
+});
+
+test('loadProtocolState repair completes a one-ahead external head with predecessor verification', () => {
+  const { opts, roots } = initializedRoots();
+  const childScript = `
+    const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+    activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+      Object.assign({ opts, bootId: 'boot-x', crashAfter: 'append_db_commit' }, appendArgs(pathsMod.resolveRoots(opts)))
+    )});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137);
+  const loaded = loadMod.loadProtocolState(Object.assign({}, opts, { repair: true }));
+  assert.equal(loaded.initialized, true);
+  assert.equal(loaded.repaired, true);
+  assert.equal(readExternalHead(roots).generation, 1);
+});
+
+test('the witnessed append path locks both activity roots (live same-boot owner blocks)', () => {
+  const { opts, roots } = initializedRoots();
+  const held = locksMod.acquireActivityRootLocks(roots, { operationId: OP_C, sourceKind: 'test' }, { bootId: 'boot-x' });
+  // both activity lock files exist, in the fixed order subset
+  assert.deepEqual(held.lockPaths, [
+    path.join(roots.activityHeadWitnessRoot, 'lock.json'),
+    path.join(roots.activityWitnessRoot, 'lock.json'),
+  ]);
+  assert.throws(
+    () => activityAppend.runExclusiveActivityAppend(Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: OP_D }))),
+    { code: 'lock_live_same_boot_owner' }
+  );
+  held.release();
+});
+
+test('a held capability-root lock does not block the activity-only append path', () => {
+  const { opts, roots } = initializedRoots();
+  // Simulate another live operation holding ONLY the capability root lock.
+  fs.writeFileSync(
+    path.join(roots.capabilityRoot, 'lock.json'),
+    JSON.stringify({ format: 1, pid: process.pid, bootId: 'boot-x', operationId: OP_C, sourceKind: 'test', sourceAuthority: null, headIdentities: {}, typedReceiptSha256: null, createdAt: CREATED_AT }),
+    { mode: 0o600 }
+  );
+  const res = activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: OP_D }))
+  );
+  assert.equal(res.row.generation, 1);
+  fs.unlinkSync(path.join(roots.capabilityRoot, 'lock.json'));
+});
+
+// ===========================================================================
+// witnessed operations: closed adapter registry + one-use capability +
+// runWitnessedOperation (plan line 335)
+// ===========================================================================
+
+const witnessedMod = require('./witnessed');
+
+const CMD_ADAPTER = 'db.command-lifecycle';
+
+function witnessedDescriptor(overrides) {
+  return Object.assign(
+    {
+      adapterId: CMD_ADAPTER,
+      kind: 'COMMAND_LIFECYCLE_MUTATION',
+      principal: { principalKind: 'local', actor: 'system', producerId: 'scheduler' },
+      commandKeySha256: 'c'.repeat(64),
+      activitySha256: 'd'.repeat(64),
+    },
+    overrides || {}
+  );
+}
+
+function makeRunner(runImpl, extraOpts, registryDefs) {
+  const { opts, roots } = initializedRoots();
+  const registry = witnessedMod.createAdapterRegistry(
+    registryDefs || [{ adapterId: CMD_ADAPTER, kind: 'COMMAND_LIFECYCLE_MUTATION', run: runImpl }]
+  );
+  const runner = witnessedMod.createWitnessedOperationRunner(
+    Object.assign({ registry, opts, bootId: 'boot-x' }, extraOpts || {})
+  );
+  return { opts, roots, registry, runner };
+}
+
+test('createAdapterRegistry is closed: duplicate adapterId, bad kind, and non-function run are rejected', () => {
+  const run = () => {};
+  assert.throws(
+    () =>
+      witnessedMod.createAdapterRegistry([
+        { adapterId: 'a', kind: 'COMMAND_LIFECYCLE_MUTATION', run },
+        { adapterId: 'a', kind: 'ACK_TRANSPORT_MUTATION', run },
+      ]),
+    { code: 'witnessed_registry_duplicate_adapter' }
+  );
+  assert.throws(
+    () => witnessedMod.createAdapterRegistry([{ adapterId: 'a', kind: 'GENESIS', run }]),
+    { code: 'witnessed_registry_invalid_kind' }
+  );
+  assert.throws(
+    () => witnessedMod.createAdapterRegistry([{ adapterId: 'a', kind: 'COMMAND_LIFECYCLE_MUTATION', run: 'nope' }]),
+    { code: 'witnessed_registry_invalid_run' }
+  );
+  const registry = witnessedMod.createAdapterRegistry([{ adapterId: 'a', kind: 'COMMAND_LIFECYCLE_MUTATION', run }]);
+  assert.equal(Object.isFrozen(registry), true);
+});
+
+test('runWitnessedOperation appends the activity intent durably BEFORE the adapter runs', () => {
+  let observedInsideAdapter = null;
+  const { roots, runner } = makeRunner((gatedDb, args, capability) => {
+    capability.consume();
+    // The intent row must already be committed and the external head already
+    // published when the adapter first runs.
+    const ro = activityDb.openReadOnly(roots.activityDbPath);
+    const row = ro.prepare('SELECT * FROM activity_chain WHERE operation_id = ?').get(capability.operationId);
+    ro.close();
+    observedInsideAdapter = {
+      row,
+      externalHeadGeneration: JSON.parse(fs.readFileSync(roots.activityHeadPath, 'utf8')).generation,
+    };
+    return 'adapter-result';
+  });
+  const outcome = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.result, 'adapter-result');
+  assert.equal(outcome.generation, 1);
+  assert.ok(observedInsideAdapter.row, 'intent row must be committed before the adapter runs');
+  assert.equal(observedInsideAdapter.row.generation, 1);
+  assert.equal(observedInsideAdapter.row.kind, 'COMMAND_LIFECYCLE_MUTATION');
+  assert.equal(observedInsideAdapter.row.adapter_id, CMD_ADAPTER);
+  assert.equal(observedInsideAdapter.externalHeadGeneration, 1);
+  // no actor identifier anywhere in the committed row
+  assert.equal(observedInsideAdapter.row.principal_sha256, activityAppend.localPrincipalSha256('system', 'scheduler'));
+});
+
+test('the one-use capability carries exactly operation ID, adapter ID, activity hash, and generation', () => {
+  let seen = null;
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    seen = capability;
+    capability.consume();
+    return null;
+  });
+  const outcome = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, true);
+  assert.equal(typeof seen.operationId, 'string');
+  assert.equal(seen.adapterId, CMD_ADAPTER);
+  assert.equal(seen.activitySha256, 'd'.repeat(64));
+  assert.equal(seen.generation, 1);
+  assert.equal(Object.isFrozen(seen), true);
+});
+
+test('the capability gates the db handle: any mutation before consumption fails', () => {
+  const calls = [];
+  const fakeDb = { mutate: (x) => { calls.push(x); return 'ok'; } };
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    assert.throws(() => gatedDb.mutate('too-early'), { code: 'witnessed_mutation_before_consumption' });
+    capability.consume();
+    assert.equal(gatedDb.mutate('after-consume'), 'ok');
+    return null;
+  });
+  const outcome = runner.runWitnessedOperation(fakeDb, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, true);
+  assert.deepEqual(calls, ['after-consume']);
+});
+
+test('double consumption fails', () => {
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    capability.consume();
+    assert.throws(() => capability.consume(), { code: 'witnessed_capability_double_use' });
+    return null;
+  });
+  const outcome = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, true); // consumed exactly once; the second call threw inside the adapter and was caught by the adapter itself
+});
+
+test('a cached capability from an earlier operation cannot be consumed by a later one', () => {
+  let cached = null;
+  let secondOutcomeInsideAdapter = null;
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    if (!cached) {
+      cached = capability;
+      capability.consume();
+      return 'first';
+    }
+    secondOutcomeInsideAdapter = assert.throws(() => cached.consume(), (err) =>
+      ['witnessed_capability_unrecognized', 'witnessed_capability_context_mismatch', 'witnessed_capability_double_use'].includes(err.code)
+    );
+    capability.consume();
+    return 'second';
+  });
+  assert.equal(runner.runWitnessedOperation({}, witnessedDescriptor(), {}).ok, true);
+  const second = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(second.ok, true);
+});
+
+test('a serialized/copied capability is unrecognized (process-private, nonserializable)', () => {
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    const copy = Object.assign(Object.create(Object.getPrototypeOf(capability)), JSON.parse(JSON.stringify(capability)));
+    copy.consume = capability.consume;
+    assert.throws(() => witnessedMod.__consumeForTest(copy), (err) =>
+      ['witnessed_capability_unrecognized', 'witnessed_no_operation_in_flight'].includes(err.code)
+    );
+    capability.consume();
+    return null;
+  });
+  assert.equal(runner.runWitnessedOperation({}, witnessedDescriptor(), {}).ok, true);
+});
+
+test('consume outside any in-flight operation fails', () => {
+  let cached = null;
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    cached = capability;
+    capability.consume();
+    return null;
+  });
+  assert.equal(runner.runWitnessedOperation({}, witnessedDescriptor(), {}).ok, true);
+  assert.throws(() => cached.consume(), (err) =>
+    ['witnessed_no_operation_in_flight', 'witnessed_capability_unrecognized', 'witnessed_capability_double_use'].includes(err.code)
+  );
+});
+
+test('an unregistered adapterId fails before any append (no evidence row)', () => {
+  const { roots, runner } = makeRunner(() => null);
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor({ adapterId: 'not-registered' }), {}),
+    { code: 'witnessed_adapter_not_registered' }
+  );
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  assert.equal(ro.prepare('SELECT COUNT(*) AS n FROM activity_chain').get().n, 1);
+  ro.close();
+});
+
+test('a kind mismatch between descriptor and registered adapter fails before any append', () => {
+  const { roots, runner } = makeRunner(() => null);
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor({ kind: 'ACK_TRANSPORT_MUTATION' }), {}),
+    { code: 'witnessed_adapter_kind_mismatch' }
+  );
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  assert.equal(ro.prepare('SELECT COUNT(*) AS n FROM activity_chain').get().n, 1);
+  ro.close();
+});
+
+test('the protected descriptor is canonicalized: unknown fields, functions, and undefined are rejected', () => {
+  const { runner } = makeRunner(() => null);
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor({ run: () => {} }), {}),
+    { code: 'schema_unknown_field' }
+  );
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor({ principal: { principalKind: 'local', actor: 'system', producerId: 'scheduler', cb: () => {} } }), {}),
+    Error
+  );
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor({ commandKeySha256: undefined }), {}),
+    Error
+  );
+});
+
+test('caller callback substitution fails: functions anywhere in args are rejected before any append', () => {
+  const { roots, runner } = makeRunner(() => null);
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor(), { run: () => {} }),
+    { code: 'witnessed_args_function_rejected' }
+  );
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor(), { nested: { deep: [{ cb: () => {} }] } }),
+    { code: 'witnessed_args_function_rejected' }
+  );
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  assert.equal(ro.prepare('SELECT COUNT(*) AS n FROM activity_chain').get().n, 1);
+  ro.close();
+});
+
+test('a nested witnessed operation fails', () => {
+  let nestedError = null;
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    capability.consume();
+    try {
+      runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+    } catch (err) {
+      nestedError = err;
+    }
+    return null;
+  });
+  const outcome = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, true);
+  assert.ok(nestedError);
+  assert.equal(nestedError.code, 'witnessed_nested_operation');
+});
+
+test('adapter completion without consumption fails but leaves the appended evidence', () => {
+  const { roots, runner } = makeRunner(() => 'finished-without-consuming');
+  const outcome = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.failure, 'witnessed_completed_without_consumption');
+  assert.equal(outcome.generation, 1);
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  assert.equal(ro.prepare('SELECT COUNT(*) AS n FROM activity_chain').get().n, 2); // evidence retained
+  ro.close();
+});
+
+test('append-only-without-adapter-completion returns failure with conservative evidence and no second attempt', () => {
+  const fixedOp = '66666666-6666-4666-8666-666666666666';
+  let attempts = 0;
+  const { roots, runner } = makeRunner(
+    () => {
+      attempts += 1;
+      throw new Error('adapter exploded before doing any work');
+    },
+    { newOperationId: () => fixedOp }
+  );
+  const outcome = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.failure, 'witnessed_adapter_failed');
+  assert.equal(outcome.generation, 1);
+  assert.equal(attempts, 1);
+  // conservative evidence: the intent row for the failed operation stays
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  const row = ro.prepare('SELECT * FROM activity_chain WHERE operation_id = ?').get(fixedOp);
+  ro.close();
+  assert.ok(row);
+  // no second attempt from the same operation ID
+  assert.throws(() => runner.runWitnessedOperation({}, witnessedDescriptor(), {}), { code: 'activity_append_operation_replayed' });
+  assert.equal(attempts, 1, 'the adapter must not run again for the replayed operation ID');
+});
+
+test('a witnessed operation refuses to run while capability state is missing', () => {
+  const { opts } = makeRoots(); // NOT initialized
+  const registry = witnessedMod.createAdapterRegistry([{ adapterId: CMD_ADAPTER, kind: 'COMMAND_LIFECYCLE_MUTATION', run: () => null }]);
+  const runner = witnessedMod.createWitnessedOperationRunner({ registry, opts, bootId: 'boot-x' });
+  assert.throws(() => runner.runWitnessedOperation({}, witnessedDescriptor(), {}), { code: 'witnessed_capability_state_missing' });
+});
+
+test('a witnessed operation refuses to run while capability state is database-restore-blocked', () => {
+  const { opts, roots, runner } = makeRunner(() => null);
+  // Hand-craft a valid generation 1 DATABASE_RESTORE_INVALIDATION on disk.
+  const gen0 = JSON.parse(fs.readFileSync(path.join(roots.generationsDir, pathsMod.generationFilename(0)), 'utf8'));
+  const gen0Sha = codecs.canonicalSha256(gen0);
+  const witness0 = JSON.parse(fs.readFileSync(path.join(roots.witnessRoot, pathsMod.generationFilename(0)), 'utf8'));
+  const witness0Sha = codecs.canonicalSha256(witness0);
+  const gen1 = {
+    format: 1,
+    generation: 1,
+    previousGeneration: 0,
+    previousSha256: gen0Sha,
+    operationId: OP_D,
+    kind: 'DATABASE_RESTORE_INVALIDATION',
+    createdAt: '2026-07-16T00:00:03.000Z',
+    state: {
+      activeIdentitySha256: null,
+      mode: 'UNNEGOTIATED',
+      historicalV2Disposition: 'UNASSESSED',
+      historicalV2DispositionReceiptSha256: null,
+      databaseRestore: { status: 'RECONCILIATION_REQUIRED', restoreEpoch: 1 },
+      invalidationReceiptSha256: 'a'.repeat(64),
+      recoveryOperationId: OP_C,
+    },
+  };
+  const gen1Sha = codecs.canonicalSha256(gen1);
+  pathsMod.writeExclusiveFile(path.join(roots.generationsDir, pathsMod.generationFilename(1)), Buffer.from(codecs.canonicalJson(gen1), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  const witness1 = { format: 1, generation: 1, generationSha256: gen1Sha, previousWitnessSha256: witness0Sha, operationId: OP_D };
+  pathsMod.writeExclusiveFile(path.join(roots.witnessRoot, pathsMod.generationFilename(1)), Buffer.from(codecs.canonicalJson(witness1), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  const head = { format: 1, generation: 1, generationSha256: gen1Sha, witnessSha256: codecs.canonicalSha256(witness1) };
+  fs.writeFileSync(roots.capabilityHeadPath, codecs.canonicalJson(head), { mode: 0o600 });
+  // sanity: the chain itself verifies
+  assert.doesNotThrow(() => loadMod.verifyCapabilityChain(roots, {}));
+  assert.throws(() => runner.runWitnessedOperation({}, witnessedDescriptor(), {}), { code: 'witnessed_database_restore_blocked' });
+});
+
+test('a witnessed operation refuses to run while capability state is malformed', () => {
+  const { roots, runner } = makeRunner(() => null);
+  fs.writeFileSync(path.join(roots.generationsDir, pathsMod.generationFilename(0)), 'not-json', { mode: 0o600 });
+  assert.throws(() => runner.runWitnessedOperation({}, witnessedDescriptor(), {}), { code: 'chain_entry_malformed_json' });
+});
+
+test('cloud principal descriptors hash the protected capability identity', () => {
+  let row = null;
+  const { roots, runner } = makeRunner((gatedDb, args, capability) => {
+    capability.consume();
+    const ro = activityDb.openReadOnly(roots.activityDbPath);
+    row = ro.prepare('SELECT * FROM activity_chain WHERE operation_id = ?').get(capability.operationId);
+    ro.close();
+    return null;
+  });
+  const idHash = 'ab'.repeat(32);
+  const outcome = runner.runWitnessedOperation(
+    {},
+    witnessedDescriptor({ principal: { principalKind: 'cloud', identitySha256: idHash } }),
+    {}
+  );
+  assert.equal(outcome.ok, true);
+  assert.equal(row.principal_kind, 'cloud');
+  assert.equal(row.principal_sha256, activityAppend.cloudPrincipalSha256(idHash));
+});
+
+test('the module-level runWitnessedOperation surface exists and fails closed with an empty registry', () => {
+  assert.equal(typeof mod.runWitnessedOperation, 'function');
+  assert.throws(() => mod.runWitnessedOperation({}, witnessedDescriptor(), {}), { code: 'witnessed_adapter_not_registered' });
+});
+
+// ===========================================================================
+// checkpoints, prune, ceilings, bounded runtime verification, full audit
+// (plan line 341)
+// ===========================================================================
+
+const INTERVAL = activityAppend.CHECKPOINT_INTERVAL; // 4096
+
+// synthesizeActivityState: builds an initialized root set whose activity
+// ledger represents a chain currently at checkpoint index `k` (boundary
+// generation B = k*INTERVAL) plus `offset` post-boundary appends, retaining
+// exactly the rows the prune discipline would have left (from (k-1)*INTERVAL
+// through B+offset). Rows in the retained window are REAL, internally
+// consistent entries (canonical hashes, chain links, rolling accumulator);
+// the pruned prehistory is represented only by a fabricated seed hash for
+// the first retained row's previousSha256 / accumulator — exactly the
+// information a genuinely pruned database would carry. Receipts are written
+// for the indices in `receiptIndices` (default: all of 0..k, with real
+// previous-link hashes; intermediate receipts carry fabricated entry/
+// cumulative hashes since their segment rows are pruned). This is the
+// documented synthesis method for the capacity tests: state is constructed
+// directly rather than via a million live appends.
+function synthesizeActivityState(baseOpts, { checkpointIndex, offset, receiptIndices }) {
+  const k = checkpointIndex;
+  const r = offset;
+  assert.ok(k >= 1);
+  const { opts } = makeRoots();
+  Object.assign(opts, baseOpts || {});
+  initMod.initializeFourRoots(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT }));
+  const roots = pathsMod.resolveRoots(opts);
+  const B = k * INTERVAL;
+  const startGen = (k - 1) * INTERVAL;
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(roots.activityDbPath);
+  db.exec('PRAGMA synchronous=FULL;');
+
+  const genesis = db.prepare('SELECT * FROM activity_chain WHERE generation=0').get();
+  const receipt0 = JSON.parse(fs.readFileSync(path.join(roots.checkpointsDir, pathsMod.generationFilename(0)), 'utf8'));
+
+  // Row synthesis: chain forward from either the real genesis (k===1) or a
+  // fabricated pruned-prehistory seed (k>=2).
+  let prevSha;
+  let acc;
+  let firstSynthGen;
+  if (k === 1) {
+    prevSha = genesis.entry_sha256;
+    acc = activityDb.checkpointCumulativeSha256(null, genesis.entry_sha256); // real acc_0
+    firstSynthGen = 1;
+  } else {
+    prevSha = '5'.repeat(64); // pruned predecessor's entry hash (fabricated seed)
+    acc = '6'.repeat(64); // accumulator value before the first retained row (fabricated seed)
+    firstSynthGen = startGen;
+    db.exec('DELETE FROM activity_chain'); // genesis row is long pruned at this scale
+  }
+
+  const insert = db.prepare(
+    `INSERT INTO activity_chain
+       (generation, previous_generation, previous_sha256, operation_id, kind, created_at,
+        principal_kind, principal_sha256, command_key_sha256, adapter_id, activity_sha256, entry_sha256)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+  );
+  const rowFacts = new Map(); // generation -> { entrySha256, acc }
+  let boundaryAcc = null;
+  let prevBoundaryEntry = null;
+  let prevBoundaryAcc = null;
+  db.exec('BEGIN IMMEDIATE');
+  for (let g = firstSynthGen; g <= B + r; g += 1) {
+    const entry = activityAppend.buildActivityEntry({
+      generation: g,
+      previousGeneration: g - 1,
+      previousSha256: prevSha,
+      operationId: `synth-op-${g}`,
+      kind: activityAppend.ACTIVITY_KINDS[g % 3],
+      createdAt: APPEND_AT,
+      principalKind: 'local',
+      principalSha256: 'b'.repeat(64),
+      commandKeySha256: 'c'.repeat(64),
+      adapterId: 'db.command-lifecycle',
+      activitySha256: 'd'.repeat(64),
+    });
+    insert.run(
+      entry.generation, entry.previousGeneration, entry.previousSha256, entry.operationId, entry.kind,
+      entry.createdAt, entry.principalKind, entry.principalSha256, entry.commandKeySha256, entry.adapterId,
+      entry.activitySha256, entry.entrySha256
+    );
+    acc = activityDb.checkpointCumulativeSha256(acc, entry.entrySha256);
+    prevSha = entry.entrySha256;
+    if (g === startGen) { prevBoundaryEntry = entry.entrySha256; prevBoundaryAcc = acc; }
+    if (g === B) { boundaryAcc = acc; }
+    rowFacts.set(g, { entrySha256: entry.entrySha256, acc });
+  }
+  const headEntrySha = rowFacts.get(B + r).entrySha256;
+  const headAcc = rowFacts.get(B + r).acc;
+
+  // Receipts. Real previous-link hashes throughout; entry/cumulative hashes
+  // are real for indices whose boundary rows are retained (k-1 when k>=2
+  // only if startGen row exists — it does; k always), fabricated otherwise.
+  const wanted = receiptIndices || Array.from({ length: k }, (_v, i) => i + 1);
+  const receiptByIndex = new Map([[0, receipt0]]);
+  let prevReceipt = receipt0;
+  let prevReceiptSha = codecs.canonicalSha256(receipt0);
+  for (let i = 1; i <= k; i += 1) {
+    let entrySha256;
+    let cumulativeSha256;
+    if (i === k) {
+      entrySha256 = rowFacts.get(B).entrySha256;
+      cumulativeSha256 = boundaryAcc;
+    } else if (i === k - 1 && k >= 2) {
+      entrySha256 = prevBoundaryEntry;
+      cumulativeSha256 = prevBoundaryAcc;
+    } else {
+      entrySha256 = codecs.sha256Hex(`fabricated-entry-${i}`);
+      cumulativeSha256 = codecs.sha256Hex(`fabricated-cumulative-${i}`);
+    }
+    const receipt = {
+      format: 1,
+      checkpointGeneration: i,
+      entrySha256,
+      previousCheckpointSha256: prevReceiptSha,
+      cumulativeSha256,
+      createdAt: APPEND_AT,
+    };
+    receiptByIndex.set(i, receipt);
+    if (wanted.includes(i)) {
+      pathsMod.writeExclusiveFile(
+        path.join(roots.checkpointsDir, pathsMod.generationFilename(i)),
+        Buffer.from(codecs.canonicalJson(receipt), 'utf8'),
+        pathsMod.defaultOwnershipAdapter
+      );
+    }
+    prevReceipt = receipt;
+    prevReceiptSha = codecs.canonicalSha256(receipt);
+  }
+  const latestReceiptSha = codecs.canonicalSha256(receiptByIndex.get(k));
+
+  db.prepare(
+    `UPDATE activity_head SET generation=?, entry_sha256=?, checkpoint_generation=?, checkpoint_sha256=?, segment_count=?, segment_accumulator_sha256=? WHERE id=1`
+  ).run(B + r, headEntrySha, k, latestReceiptSha, r + 1, headAcc);
+  db.exec('COMMIT');
+  db.close();
+
+  const externalHead = { format: 1, generation: B + r, entrySha256: headEntrySha, checkpointGeneration: k, checkpointSha256: latestReceiptSha };
+  fs.writeFileSync(roots.activityHeadPath, codecs.canonicalJson(externalHead), { mode: 0o600 });
+
+  return { opts, roots, k, B, r, headGeneration: B + r, rowFacts, receiptByIndex, latestReceiptSha, externalHead };
+}
+
+function countRows(roots) {
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  const res = ro.prepare('SELECT COUNT(*) AS n, MIN(generation) AS lo, MAX(generation) AS hi FROM activity_chain').get();
+  ro.close();
+  return res;
+}
+
+test('crossing a 4096 boundary writes the exact deterministic receipt, rebinds the head, and prunes', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: INTERVAL - 1 }); // head at 8191
+  const { opts, roots } = synth;
+  // sanity: the synthesized state verifies cleanly under the bounded verifier
+  const pre = loadMod.verifyActivityRoots(roots, {});
+  assert.equal(pre.resumable, null);
+
+  const receipt1Sha = codecs.canonicalSha256(synth.receiptByIndex.get(1));
+  const preAcc = synth.rowFacts.get(synth.headGeneration).acc;
+
+  const res = activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: 'boundary-op-8192', createdAt: '2026-07-16T00:00:05.000Z' }))
+  );
+  assert.equal(res.row.generation, 2 * INTERVAL); // 8192
+
+  // Receipt 2 exists with the exact deterministic content.
+  const receipt2Path = path.join(roots.checkpointsDir, pathsMod.generationFilename(2));
+  assert.equal(fs.existsSync(receipt2Path), true);
+  const receipt2 = JSON.parse(fs.readFileSync(receipt2Path, 'utf8'));
+  assert.deepEqual(receipt2, {
+    format: 1,
+    checkpointGeneration: 2,
+    entrySha256: res.row.entry_sha256,
+    previousCheckpointSha256: receipt1Sha,
+    cumulativeSha256: activityDb.checkpointCumulativeSha256(preAcc, res.row.entry_sha256),
+    createdAt: '2026-07-16T00:00:05.000Z',
+  });
+
+  // The DB head binds the new receipt and restarts the segment.
+  assert.equal(res.headRow.checkpoint_generation, 2);
+  assert.equal(res.headRow.checkpoint_sha256, codecs.canonicalSha256(receipt2));
+  assert.equal(res.headRow.segment_count, 1);
+
+  // External head rebinds checkpoint 2.
+  const external = JSON.parse(fs.readFileSync(roots.activityHeadPath, 'utf8'));
+  assert.deepEqual(external, {
+    format: 1,
+    generation: 2 * INTERVAL,
+    entrySha256: res.row.entry_sha256,
+    checkpointGeneration: 2,
+    checkpointSha256: codecs.canonicalSha256(receipt2),
+  });
+
+  // Prune deleted rows older than the PREVIOUS checkpoint (receipt 1,
+  // boundary 4096): retained window is exactly [4096, 8192].
+  const rows = countRows(roots);
+  assert.equal(rows.lo, INTERVAL);
+  assert.equal(rows.hi, 2 * INTERVAL);
+  assert.equal(rows.n, INTERVAL + 1);
+  assert.ok(rows.n <= activityAppend.MAX_RETAINED_ROWS);
+  assert.ok(fs.statSync(roots.activityDbPath).size <= activityAppend.MAX_ACTIVITY_DB_BYTES);
+
+  // Checkpoint receipts are never pruned online.
+  for (const i of [0, 1, 2]) {
+    assert.equal(fs.existsSync(path.join(roots.checkpointsDir, pathsMod.generationFilename(i))), true, `receipt ${i} must survive`);
+  }
+
+  // The genesis ROW is pruned, but load verification stays healthy (it
+  // verifies at most the current segment, never lifetime history).
+  const loaded = loadMod.loadProtocolState(Object.assign({}, opts, { repair: false }));
+  assert.equal(loaded.initialized, true);
+  assert.equal(loaded.resumePending, false);
+
+  // Ordinary appends continue after the boundary.
+  const next = activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: 'post-boundary-op-1', createdAt: '2026-07-16T00:00:06.000Z' }))
+  );
+  assert.equal(next.row.generation, 2 * INTERVAL + 1);
+  assert.equal(next.headRow.segment_count, 2);
+});
+
+test('the 100000-receipt hard ceiling fails closed at the next boundary', () => {
+  const K = activityAppend.MAX_CHECKPOINT_RECEIPTS; // 100000
+  const synth = synthesizeActivityState(null, { checkpointIndex: K, offset: INTERVAL - 1, receiptIndices: [K - 1, K] });
+  const { opts, roots } = synth;
+  const before = countRows(roots);
+  assert.throws(
+    () =>
+      activityAppend.runExclusiveActivityAppend(
+        Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: 'ceiling-op-000001' }))
+      ),
+    { code: 'activity_checkpoint_ceiling_reached' }
+  );
+  // Fail closed: nothing committed, head unchanged.
+  const after = countRows(roots);
+  assert.deepEqual(after, before);
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  const head = ro.prepare('SELECT * FROM activity_head WHERE id=1').get();
+  ro.close();
+  assert.equal(head.generation, synth.headGeneration);
+  assert.equal(head.checkpoint_generation, K);
+});
+
+test('runtime paths never enumerate the checkpoint directory', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: 5 });
+  const { opts, roots } = synth;
+  const realReaddir = fs.readdirSync;
+  const enumerated = [];
+  fs.readdirSync = function spied(dir, ...rest) {
+    enumerated.push(String(dir));
+    return realReaddir.call(fs, dir, ...rest);
+  };
+  try {
+    loadMod.verifyActivityRoots(roots, {});
+    mod.status(opts);
+    activityAppend.runExclusiveActivityAppend(
+      Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: 'no-enum-op-01' }))
+    );
+  } finally {
+    fs.readdirSync = realReaddir;
+  }
+  const checkpointDirHits = enumerated.filter((d) => path.resolve(d) === path.resolve(roots.checkpointsDir));
+  assert.deepEqual(checkpointDirHits, [], 'no runtime path may enumerate the checkpoints directory');
+});
+
+test('bounded verification checks the previous checkpoint link: a rewritten previous receipt blocks', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: 3 });
+  const { roots } = synth;
+  // Rewrite receipt 0 with different (still schema-valid) bytes.
+  const receipt0Path = path.join(roots.checkpointsDir, pathsMod.generationFilename(0));
+  const receipt0 = JSON.parse(fs.readFileSync(receipt0Path, 'utf8'));
+  receipt0.createdAt = '2020-01-01T00:00:00.000Z';
+  fs.writeFileSync(receipt0Path, codecs.canonicalJson(receipt0), { mode: 0o600 });
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), { code: 'activity_checkpoint_fork' });
+});
+
+test('bounded verification checks the latest receipt binding: a rewritten latest receipt blocks', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: 3 });
+  const { roots } = synth;
+  const receipt1Path = path.join(roots.checkpointsDir, pathsMod.generationFilename(1));
+  const receipt1 = JSON.parse(fs.readFileSync(receipt1Path, 'utf8'));
+  receipt1.cumulativeSha256 = 'e'.repeat(64);
+  fs.writeFileSync(receipt1Path, codecs.canonicalJson(receipt1), { mode: 0o600 });
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), (err) =>
+    ['activity_external_head_checkpoint_mismatch', 'activity_checkpoint_hash_mismatch'].includes(err.code)
+  );
+});
+
+test('bounded verification verifies the current segment: a tampered mid-segment row blocks', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: 5 });
+  const { roots } = synth;
+  const { DatabaseSync } = require('node:sqlite');
+  const rw = new DatabaseSync(roots.activityDbPath);
+  rw.prepare('UPDATE activity_chain SET created_at = ? WHERE generation = ?').run('2020-01-01T00:00:00.000Z', synth.B + 2);
+  rw.close();
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), { code: 'activity_segment_chain_broken' });
+});
+
+test('bounded verification verifies the boundary row against the latest receipt', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: 5 });
+  const { roots } = synth;
+  const { DatabaseSync } = require('node:sqlite');
+  const rw = new DatabaseSync(roots.activityDbPath);
+  // Replace the boundary row wholesale with an internally-consistent but
+  // different entry (different operationId), re-chaining nothing else: the
+  // receipt no longer matches the boundary row.
+  const forged = activityAppend.buildActivityEntry({
+    generation: synth.B,
+    previousGeneration: synth.B - 1,
+    previousSha256: synth.rowFacts.get(synth.B - 1).entrySha256,
+    operationId: 'forged-boundary-op',
+    kind: 'COMMAND_LIFECYCLE_MUTATION',
+    createdAt: APPEND_AT,
+    principalKind: 'local',
+    principalSha256: 'b'.repeat(64),
+    commandKeySha256: 'c'.repeat(64),
+    adapterId: 'db.command-lifecycle',
+    activitySha256: 'd'.repeat(64),
+  });
+  rw.prepare('UPDATE activity_chain SET operation_id=?, entry_sha256=? WHERE generation=?').run(forged.operationId, forged.entrySha256, synth.B);
+  rw.close();
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), (err) =>
+    ['activity_checkpoint_boundary_row_mismatch', 'activity_segment_chain_broken'].includes(err.code)
+  );
+});
+
+test('bounded verification verifies the rolling segment accumulator and segment count', () => {
+  const synthA = synthesizeActivityState(null, { checkpointIndex: 1, offset: 4 });
+  {
+    const { DatabaseSync } = require('node:sqlite');
+    const rw = new DatabaseSync(synthA.roots.activityDbPath);
+    rw.prepare('UPDATE activity_head SET segment_accumulator_sha256 = ? WHERE id=1').run('e'.repeat(64));
+    rw.close();
+    assert.throws(() => loadMod.verifyActivityRoots(synthA.roots, {}), { code: 'activity_segment_accumulator_mismatch' });
+  }
+  const synthB = synthesizeActivityState(null, { checkpointIndex: 1, offset: 4 });
+  {
+    const { DatabaseSync } = require('node:sqlite');
+    const rw = new DatabaseSync(synthB.roots.activityDbPath);
+    rw.prepare('UPDATE activity_head SET segment_count = 99 WHERE id=1').run();
+    rw.close();
+    assert.throws(() => loadMod.verifyActivityRoots(synthB.roots, {}), { code: 'activity_segment_count_mismatch' });
+  }
+});
+
+test('the retained-window bounds are enforced at verification time (injectable size bound)', () => {
+  const { roots } = initializedRoots();
+  assert.throws(() => loadMod.verifyActivityRoots(roots, { maxDbBytes: 512 }), { code: 'activity_db_size_exceeded' });
+});
+
+test('the full-audit verb streams the complete receipt chain and enforces its watchdog', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: INTERVAL - 1 });
+  const { opts, roots } = synth;
+  // Cross a real boundary so receipts 0..2 exist with real links.
+  activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: 'audit-boundary-op', createdAt: '2026-07-16T00:00:05.000Z' }))
+  );
+  const audit = activityAppend.fullAuditActivityChain(roots, {});
+  assert.equal(audit.ok, true);
+  assert.equal(audit.receiptCount, 3);
+  assert.equal(audit.latestCheckpointGeneration, 2);
+
+  // A broken link anywhere in the chain fails the audit.
+  const receipt1Path = path.join(roots.checkpointsDir, pathsMod.generationFilename(1));
+  const receipt1 = JSON.parse(fs.readFileSync(receipt1Path, 'utf8'));
+  receipt1.createdAt = '2020-01-01T00:00:00.000Z';
+  fs.writeFileSync(receipt1Path, codecs.canonicalJson(receipt1), { mode: 0o600 });
+  assert.throws(() => activityAppend.fullAuditActivityChain(roots, {}), { code: 'activity_checkpoint_fork' });
+  fs.writeFileSync(receipt1Path, codecs.canonicalJson(synth.receiptByIndex.get(1)), { mode: 0o600 });
+
+  // Watchdog: an impossible budget trips the 120-second wall-clock guard.
+  assert.throws(() => activityAppend.fullAuditActivityChain(roots, { watchdogMs: -1 }), { code: 'activity_audit_watchdog_exceeded' });
+});
+
+test('a crash between boundary commit and receipt write is recovered deterministically', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: INTERVAL - 1 });
+  const { opts, roots } = synth;
+  const childScript = `
+    const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+    activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+      Object.assign(
+        { opts, bootId: 'boot-x', crashAfter: 'append_db_commit' },
+        appendArgs(pathsMod.resolveRoots(opts), { operationId: 'crash-boundary-op', createdAt: '2026-07-16T00:00:05.000Z' })
+      )
+    )});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137);
+  // On disk: DB head at 8192 binding checkpoint 2, receipt 2 missing,
+  // external head still at 8191 / checkpoint 1, prune not yet run.
+  assert.equal(fs.existsSync(path.join(roots.checkpointsDir, pathsMod.generationFilename(2))), false);
+  assert.equal(JSON.parse(fs.readFileSync(roots.activityHeadPath, 'utf8')).generation, synth.headGeneration);
+  // Verification reports a resumable state, not a hard block.
+  const before = loadMod.verifyActivityRoots(roots, {});
+  assert.equal(before.resumable && before.resumable.kind, 'EXTERNAL_HEAD_PUBLICATION');
+  // Reconcile rebuilds the receipt deterministically, publishes the head,
+  // and completes the pending prune.
+  activityAppend.reconcileExternalActivityHead(roots, {});
+  const receipt2 = JSON.parse(fs.readFileSync(path.join(roots.checkpointsDir, pathsMod.generationFilename(2)), 'utf8'));
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  const head = ro.prepare('SELECT * FROM activity_head WHERE id=1').get();
+  ro.close();
+  assert.equal(codecs.canonicalSha256(receipt2), head.checkpoint_sha256);
+  const external = JSON.parse(fs.readFileSync(roots.activityHeadPath, 'utf8'));
+  assert.equal(external.generation, 2 * INTERVAL);
+  assert.equal(external.checkpointGeneration, 2);
+  const rows = countRows(roots);
+  assert.equal(rows.lo, INTERVAL); // prune completed
+  const after = loadMod.verifyActivityRoots(roots, {});
+  assert.equal(after.resumable, null);
+});
+
+// ===========================================================================
+// capacity (synthetic million-activity) + crash boundary matrix
+// (plan line 341: "Synthetic million-activity capacity tests require the
+// database bound, O(1) ordinary append work, O(4096) startup validation,
+// no checkpoint-directory enumeration on runtime paths, and injected
+// Pi-class budgets of 250 ms startup validation and 50 ms p99 append
+// excluding storage-fault injection. Crash tests cover DB commit, hot
+// journal, external head, checkpoint receipt/head, prune, and
+// incremental-vacuum boundaries.")
+// ===========================================================================
+
+// Injected Pi-class budgets (test-injected per the plan's wording; the
+// production code has no timing knobs).
+const STARTUP_VALIDATION_BUDGET_MS = 250;
+const APPEND_P99_BUDGET_MS = 50;
+
+test('synthetic million-activity capacity: bounds, budgets, and no enumeration', () => {
+  // Synthesis method (documented in the report): the chain state at
+  // checkpoint 244 (boundary generation 999,424) is constructed directly —
+  // real, hash-consistent rows for the entire retained window, sparse
+  // receipts (243, 244 + genesis 0) since runtime paths read only the
+  // latest receipt and its predecessor by computed filename. A real
+  // boundary crossing to checkpoint 245 (generation 1,003,520) then runs
+  // through the production append/checkpoint/prune machinery.
+  const K = 244;
+  const synth = synthesizeActivityState(null, { checkpointIndex: K, offset: INTERVAL - 6, receiptIndices: [K - 1, K] });
+  const { opts, roots } = synth;
+  assert.ok(synth.headGeneration > 1000000 - 4200, 'the synthesized head sits in million-generation territory');
+
+  // --- O(4096) startup validation under the 250 ms injected budget -------
+  const t0 = process.hrtime.bigint();
+  const verified = loadMod.verifyActivityRoots(roots, {});
+  const startupMs = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.equal(verified.resumable, null);
+  assert.equal(verified.genesisRow, null); // lifetime history is gone and never scanned
+  assert.ok(
+    startupMs <= STARTUP_VALIDATION_BUDGET_MS,
+    `startup validation took ${startupMs.toFixed(1)} ms > ${STARTUP_VALIDATION_BUDGET_MS} ms budget`
+  );
+
+  // --- p99 append budget across a real checkpoint boundary ----------------
+  const realReaddir = fs.readdirSync;
+  const enumerated = [];
+  fs.readdirSync = function spied(dir, ...rest) {
+    enumerated.push(String(dir));
+    return realReaddir.call(fs, dir, ...rest);
+  };
+  const durations = [];
+  let crossedBoundary = false;
+  try {
+    for (let i = 0; i < 120; i += 1) {
+      const a0 = process.hrtime.bigint();
+      const res = activityAppend.runExclusiveActivityAppend(
+        Object.assign(
+          { opts, bootId: 'boot-cap' },
+          appendArgs(roots, { operationId: `capacity-op-${String(i).padStart(4, '0')}`, createdAt: '2026-07-16T00:00:07.000Z' })
+        )
+      );
+      durations.push(Number(process.hrtime.bigint() - a0) / 1e6);
+      if (res.pendingCheckpoint) crossedBoundary = true;
+    }
+  } finally {
+    fs.readdirSync = realReaddir;
+  }
+  assert.equal(crossedBoundary, true, 'the run must cross a real 4096 boundary (checkpoint 245)');
+  const sorted = durations.slice().sort((a, b) => a - b);
+  const p99 = sorted[Math.floor(0.99 * (sorted.length - 1))];
+  assert.ok(p99 <= APPEND_P99_BUDGET_MS, `append p99 ${p99.toFixed(1)} ms > ${APPEND_P99_BUDGET_MS} ms budget`);
+
+  // --- no checkpoint-directory enumeration on any runtime path ------------
+  const checkpointDirHits = enumerated.filter((d) => path.resolve(d) === path.resolve(roots.checkpointsDir));
+  assert.deepEqual(checkpointDirHits, [], 'append paths must never enumerate the checkpoints directory');
+
+  // --- the database bound held across the boundary ------------------------
+  const rows = countRows(roots);
+  assert.ok(rows.n <= activityAppend.MAX_RETAINED_ROWS, `retained rows ${rows.n} > ${activityAppend.MAX_RETAINED_ROWS}`);
+  assert.equal(rows.lo, (245 - 1) * INTERVAL); // pruned to the previous checkpoint boundary
+  assert.ok(fs.statSync(roots.activityDbPath).size <= activityAppend.MAX_ACTIVITY_DB_BYTES);
+
+  // Receipt 245 exists and chains to 244; verification stays green and fast.
+  const receipt245 = JSON.parse(fs.readFileSync(path.join(roots.checkpointsDir, pathsMod.generationFilename(245)), 'utf8'));
+  assert.equal(receipt245.previousCheckpointSha256, synth.latestReceiptSha);
+  const t1 = process.hrtime.bigint();
+  const after = loadMod.verifyActivityRoots(roots, {});
+  const revalidateMs = Number(process.hrtime.bigint() - t1) / 1e6;
+  assert.equal(after.resumable, null);
+  assert.ok(revalidateMs <= STARTUP_VALIDATION_BUDGET_MS);
+});
+
+test('crash matrix: every append/checkpoint/prune/vacuum boundary converges after recovery', () => {
+  const NON_BOUNDARY_STEPS = ['append_mid_transaction', 'append_db_commit', 'external_head_published'];
+  const BOUNDARY_STEPS = ['append_db_commit', 'checkpoint_receipt_written', 'checkpoint_head_published', 'prune_done', 'incremental_vacuum_done'];
+
+  const runCase = (step, { boundary }) => {
+    const label = `${boundary ? 'boundary' : 'ordinary'}/${step}`;
+    // boundary: the crashing append IS the 4096-boundary append (8192).
+    // ordinary: the crashing append is a mid-segment append.
+    const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: boundary ? INTERVAL - 1 : 7 });
+    const { opts, roots } = synth;
+    const childScript = `
+      const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+      activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+        Object.assign(
+          { opts, bootId: 'boot-crash', crashAfter: step },
+          appendArgs(pathsMod.resolveRoots(opts), { operationId: `crash-${step}-op1`, createdAt: '2026-07-16T00:00:08.000Z' })
+        )
+      )});
+    `;
+    const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+    assert.equal(child.status, 137, `${label}: expected simulated crash, got ${child.status}: ${child.stderr}`);
+
+    // status() must never throw an unhandled corruption error on any of
+    // these documented crash states.
+    assert.ok(mod.status(opts), `${label}: status() should return`);
+
+    // A follow-up locked append (different boot: the crashed child's locks
+    // are stale) must recover deterministically and commit.
+    const res = activityAppend.runExclusiveActivityAppend(
+      Object.assign({ opts, bootId: 'boot-after' }, appendArgs(roots, { operationId: `after-${step}-op1`, createdAt: '2026-07-16T00:00:09.000Z' }))
+    );
+    assert.ok(res.row.generation > 0, `${label}: recovery append must commit`);
+
+    // Converged: fully healthy, external head equals the DB head, retained
+    // window within bounds, no journal left behind.
+    const verified = loadMod.verifyActivityRoots(roots, {});
+    assert.equal(verified.resumable, null, `${label}: no pending resume after recovery`);
+    const external = JSON.parse(fs.readFileSync(roots.activityHeadPath, 'utf8'));
+    assert.equal(external.generation, verified.headRow.generation, `${label}: external head converged`);
+    assert.equal(fs.existsSync(`${roots.activityDbPath}-journal`), false, `${label}: no hot journal left`);
+    const rows = countRows(roots);
+    assert.ok(rows.n <= activityAppend.MAX_RETAINED_ROWS, `${label}: retained-row bound`);
+    if (boundary && ['checkpoint_head_published', 'prune_done', 'incremental_vacuum_done'].includes(step)) {
+      // For steps at/after external-head publication the boundary append
+      // itself survived; prune must have completed by now.
+      assert.equal(rows.lo, INTERVAL, `${label}: prune completed`);
+    }
+    // The crashed operation's evidence: for steps after the DB commit the
+    // intent row is durably present exactly once.
+    if (step !== 'append_mid_transaction') {
+      const ro = activityDb.openReadOnly(roots.activityDbPath);
+      const evidence = ro.prepare('SELECT COUNT(*) AS n FROM activity_chain WHERE operation_id = ?').get(`crash-${step}-op1`);
+      ro.close();
+      assert.equal(evidence.n, 1, `${label}: committed intent row survives`);
+    }
+  };
+
+  for (const step of NON_BOUNDARY_STEPS) runCase(step, { boundary: false });
+  for (const step of BOUNDARY_STEPS) runCase(step, { boundary: true });
+});
