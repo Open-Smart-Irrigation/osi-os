@@ -68,6 +68,12 @@ vi.mock('react-i18next', () => ({
         schedulerDisableError: 'Could not disable irrigation schedules',
         dataTitle: 'Data & Refresh',
         autoRefresh: 'Auto-refresh dashboard',
+        journalTitle: 'Journal',
+        journalDetailLevel: 'Detail level',
+        journalDetailLevelHelp: 'How much detail do you record? You can change this any time.',
+        journalDetailQuick: 'Quick',
+        journalDetailFull: 'Full',
+        journalDetailResearch: 'Research',
         userRequestTitle: 'User request',
         requestType: 'Request type',
         bugFix: 'Bug fix',
@@ -191,6 +197,39 @@ describe('SettingsPage', () => {
     renderSettings();
 
     expect(document.documentElement.dataset.theme).toBe('dark');
+  });
+
+  it('renders the journal detail level control with its three options', () => {
+    renderSettings();
+
+    const journal = screen.getByRole('region', { name: 'Journal' });
+    expect(within(journal).getByRole('button', { name: 'Quick' })).toBeInTheDocument();
+    expect(within(journal).getByRole('button', { name: 'Full' })).toBeInTheDocument();
+    expect(within(journal).getByRole('button', { name: 'Research' })).toBeInTheDocument();
+    expect(within(journal).getByRole('button', { name: 'Quick' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(journal).getByText('How much detail do you record? You can change this any time.'))
+      .toBeInTheDocument();
+  });
+
+  it('persists the selected journal detail level preference', () => {
+    renderSettings();
+
+    const journal = screen.getByRole('region', { name: 'Journal' });
+    fireEvent.click(within(journal).getByRole('button', { name: 'Full' }));
+
+    expect(readDisplayPreferences().journalDetailLevel).toBe('full_record');
+    expect(window.localStorage.getItem('osi.journal.detailLevel')).toBe('full_record');
+    expect(within(journal).getByRole('button', { name: 'Full' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(journal).getByRole('button', { name: 'Quick' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('reflects a stored journal detail level preference on mount', () => {
+    window.localStorage.setItem('osi.journal.detailLevel', 'research_observation');
+    renderSettings();
+
+    const journal = screen.getByRole('region', { name: 'Journal' });
+    expect(within(journal).getByRole('button', { name: 'Research' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(journal).getByRole('button', { name: 'Quick' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('exposes the intended module defaults and warning copy', () => {

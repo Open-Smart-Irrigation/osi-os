@@ -7,6 +7,7 @@ const THEME_KEY = 'osi.display.theme';
 const DASHBOARD_DENSITY_KEY = 'osi.display.dashboardDensity';
 const DASHBOARD_AUTO_REFRESH_KEY = 'osi.display.dashboardAutoRefresh';
 const DEFAULT_TIMEZONE_KEY = 'osi.defaults.timezone';
+const JOURNAL_DETAIL_LEVEL_KEY = 'osi.journal.detailLevel';
 const MODULE_KEYS = {
   predictionAdvisory: 'osi.modules.predictionAdvisory',
   environment: 'osi.modules.environment',
@@ -17,6 +18,18 @@ const PREFERENCES_EVENT = 'osi-display-preferences';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
 export type DashboardDensity = 'comfortable' | 'compact';
+export type JournalDetailLevel = 'farmer_quick' | 'full_record' | 'research_observation';
+
+const JOURNAL_DETAIL_LEVELS: readonly JournalDetailLevel[] = [
+  'farmer_quick',
+  'full_record',
+  'research_observation',
+];
+const DEFAULT_JOURNAL_DETAIL_LEVEL: JournalDetailLevel = 'farmer_quick';
+
+function isJournalDetailLevel(value: string | null): value is JournalDetailLevel {
+  return value != null && (JOURNAL_DETAIL_LEVELS as readonly string[]).includes(value);
+}
 
 export interface ModulePreferences {
   predictionAdvisory: boolean;
@@ -31,6 +44,7 @@ export interface DisplayPreferences {
   dashboardDensity: DashboardDensity;
   dashboardAutoRefresh: 'on' | 'off';
   defaultTimezone: string | null;
+  journalDetailLevel: JournalDetailLevel;
   modules: ModulePreferences;
 }
 
@@ -94,6 +108,10 @@ export function readDisplayPreferences(): DisplayPreferences {
   const dashboardDensity: DashboardDensity = storedDensity === 'compact' ? 'compact' : 'comfortable';
   const dashboardAutoRefresh = readStorage(DASHBOARD_AUTO_REFRESH_KEY) === 'off' ? 'off' : 'on';
   const storedTimezone = normalizeStoredString(readStorage(DEFAULT_TIMEZONE_KEY));
+  const storedDetailLevel = readStorage(JOURNAL_DETAIL_LEVEL_KEY);
+  const journalDetailLevel: JournalDetailLevel = isJournalDetailLevel(storedDetailLevel)
+    ? storedDetailLevel
+    : DEFAULT_JOURNAL_DETAIL_LEVEL;
 
   return {
     swtUnit,
@@ -101,6 +119,7 @@ export function readDisplayPreferences(): DisplayPreferences {
     dashboardDensity,
     dashboardAutoRefresh,
     defaultTimezone: storedTimezone,
+    journalDetailLevel,
     modules: {
       predictionAdvisory: readBooleanPreference(MODULE_KEYS.predictionAdvisory, DEFAULT_MODULES.predictionAdvisory),
       environment: readBooleanPreference(MODULE_KEYS.environment, DEFAULT_MODULES.environment),
@@ -121,6 +140,9 @@ export function writeDisplayPreferences(next: Partial<DisplayPreferences>): void
   }
   if (Object.prototype.hasOwnProperty.call(next, 'defaultTimezone')) {
     writeStorage(DEFAULT_TIMEZONE_KEY, normalizeStoredString(next.defaultTimezone));
+  }
+  if (isJournalDetailLevel(next.journalDetailLevel ?? null)) {
+    writeStorage(JOURNAL_DETAIL_LEVEL_KEY, next.journalDetailLevel as JournalDetailLevel);
   }
   if (next.modules) {
     writeStorage(MODULE_KEYS.predictionAdvisory, String(next.modules.predictionAdvisory));

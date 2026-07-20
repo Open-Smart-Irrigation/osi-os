@@ -455,7 +455,7 @@ function validationTransitionCatalog(options: {
   amountMin?: number;
   amountMax?: number;
   secondLayout?: boolean;
-  reveal?: 'all' | 'activity' | 'template';
+  reveal?: 'all' | 'activity';
 } = {}): JournalCatalog {
   const reveal = options.reveal ?? 'all';
   return {
@@ -480,18 +480,12 @@ function validationTransitionCatalog(options: {
           ...candidate,
           definition: {
             ...candidate.definition,
-            fields: reveal === 'template' ? [] : reveal === 'activity' ? [{
+            fields: reveal === 'activity' ? [{
               code: 'attr.amount',
               visible_if: { field: 'activity_code', op: 'eq', value: 'fertilization' },
             }] : ['attr.amount'],
             carry_forward: [],
           },
-        };
-      }
-      if (candidate.code === 'full_record' && reveal === 'template') {
-        return {
-          ...candidate,
-          definition: { ...candidate.definition, fields: ['attr.amount'], carry_forward: [] },
         };
       }
       return candidate;
@@ -710,21 +704,6 @@ const correctedRepeatSource = entry({
 const layoutSwitchPlot: JournalPlot = {
   ...plot,
   settings: { ...plot.settings, layout_code: 'open_field' },
-};
-
-const templateSwitchCatalog: JournalCatalog = {
-  ...catalog,
-  vocab: [...catalog.vocab, row('attr.extra', 'attribute')],
-  templates: catalog.templates.map((candidate) => candidate.code === 'full_record'
-    ? {
-        ...candidate,
-        definition: {
-          ...candidate.definition,
-          fields: [{ code: 'attr.extra', required: true }],
-          carry_forward: [],
-        },
-      }
-    : candidate),
 };
 
 const invalidRetainedTemplateCatalog: JournalCatalog = {
@@ -974,6 +953,7 @@ function mockRepeatAuthority(): void {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
   consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => {
     reportConsoleError(...args);
   });
@@ -1069,6 +1049,7 @@ describe('JournalCaptureFlow', () => {
   });
 
   it('seeds a mapped zone crop into the editable full-record crop choice', async () => {
+    window.localStorage.setItem('osi.journal.detailLevel', 'full_record');
     const releaseJournalEffects = deferJournalEffects();
     const seedingCatalog: JournalCatalog = {
       ...canonicalCropCatalog,
@@ -1090,9 +1071,6 @@ describe('JournalCaptureFlow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'seeding' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.detailLevel' }), {
-      target: { value: 'full_record' },
-    });
 
     expect(screen.getByRole('combobox', { name: 'attr.crop' })).toHaveValue(
       'agroscope.crop.barley_winter',
@@ -1101,6 +1079,7 @@ describe('JournalCaptureFlow', () => {
   });
 
   it('preserves an edited full-record crop through confirmation and finalization', async () => {
+    window.localStorage.setItem('osi.journal.detailLevel', 'full_record');
     render(<JournalCaptureFlow
       {...baseProps}
       catalog={canonicalCropCatalog}
@@ -1110,9 +1089,6 @@ describe('JournalCaptureFlow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.detailLevel' }), {
-      target: { value: 'full_record' },
-    });
 
     const cropControl = screen.getByRole('combobox', { name: 'attr.crop' });
     expect(cropControl).toHaveValue('agroscope.crop.barley_winter');
@@ -1138,6 +1114,7 @@ describe('JournalCaptureFlow', () => {
   });
 
   it('does not restore the seeded crop after clearing the full-record crop', async () => {
+    window.localStorage.setItem('osi.journal.detailLevel', 'full_record');
     render(<JournalCaptureFlow
       {...baseProps}
       catalog={canonicalCropCatalog}
@@ -1147,9 +1124,6 @@ describe('JournalCaptureFlow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.detailLevel' }), {
-      target: { value: 'full_record' },
-    });
     const cropControl = screen.getByRole('combobox', { name: 'attr.crop' });
     expect(cropControl).toHaveValue('agroscope.crop.barley_winter');
     fireEvent.change(cropControl, { target: { value: '' } });
@@ -1291,6 +1265,7 @@ describe('JournalCaptureFlow', () => {
   });
 
   it('keeps single-plot draft POST then PUT promotion unchanged', async () => {
+    window.localStorage.setItem('osi.journal.detailLevel', 'full_record');
     render(<JournalCaptureFlow {...baseProps} />);
     expect(screen.getByRole('heading', { name: 'capture.where.title' })).toBeInTheDocument();
 
@@ -1302,9 +1277,6 @@ describe('JournalCaptureFlow', () => {
 
     expect(screen.getByRole('heading', { name: 'capture.form.title' })).toBeInTheDocument();
     expect(screen.getByText((_content, element) => element?.textContent === 'greenhouse · v6')).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.detailLevel' }), {
-      target: { value: 'full_record' },
-    });
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
@@ -1405,13 +1377,17 @@ describe('JournalCaptureFlow', () => {
     cleanup();
   });
 
-  it('selects only a template supported by the chosen layout', async () => {
+  it('floors the default quick preference to the only template a layout supports', async () => {
+    // Default pref is farmer_quick (beforeEach clears localStorage), but this
+    // layout only supports research_observation (U4: a researcher-only layout
+    // floors a Quick user to Research). There is no per-entry combobox anymore
+    // to observe the clamp directly, so we assert its effect: no picker renders,
+    // and the saved entry carries the floored template.
     render(<JournalCaptureFlow {...baseProps} catalog={researchOnlyCatalog} initialPlot={plot} />);
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
 
-    expect(screen.getByRole('combobox', { name: 'capture.form.detailLevel' })).toHaveValue('research_observation');
-    expect(screen.queryByRole('option', { name: /capture\.form\.quick/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'capture.form.detailLevel' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
@@ -1419,6 +1395,56 @@ describe('JournalCaptureFlow', () => {
       '11111111-1111-4111-8111-111111111111',
       expect.objectContaining({ template_code: 'research_observation', template_version: 9 }),
     ));
+  });
+
+  describe('Slice A: effective capture template resolves from the global detail-level preference', () => {
+    it('uses the preferred template on a multi-template layout (farmer_quick)', async () => {
+      window.localStorage.setItem('osi.journal.detailLevel', 'farmer_quick');
+      render(<JournalCaptureFlow {...baseProps} initialPlot={plot} />);
+      fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+      expect(screen.queryByRole('combobox', { name: 'capture.form.detailLevel' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).not.toBeDisabled());
+      fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+      await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalledWith(
+        '11111111-1111-4111-8111-111111111111',
+        expect.objectContaining({ template_code: 'farmer_quick', template_version: 4 }),
+      ));
+    });
+
+    it('uses the preferred template on a multi-template layout (research_observation)', async () => {
+      window.localStorage.setItem('osi.journal.detailLevel', 'research_observation');
+      render(<JournalCaptureFlow {...baseProps} initialPlot={plot} />);
+      fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+      expect(screen.queryByRole('combobox', { name: 'capture.form.detailLevel' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).not.toBeDisabled());
+      fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+      await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalledWith(
+        '11111111-1111-4111-8111-111111111111',
+        expect.objectContaining({ template_code: 'research_observation', template_version: 9 }),
+      ));
+    });
+
+    it('floors an unsupported preferred template to the lowest template the layout supports', async () => {
+      window.localStorage.setItem('osi.journal.detailLevel', 'farmer_quick');
+      render(<JournalCaptureFlow {...baseProps} catalog={researchOnlyCatalog} initialPlot={plot} />);
+      fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+      expect(screen.queryByRole('combobox', { name: 'capture.form.detailLevel' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).not.toBeDisabled());
+      fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+      await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalledWith(
+        '11111111-1111-4111-8111-111111111111',
+        expect.objectContaining({ template_code: 'research_observation', template_version: 9 }),
+      ));
+    });
   });
 
   it('carries typed activity dependency choices into confirmation and final values', async () => {
@@ -2772,46 +2798,20 @@ describe('JournalCaptureFlow', () => {
     expect(screen.queryByText('attr.crop: Attempted crop')).not.toBeInTheDocument();
   });
 
-  it('recalculates template validity and removes hidden values after a real template switch', async () => {
-    render(<JournalCaptureFlow {...baseProps} catalog={templateSwitchCatalog} initialPlot={plot} />);
-    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.detailLevel' }), { target: { value: 'full_record' } });
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.required');
-
-    fireEvent.change(screen.getByRole('textbox', { name: /attr\.extra/ }), { target: { value: 'temporary detail' } });
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /attr\.extra/ }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.detailLevel' }), { target: { value: 'farmer_quick' } });
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
-    expect(screen.queryByText('attr.extra')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
-    await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ values: expect.not.arrayContaining([expect.objectContaining({ attribute_code: 'attr.extra' })]) }),
-    ));
-  });
-
-  it('keeps a retained invalid visible value blocking confirmation after a template switch', async () => {
+  it('keeps an invalid explicit-unit value blocking confirmation at the research detail level', async () => {
+    // Formerly exercised the same catalog by switching templates mid-flow via
+    // the (now-removed) per-entry combobox: full_record -> enter an invalid
+    // value -> switch to research_observation -> still blocked. Detail level
+    // is a Settings-only preference now (Slice A), so there is no in-flow
+    // switch to perform; this pins the surviving behavior instead — an invalid
+    // explicit-unit value blocks confirmation under a pref'd stricter template.
+    window.localStorage.setItem('osi.journal.detailLevel', 'research_observation');
     render(<JournalCaptureFlow {...baseProps} catalog={invalidRetainedTemplateCatalog} initialPlot={plot} />);
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.detailLevel' }), {
-      target: { value: 'full_record' },
-    });
     fireEvent.change(screen.getByRole('textbox', { name: 'Explicit amount' }), {
       target: { value: '5' },
     });
-    expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.incompatibleUnit');
-
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.detailLevel' }), {
-      target: { value: 'research_observation' },
-    });
-    expect(screen.getByRole('textbox', { name: 'Explicit amount' })).toHaveValue('5');
     expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.incompatibleUnit');
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     await act(async () => {
@@ -3096,7 +3096,6 @@ describe('JournalCaptureFlow', () => {
     await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalledTimes(2));
     expect(screen.getByRole('button', { name: 'capture.close' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'capture.back' })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: 'capture.form.detailLevel' })).toBeDisabled();
     expect(screen.getByRole('textbox', { name: 'attr.crop' })).toBeDisabled();
 
     await act(async () => {
@@ -3500,36 +3499,6 @@ describe('JournalCaptureFlow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'fertilization' }));
     await settleJournalEffects();
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-
-    expect(screen.getByRole('textbox', { name: 'Applied amount' })).toHaveValue('1500');
-    expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.maximum');
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    expect(screen.getByRole('heading', { name: 'capture.form.title' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'capture.confirm.title' })).not.toBeInTheDocument();
-  });
-
-  it('revalidates a retained hidden value when a template makes it visible', async () => {
-    const initialCatalog = validationTransitionCatalog({ amountMax: 2000 });
-    const tightenedCatalog = validationTransitionCatalog({ amountMax: 1000, reveal: 'template' });
-    const props = { ...baseProps, initialPlot: plot };
-    const settleJournalEffects = deferJournalEffects();
-    const { rerender } = render(<JournalCaptureFlow {...props} catalog={initialCatalog} />);
-    await settleJournalEffects();
-    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
-    await settleJournalEffects();
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Applied amount' }), {
-      target: { value: '1500' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
-
-    rerender(<JournalCaptureFlow {...props} catalog={tightenedCatalog} />);
-    await settleJournalEffects();
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    expect(screen.queryByRole('textbox', { name: 'Applied amount' })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.detailLevel' }), {
-      target: { value: 'full_record' },
-    });
 
     expect(screen.getByRole('textbox', { name: 'Applied amount' })).toHaveValue('1500');
     expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.maximum');
