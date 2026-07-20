@@ -1151,7 +1151,7 @@ try {
     'SELECT id, catalog_version, catalog_hash FROM journal_catalog_state WHERE id = 1;'
   );
   assert.equal(catalogState.length, 1, 'catalog state row id=1 must exist');
-  assert.equal(catalogState[0].catalog_version, 3, 'seed-built catalog version must be the current version (3, since Slice BC / farmer_quick@3 + layout v3)');
+  assert.equal(catalogState[0].catalog_version, 4, 'seed-built catalog version must be the current version (4, since Slice D / attr.variety + farmer-facing attr.crop choices)');
   assert.match(catalogState[0].catalog_hash, /^[0-9a-f]{64}$/, 'catalog hash must be SHA-256');
 
   const seedText = fs.readFileSync(seedPath, 'utf8');

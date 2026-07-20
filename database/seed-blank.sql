@@ -2638,6 +2638,39 @@ CREATE TABLE IF NOT EXISTS journal_plot_settings (
   sync_version INTEGER NOT NULL DEFAULT 0
 , context_json TEXT);
 
+-- ---------------------------------------------------------------------------
+-- journal_crop_cycles / journal_crop_cycle_plots (Slice D crop-cycle
+-- lifecycle; migration 0025; spec
+-- docs/superpowers/specs/2026-07-20-journal-capture-streamlining-design.md §5.1)
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS journal_crop_cycles (
+  cycle_uuid TEXT PRIMARY KEY,
+  crop_code TEXT NOT NULL REFERENCES journal_vocab(code),   -- kind='choice', parent 'attr.crop'
+  variety TEXT,
+  group_uuid TEXT REFERENCES journal_plot_groups(group_uuid),  -- cohort that opened it, nullable
+  opened_by_entry_uuid TEXT NOT NULL REFERENCES journal_entries(entry_uuid),
+  starts_on TEXT NOT NULL,                                  -- = seeding occurred date (local)
+  gateway_device_eui TEXT,
+  created_by_principal_uuid TEXT NOT NULL,
+  sync_version INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
+);
+
+-- Per-plot membership carries the CLOSE state, so partial harvest (D10) and
+-- per-plot re-seed (D9) are first-class. A plot's cycle is "open" when ends_on IS NULL.
+CREATE TABLE IF NOT EXISTS journal_crop_cycle_plots (
+  cycle_uuid TEXT NOT NULL REFERENCES journal_crop_cycles(cycle_uuid) ON DELETE CASCADE,
+  plot_uuid  TEXT NOT NULL REFERENCES journal_plots(plot_uuid) ON DELETE CASCADE,
+  ends_on TEXT,                                             -- NULL = open on this plot
+  closed_by_entry_uuid TEXT REFERENCES journal_entries(entry_uuid),
+  close_reason TEXT CHECK (close_reason IN ('harvest','reseed','manual')),
+  PRIMARY KEY (cycle_uuid, plot_uuid)
+);
+CREATE INDEX IF NOT EXISTS idx_ccp_plot_open ON journal_crop_cycle_plots(plot_uuid) WHERE ends_on IS NULL;
+
 CREATE TABLE IF NOT EXISTS journal_products (
   product_uuid TEXT PRIMARY KEY,
   scope TEXT NOT NULL DEFAULT 'core' CHECK (scope IN ('core','farm')),
@@ -2986,6 +3019,10 @@ SELECT 'attr.observation_text','attribute',NULL,'text',NULL,NULL,NULL,'{"en":"Ob
 WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 1
   AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='attr.observation_text');
 INSERT INTO journal_vocab(code,kind,parent_code,value_type,quantity_kind,basis,default_unit_code,labels_json,icon_key,constraints_json,scope,active,sort_order,sync_version,created_at)
+SELECT 'attr.variety','attribute',NULL,'text',NULL,NULL,NULL,'{"en":"Variety"}',NULL,'{"maxlength":120,"autocomplete":"variety_by_crop"}','core',1,160,0,'2026-07-12T00:00:00.000Z'
+WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 4
+  AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='attr.variety');
+INSERT INTO journal_vocab(code,kind,parent_code,value_type,quantity_kind,basis,default_unit_code,labels_json,icon_key,constraints_json,scope,active,sort_order,sync_version,created_at)
 SELECT 'unit.cm_operation_depth','unit',NULL,NULL,'operation_depth','operation_depth',NULL,'{"en":"cm"}',NULL,'{"dimension":"length_operation_depth","to_canonical":{"unit_code":"unit.cm_operation_depth","scale":1,"offset":0}}','core',1,500,0,'2026-07-12T00:00:00.000Z'
 WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 1
   AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='unit.cm_operation_depth');
@@ -3213,6 +3250,26 @@ INSERT INTO journal_vocab(code,kind,parent_code,value_type,quantity_kind,basis,d
 SELECT 'choice.measurement.controller','choice','attr.measurement_source',NULL,NULL,NULL,NULL,'{"en":"Controller"}',NULL,NULL,'core',1,30,0,'2026-07-12T00:00:00.000Z'
 WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 1
   AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='choice.measurement.controller');
+INSERT INTO journal_vocab(code,kind,parent_code,value_type,quantity_kind,basis,default_unit_code,labels_json,icon_key,constraints_json,scope,active,sort_order,sync_version,created_at)
+SELECT 'choice.crop.permanent_grassland','choice','attr.crop',NULL,NULL,NULL,NULL,'{"en":"Permanent grassland"}',NULL,NULL,'core',1,4000,0,'2026-07-12T00:00:00.000Z'
+WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 4
+  AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='choice.crop.permanent_grassland');
+INSERT INTO journal_vocab(code,kind,parent_code,value_type,quantity_kind,basis,default_unit_code,labels_json,icon_key,constraints_json,scope,active,sort_order,sync_version,created_at)
+SELECT 'choice.crop.field_vegetable','choice','attr.crop',NULL,NULL,NULL,NULL,'{"en":"Field vegetable"}',NULL,NULL,'core',1,4010,0,'2026-07-12T00:00:00.000Z'
+WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 4
+  AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='choice.crop.field_vegetable');
+INSERT INTO journal_vocab(code,kind,parent_code,value_type,quantity_kind,basis,default_unit_code,labels_json,icon_key,constraints_json,scope,active,sort_order,sync_version,created_at)
+SELECT 'choice.crop.green_manure_cover','choice','attr.crop',NULL,NULL,NULL,NULL,'{"en":"Green manure / cover crop"}',NULL,NULL,'core',1,4020,0,'2026-07-12T00:00:00.000Z'
+WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 4
+  AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='choice.crop.green_manure_cover');
+INSERT INTO journal_vocab(code,kind,parent_code,value_type,quantity_kind,basis,default_unit_code,labels_json,icon_key,constraints_json,scope,active,sort_order,sync_version,created_at)
+SELECT 'choice.crop.fallow','choice','attr.crop',NULL,NULL,NULL,NULL,'{"en":"Fallow"}',NULL,NULL,'core',1,4030,0,'2026-07-12T00:00:00.000Z'
+WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 4
+  AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='choice.crop.fallow');
+INSERT INTO journal_vocab(code,kind,parent_code,value_type,quantity_kind,basis,default_unit_code,labels_json,icon_key,constraints_json,scope,active,sort_order,sync_version,created_at)
+SELECT 'choice.crop.other','choice','attr.crop',NULL,NULL,NULL,NULL,'{"en":"Other"}',NULL,NULL,'core',1,4040,0,'2026-07-12T00:00:00.000Z'
+WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 4
+  AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='choice.crop.other');
 INSERT INTO journal_vocab(code,kind,parent_code,value_type,quantity_kind,basis,default_unit_code,labels_json,icon_key,constraints_json,scope,active,sort_order,sync_version,created_at)
 SELECT 'agroscope.operation.primary_tillage','choice','attr.agroscope.operation',NULL,NULL,NULL,NULL,'{"en":"Primary Tillage"}',NULL,'{"description":"Primary tillage is a loosening, mixing or inverting form of cultivation with a cultivation depth between 15 cm and 35 cm. Primary tillage takes place prior to seedbed preparation and sowing.","source":"KTBL (2020)","source_category":"tillage"}','core',1,1000,0,'2026-07-12T00:00:00.000Z'
 WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 1
@@ -3870,7 +3927,7 @@ SELECT 'd6c3bd6e-a957-5925-9cd9-ae0738bc91af','core','Glyphosate','plant_protect
 WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 1
   AND NOT EXISTS (SELECT 1 FROM journal_products WHERE product_uuid='d6c3bd6e-a957-5925-9cd9-ae0738bc91af');
 
--- Immutable v3 postconditions. Each mismatch deliberately attempts id=0,
+-- Immutable v4 postconditions. Each mismatch deliberately attempts id=0,
 -- tripping journal_catalog_state CHECK(id=1) before state can be stamped.
 INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)
 SELECT 0,0,'catalog-v1-postcondition-failed','2026-07-12T00:00:00.000Z'
@@ -4177,6 +4234,10 @@ SELECT 0,0,'catalog-v1-postcondition-failed','2026-07-12T00:00:00.000Z'
 WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 1
   AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='attr.observation_text' AND kind='attribute' AND parent_code IS NULL AND value_type='text' AND quantity_kind IS NULL AND basis IS NULL AND default_unit_code IS NULL AND labels_json='{"en":"Observation"}' AND icon_key IS NULL AND constraints_json='{"maxlength":4000}' AND scope='core' AND active=1 AND sort_order=159 AND sync_version=0 AND created_at='2026-07-12T00:00:00.000Z');
 INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)
+SELECT 0,0,'catalog-v4-postcondition-failed','2026-07-12T00:00:00.000Z'
+WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 4
+  AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='attr.variety' AND kind='attribute' AND parent_code IS NULL AND value_type='text' AND quantity_kind IS NULL AND basis IS NULL AND default_unit_code IS NULL AND labels_json='{"en":"Variety"}' AND icon_key IS NULL AND constraints_json='{"maxlength":120,"autocomplete":"variety_by_crop"}' AND scope='core' AND active=1 AND sort_order=160 AND sync_version=0 AND created_at='2026-07-12T00:00:00.000Z');
+INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)
 SELECT 0,0,'catalog-v1-postcondition-failed','2026-07-12T00:00:00.000Z'
 WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 1
   AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='unit.cm_operation_depth' AND kind='unit' AND parent_code IS NULL AND value_type IS NULL AND quantity_kind='operation_depth' AND basis='operation_depth' AND default_unit_code IS NULL AND labels_json='{"en":"cm"}' AND icon_key IS NULL AND constraints_json='{"dimension":"length_operation_depth","to_canonical":{"unit_code":"unit.cm_operation_depth","scale":1,"offset":0}}' AND scope='core' AND active=1 AND sort_order=500 AND sync_version=0 AND created_at='2026-07-12T00:00:00.000Z');
@@ -4404,6 +4465,26 @@ INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)
 SELECT 0,0,'catalog-v1-postcondition-failed','2026-07-12T00:00:00.000Z'
 WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 1
   AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='choice.measurement.controller' AND kind='choice' AND parent_code='attr.measurement_source' AND value_type IS NULL AND quantity_kind IS NULL AND basis IS NULL AND default_unit_code IS NULL AND labels_json='{"en":"Controller"}' AND icon_key IS NULL AND constraints_json IS NULL AND scope='core' AND active=1 AND sort_order=30 AND sync_version=0 AND created_at='2026-07-12T00:00:00.000Z');
+INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)
+SELECT 0,0,'catalog-v4-postcondition-failed','2026-07-12T00:00:00.000Z'
+WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 4
+  AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='choice.crop.permanent_grassland' AND kind='choice' AND parent_code='attr.crop' AND value_type IS NULL AND quantity_kind IS NULL AND basis IS NULL AND default_unit_code IS NULL AND labels_json='{"en":"Permanent grassland"}' AND icon_key IS NULL AND constraints_json IS NULL AND scope='core' AND active=1 AND sort_order=4000 AND sync_version=0 AND created_at='2026-07-12T00:00:00.000Z');
+INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)
+SELECT 0,0,'catalog-v4-postcondition-failed','2026-07-12T00:00:00.000Z'
+WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 4
+  AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='choice.crop.field_vegetable' AND kind='choice' AND parent_code='attr.crop' AND value_type IS NULL AND quantity_kind IS NULL AND basis IS NULL AND default_unit_code IS NULL AND labels_json='{"en":"Field vegetable"}' AND icon_key IS NULL AND constraints_json IS NULL AND scope='core' AND active=1 AND sort_order=4010 AND sync_version=0 AND created_at='2026-07-12T00:00:00.000Z');
+INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)
+SELECT 0,0,'catalog-v4-postcondition-failed','2026-07-12T00:00:00.000Z'
+WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 4
+  AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='choice.crop.green_manure_cover' AND kind='choice' AND parent_code='attr.crop' AND value_type IS NULL AND quantity_kind IS NULL AND basis IS NULL AND default_unit_code IS NULL AND labels_json='{"en":"Green manure / cover crop"}' AND icon_key IS NULL AND constraints_json IS NULL AND scope='core' AND active=1 AND sort_order=4020 AND sync_version=0 AND created_at='2026-07-12T00:00:00.000Z');
+INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)
+SELECT 0,0,'catalog-v4-postcondition-failed','2026-07-12T00:00:00.000Z'
+WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 4
+  AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='choice.crop.fallow' AND kind='choice' AND parent_code='attr.crop' AND value_type IS NULL AND quantity_kind IS NULL AND basis IS NULL AND default_unit_code IS NULL AND labels_json='{"en":"Fallow"}' AND icon_key IS NULL AND constraints_json IS NULL AND scope='core' AND active=1 AND sort_order=4030 AND sync_version=0 AND created_at='2026-07-12T00:00:00.000Z');
+INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)
+SELECT 0,0,'catalog-v4-postcondition-failed','2026-07-12T00:00:00.000Z'
+WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 4
+  AND NOT EXISTS (SELECT 1 FROM journal_vocab WHERE code='choice.crop.other' AND kind='choice' AND parent_code='attr.crop' AND value_type IS NULL AND quantity_kind IS NULL AND basis IS NULL AND default_unit_code IS NULL AND labels_json='{"en":"Other"}' AND icon_key IS NULL AND constraints_json IS NULL AND scope='core' AND active=1 AND sort_order=4040 AND sync_version=0 AND created_at='2026-07-12T00:00:00.000Z');
 INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)
 SELECT 0,0,'catalog-v1-postcondition-failed','2026-07-12T00:00:00.000Z'
 WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 1
@@ -5054,6 +5135,6 @@ WHERE COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0)
   AND NOT EXISTS (SELECT 1 FROM journal_products WHERE product_uuid='d6c3bd6e-a957-5925-9cd9-ae0738bc91af' AND scope='core' AND name='Glyphosate' AND kind='plant_protection' AND composition_json='{}' AND active=1 AND sync_version=0 AND created_at='2026-07-12T00:00:00.000Z');
 
 -- journal_catalog_state
-INSERT OR IGNORE INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at) VALUES (1,3,'232ef58e9fbc403e2c41ae8419d5ce5ba5dff5df85884b00bf3242304d8392e8','2026-07-12T00:00:00.000Z');
-UPDATE journal_catalog_state SET catalog_version=3,catalog_hash='232ef58e9fbc403e2c41ae8419d5ce5ba5dff5df85884b00bf3242304d8392e8',updated_at='2026-07-12T00:00:00.000Z' WHERE id=1 AND catalog_version <= 3;
+INSERT OR IGNORE INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at) VALUES (1,4,'3f981d26dee98ee5439fac57894309658f027d2ba525ae0af972c6fc647a64af','2026-07-12T00:00:00.000Z');
+UPDATE journal_catalog_state SET catalog_version=4,catalog_hash='3f981d26dee98ee5439fac57894309658f027d2ba525ae0af972c6fc647a64af',updated_at='2026-07-12T00:00:00.000Z' WHERE id=1 AND catalog_version <= 4;
 -- END GENERATED JOURNAL CATALOG V1

@@ -22,5 +22,7 @@
   "0021__journal_plot_lookup_indexes.sql": "21591c7a050c46331f1d2ed9494d6883a0c421866f5f65168b7c5fccd9862c8c",
   "0022__journal_catalog_v2.sql": "8b002914d7bdae1996917b046d81d76498346ef8aa1c6fb879efd3264033442c",
   "0023__journal_catalog_v3.sql": "eafa56d1b2e517765e3848c61c3344109c63f5b6e6b2d2b069cc1f9b603707ba",
-  "0024__journal_plot_context.sql": "05e76046785a22b27ebe5c65112b348592b0ccd4cca9e110126a8e0ac93cc972"
+  "0024__journal_plot_context.sql": "05e76046785a22b27ebe5c65112b348592b0ccd4cca9e110126a8e0ac93cc972",
+  "0025__journal_crop_cycles.sql": "223a667310b317b5b388bdbc7a780532ef79b55045d081c0792deceae23d90d3",
+  "0026__journal_catalog_v4.sql": "1e23aaf1c02c3121b17cf0eba177311fde5bdf30c0ab8a742b30ce7f6906a204"
 }

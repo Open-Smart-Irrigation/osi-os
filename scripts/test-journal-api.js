@@ -1990,8 +1990,8 @@ test('research exports are loss-aware, formula-safe, incremental, and ZIP-manife
   assert.equal(metadata.schema.lossless_member, 'records.ndjson');
   assert.deepEqual(metadata.catalog, {
     hash_scope: 'core_catalog_state',
-    // Slice BC: the seeded catalog is now at v3.
-    core_version: 3,
+    // Slice D: the seeded catalog is now at v4 (attr.variety + farmer-facing attr.crop choices).
+    core_version: 4,
     core_hash: metadata.catalog.core_hash,
     scoped_effective_hash: {
       value: null,

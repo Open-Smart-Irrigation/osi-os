@@ -562,6 +562,27 @@ const schemaContract = {
     'sync_version',
     'context_json',
   ],
+  journal_crop_cycles: [
+    'cycle_uuid',
+    'crop_code',
+    'variety',
+    'group_uuid',
+    'opened_by_entry_uuid',
+    'starts_on',
+    'gateway_device_eui',
+    'created_by_principal_uuid',
+    'sync_version',
+    'created_at',
+    'updated_at',
+    'deleted_at',
+  ],
+  journal_crop_cycle_plots: [
+    'cycle_uuid',
+    'plot_uuid',
+    'ends_on',
+    'closed_by_entry_uuid',
+    'close_reason',
+  ],
   journal_products: [
     'product_uuid',
     'scope',
@@ -738,6 +759,9 @@ const requiredIndexes = {
   journal_plot_groups: [
     'idx_journal_plot_groups_owner_gateway',
   ],
+  journal_crop_cycle_plots: [
+    'idx_ccp_plot_open',
+  ],
 };
 
 const requiredIndexSqlFragments = {
@@ -865,6 +889,10 @@ const requiredIndexSqlFragments = {
   ],
   idx_journal_plot_groups_owner_gateway: [
     'on journal_plot_groups(owner_user_uuid, gateway_device_eui, deleted_at, resolved_at)',
+  ],
+  idx_ccp_plot_open: [
+    'on journal_crop_cycle_plots(plot_uuid)',
+    'where ends_on is null',
   ],
 };
 
