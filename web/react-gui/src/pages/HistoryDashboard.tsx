@@ -399,7 +399,7 @@ export const HistoryDashboard: React.FC = () => {
         onLogout={logout}
       />
 
-      <main className="mx-auto max-w-7xl px-4 py-4 lg:py-8">
+      <main className="mx-auto max-w-[1600px] px-4 py-4 lg:py-8">
         {!featureFlags.historyEnabled && (
           <section className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6">
             <h2 className="text-2xl font-bold text-[var(--text)]">

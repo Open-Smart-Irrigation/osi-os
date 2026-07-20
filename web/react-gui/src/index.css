@@ -114,18 +114,18 @@ body {
    (no horizontal object-cover crop that shifts the wordmark on narrow
    screens), then translated left so the "Agroscope" wordmark lands exactly on
    the content column's left edge (16px inside a max-w-7xl px-4 column) at any
-   viewport width. The wordmark begins at 16.16% of the asset; at 3rem height
-   the asset is ~1427px wide, so the wordmark sits ~230.7px from the image's
-   own left, and the red/gradient band reaches the content column's right edge
-   (so the crown spans the same width as the cards below it). The floor
-   -214.7px = 16 - 230.7 holds up to 1280px; past that the calc tracks the
-   centered column (50% - (640 + 214.7)). */
+   viewport width (the column is now max-w-[1600px], matching the cards, the nav
+   and the journal workspace). The wordmark begins at 16.16% of the asset; at
+   3rem height the asset is ~1427px wide, so the wordmark sits ~230.7px from the
+   image's own left and the red band spans most of the column, dissolving to
+   white toward the right. The floor -214.7px = 16 - 230.7 holds up to 1600px;
+   past that the calc tracks the centered column (50% - (800 + 214.7)). */
 .balken-crown {
   display: block;
   height: 3rem;
   width: auto;
   max-width: none;
-  margin-left: max(-214.7px, calc(50% - 854.7px));
+  margin-left: max(-214.7px, calc(50% - 1014.7px));
 }
 
 /* Brand typography: Noto Sans on brand surfaces (header, login card) — the

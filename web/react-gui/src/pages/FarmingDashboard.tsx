@@ -135,7 +135,7 @@ export const FarmingDashboard: React.FC = () => {
       />
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="max-w-[1600px] mx-auto px-4 py-8">
         {/* Loading State */}
         {isLoading && (
           <div className="text-center py-12">

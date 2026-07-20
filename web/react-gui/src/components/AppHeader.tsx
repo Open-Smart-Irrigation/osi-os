@@ -79,7 +79,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         <img src={balkenHorizontal} alt="Agroscope Balken" className="balken-crown" />
       </div>
       <header className="glass-chrome sticky top-0 z-30 border-b border-[var(--border)]">
-        <div className="max-w-7xl mx-auto px-4 py-3">
+        <div className="max-w-[1600px] mx-auto px-4 py-3">
           <h1 className="sr-only">{title}</h1>
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
             {/* Primary navigation on its own floating glass pill. The Agroscope
