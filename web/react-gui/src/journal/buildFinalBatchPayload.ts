@@ -90,6 +90,9 @@ export function buildFinalBatchPayload(input: BuildFinalBatchInput): BuildFinalB
       : {}),
     values: [...input.values],
     ...(input.note !== undefined ? { note: input.note } : {}),
+    ...(input.cycle_action !== undefined ? { cycle_action: input.cycle_action } : {}),
+    ...(input.cycle_uuid !== undefined ? { cycle_uuid: input.cycle_uuid } : {}),
+    ...(input.ends_crop_cycle !== undefined ? { ends_crop_cycle: input.ends_crop_cycle } : {}),
   };
   if (acknowledgements && acknowledgements.length > 0) {
     payload.duplicate_guard_ack_entry_uuids = [...acknowledgements];

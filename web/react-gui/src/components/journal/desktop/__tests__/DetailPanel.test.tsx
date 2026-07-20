@@ -336,7 +336,7 @@ describe('DetailPanel — void', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.void.submit' }));
 
-    await waitFor(() => expect(mocks.voidEntry).toHaveBeenCalledWith('entry-1', 'Logged against the wrong plot', 4));
+    await waitFor(() => expect(mocks.voidEntry).toHaveBeenCalledWith('entry-1', 'Logged against the wrong plot', 4, false));
     await waitFor(() => expect(retry).toHaveBeenCalled());
     await waitFor(() => expect(onFocusReturn).toHaveBeenCalled());
   });
@@ -366,6 +366,66 @@ describe('DetailPanel — void', () => {
     expect(mocks.voidEntry).not.toHaveBeenCalled();
     expect(onFocusReturn).toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'workspace.detail.actions.void' })).toBeInTheDocument();
+  });
+
+  // Slice D Phase 3 (D13/R7): voiding a seeding whose crop cycle has
+  // dependent entries is refused (cycle_has_dependents, 409) unless the
+  // caller sets cascade_ack. See journal/cropCycle.ts's
+  // cycleDependentsFromError and osi-journal/lifecycle.js
+  // applyVoidCycleCascade.
+  it('shows the dependent entries from a cycle_has_dependents refusal and requires explicit confirmation before retrying with cascade_ack', async () => {
+    const retry = mockDetail({ entries: [entry({ sync_version: 2 })] });
+    mocks.voidEntry
+      .mockRejectedValueOnce({
+        response: {
+          status: 409,
+          data: {
+            error: 'cycle_has_dependents',
+            message: 'Voiding this seeding would orphan entries that inherit its crop cycle',
+            details: { dependentEntryUuids: ['dep-1', 'dep-2'] },
+          },
+        },
+      })
+      .mockResolvedValueOnce({ entry_uuid: 'entry-1', outbox_event_uuid: 'evt-2', sync_version: 3 });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.void' }));
+    fireEvent.change(screen.getByLabelText('workspace.detail.void.reasonLabel'), {
+      target: { value: 'Wrong crop entered' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.void.submit' }));
+
+    await waitFor(() => expect(mocks.voidEntry).toHaveBeenNthCalledWith(1, 'entry-1', 'Wrong crop entered', 2, false));
+    await waitFor(() => expect(screen.getByText('capture.cycle.voidDependentsTitle')).toBeInTheDocument());
+    expect(screen.getByText('dep-1')).toBeInTheDocument();
+    expect(screen.getByText('dep-2')).toBeInTheDocument();
+    expect(retry).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.cycle.voidDependentsConfirm' }));
+
+    await waitFor(() => expect(mocks.voidEntry).toHaveBeenNthCalledWith(2, 'entry-1', 'Wrong crop entered', 2, true));
+    await waitFor(() => expect(retry).toHaveBeenCalled());
+  });
+
+  it('lets the operator cancel out of the dependents confirmation without voiding', async () => {
+    mockDetail({ entries: [entry({ sync_version: 2 })] });
+    mocks.voidEntry.mockRejectedValue({
+      response: {
+        status: 409,
+        data: { error: 'cycle_has_dependents', details: { dependentEntryUuids: ['dep-1'] } },
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.void' }));
+    fireEvent.change(screen.getByLabelText('workspace.detail.void.reasonLabel'), { target: { value: 'Testing' } });
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.void.submit' }));
+
+    await waitFor(() => expect(screen.getByText('capture.cycle.voidDependentsTitle')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.cycle.voidDependentsCancel' }));
+
+    expect(screen.queryByText('capture.cycle.voidDependentsTitle')).not.toBeInTheDocument();
+    expect(mocks.voidEntry).toHaveBeenCalledTimes(1);
   });
 });
 

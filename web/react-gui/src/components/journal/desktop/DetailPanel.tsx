@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { buildCatalogModel, catalogLabel } from '../../../journal/catalogModel';
+import { cycleDependentsFromError } from '../../../journal/cropCycle';
 import { buildCorrectionPayload, parseContextSnapshot } from '../../../journal/entryCorrection';
 import { deriveFieldStates } from '../../../journal/templateEngine';
 import { useJournalEntries } from '../../../journal/useJournalEntries';
@@ -390,8 +391,35 @@ function VoidForm({ aggregate, onCancel, onVoided }: VoidFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [staleError, setStaleError] = useState(false);
   const [genericError, setGenericError] = useState(false);
+  // D13/R7: voiding a seeding whose crop cycle has dependent entries (other
+  // entries currently relying on it live, or already frozen by it) is
+  // refused with dependentEntryUuids unless cascade_ack is set — see
+  // journal/cropCycle.ts's cycleDependentsFromError and
+  // osi-journal/lifecycle.js applyVoidCycleCascade. Surface those UUIDs and
+  // require an explicit confirmation before retrying with cascade_ack.
+  const [dependentEntryUuids, setDependentEntryUuids] = useState<string[] | null>(null);
   const reasonId = 'journal-detail-void-reason';
   const reasonErrorId = `${reasonId}-error`;
+
+  const submitVoid = async (trimmedReason: string, cascadeAck: boolean) => {
+    setSubmitting(true);
+    setStaleError(false);
+    setGenericError(false);
+    try {
+      await journalApi.voidEntry(aggregate.entry_uuid, trimmedReason, aggregate.sync_version, cascadeAck);
+      await onVoided();
+    } catch (failure) {
+      const dependents = cycleDependentsFromError(failure);
+      if (dependents) {
+        setDependentEntryUuids(dependents);
+      } else if (isStaleVersionError(failure)) {
+        setStaleError(true);
+      } else {
+        setGenericError(true);
+      }
+      setSubmitting(false);
+    }
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -400,17 +428,12 @@ function VoidForm({ aggregate, onCancel, onVoided }: VoidFormProps) {
       setTouched(true);
       return;
     }
-    setSubmitting(true);
-    setStaleError(false);
-    setGenericError(false);
-    try {
-      await journalApi.voidEntry(aggregate.entry_uuid, trimmed, aggregate.sync_version);
-      await onVoided();
-    } catch (failure) {
-      if (isStaleVersionError(failure)) setStaleError(true);
-      else setGenericError(true);
-      setSubmitting(false);
-    }
+    setDependentEntryUuids(null);
+    await submitVoid(trimmed, false);
+  };
+
+  const confirmCascade = async () => {
+    await submitVoid(reason.trim(), true);
   };
 
   return (
@@ -442,6 +465,33 @@ function VoidForm({ aggregate, onCancel, onVoided }: VoidFormProps) {
         <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">
           {t('workspace.detail.void.error')}
         </p>
+      )}
+      {dependentEntryUuids && (
+        <div role="alertdialog" aria-label={t('capture.cycle.voidDependentsTitle')} className="space-y-2 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-3">
+          <p className="font-bold text-[var(--text)]">{t('capture.cycle.voidDependentsTitle')}</p>
+          <p className="text-sm text-[var(--text-secondary)]">{t('capture.cycle.voidDependentsBody')}</p>
+          <ul className="ml-4 list-disc space-y-1 text-sm text-[var(--text)]">
+            {dependentEntryUuids.map((entryUuid) => <li key={entryUuid}>{entryUuid}</li>)}
+          </ul>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => setDependentEntryUuids(null)}
+              className="flex-1 rounded-lg border border-[var(--border)] px-3 py-2 font-bold"
+            >
+              {t('capture.cycle.voidDependentsCancel')}
+            </button>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => { void confirmCascade(); }}
+              className="flex-1 rounded-lg bg-[var(--error-text)] px-3 py-2 font-bold text-white"
+            >
+              {t('capture.cycle.voidDependentsConfirm')}
+            </button>
+          </div>
+        </div>
       )}
       <div className="flex gap-2">
         <button
