@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { catalogLabel } from '../../../journal/catalogModel';
 import type { JournalPlot, PlotGroup } from '../../../types/journal';
 
 const FOCUS_RING =
@@ -36,6 +37,13 @@ const STATUS_OPTIONS: readonly Exclude<EntryStatusFilter, 'all'>[] = ['draft', '
 
 export interface ScopeRailActivityOption {
   code: string;
+  // Catalog-provided display labels (see osi-journal/api.js catalogDto
+  // labels_json), keyed by locale — the same source the capture flow's
+  // ActivityPicker already reads via catalogLabel. Only ~6 of the 16 shipped
+  // activity codes have a client-side `journal.json` `activity.*` i18n key
+  // (P2-c), so this filter must resolve labels from the catalog rather than
+  // from that incomplete translation namespace, or most codes render raw.
+  labels?: Record<string, string>;
 }
 
 export interface ScopeRailProps {
@@ -84,7 +92,8 @@ export function ScopeRail({
   search,
   onSearchChange,
 }: ScopeRailProps) {
-  const { t } = useTranslation('journal');
+  const { t, i18n } = useTranslation('journal');
+  const locale = i18n.resolvedLanguage || i18n.language;
 
   const visiblePlots = useMemo(
     () => plots.filter((plot) => plot.active === 1 && plot.deleted_at === null),
@@ -160,7 +169,7 @@ export function ScopeRail({
             <option value="">{t('filters.allActivities')}</option>
             {activities.map((activity) => (
               <option key={activity.code} value={activity.code}>
-                {t(`activity.${activity.code}`, activity.code)}
+                {catalogLabel(activity, locale)}
               </option>
             ))}
           </select>

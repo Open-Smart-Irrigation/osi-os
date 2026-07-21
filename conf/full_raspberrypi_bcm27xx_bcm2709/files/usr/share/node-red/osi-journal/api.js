@@ -553,13 +553,19 @@ async function listEntriesInSnapshot(db, rawFilters, principal) {
   // Purely additive: entries on a plot with no open journal_crop_cycle_plots
   // membership -- every entry before this feature, and the overwhelming
   // majority after -- get back an empty Map and are unaffected.
-  const liveCropOverrides = await require('./lifecycle').resolveLiveCropOverrides(
-    function(sql, params) { return dbAll(db, sql, params); },
-    rows
-  );
+  const lifecycle = require('./lifecycle');
+  const queryAll = function(sql, params) { return dbAll(db, sql, params); };
+  const liveCropOverrides = await lifecycle.resolveLiveCropOverrides(queryAll, rows);
+  // P2-b (Slice D hardening): a harvest/manual-close/reseed entry that closed
+  // a crop cycle never carries its own season_crop/season_variety (see
+  // lifecycle.js resolveClosedCropCycleOverrides) -- resolve the crop it
+  // CLOSED, for display only, so the timeline/detail views can show what was
+  // harvested instead of a blank crop.
+  const closedCropOverrides = await lifecycle.resolveClosedCropCycleOverrides(queryAll, rows);
   const entries = rows.map(function(row) {
     const liveCrop = liveCropOverrides.get(row.entry_uuid);
-    const projected = liveCrop ? Object.assign({}, row, liveCrop) : row;
+    const closedCrop = closedCropOverrides.get(row.entry_uuid);
+    const projected = Object.assign({}, row, liveCrop || {}, closedCrop || {});
     return buildAggregate(Object.assign({ contract_version: 1 }, projected), valuesByEntry.get(row.entry_uuid) || []);
   });
   return {
@@ -651,7 +657,15 @@ async function activeLayout(tx, code, version) {
   return layout;
 }
 
-function plotAggregate(row, settings) {
+// Slice D hardening (P1-a/P1-b): activeCropCycles is a GUI-only, additive
+// enrichment -- the plot's currently OPEN journal_crop_cycles membership(s),
+// per osi-journal/lifecycle.js activeCropCyclesForPlot. It is deliberately
+// left OFF the base aggregate (defaults to []) for callers that feed this
+// object into the outbox/cloud-sync contract (emitPlot below) -- the cloud
+// mirror has no use for it and this keeps that wire contract unchanged.
+// Callers that build a plot response for the GUI (listPlots, upsertPlot)
+// pass the real, freshly-queried array instead.
+function plotAggregate(row, settings, activeCropCycles) {
   return {
     contract_version: 1,
     plot_uuid: row.plot_uuid,
@@ -668,6 +682,7 @@ function plotAggregate(row, settings) {
     created_at: row.created_at,
     updated_at: row.updated_at,
     deleted_at: nullable(row.deleted_at),
+    active_crop_cycles: activeCropCycles || [],
     settings: {
       layout_code: settings.layout_code,
       updated_at: settings.updated_at,
@@ -676,6 +691,19 @@ function plotAggregate(row, settings) {
       context_json: nullable(settings.context_json),
     },
   };
+}
+
+// Wraps api.js's plain db/snapshot handle (which may be callback- or
+// promise-shaped, see dbAll/syncDbCall) as the minimal tx-like `{all}` object
+// osi-journal/lifecycle.js's activeCropCyclesForPlot/openCyclesCoveringPlot
+// expect, so this read-only path can reuse that phase-2 query helper
+// verbatim instead of re-deriving the open-membership SQL.
+function txLike(db) {
+  return { all: function(sql, params) { return dbAll(db, sql, params); } };
+}
+
+async function activeCropCyclesForPlot(db, plotUuid) {
+  return require('./lifecycle').activeCropCyclesForPlot(txLike(db), plotUuid);
 }
 
 async function emitPlot(tx, row, settings) {
@@ -812,7 +840,8 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
             [byZone.plot_uuid, principal.owner_user_uuid, principal.gateway_device_eui]
           );
           const settings = await dbGet(tx, 'SELECT * FROM journal_plot_settings WHERE plot_uuid=?', [byZone.plot_uuid]);
-          return { plot: plotAggregate(row, settings), created: false };
+          const activeCropCycles = await activeCropCyclesForPlot(tx, byZone.plot_uuid);
+          return { plot: plotAggregate(row, settings, activeCropCycles), created: false };
         }
         throw apiError(409, 'zone_plot_conflict', 'This zone already has an active application plot');
       }
@@ -916,7 +945,12 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
       gateway_device_eui: principal.gateway_device_eui,
       sync_version: nextVersion,
     });
-    return { plot: plotAggregate(row, settings), outbox_event_uuid: emission.event_uuid, created: creating };
+    const activeCropCycles = await activeCropCyclesForPlot(tx, plotUuid);
+    return {
+      plot: plotAggregate(row, settings, activeCropCycles),
+      outbox_event_uuid: emission.event_uuid,
+      created: creating,
+    };
   });
 }
 
@@ -1087,17 +1121,17 @@ async function listPlots(db, principal) {
     'ORDER BY p.plot_code,p.plot_uuid',
     [principal.owner_user_uuid, principal.gateway_device_eui, principal.user_id, principal.gateway_device_eui]
   );
-  return {
-    plots: rows.map(function(row) {
-      return plotAggregate(row, {
-        layout_code: row.layout_code,
-        context_json: row.context_json,
-        updated_at: row.settings_updated_at,
-        updated_by_principal_uuid: row.updated_by_principal_uuid,
-        sync_version: row.settings_sync_version,
-      });
-    }),
-  };
+  const plots = await Promise.all(rows.map(async function(row) {
+    const activeCropCycles = await activeCropCyclesForPlot(db, row.plot_uuid);
+    return plotAggregate(row, {
+      layout_code: row.layout_code,
+      context_json: row.context_json,
+      updated_at: row.settings_updated_at,
+      updated_by_principal_uuid: row.updated_by_principal_uuid,
+      sync_version: row.settings_sync_version,
+    }, activeCropCycles);
+  }));
+  return { plots };
 }
 
 function jsonObjectText(value, field, required) {
@@ -1641,12 +1675,15 @@ async function loadCurrentAggregateInSnapshot(db, type, key, principal) {
     // uses (resolveLiveCropOverrides) so a single-entry fetch also shows a
     // deferred entry's live crop instead of the stored (possibly still-null)
     // columns -- see the D2.2/§6 comment on listEntriesInSnapshot above.
-    const liveCropOverrides = await require('./lifecycle').resolveLiveCropOverrides(
-      function(sql, params) { return dbAll(db, sql, params); },
-      [row]
-    );
+    // P2-b (Slice D hardening) applies the same closed-crop display
+    // resolution for symmetry, for the same reason.
+    const lifecycle = require('./lifecycle');
+    const queryAll = function(sql, params) { return dbAll(db, sql, params); };
+    const liveCropOverrides = await lifecycle.resolveLiveCropOverrides(queryAll, [row]);
+    const closedCropOverrides = await lifecycle.resolveClosedCropCycleOverrides(queryAll, [row]);
     const liveCrop = liveCropOverrides.get(row.entry_uuid);
-    const projected = liveCrop ? Object.assign({}, row, liveCrop) : row;
+    const closedCrop = closedCropOverrides.get(row.entry_uuid);
+    const projected = Object.assign({}, row, liveCrop || {}, closedCrop || {});
     return buildAggregate(Object.assign({ contract_version: 1 }, projected), values);
   }
   if (type === 'UPSERT_JOURNAL_CUSTOM_VOCAB') {
@@ -2102,35 +2139,73 @@ function writableAborted(writable) {
   return Boolean(writable && (writable.destroyed || writable.writableEnded));
 }
 
+// Root cause (2026-07-21 silent-hang investigation): write() signals
+// backpressure by returning false, and this used to await 'drain' with no
+// upper bound. exportJson/exportResearchPackage can hand write() a single
+// chunk containing many entries at once (see writeBoundedChunk below for why
+// exportWideCsv rarely does), so once a page's serialized JSON crosses the
+// response's highWaterMark, write() returns false -- and if the client/
+// transport never actually drains (a stalled proxy, a client that stopped
+// reading, ...), 'drain' never fires and the request hangs forever with no
+// response, no error, and no server log. EXPORT_WRITE_STALL_MS bounds that
+// wait so a genuinely stuck writable fails loudly instead of hanging.
+const EXPORT_WRITE_STALL_MS = 30000;
+
 async function writeChunk(writable, chunk) {
   if (writableAborted(writable)) throw apiError(499, 'client_aborted', 'Export client disconnected');
   if (!writable.write(chunk)) {
     await new Promise(function(resolve, reject) {
+      let settled = false;
       const cleanup = function() {
         writable.removeListener('drain', onDrain);
         writable.removeListener('close', onClose);
         writable.removeListener('error', onError);
+        clearTimeout(stallTimer);
       };
       const onDrain = function() {
+        if (settled) return;
+        settled = true;
         cleanup();
         resolve();
       };
       const onClose = function() {
+        if (settled) return;
+        settled = true;
         cleanup();
         reject(apiError(499, 'client_aborted', 'Export client disconnected'));
       };
       const onError = function(error) {
+        if (settled) return;
+        settled = true;
         cleanup();
         reject(error);
+      };
+      const onStall = function() {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(apiError(
+          504,
+          'export_stream_stalled',
+          'Export stream stalled waiting for the client to accept data'
+        ));
       };
       writable.once('drain', onDrain);
       writable.once('close', onClose);
       writable.once('error', onError);
+      const stallTimer = setTimeout(onStall, EXPORT_WRITE_STALL_MS);
+      if (typeof stallTimer.unref === 'function') stallTimer.unref();
     });
   }
 }
 
-async function writeBoundedWideChunk(writable, chunk) {
+// Bounds every write to at most WIDE_EXPORT_MAX_WRITE_BYTES so a single
+// write() is never handed more than one write-budget's worth of data. This
+// was originally CSV-only (hence the historical "Wide" name); exportJson and
+// exportResearchPackage now route their writes through it too so they can
+// never repeat the multi-entry, single-write pattern that (combined with a
+// stalled writable) reproduces the export.json/export.package hang.
+async function writeBoundedChunk(writable, chunk) {
   const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8');
   for (let offset = 0; offset < buffer.length; offset += WIDE_EXPORT_MAX_WRITE_BYTES) {
     await writeChunk(writable, buffer.subarray(offset, offset + WIDE_EXPORT_MAX_WRITE_BYTES));
@@ -2222,7 +2297,7 @@ async function exportWideCsv(db, rawFilters, principal, writable, writableFactor
     }
     const target = typeof writableFactory === 'function' ? writableFactory() : writable;
     sink = optionalSink(target);
-    await writeBoundedWideChunk(sink.writable, header);
+    await writeBoundedChunk(sink.writable, header);
     await forEachWidePage(snapshot, selection, principal, async function(entries) {
       for (const entry of entries) {
         const row = {};
@@ -2233,7 +2308,7 @@ async function exportWideCsv(db, rawFilters, principal, writable, writableFactor
           row[prefix + '.value'] = value.value_num == null ? value.value_text : value.value_num;
           row[prefix + '.unit'] = value.unit_code;
         }
-        await writeBoundedWideChunk(sink.writable, csvLine(columns, row));
+        await writeBoundedChunk(sink.writable, csvLine(columns, row));
       }
     });
     await finishWritable(sink.writable);
@@ -2473,7 +2548,7 @@ async function exportJson(db, rawFilters, principal, writable, environment) {
       research_metadata: metadata,
     };
     const prefixText = JSON.stringify(prefix);
-    await writeChunk(sink.writable, prefixText.slice(0, -1) + ',"entries":[');
+    await writeBoundedChunk(sink.writable, prefixText.slice(0, -1) + ',"entries":[');
     const entriesHash = crypto.createHash('sha256');
     const valuesHash = crypto.createHash('sha256');
     entriesHash.update('[');
@@ -2481,13 +2556,21 @@ async function exportJson(db, rawFilters, principal, writable, environment) {
     let first = true;
     let firstValue = true;
     await forEachEntryPage(snapshot, selection, principal, async function(entries) {
-      let chunk = '';
+      // Write one entry at a time (like exportWideCsv writes one row at a
+      // time) instead of batching an entire up-to-50-entry page into a
+      // single write() call. A single write() call this size is exactly the
+      // reproduced silent-hang mechanism: once a page's combined JSON
+      // crosses the response's highWaterMark, write() returns false, and
+      // writeChunk then depends on 'drain' -- which may be delayed far
+      // longer for one big write than for many small ones. writeBoundedChunk
+      // still caps each individual entry's write at WIDE_EXPORT_MAX_WRITE_BYTES
+      // as a second line of defense.
       for (const entry of entries) {
         const serialized = JSON.stringify(researchEntry(entry));
         const separator = first ? '' : ',';
         first = false;
-        chunk += separator + serialized;
         entriesHash.update(separator + serialized);
+        await writeBoundedChunk(sink.writable, separator + serialized);
         for (const value of valueRows([entry])) {
           const valueSerialized = JSON.stringify(value);
           const valueSeparator = firstValue ? '' : ',';
@@ -2495,11 +2578,10 @@ async function exportJson(db, rawFilters, principal, writable, environment) {
           valuesHash.update(valueSeparator + valueSerialized);
         }
       }
-      if (chunk) await writeChunk(sink.writable, chunk);
     });
     entriesHash.update(']');
     valuesHash.update(']');
-    await writeChunk(sink.writable, '],"record_counts":' + JSON.stringify(metadata.record_counts) +
+    await writeBoundedChunk(sink.writable, '],"record_counts":' + JSON.stringify(metadata.record_counts) +
       ',"checksums":' + JSON.stringify({
       research_metadata_sha256: crypto.createHash('sha256')
         .update(JSON.stringify(metadata), 'utf8')
@@ -2544,7 +2626,11 @@ function zipStream(writable, generatedAt) {
 
   async function output(chunk) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8');
-    await writeChunk(writable, buffer);
+    // Bounded (not a raw writeChunk) so a single big member write -- e.g.
+    // manifest.json, whose size grows with the research metadata -- can
+    // never itself become an oversized, unbounded write() call the way the
+    // pre-fix exportJson entries chunk did.
+    await writeBoundedChunk(writable, buffer);
     offset += buffer.length;
   }
 

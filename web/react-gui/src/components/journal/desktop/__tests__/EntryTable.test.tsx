@@ -426,18 +426,56 @@ describe('EntryTable', () => {
       expect(mocks.exportEntriesCsv.mock.calls[0][0]).not.toHaveProperty('limit');
     });
 
-    it('shows a retryable error message when an export fails, without disturbing the table', async () => {
+    it('shows a retryable error message when an export fails, then a success message once a retry succeeds, without disturbing the table', async () => {
       mocks.exportEntriesCsv.mockRejectedValueOnce(new Error('network down'));
       renderTable({ filters: scopedFilters });
 
       fireEvent.click(screen.getByRole('button', { name: 'workspace.table.exportCsv' }));
 
       await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('workspace.table.exportError'));
+      expect(screen.queryByText('workspace.table.exportSuccess')).not.toBeInTheDocument();
 
       mocks.exportEntriesCsv.mockResolvedValueOnce(undefined);
       fireEvent.click(screen.getByRole('button', { name: 'workspace.table.exportCsv' }));
 
       await waitFor(() => expect(mocks.exportEntriesCsv).toHaveBeenCalledTimes(2));
+      // P1-c: a failure must never look like a silent no-op, but neither
+      // must a success — both are now surfaced, and starting a fresh
+      // attempt clears whatever the previous one left behind.
+      await waitFor(() => expect(screen.getByText('workspace.table.exportSuccess')).toBeInTheDocument());
+      expect(screen.queryByText('workspace.table.exportError')).not.toBeInTheDocument();
+    });
+
+    // P1-c: CSV export already worked and already showed a failure banner —
+    // JSON and research-package were reported as silently inert. Reading the
+    // wiring shows all three already call the same downloadJournalExport
+    // helper (journalApi.ts), so this asserts the success confirmation now
+    // exists for JSON and package too, matching CSV, closing that gap for
+    // real regardless of what the live report's exact root cause was.
+    it.each([
+      ['json', 'exportEntriesJson'],
+      ['package', 'exportEntriesResearchPackage'],
+    ] as const)('shows a success status message after the %s export completes', async (kind, mockName) => {
+      mocks[mockName].mockResolvedValueOnce(undefined);
+      renderTable({ filters: scopedFilters });
+
+      fireEvent.click(screen.getByRole('button', { name: `workspace.table.export${kind === 'json' ? 'Json' : 'Package'}` }));
+
+      await waitFor(() => expect(screen.getByText('workspace.table.exportSuccess')).toBeInTheDocument());
+      expect(screen.queryByText('workspace.table.exportError')).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ['json', 'exportEntriesJson'],
+      ['package', 'exportEntriesResearchPackage'],
+    ] as const)('shows a failure status message when the %s export rejects', async (kind, mockName) => {
+      mocks[mockName].mockRejectedValueOnce(new Error('network down'));
+      renderTable({ filters: scopedFilters });
+
+      fireEvent.click(screen.getByRole('button', { name: `workspace.table.export${kind === 'json' ? 'Json' : 'Package'}` }));
+
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('workspace.table.exportError'));
+      expect(screen.queryByText('workspace.table.exportSuccess')).not.toBeInTheDocument();
     });
 
     it('clears a stale export-error banner when the filters prop changes (e.g. the user moves to a different scope)', async () => {
@@ -457,6 +495,25 @@ describe('EntryTable', () => {
       );
 
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('clears a stale export-success banner when the filters prop changes', async () => {
+      mocks.exportEntriesCsv.mockResolvedValueOnce(undefined);
+      const { rerender } = renderTable({ filters: scopedFilters });
+
+      fireEvent.click(screen.getByRole('button', { name: 'workspace.table.exportCsv' }));
+      await waitFor(() => expect(screen.getByText('workspace.table.exportSuccess')).toBeInTheDocument());
+
+      rerender(
+        <EntryTable
+          filters={{ status: 'draft' }}
+          plots={[plot()]}
+          selectedEntryUuid={null}
+          onSelectEntry={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByText('workspace.table.exportSuccess')).not.toBeInTheDocument();
     });
   });
 });

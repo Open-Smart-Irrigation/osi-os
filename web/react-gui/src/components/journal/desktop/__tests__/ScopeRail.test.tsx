@@ -9,6 +9,7 @@ vi.mock('react-i18next', () => ({
       if (options && typeof options === 'object' && 'count' in options) return `${key}:${options.count}`;
       return key;
     },
+    i18n: { resolvedLanguage: 'en-GB', language: 'en-GB' },
   }),
 }));
 
@@ -254,6 +255,27 @@ describe('ScopeRail', () => {
     const status = screen.getByLabelText('filters.status') as HTMLSelectElement;
     const optionValues = within(status).getAllByRole('option').map((option) => (option as HTMLOptionElement).value);
     expect(optionValues).toEqual(['all', 'draft', 'final', 'voided']);
+  });
+
+  // P2-c: most activity codes (e.g. crop_care, mowing, tillage_soil_work)
+  // have no `journal.json` activity.* translation key — the capture
+  // picker's catalogLabel lookup (reading the catalog's own labels_json)
+  // already handles every code; this filter must reuse it instead of
+  // t(`activity.${code}`, code), which rendered the raw snake_case code in
+  // every locale for the untranslated ones.
+  it('labels activity filter options from the catalog, not the incomplete activity.* i18n namespace', () => {
+    render(<ScopeRail {...baseProps()} activities={[
+      { code: 'crop_care', labels: { en: 'Crop care' } },
+      { code: 'mowing' },
+    ]} />);
+
+    const activityFilter = screen.getByLabelText('filters.activity') as HTMLSelectElement;
+    const options = within(activityFilter).getAllByRole('option') as HTMLOptionElement[];
+    expect(options.map((option) => option.textContent)).toEqual([
+      'filters.allActivities',
+      'Crop care',
+      'mowing',
+    ]);
   });
 
   it('renders every scope row as a native button so it is reachable by keyboard', () => {

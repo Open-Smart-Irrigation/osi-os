@@ -43,8 +43,8 @@ import {
   SEEDING_ACTIVITY_CODES,
   currentCropInfoForPlot,
   cycleDisambiguationFromError,
-  findSeedingEntryFor,
   varietySuggestionsFor,
+  type CurrentCropInfo,
   type CycleOption,
 } from '../../../journal/cropCycle';
 import type {
@@ -100,7 +100,12 @@ export interface JournalCaptureFlowProps {
   initialTimezone?: string;
   zoneCrops?: Readonly<Record<string, string>>;
   zoneTimezones?: Readonly<Record<string, string>>;
-  plotState: Pick<JournalPlotResourceActions, 'createPlot' | 'updatePlot'>;
+  // 'revalidate' (Slice D hardening): after correcting a seeding's crop via
+  // the InheritedCropBanner (which updates the CYCLE row, not this flow's own
+  // `plots` prop), refetch the plot list so active_crop_cycles — and
+  // everything derived from it (openCropCycleInfo/bannerInfo/the Where-step
+  // display) — reflects the correction instead of staying stale.
+  plotState: Pick<JournalPlotResourceActions, 'createPlot' | 'updatePlot' | 'revalidate'>;
   groupState: Pick<JournalPlotGroupResourceActions, 'createPlotGroup' | 'updatePlotGroup'>;
   onClose: () => void;
   onOpenExisting: (entryUuid: string) => void;
@@ -128,13 +133,6 @@ interface DuplicateCandidateGroup {
 interface CropCycleOverlap {
   crop_code: string;
   variety: string | null;
-}
-
-interface InheritedCropBannerInfo {
-  crop_code: string;
-  variety: string | null;
-  seededDate: string;
-  seedingEntryUuid: string;
 }
 
 interface AcceptedRepeatSnapshot {
@@ -708,25 +706,6 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const [cycleUuid, setCycleUuid] = useState<string | null>(null);
   const [cycleDisambiguationOptions, setCycleDisambiguationOptions] = useState<CycleOption[] | null>(null);
   const [pendingCycleRetry, setPendingCycleRetry] = useState(false);
-  // D3.2 (review fix, B1): an open cycle already covering EACH target plot,
-  // one entry per selected plot that has a single resolvable covering crop
-  // (best-effort, client-side detection — see journal/cropCycle.ts). Collected
-  // across ALL selected plots, not just the first that resolves — a same-
-  // crop+variety match on ANY plot (not only the first) must make the
-  // continue/new prompt load-bearing, otherwise a multi-plot seeding can
-  // silently merge into a non-first plot's open cycle with no cycle_action
-  // sent at all. An intercropped plot (>1 open cycle) legitimately yields no
-  // entry here (currentCropInfoForPlot returns null) and falls through to the
-  // reactive cycle_uuid_required disambiguation instead.
-  const [seedingOverlaps, setSeedingOverlaps] = useState<readonly CropCycleOverlap[]>([]);
-  // N3 (TOCTOU fix): true while the fetch above is in flight for the current
-  // seeding plot/activity selection. Must gate both `next()` out of details
-  // and Finalize (via cycleActionSatisfied below) — otherwise a same-crop
-  // overlap that hasn't resolved yet reads as "no overlap", cycleActionRequired
-  // is false, and the batch finalizes with cycle_action silently omitted.
-  const [seedingOverlapPending, setSeedingOverlapPending] = useState(false);
-  // D3.3: the inherited-crop banner's content for the single selected plot.
-  const [bannerInfo, setBannerInfo] = useState<InheritedCropBannerInfo | null>(null);
   // Layout-transition review gate (Task 32): values a plot/layout switch would
   // otherwise silently sanitize away (a hidden field, an invalid choice) sit
   // here pending explicit user resolution instead. Never mutated directly.
@@ -826,6 +805,32 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   // for the rationale behind each best-effort/reasoned signal).
   const isSeedingLeaf = Boolean(leaf && SEEDING_ACTIVITY_CODES.has(leaf.activity_code));
   const isManualCloseLeaf = Boolean(leaf && MANUAL_CLOSE_ACTIVITY_CODES.has(leaf.activity_code));
+  const isHarvestLeaf = Boolean(leaf && leaf.activity_code === 'harvest');
+  // Slice D hardening (P1-a/P1-b/P2-b): the open crop cycle covering the
+  // SINGLE selected plot, read directly from the plot's own AUTHORITATIVE
+  // active_crop_cycles (osi-journal/api.js listPlots via journal/cropCycle.ts
+  // currentCropInfoForPlot) -- already loaded with `plots`, no fetch needed.
+  // This is deliberately synchronous (no useEffect/useState): it must be
+  // available the instant a plot is selected, before any activity is even
+  // chosen, so the Where-step crop requirement (below) can consult it.
+  const openCropCycleInfo: CurrentCropInfo | null = !isMultiPlot && selectedPlot
+    ? currentCropInfoForPlot(selectedPlot.active_crop_cycles)
+    : null;
+  // D3.2 (review fix, B1): an open cycle already covering EACH target plot,
+  // one entry per selected plot that has a single resolvable covering crop.
+  // Collected across ALL selected plots, not just the first that resolves —
+  // a same-crop+variety match on ANY plot (not only the first) must make the
+  // continue/new prompt load-bearing, otherwise a multi-plot seeding can
+  // silently merge into a non-first plot's open cycle with no cycle_action
+  // sent at all. An intercropped plot (>1 open cycle) legitimately yields no
+  // entry here (currentCropInfoForPlot returns null) and falls through to the
+  // reactive cycle_uuid_required disambiguation instead.
+  const seedingOverlaps: readonly CropCycleOverlap[] = isSeedingLeaf
+    ? selectedPlots
+        .map((plot) => currentCropInfoForPlot(plot.active_crop_cycles))
+        .filter((info): info is CurrentCropInfo => info != null)
+        .map((info) => ({ crop_code: info.crop_code, variety: info.variety }))
+    : [];
   // The real catalog's farmer_quick@3 quick_fields DOES declare attr.crop for
   // seeding/planting_transplanting (journal-catalog-core.js), so formOwnsCrop
   // is true there and EntryForm already renders its own attr.crop choice
@@ -860,13 +865,52 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const matchingSeedingOverlap = seedingOverlaps.find((overlap) =>
     overlap.crop_code === effectiveSeedingCrop && (overlap.variety ?? '') === variety.trim()) ?? null;
   const cycleActionRequired = isSeedingLeaf && matchingSeedingOverlap != null;
-  // N3 (TOCTOU fix): while the overlap fetch is still in flight for a seeding
-  // activity, whether ANY plot overlaps the entered crop+variety is simply
-  // unknown yet — never treat that as "not required" just because the list
-  // hasn't populated. Gates both `next()` out of details (below) and
-  // Finalize (via finalizeDisabled on ConfirmStrip).
-  const cycleActionSatisfied = !isSeedingLeaf ||
-    (!seedingOverlapPending && (!cycleActionRequired || cycleAction != null));
+  // seedingOverlaps is now a synchronous read of already-loaded plot data
+  // (no fetch, see openCropCycleInfo/seedingOverlaps above), so there is no
+  // in-flight window to gate on here any more.
+  const cycleActionSatisfied = !isSeedingLeaf || !cycleActionRequired || cycleAction != null;
+  // D3.3 (P1-b, Slice D hardening): the inherited-crop banner's content for
+  // the single selected plot, gated on an OPEN covering cycle as-of today
+  // (not merely "some past entry recorded a crop") — see
+  // journal/cropCycle.ts currentCropInfoForPlot's module doc comment for why
+  // entries' season_crop alone can never answer this correctly. Never shown
+  // for a seeding activity (SeedingCropFields owns the crop there instead).
+  const bannerInfo: CurrentCropInfo | null = !isSeedingLeaf ? openCropCycleInfo : null;
+  const cropCycleLabel = useCallback((cropCode: string, variety: string | null): string => {
+    const row = model?.vocabByCode.get(cropCode);
+    const label = row ? catalogLabel(row, locale) : cropCode;
+    return variety ? `${label} · ${variety}` : label;
+  }, [locale, model]);
+  // P2-b (Slice D hardening): harvest, a checked manual-close, and a
+  // differing-crop reseed all close an existing open cycle server-side (see
+  // osi-journal/lifecycle.js applyHarvestCycleEffect/
+  // applyManualCloseCycleEffect/applySeedingCycleEffect) — surface which
+  // crop(s) that will be, across every selected plot, as a confirmation
+  // before the farmer saves. A same-crop-and-variety seeding is deliberately
+  // excluded here: that is the D3.2 continue/new prompt's job, not a close.
+  const closingCropCycles: readonly CropCycleOverlap[] = (() => {
+    const dedupe = (candidates: readonly CropCycleOverlap[]): CropCycleOverlap[] => {
+      const seen = new Set<string>();
+      return candidates.filter((candidate) => {
+        const key = `${candidate.crop_code}:${candidate.variety ?? ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    if (isHarvestLeaf || (isManualCloseLeaf && endsCropCycle)) {
+      return dedupe(selectedPlots
+        .map((plot) => currentCropInfoForPlot(plot.active_crop_cycles))
+        .filter((info): info is CurrentCropInfo => info != null)
+        .map((info) => ({ crop_code: info.crop_code, variety: info.variety })));
+    }
+    if (isSeedingLeaf && effectiveSeedingCrop) {
+      const trimmedVariety = variety.trim();
+      return dedupe(seedingOverlaps
+        .filter((overlap) => !(overlap.crop_code === effectiveSeedingCrop && (overlap.variety ?? '') === trimmedVariety)));
+    }
+    return [];
+  })();
   // Slice BC (R1 Part 2): read-only plot-context display for the Quick
   // template only — full_record/research still render these as normal
   // editable EntryForm fields (unchanged by this slice), so a redundant
@@ -1021,14 +1065,36 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
 
   const inferredCrop = useMemo(() => {
     if (crop.trim()) return crop.trim();
-    // A sensorless plot has no authoritative season snapshot. Do not infer a
-    // crop from historical rows there; the user must provide the context.
-    if (selectedPlot && !zoneLinked) return '';
+    // A sensorless plot has no authoritative season snapshot to fall back to
+    // — EXCEPT (P1-a, Slice D hardening) an open crop cycle already covering
+    // it: that IS authoritative (see openCropCycleInfo above), and asking
+    // the farmer to re-type a crop the app already has via the cycle is
+    // exactly the bug this fixes. Only a genuinely cycle-less sensorless
+    // plot still requires the user to provide the context.
+    //
+    // B2 (pre-deploy review, crop-history integrity): openCropCycleInfo is
+    // resolved by the edge "as of today" (osi-journal/lifecycle.js
+    // activeCropCyclesForPlot), not as of THIS entry's occurred date. Auto-
+    // inheriting it unconditionally would mislabel a backdated entry logged
+    // before the open cycle even started — resolveSeason has no way to tell
+    // that crop came from "today", not the entry's own date, and stamps it
+    // permanently via its explicit-crop tier. Gate the inheritance on the
+    // occurred local date falling within the open cycle's span: an open
+    // cycle has no end, so ">= seededDate" is the whole test. A backdated
+    // entry before that date falls through to '' (explicit-crop-required),
+    // exactly like a genuinely cycle-less plot.
+    if (selectedPlot && !zoneLinked) {
+      const occurredLocalDate = occurredLocal.slice(0, 10);
+      if (openCropCycleInfo && occurredLocalDate >= openCropCycleInfo.seededDate) {
+        return openCropCycleInfo.crop_code;
+      }
+      return '';
+    }
     const source = recentEntries
       .filter((entry) => entry.plot_uuid === selectedPlotUuid && entry.season_uuid && entry.season_crop)
       .sort((left, right) => Date.parse(right.occurred_start) - Date.parse(left.occurred_start))[0];
     return source?.season_crop?.trim() ?? '';
-  }, [crop, recentEntries, selectedPlot, selectedPlotUuid, zoneLinked]);
+  }, [crop, occurredLocal, openCropCycleInfo, recentEntries, selectedPlot, selectedPlotUuid, zoneLinked]);
 
   // Slice D Phase 3: the three cascade-control fields osi-journal/
   // lifecycle.js reads directly off the create/correct entry body (see
@@ -1245,64 +1311,6 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     void list();
     return () => { cancelled = true; };
   }, [draft.entryUuid, leaf, layout, model, resolved, selectedPlot]);
-
-  // Slice D Phase 3 (D3.2/D3.3): plot-scoped, best-effort crop-cycle
-  // detection. Deliberately a fresh fetch per target plot rather than the
-  // farm-wide `recentEntries` prop (that list is scoped to the journal
-  // page's own filters, not to whatever plot(s) this flow currently has
-  // selected — see journal/cropCycle.ts's currentCropInfoForPlot doc
-  // comment). Seeding activities check EVERY selected plot and collect an
-  // overlap entry for each one that resolves (review fix, B1: a same-crop
-  // match on any non-first plot must be caught too, not just the first plot
-  // that happens to resolve a covering crop — see cycleActionRequired
-  // above); the inherited-crop banner is scoped to a single selected plot,
-  // matching D8's singular "🌱 crop · variety · seeded date" framing.
-  useEffect(() => {
-    setSeedingOverlaps([]);
-    setBannerInfo(null);
-    const willFetchSeedingOverlap = isSeedingLeaf && selectedPlotUuids.length > 0;
-    setSeedingOverlapPending(willFetchSeedingOverlap);
-    if (selectedPlotUuids.length === 0) return undefined;
-    let cancelled = false;
-    const load = async () => {
-      if (isSeedingLeaf) {
-        try {
-          const perPlot = await Promise.all(selectedPlotUuids.map((plotUuid) =>
-            journalApi.listEntries({ plot_uuid: plotUuid, status: 'final', limit: 50 })
-              .then((response) => response.entries)
-              .catch(() => [] as EntryAggregate[])));
-          if (cancelled) return;
-          const overlaps = perPlot
-            .map((entries) => currentCropInfoForPlot(entries))
-            .filter((info): info is NonNullable<typeof info> => info != null)
-            .map((info) => ({ crop_code: info.crop_code, variety: info.variety }));
-          setSeedingOverlaps(overlaps);
-        } finally {
-          if (!cancelled) setSeedingOverlapPending(false);
-        }
-        return;
-      }
-      if (isMultiPlot || !selectedPlot) return;
-      try {
-        const response = await journalApi.listEntries({ plot_uuid: selectedPlot.plot_uuid, status: 'final', limit: 50 });
-        if (cancelled) return;
-        const info = currentCropInfoForPlot(response.entries);
-        if (!info) return;
-        const seedingRef = findSeedingEntryFor(response.entries, info.crop_code, info.variety);
-        if (!seedingRef) return;
-        setBannerInfo({
-          crop_code: info.crop_code,
-          variety: info.variety,
-          seededDate: seedingRef.occurredDate,
-          seedingEntryUuid: seedingRef.entry_uuid,
-        });
-      } catch {
-        if (!cancelled) setBannerInfo(null);
-      }
-    };
-    void load();
-    return () => { cancelled = true; };
-  }, [isMultiPlot, isSeedingLeaf, selectedPlot, selectedPlotUuids]);
 
   // Task 32: replaces the unconditional sanitizeValues() call at a plot/layout
   // transition with an explicit review gate. Values sanitizeValues would hide or
@@ -2121,6 +2129,32 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const startOccurrenceLabel = `${t('capture.confirm.occurrence')} · ${t('capture.form.required')}`;
   const endOccurrenceLabel = `${t('capture.confirm.occurrence')} · ${t('capture.form.optional')}`;
   const endOffsetLabel = `${t('capture.validation.chooseUtcOffset')} · ${t('capture.form.optional')}`;
+  // P1-a (Slice D hardening): the Where/Activity steps' sensorless-plot crop
+  // field. Do NOT re-ask a crop the app already has via an open cycle —
+  // show it read-only instead (the free-text input stays for a genuinely
+  // cycle-less plot, unchanged). Ambiguous intercrop (openCropCycleInfo null
+  // because >1 open cycle) falls through to the free-text input, same as
+  // before this fix — disambiguating which crop an activity is about is a
+  // capture-form concern out of scope here.
+  const whereCropField = selectedPlot && !zoneLinked && (
+    openCropCycleInfo ? (
+      <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm text-[var(--text)]">
+        <span aria-hidden="true">🌱 </span>
+        {cropCycleLabel(openCropCycleInfo.crop_code, openCropCycleInfo.variety)}
+      </p>
+    ) : (
+      <label className="block text-sm font-bold text-[var(--text)]">
+        {t('capture.carry.crop')}
+        <input
+          aria-label={t('capture.carry.crop')}
+          value={crop}
+          disabled={preparingConfirm || saving || Boolean(finalReceipt)}
+          onChange={(event) => { setCrop(event.target.value); setWhereError(null); }}
+          className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]"
+        />
+      </label>
+    )
+  );
   const body = () => {
     if (step === 'where') {
       return (
@@ -2172,14 +2206,14 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
             </label>
           )}
           {selectedPlot && <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm text-[var(--text-secondary)]">{catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v{layout?.version}</p>}
-          {selectedPlot && !zoneLinked && <label className="block text-sm font-bold text-[var(--text)]">{t('capture.carry.crop')}<input aria-label={t('capture.carry.crop')} value={crop} disabled={preparingConfirm || saving || Boolean(finalReceipt)} onChange={(event) => setCrop(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]" /></label>}
+          {whereCropField}
           {batchError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{batchError}</p>}
           {whereError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t(whereError as never)}</p>}
         </section>
       );
     }
     if (step === 'activity') {
-      return <section className="space-y-3"><p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]">{catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v{layout?.version}</p>{selectedPlot && !zoneLinked && <label className="block text-sm font-bold text-[var(--text)]">{t('capture.carry.crop')}<input aria-label={t('capture.carry.crop')} value={crop} disabled={preparingConfirm || saving || Boolean(finalReceipt)} onChange={(event) => { setCrop(event.target.value); setWhereError(null); }} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]" /></label>}{whereError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t(whereError as never)}</p>}<ActivityPicker catalogRows={activityRows} plotRecent={shortlist.plotRecent} seasonCommon={shortlist.seasonCommon} farmRecent={shortlist.farmRecent} layoutFallback={fallbackLeaves} zoneLinked={zoneLinked} locale={locale} onPick={pickActivity} /></section>;
+      return <section className="space-y-3"><p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]">{catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v{layout?.version}</p>{whereCropField}{whereError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t(whereError as never)}</p>}<ActivityPicker catalogRows={activityRows} plotRecent={shortlist.plotRecent} seasonCommon={shortlist.seasonCommon} farmRecent={shortlist.farmRecent} layoutFallback={fallbackLeaves} zoneLinked={zoneLinked} locale={locale} onPick={pickActivity} /></section>;
     }
     if (step === 'details') {
       return (
@@ -2228,7 +2262,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
               seededDate={bannerInfo.seededDate}
               seedingEntryUuid={bannerInfo.seedingEntryUuid}
               onOpenSeedingEntry={onOpenExisting}
-              onCorrected={() => setBannerInfo(null)}
+              onCorrected={() => { void plotState.revalidate(); }}
             />
           )}
           {isManualCloseLeaf && (
@@ -2246,6 +2280,15 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
                 </span>
               </span>
             </label>
+          )}
+          {closingCropCycles.length > 0 && (
+            <div role="status" className="space-y-1 rounded-xl border border-[var(--border)] bg-[var(--secondary-bg)] px-3 py-2 text-sm text-[var(--text)]">
+              {closingCropCycles.map((cycle) => (
+                <p key={`${cycle.crop_code}:${cycle.variety ?? ''}`} className="font-semibold">
+                  {t('capture.cycle.closesCycle', { crop: cropCycleLabel(cycle.crop_code, cycle.variety) })}
+                </p>
+              ))}
+            </div>
           )}
           {plotContextDisplay.length > 0 && (
             <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">

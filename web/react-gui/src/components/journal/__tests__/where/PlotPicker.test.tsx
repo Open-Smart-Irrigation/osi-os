@@ -426,7 +426,13 @@ describe('PlotPicker', () => {
     expect(stationTwoScope.getByRole('textbox')).toHaveValue('2');
 
     fireEvent.click(stationOneScope.getByRole('button', { name: 'Apply range' }));
-    expect(stationOneScope.getByRole('alert')).toHaveTextContent('out_of_station');
+    // P2-c: the alert shows only the translated message now — the raw
+    // `code: token` debug suffix (e.g. "out_of_station: 9") was dropped. This
+    // mock's `t` always resolves the component's own hardcoded defaultValue
+    // (see its `options?.defaultValue ?? defaults[key]` precedence above),
+    // so the visible text is that generic message, not a per-code one.
+    expect(stationOneScope.getByRole('alert')).toHaveTextContent('The station range is invalid.');
+    expect(stationOneScope.getByRole('alert')).not.toHaveTextContent('out_of_station');
     expect(stationTwoScope.queryByRole('alert')).not.toBeInTheDocument();
 
     fireEvent.click(stationTwoScope.getByRole('button', { name: 'Apply range' }));
@@ -435,7 +441,7 @@ describe('PlotPicker', () => {
       layoutCode: 'open_field',
       isMultiPlot: true,
     });
-    expect(stationOneScope.getByRole('alert')).toHaveTextContent('out_of_station');
+    expect(stationOneScope.getByRole('alert')).toHaveTextContent('The station range is invalid.');
     expect(stationTwoScope.queryByRole('alert')).not.toBeInTheDocument();
     expect(stationOneScope.getByRole('textbox')).toHaveValue('1, 9');
     expect(stationTwoScope.getByRole('textbox')).toHaveValue('2');

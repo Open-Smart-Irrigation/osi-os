@@ -195,6 +195,7 @@
       "exportJson": "Exporter le JSON",
       "exportPackage": "Exporter le pack de recherche",
       "exportError": "Échec de l'export. Réessayez.",
+      "exportSuccess": "Export téléchargé.",
       "scopeNotNarrowed": "Les entrées de toutes les parcelles sont affichées. Le filtrage de la liste et des exports par station ou groupe n'est pas encore disponible."
     },
     "detail": {
@@ -416,6 +417,7 @@
       "cycleActionRequired": "Choisissez de poursuivre ce cycle ou d'en démarrer un nouveau",
       "bannerCropVariety": "{{crop}} · {{variety}}",
       "bannerSeeded": "semé le {{date}}",
+      "closesCycle": "Clôture le cycle cultural : {{crop}}",
       "correctTitle": "Corriger la culture et la variété",
       "correctSave": "Enregistrer la correction",
       "correctSaving": "Enregistrement…",
@@ -429,6 +431,7 @@
       "manualCloseHint": "Marque le cycle cultural de cette parcelle comme clôturé, à la date de cette entrée.",
       "voidDependentsTitle": "Ce semis affecte d'autres entrées",
       "voidDependentsBody": "Invalider ce semis retirera la culture héritée des entrées suivantes :",
+      "voidDependentsLoading": "Chargement des entrées concernées…",
       "voidDependentsConfirm": "Invalider quand même",
       "voidDependentsCancel": "Annuler"
     }

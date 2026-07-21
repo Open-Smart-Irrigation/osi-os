@@ -8,6 +8,7 @@ import { JournalTimeline } from '../components/journal/JournalTimeline';
 import { JournalCaptureFlow } from '../components/journal/capture/JournalCaptureFlow';
 import { JournalWorkspace } from '../components/journal/desktop/JournalWorkspace';
 import { useAuth } from '../contexts/AuthContext';
+import { catalogLabel } from '../journal/catalogModel';
 import { useJournalCatalog } from '../journal/useJournalCatalog';
 import { useJournalEntries } from '../journal/useJournalEntries';
 import { useJournalPlots } from '../journal/useJournalPlots';
@@ -40,7 +41,8 @@ function zoneTimezone(zone: JournalIrrigationZone | undefined): string | undefin
 }
 
 export const JournalPage: React.FC = () => {
-  const { t } = useTranslation('journal');
+  const { t, i18n } = useTranslation('journal');
+  const locale = i18n.resolvedLanguage || i18n.language;
   const { username, logout } = useAuth();
   const isDesktop = isDesktopBrowser();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -150,10 +152,21 @@ export const JournalPage: React.FC = () => {
     next.delete('capture');
     next.delete('zone_uuid');
     setSearchParams(next, { replace: true });
+    // B1 (Slice D hardening pre-deploy review): revalidate the plots cache
+    // (`journal:plots`) on close too, mirroring the desktop JournalWorkspace
+    // closeCapture — a cycle-changing entry (seeding/harvest/reseed/
+    // manual-close) writes an entry and opens/closes a cycle server-side,
+    // and active_crop_cycles only updates via a plots re-fetch.
+    void plotState.revalidate();
   };
 
   const onSaved = async (_receipt: JournalSavedReceipt) => {
     await entryState.retry();
+    // B1: see closeCapture's comment above — a save is exactly when the
+    // plots cache (active_crop_cycles) must be refreshed so the Where step
+    // and the inherited-crop banner reflect the cycle this save just
+    // opened/closed, same-session, without a page reload.
+    void plotState.revalidate();
   };
 
   const onOpenExisting = (entryUuid: string) => {
@@ -281,7 +294,7 @@ export const JournalPage: React.FC = () => {
                   <option value="">{t('filters.allActivities')}</option>
                   {activities.map((activity) => (
                     <option key={activity.code} value={activity.code}>
-                      {t(`activity.${activity.code}`, activity.code)}
+                      {catalogLabel(activity, locale)}
                     </option>
                   ))}
                 </select>
@@ -302,6 +315,7 @@ export const JournalPage: React.FC = () => {
                 entries={entryState.entries}
                 plots={plotState.plots}
                 loading={entryState.loading || plotState.loading}
+                catalog={catalogState.catalog}
                 listBatchEntries={listBatchEntries}
               />
             )}

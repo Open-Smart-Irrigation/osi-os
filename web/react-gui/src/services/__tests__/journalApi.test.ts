@@ -481,6 +481,7 @@ describe('journalApi', () => {
       expect(get).toHaveBeenCalledWith('/api/journal/export.csv', {
         params: activeFilters,
         responseType: 'blob',
+        timeout: 120000,
       });
       expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
       expect(click).toHaveBeenCalledTimes(1);
@@ -497,6 +498,7 @@ describe('journalApi', () => {
       expect(get).toHaveBeenCalledWith('/api/journal/export.json', {
         params: activeFilters,
         responseType: 'blob',
+        timeout: 120000,
       });
       expect(click).toHaveBeenCalledTimes(1);
       click.mockRestore();
@@ -511,6 +513,7 @@ describe('journalApi', () => {
       expect(get).toHaveBeenCalledWith('/api/journal/export.package', {
         params: activeFilters,
         responseType: 'blob',
+        timeout: 120000,
       });
       expect(click).toHaveBeenCalledTimes(1);
       click.mockRestore();
@@ -547,6 +550,32 @@ describe('journalApi', () => {
         'journal-entries-package.zip',
       ]);
       spy.mockRestore();
+    });
+
+    // P1-c: a live re-test found JSON/research-package exports producing no
+    // visible activity at all. A bulk export can legitimately take longer
+    // than `api`'s blanket 10s interactive-call default (see api.ts) — the
+    // research package especially, since it streams several full passes
+    // over the matched entries through a zip writer while hashing every
+    // member (osi-journal/api.js). Sharing that 10s budget meant a slow
+    // export's GET was silently aborted mid-flight; before the export-status
+    // banner existed, that failure was invisible, so it looked exactly like
+    // clicking the button did nothing. Pin every export route to a much
+    // larger, explicit budget so this can't silently regress back to the
+    // shared interactive default.
+    it('gives every export route a timeout budget larger than the shared interactive default', async () => {
+      get.mockResolvedValue({ data: 'x' });
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+      await journalApi.exportEntriesCsv(activeFilters);
+      await journalApi.exportEntriesJson(activeFilters);
+      await journalApi.exportEntriesResearchPackage(activeFilters);
+
+      expect(get.mock.calls).toHaveLength(3);
+      for (const call of get.mock.calls) {
+        const config = call[1] as { timeout?: number };
+        expect(config.timeout).toBeGreaterThan(10000);
+      }
     });
   });
 });

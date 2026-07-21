@@ -240,6 +240,16 @@ export interface EntryAggregate {
   updated_at: string;
   deleted_at: string | null;
   values: EntryValue[];
+  // Slice D hardening (P2-b): DISPLAY-ONLY enrichment for a harvest/manual-
+  // close/reseed entry that closed a journal_crop_cycle_plots membership —
+  // resolved from the (now historical) cycle it closed, since the entry's
+  // OWN season_crop/season_variety deliberately stay NULL/deferred (see
+  // osi-journal/lifecycle.js freezeClosedSpan's excludeEntryUuid). Absent
+  // (not merely null) on every other entry — never send these back on a
+  // correction; buildCorrectionPayload must keep reading season_crop/
+  // season_variety, not these. Optional so existing fixtures compile.
+  closed_crop_code?: string | null;
+  closed_crop_variety?: string | null;
 }
 
 export interface EntryDraftMutationReceipt {
@@ -297,6 +307,24 @@ export interface JournalPlotSettings {
   context_json?: string | null;
 }
 
+// Slice D hardening (P1-a/P1-b): the plot's currently OPEN
+// journal_crop_cycles membership(s) — 0 (nothing growing), 1 (the common
+// case), or more than 1 (a genuinely intercropped plot). This is the
+// AUTHORITATIVE, date/open-aware read the GUI must use instead of inferring
+// crop from past entries' (date/open-agnostic) season_crop — see
+// journal/cropCycle.ts currentCropInfoForPlot. Sourced from
+// osi-journal/api.js listPlots/upsertPlot (osi-journal/lifecycle.js
+// activeCropCyclesForPlot).
+export interface ActiveCropCycle {
+  cycle_uuid: string;
+  crop_code: string;
+  variety: string | null;
+  /** Local calendar date (YYYY-MM-DD) the covering cycle started. */
+  seeded_on: string;
+  /** The seeding/planting entry that opened this cycle. */
+  opened_by_entry_uuid: string;
+}
+
 export interface JournalPlot {
   contract_version: number;
   plot_uuid: string;
@@ -314,6 +342,10 @@ export interface JournalPlot {
   updated_at: string;
   deleted_at: string | null;
   settings: JournalPlotSettings;
+  // Optional (not required) so the many existing test fixtures that build a
+  // JournalPlot literal without it keep compiling; treat an absent value the
+  // same as an empty array (no open cycle known).
+  active_crop_cycles?: readonly ActiveCropCycle[];
 }
 
 export interface PlotGroup {

@@ -78,13 +78,16 @@ export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry, h
 
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [pendingExport, setPendingExport] = useState<ExportKind | null>(null);
-  const [exportError, setExportError] = useState<ExportKind | null>(null);
+  // P1-c: every export attempt — CSV included — now reports its outcome
+  // here, success or failure, so none of the three can ever look like a
+  // silent no-op. Only the most recent attempt's status is kept.
+  const [exportStatus, setExportStatus] = useState<{ kind: ExportKind; result: 'success' | 'error' } | null>(null);
 
-  // A failed-export banner names a specific export attempt; once the caller
+  // A completed-export banner names a specific attempt; once the caller
   // moves to a different scope/filter set, that attempt no longer describes
   // what "export" would do now, so don't let it linger.
   useEffect(() => {
-    setExportError(null);
+    setExportStatus(null);
   }, [filtersKey]);
 
   const plotLabels = useMemo(
@@ -140,15 +143,16 @@ export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry, h
 
   const handleExport = async (kind: ExportKind) => {
     setPendingExport(kind);
-    setExportError(null);
+    setExportStatus(null);
     try {
       // `filters` — never `queryFilters` — so an export always carries exactly
       // the caller's active scope: no cursor/limit (a full export, not one
       // page) and nothing added or dropped relative to what the table itself
       // is showing.
       await EXPORT_METHOD[kind](filters);
+      setExportStatus({ kind, result: 'success' });
     } catch {
-      setExportError(kind);
+      setExportStatus({ kind, result: 'error' });
     } finally {
       setPendingExport(null);
     }
@@ -287,9 +291,20 @@ export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry, h
           </button>
         </div>
       </div>
-      {exportError && (
-        <div role="alert" className="px-4 py-2 text-sm font-semibold text-[var(--error-text)]">
+      {exportStatus?.result === 'error' && (
+        // bg-[var(--error-bg)] is load-bearing, not decorative: --error-text
+        // is white-on-light-theme (#FFFFFF), meant to sit on the red
+        // --error-bg exactly like every other error surface in this app
+        // (see StationGrid's range-error banner). Without it this text was
+        // white-on-white — invisible — so a failed export looked exactly
+        // like a silent no-op even though the request had actually run.
+        <div role="alert" className="bg-[var(--error-bg)] px-4 py-2 text-sm font-semibold text-[var(--error-text)]">
           {t('workspace.table.exportError')}
+        </div>
+      )}
+      {exportStatus?.result === 'success' && (
+        <div role="status" className="bg-[var(--success-bg)] px-4 py-2 text-sm font-semibold text-[var(--success-text)]">
+          {t('workspace.table.exportSuccess')}
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-auto">{body}</div>

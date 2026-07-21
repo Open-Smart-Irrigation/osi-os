@@ -1,9 +1,25 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { EntryAggregate, JournalPlot } from '../../types/journal';
+import type { EntryAggregate, JournalCatalog, JournalPlot } from '../../types/journal';
+import type { JournalCaptureCatalogModel } from '../../types/journalCapture';
+import { buildCatalogModel, catalogLabel } from '../../journal/catalogModel';
 import { hydrateBatchMembership, type BatchMembershipPage } from '../../journal/hydrateBatchMembership';
 import { JournalEntryRow } from './JournalEntryRow';
+
+// P2-c (mobile): season_crop is itself a vocab choice code (e.g.
+// agroscope.crop.potato) — the same lookup the desktop DetailPanel uses
+// (see its own vocabLabelOrCode) to show the catalog label instead of the
+// raw code. Duplicated locally rather than shared because DetailPanel's
+// copy isn't exported; both read the same catalogModel.ts primitives.
+function vocabLabelOrCode(
+  code: string,
+  model: JournalCaptureCatalogModel | null,
+  locale: string,
+): string {
+  const row = model?.vocabByCode.get(code);
+  return row ? catalogLabel(row, locale) : code;
+}
 
 export type JournalTimelineItem =
   | { kind: 'entry'; entry: EntryAggregate }
@@ -22,6 +38,16 @@ function normalizeCropSummary(value: string | null | undefined): string | null {
   return normalized || null;
 }
 
+// P2-b (Slice D hardening): a harvest/manual-close/reseed entry that closed a
+// crop cycle deliberately keeps its OWN season_crop NULL/deferred (see
+// osi-journal/lifecycle.js freezeClosedSpan's excludeEntryUuid) — the crop it
+// closed is instead resolved for DISPLAY ONLY as closed_crop_code/variety
+// (osi-journal/lifecycle.js resolveClosedCropCycleOverrides). Fall back to it
+// here so a harvest/close no longer shows a blank crop on the timeline.
+function displayCropCode(entry: EntryAggregate): string | null {
+  return normalizeCropSummary(entry.season_crop) ?? normalizeCropSummary(entry.closed_crop_code);
+}
+
 function summarizeBatchEntries(entries: readonly EntryAggregate[]): {
   activityCode: string;
   cropSummary: string | null;
@@ -32,7 +58,7 @@ function summarizeBatchEntries(entries: readonly EntryAggregate[]): {
   const activityCode = entries.every((entry) => entry.activity_code === first.activity_code)
     ? first.activity_code
     : '';
-  const cropValues = entries.map((entry) => normalizeCropSummary(entry.season_crop));
+  const cropValues = entries.map(displayCropCode);
   const firstCrop = cropValues[0];
   const cropSummary = cropValues.every((crop) => crop === firstCrop) ? firstCrop : null;
 
@@ -77,6 +103,11 @@ export interface JournalTimelineProps {
   entries: EntryAggregate[];
   plots: JournalPlot[];
   loading: boolean;
+  // Optional: absent in a few narrow test-only render paths. When present,
+  // it resolves the batch summary's crop code to its catalog label (see
+  // vocabLabelOrCode above); when absent, the summary falls back to the raw
+  // code exactly as before this existed.
+  catalog?: JournalCatalog;
   listBatchEntries: (filters: {
     batch_uuid: string;
     status: 'all';
@@ -100,9 +131,13 @@ export const JournalTimeline: React.FC<JournalTimelineProps> = ({
   entries,
   plots,
   loading,
+  catalog,
   listBatchEntries,
 }) => {
-  const { t } = useTranslation('journal');
+  const { t, i18n } = useTranslation('journal');
+  const locale = i18n.resolvedLanguage || i18n.language;
+  const modelResult = React.useMemo(() => (catalog ? buildCatalogModel(catalog) : null), [catalog]);
+  const model = modelResult?.ok ? modelResult.model : null;
   const [expandedBatches, setExpandedBatches] = React.useState<Set<string>>(() => new Set());
   const [hydration, setHydration] = React.useState<Record<string, BatchHydrationState>>({});
   const hydrationRef = React.useRef(hydration);
@@ -272,7 +307,7 @@ export const JournalTimeline: React.FC<JournalTimelineProps> = ({
                 <p className="text-sm text-[var(--text-secondary)]">
                   {activityLabel}
                   {activityLabel && summary.cropSummary ? ' · ' : ''}
-                  {summary.cropSummary ?? ''}
+                  {summary.cropSummary ? vocabLabelOrCode(summary.cropSummary, model, locale) : ''}
                   {(activityLabel || summary.cropSummary) && count !== null ? ' · ' : ''}
                   {count !== null
                     ? t('batch.count', { count, defaultValue: `${count} plot${count === 1 ? '' : 's'}` })

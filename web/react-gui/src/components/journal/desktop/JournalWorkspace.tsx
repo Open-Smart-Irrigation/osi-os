@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { refreshDraftsQueue } from '../../../journal/useDraftsQueue';
 import { useJournalEntries } from '../../../journal/useJournalEntries';
 import type { JournalPlotGroupResourceActions } from '../../../journal/useJournalPlotGroups';
 import type { JournalPlotResourceActions } from '../../../journal/useJournalPlots';
@@ -40,7 +41,7 @@ export interface JournalWorkspaceProps {
   initialTimezone?: string;
   zoneCrops?: Readonly<Record<string, string>>;
   zoneTimezones?: Readonly<Record<string, string>>;
-  plotState: Pick<JournalPlotResourceActions, 'createPlot' | 'updatePlot'>;
+  plotState: Pick<JournalPlotResourceActions, 'createPlot' | 'updatePlot' | 'revalidate'>;
   groupState: Pick<JournalPlotGroupResourceActions, 'createPlotGroup' | 'updatePlotGroup'>;
 }
 
@@ -273,17 +274,41 @@ export function JournalWorkspace({
   // refresh here or a finalized entry silently won't appear in the table. A
   // double retry when onSaved's own retry already ran is harmless (SWR
   // mutate is idempotent).
+  //
+  // P2-d: also revalidate the drafts queue's own independent SWR cache here.
+  // The capture flow autosaves a draft well before this fires (see
+  // useCaptureDraft's saveDraft), so leaving early without finalizing — the
+  // exact path that reaches this handler — is exactly when a fresh draft
+  // needs to show up in "Needs completion" without a page reload.
+  //
+  // B1 (Slice D hardening pre-deploy review): also revalidate the plots
+  // cache (`journal:plots`, plotState.revalidate). A save that changed a
+  // crop cycle (seeding/harvest/reseed/manual-close) writes an entry AND
+  // opens/closes a cycle server-side, but active_crop_cycles is only ever
+  // refreshed by re-fetching plots — without this, the Where-step's
+  // crop-required gate and the inherited-crop banner keep reading the
+  // pre-save snapshot for the rest of the session, same-session, until a
+  // full page reload.
   const closeCapture = useCallback(() => {
     setCaptureOpen(false);
     void retryEntries();
-  }, [retryEntries]);
+    void refreshDraftsQueue();
+    void plotState.revalidate();
+  }, [plotState, retryEntries]);
 
+  // Also revalidates the drafts queue: finalizing turns a draft final, which
+  // must make it disappear from "Needs completion" just as promptly as a new
+  // draft must appear there (see closeCapture above). Also revalidates plots
+  // (see closeCapture's B1 comment) — a save is exactly the case a
+  // cycle-changing entry needs the plots cache refreshed.
   const handleCaptureSaved = useCallback(async (receipt: JournalSavedReceipt) => {
     await retryEntries();
+    void refreshDraftsQueue();
+    void plotState.revalidate();
     setCaptureOpen(false);
     const entryUuid = savedEntryUuid(receipt);
     if (entryUuid) setSelectedEntryUuid(entryUuid);
-  }, [retryEntries]);
+  }, [plotState, retryEntries]);
 
   const handleCaptureOpenExisting = useCallback((entryUuid: string) => {
     setCaptureOpen(false);

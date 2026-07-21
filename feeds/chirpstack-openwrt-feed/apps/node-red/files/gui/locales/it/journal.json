@@ -195,6 +195,7 @@
       "exportJson": "Esporta JSON",
       "exportPackage": "Esporta pacchetto di ricerca",
       "exportError": "Esportazione non riuscita. Riprova.",
+      "exportSuccess": "Esportazione scaricata.",
       "scopeNotNarrowed": "Vengono mostrate le registrazioni di tutte le particelle. Il filtraggio dell'elenco e delle esportazioni per stazione o gruppo non è ancora disponibile."
     },
     "detail": {
@@ -416,6 +417,7 @@
       "cycleActionRequired": "Scegli se continuare questo ciclo o iniziarne uno nuovo",
       "bannerCropVariety": "{{crop}} · {{variety}}",
       "bannerSeeded": "seminato il {{date}}",
+      "closesCycle": "Chiude il ciclo colturale: {{crop}}",
       "correctTitle": "Correggi coltura e varietà",
       "correctSave": "Salva la correzione",
       "correctSaving": "Salvataggio…",
@@ -429,6 +431,7 @@
       "manualCloseHint": "Segna il ciclo colturale di questa particella come chiuso, alla data di questa registrazione.",
       "voidDependentsTitle": "Questa semina influisce su altre registrazioni",
       "voidDependentsBody": "Invalidare questa semina rimuoverà la coltura ereditata dalle seguenti registrazioni:",
+      "voidDependentsLoading": "Caricamento delle registrazioni interessate…",
       "voidDependentsConfirm": "Invalida comunque",
       "voidDependentsCancel": "Annulla"
     }

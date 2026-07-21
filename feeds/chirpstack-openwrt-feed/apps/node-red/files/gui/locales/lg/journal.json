@@ -195,6 +195,7 @@
       "exportJson": "Fulumya JSON",
       "exportPackage": "Fulumya ekipakiti ky'okunoonyereza",
       "exportError": "Fulumya kigaanye. Gezaako nate.",
+      "exportSuccess": "Fulumya kiwedde.",
       "scopeNotNarrowed": "Ebiwandiiko by'emisiri gyonna bye birabika. Okusengejja olukalala n'ebifulumizibwa okusinziira ku siteegi oba ekibinja tekinnayinzika kaakano."
     },
     "detail": {
@@ -416,6 +417,7 @@
       "cycleActionRequired": "Londa oba weyongereyo ku cycle eno oba otandikewo empya",
       "bannerCropVariety": "{{crop}} · {{variety}}",
       "bannerSeeded": "yasigibwa {{date}}",
+      "closesCycle": "Kimalira cycle y'ekirime: {{crop}}",
       "correctTitle": "Longoosa ekirime n'ekika",
       "correctSave": "Tereka enkyusa",
       "correctSaving": "Tikutereka…",
@@ -429,6 +431,7 @@
       "manualCloseHint": "Kiraga nti cycle y'ekirime ku musiri guno emaze okuggwaawo, okutuusa ku lunaku lw'ekiwandiiko kino.",
       "voidDependentsTitle": "Ensiga eno ekwata ku biwandiiko ebirala",
       "voidDependentsBody": "Okusaza ensiga eno kijja kuggyawo ekirime ekyaweebwa mu biwandiiko bino:",
+      "voidDependentsLoading": "Ebiwandiiko ebikwatibwako bitikkibwa…",
       "voidDependentsConfirm": "Saza kyokka",
       "voidDependentsCancel": "Sazaamu"
     }

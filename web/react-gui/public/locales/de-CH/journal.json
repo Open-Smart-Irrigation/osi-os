@@ -195,6 +195,7 @@
       "exportJson": "JSON exportieren",
       "exportPackage": "Forschungspaket exportieren",
       "exportError": "Export fehlgeschlagen. Erneut versuchen.",
+      "exportSuccess": "Export heruntergeladen.",
       "scopeNotNarrowed": "Es werden Einträge aller Parzellen angezeigt. Das Filtern der Liste und der Exporte nach Station oder Gruppe ist noch nicht möglich."
     },
     "detail": {
@@ -416,6 +417,7 @@
       "cycleActionRequired": "Wählen Sie, ob dieser Zyklus fortgesetzt oder ein neuer begonnen wird.",
       "bannerCropVariety": "{{crop}} · {{variety}}",
       "bannerSeeded": "gesät am {{date}}",
+      "closesCycle": "Beendet den Kulturzyklus: {{crop}}",
       "correctTitle": "Kultur und Sorte korrigieren",
       "correctSave": "Korrektur speichern",
       "correctSaving": "Wird gespeichert…",
@@ -429,6 +431,7 @@
       "manualCloseHint": "Markiert den Kulturzyklus dieser Parzelle als abgeschlossen, per Datum dieses Eintrags.",
       "voidDependentsTitle": "Diese Aussaat betrifft weitere Einträge",
       "voidDependentsBody": "Das Stornieren dieser Aussaat entfernt die geerbte Kultur von den folgenden Einträgen:",
+      "voidDependentsLoading": "Betroffene Einträge werden geladen…",
       "voidDependentsConfirm": "Trotzdem stornieren",
       "voidDependentsCancel": "Abbrechen"
     }

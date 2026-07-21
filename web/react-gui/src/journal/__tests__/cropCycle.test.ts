@@ -6,10 +6,9 @@ import {
   cycleDependentsFromError,
   cycleDisambiguationFromError,
   cycleOptionLabel,
-  findSeedingEntryFor,
   varietySuggestionsFor,
 } from '../cropCycle';
-import type { EntryAggregate, EntryValue, JournalVocabRow } from '../../types/journal';
+import type { ActiveCropCycle, EntryAggregate, EntryValue, JournalVocabRow } from '../../types/journal';
 import type { JournalCaptureCatalogModel } from '../../types/journalCapture';
 
 const timestamp = '2026-07-20T00:00:00.000Z';
@@ -164,62 +163,47 @@ describe('varietySuggestionsFor', () => {
   });
 });
 
+function activeCropCycle(overrides: Partial<ActiveCropCycle> & { cycle_uuid: string }): ActiveCropCycle {
+  return {
+    crop_code: 'agroscope.crop.wheat_winter',
+    variety: 'Marlene',
+    seeded_on: '2026-04-01',
+    opened_by_entry_uuid: 'seed-1',
+    ...overrides,
+  };
+}
+
 describe('currentCropInfoForPlot', () => {
-  it('reads crop/variety from the most recent final entry with a resolved season_crop', () => {
-    const entries = [
-      entry({ entry_uuid: 'old', occurred_start: '2026-06-01T00:00:00.000Z', season_crop: 'agroscope.crop.barley_spring' }),
-      entry({ entry_uuid: 'new', occurred_start: '2026-07-01T00:00:00.000Z', season_crop: 'agroscope.crop.wheat_winter', season_variety: 'Marlene' }),
-    ];
-    expect(currentCropInfoForPlot(entries)).toEqual({
-      crop_code: 'agroscope.crop.wheat_winter', variety: 'Marlene', asOfOccurredStart: '2026-07-01T00:00:00.000Z',
+  it('reads crop/variety/seeded date/seeding entry from the single open cycle', () => {
+    const cycles = [activeCropCycle({
+      cycle_uuid: 'cycle-1', crop_code: 'agroscope.crop.wheat_winter', variety: 'Marlene',
+      seeded_on: '2026-07-01', opened_by_entry_uuid: 'seed-uuid-1',
+    })];
+    expect(currentCropInfoForPlot(cycles)).toEqual({
+      crop_code: 'agroscope.crop.wheat_winter',
+      variety: 'Marlene',
+      seededDate: '2026-07-01',
+      seedingEntryUuid: 'seed-uuid-1',
     });
   });
 
-  it('ignores draft/voided/deleted entries and entries with no resolved crop', () => {
-    const entries = [
-      entry({ status: 'draft', season_crop: 'agroscope.crop.wheat_winter' }),
-      entry({ deleted_at: timestamp, season_crop: 'agroscope.crop.wheat_winter' }),
-      entry({ season_crop: null }),
-    ];
-    expect(currentCropInfoForPlot(entries)).toBeNull();
-  });
-});
-
-describe('findSeedingEntryFor', () => {
-  it('finds the most recent seeding/planting entry whose own recorded crop+variety match exactly', () => {
-    const entries = [
-      entry({
-        entry_uuid: 'first-seed', occurred_start: '2026-06-01T00:00:00.000Z',
-        values: [entryValue('attr.crop', 'agroscope.crop.wheat_winter'), entryValue('attr.variety', 'Marlene')],
-      }),
-      entry({
-        entry_uuid: 'later-continue-log', activity_code: 'planting_transplanting', occurred_start: '2026-07-01T00:00:00.000Z',
-        values: [entryValue('attr.crop', 'agroscope.crop.wheat_winter'), entryValue('attr.variety', 'Marlene')],
-      }),
-      entry({
-        entry_uuid: 'different-crop', occurred_start: '2026-07-05T00:00:00.000Z',
-        values: [entryValue('attr.crop', 'agroscope.crop.barley_spring')],
-      }),
-    ];
-    const found = findSeedingEntryFor(entries, 'agroscope.crop.wheat_winter', 'Marlene');
-    expect(found).toEqual({ entry_uuid: 'later-continue-log', occurredDate: '2026-07-01' });
+  it('returns null when no cycle is open (nothing growing)', () => {
+    expect(currentCropInfoForPlot([])).toBeNull();
+    expect(currentCropInfoForPlot(null)).toBeNull();
+    expect(currentCropInfoForPlot(undefined)).toBeNull();
   });
 
-  it('requires an exact variety match, including no-variety', () => {
-    const entries = [
-      entry({
-        entry_uuid: 'no-variety',
-        values: [entryValue('attr.crop', 'agroscope.crop.wheat_winter')],
-      }),
+  it('returns null for a genuinely intercropped plot (more than one open cycle) — ambiguous, deferred to R7', () => {
+    const cycles = [
+      activeCropCycle({ cycle_uuid: 'cycle-1', crop_code: 'agroscope.crop.wheat_winter' }),
+      activeCropCycle({ cycle_uuid: 'cycle-2', crop_code: 'agroscope.crop.barley_spring', variety: null }),
     ];
-    expect(findSeedingEntryFor(entries, 'agroscope.crop.wheat_winter', 'Marlene')).toBeNull();
-    expect(findSeedingEntryFor(entries, 'agroscope.crop.wheat_winter', null)).toEqual({
-      entry_uuid: 'no-variety', occurredDate: entries[0].occurred_start.slice(0, 10),
-    });
+    expect(currentCropInfoForPlot(cycles)).toBeNull();
   });
 
-  it('returns null when nothing matches', () => {
-    expect(findSeedingEntryFor([], 'agroscope.crop.wheat_winter', null)).toBeNull();
+  it('treats a blank variety the same as no variety', () => {
+    const cycles = [activeCropCycle({ cycle_uuid: 'cycle-1', variety: '  ' })];
+    expect(currentCropInfoForPlot(cycles)?.variety).toBeNull();
   });
 });
 

@@ -551,6 +551,7 @@ describe('JournalPage', () => {
       loading: false,
       error: undefined,
       retry: mocks.retryPlots,
+      revalidate: mocks.retryPlots,
       createPlot: vi.fn(),
       updatePlot: vi.fn(),
     });
@@ -661,6 +662,7 @@ describe('JournalPage', () => {
         loading: false,
         error: new Error('offline'),
         retry: mocks.retryPlots,
+        revalidate: mocks.retryPlots,
       });
     }
 
@@ -788,6 +790,7 @@ describe('JournalPage', () => {
       loading: false,
       error: undefined,
       retry: mocks.retryPlots,
+      revalidate: mocks.retryPlots,
       createPlot,
       updatePlot,
     });
@@ -874,6 +877,7 @@ describe('JournalPage', () => {
       loading: false,
       error: undefined,
       retry: mocks.retryPlots,
+      revalidate: mocks.retryPlots,
       createPlot: vi.fn(),
       updatePlot: vi.fn(),
     });
@@ -950,6 +954,7 @@ describe('JournalPage', () => {
       loading: false,
       error: undefined,
       retry: mocks.retryPlots,
+      revalidate: mocks.retryPlots,
       createPlot: vi.fn(),
       updatePlot: vi.fn(),
     });
@@ -1005,6 +1010,7 @@ describe('JournalPage', () => {
       loading: false,
       error: undefined,
       retry: mocks.retryPlots,
+      revalidate: mocks.retryPlots,
     });
     mocks.useSWR.mockReturnValue({
       data: [zones[0], secondZone],
@@ -1043,6 +1049,7 @@ describe('JournalPage', () => {
       loading: false,
       error: undefined,
       retry: mocks.retryPlots,
+      revalidate: mocks.retryPlots,
     });
 
     renderPage('/journal?capture=1&zone_uuid=zone-1');
@@ -1316,6 +1323,34 @@ describe('JournalPage', () => {
     expect(mocks.retryEntries).toHaveBeenCalledOnce();
   });
 
+  // B1 (pre-deploy review, blocking): the `journal:plots` cache carrying
+  // active_crop_cycles is never revalidated by retryEntries alone — a
+  // cycle-changing save (seeding/harvest/reseed/manual-close) opens/closes a
+  // cycle server-side, and only a plots re-fetch picks that up. Without
+  // this, the same-session Where step and inherited-crop banner keep
+  // showing the pre-save snapshot until a full page reload.
+  it('revalidates the plots cache from onSaved', async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
+    await waitFor(() => expect(mocks.captureFlow).toHaveBeenCalled());
+
+    const onSaved = mocks.captureFlow.mock.lastCall?.[0].onSaved as (receipt: unknown) => Promise<void>;
+    await onSaved({ entry_uuid: 'entry-1', sync_version: 1, outbox_event_uuid: 'outbox-1' });
+
+    expect(mocks.retryPlots).toHaveBeenCalled();
+  });
+
+  it('revalidates the plots cache when capture closes (mirrors the desktop JournalWorkspace close path)', async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
+    await waitFor(() => expect(screen.getByTestId('capture-flow')).toBeInTheDocument());
+    mocks.retryPlots.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: 'mock-close' }));
+
+    expect(mocks.retryPlots).toHaveBeenCalled();
+  });
+
   it('preserves the existing nine-activation open_field SLA regression', async () => {
     expect(partitionCarryForward(carryForwardSource, {
       definition: captureCatalog.templates.find(({ code }) => code === 'farmer_quick')?.definition,
@@ -1344,6 +1379,7 @@ describe('JournalPage', () => {
       loading: false,
       error: undefined,
       retry: mocks.retryPlots,
+      revalidate: mocks.retryPlots,
     });
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('11111111-1111-4111-8111-111111111111');
     let primaryActivations = 0;

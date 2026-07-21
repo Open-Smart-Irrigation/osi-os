@@ -51,13 +51,21 @@ function plotLabelOf(plotUuid: string | null, plots: readonly JournalPlot[]): st
   return plot ? (plot.name?.trim() || plot.plot_code) : null;
 }
 
-function attributeLabel(
+// Looks up any vocab code (activity, attribute, unit, or choice — the model's
+// vocabByCode is keyed uniformly across kinds) and returns its catalog label,
+// falling back to the raw code only when the catalog has nothing for it.
+// P2-c: this is the same lookup the capture flow's ActivityPicker already
+// uses (see journal/catalogModel.ts's catalogLabel) — reused here instead of
+// `t(`activity.${code}`, code)`, whose client-side journal.json translation
+// namespace only covers a handful of the shipped activity codes and a crop
+// choice code (e.g. agroscope.crop.potato) was never in it at all.
+function vocabLabelOrCode(
   code: string,
   model: JournalCaptureCatalogModel | null,
   locale: string,
 ): string {
-  const attribute = model?.vocabByCode.get(code);
-  return attribute ? catalogLabel(attribute, locale) : code;
+  const row = model?.vocabByCode.get(code);
+  return row ? catalogLabel(row, locale) : code;
 }
 
 function formatStoredValue(
@@ -240,7 +248,7 @@ function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: Detai
       <div>
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-lg font-bold text-[var(--text)]">
-            {t(`activity.${aggregate.activity_code}`, aggregate.activity_code)}
+            {vocabLabelOrCode(aggregate.activity_code, model, locale)}
           </h2>
           <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusBadgeClass(aggregate.status)}`}>
             {t(`row.status.${aggregate.status}`)}
@@ -272,14 +280,22 @@ function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: Detai
           ['campaign_uuid', aggregate.campaign_uuid],
           ['protocol_code', aggregate.protocol_code],
           ['observation_unit_code', aggregate.observation_unit_code],
-          ['season_crop', aggregate.season_crop],
+          // P2-b (Slice D hardening): a harvest/manual-close/reseed entry
+          // that closed a crop cycle deliberately keeps its own season_crop
+          // NULL (see osi-journal/lifecycle.js freezeClosedSpan) — fall back
+          // to the closed cycle's crop, resolved for display only (see
+          // osi-journal/lifecycle.js resolveClosedCropCycleOverrides), so
+          // this entry still shows what was harvested/closed.
+          ['season_crop', aggregate.season_crop ?? aggregate.closed_crop_code],
           ['note', aggregate.note],
         ] as const)
           .filter((entry): entry is [typeof entry[0], string] => entry[1] != null && entry[1] !== '')
           .map(([key, value]) => (
             <div key={key} className="flex justify-between gap-3">
               <dt className="text-[var(--text-secondary)]">{t(`workspace.detail.field.${key}`, key)}</dt>
-              <dd className="text-right font-semibold text-[var(--text)]">{value}</dd>
+              <dd className="text-right font-semibold text-[var(--text)]">
+                {key === 'season_crop' ? vocabLabelOrCode(value, model, locale) : value}
+              </dd>
             </div>
           ))}
       </dl>
@@ -292,7 +308,7 @@ function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: Detai
           <ul className="space-y-1">
             {aggregate.values.map((value, index) => (
               <li key={`${value.attribute_code}:${value.group_index}:${index}`} className="flex justify-between gap-3">
-                <span className="text-[var(--text-secondary)]">{attributeLabel(value.attribute_code, model, locale)}</span>
+                <span className="text-[var(--text-secondary)]">{vocabLabelOrCode(value.attribute_code, model, locale)}</span>
                 <span className="text-right font-semibold text-[var(--text)]">
                   {formatStoredValue(value, model, locale, t)}
                 </span>
@@ -356,6 +372,9 @@ function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: Detai
       {mode === 'void' && (
         <VoidForm
           aggregate={aggregate}
+          plots={plots}
+          model={model}
+          locale={locale}
           onCancel={() => { setMode('view'); returnFocus(); }}
           onVoided={afterMutation}
         />
@@ -380,11 +399,38 @@ function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: Detai
 
 interface VoidFormProps {
   aggregate: EntryAggregate;
+  plots: readonly JournalPlot[];
+  model: JournalCaptureCatalogModel | null;
+  locale: string;
   onCancel: () => void;
   onVoided: () => void | Promise<void>;
 }
 
-function VoidForm({ aggregate, onCancel, onVoided }: VoidFormProps) {
+// P2-c: the cascade-void confirmation used to list bare entry UUIDs, which
+// mean nothing to a farmer deciding whether to proceed. The refusal
+// (osi-journal/lifecycle.js applyVoidCycleCascade) only ever carries UUIDs
+// (see cropCycle.ts's cycleDependentsFromError) — there is no richer edge
+// payload to read here — so this resolves each one via the same single-entry
+// lookup DetailPanelForEntry itself already uses, then composes a label from
+// data already available on the resolved aggregate: its catalog activity
+// label, its plot label, and its occurred date. A dependent that fails to
+// resolve (or hasn't resolved yet) falls back to its raw UUID rather than
+// blocking the confirmation.
+function dependentEntryLabel(
+  entryUuid: string,
+  resolved: EntryAggregate | undefined,
+  plots: readonly JournalPlot[],
+  model: JournalCaptureCatalogModel | null,
+  locale: string,
+): string {
+  if (!resolved) return entryUuid;
+  const activityLabel = vocabLabelOrCode(resolved.activity_code, model, locale);
+  const plotLabel = plotLabelOf(resolved.plot_uuid, plots);
+  const dateLabel = formatOccurredDate(resolved.occurred_start, resolved.occurred_timezone, locale);
+  return plotLabel ? `${activityLabel} · ${plotLabel} · ${dateLabel}` : `${activityLabel} · ${dateLabel}`;
+}
+
+function VoidForm({ aggregate, plots, model, locale, onCancel, onVoided }: VoidFormProps) {
   const { t } = useTranslation('journal');
   const [reason, setReason] = useState('');
   const [touched, setTouched] = useState(false);
@@ -398,8 +444,39 @@ function VoidForm({ aggregate, onCancel, onVoided }: VoidFormProps) {
   // osi-journal/lifecycle.js applyVoidCycleCascade. Surface those UUIDs and
   // require an explicit confirmation before retrying with cascade_ack.
   const [dependentEntryUuids, setDependentEntryUuids] = useState<string[] | null>(null);
+  const [resolvedDependents, setResolvedDependents] = useState<Map<string, EntryAggregate>>(new Map());
+  const [resolvingDependents, setResolvingDependents] = useState(false);
   const reasonId = 'journal-detail-void-reason';
   const reasonErrorId = `${reasonId}-error`;
+
+  // Guards the two setState calls below when the operator cancels (or the
+  // whole panel closes) while the per-dependent lookups are still in
+  // flight — mirrors JournalTimeline's own `mounted` ref for the same
+  // reason (an async batch of requests outliving the component).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const resolveDependentLabels = async (entryUuids: string[]) => {
+    setResolvingDependents(true);
+    const results = await Promise.allSettled(
+      entryUuids.map((entryUuid) => journalApi.listEntries({ entry_uuid: entryUuid, status: 'all' })),
+    );
+    if (!mountedRef.current) return;
+    const next = new Map<string, EntryAggregate>();
+    results.forEach((result, index) => {
+      if (result.status !== 'fulfilled') return;
+      const entryUuid = entryUuids[index];
+      const found = result.value.entries.find((candidate) => candidate.entry_uuid === entryUuid);
+      if (found) next.set(entryUuid, found);
+    });
+    setResolvedDependents(next);
+    setResolvingDependents(false);
+  };
 
   const submitVoid = async (trimmedReason: string, cascadeAck: boolean) => {
     setSubmitting(true);
@@ -412,6 +489,8 @@ function VoidForm({ aggregate, onCancel, onVoided }: VoidFormProps) {
       const dependents = cycleDependentsFromError(failure);
       if (dependents) {
         setDependentEntryUuids(dependents);
+        setResolvedDependents(new Map());
+        void resolveDependentLabels(dependents);
       } else if (isStaleVersionError(failure)) {
         setStaleError(true);
       } else {
@@ -470,9 +549,19 @@ function VoidForm({ aggregate, onCancel, onVoided }: VoidFormProps) {
         <div role="alertdialog" aria-label={t('capture.cycle.voidDependentsTitle')} className="space-y-2 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-3">
           <p className="font-bold text-[var(--text)]">{t('capture.cycle.voidDependentsTitle')}</p>
           <p className="text-sm text-[var(--text-secondary)]">{t('capture.cycle.voidDependentsBody')}</p>
-          <ul className="ml-4 list-disc space-y-1 text-sm text-[var(--text)]">
-            {dependentEntryUuids.map((entryUuid) => <li key={entryUuid}>{entryUuid}</li>)}
-          </ul>
+          {resolvingDependents ? (
+            <p role="status" className="text-sm text-[var(--text-secondary)]">
+              {t('capture.cycle.voidDependentsLoading')}
+            </p>
+          ) : (
+            <ul className="ml-4 list-disc space-y-1 text-sm text-[var(--text)]">
+              {dependentEntryUuids.map((entryUuid) => (
+                <li key={entryUuid}>
+                  {dependentEntryLabel(entryUuid, resolvedDependents.get(entryUuid), plots, model, locale)}
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="flex gap-2">
             <button
               type="button"

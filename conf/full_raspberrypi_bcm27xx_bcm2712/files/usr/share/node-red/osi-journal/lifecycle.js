@@ -501,12 +501,65 @@ async function coveringSeason(tx, zoneId, localDate) {
 async function openCyclesCoveringPlot(tx, plotUuid, localDate) {
   if (plotUuid == null) return [];
   return tx.all(
-    'SELECT cc.cycle_uuid,cc.crop_code,cc.variety,cc.starts_on FROM journal_crop_cycle_plots AS ccp ' +
+    'SELECT cc.cycle_uuid,cc.crop_code,cc.variety,cc.starts_on,cc.opened_by_entry_uuid ' +
+    'FROM journal_crop_cycle_plots AS ccp ' +
     'JOIN journal_crop_cycles AS cc ON cc.cycle_uuid=ccp.cycle_uuid AND cc.deleted_at IS NULL ' +
     'WHERE ccp.plot_uuid=? AND ccp.ends_on IS NULL AND cc.starts_on<=? ' +
     'ORDER BY cc.starts_on DESC,cc.cycle_uuid',
     [plotUuid, localDate]
   );
+}
+
+// Slice D hardening (P1-a/P1-b): the GUI's Where step and inherited-crop
+// banner need an AUTHORITATIVE "what open crop cycle(s) cover this plot
+// right now" read -- unlike resolveLiveCropOverrides below (which resolves a
+// per-ENTRY historical crop as of that entry's own occurred date), this
+// answers a plot-level "as of today" question with no entry/date context
+// yet, which is exactly what is available before any activity or occurred
+// date has been chosen. Reuses openCyclesCoveringPlot (today's local date)
+// rather than re-deriving the open-membership query. Returns the GUI-shaped
+// read: crop_code/variety/seeded_on (=cc.starts_on) plus
+// opened_by_entry_uuid so the GUI can link/correct the seeding entry without
+// a separate reverse-lookup fetch.
+// C1 (pre-deploy review): "today" must be the GATEWAY's local calendar date,
+// not UTC -- new Date().toISOString() silently used UTC, which is wrong on
+// either side of UTC midnight for any gateway not itself on UTC (e.g. a
+// gateway west of Greenwich rolls to tomorrow hours late; one east of it
+// rolls over hours early), shifting which cycles activeCropCyclesForPlot
+// treats as covering "today" by up to a day. There is no single
+// gateway-wide timezone config in this module (every OTHER local-date read
+// here is per-entry/per-zone -- see occurrenceFor's input.occurred_timezone/
+// plot.zone_timezone), so this reuses the same wall-clock helpers
+// (timezoneFormatter/wallClockAt) resolveLocalTime relies on, fed with the
+// host process's own resolved default timezone -- which on the gateway is
+// the system timezone Node inherits from the OS (OpenWrt's configured
+// zonename), i.e. the gateway's actual configured UTC offset.
+function gatewayTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch (_) {
+    return 'UTC';
+  }
+}
+
+function todayLocalDate() {
+  const wall = wallClockAt(timezoneFormatter(gatewayTimezone()), Date.now());
+  return String(wall.year).padStart(4, '0') + '-' +
+    String(wall.month).padStart(2, '0') + '-' +
+    String(wall.day).padStart(2, '0');
+}
+
+async function activeCropCyclesForPlot(tx, plotUuid) {
+  const rows = await openCyclesCoveringPlot(tx, plotUuid, todayLocalDate());
+  return rows.map(function(row) {
+    return {
+      cycle_uuid: row.cycle_uuid,
+      crop_code: row.crop_code,
+      variety: nullable(row.variety),
+      seeded_on: row.starts_on,
+      opened_by_entry_uuid: row.opened_by_entry_uuid,
+    };
+  });
 }
 
 // Recover the exact local calendar date used at write time from a stored
@@ -629,6 +682,50 @@ async function resolveLiveCropOverrides(queryAll, rows) {
       season_uuid: null,
       season_crop: covering[0].crop_code,
       season_variety: nullable(covering[0].variety),
+    });
+  }
+  return overrides;
+}
+
+// P2-b (Slice D hardening): a harvest/manual-close/reseed entry that CLOSED
+// a crop-cycle membership never gets its OWN season_crop/season_variety
+// frozen (see freezeClosedSpan's excludeEntryUuid) -- by design, so it never
+// mis-stamps itself with a crop cycle that might not even be fully committed
+// yet when its own cascade runs. From the GUI's perspective this means the
+// closing entry itself displays no crop at all, even though it is often the
+// MOST informative entry for "what was growing here" (a harvest). This
+// resolves, for a page of journal_entries rows, a
+// Map<entry_uuid, {crop_code, variety}> for exactly the entries that CLOSED a
+// journal_crop_cycle_plots membership (closed_by_entry_uuid = entry_uuid),
+// read from the (now historical) closed cycle -- for DISPLAY only. Callers
+// must project this onto separate closed_crop_code/closed_crop_variety
+// fields, never onto season_crop/season_variety themselves: those stored
+// columns must stay NULL/deferred on the closing entry exactly as designed,
+// so a correction round-trip (which resends season_crop/season_variety
+// verbatim) can never accidentally re-stamp them.
+//
+// C2 (pre-deploy review): the join guards `cc.deleted_at IS NULL`, matching
+// resolveLiveCropOverrides above -- a voided (soft-deleted) crop cycle (see
+// applyVoidCycleCascade) must not resurface its crop on the closing entry's
+// display any more than a voided cycle may resolve live.
+async function resolveClosedCropCycleOverrides(queryAll, rows) {
+  const entryUuids = Array.from(new Set(
+    (rows || []).map(function(row) { return row.entry_uuid; }).filter(function(value) { return value != null; })
+  ));
+  const overrides = new Map();
+  if (!entryUuids.length) return overrides;
+  const placeholders = entryUuids.map(function() { return '?'; }).join(',');
+  const closedRows = await queryAll(
+    'SELECT ccp.closed_by_entry_uuid AS entry_uuid,cc.crop_code,cc.variety ' +
+    'FROM journal_crop_cycle_plots AS ccp ' +
+    'JOIN journal_crop_cycles AS cc ON cc.cycle_uuid=ccp.cycle_uuid AND cc.deleted_at IS NULL ' +
+    'WHERE ccp.closed_by_entry_uuid IN (' + placeholders + ')',
+    entryUuids
+  );
+  for (const row of closedRows) {
+    overrides.set(row.entry_uuid, {
+      closed_crop_code: row.crop_code,
+      closed_crop_variety: nullable(row.variety),
     });
   }
   return overrides;
@@ -2371,6 +2468,7 @@ async function discardDraft(db, entryUuid, principal) {
 }
 
 module.exports = {
+  activeCropCyclesForPlot,
   assertJournalEntryEffectKey,
   batchMemberEventUuid,
   discardDraft,
@@ -2378,6 +2476,8 @@ module.exports = {
   finalize,
   finalizeCreate,
   finalizeBatch,
+  openCyclesCoveringPlot,
+  resolveClosedCropCycleOverrides,
   resolveLiveCropOverrides,
   saveDraft,
   void_,
