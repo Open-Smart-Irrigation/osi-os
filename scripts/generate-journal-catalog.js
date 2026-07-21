@@ -33,6 +33,7 @@ const CATALOG_MIGRATIONS = [
   { version: 2, name: '0022__journal_catalog_v2.sql' },
   { version: 3, name: '0023__journal_catalog_v3.sql' },
   { version: 4, name: '0026__journal_catalog_v4.sql' },
+  { version: 5, name: '0027__journal_catalog_v5.sql' },
 ];
 
 const TABLE_ORDER = [
@@ -317,6 +318,7 @@ function validateCore(coreDef) {
     }
   }
   validateQuickFieldsAndReadings(coreDef);
+  validateOperationFieldsByActivity(coreDef);
 }
 
 // Slice BC (journal-catalog v3): a template's `quick_fields` is an
@@ -372,6 +374,52 @@ function validateQuickFieldsAndReadings(coreDef) {
     const staticNotMinimum = staticFields.filter((field) => !minimumFields.includes(field));
     assert(staticNotMinimum.length === 0,
       `${layout.code}@${layout.version} static_context_fields must be a subset of minimum_fields (missing ${staticNotMinimum.join(', ')})`);
+  }
+}
+
+// Slice E (full_record@5, R5): a template's `operation_fields_by_activity` is
+// an activity_code -> field-code map consumed by templateEngine.deriveFieldStates
+// to narrow visibility of a `scoped_by_activity` section per activity (the
+// mechanism farmer_quick@3's `quick_fields` established for Quick — see
+// validateQuickFieldsAndReadings above). Every core activity must be covered
+// (same completeness guarantee as quick_fields), every referenced field must
+// be a real attribute, and — the guard specific to this mechanism — every
+// referenced field must actually be a member of the one section it scopes,
+// so the map can only ever narrow what that section already declares, never
+// smuggle in an undeclared field.
+function validateOperationFieldsByActivity(coreDef) {
+  const attributeCodes = new Set(coreDef.attributes.map((row) => row.code));
+  const activityCodes = new Set(coreDef.activities.map((row) => row.code));
+
+  for (const template of coreDef.templates) {
+    const sections = (template.definition && template.definition.sections) || [];
+    const scopedSections = sections.filter((section) => section.scoped_by_activity);
+    const map = template.definition && template.definition.operation_fields_by_activity;
+
+    if (map == null) {
+      assert(scopedSections.length === 0,
+        `${template.code}@${template.version} has a scoped_by_activity section but declares no operation_fields_by_activity map`);
+      continue;
+    }
+    assert(scopedSections.length === 1,
+      `${template.code}@${template.version} declares operation_fields_by_activity but must have exactly one scoped_by_activity section (found ${scopedSections.length})`);
+    const allowedFields = new Set(scopedSections[0].fields);
+    const declared = Object.keys(map);
+    assert(
+      declared.length === activityCodes.size && declared.every((code) => activityCodes.has(code)),
+      `${template.code}@${template.version} operation_fields_by_activity must cover exactly every core activity`
+    );
+    for (const [activityCode, fields] of Object.entries(map)) {
+      assert(Array.isArray(fields) && fields.length > 0,
+        `${template.code}@${template.version} operation_fields_by_activity.${activityCode} must be a nonempty array`);
+      for (const field of fields) {
+        assert(attributeCodes.has(field),
+          `${template.code}@${template.version} operation_fields_by_activity.${activityCode} references unknown field ${field}`);
+        assert(allowedFields.has(field),
+          `${template.code}@${template.version} operation_fields_by_activity.${activityCode} references ${field}, ` +
+          'which is not declared on its scoped_by_activity section');
+      }
+    }
   }
 }
 

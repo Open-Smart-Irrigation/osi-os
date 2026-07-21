@@ -401,6 +401,74 @@ const FARMER_QUICK_V3_QUICK_FIELDS = {
   equipment_maintenance: ['note'],
 };
 
+// v5 (Slice E / R5, spec §4-B): per-activity visible-field map for
+// full_record's `operation` section, mirroring the mechanism farmer_quick@3's
+// quick_fields established for Quick (Slice BC / R1) — see
+// FARMER_QUICK_V3_QUICK_FIELDS above. full_record@1's `operation` section is a
+// flat ~20-field list rendered in full for every activity regardless of what
+// it actually needs (the live-UX bug this slice fixes: an irrigation entry
+// showed fertilizer/harvest/plant-count fields). This map narrows which of
+// the operation section's own declared fields render per activity; the
+// section's field list itself (below, on the full_record@5 row) stays the
+// exact same 23-field superset already shipped in full_record@1 — this is a
+// visibility change, not a new-field change. `activity_requirements` /
+// `conditional_groups` (unchanged from @1, duplicated verbatim below) still
+// govern requiredness, and templateEngine's deriveFieldStates force-adds any
+// field they mark required/required_any regardless of this map (see
+// `addRequirement`), so an agronomically load-bearing field can never be
+// scoped out from under its own required derivation — this map only trims
+// the *optional* clutter. Every one of the 16 activities must have a
+// nonempty entry (enforced by generate-journal-catalog.js's validateCore),
+// and every field must be a member of the operation section's own declared
+// field list (also enforced there).
+const FULL_RECORD_V5_OPERATION_FIELDS_BY_ACTIVITY = {
+  irrigation: [
+    'attr.irrigation_amount_kind', 'attr.measurement_source', 'attr.denominator',
+    'attr.irrigation_depth', 'attr.irrigation_volume_area', 'attr.per_plant_volume',
+    'attr.actuation_expectation_id', 'attr.operator', 'attr.equipment', 'attr.method',
+  ],
+  fertilization: [
+    'attr.product_uuid', 'attr.product', 'attr.treated_area',
+    'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
+    'attr.operator', 'attr.equipment', 'attr.method',
+  ],
+  fertigation: [
+    'attr.product_uuid', 'attr.product', 'attr.treated_area',
+    'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
+    'attr.irrigation_amount_kind', 'attr.measurement_source', 'attr.denominator',
+    'attr.irrigation_depth', 'attr.irrigation_volume_area', 'attr.per_plant_volume',
+    'attr.actuation_expectation_id', 'attr.operator', 'attr.equipment', 'attr.method',
+  ],
+  plant_protection_application: [
+    'attr.product_uuid', 'attr.product', 'attr.treated_area',
+    'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_biological_count_area',
+    'attr.target', 'attr.waiting_period_days', 'attr.operator', 'attr.equipment', 'attr.method',
+  ],
+  weed_control_nonchemical: [
+    'attr.treated_area', 'attr.target', 'attr.operator', 'attr.equipment', 'attr.method',
+  ],
+  seeding: [
+    'attr.crop', 'attr.treated_area', 'attr.amount_mass_area_product', 'attr.amount_count_area',
+    'attr.operator', 'attr.equipment', 'attr.method',
+  ],
+  planting_transplanting: [
+    'attr.crop', 'attr.treated_area', 'attr.amount_count_area',
+    'attr.operator', 'attr.equipment', 'attr.method',
+  ],
+  pruning: ['attr.operator', 'attr.equipment', 'attr.method'],
+  crop_care: ['attr.operator', 'attr.equipment', 'attr.method'],
+  tillage_soil_work: ['attr.treated_area', 'attr.operator', 'attr.equipment', 'attr.method'],
+  mowing: ['attr.treated_area', 'attr.operator', 'attr.equipment', 'attr.method'],
+  harvest: [
+    'attr.crop', 'attr.harvest_area', 'attr.harvest_yield_area',
+    'attr.operator', 'attr.equipment', 'attr.method',
+  ],
+  sampling: ['attr.measurement_source', 'attr.operator', 'attr.equipment', 'attr.method'],
+  general_observation: ['attr.operator', 'attr.equipment', 'attr.method'],
+  pest_disease_observation: ['attr.target', 'attr.operator', 'attr.equipment', 'attr.method'],
+  equipment_maintenance: ['attr.equipment', 'attr.operator', 'attr.method'],
+};
+
 const templates = [
   {
     code: 'farmer_quick',
@@ -497,6 +565,120 @@ const templates = [
         },
         { code: 'notes', fields: ['note'] },
       ],
+      activity_requirements: {
+        fertilization: {
+          required: ['attr.treated_area'],
+          required_any: [
+            ['attr.product_uuid', 'attr.product'],
+            [
+              'attr.amount_mass_area_product',
+              'attr.amount_volume_area_product',
+              'attr.amount_nutrient_rate',
+            ],
+          ],
+        },
+        fertigation: {
+          required: ['attr.treated_area'],
+          required_any: [
+            ['attr.product_uuid', 'attr.product'],
+            [
+              'attr.amount_mass_area_product',
+              'attr.amount_volume_area_product',
+              'attr.amount_nutrient_rate',
+            ],
+          ],
+        },
+        plant_protection_application: {
+          required: ['attr.treated_area'],
+          required_any: [
+            ['attr.product_uuid', 'attr.product'],
+            [
+              'attr.amount_mass_area_product',
+              'attr.amount_volume_area_product',
+              'attr.amount_biological_count_area',
+            ],
+          ],
+        },
+        seeding: {
+          required: ['attr.crop', 'attr.treated_area'],
+          required_any: [['attr.amount_mass_area_product', 'attr.amount_count_area']],
+        },
+        planting_transplanting: {
+          required: ['attr.crop', 'attr.treated_area'],
+          required_any: [['attr.amount_count_area']],
+        },
+        harvest: {
+          required: ['attr.crop', 'attr.harvest_area', 'attr.harvest_yield_area'],
+          required_any: [],
+        },
+      },
+      conditional_groups: [
+        {
+          code: 'irrigation_details',
+          activity_codes: ['irrigation', 'fertigation'],
+          required: [
+            'attr.irrigation_amount_kind',
+            'attr.measurement_source',
+            'attr.denominator',
+          ],
+          required_any: [[
+            'attr.irrigation_depth',
+            'attr.irrigation_volume_area',
+            'attr.per_plant_volume',
+          ]],
+          optional: ['attr.actuation_expectation_id'],
+        },
+      ],
+      certified_compliance_profile: null,
+    },
+  },
+  // v5 (Slice E / R5): activity-scoped visibility for the `operation`
+  // section, addressing the live-UX bug in the header comment above
+  // FULL_RECORD_V5_OPERATION_FIELDS_BY_ACTIVITY. `sections`/
+  // `activity_requirements`/`conditional_groups`/`certified_compliance_profile`
+  // are otherwise identical in shape and content to full_record@1 (only the
+  // `operation` section gains `scoped_by_activity: true`, and the definition
+  // gains `operation_fields_by_activity`) — full_record@1 above stays
+  // byte-identical so historical Full entries keep resolving against it.
+  {
+    code: 'full_record',
+    version: 5,
+    label: 'Full record',
+    definition: {
+      sections: [
+        { code: 'identity', fields: ['activity_code', 'plot_uuid', 'occurred_start', 'occurred_end'] },
+        {
+          code: 'operation',
+          scoped_by_activity: true,
+          fields: [
+            'attr.crop',
+            'attr.product_uuid',
+            'attr.product',
+            'attr.treated_area',
+            'attr.harvest_area',
+            'attr.harvest_yield_area',
+            'attr.amount_mass_area_product',
+            'attr.amount_volume_area_product',
+            'attr.amount_nutrient_rate',
+            'attr.amount_count_area',
+            'attr.amount_biological_count_area',
+            'attr.irrigation_amount_kind',
+            'attr.measurement_source',
+            'attr.denominator',
+            'attr.irrigation_depth',
+            'attr.irrigation_volume_area',
+            'attr.per_plant_volume',
+            'attr.actuation_expectation_id',
+            'attr.operator',
+            'attr.equipment',
+            'attr.method',
+            'attr.target',
+            'attr.waiting_period_days',
+          ],
+        },
+        { code: 'notes', fields: ['note'] },
+      ],
+      operation_fields_by_activity: FULL_RECORD_V5_OPERATION_FIELDS_BY_ACTIVITY,
       activity_requirements: {
         fertilization: {
           required: ['attr.treated_area'],

@@ -325,7 +325,9 @@
       "note": "Note",
       "booleanYes": "Yes",
       "booleanNo": "No",
-      "plotContext": "Plot context"
+      "plotContext": "Plot context",
+      "keyValues": "Key values",
+      "moreDetail": "More detail"
     },
     "validation": {
       "required": "Complete this field",

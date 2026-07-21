@@ -325,7 +325,9 @@
       "note": "Note",
       "booleanYes": "Sì",
       "booleanNo": "No",
-      "plotContext": "Contesto della particella"
+      "plotContext": "Contesto della particella",
+      "keyValues": "Valori chiave",
+      "moreDetail": "Altri dettagli"
     },
     "validation": {
       "required": "Completa questo campo",

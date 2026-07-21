@@ -256,6 +256,7 @@ function ControlledForm({
   products = [],
   locale = 'en-GB',
   showValidation = false,
+  templateCode,
   onResult,
 }: {
   initialValues?: CaptureEntryValueInput[];
@@ -264,6 +265,7 @@ function ControlledForm({
   products?: JournalProductRow[];
   locale?: string;
   showValidation?: boolean;
+  templateCode?: string;
   onResult: (
     inputs: CaptureEntryValueInput[],
     payload: CaptureEntryValueOutput[],
@@ -281,6 +283,7 @@ function ControlledForm({
       products={products}
       locale={locale}
       showValidation={showValidation}
+      templateCode={templateCode}
       onChange={(next, payload, valid) => {
         setValues(next);
         onResult(next, payload, valid);
@@ -834,5 +837,75 @@ describe('EntryForm', () => {
       { attribute_code: 'attr.flag', value: false },
     ]);
     expect(valid).toBe(true);
+  });
+
+  describe('Slice E: Full progressive disclosure (R5, E3)', () => {
+    it('splits visible fields into an open "Key values" group and a collapsible "More detail" group', () => {
+      render(
+        <ControlledForm
+          fieldStates={[
+            state('attr.amount', { required: true }),
+            state('attr.text'),
+            state('attr.flag'),
+          ]}
+          templateCode="full_record"
+          onResult={vi.fn()}
+        />,
+      );
+
+      // The required field renders immediately, under the open "Key values" group.
+      expect(screen.getByText('capture.form.keyValues')).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: 'attr.amount' })).toBeInTheDocument();
+
+      // The optional fields start tucked behind the closed "More detail" disclosure.
+      const toggle = screen.getByRole('button', { name: 'capture.form.moreDetail' });
+      expect(toggle).not.toBeNull();
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByRole('textbox', { name: 'Text field' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Boolean field' })).not.toBeInTheDocument();
+
+      fireEvent.click(toggle!);
+
+      expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('textbox', { name: 'Text field' })).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Boolean field' })).toBeInTheDocument();
+    });
+
+    it('never hides a required_any field inside the collapsed group while it is empty', () => {
+      render(
+        <ControlledForm
+          fieldStates={[
+            state('attr.text', { required_any_groups: [0] }),
+            state('attr.flag', { required_any_groups: [0] }),
+          ]}
+          templateCode="full_record"
+          onResult={vi.fn()}
+        />,
+      );
+
+      // Both required_any members are effectively-required until one of them
+      // has a value, so neither may ever be hidden behind the collapsed
+      // disclosure — there is nothing left to put in "More detail" at all.
+      expect(screen.getByRole('textbox', { name: 'Text field' })).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Boolean field' })).toBeInTheDocument();
+      expect(screen.queryByText('capture.form.moreDetail')).not.toBeInTheDocument();
+    });
+
+    it('does not group fields when templateCode is absent or not full_record (Quick/research unaffected)', () => {
+      render(
+        <ControlledForm
+          fieldStates={[
+            state('attr.amount', { required: true }),
+            state('attr.text'),
+          ]}
+          onResult={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByText('capture.form.keyValues')).not.toBeInTheDocument();
+      expect(screen.queryByText('capture.form.moreDetail')).not.toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: 'attr.amount' })).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: 'Text field' })).toBeInTheDocument();
+    });
   });
 });

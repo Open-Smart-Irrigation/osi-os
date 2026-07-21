@@ -703,6 +703,7 @@ function EntryCorrectionForm({
           products={products}
           locale={locale}
           showValidation={showValidation}
+          templateCode={template?.code}
         />
       </div>
       {staleError && (

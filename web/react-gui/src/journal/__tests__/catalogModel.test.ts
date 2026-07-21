@@ -479,6 +479,136 @@ describe('catalog model', () => {
     }
   });
 
+  it('Slice E: resolves activity-scoped Full visibility against the real shipped catalog', () => {
+    const fixture = shippedCatalog();
+    const result = buildCatalogModel(fixture);
+    expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
+    if (!result.ok) return;
+    const fullRecord = result.model.templates.get('full_record');
+    const openField = result.model.layouts.get('open_field');
+    expect(fullRecord).toBeDefined();
+    expect(openField).toBeDefined();
+    if (!fullRecord || !openField) return;
+
+    // full_record now resolves to the scoped v5 row (activeDefinition always
+    // picks the highest active version), and it declares the section this
+    // slice narrows.
+    expect(fullRecord.version).toBe(5);
+    const operationSection = fullRecord.sections.find((section) => section.code === 'operation');
+    expect(operationSection?.scoped_by_activity).toBe(true);
+    expect(fullRecord.operation_fields_by_activity).toBeDefined();
+
+    // Full irrigation: shows the irrigation-details fields, excludes
+    // product-mass/nutrient/harvest fields (spec §4-B).
+    const irrigationStates = deriveFieldStates(fullRecord, openField, { activity_code: 'irrigation' });
+    const irrigationVisible = irrigationStates.filter((state) => state.visible).map((state) => state.code);
+    expect(irrigationVisible).toEqual(expect.arrayContaining([
+      'attr.irrigation_amount_kind', 'attr.measurement_source', 'attr.denominator',
+      'attr.irrigation_depth', 'attr.operator', 'attr.equipment', 'attr.method',
+    ]));
+    for (const excluded of [
+      'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+      'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
+      'attr.amount_count_area', 'attr.amount_biological_count_area',
+      'attr.harvest_area', 'attr.harvest_yield_area', 'attr.crop',
+    ]) {
+      expect(irrigationVisible, `irrigation must exclude ${excluded}`).not.toContain(excluded);
+    }
+    // requiredness preserved: the irrigation_details conditional_group still
+    // forces amount_kind/measurement_source/denominator required, and the
+    // depth/volume/per-plant family stays a required_any trio.
+    expect(irrigationStates.find((state) => state.code === 'attr.irrigation_amount_kind'))
+      .toMatchObject({ required: true });
+    expect(irrigationStates.find((state) => state.code === 'attr.measurement_source'))
+      .toMatchObject({ required: true });
+    expect(irrigationStates.find((state) => state.code === 'attr.denominator'))
+      .toMatchObject({ required: true });
+    expect(irrigationStates.find((state) => state.code === 'attr.irrigation_depth')?.required_any_groups.length)
+      .toBeGreaterThan(0);
+
+    // Full fertilization: shows product/amount/treated-area/operator fields,
+    // excludes irrigation-depth/plant-count/biological fields (spec §4-B).
+    const fertilizationStates = deriveFieldStates(fullRecord, openField, { activity_code: 'fertilization' });
+    const fertilizationVisible = fertilizationStates.filter((state) => state.visible).map((state) => state.code);
+    expect(fertilizationVisible).toEqual(expect.arrayContaining([
+      'attr.product_uuid', 'attr.product', 'attr.treated_area',
+      'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
+      'attr.operator', 'attr.equipment', 'attr.method',
+    ]));
+    for (const excluded of [
+      // NOTE: attr.denominator is deliberately absent from this list — the
+      // open_field layout's own minimum_fields force it visible for every
+      // activity/template regardless of the operation section's scoping, so
+      // its presence here would prove nothing about Slice E.
+      'attr.irrigation_depth', 'attr.irrigation_volume_area', 'attr.per_plant_volume',
+      'attr.irrigation_amount_kind', 'attr.measurement_source',
+      'attr.actuation_expectation_id', 'attr.amount_count_area', 'attr.amount_biological_count_area',
+      'attr.harvest_area', 'attr.harvest_yield_area', 'attr.crop',
+    ]) {
+      expect(fertilizationVisible, `fertilization must exclude ${excluded}`).not.toContain(excluded);
+    }
+    expect(fertilizationStates.find((state) => state.code === 'attr.treated_area'))
+      .toMatchObject({ required: true });
+    expect(fertilizationStates.find((state) => state.code === 'attr.product_uuid')?.required_any_groups.length)
+      .toBeGreaterThan(0);
+  });
+
+  it("Slice E: full_record's scoped_by_activity change leaves farmer_quick/research_observation resolution byte-for-byte unchanged", () => {
+    const fixture = shippedCatalog();
+    const result = buildCatalogModel(fixture);
+    expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
+    if (!result.ok) return;
+    const quick = result.model.templates.get('farmer_quick');
+    const research = result.model.templates.get('research_observation');
+    const openField = result.model.layouts.get('open_field');
+    expect(quick).toBeDefined();
+    expect(research).toBeDefined();
+    expect(openField).toBeDefined();
+    if (!quick || !research || !openField) return;
+
+    // Neither template declares (or can ever trigger) the new
+    // scoped_by_activity/operation_fields_by_activity mechanism: it is
+    // full_record@5-only. This structural guarantee is what makes the exact
+    // snapshots below a genuine "unaffected by this slice" regression check,
+    // not a coincidence.
+    expect(quick.sections.some((section) => section.scoped_by_activity)).toBe(false);
+    expect(quick.operation_fields_by_activity).toBeUndefined();
+    expect(research.sections.some((section) => section.scoped_by_activity)).toBe(false);
+    expect(research.operation_fields_by_activity).toBeUndefined();
+
+    const state = (code: string, required = false) =>
+      ({ code, visible: true, required, required_any_groups: [] });
+
+    expect(deriveFieldStates(quick, openField, { activity_code: 'irrigation' })).toEqual([
+      state('activity_code'), state('plot_uuid'), state('occurred_start'),
+      state('attr.operator'), state('attr.equipment'), state('attr.method'),
+      state('attr.irrigation_depth'), state('note'),
+    ]);
+    expect(deriveFieldStates(quick, openField, { activity_code: 'fertilization' })).toEqual([
+      state('activity_code'), state('plot_uuid'), state('occurred_start'),
+      state('attr.operator'), state('attr.equipment'), state('attr.method'),
+      state('attr.product_uuid'), state('attr.product'),
+      state('attr.amount_mass_area_product'), state('attr.amount_volume_area_product'),
+      state('attr.amount_nutrient_rate'), state('note'),
+    ]);
+    expect(deriveFieldStates(quick, openField, { activity_code: 'harvest' })).toEqual([
+      state('activity_code'), state('plot_uuid'), state('occurred_start'),
+      state('attr.operator'), state('attr.equipment'), state('attr.method'),
+      state('attr.harvest_yield_area'), state('note'),
+    ]);
+
+    const researchExpected = [
+      state('activity_code'), state('plot_uuid'), state('occurred_start'),
+      state('campaign_uuid'), state('protocol_code'), state('protocol_version'),
+      state('observation_unit_code'), state('attr.observation_text'),
+      state('attr.block_bed_row', true), state('attr.treated_area', true),
+      state('attr.cover_type', true), state('attr.denominator', true),
+    ];
+    for (const activity of ['irrigation', 'fertilization', 'harvest']) {
+      expect(deriveFieldStates(research, openField, { activity_code: activity })).toEqual(researchExpected);
+    }
+  });
+
   it('labels by locale fallback and picks the highest active definition', () => {
     expect(catalogLabel(catalog().vocab[0], 'de-CH')).toBe('irrigation-de');
     expect(catalogLabel({ ...catalog().vocab[0], labels: { en: 'Irrigation' } }, 'fr')).toBe(

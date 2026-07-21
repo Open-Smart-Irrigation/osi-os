@@ -42,6 +42,13 @@ export interface EntryFormProps {
   products?: JournalProductRow[];
   locale?: string;
   showValidation?: boolean;
+  // Slice E (R5, E3): only 'full_record' groups its visible fields into an
+  // open "Key values" set + a collapsible "More detail" set (see
+  // groupOperationDetail below). Every other template/caller (Quick,
+  // research_observation, and any caller that omits this prop) renders the
+  // exact flat list it always has — passing this prop is opt-in, so existing
+  // callers/tests are unaffected until they start passing 'full_record'.
+  templateCode?: string;
 }
 
 export interface EntryFormValidationResult {
@@ -347,6 +354,22 @@ function productFirst(states: JournalFieldState[]): JournalFieldState[] {
     .map(({ state }) => state);
 }
 
+// Slice E (R5, E3): a field is "key" — always rendered in the open group,
+// never eligible for the collapsible "More detail" group — when it is
+// unconditionally required OR a member of any required_any family. The
+// latter matters just as much as the former: a required_any field's own
+// `required` flag stays false (only one family member must have a value,
+// not every member), but until one of them does, validateEntryForm flags
+// every member as an error the user must be able to see and fix, so none of
+// them may be hidden behind a collapsed disclosure either. This is what
+// guarantees a required(-ish) field can never end up hidden while empty —
+// the grouping itself, not the disclosure's open/closed state, is what's
+// safe: a "key" field's group membership never depends on whether it
+// currently holds a value.
+function isKeyField(state: JournalFieldState): boolean {
+  return state.required || state.required_any_groups.length > 0;
+}
+
 export const EntryForm: React.FC<EntryFormProps> = ({
   model,
   layout,
@@ -357,12 +380,14 @@ export const EntryForm: React.FC<EntryFormProps> = ({
   products = [],
   locale: localeOverride,
   showValidation = false,
+  templateCode,
 }) => {
   const { t, i18n } = useTranslation('journal');
   const locale = localeOverride || i18n.resolvedLanguage || i18n.language;
   const [numberInputErrors, setNumberInputErrors] = useState<Map<string, string>>(
     () => new Map(),
   );
+  const [moreDetailOpen, setMoreDetailOpen] = useState(false);
   const currentSelections = useMemo(
     () => mergedSelections(selections, values),
     [selections, values],
@@ -370,6 +395,22 @@ export const EntryForm: React.FC<EntryFormProps> = ({
   const visibleStates = useMemo(
     () => productFirst(visibleAttributeStates(model, fieldStates)),
     [fieldStates, model],
+  );
+  // Slice E (R5, E3): full_record's operation section is a per-activity-
+  // scoped superset (E2) that can still run to a dozen-plus fields for one
+  // activity — progressive disclosure splits it into an always-open "Key
+  // values" group and a collapsible "More detail" group. Quick and
+  // research_observation are unaffected: they only group when the caller
+  // passes templateCode="full_record" (JournalCaptureFlow/DetailPanel/
+  // DraftsQueue do; nothing else needs to).
+  const groupOperationDetail = templateCode === 'full_record';
+  const keyStates = useMemo(
+    () => (groupOperationDetail ? visibleStates.filter(isKeyField) : visibleStates),
+    [groupOperationDetail, visibleStates],
+  );
+  const moreDetailStates = useMemo(
+    () => (groupOperationDetail ? visibleStates.filter((state) => !isKeyField(state)) : []),
+    [groupOperationDetail, visibleStates],
   );
   const validation = validateEntryForm({
     model,
@@ -431,345 +472,390 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     return !required || showValidation ? error : undefined;
   };
 
-  return (
-    <div className="space-y-4">
-      {visibleStates.map((state) => {
-        const attribute = model.vocabByCode.get(state.code);
-        if (!attribute) return null;
-        const rows = fieldValues(values, state.code);
-        const existing = rows[0];
-        const label = catalogLabel(attribute, locale);
-        const statusLabel = state.required ? t('capture.form.required') : t('capture.form.optional');
-        const fieldError = errorFor(state.code);
-        const fieldErrorId = `${state.code}-error`;
+  const renderField = (state: JournalFieldState): React.ReactNode => {
+    const attribute = model.vocabByCode.get(state.code);
+    if (!attribute) return null;
+    const rows = fieldValues(values, state.code);
+    const existing = rows[0];
+    const label = catalogLabel(attribute, locale);
+    const statusLabel = state.required ? t('capture.form.required') : t('capture.form.optional');
+    const fieldError = errorFor(state.code);
+    const fieldErrorId = `${state.code}-error`;
 
-        if (state.code === 'attr.product_uuid') {
-          const retainedProduct = typeof selectedProductUuid === 'string' &&
-            !activeProducts.some(({ product_uuid: uuid }) => uuid === selectedProductUuid)
-            ? products.find(({ product_uuid: uuid }) => uuid === selectedProductUuid)
-            : undefined;
-          return (
-            <div key={state.code} className="space-y-2">
-              <label htmlFor={state.code} className="flex items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
-                <span>{t('capture.form.product')}</span>
-                <span
-                  aria-hidden={state.required ? undefined : true}
-                  className="text-xs font-semibold text-[var(--text-secondary)]"
-                >
-                  {statusLabel}
-                </span>
-              </label>
-              {activeProducts.length === 0 && (
-                <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm text-[var(--text-secondary)]">
-                  {t('capture.form.noProducts')}
-                </p>
-              )}
-              <select
-                id={state.code}
-                required={state.required}
-                aria-invalid={Boolean(fieldError)}
-                aria-describedby={fieldError ? fieldErrorId : undefined}
-                value={typeof semanticValue(existing) === 'string' ? String(semanticValue(existing)) : ''}
-                onChange={(event) => updateSingle(
-                  state.code,
-                  semanticInput(state.code, event.target.value, existing),
-                )}
-                className={`min-h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] ${FOCUS_RING}`}
-              >
-                <option value="">{t('capture.form.select')}</option>
-                {typeof selectedProductUuid === 'string' && selectedProductUuid !== '' &&
-                  !activeProducts.some(({ product_uuid: uuid }) => uuid === selectedProductUuid) && (
-                    <option value={selectedProductUuid} disabled>
-                      {retainedProduct?.name ?? t('capture.validation.invalidDependency')}
-                    </option>
-                  )}
-                {activeProducts.map((product) => (
-                  <option key={product.product_uuid} value={product.product_uuid}>{product.name}</option>
-                ))}
-              </select>
-              {fieldError && (
-                <p
-                  id={fieldErrorId}
-                  role="alert"
-                  className="text-sm font-semibold text-[var(--error-text)]"
-                >
-                  {fieldError}
-                </p>
-              )}
-            </div>
-          );
-        }
-
-        if (attribute.value_type === 'number') {
-          const constraints = numericConstraints(attribute);
-          const unitCodes = allowedUnits(model, layout, state.code, currentSelections);
-          const unitOptions = unitCodes.map((code) => ({
-            code,
-            label: catalogLabel(model.vocabByCode.get(code)!, locale),
-          }));
-          if (constraints.repeatable) {
-            const normalizedRows = normalizeNutrientRows(rows);
-            const repeatErrors = Object.fromEntries(normalizedRows.map((row, index) => {
-              const groupIndex = row.group_index ?? index;
-              return [groupIndex, errorFor(state.code, groupIndex)];
-            }));
-            return (
-              <NutrientRepeater
-                key={state.code}
-                attributeCode={state.code}
-                label={label}
-                locale={locale}
-                values={normalizedRows}
-                units={unitOptions}
-                product={selectedProduct}
-                min={constraints.min}
-                max={constraints.max}
-                step={constraints.step}
-                required={state.required}
-                error={errorFor(state.code)}
-                errors={repeatErrors}
-                onValidityChange={(groupIndex, valid, validationError) => {
-                  const nextErrors = new Map(numberInputErrors);
-                  const key = `${state.code}:${groupIndex}`;
-                  if (valid) nextErrors.delete(key);
-                  else nextErrors.set(
-                    key,
-                    validationError ?? t('capture.validation.invalidNumber'),
-                  );
-                  setNumberInputErrors(nextErrors);
-                  emit(values, nextErrors);
-                }}
-                onChange={(nextRows) => emit(replaceFieldValues(values, state.code, nextRows))}
-              />
-            );
-          }
-
-          const enteredValue = existing?.entered_value_num ?? existing?.value_num ??
-            (typeof existing?.value === 'number' ? existing.value : null);
-          const currentUnit = existing?.entered_unit_code ?? existing?.unit_code;
-          const selectedUnit = currentUnit ??
-            (attribute.default_unit_code && unitCodes.includes(attribute.default_unit_code)
-              ? attribute.default_unit_code
-              : unitCodes.length === 1 ? unitCodes[0] : null);
-          const selectedUnitLabel = unitOptions.find(({ code }) => code === selectedUnit)?.label;
-          const numberError = errorFor(state.code, existing?.group_index ?? 0);
-          const control = (
-            <NumberStepper
-              id={state.code}
-              label={label}
-              locale={locale}
-              value={enteredValue}
-              min={constraints.min}
-              max={constraints.max}
-              step={constraints.step}
-              required={state.required}
-              unitLabel={unitCodes.length === 1 ? selectedUnitLabel : undefined}
-              error={numberError}
-              onValidityChange={(valid, validationError) => {
-                const nextErrors = new Map(numberInputErrors);
-                if (valid) nextErrors.delete(state.code);
-                else nextErrors.set(
-                  state.code,
-                  validationError ?? t('capture.validation.invalidNumber'),
-                );
-                setNumberInputErrors(nextErrors);
-                emit(values, nextErrors);
-              }}
-              onChange={(entered) => updateSingle(
-                state.code,
-                numericInput(state.code, entered, selectedUnit, existing),
-              )}
-            />
-          );
-
-          if (unitCodes.length === 2) {
-            return (
-              <div key={state.code} className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
-                {control}
-                <div role="group" aria-label={t('capture.form.unit')} className="inline-flex w-full overflow-hidden rounded-xl border border-[var(--border)]">
-                  {unitOptions.map((unit) => {
-                    const selected = unit.code === selectedUnit;
-                    return (
-                      <button
-                        key={unit.code}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => updateSingle(
-                          state.code,
-                          numericInput(state.code, enteredValue, unit.code, existing),
-                        )}
-                        className={`min-h-11 flex-1 px-3 py-2 text-sm font-bold transition-colors ${
-                          selected ? 'bg-[var(--primary)] text-white' : 'bg-[var(--surface)] text-[var(--text)]'
-                        } ${FOCUS_RING}`}
-                      >
-                        {unit.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          }
-
-          if (unitCodes.length > 2) {
-            return (
-              <div key={state.code} className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
-                {control}
-                <label htmlFor={`${state.code}-unit`} className="sr-only">{t('capture.form.unit')}</label>
-                <select
-                  id={`${state.code}-unit`}
-                  value={selectedUnit ?? ''}
-                  onChange={(event) => updateSingle(
-                    state.code,
-                    numericInput(state.code, enteredValue, event.target.value || null, existing),
-                  )}
-                  className={`min-h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] ${FOCUS_RING}`}
-                >
-                  <option value="">{t('capture.form.unit')}</option>
-                  {unitOptions.map((unit) => (
-                    <option key={unit.code} value={unit.code}>{unit.label}</option>
-                  ))}
-                </select>
-              </div>
-            );
-          }
-
-          return <div key={state.code} className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">{control}</div>;
-        }
-
-        if (attribute.value_type === 'choice') {
-          const choices = allowedChoices(model, layout, state.code, currentSelections);
-          return (
-            <div key={state.code} className="space-y-2">
-              <label htmlFor={state.code} className="flex items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
-                <span>{label}</span>
-                <span
-                  aria-hidden={state.required ? undefined : true}
-                  className="text-xs font-semibold text-[var(--text-secondary)]"
-                >
-                  {statusLabel}
-                </span>
-              </label>
-              <select
-                id={state.code}
-                required={state.required}
-                value={typeof semanticValue(existing) === 'string' ? String(semanticValue(existing)) : ''}
-                aria-invalid={Boolean(fieldError)}
-                aria-describedby={fieldError ? fieldErrorId : undefined}
-                onChange={(event) => updateSingle(
-                  state.code,
-                  semanticInput(state.code, event.target.value, existing),
-                )}
-                className={`min-h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] ${FOCUS_RING}`}
-              >
-                <option value="">{t('capture.form.select')}</option>
-                {choices.map((code) => (
-                  <option key={code} value={code}>{catalogLabel(model.vocabByCode.get(code)!, locale)}</option>
-                ))}
-              </select>
-              {fieldError && (
-                <p
-                  id={fieldErrorId}
-                  role="alert"
-                  className="text-sm font-semibold text-[var(--error-text)]"
-                >
-                  {fieldError}
-                </p>
-              )}
-            </div>
-          );
-        }
-
-        if (attribute.value_type === 'boolean') {
-          const selected = semanticValue(existing);
-          return (
-            <fieldset
-              key={state.code}
-              aria-required={state.required}
-              aria-invalid={Boolean(fieldError)}
-              aria-describedby={fieldError ? fieldErrorId : undefined}
-              className="space-y-2"
+    if (state.code === 'attr.product_uuid') {
+      const retainedProduct = typeof selectedProductUuid === 'string' &&
+        !activeProducts.some(({ product_uuid: uuid }) => uuid === selectedProductUuid)
+        ? products.find(({ product_uuid: uuid }) => uuid === selectedProductUuid)
+        : undefined;
+      return (
+        <div key={state.code} className="space-y-2">
+          <label htmlFor={state.code} className="flex items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
+            <span>{t('capture.form.product')}</span>
+            <span
+              aria-hidden={state.required ? undefined : true}
+              className="text-xs font-semibold text-[var(--text-secondary)]"
             >
-              <legend className="flex w-full items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
-                <span>{label}</span>
-                <span
-                  aria-hidden={state.required ? undefined : true}
-                  className="text-xs font-semibold text-[var(--text-secondary)]"
-                >
-                  {statusLabel}
-                </span>
-              </legend>
-              <div className="inline-flex w-full overflow-hidden rounded-xl border border-[var(--border)]">
-                {([true, false] as const).map((option) => (
+              {statusLabel}
+            </span>
+          </label>
+          {activeProducts.length === 0 && (
+            <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm text-[var(--text-secondary)]">
+              {t('capture.form.noProducts')}
+            </p>
+          )}
+          <select
+            id={state.code}
+            required={state.required}
+            aria-invalid={Boolean(fieldError)}
+            aria-describedby={fieldError ? fieldErrorId : undefined}
+            value={typeof semanticValue(existing) === 'string' ? String(semanticValue(existing)) : ''}
+            onChange={(event) => updateSingle(
+              state.code,
+              semanticInput(state.code, event.target.value, existing),
+            )}
+            className={`min-h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] ${FOCUS_RING}`}
+          >
+            <option value="">{t('capture.form.select')}</option>
+            {typeof selectedProductUuid === 'string' && selectedProductUuid !== '' &&
+              !activeProducts.some(({ product_uuid: uuid }) => uuid === selectedProductUuid) && (
+                <option value={selectedProductUuid} disabled>
+                  {retainedProduct?.name ?? t('capture.validation.invalidDependency')}
+                </option>
+              )}
+            {activeProducts.map((product) => (
+              <option key={product.product_uuid} value={product.product_uuid}>{product.name}</option>
+            ))}
+          </select>
+          {fieldError && (
+            <p
+              id={fieldErrorId}
+              role="alert"
+              className="text-sm font-semibold text-[var(--error-text)]"
+            >
+              {fieldError}
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    if (attribute.value_type === 'number') {
+      const constraints = numericConstraints(attribute);
+      const unitCodes = allowedUnits(model, layout, state.code, currentSelections);
+      const unitOptions = unitCodes.map((code) => ({
+        code,
+        label: catalogLabel(model.vocabByCode.get(code)!, locale),
+      }));
+      if (constraints.repeatable) {
+        const normalizedRows = normalizeNutrientRows(rows);
+        const repeatErrors = Object.fromEntries(normalizedRows.map((row, index) => {
+          const groupIndex = row.group_index ?? index;
+          return [groupIndex, errorFor(state.code, groupIndex)];
+        }));
+        return (
+          <NutrientRepeater
+            key={state.code}
+            attributeCode={state.code}
+            label={label}
+            locale={locale}
+            values={normalizedRows}
+            units={unitOptions}
+            product={selectedProduct}
+            min={constraints.min}
+            max={constraints.max}
+            step={constraints.step}
+            required={state.required}
+            error={errorFor(state.code)}
+            errors={repeatErrors}
+            onValidityChange={(groupIndex, valid, validationError) => {
+              const nextErrors = new Map(numberInputErrors);
+              const key = `${state.code}:${groupIndex}`;
+              if (valid) nextErrors.delete(key);
+              else nextErrors.set(
+                key,
+                validationError ?? t('capture.validation.invalidNumber'),
+              );
+              setNumberInputErrors(nextErrors);
+              emit(values, nextErrors);
+            }}
+            onChange={(nextRows) => emit(replaceFieldValues(values, state.code, nextRows))}
+          />
+        );
+      }
+
+      const enteredValue = existing?.entered_value_num ?? existing?.value_num ??
+        (typeof existing?.value === 'number' ? existing.value : null);
+      const currentUnit = existing?.entered_unit_code ?? existing?.unit_code;
+      const selectedUnit = currentUnit ??
+        (attribute.default_unit_code && unitCodes.includes(attribute.default_unit_code)
+          ? attribute.default_unit_code
+          : unitCodes.length === 1 ? unitCodes[0] : null);
+      const selectedUnitLabel = unitOptions.find(({ code }) => code === selectedUnit)?.label;
+      const numberError = errorFor(state.code, existing?.group_index ?? 0);
+      const control = (
+        <NumberStepper
+          id={state.code}
+          label={label}
+          locale={locale}
+          value={enteredValue}
+          min={constraints.min}
+          max={constraints.max}
+          step={constraints.step}
+          required={state.required}
+          unitLabel={unitCodes.length === 1 ? selectedUnitLabel : undefined}
+          error={numberError}
+          onValidityChange={(valid, validationError) => {
+            const nextErrors = new Map(numberInputErrors);
+            if (valid) nextErrors.delete(state.code);
+            else nextErrors.set(
+              state.code,
+              validationError ?? t('capture.validation.invalidNumber'),
+            );
+            setNumberInputErrors(nextErrors);
+            emit(values, nextErrors);
+          }}
+          onChange={(entered) => updateSingle(
+            state.code,
+            numericInput(state.code, entered, selectedUnit, existing),
+          )}
+        />
+      );
+
+      if (unitCodes.length === 2) {
+        return (
+          <div key={state.code} className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+            {control}
+            <div role="group" aria-label={t('capture.form.unit')} className="inline-flex w-full overflow-hidden rounded-xl border border-[var(--border)]">
+              {unitOptions.map((unit) => {
+                const selected = unit.code === selectedUnit;
+                return (
                   <button
-                    key={String(option)}
+                    key={unit.code}
                     type="button"
-                    aria-pressed={selected === option}
+                    aria-pressed={selected}
                     onClick={() => updateSingle(
                       state.code,
-                      semanticInput(state.code, option, existing),
+                      numericInput(state.code, enteredValue, unit.code, existing),
                     )}
-                    className={`min-h-12 flex-1 px-4 py-2 text-sm font-bold transition-colors ${
-                      selected === option
-                        ? 'bg-[var(--primary)] text-white'
-                        : 'bg-[var(--surface)] text-[var(--text)]'
+                    className={`min-h-11 flex-1 px-3 py-2 text-sm font-bold transition-colors ${
+                      selected ? 'bg-[var(--primary)] text-white' : 'bg-[var(--surface)] text-[var(--text)]'
                     } ${FOCUS_RING}`}
                   >
-                    {t(option ? 'capture.form.booleanYes' : 'capture.form.booleanNo')}
+                    {unit.label}
                   </button>
-                ))}
-              </div>
-              {fieldError && (
-                <p
-                  id={fieldErrorId}
-                  role="alert"
-                  className="text-sm font-semibold text-[var(--error-text)]"
-                >
-                  {fieldError}
-                </p>
-              )}
-            </fieldset>
-          );
-        }
-
-        const type = attribute.value_type === 'date' ? 'date' : 'text';
-        const current = semanticValue(existing);
-        return (
-          <div key={state.code} className="space-y-2">
-            <label htmlFor={state.code} className="flex items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
-              <span>{label}</span>
-              <span
-                aria-hidden={state.required ? undefined : true}
-                className="text-xs font-semibold text-[var(--text-secondary)]"
-              >
-                {statusLabel}
-              </span>
-            </label>
-            <input
-              id={state.code}
-              type={type}
-              value={typeof current === 'string' ? current : ''}
-              required={state.required}
-              aria-invalid={Boolean(errorFor(state.code))}
-              aria-describedby={fieldError ? fieldErrorId : undefined}
-              onChange={(event) => updateSingle(
-                state.code,
-                semanticInput(state.code, event.target.value, existing),
-              )}
-              className={`min-h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] ${FOCUS_RING}`}
-            />
-            {fieldError && (
-              <p
-                id={fieldErrorId}
-                role="alert"
-                className="text-sm font-semibold text-[var(--error-text)]"
-              >
-                {fieldError}
-              </p>
-            )}
+                );
+              })}
+            </div>
           </div>
         );
-      })}
+      }
+
+      if (unitCodes.length > 2) {
+        return (
+          <div key={state.code} className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+            {control}
+            <label htmlFor={`${state.code}-unit`} className="sr-only">{t('capture.form.unit')}</label>
+            <select
+              id={`${state.code}-unit`}
+              value={selectedUnit ?? ''}
+              onChange={(event) => updateSingle(
+                state.code,
+                numericInput(state.code, enteredValue, event.target.value || null, existing),
+              )}
+              className={`min-h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] ${FOCUS_RING}`}
+            >
+              <option value="">{t('capture.form.unit')}</option>
+              {unitOptions.map((unit) => (
+                <option key={unit.code} value={unit.code}>{unit.label}</option>
+              ))}
+            </select>
+          </div>
+        );
+      }
+
+      return <div key={state.code} className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">{control}</div>;
+    }
+
+    if (attribute.value_type === 'choice') {
+      const choices = allowedChoices(model, layout, state.code, currentSelections);
+      return (
+        <div key={state.code} className="space-y-2">
+          <label htmlFor={state.code} className="flex items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
+            <span>{label}</span>
+            <span
+              aria-hidden={state.required ? undefined : true}
+              className="text-xs font-semibold text-[var(--text-secondary)]"
+            >
+              {statusLabel}
+            </span>
+          </label>
+          <select
+            id={state.code}
+            required={state.required}
+            value={typeof semanticValue(existing) === 'string' ? String(semanticValue(existing)) : ''}
+            aria-invalid={Boolean(fieldError)}
+            aria-describedby={fieldError ? fieldErrorId : undefined}
+            onChange={(event) => updateSingle(
+              state.code,
+              semanticInput(state.code, event.target.value, existing),
+            )}
+            className={`min-h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] ${FOCUS_RING}`}
+          >
+            <option value="">{t('capture.form.select')}</option>
+            {choices.map((code) => (
+              <option key={code} value={code}>{catalogLabel(model.vocabByCode.get(code)!, locale)}</option>
+            ))}
+          </select>
+          {fieldError && (
+            <p
+              id={fieldErrorId}
+              role="alert"
+              className="text-sm font-semibold text-[var(--error-text)]"
+            >
+              {fieldError}
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    if (attribute.value_type === 'boolean') {
+      const selected = semanticValue(existing);
+      return (
+        <fieldset
+          key={state.code}
+          aria-required={state.required}
+          aria-invalid={Boolean(fieldError)}
+          aria-describedby={fieldError ? fieldErrorId : undefined}
+          className="space-y-2"
+        >
+          <legend className="flex w-full items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
+            <span>{label}</span>
+            <span
+              aria-hidden={state.required ? undefined : true}
+              className="text-xs font-semibold text-[var(--text-secondary)]"
+            >
+              {statusLabel}
+            </span>
+          </legend>
+          <div className="inline-flex w-full overflow-hidden rounded-xl border border-[var(--border)]">
+            {([true, false] as const).map((option) => (
+              <button
+                key={String(option)}
+                type="button"
+                aria-pressed={selected === option}
+                onClick={() => updateSingle(
+                  state.code,
+                  semanticInput(state.code, option, existing),
+                )}
+                className={`min-h-12 flex-1 px-4 py-2 text-sm font-bold transition-colors ${
+                  selected === option
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-[var(--surface)] text-[var(--text)]'
+                } ${FOCUS_RING}`}
+              >
+                {t(option ? 'capture.form.booleanYes' : 'capture.form.booleanNo')}
+              </button>
+            ))}
+          </div>
+          {fieldError && (
+            <p
+              id={fieldErrorId}
+              role="alert"
+              className="text-sm font-semibold text-[var(--error-text)]"
+            >
+              {fieldError}
+            </p>
+          )}
+        </fieldset>
+      );
+    }
+
+    const type = attribute.value_type === 'date' ? 'date' : 'text';
+    const current = semanticValue(existing);
+    return (
+      <div key={state.code} className="space-y-2">
+        <label htmlFor={state.code} className="flex items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
+          <span>{label}</span>
+          <span
+            aria-hidden={state.required ? undefined : true}
+            className="text-xs font-semibold text-[var(--text-secondary)]"
+          >
+            {statusLabel}
+          </span>
+        </label>
+        <input
+          id={state.code}
+          type={type}
+          value={typeof current === 'string' ? current : ''}
+          required={state.required}
+          aria-invalid={Boolean(errorFor(state.code))}
+          aria-describedby={fieldError ? fieldErrorId : undefined}
+          onChange={(event) => updateSingle(
+            state.code,
+            semanticInput(state.code, event.target.value, existing),
+          )}
+          className={`min-h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)] ${FOCUS_RING}`}
+        />
+        {fieldError && (
+          <p
+            id={fieldErrorId}
+            role="alert"
+            className="text-sm font-semibold text-[var(--error-text)]"
+          >
+            {fieldError}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {groupOperationDetail ? (
+        <>
+          {keyStates.length > 0 && (
+            <p className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">
+              {t('capture.form.keyValues')}
+            </p>
+          )}
+          {keyStates.map(renderField)}
+          {moreDetailStates.length > 0 && (
+            <div id="entry-form-more-detail" className="rounded-2xl border border-[var(--border)] bg-[var(--card)]">
+              {/* The WAI-ARIA disclosure pattern (button + aria-expanded/
+                  aria-controls, content conditionally rendered) rather than
+                  native <details>/<summary>: React 18's synthetic event
+                  system does not deliver the native (non-bubbling) `toggle`
+                  event reliably, so a controlled <details open> would not
+                  respond to clicks/keyboard activation at all. A <button> is
+                  natively keyboard-operable (Enter/Space) in every browser
+                  and jsdom, and the content is a genuine unmount when
+                  collapsed — not merely CSS-hidden — so it is out of the
+                  DOM/accessibility tree, never just visually tucked away. */}
+              <button
+                type="button"
+                aria-expanded={moreDetailOpen}
+                aria-controls="entry-form-more-detail-content"
+                onClick={() => setMoreDetailOpen((open) => !open)}
+                className={`flex min-h-12 w-full items-center justify-between gap-2 rounded-2xl px-4 py-3 text-left text-sm font-bold text-[var(--text)] ${FOCUS_RING}`}
+              >
+                <span>{t('capture.form.moreDetail')}</span>
+                <span aria-hidden="true">{moreDetailOpen ? '−' : '+'}</span>
+              </button>
+              {moreDetailOpen && (
+                <div
+                  id="entry-form-more-detail-content"
+                  className="space-y-4 border-t border-[var(--border)] p-4"
+                >
+                  {moreDetailStates.map(renderField)}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      ) : (
+        visibleStates.map(renderField)
+      )}
 
       {validation.errors.has('form') && (
         <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">

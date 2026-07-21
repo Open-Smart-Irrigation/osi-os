@@ -130,14 +130,30 @@ export function deriveFieldStates(
   let requiredAnyGroupCount = 0;
 
   const rawTemplate = template as Partial<JournalTemplateDefinition>;
+  const selectedActivity = activityCode(selections);
   for (const field of rawTemplate.fields ?? []) addField(field);
   for (const section of rawTemplate.sections ?? []) {
+    // Slice E (full_record@5, R5): a scoped_by_activity section's per-entry
+    // visible fields come from operation_fields_by_activity[activity], not
+    // its own flat `fields` superset — mirroring quick_fields' resolution
+    // axis below, but for one section of a template instead of the whole
+    // template. No activity selected yet -> nothing from this section shows
+    // (same "wait for an activity" behavior quick_fields already has).
+    // Any field this section would otherwise hide but that activity_requirements
+    // / conditional_groups mark required is still force-added by addRequirement
+    // further down, regardless of this narrowing (see addField's merge-by-code
+    // logic) — a required field can never be scoped out from under itself.
+    if (section.scoped_by_activity) {
+      const scopedFields = selectedActivity
+        ? rawTemplate.operation_fields_by_activity?.[selectedActivity]
+        : undefined;
+      for (const field of scopedFields ?? []) addField(field);
+      continue;
+    }
     for (const field of section.fields ?? []) addField(field);
   }
   const rawLayout = layout as Partial<JournalLayoutDefinition>;
   for (const field of rawLayout.fields ?? []) addField(field);
-
-  const selectedActivity = activityCode(selections);
   // Slice BC (R1): `quick_fields` is a genuine new resolution axis, not a
   // variant of the old unconditional force-add below. When a template
   // declares it (farmer_quick@3+), the layout's minimum_fields/reading_fields
