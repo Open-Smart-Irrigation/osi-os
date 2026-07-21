@@ -55,7 +55,8 @@
     "invalidInterval": "Introduza um número inteiro de minutos entre 1 e 1440.",
     "applyInterval": "Aplicar intervalo",
     "applyingInterval": "A aplicar intervalo…",
-    "intervalPending": "Alteração do intervalo de uplink solicitada para {{minutes}} minuto(s).",
+    "intervalPending_one": "Alteração do intervalo de uplink solicitada para {{count}} minuto.",
+    "intervalPending_other": "Alteração do intervalo de uplink solicitada para {{count}} minutos.",
     "failedToSetInterval": "Falha ao alterar o intervalo de uplink do Kiwi",
     "enableTempHumidityTitle": "TEMPERATURA AMBIENTE + HUMIDADE",
     "enableTempHumidityNote": "Ativa o relatório de temperatura ambiente e humidade usando o intervalo introduzido acima.",
@@ -87,7 +88,8 @@
     "invalidInterval": "Introduza um número inteiro de minutos entre 1 e 255.",
     "applyInterval": "Aplicar intervalo",
     "applyingInterval": "A aplicar intervalo…",
-    "intervalPending": "Alteração do intervalo de uplink de caixa fechada solicitada para {{minutes}} minuto(s). O intervalo de caixa aberta permanece em 2 minutos.",
+    "intervalPending_one": "Alteração do intervalo de uplink de caixa fechada solicitada para {{count}} minuto. O intervalo de caixa aberta permanece em 2 minutos.",
+    "intervalPending_other": "Alteração do intervalo de uplink de caixa fechada solicitada para {{count}} minutos. O intervalo de caixa aberta permanece em 2 minutos.",
     "failedToSetInterval": "Falha ao alterar o intervalo de uplink do Strega",
     "actuationFeedback": {
       "closed": "Fechado",
@@ -176,7 +178,8 @@
       "unavailable": "Sem localização"
     },
     "local": {
-      "freshSensors": "{{count}} recente",
+      "freshSensors_one": "{{count}} recente",
+      "freshSensors_other": "{{count}} recentes",
       "staleSensors_one": "{{count}} desatualizado",
       "staleSensors_other": "{{count}} desatualizados",
       "perDevice": "Leituras por dispositivo",

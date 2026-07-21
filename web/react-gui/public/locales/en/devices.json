@@ -55,7 +55,8 @@
     "invalidInterval": "Enter a whole number of minutes between 1 and 1440.",
     "applyInterval": "Apply interval",
     "applyingInterval": "Applying interval…",
-    "intervalPending": "Uplink interval change requested for {{minutes}} minute(s).",
+    "intervalPending_one": "Uplink interval change requested for {{count}} minute.",
+    "intervalPending_other": "Uplink interval change requested for {{count}} minutes.",
     "failedToSetInterval": "Failed to change Kiwi uplink interval",
     "enableTempHumidityTitle": "AMBIENT TEMPERATURE + HUMIDITY",
     "enableTempHumidityNote": "Enable ambient temperature and humidity reporting using the interval entered above.",
@@ -87,7 +88,8 @@
     "invalidInterval": "Enter a whole number of minutes between 1 and 255.",
     "applyInterval": "Apply interval",
     "applyingInterval": "Applying interval…",
-    "intervalPending": "Closed-box uplink interval change requested for {{minutes}} minute(s). The opened interval stays at 2 minutes.",
+    "intervalPending_one": "Closed-box uplink interval change requested for {{count}} minute. The opened interval stays at 2 minutes.",
+    "intervalPending_other": "Closed-box uplink interval change requested for {{count}} minutes. The opened interval stays at 2 minutes.",
     "failedToSetInterval": "Failed to change STREGA uplink interval",
     "actuationFeedback": {
       "closed": "Closed",
@@ -176,7 +178,8 @@
       "unavailable": "No location set"
     },
     "local": {
-      "freshSensors": "{{count}} fresh",
+      "freshSensors_one": "{{count}} fresh",
+      "freshSensors_other": "{{count}} fresh",
       "staleSensors_one": "{{count}} stale",
       "staleSensors_other": "{{count}} stale",
       "perDevice": "Per-device readings",

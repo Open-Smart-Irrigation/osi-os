@@ -96,7 +96,7 @@ const ConfigPanel: React.FC<{
     try {
       await kiwiAPI.setUplinkInterval(device.deveui, minutes);
       setIntervalMinutesInput(String(minutes));
-      setInfo(t('kiwiSensor.intervalPending', { minutes }));
+      setInfo(t('kiwiSensor.intervalPending', { count: minutes }));
       onUpdate?.();
     } catch (err: any) {
       setError(err.response?.data?.message || t('kiwiSensor.failedToSetInterval'));

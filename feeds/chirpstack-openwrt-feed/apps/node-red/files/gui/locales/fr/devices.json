@@ -55,7 +55,8 @@
     "invalidInterval": "Entrez un nombre entier de minutes entre 1 et 1440.",
     "applyInterval": "Appliquer l'intervalle",
     "applyingInterval": "Application de l'intervalle…",
-    "intervalPending": "Changement d'intervalle d'uplink demandé pour {{minutes}} minute(s).",
+    "intervalPending_one": "Changement d'intervalle d'uplink demandé pour {{count}} minute.",
+    "intervalPending_other": "Changement d'intervalle d'uplink demandé pour {{count}} minutes.",
     "failedToSetInterval": "Impossible de modifier l'intervalle d'uplink Kiwi",
     "enableTempHumidityTitle": "TEMPÉRATURE AMBIANTE + HUMIDITÉ",
     "enableTempHumidityNote": "Active la remontée de la température ambiante et de l'humidité avec l'intervalle saisi ci-dessus.",
@@ -87,7 +88,8 @@
     "invalidInterval": "Entrez un nombre entier de minutes entre 1 et 255.",
     "applyInterval": "Appliquer l'intervalle",
     "applyingInterval": "Application de l'intervalle…",
-    "intervalPending": "Changement d'intervalle d'uplink boîtier fermé demandé pour {{minutes}} minute(s). L'intervalle boîtier ouvert reste à 2 minutes.",
+    "intervalPending_one": "Changement d'intervalle d'uplink boîtier fermé demandé pour {{count}} minute. L'intervalle boîtier ouvert reste à 2 minutes.",
+    "intervalPending_other": "Changement d'intervalle d'uplink boîtier fermé demandé pour {{count}} minutes. L'intervalle boîtier ouvert reste à 2 minutes.",
     "failedToSetInterval": "Impossible de modifier l'intervalle d'uplink Strega",
     "actuationFeedback": {
       "closed": "Fermée",
@@ -176,7 +178,8 @@
       "unavailable": "Aucun emplacement"
     },
     "local": {
-      "freshSensors": "{{count}} récent",
+      "freshSensors_one": "{{count}} récent",
+      "freshSensors_other": "{{count}} récents",
       "staleSensors_one": "{{count}} obsolète",
       "staleSensors_other": "{{count}} obsolètes",
       "perDevice": "Lectures par appareil",

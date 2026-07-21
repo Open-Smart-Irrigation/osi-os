@@ -55,7 +55,8 @@
     "invalidInterval": "Yingiza ennamba enzijuvu ey'edakiika, wakati wa 1 ne 1440.",
     "applyInterval": "Kozesa ebbanga",
     "applyingInterval": "Tikukozesa ebbanga…",
-    "intervalPending": "Enkyukakyuka mu bbanga ery'obubaka lyasabiddwa okuba edakiika {{minutes}}.",
+    "intervalPending_one": "Enkyukakyuka mu bbanga ery'obubaka lyasabiddwa okuba edakiika {{count}}.",
+    "intervalPending_other": "Enkyukakyuka mu bbanga ery'obubaka lyasabiddwa okuba edakiika {{count}}.",
     "failedToSetInterval": "Okukyusa ebbanga lya Kiwi ery'obubaka kugaanye",
     "enableTempHumidityTitle": "EBBUGUMU ERY'EMPEWO + AMAANZI MU MPEWO",
     "enableTempHumidityNote": "Koleeza okuwaayo ebikwata ku bbugumu ery'empewo n'amaanzi mu mpewo nga okozesa ebbanga lye oyingizza waggulu.",
@@ -87,7 +88,8 @@
     "invalidInterval": "Yingiza ennamba enzijuvu ey'edakiika, wakati wa 1 ne 255.",
     "applyInterval": "Kozesa ebbanga",
     "applyingInterval": "Tikukozesa ebbanga…",
-    "intervalPending": "Enkyukakyuka mu bbanga ery'obubaka ery'okuggala akasanduuko lyasabiddwa okuba edakiika {{minutes}}. Ebbanga ery'okuggulawo akasanduuko lisigala ku dakiika 2.",
+    "intervalPending_one": "Enkyukakyuka mu bbanga ery'obubaka ery'okuggala akasanduuko lyasabiddwa okuba edakiika {{count}}. Ebbanga ery'okuggulawo akasanduuko lisigala ku dakiika 2.",
+    "intervalPending_other": "Enkyukakyuka mu bbanga ery'obubaka ery'okuggala akasanduuko lyasabiddwa okuba edakiika {{count}}. Ebbanga ery'okuggulawo akasanduuko lisigala ku dakiika 2.",
     "failedToSetInterval": "Okukyusa ebbanga lya Strega ery'obubaka kugaanye",
     "actuationFeedback": {
       "closed": "Ggangwe",
@@ -176,7 +178,8 @@
       "unavailable": "Tewali kifo"
     },
     "local": {
-      "freshSensors": "{{count}} eppya",
+      "freshSensors_one": "{{count}} eppya",
+      "freshSensors_other": "{{count}} eppya",
       "staleSensors_one": "{{count}} ekaddiye",
       "staleSensors_other": "{{count}} ekaddiye",
       "perDevice": "Ebyofubirwa bya buli kyuma",

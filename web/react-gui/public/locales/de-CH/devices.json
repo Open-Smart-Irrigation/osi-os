@@ -55,7 +55,8 @@
     "invalidInterval": "Geben Sie eine ganze Zahl von Minuten zwischen 1 und 1440 ein.",
     "applyInterval": "Intervall anwenden",
     "applyingInterval": "Intervall wird angewendet…",
-    "intervalPending": "Uplink-Intervalländerung für {{minutes}} Minute(n) angefordert.",
+    "intervalPending_one": "Uplink-Intervalländerung für {{count}} Minute angefordert.",
+    "intervalPending_other": "Uplink-Intervalländerung für {{count}} Minuten angefordert.",
     "failedToSetInterval": "Kiwi-Uplink-Intervall konnte nicht geändert werden",
     "enableTempHumidityTitle": "UMGEBUNGSTEMPERATUR + LUFTFEUCHTIGKEIT",
     "enableTempHumidityNote": "Aktiviert die Meldung von Umgebungstemperatur und Luftfeuchtigkeit mit dem oben eingegebenen Intervall.",
@@ -87,7 +88,8 @@
     "invalidInterval": "Geben Sie eine ganze Zahl von Minuten zwischen 1 und 255 ein.",
     "applyInterval": "Intervall anwenden",
     "applyingInterval": "Intervall wird angewendet…",
-    "intervalPending": "Uplink-Intervalländerung bei geschlossenem Gehäuse für {{minutes}} Minute(n) angefordert. Das Intervall bei geöffnetem Gehäuse bleibt bei 2 Minuten.",
+    "intervalPending_one": "Uplink-Intervalländerung bei geschlossenem Gehäuse für {{count}} Minute angefordert. Das Intervall bei geöffnetem Gehäuse bleibt bei 2 Minuten.",
+    "intervalPending_other": "Uplink-Intervalländerung bei geschlossenem Gehäuse für {{count}} Minuten angefordert. Das Intervall bei geöffnetem Gehäuse bleibt bei 2 Minuten.",
     "failedToSetInterval": "Strega-Uplink-Intervall konnte nicht geändert werden",
     "actuationFeedback": {
       "closed": "Geschlossen",
@@ -176,7 +178,8 @@
       "unavailable": "Kein Standort gesetzt"
     },
     "local": {
-      "freshSensors": "{{count}} aktuell",
+      "freshSensors_one": "{{count}} aktuell",
+      "freshSensors_other": "{{count}} aktuell",
       "staleSensors_one": "{{count}} veraltet",
       "staleSensors_other": "{{count}} veraltet",
       "perDevice": "Messwerte pro Gerät",

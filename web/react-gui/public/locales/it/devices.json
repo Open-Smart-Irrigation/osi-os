@@ -55,7 +55,8 @@
     "invalidInterval": "Inserisci un numero intero di minuti tra 1 e 1440.",
     "applyInterval": "Applica intervallo",
     "applyingInterval": "Applicazione intervallo in corso…",
-    "intervalPending": "Richiesta di modifica dell'intervallo di uplink per {{minutes}} minuto/i.",
+    "intervalPending_one": "Richiesta di modifica dell'intervallo di uplink per {{count}} minuto.",
+    "intervalPending_other": "Richiesta di modifica dell'intervallo di uplink per {{count}} minuti.",
     "failedToSetInterval": "Impossibile modificare l'intervallo di uplink Kiwi",
     "enableTempHumidityTitle": "TEMPERATURA AMBIENTE + UMIDITÀ",
     "enableTempHumidityNote": "Abilita la segnalazione di temperatura ambiente e umidità utilizzando l'intervallo inserito sopra.",
@@ -87,7 +88,8 @@
     "invalidInterval": "Inserisci un numero intero di minuti tra 1 e 255.",
     "applyInterval": "Applica intervallo",
     "applyingInterval": "Applicazione intervallo in corso…",
-    "intervalPending": "Richiesta di modifica dell'intervallo di uplink a scatola chiusa per {{minutes}} minuto/i. L'intervallo a scatola aperta resta a 2 minuti.",
+    "intervalPending_one": "Richiesta di modifica dell'intervallo di uplink a scatola chiusa per {{count}} minuto. L'intervallo a scatola aperta resta a 2 minuti.",
+    "intervalPending_other": "Richiesta di modifica dell'intervallo di uplink a scatola chiusa per {{count}} minuti. L'intervallo a scatola aperta resta a 2 minuti.",
     "failedToSetInterval": "Impossibile modificare l'intervallo di uplink Strega",
     "actuationFeedback": {
       "closed": "Chiusa",
@@ -176,7 +178,8 @@
       "unavailable": "Nessuna posizione"
     },
     "local": {
-      "freshSensors": "{{count}} recente",
+      "freshSensors_one": "Aggiornati di recente: {{count}}",
+      "freshSensors_other": "Aggiornati di recente: {{count}}",
       "staleSensors_one": "{{count}} non aggiornato",
       "staleSensors_other": "{{count}} non aggiornati",
       "perDevice": "Letture per dispositivo",
