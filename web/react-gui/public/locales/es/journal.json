@@ -13,7 +13,7 @@
     "syncBody": "Cada entrada te indica si está guardada en el gateway de la finca o si está a la espera de guardarse. Nada se pierde en silencio."
   },
   "row": {
-    "farmLevel": "Nivel de finca",
+    "farmLevel": "Toda la finca",
     "unknownPlot": "Parcela desconocida",
     "status": {
       "final": "Definitivo",
@@ -116,7 +116,7 @@
     "layoutRequired": "Selecciona un layout activo",
     "stale": "Esta parcela ha cambiado en otro lugar. Vuelve a cargarla antes de guardar.",
     "codeConflict": "El código de parcela ya está en uso.",
-    "heterogeneousGroup": "La parcela pertenece a un grupo heterogéneo.",
+    "heterogeneousGroup": "La parcela pertenece a un grupo con layouts incompatibles.",
     "unresolvedGroup": "Disuelve el grupo de parcelas antes de desactivar esta parcela.",
     "loading": "Guardando…",
     "error": "No se ha podido guardar la parcela.",
@@ -151,7 +151,7 @@
   },
   "error": {
     "title": "No se pudo cargar el diario",
-    "body": "El gateway no respondió correctamente. Vuelve a intentarlo.",
+    "body": "El gateway no respondió. Vuelve a intentarlo.",
     "retry": "Reintentar"
   },
   "filters": {
@@ -375,7 +375,7 @@
       "group": "Grupo {{number}}",
       "useValues": "Usar estos valores",
       "dismiss": "No copiar",
-      "invalidated": "El tratamiento anterior ya no coincide con esta parcela, cultivo, hora, temporada o layout"
+      "invalidated": "El tratamiento anterior ya no coincide con esta parcela, este cultivo, esta hora, esta temporada o este layout."
     },
     "tankMix": {
       "title": "Mezcla en tanque",

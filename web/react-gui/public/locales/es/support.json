@@ -39,7 +39,7 @@
     "other": "Otro"
   },
   "severity": {
-    "cant_work": "No se puede trabajar",
+    "cant_work": "Bloquea mi trabajo",
     "workaround": "Hay solución temporal",
     "annoying": "Molesto",
     "idea": "Idea"

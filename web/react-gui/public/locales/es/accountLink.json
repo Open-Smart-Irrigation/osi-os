@@ -22,7 +22,7 @@
   },
   "warning": {
     "title": "Importante",
-    "message": "Después de vincular, debes usar tus credenciales de OSI Server para iniciar sesión. OSI OS guarda un verificador offline específico de la puerta de enlace para el inicio de sesión vinculado.",
+    "message": "Después de vincular, debes iniciar sesión con tus credenciales de OSI Server. OSI OS guarda una copia local segura de tu inicio de sesión en este gateway para que puedas seguir accediendo sin conexión a internet.",
     "proceed": "Continuar"
   },
   "success": {
@@ -59,7 +59,7 @@
   },
   "reauth": {
     "title": "Token de sincronización caducado",
-    "description": "Vuelve a autenticarte con OSI Server para generar un nuevo token de sincronización para esta puerta de enlace.",
+    "description": "Vuelve a autenticarte con OSI Server para generar un nuevo token de sincronización para este gateway.",
     "button": "Volver a autenticar",
     "username": "Nombre de usuario del servidor",
     "password": "Contraseña de OSI Server",

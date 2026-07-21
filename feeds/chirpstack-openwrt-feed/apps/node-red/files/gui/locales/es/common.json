@@ -14,7 +14,7 @@
     "pooled": {
       "tooltip": "Correlaciona los puntos de todas las zonas como un único conjunto combinado, además de cada zona por separado."
     },
-    "empty": "Seleccione una o más series para empezar a comparar zonas.",
+    "empty": "Selecciona una o más series para empezar a comparar zonas.",
     "catalog": {
       "loading": "Cargando series disponibles…"
     },
@@ -82,7 +82,7 @@
     "droppedNotice": "{{count}} series no se pudieron cargar",
     "correlation": {
       "comingSoon": "El diagrama de dispersión de correlación está previsto para la próxima fase.",
-      "needTwoChannels": "Añada series de al menos dos canales diferentes para compararlas.",
+      "needTwoChannels": "Añade series de al menos dos canales diferentes para compararlas.",
       "x": "Canal X",
       "y": "Canal Y",
       "pooled": "Agrupado (todas las zonas)",

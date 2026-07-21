@@ -127,9 +127,9 @@
       "download": "Descargar CSV",
       "downloading": "Preparando…",
       "rangeSummary": "{{from}} a {{to}}",
-      "error": "Error de exportacion",
-      "tooLarge": "Rango demasiado grande. Elige una granularidad mas amplia.",
-      "fullExport": "Exportacion completa"
+      "error": "Error de exportación",
+      "tooLarge": "Rango demasiado grande. Elige una granularidad más amplia.",
+      "fullExport": "Exportación completa"
     }
   },
   "schedule": {
@@ -137,7 +137,7 @@
     "triggerMetric": "Métrica de activación",
     "soilWaterTension1": "Tensión hídrica del suelo 1",
     "soilWaterTension2": "Tensión hídrica del suelo 2",
-    "average": "Promedio (WM1 + WM2)",
+    "average": "Promedio (Tensión 1 + Tensión 2)",
     "thresholdKpa": "Umbral (kPa)",
     "duration": "Duración del riego (min)",
     "enabled": "Activado",
@@ -151,7 +151,7 @@
     "reload": "Recargar",
     "reloadFailed": "Error al recargar el programa",
     "saved": "Guardado.",
-    "triggerHint": "Activar si {{metric}} ≥ {{threshold}} kPa (una vez/día, 06:00)."
+    "triggerHint": "Activar si {{metric}} ≥ {{threshold}} kPa (una vez al día, 06:00)."
   },
   "environment": {
     "sectionTitle": "Entorno y previsión meteorológica",
@@ -198,7 +198,7 @@
       "thi": "THI",
       "et0": "ET₀ referencia",
       "kc": "Coef. cultivo Kc",
-      "etc": "ET cultivo",
+      "etc": "ETc (cultivo)",
       "noData": "No hay datos agronómicos disponibles",
       "fromSource": "de {{source}}"
     },
@@ -232,10 +232,10 @@
   "irrigationOutcomes": {
     "title": "Riegos recientes",
     "updated": "actualizado",
-    "loading": "Cargando activaciones recientes…",
-    "error": "Error al cargar activaciones recientes",
+    "loading": "Cargando riegos recientes…",
+    "error": "Error al cargar riegos recientes",
     "empty": "No hay riegos recientes registrados.",
-    "zoneUnknown": "Zona ?",
+    "zoneUnknown": "Zona desconocida",
     "duration": "Duración",
     "totalVolume": "Volumen total: {{liters}}",
     "irrigated": "Regado: {{depth}}",

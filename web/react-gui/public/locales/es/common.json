@@ -14,7 +14,7 @@
     "pooled": {
       "tooltip": "Correlaciona los puntos de todas las zonas como un único conjunto combinado, además de cada zona por separado."
     },
-    "empty": "Seleccione una o más series para empezar a comparar zonas.",
+    "empty": "Selecciona una o más series para empezar a comparar zonas.",
     "catalog": {
       "loading": "Cargando series disponibles…"
     },
@@ -82,7 +82,7 @@
     "droppedNotice": "{{count}} series no se pudieron cargar",
     "correlation": {
       "comingSoon": "El diagrama de dispersión de correlación está previsto para la próxima fase.",
-      "needTwoChannels": "Añada series de al menos dos canales diferentes para compararlas.",
+      "needTwoChannels": "Añade series de al menos dos canales diferentes para compararlas.",
       "x": "Canal X",
       "y": "Canal Y",
       "pooled": "Agrupado (todas las zonas)",
@@ -93,11 +93,11 @@
     }
   },
   "restart": {
-    "gateway_identity_change": "Identidad de la puerta de enlace actualizada. Los servicios se reiniciarán en {{count}} s.",
+    "gateway_identity_change": "Identidad del gateway actualizada. Los servicios se reiniciarán en {{count}} s.",
     "chirpstack_bootstrap": "Configuración de LoRaWAN completada. Los servicios se reiniciarán en {{count}} s.",
     "account_link": "Cuenta vinculada. Los servicios se reiniciarán en {{count}} s.",
     "account_unlink": "Cuenta desvinculada. Los servicios se reiniciarán en {{count}} s.",
-    "generic": "Los servicios de la puerta de enlace se reiniciarán en {{count}} s.",
-    "in_progress": "Los servicios de la puerta de enlace se están reiniciando…"
+    "generic": "Los servicios del gateway se reiniciarán en {{count}} s.",
+    "in_progress": "Los servicios del gateway se están reiniciando…"
   }
 }
