@@ -274,6 +274,7 @@ const baseProps = {
   plotState: {
     createPlot: vi.fn(),
     updatePlot: vi.fn(),
+    revalidate: vi.fn(),
   },
   groupState: {
     createPlotGroup: vi.fn(),
@@ -1444,6 +1445,126 @@ describe('JournalCaptureFlow', () => {
     cleanup();
   });
 
+  // P1-a (Slice D hardening): a sensorless plot already covered by an open
+  // crop cycle must NOT hard-block the Where/Activity steps demanding a
+  // crop the app already has via the cycle — it must show it read-only
+  // instead (see openCropCycleInfo in JournalCaptureFlow.tsx).
+  it('does not demand crop text for a sensorless plot covered by an open crop cycle, and shows it read-only', () => {
+    const seededPlot = {
+      ...sensorlessPlot,
+      active_crop_cycles: [{
+        cycle_uuid: 'cycle-1',
+        crop_code: 'agroscope.crop.wheat_winter',
+        variety: 'Runal',
+        seeded_on: '2026-04-01',
+        opened_by_entry_uuid: 'seed-entry-1',
+      }],
+    };
+    render(<JournalCaptureFlow {...baseProps} plots={[seededPlot]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'South field' }));
+    expect(screen.queryByRole('textbox', { name: 'capture.carry.crop' })).not.toBeInTheDocument();
+    expect(screen.getByText((_content, element) => element?.textContent === '🌱 agroscope.crop.wheat_winter · Runal')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    expect(screen.queryByText('capture.validation.cropRequired')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'capture.picker.title' })).toBeInTheDocument();
+    cleanup();
+  });
+
+  // P1-b (Slice D hardening): the inherited-crop banner on a non-seeding
+  // activity must be gated on an OPEN covering cycle, not merely "some past
+  // entry recorded a crop" — see openCropCycleInfo/bannerInfo in
+  // JournalCaptureFlow.tsx and currentCropInfoForPlot's module doc comment.
+  it('shows the inherited-crop banner read-only for a non-seeding activity when an open cycle covers the plot', () => {
+    const seededPlot = {
+      ...plot,
+      active_crop_cycles: [{
+        cycle_uuid: 'cycle-2',
+        crop_code: 'agroscope.crop.wheat_winter',
+        variety: 'Runal',
+        seeded_on: '2026-04-01',
+        opened_by_entry_uuid: 'seed-entry-2',
+      }],
+    };
+    render(<JournalCaptureFlow {...baseProps} initialPlot={seededPlot} plots={[seededPlot]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    expect(screen.getByRole('button', { name: /agroscope\.crop\.wheat_winter/ })).toBeInTheDocument();
+    cleanup();
+  });
+
+  it('hides the inherited-crop banner once the covering cycle has closed (no open cycle left on the plot)', () => {
+    const harvestedPlot = { ...plot, active_crop_cycles: [] };
+    render(<JournalCaptureFlow {...baseProps} initialPlot={harvestedPlot} plots={[harvestedPlot]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    expect(screen.queryByRole('button', { name: /agroscope\.crop\.wheat_winter/ })).not.toBeInTheDocument();
+    cleanup();
+  });
+
+  // B2 (pre-deploy review, blocking, crop-history integrity): openCropCycleInfo
+  // is resolved "as of today" (osi-journal/lifecycle.js
+  // activeCropCyclesForPlot), not as of THIS entry's own occurred date.
+  // inferredCrop must only auto-fill it when the entry's occurred local date
+  // falls within the open cycle's span (>= seeded_on) — otherwise a
+  // backdated entry logged before the cycle even started would permanently
+  // mislabel itself via the edge's explicit-crop tier. This is a sensorless
+  // plot (like the P1-a/P1-b fixtures above): occurredLocal starts at "now"
+  // (after the cycle's 2026-04-01 seeded_on), so the activity -> details
+  // transition's crop-required gate is unaffected either way — this only
+  // changes what season_crop the finished entry actually sends once the
+  // occurred date is edited on the details step.
+  describe('B2: crop inheritance is gated on the occurred date, not "today"', () => {
+    const openCycleSensorlessPlot = {
+      ...sensorlessPlot,
+      active_crop_cycles: [{
+        cycle_uuid: 'cycle-b2',
+        crop_code: 'agroscope.crop.wheat_winter',
+        variety: 'Runal',
+        seeded_on: '2026-04-01',
+        opened_by_entry_uuid: 'seed-entry-b2',
+      }],
+    };
+
+    it('does not inherit the open cycle crop for an entry backdated before the cycle started', async () => {
+      render(<JournalCaptureFlow {...baseProps} initialPlot={openCycleSensorlessPlot} plots={[openCycleSensorlessPlot]} />);
+      fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' })); // activity -> details
+
+      fireEvent.change(
+        screen.getByLabelText('capture.confirm.occurrence · capture.form.required'),
+        { target: { value: '2026-03-15T09:00' } },
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' })); // details -> confirm
+      await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).not.toBeDisabled());
+      fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+      await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalled());
+      expect(apiMocks.updateEntry.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ season_crop: null }),
+      );
+    });
+
+    it('still inherits the open cycle crop for an entry dated within the cycle span (unchanged "log today" behavior)', async () => {
+      render(<JournalCaptureFlow {...baseProps} initialPlot={openCycleSensorlessPlot} plots={[openCycleSensorlessPlot]} />);
+      fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' })); // activity -> details
+
+      fireEvent.change(
+        screen.getByLabelText('capture.confirm.occurrence · capture.form.required'),
+        { target: { value: '2026-05-01T09:00' } },
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' })); // details -> confirm
+      await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).not.toBeDisabled());
+      fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+      await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalled());
+      expect(apiMocks.updateEntry.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ season_crop: 'agroscope.crop.wheat_winter' }),
+      );
+    });
+  });
+
   it('requires an explicit growing setting for farm-level capture', () => {
     render(<JournalCaptureFlow {...baseProps} plots={[]} />);
     const layout = screen.getByRole('combobox', { name: 'capture.where.layout' });
@@ -1493,7 +1614,16 @@ describe('JournalCaptureFlow', () => {
       ));
     });
 
-    it('uses the preferred template on a multi-template layout (research_observation)', async () => {
+    // Product change: "Research" was dropped as a user-selectable detail-level
+    // SETTING (displayPreferences.ts's JournalDetailLevel no longer includes
+    // it) — a pre-existing install's stored 'research_observation' now
+    // normalizes to 'full_record' at the settings layer, BEFORE it ever
+    // reaches effectiveTemplateCode here. On a layout that supports
+    // full_record directly (a multi-template layout, not a research-only
+    // one), that means full_record — not a floor to research_observation.
+    // The research-only-layout FLOOR itself is unaffected and still verified
+    // below ("floors an unsupported preferred template...").
+    it('resolves a legacy stored research_observation preference to full_record on a multi-template layout', async () => {
       window.localStorage.setItem('osi.journal.detailLevel', 'research_observation');
       render(<JournalCaptureFlow {...baseProps} initialPlot={plot} />);
       fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
@@ -1505,7 +1635,7 @@ describe('JournalCaptureFlow', () => {
       fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
       await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalledWith(
         '11111111-1111-4111-8111-111111111111',
-        expect.objectContaining({ template_code: 'research_observation', template_version: 9 }),
+        expect.objectContaining({ template_code: 'full_record', template_version: 2 }),
       ));
     });
 

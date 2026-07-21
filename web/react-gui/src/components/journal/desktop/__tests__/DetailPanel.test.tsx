@@ -3,11 +3,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import type { EntryAggregate, JournalCatalog, JournalPlot } from '../../../../types/journal';
+import { formatOccurredDate } from '../../JournalEntryRow';
 
 const mocks = vi.hoisted(() => ({
   useJournalEntries: vi.fn(),
   updateEntry: vi.fn(),
   voidEntry: vi.fn(),
+  listEntries: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -25,6 +27,7 @@ vi.mock('../../../../services/journalApi', () => ({
   journalApi: {
     updateEntry: mocks.updateEntry,
     voidEntry: mocks.voidEntry,
+    listEntries: mocks.listEntries,
   },
 }));
 
@@ -223,6 +226,7 @@ beforeEach(() => {
   mocks.useJournalEntries.mockReset();
   mocks.updateEntry.mockReset();
   mocks.voidEntry.mockReset();
+  mocks.listEntries.mockReset().mockResolvedValue({ entries: [], next_cursor: null });
 });
 
 describe('DetailPanel — read-back states', () => {
@@ -275,6 +279,68 @@ describe('DetailPanel — read-back states', () => {
     expect(screen.getByText('row.status.final')).toBeInTheDocument();
     expect(screen.getByText('North field')).toBeInTheDocument();
     expect(screen.getByText('Alex')).toBeInTheDocument();
+  });
+
+  // P2-c: the header used to show the raw `t(`activity.${code}`, code)`
+  // fallback — the client-side journal.json activity.* namespace only covers
+  // a handful of the shipped activity codes. Reuse the catalog's own label
+  // (same source ActivityPicker already reads) so the header shows a human
+  // label whenever the catalog has one, not a raw snake_case code.
+  it('shows the catalog-provided activity label in the header, not a raw code', () => {
+    mockDetail({ entries: [entry({ activity_code: 'irrigation' })] });
+
+    renderPanel();
+
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Irrigation');
+  });
+
+  it('falls back to the raw activity code in the header when the catalog has no matching row', () => {
+    mockDetail({ entries: [entry({ activity_code: 'unmapped_activity' })] });
+
+    renderPanel();
+
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('unmapped_activity');
+  });
+
+  // P2-c: a season_crop value is itself a vocab choice code (e.g.
+  // agroscope.crop.potato) — show its catalog label when the catalog has one.
+  it('shows a localized crop label for season_crop when the catalog has a matching choice row', () => {
+    const cropRow = row('agroscope.crop.potato', 'attribute');
+    const catalogWithCrop: JournalCatalog = {
+      ...catalog,
+      vocab: [...catalog.vocab, { ...cropRow, kind: 'choice', labels: { en: 'Potato' } }],
+    };
+    mockDetail({ entries: [entry({ season_crop: 'agroscope.crop.potato' })] });
+
+    renderPanel({ catalogOverride: catalogWithCrop });
+
+    expect(screen.getByText('workspace.detail.field.season_crop')).toBeInTheDocument();
+    expect(screen.getByText('Potato')).toBeInTheDocument();
+    expect(screen.queryByText('agroscope.crop.potato')).not.toBeInTheDocument();
+  });
+
+  // P2-b (Slice D hardening): a harvest/manual-close/reseed entry that
+  // closed a crop cycle keeps its OWN season_crop NULL by design — the
+  // detail view must fall back to the edge's closed_crop_code display
+  // enrichment (osi-journal/lifecycle.js resolveClosedCropCycleOverrides) so
+  // this entry still shows what was harvested/closed.
+  it('falls back to closed_crop_code for a closing entry whose own season_crop is null', () => {
+    mockDetail({ entries: [entry({
+      activity_code: 'harvest', season_crop: null, closed_crop_code: 'agroscope.crop.wheat_winter',
+    })] });
+
+    renderPanel();
+
+    expect(screen.getByText('workspace.detail.field.season_crop')).toBeInTheDocument();
+    expect(screen.getByText('agroscope.crop.wheat_winter')).toBeInTheDocument();
+  });
+
+  it('shows no crop row for a non-closing entry with neither season_crop nor closed_crop_code', () => {
+    mockDetail({ entries: [entry({ season_crop: null })] });
+
+    renderPanel();
+
+    expect(screen.queryByText('workspace.detail.field.season_crop')).not.toBeInTheDocument();
   });
 });
 
@@ -373,7 +439,12 @@ describe('DetailPanel — void', () => {
   // caller sets cascade_ack. See journal/cropCycle.ts's
   // cycleDependentsFromError and osi-journal/lifecycle.js
   // applyVoidCycleCascade.
-  it('shows the dependent entries from a cycle_has_dependents refusal and requires explicit confirmation before retrying with cascade_ack', async () => {
+  // P2-c: the confirmation must show a human label per dependent (activity
+  // · plot · date), not the bare entry UUID the edge refusal carries — see
+  // dependentEntryLabel in DetailPanel.tsx. The edge only ever sends UUIDs,
+  // so the GUI resolves each one through the same single-entry lookup
+  // DetailPanelForEntry itself already uses.
+  it('shows the dependent entries from a cycle_has_dependents refusal, resolved to human labels, and requires explicit confirmation before retrying with cascade_ack', async () => {
     const retry = mockDetail({ entries: [entry({ sync_version: 2 })] });
     mocks.voidEntry
       .mockRejectedValueOnce({
@@ -387,7 +458,27 @@ describe('DetailPanel — void', () => {
         },
       })
       .mockResolvedValueOnce({ entry_uuid: 'entry-1', outbox_event_uuid: 'evt-2', sync_version: 3 });
-    renderPanel();
+    const dependentsByUuid: Record<string, EntryAggregate> = {
+      'dep-1': entry({
+        entry_uuid: 'dep-1',
+        activity_code: 'fertilization',
+        occurred_start: '2026-07-18T08:00:00.000Z',
+      }),
+      'dep-2': entry({
+        entry_uuid: 'dep-2',
+        activity_code: 'irrigation',
+        occurred_start: '2026-07-10T08:00:00.000Z',
+      }),
+    };
+    mocks.listEntries.mockImplementation(async ({ entry_uuid }: { entry_uuid: string }) => {
+      const found = dependentsByUuid[entry_uuid];
+      return { entries: found ? [found] : [], next_cursor: null };
+    });
+    const catalogWithFertilization: JournalCatalog = {
+      ...catalog,
+      vocab: [...catalog.vocab, row('fertilization', 'activity')],
+    };
+    renderPanel({ catalogOverride: catalogWithFertilization });
 
     fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.void' }));
     fireEvent.change(screen.getByLabelText('workspace.detail.void.reasonLabel'), {
@@ -397,14 +488,37 @@ describe('DetailPanel — void', () => {
 
     await waitFor(() => expect(mocks.voidEntry).toHaveBeenNthCalledWith(1, 'entry-1', 'Wrong crop entered', 2, false));
     await waitFor(() => expect(screen.getByText('capture.cycle.voidDependentsTitle')).toBeInTheDocument());
-    expect(screen.getByText('dep-1')).toBeInTheDocument();
-    expect(screen.getByText('dep-2')).toBeInTheDocument();
+
+    const dep1Date = formatOccurredDate('2026-07-18T08:00:00.000Z', 'Europe/Zurich', 'en');
+    const dep2Date = formatOccurredDate('2026-07-10T08:00:00.000Z', 'Europe/Zurich', 'en');
+    await waitFor(() => expect(screen.getByText(`fertilization · North field · ${dep1Date}`)).toBeInTheDocument());
+    expect(screen.getByText(`Irrigation · North field · ${dep2Date}`)).toBeInTheDocument();
+    expect(screen.queryByText('dep-1')).not.toBeInTheDocument();
+    expect(screen.queryByText('dep-2')).not.toBeInTheDocument();
     expect(retry).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'capture.cycle.voidDependentsConfirm' }));
 
     await waitFor(() => expect(mocks.voidEntry).toHaveBeenNthCalledWith(2, 'entry-1', 'Wrong crop entered', 2, true));
     await waitFor(() => expect(retry).toHaveBeenCalled());
+  });
+
+  it('falls back to the raw entry UUID for a dependent whose lookup fails, instead of hiding it', async () => {
+    mockDetail({ entries: [entry({ sync_version: 2 })] });
+    mocks.voidEntry.mockRejectedValue({
+      response: {
+        status: 409,
+        data: { error: 'cycle_has_dependents', details: { dependentEntryUuids: ['dep-unresolvable'] } },
+      },
+    });
+    mocks.listEntries.mockRejectedValue(new Error('network down'));
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.void' }));
+    fireEvent.change(screen.getByLabelText('workspace.detail.void.reasonLabel'), { target: { value: 'Testing' } });
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.void.submit' }));
+
+    await waitFor(() => expect(screen.getByText('dep-unresolvable')).toBeInTheDocument());
   });
 
   it('lets the operator cancel out of the dependents confirmation without voiding', async () => {

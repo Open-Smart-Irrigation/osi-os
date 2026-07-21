@@ -37,6 +37,22 @@ export interface UpdateEntryPayload extends EntryWritePayload {
   base_sync_version: number;
 }
 
+// P1-c: `api` (services/api.ts) carries a blanket 10s timeout sized for
+// small interactive CRUD calls. A filter-scoped export can legitimately do
+// much more server-side work than that — the research package in
+// particular streams several full passes over the matched entries through a
+// zip writer while hashing every member (osi-journal/api.js
+// exportResearchPackage/exportJson) — so on a gateway with enough
+// accumulated journal history, export.json/export.package can outlive the
+// 10s budget while export.csv (one pass, no zip/hash overhead) still
+// reliably finishes inside it. When that happens the GET is aborted
+// (ECONNABORTED) and handleExport's catch runs — before the export-status
+// banner existed the failure text was invisible (white-on-white), so a
+// timed-out JSON/package export looked exactly like the button doing
+// nothing at all. Give every export route the same, much larger budget
+// instead of the interactive default.
+const EXPORT_TIMEOUT_MS = 120000;
+
 // Triggers a browser download for a shipped, filter-scoped journal export
 // route. `filters` is forwarded as-is (the same EntryListFilters the caller
 // used to list entries, minus cursor/limit) so an export can never diverge
@@ -47,7 +63,11 @@ async function downloadJournalExport(
   contentType: string,
   filename: string,
 ): Promise<void> {
-  const response = await api.get(path, { params: filters, responseType: 'blob' });
+  const response = await api.get(path, {
+    params: filters,
+    responseType: 'blob',
+    timeout: EXPORT_TIMEOUT_MS,
+  });
   const blob = new Blob([response.data], { type: contentType });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');

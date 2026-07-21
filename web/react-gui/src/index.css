@@ -125,6 +125,21 @@ body {
   margin-left: max(16px, calc(50% - 784px));
 }
 
+/* Login screen: restore the original crown framing. The shared .balken-crown was
+   retuned to align to the dashboard's 1600px card column, which shifts it right and
+   clips the wordmark inside the narrow login card. Here, object-fit: cover at 2rem
+   keeps a prominent, flush wordmark: the leading red block bleeds off the left and
+   the card's overflow-hidden crops the gradient tail, so "Agroscope" reads cleanly
+   aligned with the form labels below (the pre-regression look). */
+.login-scene .balken-crown {
+  height: 2rem;
+  width: 119.33%;
+  max-width: none;
+  margin-left: -19.33%;
+  object-fit: cover;
+  object-position: left center;
+}
+
 /* Brand typography: Noto Sans on brand surfaces (header, login card) — the
    Confederation's web substitute for the Frutiger used in the Balken. */
 .font-brand {

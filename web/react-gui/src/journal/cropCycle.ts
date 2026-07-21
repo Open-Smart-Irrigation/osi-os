@@ -4,17 +4,26 @@
 // task D-3). The edge (osi-journal/lifecycle.js) is the authority on cycle
 // state — journal_crop_cycles/journal_crop_cycle_plots are never exposed to
 // the GUI directly. Everything here is either:
-//   (a) a best-effort client-side READ of already-loaded entries, used only
-//       to decide when to show a prompt/banner (the edge silently falls back
-//       to a safe default — "continue" — if the GUI's guess is wrong; a
-//       missed differing-crop reseed is never ambiguous server-side either),
-//       or
+//   (a) a read of the plot's own AUTHORITATIVE active_crop_cycles (Slice D
+//       hardening, P1-a/P1-b — see osi-journal/api.js listPlots), used to
+//       decide when to show a prompt/banner and to suppress a redundant crop
+//       requirement the app already has via the cycle,
 //   (b) a parser for the structured error details the edge returns when it
 //       needs the caller to disambiguate (cycle_uuid_required/
 //       cycle_not_found) or confirm a cascade (cycle_has_dependents) —
 //       mirroring the duplicate-candidate error-parsing pattern already used
 //       in JournalCaptureFlow.tsx.
-import type { EntryAggregate } from '../types/journal';
+//
+// Slice D hardening (P1-b) note: currentCropInfoForPlot previously inferred
+// "what is currently growing" from the MOST RECENT final entry with a
+// resolved season_crop. That is fundamentally unable to distinguish a crop
+// still growing from one whose cycle has since closed: freezeClosedSpan (see
+// osi-journal/lifecycle.js) stamps season_crop on every entry in a closed
+// cycle's span, so a frozen/historical crop and a live one are stored
+// identically once written. Only the edge's own open/closed bookkeeping
+// (journal_crop_cycle_plots.ends_on) can tell them apart, hence
+// active_crop_cycles below.
+import type { ActiveCropCycle, EntryAggregate } from '../types/journal';
 import type { JournalCaptureCatalogModel } from '../types/journalCapture';
 import { catalogLabel } from './catalogModel';
 
@@ -57,10 +66,6 @@ function isUsableEntry(entry: EntryAggregate): boolean {
   return entry.status === 'final' && entry.deleted_at == null;
 }
 
-function byOccurredDesc(left: EntryAggregate, right: EntryAggregate): number {
-  return Date.parse(right.occurred_start) - Date.parse(left.occurred_start);
-}
-
 // D3.1 variety autocomplete (brief: "derive from crop/variety already present
 // in loaded entries/plots client-side"). Distinct, non-empty attr.variety
 // values recorded on final seeding/planting entries whose OWN attr.crop
@@ -84,61 +89,36 @@ export function varietySuggestionsFor(
 export interface CurrentCropInfo {
   crop_code: string;
   variety: string | null;
-  /** occurred_start (UTC instant) of the entry the crop info was read from. */
-  asOfOccurredStart: string;
+  /** Local calendar date (YYYY-MM-DD) the covering cycle started. */
+  seededDate: string;
+  /** The seeding/planting entry that opened the covering cycle. */
+  seedingEntryUuid: string;
 }
 
-// Best-effort "what is currently growing on this plot" signal, read from the
-// MOST RECENT final entry on the plot that carries a resolved crop
-// (season_crop/season_variety — live-overridden by the edge for any entry an
-// open cycle currently covers, see osi-journal/lifecycle.js
-// resolveLiveCropOverrides). Used only to decide whether to show the D3.2
-// same-crop continue/new prompt and the D3.3 inherited-crop banner — never
-// sent to the edge as authoritative. `entries` should already be scoped to a
-// single plot_uuid (a fresh, plot-scoped fetch — the general-purpose
-// `recentEntries` prop is not reliably plot-scoped).
-export function currentCropInfoForPlot(entries: readonly EntryAggregate[]): CurrentCropInfo | null {
-  const covering = entries
-    .filter((entry) => isUsableEntry(entry) && entry.season_crop != null && entry.season_crop.trim() !== '')
-    .sort(byOccurredDesc);
-  const latest = covering[0];
-  if (!latest?.season_crop) return null;
+// P1-a/P1-b (Slice D hardening): the authoritative "what is this plot's open
+// crop cycle right now" signal, read from the plot's OWN active_crop_cycles
+// (osi-journal/api.js listPlots — see the module doc comment above for why
+// entries' season_crop can never answer this correctly). Non-null only when
+// EXACTLY ONE cycle is open: zero means nothing is growing, and more than
+// one is a genuinely intercropped plot where "the" current crop is
+// ambiguous — deferred to the capture form / disambiguation flow (R7),
+// exactly like the edge's own resolveLiveCropOverrides leaves an
+// intercropped entry's stored value alone rather than guessing. Used to
+// decide whether to show the D3.2 same-crop continue/new prompt, the D3.3
+// inherited-crop banner, and (P1-a) whether the Where/Activity steps may
+// skip the crop-entry requirement — never sent to the edge as authoritative.
+export function currentCropInfoForPlot(
+  activeCropCycles: readonly ActiveCropCycle[] | null | undefined,
+): CurrentCropInfo | null {
+  const cycles = activeCropCycles ?? [];
+  if (cycles.length !== 1) return null;
+  const [cycle] = cycles;
   return {
-    crop_code: latest.season_crop,
-    variety: latest.season_variety?.trim() ? latest.season_variety : null,
-    asOfOccurredStart: latest.occurred_start,
+    crop_code: cycle.crop_code,
+    variety: cycle.variety?.trim() ? cycle.variety : null,
+    seededDate: cycle.seeded_on,
+    seedingEntryUuid: cycle.opened_by_entry_uuid,
   };
-}
-
-export interface SeedingEntryRef {
-  entry_uuid: string;
-  /** Local calendar date (YYYY-MM-DD) the seeding was recorded against. */
-  occurredDate: string;
-}
-
-// Best-effort reverse lookup for the D3.3 banner's "seeded {date}" link and
-// inline-correction target: among final seeding/planting entries on the
-// plot, the most recent one whose OWN recorded attr.crop/attr.variety match
-// the currently-displayed crop/variety exactly. A "continue" seeding never
-// opens a new cycle row (see osi-journal/lifecycle.js
-// applySeedingCycleEffect), so the entry that originally opened the still-
-// open cycle is not always the most recent seeding entry on the plot — this
-// match-by-recorded-value walk finds the right one without needing the edge
-// to expose cycle_uuid/opened_by_entry_uuid directly.
-export function findSeedingEntryFor(
-  entries: readonly EntryAggregate[],
-  cropCode: string,
-  variety: string | null,
-): SeedingEntryRef | null {
-  const candidates = entries
-    .filter((entry) => isUsableEntry(entry) && SEEDING_ACTIVITY_CODES.has(entry.activity_code))
-    .sort(byOccurredDesc);
-  for (const entry of candidates) {
-    if (entryAttributeValue(entry, 'attr.crop') !== cropCode) continue;
-    if ((entryAttributeValue(entry, 'attr.variety') ?? null) !== variety) continue;
-    return { entry_uuid: entry.entry_uuid, occurredDate: entry.occurred_start.slice(0, 10) };
-  }
-  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

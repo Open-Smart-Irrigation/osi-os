@@ -35,6 +35,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 import type {
+  ActiveCropCycle,
   EntryAggregate,
   JournalCatalog,
   JournalPlot,
@@ -202,6 +203,20 @@ function makePlot(overrides: Partial<JournalPlot> & { plot_uuid: string; plot_co
   };
 }
 
+// Slice D hardening: the authoritative open-cycle fixture (osi-journal/
+// api.js listPlots' active_crop_cycles) that replaces the old fetch-and-
+// mock-listEntries approach below — the overlap/banner detection this file
+// exercises is now a synchronous read of the plot's OWN data, not a fetch.
+function activeCropCycle(overrides: Partial<ActiveCropCycle> & { cycle_uuid: string }): ActiveCropCycle {
+  return {
+    crop_code: 'agroscope.crop.wheat_winter',
+    variety: null,
+    seeded_on: '2026-06-01',
+    opened_by_entry_uuid: 'seed-entry',
+    ...overrides,
+  };
+}
+
 const plotA = makePlot({ plot_uuid: 'plot-a', plot_code: 'A1', name: 'North field' });
 const plotB = makePlot({ plot_uuid: 'plot-b', plot_code: 'B1', name: 'East field' });
 
@@ -209,7 +224,7 @@ const baseProps = {
   catalog: cycleCatalog,
   plots: [plotA, plotB],
   plotGroups: [] as PlotGroup[],
-  plotState: { createPlot: vi.fn(), updatePlot: vi.fn() },
+  plotState: { createPlot: vi.fn(), updatePlot: vi.fn(), revalidate: vi.fn() },
   groupState: { createPlotGroup: vi.fn(), updatePlotGroup: vi.fn() },
   recentEntries: [] as EntryAggregate[],
   initialTimezone: 'Europe/Zurich',
@@ -217,68 +232,6 @@ const baseProps = {
   onOpenExisting: vi.fn(),
   onSaved: vi.fn(),
 };
-
-function finalEntry(overrides: Partial<EntryAggregate> = {}): EntryAggregate {
-  return {
-    contract_version: 1,
-    entry_uuid: 'existing-entry',
-    owner_user_uuid: 'owner',
-    author_principal_uuid: 'author',
-    author_label: null,
-    gateway_device_eui: 'AABBCCDDEEFF0011',
-    plot_uuid: 'plot-a',
-    zone_uuid: null,
-    device_eui: null,
-    season_uuid: null,
-    season_crop: null,
-    season_variety: null,
-    campaign_uuid: null,
-    protocol_code: null,
-    protocol_version: null,
-    observation_unit_code: null,
-    activity_code: 'seeding',
-    template_code: 'farmer_quick',
-    template_version: 1,
-    layout_code: 'open_field',
-    layout_version: 1,
-    catalog_version: 20,
-    occurred_start: '2026-06-01T08:00:00.000Z',
-    occurred_end: null,
-    occurred_timezone: 'Europe/Zurich',
-    occurred_utc_offset_minutes: 120,
-    origin: 'edge-ui',
-    status: 'final',
-    batch_uuid: null,
-    pass_uuid: null,
-    voided_at: null,
-    voided_by_principal_uuid: null,
-    void_reason: null,
-    note: null,
-    context_json: null,
-    sync_version: 1,
-    recorded_at: timestamp,
-    created_at: timestamp,
-    updated_at: timestamp,
-    deleted_at: null,
-    values: [],
-    ...overrides,
-  };
-}
-
-// My plot-scoped crop-cycle detection fetch (see journal/cropCycle.ts) uses a
-// distinct, safe-to-match signature: {plot_uuid, status:'final', limit:50},
-// no activity_code/occurred_from (unlike the duplicate-guard effect's
-// limit:100 window query) and no occurred_to (unlike activityShortlist's
-// limit:100 page query) — see JournalCaptureFlowCropCycle exploration notes.
-function mockCropCycleLookup(byPlot: Record<string, EntryAggregate[]>): void {
-  apiMocks.listEntries.mockImplementation(async (filters: Record<string, unknown>) => {
-    if (filters?.limit === 50 && typeof filters?.plot_uuid === 'string' && filters.status === 'final' &&
-        !('activity_code' in filters) && !('occurred_from' in filters) && !('occurred_to' in filters)) {
-      return { entries: byPlot[filters.plot_uuid as string] ?? [], next_cursor: null };
-    }
-    return { entries: [], next_cursor: null };
-  });
-}
 
 async function selectTwoPlotsAndPickActivity(activityCode: string): Promise<void> {
   const northButtons = screen.getAllByRole('button', { name: 'North field' });
@@ -292,12 +245,14 @@ async function selectTwoPlotsAndPickActivity(activityCode: string): Promise<void
 }
 
 async function proceedToConfirmAndFinish(): Promise<void> {
-  // N3 review fix: details -> confirm is now gated on the crop-cycle overlap
-  // fetch having settled (see cycleActionSatisfied in JournalCaptureFlow),
-  // which in real usage has normally long finished by the time the farmer
-  // reaches Confirm (the fetch starts back at plot/activity selection) but
-  // is not yet guaranteed to have settled the instant this synchronous test
-  // helper fires its own click — retry the click until it actually advances.
+  // Details -> confirm can still be gated on other async effects in the flow
+  // (e.g. the duplicate-guard check) that have normally settled by the time
+  // a real farmer reaches Confirm but are not yet guaranteed to have
+  // resolved the instant this synchronous test helper fires its own click —
+  // retry the click until it actually advances. (Slice D hardening: the
+  // crop-cycle overlap detection itself is a synchronous read of the plot's
+  // own active_crop_cycles now, no longer a fetch with its own in-flight
+  // window — see cycleActionSatisfied in JournalCaptureFlow.)
   await waitFor(() => {
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' })); // details -> confirm
     expect(screen.getByRole('button', { name: 'capture.finish' })).toBeInTheDocument();
@@ -373,14 +328,14 @@ describe('JournalCaptureFlow crop-cycle GUI (Slice D Phase 3)', () => {
   });
 
   it('shows the continue/new prompt for a same-crop+variety overlap and blocks Next until an explicit choice, then threads cycle_action', async () => {
-    mockCropCycleLookup({
-      'plot-a': [finalEntry({
-        entry_uuid: 'covering', season_crop: 'agroscope.crop.wheat_winter', season_variety: 'Marlene',
-        occurred_start: '2026-06-01T08:00:00.000Z',
-      })],
-    });
+    const plots = [
+      { ...plotA, active_crop_cycles: [activeCropCycle({
+        cycle_uuid: 'cycle-covering', crop_code: 'agroscope.crop.wheat_winter', variety: 'Marlene',
+      })] },
+      plotB,
+    ];
 
-    render(<JournalCaptureFlow {...baseProps} />);
+    render(<JournalCaptureFlow {...baseProps} plots={plots} />);
     await selectTwoPlotsAndPickActivity('seeding');
     fireEvent.change(screen.getByLabelText('capture.cycle.cropLabel'), {
       target: { value: 'agroscope.crop.wheat_winter' },
@@ -402,21 +357,24 @@ describe('JournalCaptureFlow crop-cycle GUI (Slice D Phase 3)', () => {
   });
 
   it('does not show the prompt for a differing crop (auto-reseed applies regardless of cycle_action)', async () => {
-    mockCropCycleLookup({
-      'plot-a': [finalEntry({
-        season_crop: 'agroscope.crop.barley_spring', season_variety: null,
-      })],
-    });
+    const plots = [
+      { ...plotA, active_crop_cycles: [activeCropCycle({
+        cycle_uuid: 'cycle-barley', crop_code: 'agroscope.crop.barley_spring', variety: null,
+      })] },
+      plotB,
+    ];
 
-    render(<JournalCaptureFlow {...baseProps} />);
+    render(<JournalCaptureFlow {...baseProps} plots={plots} />);
     await selectTwoPlotsAndPickActivity('seeding');
     fireEvent.change(screen.getByLabelText('capture.cycle.cropLabel'), {
       target: { value: 'agroscope.crop.wheat_winter' },
     });
     fireEvent.change(screen.getByLabelText('capture.cycle.varietyLabel'), { target: { value: 'Marlene' } });
 
-    await waitFor(() => expect(apiMocks.listEntries).toHaveBeenCalled());
     expect(screen.queryByText('capture.cycle.sameCropTitle')).not.toBeInTheDocument();
+    // P2-b (Slice D hardening): a differing-crop reseed auto-closes plot A's
+    // open barley cycle server-side — the confirmation surfaces that.
+    expect(screen.getByText('capture.cycle.closesCycle:Spring barley')).toBeInTheDocument();
     await proceedToConfirmAndFinish();
     await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledTimes(1));
     expect(apiMocks.createFinalBatch.mock.calls[0][0].cycle_action).toBeUndefined();
@@ -432,19 +390,16 @@ describe('JournalCaptureFlow crop-cycle GUI (Slice D Phase 3)', () => {
   // barley·Laverda being seeded: the prompt must still fire and gate
   // finalize, exactly matching the bug's own repro.
   it('B1: fires the continue/new prompt when the SECOND selected plot (not the first) has the matching open cycle, and threads cycle_action', async () => {
-    mockCropCycleLookup({
-      'plot-a': [finalEntry({
-        entry_uuid: 'covering-a', plot_uuid: 'plot-a',
-        season_crop: 'agroscope.crop.wheat_winter', season_variety: null,
-      })],
-      'plot-b': [finalEntry({
-        entry_uuid: 'covering-b', plot_uuid: 'plot-b',
-        season_crop: 'agroscope.crop.barley_spring', season_variety: 'Laverda',
-        occurred_start: '2026-06-01T08:00:00.000Z',
-      })],
-    });
+    const plots = [
+      { ...plotA, active_crop_cycles: [activeCropCycle({
+        cycle_uuid: 'cycle-a', crop_code: 'agroscope.crop.wheat_winter', variety: null,
+      })] },
+      { ...plotB, active_crop_cycles: [activeCropCycle({
+        cycle_uuid: 'cycle-b', crop_code: 'agroscope.crop.barley_spring', variety: 'Laverda',
+      })] },
+    ];
 
-    render(<JournalCaptureFlow {...baseProps} />);
+    render(<JournalCaptureFlow {...baseProps} plots={plots} />);
     await selectTwoPlotsAndPickActivity('seeding');
     fireEvent.change(screen.getByLabelText('capture.cycle.cropLabel'), {
       target: { value: 'agroscope.crop.barley_spring' },
@@ -471,63 +426,21 @@ describe('JournalCaptureFlow crop-cycle GUI (Slice D Phase 3)', () => {
   // regardless of cycle_action, same as the existing plot-A-only variant of
   // this check above).
   it('B1: does not fire the prompt when the SECOND selected plot has a DIFFERENT crop overlap', async () => {
-    mockCropCycleLookup({
-      'plot-b': [finalEntry({
-        entry_uuid: 'covering-b', plot_uuid: 'plot-b',
-        season_crop: 'agroscope.crop.wheat_winter', season_variety: null,
-      })],
-    });
+    const plots = [
+      plotA,
+      { ...plotB, active_crop_cycles: [activeCropCycle({
+        cycle_uuid: 'cycle-b', crop_code: 'agroscope.crop.wheat_winter', variety: null,
+      })] },
+    ];
 
-    render(<JournalCaptureFlow {...baseProps} />);
+    render(<JournalCaptureFlow {...baseProps} plots={plots} />);
     await selectTwoPlotsAndPickActivity('seeding');
     fireEvent.change(screen.getByLabelText('capture.cycle.cropLabel'), {
       target: { value: 'agroscope.crop.barley_spring' },
     });
     fireEvent.change(screen.getByLabelText('capture.cycle.varietyLabel'), { target: { value: 'Laverda' } });
 
-    await waitFor(() => expect(apiMocks.listEntries).toHaveBeenCalled());
     expect(screen.queryByText('capture.cycle.sameCropTitle')).not.toBeInTheDocument();
-    await proceedToConfirmAndFinish();
-
-    await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledTimes(1));
-    expect(apiMocks.createFinalBatch.mock.calls[0][0].cycle_action).toBeUndefined();
-  });
-
-  // N3 (TOCTOU fold-in): if the crop-cycle overlap fetch is still in flight
-  // when the user reaches Finalize, `cycleActionRequired` must not silently
-  // read as false just because the list hasn't populated yet — Next/Finalize
-  // must stay blocked until the fetch actually settles for the current
-  // plot/crop selection, then proceed normally once it has.
-  it('N3: blocks Next/Finalize while the crop-cycle overlap fetch is still in flight', async () => {
-    const resolvers = new Map<string, (value: { entries: EntryAggregate[]; next_cursor: null }) => void>();
-    apiMocks.listEntries.mockImplementation((filters: Record<string, unknown>) => {
-      if (filters?.limit === 50 && typeof filters?.plot_uuid === 'string' && filters.status === 'final' &&
-          !('activity_code' in filters) && !('occurred_from' in filters) && !('occurred_to' in filters)) {
-        return new Promise((resolve) => { resolvers.set(filters.plot_uuid as string, resolve); });
-      }
-      return Promise.resolve({ entries: [], next_cursor: null });
-    });
-
-    render(<JournalCaptureFlow {...baseProps} />);
-    await selectTwoPlotsAndPickActivity('seeding');
-    fireEvent.change(screen.getByLabelText('capture.cycle.cropLabel'), {
-      target: { value: 'agroscope.crop.wheat_winter' },
-    });
-    fireEvent.change(screen.getByLabelText('capture.cycle.varietyLabel'), { target: { value: 'Marlene' } });
-
-    // Both plots' overlap fetches are still unresolved: Next must not
-    // advance past details, even though no overlap has resolved (a naive
-    // "not yet required" read of the still-empty overlap list must not be
-    // allowed to fall through to a finalize with cycle_action silently
-    // omitted).
-    expect(apiMocks.listEntries).toHaveBeenCalledWith(expect.objectContaining({ plot_uuid: 'plot-a', limit: 50 }));
-    expect(apiMocks.listEntries).toHaveBeenCalledWith(expect.objectContaining({ plot_uuid: 'plot-b', limit: 50 }));
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    expect(screen.queryByRole('button', { name: 'capture.finish' })).not.toBeInTheDocument();
-
-    resolvers.get('plot-a')?.({ entries: [], next_cursor: null });
-    resolvers.get('plot-b')?.({ entries: [], next_cursor: null });
-
     await proceedToConfirmAndFinish();
 
     await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledTimes(1));
@@ -591,5 +504,54 @@ describe('JournalCaptureFlow crop-cycle GUI (Slice D Phase 3)', () => {
 
     await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledTimes(1));
     expect(apiMocks.createFinalBatch.mock.calls[0][0].ends_crop_cycle).toBeUndefined();
+  });
+
+  // P2-b (Slice D hardening): harvest closes every covering open cycle
+  // server-side (osi-journal/lifecycle.js applyHarvestCycleEffect) — surface
+  // which crop(s) that will be before the farmer saves.
+  it('harvest: surfaces a "closes crop cycle" confirmation for each covering open cycle', async () => {
+    const plots = [
+      { ...plotA, active_crop_cycles: [activeCropCycle({
+        cycle_uuid: 'cycle-a', crop_code: 'agroscope.crop.wheat_winter', variety: 'Marlene',
+      })] },
+      { ...plotB, active_crop_cycles: [activeCropCycle({
+        cycle_uuid: 'cycle-b', crop_code: 'agroscope.crop.barley_spring', variety: null,
+      })] },
+    ];
+    render(<JournalCaptureFlow {...baseProps} plots={plots} />);
+    await selectTwoPlotsAndPickActivity('harvest');
+
+    expect(screen.getByText('capture.cycle.closesCycle:Winter wheat · Marlene')).toBeInTheDocument();
+    expect(screen.getByText('capture.cycle.closesCycle:Spring barley')).toBeInTheDocument();
+  });
+
+  it('harvest: shows no "closes crop cycle" confirmation when neither plot has an open cycle', async () => {
+    render(<JournalCaptureFlow {...baseProps} />);
+    await selectTwoPlotsAndPickActivity('harvest');
+
+    expect(screen.queryByText(/capture\.cycle\.closesCycle/)).not.toBeInTheDocument();
+  });
+
+  // P2-b (Slice D hardening): the manual-close confirmation only appears once
+  // the toggle is actually checked (mirroring ends_crop_cycle itself), and
+  // disappears again if the farmer unchecks it.
+  it('manual close: shows the "closes crop cycle" confirmation only while the toggle is checked', async () => {
+    const plots = [
+      { ...plotA, active_crop_cycles: [activeCropCycle({
+        cycle_uuid: 'cycle-a', crop_code: 'agroscope.crop.wheat_winter', variety: 'Marlene',
+      })] },
+      plotB,
+    ];
+    render(<JournalCaptureFlow {...baseProps} plots={plots} />);
+    await selectTwoPlotsAndPickActivity('tillage_soil_work');
+
+    expect(screen.queryByText(/capture\.cycle\.closesCycle/)).not.toBeInTheDocument();
+
+    const toggle = screen.getByRole('checkbox', { name: /capture.cycle.manualCloseLabel/ });
+    fireEvent.click(toggle);
+    expect(screen.getByText('capture.cycle.closesCycle:Winter wheat · Marlene')).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(screen.queryByText(/capture\.cycle\.closesCycle/)).not.toBeInTheDocument();
   });
 });

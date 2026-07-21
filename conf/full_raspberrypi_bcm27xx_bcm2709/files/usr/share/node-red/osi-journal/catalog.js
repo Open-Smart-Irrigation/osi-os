@@ -12,6 +12,14 @@ function queryAll(db, sql, params) {
   if (!db || typeof db.all !== 'function') {
     return Promise.reject(new TypeError('Database must provide prepare().all() or all()'));
   }
+  // A promise-style db (e.g. the read-snapshot scope's all(sql, params) — used by
+  // exports via readSnapshot) takes two args, ignores any callback, and returns a
+  // promise. Await it directly instead of installing a callback it will never call
+  // (which would hang forever). Same arity discriminator syncDbCall uses in api.js;
+  // a real node-sqlite3 Database.all is arity>=3 and keeps the callback form below.
+  if (db.all.length < 3) {
+    return Promise.resolve(db.all(sql, params)).then(function(rows) { return rows || []; });
+  }
   return new Promise(function(resolve, reject) {
     db.all(sql, params, function(error, rows) {
       if (error) reject(error);
@@ -27,6 +35,11 @@ function queryOne(db, sql, params) {
   }
   if (!db || typeof db.get !== 'function') {
     return Promise.reject(new TypeError('Database must provide prepare().get() or get()'));
+  }
+  // See queryAll: a promise-style get(sql, params) (arity 2) never invokes a
+  // callback, so await its promise directly rather than hanging on new Promise.
+  if (db.get.length < 3) {
+    return Promise.resolve(db.get(sql, params)).then(function(row) { return row || null; });
   }
   return new Promise(function(resolve, reject) {
     db.get(sql, params, function(error, row) {

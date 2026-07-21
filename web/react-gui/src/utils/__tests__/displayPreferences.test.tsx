@@ -74,7 +74,7 @@ describe('display preferences', () => {
     expect(readDisplayPreferences().journalDetailLevel).toBe('farmer_quick');
   });
 
-  it.each(['farmer_quick', 'full_record', 'research_observation'] as const)(
+  it.each(['farmer_quick', 'full_record'] as const)(
     'persists and reloads the journal detail level %s',
     (journalDetailLevel) => {
       writeDisplayPreferences({ journalDetailLevel });
@@ -88,13 +88,22 @@ describe('display preferences', () => {
     expect(readDisplayPreferences()).toEqual(defaultPreferences);
   });
 
+  // Product change: the "Research" setting option was dropped (owner
+  // decision), but a pre-existing install may still have it in localStorage.
+  // Map it to the closest surviving option (full_record) instead of all the
+  // way down to the default, and never let it crash the read.
+  it('maps a legacy research_observation stored value to full_record', () => {
+    window.localStorage.setItem('osi.journal.detailLevel', 'research_observation');
+    expect(readDisplayPreferences()).toEqual({ ...defaultPreferences, journalDetailLevel: 'full_record' });
+  });
+
   it('dispatches the preferences event when the journal detail level is written', () => {
     const { result } = renderHook(() => useDisplayPreferences());
     expect(result.current.journalDetailLevel).toBe('farmer_quick');
     act(() => {
-      writeDisplayPreferences({ journalDetailLevel: 'research_observation' });
+      writeDisplayPreferences({ journalDetailLevel: 'full_record' });
     });
-    expect(result.current.journalDetailLevel).toBe('research_observation');
+    expect(result.current.journalDetailLevel).toBe('full_record');
   });
 
   it('applies explicit and system theme preferences to the document element', () => {

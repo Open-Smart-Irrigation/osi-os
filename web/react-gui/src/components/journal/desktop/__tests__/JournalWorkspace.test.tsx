@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   captureFlow: vi.fn(),
   useJournalEntries: vi.fn(),
   retryEntries: vi.fn(),
+  refreshDraftsQueue: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -20,6 +21,15 @@ vi.mock('react-i18next', () => ({
 vi.mock('../../../../journal/useJournalEntries', () => ({
   useJournalEntries: mocks.useJournalEntries,
 }));
+
+// DraftsQueue itself renders for real in these tests (see below) — only
+// refreshDraftsQueue is swapped for a spy, so JournalWorkspace's P2-d
+// cross-component cache invalidation can be asserted without depending on
+// swr's global cache/module internals.
+vi.mock('../../../../journal/useDraftsQueue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../journal/useDraftsQueue')>();
+  return { ...actual, refreshDraftsQueue: mocks.refreshDraftsQueue };
+});
 
 vi.mock('../ScopeRail', async () => {
   const actual = await vi.importActual<typeof import('../ScopeRail')>('../ScopeRail');
@@ -159,7 +169,7 @@ const catalog: JournalCatalog = {
 };
 
 function defaultPlotState() {
-  return { createPlot: vi.fn(), updatePlot: vi.fn() };
+  return { createPlot: vi.fn(), updatePlot: vi.fn(), revalidate: vi.fn() };
 }
 
 function defaultGroupState() {
@@ -174,6 +184,7 @@ function renderWorkspace(overrides: {
   catalog?: JournalCatalog;
   plotGroups?: PlotGroup[];
   recentEntries?: EntryAggregate[];
+  plotState?: ReturnType<typeof defaultPlotState>;
 } = {}) {
   return render(
     <JournalWorkspace
@@ -184,7 +195,7 @@ function renderWorkspace(overrides: {
       catalog={overrides.catalog ?? catalog}
       plotGroups={overrides.plotGroups ?? plotGroups}
       recentEntries={overrides.recentEntries ?? recentEntries}
-      plotState={defaultPlotState()}
+      plotState={overrides.plotState ?? defaultPlotState()}
       groupState={defaultGroupState()}
     />,
   );
@@ -494,6 +505,94 @@ describe('JournalWorkspace', () => {
       expect(mocks.retryEntries).toHaveBeenCalled();
     });
 
+    // P2-d: the drafts queue's "Needs completion" list has its own,
+    // independent SWR cache (useDraftsQueue) — nothing else revalidates it,
+    // so a draft the capture flow just autosaved would otherwise stay
+    // invisible there until an unrelated page reload. Every path that ends
+    // a capture session (Escape, backdrop, explicit close, and save) must
+    // also nudge it.
+    it('revalidates the drafts queue when the dialog is dismissed via Escape', () => {
+      mocks.refreshDraftsQueue.mockClear();
+      renderWorkspace();
+      openCaptureModal();
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+
+      expect(mocks.refreshDraftsQueue).toHaveBeenCalled();
+    });
+
+    it('revalidates the drafts queue when the dialog is dismissed via a backdrop click', () => {
+      mocks.refreshDraftsQueue.mockClear();
+      renderWorkspace();
+      openCaptureModal();
+
+      const dialog = screen.getByRole('dialog');
+      fireEvent.click(dialog.parentElement as HTMLElement);
+
+      expect(mocks.refreshDraftsQueue).toHaveBeenCalled();
+    });
+
+    it('revalidates the drafts queue when the capture flow calls onClose directly', () => {
+      mocks.refreshDraftsQueue.mockClear();
+      renderWorkspace();
+      openCaptureModal();
+
+      fireEvent.click(screen.getByRole('button', { name: 'mock-close' }));
+
+      expect(mocks.refreshDraftsQueue).toHaveBeenCalled();
+    });
+
+    // B1 (pre-deploy review, blocking): a cycle-changing save (seeding/
+    // harvest/reseed/manual-close) writes an entry AND opens/closes a crop
+    // cycle server-side, but the `journal:plots` SWR cache carrying
+    // active_crop_cycles is never refreshed by retryEntries/
+    // refreshDraftsQueue alone — without this, the Where step and the
+    // inherited-crop banner keep reading the pre-save snapshot for the rest
+    // of the session. Every dismiss path (Escape, backdrop, explicit close)
+    // must revalidate it, exactly like refreshDraftsQueue above.
+    it('revalidates the plots cache when the dialog is dismissed via Escape', () => {
+      const plotState = defaultPlotState();
+      renderWorkspace({ plotState });
+      openCaptureModal();
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+
+      expect(plotState.revalidate).toHaveBeenCalled();
+    });
+
+    it('revalidates the plots cache when the dialog is dismissed via a backdrop click', () => {
+      const plotState = defaultPlotState();
+      renderWorkspace({ plotState });
+      openCaptureModal();
+
+      const dialog = screen.getByRole('dialog');
+      fireEvent.click(dialog.parentElement as HTMLElement);
+
+      expect(plotState.revalidate).toHaveBeenCalled();
+    });
+
+    it('revalidates the plots cache when the capture flow calls onClose directly', () => {
+      const plotState = defaultPlotState();
+      renderWorkspace({ plotState });
+      openCaptureModal();
+
+      fireEvent.click(screen.getByRole('button', { name: 'mock-close' }));
+
+      expect(plotState.revalidate).toHaveBeenCalled();
+    });
+
+    it('on save: also revalidates the plots cache (B1 — active_crop_cycles must refresh, same-session, after a cycle-changing save)', async () => {
+      const plotState = defaultPlotState();
+      renderWorkspace({ plotState });
+      openCaptureModal();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'mock-save' }));
+      });
+
+      expect(plotState.revalidate).toHaveBeenCalled();
+    });
+
     it('closes the dialog and returns focus to the Log activity button when the capture flow calls onClose', () => {
       renderWorkspace();
       const trigger = screen.getByRole('button', { name: 'logActivity' });
@@ -538,6 +637,18 @@ describe('JournalWorkspace', () => {
       expect(mocks.retryEntries).toHaveBeenCalled();
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(lastDetailPanelProps().selectedEntryUuid).toBe('new-entry');
+    });
+
+    it('on save: also revalidates the drafts queue (a finalized draft must disappear from Needs completion)', async () => {
+      mocks.refreshDraftsQueue.mockClear();
+      renderWorkspace();
+      openCaptureModal();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'mock-save' }));
+      });
+
+      expect(mocks.refreshDraftsQueue).toHaveBeenCalled();
     });
 
     it('on save: returns focus to the Log activity button', async () => {

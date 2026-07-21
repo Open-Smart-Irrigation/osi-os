@@ -195,6 +195,7 @@
       "exportJson": "Export JSON",
       "exportPackage": "Export research package",
       "exportError": "Export failed. Try again.",
+      "exportSuccess": "Export downloaded.",
       "scopeNotNarrowed": "Showing entries for all plots. Filtering the list and exports by station or group isn't available yet."
     },
     "detail": {
@@ -416,6 +417,7 @@
       "cycleActionRequired": "Choose whether to continue this cycle or start a new one",
       "bannerCropVariety": "{{crop}} · {{variety}}",
       "bannerSeeded": "seeded {{date}}",
+      "closesCycle": "Closes crop cycle: {{crop}}",
       "correctTitle": "Correct crop and variety",
       "correctSave": "Save correction",
       "correctSaving": "Saving…",
@@ -429,6 +431,7 @@
       "manualCloseHint": "Marks the crop cycle on this plot as closed, as of this entry's date.",
       "voidDependentsTitle": "This seeding affects other entries",
       "voidDependentsBody": "Voiding this seeding will remove the inherited crop from the following entries:",
+      "voidDependentsLoading": "Loading affected entries…",
       "voidDependentsConfirm": "Void anyway",
       "voidDependentsCancel": "Cancel"
     }

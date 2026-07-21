@@ -188,8 +188,6 @@ export function StationGrid({
               {t(RANGE_ERROR_KEYS[rangeError.code], {
                 defaultValue: 'The station range is invalid.',
               })}
-              {' '}
-              <code className="whitespace-pre-wrap break-all">{rangeError.code}: {rangeError.token || '∅'}</code>
             </p>
           )}
 

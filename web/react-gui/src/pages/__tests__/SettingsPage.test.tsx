@@ -199,13 +199,13 @@ describe('SettingsPage', () => {
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
-  it('renders the journal detail level control with its three options', () => {
+  it('renders the journal detail level control with exactly Quick and Full (no Research)', () => {
     renderSettings();
 
     const journal = screen.getByRole('region', { name: 'Journal' });
     expect(within(journal).getByRole('button', { name: 'Quick' })).toBeInTheDocument();
     expect(within(journal).getByRole('button', { name: 'Full' })).toBeInTheDocument();
-    expect(within(journal).getByRole('button', { name: 'Research' })).toBeInTheDocument();
+    expect(within(journal).queryByRole('button', { name: 'Research' })).not.toBeInTheDocument();
     expect(within(journal).getByRole('button', { name: 'Quick' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(journal).getByText('How much detail do you record? You can change this any time.'))
       .toBeInTheDocument();
@@ -223,12 +223,15 @@ describe('SettingsPage', () => {
     expect(within(journal).getByRole('button', { name: 'Quick' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('reflects a stored journal detail level preference on mount', () => {
+  // Research was dropped as a selectable setting, but a pre-existing install
+  // may still have it stored — it must resolve to Full (the closest
+  // surviving option), never crash or leave nothing selected.
+  it('maps a legacy stored research_observation preference to Full', () => {
     window.localStorage.setItem('osi.journal.detailLevel', 'research_observation');
     renderSettings();
 
     const journal = screen.getByRole('region', { name: 'Journal' });
-    expect(within(journal).getByRole('button', { name: 'Research' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(journal).getByRole('button', { name: 'Full' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(journal).getByRole('button', { name: 'Quick' })).toHaveAttribute('aria-pressed', 'false');
   });
 

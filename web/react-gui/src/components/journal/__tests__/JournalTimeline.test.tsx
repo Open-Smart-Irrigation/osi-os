@@ -3,7 +3,7 @@ import { StrictMode } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { EntryAggregate, JournalPlot } from '../../../types/journal';
+import type { EntryAggregate, JournalCatalog, JournalPlot, JournalVocabRow } from '../../../types/journal';
 import type { BatchMembershipPage } from '../../../journal/hydrateBatchMembership';
 
 vi.mock('react-i18next', () => ({
@@ -50,6 +50,47 @@ function entry(
   } as unknown as EntryAggregate;
 }
 
+// P2-c (mobile): season_crop is a vocab choice code (e.g.
+// agroscope.crop.potato); a catalog with a matching row lets the batch
+// summary show its label instead of the raw code — mirrors DetailPanel's
+// desktop fixture (DetailPanel.test.tsx's `row`/season_crop test).
+function cropChoiceRow(code: string, labelEn: string): JournalVocabRow {
+  return {
+    code,
+    kind: 'choice',
+    parent_code: 'season_crop',
+    value_type: null,
+    quantity_kind: null,
+    basis: null,
+    default_unit_code: null,
+    icon_key: null,
+    scope: 'core',
+    owner_user_uuid: null,
+    gateway_device_eui: null,
+    custom_field_uuid: null,
+    active: 1,
+    sort_order: 0,
+    sync_version: 0,
+    created_at: '2026-07-16T00:00:00.000Z',
+    deleted_at: null,
+    catalog_errors: [],
+    labels: { en: labelEn },
+    constraints: null,
+  };
+}
+
+function catalogWithCrop(code: string, labelEn: string): JournalCatalog {
+  return {
+    catalog_version: 1,
+    catalog_hash: 'hash-1',
+    vocab: [cropChoiceRow(code, labelEn)],
+    templates: [],
+    layouts: [],
+    products: [],
+    mappings: [],
+  };
+}
+
 const listBatchEntries = vi.fn();
 
 describe('JournalTimeline', () => {
@@ -77,6 +118,28 @@ describe('JournalTimeline', () => {
       entries: [entries[0], entries[3]],
     });
     expect(entries).toEqual(snapshot);
+  });
+
+  // P2-b (Slice D hardening): a harvest/manual-close/reseed entry that closed
+  // a crop cycle keeps its OWN season_crop NULL by design — the timeline
+  // must fall back to the edge's closed_crop_code/variety display
+  // enrichment (osi-journal/lifecycle.js resolveClosedCropCycleOverrides) so
+  // a harvest batch still shows what was harvested.
+  it('falls back to closed_crop_code for a batch summary when season_crop is null (closing entries)', () => {
+    const grouped = groupJournalTimelineEntries([
+      entry('e1', {
+        batch_uuid: 'batch-harvest', activity_code: 'harvest', season_crop: null,
+        closed_crop_code: 'agroscope.crop.wheat_winter',
+      }),
+      entry('e2', {
+        batch_uuid: 'batch-harvest', activity_code: 'harvest', season_crop: null,
+        closed_crop_code: 'agroscope.crop.wheat_winter',
+      }),
+    ]);
+
+    expect(grouped).toEqual([
+      expect.objectContaining({ kind: 'batch', activityCode: 'harvest', cropSummary: 'agroscope.crop.wheat_winter' }),
+    ]);
   });
 
   it('keeps null and blank batch IDs standalone while preserving opaque nonblank IDs', () => {
@@ -179,6 +242,49 @@ describe('JournalTimeline', () => {
     expect(screen.queryByText(/2 plots/)).not.toBeInTheDocument();
     expect(screen.getByText(/barley/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /void|correct|apply/i })).not.toBeInTheDocument();
+  });
+
+  // P2-c (mobile): live re-test found the mobile batch card showing the raw
+  // vocab code ("Harvest · agroscope.crop.potato") — desktop's DetailPanel
+  // already resolves season_crop through the catalog (see its
+  // vocabLabelOrCode test), this mobile summary card did not. Sibling test
+  // to DetailPanel.test.tsx's "shows a localized crop label for
+  // season_crop...".
+  it('shows a localized crop label in the batch summary when the catalog has a matching choice row', () => {
+    render(
+      <JournalTimeline
+        entries={[
+          entry('e1', { batch_uuid: 'batch-1', activity_code: 'harvest', season_crop: 'agroscope.crop.potato' }),
+          entry('e2', { batch_uuid: 'batch-1', activity_code: 'harvest', season_crop: 'agroscope.crop.potato' }),
+        ]}
+        plots={[]}
+        loading={false}
+        catalog={catalogWithCrop('agroscope.crop.potato', 'Potato')}
+        listBatchEntries={listBatchEntries}
+      />,
+    );
+
+    expect(screen.getByText(/Potato/)).toBeInTheDocument();
+    expect(screen.queryByText(/agroscope\.crop\.potato/)).not.toBeInTheDocument();
+  });
+
+  // Without a matching catalog row (or no catalog at all — see the earlier
+  // tests in this file), the summary must still fall back to the raw code
+  // rather than rendering nothing.
+  it('falls back to the raw crop code in the batch summary when the catalog has no matching row', () => {
+    render(
+      <JournalTimeline
+        entries={[
+          entry('e1', { batch_uuid: 'batch-1', activity_code: 'harvest', season_crop: 'agroscope.crop.potato' }),
+        ]}
+        plots={[]}
+        loading={false}
+        catalog={catalogWithCrop('agroscope.crop.wheat_winter', 'Winter wheat')}
+        listBatchEntries={listBatchEntries}
+      />,
+    );
+
+    expect(screen.getByText(/agroscope\.crop\.potato/)).toBeInTheDocument();
   });
 
   it('keeps the aria-controls target present and neutral through batch states', async () => {

@@ -213,7 +213,7 @@ describe('StationGrid', () => {
     expect(onTogglePlot).not.toHaveBeenCalled();
   });
 
-  it('shows the range input and exact structured parse error', () => {
+  it('shows the range input and the translated parse error, without a raw code:token debug suffix', () => {
     render(<StationGrid {...props({
       rangeError: { ok: false, code: 'out_of_station', token: '2-4' },
     })} />);
@@ -221,7 +221,9 @@ describe('StationGrid', () => {
     expandStation();
 
     expect(screen.getByRole('textbox', { name: 'Station range' })).toHaveValue('1-2');
-    expect(screen.getByRole('alert')).toHaveTextContent('out_of_station: 2-4');
+    expect(screen.getByRole('alert')).toHaveTextContent('The station range is invalid.');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('out_of_station');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('2-4');
   });
 
   it.each([
@@ -248,7 +250,10 @@ describe('StationGrid', () => {
     });
   });
 
-  it('wraps one exact long structured range error token without duplication', () => {
+  // A very long/hostile token must never reach the DOM at all (not just be
+  // wrapped nicely) — the error surface only ever shows the translated
+  // message, never the raw parser code/token debug pair.
+  it('never leaks a long or hostile range-error token into the alert', () => {
     const token = 'hostile-range-token-'.repeat(24);
     render(<StationGrid {...props({
       rangeError: { ok: false, code: 'malformed', token },
@@ -257,11 +262,10 @@ describe('StationGrid', () => {
     expandStation();
 
     const alert = screen.getByRole('alert');
-    const structuredError = within(alert).getByText(`malformed: ${token}`);
-    expect(structuredError.textContent).toBe(`malformed: ${token}`);
-    expect((alert.textContent?.split(token).length ?? 0) - 1).toBe(1);
+    expect(alert).toHaveTextContent('The station range is invalid.');
+    expect(alert.textContent).not.toContain(token);
+    expect(alert.textContent).not.toContain('malformed');
     expect(alert).toHaveClass('min-w-0', 'whitespace-pre-wrap', 'break-words');
-    expect(structuredError).toHaveClass('whitespace-pre-wrap', 'break-all');
   });
 
   it('uses a text-capable input mode for comma and hyphen range syntax', () => {

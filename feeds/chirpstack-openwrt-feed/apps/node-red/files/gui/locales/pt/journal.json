@@ -195,6 +195,7 @@
       "exportJson": "Exportar JSON",
       "exportPackage": "Exportar pacote de investigação",
       "exportError": "Falha ao exportar. Tente novamente.",
+      "exportSuccess": "Exportação descarregada.",
       "scopeNotNarrowed": "São apresentados registos de todas as parcelas. A filtragem da lista e das exportações por estação ou grupo ainda não está disponível."
     },
     "detail": {
@@ -416,6 +417,7 @@
       "cycleActionRequired": "Escolha se pretende continuar este ciclo ou iniciar um novo",
       "bannerCropVariety": "{{crop}} · {{variety}}",
       "bannerSeeded": "semeado em {{date}}",
+      "closesCycle": "Encerra o ciclo de cultura: {{crop}}",
       "correctTitle": "Corrigir cultura e variedade",
       "correctSave": "Guardar correção",
       "correctSaving": "A guardar…",
@@ -429,6 +431,7 @@
       "manualCloseHint": "Marca o ciclo de cultura desta parcela como encerrado, na data deste registo.",
       "voidDependentsTitle": "Esta sementeira afeta outros registos",
       "voidDependentsBody": "Anular esta sementeira removerá a cultura herdada dos seguintes registos:",
+      "voidDependentsLoading": "A carregar os registos afetados…",
       "voidDependentsConfirm": "Anular na mesma",
       "voidDependentsCancel": "Cancelar"
     }

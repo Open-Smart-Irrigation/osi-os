@@ -6,6 +6,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { mock } = require('node:test');
+const { Writable } = require('node:stream');
 const { DatabaseSync } = require('node:sqlite');
 
 const { loadCatalog } = require('./catalog');
@@ -13,6 +15,9 @@ const {
   allowedUnits,
   assertJournalEntryEffectKey,
   convertToCanonical,
+  exportJson,
+  exportResearchPackage,
+  exportWideCsv,
   finalize,
   finalizeBatch,
   listEntries,
@@ -4860,4 +4865,497 @@ test('correcting a seeding\'s crop/variety while its cycle is STILL open remains
   const membership = readCycleMemberships(db, plot)[0];
   assert.equal(membership.crop_code, 'agroscope.crop.rye_winter');
   assert.equal(membership.variety, 'Corrected');
+});
+
+// --- Slice D hardening (P1-a/P1-b/P2-b): authoritative active-crop-cycle
+// read on the plot payload, and closed-crop display on the closing entry ---
+//
+// Root cause (2026-07-19 live UX test): the GUI had no authoritative "what
+// is this plot's OPEN crop cycle as-of a date" read, so it inferred crop
+// from past entries' season_crop -- date-agnostic and open/closed-agnostic.
+// listPlots/upsertPlot now project active_crop_cycles (0, 1, or >1 open
+// journal_crop_cycle_plots memberships covering the plot as of today), and
+// the entry read path resolves a closing entry's display crop from the
+// cycle it closed. See osi-journal/lifecycle.js activeCropCyclesForPlot /
+// resolveClosedCropCycleOverrides.
+
+test('listPlots active_crop_cycles is empty for a plot with no seeding yet', async () => {
+  const db = createJournalDb('cc-hardening-active-crop-none');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(400);
+  await makeCropCyclePlot(db, principal, plot);
+
+  const { plots } = await listPlots(db, principal);
+  const found = plots.find((row) => row.plot_uuid === plot);
+  assert.deepEqual(found.active_crop_cycles, []);
+});
+
+test('listPlots active_crop_cycles reports the single open cycle after seeding, with the fields the GUI needs', async () => {
+  const db = createJournalDb('cc-hardening-active-crop-one');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(401);
+  await makeCropCyclePlot(db, principal, plot);
+  const seedUuid = cropCycleEntryUuid(401);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: seedUuid,
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  const { plots } = await listPlots(db, principal);
+  const found = plots.find((row) => row.plot_uuid === plot);
+  assert.equal(found.active_crop_cycles.length, 1);
+  const [cycle] = found.active_crop_cycles;
+  assert.equal(cycle.crop_code, 'agroscope.crop.wheat_winter');
+  assert.equal(cycle.variety, 'Runal');
+  assert.equal(cycle.seeded_on, '2026-04-01');
+  assert.equal(cycle.opened_by_entry_uuid, seedUuid);
+  assert.equal(typeof cycle.cycle_uuid, 'string');
+});
+
+test('listPlots active_crop_cycles reverts to empty once the cycle is harvested (closed)', async () => {
+  const db = createJournalDb('cc-hardening-active-crop-closed');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(402);
+  await makeCropCyclePlot(db, principal, plot);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(402),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, harvestInput({
+    entry_uuid: cropCycleEntryUuid(403),
+    plot_uuid: plot,
+    occurred_start_local: '2026-08-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  const { plots } = await listPlots(db, principal);
+  const found = plots.find((row) => row.plot_uuid === plot);
+  assert.deepEqual(
+    found.active_crop_cycles, [],
+    'a closed cycle must never show as this plot\'s active crop (P1-b)'
+  );
+});
+
+test('listPlots active_crop_cycles reports both cycles on a genuinely intercropped plot (>1 open)', async () => {
+  const db = createJournalDb('cc-hardening-active-crop-intercrop');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(404);
+  await makeCropCyclePlot(db, principal, plot);
+  const seedUuid = cropCycleEntryUuid(404);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: seedUuid,
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  // Simulate a genuinely intercropped plot exactly like the harvest
+  // disambiguation test above: a second concurrently open cycle covering the
+  // same plot, inserted directly (normal seeding always closes a
+  // differing-crop cycle, so this state can't arise via seeding alone).
+  const secondCycleUuid = '80000000-0000-4000-8000-000000000404';
+  db.prepare(
+    'INSERT INTO journal_crop_cycles(cycle_uuid,crop_code,variety,group_uuid,opened_by_entry_uuid,starts_on,' +
+      'gateway_device_eui,created_by_principal_uuid,sync_version,created_at,updated_at,deleted_at) ' +
+    'VALUES (?,?,?,NULL,?,?,?,?,0,?,?,NULL)'
+  ).run(
+    secondCycleUuid, 'agroscope.crop.soybean', 'Asgrow', seedUuid, '2026-04-01',
+    JOURNAL_TEST_GATEWAY_EUI, JOURNAL_TEST_OWNER_UUID, '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z'
+  );
+  db.prepare(
+    'INSERT INTO journal_crop_cycle_plots(cycle_uuid,plot_uuid,ends_on,closed_by_entry_uuid,close_reason) ' +
+    'VALUES (?,?,NULL,NULL,NULL)'
+  ).run(secondCycleUuid, plot);
+
+  const { plots } = await listPlots(db, principal);
+  const found = plots.find((row) => row.plot_uuid === plot);
+  assert.equal(found.active_crop_cycles.length, 2);
+  const crops = found.active_crop_cycles.map((row) => row.crop_code).sort();
+  assert.deepEqual(crops, ['agroscope.crop.soybean', 'agroscope.crop.wheat_winter']);
+});
+
+test('upsertPlot also projects active_crop_cycles on its create/update response, not only listPlots', async () => {
+  const db = createJournalDb('cc-hardening-active-crop-upsert-response');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(405);
+  const created = await makeCropCyclePlot(db, principal, plot);
+  assert.deepEqual(created.plot.active_crop_cycles, []);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(405),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  const updated = await upsertPlot(db, {
+    plot_uuid: plot,
+    base_sync_version: created.plot.sync_version,
+    plot_code: created.plot.plot_code,
+    name: 'Renamed plot',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: null,
+    area_m2: 100,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 3,
+    context_json: null,
+  }, principal);
+  assert.equal(updated.plot.active_crop_cycles.length, 1);
+  assert.equal(updated.plot.active_crop_cycles[0].crop_code, 'agroscope.crop.wheat_winter');
+});
+
+test('a harvest entry has no season_crop of its own but resolves closed_crop_code/variety from the cycle it closed (P2-b)', async () => {
+  const db = createJournalDb('cc-hardening-closed-crop-display');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(406);
+  await makeCropCyclePlot(db, principal, plot);
+  const harvestUuid = cropCycleEntryUuid(407);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(406),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, harvestInput({
+    entry_uuid: harvestUuid,
+    plot_uuid: plot,
+    occurred_start_local: '2026-08-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  assert.equal(readJournalEntryRow(db, harvestUuid).season_crop, null, 'own season_crop stays deferred/NULL');
+
+  const { entries } = await listEntries(db, { entry_uuid: harvestUuid, status: 'all' }, principal);
+  const harvestEntry = entries.find((entry) => entry.entry_uuid === harvestUuid);
+  assert.equal(harvestEntry.season_crop, null, 'the stored/displayed season_crop column is untouched');
+  assert.equal(harvestEntry.closed_crop_code, 'agroscope.crop.wheat_winter');
+  assert.equal(harvestEntry.closed_crop_variety, 'Runal');
+
+  const single = await loadCurrentAggregate(db, 'UPSERT_JOURNAL_ENTRY', harvestUuid, principal);
+  assert.equal(single.closed_crop_code, 'agroscope.crop.wheat_winter', 'single-entry fetch resolves it too (S1 parity)');
+  assert.equal(single.closed_crop_variety, 'Runal');
+});
+
+test('a non-closing entry (still-open cycle) has no closed_crop_code', async () => {
+  const db = createJournalDb('cc-hardening-closed-crop-not-set');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(408);
+  await makeCropCyclePlot(db, principal, plot);
+  const irrigationUuid = cropCycleEntryUuid(409);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(408),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, irrigationInput({
+    entry_uuid: irrigationUuid,
+    plot_uuid: plot,
+    occurred_start_local: '2026-05-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  const { entries } = await listEntries(db, { entry_uuid: irrigationUuid, status: 'all' }, principal);
+  const irrigationEntry = entries.find((entry) => entry.entry_uuid === irrigationUuid);
+  assert.equal(irrigationEntry.closed_crop_code, undefined);
+  assert.equal(irrigationEntry.closed_crop_variety, undefined);
+  assert.equal(irrigationEntry.season_crop, 'agroscope.crop.wheat_winter', 'still live-resolved from the open cycle');
+});
+
+// --- Pre-deploy review follow-ups (C1/C2) ----------------------------------
+
+test('C1: "today" for active_crop_cycles is the GATEWAY-configured local date, not UTC (local-date boundary)', async () => {
+  const originalTz = process.env.TZ;
+  mock.timers.enable({ apis: ['Date'] });
+  // 2026-01-01T23:30:00Z: still 2026-01-01 in UTC, but a gateway configured
+  // 14h ahead of UTC (Pacific/Kiritimati) has already rolled over to
+  // 2026-01-02 locally at this exact instant -- the boundary this test pins.
+  mock.timers.setTime(Date.UTC(2026, 0, 1, 23, 30, 0));
+  try {
+    const db = createJournalDb('c1-today-local-date-boundary');
+    seedJournalTestIdentity(db);
+    const principal = journalTestPrincipal();
+    const plot = cropCyclePlotUuid(900);
+    await makeCropCyclePlot(db, principal, plot);
+
+    // The cycle's own starts_on (2026-01-02) comes from the seeding entry's
+    // OWN occurred_start_local/timezone -- unrelated to the "now" being
+    // mocked above -- exactly like a real seeding entry logged for a date
+    // that is, from the gateway's perspective, "today".
+    await saveEntry(db, seedingInput({
+      entry_uuid: cropCycleEntryUuid(900),
+      plot_uuid: plot,
+      occurred_start_local: '2026-01-02T09:00:00',
+      occurred_timezone: 'Pacific/Kiritimati',
+    }), principal, { mode: 'create' });
+
+    process.env.TZ = 'UTC';
+    const asOfUtc = await listPlots(db, principal);
+    assert.deepEqual(
+      asOfUtc.plots.find((row) => row.plot_uuid === plot).active_crop_cycles, [],
+      'a UTC-configured gateway has not yet reached 2026-01-02 at this instant, so the cycle does not cover "today" yet'
+    );
+
+    process.env.TZ = 'Pacific/Kiritimati';
+    const asOfGateway = await listPlots(db, principal);
+    const found = asOfGateway.plots.find((row) => row.plot_uuid === plot);
+    assert.equal(
+      found.active_crop_cycles.length, 1,
+      'a gateway configured 14h ahead of UTC has already reached 2026-01-02 locally at this same instant, ' +
+        'so the cycle now covers "today" (todayLocalDate must follow the gateway-configured offset, not UTC)'
+    );
+    assert.equal(found.active_crop_cycles[0].crop_code, 'agroscope.crop.wheat_winter');
+  } finally {
+    mock.timers.reset();
+    if (originalTz === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTz;
+  }
+});
+
+test('C2: a voided crop cycle no longer resurfaces its crop as closed_crop_code/variety on the entry that closed it', async () => {
+  const db = createJournalDb('cc-hardening-closed-crop-voided-cycle');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(410);
+  await makeCropCyclePlot(db, principal, plot);
+  const seedUuid = cropCycleEntryUuid(410);
+  const harvestUuid = cropCycleEntryUuid(411);
+
+  await saveEntry(db, seedingInput({
+    entry_uuid: seedUuid,
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  await saveEntry(db, harvestInput({
+    entry_uuid: harvestUuid,
+    plot_uuid: plot,
+    occurred_start_local: '2026-08-01T09:00:00',
+  }), principal, { mode: 'create' });
+
+  // Sanity (pre-existing P2-b behavior): before voiding, the harvest resolves
+  // the crop it closed.
+  const before = await listEntries(db, { entry_uuid: harvestUuid, status: 'all' }, principal);
+  assert.equal(
+    before.entries.find((entry) => entry.entry_uuid === harvestUuid).closed_crop_code,
+    'agroscope.crop.wheat_winter'
+  );
+
+  // Void the seeding entry that opened the cycle. No other final entry
+  // depends on it live or frozen (the harvest itself is excluded from
+  // freezing by design -- see freezeClosedSpan's excludeEntryUuid), so this
+  // succeeds without cascade_ack.
+  await void_(db, null, seedUuid, currentSyncVersion(db, seedUuid), 'voiding the seeding', principal);
+  const membership = readCycleMemberships(db, plot)[0];
+  assert.ok(membership.cycle_deleted_at, 'the cycle itself is now soft-deleted');
+  assert.equal(
+    membership.closed_by_entry_uuid, harvestUuid,
+    'the harvest membership row is untouched by the void -- it still names the harvest as the closer'
+  );
+
+  const after = await listEntries(db, { entry_uuid: harvestUuid, status: 'all' }, principal);
+  const harvestEntry = after.entries.find((entry) => entry.entry_uuid === harvestUuid);
+  assert.equal(
+    harvestEntry.closed_crop_code, undefined,
+    'C2: a voided (soft-deleted) cycle must not resurface its crop on the entry that closed it'
+  );
+  assert.equal(harvestEntry.closed_crop_variety, undefined);
+
+  const single = await loadCurrentAggregate(db, 'UPSERT_JOURNAL_ENTRY', harvestUuid, principal);
+  assert.equal(single.closed_crop_code, undefined, 'single-entry fetch parity (S1)');
+  assert.equal(single.closed_crop_variety, undefined);
+});
+
+// ===========================================================================
+// Field export silent-hang regression (2026-07-21)
+//
+// Root cause: exportJson/exportResearchPackage batched an entire (up to
+// 50-entry) page into a single write() call, while exportWideCsv writes one
+// row at a time. Once a page's combined JSON crossed the response's
+// highWaterMark, write() returned false and writeChunk awaited 'drain' with
+// no upper bound -- if the client/transport never actually drains, that
+// await never resolves: a genuinely silent hang (no headers, no body, no
+// error, no server log), reproduced on a live gateway with only 26 journal
+// entries via GET /api/journal/export.json (and /export.package).
+//
+// The fix has two parts: (1) writeChunk now bounds the drain wait with
+// EXPORT_WRITE_STALL_MS, so a stalled writable fails loudly (504/
+// 'export_stream_stalled') instead of hanging forever; (2) exportJson (and
+// every zip member write inside exportResearchPackage) now writes through
+// writeBoundedChunk one entry/row at a time, the same granularity
+// exportWideCsv already used, so realistic exports are far less likely to
+// ever trip backpressure in the first place.
+// ===========================================================================
+
+const EXPORT_HANG_OWNER_PLOT = 'ee000000-0000-4000-8000-000000000001';
+
+async function seedExportHangDataset(name, entryCount) {
+  const db = createJournalDb(name);
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  await makeCropCyclePlot(db, principal, EXPORT_HANG_OWNER_PLOT);
+  for (let i = 1; i <= entryCount; i += 1) {
+    const day = String((i % 27) + 1).padStart(2, '0');
+    const month = i <= 27 ? '05' : (i <= 54 ? '06' : '07');
+    await saveEntry(db, irrigationInput({
+      entry_uuid: 'ee100000-0000-4000-8000-' + String(i).padStart(12, '0'),
+      plot_uuid: EXPORT_HANG_OWNER_PLOT,
+      occurred_start_local: '2026-' + month + '-' + day + 'T09:00:00',
+      season_crop: 'ExplicitCrop',
+      season_variety: 'ExplicitVariety',
+      note: 'Irrigated field row ' + i,
+    }), principal, { mode: 'create' });
+  }
+  return { db, principal };
+}
+
+// A real stream.Writable (genuine internal buffering/backpressure, not a
+// synthetic mock) whose _write we fully control:
+//  - mode 'stall': the callback is NEVER invoked -- the consumer has
+//    genuinely stopped reading, exactly like a real stuck client/socket.
+//  - mode 'slow-drain': the callback fires on the next real macrotask, so
+//    the stream drains for real (a legitimate, if unhurried, consumer).
+function exportHangSink(mode, highWaterMark) {
+  const chunks = [];
+  const sink = new Writable({
+    highWaterMark,
+    write(chunk, encoding, callback) {
+      chunks.push(Buffer.from(chunk));
+      if (mode === 'stall') return; // never call back
+      setImmediate(callback);
+    },
+  });
+  sink.setHeader = function() {};
+  sink.getChunks = function() { return chunks; };
+  return sink;
+}
+
+// Advances past the several real (unmocked) DB round-trips exportJson/
+// exportResearchPackage/exportWideCsv make before their first write(), then
+// waits for writeChunk to actually register its 'drain' listener -- only
+// then is it safe to fast-forward the (mocked) stall timer.
+async function waitForDrainListener(sink) {
+  for (let i = 0; i < 2000 && sink.listenerCount('drain') === 0; i += 1) {
+    await new Promise(function(resolve) { setImmediate(resolve); });
+  }
+  assert.equal(sink.listenerCount('drain'), 1, 'writeChunk must be waiting on drain by now');
+}
+
+test(
+  'export.json no longer hangs forever against a stalled client -- it fails loudly instead (silent-hang regression)',
+  { timeout: 10_000 },
+  async () => {
+    const { db, principal } = await seedExportHangDataset('export-hang-json-stall', 30);
+    const sink = exportHangSink('stall', 16 * 1024);
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      const promise = exportJson(db, { status: 'final' }, principal, sink, {});
+      await waitForDrainListener(sink);
+      mock.timers.tick(30_000); // EXPORT_WRITE_STALL_MS
+      await assert.rejects(promise, function(error) {
+        assert.equal(error.code, 'export_stream_stalled');
+        assert.equal(error.statusCode, 504);
+        return true;
+      });
+    } finally {
+      mock.timers.reset();
+    }
+  }
+);
+
+test(
+  'export.package no longer hangs forever against a stalled client -- it fails loudly instead (silent-hang regression)',
+  { timeout: 10_000 },
+  async () => {
+    const { db, principal } = await seedExportHangDataset('export-hang-package-stall', 30);
+    const sink = exportHangSink('stall', 16 * 1024);
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      const promise = exportResearchPackage(db, { status: 'final' }, principal, sink, {});
+      await waitForDrainListener(sink);
+      mock.timers.tick(30_000); // EXPORT_WRITE_STALL_MS
+      await assert.rejects(promise, function(error) {
+        assert.equal(error.code, 'export_stream_stalled');
+        assert.equal(error.statusCode, 504);
+        return true;
+      });
+    } finally {
+      mock.timers.reset();
+    }
+  }
+);
+
+test(
+  'export.csv is unaffected by the silent-hang fix: it still completes against the same stalled client/dataset',
+  { timeout: 10_000 },
+  async () => {
+    const { db, principal } = await seedExportHangDataset('export-hang-csv-unaffected', 30);
+    const sink = exportHangSink('stall', 16 * 1024);
+    const result = await exportWideCsv(db, { status: 'final' }, principal, sink);
+    assert.equal(result, null);
+    assert.match(Buffer.concat(sink.getChunks()).toString('utf8'), /entry_uuid/);
+  }
+);
+
+test(
+  'export.json writes one entry at a time and produces complete, valid JSON for a dataset that exceeds the single-write budget',
+  { timeout: 10_000 },
+  async () => {
+    const ENTRY_COUNT = 30;
+    const { db, principal } = await seedExportHangDataset('export-hang-json-valid', ENTRY_COUNT);
+    const reference = JSON.parse(await exportJson(db, { status: 'final' }, principal, null, {}));
+    assert.equal(reference.record_counts.entries, ENTRY_COUNT);
+
+    const sink = exportHangSink('slow-drain', 16 * 1024);
+    const finished = new Promise(function(resolve) { sink.once('finish', resolve); });
+    await exportJson(db, { status: 'final' }, principal, sink, {});
+    await finished;
+    assert.ok(
+      sink.getChunks().length > ENTRY_COUNT,
+      'expected more than one write() per entry (prefix + one per entry + trailer), not one giant per-page write'
+    );
+    const parsed = JSON.parse(Buffer.concat(sink.getChunks()).toString('utf8'));
+    assert.equal(parsed.record_counts.entries, ENTRY_COUNT);
+    assert.equal(parsed.entries.length, ENTRY_COUNT);
+    // entries_sha256/values_sha256 are deterministic (content-only); compare
+    // across the two independent exportJson calls. research_metadata_sha256
+    // is not (research_metadata carries a fresh dataset_uuid/export_uuid/
+    // generated_at per call), so check it is internally self-consistent
+    // instead of equal to the other call's value.
+    assert.equal(parsed.checksums.entries_sha256, reference.checksums.entries_sha256);
+    assert.equal(parsed.checksums.values_sha256, reference.checksums.values_sha256);
+    assert.equal(
+      parsed.checksums.research_metadata_sha256,
+      crypto.createHash('sha256').update(JSON.stringify(parsed.research_metadata)).digest('hex')
+    );
+  }
+);
+
+test('loadCatalog resolves against a promise-only read-snapshot scope (catalog.js arity guard)', async () => {
+  // Live osi-db-helper hands exports a createTransactionScope: 2-arg all/get that
+  // return a promise, NO prepare, NO callback support. Before the fix, catalog.js's
+  // queryOne/queryAll fell to the 3-arg db.get(sql, params, callback) form, which
+  // this scope never invokes -> the Promise never settled -> export.json/.package
+  // hung forever before writing a byte. Test harnesses masked it because their
+  // snapshot scope exposes prepare (synchronous branch). This reproduces the live
+  // scope shape and asserts loadCatalog completes.
+  const raw = createTestDb('catalog-promise-scope');
+  const scope = {
+    all(sql, params) { return Promise.resolve(raw.prepare(sql).all(...(params || []))); },
+    get(sql, params) { return Promise.resolve(raw.prepare(sql).get(...(params || []))); },
+    run(sql, params) { raw.prepare(sql).run(...(params || [])); return Promise.resolve(); },
+    exec(sql) { raw.exec(sql); return Promise.resolve(); },
+  };
+  const outcome = await Promise.race([
+    loadCatalog(scope).then(function(cat) { return cat ? 'ok' : 'empty'; }),
+    new Promise(function(resolve) { setTimeout(function() { resolve('TIMEOUT'); }, 3000); }),
+  ]);
+  assert.equal(outcome, 'ok', 'loadCatalog must not hang on a promise-only scope');
 });

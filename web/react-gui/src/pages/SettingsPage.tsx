@@ -241,11 +241,17 @@ export function SettingsPage() {
     ],
     [t],
   );
+  // Product change (owner decision): the detail-level setting only offers
+  // Quick and Full. "Research" stays reachable as a per-layout floor in the
+  // capture flow (see effectiveTemplateCode), just not as a user-selectable
+  // preference here. journalDetailResearch stays in the locale files
+  // deliberately (see displayPreferences.ts's legacy-mapping comment) so a
+  // pre-existing translation isn't churned for a key that may still be
+  // referenced elsewhere.
   const journalDetailOptions = useMemo<Array<Option<JournalDetailLevel>>>(
     () => [
       { value: 'farmer_quick', label: t('journalDetailQuick') },
       { value: 'full_record', label: t('journalDetailFull') },
-      { value: 'research_observation', label: t('journalDetailResearch') },
     ],
     [t],
   );
