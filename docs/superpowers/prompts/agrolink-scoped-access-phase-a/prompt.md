@@ -29,7 +29,7 @@ If any baseline gate is red, stop and report; do not build on a red baseline.
 ## Binding design decisions (four external review rounds — not optional, not to be redesigned)
 
 1. **USER aggregate has exactly three trigger arms** (plan Task 2): `AFTER UPDATE OF user_uuid`, guarded `AFTER INSERT WHEN NEW.user_uuid IS NOT NULL`, `AFTER UPDATE OF role, disabled_at`. A bare INSERT arm emits a null uuid: sibling-trigger UPDATEs are invisible to other AFTER INSERT triggers (reproduced against SQLite; rehearsal test must cover it).
-2. **All 7 new triggers are migration-owned**: registered in `scripts/verify-runtime-schema-parity.js` `MIGRATION_OWNED_TRIGGERS`, present in seed and bundled DBs, never referenced by the frozen `sync-init-fn` boot node. The boot-survival test (Task 6) pins the drop-list at 31.
+2. **All 7 new triggers are migration-owned**: registered in `scripts/verify-runtime-schema-parity.js` `MIGRATION_OWNED_TRIGGERS`, present in seed and bundled DBs, never referenced by the frozen `sync-init-fn` boot node. The boot-survival test (Task 6) pins the drop-list at 30.
 3. **Emission is gated** by the single-row `scoped_access_emit` table, default 0, baked into every trigger's WHEN clause. Phase A installs schema only.
 4. **Bootstrap is one conditional write** (`INSERT … SELECT 'admin' … WHERE NOT EXISTS (SELECT 1 FROM users WHERE role='admin')`), counting admins in any state; the follow-up SELECT only shapes the 403 message. Registration closes after the first admin in scoped mode.
 5. **Scope = owned ∪ granted**, resolved via the `users.user_uuid → users.id` bridge (zone/device ownership is the integer id; grants and journal are the text uuid). Null `user_uuid` is a hard error, never an empty scope. Migration 0023 backfills legacy null uuids.

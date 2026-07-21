@@ -59,6 +59,12 @@ function freshDb() {
   const db = new DatabaseSync(':memory:');
   db.exec(USERS_DDL);
   db.exec(UUID_TRIGGER);
+  // Stub tables the 0022 trigger bodies reference: SQLite resolves trigger-body
+  // table names when preparing any DML on the trigger's table, even when the
+  // WHEN clause is false, so these must exist in every test DB.
+  db.exec(`CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, aggregate_type TEXT, aggregate_key TEXT,
+    op TEXT, payload_json TEXT, sync_version INTEGER, occurred_at TEXT, gateway_device_eui TEXT)`);
+  db.exec(`CREATE TABLE sync_link_state (peer_node TEXT, gateway_device_eui TEXT)`);
   db.exec(MIG_0022);
   return db;
 }
@@ -79,14 +85,13 @@ test('0022 creates assignment tables, indexes, gate table, 7 triggers', () => {
     'trg_dp_user_plot_assign_outbox_ai', 'trg_dp_user_plot_assign_outbox_au',
     'trg_dp_users_outbox_uuid_au', 'trg_dp_users_outbox_ai', 'trg_dp_users_outbox_role_au',
   ]) assert.ok(triggers.includes(tr), `missing trigger ${tr}`);
-  assert.deepEqual(db.prepare('SELECT enabled FROM scoped_access_emit WHERE id=1').get(), { enabled: 0 });
+  // node:sqlite rows are null-prototype objects; compare the scalar, not deepEqual.
+  assert.equal(db.prepare('SELECT enabled FROM scoped_access_emit WHERE id=1').get().enabled, 0);
   db.close();
 });
 
 test('emit gate default off: no outbox rows until enabled', () => {
   const db = freshDb();
-  db.exec(`CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, aggregate_type TEXT, aggregate_key TEXT,
-    op TEXT, payload_json TEXT, sync_version INTEGER, occurred_at TEXT, gateway_device_eui TEXT)`);
   db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('a','h','2026-01-01')`);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM sync_outbox').get().n, 0);
   db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');
@@ -98,8 +103,6 @@ test('emit gate default off: no outbox rows until enabled', () => {
 
 test('USER trigger arms: uuid assigned by sibling trigger still emits non-null uuid', () => {
   const db = freshDb();
-  db.exec(`CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, aggregate_type TEXT, aggregate_key TEXT,
-    op TEXT, payload_json TEXT, sync_version INTEGER, occurred_at TEXT, gateway_device_eui TEXT)`);
   db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');
   // Path 1: null uuid at insert -> uuid trigger fills -> uuid_au arm must emit non-null.
   db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('carol','h','2026-01-01')`);
@@ -116,8 +119,6 @@ test('USER trigger arms: uuid assigned by sibling trigger still emits non-null u
 
 test('assignment triggers emit upsert on grant and delete on tombstone', () => {
   const db = freshDb();
-  db.exec(`CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, aggregate_type TEXT, aggregate_key TEXT,
-    op TEXT, payload_json TEXT, sync_version INTEGER, occurred_at TEXT, gateway_device_eui TEXT)`);
   db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');
   db.exec(`INSERT INTO user_zone_assignments (assignment_uuid, user_uuid, zone_uuid, created_at)
            VALUES ('as1','u1','z1','2026-01-01')`);
@@ -127,7 +128,7 @@ test('assignment triggers emit upsert on grant and delete on tombstone', () => {
   db.close();
 });
 
-test('0023 backfills null user_uuid and promotes named admin; no-op on empty users', () => {
+test('0023 backfills null user_uuid and promotes lowest-id admin; no-op on empty users', () => {
   const db = freshDb();
   db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('legacy1','h','2026-01-01')`);
   db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('legacy2','h','2026-01-01')`);
@@ -337,6 +338,21 @@ END;
 -- USER aggregate, three arms (spec §5.2: sibling-trigger UPDATEs are
 -- invisible to other AFTER INSERT triggers, so no bare-INSERT arm may rely
 -- on trg_sync_users_uuid_ai having filled user_uuid).
+--
+-- Do NOT "simplify" this to a single bare AFTER INSERT trigger: NEW is bound
+-- to the row image as of the original INSERT, so a bare INSERT arm sees a
+-- null user_uuid on the common (uuid-not-supplied) registration path even
+-- after trg_sync_users_uuid_ai's nested UPDATE has run.
+--
+-- Arm 1 below relies on that nested UPDATE (issued from inside
+-- trg_sync_users_uuid_ai's own AFTER INSERT body) firing this AFTER UPDATE OF
+-- user_uuid trigger. This is NOT blocked by SQLite's default
+-- recursive_triggers=OFF: that pragma only suppresses a trigger re-firing
+-- ITSELF (or a cycle back to itself), never a different, non-cyclic trigger
+-- fired by DML issued from inside another trigger's body. Empirically
+-- verified against both node:sqlite (bundled SQLite) and the on-device
+-- sqlite3 npm binding during review: the cascade fires correctly under
+-- default settings, no PRAGMA change required anywhere in this codebase.
 CREATE TRIGGER IF NOT EXISTS trg_dp_users_outbox_uuid_au
 AFTER UPDATE OF user_uuid ON users
 FOR EACH ROW
@@ -400,7 +416,8 @@ END;
 CREATE TRIGGER IF NOT EXISTS trg_dp_users_outbox_role_au
 AFTER UPDATE OF role, disabled_at ON users
 FOR EACH ROW
-WHEN (SELECT enabled FROM scoped_access_emit WHERE id = 1) = 1
+WHEN NEW.user_uuid IS NOT NULL AND NEW.user_uuid != ''
+AND (SELECT enabled FROM scoped_access_emit WHERE id = 1) = 1
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -629,7 +646,9 @@ test('sync-init-fn text has no DROP TRIGGER wildcard sweep beyond its own 31', (
   const func = extractBootFunc();
   const drops = new Set([...func.matchAll(/DROP TRIGGER IF EXISTS\s+([A-Za-z0-9_]+)/gi)].map(m => m[1]));
   for (const t of EXPECTED_TRIGGERS) assert.ok(!drops.has(t), `boot node drops ${t}`);
-  assert.equal(drops.size, 31, `expected the frozen 31 drop list, found ${drops.size}: ${[...drops].join(',')}`);
+  // Pin: 30 distinct drops inside sync-init-fn (verified 2026-07-19; a 31st
+  // drop in dendro-compute-fn is unrelated to the boot node).
+  assert.equal(drops.size, 30, `expected the frozen 30 drop list, found ${drops.size}: ${[...drops].join(',')}`);
 });
 ```
 

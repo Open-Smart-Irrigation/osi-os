@@ -56,7 +56,7 @@ Every existing query that filters on an owner column (`listPlots` filters `p.own
 
 ### 5.1 The trigger constraint (hard repo invariant)
 
-The frozen `sync-init-fn` boot node drops and recreates **31 sync triggers on every boot** (verified: 31 distinct `DROP TRIGGER IF EXISTS` statements in the shipped flow, including `trg_sync_users_uuid_ai`). A migration that edits an existing trigger's body is silently reverted on the next Node-RED restart. Two consequences shape this design:
+The frozen `sync-init-fn` boot node drops and recreates **30 sync triggers on every boot** (verified: 30 distinct `DROP TRIGGER IF EXISTS` targets inside `sync-init-fn`, including `trg_sync_users_uuid_ai`; a 31st drop in `dendro-compute-fn` is unrelated). A migration that edits an existing trigger's body is silently reverted on the next Node-RED restart. Two consequences shape this design:
 
 1. **No existing trigger body changes.** Everything this spec needs propagates through new, migration-owned triggers.
 2. New triggers live in the migration, the seed, and the `MIGRATION_OWNED_TRIGGERS` allowlist in `scripts/verify-runtime-schema-parity.js` — never in the boot node. Precedent: migration 0005's `trg_improvement_requests_outbox_ai`. Editing a boot-managed trigger body instead requires the full frozen-node merge gate (four verifiers plus production-copy rehearsal) and is treated as a design failure here.
@@ -114,12 +114,15 @@ FOR EACH ROW WHEN NEW.user_uuid IS NOT NULL BEGIN … emit USER_UPSERTED … END
 -- Arm 2: caller supplied the uuid directly at insert
 CREATE TRIGGER trg_dp_users_outbox_ai AFTER INSERT ON users
 FOR EACH ROW WHEN NEW.user_uuid IS NOT NULL AND NEW.user_uuid != '' BEGIN … emit USER_UPSERTED … END;
--- Arm 3: role/disable mutations
+-- Arm 3: role/disable mutations (uuid-guarded like the others, so a role write
+-- on a pre-backfill row can never emit a null-keyed event)
 CREATE TRIGGER trg_dp_users_outbox_role_au AFTER UPDATE OF role, disabled_at ON users
-FOR EACH ROW BEGIN … emit USER_UPSERTED … END;
+FOR EACH ROW WHEN NEW.user_uuid IS NOT NULL AND NEW.user_uuid != '' BEGIN … emit USER_UPSERTED … END;
 ```
 
 Every emitted payload carries a non-null `user_uuid`, so a user event always precedes any grant event that references it; the cloud never resolves membership for an unknown `local_user_uuid`. §14 adds a test asserting the emitted payload's uuid is non-null on the trigger-assigned path.
+
+Arm 1's trigger fires because of DML (the nested `UPDATE`) issued from inside a *different* trigger's body — a non-cyclic cascade, not self-recursion. This is unaffected by SQLite's default `recursive_triggers=OFF`, which suppresses only a trigger re-firing itself; confirmed empirically against both `node:sqlite` and the on-device `sqlite3` binding during implementation-plan review. No `PRAGMA recursive_triggers` change belongs anywhere in this codebase for this mechanism to work.
 
 ### 5.3 `0023__scoped_access_backfill.sql` (data)
 
@@ -184,7 +187,7 @@ isAdmin(userUuid)
 
 - `GET /api/me` — returns `{ username, user_uuid, role, zone_uuids, plot_uuids, features }`. Drives GUI rendering.
 - **Bootstrap registration (§13).** `POST /auth/register` is currently unauthenticated. In scoped mode it accepts a registration only while no admin row exists in any state (enabled or disabled), evaluated as a single conditional write on the serialized queue: `INSERT … SELECT … WHERE NOT EXISTS (SELECT 1 FROM users WHERE role='admin')`. Two concurrent first registrations cannot both succeed; the loser gets 409. Counting disabled rows keeps bootstrap closed after a sole admin is disabled — the recovery path for that case is the CLI break-glass below, not self-registration. After an admin exists, public registration closes and account creation moves to the admin endpoints. Legacy mode keeps current behavior.
-- Account management (admin): list users, create user, reset password (admin-set temporary password; no email flow), set role, disable/enable. Disable sets `disabled_at` and bumps the scope-cache epoch. The last-enabled-admin guard is a single conditional write on the serialized queue, not a check-then-act — e.g. `UPDATE users SET disabled_at=… WHERE user_uuid=? AND (SELECT COUNT(*) FROM users WHERE role='admin' AND disabled_at IS NULL) > 1`, zero rows affected → 409. Two admins concurrently disabling each other cannot both succeed. The same conditional shape covers de-roling and account deletion/tombstone. A hub with no enabled admin is recovered by an operator on the hub CLI (`sqlite3` role reset, documented in the runbook), never by reopening registration.
+- Account management (admin): list users, create user, reset password (admin-set temporary password; no email flow), set role, disable/enable. Disable sets `disabled_at` and bumps the scope-cache epoch. The last-enabled-admin guard is a single conditional write on the serialized queue, not a check-then-act — e.g. `UPDATE users SET disabled_at=… WHERE user_uuid=? AND disabled_at IS NULL AND (role != 'admin' OR (SELECT COUNT(*) FROM users WHERE role='admin' AND disabled_at IS NULL) > 1)`, zero rows affected → 409. The `role != 'admin'` branch is load-bearing, not decorative: without it the admin-count subquery is evaluated for every target regardless of that target's own role, so disabling a researcher or viewer is wrongly blocked whenever exactly one admin happens to be enabled — the common state on a freshly bootstrapped hub (§13). Two admins concurrently disabling each other cannot both succeed. The same conditional shape covers de-roling and account deletion/tombstone. A hub with no enabled admin is recovered by an operator on the hub CLI (`sqlite3` role reset, documented in the runbook), never by reopening registration.
 - Grant management (admin): grant/revoke zone or plot. Writes go to the assignment tables, bump `sync_version`, and sync per §11.
 - `GET /api/system/features` gains `scoped_access`.
 
@@ -196,11 +199,11 @@ The contract is designed and deployed before any edge producer emits. "Schema in
 
 | Aggregate | Ops | Payload keys | Authority |
 |---|---|---|---|
-| `USER` | `USER_UPSERTED` | `user_uuid`, `username`, `role`, `disabled_at`, `gateway_device_eui`, `sync_version` | Edge → cloud only |
+| `USER` | `USER_UPSERTED` | `user_uuid`, `username`, `role`, `disabled_at`, `gateway_device_eui` | Edge → cloud only |
 | `USER_ZONE_ASSIGNMENT` | upsert / delete (tombstone) | `assignment_uuid`, `user_uuid`, `zone_uuid`, `assigned_by_user_uuid`, `sync_version`, `deleted_at` | Edge → cloud only |
 | `USER_PLOT_ASSIGNMENT` | upsert / delete (tombstone) | same shape with `plot_uuid` | Edge → cloud only |
 
-`sync_version` increments on every mutation inside the migration-owned triggers, giving the cloud a gap-detection signal per aggregate. Tombstones replay idempotently: re-applying a delete is a no-op on a converged mirror. Cloud-originated grant edits are out of scope for v1 — grants are created by edge admins; a command path (`UPSERT_USER_GRANT` et al.) is the documented extension if cloud-side administration is ever wanted.
+Grant `sync_version` is bumped by writers on every mutation (migration 0003's pattern); the triggers read `NEW.sync_version`, giving the cloud a gap-detection signal per aggregate. `users` has no `sync_version` column in v1, so `USER_UPSERTED` carries none; add the column when and if cloud-side gap detection on users proves necessary. Tombstones replay idempotently: re-applying a delete is a no-op on a converged mirror. Cloud-originated grant edits are out of scope for v1 — grants are created by edge admins; a command path (`UPSERT_USER_GRANT` et al.) is the documented extension if cloud-side administration is ever wanted.
 
 **Cloud identity model.** The cloud `User` keeps its global `USER`/`ADMIN`/`SUPER_ADMIN` role untouched. AgroLink role and enabled state are **per-gateway membership**, stored on or beside the existing `LinkedGatewayAccount` row (which already keys cloud user ↔ `gateway_device_eui` ↔ `local_user_uuid`): add `gateway_role` and `gateway_disabled_at`. A researcher who is admin on one hub holds no privilege on any other gateway. Cloud enforcement resolves the membership for the gateway being accessed, keys scope by the synced `local_user_uuid` and the mirrored assignment tables, and applies the same union rule as §4.
 
@@ -259,6 +262,7 @@ Phases A–D are edge-only and ship behind the flag with producers disabled. Pha
 
 ## 17. Revision history
 
+- **v6 (2026-07-20):** implementation-plan review round. Fixed a logic bug in §10's illustrative last-enabled-admin guard SQL, confirmed by reproduction: the guard's admin-count subquery was unconditional on the target row, so disabling *any* account — not just an admin — was refused whenever exactly one admin was enabled (the common post-bootstrap state). Added the `role != 'admin'` short-circuit so the count check applies only when the target is itself an admin. Also added a note to §5.2 confirming (empirically, against both `node:sqlite` and the on-device `sqlite3` binding) that Arm 1's cross-trigger cascade is unaffected by SQLite's default `recursive_triggers=OFF`, since that pragma suppresses only self-recursion. The Phase A–D implementation plans separately fixed a real admin-scope-bypass inconsistency this spec did not itself contain (Phase C's `assertFreshDeviceAccess` had drifted from §6's "owned + granted" rule for admin) and closed a scope-enforcement visibility gap in the journal/history read paths — see those plans' own histories.
 - **v5 (2026-07-19):** folded in the two deferred Train-A hardening efforts as Phases F and G (§15) with dedupe against this design: §11's hand-rolled coordination language superseded by Phase F's contract compatibility rule; audit layering stated against the witness ledger; protocol identity vs membership identity disambiguated; Phase C gate gains producer-fixture regeneration; emit gate vs negotiation gate kept independent. Out-of-scope boundaries recorded (§15). Phase A is unaffected.
 - **v4 (2026-07-19):** folded in the fourth external review. Changes: `USER` aggregate rebuilt as a three-arm trigger — a bare INSERT arm would emit a null `user_uuid` because sibling-trigger UPDATEs are invisible to other AFTER INSERT triggers (reproduced against SQLite); the uuid-filled arm fires on AFTER UPDATE OF user_uuid (§5.2). Last-enabled-admin guard is a single conditional write covering disable, de-role, and deletion (§10). Schedule policy stated explicitly: collective zone infrastructure, flagged for admin re-confirmation on any scope change (§8). Migration 0023's dual purpose (uuid backfill + admin promotion) stated once (§5.3).
 - **v3 (2026-07-19):** folded in the third external review (first content review of the v2 additions). Changes: scheduler authority rebuilt on zone scope — the v2 text keyed on a creator column that does not exist (§4, §8); `USER` aggregate fires on INSERT so users precede grants (§5.2); bootstrap is a single conditional write and the last enabled admin cannot be disabled, with a CLI break-glass (§10); schedule-disable triggers on loss of scope, not loss of a grant row (§8); the resolver's `user_uuid → users.id` bridge and the 0023 uuid backfill are explicit (§8); check-to-enqueue race narrowed to the serialized writer (§8).
