@@ -70,7 +70,7 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
     'history.gatewayStatus.status.offline', 'history.gatewayStatus.category.system',
     'history.gatewayStatus.metric.signal', 'history.gatewayStatus.metric.cpu',
     'history.irrigationTimeline.severity.info', 'history.irrigationTimeline.severity.unknown',
-    'history.cardType.gateway', 'history.soilProfile.depthLabel',
+    'history.cardType.gateway', 'history.cardType.dendro', 'history.soilProfile.depthLabel',
     'history.soilProfile.status.optimal', 'history.calendar.state.optimal',
     'history.calendar.state.normal', 'history.calendar.state.offline',
     'history.interpretation.title', 'history.advanced.field.rssi',

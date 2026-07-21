@@ -22,7 +22,7 @@
   },
   "warning": {
     "title": "Wichtig",
-    "message": "Nach der Verknüpfung müssen Sie sich mit Ihren OSI Server-Anmeldedaten anmelden. OSI OS speichert einen gateway-spezifischen Offline-Verifizierer für die verknüpfte Anmeldung.",
+    "message": "Nach der Verknüpfung müssen Sie sich mit Ihren OSI Server-Zugangsdaten einloggen. OSI OS speichert dafür eine sichere Offline-Kopie Ihrer Anmeldedaten auf diesem Gateway, damit Sie sich auch ohne Internetverbindung einloggen können.",
     "proceed": "Fortfahren"
   },
   "success": {

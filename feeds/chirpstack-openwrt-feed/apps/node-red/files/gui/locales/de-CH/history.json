@@ -10,11 +10,11 @@
       "subtitle": "Lokaler Gateway-Verlauf für {{username}}",
       "loadingLocalCards": "Lokale Verlaufskarten werden geladen…",
       "unavailableTitle": "Verlauf ist nicht verfügbar",
-      "unavailableBody": "Laufzeit-Feature-Flags halten die neue Verlaufsoberfläche deaktiviert, bis das lokale Gateway sie aktiviert.",
-      "featureFlagFailed": "Die Feature-Flag-Anfrage ist fehlgeschlagen. Das bestehende Dashboard ist weiterhin verfügbar.",
+      "unavailableBody": "Der Verlauf ist auf diesem Gateway noch nicht aktiviert und erscheint hier, sobald er freigeschaltet ist.",
+      "featureFlagFailed": "Es konnte nicht geprüft werden, ob der Verlauf aktiviert ist. Das bestehende Dashboard ist weiterhin verfügbar.",
       "zonesFailedTitle": "Verlaufszonen konnten nicht geladen werden",
       "noZonesTitle": "Noch keine Zonen",
-      "noZonesBody": "Erstellen Sie eine Zone im bestehenden Dashboard, bevor Sie die thematische Historie öffnen.",
+      "noZonesBody": "Erstellen Sie eine Zone im bestehenden Dashboard, bevor Sie den Verlauf öffnen.",
       "cardsFailed": "Verlaufskarten konnten nicht geladen werden.",
       "retryCards": "Karten erneut laden"
     },
@@ -39,9 +39,9 @@
       "maxPanels": "Bis zu {{count}} Vergleichsansichten",
       "singleMode": "Einzeln",
       "comparisonMode": "Vergleich",
-      "addPanel": "Panel {{title}} hinzufügen",
-      "removePanel": "Panel entfernen",
-      "panelLimitWarning": "Auf diesem Edge-Gateway können nur {{count}} Vergleichsansichten angezeigt werden.",
+      "addPanel": "Vergleichsansicht {{title}} hinzufügen",
+      "removePanel": "Vergleichsansicht entfernen",
+      "panelLimitWarning": "Auf diesem Gateway können nur {{count}} Vergleichsansichten angezeigt werden.",
       "selectedTimestampNone": "Kein Zeitstempel ausgewählt",
       "selectedTimestamp": "Ausgewählter Zeitstempel: {{timestamp}}",
       "inspectorTitle": "Inspektor",
@@ -90,7 +90,7 @@
       "pinnedCards": "Angeheftete Karten",
       "availableCards": "Verfügbare Karten",
       "savedWorkspaces": "Gespeicherte Arbeitsbereiche",
-      "workspaceDisabled": "Das Speichern von Arbeitsbereichen ist in diesem Ausbauschritt nicht aktiviert.",
+      "workspaceDisabled": "Das Speichern von Arbeitsbereichen ist noch nicht aktiviert.",
       "workspaceName": "Name des Arbeitsbereichs",
       "saveWorkspace": "Arbeitsbereich speichern",
       "updateWorkspace": "Arbeitsbereich aktualisieren",
@@ -110,14 +110,14 @@
     },
     "cardFrame": {
       "emptyTitle": "Verlaufskarte auswählen",
-      "emptyBody": "Wählen Sie eine Zone und eine thematische Karte, um den lokalen Verlauf zu untersuchen.",
+      "emptyBody": "Wählen Sie eine Zone und eine Verlaufskarte, um den lokalen Verlauf zu untersuchen.",
       "typeHistory": "{{cardType}}-Verlauf",
-      "viewModes": "Ansichtsmodi {{title}}",
+      "viewModes": "Ansichtsmodi für {{title}}",
       "unavailable": "Diese Karte ist für die ausgewählte Zone nicht verfügbar.",
       "timelineBrush": "Zeitleisten-Viewport",
       "timelineBrushKeyboardHelp": "Mit den Pfeiltasten verschieben, mit Plus oder Minus zoomen und mit Pos1 oder Enter zurücksetzen.",
       "aggregationBadge": "Aggregation: {{aggregation}}",
-      "placeholderBody": "Diagramm- und Kalenderdaten werden hier geladen, sobald die Karten-Daten-APIs aktiviert sind.",
+      "placeholderBody": "Diagramm- und Kalenderdaten werden hier geladen, sobald Kartendaten verfügbar sind.",
       "cardDataLoading": "Kartendaten werden geladen…",
       "cardDataError": "Kartendaten konnten nicht geladen werden: {{message}}",
       "cardDataUnknownError": "Unbekannter Fehler"
@@ -222,7 +222,7 @@
     },
     "cardType": {
       "soil": "Boden",
-      "dendro": "Dendro",
+      "dendro": "Dendrometer",
       "environment": "Umgebung",
       "irrigation": "Bewässerung",
       "gateway": "Gateway"
@@ -276,12 +276,12 @@
       "emptyTitle": "Keine Bodenprofildaten",
       "emptyBody": "Tiefenaufgelöste Profilmesswerte sind für diesen Zeitraum nicht verfügbar.",
       "depthLabel": "{{depth}} cm",
-      "depthUnknown": "Tiefe ausstehend",
+      "depthUnknown": "Tiefe nicht festgelegt",
       "valueMissing": "Kein Messwert",
       "status": {
         "dry_stress": "Trockenstress",
         "optimal": "Optimal",
-        "wet_excess": "Nässeüberschuss",
+        "wet_excess": "Zu nass",
         "mixed": "Gemischt",
         "no_data": "Keine Daten"
       },
@@ -310,7 +310,7 @@
       "state": {
         "dry_stress": "Trockenstress",
         "optimal": "Optimal",
-        "wet_excess": "Nässeüberschuss",
+        "wet_excess": "Zu nass",
         "mixed": "Gemischt",
         "normal_growth": "Normales Wachstum",
         "reduced_growth": "Vermindertes Wachstum",
@@ -362,9 +362,9 @@
       },
       "summary": {
         "soil": {
-          "dry_stress": "Wurzelzone war trocken, {{sampleCount}} Messwerte.",
-          "optimal": "Wurzelzone war optimal, {{sampleCount}} Messwerte.",
-          "wet_excess": "Wurzelzone war nass, {{sampleCount}} Messwerte.",
+          "dry_stress": "Wurzelzone war trocken ({{sampleCount}} Messwerte).",
+          "optimal": "Wurzelzone war optimal ({{sampleCount}} Messwerte).",
+          "wet_excess": "Wurzelzone war nass ({{sampleCount}} Messwerte).",
           "mixed": "Bodenstatus war je nach Tiefe unterschiedlich.",
           "no_data": "Keine Bodendaten verfügbar."
         },
@@ -405,7 +405,7 @@
       },
       "rootZoneDry": {
         "title": "Wurzelzone ist in den Trockenstatus übergegangen",
-        "body": "Die untere Bodenwasserspannung blieb während des ausgewählten Zeitraums trocken."
+        "body": "Die Bodenwasserspannung in der unteren Wurzelzone blieb im ausgewählten Zeitraum im trockenen Bereich."
       },
       "dataCoverageGap": {
         "title": "Sensordaten sind unvollständig",
@@ -440,7 +440,7 @@
       },
       "availability": {
         "collected": "Erfasst",
-        "not_collected_at_time": "Damals nicht erfasst",
+        "not_collected_at_time": "Zu diesem Zeitpunkt nicht erfasst",
         "unknown_now": "Aktuell unbekannt",
         "unsupported": "Nicht unterstützt"
       },
@@ -498,7 +498,7 @@
       "interpretationsTitle": "Hinweise zur Reaktion"
     },
     "dendroLineChart": {
-      "title": "Dendro-Liniendiagramm",
+      "title": "Dendrometer-Liniendiagramm",
       "emptyTitle": "Keine Dendrometer-Liniendaten",
       "emptyBody": "Dendrometer-Messwerte werden hier angezeigt, sobald Verlaufsdaten verfügbar sind.",
       "pointsCount": "{{count}} Messwerte",
@@ -511,7 +511,7 @@
       }
     },
     "dendroStressEvents": {
-      "title": "Dendro-Stressereignisse",
+      "title": "Dendrometer-Stressereignisse",
       "emptyTitle": "Keine Stressereignisse",
       "emptyBody": "Keine Stressereignisse in diesem Zeitraum.",
       "eventsCount": "{{count}} Ereignisse",

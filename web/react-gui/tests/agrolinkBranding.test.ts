@@ -162,7 +162,7 @@ describe('AgroLink branding source contracts', () => {
   it('localizes thematic history empty-zone copy in all bundled locales', () => {
     const expectedNoZonesBody: Record<string, string> = {
       en: 'Create a zone from the legacy dashboard before opening history.',
-      'de-CH': 'Erstellen Sie eine Zone im bestehenden Dashboard, bevor Sie die thematische Historie öffnen.',
+      'de-CH': 'Erstellen Sie eine Zone im bestehenden Dashboard, bevor Sie den Verlauf öffnen.',
       fr: "Créez une zone depuis le tableau de bord existant avant d'ouvrir l'historique thématique.",
       it: 'Crea una zona dalla dashboard legacy prima di aprire la cronologia tematica.',
       es: 'Crea una zona desde el panel heredado antes de abrir el historial temático.',
