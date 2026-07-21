@@ -196,7 +196,14 @@
       "exportPackage": "Forschungspaket exportieren",
       "exportError": "Export fehlgeschlagen. Erneut versuchen.",
       "exportSuccess": "Export heruntergeladen.",
-      "scopeNotNarrowed": "Es werden Einträge aller Parzellen angezeigt. Das Filtern der Liste und der Exporte nach Station oder Gruppe ist noch nicht möglich."
+      "scopeNotNarrowed": "Es werden Einträge aller Parzellen angezeigt. Das Filtern der Liste und der Exporte nach Station oder Gruppe ist noch nicht möglich.",
+      "pass": {
+        "count": "Produkte",
+        "count_one": "{{count}} Produkt",
+        "count_other": "{{count}} Produkte",
+        "expand": "Arbeitsgang aufklappen",
+        "collapse": "Arbeitsgang zuklappen"
+      }
     },
     "detail": {
       "heading": "Eintragsdetails",

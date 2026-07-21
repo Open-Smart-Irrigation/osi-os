@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { EntryAggregate, EntryListFilters, JournalPlot } from '../../../../types/journal';
+import type { EntryAggregate, EntryListFilters, JournalCatalog, JournalPlot } from '../../../../types/journal';
 
 const mocks = vi.hoisted(() => ({
   useJournalEntries: vi.fn(),
@@ -13,7 +13,17 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    // Mirrors JournalTimeline.test.tsx's mock: resolves {{count}} against a
+    // supplied defaultValue so the P2 pass-count indicator is assertable,
+    // while every other call site (no options, or a plain-string fallback
+    // like `t('activity.x', code)`) still just returns the raw key exactly
+    // as the old single-arg mock did.
+    t: (key: string, options?: { count?: number; defaultValue?: string }) => {
+      if (options?.defaultValue) {
+        return options.defaultValue.replace('{{count}}', String(options.count ?? ''));
+      }
+      return key;
+    },
     i18n: { resolvedLanguage: 'en-GB', language: 'en-GB' },
   }),
 }));
@@ -106,6 +116,43 @@ function entry(overrides: Partial<EntryAggregate> = {}): EntryAggregate {
   };
 }
 
+function activityVocabRow(code: string, labelEn: string) {
+  return {
+    code,
+    kind: 'activity' as const,
+    parent_code: null,
+    value_type: null,
+    quantity_kind: null,
+    basis: null,
+    default_unit_code: null,
+    icon_key: null,
+    scope: 'core' as const,
+    owner_user_uuid: null,
+    gateway_device_eui: null,
+    custom_field_uuid: null,
+    active: 1,
+    sort_order: 0,
+    sync_version: 0,
+    created_at: '2026-07-16T00:00:00.000Z',
+    deleted_at: null,
+    catalog_errors: [],
+    labels: { en: labelEn },
+    constraints: null,
+  };
+}
+
+function catalogWithActivity(code: string, labelEn: string): JournalCatalog {
+  return {
+    catalog_version: 1,
+    catalog_hash: 'hash-1',
+    vocab: [activityVocabRow(code, labelEn)],
+    templates: [],
+    layouts: [],
+    products: [],
+    mappings: [],
+  };
+}
+
 const FILTERS: EntryListFilters = { status: 'final' };
 
 function mockEntries(overrides: {
@@ -129,6 +176,7 @@ function renderTable(overrides: {
   plots?: JournalPlot[];
   selectedEntryUuid?: string | null;
   onSelectEntry?: (uuid: string) => void;
+  catalog?: JournalCatalog;
 } = {}) {
   const onSelectEntry = overrides.onSelectEntry ?? vi.fn();
   const utils = render(
@@ -137,6 +185,7 @@ function renderTable(overrides: {
       plots={overrides.plots ?? [plot()]}
       selectedEntryUuid={overrides.selectedEntryUuid ?? null}
       onSelectEntry={onSelectEntry}
+      catalog={overrides.catalog}
     />,
   );
   return { ...utils, onSelectEntry };
@@ -168,9 +217,35 @@ describe('EntryTable', () => {
     renderTable({ plots: [plot({ plot_uuid: 'plot-1', name: 'North field' })] });
 
     const row = screen.getByTestId('entry-row-e1');
-    expect(within(row).getByText('activity.irrigation')).toBeInTheDocument();
+    // No catalog supplied here — falls back to the raw activity code (see
+    // the dedicated P1 test below for the catalog-label resolution path).
+    expect(within(row).getByText('irrigation')).toBeInTheDocument();
     expect(within(row).getByText(/North field/)).toBeInTheDocument();
     expect(within(row).getByText('row.status.final')).toBeInTheDocument();
+  });
+
+  // P1 fix (live UX pass): the raw activity code used to leak straight to
+  // the table because `t('activity.<code>', code)` only ever covered 6 of
+  // the 16 shipped codes. plant_protection_application is one of the other
+  // 10 — this asserts the desktop table now reads the catalog's own label
+  // instead (see journal/catalogModel.ts's vocabLabelOrCode), the same fix
+  // already applied to DetailPanel and (via JournalEntryRow) the mobile
+  // timeline.
+  it('shows the catalog label for an activity outside the 6-key i18n map, not the raw code', () => {
+    mockEntries({
+      entries: [entry({
+        entry_uuid: 'e1', plot_uuid: 'plot-1', activity_code: 'plant_protection_application',
+      })],
+    });
+
+    renderTable({
+      plots: [plot({ plot_uuid: 'plot-1', name: 'North field' })],
+      catalog: catalogWithActivity('plant_protection_application', 'Plant protection'),
+    });
+
+    const row = screen.getByTestId('entry-row-e1');
+    expect(within(row).getByText('Plant protection')).toBeInTheDocument();
+    expect(within(row).queryByText('plant_protection_application')).not.toBeInTheDocument();
   });
 
   it('labels a farm-level entry (no plot) distinctly from a plot with an unresolved label', () => {
@@ -514,6 +589,93 @@ describe('EntryTable', () => {
       );
 
       expect(screen.queryByText('workspace.table.exportSuccess')).not.toBeInTheDocument();
+    });
+  });
+
+  // P2 (live UX pass): a tank-mix pass (N entries sharing one pass_uuid) used
+  // to render as N visually identical rows with no indication they were one
+  // recorded pass — see journal/groupEntryTablePassRows.ts for the grouping
+  // rule this now applies (pass_uuid, never batch_uuid).
+  describe('pass grouping', () => {
+    it('groups a 3-member pass_uuid group into ONE row with a member count, collapsed by default', () => {
+      mockEntries({
+        entries: [
+          entry({ entry_uuid: 'p1', pass_uuid: 'pass-a', activity_code: 'plant_protection_application' }),
+          entry({ entry_uuid: 'p2', pass_uuid: 'pass-a', activity_code: 'plant_protection_application' }),
+          entry({ entry_uuid: 'p3', pass_uuid: 'pass-a', activity_code: 'plant_protection_application' }),
+        ],
+      });
+
+      renderTable();
+
+      expect(screen.getByTestId('entry-pass-row-pass-a')).toBeInTheDocument();
+      expect(screen.queryByTestId('entry-row-p1')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('entry-row-p2')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('entry-row-p3')).not.toBeInTheDocument();
+      expect(within(screen.getByTestId('entry-pass-row-pass-a')).getByText('3 products')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Expand pass' })).toBeInTheDocument();
+    });
+
+    it('expands a pass row to reveal every member as its own selectable row, then collapses it again', () => {
+      mockEntries({
+        entries: [
+          entry({ entry_uuid: 'p1', pass_uuid: 'pass-a' }),
+          entry({ entry_uuid: 'p2', pass_uuid: 'pass-a' }),
+        ],
+      });
+      const onSelectEntry = vi.fn();
+      renderTable({ onSelectEntry });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Expand pass' }));
+
+      expect(screen.getByTestId('entry-row-p1')).toBeInTheDocument();
+      expect(screen.getByTestId('entry-row-p2')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Collapse pass' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('entry-row-p2'));
+      expect(onSelectEntry).toHaveBeenCalledWith('p2');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse pass' }));
+      expect(screen.queryByTestId('entry-row-p1')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('entry-row-p2')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Expand pass' })).toBeInTheDocument();
+    });
+
+    it('leaves a 2-member pass group and standalone entries both correctly represented side by side', () => {
+      mockEntries({
+        entries: [
+          entry({ entry_uuid: 'standalone-1' }),
+          entry({ entry_uuid: 'p1', pass_uuid: 'pass-a' }),
+          entry({ entry_uuid: 'p2', pass_uuid: 'pass-a' }),
+          entry({ entry_uuid: 'standalone-2' }),
+        ],
+      });
+
+      renderTable();
+
+      expect(screen.getByTestId('entry-row-standalone-1')).toBeInTheDocument();
+      expect(screen.getByTestId('entry-row-standalone-2')).toBeInTheDocument();
+      expect(screen.getByTestId('entry-pass-row-pass-a')).toBeInTheDocument();
+      expect(within(screen.getByTestId('entry-pass-row-pass-a')).getByText('2 products')).toBeInTheDocument();
+      // Exactly the two standalone rows are individually selectable before
+      // expansion — the pass's own two members are not double-counted.
+      expect(screen.getAllByTestId(/^entry-row-/)).toHaveLength(2);
+    });
+
+    it('does not regress a cross-plot batch (shared batch_uuid, no pass_uuid) — each member still renders as its own row', () => {
+      mockEntries({
+        entries: [
+          entry({ entry_uuid: 'b1', batch_uuid: 'batch-1', plot_uuid: 'plot-1', pass_uuid: null }),
+          entry({ entry_uuid: 'b2', batch_uuid: 'batch-1', plot_uuid: 'plot-2', pass_uuid: null }),
+        ],
+      });
+
+      renderTable({ plots: [plot({ plot_uuid: 'plot-1' }), plot({ plot_uuid: 'plot-2', name: 'South field' })] });
+
+      expect(screen.getByTestId('entry-row-b1')).toBeInTheDocument();
+      expect(screen.getByTestId('entry-row-b2')).toBeInTheDocument();
+      expect(screen.queryByTestId(/^entry-pass-row-/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Expand pass|Collapse pass/ })).not.toBeInTheDocument();
     });
   });
 });

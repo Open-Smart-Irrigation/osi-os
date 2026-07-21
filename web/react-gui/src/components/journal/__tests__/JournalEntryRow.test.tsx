@@ -24,14 +24,66 @@ const entry = {
   values: [],
 } as unknown as EntryAggregate;
 
+function vocabRow(code: string, labelEn: string) {
+  return {
+    code,
+    kind: 'activity' as const,
+    parent_code: null,
+    value_type: null,
+    quantity_kind: null,
+    basis: null,
+    default_unit_code: null,
+    icon_key: null,
+    scope: 'core' as const,
+    owner_user_uuid: null,
+    gateway_device_eui: null,
+    custom_field_uuid: null,
+    active: 1,
+    sort_order: 0,
+    sync_version: 0,
+    created_at: '2026-07-16T00:00:00.000Z',
+    deleted_at: null,
+    catalog_errors: [],
+    labels: { en: labelEn },
+    constraints: null,
+  };
+}
+
 describe('JournalEntryRow', () => {
-  it('shows localized activity and status keys with a human plot label', () => {
+  // P1 fix (live UX pass): without a catalog model this falls back to the
+  // raw activity code — the client-side journal.json activity.* map only
+  // ever covered 6 of the 16 shipped codes, so this row no longer reads
+  // through it at all (see vocabLabelOrCode in journal/catalogModel.ts).
+  it('falls back to the raw activity code with no catalog model', () => {
     render(<JournalEntryRow entry={entry} plotLabel="North field" />);
 
-    expect(screen.getByText('activity.irrigation')).toBeInTheDocument();
+    expect(screen.getByText('irrigation')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('row.status.final');
     expect(screen.getByText(/North field/)).toBeInTheDocument();
     expect(screen.queryByText(/p1/)).not.toBeInTheDocument();
+  });
+
+  // P1 fix: an activity code outside the 6-key journal.json activity.* map
+  // (e.g. plant_protection_application) must show its catalog label, not the
+  // raw snake_case code — this is the mobile counterpart to
+  // DetailPanel.test.tsx's "shows the catalog-provided activity label" test.
+  it('shows the catalog label for an activity outside the 6-key i18n map when a model is supplied', () => {
+    const model = {
+      vocabByCode: new Map([['plant_protection_application', vocabRow('plant_protection_application', 'Plant protection')]]),
+      templates: new Map(),
+      layouts: new Map(),
+    };
+
+    render(
+      <JournalEntryRow
+        entry={{ ...entry, activity_code: 'plant_protection_application' }}
+        plotLabel="North field"
+        model={model}
+      />,
+    );
+
+    expect(screen.getByText('Plant protection')).toBeInTheDocument();
+    expect(screen.queryByText('plant_protection_application')).not.toBeInTheDocument();
   });
 
   it('never exposes a raw plot UUID when its human label is unavailable', () => {

@@ -10,6 +10,7 @@ import {
   convertNumericValue,
   deriveActivityLeaves,
   isLayoutTemplateCompatible,
+  vocabLabelOrCode,
   withWeatherAtApplicationVisibility,
 } from '../catalogModel';
 import { deriveFieldStates } from '../templateEngine';
@@ -708,6 +709,20 @@ describe('catalog model', () => {
       definition('full_record', {}, { version: 2 }),
     ];
     expect(activeDefinition(rows, 'full_record')?.version).toBe(2);
+  });
+
+  // Shared home for the lookup DetailPanel.tsx and JournalTimeline.tsx each
+  // used to declare locally, now reused by EntryTable.tsx/JournalEntryRow.tsx
+  // too (P1, live UX pass): the client-side journal.json `activity.*` map
+  // only ever covered 6 of the 16 shipped activity codes.
+  it('resolves a vocab code to its catalog label via vocabLabelOrCode, falling back to the raw code when unresolved', () => {
+    const result = buildCatalogModel(catalog());
+    if (!result.ok) throw new Error('expected a valid catalog model');
+
+    expect(vocabLabelOrCode('irrigation', result.model, 'de-CH')).toBe('irrigation-de');
+    expect(vocabLabelOrCode('irrigation', result.model, 'fr')).toBe('irrigation');
+    expect(vocabLabelOrCode('not_a_real_code', result.model, 'en')).toBe('not_a_real_code');
+    expect(vocabLabelOrCode('irrigation', null, 'en')).toBe('irrigation');
   });
 
   it('parses all shipped definition shapes, expands custom scope, and fails closed', () => {

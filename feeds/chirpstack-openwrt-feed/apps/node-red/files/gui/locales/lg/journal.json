@@ -196,7 +196,14 @@
       "exportPackage": "Fulumya ekipakiti ky'okunoonyereza",
       "exportError": "Fulumya kigaanye. Gezaako nate.",
       "exportSuccess": "Fulumya kiwedde.",
-      "scopeNotNarrowed": "Ebiwandiiko by'emisiri gyonna bye birabika. Okusengejja olukalala n'ebifulumizibwa okusinziira ku siteegi oba ekibinja tekinnayinzika kaakano."
+      "scopeNotNarrowed": "Ebiwandiiko by'emisiri gyonna bye birabika. Okusengejja olukalala n'ebifulumizibwa okusinziira ku siteegi oba ekibinja tekinnayinzika kaakano.",
+      "pass": {
+        "count": "ebyakozesebwa",
+        "count_one": "Ekyakozesebwa {{count}}",
+        "count_other": "Ebyakozesebwa {{count}}",
+        "expand": "Gaziya omulimu guno",
+        "collapse": "Kendeeza omulimu guno"
+      }
     },
     "detail": {
       "heading": "Ebikwata ku kiwandiiko",

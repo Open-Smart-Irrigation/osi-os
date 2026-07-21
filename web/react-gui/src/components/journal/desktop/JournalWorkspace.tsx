@@ -357,6 +357,7 @@ export function JournalWorkspace({
             selectedEntryUuid={selectedEntryUuid}
             onSelectEntry={setSelectedEntryUuid}
             headerStart={logActivityButton}
+            catalog={catalog}
           />
         </div>
       </div>

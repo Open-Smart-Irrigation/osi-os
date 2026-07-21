@@ -2,7 +2,7 @@ import type { TFunction } from 'i18next';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { buildCatalogModel, catalogLabel } from '../../../journal/catalogModel';
+import { buildCatalogModel, catalogLabel, vocabLabelOrCode } from '../../../journal/catalogModel';
 import { cycleDependentsFromError } from '../../../journal/cropCycle';
 import { buildCorrectionPayload, parseContextSnapshot } from '../../../journal/entryCorrection';
 import { deriveFieldStates } from '../../../journal/templateEngine';
@@ -49,23 +49,6 @@ function plotLabelOf(plotUuid: string | null, plots: readonly JournalPlot[]): st
   if (!plotUuid) return null;
   const plot = plots.find((candidate) => candidate.plot_uuid === plotUuid);
   return plot ? (plot.name?.trim() || plot.plot_code) : null;
-}
-
-// Looks up any vocab code (activity, attribute, unit, or choice — the model's
-// vocabByCode is keyed uniformly across kinds) and returns its catalog label,
-// falling back to the raw code only when the catalog has nothing for it.
-// P2-c: this is the same lookup the capture flow's ActivityPicker already
-// uses (see journal/catalogModel.ts's catalogLabel) — reused here instead of
-// `t(`activity.${code}`, code)`, whose client-side journal.json translation
-// namespace only covers a handful of the shipped activity codes and a crop
-// choice code (e.g. agroscope.crop.potato) was never in it at all.
-function vocabLabelOrCode(
-  code: string,
-  model: JournalCaptureCatalogModel | null,
-  locale: string,
-): string {
-  const row = model?.vocabByCode.get(code);
-  return row ? catalogLabel(row, locale) : code;
 }
 
 function formatStoredValue(

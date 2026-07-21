@@ -2,24 +2,9 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { EntryAggregate, JournalCatalog, JournalPlot } from '../../types/journal';
-import type { JournalCaptureCatalogModel } from '../../types/journalCapture';
-import { buildCatalogModel, catalogLabel } from '../../journal/catalogModel';
+import { buildCatalogModel, vocabLabelOrCode } from '../../journal/catalogModel';
 import { hydrateBatchMembership, type BatchMembershipPage } from '../../journal/hydrateBatchMembership';
 import { JournalEntryRow } from './JournalEntryRow';
-
-// P2-c (mobile): season_crop is itself a vocab choice code (e.g.
-// agroscope.crop.potato) — the same lookup the desktop DetailPanel uses
-// (see its own vocabLabelOrCode) to show the catalog label instead of the
-// raw code. Duplicated locally rather than shared because DetailPanel's
-// copy isn't exported; both read the same catalogModel.ts primitives.
-function vocabLabelOrCode(
-  code: string,
-  model: JournalCaptureCatalogModel | null,
-  locale: string,
-): string {
-  const row = model?.vocabByCode.get(code);
-  return row ? catalogLabel(row, locale) : code;
-}
 
 export type JournalTimelineItem =
   | { kind: 'entry'; entry: EntryAggregate }
@@ -261,6 +246,7 @@ export const JournalTimeline: React.FC<JournalTimelineProps> = ({
       key={`${keyPrefix}:${entry.entry_uuid}`}
       entry={entry}
       plotLabel={entry.plot_uuid ? (plotLabels.get(entry.plot_uuid) ?? null) : null}
+      model={model}
     />
   );
 
@@ -288,7 +274,7 @@ export const JournalTimeline: React.FC<JournalTimelineProps> = ({
         const summary = summarizeBatchEntries(summaryEntries);
         const count = state?.status === 'ready' ? hydratedEntries.length : null;
         const activityLabel = summary.activityCode
-          ? t(`activity.${summary.activityCode}`, summary.activityCode)
+          ? vocabLabelOrCode(summary.activityCode, model, locale)
           : null;
         const titleId = `journal-batch-title-${itemIndex}`;
         const contentId = `journal-batch-content-${itemIndex}`;
