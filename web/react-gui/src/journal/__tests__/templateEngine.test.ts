@@ -257,6 +257,87 @@ describe('template engine', () => {
     });
   });
 
+  describe('Slice E: scoped_by_activity operation-section visibility (R5)', () => {
+    const scopedTemplate = {
+      code: 'full_record',
+      version: 5,
+      sections: [
+        { code: 'identity', fields: ['activity_code', 'plot_uuid'] },
+        {
+          code: 'operation',
+          scoped_by_activity: true,
+          fields: ['attr.irrigation_depth', 'attr.product_uuid', 'attr.harvest_yield_area', 'attr.operator'],
+        },
+        { code: 'notes', fields: ['note'] },
+      ],
+      operation_fields_by_activity: {
+        irrigation: ['attr.irrigation_depth', 'attr.operator'],
+        fertilization: ['attr.product_uuid', 'attr.operator'],
+      },
+      activity_requirements: {
+        fertilization: { required: ['attr.product_uuid'], optional: [], required_any: [] },
+      },
+    };
+    const layout = {
+      code: 'open_field',
+      version: 1,
+      activity_codes: ['irrigation', 'fertilization'],
+      supported_templates: ['full_record'],
+      minimum_fields: [],
+      conditional_fields: {},
+      option_dependencies: [],
+    };
+
+    it("narrows a scoped_by_activity section to that activity's operation_fields_by_activity entry", () => {
+      const irrigationCodes = deriveFieldStates(scopedTemplate, layout, { activity_code: 'irrigation' })
+        .filter((state) => state.visible)
+        .map((state) => state.code);
+      expect(irrigationCodes).toEqual(
+        expect.arrayContaining(['activity_code', 'plot_uuid', 'attr.irrigation_depth', 'attr.operator', 'note']),
+      );
+      expect(irrigationCodes).not.toContain('attr.product_uuid');
+      expect(irrigationCodes).not.toContain('attr.harvest_yield_area');
+
+      const fertilizationCodes = deriveFieldStates(scopedTemplate, layout, { activity_code: 'fertilization' })
+        .filter((state) => state.visible)
+        .map((state) => state.code);
+      expect(fertilizationCodes).toEqual(
+        expect.arrayContaining(['activity_code', 'plot_uuid', 'attr.product_uuid', 'attr.operator', 'note']),
+      );
+      expect(fertilizationCodes).not.toContain('attr.irrigation_depth');
+      expect(fertilizationCodes).not.toContain('attr.harvest_yield_area');
+    });
+
+    it('never hides a field the activity_requirements/conditional_groups mark required, even when the scoped map narrows it out', () => {
+      // fertilization's scoped map narrows the operation section to
+      // product_uuid + operator only, but activity_requirements independently
+      // requires attr.product_uuid — addRequirement's force-add must win
+      // regardless of the narrowing (this is the load-bearing guarantee the
+      // catalog-side design comment calls out: the map can only ever trim
+      // *optional* clutter, never smuggle out a required field).
+      const states = deriveFieldStates(scopedTemplate, layout, { activity_code: 'fertilization' });
+      const productState = states.find((state) => state.code === 'attr.product_uuid');
+      expect(productState).toMatchObject({ visible: true, required: true });
+    });
+
+    it('shows nothing from the scoped section until an activity is selected', () => {
+      const states = deriveFieldStates(scopedTemplate, layout, {});
+      const visibleOperationCodes = states
+        .filter((state) => state.visible &&
+          ['attr.irrigation_depth', 'attr.product_uuid', 'attr.harvest_yield_area', 'attr.operator']
+            .includes(state.code))
+        .map((state) => state.code);
+      expect(visibleOperationCodes).toEqual([]);
+    });
+
+    it('leaves an ordinary (non-scoped) section fully unaffected', () => {
+      const states = deriveFieldStates(scopedTemplate, layout, { activity_code: 'irrigation' });
+      expect(states.find((state) => state.code === 'activity_code')?.visible).toBe(true);
+      expect(states.find((state) => state.code === 'plot_uuid')?.visible).toBe(true);
+      expect(states.find((state) => state.code === 'note')?.visible).toBe(true);
+    });
+  });
+
   it('builds exact canonical and entered numeric facts without generic value', () => {
     const result = buildCatalogModel(valueCatalog());
     expect(result.ok).toBe(true);

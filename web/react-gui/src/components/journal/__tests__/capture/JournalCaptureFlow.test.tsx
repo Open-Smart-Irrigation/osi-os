@@ -1152,6 +1152,10 @@ describe('JournalCaptureFlow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'seeding' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
 
+    // This fixture's full_record row declares no activity_requirements, so
+    // attr.crop is optional here and Slice E's progressive disclosure tucks
+    // it behind the collapsed "More detail" group.
+    fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
     expect(screen.getByRole('combobox', { name: 'attr.crop' })).toHaveValue(
       'agroscope.crop.barley_winter',
     );
@@ -1170,6 +1174,10 @@ describe('JournalCaptureFlow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
 
+    // This fixture's full_record row declares no activity_requirements, so
+    // attr.crop is optional here and Slice E's progressive disclosure tucks
+    // it behind the collapsed "More detail" group.
+    fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
     const cropControl = screen.getByRole('combobox', { name: 'attr.crop' });
     expect(cropControl).toHaveValue('agroscope.crop.barley_winter');
     fireEvent.change(cropControl, { target: { value: 'agroscope.crop.barley_spring' } });
@@ -1204,6 +1212,10 @@ describe('JournalCaptureFlow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    // This fixture's full_record row declares no activity_requirements, so
+    // attr.crop is optional here and Slice E's progressive disclosure tucks
+    // it behind the collapsed "More detail" group.
+    fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
     const cropControl = screen.getByRole('combobox', { name: 'attr.crop' });
     expect(cropControl).toHaveValue('agroscope.crop.barley_winter');
     fireEvent.change(cropControl, { target: { value: '' } });
@@ -3018,6 +3030,12 @@ describe('JournalCaptureFlow', () => {
     render(<JournalCaptureFlow {...baseProps} catalog={invalidRetainedTemplateCatalog} initialPlot={plot} />);
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    // The stored 'research_observation' preference normalizes to 'full_record'
+    // (Research is no longer a selectable detail level), and this fixture's
+    // full_record row declares no activity_requirements, so attr.explicit_amount
+    // is optional and Slice E's progressive disclosure tucks it behind the
+    // collapsed "More detail" group.
+    fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Explicit amount' }), {
       target: { value: '5' },
     });

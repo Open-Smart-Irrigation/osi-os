@@ -219,6 +219,7 @@ const DraftResumePanel: React.FC<DraftResumePanelProps> = ({ draft, model, produ
         products={products}
         locale={locale}
         showValidation
+        templateCode={template.code}
       />
       {staleError && (
         <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">

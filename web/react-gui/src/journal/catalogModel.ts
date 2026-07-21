@@ -171,6 +171,8 @@ function parseSections(
     if (!isRecord(raw) || typeof raw.code !== 'string') return null;
     const includeScope = raw.include_scope;
     if (includeScope != null && includeScope !== 'core' && includeScope !== 'custom') return null;
+    const scopedByActivity = raw.scoped_by_activity;
+    if (scopedByActivity != null && typeof scopedByActivity !== 'boolean') return null;
     const rawFields = raw.fields == null ? [] : raw.fields;
     if (!validFields(rawFields, domain)) return null;
     const fields = [...rawFields];
@@ -182,9 +184,54 @@ function parseSections(
         if (!fields.some((field) => fieldCode(field) === row.code)) fields.push(row.code);
       }
     }
-    sections.push({ code: raw.code, fields, ...(includeScope ? { include_scope: includeScope } : {}) });
+    sections.push({
+      code: raw.code,
+      fields,
+      ...(includeScope ? { include_scope: includeScope } : {}),
+      ...(scopedByActivity ? { scoped_by_activity: true } : {}),
+    });
   }
   return sections;
+}
+
+// Slice E (full_record@5, R5): mirrors parseQuickFields' shape (an
+// activity_code -> field-code map validated for completeness against every
+// known activity), but scoped to the one `scoped_by_activity` section this
+// template declares — every referenced field must not just be a *known*
+// field but a member of that section's own declared field superset (the
+// guard generate-journal-catalog.js's validateOperationFieldsByActivity
+// enforces server-side; this is its GUI-side twin so a malformed/foreign
+// catalog payload can never smuggle an out-of-section field into visibility).
+// Returns `undefined` when no section is scoped_by_activity and no map is
+// declared (every template/version before full_record@5); `null` when the
+// two are out of sync or the map itself is malformed — the caller must treat
+// `null` as "reject this definition".
+function parseOperationFieldsByActivity(
+  value: unknown,
+  domain: DefinitionDomain,
+  sections: JournalTemplateSection[],
+): Record<string, string[]> | null | undefined {
+  const scopedSections = sections.filter((section) => section.scoped_by_activity);
+  if (value == null) return scopedSections.length === 0 ? undefined : null;
+  if (scopedSections.length !== 1 || !isRecord(value)) return null;
+  const allowedFields = new Set(
+    scopedSections[0].fields
+      .map((field) => fieldCode(field))
+      .filter((code): code is string => code != null),
+  );
+  const activityCodes = [...domain.vocabByCode.values()].filter((row) => row.kind === 'activity');
+  const result: Record<string, string[]> = {};
+  for (const [activityCode, rawFields] of Object.entries(value)) {
+    if (domain.vocabByCode.get(activityCode)?.kind !== 'activity') return null;
+    const fields = stringArray(rawFields);
+    if (!fields || fields.length === 0 ||
+        fields.some((code) => !knownField(domain.vocabByCode, code) || !allowedFields.has(code))) {
+      return null;
+    }
+    result[activityCode] = fields;
+  }
+  if (activityCodes.some((activity) => !(activity.code in result))) return null;
+  return result;
 }
 
 // The set of field codes a template actually shows the user: its top-level
@@ -293,6 +340,12 @@ function parseTemplate(
   }
   const quickFields = parseQuickFields(definition.quick_fields, domain);
   if (quickFields === null) return null;
+  const operationFieldsByActivity = parseOperationFieldsByActivity(
+    definition.operation_fields_by_activity,
+    domain,
+    sections,
+  );
+  if (operationFieldsByActivity === null) return null;
   return {
     code: row.code,
     version: row.version,
@@ -301,6 +354,7 @@ function parseTemplate(
     carry_forward: carryForward,
     ...(typeof maxPrimaryFields === 'number' ? { max_primary_fields: maxPrimaryFields } : {}),
     ...(quickFields ? { quick_fields: quickFields } : {}),
+    ...(operationFieldsByActivity ? { operation_fields_by_activity: operationFieldsByActivity } : {}),
     require_explicit_choices: requireExplicitChoices,
     show_standard_mappings: showStandardMappings,
     activity_requirements: activityRequirements,

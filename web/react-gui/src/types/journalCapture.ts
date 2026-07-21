@@ -40,6 +40,13 @@ export interface JournalTemplateSection {
   code: string;
   fields: JournalFieldInput[];
   include_scope?: 'core' | 'custom';
+  // Slice E (full_record@5, R5): when true, this section's *visible* fields
+  // per entry are resolved from the template's own
+  // `operation_fields_by_activity[activity_code]` map instead of this
+  // section's flat `fields` list (which stays the declared superset every
+  // per-activity entry must be a member of). Absent on every other
+  // section/template.
+  scoped_by_activity?: boolean;
 }
 
 export interface JournalRequirement {
@@ -70,6 +77,10 @@ export interface JournalTemplateDefinition {
   // this map instead of force-adding the layout's minimum_fields to every
   // entry regardless of activity. Absent on every other template/version.
   quick_fields?: Record<string, string[]>;
+  // Slice E (full_record@5, R5): activity_code -> field-code list scoping the
+  // one `scoped_by_activity` section's visibility (see that flag above).
+  // Present only alongside a scoped_by_activity section; absent otherwise.
+  operation_fields_by_activity?: Record<string, string[]>;
 }
 
 export interface JournalDependencyCondition {

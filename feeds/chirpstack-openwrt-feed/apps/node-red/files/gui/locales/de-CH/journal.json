@@ -325,7 +325,9 @@
       "note": "Notiz",
       "booleanYes": "Ja",
       "booleanNo": "Nein",
-      "plotContext": "Parzellenkontext"
+      "plotContext": "Parzellenkontext",
+      "keyValues": "Kernwerte",
+      "moreDetail": "Weitere Details"
     },
     "validation": {
       "required": "Füllen Sie dieses Feld aus.",

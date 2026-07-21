@@ -325,7 +325,9 @@
       "note": "Nota",
       "booleanYes": "Sí",
       "booleanNo": "No",
-      "plotContext": "Contexto de la parcela"
+      "plotContext": "Contexto de la parcela",
+      "keyValues": "Valores clave",
+      "moreDetail": "Más detalles"
     },
     "validation": {
       "required": "Completa este campo",

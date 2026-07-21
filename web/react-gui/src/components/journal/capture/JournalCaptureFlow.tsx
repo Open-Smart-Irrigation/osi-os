@@ -2303,7 +2303,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
               </dl>
             </div>
           )}
-          {template && layout && leaf && <EntryForm model={model} layout={layout} fieldStates={fieldStates} values={values} onChange={formChanged} selections={selections} products={catalog.products} locale={locale} showValidation={showValidation} />}
+          {template && layout && leaf && <EntryForm model={model} layout={layout} fieldStates={fieldStates} values={values} onChange={formChanged} selections={selections} products={catalog.products} locale={locale} showValidation={showValidation} templateCode={template.code} />}
           {safePrefill.length > 0 && <p role="status" className="text-sm font-semibold text-[var(--text-secondary)]">{t('capture.carry.prefilled')}</p>}
           {carryForwardCandidate?.repeatTreatment && carryForwardContext && (
             <RepeatTreatmentCard
