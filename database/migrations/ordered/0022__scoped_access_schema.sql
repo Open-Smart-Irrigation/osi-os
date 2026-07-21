@@ -239,7 +239,8 @@ END;
 CREATE TRIGGER IF NOT EXISTS trg_dp_users_outbox_role_au
 AFTER UPDATE OF role, disabled_at ON users
 FOR EACH ROW
-WHEN (SELECT enabled FROM scoped_access_emit WHERE id = 1) = 1
+WHEN NEW.user_uuid IS NOT NULL AND NEW.user_uuid != ''
+AND (SELECT enabled FROM scoped_access_emit WHERE id = 1) = 1
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,

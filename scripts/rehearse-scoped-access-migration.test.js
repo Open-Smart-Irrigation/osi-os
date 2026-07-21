@@ -86,6 +86,10 @@ test('USER trigger arms: uuid assigned by sibling trigger still emits non-null u
   // Path 3: role mutation -> role_au arm fires.
   db.exec(`UPDATE users SET role='admin' WHERE username='carol'`);
   assert.equal(db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_UPSERTED'`).get().n, 3);
+  // Guard regression: role mutation on a NULL-uuid row must NOT emit.
+  db.exec(`UPDATE users SET user_uuid=NULL WHERE username='dave'`);
+  db.exec(`UPDATE users SET role='viewer' WHERE username='dave'`);
+  assert.equal(db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_UPSERTED'`).get().n, 3);
   db.close();
 });
 
@@ -97,10 +101,15 @@ test('assignment triggers emit upsert on grant and delete on tombstone', () => {
   assert.equal(db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_ZONE_ASSIGNMENT_UPSERTED'`).get().n, 1);
   db.exec(`UPDATE user_zone_assignments SET deleted_at='2026-01-02', sync_version=sync_version+1 WHERE assignment_uuid='as1'`);
   assert.equal(db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_ZONE_ASSIGNMENT_DELETED'`).get().n, 1);
+  db.exec(`INSERT INTO user_plot_assignments (assignment_uuid, user_uuid, plot_uuid, created_at)
+           VALUES ('ap1','u1','p1','2026-01-01')`);
+  assert.equal(db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_PLOT_ASSIGNMENT_UPSERTED'`).get().n, 1);
+  db.exec(`UPDATE user_plot_assignments SET deleted_at='2026-01-02', sync_version=sync_version+1 WHERE assignment_uuid='ap1'`);
+  assert.equal(db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_PLOT_ASSIGNMENT_DELETED'`).get().n, 1);
   db.close();
 });
 
-test('0023 backfills null user_uuid and promotes named admin; no-op on empty users', () => {
+test('0023 backfills null user_uuid and promotes lowest-id admin; no-op on empty users', () => {
   const db = freshDb();
   db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('legacy1','h','2026-01-01')`);
   db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('legacy2','h','2026-01-01')`);
