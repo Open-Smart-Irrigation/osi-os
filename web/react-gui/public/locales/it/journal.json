@@ -13,7 +13,7 @@
     "syncBody": "Ogni registrazione indica se è stata salvata sul gateway aziendale o è ancora in attesa. Nulla va perso silenziosamente."
   },
   "row": {
-    "farmLevel": "Livello aziendale",
+    "farmLevel": "Intera azienda",
     "unknownPlot": "Particella sconosciuta",
     "status": {
       "final": "Definitivo",
@@ -116,7 +116,7 @@
     "layoutRequired": "Seleziona un layout attivo",
     "stale": "Questa particella è cambiata altrove. Ricaricala prima di salvare.",
     "codeConflict": "Il codice della particella è già in uso.",
-    "heterogeneousGroup": "La particella appartiene a un gruppo eterogeneo.",
+    "heterogeneousGroup": "La particella appartiene a un gruppo con layout incompatibili.",
     "unresolvedGroup": "Sciogli il gruppo di particelle prima di disattivare questa particella.",
     "loading": "Salvataggio…",
     "error": "Impossibile salvare la particella.",
@@ -151,7 +151,7 @@
   },
   "error": {
     "title": "Impossibile caricare il diario",
-    "body": "Il gateway non ha risposto correttamente. Riprova.",
+    "body": "Il gateway non ha risposto. Riprova.",
     "retry": "Riprova"
   },
   "filters": {

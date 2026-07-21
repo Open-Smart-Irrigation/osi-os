@@ -1,7 +1,7 @@
 {
   "title": "Connetti a OSI Server",
   "navLink": "OSI Server",
-  "backToDashboard": "Torna alla Dashboard",
+  "backToDashboard": "Torna alla dashboard",
   "status": {
     "linked": "Account collegato a OSI Server",
     "notLinked": "Non connesso a OSI Server",
@@ -22,7 +22,7 @@
   },
   "warning": {
     "title": "Importante",
-    "message": "Dopo il collegamento, dovrai utilizzare le tue credenziali OSI Server per accedere. OSI OS memorizza un verificatore offline specifico del gateway per l'accesso collegato.",
+    "message": "Dopo il collegamento, dovrai usare le tue credenziali OSI Server per accedere. OSI OS conserva sul gateway una copia sicura e offline delle tue credenziali, così puoi accedere anche senza connessione a internet.",
     "proceed": "Procedi"
   },
   "success": {

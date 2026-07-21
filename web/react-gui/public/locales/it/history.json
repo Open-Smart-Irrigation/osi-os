@@ -2,7 +2,7 @@
   "history": {
     "nav": {
       "history": "Cronologia",
-      "legacyDashboard": "Dashboard legacy",
+      "legacyDashboard": "Vecchia dashboard",
       "logout": "Esci"
     },
     "shell": {
@@ -10,11 +10,11 @@
       "subtitle": "Cronologia locale del gateway per {{username}}",
       "loadingLocalCards": "Caricamento schede storiche locali…",
       "unavailableTitle": "La cronologia non è disponibile",
-      "unavailableBody": "I feature flag di runtime mantengono disattivata la nuova shell della cronologia finché il gateway locale non la abilita.",
-      "featureFlagFailed": "La richiesta del feature flag non è riuscita. La dashboard legacy è ancora disponibile.",
+      "unavailableBody": "La Cronologia è disattivata su questo gateway e apparirà qui non appena sarà abilitata.",
+      "featureFlagFailed": "Non è stato possibile verificare se la Cronologia è abilitata. La vecchia dashboard è comunque disponibile.",
       "zonesFailedTitle": "Impossibile caricare le zone della cronologia",
       "noZonesTitle": "Nessuna zona ancora presente",
-      "noZonesBody": "Crea una zona dalla dashboard legacy prima di aprire la cronologia tematica.",
+      "noZonesBody": "Crea una zona dalla vecchia dashboard prima di aprire la Cronologia.",
       "cardsFailed": "Impossibile caricare le schede storiche.",
       "retryCards": "Riprova schede"
     },
@@ -41,7 +41,7 @@
       "comparisonMode": "Confronto",
       "addPanel": "Aggiungi pannello {{title}}",
       "removePanel": "Rimuovi pannello",
-      "panelLimitWarning": "Su questo gateway edge possono essere mostrati solo {{count}} pannelli di confronto.",
+      "panelLimitWarning": "Su questo gateway possono essere mostrati solo {{count}} pannelli di confronto.",
       "selectedTimestampNone": "Nessun timestamp selezionato",
       "selectedTimestamp": "Timestamp selezionato: {{timestamp}}",
       "inspectorTitle": "Ispettore",
@@ -66,10 +66,10 @@
     "detail": {
       "backToHistory": "Torna alla cronologia",
       "invalidRouteTitle": "Scheda storica non disponibile",
-      "invalidRouteBody": "Torna alla Cronologia e scegli una scheda disponibile.",
+      "invalidRouteBody": "Torna alla cronologia e scegli una scheda disponibile.",
       "loading": "Caricamento scheda storica…",
       "notFoundTitle": "Scheda storica non disponibile",
-      "notFoundBody": "Torna alla Cronologia e scegli una scheda disponibile.",
+      "notFoundBody": "Torna alla cronologia e scegli una scheda disponibile.",
       "controlsPlaceholder": "Intervallo di date",
       "inspectorPlaceholder": "Ispettore",
       "rangeControlLabel": "Intervallo di date",
@@ -90,7 +90,7 @@
       "pinnedCards": "Schede fissate",
       "availableCards": "Schede disponibili",
       "savedWorkspaces": "Aree di lavoro salvate",
-      "workspaceDisabled": "Il salvataggio delle aree di lavoro non è abilitato in questa versione.",
+      "workspaceDisabled": "Il salvataggio delle aree di lavoro non è ancora abilitato.",
       "workspaceName": "Nome area di lavoro",
       "saveWorkspace": "Salva area di lavoro",
       "updateWorkspace": "Aggiorna area di lavoro",
@@ -110,14 +110,14 @@
     },
     "cardFrame": {
       "emptyTitle": "Seleziona una scheda storica",
-      "emptyBody": "Scegli una zona e una scheda tematica per esaminare la cronologia locale.",
+      "emptyBody": "Scegli una zona e una scheda storica per esaminare la cronologia locale.",
       "typeHistory": "Cronologia {{cardType}}",
       "viewModes": "Modalità di visualizzazione {{title}}",
       "unavailable": "Questa scheda non è disponibile per la zona selezionata.",
       "timelineBrush": "Finestra della timeline",
       "timelineBrushKeyboardHelp": "Usa le frecce per spostarti, più o meno per zoomare, e Home o Invio per reimpostare.",
       "aggregationBadge": "Aggregazione: {{aggregation}}",
-      "placeholderBody": "I dati del grafico e del calendario verranno caricati qui quando le API dei dati della scheda saranno abilitate.",
+      "placeholderBody": "I dati del grafico e del calendario verranno caricati qui non appena saranno disponibili.",
       "cardDataLoading": "Caricamento dati della scheda…",
       "cardDataError": "Impossibile caricare i dati della scheda: {{message}}",
       "cardDataUnknownError": "Errore sconosciuto"
@@ -162,7 +162,7 @@
     "gatewayStatus": {
       "title": "Panoramica stato gateway",
       "emptyTitle": "Dati limitati sullo stato del gateway",
-      "emptyBody": "I dettagli sullo stato del gateway appariranno qui non appena l'hub li segnala.",
+      "emptyBody": "I dettagli sullo stato del gateway appariranno qui non appena quest'ultimo li segnala.",
       "lastSeen": "Ultimo rilevamento",
       "dataAsOf": "Dati aggiornati al",
       "syncState": "Stato di sincronizzazione",
@@ -222,7 +222,7 @@
     },
     "cardType": {
       "soil": "Suolo",
-      "dendro": "Dendro",
+      "dendro": "Dendrometro",
       "environment": "Ambiente",
       "irrigation": "Irrigazione",
       "gateway": "Gateway"
@@ -276,12 +276,12 @@
       "emptyTitle": "Nessun dato sul profilo del suolo",
       "emptyBody": "Le letture del profilo per profondità non sono disponibili per questo intervallo.",
       "depthLabel": "{{depth}} cm",
-      "depthUnknown": "Profondità in attesa",
+      "depthUnknown": "Profondità non impostata",
       "valueMissing": "Nessuna lettura",
       "status": {
         "dry_stress": "Stress idrico",
         "optimal": "Ottimale",
-        "wet_excess": "Eccesso idrico",
+        "wet_excess": "Troppo bagnato",
         "mixed": "Misto",
         "no_data": "Nessun dato"
       },
@@ -310,7 +310,7 @@
       "state": {
         "dry_stress": "Stress idrico",
         "optimal": "Ottimale",
-        "wet_excess": "Eccesso idrico",
+        "wet_excess": "Troppo bagnato",
         "mixed": "Misto",
         "normal_growth": "Crescita normale",
         "reduced_growth": "Crescita ridotta",
@@ -405,7 +405,7 @@
       },
       "rootZoneDry": {
         "title": "La zona radicale è entrata in stato secco",
-        "body": "La tensione idrica del suolo nello strato inferiore è rimasta secca per tutto il periodo selezionato."
+        "body": "La tensione idrica del suolo nello strato radicale profondo è rimasta nell'intervallo secco per tutto il periodo selezionato."
       },
       "dataCoverageGap": {
         "title": "I dati del sensore sono incompleti",
@@ -441,12 +441,12 @@
       "availability": {
         "collected": "Raccolto",
         "not_collected_at_time": "Non raccolto in quel momento",
-        "unknown_now": "Sconosciuto ora",
+        "unknown_now": "Attualmente sconosciuto",
         "unsupported": "Non supportato"
       },
       "field": {
-        "device_eui": "EUI del dispositivo",
-        "primaryDeveui": "EUI del dispositivo",
+        "device_eui": "DevEUI",
+        "primaryDeveui": "DevEUI",
         "rssi": "RSSI",
         "snr": "SNR",
         "raw_payload": "Payload grezzo",
