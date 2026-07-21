@@ -9,7 +9,7 @@
     "axis": {
       "rename": "Rename axis label"
     },
-    "backToDashboard": "← Back to Dashboard",
+    "backToDashboard": "← Back to dashboard",
     "loadError": "Analysis data could not be loaded.",
     "pooled": {
       "tooltip": "Correlates all zones' points as one combined dataset, in addition to each zone separately."
@@ -24,7 +24,7 @@
     "aggregation": {
       "label": "Aggregation",
       "raw": "Raw",
-      "fifteenMinute": "15 minutes",
+      "fifteenMinute": "15 min",
       "hourly": "Hourly",
       "daily": "Daily",
       "weekly": "Weekly"

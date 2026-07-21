@@ -24,7 +24,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.detail.visualizationHelp': 'Drag to pan, pinch to zoom, double tap to reset, or long press to inspect.',
     'history.settings.open': 'Open card settings',
     'history.settings.menuLabel': 'Card settings',
-    'history.settings.advancedView': 'Advanced View',
+    'history.settings.advancedView': 'Advanced view',
     'history.settings.cardSettings': 'Card settings',
     'history.settings.cardSettingsUnavailable': 'Card settings are not available yet.',
     'history.settings.resetRange': 'Reset range',
@@ -84,7 +84,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.viewMode.daily-min-max': 'Daily Min/Max',
     'history.viewMode.calendar': 'Calendar',
     'history.viewMode.status-overview': 'Status Overview',
-    'history.viewMode.advanced': 'Advanced View',
+    'history.viewMode.advanced': 'Advanced view',
     'history.metadata.coverageUnknown': 'Coverage unknown',
     'history.metadata.coverageKnown': '{{coverage}}% coverage',
     'history.metadata.coverageConfidence.configured': 'Configured cadence',
@@ -768,7 +768,7 @@ describe('History card detail route', () => {
     await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' });
     expect(screen.queryByRole('group', { name: 'View' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Line Chart' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Advanced view' })).not.toBeInTheDocument();
     const overlay = screen.getByTestId('view-mode-label');
     expect(overlay).toHaveTextContent(/Soil Profile/i);
     expect(overlay.className).toMatch(/absolute/);
@@ -814,12 +814,12 @@ describe('History card detail route', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.queryByRole('group', { name: 'View' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Advanced view' })).not.toBeInTheDocument();
     expect(screen.queryByText('ABCDEF0123456789')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
     const menu = screen.getByRole('menu', { name: 'Card settings' });
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Advanced View' }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Advanced view' }));
 
     expect(await screen.findByRole('region', { name: 'Advanced diagnostics' })).toBeInTheDocument();
     expect(historyAPI.getZoneCardAdvanced).toHaveBeenCalledWith(
@@ -848,7 +848,7 @@ describe('History card detail route', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
     const menu = screen.getByRole('menu', { name: 'Card settings' });
 
-    expect(within(menu).queryByRole('menuitem', { name: 'Advanced View' })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole('menuitem', { name: 'Advanced view' })).not.toBeInTheDocument();
     expect(within(menu).queryByRole('menuitem', { name: 'Card settings' })).not.toBeInTheDocument();
     expect(within(menu).getByRole('menuitem', { name: 'Refresh' })).toBeInTheDocument();
   });
@@ -1292,7 +1292,7 @@ describe('History card detail route', () => {
 
     await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
-    fireEvent.click(within(screen.getByRole('menu', { name: 'Card settings' })).getByRole('menuitem', { name: 'Advanced View' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Card settings' })).getByRole('menuitem', { name: 'Advanced view' }));
 
     await waitFor(() => expect(historyAPI.getZoneCardAdvanced).toHaveBeenCalledTimes(1));
     historyAPIMock.getZoneCardData.mockClear();

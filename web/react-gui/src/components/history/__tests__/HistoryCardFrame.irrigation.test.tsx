@@ -31,7 +31,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.viewMode.event-timeline': 'Event Timeline',
     'history.viewMode.calendar': 'Calendar',
     'history.viewMode.irrigation-response': 'Irrigation Response',
-    'history.viewMode.advanced': 'Advanced View',
+    'history.viewMode.advanced': 'Advanced view',
     'history.metadata.coverageKnown': '{{coverage}}% coverage',
     'history.metadata.coverageUnknown': 'Coverage unknown',
     'history.metadata.coverageConfidence.configured': 'Configured cadence',

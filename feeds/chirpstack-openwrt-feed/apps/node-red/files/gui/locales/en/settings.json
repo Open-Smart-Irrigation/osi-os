@@ -27,7 +27,7 @@
   "autoRefresh": "Auto-refresh dashboard",
   "on": "On",
   "off": "Off",
-  "userRequestTitle": "User request",
+  "userRequestTitle": "User Request",
   "requestType": "Request type",
   "bugFix": "Bug fix",
   "featureRequest": "Feature request",

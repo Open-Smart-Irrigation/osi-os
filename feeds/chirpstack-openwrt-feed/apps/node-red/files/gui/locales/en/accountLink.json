@@ -1,7 +1,7 @@
 {
   "title": "Connect to OSI Server",
   "navLink": "OSI Server",
-  "backToDashboard": "Back to Dashboard",
+  "backToDashboard": "Back to dashboard",
   "status": {
     "linked": "Account linked to OSI Server",
     "notLinked": "Not connected to OSI Server",

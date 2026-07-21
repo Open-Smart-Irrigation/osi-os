@@ -34,7 +34,7 @@ vi.mock('../../../services/api', () => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, params?: Record<string, string>) => {
-      if (key === 'zone.export.title') return 'Data export';
+      if (key === 'zone.export.title') return 'Export data';
       if (key === 'zone.export.rangeSummary') return `${params?.from ?? ''} to ${params?.to ?? ''}`;
       return key;
     },
@@ -67,7 +67,7 @@ describe('ZoneConfigModal irrigation calibration', () => {
       }),
     );
 
-    expect(await screen.findByText('Data export')).toBeInTheDocument();
+    expect(await screen.findByText('Export data')).toBeInTheDocument();
     expect(screen.getByTestId('range-calendar')).toBeInTheDocument();
   });
 
@@ -115,7 +115,7 @@ describe('ZoneConfigModal irrigation calibration', () => {
       }),
     );
 
-    expect(await screen.findByText('Data export')).toBeInTheDocument();
+    expect(await screen.findByText('Export data')).toBeInTheDocument();
     expect(screen.queryByText('Prediction Advisory')).not.toBeInTheDocument();
     expect(screen.queryByText('Scheduling source')).not.toBeInTheDocument();
     expect(screen.queryByText('Used to convert irrigation liters into effective mm for the water balance.')).not.toBeInTheDocument();

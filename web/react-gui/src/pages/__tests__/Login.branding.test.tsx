@@ -25,7 +25,7 @@ vi.mock('react-i18next', () => ({
         'login.usernamePlaceholder': 'Enter your username',
         'login.password': 'Password',
         'login.passwordPlaceholder': 'Enter your password',
-        'login.signIn': 'Sign In',
+        'login.signIn': 'Sign in',
         'login.signingIn': 'Signing In...',
         'login.noAccount': 'Register Account',
         'login.failed': 'Login failed. Please check your credentials.',

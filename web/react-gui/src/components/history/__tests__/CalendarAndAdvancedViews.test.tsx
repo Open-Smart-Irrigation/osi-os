@@ -27,7 +27,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
     'history.cardType.soil': 'Soil',
     'history.viewMode.calendar': 'Calendar',
-    'history.viewMode.advanced': 'Advanced View',
+    'history.viewMode.advanced': 'Advanced view',
     'history.metadata.coverageKnown': '{{coverage}}% coverage',
     'history.metadata.coverageUnknown': 'Coverage unknown',
     'history.metadata.coverageConfidence.configured': 'Configured cadence',
@@ -268,7 +268,7 @@ describe('HistoryCardFrame calendar and advanced views', () => {
     useHistoryCardAdvancedDataMock.mockReturnValue({ data: advanced(), error: undefined, isLoading: false, refresh: vi.fn() });
 
     render(<HistoryCardFrame card={card()} scope={{ type: 'zone', zoneId: 1 }} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Advanced View' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced view' }));
 
     expect(useHistoryCardAdvancedDataMock).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: true }));
     expect(screen.getByRole('region', { name: 'Advanced diagnostics' })).toBeInTheDocument();

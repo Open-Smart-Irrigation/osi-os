@@ -247,8 +247,8 @@
       "line-chart": "Line Chart",
       "calendar": "Calendar",
       "irrigation-response": "Irrigation Response",
-      "advanced": "Advanced View",
-      "growth-timeline": "Growth Timeline",
+      "advanced": "Advanced view",
+      "growth-timeline": "Growth timeline",
       "stress-events": "Stress Events",
       "daily-min-max": "Daily Min/Max",
       "event-timeline": "Event Timeline",
@@ -460,8 +460,8 @@
         "unsupported": "Unsupported"
       },
       "field": {
-        "device_eui": "Device EUI",
-        "primaryDeveui": "Device EUI",
+        "device_eui": "DevEUI",
+        "primaryDeveui": "DevEUI",
         "rssi": "RSSI",
         "snr": "SNR",
         "raw_payload": "Raw payload",
@@ -544,7 +544,7 @@
     "settings": {
       "open": "Open card settings",
       "menuLabel": "Card settings",
-      "advancedView": "Advanced View",
+      "advancedView": "Advanced view",
       "cardSettings": "Card settings",
       "resetRange": "Reset range",
       "cardSettingsUnavailable": "Card settings are not available yet.",
