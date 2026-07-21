@@ -795,6 +795,385 @@ test('saveEntry returns the original batch receipts after the plot is inactive o
   }
 });
 
+// Slice F (B1/B2 fix): tank-mix pass batch — a single-plot, multi-product
+// pass finalized as ONE atomic saveEntry call sharing one pass_uuid, using
+// the generalized multi-plot batch mechanism (finalizeBatch/
+// normalizeBatchMembers/canonicalBatchMembers now accept a pass batch whose
+// members all share ONE plot, each carrying its own per-member `values`).
+function sprayValues(product) {
+  return [
+    { attribute_code: 'attr.product', group_index: 0, value: product, value_status: 'observed' },
+    {
+      attribute_code: 'attr.treated_area', group_index: 0, value: 1000,
+      unit_code: 'unit.m2_area', value_status: 'observed',
+    },
+    {
+      attribute_code: 'attr.amount_volume_area_product', group_index: 0, value: 2,
+      unit_code: 'unit.l_per_ha_product', value_status: 'observed',
+    },
+  ];
+}
+
+test('saveEntry (pass batch) persists a 3-product tank-mix pass atomically, immune to the entry_uuid tie-break bug', async () => {
+  const db = createJournalDb('pass-batch-atomic');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plotUuid = '31000000-0000-4000-8000-000000000001';
+  await upsertPlot(db, {
+    plot_uuid: plotUuid,
+    base_sync_version: 0,
+    plot_code: 'pass-batch-atomic',
+    name: 'Pass batch atomic',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: 'barley',
+    area_m2: 1000,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+  }, principal);
+  const passUuid = '32000000-0000-4000-8000-000000000001';
+  // Ascending entry_uuids matching insertion order is the exact shape that
+  // defeated the OLD chained duplicate_guard_ack_entry_uuid mechanism: its
+  // tie-break (ORDER BY ABS(diff),entry_uuid) always resolves to the LOWEST
+  // uuid seen so far (the primary, index 0) once two or more final entries
+  // tie on time-diff, while the old chain always acknowledged "the
+  // immediately preceding member" (index i-1) — a mismatch for the third
+  // product onward. The new pass_uuid exclusion in findDuplicateCandidate
+  // sidesteps the tie-break question entirely, so this must succeed
+  // regardless of how the member UUIDs sort.
+  const primaryUuid = '33000000-0000-4000-8000-000000000001';
+  const member2Uuid = '33000000-0000-4000-8000-000000000002';
+  const member3Uuid = '33000000-0000-4000-8000-000000000003';
+  const batch = {
+    status: 'final',
+    base_sync_version: 0,
+    pass_uuid: passUuid,
+    activity_code: 'plant_protection_application',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-20T08:00:00',
+    occurred_timezone: 'Europe/Zurich',
+    season_crop: 'barley',
+    values: [],
+    members: [
+      { plot_uuid: plotUuid, entry_uuid: primaryUuid, values: sprayValues('Herbicide X') },
+      { plot_uuid: plotUuid, entry_uuid: member2Uuid, values: sprayValues('Adjuvant Y') },
+      { plot_uuid: plotUuid, entry_uuid: member3Uuid, values: sprayValues('Fungicide Z') },
+    ],
+  };
+
+  const receipt = await saveEntry(db, batch, principal, { mode: 'create' });
+  assert.equal(receipt.entries.length, 3);
+  assert.ok(receipt.batch_uuid);
+
+  const rows = db.prepare(
+    'SELECT entry_uuid,status,pass_uuid,batch_uuid,sync_version FROM journal_entries ' +
+      'WHERE entry_uuid IN (?,?,?) ORDER BY entry_uuid'
+  ).all(primaryUuid, member2Uuid, member3Uuid);
+  assert.equal(rows.length, 3, 'all three products persisted');
+  for (const row of rows) {
+    assert.equal(row.status, 'final');
+    assert.equal(row.pass_uuid, passUuid);
+    assert.equal(row.batch_uuid, receipt.batch_uuid);
+    assert.equal(row.sync_version, 1);
+  }
+  const productValues = db.prepare(
+    "SELECT entry_uuid,value_text FROM journal_entry_values WHERE attribute_code='attr.product' " +
+      'AND entry_uuid IN (?,?,?)'
+  ).all(primaryUuid, member2Uuid, member3Uuid);
+  const productByEntry = new Map(productValues.map((row) => [row.entry_uuid, row.value_text]));
+  assert.equal(productByEntry.get(primaryUuid), 'Herbicide X');
+  assert.equal(productByEntry.get(member2Uuid), 'Adjuvant Y');
+  assert.equal(productByEntry.get(member3Uuid), 'Fungicide Z');
+});
+
+test('saveEntry (pass batch) rolls back the WHOLE pass when one member fails validation -- no partial write', async () => {
+  const db = createJournalDb('pass-batch-rollback');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plotUuid = '31000000-0000-4000-8000-000000000002';
+  await upsertPlot(db, {
+    plot_uuid: plotUuid,
+    base_sync_version: 0,
+    plot_code: 'pass-batch-rollback',
+    name: 'Pass batch rollback',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: 'barley',
+    area_m2: 1000,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+  }, principal);
+  const passUuid = '32000000-0000-4000-8000-000000000002';
+  const primaryUuid = '34000000-0000-4000-8000-000000000001';
+  const member2Uuid = '34000000-0000-4000-8000-000000000002';
+  const member3Uuid = '34000000-0000-4000-8000-000000000003';
+  const batch = {
+    status: 'final',
+    base_sync_version: 0,
+    pass_uuid: passUuid,
+    activity_code: 'plant_protection_application',
+    // full_record@1 (not farmer_quick) so the missing required_any group on
+    // member 3 below actually gets enforced -- farmer_quick's quick_fields
+    // mechanism does not declare per-activity activity_requirements.
+    template_code: 'full_record',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-20T09:00:00',
+    occurred_timezone: 'Europe/Zurich',
+    season_crop: 'barley',
+    values: [],
+    members: [
+      { plot_uuid: plotUuid, entry_uuid: primaryUuid, values: sprayValues('Herbicide X') },
+      { plot_uuid: plotUuid, entry_uuid: member2Uuid, values: sprayValues('Adjuvant Y') },
+      // Missing every required_any group (no product identity, no dose, no
+      // treated_area) -- forces validateEntry to fail on the third member,
+      // deep inside the atomic transaction, after the first two members'
+      // rows would already have been written if this were non-atomic.
+      { plot_uuid: plotUuid, entry_uuid: member3Uuid, values: [] },
+    ],
+  };
+  const before = {
+    entries: db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n,
+    values: db.prepare('SELECT COUNT(*) AS n FROM journal_entry_values').get().n,
+    outbox: db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n,
+  };
+
+  await assert.rejects(
+    saveEntry(db, batch, principal, { mode: 'create' }),
+    (error) => error && error.code === 'validation_failed'
+  );
+
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, before.entries,
+    'no entry from the failed pass may persist, including the earlier members'
+  );
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM journal_entry_values').get().n, before.values,
+    'no values from the failed pass may persist'
+  );
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, before.outbox,
+    'no outbox event from the failed pass may persist'
+  );
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid IN (?,?,?)')
+      .get(primaryUuid, member2Uuid, member3Uuid).n,
+    0,
+    'not even the earlier, individually-valid members may survive the rollback'
+  );
+});
+
+test('saveEntry (pass batch) promotes an already-autosaved draft primary alongside brand-new members, atomically', async () => {
+  const db = createJournalDb('pass-batch-draft-primary');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plotUuid = '31000000-0000-4000-8000-000000000003';
+  await upsertPlot(db, {
+    plot_uuid: plotUuid,
+    base_sync_version: 0,
+    plot_code: 'pass-batch-draft-primary',
+    name: 'Pass batch draft primary',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: 'barley',
+    area_m2: 1000,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+  }, principal);
+  const passUuid = '32000000-0000-4000-8000-000000000003';
+  const primaryUuid = '35000000-0000-4000-8000-000000000001';
+  const member2Uuid = '35000000-0000-4000-8000-000000000002';
+
+  // Simulates the GUI's continuous draft autosave already having persisted
+  // the primary/currently-edited product as a version-zero draft before the
+  // pass is ever finalized.
+  await saveEntry(db, {
+    entry_uuid: primaryUuid,
+    base_sync_version: 0,
+    status: 'draft',
+    plot_uuid: plotUuid,
+    activity_code: 'plant_protection_application',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-20T10:00:00',
+    occurred_timezone: 'Europe/Zurich',
+    season_crop: 'barley',
+    values: sprayValues('Herbicide X (draft)'),
+  }, principal, { mode: 'create' });
+  assert.equal(
+    db.prepare('SELECT status,sync_version FROM journal_entries WHERE entry_uuid=?').get(primaryUuid).status,
+    'draft'
+  );
+
+  const batch = {
+    status: 'final',
+    base_sync_version: 0,
+    pass_uuid: passUuid,
+    activity_code: 'plant_protection_application',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-20T10:00:00',
+    occurred_timezone: 'Europe/Zurich',
+    season_crop: 'barley',
+    values: [],
+    members: [
+      { plot_uuid: plotUuid, entry_uuid: primaryUuid, values: sprayValues('Herbicide X') },
+      { plot_uuid: plotUuid, entry_uuid: member2Uuid, values: sprayValues('Adjuvant Y') },
+    ],
+  };
+  const receipt = await saveEntry(db, batch, principal, { mode: 'create' });
+  assert.equal(receipt.entries.length, 2);
+
+  const rows = db.prepare(
+    'SELECT entry_uuid,status,pass_uuid,batch_uuid,sync_version FROM journal_entries ' +
+      'WHERE entry_uuid IN (?,?) ORDER BY entry_uuid'
+  ).all(primaryUuid, member2Uuid);
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    assert.equal(row.status, 'final');
+    assert.equal(row.pass_uuid, passUuid);
+    assert.equal(row.batch_uuid, receipt.batch_uuid);
+    assert.equal(row.sync_version, 1);
+  }
+  const primaryProduct = db.prepare(
+    "SELECT value_text FROM journal_entry_values WHERE entry_uuid=? AND attribute_code='attr.product'"
+  ).get(primaryUuid);
+  assert.equal(primaryProduct.value_text, 'Herbicide X', 'the draft was promoted with the finalize-time values, not the stale draft values');
+});
+
+test('saveEntry (pass batch, F-1 fix) promotes a draft primary through an ACKNOWLEDGED prior duplicate instead of dead-ending the whole pass', async () => {
+  const db = createJournalDb('pass-batch-draft-ack-dup');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plotUuid = '31000000-0000-4000-8000-00000000000a';
+  await upsertPlot(db, {
+    plot_uuid: plotUuid, base_sync_version: 0, plot_code: 'pass-draft-ack', name: 'Pass draft ack',
+    zone_uuid: null, station_code: null, crop_hint: 'barley', area_m2: 1000, active: 1,
+    layout_code: 'open_field', layout_version: 1,
+  }, principal);
+  const priorUuid = '34000000-0000-4000-8000-00000000000a';
+  const passUuid = '32000000-0000-4000-8000-00000000000a';
+  const primaryUuid = '35000000-0000-4000-8000-00000000000a';
+  const member2Uuid = '35000000-0000-4000-8000-00000000000b';
+
+  // A prior FINAL plant-protection entry on the plot within +/-1h — the legitimate
+  // duplicate the farmer will acknowledge.
+  await saveEntry(db, {
+    entry_uuid: priorUuid, base_sync_version: 0, status: 'final', plot_uuid: plotUuid,
+    activity_code: 'plant_protection_application', template_code: 'farmer_quick', template_version: 1,
+    layout_code: 'open_field', layout_version: 1, occurred_start_local: '2026-07-20T10:00:00',
+    occurred_timezone: 'Europe/Zurich', season_crop: 'barley', values: sprayValues('Earlier spray'),
+  }, principal, { mode: 'create' });
+  // The GUI's autosave has already persisted the primary product as a version-zero draft.
+  await saveEntry(db, {
+    entry_uuid: primaryUuid, base_sync_version: 0, status: 'draft', plot_uuid: plotUuid,
+    activity_code: 'plant_protection_application', template_code: 'farmer_quick', template_version: 1,
+    layout_code: 'open_field', layout_version: 1, occurred_start_local: '2026-07-20T10:00:00',
+    occurred_timezone: 'Europe/Zurich', season_crop: 'barley', values: sprayValues('Herbicide X (draft)'),
+  }, principal, { mode: 'create' });
+
+  // Finalize the pass, ACKNOWLEDGING the prior duplicate. Before the F-1 fix, the
+  // draft-promotion path did not receive the acknowledgement set, re-detected
+  // priorUuid, and rolled back the WHOLE pass -> unsaveable forever.
+  const batch = {
+    status: 'final', base_sync_version: 0, pass_uuid: passUuid,
+    activity_code: 'plant_protection_application', template_code: 'farmer_quick', template_version: 1,
+    layout_code: 'open_field', layout_version: 1, occurred_start_local: '2026-07-20T10:00:00',
+    occurred_timezone: 'Europe/Zurich', season_crop: 'barley', values: [],
+    duplicate_guard_ack_entry_uuids: [priorUuid],
+    members: [
+      { plot_uuid: plotUuid, entry_uuid: primaryUuid, values: sprayValues('Herbicide X') },
+      { plot_uuid: plotUuid, entry_uuid: member2Uuid, values: sprayValues('Adjuvant Y') },
+    ],
+  };
+  const receipt = await saveEntry(db, batch, principal, { mode: 'create' });
+  assert.equal(receipt.entries.length, 2, 'both pass members persist despite the acknowledged prior duplicate');
+  const rows = db.prepare(
+    'SELECT status,pass_uuid FROM journal_entries WHERE entry_uuid IN (?,?)'
+  ).all(primaryUuid, member2Uuid);
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    assert.equal(row.status, 'final');
+    assert.equal(row.pass_uuid, passUuid);
+  }
+});
+
+test('findDuplicateCandidate still guards against a genuinely different pass on the same plot/activity/time', async () => {
+  const db = createJournalDb('pass-batch-cross-pass-duplicate');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plotUuid = '31000000-0000-4000-8000-000000000004';
+  await upsertPlot(db, {
+    plot_uuid: plotUuid,
+    base_sync_version: 0,
+    plot_code: 'pass-batch-cross-pass',
+    name: 'Pass batch cross pass',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: 'barley',
+    area_m2: 1000,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+  }, principal);
+  const firstPassUuid = '32000000-0000-4000-8000-000000000004';
+  const secondPassUuid = '32000000-0000-4000-8000-000000000005';
+  const firstEntryUuid = '36000000-0000-4000-8000-000000000001';
+  const secondEntryUuid = '36000000-0000-4000-8000-000000000002';
+
+  await saveEntry(db, {
+    entry_uuid: firstEntryUuid,
+    base_sync_version: 0,
+    status: 'final',
+    plot_uuid: plotUuid,
+    activity_code: 'plant_protection_application',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-20T11:00:00',
+    occurred_timezone: 'Europe/Zurich',
+    season_crop: 'barley',
+    pass_uuid: firstPassUuid,
+    values: sprayValues('Herbicide X'),
+  }, principal, { mode: 'create' });
+
+  // A second, UNRELATED pass (different pass_uuid) at the same plot/
+  // activity/time must still be flagged -- the pass_uuid exclusion is
+  // scoped to entries sharing the SAME pass_uuid, not every entry at this
+  // plot/activity/time.
+  await assert.rejects(
+    saveEntry(db, {
+      entry_uuid: secondEntryUuid,
+      base_sync_version: 0,
+      status: 'final',
+      plot_uuid: plotUuid,
+      activity_code: 'plant_protection_application',
+      template_code: 'farmer_quick',
+      template_version: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+      occurred_start_local: '2026-07-20T11:00:00',
+      occurred_timezone: 'Europe/Zurich',
+      season_crop: 'barley',
+      pass_uuid: secondPassUuid,
+      values: sprayValues('Fungicide Z'),
+    }, principal, { mode: 'create' }),
+    (error) => error && error.code === 'duplicate_candidate' && error.statusCode === 409
+  );
+});
+
 test('assertJournalEntryEffectKey binds UUID and prior version exactly', () => {
   const entryUuid = '12345678-1234-4234-8234-123456789abc';
   assert.doesNotThrow(() => assertJournalEntryEffectKey(
@@ -819,9 +1198,9 @@ test('assertJournalEntryEffectKey binds UUID and prior version exactly', () => {
 test('loadCatalog reads the seeded catalog into code-indexed maps', async () => {
   const catalog = await loadCatalog(createTestDb('load'));
 
-  // Slice D: the seeded catalog is now at v4 (attr.variety + farmer-facing
-  // attr.crop choices, 0026).
-  assert.equal(catalog.version, 4);
+  // Slice F: the seeded catalog is now at v6 (BBCH growth stage + manual
+  // weather-at-application attrs + farmer_quick@6/full_record@6, 0028).
+  assert.equal(catalog.version, 6);
   assert.match(catalog.hash, /^[a-f0-9]{64}$/);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
   assert.equal(catalog.templates.get('farmer_quick').get(1).definition.max_primary_fields, 5);
@@ -881,7 +1260,7 @@ test('loadCatalog supports the callback sqlite API used by Node-RED', async () =
 
   const catalog = await loadCatalog(callbackDb);
 
-  assert.equal(catalog.version, 4);
+  assert.equal(catalog.version, 6);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
 });
 

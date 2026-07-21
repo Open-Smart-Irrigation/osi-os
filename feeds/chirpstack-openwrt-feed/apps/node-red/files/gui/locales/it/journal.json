@@ -370,6 +370,15 @@
       "dismiss": "Non copiare",
       "invalidated": "Il trattamento precedente non corrisponde più a questa particella, coltura, orario, stagione o layout"
     },
+    "tankMix": {
+      "title": "Miscela in botte",
+      "addProduct": "Aggiungi prodotto a questo passaggio",
+      "empty": "Nessun prodotto aggiuntivo aggiunto finora",
+      "memberLabel": "{{index}}. {{detail}}",
+      "unknownProduct": "Nessun prodotto selezionato",
+      "remove": "Rimuovi",
+      "saveFailed": "Impossibile salvare uno dei prodotti di questo passaggio. Riprova."
+    },
     "confirm": {
       "title": "Controlla prima di salvare",
       "activity": "Attività",

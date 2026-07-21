@@ -370,6 +370,15 @@
       "dismiss": "Tokoppa",
       "invalidated": "Ekyakozesebwa ekyasooka tekikyakwatagana na musiri guno, ekirime kino, akaseera kano, ebbanga lino ery'okulima, oba layout eno"
     },
+    "tankMix": {
+      "title": "Okutabika ebyakozesebwa",
+      "addProduct": "Wongera ekyakozesebwa ku mulimu guno",
+      "empty": "Tewaliyo byakozesebwa ebirala byongeddwa",
+      "memberLabel": "{{index}}. {{detail}}",
+      "unknownProduct": "Tewali kyakozesebwa kyalondeddwa",
+      "remove": "Ggyawo",
+      "saveFailed": "Ekyakozesebwa kimu ku bino tekyayinzizza kutereka. Ddamu ogezeeko."
+    },
     "confirm": {
       "title": "Kebera nga tonnaterekawo",
       "activity": "Ekikolwa",

@@ -698,6 +698,37 @@ const automaticRepeatFlowCatalog: JournalCatalog = {
     : candidate),
 };
 
+// Slice F (B3 fix): a minimal catalog exposing one manual
+// weather-at-application field (attr.wind_speed) on plant_protection_
+// application, so withWeatherAtApplicationVisibility's caller-side wiring
+// (JournalCaptureFlow.tsx's hasWeatherSource) can be exercised end to end —
+// the real catalog's full four-field group is unnecessary here since the
+// visibility toggle keys purely on the field CODE, not on any
+// conditional_groups/operation_fields_by_activity scaffolding.
+const weatherFieldCatalog: JournalCatalog = {
+  ...protectedCatalog,
+  vocab: [...protectedCatalog.vocab, numericAttribute('attr.wind_speed', 'Wind speed')],
+  templates: protectedCatalog.templates.map((candidate) => candidate.code === 'farmer_quick'
+    ? {
+        ...candidate,
+        definition: {
+          ...candidate.definition,
+          fields: ['attr.crop', 'attr.product_uuid', 'attr.wind_speed'],
+        },
+      }
+    : candidate),
+};
+
+// zone_uuid set but zone_has_weather_source absent (false) — a zone-linked
+// plot whose zone has only soil sensors. Contrast with weatherZonePlot
+// below, whose zone_has_weather_source is explicitly true.
+const soilOnlyZonePlot: JournalPlot = {
+  ...plot, plot_uuid: 'plot-soil-only-zone', zone_uuid: 'zone-soil-only',
+};
+const weatherZonePlot: JournalPlot = {
+  ...plot, plot_uuid: 'plot-weather-zone', zone_uuid: 'zone-weather', zone_has_weather_source: true,
+};
+
 const replacementRepeatFlowCatalog: JournalCatalog = {
   ...repeatFlowCatalog,
   products: [
@@ -2086,6 +2117,208 @@ describe('JournalCaptureFlow', () => {
       expect.objectContaining({ attribute_code: 'attr.product_uuid', value: 'product-1' }),
       expect.objectContaining({ attribute_code: 'attr.amount_mass_area_product' }),
     ]));
+  });
+
+  it('Slice F (F3): "add product to this pass" queues a product, clears the product fields, and a second product can be entered', async () => {
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={replacementRepeatFlowCatalog}
+      initialPlot={plot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-20T08:00' },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'capture.tankMix.addProduct' })).toBeInTheDocument());
+    expect(screen.getByText('capture.tankMix.empty')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.product' }), {
+      target: { value: 'product-1' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Product rate' }), { target: { value: '2' } });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('2'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.tankMix.addProduct' }));
+
+    // Queuing clears the product-family fields so the next product starts
+    // fresh, and the queued product now shows in "Products in this pass".
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue(''));
+    expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('');
+    expect(screen.getByRole('listitem')).toHaveTextContent(/^capture\.tankMix\.memberLabel:1,Protected product/);
+    expect(screen.queryByText('capture.tankMix.empty')).not.toBeInTheDocument();
+
+    // A second, different product can now be entered without disturbing the
+    // already-queued first one.
+    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.product' }), {
+      target: { value: 'product-2' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Product rate' }), { target: { value: '3' } });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('3'));
+    expect(screen.getByRole('listitem')).toHaveTextContent(/^capture\.tankMix\.memberLabel:1,Protected product/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.tankMix.remove' }));
+    await waitFor(() => expect(screen.getByText('capture.tankMix.empty')).toBeInTheDocument());
+  });
+
+  it('Slice F (B1/B2 fix): finalizing a tank-mix pass posts ONE atomic createFinalBatch call covering the primary and every queued product', async () => {
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={replacementRepeatFlowCatalog}
+      initialPlot={plot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-20T08:00' },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'capture.tankMix.addProduct' })).toBeInTheDocument());
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.product' }), {
+      target: { value: 'product-1' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Product rate' }), { target: { value: '2' } });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('2'));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.tankMix.addProduct' }));
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue(''));
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.product' }), {
+      target: { value: 'product-2' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Product rate' }), { target: { value: '3' } });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('3'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledTimes(1));
+    // The primary + queued product are written in ONE call -- no separate
+    // per-member journalApi.createEntry finalize is ever made for a pass
+    // member (the pre-fix loop this replaces used exactly that call, one
+    // per queued product).
+    const [payload] = apiMocks.createFinalBatch.mock.calls[0] as [{
+      pass_uuid?: string | null;
+      members: Array<{ plot_uuid: string; entry_uuid: string; values: Array<{ attribute_code: string; value?: unknown }> }>;
+    }];
+    expect(payload.members).toHaveLength(2);
+    expect(new Set(payload.members.map((member) => member.plot_uuid))).toEqual(new Set([plot.plot_uuid]));
+    expect(payload.pass_uuid).toEqual(expect.any(String));
+    expect(payload.members).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        plot_uuid: plot.plot_uuid,
+        values: expect.arrayContaining([
+          expect.objectContaining({ attribute_code: 'attr.product_uuid', value: 'product-1' }),
+        ]),
+      }),
+      expect.objectContaining({
+        plot_uuid: plot.plot_uuid,
+        values: expect.arrayContaining([
+          expect.objectContaining({ attribute_code: 'attr.product_uuid', value: 'product-2' }),
+        ]),
+      }),
+    ]));
+    expect(apiMocks.createEntry.mock.calls.every((call) =>
+      (call[0] as { status?: string }).status !== 'final')).toBe(true);
+  });
+
+  it('Slice F (B1/B2 fix): a failed tank-mix pass retries the WHOLE pass atomically, not just the queued members', async () => {
+    apiMocks.createFinalBatch.mockRejectedValueOnce(new Error('gateway unavailable'));
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={replacementRepeatFlowCatalog}
+      initialPlot={plot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-20T08:00' },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'capture.tankMix.addProduct' })).toBeInTheDocument());
+    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.product' }), {
+      target: { value: 'product-1' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Product rate' }), { target: { value: '2' } });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('2'));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.tankMix.addProduct' }));
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue(''));
+    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.product' }), {
+      target: { value: 'product-2' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Product rate' }), { target: { value: '3' } });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('3'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledTimes(1));
+    // A failed pass must surface a retry affordance -- draft.status alone
+    // (the PRIMARY's own unrelated autosave lifecycle) would otherwise stay
+    // 'draft-saved-gateway' and hide it, exactly the bug this fixes.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.save.retry' })).toBeVisible());
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.save.retry' }));
+    await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledTimes(2));
+
+    const [firstAttempt] = apiMocks.createFinalBatch.mock.calls[0] as [{ members: Array<{ entry_uuid: string }> }];
+    const [secondAttempt] = apiMocks.createFinalBatch.mock.calls[1] as [{ members: Array<{ entry_uuid: string }> }];
+    // Retry resends the exact same WHOLE pass (same member entry UUIDs) --
+    // never a "just the remaining members" partial resend.
+    expect(secondAttempt.members.map((member) => member.entry_uuid).sort()).toEqual(
+      firstAttempt.members.map((member) => member.entry_uuid).sort());
+    expect(secondAttempt.members).toHaveLength(2);
+    // No pass member is ever finalized through the single-entry create path
+    // -- only createFinalBatch ever writes `status: 'final'`.
+    expect(apiMocks.createEntry.mock.calls.every((call) =>
+      (call[0] as { status?: string }).status !== 'final')).toBe(true);
+  });
+
+  it('Slice F (B3 fix): the manual weather field stays visible for a zone-linked plot whose zone has only soil sensors', async () => {
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={weatherFieldCatalog}
+      plots={[soilOnlyZonePlot, weatherZonePlot]}
+      initialPlot={soilOnlyZonePlot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    // soilOnlyZonePlot has a zone_uuid (it IS zone-linked) but no
+    // zone_has_weather_source -- the old bug conflated "has a zone" with
+    // "has a weather source" and would have hidden this field here.
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: 'Wind speed' })).toBeInTheDocument());
+  });
+
+  it('Slice F (B3 fix): the manual weather field hides once the zone actually has a weather-capable device', async () => {
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={weatherFieldCatalog}
+      plots={[soilOnlyZonePlot, weatherZonePlot]}
+      initialPlot={weatherZonePlot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    // Wait for the details step to have fully rendered (the tank-mix panel
+    // only appears once leaf/template/layout are all resolved) before
+    // asserting the weather field's absence.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'capture.tankMix.addProduct' })).toBeInTheDocument());
+    expect(screen.queryByRole('textbox', { name: 'Wind speed' })).not.toBeInTheDocument();
   });
 
   it('reconciles a same-context authority replacement before exposing the new candidate', async () => {

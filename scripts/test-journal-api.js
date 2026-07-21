@@ -364,6 +364,71 @@ test('plot upsert is atomic, zone-owner scoped, versioned, and command-ledger re
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM journal_plots WHERE plot_code='foreign'").get().n, 0);
 });
 
+// Slice F (B3 fix): zone_has_weather_source must reflect an actual
+// weather-capable device assignment, not merely "this plot has a zone_uuid"
+// -- a zone with only a soil-tension probe (DRAGINO_LSN50) is not a weather
+// source, and a SENSECAP_S2120 counts whether it is assigned directly
+// (devices.irrigation_zone_id) or shared via weather_station_zones.
+test('listPlots/upsertPlot expose zone_has_weather_source only when the linked zone has an actual weather-capable device', async () => {
+  const db = new TestDb('zone-weather-source');
+  seedIdentity(db);
+  const soilOnlyZoneUuid = '86000000-0000-4000-8000-000000000001';
+  const weatherZoneUuid = '86000000-0000-4000-8000-000000000002';
+  const sharedWeatherZoneUuid = '86000000-0000-4000-8000-000000000003';
+  db.prepare(
+    'INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui) VALUES (?,?,?,?,?,?)'
+  ).run(10, 'Soil only', 1, 'Europe/Zurich', soilOnlyZoneUuid, GATEWAY_EUI);
+  db.prepare(
+    'INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui) VALUES (?,?,?,?,?,?)'
+  ).run(11, 'Direct weather', 1, 'Europe/Zurich', weatherZoneUuid, GATEWAY_EUI);
+  db.prepare(
+    'INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui) VALUES (?,?,?,?,?,?)'
+  ).run(12, 'Shared weather', 1, 'Europe/Zurich', sharedWeatherZoneUuid, GATEWAY_EUI);
+  const now = '2026-07-20T00:00:00.000Z';
+  db.prepare(
+    'INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,irrigation_zone_id,gateway_device_eui) ' +
+      'VALUES (?,?,?,?,?,?,?,?)'
+  ).run('AAAAAAAAAAAAAAA1', 'Soil probe', 'DRAGINO_LSN50', 1, now, now, 10, GATEWAY_EUI);
+  db.prepare(
+    'INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,irrigation_zone_id,gateway_device_eui) ' +
+      'VALUES (?,?,?,?,?,?,?,?)'
+  ).run('AAAAAAAAAAAAAAA2', 'Weather station', 'SENSECAP_S2120', 1, now, now, 11, GATEWAY_EUI);
+  db.prepare(
+    'INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,gateway_device_eui) VALUES (?,?,?,?,?,?,?)'
+  ).run('AAAAAAAAAAAAAAA3', 'Shared weather station', 'SENSECAP_S2120', 1, now, now, GATEWAY_EUI);
+  db.prepare('INSERT INTO weather_station_zones(deveui,zone_id) VALUES (?,?)').run('AAAAAAAAAAAAAAA3', 12);
+
+  const soilOnlyPlot = '86100000-0000-4000-8000-000000000001';
+  const weatherPlot = '86100000-0000-4000-8000-000000000002';
+  const sharedWeatherPlot = '86100000-0000-4000-8000-000000000003';
+  const soilOnlyResult = await journal.upsertPlot(
+    db, plotInput(soilOnlyPlot, 'soil-only', { zone_uuid: soilOnlyZoneUuid }), principal()
+  );
+  const weatherResult = await journal.upsertPlot(
+    db, plotInput(weatherPlot, 'direct-weather', { zone_uuid: weatherZoneUuid }), principal()
+  );
+  await journal.upsertPlot(db, plotInput(sharedWeatherPlot, 'shared-weather', { zone_uuid: sharedWeatherZoneUuid }), principal());
+
+  // upsertPlot's own immediate response must already carry the real signal.
+  assert.equal(soilOnlyResult.plot.zone_has_weather_source, false);
+  assert.equal(weatherResult.plot.zone_has_weather_source, true);
+
+  const { plots } = await journal.listPlots(db, principal());
+  const byUuid = new Map(plots.map((plot) => [plot.plot_uuid, plot]));
+  assert.equal(
+    byUuid.get(soilOnlyPlot).zone_has_weather_source, false,
+    'a zone with only a soil probe has no weather source'
+  );
+  assert.equal(
+    byUuid.get(weatherPlot).zone_has_weather_source, true,
+    'a zone with a directly-assigned SENSECAP_S2120 has a weather source'
+  );
+  assert.equal(
+    byUuid.get(sharedWeatherPlot).zone_has_weather_source, true,
+    'a zone sharing a SENSECAP_S2120 via weather_station_zones has a weather source'
+  );
+});
+
 test('plot detach succeeds after the linked zone is soft-deleted', async () => {
   const db = new TestDb('plot-zone-soft-delete-detach');
   seedIdentity(db);
@@ -1990,8 +2055,9 @@ test('research exports are loss-aware, formula-safe, incremental, and ZIP-manife
   assert.equal(metadata.schema.lossless_member, 'records.ndjson');
   assert.deepEqual(metadata.catalog, {
     hash_scope: 'core_catalog_state',
-    // Slice D: the seeded catalog is now at v4 (attr.variety + farmer-facing attr.crop choices).
-    core_version: 4,
+    // Slice F: the seeded catalog is now at v6 (BBCH growth stage + manual
+    // weather-at-application attrs + farmer_quick@6/full_record@6).
+    core_version: 6,
     core_hash: metadata.catalog.core_hash,
     scoped_effective_hash: {
       value: null,
@@ -2497,6 +2563,67 @@ test('batch finalization requires canonical unique members and rejects the legac
   }
 });
 
+// Slice F (B1/B2 fix): a pass batch (top-level pass_uuid set) generalizes
+// the batch member contract the opposite way a cross-plot batch does --
+// every member must share ONE plot rather than each naming a different one.
+test('pass batch (top-level pass_uuid) requires every member to share one plot, unlike a cross-plot batch', async () => {
+  const db = new TestDb('pass-batch-member-contract');
+  seedIdentity(db);
+  const plots = [
+    '85400000-0000-4000-8000-000000000001',
+    '85400000-0000-4000-8000-000000000002',
+  ];
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'pass-batch-member-' + index), principal());
+  }
+  const passUuid = '85500000-0000-4000-8000-000000000001';
+  const base = entryInput(null, null, '2026-07-13T16:45:00', {
+    entry_uuid: null,
+    plot_uuid: null,
+    season_crop: 'barley',
+    pass_uuid: passUuid,
+    activity_code: 'plant_protection_application',
+    values: [],
+  });
+  delete base.plot_uuid;
+
+  // Different plots under one pass_uuid is invalid -- a pass is one plot's
+  // operation split into product lines, not a cross-plot batch.
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, base, {
+      members: [
+        { plot_uuid: plots[0], entry_uuid: '85600000-0000-4000-8000-000000000001', values: [] },
+        { plot_uuid: plots[1], entry_uuid: '85600000-0000-4000-8000-000000000002', values: [] },
+      ],
+    }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'invalid_batch'
+  );
+
+  // The SAME plot repeated across members is exactly what a pass batch
+  // requires and must be accepted (contrast with the cross-plot case in the
+  // previous test, where a repeated plot_uuid is a duplicate_member error).
+  const receipt = await journal.saveEntry(db, Object.assign({}, base, {
+    members: [
+      { plot_uuid: plots[0], entry_uuid: '85600000-0000-4000-8000-000000000003', values: [
+        { attribute_code: 'attr.product', group_index: 0, value: 'Herbicide X', value_status: 'observed' },
+        { attribute_code: 'attr.treated_area', group_index: 0, value: 1000, unit_code: 'unit.m2_area', value_status: 'observed' },
+        { attribute_code: 'attr.amount_volume_area_product', group_index: 0, value: 2, unit_code: 'unit.l_per_ha_product', value_status: 'observed' },
+      ] },
+      { plot_uuid: plots[0], entry_uuid: '85600000-0000-4000-8000-000000000004', values: [
+        { attribute_code: 'attr.product', group_index: 0, value: 'Adjuvant Y', value_status: 'observed' },
+        { attribute_code: 'attr.treated_area', group_index: 0, value: 1000, unit_code: 'unit.m2_area', value_status: 'observed' },
+        { attribute_code: 'attr.amount_volume_area_product', group_index: 0, value: 1, unit_code: 'unit.l_per_ha_product', value_status: 'observed' },
+      ] },
+    ],
+  }), principal(), { mode: 'create' });
+  assert.equal(receipt.entries.length, 2);
+  const rows = db.prepare('SELECT pass_uuid FROM journal_entries WHERE entry_uuid IN (?,?)').all(
+    '85600000-0000-4000-8000-000000000003', '85600000-0000-4000-8000-000000000004'
+  );
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((row) => row.pass_uuid === passUuid));
+});
+
 test('batch members reject top-level plot or zone scalars before any provisioning or writes', async () => {
   const db = new TestDb('batch-member-scalar-fields');
   seedIdentity(db);
@@ -2960,6 +3087,102 @@ function parseCsvRecords(text) {
   }
   return records;
 }
+
+test('export.csv derives a SoilManageR combination integer from a shared pass_uuid, leaving standalone entries uncombined', async () => {
+  const db = new TestDb('tank-mix-combination');
+  seedIdentity(db);
+  const plotUuid = '63000000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'tank-mix-plot'), principal());
+  const passUuid = '64000000-0000-4000-8000-000000000001';
+  const herbicideUuid = '65000000-0000-4000-8000-000000000001';
+  const adjuvantUuid = '65000000-0000-4000-8000-000000000002';
+  const standaloneUuid = '65000000-0000-4000-8000-000000000003';
+
+  function sprayValues(product) {
+    return [
+      { attribute_code: 'attr.product', group_index: 0, value: product, value_status: 'observed' },
+      {
+        attribute_code: 'attr.treated_area', group_index: 0, value: 1000,
+        unit_code: 'unit.m2_area', value_status: 'observed',
+      },
+      {
+        attribute_code: 'attr.amount_volume_area_product', group_index: 0, value: 2,
+        unit_code: 'unit.l_per_ha_product', value_status: 'observed',
+      },
+    ];
+  }
+
+  // Slice F (F3): a tank-mix pass — two products sharing one pass_uuid,
+  // exactly as JournalCaptureFlow.tsx's "add product to this pass" +
+  // createPassMembers create them (the second entry acknowledges the first
+  // as an intentional non-duplicate, since findDuplicateCandidate keys on
+  // plot+activity+time only).
+  await journal.saveEntry(
+    db,
+    entryInput(herbicideUuid, plotUuid, '2026-07-20T08:00:00', {
+      activity_code: 'plant_protection_application',
+      season_crop: 'barley',
+      pass_uuid: passUuid,
+      values: sprayValues('Herbicide X'),
+      note: null,
+    }),
+    principal(),
+    { mode: 'create' }
+  );
+  await journal.saveEntry(
+    db,
+    entryInput(adjuvantUuid, plotUuid, '2026-07-20T08:00:00', {
+      activity_code: 'plant_protection_application',
+      season_crop: 'barley',
+      pass_uuid: passUuid,
+      duplicate_guard_ack_entry_uuid: herbicideUuid,
+      values: sprayValues('Adjuvant Y'),
+      note: null,
+    }),
+    principal(),
+    { mode: 'create' }
+  );
+  // An unrelated, standalone plant-protection entry (no pass_uuid) on the
+  // same plot a day later must never be swept into the pass's combination.
+  await journal.saveEntry(
+    db,
+    entryInput(standaloneUuid, plotUuid, '2026-07-21T08:00:00', {
+      activity_code: 'plant_protection_application',
+      season_crop: 'barley',
+      values: sprayValues('Fungicide Z'),
+      note: null,
+    }),
+    principal(),
+    { mode: 'create' }
+  );
+
+  const rows = parseCsvRecords(await journal.exportWideCsv(db, { status: 'final' }, principal()));
+  const header = rows[0].map((cell) => cell.value);
+  const entryIndex = header.indexOf('entry_uuid');
+  const passIndex = header.indexOf('pass_uuid');
+  const combinationIndex = header.indexOf('combination');
+  assert.ok(combinationIndex >= 0, 'export.csv must expose a combination column');
+  const byEntry = new Map(rows.slice(1).map((row) => [row[entryIndex].value, row]));
+
+  const herbicideRow = byEntry.get(herbicideUuid);
+  const adjuvantRow = byEntry.get(adjuvantUuid);
+  const standaloneRow = byEntry.get(standaloneUuid);
+  assert.equal(herbicideRow[passIndex].value, passUuid);
+  assert.equal(adjuvantRow[passIndex].value, passUuid);
+  assert.equal(standaloneRow[passIndex].value, '');
+
+  assert.ok(herbicideRow[combinationIndex].value, 'combined entries must carry a combination number');
+  assert.equal(
+    herbicideRow[combinationIndex].value,
+    adjuvantRow[combinationIndex].value,
+    'entries sharing one pass_uuid must share one combination number'
+  );
+  assert.equal(
+    standaloneRow[combinationIndex].value,
+    '',
+    'a standalone entry (no pass_uuid) must carry no combination number'
+  );
+});
 
 test('research package CSV is formula-safe and records.ndjson preserves typed source rows', async () => {
   const dangerous = [

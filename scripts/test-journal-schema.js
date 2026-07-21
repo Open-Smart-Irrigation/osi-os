@@ -958,10 +958,15 @@ try {
       ['farmer_quick', 1],
       ['farmer_quick', 2],
       ['farmer_quick', 3],
+      ['farmer_quick', 6],
       ['full_record', 1],
+      ['full_record', 5],
+      ['full_record', 6],
       ['research_observation', 1],
     ],
-    'seed must contain the three template codes, with farmer_quick published at v1/v2 (frozen, historical) and v3 (current, Slice BC quick_fields)'
+    'seed must contain the three template codes, with farmer_quick published at v1/v2 (frozen, historical), ' +
+      'v3 (Slice BC quick_fields) and v6 (Slice F growth_stage_bbch quick-optional); full_record at v1 (frozen), ' +
+      'v5 (Slice E activity-scoped operation fields) and v6 (current, Slice F agronomy adds + review fold-in)'
   );
   const templateDefinitions = new Map(
     templates.map((template) => [template.code, JSON.parse(template.definition_json)])
@@ -1041,6 +1046,19 @@ try {
         'attr.per_plant_volume',
       ]],
       optional: ['attr.actuation_expectation_id'],
+    },
+    // Slice F (F2): manual weather-at-application fallback, full_record@6+.
+    {
+      code: 'weather_at_application',
+      activity_codes: ['plant_protection_application'],
+      required: [],
+      required_any: [],
+      optional: [
+        'attr.wind_speed',
+        'attr.wind_direction',
+        'attr.air_temperature',
+        'attr.rel_humidity',
+      ],
     },
   ]);
 
@@ -1151,7 +1169,7 @@ try {
     'SELECT id, catalog_version, catalog_hash FROM journal_catalog_state WHERE id = 1;'
   );
   assert.equal(catalogState.length, 1, 'catalog state row id=1 must exist');
-  assert.equal(catalogState[0].catalog_version, 4, 'seed-built catalog version must be the current version (4, since Slice D / attr.variety + farmer-facing attr.crop choices)');
+  assert.equal(catalogState[0].catalog_version, 6, 'seed-built catalog version must be the current version (6, since Slice F / BBCH growth stage + manual weather-at-application attrs)');
   assert.match(catalogState[0].catalog_hash, /^[0-9a-f]{64}$/, 'catalog hash must be SHA-256');
 
   const seedText = fs.readFileSync(seedPath, 'utf8');

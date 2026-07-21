@@ -370,6 +370,15 @@
       "dismiss": "Do not copy",
       "invalidated": "The previous treatment no longer matches this plot, crop, time, season, or layout"
     },
+    "tankMix": {
+      "title": "Tank mix",
+      "addProduct": "Add product to this pass",
+      "empty": "No additional products added yet",
+      "memberLabel": "{{index}}. {{detail}}",
+      "unknownProduct": "No product selected",
+      "remove": "Remove",
+      "saveFailed": "Could not save one of the pass's products. Try again."
+    },
     "confirm": {
       "title": "Review before saving",
       "activity": "Activity",
