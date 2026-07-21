@@ -19,12 +19,19 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('../JournalEntryRow', () => ({
-  JournalEntryRow: ({ entry, plotLabel }: { entry: EntryAggregate; plotLabel: string | null }) => (
+  // P1 fix (live UX pass): also renders whether a catalog `model` came
+  // through, so a test can confirm JournalTimeline threads it down to every
+  // individual (non-batched) row — the same additive plumbing the mobile
+  // batch-card crop fix already established for `catalog`/`model` here.
+  JournalEntryRow: ({ entry, plotLabel, model }: {
+    entry: EntryAggregate; plotLabel: string | null; model?: unknown;
+  }) => (
     <div data-testid="mock-journal-entry-row">
       <span>{entry.entry_uuid}</span>
       <span>{entry.status}</span>
       <span>{entry.sync_version}</span>
       <span>{plotLabel}</span>
+      <span>{model ? 'has-model' : 'no-model'}</span>
     </div>
   ),
 }));
@@ -203,9 +210,12 @@ describe('JournalTimeline', () => {
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Expand batch' }));
-    await waitFor(() => expect(screen.getByText(/activity\.harvest/)).toBeInTheDocument());
+    // No catalog prop here, so the activity summary falls back to the raw
+    // code (vocabLabelOrCode's null-model fallback) — this only asserts the
+    // hydrated membership actually replaced "irrigation" with "harvest".
+    await waitFor(() => expect(screen.getByText(/harvest/)).toBeInTheDocument());
     expect(screen.getByText(/wheat/)).toBeInTheDocument();
-    expect(screen.queryByText(/activity\.irrigation/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/irrigation/)).not.toBeInTheDocument();
 
     listBatchEntries.mockResolvedValueOnce({ entries: [], next_cursor: null });
     rerender(
@@ -452,6 +462,29 @@ describe('JournalTimeline', () => {
     expect(screen.getByText('e2')).toBeInTheDocument();
     expect(screen.getByText(/North field/)).toBeInTheDocument();
     expect(screen.queryByText(/p1/)).not.toBeInTheDocument();
+  });
+
+  // P1 fix (live UX pass): a standalone (non-batched) row must also get the
+  // catalog model, not just the batch summary — see JournalEntryRow.test.tsx
+  // for the actual label-resolution behavior this wires up to.
+  it('passes the catalog model down to every individual entry row when a catalog is supplied', () => {
+    const entries = [entry('e1', { batch_uuid: null })];
+
+    const { rerender } = render(
+      <JournalTimeline entries={entries} plots={[]} loading={false} listBatchEntries={listBatchEntries} />,
+    );
+    expect(screen.getByText('no-model')).toBeInTheDocument();
+
+    rerender(
+      <JournalTimeline
+        entries={entries}
+        plots={[]}
+        loading={false}
+        catalog={catalogWithCrop('agroscope.crop.potato', 'Potato')}
+        listBatchEntries={listBatchEntries}
+      />,
+    );
+    expect(screen.getByText('has-model')).toBeInTheDocument();
   });
 
   it('renders loading, retryable error, and succeeds after a failed hydration retry without concurrent duplicates', async () => {

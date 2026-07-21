@@ -3,9 +3,12 @@ import type { ReactNode } from 'react';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { buildCatalogModel, vocabLabelOrCode } from '../../../journal/catalogModel';
+import { groupEntryTablePassRows, type EntryTablePassRow } from '../../../journal/groupEntryTablePassRows';
 import { useJournalEntries } from '../../../journal/useJournalEntries';
 import { journalApi } from '../../../services/journalApi';
-import type { EntryAggregate, EntryListFilters, JournalPlot } from '../../../types/journal';
+import type { EntryAggregate, EntryListFilters, JournalCatalog, JournalPlot } from '../../../types/journal';
+import type { JournalCaptureCatalogModel } from '../../../types/journalCapture';
 import { formatOccurredDate } from '../JournalEntryRow';
 import { statusBadgeClass } from '../statusBadgeClass';
 import {
@@ -41,6 +44,13 @@ export interface EntryTableProps {
   // activity" trigger in the same row without EntryTable knowing anything
   // about capture.
   headerStart?: ReactNode;
+  // P1 fix (live UX pass): resolves entry.activity_code via the catalog's own
+  // label (see journal/catalogModel.ts's vocabLabelOrCode) instead of the
+  // incomplete client-side `journal.json` activity.* map. Optional/absent in
+  // narrow test-only render paths — same additive convention JournalTimeline
+  // already established for its own `catalog` prop; falls back to the raw
+  // activity code when omitted.
+  catalog?: JournalCatalog;
 }
 
 function plotLabelOf(
@@ -52,9 +62,13 @@ function plotLabelOf(
   return plotLabels.get(entry.plot_uuid) ?? t('row.unknownPlot');
 }
 
-export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry, headerStart }: EntryTableProps) {
+export function EntryTable({
+  filters, plots, selectedEntryUuid, onSelectEntry, headerStart, catalog,
+}: EntryTableProps) {
   const { t, i18n } = useTranslation('journal');
   const locale = i18n.resolvedLanguage || i18n.language;
+  const modelResult = useMemo(() => (catalog ? buildCatalogModel(catalog) : null), [catalog]);
+  const model = modelResult?.ok ? modelResult.model : null;
 
   const [pagination, dispatchPagination] = useReducer(paginationReducer, initialPaginationState);
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
@@ -96,17 +110,60 @@ export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry, h
   );
 
   const sortedEntries = useMemo(
-    () => sortEntries(entries, sort, plotLabels, t),
+    () => sortEntries(entries, sort, plotLabels, t, model, locale),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entries, sort, plotLabels],
+    [entries, sort, plotLabels, model, locale],
   );
+
+  // P2 (live UX pass): group a tank-mix pass (N entries sharing one
+  // pass_uuid) into a single collapsible row — see
+  // journal/groupEntryTablePassRows.ts for why pass_uuid, not batch_uuid, is
+  // the grouping key. Grouping runs over the already-sorted list, so a
+  // group's table position is wherever its first (in sort order) member
+  // landed; every OTHER member collapses into that same row regardless of
+  // where the sort would otherwise have placed it, mirroring how
+  // groupJournalTimelineEntries groups over its own entries prop rather than
+  // resorting the result.
+  const tableRows = useMemo(() => groupEntryTablePassRows(sortedEntries), [sortedEntries]);
+
+  const [expandedPasses, setExpandedPasses] = useState<Set<string>>(() => new Set());
+
+  const toggleExpandedPass = (passUuid: string) => {
+    setExpandedPasses((current) => {
+      const next = new Set(current);
+      if (next.has(passUuid)) next.delete(passUuid);
+      else next.add(passUuid);
+      return next;
+    });
+  };
+
+  // Known, accepted gap (same shape as the module's other documented gaps,
+  // e.g. scopeNotNarrowed): unlike JournalTimeline's cross-plot batch
+  // grouping, this never hydrates a pass's full membership from the edge —
+  // it only groups whatever page of `entries` is already loaded. A pass is
+  // created atomically (buildTankMixPassBatchPayload) with every member
+  // sharing one occurred_start, so in practice all its members land on the
+  // same page/sort position; a pass split across a page boundary would show
+  // as two partial groups instead of failing, the same tradeoff
+  // groupJournalTimelineEntries's own un-hydrated initial render already
+  // accepts.
+  //
+  // Arrow/Home/End roving-tabIndex navigation (below) and row selection only
+  // ever operate over entries the operator can actually select right now: a
+  // standalone entry, or a pass member once its group is expanded. A
+  // collapsed pass row is a pure disclosure control (its "Expand" button)
+  // with no entry of its own to select, exactly like JournalTimeline's
+  // batch card has no whole-card click-to-select either.
+  const selectableEntries = useMemo(() => tableRows.flatMap((row) => (
+    row.kind === 'entry' ? [row.entry] : (expandedPasses.has(row.passUuid) ? row.entries : [])
+  )), [tableRows, expandedPasses]);
 
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
 
   const activeIndex = useMemo(() => {
-    const idx = sortedEntries.findIndex((entry) => entry.entry_uuid === selectedEntryUuid);
+    const idx = selectableEntries.findIndex((entry) => entry.entry_uuid === selectedEntryUuid);
     return idx === -1 ? 0 : idx;
-  }, [sortedEntries, selectedEntryUuid]);
+  }, [selectableEntries, selectedEntryUuid]);
 
   const handleNext = () => {
     if (!nextCursor) return;
@@ -121,7 +178,7 @@ export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry, h
     let target = index;
     switch (event.key) {
       case 'ArrowDown':
-        target = nothingSelected ? index : Math.min(index + 1, sortedEntries.length - 1);
+        target = nothingSelected ? index : Math.min(index + 1, selectableEntries.length - 1);
         break;
       case 'ArrowUp':
         target = nothingSelected ? index : Math.max(index - 1, 0);
@@ -130,14 +187,14 @@ export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry, h
         target = 0;
         break;
       case 'End':
-        target = sortedEntries.length - 1;
+        target = selectableEntries.length - 1;
         break;
       default:
         return;
     }
     event.preventDefault();
     if (target === index && !nothingSelected) return;
-    onSelectEntry(sortedEntries[target].entry_uuid);
+    onSelectEntry(selectableEntries[target].entry_uuid);
     rowRefs.current[target]?.focus();
   };
 
@@ -182,6 +239,97 @@ export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry, h
     );
   };
 
+  // Shared row renderer: used for every standalone entry AND for each member
+  // of an expanded pass group, so the two look and behave identically (same
+  // roving-tabIndex/selection wiring) — only a pass member additionally
+  // receives `nested` (indents the occurred cell) so it visually reads as
+  // belonging to the summary row above it.
+  const renderEntryRow = (entry: EntryAggregate, index: number, nested = false) => (
+    <tr
+      key={entry.entry_uuid}
+      ref={(el) => {
+        rowRefs.current[index] = el;
+      }}
+      data-testid={`entry-row-${entry.entry_uuid}`}
+      role="row"
+      aria-selected={entry.entry_uuid === selectedEntryUuid}
+      tabIndex={index === activeIndex ? 0 : -1}
+      onClick={() => onSelectEntry(entry.entry_uuid)}
+      onKeyDown={(event) => handleRowKeyDown(event, index)}
+      className={`cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-inset ${
+        entry.entry_uuid === selectedEntryUuid ? 'bg-[var(--secondary-bg)]' : ''
+      }`}
+    >
+      <td className={`px-3 py-2 ${nested ? 'pl-8' : ''}`}>
+        <time dateTime={entry.occurred_start}>
+          {formatOccurredDate(entry.occurred_start, entry.occurred_timezone, locale)}
+        </time>
+      </td>
+      <td className="px-3 py-2">{vocabLabelOrCode(entry.activity_code, model, locale)}</td>
+      <td className="px-3 py-2">{plotLabelOf(entry, plotLabels, t)}</td>
+      <td className="px-3 py-2">
+        <span
+          className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusBadgeClass(entry.status)}`}
+        >
+          {t(`row.status.${entry.status}`)}
+        </span>
+      </td>
+    </tr>
+  );
+
+  // P2: a pass group's own row — the activity + product count once, with an
+  // expand/collapse affordance in the status column (a pass group has no
+  // single status of its own to show there; every member's actual status is
+  // visible once expanded via renderEntryRow above, same as
+  // JournalTimeline's batch card only shows member status post-expansion).
+  const renderPassRow = (row: Extract<EntryTablePassRow, { kind: 'pass' }>) => {
+    const representative = row.entries[0];
+    const count = row.entries.length;
+    const expanded = expandedPasses.has(row.passUuid);
+    return (
+      <tr
+        key={`pass:${row.passUuid}`}
+        data-testid={`entry-pass-row-${row.passUuid}`}
+        className="bg-[var(--surface)]"
+      >
+        <td className="px-3 py-2">
+          <time dateTime={representative.occurred_start}>
+            {formatOccurredDate(representative.occurred_start, representative.occurred_timezone, locale)}
+          </time>
+        </td>
+        <td className="px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold">{vocabLabelOrCode(representative.activity_code, model, locale)}</span>
+            <span className="rounded-full bg-[var(--secondary-bg)] px-2 py-0.5 text-xs font-bold text-[var(--text-secondary)]">
+              {t('workspace.table.pass.count', {
+                count,
+                defaultValue: `${count} product${count === 1 ? '' : 's'}`,
+              })}
+            </span>
+          </div>
+        </td>
+        <td className="px-3 py-2">{plotLabelOf(representative, plotLabels, t)}</td>
+        <td className="px-3 py-2">
+          <button
+            type="button"
+            // No aria-controls: this button's expanded content is a set of
+            // sibling <tr>s, only ever mounted once expanded (no
+            // always-present container to name unlike JournalTimeline's own
+            // hidden div, which isn't valid markup as a <tbody> child here).
+            // aria-expanded on its own already communicates the toggle state.
+            aria-expanded={expanded}
+            onClick={() => toggleExpandedPass(row.passUuid)}
+            className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-bold"
+          >
+            {t(expanded ? 'workspace.table.pass.collapse' : 'workspace.table.pass.expand', {
+              defaultValue: expanded ? 'Collapse pass' : 'Expand pass',
+            })}
+          </button>
+        </td>
+      </tr>
+    );
+  };
+
   let body: React.ReactNode;
   if (loading && entries.length === 0) {
     body = (
@@ -209,6 +357,22 @@ export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry, h
       </div>
     );
   } else {
+    let selectableIndex = 0;
+    const rows: React.ReactNode[] = [];
+    for (const row of tableRows) {
+      if (row.kind === 'entry') {
+        rows.push(renderEntryRow(row.entry, selectableIndex));
+        selectableIndex += 1;
+        continue;
+      }
+      rows.push(renderPassRow(row));
+      if (expandedPasses.has(row.passUuid)) {
+        for (const member of row.entries) {
+          rows.push(renderEntryRow(member, selectableIndex, true));
+          selectableIndex += 1;
+        }
+      }
+    }
     body = (
       <table className="min-w-full text-left text-sm">
         <thead className="bg-[var(--surface)] text-xs uppercase text-[var(--text-secondary)]">
@@ -219,40 +383,7 @@ export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry, h
             {headerCell('status')}
           </tr>
         </thead>
-        <tbody className="divide-y divide-[var(--border)]">
-          {sortedEntries.map((entry, index) => (
-            <tr
-              key={entry.entry_uuid}
-              ref={(el) => {
-                rowRefs.current[index] = el;
-              }}
-              data-testid={`entry-row-${entry.entry_uuid}`}
-              role="row"
-              aria-selected={entry.entry_uuid === selectedEntryUuid}
-              tabIndex={index === activeIndex ? 0 : -1}
-              onClick={() => onSelectEntry(entry.entry_uuid)}
-              onKeyDown={(event) => handleRowKeyDown(event, index)}
-              className={`cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-inset ${
-                entry.entry_uuid === selectedEntryUuid ? 'bg-[var(--secondary-bg)]' : ''
-              }`}
-            >
-              <td className="px-3 py-2">
-                <time dateTime={entry.occurred_start}>
-                  {formatOccurredDate(entry.occurred_start, entry.occurred_timezone, locale)}
-                </time>
-              </td>
-              <td className="px-3 py-2">{t(`activity.${entry.activity_code}`, entry.activity_code)}</td>
-              <td className="px-3 py-2">{plotLabelOf(entry, plotLabels, t)}</td>
-              <td className="px-3 py-2">
-                <span
-                  className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusBadgeClass(entry.status)}`}
-                >
-                  {t(`row.status.${entry.status}`)}
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
+        <tbody className="divide-y divide-[var(--border)]">{rows}</tbody>
       </table>
     );
   }
@@ -335,13 +466,15 @@ function sortEntries(
   sort: SortState,
   plotLabels: ReadonlyMap<string, string>,
   t: TFunction<'journal'>,
+  model: JournalCaptureCatalogModel | null,
+  locale: string,
 ): EntryAggregate[] {
   const keyOf = (entry: EntryAggregate): string => {
     switch (sort.key) {
       case 'occurred':
         return entry.occurred_start;
       case 'activity':
-        return t(`activity.${entry.activity_code}`, entry.activity_code);
+        return vocabLabelOrCode(entry.activity_code, model, locale);
       case 'plot':
         return plotLabelOf(entry, plotLabels, t);
       case 'status':

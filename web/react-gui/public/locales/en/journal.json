@@ -196,7 +196,14 @@
       "exportPackage": "Export research package",
       "exportError": "Export failed. Try again.",
       "exportSuccess": "Export downloaded.",
-      "scopeNotNarrowed": "Showing entries for all plots. Filtering the list and exports by station or group isn't available yet."
+      "scopeNotNarrowed": "Showing entries for all plots. Filtering the list and exports by station or group isn't available yet.",
+      "pass": {
+        "count": "products",
+        "count_one": "{{count}} product",
+        "count_other": "{{count}} products",
+        "expand": "Expand pass",
+        "collapse": "Collapse pass"
+      }
     },
     "detail": {
       "heading": "Entry detail",

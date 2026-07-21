@@ -196,7 +196,14 @@
       "exportPackage": "Exportar pacote de investigação",
       "exportError": "Falha ao exportar. Tente novamente.",
       "exportSuccess": "Exportação descarregada.",
-      "scopeNotNarrowed": "São apresentados registos de todas as parcelas. A filtragem da lista e das exportações por estação ou grupo ainda não está disponível."
+      "scopeNotNarrowed": "São apresentados registos de todas as parcelas. A filtragem da lista e das exportações por estação ou grupo ainda não está disponível.",
+      "pass": {
+        "count": "produtos",
+        "count_one": "{{count}} produto",
+        "count_other": "{{count}} produtos",
+        "expand": "Expandir passagem",
+        "collapse": "Recolher passagem"
+      }
     },
     "detail": {
       "heading": "Detalhe do registo",

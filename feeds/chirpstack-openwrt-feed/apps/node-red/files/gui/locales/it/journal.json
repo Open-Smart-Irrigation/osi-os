@@ -196,7 +196,14 @@
       "exportPackage": "Esporta pacchetto di ricerca",
       "exportError": "Esportazione non riuscita. Riprova.",
       "exportSuccess": "Esportazione scaricata.",
-      "scopeNotNarrowed": "Vengono mostrate le registrazioni di tutte le particelle. Il filtraggio dell'elenco e delle esportazioni per stazione o gruppo non è ancora disponibile."
+      "scopeNotNarrowed": "Vengono mostrate le registrazioni di tutte le particelle. Il filtraggio dell'elenco e delle esportazioni per stazione o gruppo non è ancora disponibile.",
+      "pass": {
+        "count": "prodotti",
+        "count_one": "{{count}} prodotto",
+        "count_other": "{{count}} prodotti",
+        "expand": "Espandi passaggio",
+        "collapse": "Comprimi passaggio"
+      }
     },
     "detail": {
       "heading": "Dettaglio della registrazione",

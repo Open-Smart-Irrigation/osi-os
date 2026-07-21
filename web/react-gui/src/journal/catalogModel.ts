@@ -623,6 +623,25 @@ export function catalogLabel(
   return row.labels?.[locale] ?? row.labels?.en ?? row.code;
 }
 
+// Looks up any vocab code (activity, attribute, unit, choice — vocabByCode is
+// keyed uniformly across kinds) and returns its catalog label, falling back
+// to the raw code only when the catalog has nothing for it (no model, or no
+// matching row). Single shared home for the `vocabLabelOrCode` helper that
+// DetailPanel.tsx and JournalTimeline.tsx each used to declare locally (see
+// their own history) — both read the exact same catalogByCode/catalogLabel
+// primitives, so duplicating the three-line lookup added no isolation, only
+// drift risk. EntryTable.tsx and JournalEntryRow.tsx reuse this same export
+// rather than the incomplete client-side `journal.json` `activity.*` map,
+// which only ever covered 6 of the 16 shipped activity codes.
+export function vocabLabelOrCode(
+  code: string,
+  model: Pick<JournalCaptureCatalogModel, 'vocabByCode'> | null,
+  locale: string,
+): string {
+  const row = model?.vocabByCode.get(code);
+  return row ? catalogLabel(row, locale) : code;
+}
+
 export function activeDefinition(
   rows: JournalDefinitionRow[],
   code: string,

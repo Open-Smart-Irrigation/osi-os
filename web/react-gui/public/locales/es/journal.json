@@ -196,7 +196,14 @@
       "exportPackage": "Exportar paquete de investigación",
       "exportError": "Error al exportar. Inténtalo de nuevo.",
       "exportSuccess": "Exportación descargada.",
-      "scopeNotNarrowed": "Se muestran las entradas de todas las parcelas. El filtrado de la lista y las exportaciones por estación o grupo aún no está disponible."
+      "scopeNotNarrowed": "Se muestran las entradas de todas las parcelas. El filtrado de la lista y las exportaciones por estación o grupo aún no está disponible.",
+      "pass": {
+        "count": "productos",
+        "count_one": "{{count}} producto",
+        "count_other": "{{count}} productos",
+        "expand": "Mostrar los productos del pase",
+        "collapse": "Ocultar los productos del pase"
+      }
     },
     "detail": {
       "heading": "Detalle de la entrada",

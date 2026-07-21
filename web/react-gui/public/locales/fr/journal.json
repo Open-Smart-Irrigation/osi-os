@@ -196,7 +196,14 @@
       "exportPackage": "Exporter le pack de recherche",
       "exportError": "Échec de l'export. Réessayez.",
       "exportSuccess": "Export téléchargé.",
-      "scopeNotNarrowed": "Les entrées de toutes les parcelles sont affichées. Le filtrage de la liste et des exports par station ou groupe n'est pas encore disponible."
+      "scopeNotNarrowed": "Les entrées de toutes les parcelles sont affichées. Le filtrage de la liste et des exports par station ou groupe n'est pas encore disponible.",
+      "pass": {
+        "count": "produits",
+        "count_one": "{{count}} produit",
+        "count_other": "{{count}} produits",
+        "expand": "Afficher les produits du passage",
+        "collapse": "Masquer les produits du passage"
+      }
     },
     "detail": {
       "heading": "Détail de l'entrée",
