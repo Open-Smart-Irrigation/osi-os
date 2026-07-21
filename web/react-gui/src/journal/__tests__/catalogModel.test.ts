@@ -460,9 +460,16 @@ describe('catalog model', () => {
       expect(lysimeterSampling.some((state) => state.code === readingCode && state.visible)).toBe(true);
     }
 
-    // Regression: full_record resolution is unaffected by the v3 layout bump
-    // — it must resolve to the exact same field codes/required flags it
-    // would have against the frozen v1 layout definitions.
+    // Regression: full_record resolution against the v3 layout bump differs
+    // from the frozen v1 layout definitions in exactly one, intentional way
+    // — journal capture-followups Slice 1 (Task 1.1b) relaxes a
+    // minimum_fields entry to visible-but-optional whenever it is also
+    // listed in that layout's own static_context_fields. lysimeter@3's
+    // static_context_fields is the *entire* minimum_fields set (experimental
+    // unit/replicate/treatment/surface_area — see journal-catalog-core.js),
+    // so every one of those four flips from required to optional under v3;
+    // field codes/order and every other field's requiredness stay identical
+    // to v1.
     const rows = fixture.layouts.filter((row) => row.code === 'lysimeter' && row.version === 1);
     expect(rows).toHaveLength(1);
     // Re-parse the frozen v1 row directly (bypassing activeDefinition's
@@ -475,11 +482,14 @@ describe('catalog model', () => {
       return parsed.ok ? parsed.model.layouts.get('lysimeter') : undefined;
     })();
     expect(v1Layout?.version).toBe(1);
+    const lysimeterStaticContextFields = new Set(lysimeter.static_context_fields ?? []);
     for (const activityCode of ['irrigation', 'fertilization', 'sampling']) {
       const selections = { activity_code: activityCode };
       const againstV1 = deriveFieldStates(fullRecord, v1Layout!, selections);
       const againstV3 = deriveFieldStates(fullRecord, lysimeter, selections);
-      expect(againstV3).toEqual(againstV1);
+      const expectedAgainstV3 = againstV1.map((state) =>
+        lysimeterStaticContextFields.has(state.code) ? { ...state, required: false } : state);
+      expect(againstV3).toEqual(expectedAgainstV3);
     }
   });
 
@@ -494,12 +504,12 @@ describe('catalog model', () => {
     expect(openField).toBeDefined();
     if (!fullRecord || !openField) return;
 
-    // full_record now resolves to the scoped v6 row (activeDefinition always
-    // picks the highest active version — v6 is Slice F's agronomy adds +
-    // review fold-in, layered on the v5 scoped_by_activity mechanism this
-    // slice introduced), and it still declares the section this slice
-    // narrows.
-    expect(fullRecord.version).toBe(6);
+    // full_record now resolves to the scoped v7 row (activeDefinition always
+    // picks the highest active version — v7 is the journal capture-followups
+    // Slice 1 irrigation-requiredness relaxation, layered on the v5
+    // scoped_by_activity mechanism this slice introduced), and it still
+    // declares the section this slice narrows.
+    expect(fullRecord.version).toBe(7);
     const operationSection = fullRecord.sections.find((section) => section.code === 'operation');
     expect(operationSection?.scoped_by_activity).toBe(true);
     expect(fullRecord.operation_fields_by_activity).toBeDefined();
@@ -520,15 +530,17 @@ describe('catalog model', () => {
     ]) {
       expect(irrigationVisible, `irrigation must exclude ${excluded}`).not.toContain(excluded);
     }
-    // requiredness preserved: the irrigation_details conditional_group still
-    // forces amount_kind/measurement_source/denominator required, and the
-    // depth/volume/per-plant family stays a required_any trio.
+    // requiredness (journal capture-followups Slice 1, W1): the
+    // irrigation_details conditional_group still forces amount_kind
+    // required, and the depth/volume/per-plant family stays a required_any
+    // trio; measurement_source/denominator moved to optional (visible, not
+    // required) at full_record@7.
     expect(irrigationStates.find((state) => state.code === 'attr.irrigation_amount_kind'))
       .toMatchObject({ required: true });
     expect(irrigationStates.find((state) => state.code === 'attr.measurement_source'))
-      .toMatchObject({ required: true });
+      .toMatchObject({ required: false });
     expect(irrigationStates.find((state) => state.code === 'attr.denominator'))
-      .toMatchObject({ required: true });
+      .toMatchObject({ required: false });
     expect(irrigationStates.find((state) => state.code === 'attr.irrigation_depth')?.required_any_groups.length)
       .toBeGreaterThan(0);
 
@@ -557,6 +569,112 @@ describe('catalog model', () => {
       .toMatchObject({ required: true });
     expect(fertilizationStates.find((state) => state.code === 'attr.product_uuid')?.required_any_groups.length)
       .toBeGreaterThan(0);
+  });
+
+  it('journal capture-followups Slice 1 (W1): full_record@7 + open_field@3 irrigation relaxes measurement_source/denominator/block_bed_row/cover_type to visible-but-optional, keeping amount_kind/amount/treated_area required', () => {
+    const fixture = shippedCatalog();
+    const result = buildCatalogModel(fixture);
+    expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
+    if (!result.ok) return;
+    const fullRecord = result.model.templates.get('full_record');
+    const openField = result.model.layouts.get('open_field');
+    expect(fullRecord).toBeDefined();
+    expect(openField).toBeDefined();
+    if (!fullRecord || !openField) return;
+    expect(fullRecord.version).toBe(7);
+    expect(openField.version).toBe(3);
+
+    const states = deriveFieldStates(fullRecord, openField, { activity_code: 'irrigation' });
+    const byCode = new Map(states.map((state) => [state.code, state]));
+
+    // Required: amount_kind (irrigation_details.required, Task 1.1a) + the
+    // depth/volume/per-plant required_any trio (one of, unchanged) +
+    // treated_area (open_field's own minimum_fields — not in
+    // static_context_fields, so Task 1.1b leaves it force-required).
+    expect(byCode.get('attr.irrigation_amount_kind')).toMatchObject({ visible: true, required: true });
+    expect(byCode.get('attr.treated_area')).toMatchObject({ visible: true, required: true });
+    expect(byCode.get('attr.irrigation_depth')?.required_any_groups.length).toBeGreaterThan(0);
+
+    // Visible but optional: measurement_source/denominator (moved from
+    // irrigation_details.required to .optional at full_record@7 — Task
+    // 1.1a) and block_bed_row/cover_type (open_field@3's
+    // static_context_fields, relaxed by the templateEngine decouple — Task
+    // 1.1b). denominator is relaxed by both mechanisms at once.
+    for (const optionalCode of [
+      'attr.measurement_source', 'attr.denominator', 'attr.block_bed_row', 'attr.cover_type',
+    ]) {
+      expect(byCode.get(optionalCode), optionalCode).toMatchObject({ visible: true, required: false });
+    }
+
+    // static_context_fields itself must stay populated (Fable B2/B3 guard,
+    // Global Constraint 7) — the decouple must never empty it to relax
+    // requiredness, since Quick's plot-context feature still reads it.
+    expect(openField.static_context_fields).toEqual(
+      expect.arrayContaining(['attr.block_bed_row', 'attr.cover_type', 'attr.denominator']),
+    );
+
+    // Quick capture is unaffected: farmer_quick resolves visibility entirely
+    // via quick_fields and never force-adds layout minimum_fields (it always
+    // skipped that branch, before and after this slice), so block_bed_row is
+    // still not force-required — or even present — there.
+    const farmerQuick = result.model.templates.get('farmer_quick');
+    expect(farmerQuick).toBeDefined();
+    if (!farmerQuick) return;
+    const quickStates = deriveFieldStates(farmerQuick, openField, { activity_code: 'irrigation' });
+    expect(quickStates.some((state) => state.code === 'attr.block_bed_row')).toBe(false);
+  });
+
+  it('journal capture-followups Slice 1 (W3): attr.crop exposes the 16 open-field vegetables, active with correct English labels and sort_order', () => {
+    const fixture = shippedCatalog();
+    const result = buildCatalogModel(fixture);
+    expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
+    if (!result.ok) return;
+
+    const expectedVegetables: Array<[string, string, number]> = [
+      ['choice.crop.carrot', 'Carrot', 3500],
+      ['choice.crop.onion', 'Onion', 3504],
+      ['choice.crop.leek', 'Leek', 3508],
+      ['choice.crop.cabbage', 'Cabbage', 3512],
+      ['choice.crop.cauliflower', 'Cauliflower', 3516],
+      ['choice.crop.broccoli', 'Broccoli', 3520],
+      ['choice.crop.lettuce', 'Lettuce', 3524],
+      ['choice.crop.spinach', 'Spinach', 3528],
+      ['choice.crop.celeriac', 'Celeriac', 3532],
+      ['choice.crop.fennel', 'Fennel', 3536],
+      ['choice.crop.table_beet', 'Table beet', 3540],
+      ['choice.crop.courgette', 'Courgette / zucchini', 3544],
+      ['choice.crop.pumpkin_squash', 'Pumpkin / squash', 3548],
+      ['choice.crop.sweetcorn', 'Sweetcorn', 3552],
+      ['choice.crop.garden_pea', 'Garden pea', 3556],
+      ['choice.crop.green_bean', 'Green bean', 3560],
+    ];
+    for (const [code, label, sortOrder] of expectedVegetables) {
+      const row = result.model.vocabByCode.get(code);
+      expect(row, code).toBeDefined();
+      if (!row) continue;
+      expect(row.kind, code).toBe('choice');
+      expect(row.parent_code, code).toBe('attr.crop');
+      expect(row.active, code).toBe(1);
+      expect(row.deleted_at, code).toBeNull();
+      expect(row.sort_order, code).toBe(sortOrder);
+      expect(row.labels, code).toEqual({ en: label });
+      expect(catalogLabel(row, 'en'), code).toBe(label);
+    }
+
+    // Sort order places the vegetables after the Agroscope arable-crop range
+    // (~3000-3025) and before the generic v4 buckets (4000-4040) — the
+    // active-choice UI list (activeCropChoices/attr.crop dropdown) must show
+    // them in exactly this position, not interleaved incorrectly.
+    const cropChoiceSortOrders = [...result.model.vocabByCode.values()]
+      .filter((row) => row.kind === 'choice' && row.parent_code === 'attr.crop' && row.active === 1)
+      .map((row) => row.sort_order)
+      .sort((a, b) => a - b);
+    const minVegetableSort = Math.min(...expectedVegetables.map(([, , sortOrder]) => sortOrder));
+    const maxVegetableSort = Math.max(...expectedVegetables.map(([, , sortOrder]) => sortOrder));
+    const belowRange = cropChoiceSortOrders.filter((sortOrder) => sortOrder < minVegetableSort);
+    const aboveRange = cropChoiceSortOrders.filter((sortOrder) => sortOrder > maxVegetableSort);
+    expect(Math.max(...belowRange)).toBeLessThan(3100); // Agroscope arable-crop range
+    expect(Math.min(...aboveRange)).toBeGreaterThanOrEqual(4000); // generic v4 buckets
   });
 
   it("Slice E: full_record's scoped_by_activity change leaves farmer_quick/research_observation resolution byte-for-byte unchanged", () => {
@@ -608,12 +726,18 @@ describe('catalog model', () => {
       state('attr.harvest_yield_area'), state('attr.growth_stage_bbch'), state('note'),
     ]);
 
+    // journal capture-followups Slice 1 (Task 1.1b): block_bed_row/
+    // cover_type/denominator are open_field@3's static_context_fields, so the
+    // templateEngine decouple resolves them visible-but-optional here too
+    // (research_observation has no quick_fields, so it takes the same
+    // non-quick minimum_fields branch full_record does); treated_area is not
+    // in static_context_fields and stays required.
     const researchExpected = [
       state('activity_code'), state('plot_uuid'), state('occurred_start'),
       state('campaign_uuid'), state('protocol_code'), state('protocol_version'),
       state('observation_unit_code'), state('attr.observation_text'),
-      state('attr.block_bed_row', true), state('attr.treated_area', true),
-      state('attr.cover_type', true), state('attr.denominator', true),
+      state('attr.block_bed_row', false), state('attr.treated_area', true),
+      state('attr.cover_type', false), state('attr.denominator', false),
     ];
     for (const activity of ['irrigation', 'fertilization', 'harvest']) {
       expect(deriveFieldStates(research, openField, { activity_code: activity })).toEqual(researchExpected);

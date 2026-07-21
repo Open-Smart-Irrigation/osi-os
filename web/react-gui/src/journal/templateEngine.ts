@@ -181,7 +181,21 @@ export function deriveFieldStates(
       for (const field of rawLayout.reading_fields ?? []) addField(field);
     }
   } else {
-    for (const field of rawLayout.minimum_fields ?? []) addField(field, true);
+    // Journal capture-followups Slice 1 (W1 Task 1.1b): a `minimum_fields`
+    // entry that is also declared in the layout's own `static_context_fields`
+    // (plot-static facts read-only from journal_plot_settings.context_json on
+    // Quick, per BC3 above) is force-added as visible-but-optional here
+    // instead of required — the same plot-static fact should not become a
+    // hard-required per-entry input just because Full mode still resolves
+    // minimum_fields the old way. A minimum_fields entry NOT in
+    // static_context_fields (e.g. open_field's attr.treated_area) stays
+    // force-required exactly as before. static_context_fields itself is never
+    // trimmed by this — Quick's plot-context resolution (PlotContextFields /
+    // plotContextInputs) still reads the full list untouched.
+    const staticContextFields = rawLayout.static_context_fields ?? [];
+    for (const field of rawLayout.minimum_fields ?? []) {
+      addField(field, !staticContextFields.includes(field));
+    }
     for (const field of rawLayout.reading_fields ?? []) addField(field, true);
   }
 
