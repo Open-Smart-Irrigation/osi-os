@@ -384,7 +384,7 @@
       "memberLabel": "{{index}}. {{detail}}",
       "unknownProduct": "Ningún producto seleccionado",
       "remove": "Eliminar",
-      "saveFailed": "No se pudo guardar uno de los productos de este pase. Inténtelo de nuevo."
+      "saveFailed": "No se pudo guardar uno de los productos de este pase. Inténtalo de nuevo."
     },
     "confirm": {
       "title": "Revisa antes de guardar",

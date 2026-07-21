@@ -281,7 +281,7 @@
       "status": {
         "dry_stress": "Estrés por sequía",
         "optimal": "Óptimo",
-        "wet_excess": "Demasiado mojado",
+        "wet_excess": "Demasiado húmedo",
         "mixed": "Mixto",
         "no_data": "Sin datos"
       },
@@ -310,7 +310,7 @@
       "state": {
         "dry_stress": "Estrés por sequía",
         "optimal": "Óptimo",
-        "wet_excess": "Demasiado mojado",
+        "wet_excess": "Demasiado húmedo",
         "mixed": "Mixto",
         "normal_growth": "Crecimiento normal",
         "reduced_growth": "Crecimiento reducido",
