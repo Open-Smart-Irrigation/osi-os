@@ -141,7 +141,7 @@ test('shows loading state on first render before fetch resolves', async () => {
     ),
   );
   assert.match(html, /Recent irrigations/);
-  assert.match(html, /Loading recent actuations/);
+  assert.match(html, /Loading recent irrigations/);
 });
 
 test('empty state when API returns zero actuations', async () => {
@@ -194,7 +194,7 @@ test('default view shows commanded date, duration, and effective irrigation dept
     assert.doesNotMatch(document.body.textContent ?? '', /Total volume:/);
     assert.doesNotMatch(document.body.textContent ?? '', /Confirmed open:/);
     assert.doesNotMatch(document.body.textContent ?? '', /Confirmed close:/);
-    await waitFor(() => assert.doesNotMatch(document.body.textContent ?? '', /Loading recent actuations/));
+    await waitFor(() => assert.doesNotMatch(document.body.textContent ?? '', /Loading recent irrigations/));
   } finally {
     cleanup();
     Date.now = originalNow;

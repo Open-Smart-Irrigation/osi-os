@@ -58,7 +58,7 @@ vi.mock('react-i18next', () => ({
         swtSample: 'SWT sample',
         modulesTitle: 'Modules',
         predictionAdvisory: 'Prediction advisory',
-        predictionAdvisoryWarning: 'Experimental, do not use for production!',
+        predictionAdvisoryWarning: 'Experimental — do not rely on it for real irrigation decisions.',
         waterCard: 'Water balance',
         environmentCard: 'Environment & weather forecast',
         irrigationSchedule: 'Irrigation schedule',
@@ -76,14 +76,14 @@ vi.mock('react-i18next', () => ({
         journalDetailResearch: 'Research',
         userRequestTitle: 'User Request',
         requestType: 'Request type',
-        bugFix: 'Bug fix',
+        bugFix: 'Bug',
         featureRequest: 'Feature request',
         requestTitle: 'Title',
         contactEmail: 'Email address (optional)',
         requestArea: 'Area',
         requestImpact: 'Impact',
         requestDescription: 'Description',
-        requestShareConsent: 'May be shared publicly without private farm details.',
+        requestShareConsent: 'I agree this request may be shared publicly without private farm details.',
         requestIncludeDiagnostics: 'Include diagnostics',
         requestSubmit: 'Save request',
         requestSubmitting: 'Saving...',
@@ -97,7 +97,7 @@ vi.mock('react-i18next', () => ({
         area_sync: 'Sync',
         area_system: 'System',
         area_other: 'Other',
-        impact_cant_work: 'Cannot work',
+        impact_cant_work: 'Blocks my work',
         impact_workaround: 'Workaround available',
         impact_annoying: 'Annoying',
         impact_idea: 'Idea',
@@ -241,7 +241,7 @@ describe('SettingsPage', () => {
     const modules = screen.getByRole('region', { name: 'Modules' });
 
     expect(within(modules).getByText('Prediction advisory')).toBeInTheDocument();
-    expect(within(modules).getByText('Experimental, do not use for production!')).toBeInTheDocument();
+    expect(within(modules).getByText('Experimental — do not rely on it for real irrigation decisions.')).toBeInTheDocument();
     const moduleRows = within(modules).getAllByRole('group');
     expect(moduleRows).toHaveLength(4);
     expect(moduleRows.map((row) => row.textContent)).toEqual([
@@ -333,7 +333,7 @@ describe('SettingsPage', () => {
     renderSettings();
 
     const userRequest = screen.getByRole('region', { name: 'User Request' });
-    fireEvent.click(within(userRequest).getByRole('button', { name: 'Bug fix' }));
+    fireEvent.click(within(userRequest).getByRole('button', { name: 'Bug' }));
     fireEvent.change(within(userRequest).getByLabelText('Title'), {
       target: { value: 'Water balance layout breaks' },
     });
@@ -350,7 +350,7 @@ describe('SettingsPage', () => {
       target: { value: 'The water card shifts in dark mode on desktop.' },
     });
     fireEvent.click(within(userRequest).getByLabelText('Include diagnostics'));
-    fireEvent.click(within(userRequest).getByLabelText('May be shared publicly without private farm details.'));
+    fireEvent.click(within(userRequest).getByLabelText('I agree this request may be shared publicly without private farm details.'));
 
     fireEvent.click(within(userRequest).getByRole('button', { name: 'Save request' }));
 

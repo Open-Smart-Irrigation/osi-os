@@ -15,7 +15,7 @@ globalThis.ResizeObserver = ResizeObserverStub;
 
 const { translateForTest } = vi.hoisted(() => {
   const translations: Record<string, string> = {
-    'history.dendroLineChart.title': 'Dendro line chart',
+    'history.dendroLineChart.title': 'Dendrometer line chart',
     'history.dendroLineChart.emptyTitle': 'No dendrometer line data',
     'history.dendroLineChart.emptyBody': 'Dendrometer readings will appear here when history data is available.',
     'history.dendroLineChart.pointsCount': '{{count}} readings',
@@ -112,8 +112,8 @@ describe('DendroLineChartView', () => {
   it('renders the line chart without title, reading count, or legend cards', () => {
     render(<DendroLineChartView data={data()} />);
 
-    const chart = screen.getByRole('region', { name: 'Dendro line chart' });
-    expect(within(chart).queryByText('Dendro line chart')).not.toBeInTheDocument();
+    const chart = screen.getByRole('region', { name: 'Dendrometer line chart' });
+    expect(within(chart).queryByText('Dendrometer line chart')).not.toBeInTheDocument();
     expect(within(chart).queryByText(/\breadings\b/i)).not.toBeInTheDocument();
     expect(within(chart).queryByText('Stem change')).not.toBeInTheDocument();
     expect(screen.queryByText(/dendro-src-|A84041FFFF123456/i)).not.toBeInTheDocument();

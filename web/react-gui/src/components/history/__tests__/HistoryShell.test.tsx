@@ -18,11 +18,11 @@ const { translateForTest } = vi.hoisted(() => {
     'history.shell.subtitle': 'Local gateway history for {{username}}',
     'history.shell.loadingLocalCards': 'Loading local history cards...',
     'history.shell.unavailableTitle': 'History is unavailable',
-    'history.shell.unavailableBody': 'Runtime feature flags keep the new history shell off until the local gateway enables it.',
-    'history.shell.featureFlagFailed': 'The feature flag request failed. The legacy dashboard is still available.',
+    'history.shell.unavailableBody': 'History is switched off on this gateway and will appear here once it is enabled.',
+    'history.shell.featureFlagFailed': 'Could not check whether History is enabled. The legacy dashboard is still available.',
     'history.shell.zonesFailedTitle': 'History zones failed to load',
     'history.shell.noZonesTitle': 'No zones yet',
-    'history.shell.noZonesBody': 'Create a zone from the legacy dashboard before opening thematic history.',
+    'history.shell.noZonesBody': 'Create a zone from the legacy dashboard before opening history.',
     'history.shell.cardsFailed': 'History cards failed to load.',
     'history.shell.retryCards': 'Retry cards',
     'history.desktop.toolbarTitle': 'Toolbar',
@@ -31,7 +31,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.desktop.comparisonMode': 'Comparison',
     'history.desktop.addPanel': 'Add panel {{title}}',
     'history.desktop.removePanel': 'Remove panel',
-    'history.desktop.panelLimitWarning': 'Only {{count}} comparison panels can be shown on this edge gateway.',
+    'history.desktop.panelLimitWarning': 'Only {{count}} comparison panels can be shown on this gateway.',
     'history.desktop.selectedTimestampNone': 'No timestamp selected',
     'history.desktop.selectedTimestamp': 'Selected timestamp: {{timestamp}}',
     'history.desktop.inspectorTitle': 'Inspector',
@@ -41,7 +41,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.sidebar.pinnedCards': 'Pinned cards',
     'history.sidebar.availableCards': 'Available cards',
     'history.sidebar.savedWorkspaces': 'Saved workspaces',
-    'history.sidebar.workspaceDisabled': 'Workspace saving is not enabled on this slice.',
+    'history.sidebar.workspaceDisabled': 'Workspace saving is not enabled yet.',
     'history.sidebar.workspaceName': 'Workspace name',
     'history.sidebar.saveWorkspace': 'Save workspace',
     'history.sidebar.updateWorkspace': 'Update workspace',
@@ -59,21 +59,21 @@ const { translateForTest } = vi.hoisted(() => {
     'history.source.multipleNamed': '{{count}} sources: {{names}}',
     'history.source.multiple': '{{count}} sources',
     'history.cardFrame.emptyTitle': 'Select a history card',
-    'history.cardFrame.emptyBody': 'Choose a zone and thematic card to inspect local history.',
+    'history.cardFrame.emptyBody': 'Choose a zone and a history card to inspect local history.',
     'history.cardFrame.typeHistory': '{{cardType}} history',
     'history.cardFrame.viewModes': '{{title}} view modes',
     'history.cardFrame.unavailable': 'This card is not available for the selected zone.',
     'history.cardFrame.timelineBrush': 'Timeline viewport',
     'history.cardFrame.timelineBrushKeyboardHelp': 'Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.',
     'history.cardFrame.aggregationBadge': 'Aggregation: {{aggregation}}',
-    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
+    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here once card data is available.',
     'history.cardFrame.cardDataLoading': 'Loading card data...',
     'history.cardFrame.cardDataError': 'Card data failed to load: {{message}}',
     'history.cardFrame.cardDataUnknownError': 'Unknown error',
     'history.workspace.unavailablePanel': 'Unavailable panel',
     'history.workspace.repairPanel': 'Remove unavailable panel',
     'history.cardType.soil': 'Soil',
-    'history.cardType.dendro': 'Dendro',
+    'history.cardType.dendro': 'Dendrometer',
     'history.cardType.environment': 'Environment',
     'history.cardType.irrigation': 'Irrigation',
     'history.cardType.gateway': 'Gateway',
@@ -503,7 +503,7 @@ describe('History shell', () => {
     await waitFor(() => {
       expect(screen.getAllByTestId('history-comparison-panel')).toHaveLength(4);
     });
-    expect(screen.getByText('Only 4 comparison panels can be shown on this edge gateway.')).toBeInTheDocument();
+    expect(screen.getByText('Only 4 comparison panels can be shown on this gateway.')).toBeInTheDocument();
     expect(screen.getByText('No timestamp selected')).toBeInTheDocument();
   });
 

@@ -10,11 +10,11 @@
       "subtitle": "Local gateway history for {{username}}",
       "loadingLocalCards": "Loading local history cards…",
       "unavailableTitle": "History is unavailable",
-      "unavailableBody": "Runtime feature flags keep the new history shell off until the local gateway enables it.",
-      "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
+      "unavailableBody": "History is switched off on this gateway and will appear here once it is enabled.",
+      "featureFlagFailed": "Could not check whether History is enabled. The legacy dashboard is still available.",
       "zonesFailedTitle": "History zones failed to load",
       "noZonesTitle": "No zones yet",
-      "noZonesBody": "Create a zone from the legacy dashboard before opening thematic history.",
+      "noZonesBody": "Create a zone from the legacy dashboard before opening history.",
       "cardsFailed": "History cards failed to load.",
       "retryCards": "Retry cards"
     },
@@ -41,7 +41,7 @@
       "comparisonMode": "Comparison",
       "addPanel": "Add panel {{title}}",
       "removePanel": "Remove panel",
-      "panelLimitWarning": "Only {{count}} comparison panels can be shown on this edge gateway.",
+      "panelLimitWarning": "Only {{count}} comparison panels can be shown on this gateway.",
       "selectedTimestampNone": "No timestamp selected",
       "selectedTimestamp": "Selected timestamp: {{timestamp}}",
       "inspectorTitle": "Inspector",
@@ -90,7 +90,7 @@
       "pinnedCards": "Pinned cards",
       "availableCards": "Available cards",
       "savedWorkspaces": "Saved workspaces",
-      "workspaceDisabled": "Workspace saving is not enabled on this slice.",
+      "workspaceDisabled": "Workspace saving is not enabled yet.",
       "workspaceName": "Workspace name",
       "saveWorkspace": "Save workspace",
       "updateWorkspace": "Update workspace",
@@ -110,14 +110,14 @@
     },
     "cardFrame": {
       "emptyTitle": "Select a history card",
-      "emptyBody": "Choose a zone and thematic card to inspect local history.",
+      "emptyBody": "Choose a zone and a history card to inspect local history.",
       "typeHistory": "{{cardType}} history",
       "viewModes": "{{title}} view modes",
       "unavailable": "This card is not available for the selected zone.",
       "timelineBrush": "Timeline viewport",
       "timelineBrushKeyboardHelp": "Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.",
       "aggregationBadge": "Aggregation: {{aggregation}}",
-      "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled.",
+      "placeholderBody": "Chart and calendar data will load here once card data is available.",
       "cardDataLoading": "Loading card data…",
       "cardDataError": "Card data failed to load: {{message}}",
       "cardDataUnknownError": "Unknown error"
@@ -237,7 +237,7 @@
     },
     "cardType": {
       "soil": "Soil",
-      "dendro": "Dendro",
+      "dendro": "Dendrometer",
       "environment": "Environment",
       "irrigation": "Irrigation",
       "gateway": "Gateway"
@@ -291,12 +291,12 @@
       "emptyTitle": "No soil profile data",
       "emptyBody": "Depth-aware profile readings are not available for this range.",
       "depthLabel": "{{depth}} cm",
-      "depthUnknown": "Depth pending",
+      "depthUnknown": "Depth not set",
       "valueMissing": "No reading",
       "status": {
         "dry_stress": "Dry stress",
         "optimal": "Optimal",
-        "wet_excess": "Wet excess",
+        "wet_excess": "Too wet",
         "mixed": "Mixed",
         "no_data": "No data"
       },
@@ -325,7 +325,7 @@
       "state": {
         "dry_stress": "Dry stress",
         "optimal": "Optimal",
-        "wet_excess": "Wet excess",
+        "wet_excess": "Too wet",
         "mixed": "Mixed",
         "normal_growth": "Normal growth",
         "reduced_growth": "Reduced growth",
@@ -420,7 +420,7 @@
       },
       "rootZoneDry": {
         "title": "Root zone entered dry status",
-        "body": "Lower soil tension stayed dry through the selected period."
+        "body": "Soil tension in the deeper root zone stayed in the dry range through the selected period."
       },
       "dataCoverageGap": {
         "title": "Sensor data is incomplete",
@@ -455,8 +455,8 @@
       },
       "availability": {
         "collected": "Collected",
-        "not_collected_at_time": "Not collected then",
-        "unknown_now": "Unknown now",
+        "not_collected_at_time": "Not collected at that time",
+        "unknown_now": "Currently unknown",
         "unsupported": "Unsupported"
       },
       "field": {
@@ -513,7 +513,7 @@
       "interpretationsTitle": "Response notes"
     },
     "dendroLineChart": {
-      "title": "Dendro line chart",
+      "title": "Dendrometer line chart",
       "emptyTitle": "No dendrometer line data",
       "emptyBody": "Dendrometer readings will appear here when history data is available.",
       "pointsCount": "{{count}} readings",
@@ -526,7 +526,7 @@
       }
     },
     "dendroStressEvents": {
-      "title": "Dendro stress events",
+      "title": "Dendrometer stress events",
       "emptyTitle": "No stress events",
       "emptyBody": "No stress events in this range.",
       "eventsCount": "{{count}} events",

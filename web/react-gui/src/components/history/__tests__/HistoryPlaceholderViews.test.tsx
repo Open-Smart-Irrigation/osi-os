@@ -15,7 +15,7 @@ globalThis.ResizeObserver = ResizeObserverStub;
 
 const { translateForTest } = vi.hoisted(() => {
   const translations: Record<string, string> = {
-    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
+    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here once card data is available.',
     'history.cardFrame.cardDataLoading': 'Loading card data...',
     'history.viewMode.line-chart': 'Line Chart',
     'history.viewMode.irrigation-response': 'Irrigation Response',
@@ -27,10 +27,10 @@ const { translateForTest } = vi.hoisted(() => {
     'history.soilIrrigationResponse.emptyTitle': 'No irrigation response events',
     'history.soilIrrigationResponse.emptyBody': 'No irrigation response events in this range.',
     'history.soilIrrigationResponse.eventsCount': '{{count}} irrigation events',
-    'history.dendroLineChart.title': 'Dendro line chart',
+    'history.dendroLineChart.title': 'Dendrometer line chart',
     'history.dendroLineChart.emptyTitle': 'No dendrometer line data',
     'history.dendroLineChart.emptyBody': 'Dendrometer readings will appear here when history data is available.',
-    'history.dendroStressEvents.title': 'Dendro stress events',
+    'history.dendroStressEvents.title': 'Dendrometer stress events',
     'history.dendroStressEvents.emptyTitle': 'No stress events',
     'history.dendroStressEvents.emptyBody': 'No stress events in this range.',
     'history.dendroStressEvents.eventsCount': '{{count}} stress events',
@@ -117,8 +117,8 @@ describe('History placeholder view replacements', () => {
   it.each([
     ['soil', 'line-chart', 'Soil line chart'],
     ['soil', 'irrigation-response', 'Soil irrigation response'],
-    ['dendro', 'line-chart', 'Dendro line chart'],
-    ['dendro', 'stress-events', 'Dendro stress events'],
+    ['dendro', 'line-chart', 'Dendrometer line chart'],
+    ['dendro', 'stress-events', 'Dendrometer stress events'],
   ] as const)('renders a concrete %s %s view instead of the generic placeholder', (cardType, selectedView, label) => {
     render(
       <HistoryCardVisualization
@@ -130,7 +130,7 @@ describe('History placeholder view replacements', () => {
 
     expect(screen.getByRole('region', { name: label })).toBeInTheDocument();
     expect(
-      screen.queryByText('Chart and calendar data will load here when card data APIs are enabled.'),
+      screen.queryByText('Chart and calendar data will load here once card data is available.'),
     ).not.toBeInTheDocument();
   });
 

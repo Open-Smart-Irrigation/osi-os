@@ -16,7 +16,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardFrame.timelineBrushKeyboardHelp':
       'Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.',
     'history.cardFrame.aggregationBadge': 'Aggregation: {{aggregation}}',
-    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
+    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here once card data is available.',
     'history.cardFrame.cardDataLoading': 'Loading card data...',
     'history.cardFrame.cardDataError': 'Card data failed to load: {{message}}',
     'history.cardType.soil': 'Soil',
@@ -33,7 +33,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.soilProfile.emptyTitle': 'No soil profile data',
     'history.soilProfile.emptyBody': 'Depth-aware profile readings are not available for this range.',
     'history.soilProfile.depthLabel': '{{depth}} cm',
-    'history.soilProfile.depthUnknown': 'Depth pending',
+    'history.soilProfile.depthUnknown': 'Depth not set',
     'history.soilProfile.labelUnknown': 'Soil layer {{index}}',
     'history.soilProfile.valueMissing': 'No reading',
     'history.soilProfile.status.dry_stress': 'Dry stress',
@@ -216,7 +216,7 @@ describe('HistoryCardFrame soil profile', () => {
     render(<HistoryCardFrame card={card} scope={{ type: 'zone', zoneId: 1 }} />);
 
     expect(screen.getByText('Soil layer 2')).toBeInTheDocument();
-    expect(screen.getByText('Depth pending')).toBeInTheDocument();
+    expect(screen.getByText('Depth not set')).toBeInTheDocument();
     expect(screen.getAllByText('No reading').length).toBe(2);
     expect(screen.getByText('Deep sensor')).toBeInTheDocument();
     expect(screen.queryByText(/undefined/i)).not.toBeInTheDocument();

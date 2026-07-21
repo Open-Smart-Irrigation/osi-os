@@ -709,7 +709,7 @@ describe('PlotForm', () => {
       error: 'heterogeneous_group',
       message: 'Layout change would make an unresolved plot group heterogeneous',
       translationKey: 'plot.heterogeneousGroup',
-      defaultValue: 'The plot belongs to a heterogeneous group.',
+      defaultValue: 'The plot belongs to a group with incompatible layouts.',
     },
     {
       name: 'plot in unresolved group',

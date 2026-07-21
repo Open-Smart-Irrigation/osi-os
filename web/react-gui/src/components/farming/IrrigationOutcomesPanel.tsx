@@ -210,7 +210,7 @@ const CompactActuationRow: React.FC<{
     <li className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 flex flex-col gap-1.5">
       <div className="flex flex-col gap-1">
         <div className="text-sm font-semibold text-[var(--text)]">
-          {row.zoneName ?? t('irrigationOutcomes.zoneUnknown', { defaultValue: 'Zone ?' })}
+          {row.zoneName ?? t('irrigationOutcomes.zoneUnknown', { defaultValue: 'Unknown zone' })}
         </div>
         <div className="text-xs text-[var(--text-secondary)] flex flex-wrap gap-x-3 gap-y-0.5">
           <span>
@@ -237,7 +237,7 @@ const AdvancedActuationRow: React.FC<{
     <li className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
-          <span>{row.zoneName ?? t('irrigationOutcomes.zoneUnknown', { defaultValue: 'Zone ?' })}</span>
+          <span>{row.zoneName ?? t('irrigationOutcomes.zoneUnknown', { defaultValue: 'Unknown zone' })}</span>
           <span className="text-[var(--text-tertiary)]">·</span>
           <span className="text-[var(--text-secondary)]">{row.deviceName ?? row.deviceEui}</span>
         </div>
@@ -393,13 +393,13 @@ export const IrrigationOutcomesPanel: React.FC<Props> = ({
 
       {viewState.loading && (
         <p className="text-sm text-[var(--text-tertiary)]">
-          {t('irrigationOutcomes.loading', { defaultValue: 'Loading recent actuations…' })}
+          {t('irrigationOutcomes.loading', { defaultValue: 'Loading recent irrigations…' })}
         </p>
       )}
 
       {viewState.error && (
         <p className="text-sm text-[var(--error-text, #991b1b)]">
-          {t('irrigationOutcomes.error', { defaultValue: 'Failed to load recent actuations' })}: {viewState.error}
+          {t('irrigationOutcomes.error', { defaultValue: 'Failed to load recent irrigations' })}: {viewState.error}
         </p>
       )}
 

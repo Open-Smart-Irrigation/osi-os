@@ -39,7 +39,7 @@
     "other": "Other"
   },
   "severity": {
-    "cant_work": "Cannot work",
+    "cant_work": "Blocks my work",
     "workaround": "Workaround available",
     "annoying": "Annoying",
     "idea": "Idea"

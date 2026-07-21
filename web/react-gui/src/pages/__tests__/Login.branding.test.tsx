@@ -27,7 +27,7 @@ vi.mock('react-i18next', () => ({
         'login.passwordPlaceholder': 'Enter your password',
         'login.signIn': 'Sign in',
         'login.signingIn': 'Signing in…',
-        'login.noAccount': 'Register Account',
+        'login.noAccount': 'Create account',
         'login.failed': 'Login failed. Please check your credentials.',
       };
       return map[key] ?? key;
@@ -54,7 +54,7 @@ describe('Login AgroLink branding', () => {
     );
     expect(screen.getByRole('heading', { name: 'AgroLink' })).toBeInTheDocument();
     expect(screen.queryByText('Powered by OSI OS')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Register Account' })).toHaveAttribute('href', '/register');
+    expect(screen.getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '/register');
     expect(screen.queryByText('translated login subtitle')).not.toBeInTheDocument();
     expect(screen.queryByText(/OSI OS v0\.6\.5/)).not.toBeInTheDocument();
   });

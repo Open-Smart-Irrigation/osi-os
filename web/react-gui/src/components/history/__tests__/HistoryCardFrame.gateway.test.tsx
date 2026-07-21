@@ -16,7 +16,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardFrame.timelineBrushKeyboardHelp':
       'Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.',
     'history.cardFrame.aggregationBadge': 'Aggregation: {{aggregation}}',
-    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
+    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here once card data is available.',
     'history.cardType.gateway': 'Gateway',
     'history.cardType.soil': 'Soil',
     'history.viewMode.status-overview': 'Status Overview',
@@ -301,7 +301,7 @@ describe('HistoryCardFrame gateway status overview', () => {
 
     render(<HistoryCardFrame card={soilCard()} scope={{ type: 'zone', zoneId: 1 }} />);
 
-    expect(screen.getByText('Chart and calendar data will load here when card data APIs are enabled.')).toBeInTheDocument();
+    expect(screen.getByText('Chart and calendar data will load here once card data is available.')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Gateway status overview' })).not.toBeInTheDocument();
   });
 });

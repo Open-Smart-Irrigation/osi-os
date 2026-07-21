@@ -24,7 +24,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardFrame.timelineBrushKeyboardHelp':
       'Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.',
     'history.cardFrame.aggregationBadge': 'Aggregation: {{aggregation}}',
-    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
+    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here once card data is available.',
     'history.cardType.soil': 'Soil',
     'history.viewMode.calendar': 'Calendar',
     'history.viewMode.advanced': 'Advanced view',
@@ -59,8 +59,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.advanced.field.rssi': 'RSSI',
     'history.advanced.field.rawPayload': 'Raw payload',
     'history.advanced.availability.collected': 'Collected',
-    'history.advanced.availability.not_collected_at_time': 'Not collected then',
-    'history.advanced.availability.unknown_now': 'Unknown now',
+    'history.advanced.availability.not_collected_at_time': 'Not collected at that time',
+    'history.advanced.availability.unknown_now': 'Currently unknown',
     'history.advanced.availability.unsupported': 'Unsupported',
     'history.advanced.value.unavailable': 'Unavailable',
   };
@@ -245,7 +245,7 @@ describe('AdvancedViewPanel', () => {
     expect(within(region).getByText('RSSI')).toBeInTheDocument();
     expect(within(region).getByText('-113 dBm')).toBeInTheDocument();
     expect(within(region).getByText('Raw payload')).toBeInTheDocument();
-    expect(within(region).getByText('Not collected then')).toBeInTheDocument();
+    expect(within(region).getByText('Not collected at that time')).toBeInTheDocument();
   });
 });
 
