@@ -183,7 +183,7 @@ function CaptureModal({ accessibleName, onRequestClose, children }: CaptureModal
         aria-modal="true"
         aria-label={accessibleName}
         tabIndex={-1}
-        className="my-8 max-h-[calc(100vh-4rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"
+        className="my-8 max-h-[calc(100vh-4rem)] w-full max-w-3xl overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         {children}

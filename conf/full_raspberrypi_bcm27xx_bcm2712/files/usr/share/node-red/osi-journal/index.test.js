@@ -1198,9 +1198,10 @@ test('assertJournalEntryEffectKey binds UUID and prior version exactly', () => {
 test('loadCatalog reads the seeded catalog into code-indexed maps', async () => {
   const catalog = await loadCatalog(createTestDb('load'));
 
-  // Slice F: the seeded catalog is now at v6 (BBCH growth stage + manual
-  // weather-at-application attrs + farmer_quick@6/full_record@6, 0028).
-  assert.equal(catalog.version, 6);
+  // journal capture-followups Slice 1: the seeded catalog is now at v7
+  // (relaxed full_record@7 irrigation_details requiredness + 16 open-field
+  // vegetable choices, 0029).
+  assert.equal(catalog.version, 7);
   assert.match(catalog.hash, /^[a-f0-9]{64}$/);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
   assert.equal(catalog.templates.get('farmer_quick').get(1).definition.max_primary_fields, 5);
@@ -1260,7 +1261,7 @@ test('loadCatalog supports the callback sqlite API used by Node-RED', async () =
 
   const catalog = await loadCatalog(callbackDb);
 
-  assert.equal(catalog.version, 6);
+  assert.equal(catalog.version, 7);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
 });
 
@@ -1708,6 +1709,41 @@ test('validateEntry enforces the seeded full_record irrigation conditional group
   assert.equal(missing.ok, false);
   assert.ok(missing.errors.some((error) => error.field === 'attr.irrigation_amount_kind'));
   assert.equal(complete.ok, true);
+});
+
+// journal capture-followups Slice 1 (Task 1.4): full_record@7 relaxes the
+// irrigation_details conditional group — attr.measurement_source and
+// attr.denominator move from required to optional (W1), while
+// attr.irrigation_amount_kind stays required alongside required_any (the
+// amount: one of depth/volume/per-plant). The edge validator only enforces
+// conditional_groups/activity_requirements (never layout minimum_fields — see
+// docs/superpowers/plans/2026-07-21-journal-capture-followups-plan.md), so a
+// full_record@7 irrigation entry with just amount + amount_kind must already
+// be savable with no edge-side change.
+test('validateEntry: full_record@7 irrigation is savable without measurement_source/denominator', async () => {
+  const { catalog, openField } = await loadedFixture('irrigation-group-v7');
+  const fullRecordV7 = catalog.templates.get('full_record').get(7);
+  assert.ok(fullRecordV7, 'catalog must publish full_record@7');
+
+  const minimal = validateEntry(catalog, openField, fullRecordV7, validIrrigation({
+    template_code: 'full_record',
+    values: [
+      { attribute_code: 'attr.irrigation_amount_kind', value: 'choice.irrigation_amount.measured' },
+      { attribute_code: 'attr.irrigation_depth', value: 12, unit_code: 'unit.mm_water' },
+    ],
+  }));
+
+  assert.equal(minimal.ok, true, JSON.stringify(minimal.errors));
+
+  const missingAmountKind = validateEntry(catalog, openField, fullRecordV7, validIrrigation({
+    template_code: 'full_record',
+    values: [
+      { attribute_code: 'attr.irrigation_depth', value: 12, unit_code: 'unit.mm_water' },
+    ],
+  }));
+
+  assert.equal(missingAmountKind.ok, false);
+  assert.ok(missingAmountKind.errors.some((error) => error.field === 'attr.irrigation_amount_kind'));
 });
 
 test('validateEntry rejects unsupported predicate operators as catalog errors', async () => {

@@ -402,6 +402,34 @@ const choices = [
   { ...choice('choice.wind.sw', 'attr.wind_direction', 'Southwest', 60), since_version: 6 },
   { ...choice('choice.wind.w', 'attr.wind_direction', 'West', 70), since_version: 6 },
   { ...choice('choice.wind.nw', 'attr.wind_direction', 'Northwest', 80), since_version: 6 },
+
+  // Slice 1 (journal capture-followups plan 2026-07-21, Task 1.2 / W3): 16
+  // open-field vegetable additions to attr.crop, English-only (matching every
+  // existing crop choice — full crop-vocab i18n is a separate follow-up).
+  // sort_order 3500..3560 (step 4) so these sort after the Agroscope
+  // arable-crop range (agroscope.crop.* ~3000-3025, generate-journal-catalog.js
+  // buildAgroscope) and before the generic v4 buckets (permanent_grassland /
+  // field_vegetable / fallow / other at 4000-4040). Codes are deliberately
+  // distinct from existing agronomically-different crops already in the
+  // catalog: choice.crop.garden_pea != Agroscope 'pea, spring/winter' (field
+  // pea), choice.crop.table_beet != 'beet, sugar/fodder', choice.crop.sweetcorn
+  // != 'maize, grain/silage'.
+  { ...choice('choice.crop.carrot', 'attr.crop', 'Carrot', 3500), since_version: 7 },
+  { ...choice('choice.crop.onion', 'attr.crop', 'Onion', 3504), since_version: 7 },
+  { ...choice('choice.crop.leek', 'attr.crop', 'Leek', 3508), since_version: 7 },
+  { ...choice('choice.crop.cabbage', 'attr.crop', 'Cabbage', 3512), since_version: 7 },
+  { ...choice('choice.crop.cauliflower', 'attr.crop', 'Cauliflower', 3516), since_version: 7 },
+  { ...choice('choice.crop.broccoli', 'attr.crop', 'Broccoli', 3520), since_version: 7 },
+  { ...choice('choice.crop.lettuce', 'attr.crop', 'Lettuce', 3524), since_version: 7 },
+  { ...choice('choice.crop.spinach', 'attr.crop', 'Spinach', 3528), since_version: 7 },
+  { ...choice('choice.crop.celeriac', 'attr.crop', 'Celeriac', 3532), since_version: 7 },
+  { ...choice('choice.crop.fennel', 'attr.crop', 'Fennel', 3536), since_version: 7 },
+  { ...choice('choice.crop.table_beet', 'attr.crop', 'Table beet', 3540), since_version: 7 },
+  { ...choice('choice.crop.courgette', 'attr.crop', 'Courgette / zucchini', 3544), since_version: 7 },
+  { ...choice('choice.crop.pumpkin_squash', 'attr.crop', 'Pumpkin / squash', 3548), since_version: 7 },
+  { ...choice('choice.crop.sweetcorn', 'attr.crop', 'Sweetcorn', 3552), since_version: 7 },
+  { ...choice('choice.crop.garden_pea', 'attr.crop', 'Garden pea', 3556), since_version: 7 },
+  { ...choice('choice.crop.green_bean', 'attr.crop', 'Green bean', 3560), since_version: 7 },
 ];
 
 const CORE_ACTIVITY_CODES = activities.map((activity) => activity.code);
@@ -1022,6 +1050,146 @@ const templates = [
         // fields visible+optional for plant_protection_application on its
         // own — addField's merge-by-code logic (templateEngine.ts) makes the
         // two declarations idempotent together, never conflicting.
+        {
+          code: 'weather_at_application',
+          activity_codes: ['plant_protection_application'],
+          required: [],
+          required_any: [],
+          optional: [
+            'attr.wind_speed',
+            'attr.wind_direction',
+            'attr.air_temperature',
+            'attr.rel_humidity',
+          ],
+        },
+      ],
+      certified_compliance_profile: null,
+    },
+  },
+  // v7 (Slice 1, journal capture-followups plan 2026-07-21, Task 1.1a): W1
+  // relax Full-mode irrigation requiredness. full_record@6 stays
+  // byte-identical above so historical Full entries keep resolving against
+  // it. This row is identical to @6 in every respect (sections,
+  // operation_fields_by_activity — reusing FULL_RECORD_V6_OPERATION_FIELDS_BY_ACTIVITY
+  // verbatim, activity_requirements, the weather_at_application conditional
+  // group, certified_compliance_profile) except the `irrigation_details`
+  // conditional group: `attr.measurement_source` and `attr.denominator` move
+  // from `required` to `optional` (maintainer "relax to essentials"
+  // decision, confirmed). `attr.irrigation_amount_kind` (the unit/kind)
+  // stays required, alongside `required_any` (the amount: one of
+  // depth/volume/per-plant) — both were never on the maintainer's drop list.
+  // Paired with the templateEngine decouple (Task 1.1b), open_field's
+  // block_bed_row/cover_type/denominator also become visible-but-optional via
+  // static_context_fields, while treated_area stays required (Fable I1).
+  {
+    code: 'full_record',
+    version: 7,
+    label: 'Full record',
+    definition: {
+      sections: [
+        { code: 'identity', fields: ['activity_code', 'plot_uuid', 'occurred_start', 'occurred_end'] },
+        {
+          code: 'operation',
+          scoped_by_activity: true,
+          fields: [
+            'attr.crop',
+            'attr.product_uuid',
+            'attr.product',
+            'attr.treated_area',
+            'attr.harvest_area',
+            'attr.harvest_yield_area',
+            'attr.amount_mass_area_product',
+            'attr.amount_volume_area_product',
+            'attr.amount_nutrient_rate',
+            'attr.amount_count_area',
+            'attr.amount_biological_count_area',
+            'attr.irrigation_amount_kind',
+            'attr.measurement_source',
+            'attr.denominator',
+            'attr.irrigation_depth',
+            'attr.irrigation_volume_area',
+            'attr.per_plant_volume',
+            'attr.actuation_expectation_id',
+            'attr.operator',
+            'attr.equipment',
+            'attr.method',
+            'attr.target',
+            'attr.waiting_period_days',
+            'attr.amount_operation_depth',
+            'attr.observation_text',
+            'attr.growth_stage_bbch',
+            'attr.wind_speed',
+            'attr.wind_direction',
+            'attr.air_temperature',
+            'attr.rel_humidity',
+          ],
+        },
+        { code: 'notes', fields: ['note'] },
+      ],
+      operation_fields_by_activity: FULL_RECORD_V6_OPERATION_FIELDS_BY_ACTIVITY,
+      activity_requirements: {
+        fertilization: {
+          required: ['attr.treated_area'],
+          required_any: [
+            ['attr.product_uuid', 'attr.product'],
+            [
+              'attr.amount_mass_area_product',
+              'attr.amount_volume_area_product',
+              'attr.amount_nutrient_rate',
+            ],
+          ],
+        },
+        fertigation: {
+          required: ['attr.treated_area'],
+          required_any: [
+            ['attr.product_uuid', 'attr.product'],
+            [
+              'attr.amount_mass_area_product',
+              'attr.amount_volume_area_product',
+              'attr.amount_nutrient_rate',
+            ],
+          ],
+        },
+        plant_protection_application: {
+          required: ['attr.treated_area'],
+          required_any: [
+            ['attr.product_uuid', 'attr.product'],
+            [
+              'attr.amount_mass_area_product',
+              'attr.amount_volume_area_product',
+              'attr.amount_biological_count_area',
+            ],
+          ],
+        },
+        seeding: {
+          required: ['attr.crop', 'attr.treated_area'],
+          required_any: [['attr.amount_mass_area_product', 'attr.amount_count_area']],
+        },
+        planting_transplanting: {
+          required: ['attr.crop', 'attr.treated_area'],
+          required_any: [['attr.amount_count_area']],
+        },
+        harvest: {
+          required: ['attr.crop', 'attr.harvest_area', 'attr.harvest_yield_area'],
+          required_any: [],
+        },
+      },
+      conditional_groups: [
+        {
+          code: 'irrigation_details',
+          activity_codes: ['irrigation', 'fertigation'],
+          required: ['attr.irrigation_amount_kind'],
+          required_any: [[
+            'attr.irrigation_depth',
+            'attr.irrigation_volume_area',
+            'attr.per_plant_volume',
+          ]],
+          optional: ['attr.measurement_source', 'attr.denominator', 'attr.actuation_expectation_id'],
+        },
+        // F2: manual weather-at-application fallback (unchanged from @6). See
+        // the @6 comment above for why this declaration and
+        // operation_fields_by_activity's own visibility are idempotent
+        // together.
         {
           code: 'weather_at_application',
           activity_codes: ['plant_protection_application'],

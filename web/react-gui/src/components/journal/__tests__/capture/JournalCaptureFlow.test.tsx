@@ -4473,12 +4473,16 @@ describe('JournalCaptureFlow', () => {
       ]));
     });
 
-    it('leaves full_record resolution unaffected: block/bed/row still renders as a required field there', async () => {
+    it('leaves full_record resolution unaffected: block/bed/row still renders there, visible but optional (journal capture-followups Slice 1, Task 1.1b)', async () => {
       // Slice BC's regression guard, checked directly against the resolution
       // engine (deriveFieldStates) rather than round-tripping the capture
       // UI's in-flow detail-level switcher, which this minimal fixture does
-      // not exercise: full_record has no quick_fields, so it must keep
-      // force-requiring the layout's plot-static field exactly as before.
+      // not exercise: full_record has no quick_fields, so it takes the same
+      // non-quick minimum_fields branch as before. journal capture-followups
+      // Slice 1 (W1) relaxes any minimum_fields entry that is also listed in
+      // the layout's own static_context_fields to visible-but-optional —
+      // attr.block_bed_row is one of open_field@3's static_context_fields, so
+      // it is no longer force-required here, though it still renders.
       const { buildCatalogModel } = await import('../../../../journal/catalogModel');
       const { deriveFieldStates } = await import('../../../../journal/templateEngine');
       const result = buildCatalogModel(plotContextCatalog);
@@ -4492,7 +4496,7 @@ describe('JournalCaptureFlow', () => {
       const states = deriveFieldStates(fullRecord, layout, { activity_code: 'fertilization' });
       expect(states.find((state) => state.code === 'attr.block_bed_row')).toMatchObject({
         visible: true,
-        required: true,
+        required: false,
       });
     });
   });

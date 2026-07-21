@@ -243,11 +243,16 @@ describe('template engine', () => {
       expect(visibleAttributeOrNoteCodes).toEqual(['note']);
     });
 
-    it('leaves full_record/research (no quick_fields) resolution unaffected by the v1 -> v3 layout bump', () => {
+    it('leaves full_record/research (no quick_fields) resolution unaffected by the v1 -> v3 layout bump, except static_context_fields relaxed to optional (journal capture-followups Slice 1, Task 1.1b)', () => {
       const selections = { activity_code: 'fertilization' };
       const statesAgainstV1 = deriveFieldStates(fullRecordTemplate, layoutV1, selections);
       const statesAgainstV3 = deriveFieldStates(fullRecordTemplate, layoutV3, selections);
-      expect(statesAgainstV3).toEqual(statesAgainstV1);
+      // attr.block_bed_row is layoutV3's only static_context_fields entry, so
+      // it flips from force-required to visible-but-optional; every other
+      // field/order/requiredness stays identical to v1.
+      const expectedAgainstV3 = statesAgainstV1.map((s) =>
+        s.code === 'attr.block_bed_row' ? { ...s, required: false } : s);
+      expect(statesAgainstV3).toEqual(expectedAgainstV3);
       // And the reading fields the v1 minimum_fields used to force directly
       // are still forced-visible+required via v3's reading_fields reunion.
       expect(statesAgainstV3.find((s) => s.code === 'attr.mass_start')).toMatchObject({
