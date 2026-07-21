@@ -39,7 +39,7 @@
   "requestShareConsent": "Kiyinza okugabanyizibwa awatali bikwata ku nnimiro eby’ekyama.",
   "requestIncludeDiagnostics": "Include diagnostics",
   "requestSubmit": "Save request",
-  "requestSubmitting": "Saving...",
+  "requestSubmitting": "Saving…",
   "requestSaved": "Saved, waiting for internet",
   "requestError": "Could not save request",
   "area_dashboard": "Dashboard",

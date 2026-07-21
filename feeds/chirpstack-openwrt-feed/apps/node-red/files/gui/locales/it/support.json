@@ -20,7 +20,7 @@
     "includeDiagnostics": "Includi diagnostica sicura con questa richiesta.",
     "consentPublic": "Accetto che questa richiesta possa essere condivisa pubblicamente senza dettagli privati dell'azienda agricola.",
     "submit": "Salva richiesta",
-    "submitting": "Salvataggio..."
+    "submitting": "Salvataggio…"
   },
   "types": {
     "bug": "Bug",
@@ -45,7 +45,7 @@
     "idea": "Idea"
   },
   "diagnostics": {
-    "loading": "Caricamento diagnostica...",
+    "loading": "Caricamento diagnostica…",
     "unavailable": "La diagnostica non è disponibile al momento."
   },
   "banners": {
@@ -85,7 +85,7 @@
   "myRequests": {
     "title": "Le mie richieste",
     "loadError": "Impossibile caricare le richieste.",
-    "loading": "Caricamento richieste...",
+    "loading": "Caricamento richieste…",
     "area": "Area",
     "submitted": "Inviata"
   }

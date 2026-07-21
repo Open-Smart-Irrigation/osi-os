@@ -13,7 +13,7 @@
     "osiServer": "OSI Server"
   },
   "logout": "Esci",
-  "loading": "Caricamento dashboard...",
+  "loading": "Caricamento dashboard…",
   "failedToLoad": "Caricamento dati fallito",
   "autoRefresh": "Aggiornamento automatico ogni 10 secondi",
   "emptyState": {

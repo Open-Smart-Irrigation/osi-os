@@ -20,7 +20,7 @@
     "includeDiagnostics": "Incluir diagnóstico seguro com esta solicitação.",
     "consentPublic": "Aceito que esta solicitação possa ser compartilhada publicamente sem detalhes privados da fazenda.",
     "submit": "Salvar solicitação",
-    "submitting": "Salvando..."
+    "submitting": "Salvando…"
   },
   "types": {
     "bug": "Bug",
@@ -45,7 +45,7 @@
     "idea": "Ideia"
   },
   "diagnostics": {
-    "loading": "Carregando diagnóstico...",
+    "loading": "Carregando diagnóstico…",
     "unavailable": "O diagnóstico não está disponível no momento."
   },
   "banners": {
@@ -85,7 +85,7 @@
   "myRequests": {
     "title": "Minhas solicitações",
     "loadError": "Não foi possível carregar as solicitações.",
-    "loading": "Carregando solicitações...",
+    "loading": "Carregando solicitações…",
     "area": "Área",
     "submitted": "Enviada"
   }

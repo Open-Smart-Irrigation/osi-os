@@ -45,7 +45,7 @@
   "requestShareConsent": "Pode ser partilhado publicamente sem detalhes privados da exploração.",
   "requestIncludeDiagnostics": "Incluir diagnósticos",
   "requestSubmit": "Guardar pedido",
-  "requestSubmitting": "A guardar...",
+  "requestSubmitting": "A guardar…",
   "requestSaved": "Guardado, à espera da internet",
   "requestError": "Não foi possível guardar o pedido",
   "area_dashboard": "Painel",

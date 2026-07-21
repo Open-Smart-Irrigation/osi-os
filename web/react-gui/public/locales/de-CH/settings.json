@@ -45,7 +45,7 @@
   "requestShareConsent": "Darf ohne private Betriebsdetails öffentlich geteilt werden.",
   "requestIncludeDiagnostics": "Diagnostik einschliessen",
   "requestSubmit": "Anfrage speichern",
-  "requestSubmitting": "Speichern...",
+  "requestSubmitting": "Speichern…",
   "requestSaved": "Gespeichert, wartet auf Internet",
   "requestError": "Anfrage konnte nicht gespeichert werden",
   "area_dashboard": "Dashboard",

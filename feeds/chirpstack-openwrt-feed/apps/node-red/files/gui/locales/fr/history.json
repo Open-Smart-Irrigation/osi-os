@@ -8,7 +8,7 @@
     "shell": {
       "title": "Historique",
       "subtitle": "Historique local de la passerelle pour {{username}}",
-      "loadingLocalCards": "Chargement des cartes d’historique local...",
+      "loadingLocalCards": "Chargement des cartes d’historique local…",
       "unavailableTitle": "L’historique n’est pas disponible",
       "unavailableBody": "Les indicateurs de fonctionnalité gardent la nouvelle interface d’historique désactivée tant que la passerelle locale ne l’active pas.",
       "featureFlagFailed": "La requête de l’indicateur de fonctionnalité a échoué. Le tableau de bord existant reste disponible.",
@@ -67,7 +67,7 @@
       "backToHistory": "Retour à l’historique",
       "invalidRouteTitle": "Carte d’historique non disponible",
       "invalidRouteBody": "Retournez à l’historique et choisissez une carte disponible.",
-      "loading": "Chargement de la carte d’historique...",
+      "loading": "Chargement de la carte d’historique…",
       "notFoundTitle": "Carte d’historique non disponible",
       "notFoundBody": "Retournez à l’historique et choisissez une carte disponible.",
       "controlsPlaceholder": "Plage de dates",
@@ -118,7 +118,7 @@
       "timelineBrushKeyboardHelp": "Utilisez les flèches pour déplacer, plus ou moins pour zoomer, et Origine ou Entrée pour réinitialiser.",
       "aggregationBadge": "Agrégation : {{aggregation}}",
       "placeholderBody": "Les données du graphique et du calendrier s’afficheront ici lorsque les API de données de carte seront activées.",
-      "cardDataLoading": "Chargement des données de la carte...",
+      "cardDataLoading": "Chargement des données de la carte…",
       "cardDataError": "Échec du chargement des données de la carte : {{message}}",
       "cardDataUnknownError": "Erreur inconnue"
     },
@@ -433,7 +433,7 @@
     },
     "advanced": {
       "title": "Diagnostics avancés",
-      "loading": "Chargement des diagnostics avancés...",
+      "loading": "Chargement des diagnostics avancés…",
       "emptyTitle": "Aucun diagnostic avancé",
       "value": {
         "unavailable": "Indisponible"

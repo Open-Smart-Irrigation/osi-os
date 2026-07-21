@@ -17,7 +17,7 @@
     "email": "Email",
     "password": "Ekigambo ky'okulinda",
     "submit": "Yungibwa ku OSI Server",
-    "submitting": "Kiyungibwa...",
+    "submitting": "Kiyungibwa…",
     "cancel": "Sazaamu"
   },
   "warning": {
@@ -46,13 +46,13 @@
     "title": "Okusinkroniza ku mukono",
     "description": "Kola okusinkroniza kw'okuddaabiriza kaakano ne OSI Server.",
     "button": "Sinkroniza Kaakano",
-    "running": "Tikusinkroniza...",
+    "running": "Tikusinkroniza…",
     "successTitle": "Okusinkroniza ku mukono kuwedde",
     "partialTitle": "Okusinkroniza ku mukono kuwedde n'ebizibu",
     "refreshed": "Token y'okusinkroniza ezze obuggya nga tonnasinkroniza.",
     "usedCurrentToken": "Kikozesa token y'okusinkroniza ekiriwo kaakano.",
     "bootstrap": "Bootstrap ekozesebbwa: {{applied}}, eyasaziddwaawo: {{skipped}}",
-    "outbox": "Outbox etuusiddwa: {{delivered}} ({{before}} -> {{after}} birindiridde)",
+    "outbox": "Outbox etuusiddwa: {{delivered}} ({{before}} → {{after}} birindiridde)",
     "pending": "Ebiragiro ebirindiridde ebifunibbwa: {{fetched}}, ebiterekeddwa okukozesebwa mu kitundu: {{queued}}",
     "pendingAfterResponse": "Okukozesa mu kitundu kugenda mu maaso oluvannyuma lw'okuddamu kuno.",
     "lastError": "Ensobi esembayo okuva ku {{source}}: {{message}}"
@@ -64,6 +64,6 @@
     "username": "Erinnya ery'omukozesa ku server",
     "password": "Ekigambo ky'okulinda ekya OSI Server",
     "submit": "Zzaawo Okuyunga",
-    "running": "Tikuzzaawo..."
+    "running": "Tikuzzaawo…"
   }
 }

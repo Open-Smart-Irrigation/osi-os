@@ -8,7 +8,7 @@
     "shell": {
       "title": "Ebyafaayo",
       "subtitle": "Ebyafaayo bya Gateway eby'omu kitundu ebya {{username}}",
-      "loadingLocalCards": "Amakaadi g'ebyafaayo eby'omu kitundu gatikkibwa...",
+      "loadingLocalCards": "Amakaadi g'ebyafaayo eby'omu kitundu gatikkibwa…",
       "unavailableTitle": "Ebyafaayo tebiriwo",
       "unavailableBody": "Enteekateeka za sisitimu (feature flags) zikomekkerezza ebyafaayo ebipya okutuusa Gateway y'omu kitundu lw'ebisobozesa.",
       "featureFlagFailed": "Okusaba kwa feature flag kugaanye. Dashboard enkadde ekyaliwo.",
@@ -67,7 +67,7 @@
       "backToHistory": "Ddayo ku byafaayo",
       "invalidRouteTitle": "Kaadi y'ebyafaayo tekiriwo",
       "invalidRouteBody": "Ddayo ku Byafaayo olonde kaadi eriwo.",
-      "loading": "Kaadi y'ebyafaayo etikkibwa...",
+      "loading": "Kaadi y'ebyafaayo etikkibwa…",
       "notFoundTitle": "Kaadi y'ebyafaayo tekiriwo",
       "notFoundBody": "Ddayo ku Byafaayo olonde kaadi eriwo.",
       "controlsPlaceholder": "Ekiseera ky'ennaku",
@@ -118,7 +118,7 @@
       "timelineBrushKeyboardHelp": "Kozesa obufunzo obulaga obuko okutambuza, + oba - okugaziya oba okufunza, ne Home oba Enter okuzzaawo.",
       "aggregationBadge": "Okugatta data: {{aggregation}}",
       "placeholderBody": "Data za chart ne kalendaa zijja kulabikira wano nga API za data za kaadi zisobozesezza.",
-      "cardDataLoading": "Data za kaadi zitikkibwa...",
+      "cardDataLoading": "Data za kaadi zitikkibwa…",
       "cardDataError": "Data za kaadi tezisobodde kutikkibwa: {{message}}",
       "cardDataUnknownError": "Ensobi etamanyiddwa"
     },
@@ -448,7 +448,7 @@
     },
     "advanced": {
       "title": "Okwekenneenya okw'ebisingawo",
-      "loading": "Okwekenneenya okw'ebisingawo kutikkibwa...",
+      "loading": "Okwekenneenya okw'ebisingawo kutikkibwa…",
       "emptyTitle": "Tewali kwekenneenya kw'ebisingawo",
       "value": {
         "unavailable": "Tekiriwo"

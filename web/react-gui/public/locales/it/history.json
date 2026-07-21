@@ -8,7 +8,7 @@
     "shell": {
       "title": "Cronologia",
       "subtitle": "Cronologia locale del gateway per {{username}}",
-      "loadingLocalCards": "Caricamento schede storiche locali...",
+      "loadingLocalCards": "Caricamento schede storiche locali…",
       "unavailableTitle": "La cronologia non è disponibile",
       "unavailableBody": "I feature flag di runtime mantengono disattivata la nuova shell della cronologia finché il gateway locale non la abilita.",
       "featureFlagFailed": "La richiesta del feature flag non è riuscita. La dashboard legacy è ancora disponibile.",
@@ -67,7 +67,7 @@
       "backToHistory": "Torna alla cronologia",
       "invalidRouteTitle": "Scheda storica non disponibile",
       "invalidRouteBody": "Torna alla Cronologia e scegli una scheda disponibile.",
-      "loading": "Caricamento scheda storica...",
+      "loading": "Caricamento scheda storica…",
       "notFoundTitle": "Scheda storica non disponibile",
       "notFoundBody": "Torna alla Cronologia e scegli una scheda disponibile.",
       "controlsPlaceholder": "Intervallo di date",
@@ -118,7 +118,7 @@
       "timelineBrushKeyboardHelp": "Usa le frecce per spostarti, più o meno per zoomare, e Home o Invio per reimpostare.",
       "aggregationBadge": "Aggregazione: {{aggregation}}",
       "placeholderBody": "I dati del grafico e del calendario verranno caricati qui quando le API dei dati della scheda saranno abilitate.",
-      "cardDataLoading": "Caricamento dati della scheda...",
+      "cardDataLoading": "Caricamento dati della scheda…",
       "cardDataError": "Impossibile caricare i dati della scheda: {{message}}",
       "cardDataUnknownError": "Errore sconosciuto"
     },
@@ -433,7 +433,7 @@
     },
     "advanced": {
       "title": "Diagnostica avanzata",
-      "loading": "Caricamento diagnostica avanzata...",
+      "loading": "Caricamento diagnostica avanzata…",
       "emptyTitle": "Nessuna diagnostica avanzata",
       "value": {
         "unavailable": "Non disponibile"

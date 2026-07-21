@@ -20,7 +20,7 @@
     "includeDiagnostics": "Sichere Diagnosedaten mit dieser Anfrage senden.",
     "consentPublic": "Ich bin einverstanden, dass diese Anfrage ohne private Hofdetails öffentlich geteilt werden darf.",
     "submit": "Anfrage speichern",
-    "submitting": "Speichern..."
+    "submitting": "Speichern…"
   },
   "types": {
     "bug": "Fehler",
@@ -45,7 +45,7 @@
     "idea": "Idee"
   },
   "diagnostics": {
-    "loading": "Diagnosedaten werden geladen...",
+    "loading": "Diagnosedaten werden geladen…",
     "unavailable": "Diagnosedaten sind derzeit nicht verfügbar."
   },
   "banners": {
@@ -85,7 +85,7 @@
   "myRequests": {
     "title": "Meine Anfragen",
     "loadError": "Anfragen konnten nicht geladen werden.",
-    "loading": "Anfragen werden geladen...",
+    "loading": "Anfragen werden geladen…",
     "area": "Bereich",
     "submitted": "Gesendet"
   }

@@ -8,7 +8,7 @@
     "shell": {
       "title": "Verlauf",
       "subtitle": "Lokaler Gateway-Verlauf für {{username}}",
-      "loadingLocalCards": "Lokale Verlaufskarten werden geladen...",
+      "loadingLocalCards": "Lokale Verlaufskarten werden geladen…",
       "unavailableTitle": "Verlauf ist nicht verfügbar",
       "unavailableBody": "Laufzeit-Feature-Flags halten die neue Verlaufsoberfläche deaktiviert, bis das lokale Gateway sie aktiviert.",
       "featureFlagFailed": "Die Feature-Flag-Anfrage ist fehlgeschlagen. Das bestehende Dashboard ist weiterhin verfügbar.",
@@ -67,7 +67,7 @@
       "backToHistory": "Zurück zum Verlauf",
       "invalidRouteTitle": "Verlaufskarte nicht verfügbar",
       "invalidRouteBody": "Kehren Sie zum Verlauf zurück und wählen Sie eine verfügbare Karte.",
-      "loading": "Verlaufskarte wird geladen...",
+      "loading": "Verlaufskarte wird geladen…",
       "notFoundTitle": "Verlaufskarte nicht verfügbar",
       "notFoundBody": "Kehren Sie zum Verlauf zurück und wählen Sie eine verfügbare Karte.",
       "controlsPlaceholder": "Zeitraum",
@@ -118,7 +118,7 @@
       "timelineBrushKeyboardHelp": "Mit den Pfeiltasten verschieben, mit Plus oder Minus zoomen und mit Pos1 oder Enter zurücksetzen.",
       "aggregationBadge": "Aggregation: {{aggregation}}",
       "placeholderBody": "Diagramm- und Kalenderdaten werden hier geladen, sobald die Karten-Daten-APIs aktiviert sind.",
-      "cardDataLoading": "Kartendaten werden geladen...",
+      "cardDataLoading": "Kartendaten werden geladen…",
       "cardDataError": "Kartendaten konnten nicht geladen werden: {{message}}",
       "cardDataUnknownError": "Unbekannter Fehler"
     },
@@ -433,7 +433,7 @@
     },
     "advanced": {
       "title": "Erweiterte Diagnose",
-      "loading": "Erweiterte Diagnose wird geladen...",
+      "loading": "Erweiterte Diagnose wird geladen…",
       "emptyTitle": "Keine erweiterte Diagnose",
       "value": {
         "unavailable": "Nicht verfügbar"

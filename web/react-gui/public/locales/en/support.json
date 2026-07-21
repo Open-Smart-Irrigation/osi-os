@@ -20,7 +20,7 @@
     "includeDiagnostics": "Include safe diagnostics with this request.",
     "consentPublic": "I agree this request may be shared publicly without private farm details.",
     "submit": "Save request",
-    "submitting": "Saving..."
+    "submitting": "Saving…"
   },
   "types": {
     "bug": "Bug",
@@ -45,7 +45,7 @@
     "idea": "Idea"
   },
   "diagnostics": {
-    "loading": "Loading diagnostics...",
+    "loading": "Loading diagnostics…",
     "unavailable": "Diagnostics are unavailable right now."
   },
   "banners": {
@@ -85,7 +85,7 @@
   "myRequests": {
     "title": "My Requests",
     "loadError": "Requests could not be loaded.",
-    "loading": "Loading requests...",
+    "loading": "Loading requests…",
     "area": "Area",
     "submitted": "Submitted"
   }

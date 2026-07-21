@@ -45,7 +45,7 @@
   "requestShareConsent": "Puede compartirse públicamente sin detalles privados de la finca.",
   "requestIncludeDiagnostics": "Incluir diagnósticos",
   "requestSubmit": "Guardar solicitud",
-  "requestSubmitting": "Guardando...",
+  "requestSubmitting": "Guardando…",
   "requestSaved": "Guardado, esperando internet",
   "requestError": "No se pudo guardar la solicitud",
   "area_dashboard": "Panel",

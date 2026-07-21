@@ -17,7 +17,7 @@
     "email": "Email",
     "password": "Password",
     "submit": "Connect to OSI Server",
-    "submitting": "Connecting...",
+    "submitting": "Connecting…",
     "cancel": "Cancel"
   },
   "warning": {
@@ -46,13 +46,13 @@
     "title": "Manual sync",
     "description": "Run an immediate recovery sync with OSI Server.",
     "button": "Force sync now",
-    "running": "Syncing...",
+    "running": "Syncing…",
     "successTitle": "Manual sync completed",
     "partialTitle": "Manual sync finished with issues",
     "refreshed": "Sync token refreshed before sync.",
     "usedCurrentToken": "Using current sync token.",
     "bootstrap": "Bootstrap applied: {{applied}}, skipped: {{skipped}}",
-    "outbox": "Outbox delivered: {{delivered}} ({{before}} -> {{after}} pending)",
+    "outbox": "Outbox delivered: {{delivered}} ({{before}} → {{after}} pending)",
     "pending": "Pending commands fetched: {{fetched}}, queued for local apply: {{queued}}",
     "pendingAfterResponse": "Local apply continues after this response returns.",
     "lastError": "Last error from {{source}}: {{message}}"
@@ -64,6 +64,6 @@
     "username": "Server Username",
     "password": "OSI Server Password",
     "submit": "Refresh connection",
-    "running": "Refreshing..."
+    "running": "Refreshing…"
   }
 }

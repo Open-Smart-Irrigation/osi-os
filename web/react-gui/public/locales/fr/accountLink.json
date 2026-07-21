@@ -17,7 +17,7 @@
     "email": "E-mail",
     "password": "Mot de passe",
     "submit": "Connecter à OSI Server",
-    "submitting": "Connexion...",
+    "submitting": "Connexion…",
     "cancel": "Annuler"
   },
   "warning": {
@@ -46,13 +46,13 @@
     "title": "Synchronisation manuelle",
     "description": "Lance une synchronisation de récupération immédiate avec OSI Server.",
     "button": "Forcer la synchronisation maintenant",
-    "running": "Synchronisation en cours...",
+    "running": "Synchronisation en cours…",
     "successTitle": "Synchronisation manuelle terminée",
     "partialTitle": "Synchronisation manuelle terminée avec des problèmes",
     "refreshed": "Jeton de synchronisation actualisé avant la synchronisation.",
     "usedCurrentToken": "Utilisation du jeton de synchronisation actuel.",
     "bootstrap": "Bootstrap appliqué : {{applied}}, ignoré : {{skipped}}",
-    "outbox": "Outbox livrée : {{delivered}} ({{before}} -> {{after}} en attente)",
+    "outbox": "Outbox livrée : {{delivered}} ({{before}} → {{after}} en attente)",
     "pending": "Commandes en attente récupérées : {{fetched}}, mises en file pour application locale : {{queued}}",
     "pendingAfterResponse": "L'application locale se poursuit après le retour de cette réponse.",
     "lastError": "Dernière erreur de {{source}} : {{message}}"
@@ -64,6 +64,6 @@
     "username": "Nom d'utilisateur serveur",
     "password": "Mot de passe OSI Server",
     "submit": "Actualiser la connexion",
-    "running": "Actualisation en cours..."
+    "running": "Actualisation en cours…"
   }
 }

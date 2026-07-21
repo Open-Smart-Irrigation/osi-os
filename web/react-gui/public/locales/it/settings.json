@@ -45,7 +45,7 @@
   "requestShareConsent": "Può essere condivisa pubblicamente senza dettagli privati dell’azienda.",
   "requestIncludeDiagnostics": "Includi diagnostica",
   "requestSubmit": "Salva richiesta",
-  "requestSubmitting": "Salvataggio...",
+  "requestSubmitting": "Salvataggio…",
   "requestSaved": "Salvata, in attesa di internet",
   "requestError": "Impossibile salvare la richiesta",
   "area_dashboard": "Dashboard",

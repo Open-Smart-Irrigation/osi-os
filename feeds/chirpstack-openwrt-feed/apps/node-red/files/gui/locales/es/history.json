@@ -8,7 +8,7 @@
     "shell": {
       "title": "Historial",
       "subtitle": "Historial local del gateway para {{username}}",
-      "loadingLocalCards": "Cargando tarjetas de historial locales...",
+      "loadingLocalCards": "Cargando tarjetas de historial locales…",
       "unavailableTitle": "El historial no está disponible",
       "unavailableBody": "Los indicadores de funciones en tiempo de ejecución mantienen desactivado el nuevo panel de historial hasta que el gateway local lo habilite.",
       "featureFlagFailed": "La solicitud del indicador de función falló. El panel heredado sigue disponible.",
@@ -67,7 +67,7 @@
       "backToHistory": "Volver al historial",
       "invalidRouteTitle": "Tarjeta de historial no disponible",
       "invalidRouteBody": "Vuelve a Historial y elige una tarjeta disponible.",
-      "loading": "Cargando tarjeta de historial...",
+      "loading": "Cargando tarjeta de historial…",
       "notFoundTitle": "Tarjeta de historial no disponible",
       "notFoundBody": "Vuelve a Historial y elige una tarjeta disponible.",
       "controlsPlaceholder": "Rango de fechas",
@@ -118,7 +118,7 @@
       "timelineBrushKeyboardHelp": "Usa las flechas para desplazar, más o menos para acercar, e Inicio o Intro para restablecer.",
       "aggregationBadge": "Agregación: {{aggregation}}",
       "placeholderBody": "Los datos del gráfico y del calendario se cargarán aquí cuando las API de datos de la tarjeta estén habilitadas.",
-      "cardDataLoading": "Cargando datos de la tarjeta...",
+      "cardDataLoading": "Cargando datos de la tarjeta…",
       "cardDataError": "Error al cargar los datos de la tarjeta: {{message}}",
       "cardDataUnknownError": "Error desconocido"
     },
@@ -433,7 +433,7 @@
     },
     "advanced": {
       "title": "Diagnósticos avanzados",
-      "loading": "Cargando diagnósticos avanzados...",
+      "loading": "Cargando diagnósticos avanzados…",
       "emptyTitle": "No hay diagnósticos avanzados",
       "value": {
         "unavailable": "No disponible"

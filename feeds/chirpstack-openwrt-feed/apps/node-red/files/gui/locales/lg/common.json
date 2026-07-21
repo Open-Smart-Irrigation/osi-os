@@ -1,6 +1,6 @@
 {
   "cancel": "Lekawo",
-  "loading": "Tikuyitamu...",
+  "loading": "Tikuyitamu…",
   "delete": "Sazaamu",
   "na": "Tebaawo",
   "retry": "Gezaako nate",
@@ -16,10 +16,10 @@
     },
     "empty": "Londa olunyiriri lumu oba okusingawo okutandika okugeraageranya ebitundu.",
     "catalog": {
-      "loading": "Ennyiriri eziriwo zitikkibwa..."
+      "loading": "Ennyiriri eziriwo zitikkibwa…"
     },
     "series": {
-      "loading": "Ennyiriri zitikkibwa..."
+      "loading": "Ennyiriri zitikkibwa…"
     },
     "aggregation": {
       "label": "Okugatta data",

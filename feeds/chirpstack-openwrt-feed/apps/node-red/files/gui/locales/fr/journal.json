@@ -31,7 +31,7 @@
   },
   "timeline": {
     "empty": "Aucune activité enregistrée pour le moment.",
-    "loading": "Chargement des activités...",
+    "loading": "Chargement des activités…",
     "batch": "Activité groupée",
     "batchExpand": "Afficher les entrées du lot",
     "batchCollapse": "Masquer les entrées du lot",
@@ -414,7 +414,7 @@
       "reviewAction": "Vérifier les valeurs modifiées"
     },
     "save": {
-      "saving": "Enregistrement en cours...",
+      "saving": "Enregistrement en cours…",
       "draftSavedGateway": "Brouillon enregistré sur la passerelle de la ferme",
       "finalSavedGateway": "Enregistré sur la passerelle de la ferme",
       "cloudWaiting": "Enregistré sur OSI Server — en attente de la passerelle de la ferme",

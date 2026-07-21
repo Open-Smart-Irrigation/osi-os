@@ -58,3 +58,14 @@ test('de-CH never uses ß (Swiss convention)', () => {
     }
   }
 });
+
+test('no ASCII three-dot ellipsis or -> arrow in any locale', () => {
+  for (const locale of LOCALES) {
+    for (const ns of NAMESPACES) {
+      for (const [key, value] of Object.entries(load(locale, ns))) {
+        assert.ok(!value.includes('...'), `${locale}/${ns}.json "${key}" uses ... instead of …`);
+        assert.ok(!value.includes('->'), `${locale}/${ns}.json "${key}" uses -> instead of →`);
+      }
+    }
+  }
+});

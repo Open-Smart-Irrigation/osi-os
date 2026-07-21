@@ -31,7 +31,7 @@
   },
   "timeline": {
     "empty": "Tewali kikolwa kiwandiikiddwa.",
-    "loading": "Ebikolwa bitikkibwa...",
+    "loading": "Ebikolwa bitikkibwa…",
     "batch": "Ebikolwa eby'awamu",
     "batchExpand": "Gaziya ebikolwa eby'awamu",
     "batchCollapse": "Kendeeza ebikolwa eby'awamu",
@@ -414,7 +414,7 @@
       "reviewAction": "Kebera emiwendo egikyusiddwa"
     },
     "save": {
-      "saving": "Tikutereka...",
+      "saving": "Tikutereka…",
       "draftSavedGateway": "Ekitannamala kiterekeddwa ku Gateway y'ennimiro",
       "finalSavedGateway": "Kiterekeddwa ku Gateway y'ennimiro",
       "cloudWaiting": "Kiterekeddwa ku OSI Server — kirindiridde Gateway y'ennimiro",

@@ -20,7 +20,7 @@
     "includeDiagnostics": "Inclure un diagnostic sûr avec cette demande.",
     "consentPublic": "J'accepte que cette demande soit partagée publiquement sans détails privés de l'exploitation.",
     "submit": "Enregistrer la demande",
-    "submitting": "Enregistrement..."
+    "submitting": "Enregistrement…"
   },
   "types": {
     "bug": "Bug",
@@ -45,7 +45,7 @@
     "idea": "Idée"
   },
   "diagnostics": {
-    "loading": "Chargement du diagnostic...",
+    "loading": "Chargement du diagnostic…",
     "unavailable": "Le diagnostic n'est pas disponible pour le moment."
   },
   "banners": {
@@ -85,7 +85,7 @@
   "myRequests": {
     "title": "Mes demandes",
     "loadError": "Impossible de charger les demandes.",
-    "loading": "Chargement des demandes...",
+    "loading": "Chargement des demandes…",
     "area": "Zone",
     "submitted": "Envoyé"
   }

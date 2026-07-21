@@ -8,7 +8,7 @@
     "shell": {
       "title": "History",
       "subtitle": "Local gateway history for {{username}}",
-      "loadingLocalCards": "Loading local history cards...",
+      "loadingLocalCards": "Loading local history cards…",
       "unavailableTitle": "History is unavailable",
       "unavailableBody": "Runtime feature flags keep the new history shell off until the local gateway enables it.",
       "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
@@ -67,7 +67,7 @@
       "backToHistory": "Back to history",
       "invalidRouteTitle": "History card not available",
       "invalidRouteBody": "Return to History and choose an available card.",
-      "loading": "Loading history card...",
+      "loading": "Loading history card…",
       "notFoundTitle": "History card not available",
       "notFoundBody": "Return to History and choose an available card.",
       "controlsPlaceholder": "Date range",
@@ -118,7 +118,7 @@
       "timelineBrushKeyboardHelp": "Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.",
       "aggregationBadge": "Aggregation: {{aggregation}}",
       "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled.",
-      "cardDataLoading": "Loading card data...",
+      "cardDataLoading": "Loading card data…",
       "cardDataError": "Card data failed to load: {{message}}",
       "cardDataUnknownError": "Unknown error"
     },
@@ -448,7 +448,7 @@
     },
     "advanced": {
       "title": "Advanced diagnostics",
-      "loading": "Loading advanced diagnostics...",
+      "loading": "Loading advanced diagnostics…",
       "emptyTitle": "No advanced diagnostics",
       "value": {
         "unavailable": "Unavailable"

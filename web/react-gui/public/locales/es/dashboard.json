@@ -13,7 +13,7 @@
     "osiServer": "OSI Server"
   },
   "logout": "Cerrar sesión",
-  "loading": "Cargando panel de control...",
+  "loading": "Cargando panel de control…",
   "failedToLoad": "Error al cargar los datos",
   "autoRefresh": "Actualización automática cada 10 segundos",
   "emptyState": {

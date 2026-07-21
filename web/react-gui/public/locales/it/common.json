@@ -1,6 +1,6 @@
 {
   "cancel": "Annulla",
-  "loading": "Caricamento...",
+  "loading": "Caricamento…",
   "delete": "Elimina",
   "na": "N/D",
   "retry": "Riprova",
@@ -16,10 +16,10 @@
     },
     "empty": "Seleziona una o più serie per iniziare a confrontare le zone.",
     "catalog": {
-      "loading": "Caricamento delle serie disponibili..."
+      "loading": "Caricamento delle serie disponibili…"
     },
     "series": {
-      "loading": "Caricamento delle serie..."
+      "loading": "Caricamento delle serie…"
     },
     "aggregation": {
       "label": "Aggregazione",

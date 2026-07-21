@@ -13,7 +13,7 @@
     "osiServer": "OSI Server"
   },
   "logout": "Abmelden",
-  "loading": "Dashboard wird geladen...",
+  "loading": "Dashboard wird geladen…",
   "failedToLoad": "Daten konnten nicht geladen werden",
   "autoRefresh": "Automatische Aktualisierung alle 10 Sekunden",
   "emptyState": {

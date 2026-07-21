@@ -13,7 +13,7 @@
     "osiServer": "OSI Server"
   },
   "logout": "Déconnexion",
-  "loading": "Chargement du tableau de bord...",
+  "loading": "Chargement du tableau de bord…",
   "failedToLoad": "Échec du chargement des données",
   "autoRefresh": "Actualisation automatique toutes les 10 secondes",
   "emptyState": {

@@ -39,7 +39,7 @@
   "requestShareConsent": "Peut être partagé publiquement sans détails privés de la ferme.",
   "requestIncludeDiagnostics": "Inclure les diagnostics",
   "requestSubmit": "Enregistrer la demande",
-  "requestSubmitting": "Enregistrement...",
+  "requestSubmitting": "Enregistrement…",
   "requestSaved": "Enregistré, en attente d’Internet",
   "requestError": "Impossible d’enregistrer la demande",
   "area_dashboard": "Tableau de bord",
