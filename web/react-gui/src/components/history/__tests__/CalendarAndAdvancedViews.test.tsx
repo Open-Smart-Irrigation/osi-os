@@ -55,7 +55,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.advanced.title': 'Advanced diagnostics',
     'history.advanced.loading': 'Loading advanced diagnostics...',
     'history.advanced.emptyTitle': 'No advanced diagnostics',
-    'history.advanced.field.primaryDeveui': 'Device EUI',
+    'history.advanced.field.primaryDeveui': 'DevEUI',
     'history.advanced.field.rssi': 'RSSI',
     'history.advanced.field.rawPayload': 'Raw payload',
     'history.advanced.availability.collected': 'Collected',
@@ -240,7 +240,7 @@ describe('AdvancedViewPanel', () => {
     render(<AdvancedViewPanel data={advanced()} isLoading={false} />);
 
     const region = screen.getByRole('region', { name: 'Advanced diagnostics' });
-    expect(within(region).getByText('Device EUI')).toBeInTheDocument();
+    expect(within(region).getByText('DevEUI')).toBeInTheDocument();
     expect(within(region).getByText('A84041FFFF123456')).toBeInTheDocument();
     expect(within(region).getByText('RSSI')).toBeInTheDocument();
     expect(within(region).getByText('-113 dBm')).toBeInTheDocument();

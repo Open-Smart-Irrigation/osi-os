@@ -144,7 +144,7 @@ export function getStregaActuationFeedback(
       tone: 'queued',
       label: t('stregaValve.actuationFeedback.openQueued', { defaultValue: 'Open queued' }),
       detail: t('stregaValve.actuationFeedback.waitingForUplink', {
-        defaultValue: 'waiting for valve uplink (≈ {{minutes}} min)',
+        defaultValue: 'Waiting for valve uplink (≈ {{minutes}} min)',
         minutes: approximateCommandWindowMinutes(row),
       }),
     };

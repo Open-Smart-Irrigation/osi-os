@@ -79,7 +79,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardType.gateway': 'Gateway',
     'history.viewMode.soil-profile': 'Soil Profile',
     'history.viewMode.line-chart': 'Line Chart',
-    'history.viewMode.growth-timeline': 'Growth Timeline',
+    'history.viewMode.growth-timeline': 'Growth timeline',
     'history.viewMode.stress-events': 'Stress Events',
     'history.metadata.coverageUnknown': 'Coverage unknown',
     'history.metadata.coverageKnown': '{{coverage}}% coverage',

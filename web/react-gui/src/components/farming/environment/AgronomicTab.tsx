@@ -104,7 +104,7 @@ const ETSection: React.FC<ETSectionProps> = ({
         />
         <div className="bg-[var(--card)] rounded-xl p-3 border border-[var(--border)] flex flex-col gap-1">
           <span className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide font-medium">
-            {t('environment.agronomic.kc', { defaultValue: 'Crop coeff. Kc' })}
+            {t('environment.agronomic.kc', { defaultValue: 'Crop coefficient (Kc)' })}
           </span>
           <span className="text-xl font-bold tabular-nums" style={{ color: '#8b5cf6' }}>
             {kc != null ? kc.toFixed(2) : '—'}

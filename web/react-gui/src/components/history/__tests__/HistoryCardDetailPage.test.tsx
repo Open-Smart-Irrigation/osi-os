@@ -128,7 +128,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.advanced.title': 'Advanced diagnostics',
     'history.advanced.loading': 'Loading advanced diagnostics...',
     'history.advanced.emptyTitle': 'No advanced diagnostics',
-    'history.advanced.field.primaryDeveui': 'Device EUI',
+    'history.advanced.field.primaryDeveui': 'DevEUI',
     'history.advanced.field.rssi': 'RSSI',
     'history.advanced.availability.collected': 'Collected',
     'history.advanced.availability.unknown_now': 'Unknown now',

@@ -157,7 +157,7 @@ function statusLabel(status: IrrigationActuationStatus, t: (k: string, o?: Recor
     PENDING_OPEN:  'Pending open',
     RUNNING:       'Running',
     COMPLETED:     'Completed',
-    CANCELLED:     'Cancelled',
+    CANCELLED:     'Canceled',
     COMMAND_FAILED:'Command failed',
     OPEN_TIMEOUT:  'Open timeout',
     CLOSE_TIMEOUT: 'Close timeout',

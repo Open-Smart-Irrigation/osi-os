@@ -20,7 +20,7 @@ vi.mock('react-i18next', () => ({
         'history.viewMode.irrigation-response': 'Irrigation Response',
         'history.viewMode.advanced': 'Advanced view',
         'history.viewMode.daily-min-max': 'Daily Min/Max',
-        'history.viewMode.growth-timeline': 'Growth Timeline',
+        'history.viewMode.growth-timeline': 'Growth timeline',
       };
       if (labels[key]) return labels[key];
       if (opts?.defaultValue) return opts.defaultValue as string;

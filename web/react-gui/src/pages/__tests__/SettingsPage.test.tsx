@@ -74,7 +74,7 @@ vi.mock('react-i18next', () => ({
         journalDetailQuick: 'Quick',
         journalDetailFull: 'Full',
         journalDetailResearch: 'Research',
-        userRequestTitle: 'User request',
+        userRequestTitle: 'User Request',
         requestType: 'Request type',
         bugFix: 'Bug fix',
         featureRequest: 'Feature request',
@@ -143,7 +143,7 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('heading', { name: 'Units & Display' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Modules' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Data & Refresh' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'User request' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'User Request' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Light' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Dark' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'System' })).toBeInTheDocument();
@@ -332,7 +332,7 @@ describe('SettingsPage', () => {
   it('submits user requests through the improvement request API with all required fields', async () => {
     renderSettings();
 
-    const userRequest = screen.getByRole('region', { name: 'User request' });
+    const userRequest = screen.getByRole('region', { name: 'User Request' });
     fireEvent.click(within(userRequest).getByRole('button', { name: 'Bug fix' }));
     fireEvent.change(within(userRequest).getByLabelText('Title'), {
       target: { value: 'Water balance layout breaks' },

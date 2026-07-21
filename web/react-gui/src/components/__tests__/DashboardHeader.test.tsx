@@ -16,7 +16,7 @@ vi.mock('react-i18next', () => ({
         title: 'Dashboard',
         'addMenu.zone': 'Zone',
         'addMenu.device': 'Device',
-        'addMenu.activity': 'Log activity',
+        'addMenu.activity': 'Log Activity',
         'tabs.zones': 'Zones',
         'tabs.data': 'Data',
         'tabs.journal': 'Journal',
@@ -95,7 +95,7 @@ describe('DashboardHeader (osi-os)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Device' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Log activity' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Log Activity' }));
 
     expect(`${window.location.pathname}${window.location.search}`).toBe('/journal?capture=1');
     expect(onAddZone).toHaveBeenCalledOnce();
@@ -148,7 +148,7 @@ describe('DashboardHeader (osi-os)', () => {
   it('offers Log activity in the Add menu', () => {
     renderHeader();
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    expect(screen.getByRole('menuitem', { name: 'Log activity' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Log Activity' })).toBeInTheDocument();
   });
 
   it('names the Settings link by its full label even though phones show only the gear', () => {
