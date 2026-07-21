@@ -9,7 +9,7 @@
     "deveuiHint": "Entrez exactement 16 caractères hexadécimaux (0-9, A-F)",
     "deveuiInvalid": "Le DevEUI doit contenir exactement 16 caractères hexadécimaux",
     "adding": "Ajout en cours…",
-    "submit": "Ajouter l'appareil",
+    "submit": "Ajouter un appareil",
     "failed": "Impossible d'ajouter l'appareil"
   },
   "assignModal": {
@@ -29,7 +29,7 @@
     "zoneNamePlaceholder": "ex. Jardin A, Champ Nord, Verger 1",
     "zoneNameRequired": "Le nom de la zone est requis",
     "creating": "Création en cours…",
-    "submit": "Créer la zone",
+    "submit": "Créer une zone",
     "failed": "Impossible de créer la zone"
   },
   "kiwiSensor": {
@@ -62,7 +62,7 @@
     "enableTempHumidityNote": "Active la remontée de la température ambiante et de l'humidité avec l'intervalle saisi ci-dessus.",
     "enableTempHumidity": "Activer température + humidité",
     "enablingTempHumidity": "Activation de la température + humidité…",
-    "enableTempHumidityPending": "Remontée de la température ambiante et de l'humidité demandée. La commande utilise un intervalle de {{minutes}} minute(s).",
+    "enableTempHumidityPending": "Remontée de la température ambiante et de l'humidité demandée. La commande utilise un intervalle de {{minutes}} min.",
     "failedToEnableTempHumidity": "Impossible d'activer la température et l'humidité Kiwi",
     "enableTempHumidityRequiresInterval": "Entrez un nombre entier de minutes entre 1 et 1440 avant d'activer la température ambiante et l'humidité."
   },
@@ -118,12 +118,12 @@
     "export": {
       "title": "Export des données",
       "selectRange": "Choisissez une plage de dates pour télécharger les données de la zone.",
-      "from": "De",
-      "to": "À",
+      "from": "Du",
+      "to": "Au",
       "granularity": "Granularité",
-      "raw": "Brut",
+      "raw": "Brute",
       "hourly": "Horaire",
-      "daily": "Quotidien",
+      "daily": "Quotidienne",
       "download": "Télécharger CSV",
       "downloading": "Préparation…",
       "rangeSummary": "{{from}} à {{to}}",
@@ -133,11 +133,11 @@
     }
   },
   "schedule": {
-    "irrigationSchedule": "Planning d'irrigation",
+    "irrigationSchedule": "Programme d'irrigation",
     "triggerMetric": "Métrique de déclenchement",
     "soilWaterTension1": "Tension hydrique du sol 1",
     "soilWaterTension2": "Tension hydrique du sol 2",
-    "average": "Moyenne (WM1 + WM2)",
+    "average": "Moyenne (Tension 1 + Tension 2)",
     "thresholdKpa": "Seuil (kPa)",
     "duration": "Durée d'irrigation (min)",
     "enabled": "Activé",
@@ -145,12 +145,12 @@
     "off": "Désactivé",
     "loadingSchedule": "Chargement du planning…",
     "loadFailed": "Impossible de charger le planning",
-    "saving": "Sauvegarde en cours…",
-    "saveSchedule": "Sauvegarder le planning",
-    "saveFailed": "Impossible de sauvegarder le planning",
+    "saving": "Enregistrement…",
+    "saveSchedule": "Enregistrer le planning",
+    "saveFailed": "Impossible d'enregistrer le planning",
     "reload": "Recharger",
     "reloadFailed": "Impossible de recharger le planning",
-    "saved": "Sauvegardé.",
+    "saved": "Enregistré.",
     "triggerHint": "Déclencher si {{metric}} ≥ {{threshold}} kPa (une fois/jour, 06h00)."
   },
   "environment": {
@@ -174,7 +174,7 @@
     },
     "location": {
       "zone": "Coordonnées de zone",
-      "gateway": "GPS passerelle",
+      "gateway": "GPS de la passerelle",
       "unavailable": "Aucun emplacement"
     },
     "local": {
@@ -196,9 +196,9 @@
       "dewPoint": "Point de rosée",
       "heatIndex": "Indice de chaleur",
       "thi": "THI",
-      "et0": "ET₀ référence",
-      "kc": "Coeff. culture Kc",
-      "etc": "ET culture",
+      "et0": "ET₀ de référence",
+      "kc": "Kc (coeff. cultural)",
+      "etc": "ETc (culturale)",
       "noData": "Aucune donnée agronomique disponible",
       "fromSource": "depuis {{source}}"
     },
@@ -232,13 +232,13 @@
   "irrigationOutcomes": {
     "title": "Irrigations récentes",
     "updated": "mis à jour",
-    "loading": "Chargement des activations récentes…",
-    "error": "Impossible de charger les activations récentes",
+    "loading": "Chargement des irrigations récentes…",
+    "error": "Impossible de charger les irrigations récentes",
     "empty": "Aucune irrigation récente enregistrée.",
-    "zoneUnknown": "Zone ?",
+    "zoneUnknown": "Zone inconnue",
     "duration": "Durée",
     "totalVolume": "Volume total : {{liters}}",
-    "irrigated": "Irrigué : {{depth}}",
+    "irrigated": "Lame d'eau : {{depth}}",
     "timestampTitle": "{{label}} : {{absolute}} ({{relative}})",
     "settings": "Paramètres des irrigations récentes",
     "advancedView": "Vue avancée",

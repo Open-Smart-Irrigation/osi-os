@@ -22,7 +22,7 @@
   },
   "warning": {
     "title": "Important",
-    "message": "Après la liaison, vous devez utiliser vos identifiants OSI Server pour vous connecter. OSI OS stocke un vérificateur hors ligne propre à la passerelle pour la connexion liée.",
+    "message": "Après la liaison, vous devez utiliser vos identifiants OSI Server pour vous connecter. OSI OS conserve une copie sécurisée de vos identifiants sur cette passerelle afin que vous puissiez vous connecter même sans connexion Internet.",
     "proceed": "Continuer"
   },
   "success": {
@@ -51,8 +51,8 @@
     "partialTitle": "Synchronisation manuelle terminée avec des problèmes",
     "refreshed": "Jeton de synchronisation actualisé avant la synchronisation.",
     "usedCurrentToken": "Utilisation du jeton de synchronisation actuel.",
-    "bootstrap": "Bootstrap appliqué : {{applied}}, ignoré : {{skipped}}",
-    "outbox": "Outbox livrée : {{delivered}} ({{before}} → {{after}} en attente)",
+    "bootstrap": "Initialisation appliquée : {{applied}}, ignorée : {{skipped}}",
+    "outbox": "File d'attente sortante livrée : {{delivered}} ({{before}} → {{after}} en attente)",
     "pending": "Commandes en attente récupérées : {{fetched}}, mises en file pour application locale : {{queued}}",
     "pendingAfterResponse": "L'application locale se poursuit après le retour de cette réponse.",
     "lastError": "Dernière erreur de {{source}} : {{message}}"

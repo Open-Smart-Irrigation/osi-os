@@ -89,7 +89,7 @@
       "zone": "Zone",
       "droppedPairs": "Ignorés",
       "insufficient": "insuffisant (n={{n}})",
-      "exploratory": "Exploratoire uniquement — r de Pearson sur des buckets alignés ; pas un test de signification."
+      "exploratory": "Exploratoire uniquement — r de Pearson sur des intervalles alignés ; pas un test de signification."
     }
   }
 }
