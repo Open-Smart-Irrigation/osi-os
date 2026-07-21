@@ -370,6 +370,15 @@
       "dismiss": "Nicht übernehmen",
       "invalidated": "Die vorherige Behandlung passt nicht mehr zu dieser Parzelle, Kultur, Zeit, Saison oder zu diesem Layout"
     },
+    "tankMix": {
+      "title": "Tankmischung",
+      "addProduct": "Produkt zu diesem Arbeitsgang hinzufügen",
+      "empty": "Noch keine weiteren Produkte hinzugefügt",
+      "memberLabel": "{{index}}. {{detail}}",
+      "unknownProduct": "Kein Produkt ausgewählt",
+      "remove": "Entfernen",
+      "saveFailed": "Eines der Produkte dieses Arbeitsgangs konnte nicht gespeichert werden. Bitte erneut versuchen."
+    },
     "confirm": {
       "title": "Vor dem Speichern prüfen",
       "activity": "Aktivität",

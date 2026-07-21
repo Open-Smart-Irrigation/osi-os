@@ -7,6 +7,7 @@ import {
   buildCatalogModel,
   catalogLabel,
   deriveActivityLeaves,
+  withWeatherAtApplicationVisibility,
 } from '../../../journal/catalogModel';
 import {
   loadActivityShortlist,
@@ -35,8 +36,8 @@ import {
   resolveOccurrence,
   type ResolvedOccurrence,
 } from '../../../journal/occurrence';
-import { useCaptureDraft } from '../../../journal/useCaptureDraft';
-import { buildFinalBatchPayload } from '../../../journal/buildFinalBatchPayload';
+import { useCaptureDraft, type CaptureSaveState } from '../../../journal/useCaptureDraft';
+import { buildFinalBatchPayload, buildTankMixPassBatchPayload } from '../../../journal/buildFinalBatchPayload';
 import { matchingActiveHarvestGroups } from '../../../journal/groupResolutionNudge';
 import {
   MANUAL_CLOSE_ACTIVITY_CODES,
@@ -63,6 +64,7 @@ import type {
   EntryFinalMutationReceipt,
   JournalCatalog,
   JournalPlot,
+  JournalProductRow,
   PlotGroup,
 } from '../../../types/journal';
 import type {
@@ -141,6 +143,18 @@ interface AcceptedRepeatSnapshot {
   candidateValues: ReadonlyArray<Readonly<CaptureEntryValueInput>>;
   values: CaptureEntryValueInput[];
 }
+
+// Slice F (F3): the tank-mix product-family fields a spray pass's "add
+// product to this pass" affordance snapshots per queued product and clears
+// from the live form so the next product can be entered. Kept to exactly the
+// fields plant_protection_application's operation_fields_by_activity/
+// quick_fields declare for product identity + dose — treated_area, operator,
+// equipment, wind/temp/humidity, growth stage, etc. all stay shared across
+// every product in the pass.
+const TANK_MIX_PRODUCT_FIELD_CODES = [
+  'attr.product_uuid', 'attr.product',
+  'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_biological_count_area',
+];
 
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--card)]';
@@ -232,7 +246,15 @@ function cloneFinalBatchPayload(payload: Parameters<typeof journalApi.createFina
   Parameters<typeof journalApi.createFinalBatch>[0] {
   return {
     ...payload,
-    members: payload.members.map((member) => ({ ...member })),
+    // A pass batch's members each carry their own `values` (unlike a
+    // cross-plot batch, where members never set it and share the top-level
+    // array below) -- deep-clone that per-member array too so a cached
+    // snapshot reused across retries never shares array identity with a
+    // freshly-built payload.
+    members: payload.members.map((member) => ({
+      ...member,
+      ...(member.values ? { values: member.values.map((value) => ({ ...value })) } : {}),
+    })),
     values: payload.values.map((value) => ({ ...value })),
     ...(payload.duplicate_guard_ack_entry_uuids
       ? { duplicate_guard_ack_entry_uuids: [...payload.duplicate_guard_ack_entry_uuids] }
@@ -391,6 +413,42 @@ function duplicateValueLabel(
   const unitCode = value.entered_unit_code ?? value.unit_code;
   const unit = unitCode ? model.vocabByCode.get(unitCode) : undefined;
   return `${label}: ${displayRaw}${unit ? ` ${catalogLabel(unit, locale)}` : ''}`;
+}
+
+// Slice F (F3, tank-mix): summarizes one queued pass member's product
+// identity for the "Products in this pass" list. Mirrors
+// RepeatTreatmentCard's disclosedValue product-name resolution (a
+// product_uuid resolves via the catalog.products registry, not vocab —
+// products are a separate registry, not catalog choices).
+function tankMixProductLabel(
+  values: readonly CaptureEntryValueOutput[],
+  products: readonly Pick<JournalProductRow, 'product_uuid' | 'name'>[],
+  unknownProductLabel: string,
+): string {
+  const registered = values.find((value) => value.attribute_code === 'attr.product_uuid');
+  if (registered && typeof registered.value === 'string') {
+    return products.find((product) => product.product_uuid === registered.value)?.name
+      ?? unknownProductLabel;
+  }
+  const unregistered = values.find((value) => value.attribute_code === 'attr.product');
+  if (unregistered && typeof unregistered.value === 'string' && unregistered.value) {
+    return unregistered.value;
+  }
+  return unknownProductLabel;
+}
+
+function tankMixDoseLabel(
+  values: readonly CaptureEntryValueOutput[],
+  model: JournalCaptureCatalogModel,
+  locale: string,
+): string {
+  const dose = values.find((value) =>
+    value.attribute_code === 'attr.amount_mass_area_product' ||
+    value.attribute_code === 'attr.amount_volume_area_product' ||
+    value.attribute_code === 'attr.amount_biological_count_area');
+  if (!dose || typeof dose.value_num !== 'number') return '';
+  const unit = dose.unit_code ? model.vocabByCode.get(dose.unit_code) : undefined;
+  return `${localizedNumber(dose.value_num, locale)}${unit ? ` ${catalogLabel(unit, locale)}` : ''}`;
 }
 
 const DETAIL_LEVEL_ORDER = ['farmer_quick', 'full_record', 'research_observation'];
@@ -692,6 +750,25 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const [plotEditor, setPlotEditor] = useState<{ mode: 'create' | 'update'; plot?: JournalPlot } | null>(null);
   const [preparingConfirm, setPreparingConfirm] = useState(false);
   const [batchAttemptPending, setBatchAttemptPending] = useState(false);
+  // Slice F (F3, tank-mix): "Add product to this pass" queues the current
+  // form's product-family values (TANK_MIX_PRODUCT_FIELD_CODES) as a linked
+  // pass member and clears them so the next product can be entered. All
+  // members (including the entry the user is currently editing, which
+  // becomes the pass's primary/first entry at Save) share one `passUuid`
+  // (P8's existing pass_uuid mechanism) — not a new table. Single-plot only:
+  // a pass links different operations/products on the SAME plot, orthogonal
+  // to the multi-plot batch mechanism.
+  //
+  // B1/B2 fix: the primary AND every queued member are finalized together
+  // as ONE atomic pass batch (buildPassBatchInput/finalizeBatch below,
+  // sharing the exact same saving/error/retry machinery the multi-plot
+  // batch already has) rather than the primary via a normal finalize
+  // followed by a loop of separate creates — see finalizeBatch's isTankMixPass
+  // branch and buildTankMixPassBatchPayload's doc comment for why.
+  const [passUuid, setPassUuid] = useState<string | null>(null);
+  const [passMembers, setPassMembers] = useState<
+    Array<{ id: string; entryUuid: string; values: CaptureEntryValueOutput[] }>
+  >([]);
   // Slice D Phase 3 (crop-cycle GUI, D3.1-D3.4b): `variety` is the seeding-
   // only counterpart to the existing `crop` state (D3.1) — both are injected
   // into payloadValues below the same way. `cycleAction` answers the D3.2
@@ -765,6 +842,24 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   }, [duplicateCandidates, plots, t]);
   const isMultiPlot = selectedPlotUuids.length > 1;
   const zoneLinked = Boolean(selectedPlot?.zone_uuid);
+  // B3 fix (Slice F): whether the selected plot's zone actually has a
+  // weather-capable device assigned (osi-journal/api.js's
+  // zoneHasWeatherSource, resolved into JournalPlot.zone_has_weather_source
+  // the same additive way active_crop_cycles was). This is NOT the same
+  // fact as zoneLinked above: a zone-linked plot whose zone has only soil
+  // sensors (no weather station) must still show the manual
+  // wind/temp/humidity group, so this is kept as its own variable rather
+  // than folded into zoneLinked, which stays used for its other,
+  // zone-uuid-only purposes (crop-hint fallback, shortlist scoping, etc.).
+  const hasWeatherSource = Boolean(selectedPlot?.zone_has_weather_source);
+  // Slice F (F3): tank-mix ("add product to this pass") is only offered for
+  // a single-plot plant-protection entry — see the passUuid/passMembers
+  // state doc comment above.
+  const isTankMixEligible = !isMultiPlot && leaf?.activity_code === 'plant_protection_application';
+  // B1/B2 fix: true only once there is an actual PASS to finalize atomically
+  // (a primary plus at least one queued product) — a lone product with no
+  // queued siblings is just a normal single-entry finalize, unmodified.
+  const isTankMixPass = isTankMixEligible && passMembers.length > 0;
   const layout: JournalLayoutDefinition | undefined = model?.layouts.get(layoutCode);
   const templates = useMemo(() => {
     if (!model || !layout) return [];
@@ -794,12 +889,18 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     () => captureSelections(model, leaf, crop),
     [crop, leaf, model],
   );
-  const fieldStates = useMemo(
-    () => model && layout && template && leaf
+  const fieldStates = useMemo(() => {
+    const base = model && layout && template && leaf
       ? deriveFieldStates(template, layout, selections)
-      : [],
-    [layout, leaf, model, selections, template],
-  );
+      : [];
+    // B3 fix (Slice F, F2): hide the manual weather-at-application group
+    // only when the plot's zone actually HAS a weather-capable device
+    // (hasWeatherSource) — see withWeatherAtApplicationVisibility
+    // (catalogModel.ts). A no-op for every activity other than
+    // plant_protection_application, since no other activity's definition
+    // ever declares these codes.
+    return withWeatherAtApplicationVisibility(base, hasWeatherSource);
+  }, [hasWeatherSource, layout, leaf, model, selections, template]);
   const formOwnsCrop = fieldStates.some((state) => state.code === 'attr.crop' && state.visible);
   // Slice D Phase 3: crop-cycle GUI derived state (see journal/cropCycle.ts
   // for the rationale behind each best-effort/reasoned signal).
@@ -1035,6 +1136,22 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
 
   const draft = useCaptureDraft();
   const interactionLocked = preparingConfirm || saving || Boolean(finalReceipt) || batchAttemptPending;
+  // B1/B2 fix: draft.status tracks the PRIMARY's own autosave lifecycle,
+  // which is entirely separate from a batch/pass finalize attempt (both go
+  // through journalApi.createFinalBatch, never draft.finish) — so a failed
+  // batch or pass leaves draft.status exactly where it already was (e.g.
+  // 'draft-saved-gateway', once the single-plot draft-autosave that runs on
+  // the way to 'confirm' has succeeded), which would otherwise silently
+  // hide SaveState's retry button (it only offers retry when
+  // status === 'not-saved'). Override to 'not-saved' whenever a batch/pass
+  // attempt has failed (stickyLossWarning, with no successful finalReceipt
+  // yet) so the retry button is always available to resend the whole
+  // failed attempt as a whole.
+  const saveStateStatus: CaptureSaveState = finalReceipt
+    ? 'final-saved-gateway'
+    : (isMultiPlot || isTankMixPass) && stickyLossWarning
+      ? 'not-saved'
+      : draft.status;
   const closeLocked = preparingConfirm || saving || batchAttemptPending;
 
   const prefillContext = JSON.stringify({
@@ -1127,9 +1244,16 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     occurred_utc_offset_minutes: resolvedRef.current?.offsetMinutes ?? resolved?.offsetMinutes ?? utcOffset,
     occurred_end_utc_offset_minutes: endResolvedRef.current?.offsetMinutes ?? endResolved?.offsetMinutes ?? endUtcOffset,
     duplicate_guard_ack_entry_uuid: ack ?? null,
+    // Slice F (F3, tank-mix): this payload is only ever actually SENT (via
+    // draft.finish/draft autosave) when there is no real pass to finalize
+    // atomically (isTankMixPass false) — see finalize() below. It still
+    // carries pass_uuid so the continuous draft autosave keeps recording it
+    // as metadata while the user is mid-pass, before any queued sibling
+    // exists yet.
+    ...(passUuid ? { pass_uuid: passUuid } : {}),
     values: payloadValues,
     ...cycleCascadeFields(),
-  }), [cycleCascadeFields, draft.entryUuid, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlot, template, timezone, utcOffset]);
+  }), [cycleCascadeFields, draft.entryUuid, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, passUuid, payloadValues, resolved?.offsetMinutes, selectedPlot, template, timezone, utcOffset]);
 
   const buildBatchInput = useCallback((acknowledgements: readonly string[] = []) => ({
     members: selectedPlotUuids.map((plotUuid) => {
@@ -1156,6 +1280,50 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     ...cycleCascadeFields(),
   }), [cycleCascadeFields, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlotUuids, template, timezone, utcOffset]);
 
+  // B1/B2 fix (Slice F, atomic tank-mix pass): builds the WHOLE pass —
+  // primary (draft.entryUuid, or a fresh UUID if the draft hasn't been
+  // autosaved yet) plus every queued member — as one buildTankMixPassBatchPayload
+  // input. The primary's own values (payloadValues) already combine the
+  // pass's shared fields (operator/equipment/weather/etc.) with its own
+  // product-family values exactly as a normal single-entry finalize would;
+  // each queued member instead gets the shared fields recombined with that
+  // member's own snapshot (sharedValues + member.values), matching what
+  // addProductToPass snapshotted when it was queued.
+  const buildPassBatchInput = useCallback((acknowledgements: readonly string[] = []) => {
+    const sharedValues = payloadValues.filter((value) =>
+      !TANK_MIX_PRODUCT_FIELD_CODES.includes(value.attribute_code));
+    return {
+      plot_uuid: selectedPlot?.plot_uuid ?? '',
+      pass_uuid: passUuid ?? randomUuid(),
+      primary_entry_uuid: draft.entryUuid ?? randomUuid(),
+      primary_values: payloadValues,
+      members: passMembers.map((member) => ({
+        entry_uuid: member.entryUuid,
+        values: [...sharedValues, ...member.values],
+      })),
+      season_crop: inferredCrop || null,
+      activity_code: leaf?.activity_code ?? '',
+      template_code: template?.code ?? '',
+      template_version: template?.version ?? 0,
+      layout_code: layout?.code ?? '',
+      layout_version: layout?.version ?? 0,
+      occurred_start_local: occurredLocal,
+      occurred_end_local: occurredEndLocal || null,
+      occurred_timezone: timezone,
+      occurred_utc_offset_minutes: resolvedRef.current?.offsetMinutes ?? resolved?.offsetMinutes ?? utcOffset,
+      occurred_end_utc_offset_minutes:
+        endResolvedRef.current?.offsetMinutes ?? endResolved?.offsetMinutes ?? endUtcOffset,
+      ...(acknowledgements.length > 0
+        ? { duplicate_guard_ack_entry_uuids: acknowledgements }
+        : {}),
+      ...cycleCascadeFields(),
+    };
+  }, [
+    cycleCascadeFields, draft.entryUuid, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop,
+    layout, leaf, occurredLocal, passMembers, passUuid, payloadValues, resolved?.offsetMinutes, selectedPlot,
+    template, timezone, utcOffset,
+  ]);
+
   const commitValues = useCallback((next: CaptureEntryValueInput[]) => {
     const validation = validateTransition(
       layout,
@@ -1170,6 +1338,32 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     setFormValid(validation.valid);
     setNumberInputErrors(validation.numberInputErrors);
   }, [crop, layout, leaf, numberInputErrors, template, validateTransition]);
+
+  // Slice F (F3, tank-mix): snapshots the CURRENT product identity + dose
+  // (from payloadValues — the already-canonicalized value_num/unit_code
+  // output, not the raw entered `values`) into a queued pass member, then
+  // clears those same fields from the live `values` state so the form is
+  // ready for the next product. Requires the form to already be fully valid
+  // (formValid) so a half-entered product can never be silently queued.
+  const addProductToPass = useCallback(() => {
+    if (!isTankMixEligible || !formValid) return;
+    const snapshot = payloadValues.filter((value) =>
+      TANK_MIX_PRODUCT_FIELD_CODES.includes(value.attribute_code));
+    if (snapshot.length === 0) return;
+    setPassUuid((current) => current ?? randomUuid());
+    setPassMembers((current) => [...current, { id: randomUuid(), entryUuid: randomUuid(), values: snapshot }]);
+    commitValues(values.filter((value) => !TANK_MIX_PRODUCT_FIELD_CODES.includes(value.attribute_code)));
+  }, [commitValues, formValid, isTankMixEligible, payloadValues, values]);
+
+  const removePassMember = useCallback((id: string) => {
+    setPassMembers((current) => current.filter((member) => member.id !== id));
+  }, []);
+
+  // A pass with no queued siblings is just a normal single-product entry —
+  // never send a stray pass_uuid for it.
+  useEffect(() => {
+    if (passMembers.length === 0 && passUuid) setPassUuid(null);
+  }, [passMembers.length, passUuid]);
 
   const storeAcceptedRepeat = useCallback((snapshot: AcceptedRepeatSnapshot | null) => {
     acceptedRepeatRef.current = snapshot;
@@ -1674,8 +1868,16 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     setStep(target);
   };
 
+  // B1/B2 fix (Slice F): this now covers TWO atomic-batch shapes sharing one
+  // saving/error/retry/duplicate-candidate machinery -- a cross-plot batch
+  // (isMultiPlot, one entry per plot) and a tank-mix pass (isTankMixPass,
+  // N product entries on ONE plot sharing one pass_uuid). Both build a
+  // CreateFinalBatchPayload and POST it through the exact same
+  // journalApi.createFinalBatch call, so a failed pass retries as a whole
+  // exactly the way a failed cross-plot batch already did -- there is no
+  // separate per-member create loop left to desync.
   const finalizeBatch = useCallback(async (ackOverride: readonly string[] = duplicateAckEntryUuids) => {
-    if (finalReceipt || !isMultiPlot) return finalReceipt ?? undefined;
+    if (finalReceipt || (!isMultiPlot && !isTankMixPass)) return finalReceipt ?? undefined;
     if (savePromiseRef.current) return savePromiseRef.current;
     if (pendingTransitionItems.length > 0) {
       setTransitionSheetOpen(true);
@@ -1691,7 +1893,9 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
             : {}),
         }
       : (() => {
-          const built = buildFinalBatchPayload(buildBatchInput(ackOverride));
+          const built = isMultiPlot
+            ? buildFinalBatchPayload(buildBatchInput(ackOverride))
+            : buildTankMixPassBatchPayload(buildPassBatchInput(ackOverride));
           if (!built.ok) {
             setBatchError(built.error.message);
             return null;
@@ -1713,6 +1917,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         setStickyLossWarning(false);
         batchPayloadSnapshotRef.current = null;
         setBatchAttemptPending(false);
+        setPassMembers([]);
         setReceiptHarvestGroups(matchingActiveHarvestGroups(
           leaf?.activity_code ?? '',
           selectedPlotUuids,
@@ -1757,10 +1962,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     return promise;
   }, [
     buildBatchInput,
+    buildPassBatchInput,
     duplicateAckEntryUuids,
     duplicateCandidates.length,
     finalReceipt,
     isMultiPlot,
+    isTankMixPass,
     leaf?.activity_code,
     pendingTransitionItems.length,
     plotGroups,
@@ -1769,7 +1976,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
 
   const finalize = useCallback(async (ackOverride?: string | null) => {
     if (finalReceipt) return;
-    if (isMultiPlot) {
+    if (isMultiPlot || isTankMixPass) {
       return finalizeBatch(ackOverride ? [ackOverride] : duplicateAckEntryUuids);
     }
     if (savePromiseRef.current) return savePromiseRef.current;
@@ -1831,7 +2038,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     })();
     savePromiseRef.current = promise.then(() => undefined, () => undefined);
     return promise;
-  }, [buildPayload, duplicateAck, duplicateAckEntryUuids, duplicateCandidate, draft, finalizeBatch, isMultiPlot, pendingTransitionItems.length, payloadValues]);
+  }, [buildPayload, duplicateAck, duplicateAckEntryUuids, duplicateCandidate, draft, finalizeBatch, isMultiPlot, isTankMixPass, pendingTransitionItems.length, payloadValues]);
 
   // R7: once the user picks which cycle_uuid an intercrop-disambiguation
   // error named (see cycleDisambiguationFromError above), retry the same
@@ -1840,18 +2047,23 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   // (both depend on `cycleUuid`) have already been rebuilt with the fresh
   // value — the same reason duplicate-guard acknowledgements are threaded as
   // explicit call arguments elsewhere in this file rather than read back
-  // from state synchronously after a setState.
+  // from state synchronously after a setState. finalize() itself already
+  // dispatches to finalizeBatch for both the cross-plot and tank-mix-pass
+  // cases (isMultiPlot || isTankMixPass), so one call covers every mode.
   useEffect(() => {
     if (!pendingCycleRetry || cycleUuid == null) return;
     setPendingCycleRetry(false);
     setCycleDisambiguationOptions(null);
-    if (isMultiPlot) void finalizeBatch().catch(() => undefined);
-    else void finalize().catch(() => undefined);
-  }, [cycleUuid, finalize, finalizeBatch, isMultiPlot, pendingCycleRetry]);
+    void finalize().catch(() => undefined);
+  }, [cycleUuid, finalize, pendingCycleRetry]);
 
+  // B1/B2 fix: a failed pass batch now retries as a WHOLE (finalizeBatch is
+  // fully idempotent/atomic — see its doc comment above), the same way a
+  // failed cross-plot batch already did. There is no longer a separate
+  // "retry just the pass members" path.
   const retry = useCallback(async () => {
     if (savePromiseRef.current) return savePromiseRef.current;
-    if (isMultiPlot) return finalizeBatch(duplicateAckEntryUuids);
+    if (isMultiPlot || isTankMixPass) return finalizeBatch(duplicateAckEntryUuids);
     const promise = (async () => {
       setSaving(true);
       try {
@@ -1868,7 +2080,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     })();
     savePromiseRef.current = promise.then(() => undefined, () => undefined);
     return promise;
-  }, [draft, duplicateAckEntryUuids, finalizeBatch, isMultiPlot]);
+  }, [draft, duplicateAckEntryUuids, finalizeBatch, isMultiPlot, isTankMixPass]);
 
   const resolveHarvestGroup = useCallback(async (group: PlotGroup) => {
     setGroupResolutionErrors((current) => {
@@ -2304,6 +2516,49 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
             </div>
           )}
           {template && layout && leaf && <EntryForm model={model} layout={layout} fieldStates={fieldStates} values={values} onChange={formChanged} selections={selections} products={catalog.products} locale={locale} showValidation={showValidation} templateCode={template.code} />}
+          {isTankMixEligible && model && (
+            <div className="space-y-3 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--card)] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-bold text-[var(--text)]">{t('capture.tankMix.title')}</h3>
+                <button
+                  type="button"
+                  disabled={!formValid}
+                  onClick={addProductToPass}
+                  className={`min-h-11 rounded-xl border border-[var(--primary)] px-4 py-2 text-sm font-bold text-[var(--primary)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
+                >
+                  {t('capture.tankMix.addProduct')}
+                </button>
+              </div>
+              {passMembers.length === 0 ? (
+                <p className="text-sm text-[var(--text-secondary)]">{t('capture.tankMix.empty')}</p>
+              ) : (
+                <ul className="space-y-2">
+                  {passMembers.map((member, index) => {
+                    const product = tankMixProductLabel(member.values, catalog.products, t('capture.tankMix.unknownProduct'));
+                    const dose = tankMixDoseLabel(member.values, model, locale);
+                    const detail = dose ? `${product} · ${dose}` : product;
+                    return (
+                    <li
+                      key={member.id}
+                      className="flex items-center justify-between gap-3 rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm"
+                    >
+                      <span className="min-w-0 truncate text-[var(--text)]">
+                        {t('capture.tankMix.memberLabel', { index: index + 1, detail })}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removePassMember(member.id)}
+                        className={`shrink-0 rounded-lg px-2 py-1 text-xs font-bold text-[var(--error-text)] hover:bg-[var(--card)] ${FOCUS_RING}`}
+                      >
+                        {t('capture.tankMix.remove')}
+                      </button>
+                    </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
           {safePrefill.length > 0 && <p role="status" className="text-sm font-semibold text-[var(--text-secondary)]">{t('capture.carry.prefilled')}</p>}
           {carryForwardCandidate?.repeatTreatment && carryForwardContext && (
             <RepeatTreatmentCard
@@ -2403,7 +2658,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
           />
         )}
         <div className="flex flex-wrap justify-between gap-3">{step !== 'where' && <button type="button" disabled={interactionLocked} onClick={() => { if (interactionLocked) return; preparationTokenRef.current += 1; setStep(step === 'confirm' ? 'details' : step === 'details' ? 'activity' : 'where'); }} className={`min-h-11 rounded-xl px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.back')}</button>}<span />{step !== 'confirm' && <button type="button" onClick={next} disabled={(step === 'activity' && !leaf) || (step === 'details' && preparingConfirm) || interactionLocked} style={{ minHeight: '56px' }} className={`min-h-11 rounded-xl bg-[var(--primary)] px-5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}>{t('capture.next')}</button>}</div>
-        {!duplicateCandidate && duplicateCandidates.length === 0 && (step === 'confirm' || draft.lossWarning || stickyLossWarning) && <SaveState status={finalReceipt ? 'final-saved-gateway' : draft.status} lossWarning={draft.lossWarning || stickyLossWarning} onRetry={async () => { await retry(); }} />}
+        {!duplicateCandidate && duplicateCandidates.length === 0 && (step === 'confirm' || draft.lossWarning || stickyLossWarning) && <SaveState status={saveStateStatus} lossWarning={draft.lossWarning || stickyLossWarning} onRetry={async () => { await retry(); }} />}
       </div>
       {transitionSheetOpen && pendingTransitionItems.length > 0 && (
         <LayoutTransitionReviewSheet

@@ -160,7 +160,17 @@ function normalizeInputIdentities(input) {
   return normalized;
 }
 
-function normalizeBatchMembers(members) {
+// B1/B2 fix (Slice F, atomic tank-mix pass): generalizes the pre-existing
+// multi-plot batch mechanism to also cover a single-plot, multi-product
+// pass. A cross-plot batch (no pass_uuid) still requires every member's
+// plot_uuid to be unique; a pass batch (pass_uuid set) is the opposite —
+// every member names the SAME plot, because it is one plot's operation
+// split into several product-line entries sharing one pass_uuid. Members
+// may also carry their own per-member `values` (a pass batch's whole point,
+// since every product line has different values) — when a member omits
+// `values`, finalizeBatch below falls back to the batch's shared top-level
+// values, exactly as it always has for a cross-plot batch.
+function normalizeBatchMembers(members, passUuid) {
   if (!Array.isArray(members) || members.length === 0) {
     throw lifecycleError('invalid_batch', 'Batch members must be a nonempty array');
   }
@@ -175,14 +185,28 @@ function normalizeBatchMembers(members) {
         typeof member.entry_uuid !== 'string' || !CANONICAL_UUID.test(member.entry_uuid)) {
       throw lifecycleError('invalid_uuid', 'Batch member UUIDs must be canonical');
     }
-    return {
+    const result = {
       plot_uuid: member.plot_uuid,
       entry_uuid: member.entry_uuid,
     };
+    if (Object.prototype.hasOwnProperty.call(member, 'values')) {
+      if (!Array.isArray(member.values)) {
+        throw lifecycleError('invalid_batch', 'Batch member ' + index + ' values must be an array');
+      }
+      result.values = member.values;
+    }
+    return result;
   });
-  if (new Set(normalized.map(function(member) { return member.plot_uuid; })).size !== normalized.length ||
-      new Set(normalized.map(function(member) { return member.entry_uuid; })).size !== normalized.length) {
-    throw lifecycleError('duplicate_member', 'Batch member plot and entry UUIDs must be unique');
+  if (new Set(normalized.map(function(member) { return member.entry_uuid; })).size !== normalized.length) {
+    throw lifecycleError('duplicate_member', 'Batch member entry UUIDs must be unique');
+  }
+  const plotUuids = new Set(normalized.map(function(member) { return member.plot_uuid; }));
+  if (passUuid) {
+    if (plotUuids.size !== 1) {
+      throw lifecycleError('invalid_batch', 'A pass batch requires every member to share one plot');
+    }
+  } else if (plotUuids.size !== normalized.length) {
+    throw lifecycleError('duplicate_member', 'Batch member plot UUIDs must be unique');
   }
   return normalized;
 }
@@ -1607,8 +1631,14 @@ function batchMemberIntent(input, member) {
   for (const field of BATCH_INTENT_FIELDS) {
     if (Object.prototype.hasOwnProperty.call(input, field)) intent[field] = input[field];
   }
-  if (Array.isArray(intent.values)) {
-    intent.values = intent.values.map(function(value) {
+  // Pass batch (Slice F): a member's own `values` — not the shared top-level
+  // ones — is this member's actual write intent, so the idempotency hash
+  // (and the retry-content-mismatch check it feeds) must reflect that,
+  // exactly the same way finalizeBatch's entry-creation loop below prefers
+  // member.values when present.
+  const ownValues = Array.isArray(member.values) ? member.values : intent.values;
+  if (Array.isArray(ownValues)) {
+    intent.values = ownValues.map(function(value) {
       return Object.assign({}, value, {
         group_index: value.group_index == null ? 0 : value.group_index,
         value_status: value.value_status == null ? 'observed' : value.value_status,
@@ -1693,15 +1723,30 @@ async function existingBatchRetry(tx, input, members, existingEntries) {
   return { batch_uuid: batchUuid, entries };
 }
 
+// B2 fix (Slice F, atomic tank-mix pass): a pass_uuid names a single
+// agronomic event split into several product-line entries that
+// deliberately share one plot+activity+occurred_start — those siblings must
+// never be candidate-duplicates of one another. Previously the only guard
+// against that was a caller-supplied duplicate_guard_ack_entry_uuid chained
+// to "the immediately preceding entry", but the ORDER BY below breaks ties
+// by lowest entry_uuid, not insertion order, so a 3+ member pass only
+// happened to work when member UUIDs sorted the way they were created —
+// otherwise the wrong (or no) candidate got acknowledged. Excluding same-
+// pass_uuid rows outright removes the need for that chain entirely: it is
+// exact (keys on the actual shared intent, not a UUID sort accident) and
+// applies uniformly whether an entry is being freshly inserted or promoted
+// from a draft.
 async function findDuplicateCandidate(tx, input, plot, occurrence, excludeEntryUuid) {
   if (!plot.plot_uuid) return;
   const occurredMs = Date.parse(occurrence.start.instant);
   const lowerBound = new Date(occurredMs - 60 * 60 * 1000).toISOString();
   const upperBound = new Date(occurredMs + 60 * 60 * 1000).toISOString();
+  const passUuid = nullable(input.pass_uuid);
   const candidate = await tx.get(
     'SELECT entry_uuid,occurred_start,activity_code,plot_uuid FROM journal_entries ' +
     "WHERE plot_uuid=? AND activity_code=? AND status='final' AND deleted_at IS NULL " +
       'AND (? IS NULL OR entry_uuid<>?) ' +
+      'AND (? IS NULL OR pass_uuid IS NULL OR pass_uuid<>?) ' +
       'AND occurred_start BETWEEN ? AND ? ' +
     'ORDER BY ABS(julianday(occurred_start)-julianday(?)),entry_uuid LIMIT 1',
     [
@@ -1709,6 +1754,8 @@ async function findDuplicateCandidate(tx, input, plot, occurrence, excludeEntryU
       input.activity_code,
       nullable(excludeEntryUuid),
       nullable(excludeEntryUuid),
+      passUuid,
+      passUuid,
       lowerBound,
       upperBound,
       occurrence.start.instant,
@@ -2005,7 +2052,7 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
   return result;
 }
 
-async function promoteDraftInTransaction(tx, catalog, input, principal, entryIndex, existing) {
+async function promoteDraftInTransaction(tx, catalog, input, principal, entryIndex, existing, options) {
   assertOwnedEntry(existing, principal);
   assertBaseVersion(existing, input.base_sync_version);
   if (existing.status !== 'draft' || Number(existing.sync_version) !== 0) {
@@ -2018,7 +2065,14 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
     throw lifecycleError('ownership', 'Draft promotion would move the entry outside its owner and gateway');
   }
   const occurrence = occurrenceFor(input, plot);
-  await assertNoDuplicateCandidate(tx, input, plot, occurrence, existing.entry_uuid);
+  // F-1 (Slice F re-review fix): thread the batch duplicate acknowledgements
+  // through the draft-promotion path exactly as the fresh-create path does
+  // (createFinalInTransaction below). Without this, a tank-mix pass whose
+  // primary is an autosaved draft re-detects an already-acknowledged duplicate
+  // and rolls back the whole pass, making a legitimate application unsaveable.
+  await assertNoDuplicateCandidate(
+    tx, input, plot, occurrence, existing.entry_uuid, options && options.duplicateAcknowledgements
+  );
   const deviceEui = await resolveDeviceEui(tx, input.device_eui, principal, plot);
   const candidate = Object.assign({}, input, {
     owner_user_uuid: existing.owner_user_uuid,
@@ -2093,7 +2147,7 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
     throw lifecycleError('already_exists', 'Journal entry already exists');
   }
   if (existing && existing.status === 'draft') {
-    return promoteDraftInTransaction(tx, catalog, input, principal, entryIndex, existing);
+    return promoteDraftInTransaction(tx, catalog, input, principal, entryIndex, existing, options);
   }
   if (existing) {
     return correctFinalInTransaction(tx, catalog, input, principal, entryIndex, existing);
@@ -2265,7 +2319,8 @@ async function finalizeCreate(db, catalog, input, principal) {
 async function finalizeBatch(db, catalog, input, members, principal) {
   validateRequestLimit(input);
   input = normalizeInputIdentities(input);
-  members = normalizeBatchMembers(members);
+  members = normalizeBatchMembers(members, input.pass_uuid);
+  const isPassBatch = Boolean(input.pass_uuid);
   const acknowledgementValues = input.duplicate_guard_ack_entry_uuids == null
     ? []
     : input.duplicate_guard_ack_entry_uuids;
@@ -2291,6 +2346,20 @@ async function finalizeBatch(db, catalog, input, members, principal) {
         }
         if (existing.plot_uuid !== member.plot_uuid) {
           throw idempotencyConflict('Entry UUID is already assigned to another plot');
+        }
+        // B1 fix (Slice F, atomic tank-mix pass): a pass member's entry_uuid
+        // — the primary in particular — is very likely already autosaved as
+        // a version-zero draft before the pass is ever finalized. Promoting
+        // it to final here is a fresh write, not a retry of an
+        // already-finalized batch, so it belongs with the brand-new members
+        // below (createFinalInTransaction already knows how to promote a
+        // draft in place) rather than the strict all-existing-or-all-new
+        // retry-matching path, which only ever expects already-FINAL
+        // members.
+        if (existing.status === 'draft') {
+          const plot = await resolvePlotContext(tx, member.plot_uuid, principal);
+          newMembers.push({ member, plot });
+          continue;
         }
         existingEntries.set(member.entry_uuid, existing);
       } else {
@@ -2348,6 +2417,24 @@ async function finalizeBatch(db, catalog, input, members, principal) {
         batch_uuid: batchUuid,
         base_sync_version: 0,
       });
+      // Pass batch (Slice F): a member's own values (each product line) win
+      // over the batch's shared top-level values; a cross-plot batch never
+      // sets per-member values, so entryInput.values stays exactly what it
+      // always was (the shared top-level values applied to every plot).
+      if (Array.isArray(member.values)) entryInput.values = member.values;
+      // The crop-cycle cascade (open/close) is one agronomic decision for
+      // the whole pass, not one per product line — applying it once per
+      // member on the SAME plot would try to close (or open) the same cycle
+      // N times inside this one transaction and fail on the second attempt.
+      // Restrict it to the pass's first/primary member, matching the
+      // pre-fix behavior where only the primary's create ever carried these
+      // fields at all (the additional members were plain journalApi.
+      // createEntry calls that never included them).
+      if (isPassBatch && index > 0) {
+        delete entryInput.cycle_action;
+        delete entryInput.cycle_uuid;
+        delete entryInput.ends_crop_cycle;
+      }
       const result = await createFinalInTransaction(
         tx,
         catalog,

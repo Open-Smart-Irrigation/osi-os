@@ -158,6 +158,12 @@ export interface CreateFinalBatchPayload
 export interface JournalBatchMember {
   plot_uuid: string;
   entry_uuid: string;
+  // Slice F (B1/B2 fix): a pass batch (top-level pass_uuid set) gives each
+  // member its OWN values -- the whole point of a tank-mix pass, since every
+  // product line has different values. A cross-plot batch never sets this;
+  // the edge falls back to the batch's shared top-level `values` for those
+  // members exactly as it always has.
+  values?: EntryValueInput[];
 }
 
 export interface BatchEntryMutationReceipt {
@@ -346,6 +352,12 @@ export interface JournalPlot {
   // JournalPlot literal without it keep compiling; treat an absent value the
   // same as an empty array (no open cycle known).
   active_crop_cycles?: readonly ActiveCropCycle[];
+  // Slice F (B3 fix): whether the plot's linked zone has an actual
+  // weather-capable device assigned (osi-journal/api.js's
+  // zoneHasWeatherSource) -- NOT the same fact as zone_uuid being set. A
+  // zone with only a soil-tension probe has no weather source. Same
+  // additive convention as active_crop_cycles above; absent means false.
+  zone_has_weather_source?: boolean;
 }
 
 export interface PlotGroup {

@@ -370,6 +370,15 @@
       "dismiss": "Não copiar",
       "invalidated": "O tratamento anterior deixou de corresponder a esta parcela, cultura, hora, época ou layout"
     },
+    "tankMix": {
+      "title": "Mistura em tanque",
+      "addProduct": "Adicionar produto a esta passagem",
+      "empty": "Ainda não foram adicionados mais produtos",
+      "memberLabel": "{{index}}. {{detail}}",
+      "unknownProduct": "Nenhum produto selecionado",
+      "remove": "Remover",
+      "saveFailed": "Não foi possível guardar um dos produtos desta passagem. Tente novamente."
+    },
     "confirm": {
       "title": "Reveja antes de guardar",
       "activity": "Atividade",

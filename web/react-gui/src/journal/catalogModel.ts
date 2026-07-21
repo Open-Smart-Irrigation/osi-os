@@ -6,6 +6,7 @@ import type {
   JournalConditionalGroup,
   JournalDependencyCondition,
   JournalFieldInput,
+  JournalFieldState,
   JournalLayoutDefinition,
   JournalOptionDependency,
   JournalRequirement,
@@ -836,4 +837,33 @@ export function deriveActivityLeaves(
     seen.add(key);
     return true;
   });
+}
+
+// Slice F (F2): full_record@6's manual weather-at-application fallback
+// fields (plant_protection_application only). The catalog's
+// operation_fields_by_activity/conditional_groups mechanisms only ever
+// condition on the selected activity — they cannot express "hide this group
+// when the plot already has a linked weather source," because that fact is
+// plot/zone data, not an activity or another field's value. This is the
+// GUI-side resolution the weather_at_application conditional_group's doc
+// comment in journal-catalog-core.js refers to: JournalCaptureFlow.tsx
+// already computes `zoneLinked` (Boolean(selectedPlot?.zone_uuid)) for its
+// crop-hint fallback, and parent spec §4.8 only ever populates
+// context_json's wind/temperature/humidity channels for a zone-linked plot
+// (osi-journal/context.js buildContext returns null otherwise) — so
+// "zone-linked" and "has a weather source" are the same question.
+export const WEATHER_AT_APPLICATION_FIELD_CODES: ReadonlySet<string> = new Set([
+  'attr.wind_speed', 'attr.wind_direction', 'attr.air_temperature', 'attr.rel_humidity',
+]);
+
+export function withWeatherAtApplicationVisibility(
+  states: readonly JournalFieldState[],
+  hasWeatherSource: boolean,
+): JournalFieldState[] {
+  if (!hasWeatherSource) return [...states];
+  return states.map((state) => (
+    WEATHER_AT_APPLICATION_FIELD_CODES.has(state.code)
+      ? { ...state, visible: false, required: false }
+      : state
+  ));
 }

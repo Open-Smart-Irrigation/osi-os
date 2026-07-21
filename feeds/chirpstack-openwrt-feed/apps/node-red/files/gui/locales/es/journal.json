@@ -370,6 +370,15 @@
       "dismiss": "No copiar",
       "invalidated": "El tratamiento anterior ya no coincide con esta parcela, cultivo, hora, temporada o layout"
     },
+    "tankMix": {
+      "title": "Mezcla en tanque",
+      "addProduct": "Añadir producto a este pase",
+      "empty": "Aún no se han añadido más productos",
+      "memberLabel": "{{index}}. {{detail}}",
+      "unknownProduct": "Ningún producto seleccionado",
+      "remove": "Eliminar",
+      "saveFailed": "No se pudo guardar uno de los productos de este pase. Inténtelo de nuevo."
+    },
     "confirm": {
       "title": "Revisa antes de guardar",
       "activity": "Actividad",

@@ -25,5 +25,6 @@
   "0024__journal_plot_context.sql": "05e76046785a22b27ebe5c65112b348592b0ccd4cca9e110126a8e0ac93cc972",
   "0025__journal_crop_cycles.sql": "223a667310b317b5b388bdbc7a780532ef79b55045d081c0792deceae23d90d3",
   "0026__journal_catalog_v4.sql": "1e23aaf1c02c3121b17cf0eba177311fde5bdf30c0ab8a742b30ce7f6906a204",
-  "0027__journal_catalog_v5.sql": "82baf1a980ff248a9ce972f4c04c09d31f50185d8497773de2e8966c984ca8df"
+  "0027__journal_catalog_v5.sql": "82baf1a980ff248a9ce972f4c04c09d31f50185d8497773de2e8966c984ca8df",
+  "0028__journal_catalog_v6.sql": "b90da543a9019bdc2fafd1e0618826a3de07eb55adcd703128085b14d3c45eec"
 }

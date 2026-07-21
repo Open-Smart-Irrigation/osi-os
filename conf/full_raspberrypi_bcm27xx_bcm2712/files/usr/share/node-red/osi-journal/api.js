@@ -190,7 +190,15 @@ function canonicalDuplicateAcknowledgements(raw) {
   return values;
 }
 
-function canonicalBatchMembers(raw) {
+// B1/B2 fix (Slice F, atomic tank-mix pass): `isPassBatch` (true whenever the
+// request carries a top-level pass_uuid) generalizes this HTTP-layer
+// validation the same way lifecycle.js's normalizeBatchMembers does — a
+// pass batch requires every member to share ONE plot (it is one plot's
+// operation split across product lines), the opposite of a cross-plot
+// batch's "every member is a different plot" rule. Members may also carry
+// their own `values` (validated only for array-shape here; per-attribute
+// validation happens later via validateEntry, same as any other entry).
+function canonicalBatchMembers(raw, isPassBatch) {
   if (!Array.isArray(raw) || raw.length === 0) {
     badRequest('invalid_batch', 'members must be a nonempty array');
   }
@@ -207,18 +215,29 @@ function canonicalBatchMembers(raw) {
     if (typeof member.entry_uuid !== 'string' || !CANONICAL_UUID.test(member.entry_uuid)) {
       badRequest('invalid_uuid', 'members[' + index + '].entry_uuid must be a canonical UUID');
     }
-    return {
+    const canonical = {
       plot_uuid: member.plot_uuid,
       entry_uuid: member.entry_uuid,
     };
+    if (Object.prototype.hasOwnProperty.call(member, 'values')) {
+      if (!Array.isArray(member.values)) {
+        badRequest('invalid_batch', 'members[' + index + '].values must be an array');
+      }
+      canonical.values = member.values;
+    }
+    return canonical;
   });
-  const plotUuids = new Set(members.map(function(member) { return member.plot_uuid; }));
-  if (plotUuids.size !== members.length) {
-    badRequest('duplicate_member', 'Batch member plot UUIDs must be unique');
-  }
   const entryUuids = new Set(members.map(function(member) { return member.entry_uuid; }));
   if (entryUuids.size !== members.length) {
     badRequest('duplicate_member', 'Batch member entry UUIDs must be unique');
+  }
+  const plotUuids = new Set(members.map(function(member) { return member.plot_uuid; }));
+  if (isPassBatch) {
+    if (plotUuids.size !== 1) {
+      badRequest('invalid_batch', 'A pass batch requires every member to share one plot');
+    }
+  } else if (plotUuids.size !== members.length) {
+    badRequest('duplicate_member', 'Batch member plot UUIDs must be unique');
   }
   return members;
 }
@@ -665,7 +684,13 @@ async function activeLayout(tx, code, version) {
 // mirror has no use for it and this keeps that wire contract unchanged.
 // Callers that build a plot response for the GUI (listPlots, upsertPlot)
 // pass the real, freshly-queried array instead.
-function plotAggregate(row, settings, activeCropCycles) {
+//
+// hasWeatherSource (B3 fix, Slice F) follows the exact same additive
+// convention: whether the plot's linked zone has an actual weather-capable
+// device assigned (see zoneHasWeatherSource below), defaulting to false for
+// the outbox/cloud-sync callers (which have no use for it either) and
+// resolved for real by listPlots/upsertPlot.
+function plotAggregate(row, settings, activeCropCycles, hasWeatherSource) {
   return {
     contract_version: 1,
     plot_uuid: row.plot_uuid,
@@ -683,6 +708,7 @@ function plotAggregate(row, settings, activeCropCycles) {
     updated_at: row.updated_at,
     deleted_at: nullable(row.deleted_at),
     active_crop_cycles: activeCropCycles || [],
+    zone_has_weather_source: Boolean(hasWeatherSource),
     settings: {
       layout_code: settings.layout_code,
       updated_at: settings.updated_at,
@@ -704,6 +730,33 @@ function txLike(db) {
 
 async function activeCropCyclesForPlot(db, plotUuid) {
   return require('./lifecycle').activeCropCyclesForPlot(txLike(db), plotUuid);
+}
+
+// B3 fix (Slice F): the real signal behind plotAggregate's
+// zone_has_weather_source -- whether the zone a plot is linked to has an
+// actual weather-capable device assigned, directly (devices.
+// irrigation_zone_id) or shared via the weather_station_zones junction
+// (the same two attachment paths osi-journal/context.js's loadSourceDevices
+// resolves for building the entry's weather context). SENSECAP_S2120 is the
+// only OSI device type that reports wind speed/direction, air temperature
+// and relative humidity together -- context.js's own rainCapable check
+// hardcodes the analogous device-type list for rain capability. A plot
+// merely having ANY zone_uuid is a different fact: a zone with only a soil-
+// tension probe (e.g. DRAGINO_LSN50) has no weather source at all.
+async function zoneHasWeatherSource(db, zoneUuid, principal) {
+  if (!zoneUuid) return false;
+  const row = await dbGet(
+    db,
+    'SELECT 1 FROM irrigation_zones AS z ' +
+      'JOIN devices AS d ON (d.irrigation_zone_id=z.id OR EXISTS (' +
+        'SELECT 1 FROM weather_station_zones AS wsz WHERE wsz.deveui=d.deveui AND wsz.zone_id=z.id' +
+      ')) ' +
+    'WHERE z.zone_uuid=? AND z.user_id=? AND (z.gateway_device_eui=? OR z.gateway_device_eui IS NULL) ' +
+      "AND z.deleted_at IS NULL AND d.deleted_at IS NULL AND UPPER(d.type_id)='SENSECAP_S2120' " +
+    'LIMIT 1',
+    [zoneUuid, principal.user_id, principal.gateway_device_eui]
+  );
+  return Boolean(row);
 }
 
 async function emitPlot(tx, row, settings) {
@@ -841,7 +894,8 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
           );
           const settings = await dbGet(tx, 'SELECT * FROM journal_plot_settings WHERE plot_uuid=?', [byZone.plot_uuid]);
           const activeCropCycles = await activeCropCyclesForPlot(tx, byZone.plot_uuid);
-          return { plot: plotAggregate(row, settings, activeCropCycles), created: false };
+          const hasWeatherSource = await zoneHasWeatherSource(tx, row.zone_uuid, principal);
+          return { plot: plotAggregate(row, settings, activeCropCycles, hasWeatherSource), created: false };
         }
         throw apiError(409, 'zone_plot_conflict', 'This zone already has an active application plot');
       }
@@ -946,8 +1000,9 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
       sync_version: nextVersion,
     });
     const activeCropCycles = await activeCropCyclesForPlot(tx, plotUuid);
+    const hasWeatherSource = await zoneHasWeatherSource(tx, row.zone_uuid, principal);
     return {
-      plot: plotAggregate(row, settings, activeCropCycles),
+      plot: plotAggregate(row, settings, activeCropCycles, hasWeatherSource),
       outbox_event_uuid: emission.event_uuid,
       created: creating,
     };
@@ -1027,7 +1082,11 @@ async function saveEntry(db, input, principal, options) {
       Object.prototype.hasOwnProperty.call(body, 'zone_uuid'))) {
     badRequest('invalid_batch', 'Batch members carry plot UUIDs; top-level plot or zone UUIDs are forbidden');
   }
-  const batchMembers = hasMembers ? canonicalBatchMembers(body.members) : null;
+  // B1/B2 fix (Slice F): a top-level pass_uuid marks this as an atomic
+  // single-plot, multi-product pass batch rather than a cross-plot batch —
+  // see canonicalBatchMembers's doc comment.
+  const isPassBatch = typeof body.pass_uuid === 'string' && body.pass_uuid.length > 0;
+  const batchMembers = hasMembers ? canonicalBatchMembers(body.members, isPassBatch) : null;
   if (Object.prototype.hasOwnProperty.call(body, 'duplicate_guard_ack_entry_uuids')) {
     if (!batchRequest) {
       badRequest('invalid_batch_control', 'duplicate_guard_ack_entry_uuids is valid only for batches');
@@ -1123,13 +1182,14 @@ async function listPlots(db, principal) {
   );
   const plots = await Promise.all(rows.map(async function(row) {
     const activeCropCycles = await activeCropCyclesForPlot(db, row.plot_uuid);
+    const hasWeatherSource = await zoneHasWeatherSource(db, row.zone_uuid, principal);
     return plotAggregate(row, {
       layout_code: row.layout_code,
       context_json: row.context_json,
       updated_at: row.settings_updated_at,
       updated_by_principal_uuid: row.updated_by_principal_uuid,
       sync_version: row.settings_sync_version,
-    }, activeCropCycles);
+    }, activeCropCycles, hasWeatherSource);
   }));
   return { plots };
 }
@@ -2255,6 +2315,22 @@ function wideExportTooWide(reason, extraDetails) {
   );
 }
 
+// Slice F (F3, tank-mix): SoilManageR's `combination` integer links rows
+// recorded as one field pass (osi-journal's pass_uuid — parent spec
+// §4.1/P8, "Add another operation to this pass"). Every entry sharing a
+// pass_uuid gets the same combination number; a standalone entry (no
+// pass_uuid) gets none (null), matching SoilManageR's own convention that an
+// uncombined operation carries no combination value. Numbers are assigned in
+// first-seen order within THIS export's result set — a stable, self-
+// consistent numbering scoped to the exported rows, not a globally
+// persisted counter (nothing about "combination 3 means the third pass ever
+// recorded" is meaningful outside one export).
+function passCombinationNumber(assigned, passUuid) {
+  if (!passUuid) return null;
+  if (!assigned.has(passUuid)) assigned.set(passUuid, assigned.size + 1);
+  return assigned.get(passUuid);
+}
+
 async function exportWideCsv(db, rawFilters, principal, writable, writableFactory) {
   let sink = null;
   await inReadSnapshot(db, async function(snapshot) {
@@ -2285,7 +2361,7 @@ async function exportWideCsv(db, rawFilters, principal, writable, writableFactor
       'entry_uuid', 'plot_uuid', 'zone_uuid', 'activity_code', 'template_code', 'template_version',
       'layout_code', 'layout_version', 'occurred_start', 'occurred_end', 'occurred_timezone', 'status',
       'campaign_uuid', 'protocol_code', 'protocol_version', 'observation_unit_code', 'pass_uuid',
-      'batch_uuid', 'note', 'sync_version',
+      'combination', 'batch_uuid', 'note', 'sync_version',
     ];
     const columns = fixed.concat(dynamic);
     const header = columns.map(function(column) {
@@ -2298,10 +2374,12 @@ async function exportWideCsv(db, rawFilters, principal, writable, writableFactor
     const target = typeof writableFactory === 'function' ? writableFactory() : writable;
     sink = optionalSink(target);
     await writeBoundedChunk(sink.writable, header);
+    const passCombinationNumbers = new Map();
     await forEachWidePage(snapshot, selection, principal, async function(entries) {
       for (const entry of entries) {
         const row = {};
         for (const column of fixed) row[column] = entry[column];
+        row.combination = passCombinationNumber(passCombinationNumbers, entry.pass_uuid);
         for (const value of entry.values || []) {
           const prefix = 'value.' + String(value.group_index) + '.' + value.attribute_code;
           row[prefix + '.status'] = value.value_status;

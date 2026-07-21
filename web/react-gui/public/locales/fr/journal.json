@@ -370,6 +370,15 @@
       "dismiss": "Ne pas copier",
       "invalidated": "Le traitement précédent ne correspond plus à cette parcelle, cette culture, cette heure, cette saison ou ce layout"
     },
+    "tankMix": {
+      "title": "Mélange en cuve",
+      "addProduct": "Ajouter un produit à ce passage",
+      "empty": "Aucun produit supplémentaire ajouté pour l'instant",
+      "memberLabel": "{{index}}. {{detail}}",
+      "unknownProduct": "Aucun produit sélectionné",
+      "remove": "Supprimer",
+      "saveFailed": "Impossible d'enregistrer l'un des produits de ce passage. Réessayez."
+    },
     "confirm": {
       "title": "Vérifier avant d'enregistrer",
       "activity": "Activité",

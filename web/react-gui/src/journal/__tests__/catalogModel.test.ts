@@ -10,6 +10,7 @@ import {
   convertNumericValue,
   deriveActivityLeaves,
   isLayoutTemplateCompatible,
+  withWeatherAtApplicationVisibility,
 } from '../catalogModel';
 import { deriveFieldStates } from '../templateEngine';
 import { validateEntryForm } from '../../components/journal/capture/EntryForm';
@@ -339,9 +340,11 @@ describe('catalog model', () => {
     expect(layout).toBeDefined();
     if (!layout) return;
 
-    // Slice BC: the resolved (latest-version) farmer_quick is v3 and must
-    // carry a quick_fields entry for every one of the 16 core activities.
-    expect(farmer?.version).toBe(3);
+    // Slice F: the resolved (latest-version) farmer_quick is now v6 (BBCH
+    // quick-optional fields, Slice F/F1) and must carry a quick_fields entry
+    // for every one of the 16 core activities (unchanged completeness
+    // guarantee since Slice BC introduced quick_fields at v3).
+    expect(farmer?.version).toBe(6);
     expect(Object.keys(farmer?.quick_fields ?? {})).toHaveLength(16);
     expect(farmer?.quick_fields?.irrigation).toEqual(['attr.irrigation_depth', 'note']);
     expect(farmer?.quick_fields?.irrigation).not.toContain('attr.amount_mass_area_product');
@@ -490,10 +493,12 @@ describe('catalog model', () => {
     expect(openField).toBeDefined();
     if (!fullRecord || !openField) return;
 
-    // full_record now resolves to the scoped v5 row (activeDefinition always
-    // picks the highest active version), and it declares the section this
-    // slice narrows.
-    expect(fullRecord.version).toBe(5);
+    // full_record now resolves to the scoped v6 row (activeDefinition always
+    // picks the highest active version — v6 is Slice F's agronomy adds +
+    // review fold-in, layered on the v5 scoped_by_activity mechanism this
+    // slice introduced), and it still declares the section this slice
+    // narrows.
+    expect(fullRecord.version).toBe(6);
     const operationSection = fullRecord.sections.find((section) => section.code === 'operation');
     expect(operationSection?.scoped_by_activity).toBe(true);
     expect(fullRecord.operation_fields_by_activity).toBeDefined();
@@ -591,10 +596,15 @@ describe('catalog model', () => {
       state('attr.amount_mass_area_product'), state('attr.amount_volume_area_product'),
       state('attr.amount_nutrient_rate'), state('note'),
     ]);
+    // Slice F (F1): farmer_quick@6 adds attr.growth_stage_bbch as a
+    // Quick-optional field for harvest (among the other four named
+    // activities) — this is the one activity this "byte-for-byte unchanged
+    // [by Slice E]" snapshot legitimately differs on now that farmer_quick
+    // resolves to @6 instead of @3.
     expect(deriveFieldStates(quick, openField, { activity_code: 'harvest' })).toEqual([
       state('activity_code'), state('plot_uuid'), state('occurred_start'),
       state('attr.operator'), state('attr.equipment'), state('attr.method'),
-      state('attr.harvest_yield_area'), state('note'),
+      state('attr.harvest_yield_area'), state('attr.growth_stage_bbch'), state('note'),
     ]);
 
     const researchExpected = [
@@ -607,6 +617,82 @@ describe('catalog model', () => {
     for (const activity of ['irrigation', 'fertilization', 'harvest']) {
       expect(deriveFieldStates(research, openField, { activity_code: activity })).toEqual(researchExpected);
     }
+  });
+
+  it('Slice F (F1): attr.growth_stage_bbch is a 0-99 number attribute that resolves visible into Full for every named activity', () => {
+    const fixture = shippedCatalog();
+    const bbch = fixture.vocab.find((entry) => entry.code === 'attr.growth_stage_bbch');
+    expect(bbch).toMatchObject({ kind: 'attribute', value_type: 'number' });
+    expect(bbch?.constraints).toMatchObject({ min: 0, max: 99, step: 1 });
+    const bbchUnit = fixture.vocab.find((entry) => entry.code === bbch?.default_unit_code);
+    expect(bbchUnit).toMatchObject({ kind: 'unit' });
+
+    const result = buildCatalogModel(fixture);
+    expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
+    if (!result.ok) return;
+    const fullRecord = result.model.templates.get('full_record');
+    const openField = result.model.layouts.get('open_field');
+    expect(fullRecord).toBeDefined();
+    expect(openField).toBeDefined();
+    if (!fullRecord || !openField) return;
+
+    const bbchActivities = [
+      'general_observation', 'pest_disease_observation', 'plant_protection_application',
+      'crop_care', 'harvest',
+    ];
+    for (const activityCode of bbchActivities) {
+      const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
+      const bbchState = states.find((state) => state.code === 'attr.growth_stage_bbch');
+      expect(bbchState, `${activityCode} must show attr.growth_stage_bbch`).toMatchObject({
+        visible: true, required: false,
+      });
+    }
+    for (const activityCode of ['irrigation', 'fertilization', 'tillage_soil_work', 'sampling']) {
+      const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
+      const bbchState = states.find((state) => state.code === 'attr.growth_stage_bbch');
+      expect(bbchState?.visible ?? false, `${activityCode} must not show attr.growth_stage_bbch`).toBe(false);
+    }
+  });
+
+  it("Slice F (F2): the weather-at-application group is visible+optional on plant_protection_application, and withWeatherAtApplicationVisibility hides it when the plot has a weather source", () => {
+    const fixture = shippedCatalog();
+    const result = buildCatalogModel(fixture);
+    expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
+    if (!result.ok) return;
+    const fullRecord = result.model.templates.get('full_record');
+    const openField = result.model.layouts.get('open_field');
+    expect(fullRecord).toBeDefined();
+    expect(openField).toBeDefined();
+    if (!fullRecord || !openField) return;
+
+    const weatherCodes = ['attr.wind_speed', 'attr.wind_direction', 'attr.air_temperature', 'attr.rel_humidity'];
+    const sprayStates = deriveFieldStates(fullRecord, openField, { activity_code: 'plant_protection_application' });
+    for (const code of weatherCodes) {
+      expect(sprayStates.find((state) => state.code === code), `sensorless plot must show ${code}`)
+        .toMatchObject({ visible: true, required: false });
+    }
+    // No other activity's operation_fields_by_activity ever declares these
+    // codes, so a sensorless plot must not show them anywhere else either.
+    const irrigationStates = deriveFieldStates(fullRecord, openField, { activity_code: 'irrigation' });
+    for (const code of weatherCodes) {
+      expect(irrigationStates.some((state) => state.code === code && state.visible)).toBe(false);
+    }
+
+    // Weather-source plot (GUI's zoneLinked === true): every weather field
+    // must be forced invisible+not-required, everything else must be
+    // untouched.
+    const zoned = withWeatherAtApplicationVisibility(sprayStates, true);
+    for (const code of weatherCodes) {
+      expect(zoned.find((state) => state.code === code)).toMatchObject({ visible: false, required: false });
+    }
+    const nonWeather = sprayStates.filter((state) => !weatherCodes.includes(state.code));
+    for (const state of nonWeather) {
+      expect(zoned.find((candidate) => candidate.code === state.code)).toEqual(state);
+    }
+
+    // Sensorless plot (zoneLinked === false): identical to the untouched
+    // states — a true no-op, not merely "still visible by coincidence".
+    expect(withWeatherAtApplicationVisibility(sprayStates, false)).toEqual(sprayStates);
   });
 
   it('labels by locale fallback and picks the highest active definition', () => {
@@ -717,14 +803,15 @@ describe('catalog model', () => {
   });
 
   it('accepts the shipped farmer_quick@2 carry_forward, since operator/equipment/method are visible there (P4 fix)', () => {
-    // v3 (Slice BC) is now the latest version and would otherwise shadow v2
-    // here (activeDefinition picks the highest version), so this historical
-    // P4-fix regression test isolates v1+v2 explicitly to keep proving what
-    // it always proved: v2 itself carries a valid, visible carry_forward.
+    // v3 (Slice BC) and v6 (Slice F) are both newer than v2 and would
+    // otherwise shadow it here (activeDefinition picks the highest version),
+    // so this historical P4-fix regression test isolates v1+v2 explicitly to
+    // keep proving what it always proved: v2 itself carries a valid, visible
+    // carry_forward.
     const fixture: JournalCatalog = {
       ...shippedCatalog(),
       templates: shippedCatalog().templates.filter((row) =>
-        !(row.code === 'farmer_quick' && row.version === 3)),
+        !(row.code === 'farmer_quick' && (row.version === 3 || row.version === 6))),
     };
     const result = buildCatalogModel(fixture);
     expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
@@ -745,16 +832,17 @@ describe('catalog model', () => {
     const t = ((key: string) => key) as TFunction<'journal'>;
     const fullFixture = shippedCatalog();
 
-    // v3 (Slice BC) is the current latest farmer_quick version and would
-    // otherwise become the active definition once v2 is removed below,
-    // silently defeating this historical guard (v3 also carries a valid,
-    // visible carry_forward — the point being tested here is specifically
-    // about v1 vs v2). Isolate v1+v2 explicitly so this keeps proving the P4
-    // fix regardless of how many newer versions the catalog gains.
+    // v3 (Slice BC) and v6 (Slice F) are both newer farmer_quick versions
+    // that would otherwise become the active definition once v2 is removed
+    // below, silently defeating this historical guard (both also carry a
+    // valid, visible carry_forward — the point being tested here is
+    // specifically about v1 vs v2). Isolate v1+v2 explicitly so this keeps
+    // proving the P4 fix regardless of how many newer versions the catalog
+    // gains.
     const v1v2OnlyFixture: JournalCatalog = {
       ...fullFixture,
       templates: fullFixture.templates.filter((row) =>
-        !(row.code === 'farmer_quick' && row.version === 3)),
+        !(row.code === 'farmer_quick' && (row.version === 3 || row.version === 6))),
     };
 
     // If farmer_quick@2 were ever missing (the pre-Task-27 world), @1 would

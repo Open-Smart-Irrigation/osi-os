@@ -54,7 +54,12 @@ const LAYOUT_KEYS = ['capture.confirm.layout', 'capture.form.layout', 'capture.w
 // capture.cycle.bannerCropVariety (Slice D Phase 3) is the same kind of
 // value: "{{crop}} · {{variety}}" carries no words of its own, only the
 // interpolated crop/variety labels, so it is identical in every locale.
-const SHARED_STRUCTURE_KEYS = ['where.rangeSummary', 'capture.cycle.bannerCropVariety'];
+// capture.tankMix.memberLabel (Slice F, F3 tank-mix) is the identical case:
+// "{{index}}. {{detail}}" carries no words of its own either — `detail` is
+// already a fully composed, locale-aware string built in JournalCaptureFlow.tsx
+// (tankMixProductLabel/tankMixDoseLabel), so the template itself has nothing
+// left to translate.
+const SHARED_STRUCTURE_KEYS = ['where.rangeSummary', 'capture.cycle.bannerCropVariety', 'capture.tankMix.memberLabel'];
 
 const SHARED_WITH_ENGLISH: Record<string, readonly string[]> = {
   // Task 24 group-resolution and plural values are translated in every
@@ -196,6 +201,13 @@ const REQUIRED_CAPTURE_KEYS = [
   'capture.save.notSaved',
   'capture.save.retry',
   'capture.save.saving',
+  'capture.tankMix.addProduct',
+  'capture.tankMix.empty',
+  'capture.tankMix.memberLabel',
+  'capture.tankMix.remove',
+  'capture.tankMix.saveFailed',
+  'capture.tankMix.title',
+  'capture.tankMix.unknownProduct',
   'capture.title',
   'capture.transition.body',
   'capture.transition.close',
