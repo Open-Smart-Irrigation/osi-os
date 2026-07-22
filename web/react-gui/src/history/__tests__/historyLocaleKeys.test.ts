@@ -5,7 +5,7 @@ import path from 'node:path';
 const GUI_ROOT = path.resolve(__dirname, '../../..');
 const SRC_ROOT = path.join(GUI_ROOT, 'src');
 const LOCALES_ROOT = path.join(GUI_ROOT, 'public/locales');
-const LOCALES = ['de-CH', 'en', 'es', 'fr', 'it', 'lg', 'pt', 'zh'];
+const LOCALES = ['de-CH', 'en', 'es', 'fr', 'it', 'lg', 'pt', 'zh', 'sw'];
 const NEW_KEYS = ['history.export.open', 'history.export.title', 'history.desktop.railLabel'];
 
 function sourceFiles(dir: string): string[] {

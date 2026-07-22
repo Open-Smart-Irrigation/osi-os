@@ -10,6 +10,7 @@ import itLocale from '../../../public/locales/it/journal.json';
 import lg from '../../../public/locales/lg/journal.json';
 import pt from '../../../public/locales/pt/journal.json';
 import zh from '../../../public/locales/zh/journal.json';
+import sw from '../../../public/locales/sw/journal.json';
 
 function keyShape(value: unknown, prefix = ''): string[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [prefix];
@@ -99,6 +100,16 @@ const SHARED_WITH_ENGLISH: Record<string, readonly string[]> = {
   // locales above do (Fertigation, Layout as a bare concept name aside, Zone,
   // Station, sensor…), so every other zh string in this namespace is translated.
   zh: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS],
+  // sw (Kiswahili, CLDR {one, other} — same plural shape as en) carries no
+  // additional English-identical values beyond the universally shared Layout
+  // label and structural templates either: every domain word (Zone -> Eneo,
+  // Station -> Kituo, Plot -> Kipande, Fertigation -> Mbolea kwa Maji, Final ->
+  // Mwisho, sensor -> kihisi, timezone -> Eneo la Saa, campaign -> Kampeni,
+  // protocol -> Itifaki, status -> Hali, No -> Hapana, Note -> Dokezo, Active ->
+  // Inatumika, Optional -> Si Lazima, Values -> Maelezo, Name -> Jina) has an
+  // established Swahili translation, unlike lg/de-CH/fr/es/pt which each keep a
+  // handful of loanwords for concepts with no vernacular equivalent.
+  sw: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS],
 };
 
 const REQUIRED_CAPTURE_KEYS = [
@@ -561,6 +572,12 @@ const STATION_RANGE_EXPECTED: Record<string, Record<string, string>> = {
     '2:1': 'Station A · 2 parcelas · 1 selecionada',
     '2:2': 'Station A · 2 parcelas · 2 selecionadas',
   },
+  sw: {
+    '1:0': 'Station A · Kipande 1 · 0 vimechaguliwa',
+    '1:1': 'Station A · Kipande 1 · 1 kimechaguliwa',
+    '2:1': 'Station A · Vipande 2 · 1 kimechaguliwa',
+    '2:2': 'Station A · Vipande 2 · 2 vimechaguliwa',
+  },
 };
 
 describe('journal locale parity', () => {
@@ -571,6 +588,7 @@ describe('journal locale parity', () => {
     ['it', itLocale],
     ['lg', lg],
     ['pt', pt],
+    ['sw', sw],
   ])('%s matches the English key shape', (_locale, resource) => {
     expect(keyShape(resource).sort()).toEqual(keyShape(en).sort());
   });
@@ -631,6 +649,7 @@ describe('journal locale parity', () => {
     ['it', itLocale],
     ['lg', lg],
     ['pt', pt],
+    ['sw', sw],
   ])('%s resolves group members and count-bearing journal keys through i18next', async (locale, resource) => {
     const pluralKeys = [
       'where.selectionCount',
@@ -673,6 +692,7 @@ describe('journal locale parity', () => {
     ['it', itLocale],
     ['lg', lg],
     ['pt', pt],
+    ['sw', sw],
   ])('%s renders station range summaries for all count combinations', async (locale, resource) => {
     const expected = STATION_RANGE_EXPECTED[locale];
     const i18n = i18next.createInstance();
@@ -706,6 +726,7 @@ describe('journal locale parity', () => {
     ['lg', lg],
     ['pt', pt],
     ['zh', zh],
+    ['sw', sw],
   ])('%s translates every string it does not legitimately share with English', (locale, resource) => {
     const english = new Map(flatten(en));
     const identical = flatten(resource)
@@ -729,6 +750,7 @@ describe('journal locale parity', () => {
     ['it', itLocale],
     ['lg', lg],
     ['pt', pt],
+    ['sw', sw],
   ])('%s preserves every interpolation placeholder', (_locale, resource) => {
     const placeholders = (value: string) => (value.match(/{{\s*\w+\s*}}/g) ?? []).sort();
     const translated = new Map(flatten(resource));
@@ -741,7 +763,7 @@ describe('journal locale parity', () => {
   });
 
   it('preserves the focused Phase 4 interpolation token sets', () => {
-    const resources = { en, 'de-CH': deCH, es, fr, it: itLocale, lg, pt };
+    const resources = { en, 'de-CH': deCH, es, fr, it: itLocale, lg, pt, sw };
 
     for (const [locale, resource] of Object.entries(resources)) {
       for (const [key, tokens] of Object.entries(PHASE4_INTERPOLATION_TOKENS)) {

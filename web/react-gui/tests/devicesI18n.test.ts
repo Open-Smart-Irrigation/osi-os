@@ -32,7 +32,7 @@ test('devices locale files include irrigation actuation translation keys', () =>
     'irrigationOutcomes.advancedView',
   ];
 
-  for (const locale of ['en', 'de-CH', 'es', 'fr', 'it', 'lg', 'pt', 'zh']) {
+  for (const locale of ['en', 'de-CH', 'es', 'fr', 'it', 'lg', 'pt', 'zh', 'sw']) {
     const devices = readDevices(locale);
     for (const key of requiredKeys) {
       assert.equal(typeof getPath(devices, key), 'string', `${locale} missing ${key}`);

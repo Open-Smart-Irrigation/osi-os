@@ -7,10 +7,11 @@ import itLocale from '../../../public/locales/it/history.json';
 import lg from '../../../public/locales/lg/history.json';
 import pt from '../../../public/locales/pt/history.json';
 import zh from '../../../public/locales/zh/history.json';
+import sw from '../../../public/locales/sw/history.json';
 
-const LOCALES = ['de-CH', 'es', 'fr', 'it', 'lg', 'pt', 'zh'] as const;
+const LOCALES = ['de-CH', 'es', 'fr', 'it', 'lg', 'pt', 'zh', 'sw'] as const;
 type Locale = (typeof LOCALES)[number];
-const LOCALE_RESOURCES: Record<string, unknown> = { en, 'de-CH': deCH, es, fr, it: itLocale, lg, pt, zh };
+const LOCALE_RESOURCES: Record<string, unknown> = { en, 'de-CH': deCH, es, fr, it: itLocale, lg, pt, zh, sw };
 
 function flattenLeaves(value: unknown, prefix = '', leaves: Record<string, string> = {}): Record<string, string> {
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
@@ -148,6 +149,17 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
     'history.soilProfile.depthLabel', 'history.advanced.field.device_eui',
     'history.advanced.field.primaryDeveui', 'history.advanced.field.rssi',
     'history.advanced.field.snr',
+  ]),
+  // sw keeps "Gateway" as an English loanword per the locale-expansion brief
+  // (same borrowing convention as lg), keeps "Firmware" untranslated (no
+  // established concise Swahili term, same call as the other Latin-script
+  // locales above), and shares the do-not-translate glossary (DevEUI, RSSI,
+  // SNR, CPU) plus the pure-placeholder "{{unit}}" axis template.
+  sw: new Set([
+    'history.advanced.field.device_eui', 'history.advanced.field.firmware',
+    'history.advanced.field.primaryDeveui', 'history.advanced.field.rssi',
+    'history.advanced.field.snr', 'history.cardType.gateway',
+    'history.dailyMinMax.axisLabel', 'history.gatewayStatus.metric.cpu',
   ]),
 };
 

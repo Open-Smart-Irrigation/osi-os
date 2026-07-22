@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const LOCALES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'locales');
-const LOCALES = ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg', 'zh'];
+const LOCALES = ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg', 'zh', 'sw'];
 const NAMESPACES = ['accountLink', 'auth', 'common', 'dashboard', 'devices', 'history', 'journal', 'settings', 'support'];
 
 function flatten(obj: unknown, prefix = ''): Record<string, string> {
@@ -42,7 +42,7 @@ const PLURAL_SUFFIX = /_(zero|one|two|few|many|other)$/;
 const EXPECTED_PLURAL_CATEGORIES: Record<string, string[]> = {
   en: ['one', 'other'], 'de-CH': ['one', 'other'], fr: ['one', 'other'],
   it: ['one', 'other'], es: ['one', 'other'], pt: ['one', 'other'],
-  lg: ['one', 'other'], zh: ['other'],
+  lg: ['one', 'other'], zh: ['other'], sw: ['one', 'other'],
 };
 
 // Categories Intl.PluralRules recognizes for a locale that this app deliberately
@@ -58,7 +58,7 @@ const EXPECTED_PLURAL_CATEGORIES: Record<string, string[]> = {
 // loudly instead of being silently swallowed by a lax "subset of Intl" check.
 const OMITTED_PLURAL_CATEGORIES: Record<string, string[]> = {
   en: [], 'de-CH': [], fr: ['many'], it: ['many'], es: ['many'], pt: ['many'],
-  lg: [], zh: [],
+  lg: [], zh: [], sw: [],
 };
 
 function splitKeys(keys: string[], pluralBases: Set<string>) {

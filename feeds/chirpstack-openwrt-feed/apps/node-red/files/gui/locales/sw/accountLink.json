@@ -1,0 +1,69 @@
+{
+  "title": "Unganisha na OSI Server",
+  "navLink": "OSI Server",
+  "backToDashboard": "Rudi kwenye dashibodi",
+  "status": {
+    "linked": "Akaunti imeunganishwa na OSI Server",
+    "notLinked": "Haijaunganishwa na OSI Server",
+    "linkedAs": "Imeunganishwa kama: {{username}}",
+    "linkedSince": "Tangu: {{date}}"
+  },
+  "form": {
+    "serverUrl": "URL ya OSI Server",
+    "actionLabel": "Kitendo",
+    "actionLogin": "Unganisha akaunti iliyopo",
+    "actionRegister": "Fungua akaunti mpya",
+    "username": "Jina la mtumiaji la seva",
+    "email": "Barua pepe",
+    "password": "Nenosiri",
+    "submit": "Unganisha na OSI Server",
+    "submitting": "Inaunganisha…",
+    "cancel": "Ghairi"
+  },
+  "warning": {
+    "title": "Muhimu",
+    "message": "Baada ya kuunganisha, lazima utumie taarifa zako za kuingia za OSI Server. OSI OS inahifadhi nakala salama ya taarifa zako za kuingia zilizounganishwa kwenye Gateway hii, ili uweze kuendelea kuingia hata bila intaneti.",
+    "proceed": "Endelea"
+  },
+  "success": {
+    "title": "Umeunganishwa Kikamilifu",
+    "message": "Akaunti yako sasa imeunganishwa kama {{username}} kwenye OSI Server.",
+    "claimedDevices": "Vifaa vilivyodaiwa kwenye seva: {{count}}",
+    "skippedDevices": "Vifaa vilivyorukwa (tayari vimedaiwa): {{count}}"
+  },
+  "unlink": {
+    "button": "Tenganisha kutoka OSI Server",
+    "confirm": "Una uhakika? Baada ya kutenganisha, lazima utumie nenosiri lako la awali la ndani ili kuingia.",
+    "success": "Imetenganishwa kutoka OSI Server"
+  },
+  "errors": {
+    "networkError": "Imeshindwa kufikia OSI Server. Angalia URL na muunganisho wako wa intaneti.",
+    "authFailed": "Taarifa za kuingia za OSI Server si sahihi.",
+    "generic": "Hitilafu imetokea. Tafadhali jaribu tena.",
+    "forceSyncFailed": "Usawazishaji wa mkono umeshindikana. Tafadhali jaribu tena."
+  },
+  "sync": {
+    "title": "Usawazishaji wa mkono",
+    "description": "Fanya usawazishaji wa haraka wa kurejesha data na OSI Server.",
+    "button": "Sawazisha sasa",
+    "running": "Inasawazisha…",
+    "successTitle": "Usawazishaji wa mkono umekamilika",
+    "partialTitle": "Usawazishaji wa mkono umekamilika na matatizo",
+    "refreshed": "Tokeni ya usawazishaji imesasishwa kabla ya usawazishaji.",
+    "usedCurrentToken": "Inatumia tokeni ya sasa ya usawazishaji.",
+    "bootstrap": "Uanzishaji uliotumika: {{applied}}, uliorukwa: {{skipped}}",
+    "outbox": "Kisanduku cha kutuma: {{delivered}} vimetumwa ({{before}} → {{after}} vinasubiri)",
+    "pending": "Amri zinazosubiri zilizopatikana: {{fetched}}, zilizowekwa foleni kwa matumizi ya ndani: {{queued}}",
+    "pendingAfterResponse": "Matumizi ya ndani yanaendelea baada ya jibu hili kurudi.",
+    "lastError": "Hitilafu ya mwisho kutoka {{source}}: {{message}}"
+  },
+  "reauth": {
+    "title": "Tokeni ya usawazishaji imeisha muda",
+    "description": "Thibitisha upya na OSI Server ili kutoa tokeni mpya ya usawazishaji kwa Gateway hii.",
+    "button": "Thibitisha upya",
+    "username": "Jina la mtumiaji la seva",
+    "password": "Nenosiri la OSI Server",
+    "submit": "Sasisha muunganisho",
+    "running": "Inasasisha…"
+  }
+}

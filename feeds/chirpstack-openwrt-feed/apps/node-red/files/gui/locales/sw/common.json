@@ -1,0 +1,95 @@
+{
+  "cancel": "Ghairi",
+  "loading": "Inapakia…",
+  "delete": "Futa",
+  "na": "Haipo",
+  "retry": "Jaribu tena",
+  "analysis": {
+    "title": "Uchambuzi wa data",
+    "axis": {
+      "rename": "Badilisha jina la mhimili"
+    },
+    "backToDashboard": "← Rudi kwenye dashibodi",
+    "loadError": "Data ya uchambuzi imeshindwa kupakiwa.",
+    "pooled": {
+      "tooltip": "Inalinganisha vipimo vya maeneo yote kama seti moja iliyounganishwa, pamoja na kila eneo peke yake."
+    },
+    "empty": "Chagua mfululizo mmoja au zaidi ili kuanza kulinganisha maeneo.",
+    "catalog": {
+      "loading": "Inapakia mifululizo iliyopo…"
+    },
+    "series": {
+      "loading": "Inapakia mfululizo…"
+    },
+    "aggregation": {
+      "label": "Muunganiko",
+      "raw": "Ghafi",
+      "fifteenMinute": "Dakika 15",
+      "hourly": "Kila saa",
+      "daily": "Kila siku",
+      "weekly": "Kila wiki"
+    },
+    "preset": {
+      "metricLabel": "Kipimo katika maeneo yote"
+    },
+    "tray": {
+      "label": "Mfululizo wa uchambuzi",
+      "title": "Mifululizo",
+      "search": "Tafuta maeneo au vifaa",
+      "unknownSite": "Eneo halijulikani",
+      "reason": {
+        "unsupported": "Haitumiki",
+        "available_no_recent_data": "Hakuna data mpya"
+      }
+    },
+    "range": {
+      "label": "Kipindi cha uchambuzi",
+      "custom": "Maalum",
+      "from": "Kutoka",
+      "to": "Hadi",
+      "apply": "Tumia",
+      "invalid": "Mwanzo lazima uwe kabla ya mwisho."
+    },
+    "mode": {
+      "label": "Hali ya uchambuzi",
+      "timeline": "Mstari wa Muda",
+      "correlation": "Uhusiano"
+    },
+    "layout": {
+      "label": "Mpangilio",
+      "stacked": "Yaliyorundikwa",
+      "overlaid": "Yaliyopishana",
+      "smallMultiples": "Chati Ndogo Nyingi"
+    },
+    "toggle": {
+      "normalize": "Sawazisha Kiwango"
+    },
+    "export": {
+      "csv": "Hamisha CSV",
+      "png": "Hamisha PNG"
+    },
+    "legend": {
+      "label": "Ufunguo wa chati",
+      "rename": "Badilisha jina la mfululizo"
+    },
+    "views": {
+      "title": "Mionekano Iliyohifadhiwa",
+      "save": "Hifadhi mwonekano",
+      "namePlaceholder": "Ipe jina mwonekano huu",
+      "delete": "Futa mwonekano",
+      "empty": "Hakuna mionekano iliyohifadhiwa bado."
+    },
+    "droppedNotice": "Mfululizo {{count}} umeshindwa kupakiwa",
+    "correlation": {
+      "comingSoon": "Grafu ya uhusiano (scatter) imepangwa kwa toleo lijalo.",
+      "needTwoChannels": "Ongeza mfululizo wa njia mbili tofauti angalau ili kuzilinganisha.",
+      "x": "Njia X",
+      "y": "Njia Y",
+      "pooled": "Vyote Pamoja (maeneo yote)",
+      "zone": "Eneo",
+      "droppedPairs": "Vilivyoachwa",
+      "insufficient": "haitoshi (n={{n}})",
+      "exploratory": "Uchunguzi tu — Pearson r kwenye vipimo vilivyolinganishwa; si kipimo cha uhakika wa kitakwimu."
+    }
+  }
+}

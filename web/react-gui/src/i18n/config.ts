@@ -12,6 +12,7 @@ export const SUPPORTED_LANGUAGES = [
   { code: 'pt',    label: 'Português' },
   { code: 'lg',    label: 'Luganda' },
   { code: 'zh',    label: '中文' },
+  { code: 'sw',    label: 'Kiswahili' },
 ] as const;
 
 export type SupportedLanguageCode = typeof SUPPORTED_LANGUAGES[number]['code'];

@@ -1,0 +1,36 @@
+{
+  "title": "Dashboard",
+  "welcome": "Karibu, {{username}}",
+  "add": "Ongeza",
+  "addMenu": {
+    "zone": "Ongeza Eneo",
+    "device": "Ongeza Kifaa",
+    "activity": "Andika Shughuli"
+  },
+  "data": "Data",
+  "account": "Akaunti",
+  "accountMenu": {
+    "osiServer": "OSI Server"
+  },
+  "logout": "Toka",
+  "loading": "Inapakia dashibodi…",
+  "failedToLoad": "Imeshindwa kupakia data",
+  "autoRefresh": "Inasasisha kila sekunde 10",
+  "emptyState": {
+    "title": "Karibu kwenye shamba lako!",
+    "subtitle": "Anza kwa kuunda eneo na kuongeza vifaa",
+    "createZone": "Unda Eneo",
+    "addDevice": "Ongeza Kifaa"
+  },
+  "irrigationZones": "Maeneo",
+  "unassignedDevices": "Vifaa Visivyowekwa",
+  "unassignedSubtitle": "Vifaa hivi havijawekwa kwenye eneo lolote",
+  "soilSensors": "Vihisi vya Udongo",
+  "smartValves": "Vali Janja",
+  "journal": "Shajara",
+  "tabs": {
+    "zones": "Maeneo",
+    "data": "Data",
+    "journal": "Shajara"
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "navLabel": "Msaada na Maombi",
+  "title": "Msaada na Maombi",
+  "backToDashboard": "Rudi kwenye dashibodi",
+  "empty": "Hakuna maombi bado.",
+  "form": {
+    "stepRequest": "1. Maandishi ya ombi",
+    "stepArea": "2. Sehemu na ukali",
+    "stepDiagnostics": "3. Taarifa za kiufundi na idhini",
+    "summary": "Kichwa kifupi",
+    "description": "Ni nini kinapaswa kuboreshwa?",
+    "contactEmail": "Barua pepe ya mawasiliano (si lazima)",
+    "expected": "Ilivyotarajiwa",
+    "actual": "Ilivyokuwa",
+    "steps": "Hatua",
+    "requestType": "Aina ya ombi",
+    "area": "Sehemu",
+    "severity": "Ukali",
+    "diagnostics": "Muhtasari wa taarifa za kiufundi",
+    "includeDiagnostics": "Jumuisha taarifa za kiufundi salama pamoja na ombi hili.",
+    "consentPublic": "Nakubali ombi hili lisambazwe hadharani bila taarifa za faragha za shamba.",
+    "submit": "Hifadhi ombi",
+    "submitting": "Inahifadhi…"
+  },
+  "types": {
+    "bug": "Hitilafu",
+    "improvement": "Uboreshaji",
+    "feedback": "Maoni"
+  },
+  "areas": {
+    "dashboard": "Dashibodi",
+    "history": "Historia",
+    "analysis": "Uchambuzi",
+    "copy": "Maandishi na Lebo",
+    "watering": "Umwagiliaji",
+    "sync": "Usawazishaji",
+    "devices": "Vifaa",
+    "system": "Mfumo",
+    "other": "Nyingine"
+  },
+  "severity": {
+    "cant_work": "Kunazuia kazi yangu",
+    "workaround": "Njia mbadala ipo",
+    "annoying": "Inakera",
+    "idea": "Wazo"
+  },
+  "diagnostics": {
+    "loading": "Inapakia taarifa za kiufundi…",
+    "unavailable": "Taarifa za kiufundi hazipatikani kwa sasa."
+  },
+  "banners": {
+    "retryable": "Imeshindwa kutuma kwa sasa. Ombi linaweza kujaribiwa tena."
+  },
+  "status": {
+    "QUEUED": "Imehifadhiwa, inasubiri intaneti",
+    "SUBMITTED": "Limetumwa",
+    "SYNCED": "Limesawazishwa",
+    "FAILED_RETRYABLE": "Linahitaji kujaribiwa tena",
+    "FAILED_PERMANENT": "Imeshindwa kutuma",
+    "AWAITING_PUBLISH": "Linasubiri kuchapishwa",
+    "PUBLISHING": "Linachapishwa",
+    "PUBLISH_BLOCKED_CONFIG": "Uchapishaji umezuiwa",
+    "PUBLISH_BLOCKED_SECRET": "Uchapishaji umezuiwa",
+    "TRIAGED": "Linakaguliwa",
+    "BEING_REVIEWED": "Linakaguliwa",
+    "NEEDS_INFO": "Linahitaji taarifa zaidi",
+    "ISSUE_ONLY": "Limehifadhiwa kama tatizo",
+    "ISSUE_OPEN": "Tatizo liko wazi",
+    "NOT_PLANNED": "Halijapangwa",
+    "RATE_LIMITED": "Limezuiwa kwa kiwango",
+    "RELEASED": "Limetolewa",
+    "REJECTED": "Limekataliwa",
+    "DUPLICATE": "Nakala",
+    "DUPLICATE_OF": "Nakala",
+    "AWAITING_APPROVAL": "Linasubiri idhini",
+    "AGENT_RUNNING": "Linaendelea",
+    "VERIFYING": "Linathibitishwa",
+    "PR_OPEN": "Linaendelea",
+    "IN_REVIEW": "Linakaguliwa",
+    "MERGED": "Limeunganishwa",
+    "CLOSED": "Limefungwa",
+    "AGENT_FAILED": "Linahitaji ukaguzi",
+    "UNKNOWN": "Taarifa ya hali imepokelewa"
+  },
+  "myRequests": {
+    "title": "Maombi Yangu",
+    "loadError": "Maombi yameshindwa kupakiwa.",
+    "loading": "Inapakia maombi…",
+    "area": "Sehemu",
+    "submitted": "Limetumwa"
+  }
+}

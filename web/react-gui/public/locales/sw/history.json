@@ -1,0 +1,572 @@
+{
+  "history": {
+    "nav": {
+      "history": "Historia",
+      "legacyDashboard": "Dashibodi ya zamani",
+      "logout": "Toka"
+    },
+    "shell": {
+      "title": "Historia",
+      "subtitle": "Historia ya ndani ya Gateway kwa {{username}}",
+      "loadingLocalCards": "Inapakia kadi za historia za ndani…",
+      "unavailableTitle": "Historia haipatikani",
+      "unavailableBody": "Historia imezimwa kwenye Gateway hii na itaonekana hapa mara itakapowashwa.",
+      "featureFlagFailed": "Imeshindwa kuangalia kama Historia imewashwa. Dashibodi ya zamani bado inapatikana.",
+      "zonesFailedTitle": "Maeneo ya historia yameshindwa kupakiwa",
+      "noZonesTitle": "Hakuna maeneo bado",
+      "noZonesBody": "Unda eneo kutoka dashibodi ya zamani kabla ya kufungua historia.",
+      "cardsFailed": "Kadi za historia zimeshindwa kupakiwa.",
+      "retryCards": "Jaribu tena kadi"
+    },
+    "export": {
+      "open": "Hamisha",
+      "title": "Hamisha data"
+    },
+    "desktop": {
+      "railLabel": "Kadi",
+      "toolbarTitle": "Zana",
+      "modeLabel": "Hali ya Kompyuta Mezani",
+      "modeFocus": "Lengo",
+      "modeCompare": "Linganisha",
+      "viewSelectorLabel": "Mwonekano wa kadi",
+      "compareViewSelectorLabel": "Mwonekano wa kulinganisha",
+      "sourceSelectorLabel": "Vyanzo",
+      "rangeOverviewLabel": "Muhtasari wa kipindi cha muda",
+      "chartSurfaceLabel": "Chati ya historia, tumia vitufe vya mishale kusogeza na pamoja au minus kukuza",
+      "zoomIn": "Kuza",
+      "zoomOut": "Punguza",
+      "resetZoom": "Rejesha ukuzaji",
+      "maxPanels": "Hadi paneli {{count}} za kulinganisha",
+      "singleMode": "Moja",
+      "comparisonMode": "Kulinganisha",
+      "addPanel": "Ongeza paneli {{title}}",
+      "removePanel": "Ondoa paneli",
+      "panelLimitWarning": "Paneli {{count}} tu za kulinganisha zinaweza kuonyeshwa kwenye Gateway hii.",
+      "selectedTimestampNone": "Hakuna muda uliochaguliwa",
+      "selectedTimestamp": "Muda uliochaguliwa: {{timestamp}}",
+      "inspectorTitle": "Mkaguzi",
+      "inspectorPlaceholder": "Chagua muda au kisanduku cha kalenda ili kuona tafsiri, matukio, ubora wa data, na taarifa za ziada."
+    },
+    "mobile": {
+      "zoneLabel": "Eneo",
+      "actions": "Vitendo vya historia",
+      "openActions": "Fungua vitendo vya historia"
+    },
+    "overview": {
+      "empty": "Hakuna kadi za historia zinazopatikana kwa eneo hili bado.",
+      "openCard": "Fungua historia ya {{title}}",
+      "cardTypeLabel": "kadi ya {{cardType}}",
+      "pinCard": "Bandika kadi",
+      "unpinCard": "Ondoa bandiko la kadi",
+      "pinCardForTitle": "Bandika kadi ya {{title}}",
+      "unpinCardForTitle": "Ondoa bandiko la kadi ya {{title}}",
+      "pinned": "Imebandikwa",
+      "alert": "Tahadhari"
+    },
+    "detail": {
+      "backToHistory": "Rudi kwenye historia",
+      "invalidRouteTitle": "Kadi ya historia haipatikani",
+      "invalidRouteBody": "Rudi kwenye Historia na uchague kadi inayopatikana.",
+      "loading": "Inapakia kadi ya historia…",
+      "notFoundTitle": "Kadi ya historia haipatikani",
+      "notFoundBody": "Rudi kwenye Historia na uchague kadi inayopatikana.",
+      "controlsPlaceholder": "Kipindi cha tarehe",
+      "inspectorPlaceholder": "Mkaguzi",
+      "rangeControlLabel": "Kipindi cha tarehe",
+      "viewControlLabel": "Mwonekano",
+      "visualizationLabel": "Mchoro wa historia",
+      "visualizationHelp": "Buruta kusogeza, bana kukuza, gonga mara mbili kurejesha, au shikilia kwa muda mrefu kukagua."
+    },
+    "rangeShort": {
+      "12h": "Saa12",
+      "24h": "Saa24",
+      "7d": "Siku7",
+      "30d": "Siku30",
+      "season": "Msimu",
+      "custom": "Maalum"
+    },
+    "sidebar": {
+      "zones": "Maeneo",
+      "pinnedCards": "Kadi zilizobandikwa",
+      "availableCards": "Kadi zinazopatikana",
+      "savedWorkspaces": "Nafasi za kazi zilizohifadhiwa",
+      "workspaceDisabled": "Kuhifadhi nafasi ya kazi bado hakujawashwa.",
+      "workspaceName": "Jina la nafasi ya kazi",
+      "saveWorkspace": "Hifadhi nafasi ya kazi",
+      "updateWorkspace": "Sasisha nafasi ya kazi",
+      "loadWorkspace": "Pakia {{name}}",
+      "deleteWorkspace": "Futa {{name}}",
+      "defaultWorkspaceName": "Nafasi ya kazi ya ndani",
+      "pinCard": "Bandika",
+      "unpinCard": "Ondoa bandiko",
+      "none": "Hakuna"
+    },
+    "carousel": {
+      "empty": "Hakuna kadi za historia zinazopatikana kwa eneo hili bado.",
+      "ariaLabel": "Kizunguzungu cha kadi za historia",
+      "cardAriaLabel": "kadi ya {{title}}",
+      "cardTypeLabel": "kadi ya {{cardType}}",
+      "pinned": "Imebandikwa"
+    },
+    "cardFrame": {
+      "emptyTitle": "Chagua kadi ya historia",
+      "emptyBody": "Chagua eneo na kadi ya historia ili kukagua historia ya ndani.",
+      "typeHistory": "Historia ya {{cardType}}",
+      "viewModes": "Hali za mwonekano za {{title}}",
+      "unavailable": "Kadi hii haipatikani kwa eneo lililochaguliwa.",
+      "timelineBrush": "Dirisha la mstari wa muda",
+      "timelineBrushKeyboardHelp": "Tumia vitufe vya mishale kusogeza, pamoja au minus kukuza, na Home au Enter kurejesha.",
+      "aggregationBadge": "Muunganiko: {{aggregation}}",
+      "placeholderBody": "Data ya chati na kalenda itapakiwa hapa mara data ya kadi itakapopatikana.",
+      "cardDataLoading": "Inapakia data ya kadi…",
+      "cardDataError": "Data ya kadi imeshindwa kupakiwa: {{message}}",
+      "cardDataUnknownError": "Hitilafu isiyojulikana"
+    },
+    "workspace": {
+      "unavailablePanel": "Paneli isiyopatikana",
+      "repairPanel": "Ondoa paneli isiyopatikana"
+    },
+    "dendroTimeline": {
+      "title": "Mstari wa Muda wa Ukuaji",
+      "emptyTitle": "Hakuna data ya mstari wa muda wa dendrometa",
+      "emptyBody": "Usomaji wa dendrometa utaonekana hapa mara data ya historia itakapopatikana.",
+      "eventsTitle": "Matukio ya Mstari wa Muda",
+      "eventFallback": "Tukio la dendrometa",
+      "noEvents": "Hakuna matukio katika kipindi hiki",
+      "pointsCount": "usomaji {{count}}",
+      "series": {
+        "stemChange": "Mabadiliko ya Shina",
+        "growth": "Ukuaji",
+        "shrinkage": "Kusinyaa",
+        "dendrometer": "Dendrometa"
+      }
+    },
+    "environmentLineChart": {
+      "title": "Mwelekeo wa Mazingira",
+      "emptyTitle": "Hakuna data ya mwelekeo wa mazingira",
+      "emptyBody": "Usomaji wa mazingira utaonekana hapa mara data ya historia itakapopatikana.",
+      "pointsCount": "usomaji {{count}}",
+      "axisLabel": "mhimili wa {{unit}}",
+      "axisNoUnit": "Mhimili usio na kipimo",
+      "series": {
+        "airTemperature": "Joto la hewa",
+        "humidity": "Unyevu wa hewa",
+        "rain": "Mvua",
+        "light": "Mwanga",
+        "pressure": "Shinikizo",
+        "wind": "Upepo",
+        "uv": "Kielezo cha UV",
+        "environment": "Mazingira"
+      }
+    },
+    "dailyMinMax": {
+      "title": "Kiwango cha Chini/Juu cha Kila Siku",
+      "emptyTitle": "Hakuna data ya kiwango cha chini/juu cha kila siku",
+      "emptyBody": "Usomaji wa kiwango cha chini na cha juu cha kila siku haupatikani kwa kipindi hiki.",
+      "pointsCount": "siku {{count}}",
+      "axisLabel": "{{unit}}",
+      "axisNoUnit": "Thamani",
+      "tooltipMin": "Chini",
+      "tooltipMax": "Juu",
+      "tooltipMean": "Wastani",
+      "series": {
+        "airTemperature": "Joto la hewa",
+        "environment": "Mazingira"
+      }
+    },
+    "gatewayStatus": {
+      "title": "Muhtasari wa Hali ya Gateway",
+      "emptyTitle": "Data chache za hali ya Gateway",
+      "emptyBody": "Taarifa za hali ya Gateway zitaonekana hapa Gateway inapozitoa.",
+      "lastSeen": "Ilionekana mara ya mwisho",
+      "dataAsOf": "Data hadi",
+      "syncState": "Hali ya usawazishaji",
+      "eventsTitle": "Matukio ya hivi karibuni ya Gateway",
+      "noEvents": "Hakuna matukio ya Gateway katika kipindi hiki.",
+      "eventFallback": "Tukio la Gateway",
+      "status": {
+        "ok": "Sawa",
+        "online": "Mtandaoni",
+        "offline": "Nje ya Mtandao",
+        "connected": "Imeunganishwa",
+        "disconnected": "Imetenganishwa",
+        "degraded": "Dhaifu",
+        "stale": "Kuukuu",
+        "charging": "Inachaji"
+      },
+      "category": {
+        "connectivity": "Muunganisho",
+        "storage": "Hifadhi",
+        "system": "Mfumo"
+      },
+      "metric": {
+        "signal": "Ishara",
+        "storage": "Matumizi ya Hifadhi",
+        "memory": "Matumizi ya Kumbukumbu",
+        "cpu": "CPU",
+        "temperature": "Joto"
+      },
+      "value": {
+        "unavailable": "Haijaripotiwa"
+      }
+    },
+    "irrigationTimeline": {
+      "title": "Mstari wa Muda wa Matukio ya Umwagiliaji",
+      "emptyTitle": "Hakuna matukio ya umwagiliaji",
+      "emptyBody": "Vitendo vya umwagiliaji na madirisha ya majibu vitaonekana hapa mara data ya historia itakapopatikana.",
+      "eventsCount": "matukio {{count}}",
+      "eventLabel": {
+        "irrigation": "Tukio la umwagiliaji",
+        "scheduled": "Umwagiliaji uliopangwa",
+        "manualOverride": "Uendeshaji wa mkono",
+        "possibleIneffective": "Umwagiliaji unaowezekana kutokuwa na tija",
+        "responseWindow": "Dirisha la majibu"
+      },
+      "detail": {
+        "duration": "Muda: {{value}}",
+        "responseWindow": "Dirisha la majibu: {{value}}",
+        "observedResponse": "Jibu lililoonekana: {{value}}"
+      },
+      "severity": {
+        "info": "Taarifa",
+        "warning": "Onyo",
+        "critical": "Hatari",
+        "success": "Mafanikio",
+        "unknown": "Taarifa"
+      }
+    },
+    "cardType": {
+      "soil": "Udongo",
+      "dendro": "Dendrometa",
+      "environment": "Mazingira",
+      "irrigation": "Umwagiliaji",
+      "gateway": "Gateway"
+    },
+    "viewMode": {
+      "soil-profile": "Wasifu wa Udongo",
+      "line-chart": "Chati ya Mstari",
+      "calendar": "Kalenda",
+      "irrigation-response": "Jibu la Umwagiliaji",
+      "advanced": "Mwonekano wa Hali ya Juu",
+      "growth-timeline": "Mstari wa Muda wa Ukuaji",
+      "stress-events": "Matukio ya Mkazo",
+      "daily-min-max": "Kiwango cha Chini/Juu cha Kila Siku",
+      "event-timeline": "Mstari wa Muda wa Matukio",
+      "status-overview": "Muhtasari wa Hali",
+      "connectivity-timeline": "Mstari wa Muda wa Muunganisho"
+    },
+    "metadata": {
+      "coverageUnknown": "Ufunikaji haujulikani",
+      "coverageKnown": "ufunikaji wa {{coverage}}%",
+      "coverageConfidence": {
+        "configured": "Mzunguko uliosanidiwa",
+        "derived": "Mzunguko uliokadiriwa",
+        "unknown": "Mzunguko haujulikani"
+      },
+      "syncState": {
+        "local": "Ndani",
+        "synced": "Imesawazishwa",
+        "stale": "Kuukuu",
+        "degraded": "Dhaifu",
+        "unknown": "Haijulikani"
+      },
+      "aggregation": {
+        "auto": "Kiotomatiki",
+        "raw": "Ghafi",
+        "15m": "Dakika 15",
+        "hourly": "Kila saa",
+        "daily": "Kila siku",
+        "weekly": "Kila wiki"
+      },
+      "range": {
+        "12h": "saa 12",
+        "24h": "saa 24",
+        "7d": "siku 7",
+        "30d": "siku 30",
+        "season": "Msimu",
+        "custom": "Kipindi Maalum"
+      }
+    },
+    "soilProfile": {
+      "emptyTitle": "Hakuna data ya wasifu wa udongo",
+      "emptyBody": "Usomaji wa wasifu unaozingatia kina haupatikani kwa kipindi hiki.",
+      "depthLabel": "sentimeta {{depth}}",
+      "depthUnknown": "Kina hakijawekwa",
+      "valueMissing": "Hakuna usomaji",
+      "status": {
+        "dry_stress": "Mkazo wa Ukavu",
+        "optimal": "Bora",
+        "wet_excess": "Maji Mengi Mno",
+        "mixed": "Mchanganyiko",
+        "no_data": "Hakuna data"
+      },
+      "labelUnknown": "Tabaka la udongo {{index}}"
+    },
+    "soil": {
+      "state": {
+        "wet": "Chepechepe",
+        "moist": "Unyevunyevu",
+        "dry": "Kavu"
+      }
+    },
+    "calendar": {
+      "label": "Kalenda",
+      "title": "Kalenda",
+      "emptyTitle": "Hakuna data ya kalenda",
+      "weekday": {
+        "mon": "Jtt",
+        "tue": "Jnn",
+        "wed": "Jtn",
+        "thu": "Alh",
+        "fri": "Iju",
+        "sat": "Jms",
+        "sun": "Jpl"
+      },
+      "state": {
+        "dry_stress": "Mkazo wa Ukavu",
+        "optimal": "Bora",
+        "wet_excess": "Maji Mengi Mno",
+        "mixed": "Mchanganyiko",
+        "normal_growth": "Ukuaji wa Kawaida",
+        "reduced_growth": "Ukuaji Uliopungua",
+        "high_shrinkage_stress": "Mkazo Mkubwa wa Kusinyaa",
+        "incomplete_night_recovery": "Kupona Usiku Hakukukamilika",
+        "normal": "Kawaida",
+        "heat_stress": "Mkazo wa Joto",
+        "cold_stress": "Mkazo wa Baridi",
+        "high_humidity": "Unyevu Mwingi",
+        "rain_day": "Siku ya Mvua",
+        "no_irrigation": "Hakuna Umwagiliaji",
+        "irrigation_event": "Tukio la Umwagiliaji",
+        "high_irrigation_frequency": "Marudio Makubwa ya Umwagiliaji",
+        "possible_ineffective_irrigation": "Umwagiliaji Unaowezekana Kutokuwa na Tija",
+        "manual_override": "Uendeshaji wa Mkono",
+        "offline": "Nje ya Mtandao",
+        "no_data": "Hakuna Data"
+      },
+      "marker": {
+        "irrigation": {
+          "no_irrigation": "Alama ya hakuna umwagiliaji",
+          "irrigation_event": "Alama ya umwagiliaji",
+          "high_irrigation_frequency": "Alama ya marudio makubwa",
+          "possible_ineffective_irrigation": "Alama ya umwagiliaji usio na tija",
+          "manual_override": "Alama ya uendeshaji wa mkono"
+        },
+        "rain": "Mvua",
+        "sensor_gap": "Pengo la kihisi",
+        "heat_event": "Tukio la joto",
+        "soil": {
+          "dry_stress": "Alama ya mkazo wa ukavu",
+          "optimal": "Alama ya bora",
+          "wet_excess": "Alama ya maji mengi",
+          "mixed": "Alama ya mchanganyiko"
+        },
+        "dendro": {
+          "normal_growth": "Alama ya ukuaji wa kawaida",
+          "reduced_growth": "Alama ya ukuaji uliopungua",
+          "high_shrinkage_stress": "Alama ya kusinyaa kukubwa",
+          "incomplete_night_recovery": "Alama ya kupona kusiko kamilika"
+        },
+        "environment": {
+          "normal": "Alama ya kawaida",
+          "heat_stress": "Alama ya joto",
+          "cold_stress": "Alama ya baridi",
+          "high_humidity": "Alama ya unyevu mwingi",
+          "rain_day": "Alama ya mvua"
+        }
+      },
+      "summary": {
+        "soil": {
+          "dry_stress": "Eneo la mizizi lilikuwa kavu likiwa na sampuli {{sampleCount}}.",
+          "optimal": "Eneo la mizizi lilikuwa bora likiwa na sampuli {{sampleCount}}.",
+          "wet_excess": "Eneo la mizizi lilikuwa na maji mengi likiwa na sampuli {{sampleCount}}.",
+          "mixed": "Hali ya udongo ilikuwa mchanganyiko katika kina mbalimbali.",
+          "no_data": "Hakuna data ya udongo iliyopatikana."
+        },
+        "dendro": {
+          "normal_growth": "Ukuaji wa shina ulionekana wa kawaida.",
+          "reduced_growth": "Ukuaji wa shina ulipungua.",
+          "high_shrinkage_stress": "Kusinyaa kwa shina kulionyesha mkazo.",
+          "incomplete_night_recovery": "Kupona usiku hakukukamilika.",
+          "no_data": "Hakuna data ya dendrometa iliyopatikana."
+        },
+        "environment": {
+          "normal": "Mazingira yalikuwa ya kawaida.",
+          "heat_stress": "Mkazo wa joto uligunduliwa.",
+          "cold_stress": "Mkazo wa baridi uligunduliwa.",
+          "high_humidity": "Unyevu mwingi uligunduliwa.",
+          "rain_day": "Mvua iligunduliwa.",
+          "no_data": "Hakuna data ya mazingira iliyopatikana."
+        },
+        "irrigation": {
+          "no_irrigation": "Hakuna umwagiliaji uliofanyika.",
+          "irrigation_event": "Umwagiliaji ulifanyika.",
+          "high_irrigation_frequency": "Marudio ya umwagiliaji yalikuwa makubwa.",
+          "possible_ineffective_irrigation": "Umwagiliaji huenda haukuwa na tija.",
+          "manual_override": "Uendeshaji wa mkono ulifanyika."
+        },
+        "gateway": {
+          "offline": "Muunganisho wa Gateway ulikuwa nje ya mtandao.",
+          "normal": "Hali ya Gateway ilikuwa ya kawaida.",
+          "no_data": "Hakuna data ya Gateway iliyopatikana."
+        }
+      }
+    },
+    "interpretation": {
+      "title": "Tafsiri",
+      "noData": {
+        "title": "Hakuna data katika kipindi kilichochaguliwa",
+        "body": "Kadi hii imesanidiwa, lakini hakuna historia iliyopimwa iliyopatikana kwa kipindi kilichochaguliwa."
+      },
+      "rootZoneDry": {
+        "title": "Eneo la mizizi liliingia hali ya ukavu",
+        "body": "Mkazo wa maji katika eneo la mizizi ya kina kirefu ulibaki katika kiwango cha ukavu wakati wote wa kipindi kilichochaguliwa."
+      },
+      "dataCoverageGap": {
+        "title": "Data ya kihisi haijakamilika",
+        "body": "Data ya kihisi ilikosekana wakati wa kipindi kilichochaguliwa."
+      },
+      "incompleteNightRecovery": {
+        "title": "Kupona usiku hakukukamilika",
+        "body": "Dendrometa haikupona kikamilifu usiku wakati wa kipindi kilichochaguliwa."
+      },
+      "environmentStress": {
+        "title": "Mkazo wa mazingira umegunduliwa",
+        "body": "Usomaji wa mazingira ulivuka kizingiti cha mkazo katika kipindi kilichochaguliwa."
+      },
+      "extensionUnavailable": {
+        "title": "Muktadha wa wingu haupatikani"
+      },
+      "prediction": {
+        "title": "Muktadha wa utabiri",
+        "body": "Muktadha wa utabiri unapatikana kwa eneo hili."
+      },
+      "recommendation": {
+        "irrigate": "Mwagilia",
+        "monitor": "Fuatilia"
+      }
+    },
+    "advanced": {
+      "title": "Uchunguzi wa Hali ya Juu",
+      "loading": "Inapakia uchunguzi wa hali ya juu…",
+      "emptyTitle": "Hakuna uchunguzi wa hali ya juu",
+      "value": {
+        "unavailable": "Haipatikani"
+      },
+      "availability": {
+        "collected": "Imekusanywa",
+        "not_collected_at_time": "Haikukusanywa wakati huo",
+        "unknown_now": "Haijulikani kwa sasa",
+        "unsupported": "Haitumiki"
+      },
+      "field": {
+        "device_eui": "DevEUI",
+        "primaryDeveui": "DevEUI",
+        "rssi": "RSSI",
+        "snr": "SNR",
+        "raw_payload": "Data ghafi",
+        "rawPayload": "Data ghafi",
+        "firmware": "Firmware",
+        "calibration": "Urekebishaji",
+        "prediction": "Utabiri",
+        "forecast": "Utabiri wa hali ya hewa",
+        "pending_commands": "Amri zinazosubiri",
+        "batteryPct": "Asilimia ya betri",
+        "batteryVoltage": "Volteji ya betri",
+        "calibrationStatus": "Hali ya urekebishaji",
+        "firmwareVersion": "Toleo la firmware",
+        "gatewayEui": "EUI ya Gateway",
+        "gatewayLatitude": "Latitudo ya Gateway",
+        "gatewayLocationStatus": "Hali ya eneo la Gateway",
+        "gatewayLongitude": "Longitudo ya Gateway",
+        "logicalSourceKey": "Ufunguo wa chanzo cha mantiki",
+        "pendingCommands": "Amri zinazosubiri",
+        "rawRowCount": "Idadi ya safu mlalo ghafi",
+        "sourceDeviceCount": "Idadi ya vifaa vya chanzo"
+      }
+    },
+    "source": {
+      "multipleNamed": "vyanzo {{count}}: {{names}}",
+      "multiple": "vyanzo {{count}}"
+    },
+    "soilLineChart": {
+      "title": "Chati ya Mstari ya Udongo",
+      "emptyTitle": "Hakuna data ya mwelekeo wa udongo",
+      "emptyBody": "Usomaji wa mkazo wa udongo utaonekana hapa mara data ya historia itakapopatikana.",
+      "pointsCount": "usomaji {{count}}",
+      "axisLabel": "mhimili wa {{unit}}",
+      "series": {
+        "soil1": "Udongo 1",
+        "soil2": "Udongo 2",
+        "soil3": "Udongo 3",
+        "soil": "Udongo {{index}}",
+        "sensor": "Kihisi {{index}}"
+      }
+    },
+    "soilIrrigationResponse": {
+      "title": "Jibu la Umwagiliaji la Udongo",
+      "emptyTitle": "Hakuna matukio ya jibu la umwagiliaji",
+      "emptyBody": "Hakuna matukio ya jibu la umwagiliaji katika kipindi hiki.",
+      "eventsCount": "matukio {{count}}",
+      "eventFallback": "Jibu la umwagiliaji",
+      "duration": "Muda: dakika {{value}}",
+      "interpretationsTitle": "Vidokezo vya jibu"
+    },
+    "dendroLineChart": {
+      "title": "Chati ya Mstari ya Dendrometa",
+      "emptyTitle": "Hakuna data ya mstari ya dendrometa",
+      "emptyBody": "Usomaji wa dendrometa utaonekana hapa mara data ya historia itakapopatikana.",
+      "pointsCount": "usomaji {{count}}",
+      "series": {
+        "stemChange": "Mabadiliko ya Shina",
+        "growth": "Ukuaji",
+        "shrinkage": "Kusinyaa",
+        "position": "Nafasi",
+        "dendrometer": "Dendrometa"
+      }
+    },
+    "dendroStressEvents": {
+      "title": "Matukio ya Mkazo wa Dendrometa",
+      "emptyTitle": "Hakuna matukio ya mkazo",
+      "emptyBody": "Hakuna matukio ya mkazo katika kipindi hiki.",
+      "eventsCount": "matukio {{count}}",
+      "interpretationsTitle": "Vidokezo vya mkazo",
+      "event": {
+        "stress": "Tukio la mkazo",
+        "shrinkage": "Mkazo wa kusinyaa",
+        "incompleteRecovery": "Kupona kusiko kamilika"
+      }
+    },
+    "sourceFilter": {
+      "label": "Chanzo",
+      "all": "Vyote"
+    },
+    "settings": {
+      "open": "Fungua mipangilio ya kadi",
+      "menuLabel": "Mipangilio ya kadi",
+      "advancedView": "Mwonekano wa hali ya juu",
+      "cardSettings": "Mipangilio ya kadi",
+      "resetRange": "Rejesha kipindi",
+      "cardSettingsUnavailable": "Mipangilio ya kadi bado haipatikani.",
+      "refresh": "Sasisha"
+    },
+    "inspector": {
+      "title": "Mkaguzi",
+      "context": "Kipengele kilichochaguliwa",
+      "close": "Funga",
+      "timestamp": "Muda",
+      "date": "Tarehe",
+      "source": "Chanzo",
+      "coverage": "Ufunikaji",
+      "syncState": "Hali ya usawazishaji",
+      "dataAsOf": "Data hadi",
+      "events": "Matukio",
+      "noInterpretation": "Hakuna tafsiri ya ndani kwa uchaguzi huu.",
+      "eventFallback": "Tukio la historia"
+    },
+    "sources": {
+      "button": "Vyanzo",
+      "menuLabel": "Vyanzo vya kadi"
+    }
+  }
+}
