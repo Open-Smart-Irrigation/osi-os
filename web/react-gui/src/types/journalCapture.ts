@@ -124,6 +124,14 @@ export interface JournalLayoutDefinition {
   // minimum_fields — visible only on the `sampling` Quick activity, not on
   // every entry regardless of activity.
   reading_fields?: string[];
+  // Detailed activity vocabulary plan (layout v9, 2026-07-22): declares which
+  // choice-dependency targets the activity picker should expand through
+  // before emitting a leaf (deriveActivityLeaves in catalogModel.ts) and which
+  // targets activityShortlist.ts's recents matching considers. Absent (every
+  // layout before open_field@9, including the frozen agroscope_open_field)
+  // means "expand/match every choice target" — today's deepest-expansion
+  // behaviour, unchanged.
+  picker_targets?: string[];
 }
 
 export interface JournalCaptureCatalogModel {

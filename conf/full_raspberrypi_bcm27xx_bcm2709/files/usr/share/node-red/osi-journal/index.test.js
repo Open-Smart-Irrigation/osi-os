@@ -1198,9 +1198,10 @@ test('assertJournalEntryEffectKey binds UUID and prior version exactly', () => {
 test('loadCatalog reads the seeded catalog into code-indexed maps', async () => {
   const catalog = await loadCatalog(createTestDb('load'));
 
-  // treated-area-optional plan: the seeded catalog is now at v8 (full_record@8
-  // + open_field@8 drop attr.treated_area from required, 0030).
-  assert.equal(catalog.version, 8);
+  // detailed activity vocabulary plan: the seeded catalog is now at v9
+  // (full_record@9 + farmer_quick@9 + open_field@9 expose the Agroscope
+  // operation/device pair and retire attr.equipment/attr.method, 0031).
+  assert.equal(catalog.version, 9);
   assert.match(catalog.hash, /^[a-f0-9]{64}$/);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
   assert.equal(catalog.templates.get('farmer_quick').get(1).definition.max_primary_fields, 5);
@@ -1260,7 +1261,7 @@ test('loadCatalog supports the callback sqlite API used by Node-RED', async () =
 
   const catalog = await loadCatalog(callbackDb);
 
-  assert.equal(catalog.version, 8);
+  assert.equal(catalog.version, 9);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
 });
 
@@ -1819,6 +1820,120 @@ test('validateEntry: full_record@7 fertilization still requires treated_area (ve
   assert.equal(result.ok, false);
   assert.ok(result.errors.some((error) =>
     error.field === 'attr.treated_area' && error.code === 'required'));
+});
+
+// Detailed activity vocabulary plan (2026-07-22, maintainer-confirmed):
+// full_record@9 exposes the Agroscope controlled operation/device pair
+// (attr.agroscope.operation / attr.agroscope.device) via open_field@9's
+// activity->operation->device option_dependencies, and requires BOTH for
+// tillage_soil_work/seeding/plant_protection_application only (decision 2 —
+// the vocabulary genuinely covers those three end-to-end). A tillage entry
+// with neither must fail required on both fields; one with a real,
+// dependency-valid operation+device pair must validate.
+test('validateEntry: full_record@9 tillage_soil_work requires attr.agroscope.device + attr.agroscope.operation', async () => {
+  const { catalog } = await loadedFixture('agroscope-vocabulary-v9');
+  const fullRecordV9 = catalog.templates.get('full_record').get(9);
+  const openFieldV9 = catalog.layouts.get('open_field').get(9);
+  assert.ok(fullRecordV9, 'catalog must publish full_record@9');
+  assert.ok(openFieldV9, 'catalog must publish open_field@9');
+
+  const missingDevice = validateEntry(catalog, openFieldV9, fullRecordV9, validIrrigation({
+    activity_code: 'tillage_soil_work',
+    template_code: 'full_record',
+    layout_code: 'open_field',
+    values: [],
+  }));
+  assert.equal(missingDevice.ok, false);
+  assert.ok(missingDevice.errors.some((error) =>
+    error.field === 'attr.agroscope.device' && error.code === 'required'));
+  assert.ok(missingDevice.errors.some((error) =>
+    error.field === 'attr.agroscope.operation' && error.code === 'required'));
+
+  const withDevice = validateEntry(catalog, openFieldV9, fullRecordV9, validIrrigation({
+    activity_code: 'tillage_soil_work',
+    template_code: 'full_record',
+    layout_code: 'open_field',
+    values: [
+      {
+        attribute_code: 'attr.agroscope.operation', group_index: 0,
+        value: 'agroscope.operation.primary_tillage', value_status: 'observed',
+      },
+      {
+        attribute_code: 'attr.agroscope.device', group_index: 0,
+        value: 'agroscope.device.plough', value_status: 'observed',
+      },
+    ],
+  }));
+  assert.equal(withDevice.ok, true, JSON.stringify(withDevice.errors));
+
+  // A device outside the selected operation's dependency-restricted set must
+  // still be rejected by the cascade (unaffected by the requiredness change).
+  const wrongDevice = validateEntry(catalog, openFieldV9, fullRecordV9, validIrrigation({
+    activity_code: 'tillage_soil_work',
+    template_code: 'full_record',
+    layout_code: 'open_field',
+    values: [
+      {
+        attribute_code: 'attr.agroscope.operation', group_index: 0,
+        value: 'agroscope.operation.primary_tillage', value_status: 'observed',
+      },
+      {
+        attribute_code: 'attr.agroscope.device', group_index: 0,
+        // Belongs to a different Agroscope operation, not primary_tillage.
+        value: 'agroscope.device.mower', value_status: 'observed',
+      },
+    ],
+  }));
+  assert.equal(wrongDevice.ok, false);
+  assert.ok(wrongDevice.errors.some((error) => error.code === 'invalid_under_dependency'));
+});
+
+// fertilization is Agroscope-covered (operation/device are visible, per
+// full_record@9's operation_fields_by_activity) but NOT one of the 3
+// required-device activities (decision 2) — an entry with no device/operation
+// at all must still validate as savable.
+test('validateEntry: full_record@9 fertilization validates without attr.agroscope.device (optional)', async () => {
+  const { catalog } = await loadedFixture('agroscope-vocabulary-fertilization-v9');
+  const fullRecordV9 = catalog.templates.get('full_record').get(9);
+  const openFieldV9 = catalog.layouts.get('open_field').get(9);
+  assert.ok(fullRecordV9, 'catalog must publish full_record@9');
+  assert.ok(openFieldV9, 'catalog must publish open_field@9');
+
+  const result = validateEntry(catalog, openFieldV9, fullRecordV9, validIrrigation({
+    activity_code: 'fertilization',
+    template_code: 'full_record',
+    layout_code: 'open_field',
+    values: [
+      { attribute_code: 'attr.product', group_index: 0, value: 'NPK 15-15-15' },
+      {
+        attribute_code: 'attr.amount_mass_area_product', group_index: 0, value: 25,
+        unit_code: 'unit.kg_per_ha_product',
+      },
+    ],
+  }));
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.ok(!result.errors?.some?.((error) => error.field === 'attr.agroscope.device'));
+});
+
+// Version-pinned control: an entry pinned to the frozen full_record@8 (and
+// open_field@8, which carries no option_dependencies at all) never sees or
+// requires the Agroscope operation/device pair — only NEW entries created
+// against @9 get the detailed activity vocabulary.
+test('validateEntry: full_record@8 tillage_soil_work has no device/operation requirement (version-pinned)', async () => {
+  const { catalog } = await loadedFixture('agroscope-vocabulary-pinned-v8');
+  const fullRecordV8 = catalog.templates.get('full_record').get(8);
+  const openFieldV8 = catalog.layouts.get('open_field').get(8);
+  assert.ok(fullRecordV8, 'catalog must publish full_record@8');
+  assert.ok(openFieldV8, 'catalog must publish open_field@8');
+  assert.deepEqual(JSON.parse(JSON.stringify(openFieldV8.definition.option_dependencies)), []);
+
+  const result = validateEntry(catalog, openFieldV8, fullRecordV8, validIrrigation({
+    activity_code: 'tillage_soil_work',
+    template_code: 'full_record',
+    layout_code: 'open_field',
+    values: [],
+  }));
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
 });
 
 test('validateEntry rejects unsupported predicate operators as catalog errors', async () => {

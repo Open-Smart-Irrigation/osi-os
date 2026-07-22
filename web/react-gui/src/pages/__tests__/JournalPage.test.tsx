@@ -480,8 +480,15 @@ const carryForwardSource: EntryAggregate = {
     entered_value_num: null,
     entered_unit_code: null,
   }, {
+    // Detailed activity vocabulary plan (2026-07-22): farmer_quick's
+    // currently-served (highest-version) carry_forward list drops
+    // attr.equipment/attr.method and keeps only attr.operator (see
+    // compiledFarmerQuick above, which always resolves to the highest
+    // active version) — attr.operator is the field this fixture now uses to
+    // keep exercising the same carry-forward behavior this regression test
+    // has always covered.
     group_index: 0,
-    attribute_code: 'attr.method',
+    attribute_code: 'attr.operator',
     value_status: 'observed',
     value_num: null,
     value_text: 'Drip irrigation',
@@ -1355,7 +1362,7 @@ describe('JournalPage', () => {
     expect(partitionCarryForward(carryForwardSource, {
       definition: captureCatalog.templates.find(({ code }) => code === 'farmer_quick')?.definition,
     }).automaticValues).toEqual(expect.arrayContaining([{
-      attribute_code: 'attr.method',
+      attribute_code: 'attr.operator',
       group_index: 0,
       value_status: 'observed',
       value_text: 'Drip irrigation',

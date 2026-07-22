@@ -967,18 +967,23 @@ try {
       ['farmer_quick', 2],
       ['farmer_quick', 3],
       ['farmer_quick', 6],
+      ['farmer_quick', 9],
       ['full_record', 1],
       ['full_record', 5],
       ['full_record', 6],
       ['full_record', 7],
       ['full_record', 8],
+      ['full_record', 9],
       ['research_observation', 1],
     ],
     'seed must contain the three template codes, with farmer_quick published at v1/v2 (frozen, historical), ' +
-      'v3 (Slice BC quick_fields) and v6 (Slice F growth_stage_bbch quick-optional); full_record at v1 (frozen), ' +
+      'v3 (Slice BC quick_fields), v6 (Slice F growth_stage_bbch quick-optional) and v9 (detailed activity ' +
+      'vocabulary plan: attr.equipment/attr.method dropped, attr.operator kept); full_record at v1 (frozen), ' +
       'v5 (Slice E activity-scoped operation fields), v6 (Slice F agronomy adds + review fold-in), v7 ' +
-      '(journal capture-followups Slice 1, W1 relaxed irrigation_details requiredness) and v8 ' +
-      '(treated-area-optional plan: treated_area no longer required anywhere)'
+      '(journal capture-followups Slice 1, W1 relaxed irrigation_details requiredness), v8 ' +
+      '(treated-area-optional plan: treated_area no longer required anywhere) and v9 (detailed activity ' +
+      'vocabulary plan: attr.equipment/attr.method retired everywhere; attr.agroscope.operation/device added ' +
+      'for the 7 Agroscope-covered activities, required for tillage_soil_work/seeding/plant_protection_application)'
   );
   const templateDefinitions = new Map(
     templates.map((template) => [template.code, JSON.parse(template.definition_json)])
@@ -995,11 +1000,40 @@ try {
     assert.ok(researchIdentity.fields.includes(field), `research identity must include ${field}`);
   }
 
+  // Detailed activity vocabulary plan (2026-07-22, decision 3): farmer_quick
+  // resolves to v9 now — attr.equipment/attr.method dropped from both
+  // carried_forward_details and carry_forward, attr.operator kept.
+  const farmerQuick = templateDefinitions.get('farmer_quick');
+  assert.deepEqual(farmerQuick.carry_forward, ['attr.operator'], 'farmer_quick@9 carry_forward');
+  assert.deepEqual(
+    farmerQuick.sections.find((section) => section.code === 'carried_forward_details').fields,
+    ['attr.operator'],
+    'farmer_quick@9 carried_forward_details'
+  );
+  // Version-pinned check: the frozen farmer_quick@6 row must still carry
+  // attr.equipment/attr.method — only NEW entries created against @9 drop them.
+  const farmerQuickV6Row = templates.find(
+    (template) => template.code === 'farmer_quick' && template.version === 6
+  );
+  assert.ok(farmerQuickV6Row, 'frozen farmer_quick@6 row must still exist');
+  const farmerQuickV6 = JSON.parse(farmerQuickV6Row.definition_json);
+  assert.deepEqual(
+    farmerQuickV6.carry_forward,
+    ['attr.operator', 'attr.equipment', 'attr.method'],
+    'frozen farmer_quick@6 carry_forward must still include attr.equipment/attr.method'
+  );
+
   // `templateDefinitions` resolves each code to its latest (currently-served)
-  // version, which is now full_record@8 (treated-area-optional plan,
-  // 2026-07-22): attr.treated_area is dropped from `required` on every dosing
-  // activity below — no activity requires it anymore. It stays reachable
+  // version, which is now full_record@9 (detailed activity vocabulary plan,
+  // 2026-07-22, layered on v8's treated-area-optional plan): attr.treated_area
+  // is still dropped from `required` on every dosing activity below — no
+  // activity requires it via THIS mechanism. It stays reachable
   // (visible-optional) via operation_fields_by_activity, asserted separately.
+  // seeding and plant_protection_application additionally require
+  // attr.agroscope.device + attr.agroscope.operation (decision 2: the
+  // Agroscope vocabulary genuinely covers those end-to-end); tillage_soil_work
+  // gains a brand-new activity_requirements entry for the same reason (it had
+  // none before — nothing else was ever required on it).
   const fullRecord = templateDefinitions.get('full_record');
   assert.deepEqual(fullRecord.activity_requirements.fertilization, {
     required: [],
@@ -1024,7 +1058,7 @@ try {
     ],
   });
   assert.deepEqual(fullRecord.activity_requirements.plant_protection_application, {
-    required: [],
+    required: ['attr.agroscope.device', 'attr.agroscope.operation'],
     required_any: [
       ['attr.product_uuid', 'attr.product'],
       [
@@ -1035,7 +1069,7 @@ try {
     ],
   });
   assert.deepEqual(fullRecord.activity_requirements.seeding, {
-    required: ['attr.crop'],
+    required: ['attr.crop', 'attr.agroscope.device', 'attr.agroscope.operation'],
     required_any: [
       ['attr.amount_mass_area_product', 'attr.amount_count_area'],
     ],
@@ -1048,9 +1082,14 @@ try {
     required: ['attr.crop', 'attr.harvest_area', 'attr.harvest_yield_area'],
     required_any: [],
   });
+  assert.deepEqual(fullRecord.activity_requirements.tillage_soil_work, {
+    required: ['attr.agroscope.device', 'attr.agroscope.operation'],
+    required_any: [],
+  });
   // treated_area must still be reachable (visible-optional) via
   // operation_fields_by_activity for every activity it rendered on before,
-  // plus the newly-added irrigation.
+  // plus the newly-added irrigation (unaffected by the v9 equipment/method
+  // retirement, which is a completely separate field).
   for (const activity of [
     'irrigation', 'fertilization', 'fertigation', 'plant_protection_application',
     'weed_control_nonchemical', 'seeding', 'planting_transplanting',
@@ -1058,24 +1097,68 @@ try {
   ]) {
     assert.ok(
       fullRecord.operation_fields_by_activity[activity].includes('attr.treated_area'),
-      `full_record@8 operation_fields_by_activity.${activity} must still list attr.treated_area (visible-optional)`
+      `full_record@9 operation_fields_by_activity.${activity} must still list attr.treated_area (visible-optional)`
     );
   }
-  // full_record@8 must not add treated_area anywhere it was never shown.
+  // full_record@9 must not add treated_area anywhere it was never shown.
   for (const activity of [
     'pruning', 'crop_care', 'harvest', 'sampling',
     'general_observation', 'pest_disease_observation', 'equipment_maintenance',
   ]) {
     assert.ok(
       !fullRecord.operation_fields_by_activity[activity].includes('attr.treated_area'),
-      `full_record@8 operation_fields_by_activity.${activity} must not list attr.treated_area`
+      `full_record@9 operation_fields_by_activity.${activity} must not list attr.treated_area`
+    );
+  }
+
+  // Detailed activity vocabulary plan (2026-07-22, decision 3): attr.equipment
+  // and attr.method must be gone from full_record@9's operation section
+  // superset AND from every one of the 16 activities' operation_fields_by_
+  // activity lists — no activity keeps them, and no activity is left with an
+  // empty list (worst case pruning/equipment_maintenance keep attr.operator).
+  assert.ok(
+    !fullRecord.sections.find((section) => section.code === 'operation').fields
+      .includes('attr.equipment'),
+    'full_record@9 operation section fields superset must not include attr.equipment'
+  );
+  assert.ok(
+    !fullRecord.sections.find((section) => section.code === 'operation').fields
+      .includes('attr.method'),
+    'full_record@9 operation section fields superset must not include attr.method'
+  );
+  for (const [activity, fields] of Object.entries(fullRecord.operation_fields_by_activity)) {
+    assert.ok(fields.length > 0, `full_record@9 operation_fields_by_activity.${activity} must stay nonempty`);
+    assert.ok(
+      !fields.includes('attr.equipment') && !fields.includes('attr.method'),
+      `full_record@9 operation_fields_by_activity.${activity} must not include attr.equipment/attr.method`
+    );
+  }
+  // decision 1/2: attr.agroscope.operation + attr.agroscope.device are visible
+  // for exactly the 7 Agroscope-covered activities, and no others.
+  const AGROSCOPE_COVERED_ACTIVITIES = [
+    'tillage_soil_work', 'seeding', 'plant_protection_application',
+    'fertilization', 'harvest', 'irrigation', 'general_observation',
+  ];
+  for (const activity of AGROSCOPE_COVERED_ACTIVITIES) {
+    assert.ok(
+      fullRecord.operation_fields_by_activity[activity].includes('attr.agroscope.operation') &&
+        fullRecord.operation_fields_by_activity[activity].includes('attr.agroscope.device'),
+      `full_record@9 operation_fields_by_activity.${activity} must include attr.agroscope.operation/device`
+    );
+  }
+  for (const activity of Object.keys(fullRecord.operation_fields_by_activity)) {
+    if (AGROSCOPE_COVERED_ACTIVITIES.includes(activity)) continue;
+    assert.ok(
+      !fullRecord.operation_fields_by_activity[activity].includes('attr.agroscope.operation') &&
+        !fullRecord.operation_fields_by_activity[activity].includes('attr.agroscope.device'),
+      `full_record@9 operation_fields_by_activity.${activity} must NOT include attr.agroscope.operation/device`
     );
   }
 
   // Version-pinned check: the frozen full_record@7 row (looked up directly,
   // not via the latest-wins Map above) must still require attr.treated_area
   // on the 5 dosing activities — old entries pinned to @7 keep their
-  // original requiredness; only NEW entries created against @8 get the
+  // original requiredness; only NEW entries created against @8+ get the
   // relaxed behavior.
   const fullRecordV7Row = templates.find(
     (template) => template.code === 'full_record' && template.version === 7
@@ -1091,6 +1174,31 @@ try {
       `frozen full_record@7 activity_requirements.${activity}.required must still include attr.treated_area`
     );
   }
+
+  // Version-pinned check: the frozen full_record@8 row must still render
+  // attr.equipment/attr.method and must NOT require attr.agroscope.device or
+  // attr.agroscope.operation anywhere — only NEW entries created against @9
+  // get the detailed activity vocabulary.
+  const fullRecordV8Row = templates.find(
+    (template) => template.code === 'full_record' && template.version === 8
+  );
+  assert.ok(fullRecordV8Row, 'frozen full_record@8 row must still exist');
+  const fullRecordV8 = JSON.parse(fullRecordV8Row.definition_json);
+  assert.ok(
+    fullRecordV8.sections.find((section) => section.code === 'operation').fields
+      .includes('attr.equipment'),
+    'frozen full_record@8 operation section fields superset must still include attr.equipment'
+  );
+  for (const activity of Object.keys(fullRecordV8.operation_fields_by_activity)) {
+    assert.ok(
+      !fullRecordV8.operation_fields_by_activity[activity].includes('attr.agroscope.operation'),
+      `frozen full_record@8 operation_fields_by_activity.${activity} must not include attr.agroscope.operation`
+    );
+  }
+  assert.ok(
+    !('tillage_soil_work' in fullRecordV8.activity_requirements),
+    'frozen full_record@8 must not require anything for tillage_soil_work'
+  );
 
   assert.deepEqual(fullRecord.conditional_groups, [
     {
@@ -1147,11 +1255,14 @@ try {
       ['open_field', 1],
       ['open_field', 3],
       ['open_field', 8],
+      ['open_field', 9],
     ],
     'seed must contain the four generic layout codes, with open_field/greenhouse/lysimeter ' +
       'published at v1 (frozen, historical) and v3 (Slice BC static/reading split); open_field ' +
-      'additionally at v8 (current, treated-area-optional plan: attr.treated_area dropped from ' +
-      'minimum_fields), while greenhouse/lysimeter remain current at v3'
+      'additionally at v8 (treated-area-optional plan: attr.treated_area dropped from ' +
+      'minimum_fields) and v9 (current, detailed activity vocabulary plan: activity->operation->device ' +
+      'dependencies scoped to the 7 Agroscope-covered activities, no device->unit dependencies, plus a ' +
+      'picker_targets depth knob), while greenhouse/lysimeter remain current at v3'
   );
   const parsedLayoutsByVersion = new Map(
     layouts.map((layout) => [`${layout.code}:${layout.version}`, JSON.parse(layout.definition_json)])
@@ -1228,12 +1339,57 @@ try {
     }
   }
 
+  // Detailed activity vocabulary plan (2026-07-22): open_field@9 carries the
+  // SAME activity->operation and operation->device dependency rules as
+  // agroscope_open_field (Task 1's shared-build refactor), minus the
+  // device->unit rules (Fable P2 hard rule), plus the picker_targets depth
+  // knob. Since every one of the Agroscope source's 7 categories already maps
+  // 1:1 onto one of these 7 farmer activities (agroscope_categories on the
+  // core activity rows), "scoped to the 7 covered activities" is automatic —
+  // there is no 8th category to accidentally include.
+  const openFieldV9 = parsedLayoutsByVersion.get('open_field:9');
+  assert.ok(openFieldV9, 'open_field@9 must exist');
+  assert.deepEqual(
+    openFieldV9.picker_targets,
+    ['attr.agroscope.operation'],
+    'open_field@9 must declare the operation-depth picker knob'
+  );
+  const openFieldV9CategoryRules = rulesFor(
+    openFieldV9.option_dependencies, 'activity_code', 'attr.agroscope.operation'
+  );
+  const openFieldV9OperationRules = rulesFor(
+    openFieldV9.option_dependencies, 'attr.agroscope.operation', 'attr.agroscope.device'
+  );
+  assert.equal(openFieldV9CategoryRules.length, 7, 'open_field@9 must carry one operation restriction per Agroscope category');
+  assert.equal(openFieldV9OperationRules.length, 25, 'open_field@9 must carry one device restriction per Agroscope operation');
+  assert.equal(
+    openFieldV9.option_dependencies.length,
+    openFieldV9CategoryRules.length + openFieldV9OperationRules.length,
+    'open_field@9 must carry NO device->unit dependencies (Fable P2 hard rule: they would empty every ' +
+      'bound amount attribute unit dropdown whenever no device is selected)'
+  );
+  assert.ok(
+    openFieldV9.option_dependencies.every((dependency) => 'choices' in dependency.restrict),
+    'open_field@9 option_dependencies must be entirely choice restrictions (no unit restriction)'
+  );
+  assert.deepEqual(
+    openFieldV9.option_dependencies,
+    agroscopeDefinition.option_dependencies.filter((dependency) => 'choices' in dependency.restrict),
+    'open_field@9 must carry the exact same activity->operation/operation->device rules as ' +
+      'agroscope_open_field, just without its device->unit rules'
+  );
+  assert.deepEqual(
+    parsedLayoutsByVersion.get('open_field:8').option_dependencies,
+    [],
+    'frozen open_field@8 must not carry any option_dependencies'
+  );
+
   const catalogState = sqliteJson(
     dbPath,
     'SELECT id, catalog_version, catalog_hash FROM journal_catalog_state WHERE id = 1;'
   );
   assert.equal(catalogState.length, 1, 'catalog state row id=1 must exist');
-  assert.equal(catalogState[0].catalog_version, 8, 'seed-built catalog version must be the current version (8, since the treated-area-optional plan: full_record@8 + open_field@8)');
+  assert.equal(catalogState[0].catalog_version, 9, 'seed-built catalog version must be the current version (9, since the detailed activity vocabulary plan: full_record@9 + farmer_quick@9 + open_field@9)');
   assert.match(catalogState[0].catalog_hash, /^[0-9a-f]{64}$/, 'catalog hash must be SHA-256');
 
   const seedText = fs.readFileSync(seedPath, 'utf8');

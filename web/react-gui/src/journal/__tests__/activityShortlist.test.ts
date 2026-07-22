@@ -566,4 +566,67 @@ describe('activity shortlist', () => {
     expect(result.farmRecent).toEqual([]);
     expect(result.currentSeasonUuid).toBeNull();
   });
+
+  // Detailed activity vocabulary plan (Fable P1a, CRITICAL): without the
+  // picker_targets knob ALSO governing choiceTargetCodes here (not just
+  // deriveActivityLeaves), a device-carrying entry would match NO leaf at
+  // all once the picker itself stops at the operation — the device target's
+  // leaf-side `expected` would be `null` forever, since deriveActivityLeaves
+  // never produces a device-carrying leaf to compare against. That would
+  // make "Recent on plot" / "farm recent" permanently empty for every entry
+  // on a device-required activity. This guards the fix.
+  it('detailed activity vocabulary plan (Fable P1a): a device-carrying entry still matches its operation-depth leaf when picker_targets stops the picker before the device', () => {
+    const pickerLayout: JournalLayoutDefinition = { ...layout, picker_targets: ['attr.operation'] };
+
+    // Operation-depth-only: fertilization contributes exactly one leaf — its
+    // device target is filtered out of the picker's own expansion entirely.
+    expect(deriveActivityLeaves(model, pickerLayout).map(leafKey)).toEqual([
+      'irrigation',
+      'fertilization|attr.operation=operation.spreading',
+    ]);
+
+    // A real captured entry always records BOTH operation and device values
+    // (the form sets both regardless of picker depth — Task 5's point).
+    const deviceCarryingEntry = entry({
+      activity_code: 'fertilization',
+      values: [
+        {
+          group_index: 0, attribute_code: 'attr.operation', value_status: 'observed',
+          value_text: 'operation.spreading', value_num: null, unit_code: null,
+          entered_value_num: null, entered_unit_code: null,
+        },
+        {
+          group_index: 0, attribute_code: 'attr.device', value_status: 'observed',
+          value_text: 'device.broadcast', value_num: null, unit_code: null,
+          entered_value_num: null, entered_unit_code: null,
+        },
+      ],
+    });
+
+    const result = buildActivityShortlist({
+      entries: [deviceCarryingEntry],
+      model,
+      layout: pickerLayout,
+      plotUuid: 'plot-1',
+      zoneLinked: true,
+      occurrence: '2026-07-16T09:00:00.000Z',
+    });
+
+    expect(result.plotRecent.map(leafKey)).toEqual(['fertilization|attr.operation=operation.spreading']);
+
+    // Unaffected control: the SAME device-carrying entry against a layout
+    // with NO picker_targets declared (today's default, matching
+    // agroscope_open_field) still matches the full device-depth leaf.
+    const unrestrictedResult = buildActivityShortlist({
+      entries: [deviceCarryingEntry],
+      model,
+      layout,
+      plotUuid: 'plot-1',
+      zoneLinked: true,
+      occurrence: '2026-07-16T09:00:00.000Z',
+    });
+    expect(unrestrictedResult.plotRecent.map(leafKey)).toEqual([
+      'fertilization|attr.operation=operation.spreading|attr.device=device.broadcast',
+    ]);
+  });
 });
