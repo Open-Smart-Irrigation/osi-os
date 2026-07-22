@@ -10,11 +10,11 @@
       "subtitle": "Ebyafaayo bya Gateway eby'omu kitundu ebya {{username}}",
       "loadingLocalCards": "Amakaadi g'ebyafaayo eby'omu kitundu gatikkibwa…",
       "unavailableTitle": "Ebyafaayo tebiriwo",
-      "unavailableBody": "Enteekateeka za sisitimu (feature flags) zikomekkerezza ebyafaayo ebipya okutuusa Gateway y'omu kitundu lw'ebisobozesa.",
-      "featureFlagFailed": "Okusaba kwa feature flag kugaanye. Dashboard enkadde ekyaliwo.",
+      "unavailableBody": "Ebyafaayo bizikiddwa ku Gateway eno era bijja kulabikira wano nga bimaze okusobozesebwa.",
+      "featureFlagFailed": "Tetusobodde kukebera obanga Ebyafaayo bisobozesebbwa. Dashboard enkadde ekyaliwo.",
       "zonesFailedTitle": "Ebitundu by'ebyafaayo tebisobodde kutikkibwa",
       "noZonesTitle": "Tewannaba kubaawo bitundu",
-      "noZonesBody": "Tondawo ekifo okuva ku dashboard enkadde nga tonnaggula ebyafaayo by'omulamwa.",
+      "noZonesBody": "Tondawo ekitundu okuva ku dashboard enkadde nga tonnaggula Ebyafaayo.",
       "cardsFailed": "Amakaadi g'ebyafaayo tegasobodde kutikkibwa.",
       "retryCards": "Gezaako amakaadi nate"
     },
@@ -90,7 +90,7 @@
       "pinnedCards": "Amakaadi agakwasiddwa",
       "availableCards": "Amakaadi agaliwo",
       "savedWorkspaces": "Entegeka ezitereke",
-      "workspaceDisabled": "Okutereka entegeka tekukkirizibwa ku Gateway eno.",
+      "workspaceDisabled": "Okutereka entegeka tekinnasobozesebwa.",
       "workspaceName": "Erinnya ly'entegeka",
       "saveWorkspace": "Tereka entegeka",
       "updateWorkspace": "Kyusa entegeka",
@@ -110,14 +110,14 @@
     },
     "cardFrame": {
       "emptyTitle": "Londa kaadi y'ebyafaayo",
-      "emptyBody": "Londa ekitundu ne kaadi ey'omulamwa okwekenneenya ebyafaayo eby'omu kitundu.",
+      "emptyBody": "Londa ekitundu ne kaadi y'ebyafaayo okwekenneenya ebyafaayo eby'omu kitundu.",
       "typeHistory": "Ebyafaayo bya {{cardType}}",
       "viewModes": "Enkola z'okulaba {{title}}",
       "unavailable": "Kaadi eno teriwo mu kitundu ekirondeddwa.",
       "timelineBrush": "Eddirisa ly'olunyiriri lw'ebiseera",
       "timelineBrushKeyboardHelp": "Kozesa obufunzo obulaga obuko okutambuza, + oba - okugaziya oba okufunza, ne Home oba Enter okuzzaawo.",
       "aggregationBadge": "Okugatta data: {{aggregation}}",
-      "placeholderBody": "Data za chart ne kalendaa zijja kulabikira wano nga API za data za kaadi zisobozesezza.",
+      "placeholderBody": "Data za chart ne kalendaa zijja kulabikira wano nga data ya kaadi emaze okubaawo.",
       "cardDataLoading": "Data za kaadi zitikkibwa…",
       "cardDataError": "Data za kaadi tezisobodde kutikkibwa: {{message}}",
       "cardDataUnknownError": "Ensobi etamanyiddwa"
@@ -211,15 +211,15 @@
       }
     },
     "irrigationTimeline": {
-      "title": "Olunyiriri lw'ebikolwa by'okusukkulirira",
-      "emptyTitle": "Tewali bikolwa by'okusukkulirira",
-      "emptyBody": "Ebikolwa by'okusukkulirira n'ebiseera by'okuddamu bijja kulabikira wano nga data w'ebyafaayo eriwo.",
+      "title": "Olunyiriri lw'ebikolwa by'okufukirira",
+      "emptyTitle": "Tewali bikolwa by'okufukirira",
+      "emptyBody": "Ebikolwa by'okufukirira n'ebiseera by'okuddamu bijja kulabikira wano nga data w'ebyafaayo eriwo.",
       "eventsCount": "Ebikolwa {{count}}",
       "eventLabel": {
-        "irrigation": "Ekikolwa ky'okusukkulirira",
-        "scheduled": "Okusukkulirira okutegekeddwa",
+        "irrigation": "Ekikolwa ky'okufukirira",
+        "scheduled": "Okufukirira okutegekeddwa",
         "manualOverride": "Okukozesa n'omukono",
-        "possibleIneffective": "Okusukkulirira okuyinza obutagasa",
+        "possibleIneffective": "Okufukirira okuyinza obutagasa",
         "responseWindow": "Ekiseera ky'okuddamu"
       },
       "detail": {
@@ -237,16 +237,16 @@
     },
     "cardType": {
       "soil": "Obutaka",
-      "dendro": "Dendro",
+      "dendro": "Dendrometer",
       "environment": "Obudde",
-      "irrigation": "Okusukkulirira",
+      "irrigation": "Okufukirira",
       "gateway": "Gateway"
     },
     "viewMode": {
       "soil-profile": "Obutaka mu Buziba",
       "line-chart": "Chart y'Omulongo",
       "calendar": "Kalendaa",
-      "irrigation-response": "Okuddamu kw'Okusukkulirira",
+      "irrigation-response": "Okuddamu kw'Okufukirira",
       "advanced": "Endaba y'Ebisingawo",
       "growth-timeline": "Olunyiriri lw'Okukula",
       "stress-events": "Ebikolwa by'Okunyigirizibwa",
@@ -274,7 +274,7 @@
         "auto": "Byokka",
         "raw": "Nga bwe kiri",
         "15m": "Ddakiika 15",
-        "hourly": "Buli saawa",
+        "hourly": "Buli ssaawa",
         "daily": "Buli lunaku",
         "weekly": "Buli wiiki"
       },
@@ -291,7 +291,7 @@
       "emptyTitle": "Tewali data za Butaka mu Buziba",
       "emptyBody": "Ebiwandiiko by'Obutaka ebimanyi obuziba tebiriwo mu kiseera kino.",
       "depthLabel": "{{depth}} cm",
-      "depthUnknown": "Obuziba bulindiridde",
+      "depthUnknown": "Obuziba tebuteekeddwa.",
       "valueMissing": "Tewali kiwandiiko",
       "status": {
         "dry_stress": "Okunyigirizibwa olw'obukalu",
@@ -336,18 +336,18 @@
         "cold_stress": "Okunyigirizibwa olw'obunnyogovu",
         "high_humidity": "Amaanzi mangi mu mpewo",
         "rain_day": "Olunaku olw'enkuba",
-        "no_irrigation": "Tewali kusukkulirira",
-        "irrigation_event": "Ekikolwa ky'okusukkulirira",
-        "high_irrigation_frequency": "Okusukkulirira emirundi mingi",
-        "possible_ineffective_irrigation": "Okusukkulirira okuyinza obutagasa",
+        "no_irrigation": "Tewali kufukirira",
+        "irrigation_event": "Ekikolwa ky'okufukirira",
+        "high_irrigation_frequency": "Okufukirira emirundi mingi",
+        "possible_ineffective_irrigation": "Okufukirira okuyinza obutagasa",
         "manual_override": "Okukozesa n'omukono",
         "offline": "Tekiri ku Network",
         "no_data": "Tewali data"
       },
       "marker": {
         "irrigation": {
-          "no_irrigation": "Akabonero: Tewali kusukkulirira",
-          "irrigation_event": "Akabonero: Okusukkulirira",
+          "no_irrigation": "Akabonero: Tewali kufukirira",
+          "irrigation_event": "Akabonero: Okufukirira",
           "high_irrigation_frequency": "Akabonero: Emirundi mingi",
           "possible_ineffective_irrigation": "Akabonero: Okuyinza obutagasa",
           "manual_override": "Akabonero: Okukozesa n'omukono"
@@ -399,10 +399,10 @@
           "no_data": "Tewali data z'obudde eyaliwo."
         },
         "irrigation": {
-          "no_irrigation": "Tewali kusukkulirira kwabaddewo.",
-          "irrigation_event": "Okusukkulirira kwabaddewo.",
-          "high_irrigation_frequency": "Okusukkulirira kwabaddewo emirundi mingi.",
-          "possible_ineffective_irrigation": "Okusukkulirira kiyinza okuba nga tekwagasa.",
+          "no_irrigation": "Tewali kufukirira kwabaddewo.",
+          "irrigation_event": "Okufukirira kwabaddewo.",
+          "high_irrigation_frequency": "Okufukirira kwabaddewo emirundi mingi.",
+          "possible_ineffective_irrigation": "Okufukirira kiyinza okuba nga tekwagasa.",
           "manual_override": "Waliwo okukozesa n'omukono."
         },
         "gateway": {
@@ -420,7 +420,7 @@
       },
       "rootZoneDry": {
         "title": "Ekitundu ky'emirandira kyayingira embeera ey'obukalu",
-        "body": "Okuzika kw'amazzi mu butaka obuwanvu kwasigala kukalu mu kiseera ekirondeddwa."
+        "body": "Okuzika kw'amazzi mu kitundu ky'emirandira ekiwanvu kwasigala mu mutindo ogukalu okumala ekiseera kyonna ekirondeddwa."
       },
       "dataCoverageGap": {
         "title": "Data za Sensor tezijjuvu",
@@ -442,7 +442,7 @@
         "body": "Ebikwata ku Prediction biriwo mu kitundu kino."
       },
       "recommendation": {
-        "irrigate": "Sukkulira",
+        "irrigate": "Fukirira",
         "monitor": "Lambula"
       }
     },
@@ -460,8 +460,8 @@
         "unsupported": "Tewagirwa"
       },
       "field": {
-        "device_eui": "Device EUI",
-        "primaryDeveui": "Device EUI",
+        "device_eui": "EUI y'Ekyuma",
+        "primaryDeveui": "EUI y'Ekyuma",
         "rssi": "RSSI",
         "snr": "SNR",
         "raw_payload": "Data nga bwe eri",
@@ -504,16 +504,16 @@
       }
     },
     "soilIrrigationResponse": {
-      "title": "Okuddamu kw'obutaka eri okusukkulirira",
-      "emptyTitle": "Tewali bikolwa by'okuddamu kw'okusukkulirira",
-      "emptyBody": "Tewali bikolwa by'okuddamu kw'okusukkulirira mu kiseera kino.",
+      "title": "Okuddamu kw'obutaka eri okufukirira",
+      "emptyTitle": "Tewali bikolwa by'okuddamu kw'okufukirira",
+      "emptyBody": "Tewali bikolwa by'okuddamu kw'okufukirira mu kiseera kino.",
       "eventsCount": "Ebikolwa {{count}}",
-      "eventFallback": "Okuddamu kw'okusukkulirira",
+      "eventFallback": "Okuddamu kw'okufukirira",
       "duration": "Ebanga: Ddakiika {{value}}",
       "interpretationsTitle": "Ebiwandiiko ku kuddamu"
     },
     "dendroLineChart": {
-      "title": "Chart y'omulongo gwa Dendro",
+      "title": "Chart y'omulongo gwa Dendrometer",
       "emptyTitle": "Tewali data za chart ya Dendrometer",
       "emptyBody": "Ebiwandiiko bya Dendrometer bijja kulabikira wano nga data w'ebyafaayo eriwo.",
       "pointsCount": "Ebiwandiiko {{count}}",
@@ -526,7 +526,7 @@
       }
     },
     "dendroStressEvents": {
-      "title": "Ebikolwa by'okunyigirizibwa bya Dendro",
+      "title": "Ebikolwa by'okunyigirizibwa bya Dendrometer",
       "emptyTitle": "Tewali bikolwa by'okunyigirizibwa",
       "emptyBody": "Tewali bikolwa by'okunyigirizibwa mu kiseera kino.",
       "eventsCount": "Ebikolwa {{count}}",
@@ -544,7 +544,7 @@
     "settings": {
       "open": "Ggulawo enteekateeka za kaadi",
       "menuLabel": "Enteekateeka za kaadi",
-      "advancedView": "Endaba y'ebisingawo",
+      "advancedView": "Endaba y'Ebisingawo",
       "cardSettings": "Enteekateeka za kaadi",
       "resetRange": "Zzaawo ekiseera",
       "cardSettingsUnavailable": "Enteekateeka za kaadi tezinnaba kubaawo.",

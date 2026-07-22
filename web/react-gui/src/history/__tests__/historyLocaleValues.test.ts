@@ -122,7 +122,7 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
     'history.rangeShort.12h', 'history.rangeShort.24h', 'history.rangeShort.7d',
     'history.rangeShort.30d', 'history.dendroTimeline.series.dendrometer',
     'history.dailyMinMax.axisLabel', 'history.gatewayStatus.metric.cpu',
-    'history.cardType.gateway', 'history.soilProfile.depthLabel',
+    'history.cardType.gateway', 'history.cardType.dendro', 'history.soilProfile.depthLabel',
     'history.advanced.field.rssi', 'history.advanced.field.snr', 'history.advanced.field.firmware',
     'history.advanced.field.gatewayEui', 'history.dendroLineChart.series.dendrometer',
   ]),

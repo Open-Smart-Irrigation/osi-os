@@ -130,9 +130,9 @@ describe('AgroLink branding source contracts', () => {
         unassignedSubtitle: 'Estes dispositivos não estão atribuídos a nenhuma zona',
       },
       lg: {
-        emptyStateSubtitle: "Tandika nga otondawo ekifo n'okuwaayo ebyuma",
-        irrigationZones: 'Ebifo',
-        unassignedSubtitle: 'Ebyuma ebino tebiwerekeddwa ku kifo kyonna',
+        emptyStateSubtitle: "Tandika nga otondawo ekitundu n'okuwaayo ebyuma",
+        irrigationZones: 'Ebitundu',
+        unassignedSubtitle: 'Ebyuma ebino tebiwerekeddwa ku kitundu kyonna',
       },
     };
 
@@ -143,7 +143,7 @@ describe('AgroLink branding source contracts', () => {
       it: 'Crea zona',
       es: 'Crear zona',
       pt: 'Criar zona',
-      lg: 'Tondawo Ekifo',
+      lg: 'Tondawo Ekitundu',
     };
 
     for (const [locale, copy] of Object.entries(expectedDashboardCopy)) {
@@ -167,7 +167,7 @@ describe('AgroLink branding source contracts', () => {
       it: 'Crea una zona dalla vecchia dashboard prima di aprire la cronologia.',
       es: 'Crea una zona desde el panel heredado antes de abrir el historial.',
       pt: 'Crie uma zona no painel legado antes de abrir o histórico.',
-      lg: "Tondawo ekifo okuva ku dashboard enkadde nga tonnaggula ebyafaayo by'omulamwa.",
+      lg: "Tondawo ekitundu okuva ku dashboard enkadde nga tonnaggula Ebyafaayo.",
     };
 
     for (const [locale, noZonesBody] of Object.entries(expectedNoZonesBody)) {

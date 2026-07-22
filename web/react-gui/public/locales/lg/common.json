@@ -1,6 +1,6 @@
 {
   "cancel": "Lekawo",
-  "loading": "Tikuyitamu…",
+  "loading": "Kitikkibwa…",
   "delete": "Sazaamu",
   "na": "Tebaawo",
   "retry": "Gezaako nate",
@@ -12,7 +12,7 @@
     "backToDashboard": "← Ddayo ku Dashboard",
     "loadError": "Ebikwata ku kwekenneenya tebisobodde okutikkibwa.",
     "pooled": {
-      "tooltip": "Okugatta obubonero bw'ebitundu byonna nga ekitebe kimu, wamu n'ekitundu kyonna kye kimu."
+      "tooltip": "Okugatta obubonero bw'ebitundu byonna nga ekibinja kimu eky'ebipimo, wamu n'okulaba buli kitundu kyennyini."
     },
     "empty": "Londa olunyiriri lumu oba okusingawo okutandika okugeraageranya ebitundu.",
     "catalog": {
@@ -25,7 +25,7 @@
       "label": "Okugatta data",
       "raw": "Nga bwe kiri",
       "fifteenMinute": "Ddakiika 15",
-      "hourly": "Buli saawa",
+      "hourly": "Buli ssaawa",
       "daily": "Buli lunaku",
       "weekly": "Buli wiiki"
     },
