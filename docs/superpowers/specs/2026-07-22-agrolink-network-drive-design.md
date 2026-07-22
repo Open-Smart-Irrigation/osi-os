@@ -1,16 +1,16 @@
 # AgroLink network-drive integration — design
 
-**Date:** 2026-07-22
+**Date:** 2026-07-22 (v2, revised after two independent external reviews)
 **Status:** Approved direction, pending implementation plan
 **Context:** The AgroLink hub (Pi 5, OSI OS) will sit inside the Agroscope "Fola" research network, which exposes a Windows file share that every researcher PC maps as `O:`. The hub must drop per-account sensor CSVs onto that share and import external sensor CSVs from it.
 **Companion specs:** [2026-07-19-agrolink-scoped-multiuser-design.md](2026-07-19-agrolink-scoped-multiuser-design.md) (account model this feature attaches to), [2026-07-19-agrolink-hub-hardening-design.md](2026-07-19-agrolink-hub-hardening-design.md)
-**Review provenance:** transport options and failure modes reviewed by a senior-engineer consult on 2026-07-22; the consult killed the original JS-library plan with verified evidence (SMB signing gap, NTLM deprecation) and its recommendations are folded in below.
+**Review provenance:** transport options and failure modes reviewed by a senior-engineer consult on 2026-07-22; v2 folds in two further independent reviews (a fresh-context consult and an external agent), which together produced the publish-semantics, failure-taxonomy, command-injection, DFS-port, and Windows-ACL corrections below.
 
 ## 1. Goal and non-goals
 
-Each AgroLink account gets a folder pair on the Agroscope share: the hub writes that account's scoped sensor data there as CSV, and imports external sensor CSVs that researchers or other systems drop into the paired import folder. The hub's SQLite stays the source of truth; every file on the share is regenerable.
+Each AgroLink account gets a folder pair on the Agroscope share: the hub writes that account's scoped sensor data there as CSV, and imports external sensor CSVs that researchers or other systems drop into the paired import folder. The hub's SQLite stays the source of truth; every file the hub writes is regenerable, and imported readings are rebuildable by re-importing the retained source files.
 
-Non-goals: treating the share as a system of record, per-researcher AD credentials on the hub, kernel CIFS mounts, free-text folder paths typed by researchers, syncing any drive-related state to the OSI cloud, and any behavior change for gateways without the feature flag.
+Non-goals: treating the share as a system of record, per-researcher AD credentials on the hub, kernel CIFS mounts, free-text folder paths typed by researchers, syncing any drive-related state to the OSI cloud, and any behavior change for gateways without the feature flag. The hub never deletes a researcher's file; its only writes inside `import/` are moving successfully imported files to a `processed/` archive and placing rejection sidecars.
 
 ## 2. Verified environment facts
 
@@ -19,140 +19,165 @@ Diagnosed 2026-07-22 from a standard-user domain workstation (Windows 11, build 
 | Fact | Value | Consequence |
 |---|---|---|
 | `O:` target | DFS namespace `\\agsad.admin.ch\AGROSCOPE`, current referral target `\\AGS-VCH-0101.agsad.admin.ch\AGROSCOPE` (10.183.20.10) | Configure the namespace path, not the server; survives their next file-server migration |
-| NTLM acceptance | `net use` by IP succeeded, which forces NTLMv2 | Stock OpenWrt `samba4-client` works today without a Kerberos build |
-| Domain controller | `AGS-VPO-0101.agsad.admin.ch` | Domain-based DFS referral requires DC reachability from the hub VLAN (open IT question) |
-| Client signing policy | `RequireSecuritySignature=0` on the workstation | Server-side signing mandate unknown; irrelevant, `smbclient` negotiates signing either way |
+| NTLM indication | `net use` by IP succeeded, which under default Windows behavior forces NTLM | Label: NTLM likely. The test observed success, not the negotiated package (Kerberos-over-IP via `TryIPSPN` exists, though non-default). Plan on NTLMv2; confirm from the gateway with the service account and the server's security log |
+| Domain controller | `AGS-VPO-0101.agsad.admin.ch` | Domain-based DFS referral is an SMB operation against a DC over TCP/445 (Appendix A Q2 asks for exactly that) |
+| Client signing policy | `RequireSecuritySignature=0` on the workstation | Server-side signing mandate unknown; moot, because the hub pins client-side minimums (§4) |
 
-Two limits of this diagnosis: the workstation's NTLM success does not guarantee the future service account escapes account-level NTLM restrictions, and nothing here tests reachability (TCP/445 to the file server, DC access for DFS, DNS for `agsad.admin.ch`) from the network segment the hub will occupy. Both stay on the IT question list (Appendix A).
+Two limits of this diagnosis: the workstation's success does not guarantee the future service account escapes account-level NTLM restrictions, and nothing here tests reachability (TCP/445 to file server and DCs, DNS, NTP) from the network segment the hub will occupy. Both stay on the IT question list (Appendix A).
 
 ## 3. Locked decisions
 
 | # | Decision | Reason |
 |---|---|---|
 | D1 | All drive I/O goes through one transfer-seam module; nothing else in the codebase knows SMB exists | Backend swap (local, smbclient, Kerberos build, option D) never touches pipelines |
-| D2 | First real backend: `smbclient` from the stock OpenWrt 24.10 `samba4-client` package (Samba 4.18), subprocess per batch | SMB 3.1.1 with signing, encryption, and DFS referrals; NTLMv2 verified accepted (§2); installable without reflash |
+| D2 | First real backend: `smbclient` from the stock OpenWrt 24.10 `samba4-client` package (Samba 4.18), subprocess per batch, `.ipk` dependency closure shipped pinned through the normal deploy flow | SMB 3.1.1 with signing, encryption, and DFS referrals; NTLM indicated accepted (§2); no reflash; no live dependency on package feeds from a restricted network |
 | D3 | Pure-JS SMB libraries rejected | No SMB signing support (open upstream issue), NTLM-only against a domain actively reducing NTLM; fails outright on hardened servers |
 | D4 | Kernel CIFS mount rejected | Needs firmware reflash (kmod not in image); an unreachable server can hang mounted-path I/O in uninterruptible sleep on the device that runs irrigation |
-| D5 | Folder paths are derived (`<root>/<account-slug>/export\|import`), admin-only override | With one service account, hub code is the only boundary between researchers; hand-typed paths would put that boundary in the hands it constrains |
-| D6 | Drive files are a derived mirror | Regeneration from SQLite replaces a durable queue; outage recovery is a watermark catch-up |
+| D5 | Folder paths derive from a frozen per-account slug (`<root>/<slug>/export\|import`), admin-only override | With one service account the hub cannot rely on researchers typing paths; slugs are computed once and never recomputed (§5), so renames never silently retarget folders |
+| D6 | Drive files are a derived mirror | Regeneration from SQLite replaces a durable queue; outage recovery is partition regeneration |
 | D7 | Imported data lands in a new edge-local `external_readings` table, not in `device_data` | Fake devices would drag in the sync contract, ChirpStack provisioning, and cloud-side effects for a chart overlay we can build directly |
 | D8 | New tables are excluded from cloud sync: no sync triggers, no contract changes, nothing near the frozen `sync-init-fn` boot node | Keeps this feature out of the highest-risk subsystem |
-| D9 | Auth failure stops transfers and alarms; no automatic retry until an admin re-enables | Server 2025 ships an SMB auth rate limiter and federal lockout thresholds are low; a retry loop converts one bad password into a locked account |
+| D9 | Session-authentication failure disables transfers and alarms; no automatic retry until an admin re-enables. Path-level denials never trip this | Server 2025 ships an SMB auth rate limiter and federal lockout thresholds are low; a retry loop converts one stale password into a locked account, and a single folder ACL quirk must not kill 25 accounts' exports |
 | D10 | Whole feature behind a per-gateway flag `OSI_NETWORK_DRIVE`, default off, code on osi-os mainline | Same rollout pattern as scoped access (its D7); existing farms unaffected |
 | D11 | Kerberos client and Windows-side intermediary are specced contingencies, not built (§13) | Each has a named trigger; building either now is waste |
+| D12 | The seam API is account-scoped: callers pass account and zone identifiers, never paths | A seam that accepts arbitrary relative paths cannot enforce folder ownership; deriving every remote path inside the seam makes cross-account writes unrepresentable in the API |
+| D13 | Remote-controlled strings never reach a shell: subprocesses spawn without one, smbclient scripts are built from validated tokens only, and import filenames must match a conservative grammar | `smbclient -c` is a command language whose `!` escape runs local shell commands, and Node-RED runs as root (`node-red.init` sets no unprivileged user); an attacker-chosen filename must never become code |
+| D14 | The inter-researcher boundary on the share is Windows NTFS ACLs, requested per account from IT (Appendix A); hub-side enforcement is the boundary for gateway-mediated operations only | Researchers reach `O:` directly under their own AD identity; no hub code can constrain that |
 
-## 4. Architecture: the transfer seam
+## 4. The transfer seam
 
-One backend module (Node-RED shared lib, `osiLib` pattern) exposes four operations: `health()`, `list(relPath)`, `get(relPath)`, `putAtomic(relPath, content)`. Callers pass share-relative paths; the module owns credentials, connection, timeout, and path enforcement (§5).
+One backend module (Node-RED shared lib, `osiLib` pattern) exposes account-scoped operations (D12): `health()`, `putExport(accountUuid, zoneUuid, day, content)`, `listImport(accountUuid)`, `getImport(accountUuid, fileToken)`, `moveProcessed(accountUuid, fileToken)`, `putRejectSidecar(accountUuid, fileToken, reason)`. The seam derives every remote path from stored slugs and validated tokens; callers never see or supply a path. Validation runs at time of use: canonicalization, `..` and NTFS alternate-data-stream rejection, root-prefix requirement, and the D13 filename grammar for anything listed remotely (`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,120}\.csv$`, ASCII only). Files whose names fail the grammar are not fetched and not sidecarred (a sidecar would need the unsafe name); they surface in the GUI import view as "ignored: unsupported filename", and the interface agreement (§14) documents the rule for producers.
 
 Backends behind the seam:
 
 - **`local`** — a directory on disk. Used by development, CI, and unit tests; also the first thing built, so every pipeline, GUI element, and validation rule ships and is testable before any SMB code exists.
-- **`smbclient`** — one subprocess per batch. Credentials come from a root-owned `0600` file passed with `-A`, never on the command line. Each subprocess gets a hard timeout (default 30 s per operation) and SIGKILL on expiry; a userspace TCP client dies cleanly, no kernel state involved. A fresh session per batch sidesteps Windows idle-session teardown and firewall state timeouts.
+- **`smbclient`** — one subprocess per batch, spawned without a shell (D13). Credentials come from the file described in §10, passed with `-A`, never on the command line. The client pins its own minimums regardless of server policy: `client min protocol = SMB3` and `client signing = required`, plus required encryption once IT confirms support. Samba's defaults only offer signing; capability is not protection, so the requirement is explicit. `health()` reports the negotiated dialect, signing, and encryption state to the admin GUI. Timeouts are per subprocess, scaled by operation count with a hard cap (default 30 s plus 10 s per operation, capped at 5 min), SIGKILL on expiry; a fresh session per batch sidesteps Windows idle-session teardown.
 
-Gateway-level configuration (admin only, UCI section `osi-server.drive`): `enabled`, `unc` (the DFS namespace path), `root` (agreed AgroLink subtree on the share), `credentials_file` (default `/etc/osi/drive.cred`), `direct_unc` (optional fallback target if DC-based DFS referral proves unreachable from the hub VLAN). Exact key names follow the conventions in the osi-config-and-flags skill at plan time.
+Failure taxonomy, by phase (D9): failures during session setup or tree connect (`NT_STATUS_LOGON_FAILURE`, `NT_STATUS_ACCOUNT_LOCKED_OUT` and kin) set a persistent auth-disabled state, stop all transfers, and alarm until an admin re-enables. Per-path errors never escalate: `ACCESS_DENIED` on a file or folder marks that path failed for the cycle, `SHARING_VIOLATION` marks the file in-use for soft retry next cycle (§6), and unreachable-server or timeout outcomes mark the cycle skipped with staleness continuing to accrue. Isolation ordering is file, then account, then global; one account's failures never consume another's batch window. Three states persist separately in `drive_state` (§8): admin-configured enabled, auth-disabled, alarm.
 
-On `NT_STATUS_LOGON_FAILURE` or `NT_STATUS_ACCESS_DENIED` the module sets a persistent alarm state, disables further transfers, and surfaces the state in the GUI and health telemetry (D9). All other failures (timeout, unreachable, share missing) count as "share down": the cycle is skipped and staleness tracking continues.
+Gateway-level configuration (admin only, UCI section `osi-server.drive`): `enabled`, `unc` (the DFS namespace path), `root` (agreed AgroLink subtree), `credentials_file`. A `direct_unc` bypass of DFS referral exists as an explicit degraded mode: admin-set, persistently alarmed while active, and intended only if the VLAN turns out to block DC reachability; it is not an automatic fallback, because silently pinning to a referral target reintroduces the migration fragility the namespace path avoids. Exact key names follow the osi-config-and-flags skill at plan time.
 
-## 5. Folder model and path enforcement
+## 5. Folder model, slugs, and lifecycle
 
-Each enabled account owns `<root>/<slug>/export/` and `<root>/<slug>/import/`. The slug derives from the username: lowercased, Windows-illegal characters (`<>:"/\|?*`), reserved names (`CON`, `NUL`, `COM1`…), trailing dots and spaces all rejected or mapped, uniqueness enforced case-insensitively because NTFS folder names collide by case. The GUI shows the researcher their folders as copyable `O:\...` paths.
+Each enabled account owns `<root>/<slug>/export/` and `<root>/<slug>/import/`. The slug is computed once when drive access is enabled for the account, stored, and never recomputed (D5): ASCII lowercase from the username with non-ASCII transliterated, Windows-illegal characters (`<>:"/\|?*`), control characters, reserved device names (`CON`, `NUL`, `COM1`…), and trailing dots or spaces rejected or mapped, length capped at 32. Collisions (including case-insensitive ones, since NTFS folders collide by case) get a numeric suffix at assignment time. Retired slugs are never reassigned to a different account; a slug ledger enforces this. A username rename changes nothing on the share.
 
-Admins may override either path per account. Overrides and derived paths get identical treatment: validation runs at time of use inside the transfer seam, not only at configuration time. The seam canonicalizes, rejects `..` segments and NTFS alternate-data-stream syntax (`file.csv:stream`), and requires the `root` prefix. Config-time validation exists too, but as UX; the seam check is the security boundary.
+Admins may override either path per account. Overrides go through the same seam validation at time of use, and overridden destinations keep the account's watermark state keyed by account and zone, not by path, so a path change makes the next cycle regenerate the rolling window (§6) into the new location. Old files stay where they are; the hub deletes nothing.
 
-The hub also creates missing account folders on first use, so provisioning a new researcher needs no manual folder work beyond the Windows-side subtree existing.
+Lifecycle events are explicit:
+
+| Event | Behavior |
+|---|---|
+| Account disabled or drive access revoked | Transfers stop; files and watermarks retained; audit records the stop |
+| Zone unassigned from account's scope | That zone's exports stop; files retained; watermark retained for possible re-grant |
+| Zone deleted | Exports stop; files retained |
+| Path override changed | Next cycle regenerates the rolling window into the new destination; old files untouched |
+| Account deleted | Transfers stop; slug stays burned in the ledger; files retained (they belong to Agroscope, not the hub) |
+
+The hub creates missing account folders on first use, so provisioning a new researcher needs no manual folder work beyond the Windows-side subtree and ACLs existing (Appendix A Q6).
 
 ## 6. Export pipeline
 
-A scheduled worker runs hourly with ±10 min jitter (avoids their nightly backup and AV windows; makes 25 accounts not stampede at once). Per enabled account, per zone in the account's scope: read rows from SQLite since the account-zone watermark, regenerate the current day file, publish it, advance the watermark. Layout:
+A scheduled worker runs hourly with ±10 min jitter (avoids nightly backup and AV windows; spreads 25 accounts). The unit of work is a day partition per account and zone: each cycle regenerates the current day file plus any previous day inside a rolling reconciliation window (default 2 days, admin-configurable) whose underlying rows changed. Regenerating whole partitions instead of appending since a timestamp makes late LoRa arrivals, backfills, and same-timestamp rows a non-issue: the file is always a full, correct rendering of its day. `drive_export_state` keeps, per account and zone, the last regenerated day, last success time, and the content hash of each published partition; when a regenerated partition's hash equals the published one, publish is skipped, which keeps mtimes stable for researchers and out of AV and backup churn. An admin action triggers a full historical rebuild.
+
+Layout:
 
 ```
 <root>/<slug>/export/<zone-slug>/2026/07/<zone-slug>_20260722.csv
 ```
 
-Date partitioning caps directory sizes (25 accounts at hourly cycles produce hundreds of thousands of files per year if left flat). Filenames carry no colons; `2026-07-22T10:30:00` is an illegal Windows name.
+Zone slugs follow the §5 rules and are likewise frozen at first export. Filenames carry no colons; `2026-07-22T10:30:00` is an illegal Windows name. Volume arithmetic: one file per zone per day, so 25 accounts with a few zones each produce tens of thousands of files per year in total and low hundreds per directory. Date partitioning is kept for browse, AV, and backup behavior, not because counts explode.
 
-Publish is `putAtomic`: write `<name>.csv.tmp`, delete the existing target, rename. SMB rename does not overwrite, so the delete is required; the sub-second window where no file exists is acceptable under D6. Files are never appended in place, because researchers hold CSVs open in Excel for days and an open file rejects writers.
+Publish uses smbclient's single-operation supersede: write `<name>.csv.tmp`, then `rename -f` onto the target (SMB2 ReplaceIfExists). No delete step, so no window with a missing file. When the destination is open in Excel without delete sharing, the rename fails with `SHARING_VIOLATION`; the seam records the partition as in-use and retries next cycle. This is a soft per-file state with its own GUI indicator, distinct from the staleness alarm, because a researcher keeping today's file open is normal behavior, not an outage; the data is never lost, only its republication deferred. The hard staleness alarm (last successful contact for an account older than 3 cycle intervals for reasons other than in-use files) stays, because the natural failure mode of scheduled file drops is silent rot.
 
-CSV format, fixed by the consult's Swiss-Excel findings: semicolon delimiter, UTF-8 with BOM (without it, `Bewässerung` renders as mojibake in Excel), header row naming the timezone (Europe/Zurich local time), and formula-injection sanitization: any cell starting with `=`, `+`, `-`, or `@` gets a leading apostrophe. Columns reuse the existing zone CSV export definition, including the paired `_pf` rows for positive SWT kPa values.
-
-Watermarks live in `drive_export_state` (§8). Catch-up after an outage is regeneration from the oldest stale watermark forward. A staleness alarm fires when an account's last successful export is older than 3 cycle intervals; it appears in the GUI and in health telemetry, because the natural failure mode of scheduled file drops is silent rot, not loud errors.
+CSV content: header row naming the columns and units; timestamps in RFC 3339 with numeric UTC offset (`2026-10-25T02:30:00+02:00`), which survives the October DST fold that wall-clock times do not. Formula-injection escaping applies only to non-numeric fields, reusing the semantics of the existing `csvCell` helper (`osi-history-helper/index.js`), which already exempts typed numbers; blanket escaping would turn negative temperatures into Excel text. Delimiter, BOM, decimal separator, quoting, CRLF, and null representation are published as defaults (semicolon, UTF-8 with BOM, comma decimals per Swiss locale) but are explicitly pending the interface agreement (§14), since Excel's separator handling follows each workstation's locale setting. Columns reuse the existing zone CSV export definition, including the paired `_pf` rows for positive SWT kPa values. A golden-file test fixes the format (§12).
 
 ## 7. Import pipeline
 
-A second worker polls each account's `import/` folder every 15 minutes. A file qualifies for ingestion when all of the following hold: extension `.csv`, size at most 10 MB, and identical size+mtime across two consecutive polls (the producer finished writing). Qualified files are fetched and content-hashed; a hash already present in the `drive_import_files` ledger is skipped, which makes re-drops of renamed or re-copied files harmless.
+A second worker polls each account's `import/` folder every 15 minutes, single-flight (a running cycle is never overlapped) with an overall batch deadline. Listing returns name, size, and mtime; the ledger (`drive_import_files`) is checked first on path, size, and mtime, so already-processed and already-rejected files are skipped without fetching. Only new or changed entries are downloaded, subject to the D13 filename grammar, a 10 MB size cap enforced during download, and a stability requirement (identical size and mtime across two consecutive polls). Stability is a heuristic, not a protocol: a producer can pause mid-write for 15 minutes. The interface agreement therefore asks producers to write-then-rename or use a `.part` suffix, and the worker re-stats the remote file after download, discarding the fetch when size or mtime moved.
 
-Parsing goes through a parser seam. The initial parser targets the external-sensor CSV format to be agreed with Agroscope (open dependency, §14); the seam exists so a second format is a new parser, not a pipeline change. Parsed rows are hard-validated: known metric names, numeric ranges, plausible timestamps. This folder is a trust boundary. Anyone on the network drive, including malware on a researcher PC, can write here, and its content flows toward irrigation research data.
+Fetched files are content-hashed (dedupe scope: account, parser version, SHA-256) and parsed in a bounded child process, not on the Node-RED event loop: parsing, hashing, and validation of a hostile 10 MB file must not stall the process that runs irrigation. The child enforces caps on bytes, rows, line length, and wall-clock. The parser sits behind a seam; the initial parser targets the external-sensor CSV format from the interface agreement, and validation is hostile-input-grade: known metric names, numeric ranges, plausible timestamps. This folder is a trust boundary for content and, until per-account NTFS ACLs exist (Appendix A Q6), for attribution too: anyone with share access can drop a file into any import folder, so imported data is attributed as "account's folder", which is advisory rather than audit-grade, and §10 says so.
 
-Accepted rows land in `external_readings` (D7). Rejected files are quarantined in place: the original is never moved or deleted, and the worker writes `<name>.rejected.txt` beside it with a human-readable reason, which prevents silent re-drop loops. Per-account import caps (files per cycle, rows per day) stop one account's dump from starving the batch window.
+Accepted files commit atomically: all `external_readings` rows and the ledger entry in one SQLite transaction, so a crash never leaves readings without a ledger record or vice versa. Row identity is (account, series, metric, timestamp) with upsert semantics: a re-dropped corrected file supersedes earlier values instead of doubling chart overlays. After commit the source file moves to `import/processed/<YYYY-MM>/`, which keeps the polled directory small and gives researchers a visible record of what was ingested. Rejected files stay in place with a `<name>.rejected.txt` sidecar naming the reason; the ledger's path entry stops re-processing. Per-account caps (files per cycle, rows per day) stop one account's dump from starving the batch window.
+
+Recovery ownership: `external_readings` is edge-local and not synced, so after loss of the hub the authoritative source is the files themselves, retained in `processed/`; re-import rebuilds the table. The hub-hardening spec's backup story covers the database; this feature adds no new durability claim.
 
 The GUI shows imported series as overlays in the existing history charts, filtered by the viewing account's scope.
 
 ## 8. Schema
 
-Three new edge-local tables, all excluded from sync (D8):
+Four new edge-local tables plus persisted runtime state, all excluded from sync (D8):
 
-- `drive_export_state` — account uuid, zone uuid, watermark timestamp, last success, last error.
-- `drive_import_files` — account uuid, share path, size, mtime, content hash, status (`imported`/`rejected`), reason, timestamps.
-- `external_readings` — source series (account uuid, series label, unit), reading timestamp, metric, value, importing file reference.
+- `drive_export_state` — account uuid, zone uuid, day, published content hash, last success, last error, in-use flag.
+- `drive_import_files` — account uuid, share path, size, mtime, content hash, parser version, status (`imported`/`rejected`/`superseded`), reason, timestamps.
+- `external_readings` — account uuid, series label, unit, metric, reading timestamp, value, importing file reference; uniqueness on (account, series, metric, timestamp).
+- `drive_audit_log` — system actor (worker) and subject account, operation, share path, content hash, outcome, correlation id, timestamp.
+- `drive_state` — the §4 persisted flags: enabled, auth-disabled, alarm, plus slug ledger entries.
 
-Column lists are indicative; the plan phase finalizes them under the osi-schema-change-control skill: ordered migration in the next free `NNNN` slot, seed parity, and the full verifier suite (`verify-migrations`, `verify-seed-replay`, `verify-runtime-schema-parity`, `verify-db-schema-consistency`). No trigger touches anything the boot node manages.
+Retention is stated per table: audit log archives and truncates past 12 months; the import ledger prunes superseded path entries; `external_readings` retention is admin-configurable. The AgroLink hub's NVMe postpones disk pressure but does not remove it, and the fleet has had one real overlay-fill incident already.
+
+Column lists are indicative; the plan phase finalizes them under the osi-schema-change-control skill: ordered migration in the next free `NNNN` slot, seed parity, and the complete edge-schema gate set as defined by the osi-verification-commands skill (not a hand-picked subset). No trigger touches anything the boot node manages.
 
 ## 9. GUI
 
-Researcher view (flag-gated section in account settings): the two folder paths in `O:\` notation with copy buttons, per-zone last-export timestamps, import history with per-file status and rejection reasons, and the staleness state.
+Researcher view (flag-gated section in account settings): the two folder paths in `O:\` notation with copy buttons, per-zone last-export state including the in-use indicator, import history with per-file status, rejection reasons, and ignored-filename listings, and the staleness state.
 
-Admin view: connection health (last successful contact, alarm state, a "test connection" action that runs `health()` on demand), gateway drive configuration status, per-account overview with override editing, and the audit log (§10).
+Admin view: connection health (negotiated dialect and protection from `health()`, last successful contact, the three `drive_state` flags, a "test connection" action), gateway drive configuration status including degraded `direct_unc` mode, per-account overview with override editing and lifecycle actions, and the audit log.
 
 All strings go through the standard i18n pipeline. German is the primary field language at Agroscope; French and Italian follow the existing locale set.
 
 ## 10. Security and audit
 
-The service account is the only Windows identity. Its credentials live in `/etc/osi/drive.cred`, root-owned, mode `0600`, outside every path the 20–30 GUI accounts can read, and never in the database, sync payloads, or logs. Rotation is a documented runbook step: while the credential is stale the hub is in the D9 alarm state and transfers stop. The Windows-side ask (Appendix A) is an ACL scoping the account to the AgroLink subtree only, which contains the blast radius of a hub compromise, plus denied interactive logon.
+Two distinct boundaries, named honestly (D14). Between researchers on the share, the boundary is Windows NTFS ACLs: Appendix A Q6 requests a per-account matrix (service account modify rights across the subtree; each researcher full control of their own pair, read-only or no access elsewhere; interactive logon denied to the service account). Hub-side seam enforcement (D12, D13) is the boundary for gateway-mediated operations and contains a hub compromise to the subtree, but it cannot constrain a researcher's own `O:` session. If IT declines per-account ACLs, the residual risk is stated in the interface agreement: researchers can read and modify each other's drive folders, and import attribution stays advisory.
 
-Because NTFS attributes every file to the service account, per-user attribution exists only on the hub. `drive_audit_log` records acting GUI account, operation, share path, content hash, and timestamp, append-only. That log is the answer when an auditor asks who wrote a file, and it is offered to Agroscope proactively rather than on demand.
+The service account credential lives in `/etc/osi/drive.cred`: a regular file (the seam refuses symlinks), root-owned, mode `0600`, at that fixed path only. It is excluded from support bundles, configuration exports, backups, and factory images; listed in the sysupgrade keep-list; rotated atomically (write-new-then-rename) per a runbook that names who rotates, how the secret is delivered, and that the hub sits in auth-disabled alarm state while stale. Decommissioning destroys the file and asks IT to disable the account. Credentials never appear in the database, sync payloads, logs, or subprocess argument lists.
 
-Path enforcement is restated here because it is the actual inter-researcher boundary (D5): seam-level canonicalization and root-prefix checks at time of use, case-insensitive non-overlap of account folders, no free-text paths for non-admins.
+`drive_audit_log` records both actors on every operation: the system worker that executed it and the subject account whose folder it touched, with outcome and correlation id, because scheduled exports have no acting GUI user. Append-only SQLite on the hub is not tamper-evident against a hub compromise; for audit-grade attribution of who placed or modified files, Appendix A asks IT to enable Windows file-share auditing on the subtree. The hub log is offered to Agroscope proactively as the operational record, with that limitation stated.
 
 ## 11. Reliability and operations
 
-The workers run as scheduled flows isolated from irrigation, scheduling, and sync; no HTTP request handler and no actuation path ever performs drive I/O. Subprocess timeouts plus SIGKILL bound every operation. A down share costs nothing but staleness: skipped cycles, watermarks holding position, catch-up on recovery (D6).
+The workers run as scheduled flows isolated from irrigation, scheduling, and sync; no HTTP request handler and no actuation path performs drive I/O, and the import parser's heavy work runs in a bounded child process (§7). Subprocess timeouts plus SIGKILL bound every SMB operation. Cycles are single-flight with deadlines. A down share costs staleness only: skipped cycles, state holding position, partition regeneration on recovery (D6).
 
-Known environmental hazards, accepted and handled: nightly backup and AV windows on the file server (jitter plus per-cycle retry), Windows Offline Files caching on researcher PCs showing stale folder views (documented for support; Appendix A asks IT to disable client-side caching on the subtree), and quota exhaustion on the share (surfaces as write failures, alarmed via staleness; retention expectations are an IT question).
+Known environmental hazards, accepted and handled: nightly backup and AV windows (jitter plus next-cycle retry), Excel holding files open (soft in-use state, §6), Windows Offline Files on researcher PCs showing stale views (documented for support; Appendix A asks IT to disable client-side caching on the subtree), quota exhaustion (surfaces as write failures, alarmed via staleness; retention expectations are an IT question), and `import/` growth (processed-file moves plus a per-folder file-count alarm).
 
-## 12. Testing
+## 12. Testing and release gates
 
-CI runs the real `smbclient` backend against a Samba container hardened to imitate the target: SMB3-only, signing mandatory. Integration tests cover put-temp-delete-rename semantics, listing, timeout kill behavior, and the auth-failure stop (D9). Unit tests cover slug and path sanitization (umlauts, reserved names, case collisions, `..`, ADS syntax), CSV generation (BOM, semicolons, injection escaping, timezone header), and import handling of truncated files, oversize files, re-drops, and hash dedupe. Product logic tests run on the `local` backend.
+CI runs the real `smbclient` backend against a Samba container hardened to imitate the target: SMB3-only, signing mandatory, and the client's own §4 minimums pinned in the test matrix so a regression that drops `client signing = required` fails CI. Integration tests cover `rename -f` supersede, sharing-violation classification, listing, timeout kill, the auth-failure stop, and D13 hostility: filenames containing `;`, `!`, wildcards, whitespace, quotes, and non-ASCII must never reach a subprocess argument or script token un-rejected. Unit tests cover slug rules (umlauts, reserved names, case collisions, length), path token validation, CSV generation against a golden file (BOM, delimiter, offsets, numeric-aware escaping), and import handling of truncated, oversize, re-dropped, and superseding files. Product logic tests run on the `local` backend.
 
-Pre-commit spikes for the plan phase: install `samba4-client` on a 24.10 bcm2712 image and confirm the dependency set stays client-only; exercise the backend against a real Windows share (lab VM or, once network access exists, the target share read-only) to confirm DFS referral following and rename semantics.
+A Samba container cannot prove Windows behavior: DFS referrals, share modes, Excel locks, NTFS ACL inheritance, and AV interference are all server-side realities. The release gate for the smbclient backend is therefore an acceptance run against a writable, isolated test folder on the real DFS path (Appendix A Q10): signing and encryption as negotiated, referral following, replace-while-open, credential rotation, and recovery after a forced timeout. A read-only spike cannot validate rename semantics, so the test folder must be writable.
+
+Pre-plan spikes: enumerate the pinned `samba4-client` dependency closure on a 24.10 bcm2712 image (confirmed present in the feed and absent from the current image config) and confirm nothing server-side rides along.
 
 ## 13. Contingencies, specced not built
 
-**Kerberos client.** Trigger: Agroscope IT mandates Kerberos-only, or NTLM is later switched off (their answer to Appendix A question 3 may include a sunset date). Path: custom `samba4` build via the OpenWrt 24.10 SDK with ADS enabled (the stock feed package is built `--without-ads` and cannot do Kerberos), plus MIT krb5 with a keytab and chrony against their NTP. Ships as a userspace package over the normal deploy flow, no reflash. Timeboxed to two weeks; if the spike fails, fall through to option D, not to a kernel mount, which would need the same krb5 userland plus keyring plumbing plus a reflash.
+**Kerberos client.** Trigger: Agroscope IT mandates Kerberos-only, or NTLM is later switched off (their answer to Appendix A Q3 may include a sunset date). Path: custom `samba4` build via the OpenWrt 24.10 SDK with ADS enabled (the stock feed package is built `--without-ads` and cannot do Kerberos), plus MIT krb5 with a keytab and chrony against their NTP. Ships as a userspace package over the normal deploy flow, no reflash. Timeboxed to two weeks; if the spike fails, fall through to option D, not to a kernel mount, which would need the same krb5 userland plus keyring plumbing plus a reflash.
 
 **Option D: Windows-side intermediary.** Trigger: IT refuses direct SMB from the hub's network segment, or refuses the service account. Path: a scheduled task on a managed Windows server exchanges CSVs with the hub over its authenticated HTTPS API; the hub already serves per-zone CSV export routes, so the hub-side delta is an import-upload endpoint plus integration tokens. A reference PowerShell script lives in the repo so their IT evaluates a concrete artifact. Cost is organizational (a change request and an owner on their side), which is why this is the fallback rather than the default.
 
-## 14. Open dependencies
+## 14. Dependencies: scaffold versus release gates
 
-| Dependency | Blocks | State |
-|---|---|---|
-| Agroscope IT general approval of the gateway joining the network | Everything network-facing; the Appendix A questions go out only after it | Waiting (user decision 2026-07-22) |
-| Appendix A answers, then a one-page written interface agreement (paths, account, auth, flows, rotation, contacts) | Backend choice confirmation, VLAN reachability, folder provisioning | Not started |
-| External-sensor CSV format agreement | Import parser | Not started; parser seam isolates it |
-| Service-account credential delivery | First live connection | Not started |
+Scaffold work proceeds now with no external input: the seam, `local` backend, both pipelines against fixture formats, schema, GUI, slug and lifecycle logic, and the CI suite. Release gates are a different claim, and nothing ships to the live hub before its gate clears:
 
-None of these block implementation: the seam, `local` backend, both pipelines, schema, GUI, and tests proceed now (D1); the `smbclient` backend proceeds against the CI Samba container.
+| Gate | Gates what |
+|---|---|
+| Agroscope IT general approval, then Appendix A answers, then a one-page written interface agreement (paths, account, auth, ACL matrix, CSV contract, drop convention, rotation, contacts) | Deployment of the smbclient backend; final CSV format; final parser |
+| External-sensor CSV format agreement (part of the interface agreement) | Import parser leaving fixture status; `external_readings` semantics freeze |
+| Service-account credential delivery | First live connection |
+| Acceptance run on the real share (§12) | Enabling `OSI_NETWORK_DRIVE` on the AgroLink hub |
+
+The import pipeline and smbclient backend are not "complete" until their gates clear, however green the CI suite is.
 
 ## Appendix A: questions for Agroscope IT
 
 To send after general approval; answers select between D2, the Kerberos contingency, and option D.
 
 1. **Pattern.** Will you permit a non-domain-joined Linux device with an AD service account speaking SMB directly to the AGROSCOPE share? If not: would you operate a scheduled task on a managed Windows server exchanging CSVs with the device's authenticated HTTPS API? We support both; your answer selects the architecture.
-2. **Network.** Which VLAN/zone does the device land in, and is the port 802.1X/NAC-controlled? From that segment: TCP/445 to the file server, TCP/88 and 464 to domain controllers (needed for domain-based DFS referral and any Kerberos), DNS resolution for `agsad.admin.ch`, and an internal NTP source? The device currently uses a Tailscale VPN uplink for management; is that acceptable, or must egress change?
+2. **Network.** Which VLAN/zone does the device land in, and is the port 802.1X/NAC-controlled? From that segment we need: TCP/445 to the file server **and to the domain controllers** (domain-based DFS referrals are SMB operations against a DC), DNS resolution of `agsad.admin.ch` including DC A-records, and an internal NTP source. TCP/88 to DCs only if Kerberos is mandated (Q3), and TCP/464 only if the credential workflow uses password changes. The device currently uses a Tailscale VPN uplink for management; is that acceptable, or must egress change?
 3. **Auth policy.** Is NTLMv2 permitted for this service account, and if yes, with what sunset date? If Kerberos-only: can the account get AES-256 encryption types and a keytab?
-4. **SMB mandates.** Signing required? Encryption required, globally or per share? Minimum dialect?
+4. **SMB mandates.** Signing required? Encryption required, globally or per share? Minimum dialect? (The device requires SMB3 and signing client-side regardless.)
 5. **Account mechanics.** Standard service account or gMSA-only policy? Rotation interval and secret-delivery process, lockout threshold, workstation restrictions, and whom we contact when the account locks.
-6. **Namespace and subtree.** We target `\\agsad.admin.ch\AGROSCOPE`; any planned migration we should know about? Can we get a dedicated subtree (proposal: `...\AgroLink\<account>\{export,import}`) with the service account's NTFS rights scoped to that subtree only, and denied interactive logon?
-7. **Server-side services on the subtree.** Quotas, FSRM file screens, on-access AV, backup windows, retention rules, and guidance on file counts. Please disable Offline Files/client-side caching on the subtree.
+6. **Namespace, subtree, and ACLs.** We target `\\agsad.admin.ch\AGROSCOPE`; any planned migration we should know about? We request a dedicated subtree (proposal: `...\AgroLink\<account>\{export,import}`) with: the service account holding modify rights on that subtree only and denied interactive logon; per-account NTFS ACLs so each researcher has full control of their own folder pair and read-only or no access to others'. Who provisions folders and ACL changes when accounts join or leave?
+7. **Server-side services on the subtree.** Quotas, FSRM file screens (note: the device writes `.tmp` and `.rejected.txt` files), on-access AV, backup windows, retention rules. Please disable Offline Files/client-side caching on the subtree.
 8. **Detection.** Whom do we notify so hourly service-account SMB from a device VLAN gets allowlisted by your SOC rather than paged on?
-9. **Data handling.** Classification constraints on this share, and your standard Excel locale conventions (we assume semicolon-delimited, UTF-8 with BOM).
+9. **Data handling and format.** Classification constraints on this share; your standard Excel locale conventions (list separator, decimal separator, encoding) to fix the CSV contract; agreement on the producer drop convention for import files (write-then-rename or `.part` suffix).
+10. **Acceptance test folder.** A writable, isolated test folder on the real path, available before go-live, for the release-gate acceptance run (§12).
+11. **Auditing.** Can Windows file-share auditing be enabled on the subtree so file placement and modification are attributable to AD identities? The device keeps its own operation log and offers it; NTFS-level attribution needs your side.
