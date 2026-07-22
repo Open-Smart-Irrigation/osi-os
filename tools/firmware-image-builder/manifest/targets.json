@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "repository": {
+    "name": "osi-os",
+    "remote": "origin"
+  },
+  "stages": [
+    "preflight",
+    "source",
+    "release-gates",
+    "frontend",
+    "target-setup",
+    "feeds",
+    "config",
+    "build",
+    "verify",
+    "publish"
+  ],
+  "stageDefinitions": {
+    "preflight": { "required": true, "timeoutSeconds": 300 },
+    "source": { "required": true, "timeoutSeconds": 300 },
+    "release-gates": { "required": true, "timeoutSeconds": 1800 },
+    "frontend": { "required": true, "timeoutSeconds": 1800 },
+    "target-setup": { "required": true, "timeoutSeconds": 900 },
+    "feeds": { "required": true, "timeoutSeconds": 1800 },
+    "config": { "required": true, "timeoutSeconds": 900 },
+    "build": { "required": true, "timeoutSeconds": 21600 },
+    "verify": { "required": true, "timeoutSeconds": 1800 },
+    "publish": { "required": true, "timeoutSeconds": 300 }
+  },
+  "targets": [
+    {
+      "id": "rpi-5",
+      "label": "Pi 5",
+      "environment": "full_raspberrypi_bcm27xx_bcm2712",
+      "openwrtTarget": "bcm27xx/bcm2712",
+      "profile": "DEVICE_rpi-5",
+      "rootfs": "build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx",
+      "artifactGlob": "chirpstack-gateway-os-*-full-bcm27xx-bcm2712-rpi-5-squashfs-factory.img.gz",
+      "rootfsPartSize": 14336,
+      "minimumArtifactBytes": 67108864,
+      "configSymbols": [
+        { "name": "CONFIG_TARGET_bcm27xx_bcm2712", "type": "bool", "value": true },
+        { "name": "CONFIG_TARGET_PROFILE", "type": "string", "value": "DEVICE_rpi-5" },
+        { "name": "CONFIG_TARGET_ROOTFS_PARTSIZE", "type": "number", "value": 14336 },
+        { "name": "CONFIG_PACKAGE_node-red", "type": "bool", "value": true },
+        { "name": "CONFIG_PACKAGE_node-red-contrib-chirpstack", "type": "bool", "value": true },
+        { "name": "CONFIG_PACKAGE_chirpstack", "type": "bool", "value": true },
+        { "name": "CONFIG_PACKAGE_node-red-node-sqlite", "type": "bool", "value": true }
+      ],
+      "operations": ["activate-target", "copy-feed-config", "update-feeds", "install-feeds", "resolve-config", "build-image", "verify-image"]
+    },
+    {
+      "id": "rpi-2",
+      "label": "Pi 4 / 400 / 3 / 2",
+      "environment": "full_raspberrypi_bcm27xx_bcm2709",
+      "openwrtTarget": "bcm27xx/bcm2709",
+      "profile": "DEVICE_rpi-2",
+      "rootfs": "build_dir/target-arm_cortex-a7+neon-vfpv4_musl_eabi/root-bcm27xx",
+      "artifactGlob": "chirpstack-gateway-os-*-full-bcm27xx-bcm2709-rpi-2-squashfs-factory.img.gz",
+      "rootfsPartSize": 14336,
+      "minimumArtifactBytes": 67108864,
+      "configSymbols": [
+        { "name": "CONFIG_TARGET_bcm27xx_bcm2709", "type": "bool", "value": true },
+        { "name": "CONFIG_TARGET_PROFILE", "type": "string", "value": "DEVICE_rpi-2" },
+        { "name": "CONFIG_TARGET_ROOTFS_PARTSIZE", "type": "number", "value": 14336 },
+        { "name": "CONFIG_PACKAGE_node-red", "type": "bool", "value": true },
+        { "name": "CONFIG_PACKAGE_node-red-contrib-chirpstack", "type": "bool", "value": true },
+        { "name": "CONFIG_PACKAGE_chirpstack", "type": "bool", "value": true },
+        { "name": "CONFIG_PACKAGE_node-red-node-sqlite", "type": "bool", "value": true }
+      ],
+      "operations": ["activate-target", "copy-feed-config", "update-feeds", "install-feeds", "resolve-config", "build-image", "verify-image"]
+    }
+  ]
+}
