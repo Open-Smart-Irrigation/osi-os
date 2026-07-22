@@ -319,6 +319,7 @@
       "layout": "Layout",
       "required": "Erforderlich",
       "optional": "Optional",
+      "requiredChooseOne": "Erforderlich – eine Option wählen",
       "select": "Option auswählen",
       "value": "Wert",
       "unit": "Einheit",
@@ -334,7 +335,8 @@
       "booleanNo": "Nein",
       "plotContext": "Parzellenkontext",
       "keyValues": "Kernwerte",
-      "moreDetail": "Weitere Details"
+      "moreDetail": "Weitere Details",
+      "treatedAreaDefaulted": "Aus der Parzellenfläche voreingestellt – bei Bedarf anpassen"
     },
     "validation": {
       "required": "Füllen Sie dieses Feld aus.",
@@ -345,6 +347,8 @@
       "crossBasis": "Diese Einheit verwendet eine andere Messgrundlage.",
       "invalidDependency": "Die ausgewählten Optionen ergeben keine gültige Kombination.",
       "invalidDefinition": "Dieses Journalformular ist nicht verfügbar.",
+      "invalidDefinitionDetail": "Dieser Aktivitätenkatalog konnte nicht korrekt geladen werden. Versuchen Sie es erneut, oder schliessen und öffnen Sie dieses Formular neu.",
+      "catalogEmpty": "Es sind noch keine Aktivitäten für die Erfassung eingerichtet.",
       "layoutTemplateMismatch": "Dieser Detailgrad ist für das ausgewählte Layout nicht verfügbar.",
       "cropRequired": "Geben Sie eine Kultur ein, da keine aktive Saison diese Parzelle abdeckt.",
       "invalidLocalTime": "Geben Sie ein gültiges lokales Datum und eine gültige Uhrzeit ein.",

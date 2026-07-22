@@ -13,6 +13,7 @@ import type {
   EntryValue,
   JournalCatalog,
   JournalPlot,
+  JournalProductRow,
 } from '../../../types/journal';
 import type {
   CaptureEntryValueInput,
@@ -38,6 +39,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+// NIT 9: an internal valve-expectation linkage id (a plain `text` attribute)
+// with no friendly resolver and no user-meaningful label -- never render its
+// raw opaque id.
+const OMITTED_VALUE_DISPLAY_CODE = 'attr.actuation_expectation_id';
+
 // axios-shaped errors only: this GUI never inspects response bodies beyond
 // the status code here, matching how EntryTable/PlotForm read failures.
 function isStaleVersionError(error: unknown): boolean {
@@ -54,11 +60,21 @@ function plotLabelOf(plotUuid: string | null, plots: readonly JournalPlot[]): st
 function formatStoredValue(
   value: EntryValue,
   model: JournalCaptureCatalogModel | null,
+  products: readonly Pick<JournalProductRow, 'product_uuid' | 'name'>[],
   locale: string,
   t: TFunction<'journal'>,
 ): string {
   if (value.value_status !== 'observed') {
     return t(`capture.carry.valueStatus.${value.value_status}`, value.value_status);
+  }
+  // BUG 2: attr.product_uuid stores a per-farm product UUID that is never a
+  // vocabByCode entry (products are a separate registry, not catalog
+  // choices) -- resolve it via the products list the same way
+  // tankMixProductLabel/BUG 1 do on the capture confirm screen, instead of
+  // falling through to the raw-code branch below and printing the UUID.
+  if (value.attribute_code === 'attr.product_uuid' && value.value_text != null) {
+    const product = products.find((candidate) => candidate.product_uuid === value.value_text);
+    return product?.name ?? t('capture.tankMix.unknownProduct');
   }
   if (value.value_text != null) {
     const choice = model?.vocabByCode.get(value.value_text);
@@ -216,6 +232,13 @@ function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: Detai
   const correctionUnavailable = !model || !template || !layout;
   const plotLabel = plotLabelOf(aggregate.plot_uuid, plots);
   const context = parseContextSnapshot(aggregate.context_json);
+  // NIT 9: attr.actuation_expectation_id is an internal valve-expectation
+  // linkage id with no user-meaningful label and no friendly resolver --
+  // omit it from the values list entirely rather than print the raw opaque
+  // id (mirrors the same omission on the capture confirm screen).
+  const displayedValues = aggregate.values.filter(
+    (value) => value.attribute_code !== OMITTED_VALUE_DISPLAY_CODE,
+  );
   const returnFocus = () => onFocusReturn?.();
 
   const afterMutation = async () => {
@@ -285,15 +308,15 @@ function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: Detai
 
       <div>
         <p className="mb-1 font-bold text-[var(--text)]">{t('workspace.detail.values.heading')}</p>
-        {aggregate.values.length === 0 ? (
+        {displayedValues.length === 0 ? (
           <p className="text-[var(--text-secondary)]">{t('workspace.detail.values.empty')}</p>
         ) : (
           <ul className="space-y-1">
-            {aggregate.values.map((value, index) => (
+            {displayedValues.map((value, index) => (
               <li key={`${value.attribute_code}:${value.group_index}:${index}`} className="flex justify-between gap-3">
                 <span className="text-[var(--text-secondary)]">{vocabLabelOrCode(value.attribute_code, model, locale)}</span>
                 <span className="text-right font-semibold text-[var(--text)]">
-                  {formatStoredValue(value, model, locale, t)}
+                  {formatStoredValue(value, model, catalog.products, locale, t)}
                 </span>
               </li>
             ))}

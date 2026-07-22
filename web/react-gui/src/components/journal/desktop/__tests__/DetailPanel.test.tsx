@@ -342,6 +342,126 @@ describe('DetailPanel — read-back states', () => {
 
     expect(screen.queryByText('workspace.detail.field.season_crop')).not.toBeInTheDocument();
   });
+
+  // BUG 2: attr.product_uuid's stored value_text is a per-farm product UUID
+  // that is never a model.vocabByCode entry (products are a separate
+  // registry, not catalog choices) -- it must resolve through catalog.products
+  // the same way the capture confirm screen does (BUG 1), not print raw.
+  it('resolves attr.product_uuid to the product name instead of the raw uuid', () => {
+    const catalogWithProduct: JournalCatalog = {
+      ...catalog,
+      vocab: [...catalog.vocab, row('attr.product_uuid', 'attribute', 'text')],
+      products: [{
+        product_uuid: 'product-1',
+        scope: 'farm',
+        owner_user_uuid: 'owner',
+        gateway_device_eui: 'gateway',
+        name: 'Copper Fungicide',
+        kind: 'plant_protection',
+        active: 1,
+        sync_version: 0,
+        created_at: timestamp,
+        deleted_at: null,
+        catalog_errors: [],
+      }],
+    };
+    mockDetail({ entries: [entry({
+      values: [{
+        group_index: 0,
+        attribute_code: 'attr.product_uuid',
+        value_status: 'observed',
+        value_num: null,
+        value_text: 'product-1',
+        unit_code: null,
+        entered_value_num: null,
+        entered_unit_code: null,
+      }],
+    })] });
+
+    renderPanel({ catalogOverride: catalogWithProduct });
+
+    expect(screen.getByText('Copper Fungicide')).toBeInTheDocument();
+    expect(screen.queryByText('product-1')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the unknown-product label when the product_uuid matches no catalog product', () => {
+    const catalogWithoutProduct: JournalCatalog = {
+      ...catalog,
+      vocab: [...catalog.vocab, row('attr.product_uuid', 'attribute', 'text')],
+    };
+    mockDetail({ entries: [entry({
+      values: [{
+        group_index: 0,
+        attribute_code: 'attr.product_uuid',
+        value_status: 'observed',
+        value_num: null,
+        value_text: 'unknown-product-uuid',
+        unit_code: null,
+        entered_value_num: null,
+        entered_unit_code: null,
+      }],
+    })] });
+
+    renderPanel({ catalogOverride: catalogWithoutProduct });
+
+    expect(screen.getByText('capture.tankMix.unknownProduct')).toBeInTheDocument();
+    expect(screen.queryByText('unknown-product-uuid')).not.toBeInTheDocument();
+  });
+
+  // NIT 9: an internal valve-expectation linkage id with no user-meaningful
+  // label and no friendly resolver -- omit it from the values list entirely
+  // rather than print its raw opaque id.
+  it('omits attr.actuation_expectation_id from the recorded values list', () => {
+    mockDetail({ entries: [entry({
+      values: [
+        {
+          group_index: 0,
+          attribute_code: 'attr.operator',
+          value_status: 'observed',
+          value_num: null,
+          value_text: 'Alex',
+          unit_code: null,
+          entered_value_num: null,
+          entered_unit_code: null,
+        },
+        {
+          group_index: 0,
+          attribute_code: 'attr.actuation_expectation_id',
+          value_status: 'observed',
+          value_num: null,
+          value_text: 'valve-expectation-abc123',
+          unit_code: null,
+          entered_value_num: null,
+          entered_unit_code: null,
+        },
+      ],
+    })] });
+
+    renderPanel();
+
+    expect(screen.getByText('Alex')).toBeInTheDocument();
+    expect(screen.queryByText('valve-expectation-abc123')).not.toBeInTheDocument();
+    expect(screen.queryByText('workspace.detail.values.empty')).not.toBeInTheDocument();
+  });
+
+  it('shows the empty-values state when the only recorded value is the omitted actuation_expectation_id', () => {
+    mockDetail({ entries: [entry({
+      values: [{
+        group_index: 0,
+        attribute_code: 'attr.actuation_expectation_id',
+        value_status: 'observed',
+        value_num: null,
+        value_text: 'valve-expectation-abc123',
+        unit_code: null,
+        entered_value_num: null,
+        entered_unit_code: null,
+      }],
+    })] });
+
+    renderPanel();
+
+    expect(screen.getByText('workspace.detail.values.empty')).toBeInTheDocument();
+  });
 });
 
 describe('DetailPanel — correction and void are blocked for draft and voided entries', () => {

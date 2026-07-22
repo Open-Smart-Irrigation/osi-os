@@ -26,6 +26,9 @@ export interface NutrientRepeaterProps {
   max?: number;
   step?: number;
   required?: boolean;
+  // POLISH 6: see NumberStepperProps.requiredAnyGroup -- same "choose one"
+  // distinction applied to a repeatable numeric field's own legend badge.
+  requiredAnyGroup?: boolean;
   error?: string | null;
   errors?: Record<number, string | null | undefined>;
 }
@@ -90,6 +93,7 @@ export const NutrientRepeater: React.FC<NutrientRepeaterProps> = ({
   max,
   step,
   required = false,
+  requiredAnyGroup = false,
   error,
   errors = {},
 }) => {
@@ -101,6 +105,13 @@ export const NutrientRepeater: React.FC<NutrientRepeaterProps> = ({
     (highest, row) => Math.max(highest, row.group_index ?? 0),
     -1,
   ) + 1;
+  // BUG 4 / POLISH 6: mirrors NumberStepper's own statusLabel/statusHidden
+  // (see its module comment) so a required (or required_any) repeatable
+  // numeric field shows the same badge every other field type already does.
+  const statusLabel = required
+    ? t('capture.form.required')
+    : requiredAnyGroup ? t('capture.form.requiredChooseOne') : t('capture.form.optional');
+  const statusHidden = required || requiredAnyGroup ? undefined : true;
 
   return (
     <fieldset
@@ -109,7 +120,12 @@ export const NutrientRepeater: React.FC<NutrientRepeaterProps> = ({
       aria-describedby={error ? errorId : undefined}
       className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4"
     >
-      <legend className="px-1 text-sm font-bold text-[var(--text)]">{label}</legend>
+      <legend className="flex w-full items-center justify-between gap-3 px-1 text-sm font-bold text-[var(--text)]">
+        <span>{label}</span>
+        <span aria-hidden={statusHidden} className="text-xs font-semibold text-[var(--text-secondary)]">
+          {statusLabel}
+        </span>
+      </legend>
 
       {facts.length > 0 && (
         <aside

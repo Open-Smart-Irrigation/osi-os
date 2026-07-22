@@ -900,8 +900,11 @@ describe('EntryForm', () => {
       );
 
       // The required field renders immediately, under the open "Key values" group.
+      // (BUG 4: a required number field now also carries the Required badge
+      // in its accessible name, so this is a substring match rather than an
+      // exact one -- see the dedicated Required-badge tests below.)
       expect(screen.getByText('capture.form.keyValues')).toBeInTheDocument();
-      expect(screen.getByRole('textbox', { name: 'attr.amount' })).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: /^attr\.amount/ })).toBeInTheDocument();
 
       // The optional fields start tucked behind the closed "More detail" disclosure.
       const toggle = screen.getByRole('button', { name: 'capture.form.moreDetail' });
@@ -932,8 +935,12 @@ describe('EntryForm', () => {
       // Both required_any members are effectively-required until one of them
       // has a value, so neither may ever be hidden behind the collapsed
       // disclosure — there is nothing left to put in "More detail" at all.
-      expect(screen.getByRole('textbox', { name: 'Text field' })).toBeInTheDocument();
-      expect(screen.getByRole('group', { name: 'Boolean field' })).toBeInTheDocument();
+      // (POLISH 6: a required_any member's badge now reads "choose one"
+      // rather than "Optional" and is exposed in the accessible name just
+      // like a plain required field's badge already was, so this is a
+      // substring match — see the dedicated required_any badge test.)
+      expect(screen.getByRole('textbox', { name: /^Text field/ })).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: /^Boolean field/ })).toBeInTheDocument();
       expect(screen.queryByText('capture.form.moreDetail')).not.toBeInTheDocument();
     });
 
@@ -950,7 +957,7 @@ describe('EntryForm', () => {
 
       expect(screen.queryByText('capture.form.keyValues')).not.toBeInTheDocument();
       expect(screen.queryByText('capture.form.moreDetail')).not.toBeInTheDocument();
-      expect(screen.getByRole('textbox', { name: 'attr.amount' })).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: /^attr\.amount/ })).toBeInTheDocument();
       expect(screen.getByRole('textbox', { name: 'Text field' })).toBeInTheDocument();
     });
   });

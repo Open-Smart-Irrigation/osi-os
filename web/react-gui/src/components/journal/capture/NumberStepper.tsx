@@ -68,7 +68,16 @@ export interface NumberStepperProps {
   unitLabel?: string;
   error?: string | null;
   required?: boolean;
+  // POLISH 6: true when this field is a required_any group member (not
+  // unconditionally required itself, but effectively required until one
+  // family member has a value) -- fed by the caller, which alone knows the
+  // field's required_any_groups membership.
+  requiredAnyGroup?: boolean;
   disabled?: boolean;
+  // POLISH 5: a small, unobtrusive supplementary line under the control
+  // (e.g. "defaulted from the plot area, edit if needed"). Purely
+  // presentational -- NumberStepper has no opinion on when this applies.
+  hint?: string | null;
 }
 
 export const NumberStepper: React.FC<NumberStepperProps> = ({
@@ -84,7 +93,9 @@ export const NumberStepper: React.FC<NumberStepperProps> = ({
   unitLabel,
   error: externalError,
   required = false,
+  requiredAnyGroup = false,
   disabled = false,
+  hint,
 }) => {
   const { t, i18n } = useTranslation('journal');
   const locale = localeOverride || i18n.resolvedLanguage || i18n.language;
@@ -143,10 +154,26 @@ export const NumberStepper: React.FC<NumberStepperProps> = ({
   const atMin = useMemo(() => value != null && min != null && value <= min, [min, value]);
   const atMax = useMemo(() => value != null && max != null && value >= max, [max, value]);
 
+  // BUG 4: EntryForm's choice/boolean/text/product branches already render a
+  // Required/Optional badge beside the field label; the number branches
+  // (this component and NutrientRepeater) delegated to here and rendered
+  // only the bare label, so a required number field showed no such signal.
+  // Mirrors EntryForm's own statusLabel/aria-hidden pattern exactly (POLISH
+  // 6: a required_any member gets its own "choose one" indicator instead of
+  // "Optional", since it is effectively required until one family member
+  // has a value).
+  const statusLabel = required
+    ? t('capture.form.required')
+    : requiredAnyGroup ? t('capture.form.requiredChooseOne') : t('capture.form.optional');
+  const statusHidden = required || requiredAnyGroup ? undefined : true;
+
   return (
     <div className="space-y-2">
-      <label htmlFor={id} className="block text-sm font-bold text-[var(--text)]">
-        {label}
+      <label htmlFor={id} className="flex items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
+        <span>{label}</span>
+        <span aria-hidden={statusHidden} className="text-xs font-semibold text-[var(--text-secondary)]">
+          {statusLabel}
+        </span>
       </label>
       <div className="flex w-full items-stretch overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] focus-within:border-[var(--focus)]">
         <button
@@ -165,6 +192,7 @@ export const NumberStepper: React.FC<NumberStepperProps> = ({
             inputMode="decimal"
             value={raw}
             required={required}
+            aria-required={required}
             disabled={disabled}
             aria-invalid={Boolean(error)}
             aria-describedby={error ? errorId : undefined}
@@ -196,6 +224,9 @@ export const NumberStepper: React.FC<NumberStepperProps> = ({
         <p id={errorId} role="alert" className="text-sm font-semibold text-[var(--error-text)]">
           {error}
         </p>
+      )}
+      {!error && hint && (
+        <p className="text-xs font-semibold text-[var(--text-secondary)]">{hint}</p>
       )}
     </div>
   );

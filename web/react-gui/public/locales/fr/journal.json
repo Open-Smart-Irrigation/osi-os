@@ -319,6 +319,7 @@
       "layout": "Layout",
       "required": "Obligatoire",
       "optional": "Facultatif",
+      "requiredChooseOne": "Obligatoire — choisissez-en un",
       "select": "Sélectionner une option",
       "value": "Valeur",
       "unit": "Unité",
@@ -334,7 +335,8 @@
       "booleanNo": "Non",
       "plotContext": "Contexte de la parcelle",
       "keyValues": "Valeurs clés",
-      "moreDetail": "Plus de détails"
+      "moreDetail": "Plus de détails",
+      "treatedAreaDefaulted": "Pré-rempli avec la surface de la parcelle — modifiez si nécessaire"
     },
     "validation": {
       "required": "Complétez ce champ",
@@ -345,6 +347,8 @@
       "crossBasis": "Cette unité utilise une base de mesure différente",
       "invalidDependency": "Les options sélectionnées ne forment pas une combinaison valide",
       "invalidDefinition": "Ce formulaire de journal n'est pas disponible",
+      "invalidDefinitionDetail": "Ce catalogue d'activités n'a pas pu être chargé correctement. Réessayez, ou fermez et rouvrez ce formulaire.",
+      "catalogEmpty": "Aucune activité n'est encore configurée pour la saisie.",
       "layoutTemplateMismatch": "Ce niveau de détail n'est pas disponible pour le layout sélectionné",
       "cropRequired": "Saisissez une culture, car aucune saison active ne couvre cette parcelle",
       "invalidLocalTime": "Saisissez une date et une heure locales valides",

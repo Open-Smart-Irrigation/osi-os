@@ -319,6 +319,7 @@
       "layout": "Layout",
       "required": "Obrigatório",
       "optional": "Opcional",
+      "requiredChooseOne": "Obrigatório — escolha um",
       "select": "Selecionar uma opção",
       "value": "Valor",
       "unit": "Unidade",
@@ -334,7 +335,8 @@
       "booleanNo": "Não",
       "plotContext": "Contexto da parcela",
       "keyValues": "Valores-chave",
-      "moreDetail": "Mais detalhes"
+      "moreDetail": "Mais detalhes",
+      "treatedAreaDefaulted": "Preenchido com a área da parcela — edite se necessário"
     },
     "validation": {
       "required": "Preencha este campo",
@@ -345,6 +347,8 @@
       "crossBasis": "Esta unidade utiliza uma base de medição diferente",
       "invalidDependency": "As opções selecionadas não formam uma combinação válida",
       "invalidDefinition": "Este formulário do diário não está disponível",
+      "invalidDefinitionDetail": "Este catálogo de atividades não pôde ser carregado corretamente. Tente novamente, ou feche e reabra este formulário.",
+      "catalogEmpty": "Ainda não há atividades configuradas para o registo.",
       "layoutTemplateMismatch": "Este nível de detalhe não está disponível para o layout selecionado",
       "cropRequired": "Indique uma cultura porque nenhuma época ativa cobre esta parcela",
       "invalidLocalTime": "Introduza uma data e hora locais válidas",
