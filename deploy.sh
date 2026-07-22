@@ -374,6 +374,42 @@ run_schema_migration() {
     backup_dir="${MIGRATE_BACKUP_DIR:-/data/backups/migrate}"
     mkdir -p "$backup_dir"
 
+    # Best-effort self-heal prune BEFORE the disk gate below: an already-full
+    # machine may have accumulated .premigrate- backups from prior deploys.
+    # --prune-only touches only backup FILES in backup_dir, never the DB, so
+    # it is safe to run with Node-RED still up. A prune failure must not
+    # block deploy.
+    node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --prune-only || true
+
+    # Disk preflight (fail-fast, leaves Node-RED running): refuse to start a
+    # migration that cannot safely complete (fresh backup + in-place apply)
+    # for lack of free space. BusyBox has no `stat`; use O(1) `ls -ln` for
+    # size instead of `wc -c`.
+    db_bytes=$(ls -ln "$DB_PATH" | awk '{print $5}')
+    if [ -e "$DB_PATH-wal" ]; then
+        wal_bytes=$(ls -ln "$DB_PATH-wal" | awk '{print $5}')
+        db_bytes=$((db_bytes + wal_bytes))
+    fi
+    # BusyBox `df` wraps long device names onto their own line, pushing every
+    # field right by one; Available is the 3rd-from-last field, NOT $4 (same
+    # wrap-safe idiom as the mount-point comparison at deploy.sh:82-83).
+    avail_kb=$(df -k "$backup_dir" | tail -1 | awk '{print $(NF-2)}')
+    db_kb=$(( (db_bytes + 1023) / 1024 ))
+    margin_mb="${MIGRATE_MIN_FREE_MARGIN_MB:-128}"
+    req_kb=$(( 2 * db_kb + margin_mb * 1024 ))
+    case "$avail_kb" in
+        ''|*[!0-9]*)
+            echo "WARNING: could not parse available disk space for $backup_dir; proceeding without a disk preflight gate" >&2
+            ;;
+        *)
+            if [ "$avail_kb" -lt "$req_kb" ]; then
+                echo "ERROR: insufficient disk for a safe schema migration on $backup_dir: need ~${req_kb}KB, have ${avail_kb}KB" >&2
+                echo "Free space (prune old $backup_dir/*.premigrate-*, /data/db/backups/*, check DB growth/logs) and re-deploy" >&2
+                return 1
+            fi
+            ;;
+    esac
+
     node_red_restart_needed=1
 
     echo "--- Stop Node-RED for schema migration ---"
