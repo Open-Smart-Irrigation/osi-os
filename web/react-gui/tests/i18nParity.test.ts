@@ -27,6 +27,15 @@ function placeholders(s: string): string {
   return (s.match(/\{\{[^}]+\}\}/g) ?? []).sort().join(',');
 }
 
+function placeholderSet(s: string): Set<string> {
+  return new Set(s.match(/\{\{[^}]+\}\}/g) ?? []);
+}
+
+function isSubset<T>(a: Set<T>, b: Set<T>): boolean {
+  for (const x of a) if (!b.has(x)) return false;
+  return true;
+}
+
 const PLURAL_SUFFIX = /_(zero|one|two|few|many|other)$/;
 
 // Hardcoded source of truth; an agreement test below keeps it honest vs Intl.
@@ -127,12 +136,26 @@ for (const ns of NAMESPACES) {
       }
       for (const [base, suffixes] of forms) {
         const enOther = en[`${base}_other`] ?? '';
+        const enOtherTokens = placeholderSet(enOther);
         for (const suffix of suffixes) {
           const key = `${base}_${suffix}`;
-          assert.equal(
-            placeholders(translated[key]), placeholders(enOther),
-            `${locale}/${ns}.json "${key}" placeholder mismatch (vs en "${base}_other")`,
-          );
+          const value = translated[key] ?? '';
+          if (suffix === 'other') {
+            // The universal fallback form must carry exactly en's tokens.
+            assert.equal(
+              placeholders(value), placeholders(enOther),
+              `${locale}/${ns}.json "${key}" placeholder mismatch (vs en "${base}_other")`,
+            );
+          } else {
+            // Non-"other" CLDR categories may legitimately drop tokens en's fallback
+            // carries — e.g. Arabic's genuine zero/one/two forms often state the
+            // count grammatically instead of interpolating {{count}} — so only a
+            // subset is required; any token NOT in en's set (an invented/typoed
+            // placeholder like {{cont}}) is still caught.
+            const valueTokens = placeholderSet(value);
+            assert.ok(isSubset(valueTokens, enOtherTokens),
+              `${locale}/${ns}.json "${key}" placeholder set (${[...valueTokens].sort().join(',')}) is not a subset of en "${base}_other" (${[...enOtherTokens].sort().join(',')})`);
+          }
         }
       }
     }
@@ -141,14 +164,18 @@ for (const ns of NAMESPACES) {
 
 test('EXPECTED_PLURAL_CATEGORIES agrees with Intl.PluralRules', () => {
   for (const locale of LOCALES) {
-    const intl = new Set(new Intl.PluralRules(locale).resolvedOptions().pluralCategories);
+    const resolved = new Intl.PluralRules(locale).resolvedOptions();
+    const intl: Set<string> = new Set(resolved.pluralCategories);
     const expected = EXPECTED_PLURAL_CATEGORIES[locale];
 
     // Every category we claim to support must be one Intl actually recognizes —
     // an invented category here would mean a suffix nothing can ever select.
     for (const category of expected) {
       assert.ok(intl.has(category),
-        `${locale}: EXPECTED_PLURAL_CATEGORIES claims "${category}" but Intl.PluralRules does not recognize it for this locale`);
+        `${locale}: EXPECTED_PLURAL_CATEGORIES claims "${category}" but Intl.PluralRules does not recognize it for this locale ` +
+        `(Intl resolved "${locale}" -> "${resolved.locale}"; a small-ICU Node build silently resolves an ` +
+        `unsupported locale to "root" instead of throwing — if resolved.locale doesn't match "${locale}", ` +
+        `install full-ICU Node, don't edit EXPECTED_PLURAL_CATEGORIES)`);
     }
 
     // Every Intl category we do NOT claim must be explicitly named as omitted —
