@@ -79,6 +79,36 @@ test('deploy migration wiring stops writers, checkpoints WAL, baselines, and app
   assert.match(deploy, /SKIP: schema_migrations ledger already has rows/);
 });
 
+test('deploy migration wiring self-heal prunes and disk-preflights before stopping Node-RED', () => {
+  const backupDirIdx = indexOf('backup_dir="${MIGRATE_BACKUP_DIR:-/data/backups/migrate}"');
+  const mkdirIdx = deploy.indexOf('mkdir -p "$backup_dir"', backupDirIdx);
+  const pruneOnlyIdx = indexOf(
+    'node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --prune-only || true'
+  );
+  const dbBytesIdx = indexOf('db_bytes=$(ls -ln "$DB_PATH" | awk \'{print $5}\')');
+  const availKbIdx = indexOf('avail_kb=$(df -k "$backup_dir" | tail -1 | awk \'{print $(NF-2)}\')');
+  const reqKbIdx = indexOf('req_kb=$(( 2 * db_kb + margin_mb * 1024 ))');
+  const errorIdx = indexOf('ERROR: insufficient disk for a safe schema migration');
+  const restartFlagIdx = indexOf('node_red_restart_needed=1');
+  const stopIdx = indexOf('/etc/init.d/node-red stop');
+
+  assert.ok(mkdirIdx > 0 && backupDirIdx < mkdirIdx, 'backup_dir must be resolved before mkdir -p');
+  assert.ok(mkdirIdx < pruneOnlyIdx, 'self-heal prune-only runs after backup_dir exists');
+  assert.ok(pruneOnlyIdx < dbBytesIdx, 'self-heal prune runs before the disk preflight size check');
+  assert.ok(dbBytesIdx < availKbIdx, 'DB size read precedes available-space read');
+  assert.ok(availKbIdx < reqKbIdx, 'available-space read precedes the required-space threshold calc');
+  assert.ok(reqKbIdx < errorIdx, 'threshold calc precedes the fail-fast error message');
+  assert.ok(errorIdx < restartFlagIdx, 'disk preflight gate runs before node_red_restart_needed is set');
+  assert.ok(restartFlagIdx < stopIdx, 'disk preflight leaves Node-RED running: it precedes the stop call');
+
+  // BusyBox df wraps long device rows onto their own line, shifting every
+  // field right by one — Available must be read as the 3rd-from-last field,
+  // matching the wrap-safe idiom already used for the mount-point comparison.
+  assert.match(deploy, /awk '\{print \$\(NF-2\)\}'/);
+  // O(1) size via `ls -ln`, never `wc -c`.
+  assert.doesNotMatch(deploy, /wc -c.*DB_PATH/);
+});
+
 test('deploy migration wiring provisions sqlite3-cli before refusing', () => {
   const ensureIdx = indexOf('ensure_sqlite3_cli()');
   const installIdx = indexOf('opkg install sqlite3-cli');

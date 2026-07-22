@@ -138,3 +138,144 @@ test('refuses a missing backup-dir argument', async () => {
     /backup-dir/
   );
 });
+
+function writeStalePremigrateFiles(backupDir, dbBasename, stamps) {
+  fs.mkdirSync(backupDir, { recursive: true });
+  for (const s of stamps) {
+    fs.writeFileSync(path.join(backupDir, `${dbBasename}.premigrate-2020-01-${s}`), 'stale');
+  }
+}
+
+// Retention only depends on needsBackup + keep + directory state, not on which
+// migrations actually ran — so unlike the corpus-replay tests above (which
+// exercise the real fingerprint machinery and are inherently slow, spawning a
+// `sqlite3` subprocess per table/index per step), the retention tests use a
+// tiny synthetic 2-migration corpus: bootstrap the device against a `sub` dir
+// containing only the additive migration 0001, then hand runMigrateCli the
+// full 2-migration dir so 0002 (risk: data) is the one pending migration —
+// this makes needsBackup true cheaply, without replaying the real corpus.
+async function deviceWithPendingDataMigration(dir) {
+  const crypto = require('node:crypto');
+  const migDir = path.join(dir, 'mig');
+  fs.mkdirSync(migDir);
+  const baseline = '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT);\n';
+  const pending = '-- risk: data\nALTER TABLE t ADD COLUMN w TEXT;\n';
+  fs.writeFileSync(path.join(migDir, '0001__baseline.sql'), baseline);
+  fs.writeFileSync(path.join(migDir, '0002__addcol.sql'), pending);
+  const manifest = {
+    '0001__baseline.sql': crypto.createHash('sha256').update(baseline).digest('hex'),
+    '0002__addcol.sql': crypto.createHash('sha256').update(pending).digest('hex'),
+  };
+  fs.writeFileSync(path.join(migDir, 'CHECKSUMS.json'), JSON.stringify(manifest, null, 2) + '\n');
+
+  const sub = path.join(dir, 'sub');
+  fs.mkdirSync(sub);
+  fs.copyFileSync(path.join(migDir, '0001__baseline.sql'), path.join(sub, '0001__baseline.sql'));
+  fs.writeFileSync(
+    path.join(sub, 'CHECKSUMS.json'),
+    JSON.stringify({ '0001__baseline.sql': manifest['0001__baseline.sql'] }, null, 2) + '\n'
+  );
+
+  const db = path.join(dir, 'device.db');
+  await bootstrapFresh(cliRunner(db), { migrationsDir: sub, appVersion: 'test' });
+  return { db, migDir };
+}
+
+test('retention: destructive/data run prunes old .premigrate- backups to keep=N and never deletes the just-created one', async () => {
+  const dir = scratch();
+  const { db, migDir } = await deviceWithPendingDataMigration(dir);
+  const backupDir = path.join(dir, 'bak');
+  writeStalePremigrateFiles(backupDir, path.basename(db), ['01', '02', '03', '04', '05']);
+  const prevKeep = process.env.MIGRATE_BACKUP_KEEP;
+  process.env.MIGRATE_BACKUP_KEEP = '2';
+  try {
+    const res = await runMigrateCli({ dbPath: db, backupDir, migrationsDir: migDir, log: () => {} });
+    assert.deepEqual(res.applied, [2]);
+    const left = fs.readdirSync(backupDir)
+      .filter((f) => f.startsWith(`${path.basename(db)}.premigrate-`))
+      .sort();
+    assert.strictEqual(left.length, 2, 'only newest keep=2 survive');
+    assert.ok(left.includes(path.basename(res.offDeviceBackup)), 'the just-created backup is always kept');
+  } finally {
+    if (prevKeep === undefined) delete process.env.MIGRATE_BACKUP_KEEP;
+    else process.env.MIGRATE_BACKUP_KEEP = prevKeep;
+  }
+});
+
+test('retention: the just-created backup survives even with MIGRATE_BACKUP_KEEP=0 or garbage (hard floor 1)', async () => {
+  for (const badKeep of ['0', 'not-a-number', '-7']) {
+    const dir = scratch();
+    const { db, migDir } = await deviceWithPendingDataMigration(dir);
+    const backupDir = path.join(dir, 'bak');
+    writeStalePremigrateFiles(backupDir, path.basename(db), ['01', '02', '03']);
+    const prevKeep = process.env.MIGRATE_BACKUP_KEEP;
+    process.env.MIGRATE_BACKUP_KEEP = badKeep;
+    try {
+      const res = await runMigrateCli({ dbPath: db, backupDir, migrationsDir: migDir, log: () => {} });
+      assert.ok(fs.existsSync(res.offDeviceBackup), `just-created backup must survive MIGRATE_BACKUP_KEEP=${badKeep}`);
+    } finally {
+      if (prevKeep === undefined) delete process.env.MIGRATE_BACKUP_KEEP;
+      else process.env.MIGRATE_BACKUP_KEEP = prevKeep;
+    }
+  }
+});
+
+test('retention: runs on the !needsBackup (additive-only) path too, with no new backup created', async () => {
+  const dir = scratch();
+  const db = path.join(dir, 'device.db');
+  const migDir = path.join(dir, 'mig');
+  fs.mkdirSync(migDir);
+  const baseline = '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT);\n';
+  fs.writeFileSync(path.join(migDir, '0001__baseline.sql'), baseline);
+  fs.writeFileSync(
+    path.join(migDir, 'CHECKSUMS.json'),
+    JSON.stringify({
+      '0001__baseline.sql': require('node:crypto').createHash('sha256').update(baseline).digest('hex'),
+    }, null, 2) + '\n'
+  );
+  await bootstrapFresh(cliRunner(db), { migrationsDir: migDir, appVersion: 'test' });
+  const backupDir = path.join(dir, 'bak');
+  writeStalePremigrateFiles(backupDir, path.basename(db), ['01', '02', '03', '04', '05']);
+  const prevKeep = process.env.MIGRATE_BACKUP_KEEP;
+  process.env.MIGRATE_BACKUP_KEEP = '2';
+  try {
+    const res = await runMigrateCli({ dbPath: db, backupDir, migrationsDir: migDir, log: () => {} });
+    assert.deepEqual(res.applied, [], 'device already at head; nothing pending');
+    assert.equal(res.offDeviceBackup, null, 'additive-only run creates no persistent backup');
+    const left = fs.readdirSync(backupDir)
+      .filter((f) => f.startsWith(`${path.basename(db)}.premigrate-`))
+      .sort();
+    assert.strictEqual(left.length, 2, 'the pre-existing pile is trimmed to keep=2 even with no new backup');
+  } finally {
+    if (prevKeep === undefined) delete process.env.MIGRATE_BACKUP_KEEP;
+    else process.env.MIGRATE_BACKUP_KEEP = prevKeep;
+  }
+});
+
+test('--prune-only prunes the .premigrate- pile and does NOT back up or apply pending migrations', async () => {
+  const dir = scratch();
+  const { db, migDir } = await deviceWithPendingDataMigration(dir);
+  const before = fs.readFileSync(db);
+  const backupDir = path.join(dir, 'bak');
+  writeStalePremigrateFiles(backupDir, path.basename(db), ['01', '02', '03', '04', '05']);
+  const prevKeep = process.env.MIGRATE_BACKUP_KEEP;
+  process.env.MIGRATE_BACKUP_KEEP = '2';
+  try {
+    const res = await runMigrateCli({
+      dbPath: db, backupDir, migrationsDir: migDir, log: () => {}, pruneOnly: true,
+    });
+    assert.ok(res.pruned, 'prune-only reports it pruned');
+    assert.deepEqual(res.applied, undefined, 'prune-only never applies migrations');
+    assert.ok(before.equals(fs.readFileSync(db)), 'prune-only must not touch the DB at all');
+    const left = fs.readdirSync(backupDir)
+      .filter((f) => f.startsWith(`${path.basename(db)}.premigrate-`))
+      .sort();
+    assert.strictEqual(left.length, 2, 'prune-only trims to keep=2');
+    // Confirm nothing was actually applied: migration 0002 is still pending.
+    const headCheck = await verifyHead(cliRunner(db), { migrationsDir: migDir });
+    assert.equal(headCheck.ok, false, 'device must still be behind head after --prune-only');
+  } finally {
+    if (prevKeep === undefined) delete process.env.MIGRATE_BACKUP_KEEP;
+    else process.env.MIGRATE_BACKUP_KEEP = prevKeep;
+  }
+});
