@@ -1,20 +1,26 @@
 # AgroLink GUI translation — review pack
 
-The AgroLink GUI is fully translated into all six non-English locales
-(`de-CH`, `fr`, `it`, `es`, `pt`, `lg`). This pack is for native/domain review.
+The AgroLink GUI is fully translated as of the original snapshot into all six non-English
+locales (`de-CH`, `fr`, `it`, `es`, `pt`, `lg`); see the caveat below for rows added since.
+This pack is for native/domain review.
 
 ## What's here
 
 - **`terms-<locale>.csv`** — every translated string for one locale, one file per
   language (1,325 strings each — regenerate to keep this in sync). Columns: `namespace, key, english, <locale>,
   shared_with_english`. Give each reviewer the CSV for their language; they can add a
-  correction column and return it. `shared_with_english = yes` marks strings deliberately
-  left identical to English (proper nouns like *OSI Server* / *AgroLink*, units like *kPa* /
-  *pF*, acronyms like *RSSI* / *CPU*, and international loanwords) — those are intentional,
-  not gaps.
+  correction column and return it. `shared_with_english = yes` marks strings byte-identical
+  to English (typically brand names, units, acronyms, and international loanwords, e.g.
+  *OSI Server* / *AgroLink*, *kPa* / *pF*, *RSSI* / *CPU*) — those are intentional, not gaps.
 - **`priority-terms.md`** — the subset the machine translators flagged as coined or
   uncertain, with no prior in-repo precedent. This is where review effort pays off most; the
   bulk of the CSV is routine UI copy.
+
+**Provenance caveat:** 182 of the 1,325 rows postdate the 2026-07-21 native-speaker review
+(post-snapshot growth, mostly `journal.*` features including `tankMix`, plus
+`settings.journal*` and `common.restart.*`) and have had **no native review pass yet**. The
+2026-07 repair branch fixed the 483 review findings raised against the original 1,140-row
+snapshot; the 182 newer rows were not in scope for that review.
 
 ## How the translations were produced
 

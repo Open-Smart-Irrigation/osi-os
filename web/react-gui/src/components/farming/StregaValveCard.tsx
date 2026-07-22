@@ -227,10 +227,7 @@ const ConfigPanel: React.FC<{
         tamperDisabled,
       });
       setInfo(t('stregaValve.intervalPending', {
-        defaultValue: 'Interval change requested for {{closed}} min closed / {{opened}} min opened.',
         count: closedMinutes,
-        closed: closedMinutes,
-        opened: openedMinutes,
       }));
       onUpdate();
     } catch (err: any) {
