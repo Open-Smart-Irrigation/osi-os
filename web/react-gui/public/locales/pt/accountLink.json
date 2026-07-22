@@ -33,7 +33,7 @@
   },
   "unlink": {
     "button": "Desconectar do OSI Server",
-    "confirm": "Tem a certeza? Após desligar, deve usar a sua palavra-passe local original.",
+    "confirm": "Tem a certeza? Após desconectar, deve usar a sua palavra-passe local original.",
     "success": "Desconectado do OSI Server"
   },
   "errors": {
