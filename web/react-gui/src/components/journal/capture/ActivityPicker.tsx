@@ -128,7 +128,21 @@ export function ActivityPicker({
     labelForCode(leaf.activity_code),
     ...leaf.dependent_selections.map(({ value }) => labelForCode(value)),
   ];
-  const leafLabel = (leaf: ActivityLeafSelection): string => leafLabels(leaf).join(' / ');
+  // Fix 1 (maintainer report, catalog v9 detailed activity vocabulary): a
+  // leaf's own activity/operation/device chain (leafLabels above) is still
+  // the full descriptive context, used for the accessible name so screen
+  // reader users keep their orientation ("which activity is this operation
+  // under?"). But the *visible* tile text should show only the operation --
+  // some activity labels already contain a literal "/" (e.g. "Tillage /
+  // soil work"), so the old `activity / operation` join read as three
+  // levels for what the farmer experiences as one pick ("Seedbed
+  // Preparation"). A bare activity leaf (no dependent selection) has no
+  // operation to show, so it keeps its own activity label.
+  const leafFullLabel = (leaf: ActivityLeafSelection): string => leafLabels(leaf).join(' / ');
+  const leafDisplayLabel = (leaf: ActivityLeafSelection): string => {
+    const [operation] = leaf.dependent_selections;
+    return operation ? labelForCode(operation.value) : labelForCode(leaf.activity_code);
+  };
   const leafSearchText = (leaf: ActivityLeafSelection): string => {
     const codes = [
       leaf.activity_code,
@@ -178,7 +192,7 @@ export function ActivityPicker({
     <button
       key={leafKey(leaf)}
       type="button"
-      aria-label={leafLabel(leaf)}
+      aria-label={leafFullLabel(leaf)}
       onClick={() => onPick(leaf)}
       className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2"
     >
@@ -188,7 +202,7 @@ export function ActivityPicker({
       >
         {activityIcon(leaf)}
       </span>
-      <span className="min-w-0 leading-tight">{leafLabel(leaf)}</span>
+      <span className="min-w-0 leading-tight">{leafDisplayLabel(leaf)}</span>
     </button>
   );
 

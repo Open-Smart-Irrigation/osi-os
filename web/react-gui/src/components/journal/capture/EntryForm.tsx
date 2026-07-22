@@ -367,20 +367,42 @@ function productFirst(states: JournalFieldState[]): JournalFieldState[] {
     .map(({ state }) => state);
 }
 
+// Fix 2 (maintainer report, detailed activity vocabulary catalog v9): the
+// choice fields the ActivityPicker's dependency chain restricts per
+// activity (e.g. attr.agroscope.operation restricted by activity_code,
+// attr.agroscope.device restricted in turn by the chosen operation) are
+// what confirm what the farmer just picked -- on an activity where the
+// device is optional, hiding them behind "More detail" left that
+// confirmation invisible until the Review step. Generic over the layout's
+// option_dependencies (any choice-restriction target) rather than a
+// hardcoded attr.agroscope.* allowlist, so any future picker-scoped
+// dependency chain gets the same treatment for free. Unit-only
+// restrictions (e.g. a numeric field's allowed units narrowing with the
+// chosen device) are not picker-confirmation fields and stay out of scope.
+function activityDependencyTargets(layout: JournalLayoutDefinition): ReadonlySet<string> {
+  return new Set(
+    layout.option_dependencies
+      .filter((dependency) => 'choices' in dependency.restrict)
+      .map((dependency) => dependency.restrict.attribute_code),
+  );
+}
+
 // Slice E (R5, E3): a field is "key" — always rendered in the open group,
 // never eligible for the collapsible "More detail" group — when it is
-// unconditionally required OR a member of any required_any family. The
-// latter matters just as much as the former: a required_any field's own
-// `required` flag stays false (only one family member must have a value,
-// not every member), but until one of them does, validateEntryForm flags
-// every member as an error the user must be able to see and fix, so none of
-// them may be hidden behind a collapsed disclosure either. This is what
-// guarantees a required(-ish) field can never end up hidden while empty —
-// the grouping itself, not the disclosure's open/closed state, is what's
-// safe: a "key" field's group membership never depends on whether it
-// currently holds a value.
-function isKeyField(state: JournalFieldState): boolean {
-  return state.required || state.required_any_groups.length > 0;
+// unconditionally required, a member of any required_any family, or (Fix 2)
+// an activity-dependency choice target (see activityDependencyTargets
+// above). The required_any case matters just as much as plain required: a
+// required_any field's own `required` flag stays false (only one family
+// member must have a value, not every member), but until one of them does,
+// validateEntryForm flags every member as an error the user must be able to
+// see and fix, so none of them may be hidden behind a collapsed disclosure
+// either. This is what guarantees a required(-ish) field can never end up
+// hidden while empty — the grouping itself, not the disclosure's
+// open/closed state, is what's safe: a "key" field's group membership never
+// depends on whether it currently holds a value.
+function isKeyField(state: JournalFieldState, dependencyTargets: ReadonlySet<string>): boolean {
+  return state.required || state.required_any_groups.length > 0 ||
+    dependencyTargets.has(state.code);
 }
 
 // POLISH 6: a required_any member's own `required` flag stays false (only
@@ -430,13 +452,18 @@ export const EntryForm: React.FC<EntryFormProps> = ({
   // passes templateCode="full_record" (JournalCaptureFlow/DetailPanel/
   // DraftsQueue do; nothing else needs to).
   const groupOperationDetail = templateCode === 'full_record';
+  const dependencyTargets = useMemo(() => activityDependencyTargets(layout), [layout]);
   const keyStates = useMemo(
-    () => (groupOperationDetail ? visibleStates.filter(isKeyField) : visibleStates),
-    [groupOperationDetail, visibleStates],
+    () => (groupOperationDetail
+      ? visibleStates.filter((state) => isKeyField(state, dependencyTargets))
+      : visibleStates),
+    [dependencyTargets, groupOperationDetail, visibleStates],
   );
   const moreDetailStates = useMemo(
-    () => (groupOperationDetail ? visibleStates.filter((state) => !isKeyField(state)) : []),
-    [groupOperationDetail, visibleStates],
+    () => (groupOperationDetail
+      ? visibleStates.filter((state) => !isKeyField(state, dependencyTargets))
+      : []),
+    [dependencyTargets, groupOperationDetail, visibleStates],
   );
   const validation = validateEntryForm({
     model,

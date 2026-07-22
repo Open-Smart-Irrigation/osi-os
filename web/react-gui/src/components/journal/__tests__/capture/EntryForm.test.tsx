@@ -960,5 +960,46 @@ describe('EntryForm', () => {
       expect(screen.getByRole('textbox', { name: /^attr\.amount/ })).toBeInTheDocument();
       expect(screen.getByRole('textbox', { name: 'Text field' })).toBeInTheDocument();
     });
+
+    it('Fix 2: keeps activity-dependency choice fields (operation, device) in the open "Key values" group even when optional', () => {
+      render(
+        <ControlledForm
+          fieldStates={[
+            state('attr.agroscope.operation'),
+            state('attr.agroscope.device'),
+            state('attr.text'),
+            state('attr.amount_operation_depth'),
+          ]}
+          templateCode="full_record"
+          onResult={vi.fn()}
+        />,
+      );
+
+      // attr.agroscope.operation and attr.agroscope.device are choice
+      // targets of this layout's option_dependencies (operation restricted
+      // by activity_code, device restricted in turn by operation) -- the
+      // chosen operation/device are the primary thing to confirm, so they
+      // must render immediately under "Key values", never behind the
+      // collapsed "More detail" disclosure, even though neither carries
+      // required: true here.
+      expect(screen.getByText('capture.form.keyValues')).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Operation' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Device' })).toBeInTheDocument();
+
+      // A plain optional field that is not an activity-dependency target
+      // still starts tucked behind the collapsed disclosure.
+      expect(screen.queryByRole('textbox', { name: 'Text field' })).not.toBeInTheDocument();
+
+      // A UNIT-only restriction target must NOT be promoted: attr.amount_operation_depth
+      // is restricted by this layout only in its allowed *units* (device plough ->
+      // unit.cm_operation_depth), which narrows a unit choice rather than being a
+      // "pick" the farmer confirms. Only `choices` restriction targets are key fields,
+      // so it stays behind "More detail" like any other optional field.
+      expect(screen.queryByText('attr.amount_operation_depth')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
+      expect(screen.getByRole('textbox', { name: 'Text field' })).toBeInTheDocument();
+      expect(screen.getByText('attr.amount_operation_depth')).toBeInTheDocument();
+    });
   });
 });

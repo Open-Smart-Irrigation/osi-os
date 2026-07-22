@@ -169,14 +169,18 @@ describe('ActivityPicker', () => {
     const plot = screen.getByRole('region', { name: 'Recent on this plot' });
     const season = screen.getByRole('region', { name: 'Common this season' });
     const fallback = screen.getByRole('region', { name: 'All options' });
+    // A bare activity leaf (irrigation) shows its own activity label; a leaf
+    // carrying a dependent selection (spreadingLeaf) shows only the
+    // operation label ("Ausbringen"), not the "Düngung / Ausbringen /
+    // Breitstreuer" combined label -- Fix 1.
     expect(activityButtons(plot).map(({ textContent }) => textContent)).toEqual([
       expect.stringContaining('Bewässerung'),
-      expect.stringContaining('Düngung'),
+      expect.stringContaining('Ausbringen'),
     ]);
     expect(activityButtons(season)).toHaveLength(1);
     expect(activityButtons(season)[0]).toHaveTextContent('Ernte');
     expect(activityButtons(fallback).map(({ textContent }) => textContent)).toEqual([
-      expect.stringContaining('Düngung'),
+      expect.stringContaining('Injizieren'),
       expect.stringContaining('Aussaat'),
       expect.stringContaining('Probenahme'),
     ]);
@@ -233,19 +237,59 @@ describe('ActivityPicker', () => {
     expect(screen.getByText('Bewässerung')).toBeInTheDocument();
     expect(screen.queryByText('Ernte')).not.toBeInTheDocument();
 
+    // Search still matches the activity name ("Fertilization" is the
+    // activity both leaves fall under) even though the displayed leaf
+    // label no longer shows it (Fix 1) -- both operation labels appear,
+    // and the dropped activity label does not.
     fireEvent.change(search, { target: { value: 'Fertilization' } });
-    expect(screen.getAllByText(/Düngung/)).toHaveLength(2);
+    expect(screen.getByText('Ausbringen')).toBeInTheDocument();
+    expect(screen.getByText('Injizieren')).toBeInTheDocument();
+    expect(screen.queryByText(/Düngung/)).not.toBeInTheDocument();
 
+    // Search still matches the device name too, but the tile only ever
+    // displays the operation, never the device.
     fireEvent.change(search, { target: { value: 'Broadcast spreader' } });
-    expect(screen.getByText(/Breitstreuer/)).toBeInTheDocument();
-    expect(screen.queryByText(/Injektor/)).not.toBeInTheDocument();
+    expect(screen.getByText('Ausbringen')).toBeInTheDocument();
+    expect(screen.queryByText(/Breitstreuer/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Injizieren')).not.toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: 'agroscope device injector' } });
-    expect(screen.getByText(/Injektor/)).toBeInTheDocument();
+    expect(screen.getByText('Injizieren')).toBeInTheDocument();
+    expect(screen.queryByText(/Injektor/)).not.toBeInTheDocument();
 
     rerender(<ActivityPicker {...baseProps} layoutFallback={[leaf('irrigation')]} />);
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'spray' } });
     expect(screen.getByText('No matching activities')).toBeInTheDocument();
+  });
+
+  it('Fix 1: labels a leaf with a dependent selection using only the operation, and a bare activity leaf using the activity, while search still matches the activity name', () => {
+    render(
+      <ActivityPicker
+        {...baseProps}
+        layoutFallback={[leaf('irrigation'), spreadingLeaf]}
+      />,
+    );
+
+    const fallback = screen.getByRole('region', { name: 'All options' });
+    // A bare activity leaf (no dependent selection) keeps its own activity
+    // label.
+    expect(within(fallback).getByText('Bewässerung')).toBeInTheDocument();
+    // A leaf carrying a dependent selection shows only the operation label,
+    // not the combined "activity / operation / device" label -- the
+    // maintainer's reported "Tillage / soil work / Seedbed Preparation"
+    // reading as three levels for what is really one pick.
+    expect(within(fallback).getByText('Ausbringen')).toBeInTheDocument();
+    expect(within(fallback).queryByText(/Düngung/)).not.toBeInTheDocument();
+
+    // The accessible name keeps the full activity/operation context for
+    // screen reader users even though the visible text is trimmed.
+    expect(within(fallback).getByRole('button', { name: /Düngung.*Ausbringen/ })).toBeInTheDocument();
+
+    // The activity name is still searchable even though it is no longer
+    // displayed on the tile.
+    const search = screen.getByRole('searchbox', { name: 'Search activities' });
+    fireEvent.change(search, { target: { value: 'Fertilization' } });
+    expect(screen.getByText('Ausbringen')).toBeInTheDocument();
   });
 
   it('uses locale-aware Turkish casing and preserves Cyrillic and CJK search text', () => {

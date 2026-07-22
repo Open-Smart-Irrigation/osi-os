@@ -140,6 +140,55 @@ body {
   object-position: left center;
 }
 
+/* Fix 3 (maintainer report, 2026-07-22): both rules above are desktop-tuned
+   and break below the project's `sm` breakpoint (640px, matching the
+   Tailwind `sm:` variants used elsewhere for mobile/desktop splits, e.g.
+   AppHeader's LIQUID_SIZING). The dashboard rule's fixed 3rem height gives
+   the 3508×118 asset an intrinsic width of ~1427px — on a 390px phone only
+   ~27% is visible. Below `sm`, scale the dashboard header's mark to the
+   available width instead (object-fit: contain semantics, no crop/negative
+   offset) so the full Balken is always visible there — proportionally
+   short (390px / 29.7 ≈ 13px), inherent to a ~29.7:1 banner. The dashboard
+   crown's wrapper (AppHeader.tsx) carries no side padding, so width: 100%
+   already reads as full-bleed edge-to-edge.
+
+   Maintainer follow-up (2026-07-22, same report): the dashboard's full-mark
+   thin strip is approved as-is on mobile — untouched below. But the login
+   crown applying the same "shrink to fit, show it all" treatment left the
+   wordmark itself only ~12-13px tall and effectively illegible, which
+   defeats the point of a login screen crown. Decision: on the login screen
+   only, keep a legible height and crop instead of shrinking — same
+   left-anchored crop shape as the desktop rule above, minus that rule's
+   119.33%/-19.33% overflow trick (tuned for the wide desktop card; on a
+   narrow mobile card it cropped through the wordmark instead of past it).
+   height: 2rem keeps the wordmark readable; width: 100% + object-fit: cover
+   + object-position: left center scales the mark so its left edge (red
+   block + "Agroscope") fills the card's px-6 content box and the crop
+   lands inside the tagline ("good food, healthy environment"), well after
+   "Agroscope" ends — verified against the source PNG (wordmark ends
+   ~x=785px of 3508px; tagline starts ~x=865px) and against the rendered
+   390px-viewport screenshot. The login crown keeps its existing px-6
+   wrapper (Login.tsx) unchanged — that inset is load-bearing, aligning the
+   wordmark with the form labels below it. */
+@media (max-width: 639px) {
+  .balken-crown {
+    height: auto;
+    width: 100%;
+    max-width: none;
+    margin-left: 0;
+    object-fit: contain;
+  }
+
+  .login-scene .balken-crown {
+    height: 2rem;
+    width: 100%;
+    max-width: none;
+    margin-left: 0;
+    object-fit: cover;
+    object-position: left center;
+  }
+}
+
 /* Brand typography: Noto Sans on brand surfaces (header, login card) — the
    Confederation's web substitute for the Frutiger used in the Balken. */
 .font-brand {
