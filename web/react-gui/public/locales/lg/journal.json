@@ -319,6 +319,7 @@
       "layout": "Layout",
       "required": "Kyetaagisa",
       "optional": "Si kyetaagisa",
+      "requiredChooseOne": "Kyetaagisa — londa emu",
       "select": "Londa ekintu",
       "value": "Omuwendo",
       "unit": "Ekipimo",
@@ -334,7 +335,8 @@
       "booleanNo": "Nedda",
       "plotContext": "Ebikwata ku musiri",
       "keyValues": "Emiwendo emikulu",
-      "moreDetail": "Ebikwata ebirala"
+      "moreDetail": "Ebikwata ebirala",
+      "treatedAreaDefaulted": "Kiweereddwa okuva ku bugazi bw'ekibanja — kyusa singa kyetaagisa"
     },
     "validation": {
       "required": "Jjuzaamu ekifo kino",
@@ -345,6 +347,8 @@
       "crossBasis": "Ekipimo kino kikozesa enkola endala ey'okupima",
       "invalidDependency": "Ebyolonze tebikwatagana bulungi",
       "invalidDefinition": "Fomu eno eya journal tekiriwo",
+      "invalidDefinitionDetail": "Katalogi w'ebikolwa tesobodde kutikkibwa bulungi. Ddamu ogezeeko, oba ggalawo era oddeyo oyanjuluze fomu eno.",
+      "catalogEmpty": "Tewali bikolwa bitegekeddwa kutwala byakati.",
       "layoutTemplateMismatch": "Obungi buno obw'ebikwata tebukolera ku layout gy'olonze",
       "cropRequired": "Yingiza ekirime kubanga tewali kiseera kikola ku musiri guno",
       "invalidLocalTime": "Yingiza ennaku n'ekiseera ebituufu eby'omu kitundu",

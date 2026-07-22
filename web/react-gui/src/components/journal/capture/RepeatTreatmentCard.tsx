@@ -88,6 +88,19 @@ function disclosedValue(
   return `${attributeLabel}${group}: ${String(raw)}${unitLabel ? ` ${unitLabel}` : ''}`;
 }
 
+// Mirrors InheritedCropBanner.tsx's cropCode -> label resolution: look up the
+// crop choice row in the catalog vocab and use its localized label, falling
+// back to the raw stored code only when the catalog has nothing for it.
+function cropDisplayLabel(
+  crop: string | null,
+  catalog: NonNullable<RepeatTreatmentCardProps['catalog']>,
+  locale: string,
+): string {
+  if (crop == null) return '';
+  const row = catalog.vocab.find((candidate) => candidate.code === crop);
+  return row ? catalogLabel(row, locale) : crop;
+}
+
 function sourceDateLabel(value: string, locale: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
@@ -157,7 +170,7 @@ export const RepeatTreatmentCard: React.FC<RepeatTreatmentCardProps> = ({
               <dt className="font-bold text-[var(--text-secondary)]">
                 {t('capture.carry.crop')}
               </dt>
-              <dd>{treatment.crop}</dd>
+              <dd>{cropDisplayLabel(treatment.crop, catalogData, locale)}</dd>
             </div>
           </dl>
           {treatment.values.length > 0 && (

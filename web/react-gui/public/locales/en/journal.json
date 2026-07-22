@@ -319,6 +319,7 @@
       "layout": "Layout",
       "required": "Required",
       "optional": "Optional",
+      "requiredChooseOne": "Required — choose one",
       "select": "Select an option",
       "value": "Value",
       "unit": "Unit",
@@ -334,7 +335,8 @@
       "booleanNo": "No",
       "plotContext": "Plot context",
       "keyValues": "Key values",
-      "moreDetail": "More detail"
+      "moreDetail": "More detail",
+      "treatedAreaDefaulted": "Defaulted from plot area — edit if needed"
     },
     "validation": {
       "required": "Complete this field",
@@ -345,6 +347,8 @@
       "crossBasis": "This unit uses a different measurement basis",
       "invalidDependency": "The selected options do not form a valid combination",
       "invalidDefinition": "This journal form is not available",
+      "invalidDefinitionDetail": "This activity catalog could not be loaded correctly. Try again, or close and reopen this form.",
+      "catalogEmpty": "No activities are set up for capture yet.",
       "layoutTemplateMismatch": "This detail level is not available for the selected layout",
       "cropRequired": "Enter a crop because no active season covers this plot",
       "invalidLocalTime": "Enter a valid local date and time",

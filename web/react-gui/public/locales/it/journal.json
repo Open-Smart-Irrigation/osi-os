@@ -319,6 +319,7 @@
       "layout": "Layout",
       "required": "Obbligatorio",
       "optional": "Facoltativo",
+      "requiredChooseOne": "Obbligatorio — scegline uno",
       "select": "Seleziona un'opzione",
       "value": "Valore",
       "unit": "Unità",
@@ -334,7 +335,8 @@
       "booleanNo": "No",
       "plotContext": "Contesto della particella",
       "keyValues": "Valori chiave",
-      "moreDetail": "Altri dettagli"
+      "moreDetail": "Altri dettagli",
+      "treatedAreaDefaulted": "Precompilato con la superficie della particella — modifica se necessario"
     },
     "validation": {
       "required": "Completa questo campo",
@@ -345,6 +347,8 @@
       "crossBasis": "Questa unità utilizza una base di misura diversa",
       "invalidDependency": "Le opzioni selezionate non formano una combinazione valida",
       "invalidDefinition": "Questo modulo del diario non è disponibile",
+      "invalidDefinitionDetail": "Questo catalogo delle attività non è stato caricato correttamente. Riprova, oppure chiudi e riapri questo modulo.",
+      "catalogEmpty": "Non è ancora configurata alcuna attività per la registrazione.",
       "layoutTemplateMismatch": "Questo livello di dettaglio non è disponibile per il layout selezionato",
       "cropRequired": "Inserisci una coltura perché nessuna stagione attiva copre questa particella",
       "invalidLocalTime": "Inserisci una data e un'ora locali valide",

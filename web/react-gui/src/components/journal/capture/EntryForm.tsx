@@ -49,6 +49,12 @@ export interface EntryFormProps {
   // exact flat list it always has — passing this prop is opt-in, so existing
   // callers/tests are unaffected until they start passing 'full_record'.
   templateCode?: string;
+  // POLISH 5 (treated_area prefill signal): an optional attribute_code ->
+  // hint-text map for a small, unobtrusive supplementary line under a
+  // field's control (e.g. "this number was defaulted from the plot area").
+  // Business-logic-free here -- EntryForm has no idea which attribute this
+  // is "for" or why; the caller decides both.
+  fieldHints?: Readonly<Record<string, string>>;
 }
 
 export interface EntryFormValidationResult {
@@ -377,6 +383,18 @@ function isKeyField(state: JournalFieldState): boolean {
   return state.required || state.required_any_groups.length > 0;
 }
 
+// POLISH 6: a required_any member's own `required` flag stays false (only
+// one family member must have a value, not every member) -- but until one of
+// them does, validateEntryForm flags every member as an error the user must
+// fix, exactly like a plain required field. Labelling it "Optional" (the old
+// binary required/optional badge) actively misleads the user, so a
+// required_any member gets its own distinct "choose one" indicator instead.
+function fieldStatusLabel(state: JournalFieldState, t: EntryFormTranslate): string {
+  if (state.required) return t('capture.form.required');
+  if (state.required_any_groups.length > 0) return t('capture.form.requiredChooseOne');
+  return t('capture.form.optional');
+}
+
 export const EntryForm: React.FC<EntryFormProps> = ({
   model,
   layout,
@@ -388,6 +406,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
   locale: localeOverride,
   showValidation = false,
   templateCode,
+  fieldHints,
 }) => {
   const { t, i18n } = useTranslation('journal');
   const locale = localeOverride || i18n.resolvedLanguage || i18n.language;
@@ -485,7 +504,14 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     const rows = fieldValues(values, state.code);
     const existing = rows[0];
     const label = catalogLabel(attribute, locale);
-    const statusLabel = state.required ? t('capture.form.required') : t('capture.form.optional');
+    const requiredAnyGroup = state.required_any_groups.length > 0;
+    const statusLabel = fieldStatusLabel(state, t);
+    // POLISH 6: a required_any member is just as "effectively required" as a
+    // plain required field until one family member has a value, so its
+    // status badge is exposed to the accessible name the same way a
+    // required field's already is (never hidden purely because the raw
+    // `required` flag itself is false).
+    const statusHidden = state.required || requiredAnyGroup ? undefined : true;
     const fieldError = errorFor(state.code);
     const fieldErrorId = `${state.code}-error`;
 
@@ -499,7 +525,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
           <label htmlFor={state.code} className="flex items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
             <span>{t('capture.form.product')}</span>
             <span
-              aria-hidden={state.required ? undefined : true}
+              aria-hidden={statusHidden}
               className="text-xs font-semibold text-[var(--text-secondary)]"
             >
               {statusLabel}
@@ -572,6 +598,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
             max={constraints.max}
             step={constraints.step}
             required={state.required}
+            requiredAnyGroup={requiredAnyGroup}
             error={errorFor(state.code)}
             errors={repeatErrors}
             onValidityChange={(groupIndex, valid, validationError) => {
@@ -609,8 +636,10 @@ export const EntryForm: React.FC<EntryFormProps> = ({
           max={constraints.max}
           step={constraints.step}
           required={state.required}
+          requiredAnyGroup={requiredAnyGroup}
           unitLabel={unitCodes.length === 1 ? selectedUnitLabel : undefined}
           error={numberError}
+          hint={fieldHints?.[state.code]}
           onValidityChange={(valid, validationError) => {
             const nextErrors = new Map(numberInputErrors);
             if (valid) nextErrors.delete(state.code);
@@ -690,7 +719,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
           <label htmlFor={state.code} className="flex items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
             <span>{label}</span>
             <span
-              aria-hidden={state.required ? undefined : true}
+              aria-hidden={statusHidden}
               className="text-xs font-semibold text-[var(--text-secondary)]"
             >
               {statusLabel}
@@ -739,7 +768,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
           <legend className="flex w-full items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
             <span>{label}</span>
             <span
-              aria-hidden={state.required ? undefined : true}
+              aria-hidden={statusHidden}
               className="text-xs font-semibold text-[var(--text-secondary)]"
             >
               {statusLabel}
@@ -785,7 +814,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         <label htmlFor={state.code} className="flex items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">
           <span>{label}</span>
           <span
-            aria-hidden={state.required ? undefined : true}
+            aria-hidden={statusHidden}
             className="text-xs font-semibold text-[var(--text-secondary)]"
           >
             {statusLabel}

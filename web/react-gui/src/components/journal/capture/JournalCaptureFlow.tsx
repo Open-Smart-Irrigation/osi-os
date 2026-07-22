@@ -112,6 +112,13 @@ export interface JournalCaptureFlowProps {
   onClose: () => void;
   onOpenExisting: (entryUuid: string) => void;
   onSaved: (receipt: JournalSavedReceipt) => void | Promise<void>;
+  // POLISH 7: optional re-fetch hook for the hard-failure catalog state
+  // below (a genuine buildCatalogModel failure, not a normal loading state --
+  // the caller already gates mounting this component on its own catalog
+  // loading/error states, see JournalPage.tsx). Omitted, the failure state
+  // still offers a way out via the always-present `onClose`; when the caller
+  // wires its own catalog retry, a retry action is offered too.
+  onRetryCatalog?: () => void;
 }
 
 export type JournalSavedReceipt = EntryFinalMutationReceipt | BatchMutationReceipt;
@@ -159,6 +166,10 @@ const TANK_MIX_PRODUCT_FIELD_CODES = [
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--card)]';
 const EMPTY_NUMBER_INPUT_ERRORS: ReadonlyMap<string, string> = new Map();
+// NIT 9: an internal valve-expectation linkage id (a plain `text` attribute)
+// with no friendly resolver and no user-meaningful label -- never render its
+// raw opaque id on the confirm screen (mirrors DetailPanel's own omission).
+const OMITTED_CONFIRM_VALUE_CODE = 'attr.actuation_expectation_id';
 
 function localDefault(timezone: string, fallbackTimezone: string): string {
   let formatter: Intl.DateTimeFormat;
@@ -361,7 +372,18 @@ function displayValue(
   model: JournalCaptureCatalogModel,
   locale: string,
   booleanLabels: { yes: string; no: string },
+  products: readonly Pick<JournalProductRow, 'product_uuid' | 'name'>[],
+  unknownProductLabel: string,
 ): string {
+  // BUG 1: attr.product_uuid's value is a per-farm product UUID that is
+  // never a model.vocabByCode entry (products are a separate registry, not
+  // catalog choices), so it fell through every branch below and printed the
+  // raw UUID. Resolve it via the products registry first, mirroring
+  // tankMixProductLabel's own product_uuid -> name resolution.
+  if (value.attribute_code === 'attr.product_uuid' && typeof value.value === 'string' && value.value) {
+    return products.find((product) => product.product_uuid === value.value)?.name
+      ?? unknownProductLabel;
+  }
   const attribute = model.vocabByCode.get(value.attribute_code);
   if (value.entered_value_num != null) return attribute?.value_type === 'number'
     ? localizedNumber(value.entered_value_num, locale) : String(value.entered_value_num);
@@ -394,6 +416,17 @@ function occurrenceLabel(value: string, timezone: string, locale: string): strin
   return new Intl.DateTimeFormat(locale, {
     dateStyle: 'medium', timeStyle: 'short', timeZone: timezone,
   }).format(date);
+}
+
+// NIT 10: the batch-duplicate list already shows each candidate's occurrence
+// date + activity (the human disambiguator) right beside this -- entry_uuid
+// itself only needs to still read as a distinct, human-scannable tag for the
+// rare case where two candidates in the same group land on the same
+// occurrence label (e.g. rounded to the same displayed minute). A full raw
+// UUID added nothing there; the last 8 characters are still enough to tell
+// candidates apart without dumping an opaque id onto the screen.
+function shortEntryId(entryUuid: string): string {
+  return entryUuid.slice(-8);
 }
 
 function duplicateValueLabel(
@@ -740,6 +773,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   onClose,
   onOpenExisting,
   onSaved,
+  onRetryCatalog,
 }) => {
   const { t, i18n } = useTranslation('journal');
   const locale = i18n.resolvedLanguage || i18n.language || 'en';
@@ -2369,8 +2403,48 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     if (nextValues.length !== values.length) commitValues(nextValues);
   }, [clearOwnedCarryForward, commitValues, preparingConfirm, prefillContext, values]);
 
-  if (!model) {
-    return <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t('capture.validation.invalidDefinition')}</p>;
+  // POLISH 7: distinguish a genuine hard failure (buildCatalogModel actually
+  // rejected the catalog -- duplicate codes, an invalid template/layout
+  // definition, etc.) from a merely empty one (nothing configured yet, but
+  // structurally fine). The caller already gates mounting this component on
+  // its own catalog loading/error state (see JournalPage.tsx), so a "still
+  // loading" race is not a real concern here -- but printing the exact same
+  // scary, action-less alert for both a real defect and an empty catalog
+  // was. Keep this proportionate: one shared shell (so the header's Close
+  // control is always reachable, unlike the old bare-alert return), text and
+  // affordances differ by case.
+  const catalogEmpty = catalog.vocab.length === 0 && catalog.layouts.length === 0;
+  if (!model || catalogEmpty) {
+    const emptyOnly = model != null && catalogEmpty;
+    return (
+      <div className="min-h-full bg-[var(--bg)] px-4 py-5">
+        <header className="mx-auto flex max-w-3xl items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold text-[var(--text)]">{t('capture.title')}</h1>
+          <button type="button" onClick={onClose} className={`min-h-11 rounded-xl px-3 font-bold text-[var(--primary)] ${FOCUS_RING}`}>
+            {t('capture.close')}
+          </button>
+        </header>
+        <div className="mx-auto mt-5 max-w-3xl space-y-3">
+          <p role={emptyOnly ? 'status' : 'alert'} className={`text-sm font-semibold ${emptyOnly ? 'text-[var(--text-secondary)]' : 'text-[var(--error-text)]'}`}>
+            {t(emptyOnly ? 'capture.validation.catalogEmpty' : 'capture.validation.invalidDefinition')}
+          </p>
+          {!emptyOnly && (
+            <>
+              <p className="text-sm text-[var(--text-secondary)]">{t('capture.validation.invalidDefinitionDetail')}</p>
+              {onRetryCatalog && (
+                <button
+                  type="button"
+                  onClick={onRetryCatalog}
+                  className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`}
+                >
+                  {t('error.retry')}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
   }
 
   const layoutChoices = [...model.layouts.values()].sort((left, right) => left.code.localeCompare(right.code));
@@ -2382,22 +2456,28 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const activePlotGroups = plotGroups.filter((group) => group.resolved_at === null);
   const resolvedPlotGroups = plotGroups.filter((group) => group.resolved_at !== null);
   const activityRows = catalog.vocab.filter((row) => row.active === 1 && row.deleted_at == null);
-  const valueTokens: ConfirmValueToken[] = payloadValues.map((value) => {
-    const attribute = model.vocabByCode.get(value.attribute_code);
-    const unitCode = value.entered_unit_code ?? value.unit_code;
-    const unit = unitCode ? model.vocabByCode.get(unitCode) : undefined;
-    return {
-      attribute_code: value.attribute_code,
-      group_index: value.group_index,
-      label: attribute ? catalogLabel(attribute, locale) : value.attribute_code,
-      value: displayValue(value, model, locale, {
-        yes: t('capture.form.booleanYes'),
-        no: t('capture.form.booleanNo'),
-      }),
-      unit: unit ? catalogLabel(unit, locale) : unitCode,
-      step: 'details',
-    };
-  });
+  const valueTokens: ConfirmValueToken[] = payloadValues
+    // NIT 9: attr.actuation_expectation_id is an internal valve-expectation
+    // linkage id with no user-meaningful label and no friendly resolver --
+    // omit it from the confirm screen entirely rather than print the raw
+    // opaque id.
+    .filter((value) => value.attribute_code !== OMITTED_CONFIRM_VALUE_CODE)
+    .map((value) => {
+      const attribute = model.vocabByCode.get(value.attribute_code);
+      const unitCode = value.entered_unit_code ?? value.unit_code;
+      const unit = unitCode ? model.vocabByCode.get(unitCode) : undefined;
+      return {
+        attribute_code: value.attribute_code,
+        group_index: value.group_index,
+        label: attribute ? catalogLabel(attribute, locale) : value.attribute_code,
+        value: displayValue(value, model, locale, {
+          yes: t('capture.form.booleanYes'),
+          no: t('capture.form.booleanNo'),
+        }, catalog.products, t('capture.tankMix.unknownProduct')),
+        unit: unit ? catalogLabel(unit, locale) : unitCode,
+        step: 'details',
+      };
+    });
   const confirmValues: ConfirmValueToken[] = occurredEndLocal
     ? [...valueTokens, {
         attribute_code: 'occurred_end_local',
@@ -2452,6 +2532,25 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       </label>
     )
   );
+  // POLISH 5: the treated_area plot-area default (withTreatedAreaPrefill
+  // above) is otherwise indistinguishable from a value the farmer actually
+  // typed -- give it a small hint whenever the field's CURRENT value still
+  // matches exactly what the plot's own area_m2 default would produce (i.e.
+  // it is still active and untouched). Content-based rather than reading
+  // treatedAreaOwnedRef directly: comparing current state against a freshly
+  // recomputed prefill candidate stays correct regardless of ref-timing, and
+  // naturally goes false the instant a user edit changes the value.
+  const treatedAreaPrefillCandidate = treatedAreaPrefillValue(selectedPlot);
+  const treatedAreaCurrentValue = values.find(
+    (value) => value.attribute_code === TREATED_AREA_ATTRIBUTE_CODE,
+  );
+  const treatedAreaPrefillActive = Boolean(
+    treatedAreaPrefillCandidate && treatedAreaCurrentValue &&
+    sameCaptureValue(treatedAreaCurrentValue, treatedAreaPrefillCandidate),
+  );
+  const fieldHints = treatedAreaPrefillActive
+    ? { [TREATED_AREA_ATTRIBUTE_CODE]: t('capture.form.treatedAreaDefaulted') }
+    : undefined;
   const body = () => {
     if (step === 'where') {
       return (
@@ -2486,10 +2585,10 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
           ) : (
             <div className="flex flex-wrap gap-3">
               <button type="button" className="min-h-[56px] rounded-xl border border-[var(--border)] px-4 font-bold text-[var(--text)]" disabled={interactionLocked} onClick={() => setPlotEditor({ mode: 'create' })}>
-                {t('plot.new', { defaultValue: 'New plot' })}
+                {t('plot.new')}
               </button>
               <button type="button" className="min-h-[56px] rounded-xl border border-[var(--border)] px-4 font-bold text-[var(--text)]" disabled={interactionLocked || !selectedPlot} onClick={() => selectedPlot && setPlotEditor({ mode: 'update', plot: selectedPlot })}>
-                {t('plot.edit', { defaultValue: 'Edit selected plot' })}
+                {t('plot.edit')}
               </button>
             </div>
           )}
@@ -2589,7 +2688,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
           )}
           {plotContextDisplay.length > 0 && (
             <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
-              <h3 className="text-sm font-bold text-[var(--text)]">{t('capture.form.plotContext', { defaultValue: 'Plot context' })}</h3>
+              <h3 className="text-sm font-bold text-[var(--text)]">{t('capture.form.plotContext')}</h3>
               <dl className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
                 {plotContextDisplay.map((entry) => (
                   <div key={entry.code} className="min-w-0">
@@ -2600,7 +2699,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
               </dl>
             </div>
           )}
-          {template && layout && leaf && <EntryForm model={model} layout={layout} fieldStates={fieldStates} values={values} onChange={formChanged} selections={selections} products={catalog.products} locale={locale} showValidation={showValidation} templateCode={template.code} />}
+          {template && layout && leaf && <EntryForm model={model} layout={layout} fieldStates={fieldStates} values={values} onChange={formChanged} selections={selections} products={catalog.products} locale={locale} showValidation={showValidation} templateCode={template.code} fieldHints={fieldHints} />}
           {isTankMixEligible && model && (
             <div className="space-y-3 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--card)] p-4">
               <div className="flex items-center justify-between gap-3">
@@ -2670,7 +2769,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     return (
       <>
         {batchError && <p role="alert" className="mb-4 text-sm font-semibold text-[var(--error-text)]">{batchError}</p>}
-        {duplicateCandidates.length > 0 && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('batch.duplicateTitle', { defaultValue: 'Duplicate entries found' })}</h2><p className="text-sm text-[var(--text-secondary)]">{t('batch.duplicateBody', { defaultValue: 'Review every duplicate candidate before saving this batch.' })}</p><ul className="space-y-3 text-sm text-[var(--text)]">{duplicateCandidateGroups.map((group) => <li key={group.key}><h3 className="font-bold">{group.label}</h3><ul className="ml-4 list-disc space-y-1">{group.candidates.map((candidate) => <li key={candidate.entry_uuid}><span>{occurrenceLabel(candidate.occurred_start, timezone, locale)} · {duplicateActivity(candidate)}</span>{' '}<span className="text-xs text-[var(--text-secondary)]">{candidate.entry_uuid}</span></li>)}</ul></li>)}</ul><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`} onClick={acknowledgeBatchDuplicates}>{t('batch.duplicateAcknowledge', { defaultValue: 'Acknowledge all and retry' })}</button></section>}
+        {duplicateCandidates.length > 0 && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('batch.duplicateTitle')}</h2><p className="text-sm text-[var(--text-secondary)]">{t('batch.duplicateBody')}</p><ul className="space-y-3 text-sm text-[var(--text)]">{duplicateCandidateGroups.map((group) => <li key={group.key}><h3 className="font-bold">{group.label}</h3><ul className="ml-4 list-disc space-y-1">{group.candidates.map((candidate) => <li key={candidate.entry_uuid}><span>{occurrenceLabel(candidate.occurred_start, timezone, locale)} · {duplicateActivity(candidate)}</span>{' '}<span className="text-xs text-[var(--text-secondary)]">#{shortEntryId(candidate.entry_uuid)}</span></li>)}</ul></li>)}</ul><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`} onClick={acknowledgeBatchDuplicates}>{t('batch.duplicateAcknowledge')}</button></section>}
         {duplicateCandidate && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('capture.confirm.duplicateTitle')}</h2><p className="text-sm text-[var(--text-secondary)]">{occurrenceLabel(duplicateCandidate.occurred_start, timezone, locale)} · {duplicateActivityLabel}</p>{duplicateCandidate.values.length > 0 && <ul className="space-y-1 text-sm text-[var(--text)]">{duplicateCandidate.values.map((value, index) => { const label = duplicateValueLabel(value, model, locale); return label ? <li key={`${value.attribute_code}:${value.group_index ?? index}`}>{label}</li> : null; })}</ul>}<div className="flex flex-wrap gap-2"><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl border border-[var(--primary)] px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`} onClick={() => { if (!saving && !finalReceipt) onOpenExisting(duplicateCandidate.entry_uuid); }}>{t('capture.confirm.openExisting')}</button><button type="button" className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`} onClick={saveSeparately} disabled={saving || Boolean(finalReceipt)}>{t('capture.confirm.saveSeparately')}</button></div>{duplicateWarningShown && <p role="status" className="text-sm font-semibold text-[var(--text-secondary)]">{t('capture.confirm.duplicateBody')}</p>}</section>}
         {/* Review fix: the plot-scoped crop-cycle overlap fetch (effect above)
             is asynchronous and, for a multi-plot batch, `next()` advances
@@ -2701,7 +2800,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
             </div>
           </section>
         )}
-        {isMultiPlot && <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]">{t('batch.confirmCount', { count: selectedPlotUuids.length, defaultValue: `${selectedPlotUuids.length} plots` })}</p>}
+        {isMultiPlot && <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]">{t('batch.confirmCount', { count: selectedPlotUuids.length })}</p>}
         <ConfirmStrip activity={{ label: t('capture.confirm.activity'), value: leaf ? catalogLabel(catalog.vocab.find((row) => row.code === leaf.activity_code) ?? { code: leaf?.activity_code ?? '' }, locale) : '', step: 'activity' }} plot={{ label: t('capture.confirm.plot'), value: selectedPlotLabel, step: 'where' }} layout={{ label: t('capture.confirm.layout'), value: `${catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v${layout?.version}`, step: 'where' }} occurrence={{ label: t('capture.confirm.occurrence'), value: resolved ? occurrenceLabel(resolved.instant, timezone, locale) : occurredLocal, timezone, endTimezone: occurredEndLocal ? timezone : null, step: 'details' }} values={confirmValues} onEdit={edit} onFinalize={() => { void finalize().catch(() => undefined); }} validationInFlight={showValidation && !formValid} duplicateInFlight={duplicateInFlight} saveInFlight={saving} editDisabled={interactionLocked} readOnly={Boolean(finalReceipt)} finalizeDisabled={Boolean(duplicateCandidate && duplicateAck !== duplicateCandidate.entry_uuid) || duplicateCandidates.length > 0 || pendingTransitionItems.length > 0 || !cycleActionSatisfied || Boolean(cycleDisambiguationOptions)} />
       </>
     );
@@ -2714,14 +2813,14 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         {pendingTransitionItems.length > 0 && !transitionSheetOpen && (
           <section role="alert" className="space-y-2 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-3">
             <p className="text-sm font-semibold text-[var(--text)]">
-              {t('capture.transition.pendingBanner', { defaultValue: 'Some values need your decision before you can continue.' })}
+              {t('capture.transition.pendingBanner')}
             </p>
             <button
               type="button"
               onClick={() => setTransitionSheetOpen(true)}
               className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`}
             >
-              {t('capture.transition.reviewAction', { defaultValue: 'Review changed values' })}
+              {t('capture.transition.reviewAction')}
             </button>
           </section>
         )}

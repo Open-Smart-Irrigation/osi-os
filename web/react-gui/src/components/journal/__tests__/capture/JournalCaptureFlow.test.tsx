@@ -745,6 +745,22 @@ const protectedCatalog: JournalCatalog = {
   }],
 };
 
+// NIT 9: an internal valve-expectation linkage id with no user-meaningful
+// label and no friendly resolver -- must be omitted from the confirm screen.
+const actuationExpectationCatalog: JournalCatalog = {
+  ...protectedCatalog,
+  vocab: [...protectedCatalog.vocab, row('attr.actuation_expectation_id', 'attribute')],
+  templates: protectedCatalog.templates.map((candidate) => candidate.code === 'farmer_quick'
+    ? {
+        ...candidate,
+        definition: {
+          ...candidate.definition,
+          fields: ['attr.crop', 'attr.product_uuid', 'attr.actuation_expectation_id'],
+        },
+      }
+    : candidate),
+};
+
 const invalidRepeatCatalog: JournalCatalog = {
   ...protectedCatalog,
   vocab: [
@@ -2232,6 +2248,47 @@ describe('JournalCaptureFlow', () => {
     ]));
   });
 
+  // BUG 1: attr.product_uuid's value is a per-farm product UUID never in
+  // model.vocabByCode (products are a separate registry, not catalog
+  // choices) -- the confirm screen must resolve it to the product's name via
+  // catalog.products, not print the raw uuid.
+  it('BUG 1: resolves attr.product_uuid to the product name on the confirm screen instead of the raw uuid', async () => {
+    render(<JournalCaptureFlow {...baseProps} catalog={protectedCatalog} initialPlot={plot} />);
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.product' }), {
+      target: { value: 'product-1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+
+    expect(screen.getByText('Protected product')).toBeInTheDocument();
+    expect(screen.queryByText('product-1')).not.toBeInTheDocument();
+  });
+
+  // NIT 9: attr.actuation_expectation_id is an internal valve-expectation
+  // linkage id with no user-meaningful label and no friendly resolver --
+  // it must never render its raw opaque id on the confirm screen.
+  it('NIT 9: omits attr.actuation_expectation_id from the confirm screen', async () => {
+    render(<JournalCaptureFlow {...baseProps} catalog={actuationExpectationCatalog} initialPlot={plot} />);
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'attr.actuation_expectation_id' }), {
+      target: { value: 'valve-expectation-xyz' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+
+    expect(screen.queryByText('valve-expectation-xyz')).not.toBeInTheDocument();
+    expect(screen.queryByText('attr.actuation_expectation_id')).not.toBeInTheDocument();
+  });
+
   it('Slice F (F3): "add product to this pass" queues a product, clears the product fields, and a second product can be entered', async () => {
     render(<JournalCaptureFlow
       {...baseProps}
@@ -3118,7 +3175,13 @@ describe('JournalCaptureFlow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(duplicateUuid(14)));
+    // NIT 10: the batch-duplicate list no longer renders the raw entry_uuid
+    // (a meaningless opaque id to a farmer) -- it shows the occurrence date +
+    // activity as the human disambiguator, plus a short "#<last 8 chars>" tag
+    // for the rare case two candidates in the same group share that date +
+    // activity display. Assert on that shortened tag rather than the full
+    // uuid, which no longer appears anywhere in the DOM.
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(`#${duplicateUuid(14).slice(-8)}`));
 
     const firstDate = new Intl.DateTimeFormat('de', {
       dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Zurich',
@@ -3130,8 +3193,10 @@ describe('JournalCaptureFlow', () => {
     expect(alert).toHaveTextContent(firstDate);
     expect(alert).toHaveTextContent(secondDate);
     expect(alert).toHaveTextContent('Bewässerung');
-    expect(alert).toHaveTextContent(duplicateUuid(14));
-    expect(alert).toHaveTextContent(duplicateUuid(15));
+    expect(alert).toHaveTextContent(`#${duplicateUuid(14).slice(-8)}`);
+    expect(alert).toHaveTextContent(`#${duplicateUuid(15).slice(-8)}`);
+    expect(alert).not.toHaveTextContent(duplicateUuid(14));
+    expect(alert).not.toHaveTextContent(duplicateUuid(15));
   });
 
   it('ignores malformed duplicate candidates and value rows without crashing', async () => {
@@ -4007,14 +4072,17 @@ describe('JournalCaptureFlow', () => {
     await waitFor(() => expect(apiMocks.listEntries).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Applied amount' }), {
+    // BUG 4: this field is declared required in activityTransitionCatalog, so
+    // its accessible name now also carries the Required badge -- match by
+    // substring rather than the old exact "Applied amount" string.
+    fireEvent.change(screen.getByRole('textbox', { name: /^Applied amount/ }), {
       target: { value: '5' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
     fireEvent.click(screen.getByRole('button', { name: 'fertilization' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
 
-    expect((screen.getByRole('textbox', { name: 'Applied amount' }) as HTMLInputElement).value).toBe('');
+    expect((screen.getByRole('textbox', { name: /^Applied amount/ }) as HTMLInputElement).value).toBe('');
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     expect(screen.getByRole('heading', { name: 'capture.form.title' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'capture.confirm.title' })).not.toBeInTheDocument();
@@ -4265,9 +4333,11 @@ describe('JournalCaptureFlow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(duplicateUuid(11)));
-    expect(screen.getByRole('alert')).toHaveTextContent(duplicateUuid(12));
-    expect(screen.getByRole('alert')).toHaveTextContent(duplicateUuid(13));
+    // NIT 10: see the shortened-id comment in the "keeps every plural
+    // duplicate candidate review localized and attributable" test above.
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(`#${duplicateUuid(11).slice(-8)}`));
+    expect(screen.getByRole('alert')).toHaveTextContent(`#${duplicateUuid(12).slice(-8)}`);
+    expect(screen.getByRole('alert')).toHaveTextContent(`#${duplicateUuid(13).slice(-8)}`);
     expect(screen.getByRole('heading', { name: 'North field' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'East field' })).toBeInTheDocument();
     const firstPayload = JSON.parse(JSON.stringify(apiMocks.createFinalBatch.mock.calls[0][0]));
@@ -4655,6 +4725,30 @@ describe('JournalCaptureFlow', () => {
       ]));
     });
 
+    // POLISH 5: the plot-area default is otherwise indistinguishable from a
+    // value the farmer actually typed -- show a small hint while it is still
+    // active and untouched, and drop it the instant the user edits the field.
+    it('shows a "defaulted from plot area" hint while the prefill is untouched, and drops it after an edit', async () => {
+      window.localStorage.setItem('osi.journal.detailLevel', 'full_record');
+      render(<JournalCaptureFlow
+        {...baseProps}
+        catalog={treatedAreaCatalog}
+        plots={[areaPlotA]}
+        initialPlot={areaPlotA}
+      />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
+
+      await waitFor(() => expect(screen.getByRole('textbox', { name: 'Treated area' })).toHaveValue('250'));
+      expect(screen.getByText('capture.form.treatedAreaDefaulted')).toBeInTheDocument();
+
+      fireEvent.change(screen.getByRole('textbox', { name: 'Treated area' }), { target: { value: '999' } });
+      await waitFor(() => expect(screen.getByRole('textbox', { name: 'Treated area' })).toHaveValue('999'));
+      expect(screen.queryByText('capture.form.treatedAreaDefaulted')).not.toBeInTheDocument();
+    });
+
     it('leaves attr.treated_area blank for a plot with no recorded area (area_m2 null)', async () => {
       window.localStorage.setItem('osi.journal.detailLevel', 'full_record');
       render(<JournalCaptureFlow
@@ -4705,6 +4799,66 @@ describe('JournalCaptureFlow', () => {
       fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
 
       await waitFor(() => expect(screen.getByRole('textbox', { name: 'Treated area' })).toHaveValue('400'));
+    });
+  });
+
+  // POLISH 7: distinguish a genuine hard failure (buildCatalogModel actually
+  // rejected the catalog) from a merely empty one, and give the hard-failure
+  // case a short explanatory message + a retry affordance instead of a bare,
+  // exit-less alert.
+  describe('POLISH 7: catalog load/error state', () => {
+    const brokenCatalog: JournalCatalog = {
+      ...catalog,
+      // A duplicate vocab code is a genuine buildCatalogModel failure (see
+      // catalogModel.ts), not a loading race.
+      vocab: [...catalog.vocab, catalog.vocab[0]],
+    };
+    const emptyCatalog: JournalCatalog = {
+      catalog_version: 1,
+      catalog_hash: 'empty-catalog',
+      vocab: [],
+      templates: [],
+      layouts: [],
+      products: [],
+      mappings: [],
+    };
+
+    it('shows an explanatory message and a retry action, and keeps Close reachable, on a hard catalog failure', () => {
+      const onClose = vi.fn();
+      const onRetryCatalog = vi.fn();
+      render(<JournalCaptureFlow
+        {...baseProps}
+        catalog={brokenCatalog}
+        onClose={onClose}
+        onRetryCatalog={onRetryCatalog}
+      />);
+
+      expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.invalidDefinition');
+      expect(screen.getByText('capture.validation.invalidDefinitionDetail')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'error.retry' }));
+      expect(onRetryCatalog).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole('button', { name: 'capture.close' }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('omits the retry action when the caller has no catalog retry to offer, without losing Close', () => {
+      render(<JournalCaptureFlow {...baseProps} catalog={brokenCatalog} />);
+
+      expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.invalidDefinition');
+      expect(screen.queryByRole('button', { name: 'error.retry' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'capture.close' })).toBeInTheDocument();
+    });
+
+    it('shows a distinct, non-alarming message for a genuinely empty catalog, with no retry offered', () => {
+      render(<JournalCaptureFlow {...baseProps} catalog={emptyCatalog} />);
+
+      expect(screen.getByRole('status')).toHaveTextContent('capture.validation.catalogEmpty');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.queryByText('capture.validation.invalidDefinitionDetail')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'error.retry' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'capture.close' })).toBeInTheDocument();
     });
   });
 });

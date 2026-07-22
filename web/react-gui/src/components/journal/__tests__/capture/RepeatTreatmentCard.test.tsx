@@ -186,6 +186,62 @@ describe('RepeatTreatmentCard', () => {
     expect(screen.getByRole('article')).toHaveClass('border-dashed');
   });
 
+  // BUG 3: treatment.crop can be a choice CODE (e.g.
+  // agroscope.crop.barley_spring), not a display string -- resolve it via
+  // catalog.vocab + catalogLabel the same way InheritedCropBanner.tsx does,
+  // instead of rendering the raw code.
+  it('resolves a choice-code crop to its catalog label instead of the raw code', () => {
+    const codedCandidate: CarryForwardCandidate = {
+      ...candidate,
+      repeatTreatment: {
+        ...candidate.repeatTreatment!,
+        crop: 'agroscope.crop.barley_spring',
+      },
+    };
+    render(
+      <RepeatTreatmentCard
+        candidate={codedCandidate}
+        currentContext={context}
+        catalog={{
+          products: [{ product_uuid: 'product-1', name: 'Product A' }],
+          vocab: [
+            { code: 'attr.product_uuid', kind: 'attribute', labels: { en: 'Catalog product' } },
+            {
+              code: 'agroscope.crop.barley_spring',
+              kind: 'choice',
+              labels: { en: 'Barley, spring' },
+            },
+          ],
+        }}
+        onConfirm={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Barley, spring')).toBeInTheDocument();
+    expect(screen.queryByText('agroscope.crop.barley_spring')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the raw crop code when the catalog has no matching vocab row', () => {
+    render(
+      <RepeatTreatmentCard
+        candidate={candidate}
+        currentContext={context}
+        catalog={{
+          products: [{ product_uuid: 'product-1', name: 'Product A' }],
+          vocab: [{ code: 'attr.product_uuid', kind: 'attribute', labels: { en: 'Catalog product' } }],
+        }}
+        onConfirm={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    // 'Wheat' is a plain fixture string here, not a catalog code -- no
+    // matching vocab row, so it renders as-is (unchanged pre-existing
+    // behavior for a non-coded crop value).
+    expect(screen.getByText('Wheat')).toBeInTheDocument();
+  });
+
   it('does not emit protected values until the farmer confirms, and supports dismissal', () => {
     const onConfirm = vi.fn();
     const onDismiss = vi.fn();

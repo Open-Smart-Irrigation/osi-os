@@ -167,4 +167,82 @@ describe('NumberStepper', () => {
     );
     expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.minimum');
   });
+
+  // BUG 4: EntryForm's choice/boolean/text/product branches already show a
+  // Required/Optional badge beside the field label; the number branches
+  // (this component and NutrientRepeater) delegated to here and rendered
+  // only the bare label, so a required number field showed no such signal.
+  describe('BUG 4: Required/Optional status badge', () => {
+    it('shows a Required badge exposed to the accessible name and marks the input aria-required', () => {
+      render(
+        <NumberStepper id="amount" label="Amount" value={null} required onChange={vi.fn()} />,
+      );
+
+      const input = screen.getByRole('textbox', { name: /Amount/ });
+      expect(input).toHaveAccessibleName(/capture\.form\.required/);
+      expect(input).toBeRequired();
+      expect(input).toHaveAttribute('aria-required', 'true');
+    });
+
+    it('shows an Optional badge that is hidden from the accessible name when not required', () => {
+      render(
+        <NumberStepper id="amount" label="Amount" value={null} onChange={vi.fn()} />,
+      );
+
+      expect(screen.getByText('capture.form.optional')).toBeInTheDocument();
+      const input = screen.getByRole('textbox', { name: 'Amount' });
+      expect(input).not.toBeRequired();
+      expect(input).toHaveAttribute('aria-required', 'false');
+    });
+
+    // POLISH 6: a required_any member's own `required` flag stays false, but
+    // it is effectively required until one family member has a value, so it
+    // gets its own "choose one" indicator instead of "Optional".
+    it('shows a "choose one" indicator instead of Optional for a required_any member', () => {
+      render(
+        <NumberStepper
+          id="amount"
+          label="Amount"
+          value={null}
+          requiredAnyGroup
+          onChange={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByText('capture.form.optional')).not.toBeInTheDocument();
+      const input = screen.getByRole('textbox', { name: /Amount/ });
+      expect(input).toHaveAccessibleName(/capture\.form\.requiredChooseOne/);
+      // Not unconditionally required in the native/aria sense -- only one
+      // member of the family must have a value, not this one specifically.
+      expect(input).not.toBeRequired();
+    });
+  });
+
+  // POLISH 5: a small, unobtrusive hint line under the control.
+  describe('POLISH 5: hint', () => {
+    it('renders the hint when present and no error is active', () => {
+      render(
+        <NumberStepper id="amount" label="Amount" value={250} hint="Defaulted from plot area" onChange={vi.fn()} />,
+      );
+
+      expect(screen.getByText('Defaulted from plot area')).toBeInTheDocument();
+    });
+
+    it('does not render the hint once a validation error is showing', () => {
+      render(
+        <NumberStepper
+          id="amount"
+          label="Amount"
+          value={null}
+          min={1}
+          hint="Defaulted from plot area"
+          onChange={vi.fn()}
+        />,
+      );
+      fireEvent.change(screen.getByRole('textbox', { name: 'Amount' }), { target: { value: '0' } });
+
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+      expect(screen.queryByText('Defaulted from plot area')).not.toBeInTheDocument();
+    });
+  });
 });
