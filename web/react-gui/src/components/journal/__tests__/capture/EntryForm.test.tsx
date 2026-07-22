@@ -331,6 +331,52 @@ describe('EntryForm', () => {
     expect(hidden.numberInputErrors.size).toBe(0);
   });
 
+  it('treats a cleared optional numeric field (value null, residual unit) as blank, not an incompatible-unit error', () => {
+    const t = ((key: string) => key) as TFunction<'journal'>;
+    // A cleared prefilled field (e.g. optional attr.treated_area): numericInput
+    // sets entered_value_num null but leaves the last-picked unit. Must be valid.
+    const cleared = validateEntryForm({
+      model,
+      layout,
+      fieldStates: [state('attr.amount')],
+      inputs: [{ attribute_code: 'attr.amount', entered_value_num: null, entered_unit_code: 'unit.kg' }],
+      selections: {},
+      numberInputErrors: new Map(),
+      products: [],
+      t,
+    });
+    expect(cleared.valid).toBe(true);
+    expect(cleared.errors.get('attr.amount:0')).toBeUndefined();
+
+    // A value with no unit is still a genuine incompatible-unit error.
+    const noUnit = validateEntryForm({
+      model,
+      layout,
+      fieldStates: [state('attr.amount')],
+      inputs: [{ attribute_code: 'attr.amount', entered_value_num: 5, entered_unit_code: undefined }],
+      selections: {},
+      numberInputErrors: new Map(),
+      products: [],
+      t,
+    });
+    expect(noUnit.valid).toBe(false);
+    expect(noUnit.errors.get('attr.amount:0')).toBe('capture.validation.incompatibleUnit');
+
+    // A *required* empty field is still blocked — by the required check, not the unit check.
+    const requiredEmpty = validateEntryForm({
+      model,
+      layout,
+      fieldStates: [state('attr.amount', { required: true })],
+      inputs: [{ attribute_code: 'attr.amount', entered_value_num: null, entered_unit_code: 'unit.kg' }],
+      selections: {},
+      numberInputErrors: new Map(),
+      products: [],
+      t,
+    });
+    expect(requiredEmpty.valid).toBe(false);
+    expect(requiredEmpty.errors.get('attr.amount')).toBe('capture.validation.required');
+  });
+
   it('renders Task 8 number, text, choice, date, and boolean field states but excludes shell fields', () => {
     render(
       <ControlledForm

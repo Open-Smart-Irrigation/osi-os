@@ -366,6 +366,119 @@ const plotWithContext: JournalPlot = {
   },
 };
 
+// --- Treated-area-optional plan (2026-07-22): plot-area prefill fixtures --
+// A minimal full_record + open_field pair carrying just attr.treated_area,
+// scoped to `irrigation` via operation_fields_by_activity -- close enough to
+// the real shipped full_record@8/open_field@8 shape to exercise the
+// JournalCaptureFlow prefill wiring (selectPlot/chooseLayout/pickActivity +
+// withTreatedAreaPrefill) in isolation.
+const treatedAreaUnit = {
+  ...row('unit.m2_area', 'attribute'),
+  kind: 'unit' as const,
+  value_type: null,
+  quantity_kind: 'area',
+  basis: 'land_area',
+  labels: { en: 'm2' },
+  constraints: {
+    dimension: 'area:land_area',
+    to_canonical: { unit_code: 'unit.m2_area', scale: 1, offset: 0 },
+  },
+};
+
+const treatedAreaAttribute = {
+  ...row('attr.treated_area', 'attribute'),
+  value_type: 'number' as const,
+  quantity_kind: 'area',
+  basis: 'land_area',
+  default_unit_code: 'unit.m2_area',
+  labels: { en: 'Treated area' },
+  constraints: { min: 0 },
+};
+
+const treatedAreaCatalog: JournalCatalog = {
+  catalog_version: 8,
+  catalog_hash: 'treated-area-catalog',
+  // attr.crop is unused by this fixture's actual capture flow, but the
+  // shared `definition()` helper below hard-codes carry_forward: ['attr.crop']
+  // for farmer_quick/research_observation, and parseTemplate requires every
+  // carry_forward code to resolve in vocab.
+  vocab: [row('irrigation', 'activity'), row('attr.crop', 'attribute'), treatedAreaAttribute, treatedAreaUnit],
+  templates: [
+    definition('farmer_quick', ['attr.crop'], 1),
+    {
+      code: 'full_record',
+      version: 8,
+      active: 1,
+      catalog_errors: [],
+      labels: { en: 'Full record' },
+      definition: {
+        sections: [
+          { code: 'identity', fields: ['activity_code', 'plot_uuid', 'occurred_start'] },
+          { code: 'operation', scoped_by_activity: true, fields: ['attr.treated_area'] },
+        ],
+        operation_fields_by_activity: { irrigation: ['attr.treated_area'] },
+        activity_requirements: {},
+        conditional_groups: [],
+        carry_forward: [],
+        require_explicit_choices: false,
+        show_standard_mappings: false,
+        requirements: { required: [], optional: [], required_any: [] },
+      },
+    },
+    definition('research_observation', ['attr.crop'], 9),
+  ],
+  layouts: [{
+    code: 'open_field',
+    version: 8,
+    active: 1,
+    catalog_errors: [],
+    labels: { en: 'Open field' },
+    definition: {
+      activity_codes: ['irrigation'],
+      supported_templates: ['farmer_quick', 'full_record', 'research_observation'],
+      fields: [],
+      minimum_fields: [],
+      static_context_fields: [],
+      reading_fields: [],
+      conditional_fields: {},
+      denominator_contract: [],
+      option_dependencies: [],
+    },
+  }],
+  products: [],
+  mappings: [],
+};
+
+// zone_uuid set on all three so zoneLinked is true and the "sensorless plot
+// needs an explicit crop" gate never blocks these tests -- this catalog has
+// no attr.crop attribute at all.
+const areaPlotA: JournalPlot = {
+  ...plot,
+  plot_uuid: 'area-plot-a',
+  plot_code: 'AREA-A',
+  name: 'Area plot A',
+  zone_uuid: 'zone-area',
+  crop_hint: null,
+  area_m2: 250,
+  settings: { ...plot.settings, layout_code: 'open_field' },
+};
+
+const areaPlotB: JournalPlot = {
+  ...areaPlotA,
+  plot_uuid: 'area-plot-b',
+  plot_code: 'AREA-B',
+  name: 'Area plot B',
+  area_m2: 400,
+};
+
+const areaPlotNull: JournalPlot = {
+  ...areaPlotA,
+  plot_uuid: 'area-plot-null',
+  plot_code: 'AREA-NULL',
+  name: 'Area plot null',
+  area_m2: null,
+};
+
 function entry(overrides: Partial<EntryAggregate> = {}): EntryAggregate {
   return {
     contract_version: 1,
@@ -4498,6 +4611,100 @@ describe('JournalCaptureFlow', () => {
         visible: true,
         required: false,
       });
+    });
+  });
+
+  describe('Treated-area-optional plan: plot-area prefill (2026-07-22)', () => {
+    it('prefills attr.treated_area from the plot area_m2 into the visible, editable input, and a user edit overrides it', async () => {
+      window.localStorage.setItem('osi.journal.detailLevel', 'full_record');
+      render(<JournalCaptureFlow
+        {...baseProps}
+        catalog={treatedAreaCatalog}
+        plots={[areaPlotA]}
+        initialPlot={areaPlotA}
+      />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      // This fixture's full_record row declares no activity_requirements, so
+      // attr.treated_area is optional here and Slice E's progressive
+      // disclosure tucks it behind the collapsed "More detail" group.
+      fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
+
+      await waitFor(() => expect(screen.getByRole('textbox', { name: 'Treated area' })).toHaveValue('250'));
+
+      const treatedAreaInput = screen.getByRole('textbox', { name: 'Treated area' });
+      fireEvent.change(treatedAreaInput, { target: { value: '999' } });
+      await waitFor(() => expect(screen.getByRole('textbox', { name: 'Treated area' })).toHaveValue('999'));
+
+      // Round-trip through to save: the edited value must actually reach the
+      // final payload (values state, not just a display-only artifact).
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+      await waitFor(() => expect(apiMocks.updateEntry.mock.calls.some(([, payload]) => payload.status === 'final')).toBe(true));
+      const finalPayload = apiMocks.updateEntry.mock.calls
+        .map(([, payload]) => payload)
+        .find((payload) => payload.status === 'final');
+      expect(finalPayload.values).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          attribute_code: 'attr.treated_area',
+          entered_value_num: 999,
+          entered_unit_code: 'unit.m2_area',
+        }),
+      ]));
+    });
+
+    it('leaves attr.treated_area blank for a plot with no recorded area (area_m2 null)', async () => {
+      window.localStorage.setItem('osi.journal.detailLevel', 'full_record');
+      render(<JournalCaptureFlow
+        {...baseProps}
+        catalog={treatedAreaCatalog}
+        plots={[areaPlotNull]}
+        initialPlot={areaPlotNull}
+      />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
+
+      await waitFor(() => expect(screen.getByRole('textbox', { name: 'Treated area' })).toHaveValue(''));
+    });
+
+    it('re-applies the newly selected plot\'s own area when switching plots, with no stale prior-plot area carried over', async () => {
+      window.localStorage.setItem('osi.journal.detailLevel', 'full_record');
+      render(<JournalCaptureFlow
+        {...baseProps}
+        catalog={treatedAreaCatalog}
+        plots={[areaPlotA, areaPlotB]}
+        initialPlot={areaPlotA}
+      />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
+      await waitFor(() => expect(screen.getByRole('textbox', { name: 'Treated area' })).toHaveValue('250'));
+
+      // Back to activity, then back to where, without editing the prefill.
+      fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+
+      // PlotPicker's plot buttons are individual toggles (onTogglePlot), not
+      // a single-select radio group -- deselect Area plot A before selecting
+      // Area plot B so this is a genuine plot SWITCH, not an accidental
+      // multi-plot selection.
+      fireEvent.click(screen.getByRole('button', { name: 'Area plot A' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Area plot A' }))
+        .toHaveAttribute('aria-pressed', 'false'));
+      fireEvent.click(screen.getByRole('button', { name: 'Area plot B' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Area plot B' }))
+        .toHaveAttribute('aria-pressed', 'true'));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
+
+      await waitFor(() => expect(screen.getByRole('textbox', { name: 'Treated area' })).toHaveValue('400'));
     });
   });
 });

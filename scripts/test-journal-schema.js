@@ -108,11 +108,19 @@ const EXPECTED_LAYOUT_MINIMUMS_V1 = {
 
 // v3 (Slice BC / R1): minimum_fields is reduced to just the plot-static
 // context fields; the removed measurement readings move to `reading_fields`
-// (consumed only by the `sampling` Quick activity). open_field keeps
-// attr.treated_area in minimum_fields (full_record/research parity) even
-// though it is excluded from static_context_fields.
+// (consumed only by the `sampling` Quick activity). open_field originally
+// kept attr.treated_area in minimum_fields (full_record/research parity)
+// even though it is excluded from static_context_fields.
+//
+// NOTE: despite the "V3" name, these values assert the currently-served
+// (latest) version per code, resolved by `parsedLayouts` below — greenhouse
+// and lysimeter are still at v3, but open_field's current version is now v8
+// (treated-area-optional plan, 2026-07-22): attr.treated_area is dropped
+// from minimum_fields there (paired with full_record@8 dropping it from
+// activity_requirements), so it no longer force-requires the field for any
+// activity. static_context_fields/reading_fields are unchanged from v3.
 const EXPECTED_LAYOUT_MINIMUMS_V3 = {
-  open_field: EXPECTED_LAYOUT_MINIMUMS_V1.open_field,
+  open_field: ['attr.block_bed_row', 'attr.cover_type', 'attr.denominator'],
   greenhouse: ['attr.structure_compartment', 'attr.root_zone_system', 'attr.plant_area'],
   lysimeter: ['attr.experimental_unit', 'attr.replicate', 'attr.treatment', 'attr.surface_area'],
 };
@@ -963,12 +971,14 @@ try {
       ['full_record', 5],
       ['full_record', 6],
       ['full_record', 7],
+      ['full_record', 8],
       ['research_observation', 1],
     ],
     'seed must contain the three template codes, with farmer_quick published at v1/v2 (frozen, historical), ' +
       'v3 (Slice BC quick_fields) and v6 (Slice F growth_stage_bbch quick-optional); full_record at v1 (frozen), ' +
-      'v5 (Slice E activity-scoped operation fields), v6 (Slice F agronomy adds + review fold-in) and v7 ' +
-      '(journal capture-followups Slice 1, W1 relaxed irrigation_details requiredness)'
+      'v5 (Slice E activity-scoped operation fields), v6 (Slice F agronomy adds + review fold-in), v7 ' +
+      '(journal capture-followups Slice 1, W1 relaxed irrigation_details requiredness) and v8 ' +
+      '(treated-area-optional plan: treated_area no longer required anywhere)'
   );
   const templateDefinitions = new Map(
     templates.map((template) => [template.code, JSON.parse(template.definition_json)])
@@ -985,9 +995,14 @@ try {
     assert.ok(researchIdentity.fields.includes(field), `research identity must include ${field}`);
   }
 
+  // `templateDefinitions` resolves each code to its latest (currently-served)
+  // version, which is now full_record@8 (treated-area-optional plan,
+  // 2026-07-22): attr.treated_area is dropped from `required` on every dosing
+  // activity below — no activity requires it anymore. It stays reachable
+  // (visible-optional) via operation_fields_by_activity, asserted separately.
   const fullRecord = templateDefinitions.get('full_record');
   assert.deepEqual(fullRecord.activity_requirements.fertilization, {
-    required: ['attr.treated_area'],
+    required: [],
     required_any: [
       ['attr.product_uuid', 'attr.product'],
       [
@@ -998,7 +1013,7 @@ try {
     ],
   });
   assert.deepEqual(fullRecord.activity_requirements.fertigation, {
-    required: ['attr.treated_area'],
+    required: [],
     required_any: [
       ['attr.product_uuid', 'attr.product'],
       [
@@ -1009,7 +1024,7 @@ try {
     ],
   });
   assert.deepEqual(fullRecord.activity_requirements.plant_protection_application, {
-    required: ['attr.treated_area'],
+    required: [],
     required_any: [
       ['attr.product_uuid', 'attr.product'],
       [
@@ -1020,19 +1035,63 @@ try {
     ],
   });
   assert.deepEqual(fullRecord.activity_requirements.seeding, {
-    required: ['attr.crop', 'attr.treated_area'],
+    required: ['attr.crop'],
     required_any: [
       ['attr.amount_mass_area_product', 'attr.amount_count_area'],
     ],
   });
   assert.deepEqual(fullRecord.activity_requirements.planting_transplanting, {
-    required: ['attr.crop', 'attr.treated_area'],
+    required: ['attr.crop'],
     required_any: [['attr.amount_count_area']],
   });
   assert.deepEqual(fullRecord.activity_requirements.harvest, {
     required: ['attr.crop', 'attr.harvest_area', 'attr.harvest_yield_area'],
     required_any: [],
   });
+  // treated_area must still be reachable (visible-optional) via
+  // operation_fields_by_activity for every activity it rendered on before,
+  // plus the newly-added irrigation.
+  for (const activity of [
+    'irrigation', 'fertilization', 'fertigation', 'plant_protection_application',
+    'weed_control_nonchemical', 'seeding', 'planting_transplanting',
+    'tillage_soil_work', 'mowing',
+  ]) {
+    assert.ok(
+      fullRecord.operation_fields_by_activity[activity].includes('attr.treated_area'),
+      `full_record@8 operation_fields_by_activity.${activity} must still list attr.treated_area (visible-optional)`
+    );
+  }
+  // full_record@8 must not add treated_area anywhere it was never shown.
+  for (const activity of [
+    'pruning', 'crop_care', 'harvest', 'sampling',
+    'general_observation', 'pest_disease_observation', 'equipment_maintenance',
+  ]) {
+    assert.ok(
+      !fullRecord.operation_fields_by_activity[activity].includes('attr.treated_area'),
+      `full_record@8 operation_fields_by_activity.${activity} must not list attr.treated_area`
+    );
+  }
+
+  // Version-pinned check: the frozen full_record@7 row (looked up directly,
+  // not via the latest-wins Map above) must still require attr.treated_area
+  // on the 5 dosing activities — old entries pinned to @7 keep their
+  // original requiredness; only NEW entries created against @8 get the
+  // relaxed behavior.
+  const fullRecordV7Row = templates.find(
+    (template) => template.code === 'full_record' && template.version === 7
+  );
+  assert.ok(fullRecordV7Row, 'frozen full_record@7 row must still exist');
+  const fullRecordV7 = JSON.parse(fullRecordV7Row.definition_json);
+  for (const activity of [
+    'fertilization', 'fertigation', 'plant_protection_application',
+    'seeding', 'planting_transplanting',
+  ]) {
+    assert.ok(
+      fullRecordV7.activity_requirements[activity].required.includes('attr.treated_area'),
+      `frozen full_record@7 activity_requirements.${activity}.required must still include attr.treated_area`
+    );
+  }
+
   assert.deepEqual(fullRecord.conditional_groups, [
     {
       code: 'irrigation_details',
@@ -1087,9 +1146,12 @@ try {
       ['lysimeter', 3],
       ['open_field', 1],
       ['open_field', 3],
+      ['open_field', 8],
     ],
     'seed must contain the four generic layout codes, with open_field/greenhouse/lysimeter ' +
-      'published at v1 (frozen, historical) and v3 (current, Slice BC static/reading split)'
+      'published at v1 (frozen, historical) and v3 (Slice BC static/reading split); open_field ' +
+      'additionally at v8 (current, treated-area-optional plan: attr.treated_area dropped from ' +
+      'minimum_fields), while greenhouse/lysimeter remain current at v3'
   );
   const parsedLayoutsByVersion = new Map(
     layouts.map((layout) => [`${layout.code}:${layout.version}`, JSON.parse(layout.definition_json)])
@@ -1171,7 +1233,7 @@ try {
     'SELECT id, catalog_version, catalog_hash FROM journal_catalog_state WHERE id = 1;'
   );
   assert.equal(catalogState.length, 1, 'catalog state row id=1 must exist');
-  assert.equal(catalogState[0].catalog_version, 7, 'seed-built catalog version must be the current version (7, since journal capture-followups Slice 1 / relaxed irrigation requiredness + 16 open-field vegetables)');
+  assert.equal(catalogState[0].catalog_version, 8, 'seed-built catalog version must be the current version (8, since the treated-area-optional plan: full_record@8 + open_field@8)');
   assert.match(catalogState[0].catalog_hash, /^[0-9a-f]{64}$/, 'catalog hash must be SHA-256');
 
   const seedText = fs.readFileSync(seedPath, 'utf8');

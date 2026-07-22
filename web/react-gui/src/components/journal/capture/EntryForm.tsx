@@ -289,8 +289,15 @@ export function validateEntryForm({
       const enteredValue = row.entered_value_num ?? row.value_num ??
         (typeof row.value === 'number' ? row.value : null);
       const enteredUnit = row.entered_unit_code ?? row.unit_code;
-      if (enteredValue == null && enteredUnit == null) continue;
-      if (enteredValue == null || enteredUnit == null) {
+      // An empty numeric field has nothing to unit-check: skip it regardless of
+      // any residual unit selection. Clearing a number (e.g. a prefilled,
+      // optional attr.treated_area) leaves entered_value_num null while
+      // entered_unit_code keeps its last-picked unit — that is NOT an
+      // incompatible-unit error, it is simply a blank optional field. A blank
+      // *required* field is still caught by the required check above (line ~251,
+      // `state.required && !rows.some(hasInputValue)`).
+      if (enteredValue == null) continue;
+      if (enteredUnit == null) {
         errors.set(key, t('capture.validation.incompatibleUnit'));
         continue;
       }
