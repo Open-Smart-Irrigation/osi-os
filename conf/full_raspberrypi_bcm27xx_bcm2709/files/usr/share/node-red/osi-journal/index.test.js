@@ -1198,10 +1198,9 @@ test('assertJournalEntryEffectKey binds UUID and prior version exactly', () => {
 test('loadCatalog reads the seeded catalog into code-indexed maps', async () => {
   const catalog = await loadCatalog(createTestDb('load'));
 
-  // journal capture-followups Slice 1: the seeded catalog is now at v7
-  // (relaxed full_record@7 irrigation_details requiredness + 16 open-field
-  // vegetable choices, 0029).
-  assert.equal(catalog.version, 7);
+  // treated-area-optional plan: the seeded catalog is now at v8 (full_record@8
+  // + open_field@8 drop attr.treated_area from required, 0030).
+  assert.equal(catalog.version, 8);
   assert.match(catalog.hash, /^[a-f0-9]{64}$/);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
   assert.equal(catalog.templates.get('farmer_quick').get(1).definition.max_primary_fields, 5);
@@ -1261,7 +1260,7 @@ test('loadCatalog supports the callback sqlite API used by Node-RED', async () =
 
   const catalog = await loadCatalog(callbackDb);
 
-  assert.equal(catalog.version, 7);
+  assert.equal(catalog.version, 8);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
 });
 
@@ -1744,6 +1743,82 @@ test('validateEntry: full_record@7 irrigation is savable without measurement_sou
 
   assert.equal(missingAmountKind.ok, false);
   assert.ok(missingAmountKind.errors.some((error) => error.field === 'attr.irrigation_amount_kind'));
+});
+
+// treated-area-optional plan (2026-07-22, maintainer-confirmed): full_record@8
+// drops attr.treated_area from activity_requirements.required for the 5
+// dosing activities (fertilization/fertigation/plant_protection_application/
+// seeding/planting_transplanting) — nothing computes a rate from it today,
+// and the GUI now prefills it from the plot's own area for the common
+// full-plot case. A full_record@8 fertilization/seeding entry with the rest
+// of its required fields present, but no treated_area, must validate as
+// savable; the other required_any/required fields are unchanged.
+test('validateEntry: full_record@8 fertilization/seeding are savable without treated_area', async () => {
+  const { catalog, openField } = await loadedFixture('treated-area-optional-v8');
+  const fullRecordV8 = catalog.templates.get('full_record').get(8);
+  assert.ok(fullRecordV8, 'catalog must publish full_record@8');
+
+  const fertilization = validateEntry(catalog, openField, fullRecordV8, validIrrigation({
+    activity_code: 'fertilization',
+    template_code: 'full_record',
+    values: [
+      { attribute_code: 'attr.product', group_index: 0, value: 'NPK 15-15-15' },
+      {
+        attribute_code: 'attr.amount_mass_area_product', group_index: 0, value: 25,
+        unit_code: 'unit.kg_per_ha_product',
+      },
+    ],
+  }));
+  assert.equal(fertilization.ok, true, JSON.stringify(fertilization.errors));
+
+  const seeding = validateEntry(catalog, openField, fullRecordV8, validIrrigation({
+    activity_code: 'seeding',
+    template_code: 'full_record',
+    values: [
+      { attribute_code: 'attr.crop', group_index: 0, value: 'choice.crop.carrot', value_status: 'observed' },
+      {
+        attribute_code: 'attr.amount_count_area', group_index: 0, value: 100000,
+        unit_code: 'unit.plants_per_ha',
+      },
+    ],
+  }));
+  assert.equal(seeding.ok, true, JSON.stringify(seeding.errors));
+
+  // Other required fields on these activities are unchanged: dropping the
+  // product/amount entirely must still fail, and must never blame
+  // treated_area (it is no longer required).
+  const missingProduct = validateEntry(catalog, openField, fullRecordV8, validIrrigation({
+    activity_code: 'fertilization', template_code: 'full_record', values: [],
+  }));
+  assert.equal(missingProduct.ok, false);
+  assert.ok(missingProduct.errors.some((error) =>
+    error.field.includes('attr.product_uuid') || error.field.includes('attr.product')));
+  assert.ok(!missingProduct.errors.some((error) => error.field === 'attr.treated_area'));
+});
+
+// Version-pinned control: an entry pinned to the frozen full_record@7 keeps
+// its original requiredness — only NEW entries created against @8 get the
+// relaxed behavior above.
+test('validateEntry: full_record@7 fertilization still requires treated_area (version-pinned)', async () => {
+  const { catalog, openField } = await loadedFixture('treated-area-required-v7');
+  const fullRecordV7 = catalog.templates.get('full_record').get(7);
+  assert.ok(fullRecordV7, 'catalog must publish full_record@7');
+
+  const result = validateEntry(catalog, openField, fullRecordV7, validIrrigation({
+    activity_code: 'fertilization',
+    template_code: 'full_record',
+    values: [
+      { attribute_code: 'attr.product', group_index: 0, value: 'NPK 15-15-15' },
+      {
+        attribute_code: 'attr.amount_mass_area_product', group_index: 0, value: 25,
+        unit_code: 'unit.kg_per_ha_product',
+      },
+    ],
+  }));
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) =>
+    error.field === 'attr.treated_area' && error.code === 'required'));
 });
 
 test('validateEntry rejects unsupported predicate operators as catalog errors', async () => {

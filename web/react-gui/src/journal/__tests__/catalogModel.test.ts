@@ -353,9 +353,16 @@ describe('catalog model', () => {
       'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
     ]));
     expect(farmer?.quick_fields?.fertilization).not.toContain('attr.irrigation_depth');
+    // Treated-area-optional plan (2026-07-22): open_field's currently-served
+    // version bumps to v8 (attr.treated_area dropped from minimum_fields);
+    // greenhouse/lysimeter are untouched by that plan and stay at v3.
+    const expectedLayoutVersions: Record<string, number> = {
+      open_field: 8, greenhouse: 3, lysimeter: 3,
+    };
     for (const layoutCode of ['open_field', 'greenhouse', 'lysimeter']) {
       const resolved = result.model.layouts.get(layoutCode);
-      expect(resolved?.version, `${layoutCode} resolves to its latest version`).toBe(3);
+      expect(resolved?.version, `${layoutCode} resolves to its latest version`)
+        .toBe(expectedLayoutVersions[layoutCode]);
       expect((resolved?.static_context_fields ?? []).length, `${layoutCode} static_context_fields`)
         .toBeGreaterThan(0);
       for (const field of resolved?.reading_fields ?? []) {
@@ -504,23 +511,27 @@ describe('catalog model', () => {
     expect(openField).toBeDefined();
     if (!fullRecord || !openField) return;
 
-    // full_record now resolves to the scoped v7 row (activeDefinition always
-    // picks the highest active version — v7 is the journal capture-followups
-    // Slice 1 irrigation-requiredness relaxation, layered on the v5
-    // scoped_by_activity mechanism this slice introduced), and it still
-    // declares the section this slice narrows.
-    expect(fullRecord.version).toBe(7);
+    // full_record now resolves to the scoped v8 row (activeDefinition always
+    // picks the highest active version — v8 is the treated-area-optional
+    // plan, layered on the v5 scoped_by_activity mechanism this slice
+    // introduced), and it still declares the section this slice narrows.
+    expect(fullRecord.version).toBe(8);
     const operationSection = fullRecord.sections.find((section) => section.code === 'operation');
     expect(operationSection?.scoped_by_activity).toBe(true);
     expect(fullRecord.operation_fields_by_activity).toBeDefined();
 
     // Full irrigation: shows the irrigation-details fields, excludes
-    // product-mass/nutrient/harvest fields (spec §4-B).
+    // product-mass/nutrient/harvest fields (spec §4-B). Treated-area-optional
+    // plan (2026-07-22): attr.treated_area is now ALSO visible here (newly
+    // added to operation_fields_by_activity.irrigation at full_record@8), and
+    // it is never required for irrigation (irrigation never appeared in
+    // activity_requirements).
     const irrigationStates = deriveFieldStates(fullRecord, openField, { activity_code: 'irrigation' });
     const irrigationVisible = irrigationStates.filter((state) => state.visible).map((state) => state.code);
     expect(irrigationVisible).toEqual(expect.arrayContaining([
       'attr.irrigation_amount_kind', 'attr.measurement_source', 'attr.denominator',
       'attr.irrigation_depth', 'attr.operator', 'attr.equipment', 'attr.method',
+      'attr.treated_area',
     ]));
     for (const excluded of [
       'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
@@ -534,13 +545,16 @@ describe('catalog model', () => {
     // irrigation_details conditional_group still forces amount_kind
     // required, and the depth/volume/per-plant family stays a required_any
     // trio; measurement_source/denominator moved to optional (visible, not
-    // required) at full_record@7.
+    // required) at full_record@7. treated_area is visible but never required
+    // for irrigation (treated-area-optional plan, full_record@8).
     expect(irrigationStates.find((state) => state.code === 'attr.irrigation_amount_kind'))
       .toMatchObject({ required: true });
     expect(irrigationStates.find((state) => state.code === 'attr.measurement_source'))
       .toMatchObject({ required: false });
     expect(irrigationStates.find((state) => state.code === 'attr.denominator'))
       .toMatchObject({ required: false });
+    expect(irrigationStates.find((state) => state.code === 'attr.treated_area'))
+      .toMatchObject({ visible: true, required: false });
     expect(irrigationStates.find((state) => state.code === 'attr.irrigation_depth')?.required_any_groups.length)
       .toBeGreaterThan(0);
 
@@ -565,15 +579,28 @@ describe('catalog model', () => {
     ]) {
       expect(fertilizationVisible, `fertilization must exclude ${excluded}`).not.toContain(excluded);
     }
+    // Treated-area-optional plan (2026-07-22): attr.treated_area is visible
+    // but no longer required for fertilization at full_record@8 (dropped
+    // from activity_requirements.fertilization.required).
     expect(fertilizationStates.find((state) => state.code === 'attr.treated_area'))
-      .toMatchObject({ required: true });
+      .toMatchObject({ visible: true, required: false });
     expect(fertilizationStates.find((state) => state.code === 'attr.product_uuid')?.required_any_groups.length)
       .toBeGreaterThan(0);
   });
 
-  it('journal capture-followups Slice 1 (W1): full_record@7 + open_field@3 irrigation relaxes measurement_source/denominator/block_bed_row/cover_type to visible-but-optional, keeping amount_kind/amount/treated_area required', () => {
+  it('journal capture-followups Slice 1 (W1, frozen): full_record@7 + open_field@3 irrigation relaxes measurement_source/denominator/block_bed_row/cover_type to visible-but-optional, keeping amount_kind/amount/treated_area required', () => {
+    // Pins the FROZEN v7/v3 rows directly, bypassing "latest version wins"
+    // resolution (the treated-area-optional plan added full_record@8 and
+    // open_field@8 on top of these — see the v8 test below for the current
+    // behavior) — this is a regression check that the immutable v7/v3 rows
+    // never drift, mirroring the v1Layout bypass pattern above.
     const fixture = shippedCatalog();
-    const result = buildCatalogModel(fixture);
+    const frozenFixture = {
+      ...fixture,
+      templates: fixture.templates.filter((row) => !(row.code === 'full_record' && row.version === 8)),
+      layouts: fixture.layouts.filter((row) => !(row.code === 'open_field' && row.version === 8)),
+    };
+    const result = buildCatalogModel(frozenFixture);
     expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
     if (!result.ok) return;
     const fullRecord = result.model.templates.get('full_record');
@@ -622,6 +649,64 @@ describe('catalog model', () => {
     if (!farmerQuick) return;
     const quickStates = deriveFieldStates(farmerQuick, openField, { activity_code: 'irrigation' });
     expect(quickStates.some((state) => state.code === 'attr.block_bed_row')).toBe(false);
+  });
+
+  it('treated-area-optional plan (2026-07-22): full_record@8 + open_field@8 make attr.treated_area visible-but-optional for irrigation, fertilization, and seeding (current/latest-resolving catalog)', () => {
+    const fixture = shippedCatalog();
+    const result = buildCatalogModel(fixture);
+    expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
+    if (!result.ok) return;
+    const fullRecord = result.model.templates.get('full_record');
+    const openField = result.model.layouts.get('open_field');
+    expect(fullRecord).toBeDefined();
+    expect(openField).toBeDefined();
+    if (!fullRecord || !openField) return;
+    expect(fullRecord.version).toBe(8);
+    expect(openField.version).toBe(8);
+
+    // treated_area is dropped from open_field@8's minimum_fields entirely —
+    // no longer force-required anywhere via that mechanism.
+    expect(openField.minimum_fields).not.toContain('attr.treated_area');
+    // static_context_fields is untouched by this plan (still the plot-static
+    // block/bed/row + cover_type + denominator trio).
+    expect(openField.static_context_fields).toEqual(
+      expect.arrayContaining(['attr.block_bed_row', 'attr.cover_type', 'attr.denominator']),
+    );
+
+    for (const activityCode of ['irrigation', 'fertilization', 'seeding']) {
+      const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
+      const treatedArea = states.find((state) => state.code === 'attr.treated_area');
+      expect(treatedArea, `${activityCode} must show attr.treated_area`).toMatchObject({
+        visible: true, required: false,
+      });
+    }
+
+    // amount/amount-kind requiredness is unaffected by this plan: irrigation
+    // still requires amount_kind + the depth/volume/per-plant required_any
+    // trio; fertilization/seeding still require a product/amount pair.
+    const irrigationStates = deriveFieldStates(fullRecord, openField, { activity_code: 'irrigation' });
+    expect(irrigationStates.find((state) => state.code === 'attr.irrigation_amount_kind'))
+      .toMatchObject({ required: true });
+    expect(irrigationStates.find((state) => state.code === 'attr.irrigation_depth')?.required_any_groups.length)
+      .toBeGreaterThan(0);
+    const fertilizationStates = deriveFieldStates(fullRecord, openField, { activity_code: 'fertilization' });
+    expect(fertilizationStates.find((state) => state.code === 'attr.product_uuid')?.required_any_groups.length)
+      .toBeGreaterThan(0);
+    const seedingStates = deriveFieldStates(fullRecord, openField, { activity_code: 'seeding' });
+    expect(seedingStates.find((state) => state.code === 'attr.crop')).toMatchObject({ required: true });
+    expect(seedingStates.find((state) => state.code === 'attr.amount_count_area')?.required_any_groups.length)
+      .toBeGreaterThan(0);
+
+    // Non-area activities never gain treated_area (intended visibility
+    // narrowing, not a regression -- Risks section of the plan).
+    for (const activityCode of [
+      'pruning', 'crop_care', 'harvest', 'sampling',
+      'general_observation', 'pest_disease_observation', 'equipment_maintenance',
+    ]) {
+      const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
+      expect(states.some((state) => state.code === 'attr.treated_area' && state.visible),
+        `${activityCode} must not show attr.treated_area`).toBe(false);
+    }
   });
 
   it('journal capture-followups Slice 1 (W3): attr.crop exposes the 16 open-field vegetables, active with correct English labels and sort_order', () => {
@@ -727,16 +812,19 @@ describe('catalog model', () => {
     ]);
 
     // journal capture-followups Slice 1 (Task 1.1b): block_bed_row/
-    // cover_type/denominator are open_field@3's static_context_fields, so the
+    // cover_type/denominator are open_field's static_context_fields, so the
     // templateEngine decouple resolves them visible-but-optional here too
     // (research_observation has no quick_fields, so it takes the same
-    // non-quick minimum_fields branch full_record does); treated_area is not
-    // in static_context_fields and stays required.
+    // non-quick minimum_fields branch full_record does). Treated-area-optional
+    // plan (2026-07-22): open_field now resolves to v8, which drops
+    // attr.treated_area from minimum_fields entirely -- research_observation
+    // has no other source for it, so it no longer appears here at all (not
+    // even visible), unlike the frozen v3 behavior asserted separately above.
     const researchExpected = [
       state('activity_code'), state('plot_uuid'), state('occurred_start'),
       state('campaign_uuid'), state('protocol_code'), state('protocol_version'),
       state('observation_unit_code'), state('attr.observation_text'),
-      state('attr.block_bed_row', false), state('attr.treated_area', true),
+      state('attr.block_bed_row', false),
       state('attr.cover_type', false), state('attr.denominator', false),
     ];
     for (const activity of ['irrigation', 'fertilization', 'harvest']) {

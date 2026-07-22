@@ -621,6 +621,28 @@ const FULL_RECORD_V6_OPERATION_FIELDS_BY_ACTIVITY = {
   ],
 };
 
+// v8 (treated-area-optional plan, 2026-07-22): `attr.treated_area` is removed
+// from `activity_requirements.required` for the 5 dosing activities
+// (fertilization/fertigation/plant_protection_application/seeding/
+// planting_transplanting — see full_record@8 below), so it is no longer
+// force-required anywhere. To keep it VISIBLE-optional everywhere it
+// rendered before, it must stay reachable via operation_fields_by_activity.
+// The only activity that needs it ADDED here is `irrigation` — it was never
+// in V5/V6's irrigation list. All 5 dosing activities already carry
+// treated_area in FULL_RECORD_V6_OPERATION_FIELDS_BY_ACTIVITY (inherited from
+// V5, including planting_transplanting), as do weed_control_nonchemical/
+// tillage_soil_work/mowing, so only `irrigation` is overridden here — every
+// other activity inherits unchanged. Do not mutate the frozen V6 const.
+const FULL_RECORD_V8_OPERATION_FIELDS_BY_ACTIVITY = {
+  ...FULL_RECORD_V6_OPERATION_FIELDS_BY_ACTIVITY,
+  irrigation: [
+    'attr.irrigation_amount_kind', 'attr.measurement_source', 'attr.denominator',
+    'attr.irrigation_depth', 'attr.irrigation_volume_area', 'attr.per_plant_volume',
+    'attr.actuation_expectation_id', 'attr.operator', 'attr.equipment', 'attr.method',
+    'attr.treated_area',
+  ],
+};
+
 const templates = [
   {
     code: 'farmer_quick',
@@ -1206,6 +1228,137 @@ const templates = [
       certified_compliance_profile: null,
     },
   },
+  // v8 (treated-area-optional plan, 2026-07-22, maintainer-confirmed):
+  // `attr.treated_area` is removed from `activity_requirements.required` for
+  // fertilization/fertigation/plant_protection_application/seeding/
+  // planting_transplanting — every other required field on those activities
+  // is untouched. No activity requires treated_area after this version.
+  // `operation_fields_by_activity` switches to
+  // FULL_RECORD_V8_OPERATION_FIELDS_BY_ACTIVITY so treated_area stays VISIBLE
+  // (now optional) on irrigation (newly added) plus every activity that
+  // already carried it. Everything else (sections, conditional_groups,
+  // weather group, certified_compliance_profile) is copied verbatim from @7.
+  {
+    code: 'full_record',
+    version: 8,
+    label: 'Full record',
+    definition: {
+      sections: [
+        { code: 'identity', fields: ['activity_code', 'plot_uuid', 'occurred_start', 'occurred_end'] },
+        {
+          code: 'operation',
+          scoped_by_activity: true,
+          fields: [
+            'attr.crop',
+            'attr.product_uuid',
+            'attr.product',
+            'attr.treated_area',
+            'attr.harvest_area',
+            'attr.harvest_yield_area',
+            'attr.amount_mass_area_product',
+            'attr.amount_volume_area_product',
+            'attr.amount_nutrient_rate',
+            'attr.amount_count_area',
+            'attr.amount_biological_count_area',
+            'attr.irrigation_amount_kind',
+            'attr.measurement_source',
+            'attr.denominator',
+            'attr.irrigation_depth',
+            'attr.irrigation_volume_area',
+            'attr.per_plant_volume',
+            'attr.actuation_expectation_id',
+            'attr.operator',
+            'attr.equipment',
+            'attr.method',
+            'attr.target',
+            'attr.waiting_period_days',
+            'attr.amount_operation_depth',
+            'attr.observation_text',
+            'attr.growth_stage_bbch',
+            'attr.wind_speed',
+            'attr.wind_direction',
+            'attr.air_temperature',
+            'attr.rel_humidity',
+          ],
+        },
+        { code: 'notes', fields: ['note'] },
+      ],
+      operation_fields_by_activity: FULL_RECORD_V8_OPERATION_FIELDS_BY_ACTIVITY,
+      activity_requirements: {
+        fertilization: {
+          required: [],
+          required_any: [
+            ['attr.product_uuid', 'attr.product'],
+            [
+              'attr.amount_mass_area_product',
+              'attr.amount_volume_area_product',
+              'attr.amount_nutrient_rate',
+            ],
+          ],
+        },
+        fertigation: {
+          required: [],
+          required_any: [
+            ['attr.product_uuid', 'attr.product'],
+            [
+              'attr.amount_mass_area_product',
+              'attr.amount_volume_area_product',
+              'attr.amount_nutrient_rate',
+            ],
+          ],
+        },
+        plant_protection_application: {
+          required: [],
+          required_any: [
+            ['attr.product_uuid', 'attr.product'],
+            [
+              'attr.amount_mass_area_product',
+              'attr.amount_volume_area_product',
+              'attr.amount_biological_count_area',
+            ],
+          ],
+        },
+        seeding: {
+          required: ['attr.crop'],
+          required_any: [['attr.amount_mass_area_product', 'attr.amount_count_area']],
+        },
+        planting_transplanting: {
+          required: ['attr.crop'],
+          required_any: [['attr.amount_count_area']],
+        },
+        harvest: {
+          required: ['attr.crop', 'attr.harvest_area', 'attr.harvest_yield_area'],
+          required_any: [],
+        },
+      },
+      conditional_groups: [
+        {
+          code: 'irrigation_details',
+          activity_codes: ['irrigation', 'fertigation'],
+          required: ['attr.irrigation_amount_kind'],
+          required_any: [[
+            'attr.irrigation_depth',
+            'attr.irrigation_volume_area',
+            'attr.per_plant_volume',
+          ]],
+          optional: ['attr.measurement_source', 'attr.denominator', 'attr.actuation_expectation_id'],
+        },
+        {
+          code: 'weather_at_application',
+          activity_codes: ['plant_protection_application'],
+          required: [],
+          required_any: [],
+          optional: [
+            'attr.wind_speed',
+            'attr.wind_direction',
+            'attr.air_temperature',
+            'attr.rel_humidity',
+          ],
+        },
+      ],
+      certified_compliance_profile: null,
+    },
+  },
   {
     code: 'research_observation',
     version: 1,
@@ -1293,6 +1446,26 @@ const layouts = [
       activity_codes: CORE_ACTIVITY_CODES,
       supported_templates: ALL_TEMPLATES,
       minimum_fields: ['attr.block_bed_row', 'attr.treated_area', 'attr.cover_type', 'attr.denominator'],
+      static_context_fields: ['attr.block_bed_row', 'attr.cover_type', 'attr.denominator'],
+      reading_fields: [],
+      denominator_contract: ['area', 'plant', 'row'],
+      option_dependencies: [],
+    },
+  },
+  // v8 (treated-area-optional plan, 2026-07-22): drop attr.treated_area from
+  // minimum_fields so the layout no longer force-requires it for any
+  // activity (paired with full_record@8's activity_requirements change).
+  // static_context_fields is unchanged (still the same 3 fields it already
+  // was in v3, which never included treated_area) — the static ⊆ minimum
+  // invariant holds trivially since the two sets are now equal.
+  {
+    code: 'open_field',
+    version: 8,
+    label: 'Open field',
+    definition: {
+      activity_codes: CORE_ACTIVITY_CODES,
+      supported_templates: ALL_TEMPLATES,
+      minimum_fields: ['attr.block_bed_row', 'attr.cover_type', 'attr.denominator'],
       static_context_fields: ['attr.block_bed_row', 'attr.cover_type', 'attr.denominator'],
       reading_fields: [],
       denominator_contract: ['area', 'plant', 'row'],

@@ -188,10 +188,13 @@ export function deriveFieldStates(
     // instead of required — the same plot-static fact should not become a
     // hard-required per-entry input just because Full mode still resolves
     // minimum_fields the old way. A minimum_fields entry NOT in
-    // static_context_fields (e.g. open_field's attr.treated_area) stays
-    // force-required exactly as before. static_context_fields itself is never
-    // trimmed by this — Quick's plot-context resolution (PlotContextFields /
-    // plotContextInputs) still reads the full list untouched.
+    // static_context_fields stays force-required exactly as before (this
+    // branch is version-generic; as of catalog v8 all served layouts have
+    // minimum_fields == static_context_fields, so nothing is force-required
+    // via this path today — open_field's attr.treated_area left minimum_fields
+    // in v8). static_context_fields itself is never trimmed by this — Quick's
+    // plot-context resolution (PlotContextFields / plotContextInputs) still
+    // reads the full list untouched.
     const staticContextFields = rawLayout.static_context_fields ?? [];
     for (const field of rawLayout.minimum_fields ?? []) {
       addField(field, !staticContextFields.includes(field));

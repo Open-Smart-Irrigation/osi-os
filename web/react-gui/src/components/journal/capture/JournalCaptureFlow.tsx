@@ -582,6 +582,63 @@ function withoutUnchangedOwnedValues(
   });
 }
 
+// Treated-area-optional plan (2026-07-22, maintainer-confirmed): a plot that
+// already has an area on file (journal_plots.area_m2) implies a routine
+// full-plot entry, so attr.treated_area defaults from it -- visible in the
+// editable input, not merely recorded read-only (attr.treated_area stays a
+// normal editable field for every template; unlike plotContextInputs'
+// static_context_fields, it is never force-required as of catalog v8, so
+// this is a convenience default, not a correction-context snapshot). Same
+// unit as area_m2 (m2), no conversion -- mirrors plotContextInputs' own
+// number-attribute shape.
+const TREATED_AREA_ATTRIBUTE_CODE = 'attr.treated_area';
+const TREATED_AREA_UNIT_CODE = 'unit.m2_area';
+
+function treatedAreaPrefillValue(
+  plot: JournalPlot | null | undefined,
+): CaptureEntryValueInput | null {
+  const areaM2 = plot?.area_m2;
+  if (typeof areaM2 !== 'number' || !Number.isFinite(areaM2)) return null;
+  return {
+    attribute_code: TREATED_AREA_ATTRIBUTE_CODE,
+    value_status: 'observed',
+    entered_value_num: areaM2,
+    entered_unit_code: TREATED_AREA_UNIT_CODE,
+  };
+}
+
+// Applies the plot-area default onto a values array and registers it as an
+// "owned" automatic value in the supplied map, using the exact same
+// ownership bookkeeping/pattern as automaticPrefillRef's carry-forward
+// prefills (see withoutUnchangedOwnedValues above) -- but tracked in its own
+// dedicated ref (treatedAreaOwnedRef, wired in the component below) rather
+// than sharing automaticPrefillRef itself. Sharing that ref was tried first;
+// it does not work here because applyCarryForwardCandidate unconditionally
+// clears automaticPrefillRef and re-derives it from ONLY the recent-entry
+// carry-forward candidate on every draft autosave (see updateStableDraft),
+// which would silently drop an untouched treated_area default the moment the
+// user advances past the details step -- before they ever get a chance to
+// see it on the confirm screen. A dedicated ref keeps the exact same
+// user-edit-wins / clear-and-reapply-on-plot-change semantics without that
+// cross-feature collision.
+//
+// No-op (never clobbers) if treated_area is already present in
+// candidateValues -- whether that's a kept user edit, a carry-forward value,
+// or an already-applied plot default from a prior render of the same plot.
+function withTreatedAreaPrefill(
+  candidateValues: CaptureEntryValueInput[],
+  plot: JournalPlot | null | undefined,
+  ownedValues: Map<string, CaptureEntryValueInput>,
+): CaptureEntryValueInput[] {
+  if (candidateValues.some((value) => value.attribute_code === TREATED_AREA_ATTRIBUTE_CODE)) {
+    return candidateValues;
+  }
+  const prefill = treatedAreaPrefillValue(plot);
+  if (!prefill) return candidateValues;
+  ownedValues.set(carryForwardValueKey(prefill), prefill);
+  return [...candidateValues, prefill];
+}
+
 function requiredFieldsSatisfied(
   states: Array<{ code: string; visible: boolean; required: boolean; required_any_groups: number[] }>,
   inputs: CaptureEntryValueInput[],
@@ -815,6 +872,10 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const batchEntryUuidsRef = useRef(new Map<string, string>());
   const contextKeyRef = useRef('');
   const automaticPrefillRef = useRef(new Map<string, CaptureEntryValueInput>());
+  // Dedicated ownership map for the plot-area treated_area default -- see
+  // withTreatedAreaPrefill's comment above for why this is not folded into
+  // automaticPrefillRef.
+  const treatedAreaOwnedRef = useRef(new Map<string, CaptureEntryValueInput>());
   const acceptedRepeatRef = useRef<AcceptedRepeatSnapshot | null>(null);
   const prefillContextRef = useRef<string | null>(null);
 
@@ -1386,6 +1447,17 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     return nextValues;
   }, [storeAcceptedRepeat]);
 
+  // Strips a stale, unedited plot-area treated_area default (see
+  // withTreatedAreaPrefill) ahead of a plot switch, so the next call site
+  // can re-derive it fresh from the newly selected plot's own area_m2 --
+  // never touches a value the user actually typed (withoutUnchangedOwnedValues
+  // only removes values that still match their owned snapshot verbatim).
+  const clearOwnedTreatedAreaPrefill = useCallback((currentValues: CaptureEntryValueInput[]) => {
+    const nextValues = withoutUnchangedOwnedValues(currentValues, treatedAreaOwnedRef.current.values());
+    treatedAreaOwnedRef.current.clear();
+    return nextValues;
+  }, []);
+
   const applyCarryForwardCandidate = useCallback((
     nextCandidate: CarryForwardCandidate | null,
     incomingAutomatic: CaptureEntryValueInput[],
@@ -1620,7 +1692,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       requestedSelection.some((plotUuid, index) => plotUuid !== selectedPlotUuids[index]);
     const layoutContextChanged = nextLayoutCode !== layoutCode;
     const contextValues = plotContextChanged || layoutContextChanged
-      ? clearOwnedCarryForward(values)
+      ? clearOwnedTreatedAreaPrefill(clearOwnedCarryForward(values))
       : values;
     const dependencyCodes = new Set(
       leaf?.dependent_selections.map(({ attribute_code }) => attribute_code) ?? [],
@@ -1649,10 +1721,14 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     setEndOccurrenceError(null);
     setLeaf(null);
     const nextTemplateDef = model?.templates.get(nextTemplate);
-    const nextValues = withCanonicalContextCrop(
-      model,
-      nextCrop,
-      applyLayoutTransitionGate(layout, leaf, nextLayout, nextTemplateDef, nextCrop, retainedValues),
+    const nextValues = withTreatedAreaPrefill(
+      withCanonicalContextCrop(
+        model,
+        nextCrop,
+        applyLayoutTransitionGate(layout, leaf, nextLayout, nextTemplateDef, nextCrop, retainedValues),
+      ),
+      nextPlot,
+      treatedAreaOwnedRef.current,
     );
     const validation = validateTransition(
       nextLayout,
@@ -1717,7 +1793,11 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     const previousDependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code));
     const retainedValues = contextValues.filter((value) => !previousDependencyCodes.has(value.attribute_code));
     const nextTemplateDef = model?.templates.get(nextTemplate);
-    const nextValues = applyLayoutTransitionGate(layout, leaf, nextLayout, nextTemplateDef, crop, retainedValues);
+    const nextValues = withTreatedAreaPrefill(
+      applyLayoutTransitionGate(layout, leaf, nextLayout, nextTemplateDef, crop, retainedValues),
+      selectedPlot,
+      treatedAreaOwnedRef.current,
+    );
     const validation = validateTransition(
       nextLayout,
       nextTemplateDef,
@@ -1747,7 +1827,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     }
     setLeaf(chosen);
     const previousDependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code));
-    const retainedValues = sanitizeValues(model!, layout, template, chosen, crop, contextValues, previousDependencyCodes);
+    // Seed the plot-area default BEFORE sanitizeValues so the chosen
+    // activity's own operation_fields_by_activity visibility governs whether
+    // it stays (e.g. hidden again on pruning/harvest/... -- expected, not a
+    // bug) -- see withTreatedAreaPrefill's comment above.
+    const seededContextValues = withTreatedAreaPrefill(contextValues, selectedPlot, treatedAreaOwnedRef.current);
+    const retainedValues = sanitizeValues(model!, layout, template, chosen, crop, seededContextValues, previousDependencyCodes);
     const nextValues = [
       ...retainedValues,
       ...activityDependencyInputs(chosen),
