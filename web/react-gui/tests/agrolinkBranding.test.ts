@@ -166,7 +166,7 @@ describe('AgroLink branding source contracts', () => {
       fr: 'Créez une zone depuis le tableau de bord existant avant d’ouvrir l’historique.',
       it: 'Crea una zona dalla vecchia dashboard prima di aprire la cronologia.',
       es: 'Crea una zona desde el panel heredado antes de abrir el historial.',
-      pt: 'Crie uma zona no painel legado antes de abrir o histórico temático.',
+      pt: 'Crie uma zona no painel legado antes de abrir o histórico.',
       lg: "Tondawo ekifo okuva ku dashboard enkadde nga tonnaggula ebyafaayo by'omulamwa.",
     };
 

@@ -134,7 +134,8 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
     'history.metadata.syncState.local', 'history.metadata.aggregation.15m',
     'history.soilProfile.depthLabel', 'history.calendar.state.normal',
     'history.calendar.state.offline', 'history.advanced.field.rssi', 'history.advanced.field.snr',
-    'history.advanced.field.firmware', 'history.soilLineChart.series.sensor',
+    'history.advanced.field.firmware', 'history.advanced.field.device_eui',
+    'history.advanced.field.primaryDeveui', 'history.soilLineChart.series.sensor',
   ]),
 };
 

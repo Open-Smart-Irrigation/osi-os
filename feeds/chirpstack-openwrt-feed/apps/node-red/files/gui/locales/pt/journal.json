@@ -13,7 +13,7 @@
     "syncBody": "Cada registo indica se já está guardado no gateway da quinta ou se ainda aguarda ser guardado. Nada se perde sem aviso."
   },
   "row": {
-    "farmLevel": "Nível da quinta",
+    "farmLevel": "Quinta inteira",
     "unknownPlot": "Parcela desconhecida",
     "status": {
       "final": "Final",
@@ -86,7 +86,7 @@
     "resolved": "Dissolvido",
     "resolve": "Dissolver grupo",
     "resolveError": "Não foi possível dissolver este grupo.",
-    "changedError": "Este grupo foi alterado. Atualize a página e tente novamente.",
+    "changedError": "Este grupo foi alterado. Volte a carregá-lo e tente novamente.",
     "resolutionRegion": "Dissolução do grupo após a colheita",
     "resolveHeading": "Dissolver o grupo de colheita",
     "resolveAction": "Dissolver grupo",
@@ -116,7 +116,7 @@
     "layoutRequired": "Selecione um layout ativo",
     "stale": "Esta parcela foi alterada noutro local. Volte a carregá-la antes de guardar.",
     "codeConflict": "O código da parcela já está a ser utilizado.",
-    "heterogeneousGroup": "A parcela pertence a um grupo heterogéneo.",
+    "heterogeneousGroup": "A parcela pertence a um grupo com layouts incompatíveis.",
     "unresolvedGroup": "Dissolva o grupo de parcelas antes de desativar esta parcela.",
     "loading": "A guardar…",
     "error": "Não foi possível guardar a parcela.",
@@ -151,7 +151,7 @@
   },
   "error": {
     "title": "Não foi possível carregar o diário",
-    "body": "O gateway não respondeu com sucesso. Tente novamente.",
+    "body": "O gateway não respondeu. Tente novamente.",
     "retry": "Tentar novamente"
   },
   "filters": {

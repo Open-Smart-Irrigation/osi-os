@@ -10,11 +10,11 @@
       "subtitle": "Histórico local do gateway para {{username}}",
       "loadingLocalCards": "A carregar cartões de histórico locais…",
       "unavailableTitle": "O histórico não está disponível",
-      "unavailableBody": "Os sinalizadores de funcionalidade em runtime mantêm a nova interface de histórico desativada até o gateway local a ativar.",
-      "featureFlagFailed": "O pedido do sinalizador de funcionalidade falhou. O painel legado continua disponível.",
+      "unavailableBody": "O histórico está desativado neste gateway e aparecerá aqui assim que for ativado.",
+      "featureFlagFailed": "Não foi possível verificar se o histórico está ativado. O painel legado continua disponível.",
       "zonesFailedTitle": "Falha ao carregar as zonas do histórico",
       "noZonesTitle": "Ainda não há zonas",
-      "noZonesBody": "Crie uma zona no painel legado antes de abrir o histórico temático.",
+      "noZonesBody": "Crie uma zona no painel legado antes de abrir o histórico.",
       "cardsFailed": "Falha ao carregar os cartões de histórico.",
       "retryCards": "Tentar novamente os cartões"
     },
@@ -41,7 +41,7 @@
       "comparisonMode": "Comparação",
       "addPanel": "Adicionar painel {{title}}",
       "removePanel": "Remover painel",
-      "panelLimitWarning": "Só é possível mostrar {{count}} painéis de comparação neste gateway local.",
+      "panelLimitWarning": "Só é possível mostrar {{count}} painéis de comparação neste gateway.",
       "selectedTimestampNone": "Nenhuma data/hora selecionada",
       "selectedTimestamp": "Data/hora selecionada: {{timestamp}}",
       "inspectorTitle": "Inspetor",
@@ -90,7 +90,7 @@
       "pinnedCards": "Cartões fixados",
       "availableCards": "Cartões disponíveis",
       "savedWorkspaces": "Espaços de trabalho guardados",
-      "workspaceDisabled": "Guardar espaços de trabalho não está ativado nesta versão.",
+      "workspaceDisabled": "Guardar espaços de trabalho ainda não está ativado.",
       "workspaceName": "Nome do espaço de trabalho",
       "saveWorkspace": "Guardar espaço de trabalho",
       "updateWorkspace": "Atualizar espaço de trabalho",
@@ -110,14 +110,14 @@
     },
     "cardFrame": {
       "emptyTitle": "Selecione um cartão de histórico",
-      "emptyBody": "Escolha uma zona e um cartão temático para consultar o histórico local.",
+      "emptyBody": "Escolha uma zona e um cartão de histórico para consultar o histórico local.",
       "typeHistory": "Histórico de {{cardType}}",
       "viewModes": "Modos de vista de {{title}}",
       "unavailable": "Este cartão não está disponível para a zona selecionada.",
       "timelineBrush": "Área visível da linha do tempo",
       "timelineBrushKeyboardHelp": "Use as teclas de seta para deslocar, mais ou menos para ampliar ou reduzir, e Home ou Enter para repor.",
       "aggregationBadge": "Agregação: {{aggregation}}",
-      "placeholderBody": "Os dados do gráfico e do calendário serão carregados aqui quando as APIs de dados do cartão estiverem ativadas.",
+      "placeholderBody": "Os dados do gráfico e do calendário serão carregados aqui assim que os dados do cartão estiverem disponíveis.",
       "cardDataLoading": "A carregar dados do cartão…",
       "cardDataError": "Falha ao carregar os dados do cartão: {{message}}",
       "cardDataUnknownError": "Erro desconhecido"
@@ -177,7 +177,7 @@
     "gatewayStatus": {
       "title": "Vista geral do estado do gateway",
       "emptyTitle": "Dados limitados sobre o estado do gateway",
-      "emptyBody": "Os detalhes do estado do gateway aparecerão aqui à medida que o hub os reportar.",
+      "emptyBody": "Os detalhes do estado do gateway aparecerão aqui à medida que o gateway os reportar.",
       "lastSeen": "Visto pela última vez",
       "dataAsOf": "Dados a partir de",
       "syncState": "Estado de sincronização",
@@ -192,7 +192,7 @@
         "disconnected": "Desligado",
         "degraded": "Degradado",
         "stale": "Desatualizado",
-        "charging": "A carregar"
+        "charging": "Em carregamento"
       },
       "category": {
         "connectivity": "Conectividade",
@@ -237,7 +237,7 @@
     },
     "cardType": {
       "soil": "Solo",
-      "dendro": "Dendro",
+      "dendro": "Dendrómetro",
       "environment": "Ambiente",
       "irrigation": "Rega",
       "gateway": "Gateway"
@@ -249,7 +249,7 @@
       "irrigation-response": "Resposta à rega",
       "advanced": "Vista avançada",
       "growth-timeline": "Linha do tempo de crescimento",
-      "stress-events": "Eventos de stress",
+      "stress-events": "Eventos de stresse",
       "daily-min-max": "Mín/Máx diário",
       "event-timeline": "Linha do tempo de eventos",
       "status-overview": "Vista geral do estado",
@@ -291,10 +291,10 @@
       "emptyTitle": "Sem dados de perfil do solo",
       "emptyBody": "As leituras de perfil por profundidade não estão disponíveis para este intervalo.",
       "depthLabel": "{{depth}} cm",
-      "depthUnknown": "Profundidade pendente",
+      "depthUnknown": "Profundidade não definida",
       "valueMissing": "Sem leitura",
       "status": {
-        "dry_stress": "Stress de seca",
+        "dry_stress": "Stresse de seca",
         "optimal": "Ótimo",
         "wet_excess": "Excesso de água",
         "mixed": "Misto",
@@ -323,17 +323,17 @@
         "sun": "Dom"
       },
       "state": {
-        "dry_stress": "Stress de seca",
+        "dry_stress": "Stresse de seca",
         "optimal": "Ótimo",
         "wet_excess": "Excesso de água",
         "mixed": "Misto",
         "normal_growth": "Crescimento normal",
         "reduced_growth": "Crescimento reduzido",
-        "high_shrinkage_stress": "Stress de contração elevado",
+        "high_shrinkage_stress": "Stresse de contração elevado",
         "incomplete_night_recovery": "Recuperação noturna incompleta",
         "normal": "Normal",
-        "heat_stress": "Stress de calor",
-        "cold_stress": "Stress de frio",
+        "heat_stress": "Stresse de calor",
+        "cold_stress": "Stresse de frio",
         "high_humidity": "Humidade elevada",
         "rain_day": "Dia de chuva",
         "no_irrigation": "Sem rega",
@@ -356,9 +356,9 @@
         "sensor_gap": "Lacuna do sensor",
         "heat_event": "Evento de calor",
         "soil": {
-          "dry_stress": "Marcador de stress de seca",
+          "dry_stress": "Marcador de stresse de seca",
           "optimal": "Marcador ótimo",
-          "wet_excess": "Marcador húmido",
+          "wet_excess": "Marcador de excesso de água",
           "mixed": "Marcador misto"
         },
         "dendro": {
@@ -386,14 +386,14 @@
         "dendro": {
           "normal_growth": "Crescimento do caule normal.",
           "reduced_growth": "Crescimento do caule reduzido.",
-          "high_shrinkage_stress": "Contração do caule indicou stress.",
+          "high_shrinkage_stress": "Contração do caule indicou stresse.",
           "incomplete_night_recovery": "Recuperação noturna incompleta.",
           "no_data": "Sem dados do dendrómetro disponíveis."
         },
         "environment": {
           "normal": "Ambiente normal.",
-          "heat_stress": "Stress de calor detetado.",
-          "cold_stress": "Stress de frio detetado.",
+          "heat_stress": "Stresse de calor detetado.",
+          "cold_stress": "Stresse de frio detetado.",
           "high_humidity": "Humidade elevada detetada.",
           "rain_day": "Chuva detetada.",
           "no_data": "Sem dados ambientais disponíveis."
@@ -420,7 +420,7 @@
       },
       "rootZoneDry": {
         "title": "A zona radicular entrou em estado seco",
-        "body": "A tensão do solo em profundidade manteve-se seca durante o período selecionado."
+        "body": "A tensão do solo na camada mais profunda manteve-se seca durante o período selecionado."
       },
       "dataCoverageGap": {
         "title": "Os dados do sensor estão incompletos",
@@ -431,8 +431,8 @@
         "body": "O dendrómetro não recuperou totalmente durante a noite no período selecionado."
       },
       "environmentStress": {
-        "title": "Stress ambiental detetado",
-        "body": "As leituras ambientais ultrapassaram um limiar de stress no intervalo selecionado."
+        "title": "Stresse ambiental detetado",
+        "body": "As leituras ambientais ultrapassaram um limiar de stresse no intervalo selecionado."
       },
       "extensionUnavailable": {
         "title": "Contexto na nuvem indisponível"
@@ -456,12 +456,12 @@
       "availability": {
         "collected": "Recolhido",
         "not_collected_at_time": "Não recolhido nessa altura",
-        "unknown_now": "Desconhecido atualmente",
+        "unknown_now": "Atualmente desconhecido",
         "unsupported": "Não suportado"
       },
       "field": {
-        "device_eui": "EUI do dispositivo",
-        "primaryDeveui": "EUI do dispositivo",
+        "device_eui": "DevEUI",
+        "primaryDeveui": "DevEUI",
         "rssi": "RSSI",
         "snr": "SNR",
         "raw_payload": "Payload em bruto",
@@ -513,7 +513,7 @@
       "interpretationsTitle": "Notas de resposta"
     },
     "dendroLineChart": {
-      "title": "Gráfico de linhas do dendro",
+      "title": "Gráfico de linhas do dendrómetro",
       "emptyTitle": "Sem dados de linha do dendrómetro",
       "emptyBody": "As leituras do dendrómetro aparecerão aqui quando houver dados de histórico disponíveis.",
       "pointsCount": "{{count}} leituras",
@@ -526,14 +526,14 @@
       }
     },
     "dendroStressEvents": {
-      "title": "Eventos de stress do dendro",
-      "emptyTitle": "Sem eventos de stress",
-      "emptyBody": "Sem eventos de stress neste intervalo.",
+      "title": "Eventos de stresse do dendrómetro",
+      "emptyTitle": "Sem eventos de stresse",
+      "emptyBody": "Sem eventos de stresse neste intervalo.",
       "eventsCount": "{{count}} eventos",
-      "interpretationsTitle": "Notas de stress",
+      "interpretationsTitle": "Notas de stresse",
       "event": {
-        "stress": "Evento de stress",
-        "shrinkage": "Stress de contração",
+        "stress": "Evento de stresse",
+        "shrinkage": "Stresse de contração",
         "incompleteRecovery": "Recuperação incompleta"
       }
     },
