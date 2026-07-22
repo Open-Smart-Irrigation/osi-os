@@ -6,7 +6,7 @@ The AgroLink GUI is fully translated into all six non-English locales
 ## What's here
 
 - **`terms-<locale>.csv`** — every translated string for one locale, one file per
-  language (1,140 strings each). Columns: `namespace, key, english, <locale>,
+  language (1,325 strings each — regenerate to keep this in sync). Columns: `namespace, key, english, <locale>,
   shared_with_english`. Give each reviewer the CSV for their language; they can add a
   correction column and return it. `shared_with_english = yes` marks strings deliberately
   left identical to English (proper nouns like *OSI Server* / *AgroLink*, units like *kPa* /
@@ -31,3 +31,11 @@ data set that stays English for now** and are **not** in this pack.
 coinages with no prior corpus to check against — see `priority-terms.md`. The device-settings
 strings (`kiwiSensor.*`, `stregaValve.*`) control real LoRaWAN hardware, so their technical
 accuracy matters in every language.
+
+## Regenerating this pack
+
+The CSVs are generated from `web/react-gui/public/locales/` — never edit them by hand:
+
+    node scripts/export-i18n-review-pack.mjs
+
+`shared_with_english = yes` now simply marks rows byte-identical to English.
