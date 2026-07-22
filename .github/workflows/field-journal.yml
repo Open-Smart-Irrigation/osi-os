@@ -42,6 +42,8 @@ jobs:
         run: node scripts/test-journal-catalog-generator.js
       - name: Catalog generated-file check
         run: node scripts/generate-journal-catalog.js --check
+      - name: Agroscope template linkage
+        run: node scripts/verify-agroscope-linkage.js
       - name: Performance fixture
         run: node --no-warnings scripts/test-journal-perf-fixture.js
       - name: Profile parity

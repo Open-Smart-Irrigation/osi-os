@@ -524,6 +524,7 @@ that live without also reading `osi-live-ops-runbook`.
    node scripts/verify-no-stray-ddl.js
    node scripts/verify-profile-parity.js
    node scripts/test-journal-schema.js   # MANDATORY for journal-catalog changes
+   node scripts/verify-agroscope-linkage.js   # MANDATORY for journal-catalog changes: guards the catalog against Agroscope-template drift; CI-gated via .github/workflows/field-journal.yml
    ```
    `test-journal-schema.js` is the **only** gate that compares the 7 bundled DBs'
    journal-catalog **row content** (`journal_templates`/`layouts`/`vocab`
@@ -560,6 +561,7 @@ node scripts/verify-db-schema-consistency.js            # all 7 bundled DBs matc
 node scripts/verify-no-stray-ddl.js                     # no ad hoc DDL-marker drift in flows/deploy surfaces
 node scripts/verify-profile-parity.js                   # bcm2712 == bcm2709 byte-for-byte
 node scripts/test-journal-schema.js                     # 7 bundled DBs' journal-catalog ROW CONTENT == seed-built reference (only gate that checks row bytes)
+node scripts/verify-agroscope-linkage.js                # journal catalog's vocab/activity/operation/device/unit linkages still match the Agroscope SoilManageR template (both directions)
 node scripts/verify-devices-rebuild-fence.js            # boot-node rebuild is still fail-closed
 node --test scripts/rehearse-devices-rebuild.test.js    # boot-node rebuild behaves correctly against 4 seeded cases
 node --test lib/osi-migrate/__tests__/*.test.js         # runner unit tests (risk classes, atomicity, drift preflight, partial-batch retry)
