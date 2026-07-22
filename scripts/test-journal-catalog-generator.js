@@ -97,6 +97,7 @@ assert.deepEqual(
     { version: 6, name: '0028__journal_catalog_v6.sql' },
     { version: 7, name: '0029__journal_catalog_v7.sql' },
     { version: 8, name: '0030__journal_catalog_v8.sql' },
+    { version: 9, name: '0031__journal_catalog_v9.sql' },
   ],
   'compileCatalog must emit exactly the registered catalog migrations, in version order',
 );
@@ -612,84 +613,88 @@ assert.equal(
 const mappingRows = compiled.rows.filter((row) => row.table === 'journal_vocab_mappings');
 assert.equal(mappingRows.length, 7, 'compiled row content must include seven standard mappings');
 
-// --- v-next extensibility: a hypothetical v9 must be a pure delta ---------
-// (v8 is now real — treated-area-optional plan: full_record@8 drops
-// attr.treated_area from activity_requirements + open_field@8 drops it from
-// minimum_fields, 0030 — so the extensibility probe moves to a hypothetical
-// v9 on top of it.)
+// --- v-next extensibility: a hypothetical v10 must be a pure delta --------
+// (v9 is now real — detailed activity vocabulary plan: full_record@9 +
+// farmer_quick@9 + open_field@9, 0031 — so the extensibility probe moves to a
+// hypothetical v10 on top of it.)
 
 const v3Definition = core.templates.find(
   (template) => template.code === 'farmer_quick' && template.version === 3,
 ).definition;
-const coreWithV9 = {
+const coreWithV10 = {
   ...core,
   templates: [
     ...core.templates,
     {
       code: 'farmer_quick',
-      version: 9,
+      version: 10,
       label: 'Quick',
       definition: { ...v3Definition, max_primary_fields: 6 },
     },
   ],
 };
-const registryWithV9 = [...generator.CATALOG_MIGRATIONS, { version: 9, name: 'test-only-v9.sql' }];
-const compiledWithV9 = generator.compileCatalog(coreWithV9, source, registryWithV9);
+const registryWithV10 = [...generator.CATALOG_MIGRATIONS, { version: 10, name: 'test-only-v10.sql' }];
+const compiledWithV10 = generator.compileCatalog(coreWithV10, source, registryWithV10);
 assert.equal(
-  compiledWithV9.migrations.length,
-  9,
+  compiledWithV10.migrations.length,
+  10,
   'adding a v-next row must add exactly one new delta migration',
 );
 assert.equal(
-  compiledWithV9.migrations[0].content,
+  compiledWithV10.migrations[0].content,
   compiled.migrations[0].content,
   'adding a v-next row must leave the v1 migration byte-identical',
 );
 assert.equal(
-  compiledWithV9.migrations[1].content,
+  compiledWithV10.migrations[1].content,
   compiled.migrations[1].content,
   'adding a v-next row must leave the v2 migration byte-identical',
 );
 assert.equal(
-  compiledWithV9.migrations[2].content,
+  compiledWithV10.migrations[2].content,
   compiled.migrations[2].content,
   'adding a v-next row must leave the v3 migration byte-identical',
 );
 assert.equal(
-  compiledWithV9.migrations[3].content,
+  compiledWithV10.migrations[3].content,
   compiled.migrations[3].content,
   'adding a v-next row must leave the v4 migration byte-identical',
 );
 assert.equal(
-  compiledWithV9.migrations[4].content,
+  compiledWithV10.migrations[4].content,
   compiled.migrations[4].content,
   'adding a v-next row must leave the v5 migration byte-identical',
 );
 assert.equal(
-  compiledWithV9.migrations[5].content,
+  compiledWithV10.migrations[5].content,
   compiled.migrations[5].content,
   'adding a v-next row must leave the v6 migration byte-identical',
 );
 assert.equal(
-  compiledWithV9.migrations[6].content,
+  compiledWithV10.migrations[6].content,
   compiled.migrations[6].content,
   'adding a v-next row must leave the v7 migration byte-identical',
 );
 assert.equal(
-  compiledWithV9.migrations[7].content,
+  compiledWithV10.migrations[7].content,
   compiled.migrations[7].content,
   'adding a v-next row must leave the v8 migration byte-identical',
 );
-assert.equal(compiledWithV9.migrations[8].name, 'test-only-v9.sql');
 assert.equal(
-  (compiledWithV9.migrations[8].content.match(/INSERT INTO journal_templates\(/g) || []).length,
+  compiledWithV10.migrations[8].content,
+  compiled.migrations[8].content,
+  'adding a v-next row must leave the v9 migration byte-identical',
+);
+assert.equal(compiledWithV10.migrations[9].name, 'test-only-v10.sql');
+assert.equal(
+  (compiledWithV10.migrations[9].content.match(/INSERT INTO journal_templates\(/g) || []).length,
   1,
-  'the v9 delta must contain exactly its own new row, nothing carried over from v1/v2/v3/v4/v5/v6/v7/v8',
+  'the v10 delta must contain exactly its own new row, nothing carried over from v1/v2/v3/v4/v5/v6/v7/v8/v9',
 );
 
 assert.throws(
-  () => generator.compileCatalog(coreWithV9, source, generator.CATALOG_MIGRATIONS),
-  /no CATALOG_MIGRATIONS entry|catalog version 9/i,
+  () => generator.compileCatalog(coreWithV10, source, generator.CATALOG_MIGRATIONS),
+  /no CATALOG_MIGRATIONS entry|catalog version 10/i,
   'compileCatalog must refuse to silently drop a catalog version with no registered migration file',
 );
 

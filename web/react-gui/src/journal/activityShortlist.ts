@@ -9,7 +9,7 @@ import type {
   JournalCaptureCatalogModel,
   JournalLayoutDefinition,
 } from '../types/journalCapture';
-import { deriveActivityLeaves } from './catalogModel';
+import { deriveActivityLeaves, pickerChoiceTargets } from './catalogModel';
 import { isValidApiInstant } from './occurrence';
 
 export const ACTIVITY_HISTORY_PAGE_SIZE = 100;
@@ -95,11 +95,16 @@ function valueForAttribute(entry: EntryAggregate, attributeCode: string): string
   return null;
 }
 
+// Fable P1a (CRITICAL): must honour the same layout-declared picker_targets
+// depth knob as deriveActivityLeaves. Without this, a device-depth leaf's
+// device target would still be part of choiceTargetCodes here even though
+// deriveActivityLeaves stopped at the operation — leafMatchesEntry then
+// requires the (nonexistent, `null`-expected) device selection to match every
+// entry that actually records a device, i.e. every entry for the 3
+// required-device activities, permanently. Sharing pickerChoiceTargets with
+// catalogModel.ts keeps this in lockstep by construction.
 function choiceTargetCodes(layout: JournalLayoutDefinition): string[] {
-  return layout.option_dependencies
-    .filter((dependency) => 'choices' in dependency.restrict)
-    .map((dependency) => dependency.restrict.attribute_code)
-    .filter((code, index, all) => all.indexOf(code) === index);
+  return pickerChoiceTargets(layout);
 }
 
 interface ActivityLeafContext {

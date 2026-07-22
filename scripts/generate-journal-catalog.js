@@ -37,6 +37,7 @@ const CATALOG_MIGRATIONS = [
   { version: 6, name: '0028__journal_catalog_v6.sql' },
   { version: 7, name: '0029__journal_catalog_v7.sql' },
   { version: 8, name: '0030__journal_catalog_v8.sql' },
+  { version: 9, name: '0031__journal_catalog_v9.sql' },
 ];
 
 const TABLE_ORDER = [
@@ -569,6 +570,16 @@ function buildAgroscope(coreDef, source) {
 
   return {
     choices,
+    // v9 (detailed activity vocabulary plan): the same activity->operation and
+    // operation->device rules the research layout uses, WITHOUT the
+    // device->unit rules (Fable P2 hard rule — see journal-catalog-core.js's
+    // open_field@9 comment). Exposed here, generator-side, so `buildRows` can
+    // attach it to any core layout row that opts in via
+    // `derive_agroscope_dependencies`, without buildAgroscope itself knowing
+    // which (if any) second layout consumes it, and without mutating
+    // `categoryDependencies`/`operationDependencies` (the spread below always
+    // allocates a fresh array).
+    operationScopedDependencies: [...categoryDependencies, ...operationDependencies],
     layout: {
       code: 'agroscope_open_field',
       version: 1,
@@ -729,11 +740,21 @@ function buildRows(coreDef, source) {
     });
   }
   for (const layout of [...coreDef.layouts, agroscope.layout]) {
+    // Injection seam (Task 1): attach the shared dependency build purely —
+    // derive a new definition object rather than mutating `layout` or any
+    // core module state (compileCatalog may run multiple times per process,
+    // e.g. in tests). Layouts that don't opt in (every row except
+    // open_field@9 today, including the frozen agroscope_open_field itself,
+    // which already carries its own full dependency set from buildAgroscope)
+    // are emitted completely unchanged.
+    const definition = layout.derive_agroscope_dependencies
+      ? { ...layout.definition, option_dependencies: agroscope.operationScopedDependencies }
+      : layout.definition;
     rows.push({
       table: 'journal_layouts',
       key: `${layout.code}:${layout.version}`,
       columns: ['code', 'version', 'labels_json', 'definition_json', 'active'],
-      values: [layout.code, layout.version, JSON.stringify({ en: layout.label }), JSON.stringify(layout.definition), 1],
+      values: [layout.code, layout.version, JSON.stringify({ en: layout.label }), JSON.stringify(definition), 1],
       since: layout.version,
     });
   }

@@ -564,6 +564,32 @@ function validDependencyReferences(
   return true;
 }
 
+// Detailed activity vocabulary plan (layout v9, 2026-07-22): `picker_targets`
+// declares which choice-dependency targets the activity picker should stop
+// expanding through (deriveActivityLeaves) — e.g. `['attr.agroscope.operation']`
+// stops at the operation, never descending to the device. `undefined` means
+// "not declared" (every layout before open_field@9) — deriveActivityLeaves
+// treats that as "expand every choice target", today's behaviour, unchanged.
+// `null` means malformed — reject_as_null on a non-string-array value, or on
+// any entry that is not actually a choice-target attribute of this SAME
+// layout's own dependencies (mirrors validDependencyReferences' rigor:
+// picker_targets can only narrow a real target, never invent one).
+function parsePickerTargets(
+  value: unknown,
+  dependencies: JournalOptionDependency[],
+): string[] | null | undefined {
+  if (value == null) return undefined;
+  const targets = stringArray(value);
+  if (!targets) return null;
+  const choiceTargets = new Set(
+    dependencies
+      .filter((dependency) => 'choices' in dependency.restrict)
+      .map((dependency) => dependency.restrict.attribute_code),
+  );
+  if (targets.length === 0 || targets.some((code) => !choiceTargets.has(code))) return null;
+  return targets;
+}
+
 function parseLayout(
   row: JournalDefinitionRow,
   domain: DefinitionDomain,
@@ -577,6 +603,8 @@ function parseLayout(
   if (!activityCodes || !supportedTemplates || !dependencies ||
       activityCodes.some((code) => domain.vocabByCode.get(code)?.kind !== 'activity') ||
       supportedTemplates.some((code) => !templates.has(code))) return null;
+  const pickerTargets = parsePickerTargets(definition.picker_targets, dependencies);
+  if (pickerTargets === null) return null;
   const fields = definition.fields == null ? [] : definition.fields;
   const minimumFields = definition.minimum_fields == null ? [] : stringArray(definition.minimum_fields);
   const denominatorContract = definition.denominator_contract == null
@@ -613,6 +641,7 @@ function parseLayout(
     static_context_fields: staticContextFields,
     reading_fields: readingFields,
     option_dependencies: dependencies,
+    ...(pickerTargets ? { picker_targets: pickerTargets } : {}),
   };
 }
 
@@ -821,14 +850,26 @@ function leafKey(leaf: ActivityLeafSelection): string {
   ])]);
 }
 
+// The set of choice-dependency targets `deriveActivityLeaves` should expand
+// through, honouring a layout's optional `picker_targets` depth knob (Task 5,
+// detailed activity vocabulary plan). Absent `picker_targets` (every layout
+// before open_field@9) keeps today's behaviour: expand every choice target to
+// its deepest leaf.
+export function pickerChoiceTargets(layout: JournalLayoutDefinition): string[] {
+  const allChoiceTargets = layout.option_dependencies
+    .filter((dependency) => 'choices' in dependency.restrict)
+    .map((dependency) => dependency.restrict.attribute_code)
+    .filter((code, index, all) => all.indexOf(code) === index);
+  if (!layout.picker_targets) return allChoiceTargets;
+  const declared = new Set(layout.picker_targets);
+  return allChoiceTargets.filter((code) => declared.has(code));
+}
+
 export function deriveActivityLeaves(
   model: JournalCaptureCatalogModel,
   layout: JournalLayoutDefinition,
 ): ActivityLeafSelection[] {
-  const choiceTargets = layout.option_dependencies
-    .filter((dependency) => 'choices' in dependency.restrict)
-    .map((dependency) => dependency.restrict.attribute_code)
-    .filter((code, index, all) => all.indexOf(code) === index);
+  const choiceTargets = pickerChoiceTargets(layout);
   const leaves: ActivityLeafSelection[] = [];
   const expand = (activityCode: string, dependentSelections: ActivityLeafSelection['dependent_selections']) => {
     const selections: JournalSelections = { activity_code: activityCode };
