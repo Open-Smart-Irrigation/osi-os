@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": [
+    "api/**/*.ts",
+    "builder/**/*.ts",
+    "cleanup-worker/**/*.ts",
+    "domain/**/*.ts",
+    "installer/**/*.ts",
+    "manifest/**/*.ts",
+    "runner/**/*.ts",
+    "test/**/*.ts",
+    "ui/**/*.ts",
+    "ui/**/*.tsx",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ],
+  "exclude": ["node_modules", "test/browser/screenshots"]
+}
