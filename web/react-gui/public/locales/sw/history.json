@@ -103,7 +103,7 @@
     },
     "carousel": {
       "empty": "Hakuna kadi za historia zinazopatikana kwa eneo hili bado.",
-      "ariaLabel": "Kizunguzungu cha kadi za historia",
+      "ariaLabel": "Mzunguko wa kadi za historia",
       "cardAriaLabel": "kadi ya {{title}}",
       "cardTypeLabel": "kadi ya {{cardType}}",
       "pinned": "Imebandikwa"
@@ -191,7 +191,7 @@
         "connected": "Imeunganishwa",
         "disconnected": "Imetenganishwa",
         "degraded": "Dhaifu",
-        "stale": "Kuukuu",
+        "stale": "Imepitwa",
         "charging": "Inachaji"
       },
       "category": {
@@ -266,7 +266,7 @@
       "syncState": {
         "local": "Ndani",
         "synced": "Imesawazishwa",
-        "stale": "Kuukuu",
+        "stale": "Imepitwa",
         "degraded": "Dhaifu",
         "unknown": "Haijulikani"
       },

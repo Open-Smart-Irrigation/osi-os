@@ -151,7 +151,7 @@
     "reload": "Pakia Upya",
     "reloadFailed": "Imeshindwa kupakia upya ratiba",
     "saved": "Imehifadhiwa.",
-    "triggerHint": "Chochea ikiwa {{metric}} ≥ {{threshold}} kPa (mara moja kwa siku, saa 06:00)."
+    "triggerHint": "Huchochea ikiwa {{metric}} ≥ {{threshold}} kPa (mara moja kwa siku, 06:00)."
   },
   "environment": {
     "sectionTitle": "Mazingira na Utabiri wa Hali ya Hewa",
@@ -169,7 +169,7 @@
     },
     "cache": {
       "live": "Moja kwa Moja",
-      "stale": "Kuukuu",
+      "stale": "Imepitwa",
       "miss": "Hakuna data"
     },
     "location": {
@@ -180,8 +180,8 @@
     "local": {
       "freshSensors_one": "Kihisi {{count}} kipya",
       "freshSensors_other": "Vihisi {{count}} vipya",
-      "staleSensors_one": "Kihisi {{count}} cha kuukuu",
-      "staleSensors_other": "Vihisi {{count}} vya kuukuu",
+      "staleSensors_one": "Kihisi {{count}} chenye data ya zamani",
+      "staleSensors_other": "Vihisi {{count}} vyenye data ya zamani",
       "perDevice": "Usomaji kwa kila kifaa",
       "noData": "Hakuna data ya vihisi vya ndani",
       "observedAt": "Ilionekana {{time}}"
