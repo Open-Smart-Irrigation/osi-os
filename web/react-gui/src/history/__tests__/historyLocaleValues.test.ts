@@ -6,10 +6,11 @@ import fr from '../../../public/locales/fr/history.json';
 import itLocale from '../../../public/locales/it/history.json';
 import lg from '../../../public/locales/lg/history.json';
 import pt from '../../../public/locales/pt/history.json';
+import zh from '../../../public/locales/zh/history.json';
 
-const LOCALES = ['de-CH', 'es', 'fr', 'it', 'lg', 'pt'] as const;
+const LOCALES = ['de-CH', 'es', 'fr', 'it', 'lg', 'pt', 'zh'] as const;
 type Locale = (typeof LOCALES)[number];
-const LOCALE_RESOURCES: Record<string, unknown> = { en, 'de-CH': deCH, es, fr, it: itLocale, lg, pt };
+const LOCALE_RESOURCES: Record<string, unknown> = { en, 'de-CH': deCH, es, fr, it: itLocale, lg, pt, zh };
 
 function flattenLeaves(value: unknown, prefix = '', leaves: Record<string, string> = {}): Record<string, string> {
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
@@ -136,6 +137,17 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
     'history.calendar.state.offline', 'history.advanced.field.rssi', 'history.advanced.field.snr',
     'history.advanced.field.firmware', 'history.advanced.field.device_eui',
     'history.advanced.field.primaryDeveui', 'history.soilLineChart.series.sensor',
+  ]),
+  // zh translates almost everything (unlike the Latin-script locales above, Chinese
+  // has no loanword habit for terms like "Online"/"CPU usage"/"12h"). Only the
+  // do-not-translate glossary (DevEUI, RSSI, SNR — kept Latin per the locale-expansion
+  // brief) and pure-placeholder/unit templates with no natural-language content of
+  // their own ("{{unit}}", "{{depth}} cm") are legitimately identical to English.
+  zh: new Set([
+    'history.dailyMinMax.axisLabel', 'history.gatewayStatus.metric.cpu',
+    'history.soilProfile.depthLabel', 'history.advanced.field.device_eui',
+    'history.advanced.field.primaryDeveui', 'history.advanced.field.rssi',
+    'history.advanced.field.snr',
   ]),
 };
 

@@ -33,7 +33,7 @@ describe('AgroLink branding source contracts', () => {
     const sourceLocaleRoot = path.join(reactRoot, 'public', 'locales');
     const feedLocaleRoot = path.join(repoRoot, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/locales');
 
-    for (const locale of ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg']) {
+    for (const locale of ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg', 'zh']) {
       for (const namespace of ['auth.json', 'dashboard.json', 'devices.json', 'history.json', 'journal.json']) {
         const relativePath = path.join(locale, namespace);
         assert.deepEqual(
@@ -45,11 +45,11 @@ describe('AgroLink branding source contracts', () => {
     }
   });
 
-  it('keeps the six non-English history source/feed mirrors byte-identical', () => {
+  it('keeps the seven non-English history source/feed mirrors byte-identical', () => {
     const sourceLocaleRoot = path.join(reactRoot, 'public', 'locales');
     const feedLocaleRoot = path.join(repoRoot, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/locales');
 
-    for (const locale of ['de-CH', 'es', 'fr', 'it', 'lg', 'pt']) {
+    for (const locale of ['de-CH', 'es', 'fr', 'it', 'lg', 'pt', 'zh']) {
       const relativePath = path.join(locale, 'history.json');
       const source = fs.readFileSync(path.join(sourceLocaleRoot, relativePath));
       const feed = fs.readFileSync(path.join(feedLocaleRoot, relativePath));
@@ -66,6 +66,7 @@ describe('AgroLink branding source contracts', () => {
       es: 'Regístrate en AgroLink',
       pt: 'Registe-se no AgroLink',
       lg: 'Wandiika mu AgroLink',
+      zh: '注册 AgroLink 账户',
     };
 
     for (const [locale, registerSubtitle] of Object.entries(expectedRegisterSubtitles)) {
@@ -87,7 +88,7 @@ describe('AgroLink branding source contracts', () => {
   it('keeps the dashboard title key as the plain Dashboard wordmark-free title in all locales', () => {
     // Variant A header design (2026-07-14): the AgroLink brand lives in the
     // Balken crown + login wordmark; the header H1 is the plain 'Dashboard'.
-    for (const locale of ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg']) {
+    for (const locale of ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg', 'zh']) {
       const dashboard = readReactJson(`public/locales/${locale}/dashboard.json`);
       assert.equal(dashboard.title, 'Dashboard', `${locale} dashboard title`);
     }
@@ -134,6 +135,11 @@ describe('AgroLink branding source contracts', () => {
         irrigationZones: 'Ebitundu',
         unassignedSubtitle: 'Ebyuma ebino tebiwerekeddwa ku kitundu kyonna',
       },
+      zh: {
+        emptyStateSubtitle: '创建一个分区并添加设备，即可开始使用',
+        irrigationZones: '分区',
+        unassignedSubtitle: '这些设备尚未分配到任何分区',
+      },
     };
 
     const expectedCreateZoneTitles: Record<string, string> = {
@@ -144,6 +150,7 @@ describe('AgroLink branding source contracts', () => {
       es: 'Crear zona',
       pt: 'Criar zona',
       lg: 'Tondawo Ekitundu',
+      zh: '创建分区',
     };
 
     for (const [locale, copy] of Object.entries(expectedDashboardCopy)) {
@@ -168,6 +175,7 @@ describe('AgroLink branding source contracts', () => {
       es: 'Crea una zona desde el panel heredado antes de abrir el historial.',
       pt: 'Crie uma zona no painel legado antes de abrir o histórico.',
       lg: "Tondawo ekitundu okuva ku dashboard enkadde nga tonnaggula Ebyafaayo.",
+      zh: '打开历史记录前，请先在旧版仪表盘中创建分区。',
     };
 
     for (const [locale, noZonesBody] of Object.entries(expectedNoZonesBody)) {
@@ -193,6 +201,8 @@ describe('AgroLink branding source contracts', () => {
       /zonas de rega/i,
       /ekifo ky'okusukkulirira/i,
       /ebifo by'okusukkulirira/i,
+      /灌溉分区/,
+      /灌溉区/,
     ];
 
     const offenders = listJsonFiles(localeRoot).flatMap((filePath) => {

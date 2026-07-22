@@ -1,0 +1,36 @@
+{
+  "title": "Dashboard",
+  "welcome": "欢迎，{{username}}",
+  "add": "添加",
+  "addMenu": {
+    "zone": "添加分区",
+    "device": "添加设备",
+    "activity": "记录活动"
+  },
+  "data": "数据",
+  "account": "账户",
+  "accountMenu": {
+    "osiServer": "OSI Server"
+  },
+  "logout": "退出登录",
+  "loading": "正在加载仪表盘…",
+  "failedToLoad": "数据加载失败",
+  "autoRefresh": "每 10 秒自动刷新",
+  "emptyState": {
+    "title": "欢迎来到您的农场！",
+    "subtitle": "创建一个分区并添加设备，即可开始使用",
+    "createZone": "创建分区",
+    "addDevice": "添加设备"
+  },
+  "irrigationZones": "分区",
+  "unassignedDevices": "未分配设备",
+  "unassignedSubtitle": "这些设备尚未分配到任何分区",
+  "soilSensors": "土壤传感器",
+  "smartValves": "智能阀门",
+  "journal": "田间日志",
+  "tabs": {
+    "zones": "分区",
+    "data": "数据",
+    "journal": "田间日志"
+  }
+}

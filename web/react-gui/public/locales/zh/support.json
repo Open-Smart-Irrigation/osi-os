@@ -1,0 +1,92 @@
+{
+  "navLabel": "支持与请求",
+  "title": "支持与请求",
+  "backToDashboard": "返回仪表盘",
+  "empty": "暂无请求。",
+  "form": {
+    "stepRequest": "1. 请求内容",
+    "stepArea": "2. 区域与严重程度",
+    "stepDiagnostics": "3. 诊断信息与同意",
+    "summary": "简短标题",
+    "description": "需要改进的内容是什么？",
+    "contactEmail": "联系邮箱（可选）",
+    "expected": "预期结果",
+    "actual": "实际结果",
+    "steps": "复现步骤",
+    "requestType": "请求类型",
+    "area": "区域",
+    "severity": "严重程度",
+    "diagnostics": "诊断信息预览",
+    "includeDiagnostics": "随请求附加安全诊断信息。",
+    "consentPublic": "我同意本请求可以公开分享，但不包含农场隐私信息。",
+    "submit": "保存请求",
+    "submitting": "正在保存…"
+  },
+  "types": {
+    "bug": "缺陷",
+    "improvement": "改进",
+    "feedback": "反馈"
+  },
+  "areas": {
+    "dashboard": "仪表盘",
+    "history": "历史记录",
+    "analysis": "分析",
+    "copy": "文本与标签",
+    "watering": "灌溉",
+    "sync": "同步",
+    "devices": "设备",
+    "system": "系统",
+    "other": "其他"
+  },
+  "severity": {
+    "cant_work": "无法继续工作",
+    "workaround": "有临时解决方法",
+    "annoying": "烦人",
+    "idea": "想法"
+  },
+  "diagnostics": {
+    "loading": "正在加载诊断信息…",
+    "unavailable": "诊断信息目前不可用。"
+  },
+  "banners": {
+    "retryable": "暂时无法发送，可以重试此请求。"
+  },
+  "status": {
+    "QUEUED": "已保存，等待联网",
+    "SUBMITTED": "已提交",
+    "SYNCED": "已同步",
+    "FAILED_RETRYABLE": "需要重试",
+    "FAILED_PERMANENT": "发送失败",
+    "AWAITING_PUBLISH": "等待发布",
+    "PUBLISHING": "正在发布",
+    "PUBLISH_BLOCKED_CONFIG": "发布受阻",
+    "PUBLISH_BLOCKED_SECRET": "发布受阻",
+    "TRIAGED": "正在审核",
+    "BEING_REVIEWED": "正在审核",
+    "NEEDS_INFO": "需要更多信息",
+    "ISSUE_ONLY": "已保存为问题单",
+    "ISSUE_OPEN": "问题单已开启",
+    "NOT_PLANNED": "暂无计划",
+    "RATE_LIMITED": "请求受限",
+    "RELEASED": "已发布上线",
+    "REJECTED": "已拒绝",
+    "DUPLICATE": "重复请求",
+    "DUPLICATE_OF": "重复请求",
+    "AWAITING_APPROVAL": "等待批准",
+    "AGENT_RUNNING": "处理中",
+    "VERIFYING": "正在验证",
+    "PR_OPEN": "处理中",
+    "IN_REVIEW": "审核中",
+    "MERGED": "已合并",
+    "CLOSED": "已关闭",
+    "AGENT_FAILED": "需要人工复核",
+    "UNKNOWN": "已收到状态更新"
+  },
+  "myRequests": {
+    "title": "我的请求",
+    "loadError": "请求加载失败。",
+    "loading": "正在加载请求…",
+    "area": "区域",
+    "submitted": "已提交"
+  }
+}

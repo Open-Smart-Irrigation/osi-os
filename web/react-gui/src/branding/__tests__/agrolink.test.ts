@@ -31,6 +31,7 @@ describe('AgroLink brand config', () => {
     expect(resolveAgroscopeAssetLocale('es')).toBe('en');
     expect(resolveAgroscopeAssetLocale('pt')).toBe('en');
     expect(resolveAgroscopeAssetLocale('lg')).toBe('en');
+    expect(resolveAgroscopeAssetLocale('zh')).toBe('en');
     expect(resolveAgroscopeAssetLocale(undefined)).toBe('en');
     expect(resolveAgroscopeAssetLocale(null)).toBe('en');
   });

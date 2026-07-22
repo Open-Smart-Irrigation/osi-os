@@ -9,6 +9,7 @@ import fr from '../../../public/locales/fr/journal.json';
 import itLocale from '../../../public/locales/it/journal.json';
 import lg from '../../../public/locales/lg/journal.json';
 import pt from '../../../public/locales/pt/journal.json';
+import zh from '../../../public/locales/zh/journal.json';
 
 function keyShape(value: unknown, prefix = ''): string[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [prefix];
@@ -91,6 +92,13 @@ const SHARED_WITH_ENGLISH: Record<string, readonly string[]> = {
   // detail-panel field labels for the same two concepts (campaign, protocol)
   // follow the identical precedent already set by the filters above.
   lg: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'activity.fertigation', 'capture.where.timezone', 'filters.campaign', 'filters.protocol', 'workspace.detail.field.campaign_uuid', 'workspace.detail.field.protocol_code', 'workspace.scope.sensors'],
+  // zh (Simplified Chinese, CLDR plural {other} only — see the "zh other-only
+  // plural forms" describe block below) carries no additional English-identical
+  // values beyond the universally shared Layout label and structural templates:
+  // Chinese has no loanword habit for domain words the way the Latin-script
+  // locales above do (Fertigation, Layout as a bare concept name aside, Zone,
+  // Station, sensor…), so every other zh string in this namespace is translated.
+  zh: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS],
 };
 
 const REQUIRED_CAPTURE_KEYS = [
@@ -697,6 +705,7 @@ describe('journal locale parity', () => {
     ['it', itLocale],
     ['lg', lg],
     ['pt', pt],
+    ['zh', zh],
   ])('%s translates every string it does not legitimately share with English', (locale, resource) => {
     const english = new Map(flatten(en));
     const identical = flatten(resource)
@@ -740,5 +749,119 @@ describe('journal locale parity', () => {
           .toEqual([...tokens].sort());
       }
     }
+  });
+
+  /**
+   * zh (Simplified Chinese) has CLDR cardinal plural categories {other} only —
+   * every count, not just round millions like fr/it/es/pt's "many", resolves to
+   * "other". Per the locale-expansion brief and the plural-group-aware rework of
+   * tests/i18nParity.test.ts, zh therefore carries ONLY the "_other" suffix for
+   * every plural base in this namespace and never a "_one" form. The six-locale
+   * tests above assume a flat one/other key shape (`keyShape(resource) ===
+   * keyShape(en)`, en's own `_one`/`_other` pair used as the count=1/count=2
+   * oracle, PHASE4_INTERPOLATION_TOKENS keyed by both suffixes) and would fail
+   * on zh for that reason alone, not because anything is mistranslated. This
+   * block asserts the equivalent guarantees, adapted for an {other}-only locale.
+   */
+  describe('zh (CLDR {other}-only plural forms)', () => {
+    // The ten plural bases this namespace defines (`grep -c '_one\\|_other'
+    // en/journal.json` = 20 = 10 bases × 2 English suffixes) — used only to
+    // sanity-check that the key-shape filter below actually excludes something,
+    // so a typo'd base name can't make that test vacuously pass.
+    const JOURNAL_PLURAL_BASES = [
+      'where.rangePlotCount', 'where.rangeSelectedCount', 'where.selectionCount',
+      'group.members', 'batch.confirmCount', 'batch.count',
+      'workspace.scope.sensors', 'workspace.table.pass.count',
+      'markers.clusterLabel', 'markers.sheet.overflow',
+    ];
+
+    it('matches the English key shape once the English-only "_one" forms are removed', () => {
+      const zhExpectedKeys = keyShape(en).filter((key) => !key.endsWith('_one'));
+      expect(keyShape(zh).sort()).toEqual(zhExpectedKeys.sort());
+
+      for (const base of JOURNAL_PLURAL_BASES) {
+        expect(zhExpectedKeys).not.toContain(`${base}_one`);
+        expect(zhExpectedKeys).toContain(`${base}_other`);
+      }
+    });
+
+    it('resolves group members and count-bearing journal keys through i18next via the "other" form at every count', async () => {
+      const pluralKeys = [
+        'where.selectionCount', 'batch.count', 'batch.confirmCount',
+        'where.rangePlotCount', 'where.rangeSelectedCount',
+      ] as const;
+      const i18n = i18next.createInstance();
+      try {
+        await i18n.init({
+          lng: 'zh',
+          ns: ['journal'],
+          defaultNS: 'journal',
+          resources: { zh: { journal: zh } },
+        });
+        const t = i18n.getFixedT('zh', 'journal');
+        const countCases = (key: typeof pluralKeys[number] | 'group.members') => {
+          expect(t(key)).toBe(valueAtPath(zh, key));
+          // zh carries no "_one" form at all — the "other" template must serve
+          // every count, unlike the one/other locales tested above.
+          expect(valueAtPath(zh, `${key}_one`)).toBeUndefined();
+          const otherTemplate = String(valueAtPath(zh, `${key}_other`));
+          expect(t(key, { count: 1 })).toBe(otherTemplate.replace('{{count}}', '1'));
+          expect(t(key, { count: 2 })).toBe(otherTemplate.replace('{{count}}', '2'));
+        };
+
+        countCases('group.members');
+        for (const key of pluralKeys) countCases(key);
+      } finally {
+        cleanupJournalI18n(i18n, 'zh');
+      }
+    });
+
+    it('renders station range summaries for all count combinations', async () => {
+      const expected: Record<string, string> = {
+        '1:0': 'Station A · 1 个地块 · 已选 0 个',
+        '1:1': 'Station A · 1 个地块 · 已选 1 个',
+        '2:1': 'Station A · 2 个地块 · 已选 1 个',
+        '2:2': 'Station A · 2 个地块 · 已选 2 个',
+      };
+      const i18n = i18next.createInstance();
+      try {
+        await i18n.init({
+          lng: 'zh',
+          ns: ['journal'],
+          defaultNS: 'journal',
+          resources: { zh: { journal: zh } },
+        });
+        const t = i18n.getFixedT('zh', 'journal');
+        for (const [plotCount, selectedCount] of [[1, 0], [1, 1], [2, 1], [2, 2]]) {
+          const plotCountLabel = t('where.rangePlotCount', { count: plotCount });
+          const selectedCountLabel = t('where.rangeSelectedCount', { count: selectedCount });
+          expect(t('where.rangeSummary', {
+            label: 'Station A',
+            plotCount: plotCountLabel,
+            selectedCount: selectedCountLabel,
+          })).toBe(expected[`${plotCount}:${selectedCount}`]);
+        }
+      } finally {
+        cleanupJournalI18n(i18n, 'zh');
+      }
+    });
+
+    it('preserves every interpolation placeholder it carries', () => {
+      const placeholders = (value: string) => (value.match(/{{\s*\w+\s*}}/g) ?? []).sort();
+      const englishFlat = new Map(flatten(en));
+      const mismatched = flatten(zh)
+        .filter(([key, value]) =>
+          placeholders(englishFlat.get(key) ?? '').join() !== placeholders(value).join())
+        .map(([key]) => key);
+
+      expect(mismatched).toEqual([]);
+    });
+
+    it('preserves the focused Phase 4 interpolation token sets it carries', () => {
+      for (const [key, tokens] of Object.entries(PHASE4_INTERPOLATION_TOKENS)) {
+        if (key.endsWith('_one')) continue;
+        expect(interpolationTokens(valueAtPath(zh, key)), key).toEqual([...tokens].sort());
+      }
+    });
   });
 });

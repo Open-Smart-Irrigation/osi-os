@@ -1,0 +1,69 @@
+{
+  "title": "连接到 OSI Server",
+  "navLink": "OSI Server",
+  "backToDashboard": "返回仪表盘",
+  "status": {
+    "linked": "账户已连接到 OSI Server",
+    "notLinked": "尚未连接到 OSI Server",
+    "linkedAs": "已连接为：{{username}}",
+    "linkedSince": "连接时间：{{date}}"
+  },
+  "form": {
+    "serverUrl": "OSI Server 地址",
+    "actionLabel": "操作",
+    "actionLogin": "连接现有账户",
+    "actionRegister": "创建新账户",
+    "username": "服务器用户名",
+    "email": "电子邮箱",
+    "password": "密码",
+    "submit": "连接到 OSI Server",
+    "submitting": "正在连接…",
+    "cancel": "取消"
+  },
+  "warning": {
+    "title": "重要提示",
+    "message": "连接后，您必须使用 OSI Server 的账户凭据登录。OSI OS 会在本网关上保留一份安全的离线登录副本，因此即使没有互联网也仍可登录。",
+    "proceed": "继续"
+  },
+  "success": {
+    "title": "连接成功",
+    "message": "您的账户现已作为 {{username}} 连接到 OSI Server。",
+    "claimedDevices": "已在服务器上认领的设备：{{count}}",
+    "skippedDevices": "已跳过的设备（已被认领）：{{count}}"
+  },
+  "unlink": {
+    "button": "断开与 OSI Server 的连接",
+    "confirm": "确定要断开吗？断开后，您必须使用原来的本地密码登录。",
+    "success": "已断开与 OSI Server 的连接"
+  },
+  "errors": {
+    "networkError": "无法访问 OSI Server。请检查地址和网络连接。",
+    "authFailed": "OSI Server 账户凭据无效。",
+    "generic": "发生错误，请重试。",
+    "forceSyncFailed": "手动同步失败，请重试。"
+  },
+  "sync": {
+    "title": "手动同步",
+    "description": "立即与 OSI Server 执行一次恢复同步。",
+    "button": "立即强制同步",
+    "running": "正在同步…",
+    "successTitle": "手动同步已完成",
+    "partialTitle": "手动同步已完成，但存在问题",
+    "refreshed": "同步前已刷新同步令牌。",
+    "usedCurrentToken": "使用当前同步令牌。",
+    "bootstrap": "已应用初始化数据：{{applied}}，已跳过：{{skipped}}",
+    "outbox": "已发送的待发数据：{{delivered}}（{{before}} → {{after}} 条待处理）",
+    "pending": "已获取的待处理指令：{{fetched}}，已加入本地执行队列：{{queued}}",
+    "pendingAfterResponse": "本次响应返回后，本地执行仍将继续。",
+    "lastError": "来自 {{source}} 的最近一次错误：{{message}}"
+  },
+  "reauth": {
+    "title": "同步令牌已过期",
+    "description": "请重新向 OSI Server 进行身份验证，为本网关签发新的同步令牌。",
+    "button": "重新验证",
+    "username": "服务器用户名",
+    "password": "OSI Server 密码",
+    "submit": "刷新连接",
+    "running": "正在刷新…"
+  }
+}

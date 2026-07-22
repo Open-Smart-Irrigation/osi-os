@@ -1,0 +1,572 @@
+{
+  "history": {
+    "nav": {
+      "history": "历史记录",
+      "legacyDashboard": "旧版仪表盘",
+      "logout": "退出登录"
+    },
+    "shell": {
+      "title": "历史记录",
+      "subtitle": "{{username}} 的本地网关历史记录",
+      "loadingLocalCards": "正在加载本地历史卡片…",
+      "unavailableTitle": "历史记录不可用",
+      "unavailableBody": "本网关尚未启用历史记录功能，启用后将显示在此处。",
+      "featureFlagFailed": "无法检查历史记录功能是否已启用。旧版仪表盘仍可正常使用。",
+      "zonesFailedTitle": "历史记录分区加载失败",
+      "noZonesTitle": "暂无分区",
+      "noZonesBody": "打开历史记录前，请先在旧版仪表盘中创建分区。",
+      "cardsFailed": "历史卡片加载失败。",
+      "retryCards": "重试加载卡片"
+    },
+    "export": {
+      "open": "导出",
+      "title": "导出数据"
+    },
+    "desktop": {
+      "railLabel": "卡片",
+      "toolbarTitle": "工具栏",
+      "modeLabel": "桌面模式",
+      "modeFocus": "聚焦",
+      "modeCompare": "比较",
+      "viewSelectorLabel": "卡片视图",
+      "compareViewSelectorLabel": "比较视图",
+      "sourceSelectorLabel": "数据来源",
+      "rangeOverviewLabel": "时间范围概览",
+      "chartSurfaceLabel": "历史图表，使用方向键平移，使用加号或减号缩放",
+      "zoomIn": "放大",
+      "zoomOut": "缩小",
+      "resetZoom": "重置缩放",
+      "maxPanels": "最多 {{count}} 个比较面板",
+      "singleMode": "单一",
+      "comparisonMode": "比较",
+      "addPanel": "添加面板 {{title}}",
+      "removePanel": "移除面板",
+      "panelLimitWarning": "本网关最多只能显示 {{count}} 个比较面板。",
+      "selectedTimestampNone": "未选择时间戳",
+      "selectedTimestamp": "已选择时间戳：{{timestamp}}",
+      "inspectorTitle": "检查器",
+      "inspectorPlaceholder": "选择一个时间戳或日历单元格，查看解读、事件、数据质量及高级元数据。"
+    },
+    "mobile": {
+      "zoneLabel": "分区",
+      "actions": "历史记录操作",
+      "openActions": "打开历史记录操作"
+    },
+    "overview": {
+      "empty": "该分区暂无可用的历史卡片。",
+      "openCard": "打开 {{title}} 历史记录",
+      "cardTypeLabel": "{{cardType}} 卡片",
+      "pinCard": "固定卡片",
+      "unpinCard": "取消固定卡片",
+      "pinCardForTitle": "固定 {{title}} 卡片",
+      "unpinCardForTitle": "取消固定 {{title}} 卡片",
+      "pinned": "已固定",
+      "alert": "注意"
+    },
+    "detail": {
+      "backToHistory": "返回历史记录",
+      "invalidRouteTitle": "历史卡片不可用",
+      "invalidRouteBody": "请返回历史记录，选择一张可用的卡片。",
+      "loading": "正在加载历史卡片…",
+      "notFoundTitle": "历史卡片不可用",
+      "notFoundBody": "请返回历史记录，选择一张可用的卡片。",
+      "controlsPlaceholder": "日期范围",
+      "inspectorPlaceholder": "检查器",
+      "rangeControlLabel": "日期范围",
+      "viewControlLabel": "视图",
+      "visualizationLabel": "历史可视化",
+      "visualizationHelp": "拖动可平移，双指捏合可缩放，双击可重置，长按可检查详情。"
+    },
+    "rangeShort": {
+      "12h": "12小时",
+      "24h": "24小时",
+      "7d": "7天",
+      "30d": "30天",
+      "season": "季节",
+      "custom": "自定义"
+    },
+    "sidebar": {
+      "zones": "分区",
+      "pinnedCards": "已固定卡片",
+      "availableCards": "可用卡片",
+      "savedWorkspaces": "已保存的工作区",
+      "workspaceDisabled": "工作区保存功能尚未启用。",
+      "workspaceName": "工作区名称",
+      "saveWorkspace": "保存工作区",
+      "updateWorkspace": "更新工作区",
+      "loadWorkspace": "加载 {{name}}",
+      "deleteWorkspace": "删除 {{name}}",
+      "defaultWorkspaceName": "本地工作区",
+      "pinCard": "固定",
+      "unpinCard": "取消固定",
+      "none": "无"
+    },
+    "carousel": {
+      "empty": "该分区暂无可用的历史卡片。",
+      "ariaLabel": "历史卡片轮播",
+      "cardAriaLabel": "{{title}} 卡片",
+      "cardTypeLabel": "{{cardType}} 卡片",
+      "pinned": "已固定"
+    },
+    "cardFrame": {
+      "emptyTitle": "请选择一张历史卡片",
+      "emptyBody": "选择一个分区和一张历史卡片，即可查看本地历史记录。",
+      "typeHistory": "{{cardType}} 历史记录",
+      "viewModes": "{{title}} 视图模式",
+      "unavailable": "所选分区不支持此卡片。",
+      "timelineBrush": "时间线视口",
+      "timelineBrushKeyboardHelp": "使用方向键平移，使用加号或减号缩放，按 Home 键或 Enter 键重置。",
+      "aggregationBadge": "聚合方式：{{aggregation}}",
+      "placeholderBody": "卡片数据可用后，图表和日历数据将显示在此处。",
+      "cardDataLoading": "正在加载卡片数据…",
+      "cardDataError": "卡片数据加载失败：{{message}}",
+      "cardDataUnknownError": "未知错误"
+    },
+    "workspace": {
+      "unavailablePanel": "不可用面板",
+      "repairPanel": "移除不可用面板"
+    },
+    "dendroTimeline": {
+      "title": "生长时间线",
+      "emptyTitle": "暂无茎干测微计时间线数据",
+      "emptyBody": "历史数据可用后，茎干测微计读数将显示在此处。",
+      "eventsTitle": "时间线事件",
+      "eventFallback": "茎干测微计事件",
+      "noEvents": "此范围内无事件",
+      "pointsCount": "{{count}} 条读数",
+      "series": {
+        "stemChange": "茎干变化",
+        "growth": "生长",
+        "shrinkage": "收缩",
+        "dendrometer": "茎干测微计"
+      }
+    },
+    "environmentLineChart": {
+      "title": "环境趋势",
+      "emptyTitle": "暂无环境趋势数据",
+      "emptyBody": "历史数据可用后，环境读数将显示在此处。",
+      "pointsCount": "{{count}} 条读数",
+      "axisLabel": "{{unit}} 轴",
+      "axisNoUnit": "无单位坐标轴",
+      "series": {
+        "airTemperature": "气温",
+        "humidity": "相对湿度",
+        "rain": "降雨",
+        "light": "光照",
+        "pressure": "气压",
+        "wind": "风速",
+        "uv": "紫外线指数",
+        "environment": "环境"
+      }
+    },
+    "dailyMinMax": {
+      "title": "每日最小/最大值",
+      "emptyTitle": "暂无每日最小/最大值数据",
+      "emptyBody": "此范围内暂无每日最小和最大读数。",
+      "pointsCount": "{{count}} 天",
+      "axisLabel": "{{unit}}",
+      "axisNoUnit": "数值",
+      "tooltipMin": "最小值",
+      "tooltipMax": "最大值",
+      "tooltipMean": "平均值",
+      "series": {
+        "airTemperature": "气温",
+        "environment": "环境"
+      }
+    },
+    "gatewayStatus": {
+      "title": "网关状态概览",
+      "emptyTitle": "网关状态数据有限",
+      "emptyBody": "网关上报状态详情后，将显示在此处。",
+      "lastSeen": "最近在线",
+      "dataAsOf": "数据截至",
+      "syncState": "同步状态",
+      "eventsTitle": "近期网关事件",
+      "noEvents": "此范围内无网关事件。",
+      "eventFallback": "网关事件",
+      "status": {
+        "ok": "正常",
+        "online": "在线",
+        "offline": "离线",
+        "connected": "已连接",
+        "disconnected": "已断开",
+        "degraded": "性能下降",
+        "stale": "已过期",
+        "charging": "正在充电"
+      },
+      "category": {
+        "connectivity": "连接性",
+        "storage": "存储",
+        "system": "系统"
+      },
+      "metric": {
+        "signal": "信号",
+        "storage": "存储使用量",
+        "memory": "内存使用量",
+        "cpu": "CPU",
+        "temperature": "温度"
+      },
+      "value": {
+        "unavailable": "未上报"
+      }
+    },
+    "irrigationTimeline": {
+      "title": "灌溉事件时间线",
+      "emptyTitle": "暂无灌溉事件",
+      "emptyBody": "历史数据可用后，灌溉操作和响应窗口将显示在此处。",
+      "eventsCount": "{{count}} 个事件",
+      "eventLabel": {
+        "irrigation": "灌溉事件",
+        "scheduled": "计划灌溉",
+        "manualOverride": "手动干预",
+        "possibleIneffective": "可能无效的灌溉",
+        "responseWindow": "响应窗口"
+      },
+      "detail": {
+        "duration": "时长：{{value}}",
+        "responseWindow": "响应窗口：{{value}}",
+        "observedResponse": "观测响应：{{value}}"
+      },
+      "severity": {
+        "info": "信息",
+        "warning": "警告",
+        "critical": "严重",
+        "success": "成功",
+        "unknown": "信息"
+      }
+    },
+    "cardType": {
+      "soil": "土壤",
+      "dendro": "茎干测微计",
+      "environment": "环境",
+      "irrigation": "灌溉",
+      "gateway": "网关"
+    },
+    "viewMode": {
+      "soil-profile": "土壤剖面",
+      "line-chart": "折线图",
+      "calendar": "日历",
+      "irrigation-response": "灌溉响应",
+      "advanced": "高级视图",
+      "growth-timeline": "生长时间线",
+      "stress-events": "胁迫事件",
+      "daily-min-max": "每日最小/最大值",
+      "event-timeline": "事件时间线",
+      "status-overview": "状态概览",
+      "connectivity-timeline": "连接性时间线"
+    },
+    "metadata": {
+      "coverageUnknown": "覆盖率未知",
+      "coverageKnown": "覆盖率 {{coverage}}%",
+      "coverageConfidence": {
+        "configured": "已配置的采集频率",
+        "derived": "推算的采集频率",
+        "unknown": "采集频率未知"
+      },
+      "syncState": {
+        "local": "本地",
+        "synced": "已同步",
+        "stale": "已过期",
+        "degraded": "性能下降",
+        "unknown": "未知"
+      },
+      "aggregation": {
+        "auto": "自动",
+        "raw": "原始数据",
+        "15m": "15 分钟",
+        "hourly": "按小时",
+        "daily": "按天",
+        "weekly": "按周"
+      },
+      "range": {
+        "12h": "12 小时",
+        "24h": "24 小时",
+        "7d": "7 天",
+        "30d": "30 天",
+        "season": "季节",
+        "custom": "自定义范围"
+      }
+    },
+    "soilProfile": {
+      "emptyTitle": "暂无土壤剖面数据",
+      "emptyBody": "此范围内暂无分层深度剖面读数。",
+      "depthLabel": "{{depth}} cm",
+      "depthUnknown": "未设置深度",
+      "valueMissing": "无读数",
+      "status": {
+        "dry_stress": "干旱胁迫",
+        "optimal": "最佳",
+        "wet_excess": "过湿",
+        "mixed": "混合",
+        "no_data": "无数据"
+      },
+      "labelUnknown": "土壤层 {{index}}"
+    },
+    "soil": {
+      "state": {
+        "wet": "潮湿",
+        "moist": "湿润",
+        "dry": "干燥"
+      }
+    },
+    "calendar": {
+      "label": "日历",
+      "title": "日历",
+      "emptyTitle": "暂无日历数据",
+      "weekday": {
+        "mon": "周一",
+        "tue": "周二",
+        "wed": "周三",
+        "thu": "周四",
+        "fri": "周五",
+        "sat": "周六",
+        "sun": "周日"
+      },
+      "state": {
+        "dry_stress": "干旱胁迫",
+        "optimal": "最佳",
+        "wet_excess": "过湿",
+        "mixed": "混合",
+        "normal_growth": "正常生长",
+        "reduced_growth": "生长减缓",
+        "high_shrinkage_stress": "严重收缩胁迫",
+        "incomplete_night_recovery": "夜间恢复不完全",
+        "normal": "正常",
+        "heat_stress": "高温胁迫",
+        "cold_stress": "低温胁迫",
+        "high_humidity": "高湿度",
+        "rain_day": "降雨日",
+        "no_irrigation": "未灌溉",
+        "irrigation_event": "灌溉事件",
+        "high_irrigation_frequency": "灌溉频率过高",
+        "possible_ineffective_irrigation": "可能无效的灌溉",
+        "manual_override": "手动干预",
+        "offline": "离线",
+        "no_data": "无数据"
+      },
+      "marker": {
+        "irrigation": {
+          "no_irrigation": "未灌溉标记",
+          "irrigation_event": "灌溉标记",
+          "high_irrigation_frequency": "高频标记",
+          "possible_ineffective_irrigation": "可能无效灌溉标记",
+          "manual_override": "手动干预标记"
+        },
+        "rain": "降雨",
+        "sensor_gap": "传感器数据缺失",
+        "heat_event": "高温事件",
+        "soil": {
+          "dry_stress": "干旱胁迫标记",
+          "optimal": "最佳标记",
+          "wet_excess": "过湿标记",
+          "mixed": "混合标记"
+        },
+        "dendro": {
+          "normal_growth": "正常生长标记",
+          "reduced_growth": "生长减缓标记",
+          "high_shrinkage_stress": "严重收缩标记",
+          "incomplete_night_recovery": "恢复不完全标记"
+        },
+        "environment": {
+          "normal": "正常标记",
+          "heat_stress": "高温标记",
+          "cold_stress": "低温标记",
+          "high_humidity": "高湿度标记",
+          "rain_day": "降雨标记"
+        }
+      },
+      "summary": {
+        "soil": {
+          "dry_stress": "根区在 {{sampleCount}} 个样本中呈现干旱。",
+          "optimal": "根区在 {{sampleCount}} 个样本中处于最佳状态。",
+          "wet_excess": "根区在 {{sampleCount}} 个样本中呈现过湿。",
+          "mixed": "各深度的土壤状态不一致。",
+          "no_data": "暂无土壤数据。"
+        },
+        "dendro": {
+          "normal_growth": "茎干生长情况正常。",
+          "reduced_growth": "茎干生长有所减缓。",
+          "high_shrinkage_stress": "茎干收缩显示存在胁迫。",
+          "incomplete_night_recovery": "夜间恢复不完全。",
+          "no_data": "暂无茎干测微计数据。"
+        },
+        "environment": {
+          "normal": "环境状况正常。",
+          "heat_stress": "检测到高温胁迫。",
+          "cold_stress": "检测到低温胁迫。",
+          "high_humidity": "检测到高湿度。",
+          "rain_day": "检测到降雨。",
+          "no_data": "暂无环境数据。"
+        },
+        "irrigation": {
+          "no_irrigation": "未发生灌溉。",
+          "irrigation_event": "发生了灌溉。",
+          "high_irrigation_frequency": "灌溉频率过高。",
+          "possible_ineffective_irrigation": "灌溉可能未见效。",
+          "manual_override": "发生了手动干预。"
+        },
+        "gateway": {
+          "offline": "网关连接处于离线状态。",
+          "normal": "网关状态正常。",
+          "no_data": "暂无网关数据。"
+        }
+      }
+    },
+    "interpretation": {
+      "title": "解读",
+      "noData": {
+        "title": "所选范围内无数据",
+        "body": "该卡片已配置，但所选范围内没有可用的历史测量数据。"
+      },
+      "rootZoneDry": {
+        "title": "根区进入干旱状态",
+        "body": "在所选时段内，深层根区的土壤张力始终处于干旱范围。"
+      },
+      "dataCoverageGap": {
+        "title": "传感器数据不完整",
+        "body": "所选时段内传感器数据缺失。"
+      },
+      "incompleteNightRecovery": {
+        "title": "夜间恢复不完全",
+        "body": "在所选时段内，茎干测微计未能在夜间完全恢复。"
+      },
+      "environmentStress": {
+        "title": "检测到环境胁迫",
+        "body": "所选范围内的环境读数超出了胁迫阈值。"
+      },
+      "extensionUnavailable": {
+        "title": "云端上下文不可用"
+      },
+      "prediction": {
+        "title": "预测上下文",
+        "body": "该分区已提供预测上下文。"
+      },
+      "recommendation": {
+        "irrigate": "灌溉",
+        "monitor": "观察"
+      }
+    },
+    "advanced": {
+      "title": "高级诊断",
+      "loading": "正在加载高级诊断…",
+      "emptyTitle": "暂无高级诊断信息",
+      "value": {
+        "unavailable": "不可用"
+      },
+      "availability": {
+        "collected": "已采集",
+        "not_collected_at_time": "当时未采集",
+        "unknown_now": "当前未知",
+        "unsupported": "不支持"
+      },
+      "field": {
+        "device_eui": "DevEUI",
+        "primaryDeveui": "DevEUI",
+        "rssi": "RSSI",
+        "snr": "SNR",
+        "raw_payload": "原始负载",
+        "rawPayload": "原始负载",
+        "firmware": "固件",
+        "calibration": "校准",
+        "prediction": "预测",
+        "forecast": "预报",
+        "pending_commands": "待处理指令",
+        "batteryPct": "电量百分比",
+        "batteryVoltage": "电池电压",
+        "calibrationStatus": "校准状态",
+        "firmwareVersion": "固件版本",
+        "gatewayEui": "网关 EUI",
+        "gatewayLatitude": "网关纬度",
+        "gatewayLocationStatus": "网关位置状态",
+        "gatewayLongitude": "网关经度",
+        "logicalSourceKey": "逻辑数据源标识",
+        "pendingCommands": "待处理指令",
+        "rawRowCount": "原始记录数",
+        "sourceDeviceCount": "数据源设备数量"
+      }
+    },
+    "source": {
+      "multipleNamed": "{{count}} 个数据源：{{names}}",
+      "multiple": "{{count}} 个数据源"
+    },
+    "soilLineChart": {
+      "title": "土壤折线图",
+      "emptyTitle": "暂无土壤趋势数据",
+      "emptyBody": "历史数据可用后，土壤张力读数将显示在此处。",
+      "pointsCount": "{{count}} 条读数",
+      "axisLabel": "{{unit}} 轴",
+      "series": {
+        "soil1": "土壤 1",
+        "soil2": "土壤 2",
+        "soil3": "土壤 3",
+        "soil": "土壤 {{index}}",
+        "sensor": "传感器 {{index}}"
+      }
+    },
+    "soilIrrigationResponse": {
+      "title": "土壤灌溉响应",
+      "emptyTitle": "暂无灌溉响应事件",
+      "emptyBody": "此范围内无灌溉响应事件。",
+      "eventsCount": "{{count}} 个事件",
+      "eventFallback": "灌溉响应",
+      "duration": "时长：{{value}} 分钟",
+      "interpretationsTitle": "响应说明"
+    },
+    "dendroLineChart": {
+      "title": "茎干测微计折线图",
+      "emptyTitle": "暂无茎干测微计折线数据",
+      "emptyBody": "历史数据可用后，茎干测微计读数将显示在此处。",
+      "pointsCount": "{{count}} 条读数",
+      "series": {
+        "stemChange": "茎干变化",
+        "growth": "生长",
+        "shrinkage": "收缩",
+        "position": "位置",
+        "dendrometer": "茎干测微计"
+      }
+    },
+    "dendroStressEvents": {
+      "title": "茎干测微计胁迫事件",
+      "emptyTitle": "暂无胁迫事件",
+      "emptyBody": "此范围内无胁迫事件。",
+      "eventsCount": "{{count}} 个事件",
+      "interpretationsTitle": "胁迫说明",
+      "event": {
+        "stress": "胁迫事件",
+        "shrinkage": "收缩胁迫",
+        "incompleteRecovery": "恢复不完全"
+      }
+    },
+    "sourceFilter": {
+      "label": "数据来源",
+      "all": "全部"
+    },
+    "settings": {
+      "open": "打开卡片设置",
+      "menuLabel": "卡片设置",
+      "advancedView": "高级视图",
+      "cardSettings": "卡片设置",
+      "resetRange": "重置范围",
+      "cardSettingsUnavailable": "卡片设置尚不可用。",
+      "refresh": "刷新"
+    },
+    "inspector": {
+      "title": "检查器",
+      "context": "已选中的点",
+      "close": "关闭",
+      "timestamp": "时间戳",
+      "date": "日期",
+      "source": "数据来源",
+      "coverage": "覆盖率",
+      "syncState": "同步状态",
+      "dataAsOf": "数据截至",
+      "events": "事件",
+      "noInterpretation": "该选择暂无本地解读。",
+      "eventFallback": "历史事件"
+    },
+    "sources": {
+      "button": "数据来源",
+      "menuLabel": "卡片数据来源"
+    }
+  }
+}

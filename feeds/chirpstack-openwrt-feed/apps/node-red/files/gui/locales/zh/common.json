@@ -1,0 +1,95 @@
+{
+  "cancel": "取消",
+  "loading": "正在加载…",
+  "delete": "删除",
+  "na": "不适用",
+  "retry": "重试",
+  "analysis": {
+    "title": "数据分析",
+    "axis": {
+      "rename": "重命名坐标轴标签"
+    },
+    "backToDashboard": "← 返回仪表盘",
+    "loadError": "分析数据加载失败。",
+    "pooled": {
+      "tooltip": "除单独显示各分区外，还将所有分区的数据点合并为一个数据集进行关联分析。"
+    },
+    "empty": "请选择一个或多个系列，开始比较分区。",
+    "catalog": {
+      "loading": "正在加载可用系列…"
+    },
+    "series": {
+      "loading": "正在加载系列…"
+    },
+    "aggregation": {
+      "label": "聚合方式",
+      "raw": "原始数据",
+      "fifteenMinute": "15 分钟",
+      "hourly": "按小时",
+      "daily": "按天",
+      "weekly": "按周"
+    },
+    "preset": {
+      "metricLabel": "跨分区指标"
+    },
+    "tray": {
+      "label": "分析系列",
+      "title": "系列",
+      "search": "搜索分区或设备",
+      "unknownSite": "未知站点",
+      "reason": {
+        "unsupported": "不支持",
+        "available_no_recent_data": "暂无近期数据"
+      }
+    },
+    "range": {
+      "label": "分析范围",
+      "custom": "自定义",
+      "from": "起始",
+      "to": "结束",
+      "apply": "应用",
+      "invalid": "起始时间必须早于结束时间。"
+    },
+    "mode": {
+      "label": "分析模式",
+      "timeline": "时间线",
+      "correlation": "相关性"
+    },
+    "layout": {
+      "label": "布局",
+      "stacked": "堆叠",
+      "overlaid": "叠加",
+      "smallMultiples": "小图矩阵"
+    },
+    "toggle": {
+      "normalize": "归一化"
+    },
+    "export": {
+      "csv": "导出 CSV",
+      "png": "导出 PNG"
+    },
+    "legend": {
+      "label": "图表图例",
+      "rename": "重命名系列"
+    },
+    "views": {
+      "title": "已保存视图",
+      "save": "保存视图",
+      "namePlaceholder": "为此视图命名",
+      "delete": "删除视图",
+      "empty": "暂无已保存的视图。"
+    },
+    "droppedNotice": "有 {{count}} 个系列未能加载",
+    "correlation": {
+      "comingSoon": "相关性散点图计划在下一版本中推出。",
+      "needTwoChannels": "请至少添加两个不同通道的系列以进行比较。",
+      "x": "X 通道",
+      "y": "Y 通道",
+      "pooled": "合并（所有分区）",
+      "zone": "分区",
+      "droppedPairs": "已剔除",
+      "insufficient": "数据不足（n={{n}}）",
+      "exploratory": "仅供探索性分析——基于对齐时间段的皮尔逊相关系数 r，不构成显著性检验。"
+    }
+  }
+}
