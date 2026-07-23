@@ -4439,7 +4439,7 @@
     "y": 160,
     "wires": [
       [
-        "sys-reboot-fn"
+        "system-reboot-admin-write-guard"
       ]
     ]
   },
@@ -4475,7 +4475,7 @@
     "y": 240,
     "wires": [
       [
-        "sys-fan-fn"
+        "system-fan-admin-write-guard"
       ]
     ]
   },
@@ -4756,7 +4756,7 @@
     "y": 220,
     "wires": [
       [
-        "al-link-validate"
+        "account-link-admin-write-guard"
       ]
     ]
   },
@@ -4957,7 +4957,7 @@
     "y": 360,
     "wires": [
       [
-        "al-unlink-func"
+        "account-unlink-admin-write-guard"
       ]
     ]
   },
@@ -6537,7 +6537,7 @@
     "y": 1240,
     "wires": [
       [
-        "sync-force-build"
+        "sync-force-admin-write-guard"
       ]
     ]
   },
@@ -10245,7 +10245,7 @@
     "y": 680,
     "wires": [
       [
-        "history-rollup-tick-fn"
+        "history-rollups-admin-write-guard"
       ]
     ]
   },
@@ -12494,6 +12494,192 @@
     "wires": [
       [
         "auth-response"
+      ]
+    ]
+  },
+  {
+    "id": "sync-force-admin-write-guard",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Admin Guard: Force Sync",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n  return [msg, null];\n}\nlet db;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('admin system write scope: module unavailable: ' + scopeLoad.error, msg);\n    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const actor = await db.get(\n    'SELECT user_uuid,role FROM users WHERE id=? AND username=? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!actor || !actor.user_uuid) {\n    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });\n  }\n  await scope.assertFreshRole(\n    db,\n    actor.user_uuid,\n    'admin',\n    { scopedMode: true }\n  );\n  msg.actor_user_uuid = actor.user_uuid;\n  return [msg, null];\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    error: msg.statusCode === 403 ? 'Forbidden' :\n      (msg.statusCode === 401 ? 'Unauthorized' : String(error && error.message || error))\n  };\n  return [null, msg];\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('admin system write scope close: ' +\n      String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 420,
+    "y": 1240,
+    "wires": [
+      [
+        "sync-force-build"
+      ],
+      [
+        "sync-force-response"
+      ]
+    ]
+  },
+  {
+    "id": "system-reboot-admin-write-guard",
+    "type": "function",
+    "z": "sys-admin-tab",
+    "name": "Admin Guard: System Reboot",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n  return [msg, null];\n}\nlet db;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('admin system write scope: module unavailable: ' + scopeLoad.error, msg);\n    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const actor = await db.get(\n    'SELECT user_uuid,role FROM users WHERE id=? AND username=? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!actor || !actor.user_uuid) {\n    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });\n  }\n  await scope.assertFreshRole(\n    db,\n    actor.user_uuid,\n    'admin',\n    { scopedMode: true }\n  );\n  msg.actor_user_uuid = actor.user_uuid;\n  return [msg, null];\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    error: msg.statusCode === 403 ? 'Forbidden' :\n      (msg.statusCode === 401 ? 'Unauthorized' : String(error && error.message || error))\n  };\n  return [null, msg];\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('admin system write scope close: ' +\n      String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 400,
+    "y": 160,
+    "wires": [
+      [
+        "sys-reboot-fn"
+      ],
+      [
+        "sys-resp"
+      ]
+    ]
+  },
+  {
+    "id": "system-fan-admin-write-guard",
+    "type": "function",
+    "z": "sys-admin-tab",
+    "name": "Admin Guard: System Fan",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n  return [msg, null];\n}\nlet db;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('admin system write scope: module unavailable: ' + scopeLoad.error, msg);\n    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const actor = await db.get(\n    'SELECT user_uuid,role FROM users WHERE id=? AND username=? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!actor || !actor.user_uuid) {\n    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });\n  }\n  await scope.assertFreshRole(\n    db,\n    actor.user_uuid,\n    'admin',\n    { scopedMode: true }\n  );\n  msg.actor_user_uuid = actor.user_uuid;\n  return [msg, null];\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    error: msg.statusCode === 403 ? 'Forbidden' :\n      (msg.statusCode === 401 ? 'Unauthorized' : String(error && error.message || error))\n  };\n  return [null, msg];\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('admin system write scope close: ' +\n      String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 400,
+    "y": 240,
+    "wires": [
+      [
+        "sys-fan-fn"
+      ],
+      [
+        "sys-resp"
+      ]
+    ]
+  },
+  {
+    "id": "account-link-admin-write-guard",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Admin Guard: Account Link",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n  return [msg, null];\n}\nlet db;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('admin system write scope: module unavailable: ' + scopeLoad.error, msg);\n    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const actor = await db.get(\n    'SELECT user_uuid,role FROM users WHERE id=? AND username=? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!actor || !actor.user_uuid) {\n    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });\n  }\n  await scope.assertFreshRole(\n    db,\n    actor.user_uuid,\n    'admin',\n    { scopedMode: true }\n  );\n  msg.actor_user_uuid = actor.user_uuid;\n  return [msg, null];\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    error: msg.statusCode === 403 ? 'Forbidden' :\n      (msg.statusCode === 401 ? 'Unauthorized' : String(error && error.message || error))\n  };\n  return [null, msg];\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('admin system write scope close: ' +\n      String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 400,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-validate"
+      ],
+      [
+        "al-link-resp"
+      ]
+    ]
+  },
+  {
+    "id": "account-unlink-admin-write-guard",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Admin Guard: Account Unlink",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n  return [msg, null];\n}\nlet db;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('admin system write scope: module unavailable: ' + scopeLoad.error, msg);\n    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const actor = await db.get(\n    'SELECT user_uuid,role FROM users WHERE id=? AND username=? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!actor || !actor.user_uuid) {\n    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });\n  }\n  await scope.assertFreshRole(\n    db,\n    actor.user_uuid,\n    'admin',\n    { scopedMode: true }\n  );\n  msg.actor_user_uuid = actor.user_uuid;\n  return [msg, null];\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    error: msg.statusCode === 403 ? 'Forbidden' :\n      (msg.statusCode === 401 ? 'Unauthorized' : String(error && error.message || error))\n  };\n  return [null, msg];\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('admin system write scope close: ' +\n      String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 400,
+    "y": 360,
+    "wires": [
+      [
+        "al-unlink-func"
+      ],
+      [
+        "al-unlink-resp"
+      ]
+    ]
+  },
+  {
+    "id": "history-rollups-admin-write-guard",
+    "type": "function",
+    "z": "history-api-tab",
+    "name": "Admin Guard: History Rollups",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n  return [msg, null];\n}\nlet db;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('admin system write scope: module unavailable: ' + scopeLoad.error, msg);\n    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const actor = await db.get(\n    'SELECT user_uuid,role FROM users WHERE id=? AND username=? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!actor || !actor.user_uuid) {\n    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });\n  }\n  await scope.assertFreshRole(\n    db,\n    actor.user_uuid,\n    'admin',\n    { scopedMode: true }\n  );\n  msg.actor_user_uuid = actor.user_uuid;\n  return [msg, null];\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    error: msg.statusCode === 403 ? 'Forbidden' :\n      (msg.statusCode === 401 ? 'Unauthorized' : String(error && error.message || error))\n  };\n  return [null, msg];\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('admin system write scope close: ' +\n      String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 440,
+    "y": 680,
+    "wires": [
+      [
+        "history-rollup-tick-fn"
+      ],
+      [
+        "history-api-response"
       ]
     ]
   }

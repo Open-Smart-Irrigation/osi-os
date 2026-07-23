@@ -26,14 +26,7 @@ const PUBLIC_ALLOWLIST = new Set([
 // Phase B lands before write enforcement by design. These exact pre-existing
 // mutation/effect routes are tracked debt, not general exemptions. Phase C
 // removes each id as its scope guard lands; any newly-added route still fails.
-const PHASE_C_PENDING = new Set([
-  'sys-reboot-in',
-  'sys-fan-in',
-  'al-link-in',
-  'al-unlink-in',
-  'sync-force-http',
-  'history-rollups-run-http',
-]);
+const PHASE_C_PENDING = new Set([]);
 const ALLOWLIST = new Set([...PUBLIC_ALLOWLIST, ...PHASE_C_PENDING]);
 
 function findFailures(flows, profileLabel, allowlist = ALLOWLIST) {

@@ -1023,3 +1023,76 @@ test('W8: every account and grant endpoint rejects non-admins', async () => {
     db.close();
   }
 });
+
+const ADMIN_SYSTEM_WRITES = [
+  ['sync-force-admin-write-guard', 'POST', '/api/sync/force'],
+  ['system-reboot-admin-write-guard', 'POST', '/api/system/reboot'],
+  ['system-fan-admin-write-guard', 'POST', '/api/system/fan'],
+  ['account-link-admin-write-guard', 'POST', '/api/account-link'],
+  ['account-unlink-admin-write-guard', 'DELETE', '/api/account-link'],
+  ['history-rollups-admin-write-guard', 'POST', '/api/history/rollups/run'],
+];
+
+async function adminSystemWrite(db, nodeId, userId, username, method, path, env = ENV) {
+  scopeHelper._resetForTests();
+  return executeFunction(loadNode(nodeId), {
+    msg: scopedRequest(userId, username, method, path),
+    env,
+    db,
+  });
+}
+
+test('W9: every system write allows only a fresh enabled admin', async () => {
+  const db = seedScopedDb();
+  try {
+    for (const [nodeId, method, path] of ADMIN_SYSTEM_WRITES) {
+      const admin = await adminSystemWrite(db, nodeId, 1, 'admin1', method, path);
+      assert.ok(admin.result[0], `${method} ${path} allows an enabled admin`);
+      assert.equal(admin.result[0].actor_user_uuid, 'u-admin');
+
+      const researcher = await adminSystemWrite(db, nodeId, 2, 'res1', method, path);
+      assert.equal(
+        researcher.result[1].statusCode,
+        403,
+        `${method} ${path} rejects researchers`
+      );
+
+      const viewer = await adminSystemWrite(db, nodeId, 3, 'view1', method, path);
+      assert.equal(viewer.result[1].statusCode, 403, `${method} ${path} rejects viewers`);
+    }
+
+    db.prepare("UPDATE users SET disabled_at='2026-07-01' WHERE id=1").run();
+    for (const [nodeId, method, path] of ADMIN_SYSTEM_WRITES) {
+      const disabled = await adminSystemWrite(db, nodeId, 1, 'admin1', method, path);
+      assert.equal(
+        disabled.result[1].statusCode,
+        403,
+        `${method} ${path} rejects a disabled admin`
+      );
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('W9: flag-off system writes preserve every legacy branch', async () => {
+  const db = seedScopedDb();
+  try {
+    for (const [nodeId, method, path] of ADMIN_SYSTEM_WRITES) {
+      const response = await adminSystemWrite(
+        db,
+        nodeId,
+        2,
+        'res1',
+        method,
+        path,
+        { ...ENV, OSI_SCOPED_ACCESS: '0' }
+      );
+      assert.ok(response.result[0], `${method} ${path} reaches its legacy handler`);
+      assert.equal(response.result[0].req.path, path);
+      assert.equal(response.result[1], null);
+    }
+  } finally {
+    db.close();
+  }
+});
