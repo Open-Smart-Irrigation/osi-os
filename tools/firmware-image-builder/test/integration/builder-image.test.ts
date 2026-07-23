@@ -1,30 +1,33 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
 import { probeDocker, validateBuiltBuilderImage } from '../../builder/validate-builder.js';
+import { BUILD_OUTPUT_TAIL_BYTES, BUILD_TIMEOUT_MS, runStreamingBuild } from '../support/run-streaming-build.js';
 
 const exec = promisify(execFile);
 const imageTag = `osi-image-builder-task11-test:${process.pid}`;
-const BUILD_TIMEOUT_MS = 60 * 60 * 1000;
-const BUILD_OUTPUT_TAIL_BYTES = 96 * 1024;
+function isMissingImageError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const value = error as { stderr?: unknown; stdout?: unknown; message?: unknown };
+  return /No such image|manifest unknown|reference not found/iu.test([value.stderr, value.stdout, value.message].filter((item): item is string => typeof item === 'string').join('\n'));
+}
 
-function runStreamingBuild(argv: readonly string[], cwd: string): Promise<{ readonly tail: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('/usr/bin/docker', [...argv], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-    let tail = '';
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const append = (chunk: Buffer | string) => { tail = `${tail}${chunk.toString()}`.slice(-BUILD_OUTPUT_TAIL_BYTES); };
-    child.stdout.on('data', append);
-    child.stderr.on('data', append);
-    child.once('error', (error) => { if (timer !== undefined) clearTimeout(timer); reject(error); });
-    child.once('close', (code, signal) => {
-      if (timer !== undefined) clearTimeout(timer);
-      if (code === 0) resolve({ tail });
-      else reject(new Error(`docker build exited with code=${code ?? 'null'} signal=${signal ?? 'none'}\n${tail}`));
-    });
-    timer = setTimeout(() => { child.kill('SIGTERM'); reject(new Error(`docker build timed out after ${BUILD_TIMEOUT_MS}ms\n${tail}`)); }, BUILD_TIMEOUT_MS);
-  });
+async function cleanupImageTag(tag: string): Promise<void> {
+  try {
+    await exec('/usr/bin/docker', ['image', 'inspect', tag], { maxBuffer: 64 * 1024 });
+  } catch (error) {
+    if (isMissingImageError(error)) return;
+    throw error;
+  }
+  await exec('/usr/bin/docker', ['image', 'rm', '--force', tag], { maxBuffer: 64 * 1024 });
+  try {
+    await exec('/usr/bin/docker', ['image', 'inspect', tag], { maxBuffer: 64 * 1024 });
+  } catch (error) {
+    if (isMissingImageError(error)) return;
+    throw error;
+  }
+  throw new Error(`Docker image tag was not removed: ${tag}`);
 }
 
 describe('builder image integration boundary', () => {
@@ -49,10 +52,11 @@ describe('builder image integration boundary', () => {
     }
     expect(capability).toMatchObject({ available: true, architecture: 'amd64', code: 'OK' });
     const context = new URL('../..', import.meta.url).pathname;
+    let failure: unknown;
     try {
       const check = await exec('/usr/bin/docker', ['build', '--check', '--platform=linux/amd64', '--file', 'builder/Dockerfile', '.'], { cwd: context, maxBuffer: 128 * 1024, timeout: 120_000 });
       expect(`${check.stdout}\n${check.stderr}`).not.toMatch(/FromPlatformFlagConstDisallowed/u);
-      const result = await runStreamingBuild(['build', '--platform=linux/amd64', '--no-cache', '--tag', imageTag, '--file', 'builder/Dockerfile', '.'], context);
+      const result = await runStreamingBuild(['build', '--platform=linux/amd64', '--no-cache', '--tag', imageTag, '--file', 'builder/Dockerfile', '.'], context, { timeoutMs: BUILD_TIMEOUT_MS });
       expect(result.tail).toMatch(/exporting to image|writing image sha256:|Successfully built/u);
       expect(result.tail.length).toBeLessThanOrEqual(BUILD_OUTPUT_TAIL_BYTES);
       const inspected = await exec('/usr/bin/docker', ['image', 'inspect', '--format', '{{json .}}', imageTag], { maxBuffer: 64 * 1024 });
@@ -68,9 +72,15 @@ describe('builder image integration boundary', () => {
       expect(validated).toMatchObject({ imageId: image.Id, selfTest: 'passed' });
       expect(validated.evidence.rustTargets.map(({ target }) => target).sort()).toEqual(['aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf', 'x86_64-unknown-linux-gnu']);
       expect(validated.evidence.commands.some(({ argv }) => argv.join(' ').includes('test ! -e /tmp/rust-source'))).toBe(true);
-    } finally {
-      await exec('/usr/bin/docker', ['image', 'rm', '--force', imageTag], { maxBuffer: 64 * 1024 });
-      await expect(exec('/usr/bin/docker', ['image', 'inspect', imageTag], { maxBuffer: 64 * 1024 })).rejects.toBeDefined();
+    } catch (error) {
+      failure = error;
     }
-  }, 30 * 60 * 1000);
+    try {
+      await cleanupImageTag(imageTag);
+    } catch (cleanupError) {
+      if (failure !== undefined) throw new AggregateError([failure, cleanupError], 'Build/validation and image cleanup both failed');
+      throw cleanupError;
+    }
+    if (failure !== undefined) throw failure;
+  }, 65 * 60 * 1000);
 });

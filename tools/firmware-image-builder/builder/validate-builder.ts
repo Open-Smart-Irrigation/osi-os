@@ -222,7 +222,6 @@ export function validateBuilderLockFile(value: unknown, options: { readonly inst
 export interface ProductionBuilderLockValidationOptions {
   readonly dockerfile: string;
   readonly executionDefinitionPath: string;
-  readonly verifyImage?: (imageReference: string) => Promise<{ readonly imageId: string; readonly selfTest: 'passed'; readonly versions: Readonly<Record<string, string>>; readonly evidence: BuilderValidationEvidence }>;
 }
 
 export async function validateProductionBuilderLock(value: unknown, installedVersion: string, options: ProductionBuilderLockValidationOptions): Promise<{ readonly ok: true; readonly lock: BuilderLock } | { readonly ok: false; readonly reason: string }> {
@@ -237,7 +236,7 @@ export async function validateProductionBuilderLock(value: unknown, installedVer
     validateExecutionDefinition(JSON.parse(definitionContents), '{{imageRepository}}@sha256:{{imageDigest}}');
     if (sha256(definitionContents) !== lock.executionDefinitionSha256) throw new Error('execution definition hash mismatch');
     const imageReference = canonicalBuilderImageReference(lock);
-    const verified = await (options.verifyImage ?? (validateBuiltBuilderImage))(imageReference);
+    const verified = await validateBuiltBuilderImage(imageReference);
     completeEvidence(verified.evidence, lock.packageSet, lock);
     if (validationEvidenceSha256(verified.evidence) !== lock.validationEvidenceSha256) throw new Error('validation evidence hash mismatch');
     return { ok: true, lock };
@@ -347,12 +346,16 @@ function dockerErrorMessage(error: unknown): string {
   return [value.message, value.stderr].filter((item): item is string => typeof item === 'string' && item.length > 0).join(': ') || 'Docker command failed';
 }
 
-function isDockerUnavailable(error: unknown): boolean {
+function isDockerUnavailable(error: unknown, purpose: 'inspect' | 'runtime'): boolean {
   if (!error || typeof error !== 'object') return false;
   const value = error as { code?: unknown; stderr?: unknown; message?: unknown };
-  if (typeof value.code === 'string' && ['ENOENT', 'EACCES', 'ETIMEDOUT', 'ECONNREFUSED'].includes(value.code)) return true;
   const text = `${typeof value.stderr === 'string' ? value.stderr : ''}\n${typeof value.message === 'string' ? value.message : ''}`;
-  return /Cannot connect to the Docker daemon|Is the docker daemon running|permission denied/iu.test(text);
+  if (/Cannot connect to the Docker daemon|Is the docker daemon running|docker\.sock|failed to connect to.*daemon/iu.test(text)) return true;
+  if (purpose === 'inspect') {
+    if (typeof value.code === 'string' && ['ENOENT', 'EACCES', 'ETIMEDOUT', 'ECONNREFUSED'].includes(value.code)) return true;
+    return /permission denied/iu.test(text);
+  }
+  return false;
 }
 
 function isMissingImage(error: unknown): boolean {
@@ -371,7 +374,7 @@ export async function validateBuiltBuilderImage(imageReference: string, options:
     try {
       return await command(argv, { timeout, maxBuffer: purpose === 'inspect' ? 64 * 1024 : 256 * 1024, env: environment });
     } catch (error) {
-      if (isDockerUnavailable(error)) throw new BuilderValidationError('DOCKER_UNAVAILABLE', dockerErrorMessage(error));
+      if (isDockerUnavailable(error, purpose)) throw new BuilderValidationError('DOCKER_UNAVAILABLE', dockerErrorMessage(error));
       if (purpose === 'inspect' && isMissingImage(error)) throw new BuilderValidationError('BUILDER_IMAGE_DIGEST_INVALID', dockerErrorMessage(error));
       if (purpose === 'inspect') throw new BuilderValidationError('BUILDER_IMAGE_DIGEST_INVALID', dockerErrorMessage(error));
       throw new BuilderValidationError('RUST_BOOTSTRAP_UNAVAILABLE', dockerErrorMessage(error));

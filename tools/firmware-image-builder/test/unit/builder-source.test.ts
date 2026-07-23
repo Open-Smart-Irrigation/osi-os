@@ -19,7 +19,7 @@ import {
   validateExecutionDefinition,
   type BuilderValidationEvidence,
 } from '../../builder/validate-builder.js';
-import { enforceOpenWrtRustFeed, validateOpenWrtRustFeed, validateRustToolchain, validateRustToolchainEvidence } from '../../builder/validate-rust-toolchain.js';
+import { enforceOpenWrtRustFeed, OPENWRT_RUST_FEED_CONTRACT, validateOpenWrtRustFeed, validateRustToolchain, validateRustToolchainEvidence } from '../../builder/validate-rust-toolchain.js';
 
 const digest = (letter: string) => letter.repeat(64);
 const dockerfile = new URL('../../builder/Dockerfile', import.meta.url).pathname;
@@ -27,6 +27,7 @@ const validatorSource = new URL('../../builder/validate-builder.ts', import.meta
 const rootDockerfile = new URL('../../../../Dockerfile-devel', import.meta.url).pathname;
 const executionDefinitionPath = new URL('../../builder/execution-definition.json', import.meta.url).pathname;
 const fixturePath = new URL('../fixtures/builder/non-installable-lock.json', import.meta.url).pathname;
+const rustMakefileFixturePath = new URL('../fixtures/openwrt-packages-d8cd30f4/lang/rust/Makefile', import.meta.url).pathname;
 const definitionPath = new URL('../../builder/execution-definition.json', import.meta.url).pathname;
 const targetNames = ['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const;
 const evidence: BuilderValidationEvidence = {
@@ -155,38 +156,37 @@ describe('locked builder source', () => {
     expect(source).toContain('opt -passes=polly-opt-isl');
   });
 
-  it('validates source hashes and complete evidence through the production lock path', async () => {
+  it('validates source hashes and invokes the real production image validator without evidence injection', async () => {
     const source = await validateBuilderSource({ dockerfile, rootDockerfile, executionDefinitionPath, evidence });
     const candidate = lock();
     Object.assign(candidate, { baseImage: source.baseImage, baseImageDigest: source.baseImageDigest, dockerfileSha256: source.dockerfileSha256, executionDefinitionSha256: source.executionDefinitionSha256, validationEvidenceSha256: validationEvidenceSha256(evidence), packageSet: source.packageSet, rustConfig: source.rustConfig, nodeVersion: source.nodeVersion });
-    const references: string[] = [];
-    const verifyImage = async (imageReference: string) => { references.push(imageReference); return { imageId: evidence.imageId, selfTest: 'passed' as const, versions: {}, evidence }; };
-    await expect(validateProductionBuilderLock(candidate, candidate.packageVersion, { dockerfile, executionDefinitionPath, verifyImage })).resolves.toMatchObject({ ok: true });
-    expect(references).toEqual([`registry.example.invalid/osi-builder@sha256:${digest('a')}`]);
-    candidate.validationEvidenceSha256 = digest('f');
-    await expect(validateProductionBuilderLock(candidate, candidate.packageVersion, { dockerfile, executionDefinitionPath, verifyImage })).resolves.toMatchObject({ ok: false });
+    const options = { dockerfile, executionDefinitionPath };
+    expect(Object.keys(options).sort()).toEqual(['dockerfile', 'executionDefinitionPath']);
+    const result = await validateProductionBuilderLock(candidate, candidate.packageVersion, options);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('production validation unexpectedly accepted an unbuilt image');
+    expect(result.reason).toMatch(/No such image|manifest unknown|reference not found/u);
   });
 
-  it('requires resolved Rust LLVM evidence and rejects Rust CI artifacts', () => {
+  it('requires resolved Rust LLVM evidence and rejects Rust CI artifacts', async () => {
     expect(validateRustToolchain({ llvmConfig: '/usr/bin/llvm-config', channel: 'stable', version: '1.85.0', llvmMajor: 19 }).ok).toBe(true);
     expect(validateRustToolchain({ llvmConfig: '/usr/bin/llvm-config', channel: 'stable', version: '1.85.0', llvmMajor: 19, artifact: 'rust-ci-llvm' }).ok).toBe(false);
     expect(validateRustToolchainEvidence({ rustcVersion: '1.85.0', llvmVersion: '19.1.7', llvmConfig: '/usr/bin/llvm-config', channel: 'stable', pollyVersion: '19.1.7', zstdVersion: '1.5.7' }).ok).toBe(true);
     expect(validateRustToolchainEvidence({ rustcVersion: '1.85.0', llvmVersion: 'rust-ci-llvm', llvmConfig: '/usr/bin/llvm-config', channel: 'stable', pollyVersion: '19.1.7', zstdVersion: '1.5.7' }).ok).toBe(false);
-    expect(validateOpenWrtRustFeed('llvm.download-ci-llvm=false\nllvm-config=/usr/bin/llvm-config').ok).toBe(true);
-    expect(validateOpenWrtRustFeed('llvm.download-ci-llvm=true\nllvm-config=/usr/bin/llvm-config').ok).toBe(false);
-    expect(validateOpenWrtRustFeed('llvm.download-ci-llvm=false').ok).toBe(false);
-    expect(validateOpenWrtRustFeed('llvm.download-ci-llvm=false\nllvm-config=/usr/bin/clang').ok).toBe(false);
-    const feedSource = 'define RustFeed\nllvm.download-ci-llvm=true\n';
-    const enforcedSource = 'define RustFeed\nllvm.download-ci-llvm=false\n\nllvm-config=/usr/bin/llvm-config';
-    expect(enforceOpenWrtRustFeed(feedSource, { sourceSha256: sha256(feedSource), enforcedSha256: sha256(enforcedSource) })).toMatchObject({ ok: true, source: enforcedSource });
-    expect(enforceOpenWrtRustFeed(`${feedSource}unknown=true\n`, { sourceSha256: sha256(feedSource), enforcedSha256: sha256(enforcedSource) }).ok).toBe(false);
-  });
-
-  it('rejects fabricated Rust evidence and requires all three semantic target artifacts', async () => {
-    const fabricated = { ...evidence, imageId: 'sha256:' + digest('a'), imageDigest: digest('b'), architecture: 'linux/amd64', packageVersions: {}, commands: [], rustTargets: [], } as unknown as BuilderValidationEvidence;
-    const candidate = { ...lock(), imageDigest: digest('b'), imageId: digest('a') };
-    const verifier = async (imageReference: string) => { expect(imageReference).toBe(`registry.example.invalid/osi-builder@sha256:${digest('b')}`); return { imageId: fabricated.imageId, selfTest: 'passed' as const, versions: {}, evidence: fabricated }; };
-    await expect(validateProductionBuilderLock(candidate, candidate.packageVersion, { dockerfile, executionDefinitionPath, verifyImage: verifier })).resolves.toMatchObject({ ok: false });
+    const source = await readFile(rustMakefileFixturePath, 'utf8');
+    expect(sha256(source)).toBe('e6a9895c3e4e36b1699fa472f8943ee7bc838ca7daeae1902c2abfb83379d5cb');
+    const contract = OPENWRT_RUST_FEED_CONTRACT;
+    const enforced = enforceOpenWrtRustFeed(source, contract);
+    expect(enforced).toMatchObject({ ok: true, sourceSha256: contract.sourceSha256, enforcedSha256: contract.enforcedSha256 });
+    if (enforced.ok) {
+      expect(enforced.source).toContain('\t--set=llvm.download-ci-llvm=false \\\n\t--set=target.x86_64-unknown-linux-gnu.llvm-config=/usr/bin/llvm-config \\\n');
+      expect(enforced.source.match(/--set=llvm\.download-ci-llvm=false /gu)).toHaveLength(1);
+      expect(enforced.source.match(/--set=target\.x86_64-unknown-linux-gnu\.llvm-config=\/usr\/bin\/llvm-config /gu)).toHaveLength(1);
+      expect(validateOpenWrtRustFeed(enforced.source).ok).toBe(true);
+    }
+    expect(enforceOpenWrtRustFeed(source, { ...contract, sourceCommit: '0'.repeat(40) }).ok).toBe(false);
+    expect(enforceOpenWrtRustFeed(`${source}\n`, contract).ok).toBe(false);
+    expect(enforceOpenWrtRustFeed(source.replace('--set=llvm.download-ci-llvm=true \\\n', '--set=llvm.download-ci-llvm=true \\\n\t--set=llvm.download-ci-llvm=true \\\n'), contract).ok).toBe(false);
   });
 
   it('requires canonical repository digests and classifies Docker availability separately from Rust failures', async () => {
@@ -199,6 +199,13 @@ describe('locked builder source', () => {
     await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => { if (argv[0] === 'image') return { stdout: inspect, stderr: '' }; throw semanticFailure; } })).rejects.toMatchObject({ code: 'RUST_BOOTSTRAP_UNAVAILABLE' });
     const unavailable = Object.assign(new Error('docker missing'), { code: 'ENOENT' });
     await expect(validateBuiltBuilderImage(canonical, { run: async () => { throw unavailable; } })).rejects.toMatchObject({ code: 'DOCKER_UNAVAILABLE' });
+
+    const runtimePermission = Object.assign(new Error('rustc permission denied'), { code: 1, stderr: 'rustc: permission denied' });
+    await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => argv[0] === 'image' ? { stdout: inspect, stderr: '' } : Promise.reject(runtimePermission) })).rejects.toMatchObject({ code: 'RUST_BOOTSTRAP_UNAVAILABLE' });
+    const runtimeTimeout = Object.assign(new Error('container command timed out'), { code: 'ETIMEDOUT', stderr: 'rustc timed out' });
+    await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => argv[0] === 'image' ? { stdout: inspect, stderr: '' } : Promise.reject(runtimeTimeout) })).rejects.toMatchObject({ code: 'RUST_BOOTSTRAP_UNAVAILABLE' });
+    const socketPermission = Object.assign(new Error('Docker socket permission denied'), { code: 1, stderr: '/var/run/docker.sock: permission denied' });
+    await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => argv[0] === 'image' ? { stdout: inspect, stderr: '' } : Promise.reject(socketPermission) })).rejects.toMatchObject({ code: 'DOCKER_UNAVAILABLE' });
   });
 
   it('classifies missing images and malformed inspect output separately from Docker availability', async () => {
