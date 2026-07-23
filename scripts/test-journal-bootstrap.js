@@ -545,10 +545,33 @@ for (const profile of PROFILES) {
       historyAdvancedOverlaysEnabled: false,
       historyCloudAiEnabled: false,
       fieldJournalUxEnabled: false,
+      scoped_access: false,
     });
     const occurrences = flows.filter((node) =>
       node.type === 'function' && String(node.func || '').includes('fieldJournalUxEnabled')
     );
     assert.deepEqual(occurrences.map((node) => node.id), ['history-api-router-fn']);
+  });
+
+  test(profile + ' feature response tracks OSI_SCOPED_ACCESS for scoped_access', async () => {
+    const flows = loadFlows(profile);
+    const history = flows.find((node) => node.id === 'history-api-router-fn');
+    const execute = new Function(
+      'msg', 'global', 'env', 'node', 'osiDb', 'osiHistory', 'crypto', 'HR',
+      history.func
+    );
+    const msg = { req: { method: 'GET', path: '/api/system/features' } };
+    const result = await execute(
+      msg,
+      { get() { return null; } },
+      { get(key) { return key === 'OSI_SCOPED_ACCESS' ? '1' : null; } },
+      { warn() {}, error() {}, log() {} },
+      { Database: class { constructor() { throw new Error('feature route opened DB'); } } },
+      {},
+      crypto,
+      {}
+    );
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.payload.features.scoped_access, true, 'OSI_SCOPED_ACCESS=1 must flip scoped_access on');
   });
 }
