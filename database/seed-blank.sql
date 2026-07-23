@@ -37,11 +37,9 @@ CREATE TABLE users (
   server_offline_verifier_version INTEGER DEFAULT 0,
   last_auth_sync_at               TEXT,
   last_auth_sync_status           TEXT,
-  last_auth_sync_error            TEXT,
-  role                            TEXT NOT NULL DEFAULT 'researcher' CHECK (role IN ('admin','researcher','viewer')),
-  disabled_at                     TEXT,
-  sync_version                    INTEGER NOT NULL DEFAULT 1
-);
+  last_auth_sync_error            TEXT
+, role TEXT NOT NULL DEFAULT 'researcher'
+  CHECK (role IN ('admin','researcher','viewer')), disabled_at TEXT, sync_version INTEGER NOT NULL DEFAULT 1);
 
 CREATE UNIQUE INDEX idx_users_user_uuid ON users(user_uuid);
 

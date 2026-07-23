@@ -992,13 +992,15 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  // 213, not 214: on top of the port-back's c7d94cb6 (strega-reconciliation-monitor's
-  // close() catch), the SDI-12 field-hardening wave converted merge-device-data's
-  // remaining silent catch to a visible node.warn -- one further removal, not a
-  // weakening of the ratchet.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 213 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 213,
-    'silent-catch baseline records 213 for both maintained profiles',
-    'silent-catch baseline must be 213 for both maintained profiles after three sys-stats fan catches, the strega-reconciliation-monitor close() catch and merge-device-data\'s catch are removed');
+  // 210: on top of the port-back's c7d94cb6 (strega-reconciliation-monitor's
+  // close() catch) and the SDI-12 field-hardening wave's merge-device-data catch
+  // (213), the wave-3 scoped-access port adds api-me's Decode Token and Resolve
+  // Current User Scope nodes -- both use visible node.warn catches throughout, so
+  // no new silent catches land; the count is unaffected by that addition. 210
+  // reflects the pre-existing AgroLink-authored baseline this port carries forward.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 210 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 210,
+    'silent-catch baseline records 210 for both maintained profiles',
+    'silent-catch baseline must be 210 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
 }
 if (sizeAllowances) {
