@@ -644,6 +644,216 @@ test('scoped journal reads use owned-plus-granted plots while flag-off stays own
   );
 });
 
+test('scoped journal writes allow plot grantees, preserve ownership, and revoke immediately', async () => {
+  const db = new TestDb('scoped-resource-writes');
+  seedIdentity(db);
+  const grantedPlotUuid = '22200000-0000-4000-8000-000000000001';
+  const entryUuid = '22200000-0000-4000-8000-000000000002';
+  const deniedEntryUuid = '22200000-0000-4000-8000-000000000003';
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  await journal.upsertPlot(db, plotInput(grantedPlotUuid, 'grantee-write'), other);
+  db.prepare(
+    'INSERT INTO user_plot_assignments ' +
+      '(assignment_uuid,user_uuid,plot_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
+  ).run(
+    '22200000-0000-4000-8000-000000000004',
+    OWNER_UUID,
+    grantedPlotUuid,
+    GATEWAY_EUI,
+    '2026-07-13T00:00:00.000Z'
+  );
+  const scoped = Object.assign({}, principal(), {
+    scope: scopeHelper,
+    scoped: true,
+  });
+  scopeHelper.invalidateScope(OWNER_UUID);
+
+  const created = await journal.saveEntry(
+    db,
+    entryInput(entryUuid, grantedPlotUuid, '2026-07-13T10:00:00', { season_crop: 'barley' }),
+    scoped,
+    { mode: 'create' }
+  );
+  assert.equal(created.entry_uuid, entryUuid);
+  const stored = db.prepare(
+    'SELECT owner_user_uuid,author_principal_uuid FROM journal_entries WHERE entry_uuid=?'
+  ).get(entryUuid);
+  assert.equal(stored.owner_user_uuid, OTHER_OWNER_UUID);
+  assert.equal(stored.author_principal_uuid, OWNER_UUID);
+
+  const updatedPlot = await journal.upsertPlot(
+    db,
+    plotInput(grantedPlotUuid, 'grantee-write', {
+      base_sync_version: 1,
+      name: 'Updated by grantee',
+    }),
+    scoped,
+    grantedPlotUuid
+  );
+  assert.equal(updatedPlot.plot.name, 'Updated by grantee');
+  assert.equal(
+    db.prepare('SELECT owner_user_uuid FROM journal_plots WHERE plot_uuid=?')
+      .get(grantedPlotUuid).owner_user_uuid,
+    OTHER_OWNER_UUID
+  );
+
+  const voided = await journal.voidEntry(
+    db,
+    entryUuid,
+    { base_sync_version: 1, reason: 'Scoped correction' },
+    scoped
+  );
+  assert.equal(voided.entry_uuid, entryUuid);
+  const voidedRow = db.prepare(
+    'SELECT status,voided_by_principal_uuid FROM journal_entries WHERE entry_uuid=?'
+  ).get(entryUuid);
+  assert.equal(voidedRow.status, 'voided');
+  assert.equal(voidedRow.voided_by_principal_uuid, OWNER_UUID);
+
+  db.prepare(
+    "UPDATE user_plot_assignments SET deleted_at='2026-07-13T11:00:00.000Z' " +
+      'WHERE user_uuid=? AND plot_uuid=?'
+  ).run(OWNER_UUID, grantedPlotUuid);
+  scopeHelper.invalidateScope(OWNER_UUID);
+  await assert.rejects(
+    journal.saveEntry(
+      db,
+      entryInput(
+        deniedEntryUuid,
+        grantedPlotUuid,
+        '2026-07-13T11:30:00',
+        { season_crop: 'barley' }
+      ),
+      scoped,
+      { mode: 'create' }
+    ),
+    (error) => error && error.statusCode === 404
+  );
+
+  db.prepare("UPDATE users SET role='admin' WHERE user_uuid=?").run(OWNER_UUID);
+  scopeHelper.invalidateScope(OWNER_UUID);
+  await assert.rejects(
+    journal.saveEntry(
+      db,
+      entryInput(
+        deniedEntryUuid,
+        grantedPlotUuid,
+        '2026-07-13T11:30:00',
+        { season_crop: 'barley' }
+      ),
+      scoped,
+      { mode: 'create' }
+    ),
+    (error) => error && error.statusCode === 404
+  );
+
+  await assert.rejects(
+    journal.saveEntry(
+      db,
+      entryInput(
+        deniedEntryUuid,
+        grantedPlotUuid,
+        '2026-07-13T11:30:00',
+        { season_crop: 'barley' }
+      ),
+      principal(),
+      { mode: 'create' }
+    ),
+    (error) => error && error.statusCode === 404
+  );
+});
+
+test('scoped plot creation requires zone scope and keeps the creator as owner', async () => {
+  const db = new TestDb('scoped-plot-create');
+  seedIdentity(db);
+  const plotUuid = '22300000-0000-4000-8000-000000000001';
+  const scoped = Object.assign({}, principal(), {
+    scope: scopeHelper,
+    scoped: true,
+  });
+  scopeHelper.invalidateScope(OWNER_UUID);
+  await assert.rejects(
+    journal.upsertPlot(
+      db,
+      plotInput(plotUuid, 'foreign-zone-create', { zone_uuid: FOREIGN_ZONE_UUID }),
+      scoped
+    ),
+    (error) => error && error.statusCode === 404
+  );
+
+  db.prepare(
+    'INSERT INTO user_zone_assignments ' +
+      '(assignment_uuid,user_uuid,zone_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
+  ).run(
+    '22300000-0000-4000-8000-000000000002',
+    OWNER_UUID,
+    FOREIGN_ZONE_UUID,
+    GATEWAY_EUI,
+    '2026-07-13T00:00:00.000Z'
+  );
+  scopeHelper.invalidateScope(OWNER_UUID);
+  const created = await journal.upsertPlot(
+    db,
+    plotInput(plotUuid, 'granted-zone-create', { zone_uuid: FOREIGN_ZONE_UUID }),
+    scoped
+  );
+  assert.equal(created.created, true);
+  assert.equal(
+    db.prepare('SELECT owner_user_uuid FROM journal_plots WHERE plot_uuid=?')
+      .get(plotUuid).owner_user_uuid,
+    OWNER_UUID
+  );
+});
+
+test('scoped journal HTTP mutations reject viewers before mutation dispatch', async () => {
+  const db = new TestDb('scoped-viewer-write');
+  seedIdentity(db);
+  db.prepare("UPDATE users SET role='viewer' WHERE user_uuid=?").run(OWNER_UUID);
+  const secret = 'scoped-viewer-secret';
+  const authorization = 'Bearer ' + token(secret, {
+    userId: 1,
+    username: 'field-user',
+    exp: Date.now() + 60_000,
+  });
+  class ExistingDb {
+    constructor() {
+      return db;
+    }
+  }
+  scopeHelper.invalidateScope(OWNER_UUID);
+  const response = await journal.handleHttpRequest({
+    msg: {
+      req: {
+        method: 'POST',
+        path: '/api/journal/entries',
+        headers: { authorization },
+        body: {},
+        query: {},
+        params: {},
+      },
+    },
+    Database: ExistingDb,
+    environment: {
+      authTokenSecret: secret,
+      deviceEui: GATEWAY_EUI,
+      deviceEuiConfidence: 'authoritative',
+    },
+    scope: scopeHelper,
+    scopedMode: true,
+  });
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.payload.error, 'forbidden');
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM journal_entries').get().count,
+    0
+  );
+});
+
 test('plot and group updates return 404 for another owner on the same gateway', async () => {
   const db = new TestDb('private-resource-updates');
   seedIdentity(db);
