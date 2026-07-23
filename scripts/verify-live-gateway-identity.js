@@ -985,9 +985,9 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 193 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 193,
-    'silent-catch baseline records 193 for both maintained profiles',
-    'silent-catch baseline must be 193 for both maintained profiles after AgroLink Phase B exposes scoped-read failures');
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 190 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 190,
+    'silent-catch baseline records 190 for both maintained profiles',
+    'silent-catch baseline must be 190 for both maintained profiles after AgroLink Phase B exposes admin-read failures');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'registration compensation now reports failures instead of swallowing them', 'records the PR #149 compensation cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'AgroLink Phase A', 'records the scoped-access auth cleanup');
 }

@@ -44,8 +44,10 @@ const LEGACY_ROUTE_SOURCES = {
 
 const thinRouterSource = String.raw`const dbLoad = osiLib.require('osi-db-helper');
 const journalLoad = osiLib.require('osi-journal');
-if (!dbLoad.ok || !journalLoad.ok) {
-  const detail = [dbLoad, journalLoad]
+const scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';
+const scopeLoad = scopedOn ? osiLib.require('scope') : { ok: true, value: null };
+if (!dbLoad.ok || !journalLoad.ok || !scopeLoad.ok) {
+  const detail = [dbLoad, journalLoad, scopeLoad]
     .filter(function(load) { return !load.ok; })
     .map(function(load) { return load.error; })
     .join('; ');
@@ -59,6 +61,8 @@ const osiJournal = journalLoad.value;
 return osiJournal.handleHttpRequest({
   msg: msg,
   Database: osiDb.Database,
+  scope: scopeLoad.value,
+  scopedMode: scopedOn,
   environment: {
     authTokenSecret: env.get('AUTH_TOKEN_SECRET'),
     jwtSecret: env.get('JWT_SECRET'),
