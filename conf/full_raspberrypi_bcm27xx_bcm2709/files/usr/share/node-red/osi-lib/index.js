@@ -17,6 +17,9 @@ const NAME_TO_PATH = {
   'osi-db-helper': 'osi-db-helper',
   'osi-command-ledger': 'osi-command-ledger',
   'osi-journal': 'osi-journal',
+  // Authorization cache must have one module instance. Flow consumers load it
+  // only through osiLib.require('scope'), never with a bare/relative require.
+  'scope': 'osi-scope-helper',
   'dendro-analytics': 'osi-dendro-analytics',
   'zone-env': 'osi-zone-env',
   'device-writer': 'osi-device-writer',

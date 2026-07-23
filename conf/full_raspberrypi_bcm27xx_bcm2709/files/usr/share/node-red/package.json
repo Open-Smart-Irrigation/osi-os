@@ -23,6 +23,7 @@
     "osi-journal": "file:osi-journal",
     "osi-device-writer": "file:osi-device-writer",
     "osi-uc512-normalize": "file:osi-uc512-normalize",
-    "osi-lsn50-normalize": "file:osi-lsn50-normalize"
+    "osi-lsn50-normalize": "file:osi-lsn50-normalize",
+    "osi-scope-helper": "file:osi-scope-helper"
   }
 }
