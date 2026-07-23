@@ -145,3 +145,100 @@ test('F1: admin has no scope bypass and flag-off behavior remains owner-only', a
     db.close();
   }
 });
+
+test('F3: device reads allow grants and shared weather, and hide foreign devices', async () => {
+  const grantedDb = seedScopedDb();
+  try {
+    const granted = await executeFunction(loadNode('dendro-daily-fn'), {
+      msg: requestFor(2, 'res1', { deveui: 'DENDRO2' }),
+      env: ENV,
+      db: grantedDb,
+    });
+    assert.equal(granted.result && granted.result.statusCode, 200);
+  } finally {
+    grantedDb.close();
+  }
+
+  const foreignDb = seedScopedDb();
+  try {
+    const foreign = await executeFunction(loadNode('dendro-daily-fn'), {
+      msg: requestFor(3, 'view1', { deveui: 'DENDRO2' }),
+      env: ENV,
+      db: foreignDb,
+    });
+    assert.equal(foreign.result && foreign.result.statusCode, 404);
+  } finally {
+    foreignDb.close();
+  }
+
+  const weatherDb = seedScopedDb();
+  try {
+    const weather = await executeFunction(loadNode('s2120-zones-get-fn'), {
+      msg: requestFor(3, 'view1', { deveui: 'WX1' }),
+      env: ENV,
+      db: weatherDb,
+    });
+    assert.equal(weather.result && weather.result.statusCode, 200);
+  } finally {
+    weatherDb.close();
+  }
+});
+
+test('F3: scoped today-liters hides a foreign valve', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('strega-today-liters-fn'), {
+      msg: requestFor(1, 'admin1', { deveui: 'VALVE1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result && response.result.statusCode, 404);
+  } finally {
+    db.close();
+  }
+});
+
+test('F3: sensor export filters scoped rows and keeps flag-off behavior', async () => {
+  const scopedDb = seedScopedDb();
+  try {
+    const scoped = await executeFunction(loadNode('fn_build_sensor_sql_params'), {
+      msg: requestFor(3, 'view1'),
+      env: ENV,
+      db: scopedDb,
+    });
+    const output = scoped.result && scoped.result[0];
+    assert.match(output.topic, /iz\.zone_uuid IN/);
+    assert.match(output.topic, /SENSECAP_S2120/);
+    assert.deepEqual(output.params, ['z-1']);
+  } finally {
+    scopedDb.close();
+  }
+
+  const unscopedDb = seedScopedDb();
+  try {
+    const unscoped = await executeFunction(loadNode('fn_build_sensor_sql_params'), {
+      msg: { req: { headers: {}, params: {}, query: {} } },
+      env: { OSI_SCOPED_ACCESS: '0' },
+      db: unscopedDb,
+    });
+    const output = unscoped.result && unscoped.result[0];
+    assert.doesNotMatch(output.topic, /iz\.zone_uuid IN/);
+    assert.deepEqual(output.params, []);
+  } finally {
+    unscopedDb.close();
+  }
+});
+
+test('F3: today-liters remains callable without auth while the flag is off', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('strega-today-liters-fn'), {
+      msg: { req: { headers: {}, params: { deveui: 'VALVE1' }, query: {} } },
+      env: { OSI_SCOPED_ACCESS: '0' },
+      db,
+    });
+    assert.equal(response.result && response.result.statusCode, 200);
+  } finally {
+    db.close();
+  }
+});

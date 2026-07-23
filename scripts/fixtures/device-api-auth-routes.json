@@ -259,6 +259,12 @@
       "url": "/api/valve/:deveui",
       "httpNodeId": "6ba1d1d0ac7fd7db",
       "authNodeId": "83bb4a452dd9ae37"
+    },
+    {
+      "method": "GET",
+      "url": "/api/me",
+      "httpNodeId": "api-me-http",
+      "authNodeId": "api-me-auth"
     }
   ],
   "unprotectedRoutes": [

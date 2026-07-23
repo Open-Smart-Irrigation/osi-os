@@ -2890,7 +2890,7 @@ expectLibById('put-soil-depth-fn', 'crypto', 'crypto', 'imports crypto for soil-
 expectLibById('put-soil-depth-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper for soil-depth persistence');
 expectIncludesById('sensor-history-fn', 'osiHistory.legacySensorHistory', 'routes legacy sensor history through the history helper rollup path');
 expectIncludesById('sensor-history-fn', 'field: field', 'passes the requested legacy field to the helper');
-expectIncludesById('sensor-history-fn', 'userId: auth.userId', 'preserves owner scoping for legacy sensor history');
+expectIncludesById('sensor-history-fn', 'userId: historyUserId', 'preserves owner scoping for legacy sensor history and delegates scoped access separately');
 expectLibById('sensor-history-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for legacy sensor history');
 expectLibById('sensor-history-fn', 'osiHistory', 'osi-history-helper', 'uses osi-history-helper for legacy sensor history');
 expectLibById('sensor-history-fn', 'crypto', 'crypto', 'imports crypto for legacy sensor history auth verification');
@@ -2929,7 +2929,7 @@ expectIncludesById('d0b2b1c1a937e16d', "ds.type_id = 'DRAGINO_LSN50' AND COALESC
 expectIncludesById('d0b2b1c1a937e16d', 'CASE WHEN dd.swt_3 IS NULL THEN 0 ELSE 1 END', 'scheduler SWT average counts Chameleon channel 3 only when present');
 expectIncludesById('dendro-history-fn', 'osiHistory.legacySensorHistory', 'routes legacy dendro history through the history helper rollup path');
 expectIncludesById('dendro-history-fn', "mode: 'dendro'", 'preserves dendrometer history response shape through helper dendro mode');
-expectIncludesById('dendro-history-fn', 'userId: auth.userId', 'preserves owner scoping for legacy dendro history');
+expectIncludesById('dendro-history-fn', 'userId: historyUserId', 'preserves owner scoping for legacy dendro history and delegates scoped access separately');
 expectLibById('dendro-history-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for legacy dendro history');
 expectLibById('dendro-history-fn', 'osiHistory', 'osi-history-helper', 'uses osi-history-helper for legacy dendro history');
 expectLibById('dendro-history-fn', 'crypto', 'crypto', 'imports crypto for legacy dendro history auth verification');

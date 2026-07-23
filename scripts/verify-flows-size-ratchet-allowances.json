@@ -122,12 +122,12 @@
       "reason": "issue #10: zone_daily_environment upsert bumps sync_version"
     },
     "device-api-http500": {
-      "max_chars": 2202,
-      "reason": "issue #9: adopt msg.error.statusCode instead of hardcoding 500, so auth failures (401) survive the responder; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+      "max_chars": 2219,
+      "reason": "Device API auth/status repair plus AgroLink Phase B /api/me auth-source registration (+17)."
     },
     "dendro-raw-fn": {
-      "max_chars": 5345,
-      "reason": "issue #6: restore escaped backslashes in the corrupted toBase64Url regex (invalid /+/  and comment-swallowing ///), which the node needs to compile at all"
+      "max_chars": 6219,
+      "reason": "AgroLink Phase B: scoped raw dendrometer reads and visible touched-node catches (+874)."
     },
     "auth-register-func": {
       "max_chars": 895,
@@ -150,8 +150,8 @@
       "reason": "AgroLink Phase A uses one conditional admin-bootstrap INSERT and its own change count, preventing a same-username race loser from reporting success (+1167)."
     },
     "api-me-auth": {
-      "max_chars": 3076,
-      "reason": "AgroLink Phase A authenticates GET /api/me with the persisted local token secret and visible fallback failures."
+      "max_chars": 3530,
+      "reason": "AgroLink Phase B closes the /api/me auth-ratchet gap with tagged fail-closed token variants (+454)."
     },
     "api-me-fn": {
       "max_chars": 1745,
@@ -386,8 +386,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "fn_build_sensor_sql_params": {
-      "max_chars": 1348,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 5238,
+      "reason": "AgroLink Phase B: scoped sensor CSV export with conditional auth and weather exception (+3890)."
     },
     "fn_rows_to_csv_sensordata": {
       "max_chars": 882,
@@ -426,8 +426,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "dendro-history-fn": {
-      "max_chars": 4720,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+      "max_chars": 5698,
+      "reason": "AgroLink Phase B: scoped dendrometer history with union access and visible catches (+978)."
     },
     "dendro-history-format": {
       "max_chars": 520,
@@ -458,16 +458,16 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "sensor-history-fn": {
-      "max_chars": 4868,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+      "max_chars": 5846,
+      "reason": "AgroLink Phase B: scoped sensor history with union access and visible catches (+978)."
     },
     "sensor-history-format": {
       "max_chars": 161,
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "rain-history-fn": {
-      "max_chars": 4883,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+      "max_chars": 5855,
+      "reason": "AgroLink Phase B: scoped rain history with shared-weather access and visible catches (+972)."
     },
     "sys-reboot-fn": {
       "max_chars": 3117,
@@ -530,8 +530,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "dendro-daily-fn": {
-      "max_chars": 5384,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 6161,
+      "reason": "AgroLink Phase B: scoped daily dendrometer reads and visible catches (+777)."
     },
     "dendro-zone-rec-fn": {
       "max_chars": 5400,
@@ -766,8 +766,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "s2120-zones-get-fn": {
-      "max_chars": 3380,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+      "max_chars": 4307,
+      "reason": "AgroLink Phase B: shared-weather zone-assignment reads and visible catches (+927)."
     },
     "s2120-zones-put-auth-fn": {
       "max_chars": 5138,
@@ -858,8 +858,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2); chirpstack-slice-20260719: hoisted the ChirpStack client, closed it in the same finally as the DB close on every path (success/missing-expectation/queue-flush-failure/DB-failure), and surface bounded close() cleanup failures via node.warn without leaking key/token sentinels (+470)"
     },
     "strega-today-liters-fn": {
-      "max_chars": 1494,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4528,
+      "reason": "AgroLink Phase B: conditional scoped auth and device access for today-liters (+3034)."
     },
     "a8267d5391e7bad0": {
       "max_chars": 1050,
@@ -983,7 +983,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1124059,
-    "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + live identity restart sentinel, marked identity errors, and fail-closed restart publication (Option C Slice 1) (+11605) + filtered restartPending status with explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (Option C Slice 1b) (+4862); Device API auth/status repair exact total ceiling (Plan 6 Tasks 1-2) + sync-failclosed-20260719 Train A ack/commands fail-closed slice: command-ack-mark-delivered +1493, command-ack-build-batch +1028, sync-pending-split +118, reject-indefinite-open +632 (+3271 total) + sync-failclosed-20260719 command-ack join fix: command-ack-mark-delivered +1704 (commandId->rowId correlation join) + sync-failclosed-20260719 work-request-status-apply idempotent replay: +2089 (applied_commands dedup guard + queueCommandAck-identical initial-shape ledger write) + lsn50-writer-runtime-recovery-20260715 Task 3 (async writer/UC512 await + fixed stage-code Catch wiring + restored observable legacy fallback chain, temporary until the 14-day-or-500-uplink cleanup threshold): 460e0bfd95f89e67 +1596, 6b28e0d879808dd9 +938, new nodes lsn50-fallback-marker-fn +731, lsn50-fallback-evict-fn +173, restored lsn50-sql-fn +3594 (+7032 total) + chirpstack-slice-20260719 helper contract rewiring: cs-register-device-fn +36, cs-reg-cloud-fn +75, cs-reg-cloud-ack-fn -18, cancel-strega-actuation-fn +470 (+563 net total); PR #149 review fixes: rejection ACK bypass and guarded provisioning compensation (+497); AgroLink Phase A /api/me, scoped registration/auth, and feature exposure (+7178); AgroLink Phase B scoped zone/device lists (+2573) and zone-path reads (+1637)."
+    "max_total": 1136960,
+    "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + live identity restart sentinel, marked identity errors, and fail-closed restart publication (Option C Slice 1) (+11605) + filtered restartPending status with explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (Option C Slice 1b) (+4862); Device API auth/status repair exact total ceiling (Plan 6 Tasks 1-2) + sync-failclosed-20260719 Train A ack/commands fail-closed slice: command-ack-mark-delivered +1493, command-ack-build-batch +1028, sync-pending-split +118, reject-indefinite-open +632 (+3271 total) + sync-failclosed-20260719 command-ack join fix: command-ack-mark-delivered +1704 (commandId->rowId correlation join) + sync-failclosed-20260719 work-request-status-apply idempotent replay: +2089 (applied_commands dedup guard + queueCommandAck-identical initial-shape ledger write) + lsn50-writer-runtime-recovery-20260715 Task 3 (async writer/UC512 await + fixed stage-code Catch wiring + restored observable legacy fallback chain, temporary until the 14-day-or-500-uplink cleanup threshold): 460e0bfd95f89e67 +1596, 6b28e0d879808dd9 +938, new nodes lsn50-fallback-marker-fn +731, lsn50-fallback-evict-fn +173, restored lsn50-sql-fn +3594 (+7032 total) + chirpstack-slice-20260719 helper contract rewiring: cs-register-device-fn +36, cs-reg-cloud-fn +75, cs-reg-cloud-ack-fn -18, cancel-strega-actuation-fn +470 (+563 net total); PR #149 review fixes: rejection ACK bypass and guarded provisioning compensation (+497); AgroLink Phase A /api/me, scoped registration/auth, and feature exposure (+7178); AgroLink Phase B scoped zone/device lists (+2573), zone-path reads (+1637), device reads/exports (+12430), and /api/me auth ratchet (+471)."
   }
 }
