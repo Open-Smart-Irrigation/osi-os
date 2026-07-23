@@ -2260,7 +2260,7 @@ expectLibById('put-soil-depth-fn', 'crypto', 'crypto', 'imports crypto for soil-
 expectLibById('put-soil-depth-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper for soil-depth persistence');
 expectIncludesById('sensor-history-fn', 'osiHistory.legacySensorHistory', 'routes legacy sensor history through the history helper rollup path');
 expectIncludesById('sensor-history-fn', 'field: field', 'passes the requested legacy field to the helper');
-expectIncludesById('sensor-history-fn', 'userId: auth.userId', 'preserves owner scoping for legacy sensor history');
+expectIncludesById('sensor-history-fn', 'userId: historyUserId', 'preserves owner scoping for legacy sensor history and delegates scoped access separately');
 expectLibById('sensor-history-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for legacy sensor history');
 expectLibById('sensor-history-fn', 'osiHistory', 'osi-history-helper', 'uses osi-history-helper for legacy sensor history');
 expectLibById('sensor-history-fn', 'crypto', 'crypto', 'imports crypto for legacy sensor history auth verification');
@@ -2299,7 +2299,7 @@ expectIncludesById('d0b2b1c1a937e16d', "ds.type_id = 'DRAGINO_LSN50' AND COALESC
 expectIncludesById('d0b2b1c1a937e16d', 'CASE WHEN dd.swt_3 IS NULL THEN 0 ELSE 1 END', 'scheduler SWT average counts Chameleon channel 3 only when present');
 expectIncludesById('dendro-history-fn', 'osiHistory.legacySensorHistory', 'routes legacy dendro history through the history helper rollup path');
 expectIncludesById('dendro-history-fn', "mode: 'dendro'", 'preserves dendrometer history response shape through helper dendro mode');
-expectIncludesById('dendro-history-fn', 'userId: auth.userId', 'preserves owner scoping for legacy dendro history');
+expectIncludesById('dendro-history-fn', 'userId: historyUserId', 'preserves owner scoping for legacy dendro history and delegates scoped access separately');
 expectLibById('dendro-history-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for legacy dendro history');
 expectLibById('dendro-history-fn', 'osiHistory', 'osi-history-helper', 'uses osi-history-helper for legacy dendro history');
 expectLibById('dendro-history-fn', 'crypto', 'crypto', 'imports crypto for legacy dendro history auth verification');
@@ -2333,8 +2333,16 @@ if (deviceApiCatch) {
   expectEqual(deviceApiCatch.scope, null, 'device-api catch node catches the whole tab');
 }
 expectWireById('device-api-catch', 'device-api-http500', 'routes uncaught device-api errors into the HTTP 500 formatter');
-expectIncludesById('device-api-http500', 'msg.statusCode = (msg.error && msg.error.statusCode) || 500;', 'adopts a thrown error statusCode (e.g. verifyBearer 401) for device-api failures, defaulting to 500 (issue #9)');
-expectIncludesById('device-api-http500', "error: 'device-api failed'", 'formats uncaught device-api failures with the generic error code');
+// Wave 3 scoped-access port (AgroLink c034b2893): device-api-http500 gained an
+// _osiAuthFailure exact-shape-tag + closed-allowlist classifier so a genuine 401
+// from an allowlisted auth node reports its real Unauthorized/Invalid
+// token/Token expired message, while an unclassified or spoofed tag still falls
+// through to the original issue #9 contract below -- adopt the thrown error's own
+// statusCode (400/403/404/etc, or an unclassified 401), defaulting to 500. The
+// literal assignment is split across two statements now (const statusCode = ...
+// ; msg.statusCode = statusCode;) rather than one, so the pin is updated to match.
+expectIncludesById('device-api-http500', 'const statusCode = authMessage ? 401 : (msg.error && msg.error.statusCode) || 500;', 'adopts a thrown error statusCode (e.g. verifyBearer 401) for device-api failures, defaulting to 500 (issue #9), unless overridden by a classified 401');
+expectIncludesById('device-api-http500', "error: authMessage ? 'Unauthorized' : 'device-api failed'", 'formats uncaught device-api failures with the generic error code, or Unauthorized for a classified 401');
 expectWireById('device-api-http500', 'device-response', 'returns uncaught device-api failures through the shared response node');
 expectIncludes('Format Dendro Config Response', 'dendro_force_legacy: row.dendro_force_legacy ?? null', 'returns canonical dendrometer config fields');
 expectIncludes('Format Dendro Config Response', 'dendro_invert_direction: row.dendro_invert_direction ?? null', 'keeps legacy dendrometer inversion config for compatibility');

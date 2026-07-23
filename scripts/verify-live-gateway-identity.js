@@ -992,15 +992,17 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  // 210: on top of the port-back's c7d94cb6 (strega-reconciliation-monitor's
-  // close() catch) and the SDI-12 field-hardening wave's merge-device-data catch
-  // (213), the wave-3 scoped-access port adds api-me's Decode Token and Resolve
-  // Current User Scope nodes -- both use visible node.warn catches throughout, so
-  // no new silent catches land; the count is unaffected by that addition. 210
-  // reflects the pre-existing AgroLink-authored baseline this port carries forward.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 210 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 210,
-    'silent-catch baseline records 210 for both maintained profiles',
-    'silent-catch baseline must be 210 for both maintained profiles');
+  // 193: on top of the port-back's c7d94cb6 (strega-reconciliation-monitor's
+  // close() catch), the SDI-12 field-hardening wave's merge-device-data catch
+  // (213), and the wave-3 auth-phase-A port's api-me nodes (210, no change --
+  // both use visible node.warn throughout), AgroLink 29ff9d08/c034b2893 convert
+  // 17 remaining silent catches to visible node.warn while merging scoped-read
+  // enforcement into six device-api-tab nodes (device-api-http500,
+  // fn_build_sensor_sql_params, dendro/sensor/rain-history-fn,
+  // s2120-zones-get-fn, strega-today-liters-fn): 210 -> 193.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 193 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 193,
+    'silent-catch baseline records 193 for both maintained profiles',
+    'silent-catch baseline must be 193 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
 }
 if (sizeAllowances) {
@@ -1049,9 +1051,9 @@ if (sizeAllowances) {
   // work that landed as a single unit) -- see the allowance file's own "in progress"
   // caveat. Re-verify against the branch's current total_allowance.delta rather than
   // treating any one intermediate value as final.
-  expectCondition(sizeAllowances.total_allowance?.delta === 119108,
-    'size total allowance: exact cumulative delta 119108',
-    'size total allowance: expected exact cumulative delta 119108');
+  expectCondition(sizeAllowances.total_allowance?.delta === 136100,
+    'size total allowance: exact cumulative delta 136100',
+    'size total allowance: expected exact cumulative delta 136100');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'Field Journal port allowance', 'declares the inherited Field Journal provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
