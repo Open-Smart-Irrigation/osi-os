@@ -10,6 +10,7 @@ interface DashboardHeaderProps {
   onAddDevice: () => void;
   onLogout: () => void;
   canWrite?: boolean;
+  showAdmin?: boolean;
 }
 
 /**
@@ -24,6 +25,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   onAddDevice,
   onLogout,
   canWrite = true,
+  showAdmin = false,
 }) => {
   const { t } = useTranslation('dashboard');
   const navigate = useNavigate();
@@ -34,6 +36,8 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
       activeTab="zones"
       username={username}
       onLogout={onLogout}
+      showSettings={canWrite}
+      showAdmin={showAdmin}
       actions={canWrite ? (
         <HeaderMenu
           label={t('add')}

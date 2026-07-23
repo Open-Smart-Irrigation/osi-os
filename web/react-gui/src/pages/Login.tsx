@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { AGROLINK_BRAND, resolveAgroscopeAssets } from '../branding/agrolink';
+import { isDisabledAccountError } from '../services/api';
 
 export const Login: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -23,8 +24,12 @@ export const Login: React.FC = () => {
     try {
       await login({ username, password });
       navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.response?.data?.message || t('login.failed'));
+    } catch (err: unknown) {
+      setError(
+        isDisabledAccountError(err)
+          ? 'This account is disabled. Contact an administrator.'
+          : t('login.failed'),
+      );
     } finally {
       setLoading(false);
     }

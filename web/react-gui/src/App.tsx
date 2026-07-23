@@ -15,6 +15,7 @@ import { GatewayRestartBanner } from './components/GatewayRestartBanner';
 import { AdminOnly } from './components/AdminOnly';
 import { UsersPage } from './pages/admin/UsersPage';
 import { GrantsPage } from './pages/admin/GrantsPage';
+import { WritableOnly } from './components/WritableOnly';
 
 const AnalysisRoute = lazy(() =>
   import('./pages/AnalysisRoute').then((module) => ({ default: module.AnalysisRoute })),
@@ -63,7 +64,7 @@ function App() {
             path="/settings"
             element={
               <PrivateRoute>
-                <SettingsPage />
+                <WritableOnly><SettingsPage /></WritableOnly>
               </PrivateRoute>
             }
           />

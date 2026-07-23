@@ -52,6 +52,7 @@ export const JournalPage: React.FC = () => {
     isZoneVisible,
     loading: scopeLoading,
     canWrite,
+    isAdmin,
   } = useScope();
   const isDesktop = isDesktopBrowser();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -233,6 +234,8 @@ export const JournalPage: React.FC = () => {
         activeTab="journal"
         username={username}
         onLogout={logout}
+        showSettings={canWrite && !scopeLoading}
+        showAdmin={isAdmin && isScoped && !scopeLoading}
       />
 
       <main className={showWorkspace ? 'mx-auto max-w-[1600px]' : 'mx-auto max-w-3xl px-4 py-8'}>

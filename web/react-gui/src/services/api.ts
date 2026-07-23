@@ -95,6 +95,18 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+export function isDisabledAccountError(error: unknown): boolean {
+  if (!axios.isAxiosError<ApiErrorPayload>(error) || error.response?.status !== 403) {
+    return false;
+  }
+  const payload = error.response.data;
+  const message = [payload?.detail, payload?.message, payload?.error]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return message.includes('account disabled');
+}
+
 // Create axios instance with base configuration
 const api = axios.create({
   baseURL: '/', // Vite proxy will forward to localhost:1880
@@ -127,7 +139,7 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 || isDisabledAccountError(error)) {
       localStorage.removeItem('auth_token');
       localStorage.removeItem('username');
       notifyAuthExpired();

@@ -23,6 +23,8 @@ interface AppHeaderProps {
    * `btn-liquid` for material consistency.
    */
   actions?: React.ReactNode;
+  showSettings?: boolean;
+  showAdmin?: boolean;
 }
 
 /* Phones carry up to three of these next to the tab pill, so they run compact
@@ -49,6 +51,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   activeTab,
   onLogout,
   actions,
+  showSettings = true,
+  showAdmin = false,
 }) => {
   const { t, i18n } = useTranslation(['dashboard', 'settings']);
   const { balkenHorizontal } = resolveAgroscopeAssets(i18n?.language ?? 'en');
@@ -114,19 +118,25 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   in this row ("Einstellungen"), and spelling it out pushes the
                   Account menu onto a third line in every non-English locale.
                   The accessible name stays the full label at every width. */}
-              <Link
-                to="/settings"
-                aria-label={t('settings:entryPoint')}
-                className={`${LIQUID_BUTTON} inline-flex items-center justify-center`}
-              >
-                <span aria-hidden="true" className="sm:hidden">⚙</span>
-                <span className="hidden sm:inline">{t('settings:entryPoint')}</span>
-              </Link>
+              {showSettings && (
+                <Link
+                  to="/settings"
+                  aria-label={t('settings:entryPoint')}
+                  className={`${LIQUID_BUTTON} inline-flex items-center justify-center`}
+                >
+                  <span aria-hidden="true" className="sm:hidden">⚙</span>
+                  <span className="hidden sm:inline">{t('settings:entryPoint')}</span>
+                </Link>
+              )}
 
               <HeaderMenu
                 label={t('account')}
                 triggerClassName={LIQUID_MENU_TRIGGER}
                 items={[
+                  ...(showAdmin ? [
+                    { key: 'admin-users', label: 'Manage users', to: '/admin/users' },
+                    { key: 'admin-grants', label: 'Access grants', to: '/admin/grants' },
+                  ] : []),
                   { key: 'osi-server', label: t('accountMenu.osiServer'), to: '/account-link' },
                   { key: 'logout', label: t('logout'), onSelect: onLogout },
                 ]}

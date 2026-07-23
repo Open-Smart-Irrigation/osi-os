@@ -27,7 +27,7 @@ const irrigationActuationsFetcher = () => irrigationOutcomesAPI.recentActuations
 
 export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
-  const { canWrite, isScoped, isZoneVisible, loading: scopeLoading } = useScope();
+  const { canWrite, isAdmin, isScoped, isZoneVisible, loading: scopeLoading } = useScope();
   const { t } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
   const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
@@ -149,6 +149,7 @@ export const FarmingDashboard: React.FC = () => {
         onAddDevice={() => setIsAddDeviceModalOpen(true)}
         onLogout={logout}
         canWrite={canWrite && !scopeLoading}
+        showAdmin={isAdmin && isScoped && !scopeLoading}
       />
 
       {/* Main Content */}

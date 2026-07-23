@@ -34,6 +34,7 @@ import { AnalysisChartLegend } from '../components/analysis/AnalysisChartLegend'
 import { MetricAcrossZonesPicker } from '../components/analysis/MetricAcrossZonesPicker';
 import type { EChartHandle } from '../components/analysis/EChart';
 import { useAuth } from '../contexts/AuthContext';
+import { useScope } from '../contexts/ScopeContext';
 
 function toRequest(ws: AnalysisWorkspaceState): AnalysisSeriesRequest | null {
   if (ws.selectors.length === 0) return null;
@@ -43,6 +44,7 @@ function toRequest(ws: AnalysisWorkspaceState): AnalysisSeriesRequest | null {
 export function CrossZoneAnalysisPage() {
   const { t } = useTranslation();
   const { username, logout } = useAuth();
+  const { canWrite, isAdmin, isScoped, loading: scopeLoading } = useScope();
   const [workspace, setWorkspace] = useState<AnalysisWorkspaceState>(() => loadWorkspace() ?? createDefaultWorkspace());
   const [viewSaveError, setViewSaveError] = useState<unknown>(null);
   const chartRef = useRef<EChartHandle>(null);
@@ -146,7 +148,14 @@ export function CrossZoneAnalysisPage() {
     <div className="analysis-page flex h-screen flex-col bg-[var(--bg)] text-[var(--text)]">
       {/* Crown pinned above the internal scroll area (decision A). */}
       <div className="shrink-0">
-        <AppHeader title={t('analysis.title')} activeTab="data" username={username} onLogout={logout} />
+        <AppHeader
+          title={t('analysis.title')}
+          activeTab="data"
+          username={username}
+          onLogout={logout}
+          showSettings={canWrite && !scopeLoading}
+          showAdmin={isAdmin && isScoped && !scopeLoading}
+        />
       </div>
 
       {(catalogError || seriesError || viewsError || viewSaveError) && (

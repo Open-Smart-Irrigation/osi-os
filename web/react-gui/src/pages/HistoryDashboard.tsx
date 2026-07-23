@@ -71,7 +71,7 @@ function mergeLiveWorkspaceViewport(
 
 export const HistoryDashboard: React.FC = () => {
   const { username, logout } = useAuth();
-  const { isScoped, isZoneVisible, loading: scopeLoading } = useScope();
+  const { canWrite, isAdmin, isScoped, isZoneVisible, loading: scopeLoading } = useScope();
   const { t } = useTranslation('history');
   const { t: tc } = useTranslation('common');
   const featureFlags = useFeatureFlags();
@@ -410,6 +410,8 @@ export const HistoryDashboard: React.FC = () => {
         activeTab="data"
         username={username}
         onLogout={logout}
+        showSettings={canWrite && !scopeLoading}
+        showAdmin={isAdmin && isScoped && !scopeLoading}
       />
 
       <main className="mx-auto max-w-[1600px] px-4 py-4 lg:py-8">
