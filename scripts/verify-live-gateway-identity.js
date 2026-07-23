@@ -992,14 +992,14 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  // 189: on top of the wave-3 scoped-access port through AgroLink 708e11410
-  // (193 -> 190, see git blame for the fuller chain), AgroLink d49e1cd28
-  // (feat(api): scope shared analysis reads) converts one more:
-  // get-actuations-query's recent-actuation schema compatibility failure
-  // (a defensive CREATE TABLE IF NOT EXISTS catch) is now visible: 190 -> 189.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 189 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 189,
-    'silent-catch baseline records 189 for both maintained profiles',
-    'silent-catch baseline must be 189 for both maintained profiles');
+  // 187: on top of the wave-3 scoped-access port through AgroLink d49e1cd28
+  // (190 -> 189, see git blame for the fuller chain), AgroLink 832d48ef
+  // (feat(api): enforce fresh scope on valve effects) converts two more:
+  // 83bb4a452dd9ae37's secret read/write catches gain visible node.warn as
+  // part of the merged _osiAuthFailure tagging: 189 -> 187.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 187 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 187,
+    'silent-catch baseline records 187 for both maintained profiles',
+    'silent-catch baseline must be 187 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
 }
 if (sizeAllowances) {
@@ -1048,9 +1048,9 @@ if (sizeAllowances) {
   // work that landed as a single unit) -- see the allowance file's own "in progress"
   // caveat. Re-verify against the branch's current total_allowance.delta rather than
   // treating any one intermediate value as final.
-  expectCondition(sizeAllowances.total_allowance?.delta === 150632,
-    'size total allowance: exact cumulative delta 150632',
-    'size total allowance: expected exact cumulative delta 150632');
+  expectCondition(sizeAllowances.total_allowance?.delta === 156221,
+    'size total allowance: exact cumulative delta 156221',
+    'size total allowance: expected exact cumulative delta 156221');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'Field Journal port allowance', 'declares the inherited Field Journal provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
