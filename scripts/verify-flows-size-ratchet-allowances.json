@@ -332,11 +332,23 @@
     "post-devices-response": {
       "delta": 70,
       "reason": "Wave 3 scoped-access port (AgroLink ace19a13, feat(api): scoped device provisioning (R2, R5)): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 933 -> HEAD 1003 = +70. The response payload's irrigation_zone_id now reflects msg._scopedTargetZoneId (set upstream by scoped-device-claim-router when OSI_SCOPED_ACCESS=1 and the request targets a zone) instead of always null."
+    },
+    "dendro-location-fn": {
+      "delta": 120,
+      "reason": "Wave 3 scoped-access port (AgroLink 1839ac8e, feat(api): admin account + grant management endpoints (W8), scoped zone config (W7)): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 4130 -> HEAD 4250 = +120. Zone-ownership checks now read (msg._scopedZoneWriteAuthorized ? msg._scopedZoneOwnerId : auth.userId) instead of always auth.userId, deferring to scoped-zone-config-guard's fresh-role/fresh-zone-access assertion (upstream) when OSI_SCOPED_ACCESS=1."
+    },
+    "zone-config-fn": {
+      "delta": 180,
+      "reason": "Wave 3 scoped-access port (AgroLink 1839ac8e, feat(api): admin account + grant management endpoints (W8), scoped zone config (W7)): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 8051 -> HEAD 8231 = +180. Same scoped-owner substitution as dendro-location-fn, applied at three call sites (owned-zone lookup, UPDATE, and the re-SELECT after write)."
+    },
+    "zone-calibration-fn": {
+      "delta": 60,
+      "reason": "Wave 3 scoped-access port (AgroLink 1839ac8e, feat(api): admin account + grant management endpoints (W8), scoped zone config (W7)): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 6187 -> HEAD 6247 = +60. Same scoped-owner substitution as dendro-location-fn/zone-config-fn, applied at the owned-zone lookup."
     }
   },
   "total_allowance": {
-    "delta": 194074,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink 1659881d, feat(api): fresh scope checks on device config writes) 1,267,048 chars = 194,074. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: +86,500 is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence. Note: this is the second (and last) of two AgroLink commits (ace19a13, 1659881d) whose own AgroLink history bundled an incidental whole-file reindent (2-space -> 4-space, reverted by AgroLink's own later 9f17c6e2 'fix(flows): preserve generator formatting', not in this port's scope) alongside real content; both were ported via a JSON-level semantic diff against each commit's true AgroLink parent, discarding the reindent so this branch's flows.json stays 2-space throughout."
+    "delta": 207670,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink 1839ac8e, feat(api): admin account + grant management endpoints (W8), scoped zone config (W7)) 1,280,614 chars = 207,640. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: +100,066 is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence. [Port-local correction: scoped-zone-config-guard's routeTable field renamed url -> routePath to avoid a verify-sync-flow false positive (candidate.url.replace matched the guarded url-module usage regex); +30 chars across both profiles.]"
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
@@ -378,6 +390,10 @@
     "scoped-device-config-guard": {
       "max_chars": 4244,
       "reason": "Wave 3 scoped-access port (AgroLink 1659881d, feat(api): fresh scope checks on device config writes): new function node measured at exactly 4244 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. A single shared multi-output router (23 legitimate device-config routes + 1 error output) gating every PUT/POST /api/devices/:deveui/... config write behind one bearer-verify + role/device-access assertion when OSI_SCOPED_ACCESS=1; the routeTable itself accounts for a large share of the size. Ported as-is rather than re-architected mid-port. This node's routeTable/wires are extended later in this same port slice with the two SDI-12 recipe routes AgroLink predates (guard reconciliation, binding note 4)."
+    },
+    "scoped-admin-account-router": {
+      "max_chars": 9517,
+      "reason": "Wave 3 scoped-access port (AgroLink 1839ac8e, feat(api): admin account + grant management endpoints (W8), scoped zone config (W7)): new function node measured at exactly 9517 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. A single shared router dispatching all 9 admin account/grant management routes (list/create/password-reset/role/disabled users, zone/plot grant create+delete), each requiring an admin-role assertion via osi-scope-helper plus its own request-shape validation and DB statements. Ported as-is rather than re-architected mid-port."
     }
   }
 }

@@ -170,6 +170,7 @@ async function executeFunction(node, options) {
       },
     },
     crypto,
+    bcrypt: require(path.join(NODE_RED_MODULES, 'node_modules/bcryptjs')),
     httpLib: http,
     httpsLib: https,
     osiHistory: require(path.join(NODE_RED_MODULES, 'osi-history-helper', 'index.js')),

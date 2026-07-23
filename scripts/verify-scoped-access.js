@@ -31,11 +31,7 @@ const PHASE_C_PENDING = new Set([
   'sys-fan-in',
   'al-link-in',
   'al-unlink-in',
-  'dendro-tz-http',
-  'dendro-location-http',
-  'zone-config-http',
   'sync-force-http',
-  'zone-calibration-http',
   'history-rollups-run-http',
   // Wave 3 scoped-access port: these routes don't exist anywhere in AgroLink's
   // scope arc (valve-control and SDI-12 landed on main after AgroLink's fork;
