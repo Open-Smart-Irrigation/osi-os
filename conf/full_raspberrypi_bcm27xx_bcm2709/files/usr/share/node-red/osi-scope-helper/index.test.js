@@ -96,11 +96,11 @@ test('resource and role denials carry stable HTTP status codes', async () => {
   });
   await assert.rejects(
     () => scope.assertZoneAccess(db, 'u1', 'z-foreign', { scopedMode: true }),
-    (error) => error.status === 404
+    (error) => error.status === 404 && error.statusCode === 404
   );
   await assert.rejects(
     () => scope.assertRole(db, 'u1', 'admin', { scopedMode: true }),
-    (error) => error.status === 403
+    (error) => error.status === 403 && error.statusCode === 403
   );
 });
 
