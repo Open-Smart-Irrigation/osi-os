@@ -47,12 +47,12 @@ flows.push({
   z: zoneRoutes[0].node.z,
   name: 'Fresh Zone Config Scope',
   func: `return (async () => {
-const routes = ${JSON.stringify(zoneRoutes.map(({ method, url, index }) => ({ method, url, index })))};
+const routes = ${JSON.stringify(zoneRoutes.map(({ method, url, index }) => ({ method, routePath: url, index })))};
 const method = String(msg.req && msg.req.method || '').toUpperCase();
 const requestPath = String(msg.req && (msg.req.path || msg.req.url) || '').split('?')[0];
 const route = routes.find(function(candidate) {
   if (candidate.method !== method) return false;
-  const pattern = '^' + candidate.url.replace(/:[^/]+/g, '[^/]+') + '$';
+  const pattern = '^' + candidate.routePath.replace(/:[^/]+/g, '[^/]+') + '$';
   return new RegExp(pattern).test(requestPath);
 });
 const outputs = new Array(routes.length + 1).fill(null);
