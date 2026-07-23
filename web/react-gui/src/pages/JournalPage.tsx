@@ -4,6 +4,7 @@ import useSWR from 'swr';
 import { useSearchParams } from 'react-router-dom';
 
 import { AppHeader } from '../components/AppHeader';
+import { CanWrite } from '../components/CanWrite';
 import { JournalTimeline } from '../components/journal/JournalTimeline';
 import { JournalCaptureFlow } from '../components/journal/capture/JournalCaptureFlow';
 import { JournalWorkspace } from '../components/journal/desktop/JournalWorkspace';
@@ -50,6 +51,7 @@ export const JournalPage: React.FC = () => {
     isScoped,
     isZoneVisible,
     loading: scopeLoading,
+    canWrite,
   } = useScope();
   const isDesktop = isDesktopBrowser();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -279,6 +281,7 @@ export const JournalPage: React.FC = () => {
             zoneTimezones={zoneTimezones}
             plotState={scopedPlotState}
             groupState={groupState}
+            canWrite={canWrite}
           />
         ) : (
           <>
@@ -323,14 +326,16 @@ export const JournalPage: React.FC = () => {
                 </select>
               </label>
 
-              <button
-                ref={logActivityRef}
-                type="button"
-                className="btn-liquid rounded-lg px-5 py-2.5 font-bold"
-                onClick={() => openCapture()}
-              >
-                {t('logActivity')}
-              </button>
+              <CanWrite>
+                <button
+                  ref={logActivityRef}
+                  type="button"
+                  className="btn-liquid rounded-lg px-5 py-2.5 font-bold"
+                  onClick={() => openCapture()}
+                >
+                  {t('logActivity')}
+                </button>
+              </CanWrite>
             </div>
 
             {timelineReadError ? errorCard(retryTimelineReads) : (

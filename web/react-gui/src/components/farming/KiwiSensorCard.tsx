@@ -12,6 +12,7 @@ interface KiwiSensorCardProps {
   device: Device;
   onRemove?: () => void;
   onUpdate?: () => void;
+  readOnly?: boolean;
 }
 
 interface SensorDef {
@@ -304,7 +305,12 @@ const ConfigPanel: React.FC<{
   );
 };
 
-export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove, onUpdate }) => {
+export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
+  device,
+  onRemove,
+  onUpdate,
+  readOnly = false,
+}) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
   const { light_lux, ambient_temperature, relative_humidity } = device.latest_data;
@@ -359,7 +365,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
           <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
             {t('kiwiSensor.badge')}
           </span>
-          <button
+          {!readOnly && <button
             onClick={() => setShowConfig(v => !v)}
             className={`p-1.5 rounded-md transition-colors ${
               showConfig
@@ -369,22 +375,22 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
             title={t('kiwiSensor.settings')}
           >
             ⚙
-          </button>
-          {showConfig && (
+          </button>}
+          {!readOnly && showConfig && (
             <ConfigPanel
               device={device}
               onUpdate={onUpdate}
               onClose={() => setShowConfig(false)}
             />
           )}
-          <button
+          {!readOnly && <button
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving}
             className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             title="Remove device"
           >
             ✕
-          </button>
+          </button>}
         </div>
       </div>
       <p className="text-xs text-[var(--text-tertiary)] font-mono mb-3 truncate">{device.deveui}</p>
@@ -395,7 +401,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         </div>
       )}
 
-      {showConfirm && (
+      {!readOnly && showConfirm && (
         <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
           <p className="font-bold mb-2">{t('kiwiSensor.removeConfirm')}</p>
           <p className="text-sm mb-3">{t('kiwiSensor.removeSubtitle')}</p>

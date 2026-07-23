@@ -100,6 +100,24 @@ function renderCard(overrides: Partial<Device> = {}, props: Record<string, unkno
 }
 
 describe('StregaValveCard', () => {
+    it('keeps valve status visible but removes mutation controls in read-only mode', async () => {
+        renderCard(
+            {
+                current_state: 'OPEN',
+                activeValveActuation: {
+                    expectationId: 'vae-read-only',
+                    reconciliationState: 'PENDING_OBSERVATION',
+                },
+            } as Partial<Device>,
+            { readOnly: true },
+        );
+
+        expect(await screen.findByText('stregaValve.open')).toBeInTheDocument();
+        expect(screen.queryByText(/5 min/)).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /cancel queued open/i })).not.toBeInTheDocument();
+        expect(screen.queryByTitle('Remove device')).not.toBeInTheDocument();
+    });
+
     it('sends timed OPEN with duration_seconds', async () => {
         const { onUpdate } = renderCard();
         const openBtn = await screen.findByText(/5 min/);

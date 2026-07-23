@@ -9,6 +9,7 @@ interface DashboardHeaderProps {
   onAddZone: () => void;
   onAddDevice: () => void;
   onLogout: () => void;
+  canWrite?: boolean;
 }
 
 /**
@@ -22,6 +23,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   onAddZone,
   onAddDevice,
   onLogout,
+  canWrite = true,
 }) => {
   const { t } = useTranslation('dashboard');
   const navigate = useNavigate();
@@ -32,7 +34,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
       activeTab="zones"
       username={username}
       onLogout={onLogout}
-      actions={
+      actions={canWrite ? (
         <HeaderMenu
           label={t('add')}
           triggerClassName={LIQUID_MENU_TRIGGER}
@@ -43,7 +45,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             { key: 'activity', label: t('addMenu.activity'), onSelect: () => navigate('/journal?capture=1') },
           ]}
         />
-      }
+      ) : undefined}
     />
   );
 };

@@ -13,6 +13,7 @@ interface StregaValveCardProps {
   todayLiters?: { value: number; source: 'measured_flow_meter' | 'estimated_duration_flow_rate' | 'unknown' };
   irrigationActuations?: IrrigationActuation[];
   timeZone?: string | null;
+  readOnly?: boolean;
 }
 
 const MAX_STREGA_INTERVAL_MINUTES = 255;
@@ -628,6 +629,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   todayLiters,
   irrigationActuations = [],
   timeZone,
+  readOnly = false,
 }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
@@ -709,7 +711,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           <span className="bg-violet-100 text-violet-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
             {t('stregaValve.badge')}
           </span>
-          <button
+          {!readOnly && <button
             onClick={() => setShowConfig(v => !v)}
             className={`p-1.5 rounded-md transition-colors ${
               showConfig
@@ -719,22 +721,22 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
             title={t('stregaValve.settings')}
           >
             ⚙
-          </button>
-          {showConfig && (
+          </button>}
+          {!readOnly && showConfig && (
             <ConfigPanel
               device={device}
               onUpdate={onUpdate}
               onClose={() => setShowConfig(false)}
             />
           )}
-          <button
+          {!readOnly && <button
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving || loading !== null}
             className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             title="Remove device"
           >
             ✕
-          </button>
+          </button>}
         </div>
       </div>
       <p className="text-xs text-[var(--text-tertiary)] font-mono mb-3 truncate">{device.deveui}</p>
@@ -745,7 +747,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
         </div>
       )}
 
-      {showConfirm && (
+      {!readOnly && showConfirm && (
         <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
           <p className="font-bold mb-2">{t('stregaValve.removeConfirm')}</p>
           <p className="text-sm mb-3">{t('stregaValve.removeSubtitle')}</p>
@@ -811,7 +813,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
         </div>
       )}
 
-      <div className={`grid gap-3 ${hasActiveActuation ? 'grid-cols-2' : 'grid-cols-1'}`}>
+      {!readOnly && <div className={`grid gap-3 ${hasActiveActuation ? 'grid-cols-2' : 'grid-cols-1'}`}>
         <div>
           <label htmlFor={`strega-duration-${device.deveui}`} className="text-xs text-[var(--text-secondary)]">
             {t('stregaValve.durationMin', { defaultValue: 'Duration (min)' })}
@@ -852,7 +854,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
             />
           </div>
         )}
-      </div>
+      </div>}
 
       <DeviceCardFooter
         lastSeenLabel={minutesAgo !== null
