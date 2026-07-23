@@ -14,7 +14,20 @@ interface ScopeValue {
   profile: ScopeProfile | null;
 }
 
-const ScopeContext = createContext<ScopeValue | null>(null);
+const UNSCOPED_SCOPE: ScopeValue = {
+  loading: false,
+  isScoped: false,
+  role: 'admin',
+  canWrite: true,
+  isAdmin: true,
+  isZoneVisible: () => true,
+  isPlotVisible: () => true,
+  profile: null,
+};
+
+// The default preserves flag-off behavior for isolated component consumers.
+// The application root always supplies ScopeProvider.
+const ScopeContext = createContext<ScopeValue>(UNSCOPED_SCOPE);
 
 export function ScopeProvider({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
@@ -30,7 +43,8 @@ export function ScopeProvider({ children }: { children: React.ReactNode }) {
     }
 
     setLoading(true);
-    fetchScopeProfile()
+    const loadProfile = async () => fetchScopeProfile();
+    loadProfile()
       .then((nextProfile) => {
         if (!cancelled) {
           setProfile(nextProfile);
@@ -73,9 +87,5 @@ export function ScopeProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useScope(): ScopeValue {
-  const value = useContext(ScopeContext);
-  if (!value) {
-    throw new Error('useScope outside ScopeProvider');
-  }
-  return value;
+  return useContext(ScopeContext);
 }
