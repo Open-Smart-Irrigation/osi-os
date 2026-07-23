@@ -1,11 +1,10 @@
 # AgroLink edge/cloud parity autonomous program
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
-> `superpowers:subagent-driven-development` (recommended) or
-> `superpowers:executing-plans` to execute this program slice by slice. Each
-> implementation slice needs its own approved design or refreshed implementation
-> plan, test-first execution, independent review, and current verification
-> evidence.
+> `superpowers:executing-plans` to execute this program one slice at a time.
+> Do not dispatch subagents or parallel tasks. Each implementation slice needs
+> its own approved design or refreshed implementation plan, test-first
+> execution, a separate self-review pass, and current verification evidence.
 
 **Goal:** Bring OSI Server to full parity with portable OSI OS farm workflows,
 finish scoped AgroLink account enforcement on both sides, and establish
@@ -21,9 +20,9 @@ roll out independently. Hardware-local operations stay on the edge.
 Postgres/Flyway, and React on OSI Server; REST pending commands from cloud to
 edge; REST events/bootstrap plus MQTT telemetry from edge to cloud.
 
-**Status:** Planning-only handoff. This file does not authorize production
-access, live deployment, data deletion, or changes to the active AgroLink
-network-drive work.
+**Status:** Ready for autonomous, sequential execution after Task 0 confirms
+the launch head. This file does not authorize production access, live
+deployment, data deletion, or network-drive implementation.
 
 ---
 
@@ -42,10 +41,11 @@ The following split is binding:
 | Fleet administration, cloud recovery storage, cross-installation switching, server operations | Cloud-only |
 | AgroLink network-drive tables, SMB state, imported external readings | Edge-local by the network-drive design; no sync operations |
 
-The network-drive implementation is a neighboring program. It may start after
-scoped-access Phase A is repaired and merged, but this parity program must not
-edit its active spec, plan, schema, helper, or flow nodes without an explicit
-handoff from its owner.
+The network-drive design v3.1 and Phase 1 plan v2 are reviewed and their
+planning work has released the branch. No network-drive implementation commit
+exists. This parity program may read those documents for boundary checks but
+must not execute the network plan or add drive schema, helpers, flows, or
+imports.
 
 The same ownership rule applies to every program sharing
 `design-sync/agrolink`, including journal follow-ups and i18n work. Direct
@@ -147,14 +147,14 @@ head.
 | MQTT credential reconciliation | Implemented on OSI Server | Complete |
 | Journal edge | Storage, UI, five event operations, and five pending-command handlers | Edge complete; cloud operations explicitly staged as deferred |
 | Journal cloud | No full mirror/API/UI/command issuer | Open |
-| Scoped access Phase A | Source branch commit `101d1f2f` adds `users.sync_version`; `2f7aa171` records acceptance after the fix | Verified patch source, but not merge-ready: migrations `0022–0023` collide with target migrations through `0032` |
+| Scoped access Phase A | Source head `8921e6d1` includes the accepted `101d1f2f` version fix plus later auth, bootstrap, flag, role, and trigger corrections | Patch source requiring cumulative revalidation; migrations `0022–0023` collide with target migrations through `0032` |
 | Scoped access Phases B-D | Detailed edge plans | Reusable after Phase A repair and current-code revalidation |
 | Scoped access Phase E | Edge-origin-only cloud design | Rewrite because cloud access administration is now required |
 | History remediation | Legacy durable path retained; new batch path shadow-only | Remediation complete |
 | Durable history batch | `device_data` mapper only; other history families absent | Open |
 | Incremental bootstrap | Design and plan explicitly defer until scale or measured load | Keep deferred |
 | Schema-driven code generation | Superseded by the schema/contract ownership ADR | Reject |
-| Network drive | Approved spec and Phase 1 plan; no implementation on the target branch during audit | Separate active program, dependent on repaired Phase A |
+| Network drive | Reviewed design v3.1 and Phase 1 plan v2; no implementation commit found | Excluded from parity execution; edge-local future program |
 | Installation recovery | No stable `installation_uuid` recovery model | New work |
 
 The initial OSI Server applier integration test could not start Testcontainers:
@@ -191,6 +191,8 @@ plan's promised surface to current code before running it.
 | `docs/superpowers/plans/2026-07-19-agrolink-scoped-access-phase-c.md` | Reuse after writer/provisioning inventory refresh |
 | `docs/superpowers/plans/2026-07-19-agrolink-scoped-access-phase-d.md` | Reuse after current GUI inventory |
 | `docs/superpowers/plans/2026-07-19-agrolink-scoped-access-phase-e.md` | Replace with a revised cloud plan |
+| `docs/superpowers/specs/2026-07-22-agrolink-network-drive-design.md` | Boundary source only; do not execute in this program |
+| `docs/superpowers/plans/2026-07-23-network-drive-phase-1.md` | Reviewed future plan; do not dispatch from parity |
 
 ## 7. Dependency order
 
@@ -200,30 +202,29 @@ Verified branch baseline
         +--> Code-derived parity matrix
         |
         +--> Scoped governing-doc refresh
-        |         |
-        |         +--> Scoped Phase A repair
-        |                   |
-        |                   +--> Network-drive program may start
-        |                   +--> Scoped edge reads, writes, and GUI ----+
-        |                                                               |
-        +--> Narrow cross-repo contract CI                               |
-                  |                                                      |
-                  +--> Desired-state/conflict foundation ----------------+-->
-                  |                                                           Scoped cloud
-                  |                                                           enforcement
-                  +--> Journal cloud parity
-                  +--> Remaining portable mutation parity
+                  |
+                  +--> Narrow cross-repo contract CI
+                              |
+                              +--> Scoped Phase A repair
+                                          |
+                                          +--> Desired-state/conflict foundation
+                                                      |
+                                                      +--> Journal cloud parity
+                                                                  |
+                                                                  +--> Scoped edge reads, writes, and GUI
+                                                                              |
+                                                                              +--> Scoped cloud enforcement
+                                                                                          |
+                                                                                          +--> Remaining portable parity
 
 Durable history cutover follows contract governance and mirror coverage.
 Installation recovery follows stable account membership and full mirror coverage.
 ```
 
-Phase A may start after the scoped governing documents are refreshed while
-contract CI proceeds independently. Journal server work and scoped edge Phases
-B-D may also run in separate worktrees after their respective gates. Scoped
-cloud enforcement waits for contract CI, desired-state handling, and edge
-Phases B-D. Only the orchestrator integrates shared contract files,
-`flows.json`, migration manifests, and generated GUI bundles.
+Execute the numbered tasks sequentially. An older slice plan may describe
+independent or parallel work; this program-level rule overrides it. Scoped
+cloud enforcement still waits for contract CI, desired-state handling, and
+edge Phases B-D.
 
 ## 8. Execution protocol
 
@@ -239,6 +240,31 @@ Every slice follows this loop:
 7. Review the complete slice diff independently.
 8. Update the parity matrix and execution report.
 9. Commit with an explicit file list and push the integration branch.
+
+Only one slice, worktree mutation, build, or test command may run at a time.
+Memory sampling may continue while a long command runs. Do not dispatch
+subagents.
+
+### Memory guard
+
+Record `free -m` and the `pswpin`/`pswpout` counters from `/proc/vmstat`
+before each slice, before and after every build or full test suite, and at most
+30 seconds apart while a heavyweight command runs.
+
+- At 4096 MiB or more `MemAvailable`, run the next command.
+- From 2048 to 4095 MiB, launch no new heavyweight command. Let the current
+  owned command finish, then wait and recheck.
+- Below 2048 MiB, or when available memory falls by more than 1024 MiB across
+  two samples while `pswpout` rises, terminate only the heavyweight process
+  started by this run. Wait until `MemAvailable` returns to at least 4096 MiB,
+  then retry with a narrower command.
+- After three 30-second recovery checks without enough memory, mark that
+  heavyweight gate resource-blocked, continue lightweight work, and retry it
+  before the dependent commit.
+
+Use Gradle with `--no-daemon --max-workers=2`. Limit frontend build heaps with
+`NODE_OPTIONS=--max-old-space-size=2048`. Never kill unrelated processes,
+clear system caches, disable swap, or start two Docker-backed suites together.
 
 Create and maintain:
 
@@ -261,11 +287,9 @@ New cross-repository operations use this rollout:
 
 These conditions are resolved before autonomous Task 0 starts:
 
-- Land this orchestrator file and one reviewed scoped Phase A-E documentation
-  set on `design-sync/agrolink`. The four July sync plans in the reuse map are
-  already tracked on that branch; the orchestrator and Phase A-E plan files are
-  not. Compare the committed Phase A branch versions with the newer local
-  Phase B-D edits before selecting the set.
+- Land this orchestrator file, the reviewed scoped Phase A-E documentation set,
+  the final network-drive boundary documents, the matrix, the execution report,
+  and the executor prompt on `design-sync/agrolink`.
 - Start from a clean integration worktree. The audited AgroLink worktree
   contains generated GUI and locale changes plus an office lock file; preserve
   them outside parity commits.
@@ -278,14 +302,16 @@ git switch AgroLink
 cd backend
 ./gradlew test \
   --tests org.osi.server.testsupport.FlywayMigrationIT \
-  --no-daemon
+  --no-daemon \
+  --max-workers=2
 ```
 
 Expected: Testcontainers selects `1.21.4`, starts PostgreSQL 16, applies Flyway,
 and the test exits zero. A working Docker CLI alone does not clear this gate.
 
 - Record every active program sharing `design-sync/agrolink`, its worktree, and
-  its owned files. Resolve overlapping ownership before dispatch.
+  its owned files. The network planning program has released ownership. Keep
+  the old dirty GUI/locale worktree quarantined.
 
 ## 9. Task 0: Rebaseline the launch head
 
@@ -343,9 +369,10 @@ passes:
 
 ```bash
 cd /home/phil/Repos/osi-server/backend
-./gradlew test
+./gradlew test --no-daemon --max-workers=2
 
 cd /home/phil/Repos/osi-server/frontend
+export NODE_OPTIONS=--max-old-space-size=2048
 npm run test:unit
 npm run build
 ```
@@ -380,18 +407,17 @@ git push origin design-sync/agrolink
 - [ ] Replace Phase A's fixed migration numbers with a rebase instruction that
       chooses the next two free versions. At the audited target, these are
       likely `0033` and `0034`; re-enumeration is mandatory.
-- [ ] Update the Phase A plan to use accepted patch material from `101d1f2f`.
-      Its durable `users.sync_version`, same-write increment contract, and
-      versioned trigger emission are verified source behavior, not new design.
+- [ ] Update the Phase A plan to use source head `8921e6d1` as cumulative patch
+      material. Preserve the accepted `101d1f2f` version contract and
+      revalidate every later auth, bootstrap, flag, role, and trigger fix.
 - [ ] Run the anti-slop checker on every changed prose file.
 - [ ] Review the documents for conflicting authority rules, migration numbers,
       and references to already-completed work.
 - [ ] Commit and push the documentation slice only after review.
 
-After Task 1, dispatch Tasks 2 and 3 independently. Contract CI is not a
-prerequisite for the Phase A rebase because `scoped_access_emit` remains off.
-The network-drive program may use the Task 3 readiness signal without waiting
-for Task 2.
+After Task 1, execute Task 2 and then Task 3. Contract CI is not technically a
+prerequisite for the Phase A rebase because `scoped_access_emit` remains off,
+but the user selected sequential execution.
 
 ## 11. Task 2: Land the narrow cross-repository contract gate
 
@@ -426,9 +452,10 @@ tasks already delivered by the sync stop-loss work and keep the scope below.
 
 ## 12. Task 3: Repair and integrate scoped-access Phase A
 
-Use `feat/agrolink-scoped-access-phase-a` as a verified patch source, not as a
-merge-ready branch. Commit `101d1f2f` fixes user versioning, and `2f7aa171`
-records the accepted execution report after that fix.
+Use `feat/agrolink-scoped-access-phase-a` at `8921e6d1` as a patch source, not
+as a merge-ready branch. Commit `101d1f2f` fixes user versioning, while later
+commits add credential isolation, bootstrap-race protection, durable flag
+provisioning, fresh role checks, and first-assignment-only UUID emission.
 
 **Required corrections:**
 
@@ -470,7 +497,8 @@ node scripts/verify-sync-flow.js
       Phase A base.
 - [ ] Commit and push Phase A.
 - [ ] Record `SCOPED_PHASE_A_READY` with the edge SHA in the execution report.
-      This is the network-drive program's entry signal.
+      The future network-drive program may consume this signal in a separate
+      run.
 
 ## 13. Task 4: Add durable cloud desired state and conflict handling
 
@@ -732,9 +760,10 @@ Execute only after scoped membership and mirror coverage are stable.
       decommissioning, external recovery-key decisions, skipped production
       tests, and exact branch SHAs.
 
-## 21. Stop conditions
+## 21. Block and continue conditions
 
-The autonomous executor stops the affected slice and records the blocker when:
+The autonomous executor records the affected slice as blocked and continues
+with the next independent sequential task when:
 
 - The maintainer's `main` transfer is incomplete or the integration branch is
   dirty.
@@ -759,8 +788,12 @@ The autonomous executor stops the affected slice and records the blocker when:
 - Contract acceptance and producer/issuer enablement cannot be deployed
   separately.
 
-Other failures may be diagnosed and repaired within the named slice. The
-executor must not broaden authority to escape a stop condition.
+Do not ask the user for a prompt, preference, approval, or permission during
+the run. Use the locked decisions and the least-destructive local default. Do
+not broaden authority to escape a condition. Retry blocked work after later
+tasks when the dependency may have changed. End with a blocked result only
+after every remaining task depends on an unresolved condition; the report then
+states the evidence and smallest missing external decision.
 
 ## 22. Definition of done
 

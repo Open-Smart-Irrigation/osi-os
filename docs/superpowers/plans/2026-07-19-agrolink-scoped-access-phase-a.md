@@ -1,16 +1,17 @@
 # AgroLink Scoped Access — Phase A Implementation Plan
 
-> **2026-07-23 integration overlay:** The source implementation was accepted at
-> commits `101d1f2f` and `2f7aa171`, but it is patch material rather than a
-> merge-ready branch. Its migrations `0022–0023` collide with the AgroLink
-> target, which already reaches `0032`. Before execution, rebase the semantic
-> change onto the current target, allocate the next free migration numbers, and
-> update every filename, checksum, rehearsal fixture, command, and prose
-> reference together. Preserve the `users.sync_version` and versioned
-> `USER_UPSERTED` correction from `101d1f2f`. The literal `0022–0023` references
-> below describe the accepted source patch; they are not valid target numbers.
-> Do not replay completed source-branch tasks without first proving the rebased
-> gap.
+> **2026-07-23 integration overlay:** The source implementation is patch
+> material rather than a merge-ready branch. Its head, `8921e6d1`, adds later
+> credential isolation, bootstrap-race, durable-flag, fresh-role, and
+> first-assignment trigger corrections after the accepted `101d1f2f` user
+> version fix. Revalidate the cumulative source diff. Its migrations
+> `0022–0023` collide with the AgroLink target, which already reaches `0032`.
+> Before execution, rebase the semantic change onto the current target,
+> allocate the next free migration numbers, and update every filename,
+> checksum, rehearsal fixture, command, and prose reference together. The
+> literal `0022–0023` references below describe the source branch; they are not
+> valid target numbers. Do not replay source-branch tasks without first proving
+> the rebased gap.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

@@ -44,7 +44,7 @@ and commit SHAs.
 | Surface | Status | Reason |
 |---|---|---|
 | ChirpStack bootstrap and local device-server administration | `edge-only` | Requires gateway hardware and local services |
-| Local network and AgroLink network-drive transport | `edge-only` | Owned by the active network program; its tables and imported readings do not enter sync |
+| Local network and AgroLink network-drive transport | `edge-only` | Final design and plan are boundary inputs; future tables and imported readings do not enter sync |
 | Fan, filesystem, database download, and firmware controls | `edge-only` | Gateway operations, not portable farm workflows |
 | Fleet administration and server operations | `cloud-only` | Cross-installation operational scope |
 | Encrypted recovery storage | `cloud-only` | Server custody; restored state still becomes edge-canonical |
