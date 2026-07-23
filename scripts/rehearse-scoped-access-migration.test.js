@@ -124,3 +124,18 @@ test('0023 backfills null user_uuid and promotes lowest-id admin; no-op on empty
   assert.equal(db2.prepare('SELECT COUNT(*) n FROM users').get().n, 0); // fresh image: no crash, no rows
   db.close(); db2.close();
 });
+
+test('conditional bootstrap insert: exactly one admin, loser gets zero rows', () => {
+  const db = freshDb();
+  const BOOT = `INSERT INTO users (username, password_hash, created_at, role)
+    SELECT ?, ?, ?, 'admin' WHERE NOT EXISTS (SELECT 1 FROM users WHERE role='admin')`;
+  db.prepare(BOOT).run('first', 'h', '2026-01-01');
+  db.prepare(BOOT).run('second', 'h', '2026-01-01'); // loses: admin now exists
+  assert.equal(db.prepare(`SELECT COUNT(*) n FROM users WHERE role='admin'`).get().n, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) n FROM users WHERE username='second'`).get().n, 0);
+  // A disabled admin still blocks bootstrap (spec §10: any-state count).
+  db.exec(`UPDATE users SET disabled_at='2026-01-02' WHERE role='admin'`);
+  db.prepare(BOOT).run('third', 'h', '2026-01-01');
+  assert.equal(db.prepare(`SELECT COUNT(*) n FROM users WHERE username='third'`).get().n, 0);
+  db.close();
+});
