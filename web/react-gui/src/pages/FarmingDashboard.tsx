@@ -32,7 +32,7 @@ const valvesFetcher = () => valvesAPI.list();
 
 export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
-  const { isScoped, isZoneVisible, loading: scopeLoading } = useScope();
+  const { canWrite, isScoped, isZoneVisible, loading: scopeLoading } = useScope();
   const { t } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
   const { modules } = useDisplayPreferences();
@@ -198,6 +198,7 @@ export const FarmingDashboard: React.FC = () => {
         onAddZone={() => setIsCreateZoneModalOpen(true)}
         onAddDevice={() => setIsAddDeviceModalOpen(true)}
         onLogout={logout}
+        canWrite={canWrite && !scopeLoading}
       />
 
       {/* Main Content */}
@@ -267,6 +268,7 @@ export const FarmingDashboard: React.FC = () => {
                     allZones={visibleZones.map((z) => ({ id: z.id, name: z.name }))}
                     irrigationActuations={irrigationActuations}
                     valvesByEui={valvesByEui}
+                    canWrite={canWrite}
                   />
                 ))}
               </div>
@@ -306,6 +308,7 @@ export const FarmingDashboard: React.FC = () => {
                             device={device}
                             onRemove={handleUpdate}
                             onUpdate={handleUpdate}
+                            readOnly={!canWrite}
                           />
                         ))}
                       </div>
@@ -326,6 +329,7 @@ export const FarmingDashboard: React.FC = () => {
                             irrigationActuations={irrigationActuations}
                             timeZone={device.irrigation_zone_id ? zoneTimezones.get(device.irrigation_zone_id) : undefined}
                             valve={valvesByEui.get(device.deveui)}
+                            readOnly={!canWrite}
                           />
                         ))}
                       </div>
@@ -343,6 +347,7 @@ export const FarmingDashboard: React.FC = () => {
                             device={device}
                             onRemove={handleUpdate}
                             onUpdate={handleUpdate}
+                            readOnly={!canWrite}
                           />
                         ))}
                       </div>
@@ -377,6 +382,7 @@ export const FarmingDashboard: React.FC = () => {
                             device={device}
                             allZones={visibleZones.map((z) => ({ id: z.id, name: z.name }))}
                             onUpdate={handleUpdate}
+                            readOnly={!canWrite}
                           />
                         ))}
                       </div>
@@ -393,6 +399,7 @@ export const FarmingDashboard: React.FC = () => {
                             key={device.deveui}
                             device={device}
                             onRemove={handleUpdate}
+                            readOnly={!canWrite}
                           />
                         ))}
                       </div>
@@ -427,13 +434,13 @@ export const FarmingDashboard: React.FC = () => {
 
       {/* Modals */}
       <AddDeviceModal
-        isOpen={isAddDeviceModalOpen}
+        isOpen={canWrite && isAddDeviceModalOpen}
         onClose={() => setIsAddDeviceModalOpen(false)}
         onDeviceAdded={handleDeviceAdded}
       />
 
       <CreateZoneModal
-        isOpen={isCreateZoneModalOpen}
+        isOpen={canWrite && isCreateZoneModalOpen}
         onClose={() => setIsCreateZoneModalOpen(false)}
         onZoneCreated={handleZoneCreated}
       />

@@ -8,6 +8,7 @@ import { DeviceCardFooter } from './shared/DeviceCardFooter';
 interface LoRainGaugeCardProps {
   device: Device;
   onRemove?: () => void;
+  readOnly?: boolean;
 }
 
 type SensorMonitorConfig = {
@@ -65,7 +66,11 @@ function formatCounterStatus(status: string | null | undefined): string | null {
   }
 }
 
-export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({ device, onRemove }) => {
+export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
+  device,
+  onRemove,
+  readOnly = false,
+}) => {
   const data = device.latest_data ?? {};
   const [showConfirm, setShowConfirm] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
@@ -114,7 +119,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({ device, onRemo
           <span className="rounded-md bg-cyan-100 px-2 py-0.5 text-xs font-semibold tracking-wide text-cyan-800">
             LoRain
           </span>
-          <button
+          {!readOnly && <button
             type="button"
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving}
@@ -123,7 +128,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({ device, onRemo
             className={`rounded-md bg-[var(--error-bg)] p-1.5 text-[var(--error-text)] transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_VISIBLE_RING}`}
           >
             x
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -135,7 +140,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({ device, onRemo
         </div>
       )}
 
-      {showConfirm && (
+      {!readOnly && showConfirm && (
         <div className="mb-4 rounded-lg border-2 border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-[var(--warn-text)]">
           <p className="mb-2 font-bold">Remove rain gauge?</p>
           <p className="mb-3 text-sm">This will delete the local device record and stored readings.</p>

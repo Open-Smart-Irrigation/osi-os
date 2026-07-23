@@ -46,6 +46,7 @@ export interface DetailPanelProps {
   plots: readonly JournalPlot[];
   selectedEntryUuid: string | null;
   onFocusReturn?: () => void;
+  canWrite?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -199,7 +200,13 @@ function initialCorrectionSeed(
 // the shared EntryForm capture engine. Draft and voided entries cannot be
 // voided or corrected here — drafts resume through the Task 31 queue,
 // voided entries are terminal.
-export function DetailPanel({ catalog, plots, selectedEntryUuid, onFocusReturn }: DetailPanelProps) {
+export function DetailPanel({
+  catalog,
+  plots,
+  selectedEntryUuid,
+  onFocusReturn,
+  canWrite = true,
+}: DetailPanelProps) {
   const { t } = useTranslation('journal');
 
   if (!selectedEntryUuid) {
@@ -220,6 +227,7 @@ export function DetailPanel({ catalog, plots, selectedEntryUuid, onFocusReturn }
       plots={plots}
       entryUuid={selectedEntryUuid}
       onFocusReturn={onFocusReturn}
+      canWrite={canWrite}
     />
   );
 }
@@ -229,11 +237,18 @@ interface DetailPanelForEntryProps {
   plots: readonly JournalPlot[];
   entryUuid: string;
   onFocusReturn?: () => void;
+  canWrite: boolean;
 }
 
 type PanelMode = 'view' | 'void' | 'correct' | 'copy';
 
-function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: DetailPanelForEntryProps) {
+function DetailPanelForEntry({
+  catalog,
+  plots,
+  entryUuid,
+  onFocusReturn,
+  canWrite,
+}: DetailPanelForEntryProps) {
   const { t, i18n } = useTranslation('journal');
   const locale = i18n.resolvedLanguage || i18n.language;
   const { entries, loading, error, retry } = useJournalEntries(
@@ -413,7 +428,7 @@ function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: Detai
         )}
       </div>
 
-      {aggregate.status === 'final' && mode === 'view' && (
+      {canWrite && aggregate.status === 'final' && mode === 'view' && (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-2">
             <button

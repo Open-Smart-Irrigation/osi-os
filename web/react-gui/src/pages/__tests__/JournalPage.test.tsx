@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
     loading: false,
     isScoped: false,
     role: 'admin',
+    canWrite: true,
     isZoneVisible: vi.fn<(zoneUuid: string) => boolean>(() => true),
     isPlotVisible: vi.fn<(plotUuid: string) => boolean>(() => true),
   },
@@ -535,6 +536,7 @@ describe('JournalPage', () => {
     mocks.scopeState.loading = false;
     mocks.scopeState.isScoped = false;
     mocks.scopeState.role = 'admin';
+    mocks.scopeState.canWrite = true;
     mocks.scopeState.isZoneVisible.mockReturnValue(true);
     mocks.scopeState.isPlotVisible.mockReturnValue(true);
     mocks.getZones.mockResolvedValue(zones);
@@ -614,6 +616,17 @@ describe('JournalPage', () => {
     expect(screen.getByTestId('timeline')).toBeInTheDocument();
     expect(screen.queryByTestId('journal-workspace')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'logActivity' })).toBeInTheDocument();
+  });
+
+  it('keeps journal data visible but removes capture controls for viewers', () => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+    mocks.scopeState.role = 'viewer';
+    mocks.scopeState.canWrite = false;
+
+    renderPage();
+
+    expect(screen.getByTestId('timeline')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'logActivity' })).not.toBeInTheDocument();
   });
 
   it.each([

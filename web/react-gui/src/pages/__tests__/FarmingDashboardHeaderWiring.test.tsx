@@ -20,6 +20,7 @@ const { headerProps, logoutSpy, getDevices, getZones, scopeState } = vi.hoisted(
     loading: false,
     isScoped: true,
     role: 'researcher',
+    canWrite: true,
     isZoneVisible: vi.fn((zoneUuid: string) => zoneUuid === 'zone-visible'),
   },
 }));
@@ -135,6 +136,7 @@ beforeEach(() => {
   scopeState.loading = false;
   scopeState.isScoped = true;
   scopeState.role = 'researcher';
+  scopeState.canWrite = true;
   scopeState.isZoneVisible.mockImplementation(
     (zoneUuid: string) => zoneUuid === 'zone-visible',
   );

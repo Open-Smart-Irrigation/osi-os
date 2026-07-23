@@ -43,6 +43,7 @@ export interface JournalWorkspaceProps {
   zoneTimezones?: Readonly<Record<string, string>>;
   plotState: Pick<JournalPlotResourceActions, 'createPlot' | 'updatePlot' | 'revalidate'>;
   groupState: Pick<JournalPlotGroupResourceActions, 'createPlotGroup' | 'updatePlotGroup'>;
+  canWrite?: boolean;
 }
 
 type ZoneLike = Pick<IrrigationZone, 'zone_uuid' | 'zoneUuid' | 'device_count' | 'deviceCount'>;
@@ -205,6 +206,7 @@ export function JournalWorkspace({
   zoneTimezones,
   plotState,
   groupState,
+  canWrite = true,
 }: JournalWorkspaceProps) {
   const { t } = useTranslation('journal');
   const [scope, setScope] = useState<ScopeSelection>({ kind: 'all' });
@@ -315,7 +317,7 @@ export function JournalWorkspace({
     setSelectedEntryUuid(entryUuid);
   }, []);
 
-  const logActivityButton = (
+  const logActivityButton = canWrite ? (
     <button
       ref={logActivityButtonRef}
       type="button"
@@ -324,7 +326,7 @@ export function JournalWorkspace({
     >
       {t('logActivity')}
     </button>
-  );
+  ) : null;
 
   return (
     <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-4 px-4 py-6 lg:grid-cols-[320px_1fr_360px]">
@@ -367,9 +369,10 @@ export function JournalWorkspace({
         plots={plots}
         selectedEntryUuid={selectedEntryUuid}
         onFocusReturn={focusSelectedRow}
+        canWrite={canWrite}
       />
 
-      {captureOpen && (
+      {canWrite && captureOpen && (
         <CaptureModal accessibleName={t('capture.title')} onRequestClose={closeCapture}>
           <JournalCaptureFlow
             catalog={catalog}

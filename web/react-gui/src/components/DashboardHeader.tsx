@@ -9,6 +9,7 @@ interface DashboardHeaderProps {
   onAddZone: () => void;
   onAddDevice: () => void;
   onLogout: () => void;
+  canWrite?: boolean;
 }
 
 export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
@@ -16,6 +17,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   onAddZone,
   onAddDevice,
   onLogout,
+  canWrite = true,
 }) => {
   const { t } = useTranslation(['dashboard', 'settings']);
   const navigate = useNavigate();
@@ -33,21 +35,23 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-            <HeaderMenu
-              label={t('add')}
-              className="w-[calc(50%-4px)] sm:w-auto"
-              triggerClassName="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white text-lg px-6 py-3"
-              align="left"
-              items={[
-                { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
-                { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
-                {
-                  key: 'activity',
-                  label: t('addMenu.activity'),
-                  onSelect: () => navigate('/journal?capture=1'),
-                },
-              ]}
-            />
+            {canWrite && (
+              <HeaderMenu
+                label={t('add')}
+                className="w-[calc(50%-4px)] sm:w-auto"
+                triggerClassName="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white text-lg px-6 py-3"
+                align="left"
+                items={[
+                  { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
+                  { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
+                  {
+                    key: 'activity',
+                    label: t('addMenu.activity'),
+                    onSelect: () => navigate('/journal?capture=1'),
+                  },
+                ]}
+              />
+            )}
 
             {showDesktopData && (
               <Link

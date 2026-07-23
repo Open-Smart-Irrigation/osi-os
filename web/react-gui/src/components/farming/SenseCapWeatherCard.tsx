@@ -14,6 +14,7 @@ interface Props {
   onRemove?: () => void;
   onUpdate?: () => void;
   allZones?: Array<{ id: number; name: string }>;
+  readOnly?: boolean;
 }
 
 type SensorMonitorConfig = {
@@ -151,7 +152,13 @@ const ZonePickerPanel: React.FC<{
   );
 };
 
-export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdate, allZones = [] }) => {
+export const SenseCapWeatherCard: React.FC<Props> = ({
+  device,
+  onRemove,
+  onUpdate,
+  allZones = [],
+  readOnly = false,
+}) => {
   const { t: tc } = useTranslation('common');
   const data = device.latest_data ?? {};
   const [showConfig, setShowConfig] = useState(false);
@@ -197,7 +204,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
           <span className="rounded-md bg-sky-100 px-2 py-0.5 text-xs font-semibold tracking-wide text-sky-800">
             S2120
           </span>
-          <button
+          {!readOnly && <button
             onClick={() => setShowConfig((visible) => !visible)}
             className={`rounded-md p-1.5 transition-colors ${
               showConfig
@@ -207,8 +214,8 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
             title="Manage zone assignments"
           >
             ⚙
-          </button>
-          {showConfig && (
+          </button>}
+          {!readOnly && showConfig && (
             <ZonePickerPanel
               device={device}
               allZones={allZones}
@@ -216,14 +223,14 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
               onUpdate={onUpdate}
             />
           )}
-          <button
+          {!readOnly && <button
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving}
             className="rounded-md bg-[var(--error-bg)] p-1.5 text-[var(--error-text)] transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
             title="Remove device"
           >
             ✕
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -235,7 +242,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
         </div>
       )}
 
-      {showConfirm && (
+      {!readOnly && showConfirm && (
         <div className="mb-4 rounded-lg border-2 border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-[var(--warn-text)]">
           <p className="mb-2 font-bold">Remove weather station?</p>
           <p className="mb-3 text-sm">This will delete all stored readings and zone assignments.</p>

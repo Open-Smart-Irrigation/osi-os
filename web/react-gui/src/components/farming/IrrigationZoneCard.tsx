@@ -29,6 +29,7 @@ interface IrrigationZoneCardProps {
   allZones?: Array<{ id: number; name: string }>;
   irrigationActuations?: IrrigationActuation[];
   valvesByEui?: Map<string, ValveSummary>;
+  canWrite?: boolean;
 }
 
 function formatWaterValue(value: number | null | undefined, unit: string, digits = 1): string {
@@ -101,6 +102,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   allZones,
   irrigationActuations = [],
   valvesByEui,
+  canWrite = true,
 }) => {
   const { t } = useTranslation('devices');
   const { t: tDashboard } = useTranslation('dashboard');
@@ -209,26 +211,30 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           </p>
         </button>
         <div className="flex flex-wrap gap-2 shrink-0 max-w-full">
-          <button
-            onClick={() => setShowConfigModal(true)}
-            className="p-2 rounded-md text-[var(--text-secondary)] hover:bg-[var(--card)] transition-colors text-xl"
-            title="Configure"
-          >
-            ⚙
-          </button>
-          <button
-            onClick={() => setShowAssignModal(true)}
-            className="touch-target bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
-          >
-            {t('zone.assignDevice')}
-          </button>
-          <Link
-            to={buildJournalHref(zone)}
-            style={{ minHeight: '56px' }}
-            className="touch-target min-h-14 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors inline-flex items-center justify-center"
-          >
-            {tDashboard('addMenu.activity')}
-          </Link>
+          {canWrite && (
+            <>
+              <button
+                onClick={() => setShowConfigModal(true)}
+                className="p-2 rounded-md text-[var(--text-secondary)] hover:bg-[var(--card)] transition-colors text-xl"
+                title="Configure"
+              >
+                ⚙
+              </button>
+              <button
+                onClick={() => setShowAssignModal(true)}
+                className="touch-target bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+              >
+                {t('zone.assignDevice')}
+              </button>
+              <Link
+                to={buildJournalHref(zone)}
+                style={{ minHeight: '56px' }}
+                className="touch-target min-h-14 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors inline-flex items-center justify-center"
+              >
+                {tDashboard('addMenu.activity')}
+              </Link>
+            </>
+          )}
           {showZoneDataLink && (
             <Link
               to={`/history/zones/${zone.id}`}
@@ -237,13 +243,13 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               {t('zone.data', 'Data')}
             </Link>
           )}
-          <button
+          {canWrite && <button
             onClick={() => setShowDeleteConfirm(true)}
             disabled={isDeleting}
             className="touch-target bg-[var(--error-bg)] hover:bg-red-700 disabled:bg-[var(--border)] text-[var(--error-text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
           >
             {t('zone.deleteZone')}
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -372,7 +378,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
         </div>
       )}
 
-      {showDeleteConfirm && (
+      {canWrite && showDeleteConfirm && (
         <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
           <p className="font-bold mb-2">{t('zone.deleteConfirm')}</p>
           <p className="text-sm mb-3">
@@ -405,7 +411,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       )}
 
       {/* Schedule Section */}
-      {modules.schedulerUi && (
+      {canWrite && modules.schedulerUi && (
         <ScheduleSection
           zoneId={zone.id}
           zoneName={zone.name}
@@ -454,6 +460,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           device={device}
                           onRemove={() => handleRemoveDevice(device.deveui)}
                           onUpdate={onUpdate}
+                          readOnly={!canWrite}
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
@@ -481,6 +488,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           irrigationActuations={irrigationActuations}
                           timeZone={zone.timezone}
                           valve={valvesByEui?.get(device.deveui)}
+                          readOnly={!canWrite}
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
@@ -503,6 +511,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                         <DraginoTempCard
                           device={device}
                           onRemove={() => handleRemoveDevice(device.deveui)}
+                          readOnly={!canWrite}
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
@@ -550,6 +559,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           onRemove={() => handleRemoveDevice(device.deveui)}
                           onUpdate={onUpdate}
                           allZones={allZones ?? [{ id: zone.id, name: zone.name }]}
+                          readOnly={!canWrite}
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
@@ -572,6 +582,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                         <LoRainGaugeCard
                           device={device}
                           onRemove={() => handleRemoveDevice(device.deveui)}
+                          readOnly={!canWrite}
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
@@ -587,12 +598,12 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           ) : (
             <div className="mt-3 bg-[var(--card)] rounded-lg p-6 text-center">
               <p className="text-[var(--text-tertiary)] text-lg mb-3">{t('zone.noDevices')}</p>
-              <button
+              {canWrite && <button
                 onClick={() => setShowAssignModal(true)}
                 className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-6 py-3 rounded-lg transition-colors"
               >
                 {t('zone.assignFirst')}
-              </button>
+              </button>}
             </div>
           )
         )}
@@ -601,14 +612,11 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       </>
       )} {/* end !zoneCollapsed */}
 
-      {/* Zone device modal: assign an existing device or register a new one. */}
-      {/* Cherry-pick note: fcf70de4 gated this on `canWrite`, which comes from the
-          write-only-scoping work on feat/journal-cloud-primary and is NOT on this branch.
-          Taking that gate verbatim would reference an undefined identifier, so the modal is
-          opened unconditionally here, matching this branch's existing behaviour. Restore the
-          gate when scoping lands. */}
+      {/* Zone device modal: assign an existing device or register a new one.
+          Gated on `canWrite` (wave 3 scoped-access port): a prior port had left this
+          unconditional pending scoping work landing -- it has now landed. */}
       <ZoneDeviceModal
-        isOpen={showAssignModal}
+        isOpen={canWrite && showAssignModal}
         onClose={() => setShowAssignModal(false)}
         onChanged={onUpdate}
         zoneId={zone.id}
@@ -617,14 +625,14 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       />
 
       <ZoneConfigModal
-        isOpen={showConfigModal}
+        isOpen={canWrite && showConfigModal}
         zone={zone}
         onClose={() => setShowConfigModal(false)}
         onSaved={onUpdate}
       />
 
       <AdvancedScheduleDrawer
-        isOpen={showAdvancedDrawer}
+        isOpen={canWrite && showAdvancedDrawer}
         zone={zone}
         onClose={() => setShowAdvancedDrawer(false)}
         onSaved={onUpdate}
