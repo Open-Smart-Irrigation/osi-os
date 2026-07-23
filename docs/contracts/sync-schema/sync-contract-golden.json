@@ -14,6 +14,12 @@
       "cloudIssuerEnabled": false
     },
     {
+      "name": "scoped_access_commands_v1",
+      "schemaAccepted": true,
+      "edgeProducerEnabled": false,
+      "cloudIssuerEnabled": false
+    },
+    {
       "name": "desired_state_conflicts_v1",
       "schemaAccepted": true,
       "edgeProducerEnabled": false,
@@ -156,7 +162,13 @@
       "VOID_JOURNAL_ENTRY",
       "UPSERT_JOURNAL_CUSTOM_VOCAB",
       "UPSERT_JOURNAL_PLOT",
-      "UPSERT_JOURNAL_PLOT_GROUP"
+      "UPSERT_JOURNAL_PLOT_GROUP",
+      "UPSERT_SCOPED_USER",
+      "RESET_SCOPED_USER_PASSWORD",
+      "UPSERT_USER_ZONE_ASSIGNMENT",
+      "DELETE_USER_ZONE_ASSIGNMENT",
+      "UPSERT_USER_PLOT_ASSIGNMENT",
+      "DELETE_USER_PLOT_ASSIGNMENT"
     ],
     "cloudIssuerEnabled": [
       "OPEN_FOR_DURATION",
@@ -200,7 +212,14 @@
       "UPSERT_JOURNAL_PLOT",
       "UPSERT_JOURNAL_PLOT_GROUP"
     ],
-    "staged": []
+    "staged": [
+      "DELETE_USER_PLOT_ASSIGNMENT",
+      "DELETE_USER_ZONE_ASSIGNMENT",
+      "RESET_SCOPED_USER_PASSWORD",
+      "UPSERT_SCOPED_USER",
+      "UPSERT_USER_PLOT_ASSIGNMENT",
+      "UPSERT_USER_ZONE_ASSIGNMENT"
+    ]
   },
   "commandAckResults": [
     {

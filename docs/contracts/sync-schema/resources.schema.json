@@ -92,6 +92,90 @@
                 "deleted_at": {"type": ["string", "null"], "format": "date-time"}
             }
         },
+        "ScopedUser": {
+            "type": "object",
+            "required": ["user_uuid", "username", "role", "disabled_at", "sync_version", "gateway_device_eui"],
+            "properties": {
+                "user_uuid": {"$ref": "#/definitions/Uuid"},
+                "username": {"type": "string", "minLength": 1, "maxLength": 64},
+                "role": {"type": "string", "enum": ["admin", "researcher", "viewer"]},
+                "disabled_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "sync_version": {"type": "integer", "minimum": 1},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "occurred_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"}
+            }
+        },
+        "ScopedUserCommand": {
+            "allOf": [
+                {"$ref": "#/definitions/ScopedUser"},
+                {
+                    "required": ["base_sync_version"],
+                    "propertyNames": {
+                        "enum": ["user_uuid", "username", "role", "disabled_at", "sync_version", "gateway_device_eui", "occurred_at", "base_sync_version", "password_hash"]
+                    },
+                    "properties": {
+                        "base_sync_version": {"type": "integer", "minimum": 0},
+                        "password_hash": {"type": "string", "pattern": "^\\$2[aby]\\$[0-9]{2}\\$.{53}$"}
+                    }
+                }
+            ]
+        },
+        "UserZoneAssignment": {
+            "type": "object",
+            "required": ["assignment_uuid", "user_uuid", "zone_uuid", "assigned_by_user_uuid", "sync_version", "deleted_at", "gateway_device_eui"],
+            "properties": {
+                "assignment_uuid": {"$ref": "#/definitions/Uuid"},
+                "user_uuid": {"$ref": "#/definitions/Uuid"},
+                "zone_uuid": {"$ref": "#/definitions/Uuid"},
+                "assigned_by_user_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "sync_version": {"type": "integer", "minimum": 1},
+                "deleted_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "occurred_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"}
+            }
+        },
+        "UserZoneAssignmentCommand": {
+            "allOf": [
+                {"$ref": "#/definitions/UserZoneAssignment"},
+                {
+                    "required": ["base_sync_version"],
+                    "propertyNames": {
+                        "enum": ["assignment_uuid", "user_uuid", "zone_uuid", "assigned_by_user_uuid", "sync_version", "deleted_at", "gateway_device_eui", "occurred_at", "base_sync_version"]
+                    },
+                    "properties": {
+                        "base_sync_version": {"type": "integer", "minimum": 0}
+                    }
+                }
+            ]
+        },
+        "UserPlotAssignment": {
+            "type": "object",
+            "required": ["assignment_uuid", "user_uuid", "plot_uuid", "assigned_by_user_uuid", "sync_version", "deleted_at", "gateway_device_eui"],
+            "properties": {
+                "assignment_uuid": {"$ref": "#/definitions/Uuid"},
+                "user_uuid": {"$ref": "#/definitions/Uuid"},
+                "plot_uuid": {"$ref": "#/definitions/Uuid"},
+                "assigned_by_user_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "sync_version": {"type": "integer", "minimum": 1},
+                "deleted_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "occurred_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"}
+            }
+        },
+        "UserPlotAssignmentCommand": {
+            "allOf": [
+                {"$ref": "#/definitions/UserPlotAssignment"},
+                {
+                    "required": ["base_sync_version"],
+                    "propertyNames": {
+                        "enum": ["assignment_uuid", "user_uuid", "plot_uuid", "assigned_by_user_uuid", "sync_version", "deleted_at", "gateway_device_eui", "occurred_at", "base_sync_version"]
+                    },
+                    "properties": {
+                        "base_sync_version": {"type": "integer", "minimum": 0}
+                    }
+                }
+            ]
+        },
         "JournalEntryValue": {
             "type": "object",
             "additionalProperties": false,

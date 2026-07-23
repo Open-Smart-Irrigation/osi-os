@@ -19,8 +19,15 @@ const SEPARATE_ROUTE_SPECS = [
         applierName: 'Apply Work Request Status',
     },
 ];
-const EXACT_STAGED_JOURNAL_COMMANDS = [];
-const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [];
+const EXACT_STAGED_JOURNAL_COMMANDS = [
+    'DELETE_USER_PLOT_ASSIGNMENT',
+    'DELETE_USER_ZONE_ASSIGNMENT',
+    'RESET_SCOPED_USER_PASSWORD',
+    'UPSERT_SCOPED_USER',
+    'UPSERT_USER_PLOT_ASSIGNMENT',
+    'UPSERT_USER_ZONE_ASSIGNMENT',
+];
+const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [...EXACT_STAGED_JOURNAL_COMMANDS];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
@@ -36,6 +43,24 @@ const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     },
     UPSERT_JOURNAL_PLOT_GROUP: {
         effect_key: { prefix: 'journal_plot_group', uuid_path: 'plot_group.group_uuid', version_path: 'plot_group.base_sync_version' },
+    },
+    UPSERT_SCOPED_USER: {
+        effect_key: { prefix: 'scoped_user', uuid_path: 'user.user_uuid', version_path: 'user.base_sync_version' },
+    },
+    RESET_SCOPED_USER_PASSWORD: {
+        effect_key: { prefix: 'scoped_user_password', uuid_path: 'user_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_USER_ZONE_ASSIGNMENT: {
+        effect_key: { prefix: 'scoped_zone_assignment', uuid_path: 'zone_assignment.assignment_uuid', version_path: 'zone_assignment.base_sync_version' },
+    },
+    DELETE_USER_ZONE_ASSIGNMENT: {
+        effect_key: { prefix: 'scoped_zone_assignment', uuid_path: 'assignment_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_USER_PLOT_ASSIGNMENT: {
+        effect_key: { prefix: 'scoped_plot_assignment', uuid_path: 'plot_assignment.assignment_uuid', version_path: 'plot_assignment.base_sync_version' },
+    },
+    DELETE_USER_PLOT_ASSIGNMENT: {
+        effect_key: { prefix: 'scoped_plot_assignment', uuid_path: 'assignment_uuid', version_path: 'base_sync_version' },
     },
 };
 const EXACT_EVENT_SEMANTIC_BINDINGS = {
@@ -195,6 +220,7 @@ function verifyGoldenFixture(commandSchema, eventsSchema) {
         'command_ack_results_v1',
         'desired_state_conflicts_v1',
         'journal_sync_v1',
+        'scoped_access_commands_v1',
         'scoped_access_sync_v1',
     ];
     const capabilities = golden.capabilities || [];
