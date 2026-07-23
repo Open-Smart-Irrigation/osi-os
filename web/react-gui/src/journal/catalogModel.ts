@@ -16,6 +16,14 @@ import type {
   NumericConversionResult,
 } from '../types/journalCapture';
 
+// The choice fields a host renders as a read-only "chip + change" instead of an
+// open <select> once they hold a value: the detailed operation is chosen in the
+// activity picker (capture flow) or carried from the source entry (correction /
+// copy), so re-showing a 9-option select invites an accidental change that also
+// invalidates the operation-scoped device. Shared by the capture flow and the
+// desktop correction/copy forms so all three surfaces behave identically.
+export const OPERATION_CONFIRMED_CHOICE_CODES: readonly string[] = ['attr.agroscope.operation'];
+
 const TOP_LEVEL_FIELDS = new Set([
   'entry_uuid', 'owner_user_uuid', 'user_id', 'author_principal_uuid', 'author_label',
   'plot_uuid', 'zone_id', 'zone_uuid', 'device_eui', 'season_uuid', 'season_crop',

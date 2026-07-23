@@ -7,6 +7,7 @@ import {
   allowedUnits,
   catalogLabel,
   convertNumericValue,
+  vocabLabelOrCode,
 } from '../../../journal/catalogModel';
 import { buildEntryValues } from '../../../journal/templateEngine';
 import type { JournalProductRow, JournalVocabRow } from '../../../types/journal';
@@ -67,6 +68,18 @@ export interface EntryFormProps {
   // itself stays business-logic-free about what a "kind" means, same spirit
   // as fieldHints above.
   allowedProductKinds?: readonly string[];
+  // Copy-entry-and-polish plan (2026-07-23, §C): an optional allow-list of
+  // choice attribute codes to render as a read-only "confirmed" chip (the
+  // selected choice's label plus a "change" button that reveals the normal
+  // select) whenever that field already holds a value, instead of the open
+  // dropdown. EntryForm has no idea which codes these are or why (same
+  // business-logic-free spirit as fieldHints/allowedProductKinds above) — the
+  // caller decides (e.g. DetailPanel's correction/copy forms pass
+  // attr.agroscope.operation, since re-editing an already-recorded operation
+  // is the rare path, not the default one). Undefined (every caller that
+  // omits this prop, including the live capture flow) means no chip —
+  // unchanged behavior.
+  confirmedChoiceCodes?: readonly string[];
 }
 
 export interface EntryFormValidationResult {
@@ -442,6 +455,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
   templateCode,
   fieldHints,
   allowedProductKinds,
+  confirmedChoiceCodes,
 }) => {
   const { t, i18n } = useTranslation('journal');
   const locale = localeOverride || i18n.resolvedLanguage || i18n.language;
@@ -449,6 +463,13 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     () => new Map(),
   );
   const [moreDetailOpen, setMoreDetailOpen] = useState(false);
+  // §C: once the operator explicitly asks to "change" a confirmed choice
+  // chip, it stays unlocked (reverts to the normal select) for the rest of
+  // this form instance — there is no reason to re-collapse it back into a
+  // chip after the very re-edit the button exists for.
+  const [unlockedChoiceCodes, setUnlockedChoiceCodes] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const currentSelections = useMemo(
     () => mergedSelections(selections, values),
     [selections, values],
@@ -772,6 +793,54 @@ export const EntryForm: React.FC<EntryFormProps> = ({
 
     if (attribute.value_type === 'choice') {
       const choices = allowedChoices(model, layout, state.code, currentSelections);
+      const selectedChoiceCode = semanticValue(existing);
+      // §C: a confirmed-choice chip only ever replaces the SELECT for a
+      // field that (a) the host opted into via confirmedChoiceCodes, (b)
+      // currently holds a value (an empty field has nothing to "confirm" —
+      // it must still render as a normal select so the operator can make a
+      // first choice), and (c) has not been explicitly unlocked via "change"
+      // yet.
+      const confirmedChoiceValue = confirmedChoiceCodes?.includes(state.code) &&
+        !unlockedChoiceCodes.has(state.code) &&
+        typeof selectedChoiceCode === 'string' && selectedChoiceCode !== ''
+        ? selectedChoiceCode
+        : null;
+      if (confirmedChoiceValue) {
+        const chipLabelId = `${state.code}-chip-label`;
+        return (
+          <div key={state.code} className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <span id={chipLabelId} className="text-sm font-bold text-[var(--text)]">{label}</span>
+            </div>
+            <div
+              role="group"
+              aria-labelledby={chipLabelId}
+              aria-describedby={fieldError ? fieldErrorId : undefined}
+              className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--secondary-bg)] px-3 py-2"
+            >
+              <span className="font-semibold text-[var(--text)]">
+                {vocabLabelOrCode(confirmedChoiceValue, model, locale)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setUnlockedChoiceCodes((current) => new Set(current).add(state.code))}
+                className={`rounded-lg px-2 py-1 text-xs font-bold text-[var(--primary)] hover:bg-[var(--card)] ${FOCUS_RING}`}
+              >
+                {t('capture.form.change', { field: label })}
+              </button>
+            </div>
+            {fieldError && (
+              <p
+                id={fieldErrorId}
+                role="alert"
+                className="text-sm font-semibold text-[var(--error-text)]"
+              >
+                {fieldError}
+              </p>
+            )}
+          </div>
+        );
+      }
       return (
         <div key={state.code} className="space-y-2">
           <label htmlFor={state.code} className="flex items-center justify-between gap-3 text-sm font-bold text-[var(--text)]">

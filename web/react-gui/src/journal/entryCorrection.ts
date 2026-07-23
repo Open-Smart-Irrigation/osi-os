@@ -94,7 +94,12 @@ export function currentNoteValue(values: readonly CaptureEntryValueInput[]): str
 // engine already re-specifies a field's full row set on every change). Every
 // row whose code is NOT owned by the form (legacy/custom values, or values
 // outside this template) passes through byte-for-byte unchanged.
-function mergedValues(
+//
+// Exported (copy-entry-and-polish plan, 2026-07-23, §A5): the copy form
+// (journal/entryCopy.ts's buildCopyPayload) reuses this exact preserved+
+// edited merge rather than re-deriving its own — a copy's `values` should
+// behave identically to a correction's, just against a fresh entry.
+export function mergedValues(
   baseValues: readonly EntryValue[],
   formOwnedAttributeCodes: ReadonlySet<string>,
   editedValues: readonly CaptureEntryValueOutput[],

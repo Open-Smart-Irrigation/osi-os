@@ -234,6 +234,7 @@
       },
       "actions": {
         "correct": "Longoosa",
+        "copy": "Kkopa",
         "void": "Saza"
       },
       "correction": {
@@ -244,6 +245,18 @@
         "saving": "Tikutereka…",
         "stale": "Ekiwandiiko kino kikyusiddwa mu kifo ekirala. Kiddemu okutikka nga tonnalongoosa nate.",
         "error": "Twayisiddwa okutereka enkyusa. Gezaako nate."
+      },
+      "copy": {
+        "heading": "Kkopa ekiwandiiko kino",
+        "occurredLabel": "Ennaku n'ekiseera ebipya",
+        "dateError": "Yingiza ennaku n'ekiseera ebituufu nga tonnatereka.",
+        "cancel": "Sazaamu",
+        "save": "Tereka ng'ekiwandiiko ekipya",
+        "saving": "Tikutereka…",
+        "error": "Ekkopi teyayinzizza kuterekebwa. Ddamu ogezeeko.",
+        "duplicateTitle": "Kiyinza okuba ekifaanana",
+        "duplicateBody": "Ekiwandiiko ku musiri guno n'ekikolwa kino kimaze okubaawo okumpi n'ekiseera kino. Kitereke nga kiwandiiko ekyawukana?",
+        "saveSeparately": "Tereka awuka"
       },
       "void": {
         "reasonLabel": "Ensonga ey'okusaza",
@@ -336,7 +349,8 @@
       "plotContext": "Ebikwata ku musiri",
       "keyValues": "Emiwendo emikulu",
       "moreDetail": "Ebikwata ebirala",
-      "treatedAreaDefaulted": "Kiweereddwa okuva ku bugazi bw'ekibanja — kyusa singa kyetaagisa"
+      "treatedAreaDefaulted": "Kiweereddwa okuva ku bugazi bw'ekibanja — kyusa singa kyetaagisa",
+      "change": "Kyusa {{field}}"
     },
     "validation": {
       "required": "Jjuzaamu ekifo kino",

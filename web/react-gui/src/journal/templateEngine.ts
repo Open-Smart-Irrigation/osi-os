@@ -78,6 +78,48 @@ function activityCode(selections: JournalSelections): string | undefined {
   return Array.isArray(selected) && typeof selected[0] === 'string' ? selected[0] : undefined;
 }
 
+// Copy-entry-and-polish plan (2026-07-23, B2): every field code the
+// template's own operation-scoping machinery can ever reference — the
+// per-activity AND per-operation scoped-section maps, every
+// activity/operation requirement list, and every conditional_group. A field
+// named here is "operation-scoped": whether it is actually visible for the
+// CURRENT selection is decided entirely by those mechanisms further down in
+// deriveFieldStates, so the unconditional layout-level static-context
+// force-add loop below must leave it alone rather than forcing it visible
+// for every activity regardless of operation (the attr.denominator bug this
+// fixes — it is referenced by irrigation/fertigation's operation section but
+// force-added everywhere via minimum_fields). A field referenced nowhere in
+// this set (attr.block_bed_row, attr.cover_type) is untouched by this gate
+// and keeps force-showing everywhere, exactly as before.
+function collectOperationScopedFieldCodes(
+  rawTemplate: Partial<JournalTemplateDefinition>,
+): ReadonlySet<string> {
+  const codes = new Set<string>();
+  const addRequirementCodes = (requirement: JournalRequirement | undefined) => {
+    if (!requirement) return;
+    for (const code of requirement.required ?? []) codes.add(code);
+    for (const code of requirement.optional ?? []) codes.add(code);
+    for (const family of requirement.required_any ?? []) {
+      for (const code of family) codes.add(code);
+    }
+  };
+  for (const fields of Object.values(rawTemplate.operation_fields_by_activity ?? {})) {
+    for (const code of fields ?? []) codes.add(code);
+  }
+  for (const fields of Object.values(rawTemplate.operation_fields_by_operation ?? {})) {
+    for (const code of fields ?? []) codes.add(code);
+  }
+  addRequirementCodes(rawTemplate.requirements);
+  for (const requirement of Object.values(rawTemplate.activity_requirements ?? {})) {
+    addRequirementCodes(requirement);
+  }
+  for (const requirement of Object.values(rawTemplate.operation_requirements ?? {})) {
+    addRequirementCodes(requirement);
+  }
+  for (const group of rawTemplate.conditional_groups ?? []) addRequirementCodes(group);
+  return codes;
+}
+
 // Operation-level field/requirement/product scoping plan (full_record@10,
 // spec §0.1/§0.2): the operation choice code currently selected for
 // attr.agroscope.operation, if any. Callers merge the live in-form value
@@ -218,8 +260,24 @@ export function deriveFieldStates(
     // in v8). static_context_fields itself is never trimmed by this — Quick's
     // plot-context resolution (PlotContextFields / plotContextInputs) still
     // reads the full list untouched.
+    // B2 (copy-entry-and-polish plan, 2026-07-23): a static-context field the
+    // template's own operation-scoping already governs (attr.denominator, via
+    // irrigation/fertigation's operation section) must NOT be force-added
+    // here regardless of activity — that would show it on every activity
+    // (tillage, weeding, ...) the scoping never lists it for. Skipping the
+    // force-add entirely (not merely leaving it optional) is safe: the
+    // operation-scoping loops above/below still add it — visible — exactly
+    // when the resolved operation/activity fields include it, and
+    // addRequirement's force-add further down still wins if a requirement
+    // list marks it required, so a required field can never be hidden by
+    // this skip (addField's merge-by-code logic). A static-context field
+    // referenced NOWHERE in operation-scoping (attr.block_bed_row,
+    // attr.cover_type) is not in this set, so it keeps force-showing on every
+    // activity exactly as before.
     const staticContextFields = rawLayout.static_context_fields ?? [];
+    const operationScopedFieldCodes = collectOperationScopedFieldCodes(rawTemplate);
     for (const field of rawLayout.minimum_fields ?? []) {
+      if (staticContextFields.includes(field) && operationScopedFieldCodes.has(field)) continue;
       addField(field, !staticContextFields.includes(field));
     }
     for (const field of rawLayout.reading_fields ?? []) addField(field, true);

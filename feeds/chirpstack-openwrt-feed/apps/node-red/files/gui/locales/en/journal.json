@@ -234,6 +234,7 @@
       },
       "actions": {
         "correct": "Correct",
+        "copy": "Copy",
         "void": "Void"
       },
       "correction": {
@@ -244,6 +245,18 @@
         "saving": "Saving…",
         "stale": "This entry changed elsewhere. Reload it before correcting again.",
         "error": "Could not save the correction. Try again."
+      },
+      "copy": {
+        "heading": "Copy this entry",
+        "occurredLabel": "New date & time",
+        "dateError": "Enter a valid date and time before saving.",
+        "cancel": "Cancel",
+        "save": "Save as new entry",
+        "saving": "Saving…",
+        "error": "Could not save the copy. Try again.",
+        "duplicateTitle": "Possible duplicate",
+        "duplicateBody": "An entry for this plot and activity already exists close to this time. Save it anyway as a separate entry?",
+        "saveSeparately": "Save separately"
       },
       "void": {
         "reasonLabel": "Reason for voiding",
@@ -336,7 +349,8 @@
       "plotContext": "Plot context",
       "keyValues": "Key values",
       "moreDetail": "More detail",
-      "treatedAreaDefaulted": "Defaulted from plot area — edit if needed"
+      "treatedAreaDefaulted": "Defaulted from plot area — edit if needed",
+      "change": "Change {{field}}"
     },
     "validation": {
       "required": "Complete this field",

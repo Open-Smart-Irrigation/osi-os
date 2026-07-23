@@ -6,15 +6,19 @@ import {
   allowedProductKindsForOperation,
   buildCatalogModel,
   catalogLabel,
+  OPERATION_CONFIRMED_CHOICE_CODES,
   vocabLabelOrCode,
 } from '../../../journal/catalogModel';
-import { cycleDependentsFromError } from '../../../journal/cropCycle';
+import { cycleDependentsFromError, SEEDING_ACTIVITY_CODES } from '../../../journal/cropCycle';
+import { buildCopyPayload, deriveCopySeason } from '../../../journal/entryCopy';
 import {
   buildCorrectionPayload,
   currentNoteValue,
   parseContextSnapshot,
   scalarSelectionsFromValues,
 } from '../../../journal/entryCorrection';
+import { resolveOccurrence, type ResolvedOccurrence } from '../../../journal/occurrence';
+import { randomUuid } from '../../../utils/uuid';
 import { deriveFieldStates } from '../../../journal/templateEngine';
 import { useJournalEntries } from '../../../journal/useJournalEntries';
 import { journalApi } from '../../../services/journalApi';
@@ -58,6 +62,64 @@ const OMITTED_VALUE_DISPLAY_CODE = 'attr.actuation_expectation_id';
 function isStaleVersionError(error: unknown): boolean {
   const status = isRecord(error) && isRecord(error.response) ? error.response.status : undefined;
   return status === 409;
+}
+
+// A4 (copy-entry-and-polish plan): Copy is offered only for a `final` entry
+// whose activity is NOT in the crop-cycle cascade set — seeding/planting
+// open or continue a cycle, harvest closes one, and the copy form has none
+// of JournalCaptureFlow's cycle-disambiguation UI (out of scope for this
+// wrap-up slice). `final`-only is enforced separately by the caller (A6: a
+// draft source is the one case where POST-with-fresh-uuid+base-0 could ever
+// resemble an upsert of something else) — this only narrows by activity.
+function copyBlockedForActivity(activityCode: string): boolean {
+  return SEEDING_ACTIVITY_CODES.has(activityCode) || activityCode === 'harvest';
+}
+
+// §C: the one choice field DetailPanel's correction/copy forms render as a
+// read-only "confirmed" chip (with a "change" button) instead of an open
+// select — the operation was already picked once, either live at capture
+// time or by whatever a copy inherited, so re-editing it here is the rare
+// path, not the default one. See EntryForm's confirmedChoiceCodes prop doc.
+
+// A2: the edge's duplicate-guard 409 (`duplicate_candidate`,
+// osi-journal/lifecycle.js) on a create. Only the candidate's entry_uuid is
+// needed here (to retry with duplicate_guard_ack_entry_uuid) — unlike
+// JournalCaptureFlow's richer DuplicateCandidate (which also renders the
+// candidate's own occurred time/activity/values for comparison), the copy
+// form's confirmation only ever needs to name what to acknowledge.
+function copyDuplicateCandidateEntryUuid(error: unknown): string | null {
+  if (!isRecord(error)) return null;
+  const response = isRecord(error.response) ? error.response : null;
+  const data = response && isRecord(response.data) ? response.data : null;
+  if (!data || data.error !== 'duplicate_candidate') return null;
+  const details = isRecord(data.details) ? data.details : null;
+  const candidate = details && isRecord(details.duplicateCandidate)
+    ? details.duplicateCandidate
+    : details && isRecord(details.duplicate_candidate) ? details.duplicate_candidate : null;
+  const uuid = candidate?.entryUuid ?? candidate?.entry_uuid;
+  return typeof uuid === 'string' && uuid ? uuid : null;
+}
+
+// The copy form's own occurred date/time input default: "now", formatted in
+// the SOURCE entry's occurred_timezone (A1 — the new occurrence is resolved
+// against that same timezone, DST-safe, never the source's stored offset).
+function defaultCopyOccurredLocal(timezone: string): string {
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    });
+  } catch {
+    formatter = new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    });
+  }
+  const parts = formatter.formatToParts(new Date());
+  const values = new Map(parts.map(({ type, value }) => [type, value]));
+  return `${values.get('year')}-${values.get('month')}-${values.get('day')}T${values.get('hour')}:${values.get('minute')}`;
 }
 
 function plotLabelOf(plotUuid: string | null, plots: readonly JournalPlot[]): string | null {
@@ -169,7 +231,7 @@ interface DetailPanelForEntryProps {
   onFocusReturn?: () => void;
 }
 
-type PanelMode = 'view' | 'void' | 'correct';
+type PanelMode = 'view' | 'void' | 'correct' | 'copy';
 
 function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: DetailPanelForEntryProps) {
   const { t, i18n } = useTranslation('journal');
@@ -228,6 +290,9 @@ function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: Detai
   const template = model?.templates.get(aggregate.template_code);
   const layout = model?.layouts.get(aggregate.layout_code);
   const correctionUnavailable = !model || !template || !layout;
+  // A4: Copy is a `final`-only, non-cycle-activity action -- see
+  // copyBlockedForActivity's doc comment above.
+  const copyBlocked = copyBlockedForActivity(aggregate.activity_code);
   const plotLabel = plotLabelOf(aggregate.plot_uuid, plots);
   const context = parseContextSnapshot(aggregate.context_json);
   // NIT 9: attr.actuation_expectation_id is an internal valve-expectation
@@ -350,7 +415,7 @@ function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: Detai
 
       {aggregate.status === 'final' && mode === 'view' && (
         <div className="flex flex-col gap-2">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               disabled={correctionUnavailable}
@@ -359,10 +424,24 @@ function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: Detai
             >
               {t('workspace.detail.actions.correct')}
             </button>
+            {/* A4: hidden entirely (not merely disabled) on seeding/planting/
+                harvest -- there is no legitimate reason to show a farmer a
+                greyed-out Copy button for an activity this wrap-up slice
+                deliberately never supports copying. */}
+            {!copyBlocked && (
+              <button
+                type="button"
+                disabled={correctionUnavailable}
+                onClick={() => setMode('copy')}
+                className="flex-1 rounded-lg border border-[var(--border)] px-3 py-2 font-bold disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t('workspace.detail.actions.copy')}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setMode('void')}
-              className="flex-1 rounded-lg border border-[var(--border)] px-3 py-2 font-bold text-[var(--error-text)]"
+              className="flex-1 rounded-lg border border-[var(--border)] px-3 py-2 font-bold text-[var(--danger-fg)]"
             >
               {t('workspace.detail.actions.void')}
             </button>
@@ -392,6 +471,24 @@ function DetailPanelForEntry({ catalog, plots, entryUuid, onFocusReturn }: Detai
           template={template}
           layout={layout}
           products={catalog.products}
+          locale={locale}
+          onCancel={() => { setMode('view'); returnFocus(); }}
+          onSaved={afterMutation}
+        />
+      )}
+
+      {mode === 'copy' && model && template && layout && (
+        // No key={sync_version} here (unlike EntryCorrectionForm above): that
+        // key exists to re-seed a PUT-target form against a changed source
+        // version, which is meaningless for a create -- see the plan's A7
+        // note. entry point/mode-toggle unmount/remount is enough.
+        <EntryCopyForm
+          aggregate={aggregate}
+          model={model}
+          template={template}
+          layout={layout}
+          products={catalog.products}
+          plots={plots}
           locale={locale}
           onCancel={() => { setMode('view'); returnFocus(); }}
           onSaved={afterMutation}
@@ -535,17 +632,17 @@ function VoidForm({ aggregate, plots, model, locale, onCancel, onVoided }: VoidF
         className="min-h-20 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[var(--text)]"
       />
       {touched && (
-        <p id={reasonErrorId} role="alert" className="text-sm font-semibold text-[var(--error-text)]">
+        <p id={reasonErrorId} role="alert" className="text-sm font-semibold text-[var(--danger-fg)]">
           {t('workspace.detail.void.reasonRequired')}
         </p>
       )}
       {staleError && (
-        <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">
+        <p role="alert" className="text-sm font-semibold text-[var(--danger-fg)]">
           {t('workspace.detail.void.stale')}
         </p>
       )}
       {genericError && (
-        <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">
+        <p role="alert" className="text-sm font-semibold text-[var(--danger-fg)]">
           {t('workspace.detail.void.error')}
         </p>
       )}
@@ -579,7 +676,7 @@ function VoidForm({ aggregate, plots, model, locale, onCancel, onVoided }: VoidF
               type="button"
               disabled={submitting}
               onClick={() => { void confirmCascade(); }}
-              className="flex-1 rounded-lg bg-[var(--error-text)] px-3 py-2 font-bold text-white"
+              className="flex-1 rounded-lg bg-[var(--error-bg)] px-3 py-2 font-bold text-white"
             >
               {t('capture.cycle.voidDependentsConfirm')}
             </button>
@@ -734,15 +831,16 @@ function EntryCorrectionForm({
           showValidation={showValidation}
           templateCode={template?.code}
           allowedProductKinds={allowedProductKinds}
+          confirmedChoiceCodes={OPERATION_CONFIRMED_CHOICE_CODES}
         />
       </div>
       {staleError && (
-        <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">
+        <p role="alert" className="text-sm font-semibold text-[var(--danger-fg)]">
           {t('workspace.detail.correction.stale')}
         </p>
       )}
       {genericError && (
-        <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">
+        <p role="alert" className="text-sm font-semibold text-[var(--danger-fg)]">
           {t('workspace.detail.correction.error')}
         </p>
       )}
@@ -761,6 +859,242 @@ function EntryCorrectionForm({
           className="flex-1 rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-white"
         >
           {submitting ? t('workspace.detail.correction.saving') : t('workspace.detail.correction.save')}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+interface EntryCopyFormProps {
+  aggregate: EntryAggregate;
+  model: JournalCaptureCatalogModel;
+  template: JournalTemplateDefinition;
+  layout: JournalLayoutDefinition;
+  products: JournalCatalog['products'];
+  plots: readonly JournalPlot[];
+  locale: string;
+  onCancel: () => void;
+  onSaved: () => void | Promise<void>;
+}
+
+// A7: a SIBLING of EntryCorrectionForm above, deliberately not a mode branch
+// on it — the dangerous divergence between the two is the save target
+// (createEntry here, updateEntry there), and a shared submit handler risks
+// mis-routing one into the other. This form imports ONLY journalApi.createEntry
+// (never updateEntry/voidEntry/discardDraft) -- see journal/entryCopy.ts's
+// buildCopyPayload doc comment for the rest of the never-mutate-source
+// argument (A6).
+function EntryCopyForm({
+  aggregate,
+  model,
+  template,
+  layout,
+  products,
+  plots,
+  locale,
+  onCancel,
+  onSaved,
+}: EntryCopyFormProps) {
+  const { t } = useTranslation('journal');
+  // M1-style note seed (mirrors EntryCorrectionForm above): 'note' is not a
+  // journal_entry_values row, so it must be injected into the form's
+  // `values` seed here or the note textarea renders empty even though the
+  // source entry has a stored note.
+  const [values, setValues] = useState<CaptureEntryValueInput[]>(() => (
+    aggregate.note
+      ? [...aggregate.values, { attribute_code: 'note', value: aggregate.note }]
+      : aggregate.values
+  ));
+  const [payload, setPayload] = useState<CaptureEntryValueOutput[]>(
+    () => initialCorrectionSeed(model, template, layout, aggregate, products, t).payload,
+  );
+  const [valid, setValid] = useState<boolean>(
+    () => initialCorrectionSeed(model, template, layout, aggregate, products, t).valid,
+  );
+  // A1: the copy form's OWN occurred date/time input, defaulted to "now" in
+  // the source's own occurred_timezone -- never the source's stored instant.
+  const [occurredLocal, setOccurredLocal] = useState<string>(
+    () => defaultCopyOccurredLocal(aggregate.occurred_timezone),
+  );
+  const [showValidation, setShowValidation] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  // Held stable for this copy form instance so a duplicate-guard-409 ack-retry
+  // (or a fast double "save separately") re-POSTs the SAME new-entry uuid — the
+  // second attempt lands as a 409, never a second create.
+  const [copyEntryUuid] = useState(() => randomUuid());
+  const [dateError, setDateError] = useState(false);
+  const [genericError, setGenericError] = useState(false);
+  // A2: set only when the edge's duplicate-guard 409 fires -- surfaced as a
+  // confirmation the operator can explicitly override via "save separately".
+  const [duplicateCandidateUuid, setDuplicateCandidateUuid] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const selections = useMemo<JournalSelections>(() => ({
+    activity_code: aggregate.activity_code,
+    ...scalarSelectionsFromValues(values),
+  }), [aggregate.activity_code, values]);
+  const fieldStates = useMemo(
+    () => deriveFieldStates(template, layout, selections),
+    [template, layout, selections],
+  );
+  const allowedProductKinds = useMemo(
+    () => allowedProductKindsForOperation(template, selections),
+    [selections, template],
+  );
+  const formOwnedAttributeCodes = useMemo(() => new Set(
+    fieldStates
+      .filter((state) => state.visible && model.vocabByCode.get(state.code)?.kind === 'attribute')
+      .map((state) => state.code),
+  ), [fieldStates, model]);
+
+  useEffect(() => {
+    const firstField = containerRef.current?.querySelector<HTMLElement>('input, select, textarea, button');
+    firstField?.focus();
+  }, []);
+
+  const submit = async (ack?: string | null) => {
+    if (!valid) {
+      setShowValidation(true);
+      return;
+    }
+    setSubmitting(true);
+    setDateError(false);
+    setGenericError(false);
+    let occurrence: ResolvedOccurrence;
+    try {
+      // A1: resolved against the SOURCE's own occurred_timezone (DST-safe) —
+      // never the source's stored occurred_utc_offset_minutes.
+      occurrence = resolveOccurrence(occurredLocal, aggregate.occurred_timezone);
+    } catch {
+      setDateError(true);
+      setSubmitting(false);
+      return;
+    }
+    const plot = plots.find((candidate) => candidate.plot_uuid === aggregate.plot_uuid);
+    const season = deriveCopySeason(plot?.active_crop_cycles, occurrence.localDate);
+    const createPayload = {
+      ...buildCopyPayload(aggregate, formOwnedAttributeCodes, payload, {
+        occurred_start_local: occurredLocal,
+        occurred_timezone: aggregate.occurred_timezone,
+        occurred_utc_offset_minutes: occurrence.offsetMinutes,
+        zone_uuid: plot?.zone_uuid ?? null,
+        season_crop: season.season_crop,
+        season_variety: season.season_variety,
+        template_code: template.code,
+        template_version: template.version,
+        layout_code: layout.code,
+        layout_version: layout.version,
+        note: currentNoteValue(values) ?? null,
+      }, copyEntryUuid),
+      ...(ack ? { duplicate_guard_ack_entry_uuid: ack } : {}),
+    };
+    try {
+      await journalApi.createEntry(createPayload);
+      setDuplicateCandidateUuid(null);
+      await onSaved();
+    } catch (failure) {
+      const candidateUuid = copyDuplicateCandidateEntryUuid(failure);
+      if (candidateUuid) {
+        setDuplicateCandidateUuid(candidateUuid);
+      } else {
+        setGenericError(true);
+      }
+      setSubmitting(false);
+    }
+  };
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    void submit();
+  };
+
+  const saveSeparately = () => {
+    if (!duplicateCandidateUuid || submitting) return;
+    void submit(duplicateCandidateUuid);
+  };
+
+  const occurredId = 'journal-copy-occurred';
+  const occurredErrorId = `${occurredId}-error`;
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      aria-label={t('workspace.detail.copy.heading')}
+      className="space-y-4 rounded-xl border border-[var(--border)] p-3"
+    >
+      <div ref={containerRef} className="space-y-4">
+        <div className="space-y-2">
+          <label htmlFor={occurredId} className="text-sm font-bold text-[var(--text)]">
+            {t('workspace.detail.copy.occurredLabel')}
+          </label>
+          <input
+            id={occurredId}
+            type="datetime-local"
+            value={occurredLocal}
+            aria-invalid={dateError}
+            aria-describedby={dateError ? occurredErrorId : undefined}
+            onChange={(event) => { setOccurredLocal(event.target.value); setDateError(false); }}
+            className="min-h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)]"
+          />
+          {dateError && (
+            <p id={occurredErrorId} role="alert" className="text-sm font-semibold text-[var(--danger-fg)]">
+              {t('workspace.detail.copy.dateError')}
+            </p>
+          )}
+        </div>
+        <EntryForm
+          model={model}
+          layout={layout}
+          fieldStates={fieldStates}
+          values={values}
+          onChange={(nextInputs, nextPayload, nextValid) => {
+            setValues(nextInputs);
+            setPayload(nextPayload);
+            setValid(nextValid);
+          }}
+          selections={selections}
+          products={products}
+          locale={locale}
+          showValidation={showValidation}
+          templateCode={template?.code}
+          allowedProductKinds={allowedProductKinds}
+          confirmedChoiceCodes={OPERATION_CONFIRMED_CHOICE_CODES}
+        />
+      </div>
+      {genericError && (
+        <p role="alert" className="text-sm font-semibold text-[var(--danger-fg)]">
+          {t('workspace.detail.copy.error')}
+        </p>
+      )}
+      {duplicateCandidateUuid && (
+        <div role="alert" className="space-y-2 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-3">
+          <p className="font-bold text-[var(--text)]">{t('workspace.detail.copy.duplicateTitle')}</p>
+          <p className="text-sm text-[var(--text-secondary)]">{t('workspace.detail.copy.duplicateBody')}</p>
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={saveSeparately}
+            className="rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-white"
+          >
+            {t('workspace.detail.copy.saveSeparately')}
+          </button>
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={submitting}
+          className="flex-1 rounded-lg border border-[var(--border)] px-3 py-2 font-bold"
+        >
+          {t('workspace.detail.copy.cancel')}
+        </button>
+        <button
+          type="submit"
+          disabled={submitting}
+          className="flex-1 rounded-lg bg-[var(--primary)] px-3 py-2 font-bold text-white"
+        >
+          {submitting ? t('workspace.detail.copy.saving') : t('workspace.detail.copy.save')}
         </button>
       </div>
     </form>

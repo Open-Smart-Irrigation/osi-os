@@ -234,6 +234,7 @@
       },
       "actions": {
         "correct": "Korrigieren",
+        "copy": "Kopieren",
         "void": "Stornieren"
       },
       "correction": {
@@ -244,6 +245,18 @@
         "saving": "Wird gespeichert…",
         "stale": "Dieser Eintrag hat sich anderswo geändert. Laden Sie ihn neu, bevor Sie erneut korrigieren.",
         "error": "Die Korrektur konnte nicht gespeichert werden. Versuchen Sie es erneut."
+      },
+      "copy": {
+        "heading": "Diesen Eintrag kopieren",
+        "occurredLabel": "Neues Datum und neue Uhrzeit",
+        "dateError": "Geben Sie ein gültiges Datum und eine gültige Uhrzeit ein, bevor Sie speichern.",
+        "cancel": "Abbrechen",
+        "save": "Als neuen Eintrag speichern",
+        "saving": "Wird gespeichert…",
+        "error": "Die Kopie konnte nicht gespeichert werden. Versuchen Sie es erneut.",
+        "duplicateTitle": "Möglicher Duplikat-Eintrag",
+        "duplicateBody": "Für diese Parzelle und Tätigkeit besteht bereits ein Eintrag nahe an dieser Zeit. Trotzdem als separaten Eintrag speichern?",
+        "saveSeparately": "Separat speichern"
       },
       "void": {
         "reasonLabel": "Grund für die Stornierung",
@@ -336,7 +349,8 @@
       "plotContext": "Parzellenkontext",
       "keyValues": "Kernwerte",
       "moreDetail": "Weitere Details",
-      "treatedAreaDefaulted": "Aus der Parzellenfläche voreingestellt – bei Bedarf anpassen"
+      "treatedAreaDefaulted": "Aus der Parzellenfläche voreingestellt – bei Bedarf anpassen",
+      "change": "{{field}} ändern"
     },
     "validation": {
       "required": "Füllen Sie dieses Feld aus.",

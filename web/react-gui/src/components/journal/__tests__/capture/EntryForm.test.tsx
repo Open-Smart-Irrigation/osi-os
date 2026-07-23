@@ -133,6 +133,9 @@ const rows = [
   vocab('attr.product_uuid', { labels: { en: 'Registered product' } }),
   vocab('attr.agroscope.operation', { value_type: 'choice', labels: { en: 'Operation' } }),
   vocab('attr.agroscope.device', { value_type: 'choice', labels: { en: 'Device' } }),
+  vocab('attr.block_bed_row', { labels: { en: 'Block/bed/row' } }),
+  vocab('attr.cover_type', { value_type: 'choice', labels: { en: 'Cover type' } }),
+  vocab('attr.denominator', { value_type: 'choice', labels: { en: 'Denominator' } }),
   vocab('agroscope.operation.primary_tillage', {
     kind: 'choice',
     parent_code: 'attr.agroscope.operation',
@@ -257,6 +260,7 @@ function ControlledForm({
   locale = 'en-GB',
   showValidation = false,
   templateCode,
+  confirmedChoiceCodes,
   onResult,
 }: {
   initialValues?: CaptureEntryValueInput[];
@@ -266,6 +270,7 @@ function ControlledForm({
   locale?: string;
   showValidation?: boolean;
   templateCode?: string;
+  confirmedChoiceCodes?: readonly string[];
   onResult: (
     inputs: CaptureEntryValueInput[],
     payload: CaptureEntryValueOutput[],
@@ -284,6 +289,7 @@ function ControlledForm({
       locale={locale}
       showValidation={showValidation}
       templateCode={templateCode}
+      confirmedChoiceCodes={confirmedChoiceCodes}
       onChange={(next, payload, valid) => {
         setValues(next);
         onResult(next, payload, valid);
@@ -1000,6 +1006,135 @@ describe('EntryForm', () => {
       fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
       expect(screen.getByRole('textbox', { name: 'Text field' })).toBeInTheDocument();
       expect(screen.getByText('attr.amount_operation_depth')).toBeInTheDocument();
+    });
+
+    // B1 (copy-entry-and-polish plan, 2026-07-23): the audit that prompted
+    // this plan suspected attr.block_bed_row/attr.cover_type/attr.denominator
+    // rendered prominently in the open group — they do not; grouping is
+    // already correct (none of them is required, required_any, or an
+    // option_dependencies choice-restriction target), so isKeyField already
+    // routes all three to the collapsed "More detail" group for full_record.
+    // This is the regression test the plan calls for (B1) rather than a code
+    // change.
+    it('B1: keeps attr.block_bed_row/attr.cover_type/attr.denominator in "More detail", not the open "Key values" group', () => {
+      render(
+        <ControlledForm
+          fieldStates={[
+            state('attr.block_bed_row'),
+            state('attr.cover_type'),
+            state('attr.denominator'),
+          ]}
+          templateCode="full_record"
+          onResult={vi.fn()}
+        />,
+      );
+
+      // Nothing renders until the disclosure is opened -- there is no
+      // required/key field here to force "Key values" open with content.
+      expect(screen.queryByText('capture.form.keyValues')).not.toBeInTheDocument();
+      expect(screen.queryByRole('textbox', { name: /Block\/bed\/row/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('combobox', { name: 'Cover type' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('combobox', { name: 'Denominator' })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'capture.form.moreDetail' }));
+
+      expect(screen.getByRole('textbox', { name: /Block\/bed\/row/ })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Cover type' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Denominator' })).toBeInTheDocument();
+    });
+  });
+
+  describe('§C (copy-entry-and-polish plan, 2026-07-23): confirmedChoiceCodes read-only chip', () => {
+    it('renders a confirmed choice as a read-only chip instead of a select, and "change" reveals the select again', () => {
+      render(
+        <ControlledForm
+          fieldStates={[state('attr.agroscope.operation'), state('attr.agroscope.device')]}
+          initialValues={[
+            { attribute_code: 'attr.agroscope.operation', value: 'agroscope.operation.primary_tillage' },
+            { attribute_code: 'attr.agroscope.device', value: 'agroscope.device.plough' },
+          ]}
+          selections={{ activity_code: 'tillage_soil_work' }}
+          confirmedChoiceCodes={['attr.agroscope.operation']}
+          onResult={vi.fn()}
+        />,
+      );
+
+      // No open select for the confirmed field -- a read-only chip showing
+      // the selected choice's label, plus a "change" button, instead.
+      expect(screen.queryByRole('combobox', { name: 'Operation' })).not.toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Operation' })).toHaveTextContent('Primary tillage');
+      // Every field NOT opted into confirmedChoiceCodes is entirely
+      // unaffected -- device still renders as its normal select.
+      expect(screen.getByRole('combobox', { name: 'Device' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /change/i }));
+
+      expect(screen.getByRole('combobox', { name: 'Operation' })).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Operation' })).not.toBeInTheDocument();
+    });
+
+    it('renders the normal select (not a chip) when the confirmed field has no value yet', () => {
+      render(
+        <ControlledForm
+          fieldStates={[state('attr.agroscope.operation')]}
+          selections={{ activity_code: 'tillage_soil_work' }}
+          confirmedChoiceCodes={['attr.agroscope.operation']}
+          onResult={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByRole('combobox', { name: 'Operation' })).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Operation' })).not.toBeInTheDocument();
+    });
+
+    it('leaves every field alone when the host passes no confirmedChoiceCodes at all', () => {
+      render(
+        <ControlledForm
+          fieldStates={[state('attr.agroscope.operation')]}
+          initialValues={[{ attribute_code: 'attr.agroscope.operation', value: 'agroscope.operation.primary_tillage' }]}
+          selections={{ activity_code: 'tillage_soil_work' }}
+          onResult={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByRole('combobox', { name: 'Operation' })).toBeInTheDocument();
+    });
+
+    // Keeps the EXISTING error-driven device behavior (EntryForm.tsx:279-291)
+    // unchanged: changing a confirmed-then-unlocked operation to one that no
+    // longer permits the already-selected device leaves the device flagged
+    // invalidDependency for the operator to re-pick -- no auto-clear was
+    // added by the chip.
+    it('changing operation via "change" still flags a now-stale device invalidDependency, with no auto-clear', () => {
+      const onResult = vi.fn();
+      render(
+        <ControlledForm
+          fieldStates={[state('attr.agroscope.operation'), state('attr.agroscope.device')]}
+          initialValues={[
+            { attribute_code: 'attr.agroscope.operation', value: 'agroscope.operation.primary_tillage' },
+            { attribute_code: 'attr.agroscope.device', value: 'agroscope.device.plough' },
+          ]}
+          selections={{ activity_code: 'tillage_soil_work' }}
+          confirmedChoiceCodes={['attr.agroscope.operation']}
+          showValidation
+          onResult={onResult}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /change/i }));
+      fireEvent.change(screen.getByRole('combobox', { name: 'Operation' }), {
+        target: { value: 'agroscope.operation.seedbed_preparation' },
+      });
+
+      // The device value in form state is untouched (still the now-invalid
+      // plough -- no auto-clear was added by the chip); the select simply
+      // cannot visually render an option no longer in its allowed list,
+      // exactly like this dependency chain already behaved before §C.
+      const [lastInputs] = onResult.mock.calls[onResult.mock.calls.length - 1] as [CaptureEntryValueInput[]];
+      const device = lastInputs.find((input) => input.attribute_code === 'attr.agroscope.device');
+      expect(device?.value).toBe('agroscope.device.plough');
+      // ...and is flagged, exactly like the pre-existing behavior without any chip.
+      expect(screen.getByText('capture.validation.invalidDependency')).toBeInTheDocument();
     });
   });
 });

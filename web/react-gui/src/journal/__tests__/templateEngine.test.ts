@@ -343,6 +343,85 @@ describe('template engine', () => {
     });
   });
 
+  describe('Copy-entry-and-polish plan (B2): denominator gate on static-context force-add', () => {
+    // Mirrors the real full_record@10/open_field@9 shape (database/migrations/
+    // ordered/0032__journal_catalog_v10.sql, database/seed-blank.sql): three
+    // static-context fields force-added by minimum_fields, but only
+    // attr.denominator is ALSO referenced by the operation-scoped section
+    // (irrigation/fertigation only) — attr.block_bed_row/attr.cover_type are
+    // referenced nowhere in scoping and must keep force-showing everywhere.
+    // tillage_soil_work's own operation section references
+    // attr.amount_operation_depth (an attr.amount_* field) specifically to
+    // prove the fix cannot be an `attr.amount_*` hardcoded rule (B2 note) —
+    // it must stay visible on tillage while denominator does not.
+    const gatedTemplate = {
+      code: 'full_record',
+      version: 10,
+      sections: [
+        {
+          code: 'operation',
+          scoped_by_activity: true,
+          fields: ['attr.denominator', 'attr.amount_operation_depth', 'attr.operator'],
+        },
+      ],
+      operation_fields_by_activity: {
+        irrigation: ['attr.denominator', 'attr.operator'],
+        fertigation: ['attr.denominator', 'attr.operator'],
+        tillage_soil_work: ['attr.amount_operation_depth', 'attr.operator'],
+        weed_control_nonchemical: ['attr.operator'],
+      },
+    };
+    const gatedLayout = {
+      code: 'open_field',
+      version: 9,
+      activity_codes: ['irrigation', 'fertigation', 'tillage_soil_work', 'weed_control_nonchemical'],
+      supported_templates: ['full_record'],
+      minimum_fields: ['attr.block_bed_row', 'attr.cover_type', 'attr.denominator'],
+      static_context_fields: ['attr.block_bed_row', 'attr.cover_type', 'attr.denominator'],
+      conditional_fields: {},
+      option_dependencies: [],
+    };
+
+    it('shows attr.denominator only for the operations whose scoping references it (irrigation/fertigation)', () => {
+      const irrigation = deriveFieldStates(gatedTemplate, gatedLayout, { activity_code: 'irrigation' });
+      expect(irrigation.find((s) => s.code === 'attr.denominator')).toMatchObject({ visible: true, required: false });
+
+      const fertigation = deriveFieldStates(gatedTemplate, gatedLayout, { activity_code: 'fertigation' });
+      expect(fertigation.find((s) => s.code === 'attr.denominator')).toMatchObject({ visible: true, required: false });
+    });
+
+    it('hides attr.denominator entirely for an operation whose scoping never references it (tillage, weeding)', () => {
+      const tillage = deriveFieldStates(gatedTemplate, gatedLayout, { activity_code: 'tillage_soil_work' });
+      expect(tillage.some((s) => s.code === 'attr.denominator')).toBe(false);
+      // The self-defeat check (B2 note): attr.amount_operation_depth is
+      // itself an attr.amount_* field and MUST stay visible on tillage — an
+      // `attr.amount_*` hardcoded gate rule would have hidden it too.
+      expect(tillage.find((s) => s.code === 'attr.amount_operation_depth')).toMatchObject({ visible: true });
+
+      const weeding = deriveFieldStates(gatedTemplate, gatedLayout, { activity_code: 'weed_control_nonchemical' });
+      expect(weeding.some((s) => s.code === 'attr.denominator')).toBe(false);
+    });
+
+    it('keeps attr.block_bed_row/attr.cover_type force-added visible-but-optional on every activity, unaffected by the gate', () => {
+      for (const activity_code of ['irrigation', 'tillage_soil_work', 'weed_control_nonchemical']) {
+        const states = deriveFieldStates(gatedTemplate, gatedLayout, { activity_code });
+        expect(states.find((s) => s.code === 'attr.block_bed_row')).toMatchObject({ visible: true, required: false });
+        expect(states.find((s) => s.code === 'attr.cover_type')).toMatchObject({ visible: true, required: false });
+      }
+    });
+
+    it('still force-shows attr.denominator when a requirement list marks it required, even though the gate would otherwise skip it', () => {
+      const requiredTemplate = {
+        ...gatedTemplate,
+        activity_requirements: {
+          tillage_soil_work: { required: ['attr.denominator'], optional: [], required_any: [] },
+        },
+      };
+      const states = deriveFieldStates(requiredTemplate, gatedLayout, { activity_code: 'tillage_soil_work' });
+      expect(states.find((s) => s.code === 'attr.denominator')).toMatchObject({ visible: true, required: true });
+    });
+  });
+
   it('builds exact canonical and entered numeric facts without generic value', () => {
     const result = buildCatalogModel(valueCatalog());
     expect(result.ok).toBe(true);
