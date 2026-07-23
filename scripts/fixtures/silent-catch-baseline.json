@@ -1,15 +1,15 @@
 {
   "description": "Ratchet baseline for empty catch blocks in maintained Node-RED function nodes. Update counts downward in the same commit that removes silent catches.",
-  "generatedFrom": "PR #149 review fixes: registration compensation now reports failures instead of swallowing them",
+  "generatedFrom": "PR #149 review fixes: registration compensation now reports failures instead of swallowing them; AgroLink Phase A: auth secret reads/writes and registration DB close now warn instead of swallowing failures",
   "pattern": "catch\\s*(?:\\([^)]*\\))?\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}  |  \\.catch\\s*\\(\\s*(?:(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}|function\\s*[A-Za-z_$][\\w$]*?\\s*\\([^)]*\\)\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\})\\s*\\)",
   "profiles": {
     "bcm2712": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json",
-      "silentCatchCount": 213
+      "silentCatchCount": 210
     },
     "bcm2709": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json",
-      "silentCatchCount": 213
+      "silentCatchCount": 210
     }
   }
 }

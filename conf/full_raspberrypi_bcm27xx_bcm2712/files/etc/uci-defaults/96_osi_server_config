@@ -27,6 +27,7 @@ set osi-server.cloud.firmware_version=0.7.0
 set osi-server.cloud.server_host=
 set osi-server.cloud.mqtt_password=
 set osi-server.cloud.allow_private_target=0
+set osi-server.cloud.scoped_access_enabled=0
 set osi-server.cloud.openagri_weather_url=
 set osi-server.cloud.openagri_weather_username=
 set osi-server.cloud.openagri_weather_password=

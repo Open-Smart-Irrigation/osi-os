@@ -579,7 +579,7 @@ test('history router warns when SQLite close reports an asynchronous error', asy
 });
 
 for (const profile of PROFILES) {
-  test(profile + ' feature response adds the UI-only journal flag and preserves history flags', async () => {
+  test(profile + ' feature response preserves history flags and exposes scoped access', async () => {
     const flows = loadFlows(profile);
     const history = flows.find((node) => node.id === 'history-api-router-fn');
     assert.equal(history && history.name, 'History API Router');
@@ -607,7 +607,20 @@ for (const profile of PROFILES) {
       historyAdvancedOverlaysEnabled: false,
       historyCloudAiEnabled: false,
       fieldJournalUxEnabled: false,
+      scoped_access: false,
     });
+    const scopedResult = await execute(
+      { req: { method: 'GET', path: '/api/system/features' } },
+      { get() { return null; } },
+      { get(key) { return key === 'OSI_SCOPED_ACCESS' ? '1' : null; } },
+      { warn() {}, error() {}, log() {} },
+      { Database: class { constructor() { throw new Error('feature route opened DB'); } } },
+      {},
+      crypto,
+      {}
+    );
+    assert.equal(scopedResult.statusCode, 200);
+    assert.equal(scopedResult.payload.features.scoped_access, true);
     const occurrences = flows.filter((node) =>
       node.type === 'function' && String(node.func || '').includes('fieldJournalUxEnabled')
     );
