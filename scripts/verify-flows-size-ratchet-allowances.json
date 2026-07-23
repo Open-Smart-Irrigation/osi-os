@@ -328,11 +328,15 @@
     "a0a61f4b7dca1c2e": {
       "delta": 383,
       "reason": "Wave 3 scoped-access port (AgroLink a6289e96, feat(api): enforce schedule scope and authority), auto-merged cleanly: measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 882 -> HEAD 1265 = +383. Build zones query (enabled schedules) threads the upstream actor_user_uuid/scope context through to its own zone query."
+    },
+    "post-devices-response": {
+      "delta": 70,
+      "reason": "Wave 3 scoped-access port (AgroLink ace19a13, feat(api): scoped device provisioning (R2, R5)): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 933 -> HEAD 1003 = +70. The response payload's irrigation_zone_id now reflects msg._scopedTargetZoneId (set upstream by scoped-device-claim-router when OSI_SCOPED_ACCESS=1 and the request targets a zone) instead of always null."
     }
   },
   "total_allowance": {
-    "delta": 171557,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink bc156fb2, feat(api): enforce scoped zone lifecycle) 1,244,531 chars = 171,557. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: +63,983 is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
+    "delta": 189830,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink ace19a13, feat(api): scoped device provisioning (R2, R5)) 1,262,804 chars = 189,830. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: +82,256 is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence. Note: AgroLink's own commit ace19a13 also carried an incidental whole-file 4-space reindent of flows.json bundled alongside its real content (5 new scope-gate router nodes + 2 small field patches); only the semantic diff was ported here (extracted via a JSON-level, formatting-agnostic comparison against ace19a13's direct AgroLink parent) -- the reindent itself was discarded, so this branch's flows.json stays 2-space (JSON.stringify(x, null, 2)) throughout."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
@@ -366,6 +370,10 @@
     "scoped-zone-delete-router": {
       "max_chars": 5018,
       "reason": "Wave 3 scoped-access port (AgroLink bc156fb2, feat(api): enforce scoped zone lifecycle): new function node measured at exactly 5018 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Zone delete under OSI_SCOPED_ACCESS=1 is inherently larger than a typical scoped-gate wrapper: it resolves the target zone and its grantees, requires either sole ownership/grant or an admin role for non-owner deletion, and runs a 5-statement transaction (devices, journal_plots, user_zone_assignments, irrigation_schedules, irrigation_zones) with per-grantee scope-cache invalidation. Ported as-is rather than re-architected mid-port."
+    },
+    "scoped-weather-zone-assign-router": {
+      "max_chars": 4377,
+      "reason": "Wave 3 scoped-access port (AgroLink ace19a13, feat(api): scoped device provisioning (R2, R5)): new function node measured at exactly 4377 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Weather-zone assignment scope gating (bearer verify + role/zone-access assertion, matching the other four *-router guards added in this same commit) is inherently larger than the 4096 default. Ported as-is rather than re-architected mid-port."
     }
   }
 }

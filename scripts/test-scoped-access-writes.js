@@ -437,3 +437,190 @@ test('W3: researcher cannot delete a multi-holder zone; admin can', async () => 
     db.close();
   }
 });
+
+test('W4: scoped claims require an accessible target zone except for admins', async () => {
+  const db = seedScopedDb();
+  try {
+    const researcherMissing = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
+        deveui: 'NEW1',
+        name: 'New sensor',
+        type_id: 'DRAGINO_LSN50',
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(researcherMissing.result[1].statusCode, 400);
+
+    scopeHelper._resetForTests();
+    const adminMissing = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(1, 'admin1', 'POST', '/api/devices', {}, {
+        deveui: 'NEW1',
+        name: 'New sensor',
+        type_id: 'DRAGINO_LSN50',
+      }),
+      env: ENV,
+      db,
+    });
+    assert.ok(adminMissing.result[0]);
+    assert.equal(adminMissing.result[0]._scopedTargetZoneId, null);
+
+    scopeHelper._resetForTests();
+    const scoped = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
+        deveui: 'NEW2',
+        name: 'Scoped sensor',
+        type_id: 'DRAGINO_LSN50',
+        irrigation_zone_id: 1,
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(scoped.result[0]._scopedTargetZoneId, 1);
+
+    scopeHelper._resetForTests();
+    const foreignZone = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(1, 'admin1', 'POST', '/api/devices', {}, {
+        deveui: 'NEW3',
+        name: 'Foreign sensor',
+        type_id: 'DRAGINO_LSN50',
+        irrigation_zone_id: 1,
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(foreignZone.result[1].statusCode, 404);
+  } finally {
+    db.close();
+  }
+});
+
+test('W4: a foreign existing device is hidden before claim or reassignment', async () => {
+  const db = seedScopedDb();
+  try {
+    const claim = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(1, 'admin1', 'POST', '/api/devices', {}, {
+        deveui: 'DENDRO1',
+        name: 'Tree 1',
+        type_id: 'DRAGINO_LSN50',
+        irrigation_zone_id: 2,
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(claim.result[1].statusCode, 404);
+    assert.deepEqual(claim.result[1].payload, { message: 'Device not found' });
+
+    scopeHelper._resetForTests();
+    const assignment = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        1,
+        'admin1',
+        'PUT',
+        '/api/irrigation-zones/2/devices/DENDRO1',
+        { id: '2', deveui: 'DENDRO1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(assignment.result[1].statusCode, 404);
+    assert.deepEqual(assignment.result[1].payload, { message: 'Device not found' });
+  } finally {
+    db.close();
+  }
+});
+
+test('W4: assignment and removal fresh-check both the device and zone', async () => {
+  const db = seedScopedDb();
+  try {
+    const assigned = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/irrigation-zones/2/devices/DENDRO1',
+        { id: '2', deveui: 'DENDRO1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(assigned.result[1].statusCode, 200);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get()
+        .irrigation_zone_id,
+      2
+    );
+
+    scopeHelper._resetForTests();
+    const removed = await executeFunction(loadNode('scoped-device-unassign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'DELETE',
+        '/api/irrigation-zones/2/devices/DENDRO1',
+        { id: '2', deveui: 'DENDRO1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(removed.result[1].statusCode, 200);
+    assert.equal(
+      db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get()
+        .irrigation_zone_id,
+      null
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('W4: device delete and weather-zone replacement enforce fresh scope', async () => {
+  const db = seedScopedDb();
+  try {
+    const foreignDelete = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(
+        1,
+        'admin1',
+        'DELETE',
+        '/api/devices/DENDRO1',
+        { deveui: 'DENDRO1' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(foreignDelete.result[1].statusCode, 404);
+
+    scopeHelper._resetForTests();
+    const weather = await executeFunction(loadNode('scoped-weather-zone-assign-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/devices/WX1/zone-assignments',
+        { deveui: 'WX1' },
+        { zone_ids: [1, 2] }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(weather.result[1].statusCode, 200);
+    assert.deepEqual(weather.result[1].payload.zone_ids, [1, 2]);
+
+    scopeHelper._resetForTests();
+    const viewer = await executeFunction(loadNode('scoped-weather-zone-assign-router'), {
+      msg: scopedRequest(
+        3,
+        'view1',
+        'PUT',
+        '/api/devices/WX1/zone-assignments',
+        { deveui: 'WX1' },
+        { zone_ids: [1] }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(viewer.result[1].statusCode, 403);
+  } finally {
+    db.close();
+  }
+});
