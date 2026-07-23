@@ -27,10 +27,6 @@ const PUBLIC_ALLOWLIST = new Set([
 // mutation/effect routes are tracked debt, not general exemptions. Phase C
 // removes each id as its scope guard lands; any newly-added route still fails.
 const PHASE_C_PENDING = new Set([
-  'post-devices-http',
-  'delete-device-http',
-  'assign-device-http',
-  'unassign-device-http',
   'put-dendro-http',
   'put-temp-http',
   'sys-reboot-in',
@@ -56,7 +52,6 @@ const PHASE_C_PENDING = new Set([
   'put-strega-flush-http',
   'put-rain-gauge-http',
   'put-flow-meter-http',
-  's2120-zones-put-http',
   'put-soil-depth-http',
   'put-chameleon-enabled-http',
   'put-dendro-config-http',
