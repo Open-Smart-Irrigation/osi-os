@@ -1,6 +1,6 @@
 {
   "description": "Ratchet baseline for empty catch blocks in maintained Node-RED function nodes. Update counts downward in the same commit that removes silent catches.",
-  "generatedFrom": "AgroLink Phase B shared reads: recent-actuation schema compatibility failure is now visible",
+  "generatedFrom": "PR #149 review fixes: registration compensation now reports failures instead of swallowing them; AgroLink Phase A: auth secret reads/writes and registration DB close now warn instead of swallowing failures; AgroLink Phase B shared reads: recent-actuation schema compatibility failure is now visible",
   "pattern": "catch\\s*(?:\\([^)]*\\))?\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}  |  \\.catch\\s*\\(\\s*(?:(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}|function\\s*[A-Za-z_$][\\w$]*?\\s*\\([^)]*\\)\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\})\\s*\\)",
   "profiles": {
     "bcm2712": {

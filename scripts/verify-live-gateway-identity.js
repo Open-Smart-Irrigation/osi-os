@@ -985,11 +985,12 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 190 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 190,
-    'silent-catch baseline records 190 for both maintained profiles',
-    'silent-catch baseline must be 190 for both maintained profiles after AgroLink Phase B exposes admin-read failures');
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 189 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 189,
+    'silent-catch baseline records 189 for both maintained profiles',
+    'silent-catch baseline must be 189 for both maintained profiles after AgroLink Phase B exposes shared-read failures');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'registration compensation now reports failures instead of swallowing them', 'records the PR #149 compensation cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'AgroLink Phase A', 'records the scoped-access auth cleanup');
+  expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'AgroLink Phase B shared reads', 'records the scoped-access shared-read cleanup');
 }
 // Ownership split (refactor-program A0 repair commit 3): the numeric ceilings
 // (max_chars / max_total) in scripts/verify-flows-size-ratchet-allowances.json are now

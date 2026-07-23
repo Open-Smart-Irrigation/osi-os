@@ -260,11 +260,14 @@ function verifyAnalysisRouterImplementation(flows, failures) {
 
   const source = String(router.func || '');
   assertContains(failures, source, 'verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization)', 'analysis bearer auth gate');
+  assertContains(failures, source, "osiLib.require('scope')", 'analysis reads load the shared scope module');
+  assertContains(failures, source, 'scopeZoneUuids = await scopeLoad.value.listScopeZoneUuids', 'analysis reads resolve owned-plus-granted zone scope');
   assertContains(failures, source, 'osiHistory.buildAnalysisCatalog', 'analysis /channels calls buildAnalysisCatalog');
-  assertContains(failures, source, 'buildAnalysisCatalog(db, { deviceEui: deviceEui, userId: auth.userId })', 'analysis /channels scopes catalog to authenticated user');
+  assertContains(failures, source, 'buildAnalysisCatalog(db, { deviceEui: deviceEui, userId: auth.userId, zoneUuids: scopeZoneUuids })', 'analysis /channels scopes catalog to authenticated user and owned-plus-granted zones');
   assertContains(failures, source, 'osiHistory.resolveAnalysisSeries', 'analysis /series calls resolveAnalysisSeries');
-  assertContains(failures, source, 'userId: auth.userId', 'analysis /series scopes resolver to authenticated user');
+  assertContains(failures, source, 'zoneUuids: scopeZoneUuids', 'analysis /series scopes resolver to owned-plus-granted zones');
   assertContains(failures, source, 'osiHistory.listAnalysisViews', 'analysis /views calls listAnalysisViews');
+  assertContains(failures, source, 'deviceEui: deviceEui, zoneUuids: scopeZoneUuids', 'analysis /views filters saved selectors to owned-plus-granted zones');
   assertContains(failures, source, 'osiHistory.saveAnalysisView', 'analysis /views POST calls saveAnalysisView');
   assertContains(failures, source, 'payload.suggestion = error.suggestion', 'structured analysis suggestions');
   assertNotContains(failures, source, 'sync_outbox', 'edge sync outbox mutation from local-only analysis views');
@@ -360,9 +363,13 @@ function verify(options) {
   }
 }
 
-try {
-  verify(parseArgs(process.argv.slice(2)));
-} catch (error) {
-  console.error(`FAIL verify-history-api-contract: ${error.message}`);
-  process.exitCode = 1;
+if (require.main === module) {
+  try {
+    verify(parseArgs(process.argv.slice(2)));
+  } catch (error) {
+    console.error(`FAIL verify-history-api-contract: ${error.message}`);
+    process.exitCode = 1;
+  }
 }
+
+module.exports = { verifyAnalysisRouterImplementation };
