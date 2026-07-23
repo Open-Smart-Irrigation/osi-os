@@ -234,6 +234,7 @@
       },
       "actions": {
         "correct": "Correggi",
+        "copy": "Copia",
         "void": "Invalida"
       },
       "correction": {
@@ -244,6 +245,18 @@
         "saving": "Salvataggio…",
         "stale": "Questa registrazione è cambiata altrove. Ricaricala prima di correggerla di nuovo.",
         "error": "Impossibile salvare la correzione. Riprova."
+      },
+      "copy": {
+        "heading": "Copia questa registrazione",
+        "occurredLabel": "Nuova data e ora",
+        "dateError": "Inserisci una data e un'ora valide prima di salvare.",
+        "cancel": "Annulla",
+        "save": "Salva come nuova registrazione",
+        "saving": "Salvataggio…",
+        "error": "Impossibile salvare la copia. Riprova.",
+        "duplicateTitle": "Possibile duplicato",
+        "duplicateBody": "Esiste già una registrazione per questo appezzamento e questa attività vicino a questo orario. Salvarla comunque come registrazione separata?",
+        "saveSeparately": "Salva separatamente"
       },
       "void": {
         "reasonLabel": "Motivo dell'invalidazione",
@@ -336,7 +349,8 @@
       "plotContext": "Contesto della particella",
       "keyValues": "Valori chiave",
       "moreDetail": "Altri dettagli",
-      "treatedAreaDefaulted": "Precompilato con la superficie della particella — modifica se necessario"
+      "treatedAreaDefaulted": "Precompilato con la superficie della particella — modifica se necessario",
+      "change": "Modifica {{field}}"
     },
     "validation": {
       "required": "Completa questo campo",

@@ -234,6 +234,7 @@
       },
       "actions": {
         "correct": "Corriger",
+        "copy": "Copier",
         "void": "Invalider"
       },
       "correction": {
@@ -244,6 +245,18 @@
         "saving": "Enregistrement…",
         "stale": "Cette entrée a changé ailleurs. Rechargez-la avant de la corriger à nouveau.",
         "error": "Impossible d'enregistrer la correction. Réessayez."
+      },
+      "copy": {
+        "heading": "Copier cette entrée",
+        "occurredLabel": "Nouvelle date et heure",
+        "dateError": "Saisissez une date et une heure valides avant d'enregistrer.",
+        "cancel": "Annuler",
+        "save": "Enregistrer comme nouvelle entrée",
+        "saving": "Enregistrement…",
+        "error": "Impossible d'enregistrer la copie. Réessayez.",
+        "duplicateTitle": "Doublon possible",
+        "duplicateBody": "Une entrée pour cette parcelle et cette activité existe déjà à une heure proche. L'enregistrer quand même comme une entrée distincte ?",
+        "saveSeparately": "Enregistrer séparément"
       },
       "void": {
         "reasonLabel": "Motif de l'invalidation",
@@ -336,7 +349,8 @@
       "plotContext": "Contexte de la parcelle",
       "keyValues": "Valeurs clés",
       "moreDetail": "Plus de détails",
-      "treatedAreaDefaulted": "Pré-rempli avec la surface de la parcelle — modifiez si nécessaire"
+      "treatedAreaDefaulted": "Pré-rempli avec la surface de la parcelle — modifiez si nécessaire",
+      "change": "Modifier {{field}}"
     },
     "validation": {
       "required": "Complétez ce champ",

@@ -234,6 +234,7 @@
       },
       "actions": {
         "correct": "Corrigir",
+        "copy": "Copiar",
         "void": "Anular"
       },
       "correction": {
@@ -244,6 +245,18 @@
         "saving": "A guardar…",
         "stale": "Este registo foi alterado noutro local. Volte a carregá-lo antes de o corrigir novamente.",
         "error": "Não foi possível guardar a correção. Tente novamente."
+      },
+      "copy": {
+        "heading": "Copiar este registo",
+        "occurredLabel": "Nova data e hora",
+        "dateError": "Introduza uma data e hora válidas antes de guardar.",
+        "cancel": "Cancelar",
+        "save": "Guardar como novo registo",
+        "saving": "A guardar…",
+        "error": "Não foi possível guardar a cópia. Tente novamente.",
+        "duplicateTitle": "Possível duplicado",
+        "duplicateBody": "Já existe um registo para esta parcela e atividade perto desta hora. Guardar mesmo assim como um registo separado?",
+        "saveSeparately": "Guardar separadamente"
       },
       "void": {
         "reasonLabel": "Motivo da anulação",
@@ -336,7 +349,8 @@
       "plotContext": "Contexto da parcela",
       "keyValues": "Valores-chave",
       "moreDetail": "Mais detalhes",
-      "treatedAreaDefaulted": "Preenchido com a área da parcela — edite se necessário"
+      "treatedAreaDefaulted": "Preenchido com a área da parcela — edite se necessário",
+      "change": "Alterar {{field}}"
     },
     "validation": {
       "required": "Preencha este campo",

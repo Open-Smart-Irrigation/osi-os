@@ -160,6 +160,7 @@ const REQUIRED_CAPTURE_KEYS = [
   'capture.form.add',
   'capture.form.booleanNo',
   'capture.form.booleanYes',
+  'capture.form.change',
   'capture.form.decrease',
   'capture.form.derivedNutrients',
   'capture.form.detailLevel',

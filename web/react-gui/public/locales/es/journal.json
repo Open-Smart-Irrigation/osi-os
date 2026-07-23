@@ -234,6 +234,7 @@
       },
       "actions": {
         "correct": "Corregir",
+        "copy": "Copiar",
         "void": "Anular"
       },
       "correction": {
@@ -244,6 +245,18 @@
         "saving": "Guardando…",
         "stale": "Esta entrada ha cambiado en otro lugar. Vuelve a cargarla antes de corregirla de nuevo.",
         "error": "No se pudo guardar la corrección. Inténtalo de nuevo."
+      },
+      "copy": {
+        "heading": "Copiar esta entrada",
+        "occurredLabel": "Nueva fecha y hora",
+        "dateError": "Introduce una fecha y hora válidas antes de guardar.",
+        "cancel": "Cancelar",
+        "save": "Guardar como nueva entrada",
+        "saving": "Guardando…",
+        "error": "No se pudo guardar la copia. Inténtalo de nuevo.",
+        "duplicateTitle": "Posible duplicado",
+        "duplicateBody": "Ya existe una entrada para esta parcela y actividad cerca de esta hora. ¿Guardarla de todos modos como una entrada separada?",
+        "saveSeparately": "Guardar por separado"
       },
       "void": {
         "reasonLabel": "Motivo de la anulación",
@@ -336,7 +349,8 @@
       "plotContext": "Contexto de la parcela",
       "keyValues": "Valores clave",
       "moreDetail": "Más detalles",
-      "treatedAreaDefaulted": "Rellenado con la superficie de la parcela — edítalo si es necesario"
+      "treatedAreaDefaulted": "Rellenado con la superficie de la parcela — edítalo si es necesario",
+      "change": "Cambiar {{field}}"
     },
     "validation": {
       "required": "Completa este campo",

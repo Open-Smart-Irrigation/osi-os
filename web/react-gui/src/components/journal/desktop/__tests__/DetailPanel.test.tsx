@@ -7,8 +7,10 @@ import { formatOccurredDate } from '../../JournalEntryRow';
 
 const mocks = vi.hoisted(() => ({
   useJournalEntries: vi.fn(),
+  createEntry: vi.fn(),
   updateEntry: vi.fn(),
   voidEntry: vi.fn(),
+  discardDraft: vi.fn(),
   listEntries: vi.fn(),
 }));
 
@@ -25,8 +27,10 @@ vi.mock('../../../../journal/useJournalEntries', () => ({
 
 vi.mock('../../../../services/journalApi', () => ({
   journalApi: {
+    createEntry: mocks.createEntry,
     updateEntry: mocks.updateEntry,
     voidEntry: mocks.voidEntry,
+    discardDraft: mocks.discardDraft,
     listEntries: mocks.listEntries,
   },
 }));
@@ -224,8 +228,10 @@ function renderPanel(overrides: {
 
 beforeEach(() => {
   mocks.useJournalEntries.mockReset();
+  mocks.createEntry.mockReset();
   mocks.updateEntry.mockReset();
   mocks.voidEntry.mockReset();
+  mocks.discardDraft.mockReset();
   mocks.listEntries.mockReset().mockResolvedValue({ entries: [], next_cursor: null });
 });
 
@@ -889,5 +895,259 @@ describe('DetailPanel — full-record correction', () => {
     await waitFor(() => expect(mocks.updateEntry).toHaveBeenCalled());
     const [, clearedPayload] = mocks.updateEntry.mock.calls[0];
     expect(clearedPayload.note).toBeNull();
+  });
+});
+
+// Copy-entry-and-polish plan (2026-07-23), §A: "copy this entry" -- a brand
+// new final entry seeded from the source, never a mutation of it.
+describe('DetailPanel — copy an entry', () => {
+  it('offers Copy alongside Correct/Void for a final, non-cycle-activity entry', () => {
+    mockDetail({ entries: [entry({ activity_code: 'irrigation' })] });
+    renderPanel();
+
+    expect(screen.getByRole('button', { name: 'workspace.detail.actions.copy' })).toBeInTheDocument();
+  });
+
+  it.each(['seeding', 'planting_transplanting', 'harvest'])(
+    'hides Copy entirely for a %s entry (crop-cycle cascade activities are out of scope)',
+    (activityCode) => {
+      mockDetail({ entries: [entry({ activity_code: activityCode })] });
+      renderPanel();
+
+      expect(screen.queryByRole('button', { name: 'workspace.detail.actions.copy' })).not.toBeInTheDocument();
+      // Correct/Void are unaffected by the copy-specific scope gate.
+      expect(screen.getByRole('button', { name: 'workspace.detail.actions.correct' })).toBeInTheDocument();
+    },
+  );
+
+  it('offers no Copy action for a draft or voided entry (final-only safety gate)', () => {
+    mockDetail({ entries: [entry({ status: 'draft', sync_version: 0 })] });
+    renderPanel();
+    expect(screen.queryByRole('button', { name: 'workspace.detail.actions.copy' })).not.toBeInTheDocument();
+
+    mockDetail({ entries: [entry({ status: 'voided', voided_at: timestamp })] });
+    renderPanel();
+    expect(screen.queryByRole('button', { name: 'workspace.detail.actions.copy' })).not.toBeInTheDocument();
+  });
+
+  it('disables Copy when the catalog no longer has the entry template or layout', () => {
+    mockDetail({ entries: [entry({ template_code: 'retired_template' })] });
+    renderPanel();
+
+    expect(screen.getByRole('button', { name: 'workspace.detail.actions.copy' })).toBeDisabled();
+  });
+
+  it('saves via createEntry (never updateEntry/voidEntry) with a fresh entry_uuid, no batch/pass/cycle fields, and drops attr.actuation_expectation_id', async () => {
+    const sourceEntry = entry({
+      activity_code: 'irrigation',
+      batch_uuid: 'batch-9',
+      pass_uuid: 'pass-9',
+      sync_version: 5,
+      values: [
+        {
+          group_index: 0,
+          attribute_code: 'attr.operator',
+          value_status: 'observed',
+          value_num: null,
+          value_text: 'Alex',
+          unit_code: null,
+          entered_value_num: null,
+          entered_unit_code: null,
+        },
+        {
+          group_index: 0,
+          attribute_code: 'attr.actuation_expectation_id',
+          value_status: 'observed',
+          value_num: null,
+          value_text: 'valve-expectation-abc123',
+          unit_code: null,
+          entered_value_num: null,
+          entered_unit_code: null,
+        },
+      ],
+    });
+    mockDetail({ entries: [sourceEntry] });
+    mocks.createEntry.mockResolvedValue({ entry_uuid: 'new-entry-1', outbox_event_uuid: 'evt-1', sync_version: 1 });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.copy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.save' }));
+
+    await waitFor(() => expect(mocks.createEntry).toHaveBeenCalled());
+    const [payload] = mocks.createEntry.mock.calls[0];
+
+    // Never-mutate-source (A6): a fresh uuid, never the source's, and the
+    // source is never addressed through any mutating call at all.
+    expect(payload.entry_uuid).toBeDefined();
+    expect(payload.entry_uuid).not.toBe(sourceEntry.entry_uuid);
+    expect(payload.base_sync_version).toBe(0);
+    expect(payload.status).toBe('final');
+    expect(mocks.updateEntry).not.toHaveBeenCalled();
+    expect(mocks.voidEntry).not.toHaveBeenCalled();
+    expect(mocks.discardDraft).not.toHaveBeenCalled();
+
+    // No batch/pass/cycle-lifecycle fields at all.
+    expect(payload).not.toHaveProperty('batch_uuid');
+    expect(payload).not.toHaveProperty('pass_uuid');
+    expect(payload).not.toHaveProperty('cycle_action');
+    expect(payload).not.toHaveProperty('cycle_uuid');
+    expect(payload).not.toHaveProperty('ends_crop_cycle');
+
+    // The internal valve-linkage id is dropped from the copied values.
+    expect(payload.values.some((value: { attribute_code: string }) =>
+      value.attribute_code === 'attr.actuation_expectation_id')).toBe(false);
+    expect(payload.values.some((value: { attribute_code: string }) =>
+      value.attribute_code === 'attr.operator')).toBe(true);
+  });
+
+  it('uses the CURRENT catalog template/layout versions and the plot\'s CURRENT zone, not the source\'s stale ones', async () => {
+    mockDetail({ entries: [entry({
+      template_version: 9,
+      layout_version: 9,
+      zone_uuid: 'zone-old',
+    })] });
+    mocks.createEntry.mockResolvedValue({ entry_uuid: 'new-entry-1', outbox_event_uuid: 'evt-1', sync_version: 1 });
+    renderPanel({ plots: [plot({ zone_uuid: 'zone-current' })] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.copy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.save' }));
+
+    await waitFor(() => expect(mocks.createEntry).toHaveBeenCalled());
+    const [payload] = mocks.createEntry.mock.calls[0];
+
+    // catalog's own template/layout row is version 1 in this fixture -- the
+    // CURRENT version, not the source's stale stored 9.
+    expect(payload.template_version).toBe(1);
+    expect(payload.layout_version).toBe(1);
+    expect(payload.zone_uuid).toBe('zone-current');
+    expect(payload.zone_uuid).not.toBe('zone-old');
+  });
+
+  it('re-derives season_crop from the plot\'s open crop cycle as of the edited date, never the source\'s stale value', async () => {
+    mockDetail({ entries: [entry({ season_crop: 'wheat', season_variety: 'winter' })] });
+    mocks.createEntry.mockResolvedValue({ entry_uuid: 'new-entry-1', outbox_event_uuid: 'evt-1', sync_version: 1 });
+    renderPanel({ plots: [plot({
+      active_crop_cycles: [{
+        cycle_uuid: 'cycle-1',
+        crop_code: 'agroscope.crop.potato',
+        variety: 'Charlotte',
+        seeded_on: '2026-05-01',
+        opened_by_entry_uuid: 'seed-entry-1',
+      }],
+    })] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.copy' }));
+    fireEvent.change(screen.getByLabelText('workspace.detail.copy.occurredLabel'), {
+      target: { value: '2026-08-01T10:00' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.save' }));
+
+    await waitFor(() => expect(mocks.createEntry).toHaveBeenCalled());
+    const [payload] = mocks.createEntry.mock.calls[0];
+
+    expect(payload.season_crop).toBe('agroscope.crop.potato');
+    expect(payload.season_crop).not.toBe('wheat');
+    expect(payload.season_variety).toBe('Charlotte');
+  });
+
+  it('falls back to a null season_crop when nothing is growing on the plot, rather than carrying the source\'s value', async () => {
+    mockDetail({ entries: [entry({ season_crop: 'wheat' })] });
+    mocks.createEntry.mockResolvedValue({ entry_uuid: 'new-entry-1', outbox_event_uuid: 'evt-1', sync_version: 1 });
+    renderPanel({ plots: [plot({ active_crop_cycles: [] })] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.copy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.save' }));
+
+    await waitFor(() => expect(mocks.createEntry).toHaveBeenCalled());
+    const [payload] = mocks.createEntry.mock.calls[0];
+    expect(payload.season_crop).toBeNull();
+  });
+
+  it('persists an edited occurred date/time on the new entry', async () => {
+    mockDetail({ entries: [entry({ occurred_timezone: 'Europe/Zurich' })] });
+    mocks.createEntry.mockResolvedValue({ entry_uuid: 'new-entry-1', outbox_event_uuid: 'evt-1', sync_version: 1 });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.copy' }));
+    fireEvent.change(screen.getByLabelText('workspace.detail.copy.occurredLabel'), {
+      target: { value: '2026-08-01T10:00' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.save' }));
+
+    await waitFor(() => expect(mocks.createEntry).toHaveBeenCalled());
+    const [payload] = mocks.createEntry.mock.calls[0];
+    expect(payload.occurred_start_local).toBe('2026-08-01T10:00');
+    expect(payload.occurred_end_local).toBeNull();
+    // Europe/Zurich is on summer time (+120) in August, same convention the
+    // source used -- resolved fresh against the NEW date, not reused from
+    // the source's stored offset.
+    expect(payload.occurred_utc_offset_minutes).toBe(120);
+  });
+
+  it('closes the copy form and refreshes/returns focus after a successful save', async () => {
+    const retry = mockDetail({ entries: [entry()] });
+    mocks.createEntry.mockResolvedValue({ entry_uuid: 'new-entry-1', outbox_event_uuid: 'evt-1', sync_version: 1 });
+    const { onFocusReturn } = renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.copy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.save' }));
+
+    await waitFor(() => expect(retry).toHaveBeenCalled());
+    await waitFor(() => expect(onFocusReturn).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'workspace.detail.actions.copy' })).toBeInTheDocument();
+  });
+
+  it('cancelling the copy form discards it and returns focus without calling the API', () => {
+    mockDetail({ entries: [entry()] });
+    const { onFocusReturn } = renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.copy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.cancel' }));
+
+    expect(mocks.createEntry).not.toHaveBeenCalled();
+    expect(onFocusReturn).toHaveBeenCalled();
+  });
+
+  // A2: the edge's duplicate-guard 409 on create -- surface the candidate and
+  // retry with duplicate_guard_ack_entry_uuid on explicit "save separately".
+  it('shows a duplicate-candidate confirmation on a 409 and retries with the acknowledgement on "save separately"', async () => {
+    mockDetail({ entries: [entry()] });
+    mocks.createEntry
+      .mockRejectedValueOnce({
+        response: {
+          status: 409,
+          data: {
+            error: 'duplicate_candidate',
+            details: { duplicateCandidate: { entryUuid: 'dup-entry-1' } },
+          },
+        },
+      })
+      .mockResolvedValueOnce({ entry_uuid: 'new-entry-1', outbox_event_uuid: 'evt-1', sync_version: 1 });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.copy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.save' }));
+
+    await waitFor(() => expect(screen.getByText('workspace.detail.copy.duplicateTitle')).toBeInTheDocument());
+    expect(mocks.createEntry).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.saveSeparately' }));
+
+    await waitFor(() => expect(mocks.createEntry).toHaveBeenCalledTimes(2));
+    const [retryPayload] = mocks.createEntry.mock.calls[1];
+    expect(retryPayload.duplicate_guard_ack_entry_uuid).toBe('dup-entry-1');
+  });
+
+  it('shows a generic error (not the duplicate confirmation) for a non-duplicate save failure, and keeps the form open', async () => {
+    mockDetail({ entries: [entry()] });
+    mocks.createEntry.mockRejectedValue(new Error('network down'));
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.copy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.save' }));
+
+    await waitFor(() => expect(screen.getByText('workspace.detail.copy.error')).toBeInTheDocument());
+    expect(screen.queryByText('workspace.detail.copy.duplicateTitle')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'workspace.detail.copy.save' })).toBeInTheDocument();
   });
 });

@@ -8,6 +8,7 @@ import {
   buildCatalogModel,
   catalogLabel,
   deriveActivityLeaves,
+  OPERATION_CONFIRMED_CHOICE_CODES,
   withWeatherAtApplicationVisibility,
 } from '../../../journal/catalogModel';
 import {
@@ -2739,7 +2740,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
               </dl>
             </div>
           )}
-          {template && layout && leaf && <EntryForm model={model} layout={layout} fieldStates={fieldStates} values={values} onChange={formChanged} selections={selections} products={catalog.products} locale={locale} showValidation={showValidation} templateCode={template.code} fieldHints={fieldHints} allowedProductKinds={allowedProductKinds} />}
+          {template && layout && leaf && <EntryForm model={model} layout={layout} fieldStates={fieldStates} values={values} onChange={formChanged} selections={selections} products={catalog.products} locale={locale} showValidation={showValidation} templateCode={template.code} fieldHints={fieldHints} allowedProductKinds={allowedProductKinds} confirmedChoiceCodes={OPERATION_CONFIRMED_CHOICE_CODES} />}
           {isTankMixEligible && model && (
             <div className="space-y-3 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--card)] p-4">
               <div className="flex items-center justify-between gap-3">
