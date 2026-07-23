@@ -45,6 +45,8 @@ describe('toolchain contract', () => {
     expect(vitestConfig).toContain("'test/**/*.test.ts'");
     expect(vitestConfig).toContain("'ui/src/**/*.test.ts'");
     expect(vitestConfig).toContain("'ui/src/**/*.test.tsx'");
+    expect(vitestConfig).toContain('fileParallelism: false');
+    expect(vitestConfig).toContain('maxWorkers: 1');
     expect(vitestConfig).not.toContain('passWithNoTests');
     await expect(execFile(process.execPath, ['-e', "import('node:sqlite')"])).resolves.toBeDefined();
   });

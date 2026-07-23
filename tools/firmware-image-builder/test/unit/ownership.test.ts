@@ -177,11 +177,14 @@ function seedUnsealedLogs(path: string, jobId: string): void {
   for (const stream of ['runner', 'docker']) db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, size_bytes) VALUES (?, ?, 0, ?, ?, 0)').run(jobId, stream, `logs/${stream}-0.log`, NOW);
   db.close();
 }
-function toPublishing(ownership: OwnershipStore, jobId: string): void {
+function toVerifying(ownership: OwnershipStore, jobId: string): void {
   ownership.apiWrite(dispatch(jobId)); ownership.runnerWrite(lease(ACTIVE, jobId));
   const stages: Array<[PipelineStageName, JobState, JobState]> = [['preflight', 'starting', 'preflight'], ['source', 'preflight', 'source'], ['release-gates', 'source', 'release_gates'], ['frontend', 'release_gates', 'frontend'], ['target-setup', 'frontend', 'target_setup'], ['feeds', 'target_setup', 'feeds'], ['config', 'feeds', 'config'], ['build', 'config', 'building'], ['verify', 'building', 'verifying']];
   for (const [name, from, to] of stages) ownership.runnerWrite({ ...runnerBase(jobId), kind: 'stage', expectedState: from, state: to, stage: name, outcome: 'passed', startedAt: NOW, finishedAt: NOW, evidencePath: `evidence/${name}`, evidenceSha256: SHA64 });
   ownership.runnerWrite({ ...runnerBase(jobId), kind: 'artifact', expectedState: 'verifying', state: 'verifying', stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256: manifestHash(jobId), verificationPath: 'staging/verify', verificationSha256: verificationHash(jobId) });
+}
+function toPublishing(ownership: OwnershipStore, jobId: string): void {
+  toVerifying(ownership, jobId);
   ownership.runnerWrite({ ...runnerBase(jobId), kind: 'publish', expectedState: 'verifying', state: 'publishing', finalDirectory: `release/${jobId}`, finalPath: `release/${jobId}/image`, startedAt: NOW });
 }
 function recoveryEvidence(jobId: string, terminalState: 'succeeded' | 'failed' = 'succeeded'): PublishRecoveryEvidence {
@@ -272,18 +275,18 @@ describe('actor-owned compare-and-set writes', () => {
     const stageCase = await fixture('delayed-stage'); stageCase.ownership.apiWrite(dispatch('delayed-stage')); stageCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-stage'));
     expect(stageCase.ownership.runnerWrite({ ...runnerBase('delayed-stage'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'passed', startedAt: NOW, finishedAt: LATER, evidencePath: 'evidence/preflight', evidenceSha256: SHA64 }).ok).toBe(true);
     expect(() => stageCase.ownership.runnerWrite({ ...runnerBase('delayed-stage'), kind: 'stage', expectedState: 'preflight', state: 'source', stage: 'source', outcome: 'running', startedAt: RECOVERY })).toThrow(OwnershipValidationError);
-    expect(stageCase.ownership.runnerWrite({ ...runnerBase('delayed-stage'), at: RECOVERY, kind: 'stage', expectedState: 'preflight', state: 'source', stage: 'source', outcome: 'passed', startedAt: LATER, finishedAt: NOW, evidencePath: 'evidence/source', evidenceSha256: SHA64 })).toMatchObject({ ok: false });
+    expect(() => stageCase.ownership.runnerWrite({ ...runnerBase('delayed-stage'), at: RECOVERY, kind: 'stage', expectedState: 'preflight', state: 'source', stage: 'source', outcome: 'passed', startedAt: LATER, finishedAt: NOW, evidencePath: 'evidence/source', evidenceSha256: SHA64 })).toThrow(OwnershipValidationError);
 
     const operationCase = await fixture('delayed-operation'); operationCase.ownership.apiWrite(dispatch('delayed-operation')); operationCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-operation'));
     expect(operationCase.ownership.runnerWrite({ ...runnerBase('delayed-operation'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }).ok).toBe(true);
     const operationInput = { operationId: 'activate-target' as const, attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'not_created' as const, containerMount: null, containerEnvironment: null, containerSecurity: null, inspection: null, exitCode: 1, signal: null, outcome: 'failed' as const, evidencePath: 'evidence/op', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED' as const, error: { reason: 'delayed' } };
     expect(operationCase.ownership.runnerWrite({ ...runnerBase('delayed-operation'), kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: operationInput }).ok).toBe(true);
-    expect(operationCase.ownership.runnerWrite({ ...runnerBase('delayed-operation'), at: LATER, kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: { ...operationInput, finishedAt: RECOVERY } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(() => operationCase.ownership.runnerWrite({ ...runnerBase('delayed-operation'), at: LATER, kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: { ...operationInput, finishedAt: RECOVERY } })).toThrow(OwnershipValidationError);
 
     const terminalCase = await fixture('delayed-terminal'); terminalCase.ownership.apiWrite(dispatch('delayed-terminal')); terminalCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-terminal'));
     terminalCase.ownership.runnerWrite({ ...runnerBase('delayed-terminal'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW });
     expect(terminalCase.ownership.runnerWrite({ ...runnerBase('delayed-terminal'), kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: LATER, errorCode: 'BUILD_FAILED', error: { reason: 'delayed' } }).ok).toBe(true);
-    expect(terminalCase.ownership.runnerWrite({ ...runnerBase('delayed-terminal'), at: LATER, kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: RECOVERY, errorCode: 'BUILD_FAILED', error: { reason: 'future' } })).toMatchObject({ ok: false });
+    expect(() => terminalCase.ownership.runnerWrite({ ...runnerBase('delayed-terminal'), at: LATER, kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: RECOVERY, errorCode: 'BUILD_FAILED', error: { reason: 'future' } })).toThrow(OwnershipValidationError);
   });
 
   it('rejects incomplete nested proof variants before BEGIN for every actor family', async () => {
@@ -677,6 +680,43 @@ describe('actor-owned compare-and-set writes', () => {
     expect(ownership.runnerWrite({ ...runnerBase(), at: LATER, kind: 'normal-terminal', expectedState: 'publishing', state: 'succeeded', terminalAt: LATER }).ok).toBe(true); expect(store.getJob('job-1').state).toBe('succeeded');
   });
 
+  it('renews a live publishing runner lease but rejects terminal and non-runner states without mutation', async () => {
+    const publishing = await fixture('renew-publishing'); toPublishing(publishing.ownership, 'renew-publishing');
+    const beforeEvents = publishing.store.listEvents('renew-publishing').events.length; const before = publishing.store.getJob('renew-publishing');
+    expect(publishing.ownership.runnerWrite({ kind: 'renew-lease', jobId: 'renew-publishing', runnerUnit: 'osi-image-builder-runner@renew-publishing.service', owner: 'runner-a', expectedExpiresAt: ACTIVE, expiresAt: EXPIRY, at: LATER })).toMatchObject({ ok: true });
+    expect(publishing.store.listEvents('renew-publishing').events).toHaveLength(beforeEvents + 1); expect(publishing.store.getJob('renew-publishing')).toMatchObject({ runnerLeaseExpiresAt: EXPIRY }); expect(publishing.store.getJob('renew-publishing')).not.toEqual(before);
+
+    const terminal = await fixture('renew-terminal'); toPublishing(terminal.ownership, 'renew-terminal');
+    terminal.ownership.runnerWrite({ ...runnerBase('renew-terminal'), kind: 'publish', expectedState: 'publishing', state: 'published', finalDirectory: 'release/renew-terminal', finalPath: 'release/renew-terminal/image', publishedAt: LATER });
+    terminal.ownership.runnerWrite({ ...runnerBase('renew-terminal'), at: LATER, kind: 'normal-terminal', expectedState: 'publishing', state: 'succeeded', terminalAt: LATER });
+    const terminalEvents = terminal.store.listEvents('renew-terminal').events.length; const terminalBefore = terminal.store.getJob('renew-terminal');
+    expect(terminal.ownership.runnerWrite({ kind: 'renew-lease', jobId: 'renew-terminal', runnerUnit: 'osi-image-builder-runner@renew-terminal.service', owner: 'runner-a', expectedExpiresAt: ACTIVE, expiresAt: EXPIRY, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'stale-predecessor' } });
+    expect(terminal.store.listEvents('renew-terminal').events).toHaveLength(terminalEvents); expect(terminal.store.getJob('renew-terminal')).toEqual(terminalBefore);
+
+    const queued = await fixture('renew-queued'); const queuedEvents = queued.store.listEvents('renew-queued').events.length; const queuedBefore = queued.store.getJob('renew-queued');
+    expect(queued.ownership.runnerWrite({ kind: 'renew-lease', jobId: 'renew-queued', runnerUnit: 'osi-image-builder-runner@renew-queued.service', owner: 'runner-a', expectedExpiresAt: ACTIVE, expiresAt: EXPIRY, at: NOW })).toMatchObject({ ok: false, conflict: { kind: 'stale-predecessor' } });
+    expect(queued.store.listEvents('renew-queued').events).toHaveLength(queuedEvents); expect(queued.store.getJob('renew-queued')).toEqual(queuedBefore);
+  });
+
+  it('validates effective publish timestamps before mutation and preserves a valid completion sequence', async () => {
+    const probe = await fixture('publish-effective-fallback'); toVerifying(probe.ownership, 'publish-effective-fallback');
+    let begins = 0; const guarded = new OwnershipStore(probe.db, { now: () => NOW, beforeBegin: () => { begins += 1; } });
+    const beforeEvents = probe.store.listEvents('publish-effective-fallback').events.length; const before = probe.store.getJob('publish-effective-fallback');
+    expect(() => guarded.runnerWrite({ ...runnerBase('publish-effective-fallback'), at: LATER, kind: 'publish', expectedState: 'verifying', state: 'published', finalDirectory: 'release/publish-effective-fallback', finalPath: 'release/publish-effective-fallback/image', publishedAt: NOW } as never)).toThrow(OwnershipValidationError);
+    expect(begins).toBe(0); expect(probe.store.listEvents('publish-effective-fallback').events).toHaveLength(beforeEvents); expect(probe.store.getJob('publish-effective-fallback')).toEqual(before);
+
+    const valid = await fixture('publish-effective-valid'); toVerifying(valid.ownership, 'publish-effective-valid');
+    valid.ownership.runnerWrite({ kind: 'renew-lease', jobId: 'publish-effective-valid', runnerUnit: 'osi-image-builder-runner@publish-effective-valid.service', owner: 'runner-a', expectedExpiresAt: ACTIVE, expiresAt: EXPIRY, at: LATER });
+    expect(valid.ownership.runnerWrite({ ...runnerBase('publish-effective-valid'), at: LATER, leaseExpiresAt: EXPIRY, kind: 'publish', expectedState: 'verifying', state: 'publishing', finalDirectory: 'release/publish-effective-valid', finalPath: 'release/publish-effective-valid/image' }).ok).toBe(true);
+    expect(valid.ownership.runnerWrite({ ...runnerBase('publish-effective-valid'), at: RECOVERY, leaseExpiresAt: EXPIRY, kind: 'publish', expectedState: 'publishing', state: 'published', finalDirectory: 'release/publish-effective-valid', finalPath: 'release/publish-effective-valid/image', publishedAt: RECOVERY }).ok).toBe(true);
+    expect(valid.store.getJob('publish-effective-valid')).toMatchObject({ state: 'publishing', publishState: 'published', publishStartedAt: LATER, publishedAt: RECOVERY });
+
+    const ignored = await fixture('publish-ignored-timestamps'); toVerifying(ignored.ownership, 'publish-ignored-timestamps'); const ignoredEvents = ignored.store.listEvents('publish-ignored-timestamps').events.length; const ignoredBefore = ignored.store.getJob('publish-ignored-timestamps');
+    expect(() => ignored.ownership.runnerWrite({ ...runnerBase('publish-ignored-timestamps'), kind: 'publish', expectedState: 'verifying', state: 'staged', startedAt: NOW } as never)).toThrow(OwnershipValidationError);
+    expect(() => ignored.ownership.runnerWrite({ ...runnerBase('publish-ignored-timestamps'), kind: 'publish', expectedState: 'verifying', state: 'blocked', publishedAt: NOW, blockerCode: 'PUBLISH_FAILED', blocker: { reason: 'test' } } as never)).toThrow(OwnershipValidationError);
+    expect(ignored.store.listEvents('publish-ignored-timestamps').events).toHaveLength(ignoredEvents); expect(ignored.store.getJob('publish-ignored-timestamps')).toEqual(ignoredBefore);
+  });
+
   it('accepts only typed publishing recovery evidence for success and failure', async () => {
     const success = await fixture('job-2'); toPublishing(success.ownership, 'job-2'); seedLogs(success.path, 'job-2');
     expect(success.ownership.apiWrite({ kind: 'publish-recovery', jobId: 'job-2', expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence: recoveryEvidence('job-2') })).toMatchObject({ ok: true });
@@ -836,6 +876,96 @@ describe('actor-owned compare-and-set writes', () => {
     const claim: CleanupWriteCommand = { kind: 'claim-lease', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshot(), at: RECOVERY }; expect(fenced.ownership.cleanupWrite(claim).ok).toBe(true);
     const complete: CleanupWriteCommand = { kind: 'complete', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshot(), postcondition: postcondition(snapshot()), exactContainerId: 'container-job-1', containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY };
     expect(fenced.ownership.cleanupWrite(complete).ok).toBe(true); const after = eventCount(fenced.store); expect(apiB.cleanupWrite(complete)).toMatchObject({ ok: false }); expect(eventCount(fenced.store)).toBe(after);
+  });
+
+  it('classifies delayed runner writes against an existing fence without masking intrinsic chronology errors', async () => {
+    const delayed = await fixture('delayed-runner-fence');
+    delayed.ownership.apiWrite(dispatch('delayed-runner-fence'));
+    delayed.ownership.runnerWrite(lease(ACTIVE, 'delayed-runner-fence'));
+    expect(delayed.ownership.apiWrite(cleanupAdmission(snapshot('absent', 'delayed-runner-fence'), 'delayed-runner-fence')).ok).toBe(true);
+    const before = delayed.store.listEvents('delayed-runner-fence').events.length;
+
+    const validDelayedStage: RunnerWriteCommand = {
+      ...runnerBase('delayed-runner-fence'), at: LATER, kind: 'stage', expectedState: 'starting', state: 'preflight',
+      stage: 'preflight', outcome: 'running', startedAt: LATER,
+    };
+    expect(delayed.ownership.runnerWrite(validDelayedStage)).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
+    expect(delayed.store.listEvents('delayed-runner-fence').events).toHaveLength(before);
+
+    const malformedDelayedStage: RunnerWriteCommand = {
+      ...validDelayedStage, at: AFTER, startedAt: LATER, finishedAt: NOW, outcome: 'passed',
+      evidencePath: 'evidence/preflight', evidenceSha256: SHA64,
+    };
+    expect(() => delayed.ownership.runnerWrite(malformedDelayedStage)).toThrow(OwnershipValidationError);
+    expect(delayed.store.listEvents('delayed-runner-fence').events).toHaveLength(before);
+  });
+
+  it('classifies delayed lease acquisition and renewal against a cleanup fence without mutation', async () => {
+    const acquireCase = await fixture('delayed-acquire-fence');
+    acquireCase.ownership.apiWrite(dispatch('delayed-acquire-fence'));
+    expect(acquireCase.ownership.apiWrite(cleanupAdmission(nullLeaseSnapshot('delayed-acquire-fence'), 'delayed-acquire-fence')).ok).toBe(true);
+    const acquireEvents = acquireCase.store.listEvents('delayed-acquire-fence').events.length;
+    const acquireBefore = acquireCase.store.getJob('delayed-acquire-fence');
+    expect(acquireCase.ownership.runnerWrite({ ...lease(ACTIVE, 'delayed-acquire-fence'), at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
+    expect(acquireCase.store.listEvents('delayed-acquire-fence').events).toHaveLength(acquireEvents);
+    expect(acquireCase.store.getJob('delayed-acquire-fence')).toEqual(acquireBefore);
+
+    const renewCase = await fixture('delayed-renew-fence');
+    renewCase.ownership.apiWrite(dispatch('delayed-renew-fence'));
+    renewCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-renew-fence'));
+    renewCase.ownership.runnerWrite(container('delayed-renew-fence'));
+    expect(renewCase.ownership.apiWrite(cleanupAdmission(snapshot('present', 'delayed-renew-fence'), 'delayed-renew-fence')).ok).toBe(true);
+    const renewEvents = renewCase.store.listEvents('delayed-renew-fence').events.length;
+    const renewBefore = renewCase.store.getJob('delayed-renew-fence');
+    expect(renewCase.ownership.runnerWrite({
+      kind: 'renew-lease', jobId: 'delayed-renew-fence', runnerUnit: 'osi-image-builder-runner@delayed-renew-fence.service', owner: 'runner-a',
+      expectedExpiresAt: ACTIVE, expiresAt: '2026-07-23T10:02:30.000Z', at: LATER,
+    })).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
+    expect(renewCase.store.listEvents('delayed-renew-fence').events).toHaveLength(renewEvents);
+    expect(renewCase.store.getJob('delayed-renew-fence')).toEqual(renewBefore);
+  });
+
+  it('rejects malformed lease timestamps before BEGIN', async () => {
+    const acquireCase = await fixture('malformed-acquire-timestamp'); let acquireBegins = 0;
+    const acquire = new OwnershipStore(acquireCase.db, { now: () => NOW, beforeBegin: () => { acquireBegins += 1; } });
+    expect(() => acquire.runnerWrite({ ...lease(ACTIVE, 'malformed-acquire-timestamp'), at: 'not-an-instant' } as never)).toThrow(OwnershipValidationError);
+    expect(acquireBegins).toBe(0); expect(acquireCase.store.listEvents('malformed-acquire-timestamp').events).toHaveLength(1);
+
+    const renewCase = await fixture('malformed-renew-timestamp'); renewCase.ownership.apiWrite(dispatch('malformed-renew-timestamp')); renewCase.ownership.runnerWrite(lease(ACTIVE, 'malformed-renew-timestamp')); let renewBegins = 0;
+    const renew = new OwnershipStore(renewCase.db, { now: () => NOW, beforeBegin: () => { renewBegins += 1; } });
+    expect(() => renew.runnerWrite({ kind: 'renew-lease', jobId: 'malformed-renew-timestamp', runnerUnit: 'osi-image-builder-runner@malformed-renew-timestamp.service', owner: 'runner-a', expectedExpiresAt: 'not-an-instant', expiresAt: EXPIRY, at: LATER } as never)).toThrow(OwnershipValidationError);
+    expect(renewBegins).toBe(0); expect(renewCase.store.listEvents('malformed-renew-timestamp').events).toHaveLength(3);
+  });
+
+  it('classifies delayed container writes after direct interruption and hand-back as stale predecessors', async () => {
+    const handBackCase = await claimedCleanup('delayed-container-hand-back');
+    const complete: CleanupWriteCommand = { kind: 'complete', jobId: 'delayed-container-hand-back', admissionId: handBackCase.admission.admissionId, owner: 'cleanup-a', unitName: handBackCase.admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: handBackCase.snapshot, postcondition: postcondition(handBackCase.snapshot), exactContainerId: 'container-delayed-container-hand-back', containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY };
+    handBackCase.ownership.cleanupWrite(complete);
+    handBackCase.ownership.apiWrite({ kind: 'hand-back', jobId: 'delayed-container-hand-back', admissionId: handBackCase.admission.admissionId, owner: 'cleanup-a', unitName: handBackCase.admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, at: RECOVERY, proof: { runner: handBackCase.snapshot.runner, container: absent(RECOVERY), blocker: 'none' } });
+    const handBackEvents = handBackCase.store.listEvents('delayed-container-hand-back').events.length;
+    const handBackBefore = handBackCase.store.getJob('delayed-container-hand-back');
+    expect(handBackCase.ownership.runnerWrite({ ...container('delayed-container-hand-back'), at: LATER, occurredAt: LATER })).toMatchObject({ ok: false, conflict: { kind: 'stale-predecessor' } });
+    expect(handBackCase.store.listEvents('delayed-container-hand-back').events).toHaveLength(handBackEvents);
+    expect(handBackCase.store.getJob('delayed-container-hand-back')).toEqual(handBackBefore);
+
+    const directCase = await fixture('delayed-container-direct');
+    directCase.ownership.apiWrite(dispatch('delayed-container-direct')); directCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-container-direct'));
+    directCase.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'delayed-container-direct', expectedState: 'starting', at: RECOVERY, proof: direct('active', 'delayed-container-direct'), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'delayed container' } });
+    const directEvents = directCase.store.listEvents('delayed-container-direct').events.length;
+    const directBefore = directCase.store.getJob('delayed-container-direct');
+    expect(directCase.ownership.runnerWrite({ ...container('delayed-container-direct'), at: LATER, occurredAt: LATER })).toMatchObject({ ok: false, conflict: { kind: 'stale-predecessor' } });
+    expect(directCase.store.listEvents('delayed-container-direct').events).toHaveLength(directEvents);
+    expect(directCase.store.getJob('delayed-container-direct')).toEqual(directBefore);
+  });
+
+  it('rejects malformed container lifecycle and derived chronology before a fence can mask them', async () => {
+    const target = await fixture('malformed-container-fence');
+    target.ownership.apiWrite(dispatch('malformed-container-fence')); target.ownership.runnerWrite(lease(ACTIVE, 'malformed-container-fence')); target.ownership.runnerWrite(container('malformed-container-fence'));
+    expect(target.ownership.apiWrite(cleanupAdmission(snapshot('present', 'malformed-container-fence'), 'malformed-container-fence')).ok).toBe(true);
+    const before = target.store.listEvents('malformed-container-fence').events.length;
+    expect(() => target.ownership.runnerWrite({ ...container('malformed-container-fence'), lifecycle: 'not_created' } as never)).toThrow(OwnershipValidationError);
+    expect(() => target.ownership.runnerWrite({ ...container('malformed-container-fence'), at: RECOVERY, occurredAt: AFTER })).toThrow(OwnershipValidationError);
+    expect(target.store.listEvents('malformed-container-fence').events).toHaveLength(before);
   });
 
   it('returns one loser result under held two-connection dispatch, fence, and cleanup overlap', async () => {

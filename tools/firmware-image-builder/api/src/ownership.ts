@@ -21,6 +21,9 @@ const HASH64 = /^[0-9a-f]{64}$/;
 const ADMISSION_ID = /^cln_[0-9a-hj-km-np-tv-z]{26}$/;
 const EVENT_TYPES = new Set(['enqueue', 'dispatch', 'cancellation_requested', 'state', 'stage', 'operation', 'container', 'artifact', 'publish', 'terminal', 'cleanup_admission', 'cleanup_claim', 'cleanup_renew', 'cleanup_complete', 'cleanup', 'recovery', 'freshness']);
 const ACTIVE_STATES = new Set<JobState>(ACTIVE_RECOVERY_STATES);
+const ACTIVE_RECOVERY_STATE_SQL = ACTIVE_RECOVERY_STATES.map((state) => `'${state}'`).join(',');
+const RUNNER_LEASE_RENEWABLE_STATES = Object.freeze([...ACTIVE_RECOVERY_STATES, 'publishing'] as const);
+const RUNNER_LEASE_RENEWABLE_STATE_SQL = RUNNER_LEASE_RENEWABLE_STATES.map((state) => `'${state}'`).join(',');
 export const MAX_QUEUE_LENGTH = 50;
 const STAGE_STATE: Readonly<Record<PipelineStageName, JobState>> = Object.freeze({
   preflight: 'preflight', source: 'source', 'release-gates': 'release_gates', frontend: 'frontend',
@@ -238,8 +241,13 @@ function requireChronology(values: readonly (readonly [string, string | null | u
   catch (error) { if (error instanceof SharedValidationError) throw new OwnershipValidationError(error.message, { cause: error }); throw error; }
 }
 
+function matchesExpectedState(actual: string, expected: JobState | readonly JobState[]): boolean {
+  return Array.isArray(expected) ? expected.includes(actual as JobState) : actual === expected;
+}
+
 const COMMAND_OUTCOMES = new Set(['running', 'passed', 'failed', 'cancelled', 'interrupted', 'blocking']);
 const COMMAND_LIFECYCLES = new Set(['created', 'started', 'stopped', 'removed', 'not_created']);
+const CONTAINER_LIFECYCLES = Object.freeze(['created', 'started', 'stopped', 'removed'] as const);
 
 function prepareCommand<T>(command: T): T {
   try {
@@ -464,16 +472,45 @@ function shapeHandBackProof(value: unknown, at: string): void {
   const proof = shapeRecord(value, 'hand-back proof'); const runner = shapeRecord(proof.runner, 'hand-back runner'); preparedString(runner.unit, 'hand-back runner unit', TEXT_LIMITS.maxIdentifierBytes); shapeNullableString(runner.owner, 'hand-back runner owner'); shapeNullableString(runner.leaseExpiresAt, 'hand-back runner lease expiry'); if ((runner.owner == null) !== (runner.leaseExpiresAt == null)) throw new OwnershipValidationError('hand-back runner owner/lease pair is incomplete'); preparedInstant(runner.inactiveAt, 'hand-back runner inactiveAt'); preparedInstant(runner.observedAt, 'hand-back runner observedAt'); shapeNullContainer(proof.container, 'hand-back container', at as string); shapeLiteral(proof.blocker, 'none', 'hand-back blocker'); shapeChronology([['hand-back inactiveAt', runner.inactiveAt], ['hand-back observedAt', runner.observedAt], ['hand-back at', at]], 'hand-back proof');
 }
 
-function shapeStageCommand(value: PreparedRecord): void {
+function shapeStageCommand(value: PreparedRecord, at: string): void {
   const outcome = String(value.outcome);
   const finished = value.finishedAt !== undefined && value.finishedAt !== null;
   const evidence = value.evidencePath !== undefined && value.evidencePath !== null;
   const evidenceHash = value.evidenceSha256 !== undefined && value.evidenceSha256 !== null;
   const errorCode = value.errorCode !== undefined && value.errorCode !== null;
   const error = value.error !== undefined && value.error !== null;
+  shapeChronology([['stage startedAt', value.startedAt], ['stage finishedAt', value.finishedAt], ['stage command.at', at]], 'stage');
   if (outcome === 'running' && (finished || evidence || evidenceHash || errorCode || error)) throw new OwnershipValidationError('running stage contains terminal evidence');
   if (outcome === 'passed' && (!finished || !evidence || !evidenceHash || errorCode || error)) throw new OwnershipValidationError('passed stage evidence is incomplete');
   if (['failed', 'cancelled', 'interrupted'].includes(outcome) && (!finished || !evidence || !evidenceHash || !errorCode || !error)) throw new OwnershipValidationError('failed stage evidence is incomplete');
+}
+
+function shapeContainerCommand(value: PreparedRecord, at: string): void {
+  const lifecycle = String(value.lifecycle);
+  if (!(CONTAINER_LIFECYCLES as readonly string[]).includes(lifecycle)) throw new OwnershipValidationError('container lifecycle is invalid');
+  const occurred = value.occurredAt;
+  const created = value.createdAt ?? (lifecycle === 'created' ? occurred : null);
+  const started = value.startedAt ?? (lifecycle === 'started' ? occurred : null);
+  const stopped = value.stoppedAt ?? (lifecycle === 'stopped' ? occurred : null);
+  const removed = value.removedAt ?? (lifecycle === 'removed' ? occurred : null);
+  shapeChronology([
+    ['container createdAt', created], ['container startedAt', started], ['container stoppedAt', stopped],
+    ['container removedAt', removed], ['container occurredAt', occurred], ['container command.at', at],
+  ], 'container');
+}
+
+function shapePublishCommand(value: PreparedRecord, at: string): void {
+  const state = String(value.state);
+  const startedAt = value.startedAt;
+  const publishedAt = value.publishedAt;
+  if (state === 'publishing') {
+    if (publishedAt !== undefined && publishedAt !== null) throw new OwnershipValidationError('publishing command cannot include publishedAt');
+    shapeChronology([['effective publish startedAt', startedAt ?? at], ['publish command.at', at]], 'publish');
+  } else if (state === 'published') {
+    shapeChronology([['publish startedAt', startedAt], ['publish publishedAt', publishedAt], ['publish command.at', at]], 'publish');
+  } else if ((state === 'staged' || state === 'blocked') && (startedAt !== undefined && startedAt !== null || publishedAt !== undefined && publishedAt !== null)) {
+    throw new OwnershipValidationError(`${state} publish command cannot include publish timestamps`);
+  }
 }
 
 function shapePublishEvidence(value: unknown, at: string): void {
@@ -494,17 +531,37 @@ function validateRunnerCommand(command: RunnerWriteCommand): void {
     case 'renew-lease': preparedCommon(value, 'runner'); runnerUnit(preparedString(value.jobId, 'renew jobId'), preparedString(value.runnerUnit, 'renew runnerUnit')); preparedString(value.owner, 'renew owner'); preparedInstant(value.expectedExpiresAt, 'renew expected expiry'); preparedInstant(value.expiresAt, 'renew expiry'); return;
     case 'cancellation-transition': preparedRunnerCommon(value); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation expectedState'); return;
     case 'cancellation-cleanup': preparedRunnerCommon(value); preparedEnum(value.expectedState, ['cancel_requested'], 'cancellation cleanup expectedState'); shapeCancellationProof(value.proof, value.at as string); return;
-    case 'cancellation-terminal': preparedRunnerCommon(value); preparedEnum(value.expectedState, ['cancel_requested'], 'cancellation terminal expectedState'); preparedInstant(value.terminalAt, 'cancellation terminal time'); if (!Number.isSafeInteger(value.cleanupEventSeq) || Number(value.cleanupEventSeq) < 0) throw new OwnershipValidationError('cancellation cleanup event sequence is invalid'); return;
-    case 'stage': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'stage expectedState'); preparedEnum(value.state, JOB_STATES, 'stage state'); preparedEnum(value.stage, PIPELINE_STAGE_NAMES, 'stage name'); preparedEnum(value.outcome, [...COMMAND_OUTCOMES], 'stage outcome'); preparedInstant(value.startedAt, 'stage startedAt'); preparedOptionalInstant(value.finishedAt, 'stage finishedAt'); preparedOptionalPath(value.evidencePath, 'stage evidence path'); preparedOptionalHash(value.evidenceSha256, 'stage evidence SHA'); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'stage errorCode'); preparedJsonObject(value.error, 'stage error', true); shapeStageCommand(value); return;
-    case 'container': preparedRunnerCommon(value); preparedEnum(value.lifecycle, [...COMMAND_LIFECYCLES], 'container lifecycle'); for (const field of ['containerId', 'containerName']) preparedString(value[field], `container ${field}`, TEXT_LIMITS.maxIdentifierBytes); preparedHash(value.imageDigest, 'container image digest'); preparedJsonObject(value.labels, 'container labels'); preparedJsonObject(value.mount, 'container mount'); preparedJsonObject(value.environment, 'container environment'); preparedJsonObject(value.security, 'container security'); preparedJsonObject(value.inspection, 'container inspection'); preparedInstant(value.occurredAt, 'container occurredAt'); preparedOptionalInstant(value.createdAt, 'container createdAt'); preparedOptionalInstant(value.startedAt, 'container startedAt'); preparedOptionalInstant(value.stoppedAt, 'container stoppedAt'); preparedOptionalInstant(value.removedAt, 'container removedAt'); preparedOptionalEnum(value.cleanupOutcome, ['passed', 'failed', 'blocking'], 'container cleanup outcome'); return;
-    case 'artifact': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'artifact expectedState'); preparedEnum(value.state, JOB_STATES, 'artifact state'); for (const field of ['stagingPath', 'checksumPath', 'manifestPath', 'verificationPath']) preparedPath(value[field], `artifact ${field}`); for (const field of ['artifactSha256', 'checksumSha256', 'manifestSha256', 'verificationSha256']) preparedHash(value[field], `artifact ${field}`); if (!Number.isSafeInteger(value.artifactSize) || Number(value.artifactSize) < 0) throw new OwnershipValidationError('artifact size is invalid'); preparedInstant(value.artifactMtime, 'artifact mtime'); return;
-    case 'publish': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'publish expectedState'); preparedEnum(value.state, ['staged', 'publishing', 'published', 'blocked'], 'publish state'); if (value.finalDirectory !== undefined && value.finalDirectory !== null) preparedPath(value.finalDirectory, 'publish final directory'); if (value.finalPath !== undefined && value.finalPath !== null) preparedPath(value.finalPath, 'publish final path'); preparedOptionalInstant(value.startedAt, 'publish startedAt'); preparedOptionalInstant(value.publishedAt, 'publish publishedAt'); preparedOptionalEnum(value.blockerCode, BUILDER_ERROR_CODES, 'publish blockerCode'); preparedJsonObject(value.blocker, 'publish blocker', true); return;
-    case 'normal-terminal': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'terminal expectedState'); preparedEnum(value.state, ['succeeded', 'failed'], 'terminal state'); preparedInstant(value.terminalAt, 'terminal time'); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'terminal errorCode'); preparedJsonObject(value.error, 'terminal error', true); return;
-    case 'operation-begin': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'operation expectedState'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation id'); if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) <= 0) throw new OwnershipValidationError('operation attempt is invalid'); preparedHash(value.argvHash, 'operation argv hash'); preparedJsonArray(value.argv, 'operation argv'); preparedInstant(value.startedAt, 'operation startedAt'); return;
-    case 'operation-complete': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'operation complete expectedState'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation complete operation id'); if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) <= 0) throw new OwnershipValidationError('operation complete attempt is invalid'); validateOperationInput(value.input); return;
+    case 'cancellation-terminal': preparedRunnerCommon(value); preparedEnum(value.expectedState, ['cancel_requested'], 'cancellation terminal expectedState'); preparedInstant(value.terminalAt, 'cancellation terminal time'); shapeChronology([['cancellation terminal time', value.terminalAt], ['cancellation command.at', value.at]], 'cancellation terminal'); if (!Number.isSafeInteger(value.cleanupEventSeq) || Number(value.cleanupEventSeq) < 0) throw new OwnershipValidationError('cancellation cleanup event sequence is invalid'); return;
+    case 'stage': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'stage expectedState'); preparedEnum(value.state, JOB_STATES, 'stage state'); preparedEnum(value.stage, PIPELINE_STAGE_NAMES, 'stage name'); preparedEnum(value.outcome, [...COMMAND_OUTCOMES], 'stage outcome'); preparedInstant(value.startedAt, 'stage startedAt'); preparedOptionalInstant(value.finishedAt, 'stage finishedAt'); preparedOptionalPath(value.evidencePath, 'stage evidence path'); preparedOptionalHash(value.evidenceSha256, 'stage evidence SHA'); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'stage errorCode'); preparedJsonObject(value.error, 'stage error', true); shapeStageCommand(value, value.at as string); return;
+    case 'container': preparedRunnerCommon(value); preparedEnum(value.lifecycle, CONTAINER_LIFECYCLES, 'container lifecycle'); for (const field of ['containerId', 'containerName']) preparedString(value[field], `container ${field}`, TEXT_LIMITS.maxIdentifierBytes); preparedHash(value.imageDigest, 'container image digest'); preparedJsonObject(value.labels, 'container labels'); preparedJsonObject(value.mount, 'container mount'); preparedJsonObject(value.environment, 'container environment'); preparedJsonObject(value.security, 'container security'); preparedJsonObject(value.inspection, 'container inspection'); preparedInstant(value.occurredAt, 'container occurredAt'); preparedOptionalInstant(value.createdAt, 'container createdAt'); preparedOptionalInstant(value.startedAt, 'container startedAt'); preparedOptionalInstant(value.stoppedAt, 'container stoppedAt'); preparedOptionalInstant(value.removedAt, 'container removedAt'); preparedOptionalEnum(value.cleanupOutcome, ['passed', 'failed', 'blocking'], 'container cleanup outcome'); shapeContainerCommand(value, value.at as string); return;
+    case 'artifact': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'artifact expectedState'); preparedEnum(value.state, JOB_STATES, 'artifact state'); for (const field of ['stagingPath', 'checksumPath', 'manifestPath', 'verificationPath']) preparedPath(value[field], `artifact ${field}`); for (const field of ['artifactSha256', 'checksumSha256', 'manifestSha256', 'verificationSha256']) preparedHash(value[field], `artifact ${field}`); if (!Number.isSafeInteger(value.artifactSize) || Number(value.artifactSize) < 0) throw new OwnershipValidationError('artifact size is invalid'); preparedInstant(value.artifactMtime, 'artifact mtime'); shapeChronology([['artifact mtime', value.artifactMtime], ['artifact command.at', value.at]], 'artifact'); return;
+    case 'publish': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'publish expectedState'); preparedEnum(value.state, ['staged', 'publishing', 'published', 'blocked'], 'publish state'); if (value.finalDirectory !== undefined && value.finalDirectory !== null) preparedPath(value.finalDirectory, 'publish final directory'); if (value.finalPath !== undefined && value.finalPath !== null) preparedPath(value.finalPath, 'publish final path'); preparedOptionalInstant(value.startedAt, 'publish startedAt'); preparedOptionalInstant(value.publishedAt, 'publish publishedAt'); preparedOptionalEnum(value.blockerCode, BUILDER_ERROR_CODES, 'publish blockerCode'); preparedJsonObject(value.blocker, 'publish blocker', true); shapePublishCommand(value, value.at as string); return;
+    case 'normal-terminal': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'terminal expectedState'); preparedEnum(value.state, ['succeeded', 'failed'], 'terminal state'); preparedInstant(value.terminalAt, 'terminal time'); shapeChronology([['terminal time', value.terminalAt], ['terminal command.at', value.at]], 'terminal'); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'terminal errorCode'); preparedJsonObject(value.error, 'terminal error', true); return;
+    case 'operation-begin': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'operation expectedState'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation id'); if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) <= 0) throw new OwnershipValidationError('operation attempt is invalid'); preparedHash(value.argvHash, 'operation argv hash'); preparedJsonArray(value.argv, 'operation argv'); preparedInstant(value.startedAt, 'operation startedAt'); shapeChronology([['operation startedAt', value.startedAt], ['operation command.at', value.at]], 'operation begin'); return;
+    case 'operation-complete': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'operation complete expectedState'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation complete operation id'); if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) <= 0) throw new OwnershipValidationError('operation complete attempt is invalid'); validateOperationInput(value.input); { const input = preparedObject(value.input, 'operation input'); shapeChronology([['operation startedAt', input.startedAt], ['operation finishedAt', input.finishedAt], ['operation command.at', value.at]], 'operation complete'); } return;
     case 'operation-cleanup': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'operation cleanup expectedState'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation cleanup operation id'); if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) <= 0) throw new OwnershipValidationError('operation cleanup attempt is invalid'); shapeOperationCleanupProof(value.proof, value.at as string); return;
     default: throw new OwnershipValidationError('runner command kind is invalid');
   }
+}
+
+function validatePublishEffectiveSemantics(command: Extract<RunnerWriteCommand, { kind: 'publish' }>, row: Row): void {
+  const acceptedAt = String(row.accepted_at);
+  const artifactMtime = row.artifact_mtime === null ? null : String(row.artifact_mtime);
+  const persistedStart = row.publish_started_at === null ? null : String(row.publish_started_at);
+  if (command.state === 'publishing') {
+    if (persistedStart !== null && command.startedAt !== undefined && command.startedAt !== null && command.startedAt !== persistedStart) throw new OwnershipValidationError('publishing startedAt must match the persisted publish start time');
+    const effectiveStart = persistedStart ?? command.startedAt ?? command.at;
+    requireChronology([['accepted time', acceptedAt], ['artifact mtime', artifactMtime], ['effective publish start time', effectiveStart], ['publish write time', command.at]]);
+    return;
+  }
+  if (command.state === 'published') {
+    if (row.publish_state !== 'publishing' || persistedStart === null) throw new OwnershipValidationError('published completion requires an existing publishing start time');
+    if (command.startedAt !== undefined && command.startedAt !== null && command.startedAt !== persistedStart) throw new OwnershipValidationError('published completion startedAt must match the persisted publishing start time');
+    const effectivePublishedAt = command.publishedAt ?? command.at;
+    requireChronology([['accepted time', acceptedAt], ['artifact mtime', artifactMtime], ['persisted publish start time', persistedStart], ['effective published time', effectivePublishedAt], ['publish write time', command.at]]);
+    return;
+  }
+  requireChronology([['accepted time', acceptedAt], ['artifact mtime', artifactMtime], ['publish write time', command.at]]);
 }
 
 function validateCleanupCommand(command: CleanupWriteCommand): void {
@@ -1020,6 +1077,10 @@ function isActiveState(state: JobState): state is ActiveRecoveryState {
   return ACTIVE_STATES.has(state);
 }
 
+function isRunnerLeaseRenewableState(state: JobState): boolean {
+  return RUNNER_LEASE_RENEWABLE_STATES.includes(state as (typeof RUNNER_LEASE_RENEWABLE_STATES)[number]);
+}
+
 function conflict(kind: OwnershipConflictKind, message: string = kind): never {
   throw new OwnershipConflictError(kind, message);
 }
@@ -1084,6 +1145,7 @@ export class OwnershipStore {
       throw new OwnershipViolationError('runner', prepared.kind);
     }
     validateRunnerCommand(prepared);
+    if (prepared.kind === 'publish') this.#validatePublishPreflight(prepared);
     switch (prepared.kind) {
       case 'acquire-lease': return this.#transaction(() => this.#acquireLease(prepared));
       case 'renew-lease': return this.#transaction(() => this.#renewLease(prepared));
@@ -1409,6 +1471,10 @@ export class OwnershipStore {
   #acquireLease(command: Extract<RunnerWriteCommand, { kind: 'acquire-lease' }>): void {
     instant(command.at, 'runner start time'); instant(command.expiresAt, 'runner lease expiry'); runnerUnit(command.jobId, command.runnerUnit); string(command.owner, 'runner owner');
     const row = this.#job(command.jobId);
+    if (row.state !== 'starting') conflict('stale-predecessor', 'runner lease predecessor changed');
+    if (row.runner_unit !== command.runnerUnit) conflict('stale-runner-owner', 'runner identity changed');
+    if (row.cleanup_fence_generation !== null || row.cleanup_admission_id !== null) conflict('fenced', 'runner is fenced for recovery');
+    if (row.runner_lease_owner !== null || row.runner_lease_expires_at !== null) conflict('stale-predecessor', 'runner lease was already claimed');
     requirePersistedTimeline(this.#db, command.jobId, [['runner start time', command.at]]);
     requireChronology([['accepted time', String(row.accepted_at)], ['dispatch time', row.dispatched_at === null ? null : String(row.dispatched_at)], ['runner start time', command.at]]);
     if (command.expiresAt <= command.at) conflict('stale-lease', 'runner lease must be active');
@@ -1422,9 +1488,13 @@ export class OwnershipStore {
     instant(command.at, 'runner renewal time'); instant(command.expectedExpiresAt, 'expected lease expiry'); instant(command.expiresAt, 'runner lease expiry'); runnerUnit(command.jobId, command.runnerUnit);
     if (command.expiresAt <= command.expectedExpiresAt || command.expiresAt <= command.at) conflict('stale-lease', 'runner lease renewal must advance the expiry');
     const row = this.#job(command.jobId);
+    if (!isRunnerLeaseRenewableState(String(row.state) as JobState)) conflict('stale-predecessor', 'runner lease predecessor changed');
+    if (row.runner_unit !== command.runnerUnit || row.runner_lease_owner !== command.owner) conflict('stale-runner-owner', 'runner identity changed');
+    if (row.cleanup_fence_generation !== null || row.cleanup_admission_id !== null) conflict('fenced', 'runner is fenced for recovery');
+    if (row.runner_lease_expires_at !== command.expectedExpiresAt) conflict('stale-lease', 'runner lease identity changed');
     requirePersistedTimeline(this.#db, command.jobId, [['runner renewal time', command.at], ['runner new expiry', command.expiresAt]]);
     requireChronology([['accepted time', String(row.accepted_at)], ['runner start time', row.runner_started_at === null ? null : String(row.runner_started_at)], ['runner renewal time', command.at]]);
-    const result = this.#db.prepare(`UPDATE jobs SET runner_lease_expires_at=?, updated_at=? WHERE job_id=? AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=?
+    const result = this.#db.prepare(`UPDATE jobs SET runner_lease_expires_at=?, updated_at=? WHERE job_id=? AND state IN (${RUNNER_LEASE_RENEWABLE_STATE_SQL}) AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=?
       AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(command.expiresAt, command.at, command.jobId, command.runnerUnit, command.owner, command.expectedExpiresAt, command.at);
     if (Number(result.changes) !== 1) conflict('stale-lease', 'runner lease renewal lost ownership');
     this.#event(command.jobId, 'state', { state: 'runner_lease_renewed' }, command.at);
@@ -1512,8 +1582,8 @@ export class OwnershipStore {
   }
 
   #container(command: Extract<RunnerWriteCommand, { kind: 'container' }>): void {
-    this.#runnerGuard(command, undefined); hash(command.imageDigest, 'container image digest'); instant(command.occurredAt, 'container event time');
-    if (!['created', 'started', 'stopped', 'removed'].includes(command.lifecycle)) throw new OwnershipValidationError('container lifecycle is invalid');
+    this.#runnerGuard(command, ACTIVE_RECOVERY_STATES); hash(command.imageDigest, 'container image digest'); instant(command.occurredAt, 'container event time');
+    if (!(CONTAINER_LIFECYCLES as readonly string[]).includes(command.lifecycle)) throw new OwnershipValidationError('container lifecycle is invalid');
     const row = this.#job(command.jobId); requirePersistedTimeline(this.#db, command.jobId, [['container command time', command.at], ['container occurred time', command.occurredAt], ['container created time', command.createdAt], ['container started time', command.startedAt], ['container stopped time', command.stoppedAt], ['container removed time', command.removedAt]]); const labelJson = labels(command.labels, String(row.job_id), String(row.target_manifest_sha256)); const mount = json(command.mount, 'container mount', true); const environment = json(command.environment, 'container environment', true);
     const security = json(command.security, 'container security', true); const inspection = json(command.inspection, 'container inspection', true);
     if (row.container_id !== null && row.container_id !== command.containerId) conflict('identity-mismatch', 'container ID changed');
@@ -1527,11 +1597,17 @@ export class OwnershipStore {
     const result = this.#db.prepare(`UPDATE jobs SET container_id=?, container_name=?, container_image_digest=?, container_label_job_id=?, container_label_manifest_sha=?, container_labels_json=?,
       container_mount_json=?, container_env_json=?, container_security_json=?, container_inspection_json=?, container_created_at=COALESCE(container_created_at, ?),
       container_started_at=COALESCE(container_started_at, ?), container_stopped_at=COALESCE(container_stopped_at, ?), container_removed_at=COALESCE(container_removed_at, ?),
-      container_cleanup_outcome=COALESCE(container_cleanup_outcome, ?), updated_at=? WHERE job_id=? AND state NOT IN ('succeeded','failed','cancelled','interrupted')
+      container_cleanup_outcome=COALESCE(container_cleanup_outcome, ?), updated_at=? WHERE job_id=? AND state IN (${ACTIVE_RECOVERY_STATE_SQL})
       AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL
       AND (container_id IS NULL OR container_id=?)`).run(command.containerId, command.containerName, command.imageDigest, command.jobId, JSON.parse(labelJson)['org.osi.image-builder.manifest-sha'], labelJson, mount, environment, security, inspection, created, started, stopped, removed, command.cleanupOutcome ?? null, command.at, command.jobId, command.owner, command.runnerUnit, command.leaseExpiresAt, command.at, command.containerId);
     if (Number(result.changes) !== 1) conflict('cas-lost', 'runtime identity CAS lost');
     this.#event(command.jobId, 'container', { lifecycle: command.lifecycle, containerId: command.containerId }, command.at);
+  }
+
+  #validatePublishPreflight(command: Extract<RunnerWriteCommand, { kind: 'publish' }>): void {
+    const row = this.#db.prepare('SELECT * FROM jobs WHERE job_id=?').get(command.jobId) as Row | undefined;
+    if (!row || String(row.state) !== command.expectedState || row.runner_unit !== command.runnerUnit || row.runner_lease_owner !== command.owner || row.runner_lease_expires_at !== command.leaseExpiresAt || row.cleanup_fence_generation !== null || row.cleanup_admission_id !== null) return;
+    validatePublishEffectiveSemantics(command, row);
   }
 
   #artifact(command: Extract<RunnerWriteCommand, { kind: 'artifact' }>): void {
@@ -1548,11 +1624,7 @@ export class OwnershipStore {
   }
 
   #publish(command: Extract<RunnerWriteCommand, { kind: 'publish' }>): void {
-    this.#runnerGuard(command, command.expectedState); const row = this.#job(command.jobId); requirePersistedTimeline(this.#db, command.jobId, [['publish command time', command.at], ['publish start time', command.startedAt], ['publish finish time', command.publishedAt]]); const now = command.at; let result;
-    if (!['staged', 'publishing', 'published', 'blocked'].includes(command.state)) throw new OwnershipValidationError('publish state is invalid');
-    if (command.startedAt !== undefined) instant(command.startedAt, 'publish start time'); if (command.publishedAt !== undefined) instant(command.publishedAt, 'publish finish time');
-    requireChronology([['publish start time', command.startedAt], ['publish finish time', command.publishedAt]]);
-    requireChronology([['accepted time', String(row.accepted_at)], ['artifact mtime', row.artifact_mtime === null ? null : String(row.artifact_mtime)], ['persisted publish start time', row.publish_started_at === null ? null : String(row.publish_started_at)], ['publish start time', command.startedAt], ['publish finish time', command.publishedAt], ['publish write time', command.at]]);
+    this.#runnerGuard(command, command.expectedState); const row = this.#job(command.jobId); if (!['staged', 'publishing', 'published', 'blocked'].includes(command.state)) throw new OwnershipValidationError('publish state is invalid'); if (command.startedAt !== undefined) instant(command.startedAt, 'publish start time'); if (command.publishedAt !== undefined) instant(command.publishedAt, 'publish finish time'); validatePublishEffectiveSemantics(command, row); requirePersistedTimeline(this.#db, command.jobId, [['publish command time', command.at], ['publish start time', command.startedAt], ['publish finish time', command.publishedAt]]); const now = command.at; let result;
     if (command.state === 'publishing') {
       if (!command.finalDirectory || !command.finalPath) throw new TypeError('publishing needs final paths');
       confinedPath(command.finalDirectory, 'publish final directory'); confinedPath(command.finalPath, 'publish final path');
@@ -1800,13 +1872,13 @@ export class OwnershipStore {
     WHERE jobs.job_id=ordered.job_id AND jobs.queue_state='queued'`).run();
   }
 
-  #runnerGuard(command: CommonRunner, expectedState: JobState | undefined, skipLatest = false): void {
+  #runnerGuard(command: CommonRunner, expectedState: JobState | readonly JobState[] | undefined, skipLatest = false): void {
     instant(command.at, 'runner write time'); instant(command.leaseExpiresAt, 'runner lease expiry'); runnerUnit(command.jobId, command.runnerUnit); string(command.owner, 'runner owner');
-    if (!skipLatest) requirePersistedTimeline(this.#db, command.jobId, [['runner command time', command.at]]);
     const row = this.#job(command.jobId);
-    if (expectedState !== undefined && row.state !== expectedState) conflict('stale-predecessor', 'runner predecessor changed');
+    if (expectedState !== undefined && !matchesExpectedState(String(row.state), expectedState)) conflict('stale-predecessor', 'runner predecessor changed');
     if (row.runner_unit !== command.runnerUnit || row.runner_lease_owner !== command.owner) conflict('stale-runner-owner', 'runner identity changed');
     if (row.cleanup_fence_generation !== null || row.cleanup_admission_id !== null) conflict('fenced', 'runner is fenced for recovery');
+    if (!skipLatest) requirePersistedTimeline(this.#db, command.jobId, [['runner command time', command.at]]);
     if (row.runner_lease_expires_at !== command.leaseExpiresAt || row.runner_lease_expires_at <= command.at) conflict('stale-lease', 'runner lease is stale');
   }
 
