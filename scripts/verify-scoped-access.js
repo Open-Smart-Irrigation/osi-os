@@ -29,8 +29,6 @@ const PUBLIC_ALLOWLIST = new Set([
 const PHASE_C_PENDING = new Set([
   'post-devices-http',
   'delete-device-http',
-  'post-zone-http',
-  'delete-zone-http',
   'assign-device-http',
   'unassign-device-http',
   'put-dendro-http',

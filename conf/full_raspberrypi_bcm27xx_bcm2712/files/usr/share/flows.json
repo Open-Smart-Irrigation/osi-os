@@ -959,7 +959,7 @@
     "y": 700,
     "wires": [
       [
-        "post-zone-auth"
+        "scoped-zone-create-router"
       ]
     ]
   },
@@ -1233,7 +1233,7 @@
     "y": 1020,
     "wires": [
       [
-        "delete-zone-auth"
+        "scoped-zone-delete-router"
       ]
     ]
   },
@@ -11937,6 +11937,76 @@
     "wires": [
       [
         "catalog-response"
+      ],
+      [
+        "device-response"
+      ]
+    ]
+  },
+  {
+    "id": "scoped-zone-create-router",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Scoped Zone Create",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') return [msg, null];\nlet db;\nlet transactionOpen = false;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\nconst run = function(sql, params) {\n  return new Promise(function(resolve, reject) {\n    db.run(sql, params || [], function(error) {\n      if (error) return reject(error);\n      resolve({\n        changes: this && Number(this.changes || 0),\n        lastID: this && Number(this.lastID || 0)\n      });\n    });\n  });\n};\ntry {\nconst scopeLoad = osiLib.require('scope');\nif (!scopeLoad.ok) {\n  node.error('zone lifecycle: scope module unavailable: ' + scopeLoad.error, msg);\n  const error = new Error('scope resolver unavailable');\n  error.statusCode = 500;\n  throw error;\n}\nconst scope = scopeLoad.value;\nconst auth = scope.verifyBearer(\n  msg.req && msg.req.headers && msg.req.headers.authorization,\n  {\n    configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n    fs: global.get('fs'),\n    warn: function(message) { node.warn(message); }\n  }\n);\ndb = new osiDb.Database('/data/db/farming.db');\nconst actor = await db.get(\n  'SELECT id, user_uuid, role FROM users WHERE id = ? AND username = ? LIMIT 1',\n  [auth.userId, auth.username]\n);\nif (!actor || !actor.user_uuid) {\n  const error = new Error('Unauthorized');\n  error.statusCode = 401;\n  throw error;\n}\nconst actorScope = await scope.assertFreshRole(\n  db,\n  actor.user_uuid,\n  actor.role,\n  { scopedMode: true }\n);\nif (actorScope.role === 'viewer') {\n  const error = new Error('insufficient role');\n  error.statusCode = 403;\n  throw error;\n}\n  const body = msg.req && msg.req.body || msg.payload || {};\n  const name = String(body.name || '').trim();\n  if (!name) {\n    const error = new Error('Zone name is required');\n    error.statusCode = 400;\n    throw error;\n  }\n  const now = new Date().toISOString();\n  const zoneUuid = crypto.randomBytes(16).toString('hex');\n  const assignmentUuid = crypto.randomBytes(16).toString('hex');\n  const gatewayEui = String(\n    env.get('DEVICE_EUI') || env.get('GATEWAY_DEVICE_EUI') || 'UNKNOWN'\n  ).trim().toUpperCase();\n\n  await run('BEGIN IMMEDIATE');\n  transactionOpen = true;\n  const inserted = await run(\n    'INSERT INTO irrigation_zones ' +\n    '(name, user_id, zone_uuid, gateway_device_eui, sync_version, created_at, updated_at) ' +\n    'VALUES (?, ?, ?, ?, 1, ?, ?)',\n    [name, actor.id, zoneUuid, gatewayEui, now, now]\n  );\n  await run(\n    'INSERT INTO user_zone_assignments ' +\n    '(assignment_uuid, user_uuid, zone_uuid, assigned_by_user_uuid, ' +\n    'gateway_device_eui, sync_version, created_at, updated_at) ' +\n    'VALUES (?, ?, ?, ?, ?, 1, ?, ?)',\n    [\n      assignmentUuid,\n      actor.user_uuid,\n      zoneUuid,\n      actor.user_uuid,\n      gatewayEui,\n      now,\n      now\n    ]\n  );\n  await run('COMMIT');\n  transactionOpen = false;\n  scope.invalidateScope(actor.user_uuid);\n\n  msg.statusCode = 201;\n  msg.payload = {\n    id: inserted.lastID,\n    name,\n    zone_uuid: zoneUuid,\n    gateway_device_eui: gatewayEui,\n    sync_version: 1,\n    deleted_at: null,\n    device_count: 0,\n    created_at: now,\n    updated_at: now,\n    schedule: null\n  };\n  return [null, msg];\n} catch (error) {\n  if (transactionOpen) {\n    try {\n      await run('ROLLBACK');\n    } catch (rollbackError) {\n      node.warn('zone create rollback: ' + String(rollbackError && rollbackError.message ? rollbackError.message : rollbackError));\n    }\n  }\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    message: msg.statusCode === 403\n      ? 'Forbidden'\n      : String(error && error.message || error)\n  };\n  return [null, msg];\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('zone create close: ' + String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 350,
+    "y": 700,
+    "wires": [
+      [
+        "post-zone-auth"
+      ],
+      [
+        "device-response"
+      ]
+    ]
+  },
+  {
+    "id": "scoped-zone-delete-router",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Scoped Zone Delete",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') return [msg, null];\nlet db;\nlet transactionOpen = false;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\nconst run = function(sql, params) {\n  return new Promise(function(resolve, reject) {\n    db.run(sql, params || [], function(error) {\n      if (error) return reject(error);\n      resolve(Number(this && this.changes || 0));\n    });\n  });\n};\ntry {\nconst scopeLoad = osiLib.require('scope');\nif (!scopeLoad.ok) {\n  node.error('zone lifecycle: scope module unavailable: ' + scopeLoad.error, msg);\n  const error = new Error('scope resolver unavailable');\n  error.statusCode = 500;\n  throw error;\n}\nconst scope = scopeLoad.value;\nconst auth = scope.verifyBearer(\n  msg.req && msg.req.headers && msg.req.headers.authorization,\n  {\n    configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n    fs: global.get('fs'),\n    warn: function(message) { node.warn(message); }\n  }\n);\ndb = new osiDb.Database('/data/db/farming.db');\nconst actor = await db.get(\n  'SELECT id, user_uuid, role FROM users WHERE id = ? AND username = ? LIMIT 1',\n  [auth.userId, auth.username]\n);\nif (!actor || !actor.user_uuid) {\n  const error = new Error('Unauthorized');\n  error.statusCode = 401;\n  throw error;\n}\nconst actorScope = await scope.assertFreshRole(\n  db,\n  actor.user_uuid,\n  actor.role,\n  { scopedMode: true }\n);\nif (actorScope.role === 'viewer') {\n  const error = new Error('insufficient role');\n  error.statusCode = 403;\n  throw error;\n}\n  const zoneId = Number(msg.req && msg.req.params && msg.req.params.id);\n  if (!Number.isInteger(zoneId)) {\n    const error = new Error('Invalid zone ID');\n    error.statusCode = 400;\n    throw error;\n  }\n  const zone = await db.get(\n    'SELECT id, zone_uuid, user_id, sync_version FROM irrigation_zones ' +\n    'WHERE id = ? AND deleted_at IS NULL',\n    [zoneId]\n  );\n  if (!zone || !zone.zone_uuid) {\n    const error = new Error('zone not found');\n    error.statusCode = 404;\n    throw error;\n  }\n\n  const grantees = await db.all(\n    'SELECT user_uuid FROM user_zone_assignments ' +\n    'WHERE zone_uuid = ? AND deleted_at IS NULL ORDER BY user_uuid',\n    [zone.zone_uuid]\n  );\n  if (actorScope.role !== 'admin') {\n    await scope.assertFreshZoneAccess(\n      db,\n      actor.user_uuid,\n      zone.zone_uuid,\n      { scopedMode: true }\n    );\n    const soleGrant =\n      grantees.length === 1 &&\n      grantees[0].user_uuid === actor.user_uuid;\n    const soleOwner =\n      Number(zone.user_id) === Number(actor.id) &&\n      grantees.length === 0;\n    if (!soleGrant && !soleOwner) {\n      const error = new Error('zone has other scope holders; admin required');\n      error.statusCode = 409;\n      throw error;\n    }\n  }\n\n  const now = new Date().toISOString();\n  await run('BEGIN IMMEDIATE');\n  transactionOpen = true;\n  await run(\n    'UPDATE devices SET irrigation_zone_id = NULL, updated_at = ?, ' +\n    'sync_version = COALESCE(sync_version, 0) + 1 ' +\n    'WHERE irrigation_zone_id = ? AND deleted_at IS NULL',\n    [now, zoneId]\n  );\n  await run(\n    'UPDATE journal_plots SET zone_uuid = NULL, updated_at = ?, ' +\n    'sync_version = sync_version + 1 ' +\n    'WHERE zone_uuid = ? AND deleted_at IS NULL',\n    [now, zone.zone_uuid]\n  );\n  await run(\n    'UPDATE user_zone_assignments SET deleted_at = ?, updated_at = ?, ' +\n    'sync_version = sync_version + 1 ' +\n    'WHERE zone_uuid = ? AND deleted_at IS NULL',\n    [now, now, zone.zone_uuid]\n  );\n  await run(\n    'UPDATE irrigation_schedules SET enabled = 0, deleted_at = ?, updated_at = ?, ' +\n    'sync_version = COALESCE(sync_version, 0) + 1 ' +\n    'WHERE irrigation_zone_id = ? AND deleted_at IS NULL',\n    [now, now, zoneId]\n  );\n  await run(\n    'UPDATE irrigation_zones SET deleted_at = ?, updated_at = ?, ' +\n    'sync_version = COALESCE(sync_version, 0) + 1 ' +\n    'WHERE id = ? AND deleted_at IS NULL',\n    [now, now, zoneId]\n  );\n  await run('COMMIT');\n  transactionOpen = false;\n  scope.invalidateScope(actor.user_uuid);\n  for (const grantee of grantees) scope.invalidateScope(grantee.user_uuid);\n\n  msg.statusCode = 200;\n  msg.payload = { message: 'Zone deleted successfully' };\n  return [null, msg];\n} catch (error) {\n  if (transactionOpen) {\n    try {\n      await run('ROLLBACK');\n    } catch (rollbackError) {\n      node.warn('zone delete rollback: ' + String(rollbackError && rollbackError.message ? rollbackError.message : rollbackError));\n    }\n  }\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    message: msg.statusCode === 404\n      ? 'zone not found'\n      : (msg.statusCode === 403 ? 'Forbidden' : String(error && error.message || error))\n  };\n  return [null, msg];\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('zone delete close: ' + String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 350,
+    "y": 1020,
+    "wires": [
+      [
+        "delete-zone-auth"
       ],
       [
         "device-response"
