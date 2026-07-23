@@ -28,9 +28,10 @@ Contract rollout has three independent facts:
 - `cloudIssuerEnabled` means the cloud may issue its commands.
 
 Schema acceptance must land before either enablement flag becomes true. An
-accepted but disabled capability is staged, not active. Journal and scoped
-access remain staged until their dedicated parity slices prove server handlers
-and edge application.
+accepted but disabled capability is staged, not active. Journal sync is active
+after its edge application and server mirror/issuer parity slice. Scoped access
+remains staged until its dedicated parity slice proves server handlers and edge
+application.
 
 ## Versioning
 

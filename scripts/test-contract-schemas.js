@@ -910,7 +910,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
     staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
     const exactStaging = staging && staging.version === 1 &&
         JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS) &&
+        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify([]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',
             'JOURNAL_ENTRY_VOIDED',
@@ -919,11 +919,8 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify(SCOPED_ACCESS_EVENT_OPS) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([
-            ...Object.keys(JOURNAL_EVENT_BINDINGS),
-            ...SCOPED_ACCESS_EVENT_OPS,
-        ]);
-    reportCheck(exactStaging, 'staging manifest pins the exact journal and scoped-access sets', 'staging manifest drifted from the exact journal and scoped-access sets');
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(SCOPED_ACCESS_EVENT_OPS);
+    reportCheck(exactStaging, 'staging manifest enables journal and pins scoped-access deferrals', 'staging manifest drifted from the journal rollout and scoped-access deferrals');
 }
 
 const journalEntry = {

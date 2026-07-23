@@ -103,18 +103,20 @@ const JOURNAL_EVENT_OPS = [
   'JOURNAL_PLOT_GROUP_UPSERTED',
 ];
 
-function exactJournalStaging() {
+const SCOPED_ACCESS_EVENT_OPS = [
+  'USER_PLOT_ASSIGNMENT_DELETED',
+  'USER_PLOT_ASSIGNMENT_UPSERTED',
+  'USER_UPSERTED',
+  'USER_ZONE_ASSIGNMENT_DELETED',
+  'USER_ZONE_ASSIGNMENT_UPSERTED',
+];
+
+function exactRolloutStaging() {
   return {
     version: 1,
     commands: {
       edgeDeferred: [],
-      cloudDeferred: [
-        'UPSERT_JOURNAL_ENTRY',
-        'VOID_JOURNAL_ENTRY',
-        'UPSERT_JOURNAL_CUSTOM_VOCAB',
-        'UPSERT_JOURNAL_PLOT',
-        'UPSERT_JOURNAL_PLOT_GROUP',
-      ],
+      cloudDeferred: [],
     },
     eventOps: {
       edgeModuleOwned: [
@@ -124,8 +126,8 @@ function exactJournalStaging() {
         'JOURNAL_PLOT_UPSERTED',
         'JOURNAL_PLOT_GROUP_UPSERTED',
       ],
-      edgeDeferred: [],
-      cloudDeferred: JOURNAL_EVENT_OPS.slice(),
+      edgeDeferred: SCOPED_ACCESS_EVENT_OPS.slice(),
+      cloudDeferred: SCOPED_ACCESS_EVENT_OPS.slice(),
     },
   };
 }
@@ -145,7 +147,7 @@ function createStagedParityFixture(overrides) {
   fs.writeFileSync(schemaPath, JSON.stringify({
     type: 'object',
     properties: {
-      op: { enum: ['DEVICE_DATA_APPENDED'].concat(JOURNAL_EVENT_OPS) },
+      op: { enum: ['DEVICE_DATA_APPENDED'].concat(JOURNAL_EVENT_OPS, SCOPED_ACCESS_EVENT_OPS) },
       payload: {
         type: 'object',
         required: ['contract_version'],
@@ -187,6 +189,9 @@ class EdgeSyncService {
   private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
     switch (event.op()) {
       case "DEVICE_DATA_APPENDED" -> { return true; }
+      case "JOURNAL_ENTRY_UPSERTED", "JOURNAL_ENTRY_VOIDED",
+           "JOURNAL_VOCAB_UPSERTED", "JOURNAL_PLOT_UPSERTED",
+           "JOURNAL_PLOT_GROUP_UPSERTED" -> { return true; }
       default -> { return false; }
     }
   }
@@ -205,7 +210,7 @@ class EdgeSyncService {
       { name: 'journal-lifecycle', path: modulePath },
       { name: 'journal-api', path: apiModulePath },
     ],
-    stagingManifest: exactJournalStaging(),
+    stagingManifest: exactRolloutStaging(),
   }, overrides || {});
 }
 
@@ -404,14 +409,14 @@ test('default server lookup reaches a sibling repo from a nested worktree', () =
   }
 });
 
-test('parity accepts only the exact staged journal ownership split', () => {
+test('parity accepts enabled journal operations with only scoped access staged', () => {
   const result = checkSyncOpParity(createStagedParityFixture());
 
   assert.equal(result.ok, true, result.message);
 });
 
-test('parity rejects arbitrary additions to the staged journal exemptions', () => {
-  const stagingManifest = exactJournalStaging();
+test('parity rejects arbitrary additions to the staged operation exemptions', () => {
+  const stagingManifest = exactRolloutStaging();
   stagingManifest.eventOps.cloudDeferred.push('JOURNAL_BOGUS_UPSERTED');
 
   const result = checkSyncOpParity(createStagedParityFixture({ stagingManifest }));

@@ -4,8 +4,8 @@
     {
       "name": "journal_sync_v1",
       "schemaAccepted": true,
-      "edgeProducerEnabled": false,
-      "cloudIssuerEnabled": false
+      "edgeProducerEnabled": true,
+      "cloudIssuerEnabled": true
     },
     {
       "name": "scoped_access_sync_v1",
@@ -68,6 +68,11 @@
       "DEVICE_UNCLAIMED",
       "GATEWAY_LOCATION_UPSERTED",
       "IRRIGATION_EVENT_APPENDED",
+      "JOURNAL_ENTRY_UPSERTED",
+      "JOURNAL_ENTRY_VOIDED",
+      "JOURNAL_PLOT_GROUP_UPSERTED",
+      "JOURNAL_PLOT_UPSERTED",
+      "JOURNAL_VOCAB_UPSERTED",
       "SCHEDULE_UPSERTED",
       "WORK_REQUEST_SUBMITTED",
       "ZONE_CONFIG_UPSERTED",
@@ -88,6 +93,11 @@
       "DEVICE_UNCLAIMED",
       "GATEWAY_LOCATION_UPSERTED",
       "IRRIGATION_EVENT_APPENDED",
+      "JOURNAL_ENTRY_UPSERTED",
+      "JOURNAL_ENTRY_VOIDED",
+      "JOURNAL_PLOT_GROUP_UPSERTED",
+      "JOURNAL_PLOT_UPSERTED",
+      "JOURNAL_VOCAB_UPSERTED",
       "SCHEDULE_UPSERTED",
       "WORK_REQUEST_SUBMITTED",
       "ZONE_CONFIG_UPSERTED",
@@ -98,11 +108,6 @@
       "ZONE_UPSERTED"
     ],
     "staged": [
-      "JOURNAL_ENTRY_UPSERTED",
-      "JOURNAL_ENTRY_VOIDED",
-      "JOURNAL_PLOT_GROUP_UPSERTED",
-      "JOURNAL_PLOT_UPSERTED",
-      "JOURNAL_VOCAB_UPSERTED",
       "USER_PLOT_ASSIGNMENT_DELETED",
       "USER_PLOT_ASSIGNMENT_UPSERTED",
       "USER_UPSERTED",
@@ -188,15 +193,14 @@
       "UPSERT_DEVICE_SOIL_DEPTHS",
       "UPDATE_SCHEDULE",
       "UPSERT_SCHEDULE",
-      "WORK_REQUEST_STATUS"
-    ],
-    "staged": [
+      "WORK_REQUEST_STATUS",
       "UPSERT_JOURNAL_ENTRY",
       "VOID_JOURNAL_ENTRY",
       "UPSERT_JOURNAL_CUSTOM_VOCAB",
       "UPSERT_JOURNAL_PLOT",
       "UPSERT_JOURNAL_PLOT_GROUP"
-    ]
+    ],
+    "staged": []
   },
   "commandAckResults": [
     {

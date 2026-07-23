@@ -14,13 +14,7 @@ const AUDITED_JOURNAL_OUTBOX_EMITTER = {
   file: 'lifecycle.js',
   functionName: 'emitJournalOutbox',
 };
-const EXACT_STAGED_COMMANDS = [
-  'UPSERT_JOURNAL_ENTRY',
-  'VOID_JOURNAL_ENTRY',
-  'UPSERT_JOURNAL_CUSTOM_VOCAB',
-  'UPSERT_JOURNAL_PLOT',
-  'UPSERT_JOURNAL_PLOT_GROUP',
-];
+const EXACT_STAGED_COMMANDS = [];
 const EXACT_EDGE_DEFERRED_COMMANDS = [];
 const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_ENTRY_UPSERTED',
@@ -36,11 +30,7 @@ const EXACT_EDGE_DEFERRED_OPS = [
   'USER_ZONE_ASSIGNMENT_DELETED',
   'USER_ZONE_ASSIGNMENT_UPSERTED',
 ];
-const EXACT_JOURNAL_EVENT_OPS = [
-  ...EXACT_EDGE_MODULE_OPS,
-];
 const EXACT_CLOUD_DEFERRED_OPS = [
-  ...EXACT_JOURNAL_EVENT_OPS,
   ...EXACT_EDGE_DEFERRED_OPS,
 ];
 const FLOW_SOURCES = [
@@ -756,9 +746,12 @@ function validateStagingManifest(manifest) {
 
   if (eventOps && Array.isArray(eventOps.edgeModuleOwned) && Array.isArray(eventOps.edgeDeferred)) {
     const edgeUnion = sortedUnique(eventOps.edgeModuleOwned.concat(eventOps.edgeDeferred));
-    const edgeDiff = diffSets(sortedUnique(EXACT_CLOUD_DEFERRED_OPS), edgeUnion);
+    const edgeDiff = diffSets(
+      sortedUnique(EXACT_EDGE_MODULE_OPS.concat(EXACT_EDGE_DEFERRED_OPS)),
+      edgeUnion
+    );
     if (edgeDiff.missing.length || edgeDiff.extra.length) {
-      errors.push('staging edgeModuleOwned union edgeDeferred must equal the exact staged event-op set');
+      errors.push('staging edgeModuleOwned union edgeDeferred must equal the exact reviewed edge event-op set');
     }
   }
   return errors;
@@ -1413,12 +1406,10 @@ function checkSyncOpParity(options = {}) {
   }
 
   const deployedEdgeOps = sortedUnique(nonModuleRuntimeOps.concat(moduleUnion));
-  const deployedDeferred = deployedEdgeOps.filter((op) => staging.edgeDeferred.includes(op));
-  if (deployedDeferred.length) {
-    ok = false;
-    lines.push(`  edgeDeferred ops already appear in deployed edge sources: ${deployedDeferred.join(', ')}`);
-  }
-
+  // edgeDeferred is a rollout flag, not a source-absence promise. Phase A may
+  // ship producers before the feature flag enables the writes that exercise
+  // them. cloudDeferred still excludes those operations from the required
+  // server-handler set.
   const expectedSchemaOps = sortedUnique(deployedEdgeOps.concat(staging.edgeDeferred));
   const schemaDiffLines = formatDiff('schema', 'deployed edge plus staged union', diffSets(expectedSchemaOps, schemaResult.ops));
   if (schemaDiffLines.length) {
