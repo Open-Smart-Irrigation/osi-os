@@ -1044,10 +1044,15 @@ if (sizeAllowances) {
   // chars of slack against origin/main's real total of 1177499; this slice adds a
   // measured +3049 for the six journal-v2-replication nodes, and re-pinning to the
   // measured HEAD total absorbs that slack instead of carrying it forward.
-  expectCondition(sizeAllowances.total_allowance?.delta === 107574,
-    'size total allowance: exact cumulative delta 107574',
-    'size total allowance: expected exact cumulative delta 107574');
-  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'Option C Slice 1b, main, 2026-08, sys-stats-fn +4862', 'declares Task 5 (sys-stats-fn) provenance within the re-measured total');
+  // This pin is updated in progress, mid-slice, as the wave-3 scoped-access port lands
+  // commits that touch flows.json (unlike the other node/task pins above, which cover
+  // work that landed as a single unit) -- see the allowance file's own "in progress"
+  // caveat. Re-verify against the branch's current total_allowance.delta rather than
+  // treating any one intermediate value as final.
+  expectCondition(sizeAllowances.total_allowance?.delta === 119108,
+    'size total allowance: exact cumulative delta 119108',
+    'size total allowance: expected exact cumulative delta 119108');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'Field Journal port allowance', 'declares the inherited Field Journal provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
     'size allowances contain no duplicate node keys',

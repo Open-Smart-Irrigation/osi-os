@@ -54,8 +54,8 @@
       "reason": "FW-T5: default a missing zone timezone to the app_settings gateway_timezone (table-missing-safe), instead of silently relying on the irrigation_zones.timezone column DEFAULT 'UTC'; adds an async osiDb read/close and error-wrapping around the existing INSERT build (exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 1080 -> HEAD 2370 = +1290, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
     },
     "get-devices-query": {
-      "delta": 1202,
-      "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 1499 -> branch base a38c9db6 1499 -> HEAD 2701 = +1202, all +1202 of it this SDI-12 port. SDI-12 contribution: the devices list joins sdi12_recipe_deployments and sdi12_identify_attempts, projects their columns, and binds the owner id instead of interpolating it."
+      "delta": 1595,
+      "reason": "Wave 3 scoped-access port (AgroLink 29ff9d08, feat(api): enforce scope on zone and device reads): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 2701 -> HEAD 4296 = +1595, superseding the previous +1202 SDI-12-only entry (which is fully subsumed: the SDI-12 joins/columns and the bound-$userId hardening are preserved verbatim in the merged query). Scope contribution (+393 net vs the SDI-12 baseline): when OSI_SCOPED_ACCESS=1, the WHERE clause becomes a zone-membership predicate (iz.zone_uuid IN (...) OR d.type_id IN ('SENSECAP_S2120','AQUASCOPE_LORAIN')) built from osi-scope-helper's listScopeZoneUuids, resolved and escaped before the query runs; unscoped mode is unchanged (still 'd.user_id = $userId', bound)."
     },
     "write-strega-expectation": {
       "delta": 1034,
@@ -138,8 +138,8 @@
       "reason": "valve control: recent-actuations SELECT exposes valve_actuation_expectations.trigger (+20); final-fix-wave MINOR 3: defensive CREATE TABLE IF NOT EXISTS fallback for never-migrated Pis was missing the trigger column entirely, 500ing the SELECT vae.trigger on those gateways - added `trigger TEXT` to the fallback DDL to match the real (migrated) schema (+34) [re-measured on port/sdi12-edge: origin/main 2957 -> HEAD 3011 = +54, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
     },
     "zone-env-fn": {
-      "delta": 29,
-      "reason": "FW-T1b Gap B: exclude STALE_NO_OBSERVATION alongside CANCELLED from estimated-irrigation litres so a never-observed command does not credit phantom litres to the zone water balance (exact delta vs origin/main) [re-measured on port/sdi12-edge: origin/main 39231 -> HEAD 39260 = +29, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+      "delta": 854,
+      "reason": "Wave 3 scoped-access port (AgroLink 29ff9d08, feat(api): enforce scope on zone and device reads): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 39260 -> HEAD 40114 = +854, superseding the previous +29 FW-T1b-only entry (preserved verbatim: the STALE_NO_OBSERVATION exclusion from estimated-irrigation litres is unchanged in the merge). Scope contribution (+825 net vs the FW-T1b baseline): when OSI_SCOPED_ACCESS=1, resolves the zone by id via osi-scope-helper's resolveZoneUuidById and asserts access via assertZoneAccess before the environment summary query runs; the zone/device WHERE clauses drop their iz.user_id/d.user_id predicate in scoped mode (already covered by the assertion) and keep it unscoped."
     },
     "strega-today-liters-fn": {
       "delta": 23,
@@ -252,11 +252,19 @@
     "dendro-raw-fn": {
       "delta": 10,
       "reason": "issue #6: restore escaped backslashes in the corrupted toBase64Url regex (invalid /+/  and comment-swallowing ///), which the node needs to compile at all"
+    },
+    "get-zones-query": {
+      "delta": 1124,
+      "reason": "Wave 3 scoped-access port (AgroLink 29ff9d08, feat(api): enforce scope on zone and device reads): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 3564 -> HEAD 4688 = +1124. New node-local scope gate: when OSI_SCOPED_ACCESS=1, resolves the caller's owned-plus-granted zone UUID set via osi-scope-helper's listScopeZoneUuids and scopes the zone list query to iz.zone_uuid IN (...); unscoped mode keeps the existing iz.user_id predicate."
+    },
+    "dendro-zone-rec-fn": {
+      "delta": 783,
+      "reason": "Wave 3 scoped-access port (AgroLink 29ff9d08, feat(api): enforce scope on zone and device reads): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 4617 -> HEAD 5400 = +783. New node-local scope gate: when OSI_SCOPED_ACCESS=1, asserts the caller has zone access via osi-scope-helper's assertZoneAccess before returning zone recommendations; unscoped mode keeps the existing owner check."
     }
   },
   "total_allowance": {
-    "delta": 114752,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress -- this figure will be re-tightened again at the end of the slice once every scope commit lands. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink 4eb05522, feat(auth): complete scoped access phase A) 1,187,726 chars = 114,752. Measured, not estimated, and not a sum-of-sums. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance as recorded on origin/main (port/wave3-edge-journal), itself dual-provenance per its own entry (valve-control + SDI-12 105,552 plus the 3,049-char journal-v2-replication addition). New half: +7,178 is this scope port so far -- two new function nodes on the device-api tab, api-me-auth 'Decode Token' (3,076) and api-me-fn 'Resolve Current User Scope' (1,745), summing to 4,821; plus five existing nodes growing (auth-register-func +251, auth-login-func +54, auth-process-result +810, auth-db-insert +1167, history-api-router-fn +75 -- the last already covered by its own larger pre-existing allowance), summing to 2,357. 4,821 + 2,357 = 7,178 exactly. A node-by-node diff of flows.json against origin/main confirms 2 added, 5 changed, 0 removed."
+    "delta": 119108,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress -- this figure will be re-tightened again at the end of the slice once every scope commit lands. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink 29ff9d08, feat(api): enforce scope on zone and device reads) 1,192,082 chars = 119,108. Measured, not estimated, and not a sum-of-sums. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance as recorded on origin/main (port/wave3-edge-journal), itself dual-provenance per its own entry. New half: +11,534 is this scope port so far -- two new function nodes (api-me-auth 3,076 + api-me-fn 1,745 = 4,821) plus nine existing nodes growing: auth-register-func +251, auth-login-func +54, auth-process-result +810, auth-db-insert +1167 (all AgroLink 4eb05522); get-devices-query +1595, get-zones-query +1124, dendro-zone-rec-fn +783, zone-env-fn +854, history-api-router-fn +75 -- the last already covered by its own larger pre-existing allowance -- (all AgroLink 29ff9d08), summing to 6,713. 4,821 + 6,713 = 11,534 exactly. A node-by-node diff of flows.json against origin/main confirms 2 added, 9 changed, 0 removed."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
