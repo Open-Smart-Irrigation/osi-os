@@ -2,15 +2,15 @@
 
 ## Preparation record: 2026-07-23
 
-**State:** Orchestrator inputs prepared and published; autonomous
-implementation has not started.
+**State:** Orchestrator inputs integrated into `design-sync/agrolink`;
+autonomous implementation has not started.
 
 ### Repository bases
 
 | Repository | Branch/worktree | Base |
 |---|---|---|
-| OSI OS | `docs/agrolink-parity-orchestrator-prep` in `.worktrees/agrolink-parity-orchestrator-prep` | `f5ca4a1fc4d3dc591c1e320a1f905cdb41bebc74` |
-| OSI OS target | `design-sync/agrolink` | `f5ca4a1fc4d3dc591c1e320a1f905cdb41bebc74` |
+| OSI OS integration | `design-sync/agrolink` in `.worktrees/agrolink-parity-orchestrator-prep` | Handoff content `5fc265bb` |
+| OSI OS preparation source | `docs/agrolink-parity-orchestrator-prep` | `5fc265bb` |
 | OSI OS `origin/main` | audited merge base | `b31825becbb8abcef86cfad9dc756cd2e351f135` |
 | OSI Server | `AgroLink` in `.worktrees/agrolink` | `bee9435cf17b14ce582db61cc4bc9f1215657b8b` |
 | OSI Server `origin/main` | branch source and merge base | `8cac33d3a8a210784fa5f9b73c8e4dfe796203f7` |
@@ -64,14 +64,13 @@ files remain outside the parity program.
 
 The old target worktree `/home/phil/Repos/osi-os-agrolink` still contains
 unrelated generated GUI assets, locale changes, and an office lock file. It is
-quarantined rather than cleaned or staged. The executor must work from the
-clean integration worktree and must not absorb those files.
+detached at `f5ca4a1f` and quarantined rather than cleaned or staged. The
+executor must work from the clean integration worktree and must not absorb
+those files.
 
 ### Remaining launch actions
 
-1. Integrate this final sequential-execution revision into
-   `design-sync/agrolink` without taking the quarantined generated files.
-2. Start the orchestrator prompt. It must run launch prerequisites and Task 0
+1. Start the orchestrator prompt. It must run launch prerequisites and Task 0
    before implementing numbered tasks.
 
 No production host, live gateway, external key provider, or AgroLink SMB share
