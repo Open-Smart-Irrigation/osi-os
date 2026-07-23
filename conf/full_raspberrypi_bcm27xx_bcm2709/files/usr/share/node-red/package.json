@@ -10,6 +10,7 @@
     "osi-chirpstack-helper": "file:osi-chirpstack-helper",
     "osi-cloud-http": "file:osi-cloud-http",
     "osi-command-ledger": "file:osi-command-ledger",
+    "osi-scoped-access-commands": "file:osi-scoped-access-commands",
     "osi-zone-commands": "file:osi-zone-commands",
     "osi-dendro-helper": "file:osi-dendro-helper",
     "osi-db-helper": "file:osi-db-helper",

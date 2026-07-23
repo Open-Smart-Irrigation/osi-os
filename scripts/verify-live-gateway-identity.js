@@ -1048,9 +1048,9 @@ if (sizeAllowances) {
   // work that landed as a single unit) -- see the allowance file's own "in progress"
   // caveat. Re-verify against the branch's current total_allowance.delta rather than
   // treating any one intermediate value as final.
-  expectCondition(sizeAllowances.total_allowance?.delta === 207670,
-    'size total allowance: exact cumulative delta 207670',
-    'size total allowance: expected exact cumulative delta 207670');
+  expectCondition(sizeAllowances.total_allowance?.delta === 212333,
+    'size total allowance: exact cumulative delta 212333',
+    'size total allowance: expected exact cumulative delta 212333');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'Field Journal port allowance', 'declares the inherited Field Journal provenance within the re-measured total');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,

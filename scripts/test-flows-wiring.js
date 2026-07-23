@@ -64,6 +64,10 @@ const OSI_JOURNAL_BINDING = { variable: 'osiJournal', module: 'osi-journal' };
 const OSI_COMMAND_LEDGER_BINDING = { variable: 'osiCommandLedger', module: 'osi-command-ledger' };
 const OSI_ZONE_COMMAND_BINDING = { variable: 'osiZoneCommands', module: 'zone-commands' };
 const OSI_SCOPE_BINDING = { variable: 'scope', module: 'scope' };
+const OSI_SCOPED_ACCESS_COMMANDS_BINDING = {
+    variable: 'osiScopedAccessCommands',
+    module: 'scoped-access-commands',
+};
 
 function requireOsiLibContract(node, expectedBindings, label, unavailableErrorPrefix = 'Journal helpers unavailable:') {
     if (!node || typeof node.func !== 'string') return false;
@@ -281,6 +285,7 @@ const pendingGuard = byId['reject-indefinite-open'];
 const dedupe = byId['command-dedupe-dispatch'];
 const journalApply = byId['journal-command-apply-fn'];
 const terraZoneConfigApply = byId['terra-zone-config-command-apply-fn'];
+const scopedAccessApply = byId['scoped-access-command-apply-fn'];
 const ackQueue = byId['command-ack-queue-rest'];
 for (const commandType of journalCommandTypes) {
     if (!commandRegistry || !new RegExp('\\b' + commandType + '\\s*:').test(commandRegistry.func || '')) {
@@ -334,9 +339,21 @@ if (!journalApply || !requireOsiLibContract(
     'journal commands: applier'
 ) || JSON.stringify(journalApply.wires) !== JSON.stringify([
     ['terra-zone-config-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
+    ['scoped-access-command-apply-fn'],
 ]) || !/applyJournalCommand/.test(journalApply.func || '') || !/\.close\s*\(/.test(journalApply.func || '')) {
-    failures.push('journal commands: journal applier must delegate, close DB, and separate fallback from durable ACK');
+    failures.push('journal commands: journal applier must delegate, close DB, and pass non-journal commands to scoped access handling');
+}
+if (!scopedAccessApply || !requireOsiLibContract(
+    scopedAccessApply,
+    [OSI_DB_BINDING, OSI_SCOPED_ACCESS_COMMANDS_BINDING, OSI_SCOPE_BINDING],
+    'scoped access commands: applier',
+    'Scoped access command helpers unavailable:'
+) || JSON.stringify(scopedAccessApply.wires) !== JSON.stringify([
+    ['934bf2bc19a8ce22'],
+    ['9d5e3035c3d069c4'],
+]) || !/applyScopedAccessCommand/.test(scopedAccessApply.func || '') ||
+    !/\.close\s*\(/.test(scopedAccessApply.func || '')) {
+    failures.push('scoped access commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
 }
 if (!terraZoneConfigApply || !requireOsiLibContract(
     terraZoneConfigApply,
@@ -385,6 +402,14 @@ async function runJournalHelperFailureMatrix() {
             // the marker must be present or this case never reaches helper loading at all.
             envelopePayload: { terraConfigurationOperation: true },
             errorPrefix: 'Terra zone-config command helpers unavailable: ',
+            expected: [null, null],
+        },
+        {
+            node: scopedAccessApply,
+            label: 'scoped access helper failure: apply',
+            commandType: 'UPSERT_SCOPED_USER',
+            helpers: ['osi-db-helper', 'scoped-access-commands', 'scope'],
+            errorPrefix: 'Scoped access command helpers unavailable: ',
             expected: [null, null],
         },
         {

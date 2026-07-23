@@ -345,8 +345,8 @@ const targetSpecs = {
     func: dedupeSource,
   },
   'journal-command-apply-fn': {
-    beforeNodeHash: 'ee6b041a01fcb1741bae7e71af10215e49d5128d1b89d8bbbf76a4112c8bc1dc',
-    shapeHash: '5bf0e7fa124ba6f56efdee2a2598b4bd0a893d7bdf6dc7ab912ae5a45e80da80',
+    beforeNodeHash: '79ef0ff9d2534d9921996da9b4dd3e3f59b83ef8656434d87e6bce94ddf09d97',
+    shapeHash: '85f1bd8bdae89241b92a609f60b3c28b6a4cf316477367a579df9ade5d6002e1',
     func: journalApplySource,
   },
   'command-ack-queue-rest': {
