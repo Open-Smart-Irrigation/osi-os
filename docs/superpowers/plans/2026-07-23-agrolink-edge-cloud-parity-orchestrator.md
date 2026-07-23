@@ -291,8 +291,8 @@ These conditions are resolved before autonomous Task 0 starts:
   the final network-drive boundary documents, the matrix, the execution report,
   and the executor prompt on `design-sync/agrolink`.
 - Start from a clean integration worktree. The audited AgroLink worktree
-  contains generated GUI and locale changes plus an office lock file; preserve
-  them outside parity commits.
+  contains generated GUI and locale changes; preserve them outside parity
+  commits.
 - Confirm the `AgroLink` branch contains the Testcontainers compatibility
   commit and re-run the smoke test:
 

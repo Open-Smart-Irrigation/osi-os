@@ -63,10 +63,9 @@ network-drive schema, helper, flow, or implementation commit. Those future
 files remain outside the parity program.
 
 The old target worktree `/home/phil/Repos/osi-os-agrolink` still contains
-unrelated generated GUI assets, locale changes, and an office lock file. It is
-detached at `f5ca4a1f` and quarantined rather than cleaned or staged. The
-executor must work from the clean integration worktree and must not absorb
-those files.
+unrelated generated GUI assets and locale changes. It is detached at
+`f5ca4a1f` and quarantined rather than cleaned or staged. The executor must
+work from the clean integration worktree and must not absorb those files.
 
 ### Remaining launch actions
 

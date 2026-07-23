@@ -18,9 +18,8 @@ task in numbered order, then retry the blocker before final verification.
   `bee9435cf17b14ce582db61cc4bc9f1215657b8b`.
 - Network-drive design v3.1 and Phase 1 plan v2 are finished planning inputs.
   No network-drive implementation commit exists. Do not execute that plan.
-- `/home/phil/Repos/osi-os-agrolink` retains unrelated generated GUI/locales
-  and an office lock file. It is quarantined. Do not clean, stage, reset, or
-  execute parity work there.
+- `/home/phil/Repos/osi-os-agrolink` retains unrelated generated GUI/locales.
+  It is quarantined. Do not clean, stage, reset, or execute parity work there.
 - Scoped Phase A source head `8921e6d1` is cumulative patch material, not a
   merge-ready branch. Revalidate and renumber it as specified by Task 3.
 
