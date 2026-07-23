@@ -242,3 +242,129 @@ test('F3: today-liters remains callable without auth while the flag is off', asy
     db.close();
   }
 });
+
+function historyRequest(userId, username, method, path, params = {}, body = {}) {
+  const msg = requestFor(userId, username, params);
+  msg.req.method = method;
+  msg.req.path = path;
+  msg.req.body = body;
+  return msg;
+}
+
+test('F4: history zone reads allow owned and granted zones but hide foreign zones', async () => {
+  const ownDb = seedScopedDb();
+  try {
+    const own = await executeFunction(loadNode('history-api-router-fn'), {
+      msg: historyRequest(2, 'res1', 'GET', '/api/history/zones/1/cards', { zoneId: '1' }),
+      env: ENV,
+      db: ownDb,
+    });
+    assert.equal(own.result && own.result.statusCode, 200);
+  } finally {
+    ownDb.close();
+  }
+
+  const grantedDb = seedScopedDb();
+  try {
+    const granted = await executeFunction(loadNode('history-api-router-fn'), {
+      msg: historyRequest(2, 'res1', 'GET', '/api/history/zones/2/cards', { zoneId: '2' }),
+      env: ENV,
+      db: grantedDb,
+    });
+    assert.equal(granted.result && granted.result.statusCode, 200);
+  } finally {
+    grantedDb.close();
+  }
+
+  const foreignDb = seedScopedDb();
+  try {
+    const foreign = await executeFunction(loadNode('history-api-router-fn'), {
+      msg: historyRequest(3, 'view1', 'GET', '/api/history/zones/2/cards', { zoneId: '2' }),
+      env: ENV,
+      db: foreignDb,
+    });
+    assert.equal(foreign.result && foreign.result.statusCode, 404);
+  } finally {
+    foreignDb.close();
+  }
+});
+
+test('F4b: gateway history is admin-only while scoped access is enabled', async () => {
+  const researcherDb = seedScopedDb();
+  researcherDb.exec("UPDATE irrigation_zones SET gateway_device_eui = 'A84041ABCDEF0002' WHERE id = 2");
+  try {
+    const researcher = await executeFunction(loadNode('history-api-router-fn'), {
+      msg: historyRequest(2, 'res1', 'GET', '/api/history/gateways/A84041ABCDEF0002/cards', { gatewayEui: 'A84041ABCDEF0002' }),
+      env: ENV,
+      db: researcherDb,
+    });
+    assert.equal(researcher.result && researcher.result.statusCode, 403);
+  } finally {
+    researcherDb.close();
+  }
+
+  const adminDb = seedScopedDb();
+  adminDb.exec("UPDATE irrigation_zones SET gateway_device_eui = 'A84041ABCDEF0002' WHERE id = 2");
+  try {
+    const admin = await executeFunction(loadNode('history-api-router-fn'), {
+      msg: historyRequest(1, 'admin1', 'GET', '/api/history/gateways/A84041ABCDEF0002/cards', { gatewayEui: 'A84041ABCDEF0002' }),
+      env: ENV,
+      db: adminDb,
+    });
+    assert.equal(admin.result && admin.result.statusCode, 200);
+  } finally {
+    adminDb.close();
+  }
+});
+
+test('F4b: workspace rows remain owner-only in scoped mode', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS history_workspaces (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      owner_user_uuid TEXT,
+      zone_id INTEGER,
+      name TEXT NOT NULL,
+      workspace_json TEXT NOT NULL,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO history_workspaces (
+      user_id, owner_user_uuid, zone_id, name, workspace_json, created_at, updated_at
+    ) VALUES (1, 'u-admin', 2, 'Foreign workspace', '{}', '2026-01-01', '2026-01-01');
+  `);
+  try {
+    const response = await executeFunction(loadNode('history-api-router-fn'), {
+      msg: historyRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/history/workspaces/1',
+        { id: '1' },
+        { name: 'Should not change' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result && response.result.statusCode, 404);
+    assert.equal(db.prepare('SELECT name FROM history_workspaces WHERE id = 1').get().name, 'Foreign workspace');
+  } finally {
+    db.close();
+  }
+});
+
+test('F4: flag-off history behavior remains owner-only', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('history-api-router-fn'), {
+      msg: historyRequest(2, 'res1', 'GET', '/api/history/zones/2/cards', { zoneId: '2' }),
+      env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
+      db,
+    });
+    assert.equal(response.result && response.result.statusCode, 404);
+  } finally {
+    db.close();
+  }
+});

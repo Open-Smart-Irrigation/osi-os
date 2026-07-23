@@ -128,6 +128,7 @@ async function executeFunction(node, options) {
   const errors = [];
   const warnings = [];
   const flowStore = new Map(Object.entries(flowState));
+  const globalStore = new Map();
   const databaseFacade = facadeDb(db);
   const sandbox = {
     msg,
@@ -142,11 +143,12 @@ async function executeFunction(node, options) {
       set: (key, value) => flowStore.set(key, value),
     },
     global: {
-      get: (key) => ({
+      get: (key) => globalStore.has(key) ? globalStore.get(key) : ({
         fs,
         os: require('node:os'),
         cp: require('node:child_process'),
       })[key],
+      set: (key, value) => globalStore.set(key, value),
     },
     env: { get: (key) => env[key] },
     context: { get: () => undefined, set: () => {} },
@@ -164,6 +166,8 @@ async function executeFunction(node, options) {
     crypto,
     httpLib: http,
     httpsLib: https,
+    osiHistory: require(path.join(NODE_RED_MODULES, 'osi-history-helper', 'index.js')),
+    HR: require(path.join(NODE_RED_MODULES, 'osi-history-router', 'index.js')),
   };
   const names = Object.keys(sandbox);
   const values = Object.values(sandbox);
