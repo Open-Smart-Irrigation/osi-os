@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import {
   allowedChoices,
+  allowedProductKindsForOperation,
   allowedUnits,
   buildCatalogModel,
   catalogLabel,
@@ -38,6 +39,7 @@ import {
 } from '../../../journal/occurrence';
 import { useCaptureDraft, type CaptureSaveState } from '../../../journal/useCaptureDraft';
 import { buildFinalBatchPayload, buildTankMixPassBatchPayload } from '../../../journal/buildFinalBatchPayload';
+import { currentNoteValue } from '../../../journal/entryCorrection';
 import { matchingActiveHarvestGroups } from '../../../journal/groupResolutionNudge';
 import {
   MANUAL_CLOSE_ACTIVITY_CODES,
@@ -559,6 +561,30 @@ function captureSelections(
   };
 }
 
+// Operation-level field/requirement/product scoping plan (full_record@10,
+// spec §0.5): captureSelections above derives attr.agroscope.operation only
+// from the picker leaf's dependent_selections. That is stale the moment the
+// user changes the operation via the dropdown EntryForm itself renders in
+// the operation section — that control writes into `values`, never onto the
+// leaf. Every deriveFieldStates call in this component must therefore fold
+// the LIVE attr.agroscope.operation value out of `values` into the
+// leaf-derived selections (mergedSelections-style — EntryForm.tsx already
+// does the analogous fold locally for its own choice-dependency resolution;
+// this is the parent-level twin, since deriveFieldStates itself runs here,
+// not inside EntryForm).
+function withLiveOperationSelection(
+  selections: JournalSelections,
+  values: readonly CaptureEntryValueInput[],
+): JournalSelections {
+  const input = values.find(({ attribute_code }) => attribute_code === 'attr.agroscope.operation');
+  if (!input) return selections;
+  const value = input.value !== undefined
+    ? input.value
+    : input.value_text != null ? input.value_text : undefined;
+  return value === undefined ? selections : { ...selections, 'attr.agroscope.operation': value };
+}
+
+
 function inputHasValue(input: CaptureEntryValueInput): boolean {
   if (input.value_status != null && input.value_status !== 'observed') return true;
   return input.value !== undefined && input.value !== null && input.value !== ''
@@ -694,13 +720,13 @@ function sanitizeValues(
 ): CaptureEntryValueInput[] {
   if (!layout || !template) return [];
   const cropValue = canonicalCropValue(model, crop);
-  const selections: JournalSelections = {
+  const selections: JournalSelections = withLiveOperationSelection({
     activity_code: leaf?.activity_code,
     ...(leaf?.dependent_selections.reduce<Record<string, JournalScalar>>((result, selection) => ({
       ...result, [selection.attribute_code]: selection.value,
     }), {}) ?? {}),
     ...(cropValue ? { 'attr.crop': cropValue } : {}),
-  };
+  }, values);
   const fieldStates = deriveFieldStates(template, layout, selections);
   const visibleCodes = new Set(fieldStates.filter((state) => state.visible).map((state) => state.code));
   const dependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code) ?? []);
@@ -981,8 +1007,8 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   );
   const cropValue = useMemo(() => canonicalCropValue(model, crop), [crop, model]);
   const selections = useMemo<JournalSelections>(
-    () => captureSelections(model, leaf, crop),
-    [crop, leaf, model],
+    () => withLiveOperationSelection(captureSelections(model, leaf, crop), values),
+    [crop, leaf, model, values],
   );
   const fieldStates = useMemo(() => {
     const base = model && layout && template && leaf
@@ -996,6 +1022,14 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     // ever declares these codes.
     return withWeatherAtApplicationVisibility(base, hasWeatherSource);
   }, [hasWeatherSource, layout, leaf, model, selections, template]);
+  // Operation-level field/requirement/product scoping plan (full_record@10,
+  // spec §2): resolved from the template's operation_product_kinds map +
+  // the current (live-merged) attr.agroscope.operation selection. undefined
+  // -> no restriction, matching every caller/template before v10.
+  const allowedProductKinds = useMemo(
+    () => allowedProductKindsForOperation(template, selections),
+    [selections, template],
+  );
   const formOwnsCrop = fieldStates.some((state) => state.code === 'attr.crop' && state.visible);
   // Slice D Phase 3: crop-cycle GUI derived state (see journal/cropCycle.ts
   // for the rationale behind each best-effort/reasoned signal).
@@ -1216,7 +1250,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         numberInputErrors: EMPTY_NUMBER_INPUT_ERRORS,
       };
     }
-    const nextSelections = captureSelections(model, nextLeaf, nextCrop);
+    const nextSelections = withLiveOperationSelection(captureSelections(model, nextLeaf, nextCrop), nextValues);
     return validateEntryForm({
       model,
       layout: nextLayout,
@@ -1347,8 +1381,9 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     // exists yet.
     ...(passUuid ? { pass_uuid: passUuid } : {}),
     values: payloadValues,
+    ...(currentNoteValue(values) !== undefined ? { note: currentNoteValue(values) } : {}),
     ...cycleCascadeFields(),
-  }), [cycleCascadeFields, draft.entryUuid, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, passUuid, payloadValues, resolved?.offsetMinutes, selectedPlot, template, timezone, utcOffset]);
+  }), [cycleCascadeFields, draft.entryUuid, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, passUuid, payloadValues, resolved?.offsetMinutes, selectedPlot, template, timezone, utcOffset, values]);
 
   const buildBatchInput = useCallback((acknowledgements: readonly string[] = []) => ({
     members: selectedPlotUuids.map((plotUuid) => {
@@ -1369,11 +1404,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     occurred_utc_offset_minutes: resolvedRef.current?.offsetMinutes ?? resolved?.offsetMinutes ?? utcOffset,
     occurred_end_utc_offset_minutes: endResolvedRef.current?.offsetMinutes ?? endResolved?.offsetMinutes ?? endUtcOffset,
     values: payloadValues,
+    ...(currentNoteValue(values) !== undefined ? { note: currentNoteValue(values) } : {}),
     ...(acknowledgements.length > 0
       ? { duplicate_guard_ack_entry_uuids: acknowledgements }
       : {}),
     ...cycleCascadeFields(),
-  }), [cycleCascadeFields, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlotUuids, template, timezone, utcOffset]);
+  }), [cycleCascadeFields, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlotUuids, template, timezone, utcOffset, values]);
 
   // B1/B2 fix (Slice F, atomic tank-mix pass): builds the WHOLE pass —
   // primary (draft.entryUuid, or a fresh UUID if the draft hasn't been
@@ -1408,6 +1444,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       occurred_utc_offset_minutes: resolvedRef.current?.offsetMinutes ?? resolved?.offsetMinutes ?? utcOffset,
       occurred_end_utc_offset_minutes:
         endResolvedRef.current?.offsetMinutes ?? endResolved?.offsetMinutes ?? endUtcOffset,
+      ...(currentNoteValue(values) !== undefined ? { note: currentNoteValue(values) } : {}),
       ...(acknowledgements.length > 0
         ? { duplicate_guard_ack_entry_uuids: acknowledgements }
         : {}),
@@ -1416,7 +1453,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   }, [
     cycleCascadeFields, draft.entryUuid, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop,
     layout, leaf, occurredLocal, passMembers, passUuid, payloadValues, resolved?.offsetMinutes, selectedPlot,
-    template, timezone, utcOffset,
+    template, timezone, utcOffset, values,
   ]);
 
   const commitValues = useCallback((next: CaptureEntryValueInput[]) => {
@@ -1647,8 +1684,11 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     // about to be reset for re-picking), not the empty post-reset selections —
     // otherwise an activity-anchored option_dependency (e.g. "this choice is
     // only valid for irrigation") can never fire during the transition itself.
-    const diffSelections = captureSelections(model, effectiveOldLeaf, nextCrop);
     const candidateValues = [...retainedValues, ...keptTransitionValues];
+    const diffSelections = withLiveOperationSelection(
+      captureSelections(model, effectiveOldLeaf, nextCrop),
+      candidateValues,
+    );
     // An empty/"No plot" target (nextLayout === undefined) hides every field a
     // value was entered under — the same "never silently sanitize" contract
     // applies as to a real layout swap. computeLayoutTransitionDiff is pure
@@ -2699,7 +2739,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
               </dl>
             </div>
           )}
-          {template && layout && leaf && <EntryForm model={model} layout={layout} fieldStates={fieldStates} values={values} onChange={formChanged} selections={selections} products={catalog.products} locale={locale} showValidation={showValidation} templateCode={template.code} fieldHints={fieldHints} />}
+          {template && layout && leaf && <EntryForm model={model} layout={layout} fieldStates={fieldStates} values={values} onChange={formChanged} selections={selections} products={catalog.products} locale={locale} showValidation={showValidation} templateCode={template.code} fieldHints={fieldHints} allowedProductKinds={allowedProductKinds} />}
           {isTankMixEligible && model && (
             <div className="space-y-3 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--card)] p-4">
               <div className="flex items-center justify-between gap-3">

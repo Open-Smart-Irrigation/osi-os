@@ -517,12 +517,12 @@ describe('catalog model', () => {
     expect(openField).toBeDefined();
     if (!fullRecord || !openField) return;
 
-    // full_record now resolves to the scoped v9 row (activeDefinition always
-    // picks the highest active version — v9 is the detailed activity
-    // vocabulary plan, layered on the v5 scoped_by_activity mechanism this
-    // slice introduced), and it still declares the section this slice
-    // narrows.
-    expect(fullRecord.version).toBe(9);
+    // full_record now resolves to the scoped v10 row (activeDefinition always
+    // picks the highest active version — v10 is the operation-level field/
+    // requirement/product scoping plan, layered on the v5 scoped_by_activity
+    // mechanism this slice introduced), and it still declares the section
+    // this slice narrows.
+    expect(fullRecord.version).toBe(10);
     const operationSection = fullRecord.sections.find((section) => section.code === 'operation');
     expect(operationSection?.scoped_by_activity).toBe(true);
     expect(fullRecord.operation_fields_by_activity).toBeDefined();
@@ -615,6 +615,124 @@ describe('catalog model', () => {
       .toBeGreaterThan(0);
   });
 
+  it('operation-level field/requirement/product scoping plan (2026-07-23): deriveFieldStates resolves the operation map when an operation is selected, the activity map otherwise, and every activity keeps a visible comment (note) state', () => {
+    const fixture = shippedCatalog();
+    const result = buildCatalogModel(fixture);
+    expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
+    if (!result.ok) return;
+    const fullRecord = result.model.templates.get('full_record');
+    const openField = result.model.layouts.get('open_field');
+    expect(fullRecord).toBeDefined();
+    expect(openField).toBeDefined();
+    if (!fullRecord || !openField) return;
+    expect(fullRecord.version).toBe(10);
+    expect(fullRecord.operation_fields_by_operation).toBeDefined();
+    expect(fullRecord.operation_requirements).toBeDefined();
+    expect(fullRecord.operation_product_kinds).toBeDefined();
+
+    // No operation selected -> activity map (weed_mechanical's activity,
+    // plant_protection_application, still shows the full spray set here).
+    const noOperation = deriveFieldStates(fullRecord, openField, {
+      activity_code: 'plant_protection_application',
+    });
+    expect(noOperation.some((state) => state.code === 'attr.wind_speed' && state.visible)).toBe(true);
+
+    // Operation selected AND overridden -> operation map REPLACES it:
+    // weed_mechanical's OWN field list has no product/weather/waiting-period
+    // fields at all (spec §1). Deviation 1 fix (2026-07-23): the
+    // weather_at_application conditional_group — previously ACTIVITY-keyed on
+    // plant_protection_application and additive regardless of which operation
+    // was selected — is removed from full_record@10 entirely. Weather now
+    // reaches `states` only via operation_fields_by_operation on the 5
+    // chemical-spray operations, so weed_mechanical (a non-chemical
+    // operation) must NOT show wind/temp/humidity at all; the comment field
+    // is the escape for drift/compliance notes on lean operations like this.
+    const weedMechanical = deriveFieldStates(fullRecord, openField, {
+      activity_code: 'plant_protection_application',
+      'attr.agroscope.operation': 'agroscope.operation.weed_mechanical',
+    });
+    const weedMechanicalVisible = weedMechanical.filter((state) => state.visible).map((state) => state.code);
+    expect(weedMechanicalVisible).toEqual(expect.arrayContaining([
+      'attr.agroscope.operation', 'attr.agroscope.device', 'attr.amount_operation_depth',
+      'attr.treated_area', 'attr.growth_stage_bbch', 'attr.operator',
+    ]));
+    for (const excluded of [
+      'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+      'attr.amount_volume_area_product', 'attr.waiting_period_days',
+      'attr.wind_speed', 'attr.wind_direction', 'attr.air_temperature', 'attr.rel_humidity',
+    ]) {
+      expect(weedMechanicalVisible, `weed_mechanical must exclude ${excluded}`).not.toContain(excluded);
+    }
+    // Nothing in weed_mechanical's OWN operation_requirements is required.
+    expect(weedMechanical.every((state) => state.required === false)).toBe(true);
+
+    // cleaning_cut: no yield field at all, nothing required.
+    const cleaningCut = deriveFieldStates(fullRecord, openField, {
+      activity_code: 'harvest',
+      'attr.agroscope.operation': 'agroscope.operation.cleaning_cut',
+    });
+    expect(cleaningCut.some((state) => state.code === 'attr.harvest_yield_area')).toBe(false);
+    expect(cleaningCut.every((state) => state.required === false)).toBe(true);
+
+    // weed_herbicide keeps the strict chem-spray requirement (device+operation
+    // required, product-or-unregistered family, mass-or-volume dose family).
+    const weedHerbicide = deriveFieldStates(fullRecord, openField, {
+      activity_code: 'plant_protection_application',
+      'attr.agroscope.operation': 'agroscope.operation.weed_herbicide',
+    });
+    expect(weedHerbicide.find((state) => state.code === 'attr.agroscope.device'))
+      .toMatchObject({ visible: true, required: true });
+    expect(weedHerbicide.find((state) => state.code === 'attr.product_uuid')?.required_any_groups.length)
+      .toBeGreaterThan(0);
+    expect(weedHerbicide.find((state) => state.code === 'attr.amount_mass_area_product')?.required_any_groups.length)
+      .toBeGreaterThan(0);
+
+    // §0.5: a value-carried operation (not on the picker leaf's
+    // dependent_selections, just present in selections directly) resolves
+    // identically to a leaf-carried one — the mechanism is generic over where
+    // the value came from.
+    const valueCarried = deriveFieldStates(fullRecord, openField, {
+      activity_code: 'plant_protection_application',
+      'attr.agroscope.operation': ['agroscope.operation.weed_mechanical'],
+    });
+    expect(valueCarried.filter((state) => state.visible).map((state) => state.code))
+      .toEqual(weedMechanicalVisible);
+
+    // §0.4: a comment (note) state is visible for every activity, operation
+    // or not — the top-level `notes` section, unaffected by the operation
+    // scoping mechanism above.
+    for (const activityCode of [
+      'plant_protection_application', 'harvest', 'irrigation', 'fertilization',
+      'pruning', 'mowing', 'equipment_maintenance',
+    ]) {
+      const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
+      expect(states.find((state) => state.code === 'note'), activityCode)
+        .toMatchObject({ visible: true });
+    }
+
+    // §3: the 9 Agroscope-uncovered activities show the restored Equipment
+    // free text; the 7 covered activities never do (they have a scoped
+    // device dropdown instead).
+    for (const activityCode of ['pruning', 'mowing', 'equipment_maintenance']) {
+      const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
+      expect(states.some((state) => state.code === 'attr.equipment' && state.visible), activityCode).toBe(true);
+    }
+    for (const activityCode of ['harvest', 'irrigation', 'fertilization']) {
+      const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
+      expect(states.some((state) => state.code === 'attr.equipment'), activityCode).toBe(false);
+    }
+
+    // §2: operation_product_kinds spot checks — the frozen 4-value CHECK set,
+    // scoped per operation.
+    expect(fullRecord.operation_product_kinds?.['agroscope.operation.mineral_fertilization'])
+      .toEqual(['mineral']);
+    expect(fullRecord.operation_product_kinds?.['agroscope.operation.organic_fertilization'])
+      .toEqual(['organic_amendment']);
+    expect(fullRecord.operation_product_kinds?.['agroscope.operation.pest_control'])
+      .toEqual(['plant_protection', 'other']);
+    expect(fullRecord.operation_product_kinds?.['agroscope.operation.weed_mechanical']).toBeUndefined();
+  });
+
   it('detailed activity vocabulary plan (2026-07-22): full_record@9 requires attr.agroscope.device + attr.agroscope.operation for tillage_soil_work/seeding/plant_protection_application only', () => {
     const fixture = shippedCatalog();
     const result = buildCatalogModel(fixture);
@@ -625,7 +743,7 @@ describe('catalog model', () => {
     expect(fullRecord).toBeDefined();
     expect(openField).toBeDefined();
     if (!fullRecord || !openField) return;
-    expect(fullRecord.version).toBe(9);
+    expect(fullRecord.version).toBe(10);
 
     for (const activityCode of ['tillage_soil_work', 'seeding', 'plant_protection_application']) {
       const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
@@ -648,12 +766,22 @@ describe('catalog model', () => {
       expect(states.some((state) => state.code === 'attr.agroscope.device'), activityCode).toBe(false);
       expect(states.some((state) => state.code === 'attr.agroscope.operation'), activityCode).toBe(false);
     }
-    // attr.equipment/attr.method no longer render on full_record for ANY
-    // activity (decision 3, retired everywhere).
+    // attr.method never comes back on full_record for ANY activity (decision
+    // 3, retired everywhere, permanently). Operation-level field/requirement/
+    // product scoping plan (2026-07-23, catalog v10): attr.equipment IS
+    // restored, but only for the 9 Agroscope-uncovered activities (spec §3) —
+    // the 7 covered activities above stay equipment-free (they have a scoped
+    // device dropdown instead).
+    const NINE_UNCOVERED_ACTIVITIES = new Set([
+      'fertigation', 'weed_control_nonchemical', 'planting_transplanting',
+      'pruning', 'crop_care', 'mowing', 'sampling', 'pest_disease_observation',
+      'equipment_maintenance',
+    ]);
     for (const activityCode of Object.keys(fullRecord.operation_fields_by_activity ?? {})) {
       const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
-      expect(states.some((state) => state.code === 'attr.equipment'), activityCode).toBe(false);
       expect(states.some((state) => state.code === 'attr.method'), activityCode).toBe(false);
+      expect(states.some((state) => state.code === 'attr.equipment'), activityCode)
+        .toBe(NINE_UNCOVERED_ACTIVITIES.has(activityCode));
     }
   });
 
@@ -747,16 +875,17 @@ describe('catalog model', () => {
   it('journal capture-followups Slice 1 (W1, frozen): full_record@7 + open_field@3 irrigation relaxes measurement_source/denominator/block_bed_row/cover_type to visible-but-optional, keeping amount_kind/amount/treated_area required', () => {
     // Pins the FROZEN v7/v3 rows directly, bypassing "latest version wins"
     // resolution (the treated-area-optional plan added full_record@8 and
-    // open_field@8 on top of these, and the detailed activity vocabulary plan
-    // added full_record@9/open_field@9 on top of that — see the v9 test below
-    // for the current behavior) — this is a regression check that the
-    // immutable v7/v3 rows never drift, mirroring the v1Layout bypass pattern
-    // above.
+    // open_field@8 on top of these, the detailed activity vocabulary plan
+    // added full_record@9/open_field@9 on top of that, and the operation-level
+    // field/requirement/product scoping plan added full_record@10 on top of
+    // THAT — see the v10 test below for the current behavior) — this is a
+    // regression check that the immutable v7/v3 rows never drift, mirroring
+    // the v1Layout bypass pattern above.
     const fixture = shippedCatalog();
     const frozenFixture = {
       ...fixture,
       templates: fixture.templates.filter((row) =>
-        !(row.code === 'full_record' && (row.version === 8 || row.version === 9))),
+        !(row.code === 'full_record' && (row.version === 8 || row.version === 9 || row.version === 10))),
       layouts: fixture.layouts.filter((row) =>
         !(row.code === 'open_field' && (row.version === 8 || row.version === 9))),
     };
@@ -821,11 +950,13 @@ describe('catalog model', () => {
     expect(fullRecord).toBeDefined();
     expect(openField).toBeDefined();
     if (!fullRecord || !openField) return;
-    // The currently-served version is now v9 (detailed activity vocabulary
-    // plan, layered on top of v8's treated-area-optional plan being tested
-    // here) — every assertion below still holds under v9 since it never
-    // touched treated_area.
-    expect(fullRecord.version).toBe(9);
+    // The currently-served version is now v10 (operation-level field/
+    // requirement/product scoping plan, layered on top of v9's detailed
+    // activity vocabulary plan and v8's treated-area-optional plan being
+    // tested here) — every assertion below still holds under v10 since it
+    // never touched treated_area. open_field stays at v9 (v10 added no new
+    // layout version).
+    expect(fullRecord.version).toBe(10);
     expect(openField.version).toBe(9);
 
     // treated_area is dropped from open_field@8's minimum_fields entirely —

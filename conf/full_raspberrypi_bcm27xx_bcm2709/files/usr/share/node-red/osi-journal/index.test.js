@@ -1198,10 +1198,11 @@ test('assertJournalEntryEffectKey binds UUID and prior version exactly', () => {
 test('loadCatalog reads the seeded catalog into code-indexed maps', async () => {
   const catalog = await loadCatalog(createTestDb('load'));
 
-  // detailed activity vocabulary plan: the seeded catalog is now at v9
-  // (full_record@9 + farmer_quick@9 + open_field@9 expose the Agroscope
-  // operation/device pair and retire attr.equipment/attr.method, 0031).
-  assert.equal(catalog.version, 9);
+  // operation-level field/requirement/product scoping plan: the seeded
+  // catalog is now at v10 (full_record@10 adds operation_fields_by_operation/
+  // operation_requirements/operation_product_kinds + restores attr.equipment
+  // for the 9 Agroscope-uncovered activities, 0032).
+  assert.equal(catalog.version, 10);
   assert.match(catalog.hash, /^[a-f0-9]{64}$/);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
   assert.equal(catalog.templates.get('farmer_quick').get(1).definition.max_primary_fields, 5);
@@ -1261,7 +1262,7 @@ test('loadCatalog supports the callback sqlite API used by Node-RED', async () =
 
   const catalog = await loadCatalog(callbackDb);
 
-  assert.equal(catalog.version, 9);
+  assert.equal(catalog.version, 10);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
 });
 
@@ -1934,6 +1935,168 @@ test('validateEntry: full_record@8 tillage_soil_work has no device/operation req
     values: [],
   }));
   assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+// Operation-level field/requirement/product scoping plan (2026-07-23, catalog
+// v10, spec §0.7/§7): full_record@10's operation_requirements REPLACES
+// activity_requirements[activity] once a semantically-present
+// attr.agroscope.operation value resolves to an entry there.
+// weed_mechanical's entry is deliberately empty ({required:[],required_any:[]}
+// — maintainer decision, mechanical weeding has no meaningful product/dose)
+// — an entry naming only the operation (no device, no product, no dose) must
+// still validate, where the OLD activity-wide plant_protection_application
+// requirement (device+operation required, product-or-dose required_any) would
+// have rejected it.
+test('validateEntry: full_record@10 weed_mechanical validates without product/dose (operation-level scoping)', async () => {
+  const { catalog } = await loadedFixture('operation-scoping-weed-mechanical-v10');
+  const fullRecordV10 = catalog.templates.get('full_record').get(10);
+  const openFieldV9 = catalog.layouts.get('open_field').get(9);
+  assert.ok(fullRecordV10, 'catalog must publish full_record@10');
+  assert.ok(openFieldV9, 'catalog must publish open_field@9');
+  assert.deepEqual(
+    fullRecordV10.definition.operation_requirements['agroscope.operation.weed_mechanical'],
+    { required: [], required_any: [] },
+  );
+
+  const result = validateEntry(catalog, openFieldV9, fullRecordV10, validIrrigation({
+    activity_code: 'plant_protection_application',
+    template_code: 'full_record',
+    layout_code: 'open_field',
+    values: [
+      {
+        attribute_code: 'attr.agroscope.operation', group_index: 0,
+        value: 'agroscope.operation.weed_mechanical', value_status: 'observed',
+      },
+    ],
+  }));
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+// cleaning_cut's entry is also deliberately empty — no yield field exists for
+// it at all (biomass stays on the field), so an entry naming only the
+// operation must validate where the OLD activity-wide harvest requirement
+// (crop + harvest_area + harvest_yield_area) would have rejected it for a
+// missing yield.
+test('validateEntry: full_record@10 cleaning_cut validates without a yield (operation-level scoping)', async () => {
+  const { catalog } = await loadedFixture('operation-scoping-cleaning-cut-v10');
+  const fullRecordV10 = catalog.templates.get('full_record').get(10);
+  const openFieldV9 = catalog.layouts.get('open_field').get(9);
+  assert.ok(fullRecordV10, 'catalog must publish full_record@10');
+  assert.deepEqual(
+    fullRecordV10.definition.operation_requirements['agroscope.operation.cleaning_cut'],
+    { required: [], required_any: [] },
+  );
+
+  const result = validateEntry(catalog, openFieldV9, fullRecordV10, validIrrigation({
+    activity_code: 'harvest',
+    template_code: 'full_record',
+    layout_code: 'open_field',
+    values: [
+      {
+        attribute_code: 'attr.agroscope.operation', group_index: 0,
+        value: 'agroscope.operation.cleaning_cut', value_status: 'observed',
+      },
+      {
+        attribute_code: 'attr.agroscope.device', group_index: 0,
+        value: 'agroscope.device.mower', value_status: 'observed',
+      },
+    ],
+  }));
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+// weed_herbicide (a chemical spray) keeps the strict requirement: device +
+// operation required, plus a product-or-unregistered-product family and a
+// mass-or-volume dose family — an entry with a valid operation+device pair
+// but no product/dose must still be rejected exactly as full_record@9's
+// activity-wide requirement rejected it.
+test('validateEntry: full_record@10 weed_herbicide still rejects missing product+dose (operation-level scoping)', async () => {
+  const { catalog } = await loadedFixture('operation-scoping-weed-herbicide-v10');
+  const fullRecordV10 = catalog.templates.get('full_record').get(10);
+  const openFieldV9 = catalog.layouts.get('open_field').get(9);
+  assert.ok(fullRecordV10, 'catalog must publish full_record@10');
+
+  const result = validateEntry(catalog, openFieldV9, fullRecordV10, validIrrigation({
+    activity_code: 'plant_protection_application',
+    template_code: 'full_record',
+    layout_code: 'open_field',
+    values: [
+      {
+        attribute_code: 'attr.agroscope.operation', group_index: 0,
+        value: 'agroscope.operation.weed_herbicide', value_status: 'observed',
+      },
+      {
+        attribute_code: 'attr.agroscope.device', group_index: 0,
+        value: 'agroscope.device.sprayer_broadcast', value_status: 'observed',
+      },
+    ],
+  }));
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.field === 'attr.product_uuid|attr.product'));
+  assert.ok(result.errors.some((error) =>
+    error.field === 'attr.amount_mass_area_product|attr.amount_volume_area_product'));
+});
+
+// No attr.agroscope.operation value present at all -> operation_requirements
+// is never consulted; full_record@10 must fall back to
+// activity_requirements.fertilization UNCHANGED from @9 (product-or-
+// unregistered-product family + a mass/volume/nutrient-rate dose family still
+// enforced).
+test('validateEntry: full_record@10 fertilization with no operation falls back to activity_requirements', async () => {
+  const { catalog } = await loadedFixture('operation-scoping-fertilization-fallback-v10');
+  const fullRecordV10 = catalog.templates.get('full_record').get(10);
+  const openFieldV9 = catalog.layouts.get('open_field').get(9);
+  assert.ok(fullRecordV10, 'catalog must publish full_record@10');
+
+  const missingDose = validateEntry(catalog, openFieldV9, fullRecordV10, validIrrigation({
+    activity_code: 'fertilization',
+    template_code: 'full_record',
+    layout_code: 'open_field',
+    values: [],
+  }));
+  assert.equal(missingDose.ok, false);
+  assert.ok(missingDose.errors.some((error) => error.field === 'attr.product_uuid|attr.product'));
+  assert.ok(missingDose.errors.some((error) =>
+    error.field === 'attr.amount_mass_area_product|attr.amount_volume_area_product|attr.amount_nutrient_rate'));
+
+  const withDose = validateEntry(catalog, openFieldV9, fullRecordV10, validIrrigation({
+    activity_code: 'fertilization',
+    template_code: 'full_record',
+    layout_code: 'open_field',
+    values: [
+      { attribute_code: 'attr.product', group_index: 0, value: 'NPK 15-15-15', value_status: 'observed' },
+      {
+        attribute_code: 'attr.amount_mass_area_product', group_index: 0, value: 25,
+        unit_code: 'unit.kg_per_ha_product', value_status: 'observed',
+      },
+    ],
+  }));
+  assert.equal(withDose.ok, true, JSON.stringify(withDose.errors));
+});
+
+// Version-pinned control: an entry pinned to the frozen full_record@9 keeps
+// v9's activity-wide harvest requirement (crop + harvest_area +
+// harvest_yield_area) — only NEW entries created against @10 get
+// per-operation scoping (e.g. cleaning_cut's empty requirement above).
+test('validateEntry: full_record@9 harvest still requires a yield (version-pinned)', async () => {
+  const { catalog } = await loadedFixture('operation-scoping-pinned-v9');
+  const fullRecordV9 = catalog.templates.get('full_record').get(9);
+  const openFieldV9 = catalog.layouts.get('open_field').get(9);
+  assert.ok(fullRecordV9, 'catalog must publish full_record@9');
+  assert.ok(!('operation_requirements' in fullRecordV9.definition),
+    'frozen full_record@9 must not declare operation_requirements at all');
+
+  const result = validateEntry(catalog, openFieldV9, fullRecordV9, validIrrigation({
+    activity_code: 'harvest',
+    template_code: 'full_record',
+    layout_code: 'open_field',
+    values: [
+      { attribute_code: 'attr.crop', group_index: 0, value: 'choice.crop.other', value_status: 'observed' },
+    ],
+  }));
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) =>
+    error.field === 'attr.harvest_yield_area' && error.code === 'required'));
 });
 
 test('validateEntry rejects unsupported predicate operators as catalog errors', async () => {

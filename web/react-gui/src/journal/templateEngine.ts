@@ -78,6 +78,17 @@ function activityCode(selections: JournalSelections): string | undefined {
   return Array.isArray(selected) && typeof selected[0] === 'string' ? selected[0] : undefined;
 }
 
+// Operation-level field/requirement/product scoping plan (full_record@10,
+// spec §0.1/§0.2): the operation choice code currently selected for
+// attr.agroscope.operation, if any. Callers merge the live in-form value
+// into `selections` before calling deriveFieldStates (spec §0.5) — this
+// helper is agnostic to where that value came from.
+function operationChoiceCode(selections: JournalSelections): string | undefined {
+  const selected = selections['attr.agroscope.operation'];
+  if (typeof selected === 'string') return selected;
+  return Array.isArray(selected) && typeof selected[0] === 'string' ? selected[0] : undefined;
+}
+
 export function deriveFieldStates(
   template: JournalTemplateDefinition | Record<string, unknown>,
   layout: JournalLayoutDefinition | Record<string, unknown>,
@@ -144,9 +155,21 @@ export function deriveFieldStates(
     // further down, regardless of this narrowing (see addField's merge-by-code
     // logic) — a required field can never be scoped out from under itself.
     if (section.scoped_by_activity) {
-      const scopedFields = selectedActivity
-        ? rawTemplate.operation_fields_by_activity?.[selectedActivity]
+      // Operation-level field/requirement/product scoping plan (full_record@10,
+      // spec §0.1/§0.2): when attr.agroscope.operation is selected AND
+      // operation_fields_by_operation has an entry for it, that entry
+      // REPLACES operation_fields_by_activity[activity] entirely for this
+      // section — it is not merged with it. No operation selected, or the
+      // selected operation has no entry here, falls back to the activity map
+      // unchanged (every template/version before v10, the 9 Agroscope-
+      // uncovered activities, and any future operation without an override).
+      const selectedOperation = operationChoiceCode(selections);
+      const operationFields = selectedOperation
+        ? rawTemplate.operation_fields_by_operation?.[selectedOperation]
         : undefined;
+      const scopedFields = operationFields ?? (selectedActivity
+        ? rawTemplate.operation_fields_by_activity?.[selectedActivity]
+        : undefined);
       for (const field of scopedFields ?? []) addField(field);
       continue;
     }
@@ -203,7 +226,20 @@ export function deriveFieldStates(
   }
 
   addRequirement(rawTemplate.requirements);
-  if (selectedActivity) addRequirement(rawTemplate.activity_requirements?.[selectedActivity]);
+  // Operation-level field/requirement/product scoping plan (full_record@10,
+  // spec §0.2): operation_requirements[operation] REPLACES (not merges with)
+  // activity_requirements[activity] under the same selected-operation-with-
+  // an-entry condition as the fields resolution above. conditional_groups
+  // below stays activity-keyed and ADDITIVE regardless of which branch fires
+  // here — load-bearing for watering, whose operation_requirements entry is
+  // deliberately empty because irrigation_details still supplies it.
+  if (selectedActivity) {
+    const selectedOperation = operationChoiceCode(selections);
+    const operationRequirement = selectedOperation
+      ? rawTemplate.operation_requirements?.[selectedOperation]
+      : undefined;
+    addRequirement(operationRequirement ?? rawTemplate.activity_requirements?.[selectedActivity]);
+  }
   for (const group of rawTemplate.conditional_groups ?? []) {
     if (selectedActivity && group.activity_codes.includes(selectedActivity)) addRequirement(group);
   }

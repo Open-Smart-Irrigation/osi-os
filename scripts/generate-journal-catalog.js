@@ -38,6 +38,7 @@ const CATALOG_MIGRATIONS = [
   { version: 7, name: '0029__journal_catalog_v7.sql' },
   { version: 8, name: '0030__journal_catalog_v8.sql' },
   { version: 9, name: '0031__journal_catalog_v9.sql' },
+  { version: 10, name: '0032__journal_catalog_v10.sql' },
 ];
 
 const TABLE_ORDER = [
@@ -427,6 +428,101 @@ function validateOperationFieldsByActivity(coreDef) {
   }
 }
 
+// v10 (operation-level field/requirement/product scoping plan, 2026-07-23):
+// the operation-keyed twin of validateOperationFieldsByActivity above, plus
+// the analogous checks for operation_requirements/operation_product_kinds.
+// Unlike operation_fields_by_activity/activity_requirements (which must cover
+// every core activity), these three maps are declared PARTIAL by design
+// (spec §0.6): the GUI parser must accept a template row that only covers
+// some operations (so a future OSI-terms operation addition never
+// retroactively invalidates a pinned template row). This generator-side
+// validator is the one place that DOES assert exact coverage of the 25
+// operations for operation_fields_by_operation/operation_requirements — at
+// generation time, against the current Agroscope source, not at GUI runtime
+// against whatever vocab a stored row happened to ship with.
+function validateOperationFieldsByOperation(coreDef, source) {
+  const attributeCodes = new Set(coreDef.attributes.map((row) => row.code));
+  const operationCodes = new Set(
+    source.categories.flatMap((category) =>
+      category.operations.map((operation) => `agroscope.operation.${operation.code}`))
+  );
+  const validProductKinds = new Set(['mineral', 'organic_amendment', 'plant_protection', 'other']);
+
+  for (const template of coreDef.templates) {
+    const definition = template.definition || {};
+    const fieldsMap = definition.operation_fields_by_operation;
+    const requirementsMap = definition.operation_requirements;
+    const productKindsMap = definition.operation_product_kinds;
+    if (fieldsMap == null && requirementsMap == null && productKindsMap == null) continue;
+
+    const sections = definition.sections || [];
+    const scopedSections = sections.filter((section) => section.scoped_by_activity);
+    assert(scopedSections.length === 1,
+      `${template.code}@${template.version} declares an operation-level map but must have exactly one scoped_by_activity section (found ${scopedSections.length})`);
+    const allowedFields = new Set(scopedSections[0].fields);
+
+    if (fieldsMap != null) {
+      const declared = Object.keys(fieldsMap);
+      assert(
+        declared.length === operationCodes.size && declared.every((code) => operationCodes.has(code)),
+        `${template.code}@${template.version} operation_fields_by_operation must cover exactly the ${operationCodes.size} Agroscope operations`
+      );
+      for (const [opCode, fields] of Object.entries(fieldsMap)) {
+        assert(Array.isArray(fields) && fields.length > 0,
+          `${template.code}@${template.version} operation_fields_by_operation.${opCode} must be a nonempty array`);
+        assert(fields[0] === 'attr.agroscope.operation' && fields[1] === 'attr.agroscope.device',
+          `${template.code}@${template.version} operation_fields_by_operation.${opCode} must lead with attr.agroscope.operation, attr.agroscope.device`);
+        for (const field of fields) {
+          assert(attributeCodes.has(field),
+            `${template.code}@${template.version} operation_fields_by_operation.${opCode} references unknown field ${field}`);
+          assert(allowedFields.has(field),
+            `${template.code}@${template.version} operation_fields_by_operation.${opCode} references ${field}, ` +
+            'which is not declared on its scoped_by_activity section');
+        }
+      }
+    }
+
+    if (requirementsMap != null) {
+      const declared = Object.keys(requirementsMap);
+      assert(
+        declared.length === operationCodes.size && declared.every((code) => operationCodes.has(code)),
+        `${template.code}@${template.version} operation_requirements must cover exactly the ${operationCodes.size} Agroscope operations`
+      );
+      for (const [opCode, requirement] of Object.entries(requirementsMap)) {
+        assert(requirement && Array.isArray(requirement.required) && Array.isArray(requirement.required_any),
+          `${template.code}@${template.version} operation_requirements.${opCode} must declare required[] and required_any[]`);
+        for (const field of requirement.required) {
+          assert(attributeCodes.has(field) && allowedFields.has(field),
+            `${template.code}@${template.version} operation_requirements.${opCode}.required references ${field}, ` +
+            'which is not a known field of its scoped_by_activity section');
+        }
+        for (const family of requirement.required_any) {
+          assert(Array.isArray(family) && family.length > 0,
+            `${template.code}@${template.version} operation_requirements.${opCode}.required_any entries must be nonempty arrays`);
+          for (const field of family) {
+            assert(attributeCodes.has(field) && allowedFields.has(field),
+              `${template.code}@${template.version} operation_requirements.${opCode}.required_any references ${field}, ` +
+              'which is not a known field of its scoped_by_activity section');
+          }
+        }
+      }
+    }
+
+    if (productKindsMap != null) {
+      for (const [opCode, kinds] of Object.entries(productKindsMap)) {
+        assert(operationCodes.has(opCode),
+          `${template.code}@${template.version} operation_product_kinds references unknown operation ${opCode}`);
+        assert(Array.isArray(kinds) && kinds.length > 0,
+          `${template.code}@${template.version} operation_product_kinds.${opCode} must be a nonempty array`);
+        for (const kind of kinds) {
+          assert(validProductKinds.has(kind),
+            `${template.code}@${template.version} operation_product_kinds.${opCode} references unknown product kind ${kind}`);
+        }
+      }
+    }
+  }
+}
+
 function validateSource(coreDef, source) {
   assert(source.categories.length === 7, 'Agroscope source must contain seven categories');
   const operations = source.categories.flatMap((category) => category.operations);
@@ -664,6 +760,7 @@ function vocabRow(row) {
 function buildRows(coreDef, source) {
   validateCore(coreDef);
   validateSource(coreDef, source);
+  validateOperationFieldsByOperation(coreDef, source);
   const agroscope = buildAgroscope(coreDef, source);
   const rows = [];
 
@@ -1025,6 +1122,7 @@ module.exports = {
   compileCatalog,
   validateCore,
   validateSource,
+  validateOperationFieldsByOperation,
   replaceSeedBlock,
   expectedManifestText,
   writeGeneratedArtifacts,

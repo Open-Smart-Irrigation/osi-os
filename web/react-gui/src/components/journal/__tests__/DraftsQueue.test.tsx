@@ -171,6 +171,81 @@ function productResumeCatalog(): JournalCatalog {
   } as unknown as JournalCatalog;
 }
 
+// Deviation 3 fix (2026-07-23): a draft that already carries a value for
+// attr.agroscope.operation must resolve fieldStates via the OPERATION-level
+// maps (operation_fields_by_operation/operation_requirements), not just the
+// broader activity-level fallback (operation_fields_by_activity) — mirrors
+// the real full_record@10 operation-level scoping plan at a minimal scale.
+// 'op.narrow' is declared as a vocab choice row (kind: 'choice', parent_code:
+// 'attr.agroscope.operation') per catalogModel.ts's parser contract; the
+// attribute itself never needs to be rendered for this to exercise the bug.
+function operationScopedResumeCatalog(): JournalCatalog {
+  return {
+    catalog_version: 1,
+    catalog_hash: 'operation-scoped-resume-catalog',
+    vocab: [
+      vocabRow('irrigation', { kind: 'activity', value_type: null }),
+      vocabRow('attr.wide_field', { value_type: 'text' }),
+      vocabRow('attr.narrow_field', { value_type: 'text' }),
+      vocabRow('op.narrow', { kind: 'choice', parent_code: 'attr.agroscope.operation', value_type: null }),
+    ],
+    templates: [definitionRow('full_record', {
+      sections: [
+        { code: 'operation', scoped_by_activity: true, fields: ['attr.wide_field', 'attr.narrow_field'] },
+      ],
+      operation_fields_by_activity: { irrigation: ['attr.wide_field'] },
+      operation_fields_by_operation: { 'op.narrow': ['attr.narrow_field'] },
+      operation_requirements: {
+        'op.narrow': { required: ['attr.narrow_field'], required_any: [] },
+      },
+    })],
+    layouts: [definitionRow('open_field', {
+      activity_codes: ['irrigation'],
+      supported_templates: ['full_record'],
+      option_dependencies: [],
+    })],
+    products: [],
+    mappings: [],
+  } as unknown as JournalCatalog;
+}
+
+function operationValue(operationCode: string) {
+  return {
+    attribute_code: 'attr.agroscope.operation',
+    group_index: 0,
+    value_status: 'observed' as const,
+    value_num: null,
+    value_text: operationCode,
+    unit_code: null,
+    entered_value_num: null,
+    entered_unit_code: null,
+  };
+}
+
+// M1 fix (2026-07-23): the note textarea is a top-level EntryForm field, not
+// a journal_entry_values row -- DraftResumePanel must seed it from
+// draft.note and persist an edit back onto the finalize payload's top-level
+// `note`, mirroring DetailPanel's correction form.
+function notesResumeCatalog(): JournalCatalog {
+  return {
+    catalog_version: 1,
+    catalog_hash: 'notes-resume-catalog',
+    vocab: [
+      vocabRow('irrigation', { kind: 'activity', value_type: null }),
+    ],
+    templates: [definitionRow('full_record', {
+      sections: [{ code: 'notes', fields: ['note'] }],
+    })],
+    layouts: [definitionRow('open_field', {
+      activity_codes: ['irrigation'],
+      supported_templates: ['full_record'],
+      option_dependencies: [],
+    })],
+    products: [],
+    mappings: [],
+  } as unknown as JournalCatalog;
+}
+
 beforeEach(() => {
   useDraftsQueueMock.mockReset();
   useJournalCatalogMock.mockReset();
@@ -442,5 +517,92 @@ describe('DraftsQueue resume complete', () => {
       value.attribute_code === 'attr.product_uuid' && value.value === 'prod-1')).toBe(true);
 
     await waitFor(() => expect(retry).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('DraftsQueue resume operation scoping (Deviation 3 fix)', () => {
+  it('scopes a resumed draft to its stored operation, not the broader activity field set', async () => {
+    useDraftsQueueMock.mockReturnValue(queueState({
+      status: 'ready',
+      drafts: [draft('d1', { activity_code: 'irrigation', values: [operationValue('op.narrow')] })],
+    }));
+    useJournalCatalogMock.mockReturnValue({ catalog: operationScopedResumeCatalog(), available: true });
+
+    render(<DraftsQueue />);
+    fireEvent.click(screen.getByRole('button', { name: 'drafts.resume' }));
+
+    // The operation-scoped field renders and is the one Complete is blocked
+    // on; the activity-level-only field must never appear at all.
+    await waitFor(() => expect(document.getElementById('attr.narrow_field')).not.toBeNull());
+    expect(document.getElementById('attr.wide_field')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'drafts.complete' })).toBeDisabled();
+  });
+
+  it('completes a resumed operation-scoped draft once its operation-required field is filled in', async () => {
+    const retry = vi.fn().mockResolvedValue(undefined);
+    useDraftsQueueMock.mockReturnValue(queueState({
+      status: 'ready',
+      drafts: [draft('d1', { activity_code: 'irrigation', values: [operationValue('op.narrow')] })],
+      retry,
+    }));
+    useJournalCatalogMock.mockReturnValue({ catalog: operationScopedResumeCatalog(), available: true });
+    createEntryMock.mockResolvedValue({ entry_uuid: 'd1', outbox_event_uuid: 'evt-1', sync_version: 1 });
+
+    render(<DraftsQueue />);
+    fireEvent.click(screen.getByRole('button', { name: 'drafts.resume' }));
+
+    await waitFor(() => expect(document.getElementById('attr.narrow_field')).not.toBeNull());
+    fireEvent.change(document.getElementById('attr.narrow_field') as HTMLInputElement, {
+      target: { value: 'filled in' },
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'drafts.complete' })).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'drafts.complete' }));
+    });
+
+    await waitFor(() => expect(createEntryMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(retry).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('DraftsQueue resume note round-trip (M1 fix)', () => {
+  it('prefills the note textarea from the draft\'s stored note', async () => {
+    useDraftsQueueMock.mockReturnValue(queueState({
+      status: 'ready',
+      drafts: [draft('d1', { values: [], note: 'half-finished entry, resume later' })],
+    }));
+    useJournalCatalogMock.mockReturnValue({ catalog: notesResumeCatalog(), available: true });
+
+    render(<DraftsQueue />);
+    fireEvent.click(screen.getByRole('button', { name: 'drafts.resume' }));
+
+    await waitFor(() => expect(screen.getByLabelText('capture.form.note'))
+      .toHaveValue('half-finished entry, resume later'));
+  });
+
+  it('persists an edited note on Complete', async () => {
+    const retry = vi.fn().mockResolvedValue(undefined);
+    useDraftsQueueMock.mockReturnValue(queueState({
+      status: 'ready',
+      drafts: [draft('d1', { values: [], note: 'original draft note' })],
+      retry,
+    }));
+    useJournalCatalogMock.mockReturnValue({ catalog: notesResumeCatalog(), available: true });
+    createEntryMock.mockResolvedValue({ entry_uuid: 'd1', outbox_event_uuid: 'evt-1', sync_version: 1 });
+
+    render(<DraftsQueue />);
+    fireEvent.click(screen.getByRole('button', { name: 'drafts.resume' }));
+
+    await waitFor(() => expect(screen.getByLabelText('capture.form.note')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('capture.form.note'), { target: { value: 'updated draft note' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'drafts.complete' }));
+    });
+
+    await waitFor(() => expect(createEntryMock).toHaveBeenCalledTimes(1));
+    const payload = createEntryMock.mock.calls[0][0] as { note?: string | null };
+    expect(payload.note).toBe('updated draft note');
   });
 });

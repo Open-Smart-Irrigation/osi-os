@@ -837,4 +837,57 @@ describe('DetailPanel — full-record correction', () => {
     const hiddenValue = payload.values.find((value: { attribute_code: string }) => value.attribute_code === 'attr.hidden');
     expect(hiddenValue).toMatchObject({ value_text: 'secret' });
   });
+
+  // M1 fix (2026-07-23): the note textarea is a top-level EntryForm field
+  // (spec §0.4) but 'note' is never a journal_entry_values row -- it lives on
+  // the entry's own `note` column, so the correction form must seed it from
+  // aggregate.note and persist an edit back onto the payload explicitly
+  // (buildCorrectionPayload's default is the UNEDITED aggregate.note).
+  const notesCatalog: JournalCatalog = {
+    ...catalog,
+    templates: [{
+      ...catalog.templates[0],
+      definition: {
+        ...catalog.templates[0].definition,
+        sections: [{ code: 'notes', fields: ['note'] }],
+      },
+    }],
+  };
+
+  it('prefills the note textarea from the entry\'s stored note when correction is opened (M1)', () => {
+    mockDetail({ entries: [entry({ note: 'irrigated the north row twice' })] });
+    renderPanel({ catalogOverride: notesCatalog });
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.correct' }));
+
+    expect(screen.getByLabelText('capture.form.note')).toHaveValue('irrigated the north row twice');
+  });
+
+  it('persists an edited note textarea value on correction save, and allows clearing it (M1)', async () => {
+    mockDetail({ entries: [entry({ note: 'original note' })] });
+    mocks.updateEntry.mockResolvedValue({ entry_uuid: 'entry-1', outbox_event_uuid: 'evt-1', sync_version: 3 });
+    renderPanel({ catalogOverride: notesCatalog });
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.correct' }));
+    fireEvent.change(screen.getByLabelText('capture.form.note'), { target: { value: 'updated note' } });
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.correction.save' }));
+
+    await waitFor(() => expect(mocks.updateEntry).toHaveBeenCalled());
+    const [, updatedPayload] = mocks.updateEntry.mock.calls[0];
+    expect(updatedPayload.note).toBe('updated note');
+  });
+
+  it('clears the stored note when the textarea is edited down to empty (M1)', async () => {
+    mockDetail({ entries: [entry({ note: 'original note' })] });
+    mocks.updateEntry.mockResolvedValue({ entry_uuid: 'entry-1', outbox_event_uuid: 'evt-1', sync_version: 3 });
+    renderPanel({ catalogOverride: notesCatalog });
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.correct' }));
+    fireEvent.change(screen.getByLabelText('capture.form.note'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.correction.save' }));
+
+    await waitFor(() => expect(mocks.updateEntry).toHaveBeenCalled());
+    const [, clearedPayload] = mocks.updateEntry.mock.calls[0];
+    expect(clearedPayload.note).toBeNull();
+  });
 });

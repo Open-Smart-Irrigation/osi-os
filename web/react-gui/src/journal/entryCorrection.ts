@@ -9,7 +9,7 @@
 // here would silently erase it on the gateway.
 import type { UpdateEntryPayload } from '../services/journalApi';
 import type { EntryAggregate, EntryValue, EntryValueInput } from '../types/journal';
-import type { CaptureEntryValueOutput } from '../types/journalCapture';
+import type { CaptureEntryValueInput, CaptureEntryValueOutput, JournalScalar } from '../types/journalCapture';
 
 export interface JournalContextSnapshot {
   channels?: Record<string, unknown>;
@@ -43,6 +43,46 @@ export function parseContextSnapshot(contextJson: string | null): JournalContext
 function localTimeFromInstant(instant: string, offsetMinutes: number): string {
   const shifted = new Date(Date.parse(instant) + offsetMinutes * 60_000);
   return shifted.toISOString().slice(0, 16);
+}
+
+// Shared by both non-live-capture EntryForm hosts (DetailPanel's correction
+// form, DraftsQueue's DraftResumePanel) to derive a `JournalSelections`-
+// compatible scalar map from a set of stored/carried values -- the same
+// shape JournalCaptureFlow's live `selections` state already carries, so
+// deriveFieldStates resolves identically regardless of which host called it.
+export function scalarSelectionsFromValues(
+  values: readonly CaptureEntryValueInput[],
+): Record<string, JournalScalar> {
+  const result: Record<string, JournalScalar> = {};
+  for (const value of values) {
+    const scalar = value.value ?? value.value_text ?? value.entered_value_num ?? value.value_num;
+    if (typeof scalar === 'string' || typeof scalar === 'number' || typeof scalar === 'boolean') {
+      result[value.attribute_code] = scalar;
+    }
+  }
+  return result;
+}
+
+// v10 comment-everywhere decision (spec §0.4): the comment textarea EntryForm
+// renders for the top-level `note` field state stores its text into `values`
+// under attribute_code 'note' (safe: 'note' is not an attribute, so it is
+// filtered out of visibleInputs before buildEntryValues ever sees it — see
+// EntryForm.tsx's visibleAttributeStates). `note` never reaches
+// payloadValues/formPayload (both attribute-value-only), so it must be read
+// back out of the raw `values` state instead and threaded onto the
+// top-level `note` field every write payload carries
+// (JournalEntryWriteFields.note). Shared by all three EntryForm hosts
+// (JournalCaptureFlow, DetailPanel's correction form, DraftsQueue's
+// DraftResumePanel) so a stored/typed note round-trips identically
+// regardless of which host is reading it back.
+export function currentNoteValue(values: readonly CaptureEntryValueInput[]): string | undefined {
+  const input = values.find(({ attribute_code }) => attribute_code === 'note');
+  if (!input) return undefined;
+  const raw = typeof input.value === 'string'
+    ? input.value
+    : typeof input.value_text === 'string' ? input.value_text : undefined;
+  const trimmed = raw?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 // Merges the correction form's edited values over the aggregate's stored
