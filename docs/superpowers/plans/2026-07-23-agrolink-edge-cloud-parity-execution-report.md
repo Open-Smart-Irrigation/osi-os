@@ -2,8 +2,8 @@
 
 ## Preparation record: 2026-07-23
 
-**State:** Orchestrator inputs prepared; autonomous implementation has not
-started.
+**State:** Orchestrator inputs prepared and published; autonomous
+implementation has not started.
 
 ### Repository bases
 
@@ -64,10 +64,11 @@ flows, or imported external readings while that program is active.
 
 ### Remaining launch actions
 
-1. Commit and push this preparation packet.
-2. After the network work releases `design-sync/agrolink`, integrate the packet
-   into that branch without taking its dirty generated files.
-3. Start the orchestrator prompt. It must run launch prerequisites and Task 0
+1. After the network work releases `design-sync/agrolink`, integrate the head
+   of `docs/agrolink-parity-orchestrator-prep` into that branch without taking
+   its dirty generated files. Preparation content commit:
+   `0b41e60e0e24b7c6c7735c88c9e4b5a659b0e866`.
+2. Start the orchestrator prompt. It must run launch prerequisites and Task 0
    before dispatching implementation slices.
 
 No production host, live gateway, external key provider, or AgroLink SMB share
