@@ -98,6 +98,7 @@ evidence.
 From `web/react-gui`:
 
 ```bash
+npm run typecheck
 npm run test:unit
 npm run build
 ```
@@ -110,6 +111,9 @@ npm run build
 
 Also run `git diff --check` from the repo root before committing.
 
+`npm run typecheck` (`tsc --noEmit`) is CI-gated; `vite build` does not
+typecheck.
+
 ## Common Mistakes
 
 - Replacing `HashRouter` with `BrowserRouter` and breaking on-device deep links.
@@ -121,3 +125,5 @@ Also run `git diff --check` from the repo root before committing.
   loading.
 - Rendering missing agronomy data as a plausible numeric default.
 - Running only Vitest and forgetting the `tests/**/*.test.ts` tsx runner.
+- Relying on `npm run build` to catch type errors — `vite build` does not
+  typecheck; run `npm run typecheck`.
