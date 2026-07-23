@@ -312,11 +312,27 @@
     "cancel-strega-actuation-fn": {
       "delta": 1943,
       "reason": "Wave 3 scoped-access port (AgroLink 832d48ef, feat(api): enforce fresh scope on valve effects): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 6624 -> HEAD 8567 = +1943. AgroLink's snapshot pre-dates main's osi-valve-control.cancelActuation() refactor, so its inline reimplementation of the cancel transaction was NOT ported; only the scope-relevant addition was merged onto HEAD's already-refactored VC.cancelActuation() call: when OSI_SCOPED_ACCESS=1, asserts fresh device access via osi-scope-helper (403 on a viewer role) and skips the legacy device.user_id-vs-auth.userId ownership check (superseded by the assertion); verifyBearer tags msg._osiAuthFailure on each 401 path."
+    },
+    "70fcbea336401bd1": {
+      "delta": 2879,
+      "reason": "Wave 3 scoped-access port (AgroLink a6289e96, feat(api): enforce schedule scope and authority): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 2981 -> HEAD 5860 = +2879. Schedule-mutation boundary node (Decode Token): when OSI_SCOPED_ACCESS=1, resolves the target zone by id, asserts fresh zone access via osi-scope-helper (403 on a viewer role), and stamps msg.actor_user_uuid; verifyBearer tags msg._osiAuthFailure on each 401 path; two secret read/write catches converted to visible node.warn."
+    },
+    "22cc64fa2a899cea": {
+      "delta": 103,
+      "reason": "Wave 3 scoped-access port (AgroLink a6289e96, feat(api): enforce schedule scope and authority), auto-merged cleanly: measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 4256 -> HEAD 4359 = +103. Verify Zone Ownership threads the upstream actor_user_uuid through."
+    },
+    "settings-disable-schedules-fn": {
+      "delta": 2475,
+      "reason": "Wave 3 scoped-access port (AgroLink a6289e96, feat(api): enforce schedule scope and authority): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 4249 -> HEAD 6724 = +2475. When OSI_SCOPED_ACCESS=1, resolves the actor's role via osi-scope-helper's assertFreshRole and scopes the bulk schedule-disable UPDATE to owned-plus-granted zone_uuids for a non-admin actor (admin disables account-wide, matching unscoped semantics); verifyBearer tags msg._osiAuthFailure on each 401 path; one token-parse catch converted to visible node.warn."
+    },
+    "a0a61f4b7dca1c2e": {
+      "delta": 383,
+      "reason": "Wave 3 scoped-access port (AgroLink a6289e96, feat(api): enforce schedule scope and authority), auto-merged cleanly: measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 882 -> HEAD 1265 = +383. Build zones query (enabled schedules) threads the upstream actor_user_uuid/scope context through to its own zone query."
     }
   },
   "total_allowance": {
-    "delta": 156221,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink 832d48ef, feat(api): enforce fresh scope on valve effects) 1,229,195 chars = 156,221. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: +48,647 is this scope port so far, itemized in node_allowances for every node this port has touched or that auto-merged cleanly as a consequence."
+    "delta": 162582,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink a6289e96, feat(api): enforce schedule scope and authority) 1,235,556 chars = 162,582. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: +55,008 is this scope port so far, itemized in node_allowances for every node this port has touched or that auto-merged cleanly as a consequence."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {

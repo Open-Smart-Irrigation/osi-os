@@ -33,8 +33,6 @@ const PHASE_C_PENDING = new Set([
   'delete-zone-http',
   'assign-device-http',
   'unassign-device-http',
-  'e970d93ded4679af',
-  'settings-disable-schedules-http',
   'put-dendro-http',
   'put-temp-http',
   'sys-reboot-in',
