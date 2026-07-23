@@ -52,7 +52,7 @@ async function createRoot(dependencies?: Partial<PathAuthorityDependencies>) {
   const loaded = await loadConfig({
     configPath,
     env: { HOME: base, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome },
-    git: { getOriginUrl: async () => 'git@github.com:Open-Smart-Irrigation/osi-os.git' },
+    git: { getOriginPolicy: async () => ({ url: 'git@github.com:Open-Smart-Irrigation/osi-os.git', fetchRefspec: '+refs/heads/*:refs/remotes/origin/*' }) },
     rootFs: { statfs: ampleDisk },
     pathAuthorityDependencies: dependencies,
   });
@@ -138,7 +138,7 @@ describe('deterministic path previews', () => {
     await mkdir(configHome, { recursive: true });
     const configPath = join(configHome, 'config.json');
     await writeFile(configPath, JSON.stringify({ repositoryPath: repo, approvedOutputRoots: [{ id: 'a', label: 'a', path: images }, { id: 'b', label: 'b', path: nested }], builderLockPath: '/opt/osi-image-builder/2026.07.22.1/builder.lock.json' }));
-    await expect(loadConfig({ configPath, env: { HOME: base, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome }, git: { getOriginUrl: async () => 'git@example.com:osi/os.git' }, rootFs: { statfs: ampleDisk } })).rejects.toThrow(/overlap/i);
+    await expect(loadConfig({ configPath, env: { HOME: base, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome }, git: { getOriginPolicy: async () => ({ url: 'git@example.com:osi/os.git', fetchRefspec: '+refs/heads/*:refs/remotes/origin/*' }) }, rootFs: { statfs: ampleDisk } })).rejects.toThrow(/overlap/i);
   });
 
   it('detects root replacement and symlink replacement after config issuance', async () => {
@@ -262,6 +262,7 @@ describe('held no-follow read capabilities', () => {
     const probeFixture = await createRoot();
     await execFile('/usr/bin/git', ['init', '--quiet', probeFixture.repositoryPath]);
     await execFile('/usr/bin/git', ['-C', probeFixture.repositoryPath, 'config', 'remote.origin.url', 'git@github.com:Open-Smart-Irrigation/osi-os.git']);
+    await execFile('/usr/bin/git', ['-C', probeFixture.repositoryPath, 'config', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*']);
     await mkdir(join(probeFixture.root.path, 'payload'));
     const fifo = join(probeFixture.root.path, 'payload', 'evidence.fifo');
     await execFile('/usr/bin/mkfifo', [fifo]);

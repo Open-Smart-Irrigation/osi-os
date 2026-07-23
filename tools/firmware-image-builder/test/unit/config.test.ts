@@ -13,6 +13,7 @@ import {
   validateApprovedRoots,
   type RootStats,
 } from '../../config/load.js';
+import { CANONICAL_FETCH_REFSPEC, type ValidatedOriginPolicy } from '../../config/origin-policy.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -62,8 +63,12 @@ async function writeConfig(workspace: Awaited<ReturnType<typeof createWorkspace>
 }
 
 const ampleDisk = async () => ({ bavail: 30, bsize: 1024 ** 3 });
-const sshOrigin = { getOriginUrl: async () => 'git@github.com:Open-Smart-Irrigation/osi-os.git' };
-const httpsOrigin = { getOriginUrl: async () => 'https://github.com/example/osi-os.git' };
+function originPolicy(url: string): ValidatedOriginPolicy {
+  return { url, fetchRefspec: CANONICAL_FETCH_REFSPEC };
+}
+
+const sshOrigin = { getOriginPolicy: async () => originPolicy('git@github.com:Open-Smart-Irrigation/osi-os.git') };
+const httpsOrigin = { getOriginPolicy: async () => originPolicy('https://github.com/example/osi-os.git') };
 const cleanGitEnv = {
   PATH: '/usr/bin:/bin',
   HOME: '/nonexistent',
@@ -81,6 +86,7 @@ async function initGitRepository(path: string, origin?: string) {
   if (origin) {
     await execFile('/usr/bin/git', ['-C', path, 'config', '--local', 'remote.origin.url', origin], { env: cleanGitEnv });
   }
+  await execFile('/usr/bin/git', ['-C', path, 'config', '--local', 'remote.origin.fetch', CANONICAL_FETCH_REFSPEC], { env: cleanGitEnv });
 }
 
 async function addGitOrigin(path: string, origin: string) {
@@ -206,10 +212,124 @@ describe('builder configuration', () => {
     ['undefined', undefined],
     ['empty', ''],
     ['non-string', 42],
+    ['HTTPS', 'https://github.com/example/osi-os.git'],
+    ['SSH password', 'ssh://user:secret@example.com/repo'],
+    ['percent encoded control', 'ssh://example.com/repo%0A'],
+    ['remote helper', 'ext::ssh example.com/repo'],
+    ['local file', 'file:///tmp/osi-os.git'],
+    ['ambiguous SCP', 'example.com:repo'],
+    ['absolute SCP path', 'git@example.com:/repo'],
+    ['SSH port zero', 'ssh://git@example.com:0/repo'],
+    ['SSH option-like username', 'ssh://-git@example.com/repo'],
+    ['SSH option-like host', 'ssh://git@-example.com/repo'],
+    ['SSH malformed host label', 'ssh://git@example..com/repo'],
+    ['SCP option-like username', '-git@example.com:repo'],
+    ['SCP option-like host', 'git@-example.com:repo'],
+    ['SCP option-like path', 'git@example.com:-repo'],
   ])('rejects %s origin values', (_name, value) => {
     expect(() => validateOrigin(value)).toThrowError(
       expect.objectContaining<Partial<ConfigValidationError>>({ code: 'ORIGIN_NOT_SSH' }),
     );
+  });
+
+  it.each([
+    'ssh://git@example.com:1/repo',
+    'ssh://git@example.com:65535/repo',
+    'git@example.com:repo.git',
+  ])('accepts bounded SSH target %s', (value) => {
+    expect(() => validateOrigin(value)).not.toThrow();
+  });
+
+  it('uses the shared policy to reject local transport overrides at startup', async () => {
+    const workspace = await createWorkspace();
+    await initGitRepository(workspace.repositoryPath, 'git@github.com:Open-Smart-Irrigation/osi-os.git');
+    await execFile('/usr/bin/git', ['-C', workspace.repositoryPath, 'config', '--local', 'core.sshCommand', 'ssh -i /secret/key'], { env: cleanGitEnv });
+    await writeConfig(workspace, configFor(workspace));
+
+    await expect(loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      rootFs: { statfs: ampleDisk },
+    })).rejects.toMatchObject({ code: 'ORIGIN_NOT_SSH' });
+  });
+
+  it('accepts the configured common hooks path because startup Git is fixed to /dev/null', async () => {
+    const workspace = await createWorkspace();
+    await initGitRepository(workspace.repositoryPath, 'git@github.com:Open-Smart-Irrigation/osi-os.git');
+    await execFile('/usr/bin/git', ['-C', workspace.repositoryPath, 'config', '--local', 'core.hooksPath', '/home/phil/Repos/osi-os/.git/hooks'], { env: cleanGitEnv });
+    await writeConfig(workspace, configFor(workspace));
+
+    await expect(loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      rootFs: { statfs: ampleDisk },
+    })).resolves.toBeDefined();
+  });
+
+  it('rejects configured hook commands and bundle endpoints during startup inspection', async () => {
+    const workspace = await createWorkspace();
+    await initGitRepository(workspace.repositoryPath, 'git@github.com:Open-Smart-Irrigation/osi-os.git');
+    await execFile('/usr/bin/git', ['-C', workspace.repositoryPath, 'config', '--local', 'hook.reference-transaction.command', 'touch /tmp/configured-hook'], { env: cleanGitEnv });
+    await execFile('/usr/bin/git', ['-C', workspace.repositoryPath, 'config', '--local', 'hook.reference-transaction.event', 'prepared'], { env: cleanGitEnv });
+    await execFile('/usr/bin/git', ['-C', workspace.repositoryPath, 'config', '--local', 'fetch.bundleURI', 'https://example.invalid/bundle'], { env: cleanGitEnv });
+    await writeConfig(workspace, configFor(workspace));
+
+    await expect(loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      rootFs: { statfs: ampleDisk },
+    })).rejects.toMatchObject({ code: 'ORIGIN_NOT_SSH' });
+  });
+
+  it('inspects effective worktree config and rejects transport, protocol, and refspec overrides', async () => {
+    const workspace = await createWorkspace();
+    await initGitRepository(workspace.repositoryPath, 'git@github.com:Open-Smart-Irrigation/osi-os.git');
+    await execFile('/usr/bin/git', ['-C', workspace.repositoryPath, 'config', '--local', 'extensions.worktreeConfig', 'true'], { env: cleanGitEnv });
+    for (const [key, value] of [
+      ['url.ext::evil.insteadOf', 'git@github.com:rewritten/osi-os.git'],
+      ['protocol.ext.allow', 'always'],
+      ['core.sshCommand', 'ssh -i /secret/key'],
+      ['core.hooksPath', '/tmp/hooks'],
+      ['core.alternateRefsCommand', 'touch /tmp/alternate-refs'],
+      ['core.pager', 'touch /tmp/pager'],
+      ['core.editor', 'touch /tmp/editor'],
+      ['fetch.bundleURI', 'https://example.invalid/bundle'],
+      ['remote.origin.uploadpack', 'evil-upload-pack'],
+      ['remote.origin.fetch', 'refs/heads/main:refs/remotes/origin/main'],
+    ]) {
+      await execFile('/usr/bin/git', ['-C', workspace.repositoryPath, 'config', '--worktree', key, value], { env: cleanGitEnv });
+    }
+    await writeConfig(workspace, configFor(workspace));
+
+    await expect(loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      rootFs: { statfs: ampleDisk },
+    })).rejects.toMatchObject({ code: 'ORIGIN_NOT_SSH' });
+  });
+
+  it('validates the canonical fetch refspec during startup', async () => {
+    const workspace = await createWorkspace();
+    await initGitRepository(workspace.repositoryPath, 'git@github.com:Open-Smart-Irrigation/osi-os.git');
+    await execFile('/usr/bin/git', ['-C', workspace.repositoryPath, 'config', '--local', '--replace-all', 'remote.origin.fetch', 'refs/heads/main:refs/remotes/origin/main'], { env: cleanGitEnv });
+    await writeConfig(workspace, configFor(workspace));
+
+    await expect(loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      rootFs: { statfs: ampleDisk },
+    })).rejects.toMatchObject({ code: 'ORIGIN_NOT_SSH' });
+  });
+
+  it('sanitizes global and system Git config while inspecting the repository', async () => {
+    const workspace = await createWorkspace();
+    const ambientConfig = join(workspace.directory, 'ambient.gitconfig');
+    await initGitRepository(workspace.repositoryPath, 'git@github.com:Open-Smart-Irrigation/osi-os.git');
+    await writeFile(ambientConfig, '[core]\n\tsshCommand = ssh -i /secret/key\n[protocol "ext"]\n\tallow = always\n[url "ext::evil"]\n\tinsteadOf = git@github.com:\n[remote "origin"]\n\tfetch = refs/heads/main:refs/remotes/origin/main\n');
+    await writeConfig(workspace, configFor(workspace));
+    vi.stubEnv('GIT_CONFIG_GLOBAL', ambientConfig);
+    vi.stubEnv('GIT_CONFIG_SYSTEM', ambientConfig);
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '0');
+
+    await expect(loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      rootFs: { statfs: ampleDisk },
+    })).resolves.toBeDefined();
   });
 
   it('reads the raw repository-local origin despite ambient Git config and GIT_DIR', async () => {
@@ -278,7 +398,7 @@ describe('builder configuration', () => {
 
     const result = loadConfig({
       env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
-      git: { getOriginUrl: async () => { throw new Error('secret stderr from git'); } },
+      git: { getOriginPolicy: async () => { throw new Error('secret stderr from git'); } },
       rootFs: { statfs: ampleDisk },
     });
     await expect(result).rejects.toMatchObject({ code: 'ORIGIN_NOT_SSH' });

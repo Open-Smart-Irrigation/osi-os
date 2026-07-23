@@ -15,6 +15,13 @@ import {
   resolveConfigDirectories,
   type ConfigDirectories,
 } from './defaults.js';
+import {
+  EFFECTIVE_ORIGIN_CONFIG_COMMANDS,
+  parseNulValues,
+  validateEffectiveOriginConfig,
+  validateOriginUrl,
+  type ValidatedOriginPolicy,
+} from './origin-policy.js';
 
 const ROOT_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const BUILDER_VERSION_PATTERN = /^(?:v?\d+\.\d+\.\d+|\d{4}\.\d{2}\.\d{2}(?:\.\d+)?)$/;
@@ -29,8 +36,15 @@ const SAFE_GIT_ENV = {
   GIT_CONFIG_NOSYSTEM: '1',
   GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_CONFIG_SYSTEM: '/dev/null',
+  GIT_CONFIG_COUNT: '1',
+  GIT_CONFIG_KEY_0: 'core.hooksPath',
+  GIT_CONFIG_VALUE_0: '/dev/null',
   GIT_TERMINAL_PROMPT: '0',
   GIT_OPTIONAL_LOCKS: '0',
+  GIT_NO_REPLACE_OBJECTS: '1',
+  GIT_ALLOW_PROTOCOL: 'ssh',
+  GIT_SSH_COMMAND: '/usr/bin/ssh -oBatchMode=yes -oIdentitiesOnly=no',
+  GIT_SSH_VARIANT: 'ssh',
 } as const;
 
 export type ConfigErrorCode =
@@ -213,7 +227,7 @@ export interface RootFileSystem {
 }
 
 export interface GitOriginProbe {
-  readonly getOriginUrl: (repositoryPath: string, remote: typeof DEFAULT_REMOTE) => Promise<string>;
+  readonly getOriginPolicy: (repositoryPath: string, remote: typeof DEFAULT_REMOTE) => Promise<ValidatedOriginPolicy>;
 }
 
 export interface RootValidationOptions {
@@ -342,10 +356,10 @@ export async function withStateRootSnapshot<T>(stateRoot: StateRootAuthority, ca
 }
 
 const defaultGitOriginProbe: GitOriginProbe = {
-  async getOriginUrl(repositoryPath, remote) {
+  async getOriginPolicy(repositoryPath, remote) {
     const result = await execFile(
       TRUSTED_GIT_EXECUTABLE,
-      ['config', '--local', '--no-includes', '--null', '--get-all', `remote.${remote}.url`],
+      EFFECTIVE_ORIGIN_CONFIG_COMMANDS.urls,
       {
         cwd: repositoryPath,
         encoding: 'utf8',
@@ -355,16 +369,36 @@ const defaultGitOriginProbe: GitOriginProbe = {
         windowsHide: true,
       },
     );
-    const output = result.stdout.endsWith('\0') ? result.stdout.slice(0, -1) : result.stdout;
-    const originUrls = output.split('\0');
-    if (originUrls.length !== 1 || originUrls[0].length === 0 || originUrls[0].trim().length === 0) {
-      throw new ConfigValidationError(
-        'ORIGIN_NOT_SSH',
-        'Repository origin must contain exactly one nonempty URL.',
-        'origin',
-      );
-    }
-    return originUrls[0];
+    const originUrls = parseNulValues(result.stdout);
+    const keys = await execFile(
+      TRUSTED_GIT_EXECUTABLE,
+      EFFECTIVE_ORIGIN_CONFIG_COMMANDS.keys,
+      {
+        cwd: repositoryPath,
+        encoding: 'utf8',
+        env: SAFE_GIT_ENV,
+        timeout: GIT_PROBE_TIMEOUT_MS,
+        maxBuffer: GIT_PROBE_MAX_BUFFER_BYTES,
+        windowsHide: true,
+      },
+    );
+    const refspecs = await execFile(
+      TRUSTED_GIT_EXECUTABLE,
+      EFFECTIVE_ORIGIN_CONFIG_COMMANDS.fetchRefspecs,
+      {
+        cwd: repositoryPath,
+        encoding: 'utf8',
+        env: SAFE_GIT_ENV,
+        timeout: GIT_PROBE_TIMEOUT_MS,
+        maxBuffer: GIT_PROBE_MAX_BUFFER_BYTES,
+        windowsHide: true,
+      },
+    );
+    return validateEffectiveOriginConfig({
+      urls: originUrls,
+      keys: parseNulValues(keys.stdout, { allowEmpty: true }),
+      fetchRefspecs: parseNulValues(refspecs.stdout, { allowEmpty: true }),
+    });
   },
 };
 
@@ -384,9 +418,14 @@ export async function loadConfig(options: ConfigLoadOptions = {}): Promise<Loade
 
   const file = parseConfigFile(raw);
   const repositoryPath = validateRepositoryPath(file.repositoryPath);
-  let originUrl: string;
+  let originPolicy: ValidatedOriginPolicy;
   try {
-    originUrl = await (options.git ?? defaultGitOriginProbe).getOriginUrl(repositoryPath, DEFAULT_REMOTE);
+    const inspectedPolicy = await (options.git ?? defaultGitOriginProbe).getOriginPolicy(repositoryPath, DEFAULT_REMOTE);
+    originPolicy = validateEffectiveOriginConfig({
+      urls: [inspectedPolicy.url],
+      keys: [],
+      fetchRefspecs: [inspectedPolicy.fetchRefspec],
+    });
   } catch (error) {
     throw new ConfigValidationError(
       'ORIGIN_NOT_SSH',
@@ -394,7 +433,7 @@ export async function loadConfig(options: ConfigLoadOptions = {}): Promise<Loade
       'origin',
     );
   }
-  validateOrigin(originUrl);
+  validateOrigin(originPolicy.url);
   const maxQueueLength = validateMaxQueueLength(file.maxQueueLength ?? DEFAULT_MAX_QUEUE_LENGTH);
   const diskFreeMinimumBytes = validateDiskThreshold(file.diskFreeMinimumBytes ?? MIN_DISK_FREE_BYTES);
   const builderLockPath = validateBuilderLockPath(file.builderLockPath);
@@ -647,18 +686,9 @@ function validateRepositoryPath(value: string): string {
 }
 
 export function validateOrigin(value: unknown): void {
-  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) {
-    throw new ConfigValidationError('ORIGIN_NOT_SSH', 'The configured origin must use SSH syntax.', 'origin');
-  }
-  const isScpSsh = /^[^@\s/:]+@[^:\s/]+:.+$/.test(value);
-  let isSshUrl = false;
   try {
-    const parsed = new URL(value);
-    isSshUrl = parsed.protocol === 'ssh:' && parsed.hostname.length > 0 && parsed.pathname.length > 1;
+    validateOriginUrl(value);
   } catch {
-    isSshUrl = false;
-  }
-  if (!isScpSsh && !isSshUrl) {
     throw new ConfigValidationError('ORIGIN_NOT_SSH', 'The configured origin must use SSH syntax.', 'origin');
   }
 }
