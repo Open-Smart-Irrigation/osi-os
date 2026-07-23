@@ -15,14 +15,15 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const NODE_VERSION = /(?:node-v|NODE_VERSION=|nodejs\s+)(\d+\.\d+\.\d+)/u;
 const LLVM_MAJOR = /(?:LLVM_MAJOR=|llvm(?:-dev)?\s+)(\d+)/u;
 const POLLY_PACKAGE = /libpolly-(\d+)-dev/u;
-const BASE_IMAGE = /^FROM\s+--platform=linux\/amd64\s+(\S+@sha256:([0-9a-f]{64}))\s*$/mu;
+const BASE_IMAGE = /^ARG BUILDER_PLATFORM=linux\/amd64\s+FROM\s+--platform=\$\{BUILDER_PLATFORM\}\s+(\S+@sha256:([0-9a-f]{64}))\s*$/mu;
 const IMAGE_ID = /^sha256:[0-9a-f]{64}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+const DOCKER_REPOSITORY = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9]\d{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/u;
 export const RUST_TARGETS = Object.freeze(['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const);
 const TARGET_PACKAGE_NAMES = Object.freeze(['musl:arm64', 'musl-dev:arm64', 'musl:armhf', 'musl-dev:armhf'] as const);
 
-export type BuilderValidationErrorCode = 'BUILDER_SOURCE_DRIFT' | 'BUILDER_DOCKERFILE_INVALID' | 'BUILDER_VALIDATION_EVIDENCE_INVALID' | 'BUILDER_LOCK_INVALID' | 'DOCKER_UNAVAILABLE';
+export type BuilderValidationErrorCode = 'BUILDER_SOURCE_DRIFT' | 'BUILDER_DOCKERFILE_INVALID' | 'BUILDER_VALIDATION_EVIDENCE_INVALID' | 'BUILDER_LOCK_INVALID' | 'BUILDER_IMAGE_DIGEST_INVALID' | 'BUILDER_RUNTIME_ENV_INVALID' | 'RUST_BOOTSTRAP_UNAVAILABLE' | 'DOCKER_UNAVAILABLE';
 
 export class BuilderValidationError extends Error {
   readonly code: BuilderValidationErrorCode;
@@ -89,6 +90,11 @@ export interface DockerCapability {
   readonly code: 'OK' | 'DOCKER_UNAVAILABLE';
 }
 
+export interface DockerImageValidationOptions {
+  readonly executable?: string;
+  readonly run?: (argv: readonly string[], options?: { readonly timeout: number; readonly maxBuffer: number; readonly env: Readonly<Record<string, string>> }) => Promise<{ readonly stdout: string; readonly stderr: string }>;
+}
+
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalize(item)]));
@@ -138,7 +144,8 @@ function dockerfileMetadata(contents: string): BuilderSourceMetadata {
   if (baseName.includes(':')) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Mutable base tags are not accepted');
   if (!/ARG DEBIAN_SNAPSHOT=20260715T000000Z/u.test(contents) || !/snapshot\.debian\.org\/archive\/debian\/\$\{DEBIAN_SNAPSHOT\}/u.test(contents) || /(?:deb|security)\.debian\.org/u.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile package source is not the immutable Debian snapshot');
   if (!/ARG RUST_SOURCE_SHA256=2f4f3142ffb7c8402139cfa0796e24baaac8b9fd3f96b2deec3b94b4045c6a8a/u.test(contents) || !/static\.rust-lang\.org\/dist\/rustc-\$\{RUST_SOURCE_VERSION\}-src\.tar\.gz/u.test(contents) || !/jobs\s*=\s*2/u.test(contents) || !/download-ci-llvm\s*=\s*false/u.test(contents) || !/llvm-config\s*=\s*"\/usr\/bin\/llvm-config"/u.test(contents) || /rustup/iu.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile Rust compiler source is not system-LLVM configured');
-  if (!/FROM\s+--platform=linux\/amd64/u.test(contents) || !/ARG NODE_ARCH=linux-x64/u.test(contents) || !/node-v\$\{NODE_VERSION\}-\$\{NODE_ARCH\}\.tar\.xz/u.test(contents) || !/ARG NODE_TARBALL_SHA256=[0-9a-f]{64}/u.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile architecture or Node archive pin is incomplete');
+  if (!/^ARG BUILDER_PLATFORM=linux\/amd64\s+FROM\s+--platform=\$\{BUILDER_PLATFORM\}/mu.test(contents) || /^FROM\s+--platform=linux\/amd64/mu.test(contents) || !/ARG NODE_ARCH=linux-x64/u.test(contents) || !/node-v\$\{NODE_VERSION\}-\$\{NODE_ARCH\}\.tar\.xz/u.test(contents) || !/ARG NODE_TARBALL_SHA256=[0-9a-f]{64}/u.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile architecture or Node archive pin is incomplete');
+  if (!/^ENV PATH=\/usr\/local\/sbin:\/usr\/local\/bin:\/usr\/sbin:\/usr\/bin:\/sbin:\/bin$/mu.test(contents) || /^ENV\s+(?!PATH=\/usr\/local\/sbin:\/usr\/local\/bin:\/usr\/sbin:\/usr\/bin:\/sbin:\/bin$)/mu.test(contents) || /^(?:ENV|ARG)\s+(?:CARGO_HOME|DEBIAN_FRONTEND|CARGO_BUILD_JOBS|RUST_TARGETS)=/mu.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile runtime environment contains build-only values');
   const node = contents.match(NODE_VERSION)?.[1];
   const llvmMajor = Number(contents.match(/LLVM_MAJOR=(\d+)/u)?.[1] ?? contents.match(POLLY_PACKAGE)?.[1] ?? '0');
   const pollyMajor = Number(contents.match(POLLY_PACKAGE)?.[1] ?? '0');
@@ -171,17 +178,34 @@ export function validateExecutionDefinition(value: unknown, imageTemplate = '{{i
 }
 
 export function builderImageReference(lock: Pick<BuilderLock, 'imageRepository' | 'imageDigest'>): string {
-  if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9]\d{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/u.test(lock.imageRepository) || !SHA256.test(lock.imageDigest) || /^0+$/u.test(lock.imageDigest)) {
+  if (!DOCKER_REPOSITORY.test(lock.imageRepository) || !SHA256.test(lock.imageDigest) || /^0+$/u.test(lock.imageDigest)) {
     throw new BuilderSourceError('BUILDER_DOCKERFILE_INVALID', 'Builder image reference is not immutable');
   }
   return `${lock.imageRepository}@sha256:${lock.imageDigest}`;
 }
 
 export function canonicalBuilderImageReference(value: { readonly imageRepository: string; readonly imageDigest: string }): string {
-  if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9]\d{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/u.test(value.imageRepository) || !SHA256.test(value.imageDigest) || /^0+$/u.test(value.imageDigest)) {
+  if (!DOCKER_REPOSITORY.test(value.imageRepository) || !SHA256.test(value.imageDigest) || /^0+$/u.test(value.imageDigest)) {
     throw new BuilderSourceError('BUILDER_DOCKERFILE_INVALID', 'Builder image reference is not immutable');
   }
   return builderImageReference(value as BuilderLock);
+}
+
+export function parseCanonicalBuilderImageReference(value: string): { readonly imageRepository: string; readonly imageDigest: string } {
+  const marker = '@sha256:';
+  const markerIndex = value.lastIndexOf(marker);
+  const imageRepository = markerIndex > 0 ? value.slice(0, markerIndex) : '';
+  const imageDigest = markerIndex > 0 ? value.slice(markerIndex + marker.length) : '';
+  if (markerIndex !== value.indexOf(marker) || !DOCKER_REPOSITORY.test(imageRepository) || !DIGEST.test(imageDigest) || /^0+$/u.test(imageDigest)) throw new BuilderValidationError('BUILDER_IMAGE_DIGEST_INVALID', 'Builder image reference must be canonical repository@sha256:digest metadata');
+  return { imageRepository, imageDigest };
+}
+
+export function selectExactRepositoryDigest(imageReference: string, repoDigests: readonly unknown[]): string {
+  const { imageRepository } = parseCanonicalBuilderImageReference(imageReference);
+  const prefix = `${imageRepository}@sha256:`;
+  const matches = repoDigests.filter((value): value is string => typeof value === 'string' && value.startsWith(prefix) && DIGEST.test(value.slice(prefix.length)));
+  if (matches.length !== 1) throw new BuilderValidationError('BUILDER_IMAGE_DIGEST_INVALID', `Expected exactly one RepoDigest for ${imageRepository}, found ${matches.length}`);
+  return matches[0]!.slice(matches[0]!.lastIndexOf('@sha256:') + 8);
 }
 
 export function validateBuilderDockerfile(contents: string): { readonly ok: true; readonly metadata: BuilderSourceMetadata } | { readonly ok: false; readonly reason: string } {
@@ -195,7 +219,13 @@ export function validateBuilderLockFile(value: unknown, options: { readonly inst
   return result.lock;
 }
 
-export function validateProductionBuilderLock(value: unknown, installedVersion: string, options: { readonly dockerfile: string; readonly executionDefinitionPath: string; readonly evidence: BuilderValidationEvidence }): { readonly ok: true; readonly lock: BuilderLock } | { readonly ok: false; readonly reason: string } {
+export interface ProductionBuilderLockValidationOptions {
+  readonly dockerfile: string;
+  readonly executionDefinitionPath: string;
+  readonly verifyImage?: (imageReference: string) => Promise<{ readonly imageId: string; readonly selfTest: 'passed'; readonly versions: Readonly<Record<string, string>>; readonly evidence: BuilderValidationEvidence }>;
+}
+
+export async function validateProductionBuilderLock(value: unknown, installedVersion: string, options: ProductionBuilderLockValidationOptions): Promise<{ readonly ok: true; readonly lock: BuilderLock } | { readonly ok: false; readonly reason: string }> {
   const domain = validateBuilderLock(value, installedVersion);
   if (!domain.ok) return domain;
   try {
@@ -206,8 +236,10 @@ export function validateProductionBuilderLock(value: unknown, installedVersion: 
     const definitionContents = requireRead(options.executionDefinitionPath);
     validateExecutionDefinition(JSON.parse(definitionContents), '{{imageRepository}}@sha256:{{imageDigest}}');
     if (sha256(definitionContents) !== lock.executionDefinitionSha256) throw new Error('execution definition hash mismatch');
-    completeEvidence(options.evidence, lock.packageSet, lock);
-    if (validationEvidenceSha256(options.evidence) !== lock.validationEvidenceSha256) throw new Error('validation evidence hash mismatch');
+    const imageReference = canonicalBuilderImageReference(lock);
+    const verified = await (options.verifyImage ?? (validateBuiltBuilderImage))(imageReference);
+    completeEvidence(verified.evidence, lock.packageSet, lock);
+    if (validationEvidenceSha256(verified.evidence) !== lock.validationEvidenceSha256) throw new Error('validation evidence hash mismatch');
     return { ok: true, lock };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : 'builder lock validation failed' };
@@ -309,50 +341,77 @@ for spec in x86_64-unknown-linux-gnu:x86_64 aarch64-unknown-linux-musl:aarch64 a
   printf '%s|%s|%s|%s|%s|%s|%s|%s\\n' "$target" "$libdir" "$std" "$(sha256sum "$std" | cut -d' ' -f1)" "$std_arch" "$out" "$(sha256sum "$out" | cut -d' ' -f1)" "$out_arch"
 done`;
 
-export async function validateBuiltBuilderImage(imageReference: string): Promise<{ readonly imageId: string; readonly selfTest: 'passed'; readonly versions: Readonly<Record<string, string>>; readonly evidence: BuilderValidationEvidence }> {
-  try {
-    const inspect = await execFileAsync('/usr/bin/docker', ['image', 'inspect', '--format', '{{json .}}', imageReference], { timeout: 10_000, maxBuffer: 64 * 1024, env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent' } });
-    const image = JSON.parse(inspect.stdout) as { Id?: unknown; Architecture?: unknown; Os?: unknown; RepoDigests?: unknown; Size?: unknown };
-    if (typeof image.Id !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(image.Id)) throw new Error('Docker image ID is invalid');
-    if (image.Architecture !== 'amd64' || image.Os !== 'linux') throw new Error('Docker image architecture is not linux/amd64');
-    if (typeof image.Size !== 'number' || image.Size <= 0 || image.Size > 4 * 1024 * 1024 * 1024) throw new Error('Docker image size is outside the builder limit');
-    const repoDigest = Array.isArray(image.RepoDigests) ? image.RepoDigests.find((value): value is string => typeof value === 'string' && /@sha256:[0-9a-f]{64}$/u.test(value)) : undefined;
-    const imageDigest = repoDigest?.slice(repoDigest.lastIndexOf('@sha256:') + 8) ?? image.Id.slice(7);
-    const versions: Record<string, string> = {};
-    const commands: BuilderEvidenceCommand[] = [];
-    const packageVersions: Record<string, string> = {};
-    const run = async (argv: readonly string[], timeout = 60_000): Promise<{ stdout: string; stderr: string }> => {
-      const result = await execFileAsync('/usr/bin/docker', ['run', '--platform=linux/amd64', '--rm', '--network', 'none', imageReference, ...argv], { timeout, maxBuffer: 256 * 1024, env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent' } });
-      commands.push(evidenceCommand(argv, result.stdout, result.stderr));
-      return result;
-    };
-    for (const [name, argv] of Object.entries({ node: ['node', '--version'], npm: ['npm', '--version'], gcc14: ['gcc-14', '--version'], rustc: ['/usr/bin/rustc', '-vV'], llvm: ['/usr/bin/llvm-config', '--version'], polly: ['dpkg-query', '--show', '--showformat=${Version}', 'libpolly-19-dev'], zstd: ['pkg-config', '--modversion', 'libzstd'] })) {
-      const result = await run(argv);
-      versions[name] = result.stdout.trim();
-      if (versions[name].length === 0) throw new Error(`${name} self-test returned no output`);
+function dockerErrorMessage(error: unknown): string {
+  if (!error || typeof error !== 'object') return 'Docker command failed';
+  const value = error as { message?: unknown; stderr?: unknown };
+  return [value.message, value.stderr].filter((item): item is string => typeof item === 'string' && item.length > 0).join(': ') || 'Docker command failed';
+}
+
+function isDockerUnavailable(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const value = error as { code?: unknown; stderr?: unknown; message?: unknown };
+  if (typeof value.code === 'string' && ['ENOENT', 'EACCES', 'ETIMEDOUT', 'ECONNREFUSED'].includes(value.code)) return true;
+  const text = `${typeof value.stderr === 'string' ? value.stderr : ''}\n${typeof value.message === 'string' ? value.message : ''}`;
+  return /Cannot connect to the Docker daemon|Is the docker daemon running|No such image|permission denied/u.test(text);
+}
+
+export async function validateBuiltBuilderImage(imageReference: string, options: DockerImageValidationOptions = {}): Promise<{ readonly imageId: string; readonly selfTest: 'passed'; readonly versions: Readonly<Record<string, string>>; readonly evidence: BuilderValidationEvidence }> {
+  const canonical = parseCanonicalBuilderImageReference(imageReference);
+  const executable = options.executable ?? '/usr/bin/docker';
+  const environment = { PATH: '/usr/bin:/bin', HOME: '/nonexistent' } as const;
+  const command = options.run ?? ((argv, runOptions) => execFileAsync(executable, [...argv], { ...runOptions, encoding: 'utf8' }) as Promise<{ stdout: string; stderr: string }>);
+  const invoke = async (argv: readonly string[], timeout: number, purpose: 'inspect' | 'runtime'): Promise<{ stdout: string; stderr: string }> => {
+    try {
+      return await command(argv, { timeout, maxBuffer: purpose === 'inspect' ? 64 * 1024 : 256 * 1024, env: environment });
+    } catch (error) {
+      if (purpose === 'inspect' || isDockerUnavailable(error)) throw new BuilderValidationError('DOCKER_UNAVAILABLE', dockerErrorMessage(error));
+      throw new BuilderValidationError('RUST_BOOTSTRAP_UNAVAILABLE', dockerErrorMessage(error));
     }
-    const packageResult = await run(['dpkg-query', '--show', '--showformat=${Package}=${Version}\\n', 'gcc-14', 'nodejs', 'npm', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev']);
-    for (const line of packageResult.stdout.trim().split(/\r?\n/u)) { const separator = line.indexOf('='); if (separator > 0) packageVersions[line.slice(0, separator)] = line.slice(separator + 1); }
-    packageVersions['openwrt-build-tools'] = 'complete-host-tool-set';
-    const targetPackageResult = await run(['/bin/sh', '-c', 'cat /opt/target-sysroots/package-versions']);
-    for (const line of targetPackageResult.stdout.trim().split(/\r?\n/u)) { const separator = line.indexOf('='); if (separator > 0) packageVersions[line.slice(0, separator)] = line.slice(separator + 1); }
-    await run(['/bin/sh', '-c', 'test ! -e /tmp/rust-source && test -s /opt/target-sysroots/package-versions && du -sb /opt/rust-system /opt/target-sysroots']);
-    const systemProbe = await run(['/bin/sh', '-c', SYSTEM_TOOLCHAIN_PROBE]);
-    const systemLines = systemProbe.stdout.trim().split(/\r?\n/u);
-    const systemRustLlv = systemLines.find((line) => /^LLVM version:\s*\d+\.\d+/u.test(line));
-    if (systemLines.length < 4 || !/^\d+\.\d+/u.test(systemLines[0]!) || systemRustLlv === undefined) throw new Error('system LLVM/Polly/Zstd probe evidence is not semantic');
-    const rustResult = await run(['/bin/sh', '-c', RUST_TARGET_VALIDATION]);
-    const rustTargets = rustResult.stdout.trim().split(/\r?\n/u).map((line) => {
-      const fields = line.split('|');
-      if (fields.length !== 8 || !RUST_TARGETS.includes(fields[0] as (typeof RUST_TARGETS)[number]) || !DIGEST.test(fields[3]!) || !DIGEST.test(fields[6]!)) throw new Error('Rust target validation evidence is malformed');
-      return { target: fields[0] as (typeof RUST_TARGETS)[number], standardLibraryPath: fields[2]!, standardLibrarySha256: fields[3]!, standardLibraryArchitecture: fields[4]!, compileArtifact: fields[5]!, compileSha256: fields[6]!, compileArchitecture: fields[7]!, result: 'passed' as const };
-    });
-    const evidence: BuilderValidationEvidence = { imageId: image.Id, imageDigest, architecture: 'linux/amd64', rustc: versions.rustc!, llvm: systemLines[0]!, polly: packageVersions['libpolly-19-dev']!, zstd: packageVersions['libzstd-dev']!, node: versions.node!, packages: ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev'], packageVersions, commands, rustTargets, executionSelfTest: 'passed' };
-    completeEvidence(evidence, evidence.packages);
-    return { imageId: image.Id, selfTest: 'passed', versions, evidence };
-  } catch (error) {
-    throw new BuilderValidationError('DOCKER_UNAVAILABLE', error instanceof Error ? error.message : 'Docker image validation failed');
+  };
+  let inspect: { stdout: string; stderr: string };
+  try { inspect = await invoke(['image', 'inspect', '--format', '{{json .}}', imageReference], 10_000, 'inspect'); }
+  catch (error) { throw error; }
+  let image: { Id?: unknown; Architecture?: unknown; Os?: unknown; RepoDigests?: unknown; Size?: unknown; Config?: { Env?: unknown } };
+  try { image = JSON.parse(inspect.stdout) as typeof image; } catch (error) { throw new BuilderValidationError('DOCKER_UNAVAILABLE', `Docker image inspect was not valid JSON: ${dockerErrorMessage(error)}`); }
+  if (typeof image.Id !== 'string' || !IMAGE_ID.test(image.Id)) throw new BuilderValidationError('BUILDER_IMAGE_DIGEST_INVALID', 'Docker image ID is invalid');
+  if (image.Architecture !== 'amd64' || image.Os !== 'linux') throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Docker image architecture is not linux/amd64');
+  if (typeof image.Size !== 'number' || image.Size <= 0 || image.Size > 4 * 1024 * 1024 * 1024) throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Docker image size is outside the builder limit');
+  if (!Array.isArray(image.Config?.Env) || JSON.stringify(image.Config.Env) !== JSON.stringify([`PATH=${IMAGE_PATH}`])) throw new BuilderValidationError('BUILDER_RUNTIME_ENV_INVALID', 'Docker image Config.Env is not the exact permitted runtime PATH');
+  const repoDigests = Array.isArray(image.RepoDigests) ? image.RepoDigests : [];
+  const imageDigest = selectExactRepositoryDigest(imageReference, repoDigests);
+  if (imageDigest !== canonical.imageDigest) throw new BuilderValidationError('BUILDER_IMAGE_DIGEST_INVALID', 'Docker image RepoDigest does not match the requested canonical digest');
+  const versions: Record<string, string> = {};
+  const commands: BuilderEvidenceCommand[] = [];
+  const packageVersions: Record<string, string> = {};
+  const run = async (argv: readonly string[], timeout = 60_000): Promise<{ stdout: string; stderr: string }> => {
+    const result = await invoke(['run', '--platform=linux/amd64', '--rm', '--network', 'none', imageReference, ...argv], timeout, 'runtime');
+    commands.push(evidenceCommand(argv, result.stdout, result.stderr));
+    return result;
+  };
+  for (const [name, argv] of Object.entries({ node: ['node', '--version'], npm: ['npm', '--version'], gcc14: ['gcc-14', '--version'], rustc: ['/usr/bin/rustc', '-vV'], llvm: ['/usr/bin/llvm-config', '--version'], polly: ['dpkg-query', '--show', '--showformat=${Version}', 'libpolly-19-dev'], zstd: ['pkg-config', '--modversion', 'libzstd'] })) {
+    const result = await run(argv);
+    versions[name] = result.stdout.trim();
+    if (versions[name].length === 0) throw new BuilderValidationError('RUST_BOOTSTRAP_UNAVAILABLE', `${name} self-test returned no output`);
   }
+  const packageResult = await run(['dpkg-query', '--show', '--showformat=${Package}=${Version}\\n', 'gcc-14', 'nodejs', 'npm', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev']);
+  for (const line of packageResult.stdout.trim().split(/\r?\n/u)) { const separator = line.indexOf('='); if (separator > 0) packageVersions[line.slice(0, separator)] = line.slice(separator + 1); }
+  packageVersions['openwrt-build-tools'] = 'complete-host-tool-set';
+  const targetPackageResult = await run(['/bin/sh', '-c', 'cat /opt/target-sysroots/package-versions']);
+  for (const line of targetPackageResult.stdout.trim().split(/\r?\n/u)) { const separator = line.indexOf('='); if (separator > 0) packageVersions[line.slice(0, separator)] = line.slice(separator + 1); }
+  await run(['/bin/sh', '-c', 'test ! -e /tmp/rust-source && test -s /opt/target-sysroots/package-versions && du -sb /opt/rust-system /opt/target-sysroots']);
+  const systemProbe = await run(['/bin/sh', '-c', SYSTEM_TOOLCHAIN_PROBE]);
+  const systemLines = systemProbe.stdout.trim().split(/\r?\n/u);
+  const systemRustLlv = systemLines.find((line) => /^LLVM version:\s*\d+\.\d+/u.test(line));
+  if (systemLines.length < 4 || !/^\d+\.\d+/u.test(systemLines[0]!) || systemRustLlv === undefined) throw new BuilderValidationError('RUST_BOOTSTRAP_UNAVAILABLE', 'System LLVM/Polly/Zstd probe evidence is not semantic');
+  const rustResult = await run(['/bin/sh', '-c', RUST_TARGET_VALIDATION]);
+  const rustTargets = rustResult.stdout.trim().split(/\r?\n/u).map((line) => {
+    const fields = line.split('|');
+    if (fields.length !== 8 || !RUST_TARGETS.includes(fields[0] as (typeof RUST_TARGETS)[number]) || !DIGEST.test(fields[3]!) || !DIGEST.test(fields[6]!)) throw new BuilderValidationError('RUST_BOOTSTRAP_UNAVAILABLE', 'Rust target validation evidence is malformed');
+    return { target: fields[0] as (typeof RUST_TARGETS)[number], standardLibraryPath: fields[2]!, standardLibrarySha256: fields[3]!, standardLibraryArchitecture: fields[4]!, compileArtifact: fields[5]!, compileSha256: fields[6]!, compileArchitecture: fields[7]!, result: 'passed' as const };
+  });
+  const evidence: BuilderValidationEvidence = { imageId: image.Id, imageDigest, architecture: 'linux/amd64', rustc: versions.rustc!, llvm: systemLines[0]!, polly: packageVersions['libpolly-19-dev']!, zstd: packageVersions['libzstd-dev']!, node: versions.node!, packages: ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev'], packageVersions, commands, rustTargets, executionSelfTest: 'passed' };
+  completeEvidence(evidence, evidence.packages);
+  return { imageId: image.Id, selfTest: 'passed', versions, evidence };
 }
 
 export async function inspectBuilderImage(options: { readonly executable: string; readonly imageReference: string; readonly run: (executable: string, argv: readonly string[], options?: Record<string, unknown>) => Promise<{ readonly stdout: string; readonly stderr: string }> }): Promise<{ readonly available: boolean; readonly code: 'DOCKER_UNAVAILABLE' | null; readonly imageId?: string }> {

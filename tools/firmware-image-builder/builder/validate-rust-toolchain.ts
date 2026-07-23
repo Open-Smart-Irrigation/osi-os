@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export interface RustToolchainConfig {
   readonly llvmConfig: string;
   readonly channel: string;
@@ -29,6 +31,24 @@ export type OpenWrtRustFeedValidation =
   | { readonly ok: true; readonly policy: 'system-llvm-only' }
   | { readonly ok: false; readonly reason: string };
 
+export interface OpenWrtRustFeedTransformContract {
+  readonly sourceSha256: string;
+  readonly enforcedSha256: string;
+}
+
+export type OpenWrtRustFeedEnforcement =
+  | { readonly ok: true; readonly policy: 'system-llvm-only'; readonly sourceSha256: string; readonly enforcedSha256: string; readonly source: string }
+  | { readonly ok: false; readonly reason: string };
+
+const FEED_CI_LLVM_ENABLED = 'llvm.download-ci-llvm=true';
+const FEED_CI_LLVM_DISABLED = 'llvm.download-ci-llvm=false';
+const FEED_HOST_LLVM_CONFIG = 'llvm-config=/usr/bin/llvm-config';
+const HASH = /^[0-9a-f]{64}$/u;
+
+function feedSha256(source: string): string {
+  return createHash('sha256').update(source).digest('hex');
+}
+
 /**
  * The builder image proves its own compiler path; the firmware feed must be
  * checked separately before OpenWrt configuration so that proof is not
@@ -36,9 +56,31 @@ export type OpenWrtRustFeedValidation =
  */
 export function validateOpenWrtRustFeed(source: string): OpenWrtRustFeedValidation {
   if (typeof source !== 'string' || source.length === 0) return { ok: false, reason: 'OpenWrt Rust feed source is missing' };
-  if (/download-ci-llvm\s*=\s*true/iu.test(source)) return { ok: false, reason: 'OpenWrt Rust feed enables the mutable Rust CI LLVM artifact' };
-  if (!/download-ci-llvm\s*=\s*false/iu.test(source)) return { ok: false, reason: 'OpenWrt Rust feed does not explicitly disable Rust CI LLVM downloads' };
+  const lines = source.split(/\r?\n/u).map((line) => line.trim());
+  if (lines.filter((line) => line === FEED_CI_LLVM_ENABLED).length > 0) return { ok: false, reason: 'OpenWrt Rust feed enables the mutable Rust CI LLVM artifact' };
+  if (lines.filter((line) => line === FEED_CI_LLVM_DISABLED).length !== 1) return { ok: false, reason: 'OpenWrt Rust feed must contain exactly one download-ci-llvm=false assignment' };
+  if (lines.filter((line) => line === FEED_HOST_LLVM_CONFIG).length !== 1) return { ok: false, reason: 'OpenWrt Rust feed must contain exactly one host llvm-config=/usr/bin/llvm-config assignment' };
+  if (lines.some((line) => line.startsWith('llvm.download-ci-llvm=') && line !== FEED_CI_LLVM_DISABLED) || lines.some((line) => line.startsWith('llvm-config=') && line !== FEED_HOST_LLVM_CONFIG)) return { ok: false, reason: 'OpenWrt Rust feed contains an unsupported LLVM assignment' };
+  if (/rust-ci-llvm/iu.test(source)) return { ok: false, reason: 'OpenWrt Rust feed contains a Rust CI LLVM artifact reference' };
   return { ok: true, policy: 'system-llvm-only' };
+}
+
+export function enforceOpenWrtRustFeed(source: string, contract: OpenWrtRustFeedTransformContract): OpenWrtRustFeedEnforcement {
+  if (!HASH.test(contract.sourceSha256) || !HASH.test(contract.enforcedSha256)) return { ok: false, reason: 'OpenWrt Rust feed contract hashes are invalid' };
+  const sourceSha256 = feedSha256(source);
+  if (sourceSha256 !== contract.sourceSha256) return { ok: false, reason: 'OpenWrt Rust feed source hash is not approved' };
+  const lines = source.split(/\r?\n/u);
+  const enabled = lines.filter((line) => line.trim() === FEED_CI_LLVM_ENABLED).length;
+  if (enabled !== 1 || lines.some((line) => line.trim().startsWith('llvm.download-ci-llvm=') && line.trim() !== FEED_CI_LLVM_ENABLED)) return { ok: false, reason: 'OpenWrt Rust feed does not match the exact transform input contract' };
+  if (lines.some((line) => line.trim().startsWith('llvm-config=') && line.trim() !== FEED_HOST_LLVM_CONFIG)) return { ok: false, reason: 'OpenWrt Rust feed contains an unknown host LLVM config input' };
+  const transformedLines = lines.map((line) => line.trim() === FEED_CI_LLVM_ENABLED ? line.replace(FEED_CI_LLVM_ENABLED, FEED_CI_LLVM_DISABLED) : line);
+  if (!transformedLines.some((line) => line.trim() === FEED_HOST_LLVM_CONFIG)) transformedLines.push(FEED_HOST_LLVM_CONFIG);
+  const transformed = transformedLines.join('\n');
+  const enforcedSha256 = feedSha256(transformed);
+  if (enforcedSha256 !== contract.enforcedSha256) return { ok: false, reason: 'OpenWrt Rust feed transformed hash is not approved' };
+  const validation = validateOpenWrtRustFeed(transformed);
+  if (!validation.ok) return validation;
+  return { ok: true, policy: 'system-llvm-only', sourceSha256, enforcedSha256, source: transformed };
 }
 
 export interface RustToolchainEvidence {

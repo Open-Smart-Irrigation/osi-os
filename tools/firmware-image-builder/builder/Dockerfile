@@ -1,4 +1,5 @@
-FROM --platform=linux/amd64 docker.io/debian@sha256:4cc40147060d766a649b100b175ac0a346a5b5c8fbcc5677c2f471854ee4e55c
+ARG BUILDER_PLATFORM=linux/amd64
+FROM --platform=${BUILDER_PLATFORM} docker.io/debian@sha256:4cc40147060d766a649b100b175ac0a346a5b5c8fbcc5677c2f471854ee4e55c
 
 ARG DEBIAN_SNAPSHOT=20260715T000000Z
 ARG NODE_VERSION=22.14.0
@@ -11,16 +12,11 @@ ARG MUSL_ARM64_SHA256=46cf1fcaa2d49d1573ef0ceabdb36e04a359a9a37d8e4304024f901868
 ARG MUSL_DEV_ARM64_SHA256=384ea029e3694baac696d3993d93246f9a4b3741c493697e1ceb7256d8820748
 ARG MUSL_ARMHF_SHA256=e3a3adee81ad494a4c36521377ed078a453bf4a4400e747fe267a569fd8aa420
 ARG MUSL_DEV_ARMHF_SHA256=db485234c01cb9887da0907f3e47d36d101a3299528afd3bbeb46edd551c8264
+ARG RUST_CHANNEL=stable
+ARG RUST_VERSION=1.85.0
+ARG LLVM_MAJOR=19
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    GCC_COLORS='error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01' \
-    PATH=/opt/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    CARGO_HOME=/opt/cargo \
-    RUST_CHANNEL=stable \
-    RUST_VERSION=1.85.0 \
-    LLVM_MAJOR=19 \
-    CARGO_BUILD_JOBS=2 \
-    RUST_TARGETS='x86_64-unknown-linux-gnu aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf'
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 WORKDIR /workdir
 
@@ -28,7 +24,8 @@ WORKDIR /workdir
 # Debian-stable ncurses package name and explicit GCC/LLVM support added.
 # The snapshot source is immutable; package versions are recorded by the
 # validation evidence rather than resolved from a moving Debian mirror.
-RUN dpkg --add-architecture arm64 \
+RUN export DEBIAN_FRONTEND=noninteractive GCC_COLORS='error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01' \
+  && dpkg --add-architecture arm64 \
   && dpkg --add-architecture armhf \
   && rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources \
   && printf '%s\n' \
@@ -69,7 +66,8 @@ RUN dpkg --add-architecture arm64 \
   && file -b /tmp/armv7-target-sysroot.o | grep -i 'ARM' \
   && rm -rf /tmp/target-musl-packages /tmp/target-sysroot.c /tmp/aarch64-target-sysroot.o /tmp/armv7-target-sysroot.o
 
-RUN mkdir -p /tmp/rust-source \
+RUN export CARGO_HOME=/opt/cargo CARGO_BUILD_JOBS=2 \
+  && mkdir -p /tmp/rust-source \
   && curl --fail --location --retry 3 --output /tmp/rust-source/rust.tar.gz "https://static.rust-lang.org/dist/rustc-${RUST_SOURCE_VERSION}-src.tar.gz" \
   && printf '%s  %s\n' "${RUST_SOURCE_SHA256}" /tmp/rust-source/rust.tar.gz | sha256sum --check --status \
   && tar --extract --gzip --file /tmp/rust-source/rust.tar.gz --directory /tmp/rust-source \

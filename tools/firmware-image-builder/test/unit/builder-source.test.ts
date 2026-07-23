@@ -7,6 +7,10 @@ import { BUILDER_LOCK_OPTIONAL_KEYS, BUILDER_LOCK_REQUIRED_KEYS, validateBuilder
 import { BuilderSourceError, deriveDockerfile, supportedPackageTokens } from '../../builder/derive-dockerfile.js';
 import {
   builderImageReference,
+  parseCanonicalBuilderImageReference,
+  selectExactRepositoryDigest,
+  sha256,
+  validateBuiltBuilderImage,
   validateBuilderDockerfile,
   validateBuilderLockFile,
   validateBuilderSource,
@@ -15,7 +19,7 @@ import {
   validateExecutionDefinition,
   type BuilderValidationEvidence,
 } from '../../builder/validate-builder.js';
-import { validateOpenWrtRustFeed, validateRustToolchain, validateRustToolchainEvidence } from '../../builder/validate-rust-toolchain.js';
+import { enforceOpenWrtRustFeed, validateOpenWrtRustFeed, validateRustToolchain, validateRustToolchainEvidence } from '../../builder/validate-rust-toolchain.js';
 
 const digest = (letter: string) => letter.repeat(64);
 const dockerfile = new URL('../../builder/Dockerfile', import.meta.url).pathname;
@@ -113,6 +117,9 @@ describe('locked builder source', () => {
   it('validates complete Dockerfile requirements and detects root drift before mutation', async () => {
     const contents = await readFile(dockerfile, 'utf8');
     expect(validateBuilderDockerfile(contents).ok).toBe(true);
+    expect(contents).toContain('ARG BUILDER_PLATFORM=linux/amd64\nFROM --platform=${BUILDER_PLATFORM}');
+    expect(contents).toContain('ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin');
+    expect(contents).not.toMatch(/^ENV .*\b(?:CARGO_HOME|DEBIAN_FRONTEND|CARGO_BUILD_JOBS|RUST_TARGETS)=/mu);
     expect(contents).toContain('liblibz3.so.so');
     expect(contents).toContain('jobs = 2');
     expect(contents).toContain('/opt/target-sysroots/aarch64/usr/lib/aarch64-linux-musl');
@@ -152,9 +159,12 @@ describe('locked builder source', () => {
     const source = await validateBuilderSource({ dockerfile, rootDockerfile, executionDefinitionPath, evidence });
     const candidate = lock();
     Object.assign(candidate, { baseImage: source.baseImage, baseImageDigest: source.baseImageDigest, dockerfileSha256: source.dockerfileSha256, executionDefinitionSha256: source.executionDefinitionSha256, validationEvidenceSha256: validationEvidenceSha256(evidence), packageSet: source.packageSet, rustConfig: source.rustConfig, nodeVersion: source.nodeVersion });
-    expect(validateProductionBuilderLock(candidate, candidate.packageVersion, { dockerfile, executionDefinitionPath, evidence })).toMatchObject({ ok: true });
+    const references: string[] = [];
+    const verifyImage = async (imageReference: string) => { references.push(imageReference); return { imageId: evidence.imageId, selfTest: 'passed' as const, versions: {}, evidence }; };
+    await expect(validateProductionBuilderLock(candidate, candidate.packageVersion, { dockerfile, executionDefinitionPath, verifyImage })).resolves.toMatchObject({ ok: true });
+    expect(references).toEqual([`registry.example.invalid/osi-builder@sha256:${digest('a')}`]);
     candidate.validationEvidenceSha256 = digest('f');
-    expect(validateProductionBuilderLock(candidate, candidate.packageVersion, { dockerfile, executionDefinitionPath, evidence })).toMatchObject({ ok: false });
+    await expect(validateProductionBuilderLock(candidate, candidate.packageVersion, { dockerfile, executionDefinitionPath, verifyImage })).resolves.toMatchObject({ ok: false });
   });
 
   it('requires resolved Rust LLVM evidence and rejects Rust CI artifacts', () => {
@@ -162,15 +172,39 @@ describe('locked builder source', () => {
     expect(validateRustToolchain({ llvmConfig: '/usr/bin/llvm-config', channel: 'stable', version: '1.85.0', llvmMajor: 19, artifact: 'rust-ci-llvm' }).ok).toBe(false);
     expect(validateRustToolchainEvidence({ rustcVersion: '1.85.0', llvmVersion: '19.1.7', llvmConfig: '/usr/bin/llvm-config', channel: 'stable', pollyVersion: '19.1.7', zstdVersion: '1.5.7' }).ok).toBe(true);
     expect(validateRustToolchainEvidence({ rustcVersion: '1.85.0', llvmVersion: 'rust-ci-llvm', llvmConfig: '/usr/bin/llvm-config', channel: 'stable', pollyVersion: '19.1.7', zstdVersion: '1.5.7' }).ok).toBe(false);
-    expect(validateOpenWrtRustFeed('[llvm]\ndownload-ci-llvm = false').ok).toBe(true);
-    expect(validateOpenWrtRustFeed('[llvm]\ndownload-ci-llvm=true').ok).toBe(false);
-    expect(validateOpenWrtRustFeed('[llvm]\nllvm-config = "/usr/bin/llvm-config"').ok).toBe(false);
+    expect(validateOpenWrtRustFeed('llvm.download-ci-llvm=false\nllvm-config=/usr/bin/llvm-config').ok).toBe(true);
+    expect(validateOpenWrtRustFeed('llvm.download-ci-llvm=true\nllvm-config=/usr/bin/llvm-config').ok).toBe(false);
+    expect(validateOpenWrtRustFeed('llvm.download-ci-llvm=false').ok).toBe(false);
+    expect(validateOpenWrtRustFeed('llvm.download-ci-llvm=false\nllvm-config=/usr/bin/clang').ok).toBe(false);
+    const feedSource = 'define RustFeed\nllvm.download-ci-llvm=true\n';
+    const enforcedSource = 'define RustFeed\nllvm.download-ci-llvm=false\n\nllvm-config=/usr/bin/llvm-config';
+    expect(enforceOpenWrtRustFeed(feedSource, { sourceSha256: sha256(feedSource), enforcedSha256: sha256(enforcedSource) })).toMatchObject({ ok: true, source: enforcedSource });
+    expect(enforceOpenWrtRustFeed(`${feedSource}unknown=true\n`, { sourceSha256: sha256(feedSource), enforcedSha256: sha256(enforcedSource) }).ok).toBe(false);
   });
 
-  it('rejects fabricated Rust evidence and requires all three semantic target artifacts', () => {
+  it('rejects fabricated Rust evidence and requires all three semantic target artifacts', async () => {
     const fabricated = { ...evidence, imageId: 'sha256:' + digest('a'), imageDigest: digest('b'), architecture: 'linux/amd64', packageVersions: {}, commands: [], rustTargets: [], } as unknown as BuilderValidationEvidence;
     const candidate = { ...lock(), imageDigest: digest('b'), imageId: digest('a') };
-    expect(validateProductionBuilderLock(candidate, candidate.packageVersion, { dockerfile, executionDefinitionPath, evidence: fabricated })).toMatchObject({ ok: false });
+    const verifier = async (imageReference: string) => { expect(imageReference).toBe(`registry.example.invalid/osi-builder@sha256:${digest('b')}`); return { imageId: fabricated.imageId, selfTest: 'passed' as const, versions: {}, evidence: fabricated }; };
+    await expect(validateProductionBuilderLock(candidate, candidate.packageVersion, { dockerfile, executionDefinitionPath, verifyImage: verifier })).resolves.toMatchObject({ ok: false });
+  });
+
+  it('requires canonical repository digests and classifies Docker availability separately from Rust failures', async () => {
+    const canonical = `registry.example.invalid/osi-builder@sha256:${digest('a')}`;
+    expect(parseCanonicalBuilderImageReference(canonical)).toEqual({ imageRepository: 'registry.example.invalid/osi-builder', imageDigest: digest('a') });
+    expect(selectExactRepositoryDigest(canonical, [`other@sha256:${digest('b')}`, canonical])).toBe(digest('a'));
+    expect(() => selectExactRepositoryDigest(canonical, [canonical, canonical])).toThrow(/exactly one/u);
+    const inspect = JSON.stringify({ Id: `sha256:${digest('b')}`, Architecture: 'amd64', Os: 'linux', Size: 1, RepoDigests: [canonical], Config: { Env: ['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'] } });
+    const semanticFailure = Object.assign(new Error('rust probe failed'), { code: 1, stderr: 'target artifact missing' });
+    await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => { if (argv[0] === 'image') return { stdout: inspect, stderr: '' }; throw semanticFailure; } })).rejects.toMatchObject({ code: 'RUST_BOOTSTRAP_UNAVAILABLE' });
+    const unavailable = Object.assign(new Error('docker missing'), { code: 'ENOENT' });
+    await expect(validateBuiltBuilderImage(canonical, { run: async () => { throw unavailable; } })).rejects.toMatchObject({ code: 'DOCKER_UNAVAILABLE' });
+  });
+
+  it('rejects build-only values in the inspected runtime environment', async () => {
+    const canonical = `registry.example.invalid/osi-builder@sha256:${digest('a')}`;
+    const inspect = JSON.stringify({ Id: `sha256:${digest('b')}`, Architecture: 'amd64', Os: 'linux', Size: 1, RepoDigests: [canonical], Config: { Env: ['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'CARGO_HOME=/opt/cargo'] } });
+    await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => argv[0] === 'image' ? { stdout: inspect, stderr: '' } : { stdout: '', stderr: '' } })).rejects.toMatchObject({ code: 'BUILDER_RUNTIME_ENV_INVALID' });
   });
 
   it('keeps the schema field set identical to the canonical domain contract and accepts the same repository ports', async () => {

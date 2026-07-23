@@ -67,7 +67,7 @@ export async function deriveDockerfile(options: {
     await assertSupportedPackageParity(options.rootDockerfilePath, toolDockerfilePath);
     root = await readFile(options.rootDockerfilePath, 'utf8');
     tool = await readFile(toolDockerfilePath, 'utf8');
-    if (!/^FROM\s+--platform=linux\/amd64\s+\S+@sha256:[0-9a-f]{64}\s*$/mu.test(tool)) throw new BuilderSourceError('BUILDER_DOCKERFILE_INVALID', 'The tool-owned Dockerfile must use a digest-pinned linux/amd64 base image');
+    if (!/^ARG BUILDER_PLATFORM=linux\/amd64\s+FROM\s+--platform=\$\{BUILDER_PLATFORM\}\s+\S+@sha256:[0-9a-f]{64}\s*$/mu.test(tool) || /^FROM\s+--platform=linux\/amd64/mu.test(tool)) throw new BuilderSourceError('BUILDER_DOCKERFILE_INVALID', 'The tool-owned Dockerfile must use a digest-pinned validated linux/amd64 base image');
     await mkdir(dirname(options.destinationPath), { recursive: true });
     await copyFile(toolDockerfilePath, options.destinationPath);
   }
