@@ -6,6 +6,10 @@ const DB_BINDING = Object.freeze({ variable: 'osiDb', module: 'osi-db-helper' })
 const JOURNAL_BINDING = Object.freeze({ variable: 'osiJournal', module: 'osi-journal' });
 const LEDGER_BINDING = Object.freeze({ variable: 'osiCommandLedger', module: 'osi-command-ledger' });
 const SCOPE_BINDING = Object.freeze({ variable: 'scope', module: 'scope' });
+const SCOPED_ACCESS_COMMANDS_BINDING = Object.freeze({
+  variable: 'osiScopedAccessCommands',
+  module: 'scoped-access-commands',
+});
 
 // Fail closed on complete reviewed sources. Any function change must be reviewed
 // and explicitly re-pinned here before either executable flow audit accepts it.
@@ -21,6 +25,10 @@ const TASK9_OSI_LIB_NODE_POLICIES = Object.freeze({
   'journal-command-apply-fn': Object.freeze({
     funcSha256: 'b4a36cd22082c8a93aac0f7946c9dcb124cef568402a939983aed12238cded72',
     bindings: Object.freeze([DB_BINDING, JOURNAL_BINDING]),
+  }),
+  'scoped-access-command-apply-fn': Object.freeze({
+    funcSha256: '98e5bf7a989bf60ba6d9803bc696a1464b75229a9c91757e2d8767a423dc37e9',
+    bindings: Object.freeze([DB_BINDING, SCOPED_ACCESS_COMMANDS_BINDING, SCOPE_BINDING]),
   }),
   'command-ack-queue-rest': Object.freeze({
     funcSha256: '473a5272dfb0c6dbea00143258d91b464fa532e5c96f706ce5aab5381f9dbeff',

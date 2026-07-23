@@ -29,17 +29,21 @@
       "max_chars": 2890,
       "reason": "Field Journal Task 10: shared command-ledger replay; PR #141 hardening: guarded osiLib loading and protected-type routing keep generic commands independent from optional journal hooks"
     },
+    "scoped-access-command-apply-fn": {
+      "max_chars": 2503,
+      "reason": "AgroLink Task 7: fail-closed scoped-access command dispatch through the transactional helper."
+    },
     "cmd-type-registry": {
-      "max_chars": 4976,
-      "reason": "1.C: expanded command-type registry from 8 to 33 types"
+      "max_chars": 5696,
+      "reason": "1.C expanded the command-type registry; AgroLink Task 7 adds the six scoped user and assignment commands (+720)."
     },
     "reject-indefinite-open": {
-      "max_chars": 6696,
-      "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry; sync-failclosed-20260719: durable REJECTED_PERMANENT ack builder (rejectionAck) replaces the silent null drop for bare OPEN, unknown command types, and OPEN_FOR_DURATION without a duration (+632); PR #149 review: second output routes terminal rejection ACKs directly to the durable queue (+40)"
+      "max_chars": 7416,
+      "reason": "1.C expanded COMMAND_TYPES_FALLBACK; sync-failclosed-20260719 adds durable permanent rejection; PR #149 routes terminal rejection ACKs directly to the durable queue; AgroLink Task 7 adds the six scoped user and assignment commands (+720)."
     },
     "write-strega-expectation": {
-      "max_chars": 11313,
-      "reason": "AgroLink Phase C reasserts fresh device scope at enqueue, fails closed, and records user originators."
+      "max_chars": 12033,
+      "reason": "AgroLink Phase C reasserts fresh device scope at enqueue, fails closed, and records user originators; Task 7 adds the six scoped command fallback registrations (+720)."
     },
     "9b3afb405207302e": {
       "max_chars": 3315,
@@ -1067,7 +1071,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1215625,
-    "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + live identity restart sentinel, marked identity errors, and fail-closed restart publication (Option C Slice 1) (+11605) + filtered restartPending status with explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (Option C Slice 1b) (+4862); Device API auth/status repair exact total ceiling (Plan 6 Tasks 1-2) + sync-failclosed-20260719 Train A ack/commands fail-closed slice: command-ack-mark-delivered +1493, command-ack-build-batch +1028, sync-pending-split +118, reject-indefinite-open +632 (+3271 total) + sync-failclosed-20260719 command-ack join fix: command-ack-mark-delivered +1704 (commandId->rowId correlation join) + sync-failclosed-20260719 work-request-status-apply idempotent replay: +2089 (applied_commands dedup guard + queueCommandAck-identical initial-shape ledger write) + lsn50-writer-runtime-recovery-20260715 Task 3 (async writer/UC512 await + fixed stage-code Catch wiring + restored observable legacy fallback chain, temporary until the 14-day-or-500-uplink cleanup threshold): 460e0bfd95f89e67 +1596, 6b28e0d879808dd9 +938, new nodes lsn50-fallback-marker-fn +731, lsn50-fallback-evict-fn +173, restored lsn50-sql-fn +3594 (+7032 total) + chirpstack-slice-20260719 helper contract rewiring: cs-register-device-fn +36, cs-reg-cloud-fn +75, cs-reg-cloud-ack-fn -18, cancel-strega-actuation-fn +470 (+563 net total); PR #149 review fixes: rejection ACK bypass and guarded provisioning compensation (+497); AgroLink Phase A /api/me, scoped registration/auth, and feature exposure (+7178); AgroLink Phase B scoped zone/device lists (+2573), zone-path reads (+1637), device reads/exports (+12430), /api/me auth ratchet (+471), history API scope enforcement (+2596), journal scope-helper injection (+229), and shared catalog/analysis/recent-actuation reads (+3570); AgroLink Phase C scoped zone lifecycle routers (+8975), scoped device provisioning, assignment, removal, delete, and weather-zone replacement (+18273), shared device-config write guard (+4244), scoped zone config plus admin account/grant API (+13566), verifier-safe zone route metadata (+30), and six route-local fresh admin system-write guards (+10722)."
+    "max_total": 1220288,
+    "reason": "Reviewed absolute ceiling through AgroLink Task 7, including the transactional scoped-access command stage and six command registrations (+4663 over the prior ceiling). Earlier owners remain recorded in git history and per-node reasons."
   }
 }

@@ -474,7 +474,7 @@ const PRIOR_CURRENT_COMMAND_SURFACES = Object.freeze({
 });
 const expectedCommandShapeHashes = {
   'command-dedupe-dispatch': 'cac813cf50ef6a3527e5e205ceb4330d4cf18cca15c79c89a86c4f63d867c609',
-  'journal-command-apply-fn': 'ede833ad182c0a3056d2ed1420b407c513e1f14d6ca24c72f55ee0c0c9b41de3',
+  'journal-command-apply-fn': '18e8af185bc218be8edfad11b1d7ef8a299c4509639151c6ab536b540744d967',
   'command-ack-queue-rest': '28368a33749674b0bc1036143c42f98dea5ea10535c437735175e83cc670650e',
 };
 

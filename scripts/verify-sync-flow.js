@@ -16,6 +16,8 @@ const journalCommandsPath = path.join(nodeRedRoot, 'osi-journal', 'commands.js')
 const journalCommandsSource = fs.readFileSync(journalCommandsPath, 'utf8');
 const commandLedgerPath = path.join(nodeRedRoot, 'osi-command-ledger', 'index.js');
 const commandLedgerSource = fs.readFileSync(commandLedgerPath, 'utf8');
+const scopedAccessCommandsPath = path.join(nodeRedRoot, 'osi-scoped-access-commands', 'index.js');
+const scopedAccessCommandsSource = fs.readFileSync(scopedAccessCommandsPath, 'utf8');
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
 const chirpstackInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'chirpstack', 'chirpstack', 'files', 'chirpstack.init');
@@ -1625,8 +1627,22 @@ expectOrderedIncludesById('journal-command-apply-fn', [
   "const dbLoad = osiLib.require('osi-db-helper');",
   "const journalLoad = osiLib.require('osi-journal');",
 ], 'passes non-journal commands toward legacy dispatch before loading journal helpers');
+expectOrderedIncludesById('scoped-access-command-apply-fn', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const accessLoad = osiLib.require('scoped-access-commands');",
+  "const scopeLoad = osiLib.require('scope');",
+  'applyScopedAccessCommand(db, envelope, {',
+], 'passes protected scoped-access commands through the transactional helper');
+expectIncludesById('scoped-access-command-apply-fn', 'Scoped access command helpers unavailable:', 'fails closed when scoped-access helpers are unavailable');
+expectIncludesById('scoped-access-command-apply-fn', '.close(', 'closes the scoped-access command database handle');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1', 'looks up exact command IDs before payload validation');
 expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'result_detail', 'reconstructs ACK facts from canonical replay-ledger detail');
+expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'db.transaction(async (tx) => {', 'applies scoped-access mutations and terminal ACK persistence in one transaction');
+expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'base_version_conflict', 'rejects stale scoped-access commands with a terminal conflict');
+expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'Cannot disable or demote the last enabled local admin', 'protects the final enabled gateway admin');
+expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'invalidateGateway', 'invalidates cached scope after an applied mutation');
 expectIncludes('Queue REST Command ACK', 'osiCommandLedger.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing via the shared command ledger');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'ON CONFLICT(command_id) DO NOTHING', 'never rewrites an existing terminal command result');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs in the shared transaction helper');
@@ -1757,8 +1773,10 @@ expectWireById('reject-indefinite-open', 'command-dedupe-dispatch', 'routes guar
 expectWireById('reject-indefinite-open', 'command-ack-queue-rest', 'routes permanent rejection ACKs around the command deduper and into the durable ACK queue');
 expectWireById('command-dedupe-dispatch', 'journal-command-apply-fn', 'routes non-duplicates through the journal-aware command applier');
 expectWireById('command-dedupe-dispatch', '9d5e3035c3d069c4', 'publishes already-persisted exact replay ACKs without reclassification');
-expectWireById('journal-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-journal commands to the existing router');
-expectWireById('journal-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted journal ACKs');
+expectWireById('journal-command-apply-fn', '934bf2bc19a8ce22', 'preserves the legacy output while routing non-journal commands onward');
+expectWireById('journal-command-apply-fn', 'scoped-access-command-apply-fn', 'routes non-journal commands through scoped-access handling');
+expectWireById('scoped-access-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-access commands to the existing router');
+expectWireById('scoped-access-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted scoped-access ACKs');
 expectWireById('c8628cffe45f64f7', 'command-ack-queue-rest', 'routes STREGA command ACKs through the durable ACK queue');
 expectWireById('cs-reg-cloud-ack-fn', 'command-ack-queue-rest', 'routes special command ACKs through the durable ACK queue');
 expectWireById('lsn50-mode-ack-link-in', 'command-ack-queue-rest', 'routes LSN50 command ACKs through the durable ACK queue');
