@@ -7,6 +7,7 @@ const ROOT = path.resolve(__dirname, '..');
 const SCHEMA_DIR = path.join(ROOT, 'docs/contracts/sync-schema');
 const FLOWS = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 const STAGING_MANIFEST = path.join(ROOT, 'scripts/fixtures/sync-contract-staging.json');
+const GOLDEN_FIXTURE = path.join(SCHEMA_DIR, 'sync-contract-golden.json');
 const SEPARATELY_ROUTED_COMMANDS = ['WORK_REQUEST_STATUS'];
 const SEPARATE_ROUTE_SPECS = [
     {
@@ -115,6 +116,14 @@ function assertExactList(name, actual, expected) {
     }
 }
 
+function assertPartition(name, accepted, enabled, staged) {
+    assertExactList(`${name}.accepted`, accepted, sortedUnique(enabled.concat(staged)));
+    const overlap = enabled.filter((value) => staged.includes(value));
+    if (overlap.length) {
+        throw new Error(`${name} enablement overlaps staged values: ${sortedUnique(overlap).join(',')}`);
+    }
+}
+
 function canonicalJson(value) {
     if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
     if (value && typeof value === 'object') {
@@ -141,6 +150,110 @@ function loadStagedCommands() {
     assertExactList('staging commands.edgeDeferred', staging.commands.edgeDeferred, EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS);
     assertExactList('staging commands.cloudDeferred', staging.commands.cloudDeferred, EXACT_STAGED_JOURNAL_COMMANDS);
     return staging.commands.edgeDeferred;
+}
+
+function verifyGoldenFixture(commandSchema, eventsSchema) {
+    const golden = JSON.parse(fs.readFileSync(GOLDEN_FIXTURE, 'utf8'));
+    const rootKeys = Object.keys(golden).sort();
+    assertExactList(
+        'sync-contract-golden root keys',
+        rootKeys,
+        ['capabilities', 'commandAckResults', 'commandTypes', 'eventOperations', 'format']
+    );
+    if (golden.format !== 1) throw new Error(`sync-contract-golden format must be 1; got ${golden.format}`);
+
+    const eventOperations = golden.eventOperations || {};
+    assertExactList(
+        'golden accepted event operations',
+        eventOperations.accepted,
+        eventsSchema.properties.op.enum
+    );
+    assertPartition(
+        'golden event operations',
+        eventOperations.accepted,
+        eventOperations.edgeProducerEnabled,
+        eventOperations.staged
+    );
+    assertExactList(
+        'golden server event handlers',
+        eventOperations.serverHandlerEnabled,
+        eventOperations.edgeProducerEnabled
+    );
+
+    const commandTypes = golden.commandTypes || {};
+    assertExactList(
+        'golden accepted command types',
+        commandTypes.accepted,
+        commandSchema.properties.command_type.enum
+    );
+    assertPartition(
+        'golden command types',
+        commandTypes.accepted,
+        commandTypes.cloudIssuerEnabled,
+        commandTypes.staged
+    );
+
+    const staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
+    assertExactList('golden staged events', eventOperations.staged, staging.eventOps.cloudDeferred);
+    assertExactList('golden staged commands', commandTypes.staged, staging.commands.cloudDeferred);
+
+    const expectedCapabilities = [
+        'command_ack_results_v1',
+        'desired_state_conflicts_v1',
+        'journal_sync_v1',
+        'scoped_access_sync_v1',
+    ];
+    const capabilities = golden.capabilities || [];
+    assertExactList(
+        'golden capability names',
+        capabilities.map((entry) => entry && entry.name),
+        expectedCapabilities
+    );
+    for (const capability of capabilities) {
+        const keys = Object.keys(capability || {}).sort();
+        assertExactList(
+            `capability ${capability && capability.name} keys`,
+            keys,
+            ['cloudIssuerEnabled', 'edgeProducerEnabled', 'name', 'schemaAccepted']
+        );
+        for (const field of ['schemaAccepted', 'edgeProducerEnabled', 'cloudIssuerEnabled']) {
+            if (typeof capability[field] !== 'boolean') {
+                throw new Error(`capability ${capability.name}.${field} must be boolean`);
+            }
+        }
+        if ((capability.edgeProducerEnabled || capability.cloudIssuerEnabled) && !capability.schemaAccepted) {
+            throw new Error(`capability ${capability.name} cannot be enabled before schema acceptance`);
+        }
+    }
+
+    const ackResults = golden.commandAckResults || [];
+    assertExactList(
+        'golden command ACK results',
+        ackResults.map((entry) => entry && entry.result),
+        ['APPLIED', 'CONFLICT', 'EXPIRED', 'FAILED_RETRYABLE', 'REJECTED_PERMANENT']
+    );
+    const commandIds = ackResults.map((entry) => entry.commandId);
+    if (new Set(commandIds).size !== commandIds.length ||
+        commandIds.some((value) => !Number.isSafeInteger(value) || value <= 0)) {
+        throw new Error('golden command ACK commandId values must be unique positive safe integers');
+    }
+    for (const result of ackResults) {
+        for (const field of ['requestStatus', 'responseStatus', 'desiredStateStatus']) {
+            if (typeof result[field] !== 'string' || !result[field]) {
+                throw new Error(`golden command ACK ${result.result}.${field} must be nonempty`);
+            }
+        }
+        for (const field of ['terminal', 'leasedAgain', 'serverHandlerEnabled']) {
+            if (typeof result[field] !== 'boolean') {
+                throw new Error(`golden command ACK ${result.result}.${field} must be boolean`);
+            }
+        }
+    }
+    const conflict = ackResults.find((entry) => entry.result === 'CONFLICT');
+    if (!conflict || conflict.serverHandlerEnabled || conflict.desiredStateStatus !== 'conflicted') {
+        throw new Error('golden CONFLICT result must remain staged for desired-state conflict handling');
+    }
+    console.log('  ok golden operations, ACK results, and capability rollout metadata');
 }
 
 function main() {
@@ -181,9 +294,10 @@ function main() {
         EXACT_EVENT_SEMANTIC_BINDINGS
     );
     console.log('  ok journal semantic bindings are exact and machine-readable');
+    verifyGoldenFixture(schema, eventsSchema);
 
     // 2. Verify schema files exist
-    for (const name of ['commands.schema.json', 'events.schema.json', 'resources.schema.json']) {
+    for (const name of ['commands.schema.json', 'events.schema.json', 'resources.schema.json', 'sync-contract-golden.json']) {
         const f = path.join(SCHEMA_DIR, name);
         if (!fs.existsSync(f)) throw new Error(`Missing schema: ${name}`);
         JSON.parse(fs.readFileSync(f, 'utf8')); // validate parseable

@@ -23,6 +23,13 @@ const JOURNAL_EVENT_BINDINGS = {
     JOURNAL_PLOT_UPSERTED: ['JOURNAL_PLOT', 'JournalPlot', 'plot_uuid'],
     JOURNAL_PLOT_GROUP_UPSERTED: ['JOURNAL_PLOT_GROUP', 'JournalPlotGroup', 'group_uuid'],
 };
+const SCOPED_ACCESS_EVENT_OPS = [
+    'USER_PLOT_ASSIGNMENT_DELETED',
+    'USER_PLOT_ASSIGNMENT_UPSERTED',
+    'USER_UPSERTED',
+    'USER_ZONE_ASSIGNMENT_DELETED',
+    'USER_ZONE_ASSIGNMENT_UPSERTED',
+];
 const EXPECTED_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
@@ -911,9 +918,12 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_UPSERTED',
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS));
-    reportCheck(exactStaging, 'staging manifest pins the exact journal sets', 'staging manifest drifted from the exact journal sets');
+        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify(SCOPED_ACCESS_EVENT_OPS) &&
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([
+            ...Object.keys(JOURNAL_EVENT_BINDINGS),
+            ...SCOPED_ACCESS_EVENT_OPS,
+        ]);
+    reportCheck(exactStaging, 'staging manifest pins the exact journal and scoped-access sets', 'staging manifest drifted from the exact journal and scoped-access sets');
 }
 
 const journalEntry = {

@@ -29,9 +29,18 @@ const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_PLOT_UPSERTED',
   'JOURNAL_PLOT_GROUP_UPSERTED',
 ];
-const EXACT_EDGE_DEFERRED_OPS = [];
+const EXACT_EDGE_DEFERRED_OPS = [
+  'USER_PLOT_ASSIGNMENT_DELETED',
+  'USER_PLOT_ASSIGNMENT_UPSERTED',
+  'USER_UPSERTED',
+  'USER_ZONE_ASSIGNMENT_DELETED',
+  'USER_ZONE_ASSIGNMENT_UPSERTED',
+];
 const EXACT_JOURNAL_EVENT_OPS = [
   ...EXACT_EDGE_MODULE_OPS,
+];
+const EXACT_CLOUD_DEFERRED_OPS = [
+  ...EXACT_JOURNAL_EVENT_OPS,
   ...EXACT_EDGE_DEFERRED_OPS,
 ];
 const FLOW_SOURCES = [
@@ -727,7 +736,7 @@ function validateStagingManifest(manifest) {
     ['commands.cloudDeferred', commands && commands.cloudDeferred, EXACT_STAGED_COMMANDS],
     ['eventOps.edgeModuleOwned', eventOps && eventOps.edgeModuleOwned, EXACT_EDGE_MODULE_OPS],
     ['eventOps.edgeDeferred', eventOps && eventOps.edgeDeferred, EXACT_EDGE_DEFERRED_OPS],
-    ['eventOps.cloudDeferred', eventOps && eventOps.cloudDeferred, EXACT_JOURNAL_EVENT_OPS],
+    ['eventOps.cloudDeferred', eventOps && eventOps.cloudDeferred, EXACT_CLOUD_DEFERRED_OPS],
   ];
   for (const [name, actual, expected] of checks) {
     if (!Array.isArray(actual)) {
@@ -747,9 +756,9 @@ function validateStagingManifest(manifest) {
 
   if (eventOps && Array.isArray(eventOps.edgeModuleOwned) && Array.isArray(eventOps.edgeDeferred)) {
     const edgeUnion = sortedUnique(eventOps.edgeModuleOwned.concat(eventOps.edgeDeferred));
-    const edgeDiff = diffSets(sortedUnique(EXACT_JOURNAL_EVENT_OPS), edgeUnion);
+    const edgeDiff = diffSets(sortedUnique(EXACT_CLOUD_DEFERRED_OPS), edgeUnion);
     if (edgeDiff.missing.length || edgeDiff.extra.length) {
-      errors.push('staging edgeModuleOwned union edgeDeferred must equal the exact journal event-op set');
+      errors.push('staging edgeModuleOwned union edgeDeferred must equal the exact staged event-op set');
     }
   }
   return errors;
@@ -1291,7 +1300,7 @@ function checkSyncOpParity(options = {}) {
   const staging = stagingEnabled ? {
     edgeModuleOwned: EXACT_EDGE_MODULE_OPS,
     edgeDeferred: EXACT_EDGE_DEFERRED_OPS,
-    cloudDeferred: EXACT_JOURNAL_EVENT_OPS,
+    cloudDeferred: EXACT_CLOUD_DEFERRED_OPS,
   } : {
     edgeModuleOwned: [],
     edgeDeferred: [],

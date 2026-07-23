@@ -22,6 +22,10 @@ jobs:
           node-version: '22'
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
+      - name: Verify edge-owned sync contracts and golden operations
+        run: |
+          node scripts/verify-sync-contract.js
+          node scripts/test-contract-schemas.js
       # The repo's main local gate, promoted to CI after issue #84 proved it can
       # break on main invisibly (it chains comm-contract, DB-schema consistency,
       # history schema/worker tests, history API contract, helper tests, and
