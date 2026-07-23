@@ -428,11 +428,21 @@ New endpoints, each: `http in` → auth (copied block) → thin function → `ht
 
 The role/disable/grant mutations also bump the scope epoch via `invalidateScope(targetUuid)`; disable additionally triggers the C3 scope-empty evaluation lazily at scheduler execution (no eager schedule walk).
 
-- [ ] **Step 3: Tests**
+- [ ] **Step 3: REQUIREMENT — `user_uuid` write-once immutability guard (precondition for Phase E Task E5)**
+
+Add a `BEFORE UPDATE ON users` trigger that `RAISE`s (abort) whenever `OLD.user_uuid` is non-empty and `NEW.user_uuid` differs from `OLD.user_uuid`, including a change to `NULL`. This makes `user_uuid` write-once: it may be set from empty, but never reassigned or cleared once set.
+
+Migration 0022's `trg_dp_users_outbox_uuid_au` emits only on unset→set, which leaves two gaps this guard closes: an out-of-contract reassignment (`OLD` non-empty → a different `NEW`) currently updates the row without emitting, so the server mirror silently diverges; and clearing `user_uuid` to `NULL` then setting it again re-arms the unset→set emit condition, so a re-set to the *same* value without a `sync_version` bump reproduces the `equal_version_payload_conflict` terminal rejection this trigger line was fixed to remove. Rejecting the reassignment and the null-out at the write path removes both cases instead of patching the outbox trigger further.
+
+Ship this as its own migration + trigger definition (schema-change-control applies: `schema_object_fingerprints` update, `verify-migrations`, `verify-seed-replay`), with a regression test asserting: reassignment (`u1` → `u2`) raises and the row is unchanged; clear-to-`NULL` raises; first assignment (empty → `u1`) still succeeds; re-running the same value (`u1` → `u1`) is a no-op update, not a rejection (idempotent retries must not fail).
+
+**This item is a hard precondition for Phase E Task E5** (see `2026-07-19-agrolink-scoped-access-phase-e.md`, Notes for the executor): the emit-gate flip must not run until this guard is merged and its regression test passes.
+
+- [ ] **Step 4: Tests**
 
 Admin CRUD round-trip; non-admin 403 on every endpoint; last-admin disable 409; two-admins-disable-each-other serialized race leaves ≥1 enabled admin (run both writes through the queue and assert the guarded UPDATE's 0-row path); grant insert/tombstone visible in next `resolveScope`; user list contains no `password_hash`.
 
-- [ ] **Step 4: Allowances + checklist + commit**
+- [ ] **Step 5: Allowances + checklist + commit**
 
 ```bash
 git add conf/ scripts/verify-flows-size-ratchet-allowances.json scripts/
