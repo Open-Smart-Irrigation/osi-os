@@ -2,6 +2,7 @@
 
 const CACHE_TTL_MS = 30000;
 const cache = new Map();
+const WEATHER_TYPE_IDS = new Set(['SENSECAP_S2120', 'AQUASCOPE_LORAIN']);
 
 function isScopedMode(envValue) {
   return String(
@@ -163,6 +164,38 @@ async function filterZoneUuids(db, userUuid, zoneUuids, options) {
   return zoneUuids.filter((zoneUuid) => scope.zoneUuids.has(zoneUuid));
 }
 
+async function resolveZoneUuidById(db, zoneId) {
+  const row = await db.get(
+    'SELECT zone_uuid FROM irrigation_zones WHERE id = ? AND deleted_at IS NULL',
+    [zoneId]
+  );
+  return row && row.zone_uuid ? row.zone_uuid : null;
+}
+
+async function assertDeviceAccess(db, userUuid, deveui, options) {
+  const device = await db.get(
+    `SELECT d.deveui, d.type_id, iz.zone_uuid
+       FROM devices d LEFT JOIN irrigation_zones iz
+         ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL
+      WHERE d.deveui = ? AND d.deleted_at IS NULL`,
+    [deveui]
+  );
+  if (!device) throw httpError(404, 'device not found');
+  if (WEATHER_TYPE_IDS.has(device.type_id)) {
+    const scope = await resolveScope(db, userUuid, options);
+    if (scope.disabled) throw httpError(403, 'account disabled');
+    return scope;
+  }
+  if (!device.zone_uuid) throw httpError(404, 'device not found');
+  return assertZoneAccess(db, userUuid, device.zone_uuid, options);
+}
+
+async function listScopeZoneUuids(db, userUuid, options) {
+  const scope = await resolveScope(db, userUuid, options);
+  if (scope.wildcard) return null;
+  return [...scope.zoneUuids];
+}
+
 function _resetForTests() {
   cache.clear();
 }
@@ -179,5 +212,8 @@ module.exports = {
   assertFreshRole,
   isAdmin,
   filterZoneUuids,
+  resolveZoneUuidById,
+  assertDeviceAccess,
+  listScopeZoneUuids,
   _resetForTests,
 };
