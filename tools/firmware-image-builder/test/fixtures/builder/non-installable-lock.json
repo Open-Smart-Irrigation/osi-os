@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "2026.07.23.1",
+  "imageRepository": "registry.example.invalid/fixture-builder",
+  "imageDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "baseImage": "docker.io/library/debian@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "baseImageDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "dockerfileSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "packageSet": ["gcc-14", "nodejs", "npm", "openwrt-build-tools", "llvm-dev", "libpolly-19-dev", "libzstd-dev"],
+  "rustConfig": { "llvmConfig": "/usr/bin/llvm-config", "channel": "stable", "version": "1.85.0", "llvmMajor": 19 },
+  "nodeVersion": "22.14.0",
+  "executionDefinitionSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "validationEvidenceSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "installable": false
+}

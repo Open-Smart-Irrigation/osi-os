@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://osi.invalid/schemas/firmware-image-builder/builder-lock.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "packageVersion", "imageRepository", "imageDigest", "baseImage",
+    "baseImageDigest", "dockerfileSha256", "packageSet", "rustConfig", "nodeVersion",
+    "executionDefinitionSha256", "validationEvidenceSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "packageVersion": { "type": "string", "pattern": "^(?:v?\\d+\\.\\d+\\.\\d+|\\d{4}\\.\\d{2}\\.\\d{2}(?:\\.\\d+)?)$" },
+    "imageRepository": { "type": "string", "pattern": "^(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*|[a-z0-9]+(?:[._-][a-z0-9]+)*:[1-9][0-9]{0,4}/[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*)$" },
+    "imageDigest": { "$ref": "#/$defs/digest" },
+    "baseImage": { "type": "string", "pattern": "^(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*|[a-z0-9]+(?:[._-][a-z0-9]+)*:[1-9][0-9]{0,4}/[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*)@sha256:[0-9a-f]{64}$" },
+    "baseImageDigest": { "$ref": "#/$defs/digest" },
+    "dockerfileSha256": { "$ref": "#/$defs/digest" },
+    "packageSet": {
+      "type": "array", "minItems": 7, "maxItems": 7, "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+    },
+    "rustConfig": {
+      "type": "object", "additionalProperties": false,
+      "required": ["llvmConfig", "channel", "version", "llvmMajor"],
+      "properties": {
+        "llvmConfig": { "const": "/usr/bin/llvm-config" },
+        "channel": { "const": "stable" },
+        "version": { "type": "string", "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$" },
+        "llvmMajor": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "nodeVersion": { "type": "string", "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$" },
+    "executionDefinitionSha256": { "$ref": "#/$defs/digest" },
+    "validationEvidenceSha256": { "$ref": "#/$defs/digest" },
+    "installable": { "type": "boolean" },
+    "publisherSha256": { "$ref": "#/$defs/digest" },
+    "imageId": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "not": { "pattern": "^0+$" } }
+  }
+}
