@@ -14,7 +14,7 @@ interface DashboardHeaderProps {
 /**
  * Zones page chrome. Delegates all shared structure (crown, glass header,
  * tabs) to AppHeader and supplies the dashboard's own Add menu as the page
- * action. Add carries the journal entry point (Log activity → /journal?capture=1) per
+ * action. Add carries the journal entry point (Log Activity → /journal?capture=1) per
  * the field-journal spec §6.1(c).
  */
 export const DashboardHeader: React.FC<DashboardHeaderProps> = ({

@@ -1,7 +1,7 @@
 {
   "title": "Connect to OSI Server",
   "navLink": "OSI Server",
-  "backToDashboard": "Back to Dashboard",
+  "backToDashboard": "Back to dashboard",
   "status": {
     "linked": "Account linked to OSI Server",
     "notLinked": "Not connected to OSI Server",
@@ -17,12 +17,12 @@
     "email": "Email",
     "password": "Password",
     "submit": "Connect to OSI Server",
-    "submitting": "Connecting...",
+    "submitting": "Connecting…",
     "cancel": "Cancel"
   },
   "warning": {
     "title": "Important",
-    "message": "After linking, you must use your OSI Server credentials to log in. OSI OS stores a gateway-specific offline verifier for linked login.",
+    "message": "After linking, you must use your OSI Server credentials to log in. OSI OS keeps a secure offline copy of your linked login on this gateway so you can still sign in without internet.",
     "proceed": "Proceed"
   },
   "success": {
@@ -46,24 +46,24 @@
     "title": "Manual sync",
     "description": "Run an immediate recovery sync with OSI Server.",
     "button": "Force sync now",
-    "running": "Syncing...",
+    "running": "Syncing…",
     "successTitle": "Manual sync completed",
     "partialTitle": "Manual sync finished with issues",
     "refreshed": "Sync token refreshed before sync.",
     "usedCurrentToken": "Using current sync token.",
     "bootstrap": "Bootstrap applied: {{applied}}, skipped: {{skipped}}",
-    "outbox": "Outbox delivered: {{delivered}} ({{before}} -> {{after}} pending)",
+    "outbox": "Outbox delivered: {{delivered}} ({{before}} → {{after}} pending)",
     "pending": "Pending commands fetched: {{fetched}}, queued for local apply: {{queued}}",
     "pendingAfterResponse": "Local apply continues after this response returns.",
     "lastError": "Last error from {{source}}: {{message}}"
   },
   "reauth": {
     "title": "Sync token expired",
-    "description": "Re-authenticate with OSI Server to mint a fresh sync token for this gateway.",
+    "description": "Re-authenticate with OSI Server to issue a new sync token for this gateway.",
     "button": "Re-authenticate",
     "username": "Server Username",
     "password": "OSI Server Password",
     "submit": "Refresh connection",
-    "running": "Refreshing..."
+    "running": "Refreshing…"
   }
 }

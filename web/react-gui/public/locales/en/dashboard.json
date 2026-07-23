@@ -5,7 +5,7 @@
   "addMenu": {
     "zone": "Add Zone",
     "device": "Add Device",
-    "activity": "Log activity"
+    "activity": "Log Activity"
   },
   "data": "Data",
   "account": "Account",
@@ -13,7 +13,7 @@
     "osiServer": "OSI Server"
   },
   "logout": "Logout",
-  "loading": "Loading dashboard...",
+  "loading": "Loading dashboard…",
   "failedToLoad": "Failed to load data",
   "autoRefresh": "Auto-refreshing every 10 seconds",
   "emptyState": {

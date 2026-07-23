@@ -130,9 +130,9 @@ describe('AgroLink branding source contracts', () => {
         unassignedSubtitle: 'Estes dispositivos não estão atribuídos a nenhuma zona',
       },
       lg: {
-        emptyStateSubtitle: "Tandika nga otondawo ekifo n'okuwaayo ebyuma",
-        irrigationZones: 'Ebifo',
-        unassignedSubtitle: 'Ebyuma ebino tebiwerekeddwa ku kifo kyonna',
+        emptyStateSubtitle: "Tandika nga otondawo ekitundu n'okuwaayo ebyuma",
+        irrigationZones: 'Ebitundu',
+        unassignedSubtitle: 'Ebyuma ebino tebiwerekeddwa ku kitundu kyonna',
       },
     };
 
@@ -143,7 +143,7 @@ describe('AgroLink branding source contracts', () => {
       it: 'Crea zona',
       es: 'Crear zona',
       pt: 'Criar zona',
-      lg: 'Tondawo Ekifo',
+      lg: 'Tondawo Ekitundu',
     };
 
     for (const [locale, copy] of Object.entries(expectedDashboardCopy)) {
@@ -161,13 +161,13 @@ describe('AgroLink branding source contracts', () => {
 
   it('localizes thematic history empty-zone copy in all bundled locales', () => {
     const expectedNoZonesBody: Record<string, string> = {
-      en: 'Create a zone from the legacy dashboard before opening thematic history.',
-      'de-CH': 'Erstellen Sie eine Zone im bestehenden Dashboard, bevor Sie die thematische Historie öffnen.',
-      fr: "Créez une zone depuis le tableau de bord existant avant d'ouvrir l'historique thématique.",
-      it: 'Crea una zona dalla dashboard legacy prima di aprire la cronologia tematica.',
-      es: 'Crea una zona desde el panel heredado antes de abrir el historial temático.',
-      pt: 'Crie uma zona no painel legado antes de abrir o histórico temático.',
-      lg: "Tondawo ekifo okuva ku dashboard enkadde nga tonnaggula ebyafaayo by'omulamwa.",
+      en: 'Create a zone from the legacy dashboard before opening history.',
+      'de-CH': 'Erstellen Sie eine Zone im bestehenden Dashboard, bevor Sie den Verlauf öffnen.',
+      fr: 'Créez une zone depuis le tableau de bord existant avant d’ouvrir l’historique.',
+      it: 'Crea una zona dalla vecchia dashboard prima di aprire la cronologia.',
+      es: 'Crea una zona desde el panel heredado antes de abrir el historial.',
+      pt: 'Crie uma zona no painel legado antes de abrir o histórico.',
+      lg: "Tondawo ekitundu okuva ku dashboard enkadde nga tonnaggula Ebyafaayo.",
     };
 
     for (const [locale, noZonesBody] of Object.entries(expectedNoZonesBody)) {

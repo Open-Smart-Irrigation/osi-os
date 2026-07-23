@@ -19,7 +19,7 @@ vi.mock('react-i18next', () => ({
         'history.viewMode.line-chart': 'Line Chart',
         'history.viewMode.calendar': 'Calendar',
         'history.viewMode.irrigation-response': 'Irrigation Response',
-        'history.viewMode.advanced': 'Advanced View',
+        'history.viewMode.advanced': 'Advanced view',
         'history.viewMode.daily-min-max': 'Daily Min/Max',
         'history.viewMode.event-timeline': 'Event Timeline',
       };
@@ -261,7 +261,7 @@ describe('HistoryCompareGrid', () => {
     expect(screen.getByRole('button', { name: 'Calendar' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Soil Profile' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Daily Min/Max' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Advanced view' })).not.toBeInTheDocument();
   });
 
   it('changes the selected comparison view for every selected panel', () => {

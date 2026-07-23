@@ -16,19 +16,19 @@ globalThis.ResizeObserver = ResizeObserverStub;
 const { translateForTest } = vi.hoisted(() => {
   const translations: Record<string, string> = {
     'history.cardFrame.emptyTitle': 'Select a history card',
-    'history.cardFrame.emptyBody': 'Choose a zone and thematic card to inspect local history.',
+    'history.cardFrame.emptyBody': 'Choose a zone and a history card to inspect local history.',
     'history.cardFrame.typeHistory': '{{cardType}} history',
     'history.cardFrame.viewModes': '{{title}} view modes',
     'history.cardFrame.unavailable': 'This card is not available for the selected zone.',
     'history.cardFrame.timelineBrush': 'Timeline viewport',
     'history.cardFrame.timelineBrushKeyboardHelp': 'Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.',
     'history.cardFrame.aggregationBadge': 'Aggregation: {{aggregation}}',
-    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
+    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here once card data is available.',
     'history.cardType.soil': 'Soil',
-    'history.cardType.dendro': 'Dendro',
+    'history.cardType.dendro': 'Dendrometer',
     'history.viewMode.soil-profile': 'Soil Profile',
     'history.viewMode.line-chart': 'Line Chart',
-    'history.viewMode.growth-timeline': 'Growth Timeline',
+    'history.viewMode.growth-timeline': 'Growth timeline',
     'history.metadata.coverageKnown': '{{coverage}}% coverage',
     'history.metadata.coverageUnknown': 'Coverage unknown',
     'history.metadata.coverageConfidence.configured': 'Configured cadence',
@@ -277,7 +277,7 @@ describe('HistoryCardFrame Dendro growth timeline', () => {
       />,
     );
 
-    expect(screen.getByText('Chart and calendar data will load here when card data APIs are enabled.')).toBeInTheDocument();
+    expect(screen.getByText('Chart and calendar data will load here once card data is available.')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Growth timeline' })).not.toBeInTheDocument();
   });
 });

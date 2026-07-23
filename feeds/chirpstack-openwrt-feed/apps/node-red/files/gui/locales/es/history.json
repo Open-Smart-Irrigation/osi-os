@@ -8,13 +8,13 @@
     "shell": {
       "title": "Historial",
       "subtitle": "Historial local del gateway para {{username}}",
-      "loadingLocalCards": "Cargando tarjetas de historial locales...",
+      "loadingLocalCards": "Cargando tarjetas de historial locales…",
       "unavailableTitle": "El historial no está disponible",
-      "unavailableBody": "Los indicadores de funciones en tiempo de ejecución mantienen desactivado el nuevo panel de historial hasta que el gateway local lo habilite.",
-      "featureFlagFailed": "La solicitud del indicador de función falló. El panel heredado sigue disponible.",
+      "unavailableBody": "El historial está desactivado en este gateway. Aparecerá aquí en cuanto se active.",
+      "featureFlagFailed": "No se pudo comprobar si el historial está activado. El panel heredado sigue disponible.",
       "zonesFailedTitle": "Error al cargar las zonas de historial",
       "noZonesTitle": "Aún no hay zonas",
-      "noZonesBody": "Crea una zona desde el panel heredado antes de abrir el historial temático.",
+      "noZonesBody": "Crea una zona desde el panel heredado antes de abrir el historial.",
       "cardsFailed": "Error al cargar las tarjetas de historial.",
       "retryCards": "Reintentar tarjetas"
     },
@@ -32,7 +32,7 @@
       "compareViewSelectorLabel": "Vista de comparación",
       "sourceSelectorLabel": "Fuentes",
       "rangeOverviewLabel": "Resumen del intervalo de tiempo",
-      "chartSurfaceLabel": "Gráfico de historial, use las flechas para desplazar y más o menos para acercar",
+      "chartSurfaceLabel": "Gráfico de historial, usa las flechas para desplazar y más o menos para acercar",
       "zoomIn": "Acercar",
       "zoomOut": "Alejar",
       "resetZoom": "Restablecer zoom",
@@ -41,11 +41,11 @@
       "comparisonMode": "Comparación",
       "addPanel": "Añadir panel {{title}}",
       "removePanel": "Quitar panel",
-      "panelLimitWarning": "Solo se pueden mostrar {{count}} paneles de comparación en esta pasarela edge.",
+      "panelLimitWarning": "Solo se pueden mostrar {{count}} paneles de comparación en este gateway.",
       "selectedTimestampNone": "Ninguna marca de tiempo seleccionada",
       "selectedTimestamp": "Marca de tiempo seleccionada: {{timestamp}}",
       "inspectorTitle": "Inspector",
-      "inspectorPlaceholder": "Seleccione una marca de tiempo o celda del calendario para ver interpretación, eventos, calidad de datos y metadatos avanzados."
+      "inspectorPlaceholder": "Selecciona una marca de tiempo o celda del calendario para ver interpretación, eventos, calidad de datos y metadatos avanzados."
     },
     "mobile": {
       "zoneLabel": "Zona",
@@ -66,10 +66,10 @@
     "detail": {
       "backToHistory": "Volver al historial",
       "invalidRouteTitle": "Tarjeta de historial no disponible",
-      "invalidRouteBody": "Vuelve a Historial y elige una tarjeta disponible.",
-      "loading": "Cargando tarjeta de historial...",
+      "invalidRouteBody": "Vuelve a historial y elige una tarjeta disponible.",
+      "loading": "Cargando tarjeta de historial…",
       "notFoundTitle": "Tarjeta de historial no disponible",
-      "notFoundBody": "Vuelve a Historial y elige una tarjeta disponible.",
+      "notFoundBody": "Vuelve a historial y elige una tarjeta disponible.",
       "controlsPlaceholder": "Rango de fechas",
       "inspectorPlaceholder": "Inspector",
       "rangeControlLabel": "Rango de fechas",
@@ -90,7 +90,7 @@
       "pinnedCards": "Tarjetas fijadas",
       "availableCards": "Tarjetas disponibles",
       "savedWorkspaces": "Espacios de trabajo guardados",
-      "workspaceDisabled": "El guardado de espacios de trabajo no está habilitado en esta versión.",
+      "workspaceDisabled": "El guardado de espacios de trabajo aún no está habilitado.",
       "workspaceName": "Nombre del espacio de trabajo",
       "saveWorkspace": "Guardar espacio de trabajo",
       "updateWorkspace": "Actualizar espacio de trabajo",
@@ -110,15 +110,15 @@
     },
     "cardFrame": {
       "emptyTitle": "Selecciona una tarjeta de historial",
-      "emptyBody": "Elige una zona y una tarjeta temática para inspeccionar el historial local.",
+      "emptyBody": "Elige una zona y una tarjeta de historial para inspeccionar el historial local.",
       "typeHistory": "Historial de {{cardType}}",
       "viewModes": "Modos de vista de {{title}}",
       "unavailable": "Esta tarjeta no está disponible para la zona seleccionada.",
       "timelineBrush": "Ventana de la línea de tiempo",
       "timelineBrushKeyboardHelp": "Usa las flechas para desplazar, más o menos para acercar, e Inicio o Intro para restablecer.",
       "aggregationBadge": "Agregación: {{aggregation}}",
-      "placeholderBody": "Los datos del gráfico y del calendario se cargarán aquí cuando las API de datos de la tarjeta estén habilitadas.",
-      "cardDataLoading": "Cargando datos de la tarjeta...",
+      "placeholderBody": "Los datos del gráfico y del calendario se cargarán aquí en cuanto los datos de la tarjeta estén disponibles.",
+      "cardDataLoading": "Cargando datos de la tarjeta…",
       "cardDataError": "Error al cargar los datos de la tarjeta: {{message}}",
       "cardDataUnknownError": "Error desconocido"
     },
@@ -162,7 +162,7 @@
     "gatewayStatus": {
       "title": "Resumen del estado del gateway",
       "emptyTitle": "Datos limitados del estado del gateway",
-      "emptyBody": "Los detalles del estado del gateway aparecerán aquí a medida que el hub los reporte.",
+      "emptyBody": "Los detalles del estado del gateway aparecerán aquí a medida que el gateway los reporte.",
       "lastSeen": "Visto por última vez",
       "dataAsOf": "Datos a fecha de",
       "syncState": "Estado de sincronización",
@@ -222,7 +222,7 @@
     },
     "cardType": {
       "soil": "Suelo",
-      "dendro": "Dendro",
+      "dendro": "Dendrómetro",
       "environment": "Entorno",
       "irrigation": "Riego",
       "gateway": "Gateway"
@@ -276,12 +276,12 @@
       "emptyTitle": "No hay datos de perfil de suelo",
       "emptyBody": "Las lecturas de perfil por profundidad no están disponibles para este rango.",
       "depthLabel": "{{depth}} cm",
-      "depthUnknown": "Profundidad pendiente",
+      "depthUnknown": "Profundidad no definida",
       "valueMissing": "Sin lectura",
       "status": {
         "dry_stress": "Estrés por sequía",
         "optimal": "Óptimo",
-        "wet_excess": "Exceso de humedad",
+        "wet_excess": "Demasiado húmedo",
         "mixed": "Mixto",
         "no_data": "Sin datos"
       },
@@ -310,7 +310,7 @@
       "state": {
         "dry_stress": "Estrés por sequía",
         "optimal": "Óptimo",
-        "wet_excess": "Exceso de humedad",
+        "wet_excess": "Demasiado húmedo",
         "mixed": "Mixto",
         "normal_growth": "Crecimiento normal",
         "reduced_growth": "Crecimiento reducido",
@@ -405,7 +405,7 @@
       },
       "rootZoneDry": {
         "title": "La zona radicular entró en estado seco",
-        "body": "La tensión del suelo en profundidad se mantuvo seca durante el período seleccionado."
+        "body": "La tensión del suelo en la zona radicular profunda se mantuvo en el rango seco durante el período seleccionado."
       },
       "dataCoverageGap": {
         "title": "Los datos del sensor están incompletos",
@@ -433,7 +433,7 @@
     },
     "advanced": {
       "title": "Diagnósticos avanzados",
-      "loading": "Cargando diagnósticos avanzados...",
+      "loading": "Cargando diagnósticos avanzados…",
       "emptyTitle": "No hay diagnósticos avanzados",
       "value": {
         "unavailable": "No disponible"
@@ -441,7 +441,7 @@
       "availability": {
         "collected": "Recopilado",
         "not_collected_at_time": "No recopilado en ese momento",
-        "unknown_now": "Desconocido ahora",
+        "unknown_now": "Actualmente desconocido",
         "unsupported": "No compatible"
       },
       "field": {

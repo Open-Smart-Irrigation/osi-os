@@ -24,10 +24,10 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardFrame.timelineBrushKeyboardHelp':
       'Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.',
     'history.cardFrame.aggregationBadge': 'Aggregation: {{aggregation}}',
-    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
+    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here once card data is available.',
     'history.cardType.soil': 'Soil',
     'history.viewMode.calendar': 'Calendar',
-    'history.viewMode.advanced': 'Advanced View',
+    'history.viewMode.advanced': 'Advanced view',
     'history.metadata.coverageKnown': '{{coverage}}% coverage',
     'history.metadata.coverageUnknown': 'Coverage unknown',
     'history.metadata.coverageConfidence.configured': 'Configured cadence',
@@ -55,12 +55,12 @@ const { translateForTest } = vi.hoisted(() => {
     'history.advanced.title': 'Advanced diagnostics',
     'history.advanced.loading': 'Loading advanced diagnostics...',
     'history.advanced.emptyTitle': 'No advanced diagnostics',
-    'history.advanced.field.primaryDeveui': 'Device EUI',
+    'history.advanced.field.primaryDeveui': 'DevEUI',
     'history.advanced.field.rssi': 'RSSI',
     'history.advanced.field.rawPayload': 'Raw payload',
     'history.advanced.availability.collected': 'Collected',
-    'history.advanced.availability.not_collected_at_time': 'Not collected then',
-    'history.advanced.availability.unknown_now': 'Unknown now',
+    'history.advanced.availability.not_collected_at_time': 'Not collected at that time',
+    'history.advanced.availability.unknown_now': 'Currently unknown',
     'history.advanced.availability.unsupported': 'Unsupported',
     'history.advanced.value.unavailable': 'Unavailable',
   };
@@ -240,12 +240,12 @@ describe('AdvancedViewPanel', () => {
     render(<AdvancedViewPanel data={advanced()} isLoading={false} />);
 
     const region = screen.getByRole('region', { name: 'Advanced diagnostics' });
-    expect(within(region).getByText('Device EUI')).toBeInTheDocument();
+    expect(within(region).getByText('DevEUI')).toBeInTheDocument();
     expect(within(region).getByText('A84041FFFF123456')).toBeInTheDocument();
     expect(within(region).getByText('RSSI')).toBeInTheDocument();
     expect(within(region).getByText('-113 dBm')).toBeInTheDocument();
     expect(within(region).getByText('Raw payload')).toBeInTheDocument();
-    expect(within(region).getByText('Not collected then')).toBeInTheDocument();
+    expect(within(region).getByText('Not collected at that time')).toBeInTheDocument();
   });
 });
 
@@ -268,7 +268,7 @@ describe('HistoryCardFrame calendar and advanced views', () => {
     useHistoryCardAdvancedDataMock.mockReturnValue({ data: advanced(), error: undefined, isLoading: false, refresh: vi.fn() });
 
     render(<HistoryCardFrame card={card()} scope={{ type: 'zone', zoneId: 1 }} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Advanced View' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced view' }));
 
     expect(useHistoryCardAdvancedDataMock).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: true }));
     expect(screen.getByRole('region', { name: 'Advanced diagnostics' })).toBeInTheDocument();

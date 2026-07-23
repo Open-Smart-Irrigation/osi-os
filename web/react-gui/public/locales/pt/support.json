@@ -1,26 +1,26 @@
 {
-  "navLabel": "Suporte e solicitações",
-  "title": "Suporte e solicitações",
+  "navLabel": "Suporte e pedidos",
+  "title": "Suporte e pedidos",
   "backToDashboard": "Voltar ao painel",
-  "empty": "Ainda não há solicitações.",
+  "empty": "Ainda não há pedidos.",
   "form": {
-    "stepRequest": "1. Texto da solicitação",
+    "stepRequest": "1. Texto do pedido",
     "stepArea": "2. Área e gravidade",
     "stepDiagnostics": "3. Diagnóstico e consentimento",
     "summary": "Título curto",
     "description": "O que deve ser melhorado?",
-    "contactEmail": "E-mail de contato (opcional)",
+    "contactEmail": "E-mail de contacto (opcional)",
     "expected": "Esperado",
     "actual": "Atual",
     "steps": "Passos",
-    "requestType": "Tipo de solicitação",
+    "requestType": "Tipo de pedido",
     "area": "Área",
     "severity": "Gravidade",
-    "diagnostics": "Prévia do diagnóstico",
-    "includeDiagnostics": "Incluir diagnóstico seguro com esta solicitação.",
-    "consentPublic": "Aceito que esta solicitação possa ser compartilhada publicamente sem detalhes privados da fazenda.",
-    "submit": "Salvar solicitação",
-    "submitting": "Salvando..."
+    "diagnostics": "Pré-visualização do diagnóstico",
+    "includeDiagnostics": "Incluir diagnóstico seguro com este pedido.",
+    "consentPublic": "Concordo que este pedido possa ser partilhado publicamente sem detalhes privados da quinta.",
+    "submit": "Guardar pedido",
+    "submitting": "A guardar…"
   },
   "types": {
     "bug": "Bug",
@@ -39,53 +39,53 @@
     "other": "Outro"
   },
   "severity": {
-    "cant_work": "Não é possível trabalhar",
-    "workaround": "Solução temporária disponível",
-    "annoying": "Incômodo",
+    "cant_work": "Impede o meu trabalho",
+    "workaround": "Há alternativa",
+    "annoying": "Incómodo",
     "idea": "Ideia"
   },
   "diagnostics": {
-    "loading": "Carregando diagnóstico...",
-    "unavailable": "O diagnóstico não está disponível no momento."
+    "loading": "A carregar diagnóstico…",
+    "unavailable": "O diagnóstico não está disponível de momento."
   },
   "banners": {
-    "retryable": "Não foi possível enviar agora. A solicitação pode ser tentada novamente."
+    "retryable": "Não foi possível enviar agora. O pedido pode ser tentado novamente."
   },
   "status": {
-    "QUEUED": "Salva, aguardando internet",
+    "QUEUED": "Guardado, à espera da internet",
     "SUBMITTED": "Enviada",
     "SYNCED": "Sincronizada",
     "FAILED_RETRYABLE": "Nova tentativa necessária",
     "FAILED_PERMANENT": "Não foi possível enviar",
-    "AWAITING_PUBLISH": "Aguardando publicação",
-    "PUBLISHING": "Publicando",
+    "AWAITING_PUBLISH": "A aguardar publicação",
+    "PUBLISHING": "A publicar",
     "PUBLISH_BLOCKED_CONFIG": "Publicação bloqueada",
     "PUBLISH_BLOCKED_SECRET": "Publicação bloqueada",
     "TRIAGED": "Em análise",
     "BEING_REVIEWED": "Em análise",
     "NEEDS_INFO": "Precisa de mais informações",
-    "ISSUE_ONLY": "Salva como issue",
+    "ISSUE_ONLY": "Guardada como issue",
     "ISSUE_OPEN": "Issue aberta",
-    "NOT_PLANNED": "Não planejada",
-    "RATE_LIMITED": "Limite de taxa atingido",
+    "NOT_PLANNED": "Não planeada",
+    "RATE_LIMITED": "Limite de pedidos atingido",
     "RELEASED": "Lançada",
     "REJECTED": "Rejeitada",
     "DUPLICATE": "Duplicada",
     "DUPLICATE_OF": "Duplicada",
-    "AWAITING_APPROVAL": "Aguardando aprovação",
+    "AWAITING_APPROVAL": "A aguardar aprovação",
     "AGENT_RUNNING": "Em andamento",
-    "VERIFYING": "Verificando",
+    "VERIFYING": "A verificar",
     "PR_OPEN": "Em andamento",
     "IN_REVIEW": "Em revisão",
-    "MERGED": "Mesclada",
+    "MERGED": "Integrada",
     "CLOSED": "Fechada",
     "AGENT_FAILED": "Precisa de revisão",
-    "UNKNOWN": "Atualização de status recebida"
+    "UNKNOWN": "Atualização de estado recebida"
   },
   "myRequests": {
-    "title": "Minhas solicitações",
-    "loadError": "Não foi possível carregar as solicitações.",
-    "loading": "Carregando solicitações...",
+    "title": "Os meus pedidos",
+    "loadError": "Não foi possível carregar os pedidos.",
+    "loading": "A carregar pedidos…",
     "area": "Área",
     "submitted": "Enviada"
   }

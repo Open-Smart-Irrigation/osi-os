@@ -19,7 +19,7 @@ vi.mock('react-i18next', () => ({
       translationMocks.t(key, options);
       const defaults: Record<string, string> = {
         'where.station': 'Station',
-        'where.unstationed': 'Unstationed plots',
+        'where.unstationed': 'Plots without a station',
         'where.namedPlots': 'Named plots',
         'where.noStation': 'No station',
         'where.selectAll': 'Select all',
@@ -214,7 +214,7 @@ describe('PlotPicker', () => {
     });
 
     expect(screen.getByText('ST-1')).toBeVisible();
-    expect(screen.getByText('Unstationed plots')).toBeVisible();
+    expect(screen.getByText('Plots without a station')).toBeVisible();
     expect(screen.queryByText('deleted')).not.toBeInTheDocument();
     expect(screen.queryByText('inactive')).not.toBeInTheDocument();
 

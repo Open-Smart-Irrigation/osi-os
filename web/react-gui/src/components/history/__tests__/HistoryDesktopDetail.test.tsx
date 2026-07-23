@@ -18,9 +18,9 @@ vi.mock('react-i18next', () => ({
         'history.viewMode.line-chart': 'Line Chart',
         'history.viewMode.calendar': 'Calendar',
         'history.viewMode.irrigation-response': 'Irrigation Response',
-        'history.viewMode.advanced': 'Advanced View',
+        'history.viewMode.advanced': 'Advanced view',
         'history.viewMode.daily-min-max': 'Daily Min/Max',
-        'history.viewMode.growth-timeline': 'Growth Timeline',
+        'history.viewMode.growth-timeline': 'Growth timeline',
       };
       if (labels[key]) return labels[key];
       if (opts?.defaultValue) return opts.defaultValue as string;
@@ -255,7 +255,7 @@ describe('HistoryDesktopDetail', () => {
     expect(screen.getByRole('button', { name: 'Line Chart' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Calendar' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Irrigation Response' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Advanced View' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Advanced view' })).toBeInTheDocument();
   });
 
   it('switches the selected view without changing card route state', () => {
@@ -344,7 +344,7 @@ describe('HistoryDesktopDetail', () => {
     });
     renderDesktopDetail([card], card);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Advanced View' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced view' }));
 
     expect(screen.getByTestId('card-visualization')).toHaveAttribute('data-selected-view', 'advanced');
   });

@@ -168,7 +168,7 @@ function PlotFormState({
       },
       heterogeneous_group: {
         key: 'plot.heterogeneousGroup',
-        defaultValue: 'The plot belongs to a heterogeneous group.',
+        defaultValue: 'The plot belongs to a group with incompatible layouts.',
       },
       plot_in_unresolved_group: {
         key: 'plot.unresolvedGroup',

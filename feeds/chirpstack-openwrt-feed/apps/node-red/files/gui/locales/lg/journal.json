@@ -4,7 +4,7 @@
   "comingSoon": {
     "badge": "Kikyakolebwa",
     "heading": "Journal y'ennimiro ekyakolebwa",
-    "body": "Wandiika ekyabaddewo mu nnimiro — okusukkulirira, okumansira eddagala, okusiga, okukungula, n'okulambula — okusobola okutegeera obulungi chart za sensor n'okwekenneenya kwo. Ebiwandiiko bikwatagana n'omusiri, ne bikwata endaba ya sensor mu kiseera ky'ekikolwa, era bilabika ng'obubonero ku chart z'ebyafaayo byo.",
+    "body": "Wandiika ekyabaddewo mu nnimiro — okufukirira, okumansira eddagala, okusiga, okukungula, n'okulambula — okusobola okutegeera obulungi chart za sensor n'okwekenneenya kwo. Ebiwandiiko bikwatagana n'omusiri, ne bikwata endaba ya sensor mu kiseera ky'ekikolwa, era bilabika ng'obubonero ku chart z'ebyafaayo byo.",
     "captureTitle": "Okuwandiika amangu",
     "captureBody": "Ebikolwa mukaaga ebisembayo ku lupapula lw'okukwatako, okuwandiika nga otandika ku kika ky'ekyakozesebwa, n'olunyiriri olukakasa mu bigambo ebyangu buli lwoterekawo.",
     "recordTitle": "Ebiwandiiko bya nnimiro eby'amazima",
@@ -22,7 +22,7 @@
     }
   },
   "activity": {
-    "irrigation": "Okusukkulirira",
+    "irrigation": "Okufukirira",
     "fertigation": "Fertigation",
     "fertilization": "Okugimusa",
     "seeding": "Okusiga",
@@ -31,7 +31,7 @@
   },
   "timeline": {
     "empty": "Tewali kikolwa kiwandiikiddwa.",
-    "loading": "Ebikolwa bitikkibwa...",
+    "loading": "Ebikolwa bitikkibwa…",
     "batch": "Ebikolwa eby'awamu",
     "batchExpand": "Gaziya ebikolwa eby'awamu",
     "batchCollapse": "Kendeeza ebikolwa eby'awamu",
@@ -74,7 +74,7 @@
     "editGroup": "Kyusa ekibinja",
     "groupLabel": "Erinnya ly'ekibinja",
     "saveGroup": "Tereka ekibinja",
-    "cancel": "Sazaamu",
+    "cancel": "Lekawo",
     "loading": "Bitikkibwa…",
     "retry": "Gezaako nate"
   },
@@ -112,13 +112,13 @@
     "active": "Kikola",
     "layout": "Layout",
     "save": "Tereka",
-    "cancel": "Sazaamu",
+    "cancel": "Lekawo",
     "layoutRequired": "Londa layout ekola",
     "stale": "Omusiri guno gukyusiddwa awalala. Guddemu okutikka nga tonnatereka.",
     "codeConflict": "Koodi y'omusiri ekozesebwa dda.",
     "heterogeneousGroup": "Omusiri guno guli mu kibinja kya layouts ezitakwatagana.",
     "unresolvedGroup": "Saasaanya ekibinja ky'omusiri nga tonnakiremesa.",
-    "loading": "Tikutereka…",
+    "loading": "Kirimu okutereka…",
     "error": "Twayisiddwa okutereka omusiri.",
     "retry": "Gezaako nate",
     "context": "Ebikwata ku musiri",
@@ -131,7 +131,7 @@
     "applyToStationError": "Tetusobodde kukozesa bino ku siteegi."
   },
   "batch": {
-    "saving": "Tikutereka…",
+    "saving": "Kirimu okutereka…",
     "saved": "Kiterekeddwa",
     "confirm": "Kebera ebikolwa eby'awamu nga tonnatereka",
     "confirmCount": "emisiri",
@@ -151,7 +151,7 @@
   },
   "error": {
     "title": "Journal teyasobodde kutikkibwa",
-    "body": "Gateway teyaddamu bulungi. Gezaako nate.",
+    "body": "Gateway teyaddamu. Gezaako nate.",
     "retry": "Gezaako nate"
   },
   "filters": {
@@ -239,16 +239,16 @@
       "correction": {
         "heading": "Longoosa ekiwandiiko kino",
         "unavailable": "Fomu y'ekiwandiiko kino teri kyaliwo, n'olwekyo tekisobola kulongoosebwa wano.",
-        "cancel": "Sazaamu",
+        "cancel": "Lekawo",
         "save": "Tereka enkyusa",
-        "saving": "Tikutereka…",
+        "saving": "Kirimu okutereka…",
         "stale": "Ekiwandiiko kino kikyusiddwa mu kifo ekirala. Kiddemu okutikka nga tonnalongoosa nate.",
         "error": "Twayisiddwa okutereka enkyusa. Gezaako nate."
       },
       "void": {
         "reasonLabel": "Ensonga ey'okusaza",
         "reasonRequired": "Yingiza ensonga nga tonnasaza kiwandiiko kino.",
-        "cancel": "Sazaamu",
+        "cancel": "Lekawo",
         "submit": "Saza ekiwandiiko",
         "saving": "Kisaziddwa…",
         "stale": "Ekiwandiiko kino kikyusiddwa mu kifo ekirala. Kiddemu okutikka nga tonnaddamu kukisaza.",
@@ -418,7 +418,7 @@
       "reviewAction": "Kebera emiwendo egikyusiddwa"
     },
     "save": {
-      "saving": "Tikutereka...",
+      "saving": "Kirimu okutereka…",
       "draftSavedGateway": "Ekitannamala kiterekeddwa ku Gateway y'ennimiro",
       "finalSavedGateway": "Kiterekeddwa ku Gateway y'ennimiro",
       "cloudWaiting": "Kiterekeddwa ku OSI Server — kirindiridde Gateway y'ennimiro",
@@ -442,8 +442,8 @@
       "closesCycle": "Kimalira cycle y'ekirime: {{crop}}",
       "correctTitle": "Longoosa ekirime n'ekika",
       "correctSave": "Tereka enkyusa",
-      "correctSaving": "Tikutereka…",
-      "correctCancel": "Sazaamu",
+      "correctSaving": "Kirimu okutereka…",
+      "correctCancel": "Lekawo",
       "correctStale": "Ekiwandiiko kino kikyusiddwa mu kifo ekirala. Kiddemu okutikka nga tonnalongoosa nate.",
       "correctDesynced": "Cycle y'ekirime eky'ensiga eno emaze okuggwaawo era teyinza kukyusibwa nate wano.",
       "correctError": "Twayisiddwa okutereka enkyusa eno. Gezaako nate.",
@@ -455,7 +455,7 @@
       "voidDependentsBody": "Okusaza ensiga eno kijja kuggyawo ekirime ekyaweebwa mu biwandiiko bino:",
       "voidDependentsLoading": "Ebiwandiiko ebikwatibwako bitikkibwa…",
       "voidDependentsConfirm": "Saza kyokka",
-      "voidDependentsCancel": "Sazaamu"
+      "voidDependentsCancel": "Lekawo"
     }
   },
   "markers": {

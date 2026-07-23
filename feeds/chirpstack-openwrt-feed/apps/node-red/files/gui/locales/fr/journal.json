@@ -10,7 +10,7 @@
     "recordTitle": "Un véritable registre agricole",
     "recordBody": "Des entrées structurées et lisibles par machine, par parcelle, avec une provenance figée — un registre détaillé conçu pour de futurs profils de conformité.",
     "syncTitle": "Synchronisation transparente",
-    "syncBody": "Chaque entrée vous indique si elle est enregistrée sur la passerelle de la ferme ou si elle attend de l'être. Rien n'est perdu silencieusement."
+    "syncBody": "Chaque entrée vous indique si elle est enregistrée sur la passerelle de la ferme ou si elle attend de l'être. Rien ne se perd sans que vous le sachiez."
   },
   "row": {
     "farmLevel": "Toute la ferme",
@@ -31,7 +31,7 @@
   },
   "timeline": {
     "empty": "Aucune activité enregistrée pour le moment.",
-    "loading": "Chargement des activités...",
+    "loading": "Chargement des activités…",
     "batch": "Activité groupée",
     "batchExpand": "Afficher les entrées du lot",
     "batchCollapse": "Masquer les entrées du lot",
@@ -116,7 +116,7 @@
     "layoutRequired": "Sélectionnez un layout actif",
     "stale": "Cette parcelle a changé ailleurs. Rechargez-la avant de l'enregistrer.",
     "codeConflict": "Le code de parcelle est déjà utilisé.",
-    "heterogeneousGroup": "La parcelle appartient à un groupe hétérogène.",
+    "heterogeneousGroup": "La parcelle appartient à un groupe avec des layouts incompatibles.",
     "unresolvedGroup": "Dissolvez le groupe de parcelles avant de désactiver cette parcelle.",
     "loading": "Enregistrement…",
     "error": "Impossible d'enregistrer la parcelle.",
@@ -151,7 +151,7 @@
   },
   "error": {
     "title": "Impossible de charger le journal",
-    "body": "La passerelle n'a pas répondu correctement. Réessayez.",
+    "body": "La passerelle n'a pas répondu. Réessayez.",
     "retry": "Réessayer"
   },
   "filters": {
@@ -418,7 +418,7 @@
       "reviewAction": "Vérifier les valeurs modifiées"
     },
     "save": {
-      "saving": "Enregistrement en cours...",
+      "saving": "Enregistrement…",
       "draftSavedGateway": "Brouillon enregistré sur la passerelle de la ferme",
       "finalSavedGateway": "Enregistré sur la passerelle de la ferme",
       "cloudWaiting": "Enregistré sur OSI Server — en attente de la passerelle de la ferme",

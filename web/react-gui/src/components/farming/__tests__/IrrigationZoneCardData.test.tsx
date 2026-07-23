@@ -54,7 +54,7 @@ vi.mock('react-i18next', () => ({
       if (key === 'zone.deviceCount') return '2 devices';
       if (key === 'zone.assignDevice') return 'Assign Device';
       if (key === 'zone.deleteZone') return 'Delete Zone';
-      if (key === 'addMenu.activity') return 'Log activity';
+      if (key === 'addMenu.activity') return 'Log Activity';
       return key;
     },
   }),
@@ -188,7 +188,7 @@ describe('IrrigationZoneCard Data entry', () => {
     const zoneUuid = 'zone uuid/typed';
     renderCard([], { zoneUuid });
 
-    const journalLink = screen.getByRole('link', { name: 'Log activity' });
+    const journalLink = screen.getByRole('link', { name: 'Log Activity' });
     expect(journalLink).toHaveAttribute(
       'href',
       `/journal?capture=1&zone_uuid=${encodeURIComponent(zoneUuid)}`,
@@ -200,7 +200,7 @@ describe('IrrigationZoneCard Data entry', () => {
     const zoneUuid = 'zone uuid/snake';
     renderCard([], { zone_uuid: zoneUuid });
 
-    expect(screen.getByRole('link', { name: 'Log activity' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Log Activity' })).toHaveAttribute(
       'href',
       `/journal?capture=1&zone_uuid=${encodeURIComponent(zoneUuid)}`,
     );
@@ -209,7 +209,7 @@ describe('IrrigationZoneCard Data entry', () => {
   it('prefers the edge snake_case UUID if compatibility aliases conflict', () => {
     renderCard([], { zone_uuid: 'edge-zone', zoneUuid: 'cloud-zone' });
 
-    expect(screen.getByRole('link', { name: 'Log activity' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Log Activity' })).toHaveAttribute(
       'href',
       '/journal?capture=1&zone_uuid=edge-zone',
     );
@@ -218,7 +218,7 @@ describe('IrrigationZoneCard Data entry', () => {
   it('keeps a generic Journal CTA when the zone UUID is missing', () => {
     renderCard();
 
-    expect(screen.getByRole('link', { name: 'Log activity' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Log Activity' })).toHaveAttribute(
       'href',
       '/journal?capture=1',
     );
@@ -227,7 +227,7 @@ describe('IrrigationZoneCard Data entry', () => {
   it('uses a translated, touch-sized Journal CTA in a wrapping action group', () => {
     renderCard();
 
-    const journalLink = screen.getByRole('link', { name: 'Log activity' });
+    const journalLink = screen.getByRole('link', { name: 'Log Activity' });
     expect(journalLink.style.minHeight).toBe('56px');
     expect(getComputedStyle(journalLink).minHeight).toBe('56px');
     expect(journalLink).toHaveClass('touch-target', 'min-h-14');

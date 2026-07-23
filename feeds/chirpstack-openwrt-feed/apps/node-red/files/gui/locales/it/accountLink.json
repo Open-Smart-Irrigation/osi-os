@@ -1,7 +1,7 @@
 {
   "title": "Connetti a OSI Server",
   "navLink": "OSI Server",
-  "backToDashboard": "Torna alla Dashboard",
+  "backToDashboard": "Torna alla dashboard",
   "status": {
     "linked": "Account collegato a OSI Server",
     "notLinked": "Non connesso a OSI Server",
@@ -17,12 +17,12 @@
     "email": "Email",
     "password": "Password",
     "submit": "Connetti a OSI Server",
-    "submitting": "Connessione in corso...",
+    "submitting": "Connessione in corso…",
     "cancel": "Annulla"
   },
   "warning": {
     "title": "Importante",
-    "message": "Dopo il collegamento, dovrai utilizzare le tue credenziali OSI Server per accedere. OSI OS memorizza un verificatore offline specifico del gateway per l'accesso collegato.",
+    "message": "Dopo il collegamento, dovrai usare le tue credenziali OSI Server per accedere. OSI OS conserva sul gateway una copia sicura e offline delle tue credenziali, così puoi accedere anche senza connessione a internet.",
     "proceed": "Procedi"
   },
   "success": {
@@ -46,13 +46,13 @@
     "title": "Sincronizzazione manuale",
     "description": "Esegui una sincronizzazione di ripristino immediata con OSI Server.",
     "button": "Forza sincronizzazione ora",
-    "running": "Sincronizzazione in corso...",
+    "running": "Sincronizzazione in corso…",
     "successTitle": "Sincronizzazione manuale completata",
     "partialTitle": "Sincronizzazione manuale completata con problemi",
     "refreshed": "Token di sincronizzazione aggiornato prima della sincronizzazione.",
     "usedCurrentToken": "Utilizzo del token di sincronizzazione corrente.",
     "bootstrap": "Bootstrap applicato: {{applied}}, saltato: {{skipped}}",
-    "outbox": "Outbox consegnato: {{delivered}} ({{before}} -> {{after}} in sospeso)",
+    "outbox": "Outbox consegnato: {{delivered}} ({{before}} → {{after}} in sospeso)",
     "pending": "Comandi in sospeso recuperati: {{fetched}}, in coda per l'applicazione locale: {{queued}}",
     "pendingAfterResponse": "L'applicazione locale continua dopo la restituzione di questa risposta.",
     "lastError": "Ultimo errore da {{source}}: {{message}}"
@@ -64,6 +64,6 @@
     "username": "Nome utente server",
     "password": "Password OSI Server",
     "submit": "Aggiorna connessione",
-    "running": "Aggiornamento in corso..."
+    "running": "Aggiornamento in corso…"
   }
 }

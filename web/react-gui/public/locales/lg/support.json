@@ -18,9 +18,9 @@
     "severity": "Obukulu",
     "diagnostics": "Ebikwata ku kukebera",
     "includeDiagnostics": "Teekako ebikwata ku kyuma ebitali bya kyama.",
-    "consentPublic": "Nzikiriza okusaba kuno kugabanyizibwe mu lujjudde awatali bikwata ku faamu eby'ekyama.",
+    "consentPublic": "Nzikiriza okusaba kuno kugabanyizibwe mu lujjudde awatali bikwata ku nnimiro eby'ekyama.",
     "submit": "Tereka okusaba",
-    "submitting": "Kutereka..."
+    "submitting": "Kutereka…"
   },
   "types": {
     "bug": "Ekizibu",
@@ -35,7 +35,7 @@
     "watering": "Okufukirira",
     "sync": "Okusinkroniza",
     "devices": "Ebyuma",
-    "system": "Enkola",
+    "system": "Sisitimu",
     "other": "Ekirala"
   },
   "severity": {
@@ -45,7 +45,7 @@
     "idea": "Ekirowoozo"
   },
   "diagnostics": {
-    "loading": "Ebikwata ku kukebera bitikkibwa...",
+    "loading": "Ebikwata ku kukebera bitikkibwa…",
     "unavailable": "Ebikwata ku kukebera tebiriwo kati."
   },
   "banners": {
@@ -85,7 +85,7 @@
   "myRequests": {
     "title": "Okusaba kwange",
     "loadError": "Okusaba tekusobodde kutikkibwa.",
-    "loading": "Okusaba kutikkibwa...",
+    "loading": "Okusaba kutikkibwa…",
     "area": "Ekitundu",
     "submitted": "Kisindikiddwa"
   }

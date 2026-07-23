@@ -373,9 +373,9 @@ export function PlotPicker({
         ))}
 
         {unstationedPlots.length > 0 && (
-          <section className="w-full min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4" aria-label={t('where.unstationed', { defaultValue: 'Unstationed plots' })}>
+          <section className="w-full min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4" aria-label={t('where.unstationed', { defaultValue: 'Plots without a station' })}>
             <h2 className="mb-3 text-base font-bold text-[var(--text)]">
-              {t('where.unstationed', { defaultValue: 'Unstationed plots' })}
+              {t('where.unstationed', { defaultValue: 'Plots without a station' })}
             </h2>
             <PlotOptionList
               plots={unstationedPlots}

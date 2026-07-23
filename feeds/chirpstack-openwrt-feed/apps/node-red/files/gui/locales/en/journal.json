@@ -13,7 +13,7 @@
     "syncBody": "Every entry tells you whether it is saved on the farm gateway or waiting for it. Nothing is silently lost."
   },
   "row": {
-    "farmLevel": "Farm-level",
+    "farmLevel": "Whole farm",
     "unknownPlot": "Unknown plot",
     "status": {
       "final": "Final",
@@ -41,7 +41,7 @@
   },
   "where": {
     "station": "Station",
-    "unstationed": "Unstationed plots",
+    "unstationed": "Plots without a station",
     "namedPlots": "Named plots",
     "noStation": "No station",
     "selectAll": "Select all",
@@ -116,7 +116,7 @@
     "layoutRequired": "Select an active layout",
     "stale": "This plot changed elsewhere. Reload before saving.",
     "codeConflict": "Plot code is already in use.",
-    "heterogeneousGroup": "The plot belongs to a heterogeneous group.",
+    "heterogeneousGroup": "The plot belongs to a group with incompatible layouts.",
     "unresolvedGroup": "Resolve the plot group before deactivating this plot.",
     "loading": "Saving…",
     "error": "Could not save the plot.",
@@ -151,7 +151,7 @@
   },
   "error": {
     "title": "Could not load the journal",
-    "body": "The gateway did not answer successfully. Try again.",
+    "body": "The gateway did not respond. Try again.",
     "retry": "Try again"
   },
   "filters": {
@@ -339,7 +339,7 @@
       "treatedAreaDefaulted": "Defaulted from plot area — edit if needed"
     },
     "validation": {
-      "required": "Complete this field",
+      "required": "This field is required",
       "invalidNumber": "Enter a valid number",
       "minimum": "Enter a value of at least {{min}}",
       "maximum": "Enter a value no greater than {{max}}",

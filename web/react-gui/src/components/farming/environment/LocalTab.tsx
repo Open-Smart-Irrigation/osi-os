@@ -179,7 +179,7 @@ export const LocalTab: React.FC<Props> = ({ local }) => {
         {local.staleSensorCount > 0 && (
           <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-semibold ${staleCls}`}>
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-            {t('environment.local.staleSensors_other', { count: local.staleSensorCount, defaultValue: `${local.staleSensorCount} stale` })}
+            {t('environment.local.staleSensors', { count: local.staleSensorCount, defaultValue: `${local.staleSensorCount} stale` })}
           </span>
         )}
         {local.observedAt && (

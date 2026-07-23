@@ -20,7 +20,7 @@
     "includeDiagnostics": "Incluir diagnóstico seguro con esta solicitud.",
     "consentPublic": "Acepto que esta solicitud pueda compartirse públicamente sin detalles privados de la finca.",
     "submit": "Guardar solicitud",
-    "submitting": "Guardando..."
+    "submitting": "Guardando…"
   },
   "types": {
     "bug": "Error",
@@ -39,13 +39,13 @@
     "other": "Otro"
   },
   "severity": {
-    "cant_work": "No se puede trabajar",
+    "cant_work": "Bloquea mi trabajo",
     "workaround": "Hay solución temporal",
     "annoying": "Molesto",
     "idea": "Idea"
   },
   "diagnostics": {
-    "loading": "Cargando diagnóstico...",
+    "loading": "Cargando diagnóstico…",
     "unavailable": "El diagnóstico no está disponible ahora mismo."
   },
   "banners": {
@@ -85,7 +85,7 @@
   "myRequests": {
     "title": "Mis solicitudes",
     "loadError": "No se pudieron cargar las solicitudes.",
-    "loading": "Cargando solicitudes...",
+    "loading": "Cargando solicitudes…",
     "area": "Área",
     "submitted": "Enviado"
   }

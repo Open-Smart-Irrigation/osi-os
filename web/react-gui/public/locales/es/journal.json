@@ -13,7 +13,7 @@
     "syncBody": "Cada entrada te indica si está guardada en el gateway de la finca o si está a la espera de guardarse. Nada se pierde en silencio."
   },
   "row": {
-    "farmLevel": "Nivel de finca",
+    "farmLevel": "Toda la finca",
     "unknownPlot": "Parcela desconocida",
     "status": {
       "final": "Definitivo",
@@ -31,11 +31,11 @@
   },
   "timeline": {
     "empty": "Aún no se ha registrado ninguna actividad.",
-    "loading": "Cargando actividades...",
+    "loading": "Cargando actividades…",
     "batch": "Actividad por lote",
     "batchExpand": "Mostrar las entradas del lote",
     "batchCollapse": "Ocultar las entradas del lote",
-    "batchLoading": "Cargando entradas del lote...",
+    "batchLoading": "Cargando entradas del lote…",
     "batchError": "No se han podido cargar las entradas del lote.",
     "batchRetry": "Reintentar"
   },
@@ -75,7 +75,7 @@
     "groupLabel": "Nombre del grupo",
     "saveGroup": "Guardar grupo",
     "cancel": "Cancelar",
-    "loading": "Cargando...",
+    "loading": "Cargando…",
     "retry": "Reintentar"
   },
   "group": {
@@ -94,7 +94,7 @@
     "heterogeneous": "El grupo contiene layouts incompatibles.",
     "create": "Crear grupo",
     "edit": "Editar grupo",
-    "loading": "Cargando grupos...",
+    "loading": "Cargando grupos…",
     "error": "No se ha podido guardar el grupo de parcelas.",
     "retry": "Reintentar"
   },
@@ -116,9 +116,9 @@
     "layoutRequired": "Selecciona un layout activo",
     "stale": "Esta parcela ha cambiado en otro lugar. Vuelve a cargarla antes de guardar.",
     "codeConflict": "El código de parcela ya está en uso.",
-    "heterogeneousGroup": "La parcela pertenece a un grupo heterogéneo.",
+    "heterogeneousGroup": "La parcela pertenece a un grupo con layouts incompatibles.",
     "unresolvedGroup": "Disuelve el grupo de parcelas antes de desactivar esta parcela.",
-    "loading": "Guardando...",
+    "loading": "Guardando…",
     "error": "No se ha podido guardar la parcela.",
     "retry": "Reintentar",
     "context": "Contexto de la parcela",
@@ -131,7 +131,7 @@
     "applyToStationError": "No se ha podido aplicar este contexto a la estación."
   },
   "batch": {
-    "saving": "Guardando...",
+    "saving": "Guardando…",
     "saved": "Guardado",
     "confirm": "Revisa el lote antes de guardarlo",
     "confirmCount": "parcelas",
@@ -151,7 +151,7 @@
   },
   "error": {
     "title": "No se pudo cargar el diario",
-    "body": "El gateway no respondió correctamente. Vuelve a intentarlo.",
+    "body": "El gateway no respondió. Vuelve a intentarlo.",
     "retry": "Reintentar"
   },
   "filters": {
@@ -379,7 +379,7 @@
       "group": "Grupo {{number}}",
       "useValues": "Usar estos valores",
       "dismiss": "No copiar",
-      "invalidated": "El tratamiento anterior ya no coincide con esta parcela, cultivo, hora, temporada o layout"
+      "invalidated": "El tratamiento anterior ya no coincide con esta parcela, este cultivo, esta hora, esta temporada o este layout."
     },
     "tankMix": {
       "title": "Mezcla en tanque",
@@ -388,7 +388,7 @@
       "memberLabel": "{{index}}. {{detail}}",
       "unknownProduct": "Ningún producto seleccionado",
       "remove": "Eliminar",
-      "saveFailed": "No se pudo guardar uno de los productos de este pase. Inténtelo de nuevo."
+      "saveFailed": "No se pudo guardar uno de los productos de este pase. Inténtalo de nuevo."
     },
     "confirm": {
       "title": "Revisa antes de guardar",
@@ -418,7 +418,7 @@
       "reviewAction": "Revisar valores modificados"
     },
     "save": {
-      "saving": "Guardando...",
+      "saving": "Guardando…",
       "draftSavedGateway": "Borrador guardado en el gateway de la finca",
       "finalSavedGateway": "Guardado en el gateway de la finca",
       "cloudWaiting": "Guardado en OSI Server — a la espera del gateway de la finca",

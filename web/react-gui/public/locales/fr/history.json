@@ -8,13 +8,13 @@
     "shell": {
       "title": "Historique",
       "subtitle": "Historique local de la passerelle pour {{username}}",
-      "loadingLocalCards": "Chargement des cartes d’historique local...",
+      "loadingLocalCards": "Chargement des cartes d’historique local…",
       "unavailableTitle": "L’historique n’est pas disponible",
-      "unavailableBody": "Les indicateurs de fonctionnalité gardent la nouvelle interface d’historique désactivée tant que la passerelle locale ne l’active pas.",
-      "featureFlagFailed": "La requête de l’indicateur de fonctionnalité a échoué. Le tableau de bord existant reste disponible.",
+      "unavailableBody": "L’historique est désactivé sur cette passerelle et apparaîtra ici une fois activé.",
+      "featureFlagFailed": "Impossible de vérifier si l’historique est activé. Le tableau de bord existant reste disponible.",
       "zonesFailedTitle": "Échec du chargement des zones d’historique",
       "noZonesTitle": "Aucune zone pour le moment",
-      "noZonesBody": "Créez une zone depuis le tableau de bord existant avant d'ouvrir l'historique thématique.",
+      "noZonesBody": "Créez une zone depuis le tableau de bord existant avant d’ouvrir l’historique.",
       "cardsFailed": "Échec du chargement des cartes d’historique.",
       "retryCards": "Réessayer les cartes"
     },
@@ -41,7 +41,7 @@
       "comparisonMode": "Comparaison",
       "addPanel": "Ajouter le panneau {{title}}",
       "removePanel": "Retirer le panneau",
-      "panelLimitWarning": "Seuls {{count}} panneaux de comparaison peuvent être affichés sur cette passerelle edge.",
+      "panelLimitWarning": "Seuls {{count}} panneaux de comparaison peuvent être affichés sur cette passerelle.",
       "selectedTimestampNone": "Aucun horodatage sélectionné",
       "selectedTimestamp": "Horodatage sélectionné : {{timestamp}}",
       "inspectorTitle": "Inspecteur",
@@ -67,7 +67,7 @@
       "backToHistory": "Retour à l’historique",
       "invalidRouteTitle": "Carte d’historique non disponible",
       "invalidRouteBody": "Retournez à l’historique et choisissez une carte disponible.",
-      "loading": "Chargement de la carte d’historique...",
+      "loading": "Chargement de la carte d’historique…",
       "notFoundTitle": "Carte d’historique non disponible",
       "notFoundBody": "Retournez à l’historique et choisissez une carte disponible.",
       "controlsPlaceholder": "Plage de dates",
@@ -90,7 +90,7 @@
       "pinnedCards": "Cartes épinglées",
       "availableCards": "Cartes disponibles",
       "savedWorkspaces": "Espaces de travail enregistrés",
-      "workspaceDisabled": "L’enregistrement des espaces de travail n’est pas activé à cette étape.",
+      "workspaceDisabled": "L’enregistrement des espaces de travail n’est pas encore activé.",
       "workspaceName": "Nom de l’espace de travail",
       "saveWorkspace": "Enregistrer l’espace de travail",
       "updateWorkspace": "Mettre à jour l’espace de travail",
@@ -110,15 +110,15 @@
     },
     "cardFrame": {
       "emptyTitle": "Sélectionnez une carte d’historique",
-      "emptyBody": "Choisissez une zone et une carte thématique pour inspecter l’historique local.",
+      "emptyBody": "Choisissez une zone et une carte d’historique pour inspecter l’historique local.",
       "typeHistory": "Historique {{cardType}}",
       "viewModes": "Modes d’affichage {{title}}",
       "unavailable": "Cette carte n’est pas disponible pour la zone sélectionnée.",
       "timelineBrush": "Fenêtre de la chronologie",
       "timelineBrushKeyboardHelp": "Utilisez les flèches pour déplacer, plus ou moins pour zoomer, et Origine ou Entrée pour réinitialiser.",
       "aggregationBadge": "Agrégation : {{aggregation}}",
-      "placeholderBody": "Les données du graphique et du calendrier s’afficheront ici lorsque les API de données de carte seront activées.",
-      "cardDataLoading": "Chargement des données de la carte...",
+      "placeholderBody": "Les données du graphique et du calendrier s’afficheront ici lorsque les données de la carte seront disponibles.",
+      "cardDataLoading": "Chargement des données de la carte…",
       "cardDataError": "Échec du chargement des données de la carte : {{message}}",
       "cardDataUnknownError": "Erreur inconnue"
     },
@@ -152,7 +152,7 @@
         "airTemperature": "Température de l’air",
         "humidity": "Humidité relative",
         "rain": "Pluie",
-        "light": "Luminosité",
+        "light": "Lumière",
         "pressure": "Pression",
         "wind": "Vent",
         "uv": "Indice UV",
@@ -222,7 +222,7 @@
     },
     "cardType": {
       "soil": "Sol",
-      "dendro": "Dendro",
+      "dendro": "Dendromètre",
       "environment": "Environnement",
       "irrigation": "Irrigation",
       "gateway": "Passerelle"
@@ -276,12 +276,12 @@
       "emptyTitle": "Aucune donnée de profil du sol",
       "emptyBody": "Les relevés de profil par profondeur ne sont pas disponibles pour cette période.",
       "depthLabel": "{{depth}} cm",
-      "depthUnknown": "Profondeur en attente",
+      "depthUnknown": "Profondeur non définie",
       "valueMissing": "Aucun relevé",
       "status": {
         "dry_stress": "Stress hydrique",
         "optimal": "Optimal",
-        "wet_excess": "Excès d’eau",
+        "wet_excess": "Trop humide",
         "mixed": "Mixte",
         "no_data": "Aucune donnée"
       },
@@ -310,7 +310,7 @@
       "state": {
         "dry_stress": "Stress hydrique",
         "optimal": "Optimal",
-        "wet_excess": "Excès d’eau",
+        "wet_excess": "Trop humide",
         "mixed": "Mixte",
         "normal_growth": "Croissance normale",
         "reduced_growth": "Croissance réduite",
@@ -405,7 +405,7 @@
       },
       "rootZoneDry": {
         "title": "La zone racinaire est passée en état sec",
-        "body": "La tension hydrique du sol en profondeur est restée sèche pendant la période sélectionnée."
+        "body": "La tension hydrique du sol en profondeur est restée dans la plage sèche pendant la période sélectionnée."
       },
       "dataCoverageGap": {
         "title": "Les données du capteur sont incomplètes",
@@ -433,7 +433,7 @@
     },
     "advanced": {
       "title": "Diagnostics avancés",
-      "loading": "Chargement des diagnostics avancés...",
+      "loading": "Chargement des diagnostics avancés…",
       "emptyTitle": "Aucun diagnostic avancé",
       "value": {
         "unavailable": "Indisponible"
@@ -445,8 +445,8 @@
         "unsupported": "Non pris en charge"
       },
       "field": {
-        "device_eui": "EUI de l’appareil",
-        "primaryDeveui": "EUI de l’appareil",
+        "device_eui": "DevEUI",
+        "primaryDeveui": "DevEUI",
         "rssi": "RSSI",
         "snr": "SNR",
         "raw_payload": "Charge utile brute",
@@ -454,7 +454,7 @@
         "firmware": "Firmware",
         "calibration": "Étalonnage",
         "prediction": "Prédiction",
-        "forecast": "Prévision",
+        "forecast": "Prévisions",
         "pending_commands": "Commandes en attente",
         "batteryPct": "Pourcentage de batterie",
         "batteryVoltage": "Tension de la batterie",

@@ -13,7 +13,7 @@
     "syncBody": "Jeder Eintrag zeigt Ihnen, ob er auf dem Gateway gespeichert ist oder noch darauf wartet. Nichts geht unbemerkt verloren."
   },
   "row": {
-    "farmLevel": "Hofebene",
+    "farmLevel": "Ganzer Hof",
     "unknownPlot": "Unbekannte Parzelle",
     "status": {
       "final": "Final",
@@ -116,7 +116,7 @@
     "layoutRequired": "Aktives Layout auswählen",
     "stale": "Diese Parzelle wurde anderswo geändert. Laden Sie sie vor dem Speichern neu.",
     "codeConflict": "Dieser Parzellen-Code wird bereits verwendet.",
-    "heterogeneousGroup": "Die Parzelle gehört zu einer heterogenen Gruppe.",
+    "heterogeneousGroup": "Die Parzelle gehört zu einer Gruppe mit inkompatiblen Layouts.",
     "unresolvedGroup": "Lösen Sie die Parzellengruppe auf, bevor Sie diese Parzelle deaktivieren.",
     "loading": "Wird gespeichert…",
     "error": "Die Parzelle konnte nicht gespeichert werden.",
@@ -151,7 +151,7 @@
   },
   "error": {
     "title": "Journal konnte nicht geladen werden",
-    "body": "Das Gateway hat nicht erfolgreich geantwortet. Versuchen Sie es erneut.",
+    "body": "Das Gateway hat nicht geantwortet. Versuchen Sie es erneut.",
     "retry": "Erneut versuchen"
   },
   "filters": {
