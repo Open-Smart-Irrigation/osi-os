@@ -4123,7 +4123,7 @@
     "y": 1900,
     "wires": [
       [
-        "put-dendro-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -4200,7 +4200,7 @@
     "y": 2000,
     "wires": [
       [
-        "put-temp-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -5358,7 +5358,7 @@
     "y": 420,
     "wires": [
       [
-        "dendro-ref-tree-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -6619,7 +6619,7 @@
     "y": 560,
     "wires": [
       [
-        "put-lsn50-mode-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -6739,7 +6739,7 @@
     "y": 680,
     "wires": [
       [
-        "put-lsn50-interval-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -6953,7 +6953,7 @@
     "y": 800,
     "wires": [
       [
-        "put-kiwi-interval-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -7073,7 +7073,7 @@
     "y": 920,
     "wires": [
       [
-        "post-kiwi-enable-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -7193,7 +7193,7 @@
     "y": 1040,
     "wires": [
       [
-        "put-strega-interval-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -7326,7 +7326,7 @@
     "y": 760,
     "wires": [
       [
-        "put-lsn50-interrupt-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -7370,7 +7370,7 @@
     "y": 820,
     "wires": [
       [
-        "put-lsn50-5v-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -7474,7 +7474,7 @@
     "y": 1120,
     "wires": [
       [
-        "put-strega-model-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -7518,7 +7518,7 @@
     "y": 1180,
     "wires": [
       [
-        "put-strega-timed-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -7562,7 +7562,7 @@
     "y": 1240,
     "wires": [
       [
-        "put-strega-magnet-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -7606,7 +7606,7 @@
     "y": 1300,
     "wires": [
       [
-        "put-strega-partial-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -7650,7 +7650,7 @@
     "y": 1360,
     "wires": [
       [
-        "put-strega-flush-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -7945,7 +7945,7 @@
     "y": 1900,
     "wires": [
       [
-        "put-rain-gauge-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -8022,7 +8022,7 @@
     "y": 1900,
     "wires": [
       [
-        "put-flow-meter-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -8486,7 +8486,7 @@
     "y": 2100,
     "wires": [
       [
-        "put-soil-depth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -8531,7 +8531,7 @@
     "y": 1920,
     "wires": [
       [
-        "put-chameleon-enabled-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -8575,7 +8575,7 @@
     "y": 1960,
     "wires": [
       [
-        "put-dendro-config-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -8655,7 +8655,7 @@
     "y": 2020,
     "wires": [
       [
-        "post-dendro-baseline-reset-auth-fn"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -9447,7 +9447,7 @@
     "y": 2170,
     "wires": [
       [
-        "44e7d74ff3668e01"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -9576,7 +9576,7 @@
     "y": 2370,
     "wires": [
       [
-        "8b93fa005d78e25f"
+        "scoped-device-config-guard"
       ]
     ]
   },
@@ -13356,6 +13356,103 @@
     "wires": [
       [
         "s2120-zones-put-auth-fn"
+      ],
+      [
+        "device-response"
+      ]
+    ]
+  },
+  {
+    "id": "scoped-device-config-guard",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Fresh Device Config Scope",
+    "func": "return (async () => {\nconst routeTable = [{\"method\":\"PUT\",\"suffix\":\"/dendro\",\"index\":0},{\"method\":\"PUT\",\"suffix\":\"/temp\",\"index\":1},{\"method\":\"PUT\",\"suffix\":\"/reference-tree\",\"index\":2},{\"method\":\"PUT\",\"suffix\":\"/lsn50/mode\",\"index\":3},{\"method\":\"PUT\",\"suffix\":\"/lsn50/interval\",\"index\":4},{\"method\":\"PUT\",\"suffix\":\"/kiwi/interval\",\"index\":5},{\"method\":\"POST\",\"suffix\":\"/kiwi/temperature-humidity/enable\",\"index\":6},{\"method\":\"PUT\",\"suffix\":\"/strega/interval\",\"index\":7},{\"method\":\"PUT\",\"suffix\":\"/lsn50/interrupt-mode\",\"index\":8},{\"method\":\"PUT\",\"suffix\":\"/lsn50/5v-warmup\",\"index\":9},{\"method\":\"PUT\",\"suffix\":\"/strega/model\",\"index\":10},{\"method\":\"PUT\",\"suffix\":\"/strega/timed-action\",\"index\":11},{\"method\":\"PUT\",\"suffix\":\"/strega/magnet\",\"index\":12},{\"method\":\"PUT\",\"suffix\":\"/strega/partial-opening\",\"index\":13},{\"method\":\"PUT\",\"suffix\":\"/strega/flushing\",\"index\":14},{\"method\":\"PUT\",\"suffix\":\"/rain-gauge\",\"index\":15},{\"method\":\"PUT\",\"suffix\":\"/flow-meter\",\"index\":16},{\"method\":\"PUT\",\"suffix\":\"/soil-moisture-depths\",\"index\":17},{\"method\":\"PUT\",\"suffix\":\"/chameleon\",\"index\":18},{\"method\":\"PUT\",\"suffix\":\"/dendro-config\",\"index\":19},{\"method\":\"POST\",\"suffix\":\"/dendro-baseline/reset\",\"index\":20},{\"method\":\"POST\",\"suffix\":\"/chameleon/refresh-calibration\",\"index\":21},{\"method\":\"PUT\",\"suffix\":\"/chameleon/depth\",\"index\":22}];\nconst method = String(msg.req && msg.req.method || '').toUpperCase();\nconst requestPath = String(msg.req && (msg.req.path || msg.req.url) || '').split('?')[0];\nconst deveui = String(msg.req && msg.req.params && msg.req.params.deveui || '').trim().toUpperCase();\nconst prefix = '/api/devices/' + String(msg.req && msg.req.params && msg.req.params.deveui || '');\nconst suffix = requestPath.startsWith(prefix) ? requestPath.slice(prefix.length) : '';\nconst route = routeTable.find(function(candidate) {\n  return candidate.method === method && candidate.suffix === suffix;\n});\nconst outputs = new Array(routeTable.length + 1).fill(null);\nconst errorOutput = routeTable.length;\nif (!route) {\n  msg.statusCode = 404;\n  msg.payload = { message: 'Device config route not found' };\n  outputs[errorOutput] = msg;\n  return outputs;\n}\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n  outputs[route.index] = msg;\n  return outputs;\n}\nlet db;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('device config scope: module unavailable: ' + scopeLoad.error, msg);\n    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const actor = await db.get(\n    'SELECT user_uuid, role FROM users WHERE id = ? AND username = ? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!actor || !actor.user_uuid) {\n    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });\n  }\n  const actorScope = await scope.assertFreshRole(\n    db,\n    actor.user_uuid,\n    actor.role,\n    { scopedMode: true }\n  );\n  if (actorScope.role === 'viewer') {\n    throw Object.assign(new Error('insufficient role'), { statusCode: 403 });\n  }\n  await scope.assertFreshDeviceAccess(\n    db,\n    actor.user_uuid,\n    deveui,\n    { scopedMode: true }\n  );\n  msg.actor_user_uuid = actor.user_uuid;\n  outputs[route.index] = msg;\n  return outputs;\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    message: msg.statusCode === 404 ? 'Device not found' :\n      (msg.statusCode === 403 ? 'Forbidden' : String(error && error.message || error))\n  };\n  outputs[errorOutput] = msg;\n  return outputs;\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('device config scope close: ' + String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
+    "outputs": 24,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 330,
+    "y": 1900,
+    "wires": [
+      [
+        "put-dendro-auth-fn"
+      ],
+      [
+        "put-temp-auth-fn"
+      ],
+      [
+        "dendro-ref-tree-fn"
+      ],
+      [
+        "put-lsn50-mode-auth-fn"
+      ],
+      [
+        "put-lsn50-interval-auth-fn"
+      ],
+      [
+        "put-kiwi-interval-auth-fn"
+      ],
+      [
+        "post-kiwi-enable-auth-fn"
+      ],
+      [
+        "put-strega-interval-auth-fn"
+      ],
+      [
+        "put-lsn50-interrupt-auth-fn"
+      ],
+      [
+        "put-lsn50-5v-auth-fn"
+      ],
+      [
+        "put-strega-model-auth-fn"
+      ],
+      [
+        "put-strega-timed-auth-fn"
+      ],
+      [
+        "put-strega-magnet-auth-fn"
+      ],
+      [
+        "put-strega-partial-auth-fn"
+      ],
+      [
+        "put-strega-flush-auth-fn"
+      ],
+      [
+        "put-rain-gauge-auth-fn"
+      ],
+      [
+        "put-flow-meter-auth-fn"
+      ],
+      [
+        "put-soil-depth-fn"
+      ],
+      [
+        "put-chameleon-enabled-auth-fn"
+      ],
+      [
+        "put-dendro-config-auth-fn"
+      ],
+      [
+        "post-dendro-baseline-reset-auth-fn"
+      ],
+      [
+        "44e7d74ff3668e01"
+      ],
+      [
+        "8b93fa005d78e25f"
       ],
       [
         "device-response"

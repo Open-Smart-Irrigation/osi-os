@@ -624,3 +624,114 @@ test('W4: device delete and weather-zone replacement enforce fresh scope', async
     db.close();
   }
 });
+
+const DEVICE_CONFIG_ROUTES = [
+  ['PUT', '/dendro'],
+  ['PUT', '/temp'],
+  ['PUT', '/reference-tree'],
+  ['PUT', '/lsn50/mode'],
+  ['PUT', '/lsn50/interval'],
+  ['PUT', '/kiwi/interval'],
+  ['POST', '/kiwi/temperature-humidity/enable'],
+  ['PUT', '/strega/interval'],
+  ['PUT', '/lsn50/interrupt-mode'],
+  ['PUT', '/lsn50/5v-warmup'],
+  ['PUT', '/strega/model'],
+  ['PUT', '/strega/timed-action'],
+  ['PUT', '/strega/magnet'],
+  ['PUT', '/strega/partial-opening'],
+  ['PUT', '/strega/flushing'],
+  ['PUT', '/rain-gauge'],
+  ['PUT', '/flow-meter'],
+  ['PUT', '/soil-moisture-depths'],
+  ['PUT', '/chameleon'],
+  ['PUT', '/dendro-config'],
+  ['POST', '/dendro-baseline/reset'],
+  ['POST', '/chameleon/refresh-calibration'],
+  ['PUT', '/chameleon/depth'],
+];
+
+test('W5: every device-config route fresh-checks write scope', async () => {
+  const db = seedScopedDb();
+  try {
+    for (const [index, [method, suffix]] of DEVICE_CONFIG_ROUTES.entries()) {
+      scopeHelper._resetForTests();
+      const path = `/api/devices/DENDRO1${suffix}`;
+      const allowed = await executeFunction(loadNode('scoped-device-config-guard'), {
+        msg: scopedRequest(
+          2,
+          'res1',
+          method,
+          path,
+          { deveui: 'DENDRO1' }
+        ),
+        env: ENV,
+        db,
+      });
+      assert.equal(allowed.result[index].actor_user_uuid, 'u-res1', `${method} ${suffix}`);
+      assert.equal(
+        allowed.result.filter(Boolean).length,
+        1,
+        `${method} ${suffix} uses one legacy output`
+      );
+
+      scopeHelper._resetForTests();
+      const foreignAdmin = await executeFunction(loadNode('scoped-device-config-guard'), {
+        msg: scopedRequest(
+          1,
+          'admin1',
+          method,
+          path,
+          { deveui: 'DENDRO1' }
+        ),
+        env: ENV,
+        db,
+      });
+      assert.equal(
+        foreignAdmin.result.at(-1).statusCode,
+        404,
+        `${method} ${suffix} does not give admins a scope bypass`
+      );
+
+      scopeHelper._resetForTests();
+      const viewer = await executeFunction(loadNode('scoped-device-config-guard'), {
+        msg: scopedRequest(
+          3,
+          'view1',
+          method,
+          path,
+          { deveui: 'DENDRO1' }
+        ),
+        env: ENV,
+        db,
+      });
+      assert.equal(viewer.result.at(-1).statusCode, 403, `${method} ${suffix} rejects viewers`);
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('W5: flag-off device-config routing preserves each legacy branch', async () => {
+  const db = seedScopedDb();
+  try {
+    for (const [index, [method, suffix]] of DEVICE_CONFIG_ROUTES.entries()) {
+      const path = `/api/devices/DENDRO1${suffix}`;
+      const response = await executeFunction(loadNode('scoped-device-config-guard'), {
+        msg: scopedRequest(
+          2,
+          'res1',
+          method,
+          path,
+          { deveui: 'DENDRO1' }
+        ),
+        env: { ...ENV, OSI_SCOPED_ACCESS: '0' },
+        db,
+      });
+      assert.equal(response.result[index].req.path, path);
+      assert.equal(response.result.filter(Boolean).length, 1);
+    }
+  } finally {
+    db.close();
+  }
+});
