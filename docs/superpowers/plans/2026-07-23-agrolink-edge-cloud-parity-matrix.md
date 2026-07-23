@@ -11,6 +11,13 @@ come from the fetched integration heads, not the earlier planning audit.
 - OSI Server `origin/main` and merge base:
   `8cac33d3a8a210784fa5f9b73c8e4dfe796203f7`
 
+## Accepted slices
+
+| Task | Result | Commit |
+|---|---|---|
+| 0 | Launch inventory recorded; stale server frontend manifest pin repaired and all baseline suites passed | Edge `ed89dc010cfcccfea001b81583a0690608d1c3d9`; server `3179df875204ac2c9d38e6d9c96cb2beaa15a1b4` |
+| 1 | Scoped authority, per-gateway cloud membership, dynamic migration allocation, and the accepted user-version contract reconciled in governing documents | Edge `459cf73f010a390c10b6dbb707de891f0179775e` |
+
 ## Status rules
 
 | Status | Meaning |
@@ -35,8 +42,8 @@ come from the fetched integration heads, not the earlier planning audit.
 | Journal entries | `cloud-missing` | Edge storage, UI, five event operations, and five command handlers exist; full server mirror/API/UI/issuer does not | Task 5 |
 | Farm history mirror | `partial` | Legacy durable delivery remains; the new batch mapper covers `device_data` only | Task 9 |
 | Analysis and recommendations | `partial` | Both repositories contain analysis surfaces; input, scope, missing-data, and result semantics need route-level comparison | Task 8 |
-| Account scope and per-gateway grants | `partial` | Accepted Phase A patch material exists off target; Phases B-D and server enforcement remain open | Tasks 1, 3, 6, and 7 |
-| Cloud access administration | `cloud-missing` | Product decision requires durable edge-approved commands; the old Phase E plan is superseded | Task 7 |
+| Account scope and per-gateway grants | `partial` | Task 1 reconciled the governing model and Phase A rebase instructions; implementation, Phases B-D, and server enforcement remain open | Tasks 3, 6, and 7 |
+| Cloud access administration | `cloud-missing` | Task 1 now governs this as durable desired state plus versioned edge-applied commands; implementation remains in Tasks 4 and 7 | Tasks 4 and 7 |
 | Installation recovery | `cloud-missing` | No stable `installation_uuid` recovery model or encrypted recovery bundle exists | Task 10 |
 | Optimistic zone and journal edits | `cloud-missing` | UX decision is immediate local desired state with background sync; durable state machine is not complete | Tasks 4 and 5 |
 

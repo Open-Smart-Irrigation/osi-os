@@ -2,9 +2,10 @@
 
 ## Preparation record: 2026-07-23
 
-**State:** Task 0 complete through pre-commit verification. Launch heads were
-fetched, base gates run, one server frontend base defect repaired and pushed,
-and the route/contract inventory regenerated.
+**State:** Tasks 0 and 1 complete and pushed. Launch heads were fetched, base
+gates run, one server frontend base defect repaired, the route/contract
+inventory regenerated, and the scoped-access governing documents reconciled
+with the current cloud-administration decision.
 
 ### Repository bases
 
@@ -80,13 +81,39 @@ generated output or behavior change. Commit
 `3179df875204ac2c9d38e6d9c96cb2beaa15a1b4` was pushed to `AgroLink`, and
 `git ls-remote --exit-code origin refs/heads/AgroLink` returned the same SHA.
 
+### Task 1 scoped governance refresh
+
+The ADR and scoped design now distinguish a cloud request from canonical edge
+state. Cloud access administration saves durable desired state and queues a
+versioned REST pending command. The edge checks the version precondition,
+applies or rejects the request, and emits the canonical mirror event. The
+cloud's global `User.role` remains outside this model; role and enabled state
+stay per gateway on the `LinkedGatewayAccount` axis.
+
+The Phase A plan now derives the next two free migration versions from the
+target head and carries those selected filenames through rehearsals,
+checksums, bundled databases, and commits. It treats `8921e6d1` as cumulative
+patch material and preserves the accepted `101d1f2f` contract: durable
+`users.sync_version`, writer increments in the same synced mutation, and
+trigger emission from `NEW.sync_version`. The refreshed acceptance test also
+requires positive initial versions, two increasing user mutations, and the
+first-assignment-only user UUID trigger guard.
+
+The anti-slop checker passed on all three governing files, `git diff --check`
+passed, and a separate full-diff review found no remaining executable
+references to the source migration numbers or conflicting authority rules.
+Commit `459cf73f010a390c10b6dbb707de891f0179775e` was pushed to
+`design-sync/agrolink`; `git ls-remote --exit-code origin
+refs/heads/design-sync/agrolink` returned the same SHA.
+
 ### Memory samples
 
 Every heavyweight command started above the 4,096 MiB threshold. Recorded
 `MemAvailable` values ranged from 12,942 MiB to 14,155 MiB. During the
 one-minute backend suite, availability fell by 705 MiB between the first two
 samples while `pswpout` rose, below the 1,024 MiB termination threshold. No
-owned process was terminated.
+owned process was terminated. Task 1 prose verification started with 14,113
+MiB available.
 
 ### Program ownership
 
