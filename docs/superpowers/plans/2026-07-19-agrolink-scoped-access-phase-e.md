@@ -1,200 +1,200 @@
-# AgroLink Scoped Access — Phase E Implementation Plan (Cloud Contract + Enforcement)
+# AgroLink scoped access Phase E implementation plan
 
-> **Superseded for execution on 2026-07-23:** Keep this file as historical
-> design input only. The accepted product decision now allows cloud access
-> administration through durable, edge-approved pending commands, so this
-> edge-origin-only plan must not be dispatched. Orchestrator Task 7 owns the
-> replacement design and must validate it against current server code.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or
+> superpowers:executing-plans to implement this plan task-by-task. Steps use
+> checkbox (`- [ ]`) syntax for tracking.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+**Goal:** Mirror gateway-local users and grants in OSI Server, enforce
+per-gateway roles, and support edge-approved cloud administration without
+enabling either runtime direction before deployment.
 
-**Goal:** The three scoped-access aggregates flow edge→cloud through the governed contract; osi-server mirrors grants, holds per-gateway membership, and enforces the same scoped model for remote researcher access.
+**Architecture:** Normalized mirror tables feed one `GatewayScopeService`.
+Cloud changes reuse `DesiredStateService` and REST pending commands. New edge
+commands apply through a focused helper and the existing command ledger. The
+edge remains canonical.
 
-**Architecture:** Per edge spec §11 and the paired cloud spec [`2026-07-19-agrolink-scoped-access-osi-server.md`](../specs/2026-07-19-agrolink-scoped-access-osi-server.md). Cloud-first deployment per the Phase F compatibility rule: the contract schema change lands on the edge first (additive, no producers), the server PR merges and deploys accepting the new aggregates, and only then does an operator flip `scoped_access_emit=1` on the hub. Load `osi-sync-contract-awareness` (contract edits) and `osi-server-backend-patterns` (server tasks) before starting.
-
-**Tech Stack:** Edge: `docs/contracts/sync-schema/**` + vendored mirrors. Cloud: Java 21/Spring Boot, Flyway, PostgreSQL 16, JUnit 5, Gradle.
-
-**Prerequisites:** Phase F complete (contract CI live; vendored byte-compare gate exists on the server). Phases A–D merged. Train A integration merged to `osi-os/main`.
-
-**Cross-repo PR rule:** paired branches/PRs; each PR states contract files changed, mirror-update status, where the paired PR lands, and which edge/server verification commands ran. Never cross-commit between repos.
+**Tech Stack:** PostgreSQL 16, Flyway, Java 21/Spring Boot/JPA, React and
+TypeScript, SQLite, Node-RED, governed JSON Schema contracts.
 
 ---
 
-## Task E1: Contract schema additions (edge, osi-os)
+### Task 1: Govern access command contracts
 
 **Files:**
-- Modify: `docs/contracts/sync-schema/events.schema.json`
+- Modify: `docs/contracts/sync-schema/commands.schema.json`
 - Modify: `docs/contracts/sync-schema/resources.schema.json`
-- Modify: `docs/contracts/sync-schema/README.md` (aggregate list)
+- Modify: `docs/contracts/sync-schema/sync-contract-golden.json`
+- Modify: `scripts/test-contract-schemas.js`
+- Modify: `scripts/verify-sync-contract.js`
+- Modify: `scripts/verify-sync-op-parity.js`
 
-- [ ] **Step 1: Add the ops to the enum**
-
-In `events.schema.json`, append to the `op` enum (keep alphabetical neighbors intact):
-
-```json
-"USER_UPSERTED",
-"USER_ZONE_ASSIGNMENT_DELETED",
-"USER_ZONE_ASSIGNMENT_UPSERTED",
-"USER_PLOT_ASSIGNMENT_DELETED",
-"USER_PLOT_ASSIGNMENT_UPSERTED",
-```
-
-- [ ] **Step 2: Add resource definitions**
-
-In `resources.schema.json`, add `SyncUserUpsert`, `SyncUserZoneAssignment`, `SyncUserPlotAssignment` definitions with exactly the payload keys from the paired spec §2 (all camelCase in payload per the trigger bodies: `user_uuid` etc. stay snake_case **inside payloads**, matching every existing trigger payload — verify against one existing definition before writing; do not invent a new casing convention).
-
-- [ ] **Step 3: Validate**
+- [ ] Add the six command types from the paired spec. Require canonical UUIDs,
+  a non-negative `base_sync_version`, a stable `effect_key`, and exactly one
+  command-specific resource body.
+- [ ] Define user and assignment resource shapes. Keep passwords out of all
+  resource definitions; permit only `password_hash` on the two user credential
+  command payloads.
+- [ ] Add positive fixtures and negative fixtures for a stale/missing base,
+  malformed UUID, invalid role, missing tombstone identity, and plaintext
+  password fields.
+- [ ] Keep `scoped_access_sync_v1.edgeProducerEnabled=false` and add
+  `scoped_access_commands_v1` with issuer disabled.
+- [ ] Run:
 
 ```bash
 node scripts/test-contract-schemas.js
 node scripts/verify-sync-contract.js
 node scripts/verify-sync-op-parity.js
-```
-Expected: exit 0. If `verify-sync-op-parity` maps ops to cloud handlers, extend its allowlist/table with the three aggregates and their ops.
-
-- [ ] **Step 4: Commit (edge contract PR, merges first)**
-
-```bash
-git add docs/contracts/
-git commit -m "feat(contract): scoped-access aggregates (USER + grant assignments)"
+node scripts/verify-communication-contract.js
 ```
 
----
+- [ ] Commit as `feat(contract): govern scoped access commands`.
 
-## Task E2: Server schema + mirror tables (osi-server)
+### Task 2: Add server mirrors and membership fields
 
 **Files:**
-- Create: `backend/src/main/resources/db/migration/V<next>__agrolink_gateway_membership.sql` (exact SQL from paired spec §3)
-- Create: `backend/src/main/java/org/osi/server/user/UserZoneAssignmentMirror.java` + repository
-- Create: `backend/src/main/java/org/osi/server/user/UserPlotAssignmentMirror.java` + repository
-- Modify: `backend/src/main/java/org/osi/server/user/LinkedGatewayAccount.java` (`gatewayRole`, `gatewayDisabledAt`)
+- Create: `backend/src/main/resources/db/migration/V2026_07_23_003__scoped_access_mirrors.sql`
+- Create: `backend/src/main/java/org/osi/server/scopedaccess/GatewayUserMirror.java`
+- Create: `backend/src/main/java/org/osi/server/scopedaccess/GatewayUserMirrorRepository.java`
+- Create: `backend/src/main/java/org/osi/server/scopedaccess/UserZoneAssignmentMirror.java`
+- Create: `backend/src/main/java/org/osi/server/scopedaccess/UserZoneAssignmentMirrorRepository.java`
+- Create: `backend/src/main/java/org/osi/server/scopedaccess/UserPlotAssignmentMirror.java`
+- Create: `backend/src/main/java/org/osi/server/scopedaccess/UserPlotAssignmentMirrorRepository.java`
+- Modify: `backend/src/main/java/org/osi/server/user/LinkedGatewayAccount.java`
+- Test: `backend/src/test/java/org/osi/server/scopedaccess/ScopedAccessMigrationIT.java`
 
-- [ ] **Step 1: Flyway migration + catalog test**
+- [ ] Write the migration integration test first. Assert all three tables,
+  composite unique constraints, active-grant indexes, and
+  `linked_gateway_accounts.gateway_role/gateway_disabled_at`.
+- [ ] Run the focused test and retain the expected missing-relation failure.
+- [ ] Add Flyway DDL and JPA entities. Roles are strings constrained to
+  `admin`, `researcher`, or `viewer`; mirror versions are positive.
+- [ ] Run the focused migration test with the guarded Gradle command.
+- [ ] Commit as `feat(sync): add scoped access mirrors`.
 
-Apply the paired spec §3 SQL verbatim (choose the next `V<next>` from `ls backend/src/main/resources/db/migration/`). Extend the migration catalog test to assert: both columns with CHECK, both mirror tables, four partial indexes.
-
-- [ ] **Step 2: Entities + repositories**
-
-Map both mirror tables and the two new `LinkedGatewayAccount` fields following the existing entity conventions in the `user` package (builder, JPA annotations, no business logic in entities).
-
-- [ ] **Step 3: Test + commit**
-
-```bash
-cd backend && ./gradlew test --no-daemon -x buildFrontend -x buildTerraIntelligenceFrontend \
-  --tests '*FlywayMigrationIT'
-git add backend/
-git commit -m "feat(sync): gateway membership columns + grant mirror tables"
-```
-
----
-
-## Task E3: Server event handlers
+### Task 3: Apply scoped mirror events
 
 **Files:**
-- Modify: `backend/src/main/java/org/osi/server/sync/EdgeSyncService.java` (op dispatch)
-- Create: `backend/src/main/java/org/osi/server/sync/ScopedAccessEventApplier.java` + test
-- Modify: `backend/src/test/resources/sync-contract/events.schema.json` (vendored byte-copy of the Task E1 file)
+- Create: `backend/src/main/java/org/osi/server/scopedaccess/ScopedAccessMirrorService.java`
+- Create: `backend/src/main/java/org/osi/server/sync/GatewayUserApplier.java`
+- Create: `backend/src/main/java/org/osi/server/sync/UserZoneAssignmentApplier.java`
+- Create: `backend/src/main/java/org/osi/server/sync/UserPlotAssignmentApplier.java`
+- Modify: `backend/src/main/java/org/osi/server/sync/SyncEventTxExecutor.java`
+- Test: `backend/src/test/java/org/osi/server/scopedaccess/ScopedAccessMirrorServiceTest.java`
+- Test: `backend/src/test/java/org/osi/server/sync/ScopedAccessEventApplierTest.java`
 
-- [ ] **Step 1: Vendor the updated contract**
+- [ ] Write tests for user upsert, linked-membership refresh, assignment
+  upsert/delete, tombstone-first delivery, missing-user retry, replay, stale
+  version, equal-version/different-payload rejection, and the accepted
+  first-assignment-only UUID trigger (no equal-version no-op `USER_UPSERTED`
+  duplicate).
+- [ ] Add mirror service methods that validate gateway and aggregate identity,
+  store canonical JSON, and update matching linked-account fields.
+- [ ] Add one applier per resource family. Extend the transaction executor's
+  parent-missing classifier to recognize a missing scoped user.
+- [ ] Run focused tests, then the server vendor and sync-event selections.
+- [ ] Commit as `feat(sync): apply scoped access events`.
 
-```bash
-cp ../osi-os/docs/contracts/sync-schema/events.schema.json \
-   backend/src/test/resources/sync-contract/events.schema.json
-# resources.schema.json likewise if E1 added definitions there
-```
-
-The Phase F vendor CI enforces byte identity from here on; any drift fails server CI.
-
-- [ ] **Step 2: Applier**
-
-`ScopedAccessEventApplier` implements the paired spec §4 semantics: `USER_UPSERTED` → membership upsert on `(gateway_device_eui, user_uuid)` with `unknown_local_user` retryable; grant upserts apply when `sync_version` is newer; deletes tombstone idempotently. Wire the three cases into the existing `switch (event.op())`, returning the shipped result types (`APPLIED` / `DUPLICATE` / `RETRYABLE_ERROR` / `REJECTED`).
-
-- [ ] **Step 3: Handler tests**
-
-Happy path, replay idempotency, unknown-user retry converges after membership row arrives, stale version rejected, tombstone replay → `DUPLICATE`, malformed payload → `REJECTED`. Run the named selections, then the full backend gate:
-
-```bash
-cd backend && ./gradlew test --no-daemon -x buildFrontend -x buildTerraIntelligenceFrontend \
-  --tests '*ScopedAccessEventApplier*' --tests '*EdgeSync*'
-cd backend && ./gradlew test --no-daemon -x buildFrontend -x buildTerraIntelligenceFrontend
-```
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add backend/
-git commit -m "feat(sync): apply scoped-access aggregates (membership + grant mirrors)"
-```
-
----
-
-## Task E4: Server enforcement for remote researchers
+### Task 4: Resolve and enforce gateway scope
 
 **Files:**
-- Modify: the controllers/services serving gateway-scoped researcher reads (zone/device/history dashboards) and command-enqueue paths (`VALVE_COMMAND`, schedule/config upserts) — identify exact classes during execution with a blast-radius grep for `LinkedGatewayAccount` consumers; record in the execution report
-- Create: `backend/src/main/java/org/osi/server/user/GatewayScopeService.java` + test
+- Create: `backend/src/main/java/org/osi/server/scopedaccess/GatewayScope.java`
+- Create: `backend/src/main/java/org/osi/server/scopedaccess/GatewayScopeService.java`
+- Modify: `backend/src/main/java/org/osi/server/journal/JournalAccessService.java`
+- Modify: `backend/src/main/java/org/osi/server/zone/IrrigationZoneController.java`
+- Modify: gateway-scoped device, history, analysis, valve, and schedule
+  controllers identified by `rg "gateway(Device)?Eui|LinkedGatewayAccount"`
+- Test: `backend/src/test/java/org/osi/server/scopedaccess/GatewayScopeServiceTest.java`
 
-- [ ] **Step 1: `GatewayScopeService`**
+- [ ] Write scope tests for ownership plus grants, foreign 404, viewer 403 on
+  mutation, disabled 403, admin wildcard, and one cloud user holding admin on
+  gateway A and viewer on gateway B.
+- [ ] Resolve the linked account, current user mirror, owned resources, and
+  active grants. Do not consult `User.role`.
+- [ ] Replace owner-only journal access with gateway scope and apply the same
+  service to portable gateway-scoped controllers. Preserve edge checks as the
+  final authority on queued mutations.
+- [ ] Run focused controller tests and the complete backend test suite.
+- [ ] Commit as `feat(auth): enforce per-gateway scoped access`.
 
-```java
-public GatewayScope resolve(User cloudUser, String gatewayEui) { ... }
-// membership: LinkedGatewayAccount(gatewayEui, cloudUser) -> localUserUuid, gatewayRole, gatewayDisabledAt
-//   missing row or disabled -> 403
-// scope: owned zones (existing mirrors) UNION user_zone_assignments_mirror grants; plots likewise
-// methods: boolean zoneVisible(String zoneUuid), boolean plotVisible(String plotUuid),
-//          void assertZone(String zoneUuid) -> 404, void assertRole(String role) -> 403
-```
+### Task 5: Issue desired access commands
 
-- [ ] **Step 2: Apply to read + command paths**
+**Files:**
+- Modify: `backend/src/main/java/org/osi/server/desiredstate/DesiredStateMutationKind.java`
+- Modify: `backend/src/main/java/org/osi/server/desiredstate/DesiredStateService.java`
+- Create: `backend/src/main/java/org/osi/server/scopedaccess/ScopedAccessMutationService.java`
+- Create: `backend/src/main/java/org/osi/server/scopedaccess/ScopedAccessController.java`
+- Test: `backend/src/test/java/org/osi/server/scopedaccess/ScopedAccessMutationServiceTest.java`
+- Test: `backend/src/test/java/org/osi/server/scopedaccess/ScopedAccessControllerTest.java`
 
-Read endpoints filter through `GatewayScope`; command-enqueue paths assert the target zone before queueing a pending command (the edge re-checks on application; the cloud check is UX/early rejection, never the authority).
+- [ ] Add an ACK-only credential mutation kind. Test that only this kind
+  becomes applied on an `APPLIED` ACK without a mirror.
+- [ ] Write mutation tests for user create/update/disable/re-enable, password
+  reset, grant/revoke, last-admin rejection, base conflict, and offline
+  pending state.
+- [ ] Build desired resources from canonical mirrors. Hash temporary passwords
+  with the configured `PasswordEncoder`, place only the hash in the command
+  payload, and never place it in desired JSON.
+- [ ] Require fresh gateway admin scope before every mutation. Return canonical
+  plus desired and operation state.
+- [ ] Run focused and full backend tests.
+- [ ] Commit as `feat(admin): queue scoped access changes`.
 
-- [ ] **Step 3: Enforcement tests**
+### Task 6: Apply access commands on the edge
 
-Per paired spec §7: own-zone 200, foreign 404, viewer command 403, disabled membership 403, gateway-admin full, `SUPER_ADMIN` unaffected. Full backend gate green.
+**Files:**
+- Create: `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scoped-access-commands.js`
+- Mirror: `conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scoped-access-commands.js`
+- Create: `scripts/migrate-flows-scoped-access-commands.js`
+- Modify: both maintained `flows.json` files through that script only
+- Create: `scripts/test-scoped-access-command-path.js`
+- Modify: `scripts/verify-sync-flow.js`
+- Modify: `scripts/verify-flows-size-ratchet-allowances.json`
 
-- [ ] **Step 4: Commit + server PR merge + deploy**
+- [ ] Write lifecycle tests for apply, replay, stale base, malformed resource,
+  last-admin protection, grant delete, and credential ACK with no secret in
+  the ledger result.
+- [ ] Implement one helper that applies all six commands in a transaction,
+  checks `base_sync_version`, increments the canonical version, invalidates
+  the shared scope cache, and returns stable ACK facts.
+- [ ] Add registry entries and one guarded flow dispatch node through the
+  one-shot migration script. Preserve the protected delivery envelope.
+- [ ] Run helper tests and every flow parse, wiring, size, bare-require,
+  silent-catch, profile-parity, scoped write, and sync-flow gate.
+- [ ] Commit as `feat(sync): apply scoped access commands`.
 
-```bash
-git add backend/
-git commit -m "feat(sync): per-gateway scoped enforcement for researcher access"
-```
+### Task 7: Cloud administration UI
 
-The server PR states: contract files consumed (vendored, byte-identical), paired edge PR (`feat(contract): scoped-access aggregates`), and the verification commands run. Deploy the server change before Task E5.
+**Files:**
+- Modify: `frontend/src/services/api.ts`
+- Modify: `frontend/src/types/farming.ts`
+- Create: `frontend/src/pages/GatewayAccessAdminPage.tsx`
+- Modify: `frontend/src/App.tsx`
+- Test: `frontend/src/pages/__tests__/GatewayAccessAdminPage.test.tsx`
 
----
+- [ ] Write tests for gateway switching, mirrored users/grants, pending
+  overlays, conflict recovery, rejected state, disabled membership, and
+  different roles on two gateways.
+- [ ] Add typed service normalization for canonical, desired, and operation
+  responses.
+- [ ] Build the admin page with user and grant workflows. Hide it unless the
+  selected gateway's confirmed role is admin.
+- [ ] Run frontend typecheck if present, unit tests, and build.
+- [ ] Commit as `feat(ui): administer gateway access`.
 
-## Task E5: Enable edge producers on the AgroLink hub (operator step)
+### Task 8: Vendor, verify, and stop at activation boundary
 
-**Files:** none (live operation; the runbook entry is the artifact)
+**Files:**
+- Update server contract vendor files under
+  `backend/src/test/resources/sync-contract/`
+- Modify: `docs/superpowers/plans/2026-07-23-agrolink-edge-cloud-parity-execution-report.md`
 
-- [ ] **Step 1: Pre-flight**
-
-Confirm: server deployed with Task E3+E4; edge image with Phase A–E schema installed is flashed on the hub; `scoped_access_emit` reads `enabled=0`.
-
-- [ ] **Step 2: Enable and verify**
-
-```bash
-sqlite3 /data/db/farming.db "UPDATE scoped_access_emit SET enabled=1 WHERE id=1;"
-sqlite3 /data/db/farming.db "SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='USER';"
-```
-
-Create one test grant via the admin API; confirm: one `USER_ZONE_ASSIGNMENT_UPSERTED` row in the edge outbox, delivery without `rejected_at`, the mirror row on the server, and a scoped remote login seeing exactly the granted zone.
-
-- [ ] **Step 3: Rollback path**
-
-`UPDATE scoped_access_emit SET enabled=0 WHERE id=1;` stops emission immediately; delivered rows stay mirrored harmlessly. Record the operator runbook entry under `docs/operations/`.
-
----
-
-## Task E6: Phase E gate
-
-- [ ] Contract schemas green on both repos; vendored copies byte-identical (Phase F CI proves it continuously).
-- [ ] Full backend suite green; `verify-sync-contract.js`, `test-contract-schemas.js`, `verify-sync-op-parity.js`, `verify-sync-flow.js` green on the edge.
-- [ ] Acceptance per spec §15: cloud accepts all three aggregates; scoped remote login verified end-to-end on the hub.
-
-## Notes for the executor
-
-- Payload key casing follows the existing trigger payloads (snake_case inside `payload_json`); the v3 HTTP envelope camelCase convention from the Phase F fixture applies to transport envelopes, not to event payloads. Check one existing aggregate's definition before writing any schema line.
-- If Phase F has not landed when this phase starts, stop: E without the governed contract reintroduces exactly the drift F exists to prevent.
-- Grant events must never be enabled before the server accepts them — that is the entire reason `scoped_access_emit` exists; E5 is the only task that flips it, and it is an operator step with a documented rollback.
+- [ ] Copy canonical contract files byte-for-byte to the server vendor.
+- [ ] Run the paired contract gates, edge scope/flow suites, full server
+  backend suite, server frontend suite, and builds after the memory gate.
+- [ ] Confirm scoped event producer and command issuer enablement remain false.
+- [ ] Record that production acceptance deployment and live capability
+  activation were skipped because the autonomous program forbids production
+  and live-gateway access.
+- [ ] Push both branches. Do not flip a live flag or report end-to-end success.
