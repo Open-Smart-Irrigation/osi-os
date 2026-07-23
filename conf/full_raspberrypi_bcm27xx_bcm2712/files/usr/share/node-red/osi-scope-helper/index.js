@@ -204,6 +204,27 @@ async function assertFreshPlotAccess(db, userUuid, plotUuid, { scopedMode } = {}
   return scope;
 }
 
+async function assertFreshDeviceAccess(db, userUuid, deveui, { scopedMode } = {}) {
+  if (!isScopedMode() && scopedMode !== true) {
+    return { role: 'admin', disabled: false, wildcard: true };
+  }
+  const device = await db.get(
+    `SELECT d.deveui, d.type_id, iz.zone_uuid
+       FROM devices d LEFT JOIN irrigation_zones iz
+         ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL
+      WHERE d.deveui = ? AND d.deleted_at IS NULL`,
+    [deveui]
+  );
+  if (!device) throw httpError(404, 'device not found');
+  const scope = await loadScope(db, userUuid);
+  if (scope.disabled) throw httpError(403, 'account disabled');
+  if (WEATHER_TYPE_IDS.has(device.type_id)) return scope;
+  if (!device.zone_uuid || !scope.zoneUuids.has(device.zone_uuid)) {
+    throw httpError(404, 'device not found');
+  }
+  return scope;
+}
+
 async function assertRole(db, userUuid, role, options) {
   const scope = await resolveScope(db, userUuid, options);
   if (scope.disabled) throw httpError(403, 'account disabled');
@@ -266,6 +287,21 @@ async function assertFreshRole(db, userUuid, role, { scopedMode } = {}) {
   return scope;
 }
 
+function buildDisableUserGuardedSql() {
+  return "UPDATE users SET disabled_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') " +
+    'WHERE user_uuid = ? AND disabled_at IS NULL ' +
+    "AND (role != 'admin' OR " +
+    "(SELECT COUNT(*) FROM users WHERE role='admin' AND disabled_at IS NULL) > 1)";
+}
+
+function buildDeroleUserGuardedSql() {
+  return 'UPDATE users SET role = ? WHERE user_uuid = ? ' +
+    "AND (role != 'admin' OR ? = 'admin' OR " +
+    "(SELECT COUNT(*) FROM users WHERE role='admin' AND disabled_at IS NULL) > 1)";
+}
+
+const buildDeriveUserGuardedSql = buildDeroleUserGuardedSql;
+
 async function isAdmin(db, userUuid, options) {
   const scope = await resolveScope(db, userUuid, options);
   return !scope.disabled && (scope.wildcard || scope.role === 'admin');
@@ -323,11 +359,15 @@ module.exports = {
   assertPlotAccess,
   assertFreshZoneAccess,
   assertFreshPlotAccess,
+  assertFreshDeviceAccess,
   assertRole,
   assertEnabledAccount,
   assertAuthenticatedRole,
   authorizeAdminRead,
   assertFreshRole,
+  buildDisableUserGuardedSql,
+  buildDeroleUserGuardedSql,
+  buildDeriveUserGuardedSql,
   isAdmin,
   filterZoneUuids,
   resolveZoneUuidById,
