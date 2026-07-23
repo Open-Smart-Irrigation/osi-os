@@ -1,7 +1,7 @@
 # AgroLink scoped multi-user access — design
 
-**Date:** 2026-07-19 (v2, revised after two independent external reviews)
-**Status:** Approved direction, pending implementation plan
+**Date:** 2026-07-23 (v3, revised for cloud access administration and integration)
+**Status:** Approved direction, implementation sequenced by the parity orchestrator
 **Context:** Agroscope deployment (rebranded AgroLink): one Pi 5 hub (16 GB RAM, NVMe RAID) serving 20–30 researcher accounts, OSI cloud sync enabled. Current OSI OS edge is built as one farm with a handful of trusted local accounts; this spec adds fully scoped multi-user access.
 **ADR:** [2026-07-19-scoped-multiuser-access-model.md](../../adr/2026-07-19-scoped-multiuser-access-model.md)
 **Companion spec:** [2026-07-19-agrolink-hub-hardening-design.md](2026-07-19-agrolink-hub-hardening-design.md) (operational hardening, independent)
@@ -20,7 +20,7 @@ Non-goals: multi-farm tenancy on one gateway (the farm/zone/sync aggregates assu
 | D2 | Roles: `admin`, `researcher`, `viewer` | Role decides action class; scope decides which resources |
 | D3 | Researchers get direct control within scope (valves, schedules) | Physical-effect paths get uncached authorization checks (§8); a scoping bug actuates someone else's valve |
 | D4 | Weather/environment data (S2120, LoRain, `zone_shared_environment`) is readable by all authenticated users; gateway and unassigned hardware are admin-only | Read filter keys on device profile, not only zone assignment |
-| D5 | Same scoped model on osi-server, researchers get cloud accounts | Role and assignments sync as per-gateway membership (§11), never into the cloud's global user role |
+| D5 | Same scoped model on osi-server, researchers get cloud accounts | Role and assignments remain per-gateway membership (§11), never the cloud's global user role; cloud administration requests changes through pending commands |
 | D6 | Researchers provision devices and create/delete zones within scope | Provisioning handlers move from trusted single-operator input to untrusted multi-user input |
 | D7 | Whole system behind a per-gateway feature flag, default off | Existing farms keep their current authorization behavior; schema, audit attribution, and sync payloads still evolve on upgrade (§13) |
 
@@ -31,6 +31,7 @@ Non-goals: multi-farm tenancy on one gateway (the farm/zone/sync aggregates assu
 - **Grant**: a row in `user_zone_assignments` or `user_plot_assignments` giving a non-owner access. Tombstoned via `deleted_at`, never hard-deleted, so the cloud mirror converges.
 - **Scope**: the union of what a principal owns and what it is granted (§4). Resolved server-side per request, never trusted from the client.
 - **Scoped mode**: gateway runtime state when `OSI_SCOPED_ACCESS` is enabled. When disabled, all authenticated users behave as today.
+- **Desired state**: the cloud's durable representation of a requested edit while its versioned pending command awaits an edge decision. It may drive an optimistic UI overlay, but it is not canonical state.
 - **Shared environmental device**: a device whose ChirpStack profile marks it as weather-class (`CHIRPSTACK_PROFILE_S2120`, LoRain). Readable in every scope per D4.
 
 ## 4. Ownership model: owner, principal, grants
@@ -63,12 +64,15 @@ The frozen `sync-init-fn` boot node drops and recreates **31 sync triggers on ev
 
 There is no users outbox trigger today; `trg_sync_users_uuid_ai` only assigns `user_uuid`. Role and disable state therefore reach the cloud through a new `USER` aggregate with its own migration-owned trigger (§11), not by modifying anything that exists.
 
-### 5.2 `0022__scoped_access_schema.sql` (additive)
+### 5.2 Next free additive schema migration
+
+The source patch's migration filenames are historical only. An integration must enumerate `database/migrations/ordered/` at its target head and allocate this migration and §5.3 as the next two free contiguous versions. At the 2026-07-23 audit they are likely `0033` and `0034`, but the executor must re-enumerate immediately before creating either file.
 
 ```sql
 ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'researcher'
   CHECK (role IN ('admin','researcher','viewer'));
 ALTER TABLE users ADD COLUMN disabled_at TEXT;
+ALTER TABLE users ADD COLUMN sync_version INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE user_zone_assignments (
   assignment_uuid      TEXT PRIMARY KEY,
@@ -76,7 +80,7 @@ CREATE TABLE user_zone_assignments (
   zone_uuid            TEXT NOT NULL,
   assigned_by_user_uuid TEXT,
   gateway_device_eui   TEXT,
-  sync_version         INTEGER NOT NULL DEFAULT 0,
+  sync_version         INTEGER NOT NULL DEFAULT 1,
   created_at           TEXT NOT NULL,
   updated_at           TEXT,
   deleted_at           TEXT
@@ -92,7 +96,7 @@ CREATE TABLE user_plot_assignments (
   plot_uuid            TEXT NOT NULL,
   assigned_by_user_uuid TEXT,
   gateway_device_eui   TEXT,
-  sync_version         INTEGER NOT NULL DEFAULT 0,
+  sync_version         INTEGER NOT NULL DEFAULT 1,
   created_at           TEXT NOT NULL,
   updated_at           TEXT,
   deleted_at           TEXT
@@ -103,11 +107,13 @@ CREATE INDEX idx_user_plot_by_plot
   ON user_plot_assignments(plot_uuid) WHERE deleted_at IS NULL;
 ```
 
-The reverse indexes answer "who holds this zone/plot" (needed by R3 sole-assignee checks and admin screens) without scanning by user. New migration-owned outbox triggers fire on insert and on tombstone update for both assignment tables, and on `role`/`disabled_at` change for the `USER` aggregate. Every mutation bumps `sync_version` inside the trigger, matching the established trigger pattern from migration 0003.
+The reverse indexes answer "who holds this zone/plot" (needed by R3 sole-assignee checks and admin screens) without scanning by user. New migration-owned outbox triggers fire on insert and tombstone update for both assignment tables, and on synced `USER` changes.
 
-### 5.3 `0023__scoped_access_backfill.sql` (data)
+Commit `101d1f2f` is accepted patch material for the `USER` version contract. It verified durable `users.sync_version`, writer-bumped versions in the same write as each synced mutation, and trigger emission from `NEW.sync_version`. This is required behavior, not a design option to reconsider during the rebase. The parity fixture additionally requires a positive initial version, so new user and grant rows start at 1 and the data migration normalizes older rows before producers can be enabled. Writers that change role, disabled state, username, or another synced user field increment `sync_version` in that same statement. Later grant or user mutations increase it. Trigger bodies observe the new value and never perform a second version bump.
 
-Idempotent backfill for **in-place upgrades only**: on a hub that already has users, the operator names the bootstrap admin via a migration input (or, absent input, the lowest-`id` active account is promoted and the runbook tells the operator to verify). This migration does nothing on a fresh image, where the users table is empty; the fresh-hub path is the registration-time rule in §13.
+### 5.3 Following free data migration
+
+Idempotent backfill for **in-place upgrades only**: normalize non-positive user versions to 1; then, on a hub that already has users, the operator names the bootstrap admin via a migration input (or, absent input, the lowest-`id` active account is promoted and the runbook tells the operator to verify). Promotion increments `sync_version` in the same write as the role change. This migration does nothing on a fresh image, where the users table is empty; the fresh-hub path is the registration-time rule in §13.
 
 ### 5.4 Verification strategy
 
@@ -182,11 +188,13 @@ The contract is designed and deployed before any edge producer emits. "Schema in
 | `USER_ZONE_ASSIGNMENT` | upsert / delete (tombstone) | `assignment_uuid`, `user_uuid`, `zone_uuid`, `assigned_by_user_uuid`, `sync_version`, `deleted_at` | Edge → cloud only |
 | `USER_PLOT_ASSIGNMENT` | upsert / delete (tombstone) | same shape with `plot_uuid` | Edge → cloud only |
 
-`sync_version` increments on every mutation inside the migration-owned triggers, giving the cloud a gap-detection signal per aggregate. Tombstones replay idempotently: re-applying a delete is a no-op on a converged mirror. Cloud-originated grant edits are out of scope for v1 — grants are created by edge admins; a command path (`UPSERT_USER_GRANT` et al.) is the documented extension if cloud-side administration is ever wanted.
+Writers increment `sync_version` in the same statement as every synced mutation, and migration-owned triggers emit `NEW.sync_version`. The cloud uses the version as the resource precondition and gap-detection signal. Tombstones replay idempotently: re-applying a delete is a no-op on a converged mirror.
+
+Cloud administration is a supported request path. A cloud account, role, enabled-state, or grant edit writes durable desired state and queues a versioned REST pending command with the expected edge version. The edge rejects a stale precondition as a recoverable conflict, otherwise applies the mutation to canonical SQLite state and emits the normal mirror event. Desired state may appear immediately as an overlay, but the cloud keeps the canonical mirror unchanged until that event arrives and exposes pending, applied, conflicted, rejected, or expired status.
 
 **Cloud identity model.** The cloud `User` keeps its global `USER`/`ADMIN`/`SUPER_ADMIN` role untouched. AgroLink role and enabled state are **per-gateway membership**, stored on or beside the existing `LinkedGatewayAccount` row (which already keys cloud user ↔ `gateway_device_eui` ↔ `local_user_uuid`): add `gateway_role` and `gateway_disabled_at`. A researcher who is admin on one hub holds no privilege on any other gateway. Cloud enforcement resolves the membership for the gateway being accessed, keys scope by the synced `local_user_uuid` and the mirrored assignment tables, and applies the same union rule as §4.
 
-**Sequencing.** The osi-server PR (Flyway mirror tables, membership columns, event handlers, scoped query enforcement) merges and deploys first. Only then does an edge image enable the producers; without that ordering the cloud rejects unknown aggregates and events accumulate in `rejected_at`. A paired osi-server spec is produced in Phase E before any contract edit.
+**Sequencing.** The osi-server PR (Flyway mirror and desired-state tables, membership columns, event handlers, command issuers, status model, and scoped query enforcement) merges and deploys first. The edge then gains command handlers and advertises compatible capabilities. Only after both directions are accepted does an edge image enable scoped-access event producers. Without that ordering, the cloud can reject unknown aggregates or queue commands an older edge cannot apply. The paired osi-server spec and Phase E plan define the exact command operations before any contract edit.
 
 ## 12. GUI changes
 
@@ -201,7 +209,8 @@ The AgroLink hub image sets the flag at provisioning. Fresh-hub bootstrap: the f
 ## 14. Testing
 
 - Unit tests for `osi-scope-helper`: union rule (owner + grant), tombstoned grants, cache TTL, epoch invalidation on grant/role/disable writes, flag-off wildcard, fresh-vs-cached assert paths.
-- Migration rehearsal: production-shaped DB copy with users, zones, plots, devices; apply 0022–0023; assert idempotent re-run. Fresh-image rehearsal: zero users, register first account, assert it becomes admin in one transaction.
+- Migration rehearsal: production-shaped DB copy with users, zones, plots, devices; allocate and apply the next two free scoped-access migrations; assert idempotent behavior. Fresh-image rehearsal: zero users, register first account, assert it becomes admin in one transaction.
+- Version rehearsal: assert initial emitted user and grant versions are positive, later synced mutations increase them, and each outbox payload carries the row version from the same write.
 - **Restart-reversion test:** apply migrations, restart the flow runtime, assert all migration-owned triggers still exist with their migration bodies (guards the §5.1 invariant against regression).
 - Behavioral matrix, mandatory per write endpoint: admin / researcher / viewer / disabled × own scope / foreign scope × flag on/off, plus every R1–R6 rule, especially R5 foreign-enumeration denial and §8 scheduler-origin forgery attempts.
 - Concurrency smoke: cold-cache `resolveScope` under a dozen concurrent dashboard readers, timed on Pi-class hardware (validates app-level enforcement overhead before Phase C).
@@ -212,21 +221,22 @@ The AgroLink hub image sets the flag at provisioning. Fresh-hub bootstrap: the f
 
 | Phase | Deliverable | Gate |
 |---|---|---|
-| A | Migrations 0022–0023, `osi-scope-helper`, flag, `/api/me`, bootstrap registration, verifiers incl. `MIGRATION_OWNED_TRIGGERS` | Migration gates green; fresh-image and in-place rehearsals pass; restart-reversion test green |
+| A | Next two free scoped-access migrations, `osi-scope-helper`, flag, `/api/me`, bootstrap registration, verifiers incl. `MIGRATION_OWNED_TRIGGERS` | Migration gates green; fresh-image, in-place, and monotonic-version rehearsals pass; restart-reversion test green |
 | B | Read-path enforcement (lists, history, exports, shared-env exception) | Behavioral matrix green for read endpoints |
 | C | Write-path enforcement, scheduler authority, audit attribution, R1–R6 | Crafted-request tests green; `applied_commands.originator` populated; revocation measured immediate on actuation |
 | D | GUI scoping, admin screens, viewer mode | GUI unit tests; build green |
-| E | Paired osi-server spec + PR (mirror tables, membership, event handlers, cloud enforcement); contract schema updates; then edge producers enabled | Cloud accepts aggregates; scoped remote login verified |
+| E | Paired osi-server spec + implementation for mirror and desired state, per-gateway membership, event handlers, pending-command issuers/handlers, status UI, and cloud enforcement; then edge producers enabled | Cloud accepts aggregates; edge applies versioned access commands; pending and conflict states verified; scoped remote login verified |
 
 Phases A–D are edge-only and ship behind the flag with producers disabled. Phase E is cross-repo and sequenced cloud-first per §11.
 
 ## 16. Open questions for the plan phase
 
-- Exact payload columns for the three aggregates, matched against osi-server canonicalization expectations when the paired spec is written (Phase E, not blocking A–D).
+- Exact payload and command fields for access resources, matched against osi-server canonicalization and pending-command expectations when the paired spec is refreshed (Phase E, not blocking A–D while the emit gate stays off).
 - Whether researcher-created zones need an admin-set water-budget ceiling to protect shared pressure infrastructure; deferred until Agroscope confirms trial layouts.
 - Grant expiry (time-boxed access for visiting students) — not in v1; the tombstone model supports it later without schema change.
 
 ## 17. Revision history
 
+- **v3 (2026-07-23):** made cloud access administration an explicit desired-state and versioned pending-command workflow while preserving edge authority and per-gateway `LinkedGatewayAccount` membership. Replaced fixed migration numbers with target-head enumeration. Incorporated the accepted `101d1f2f` contract: durable `users.sync_version`, same-write writer increments, and trigger emission of `NEW.sync_version`.
 - **v2 (2026-07-19):** folded in two external reviews. Changes: ownership/grant union model (§4); trigger invariant and migration-owned-trigger strategy (§5.1); registration-time bootstrap replacing the lowest-id heuristic (§10, §13); uncached physical-effect checks and scheduler authority (§8); contract-first sync with per-gateway cloud membership (§11); reverse indexes, R4 implementation detail, R6; ratchet demoted to necessary-not-sufficient (§5.4, §14); flag-off claim narrowed (§13).
 - v1 (2026-07-19): initial approved direction.

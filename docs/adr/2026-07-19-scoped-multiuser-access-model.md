@@ -1,6 +1,6 @@
 # ADR — Scoped multi-user access model on the edge
 
-**Status:** Accepted — 2026-07-19 (v2, revised after two independent external reviews)
+**Status:** Accepted — 2026-07-23 (v3, revised for cloud access administration)
 **Closes:** —
 **Supersedes:** —
 **Superseded by:** —
@@ -16,6 +16,8 @@ A capacity analysis ruled out the database as a constraint: sensor write load si
 
 Two external reviews of the v1 design corrected four load-bearing facts, verified against the repo: the frozen boot node recreates all 31 sync triggers on every restart, so migrations must never edit existing trigger bodies; no users outbox aggregate exists to extend; the cloud already models gateway identity per-gateway (`LinkedGatewayAccount`), not on the global user; and a fresh image has zero users at migration time, so a deploy-time backfill cannot produce the first admin.
 
+Cloud access administration is now a product requirement. This changes where an administrator may request an account, role, or grant edit, but not which side owns the accepted state: the cloud records desired state and queues a versioned REST pending command; the edge validates and applies the mutation to canonical SQLite state.
+
 ## Decision
 
 Adopt scoped multi-user access as an opt-in edge capability:
@@ -24,14 +26,15 @@ Adopt scoped multi-user access as an opt-in edge capability:
 2. **Access is the union of ownership and grants.** Shipped single-owner columns (`irrigation_zones.user_id`, `journal_plots.owner_user_uuid`, …) keep their meaning; grants widen access without migrating ownership. Three roles (`admin`, `researcher`, `viewer`) decide action class; scope decides which resources.
 3. **Enforcement is server-side and split by risk.** Read paths use a short-lived scope cache; physical-effect and privilege paths (valves, schedules, provisioning, account/grant management, database download) use uncached membership checks and read `disabled_at` synchronously, so revocation is immediate where it matters. Out-of-scope resources answer 404 (anti-enumeration), wrong-role actions 403. Scheduler-originated actuation is an internal, unforgeable execution path whose schedules are disabled when the owning account loses scope.
 4. **Everything propagates through new migration-owned triggers.** New aggregates (`USER`, `USER_ZONE_ASSIGNMENT`, `USER_PLOT_ASSIGNMENT`) get triggers delivered by migration + seed + the `MIGRATION_OWNED_TRIGGERS` allowlist, never the boot node. No existing trigger body changes; that route would force the frozen-boot-node merge gate and is treated as design failure.
-5. **Edge-authoritative, contract-first.** The cloud deploys acceptance for the new aggregates before any edge producer emits ("schema installed" split from "events emitted"). Grants are edge-admin-originated in v1. On the cloud, AgroLink role and enabled state are **per-gateway membership** on the `LinkedGatewayAccount` axis (cloud user ↔ gateway EUI ↔ local user_uuid); the global `User.role` is untouched, so privilege never leaks across gateways.
+5. **Edge-authoritative, contract-first.** The cloud deploys acceptance for new access aggregates and pending-command types before the edge enables either direction. An edge administrator may write canonical access state locally. A cloud administrator instead writes durable desired state and queues a versioned REST pending command; the edge checks its version precondition, applies or rejects it, and emits the resulting canonical mirror event. The cloud reports pending, applied, conflicted, rejected, or expired status and never treats desired state as accepted edge state. AgroLink role and enabled state remain **per-gateway membership** on the `LinkedGatewayAccount` axis (cloud user ↔ gateway EUI ↔ local `user_uuid`); the global `User.role` is untouched, so privilege never leaks across gateways.
 6. **Feature-flagged, default off** (`OSI_SCOPED_ACCESS`). Existing deployments keep their current authorization behavior. Bootstrap is a registration-time rule: the first registration on a scoped hub with zero admins becomes admin in one transaction, after which public registration closes and account creation is admin-only. Deploy-time backfill covers only the in-place upgrade path.
 
 ## Consequences
 
 - Authorization becomes a first-class edge concern: ~118 HTTP endpoints gain a scope-resolution step. A static ratchet guards presence; correctness is enforced by a behavioral test matrix (per endpoint: admin/researcher/viewer/disabled × own/foreign scope × flag state) and code review, because a ratchet can be satisfied by a wrong or misplaced call.
 - Provisioning handlers (`REGISTER_DEVICE`, claim flows) move from trusted single-operator input to untrusted multi-user input and get scope validation.
-- The sync contract grows three aggregates; contract changes for access control follow the paired-PR rule permanently, cloud-first.
+- The sync contract grows three edge-originated mirror aggregates plus versioned pending commands for cloud-requested account, role, enabled-state, and grant mutations. Contract changes for access control follow the paired-PR rule permanently, with server acceptance deployed before edge activation.
+- A cloud request is not successful merely because desired state was saved. Operator and user interfaces must expose its pending or terminal command status until the edge confirms the canonical result.
 - Audit improves for everyone: `applied_commands.originator` is populated on user-originated actuation regardless of flag state.
 - Every existing owner-filtered query (the journal API's `owner_user_uuid` filters are the dense cluster) must be enumerated and extended to the union rule; a missed query either denies legitimate grantees or leaks across scopes.
 - Scoped mode is a one-way door for a hub once accounts and grants accumulate; migrating a live hub in or out is an operator runbook step, not an automatic transition.
@@ -46,4 +49,4 @@ Adopt scoped multi-user access as an opt-in edge capability:
 
 ## Flip conditions
 
-Revisit if any of these become true: a second hub-class deployment needs disjoint tenants on one gateway (multi-farm); role count or permission complexity outgrows the matrix (e.g. per-action grants); cloud-side grant administration becomes a requirement (adds the command path); or the cold-cache enforcement overhead benchmark (scoped spec §14) shows request-latency impact on the Pi 5 beyond budget.
+Revisit if any of these become true: a second hub-class deployment needs disjoint tenants on one gateway (multi-farm); role count or permission complexity outgrows the matrix (e.g. per-action grants); the desired-state and pending-command model cannot represent an approved access workflow without weakening edge authority; or the cold-cache enforcement overhead benchmark (scoped spec §14) shows request-latency impact on the Pi 5 beyond budget.

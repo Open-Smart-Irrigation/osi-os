@@ -1,23 +1,47 @@
 # AgroLink Scoped Access — Phase A Implementation Plan
 
-> **2026-07-23 integration overlay:** The source implementation is patch
-> material rather than a merge-ready branch. Its head, `8921e6d1`, adds later
-> credential isolation, bootstrap-race, durable-flag, fresh-role, and
-> first-assignment trigger corrections after the accepted `101d1f2f` user
-> version fix. Revalidate the cumulative source diff. Its migrations
-> `0022–0023` collide with the AgroLink target, which already reaches `0032`.
-> Before execution, rebase the semantic change onto the current target,
-> allocate the next free migration numbers, and update every filename,
-> checksum, rehearsal fixture, command, and prose reference together. The
-> literal `0022–0023` references below describe the source branch; they are not
-> valid target numbers. Do not replay source-branch tasks without first proving
-> the rebased gap.
+> **2026-07-23 integration overlay:** Treat source head `8921e6d1` as cumulative
+> patch material, not a merge-ready branch. It contains credential-isolation,
+> bootstrap-race, durable-flag, fresh-role, and first-assignment trigger fixes
+> after the accepted `101d1f2f` user-version fix. Revalidate the entire
+> cumulative diff against the current target instead of replaying its commits.
+>
+> Immediately before creating a migration, enumerate
+> `database/migrations/ordered/` and select the next two free contiguous
+> versions. At the audit head they are likely `0033` and `0034`; that observation
+> is not an allocation. Record `LAST_VERSION`, `SCHEMA_VERSION`,
+> `BACKFILL_VERSION`, `SCHEMA_MIGRATION`, and `BACKFILL_MIGRATION` from the live
+> target and use those names in every checksum, fixture, command, and commit:
+>
+> ```bash
+> LAST_VERSION="$(find database/migrations/ordered -maxdepth 1 -type f \
+>   -name '[0-9][0-9][0-9][0-9]__*.sql' -printf '%f\n' |
+>   sed 's/__.*//' | sort -n | tail -1)"
+> SCHEMA_VERSION="$(printf '%04d' "$((10#$LAST_VERSION + 1))")"
+> BACKFILL_VERSION="$(printf '%04d' "$((10#$LAST_VERSION + 2))")"
+> SCHEMA_MIGRATION="${SCHEMA_VERSION}__scoped_access_schema.sql"
+> BACKFILL_MIGRATION="${BACKFILL_VERSION}__scoped_access_backfill.sql"
+> test ! -e "database/migrations/ordered/$SCHEMA_MIGRATION"
+> test ! -e "database/migrations/ordered/$BACKFILL_MIGRATION"
+> ```
+>
+> Re-run this allocation after any target-head change. Historical source labels
+> must never become target filenames.
+
+> **Accepted version contract:** Commit `101d1f2f` and its accepted report
+> `2f7aa171` established durable `users.sync_version`. Every writer changing
+> username, role, disabled state, or another synced user field increments the
+> version in the same write. Migration-owned triggers emit `NEW.sync_version`;
+> they do not increment it. The parity program strengthens the source default
+> from zero to a positive initial version, because its fixture gate rejects any
+> emitted user event at version zero. Rehearsals must prove a positive first
+> emitted version and strictly greater versions after two later mutations.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Land the scoped-access foundation on the edge: migrations 0022–0023 (schema + backfill), the `osi-scope-helper` seam module, the `OSI_SCOPED_ACCESS` feature flag, `/api/me`, and scoped-mode bootstrap registration, all behind the flag, with producers (sync events) gated off until Phase E.
+**Goal:** Land the scoped-access foundation on the edge: the next two free migrations (schema + backfill), the `osi-scope-helper` seam module, the `OSI_SCOPED_ACCESS` feature flag, `/api/me`, and scoped-mode bootstrap registration, all behind the flag, with producers (sync events) gated off until Phase E.
 
-**Architecture:** Per spec `docs/superpowers/specs/2026-07-19-agrolink-scoped-multiuser-design.md` v4 (§5 data model, §5.1 trigger constraint, §8 identifier bridge, §10 bootstrap). New triggers are migration-owned (never the boot node) and registered in `MIGRATION_OWNED_TRIGGERS`. All flow-node logic lives in the seam module loaded via `osiLib.require('scope')`; flow nodes stay thin to satisfy `verify-flows-size-ratchet.js`. Sync event emission is gated by a single-row SQL flag table (`scoped_access_emit`), default off, so Phase A cannot emit unknown aggregates at the cloud.
+**Architecture:** Per spec `docs/superpowers/specs/2026-07-19-agrolink-scoped-multiuser-design.md` v3 (§5 data model, §5.1 trigger constraint, §8 identifier bridge, §10 bootstrap). New triggers are migration-owned (never the boot node) and registered in `MIGRATION_OWNED_TRIGGERS`. All flow-node logic lives in the seam module loaded via `osiLib.require('scope')`; flow nodes stay thin to satisfy `verify-flows-size-ratchet.js`. Sync event emission is gated by a single-row SQL flag table (`scoped_access_emit`), default off, so Phase A cannot emit unknown aggregates at the cloud.
 
 **Tech Stack:** SQLite (`lib/osi-migrate` ordered migrations), Node-RED function nodes (`flows.json` via one-shot mutation scripts only), Node built-in `node:test` + `node:sqlite` for rehearsals, `bcryptjs` (existing register chain).
 
@@ -25,7 +49,7 @@
 
 ---
 
-## Task 1: Failing rehearsal test for migrations 0022–0023
+## Task 1: Failing rehearsal test for the selected migration pair
 
 **Files:**
 - Create: `scripts/rehearse-scoped-access-migration.test.js`
@@ -37,10 +61,11 @@ This test drives the two migration files. It uses `node:sqlite` (`DatabaseSync`)
 ```js
 #!/usr/bin/env node
 'use strict';
-// Rehearsal for migrations 0022 (additive scoped-access schema) and
-// 0023 (data backfill). Drives: tables/indexes/triggers exist, emit gate
-// default-off, USER three-arm trigger emits non-null user_uuid, conditional
-// bootstrap insert semantics, uuid backfill, in-place admin promotion.
+// Rehearsal for the selected scoped-access schema and data-backfill migrations.
+// Drives: tables/indexes/triggers exist, emit gate
+// default-off, USER three-arm trigger emits non-null user_uuid and monotonic
+// positive versions, conditional bootstrap semantics, uuid/version backfill,
+// and in-place admin promotion.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -48,8 +73,14 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
 const ROOT = path.resolve(__dirname, '..');
-const MIG_0022 = fs.readFileSync(path.join(ROOT, 'database/migrations/ordered/0022__scoped_access_schema.sql'), 'utf8');
-const MIG_0023 = fs.readFileSync(path.join(ROOT, 'database/migrations/ordered/0023__scoped_access_backfill.sql'), 'utf8');
+function readUniqueMigration(suffix) {
+  const dir = path.join(ROOT, 'database/migrations/ordered');
+  const matches = fs.readdirSync(dir).filter((name) => name.endsWith(suffix));
+  assert.equal(matches.length, 1, `expected one migration ending ${suffix}`);
+  return fs.readFileSync(path.join(dir, matches[0]), 'utf8');
+}
+const MIG_SCHEMA = readUniqueMigration('__scoped_access_schema.sql');
+const MIG_BACKFILL = readUniqueMigration('__scoped_access_backfill.sql');
 
 const USERS_DDL = `CREATE TABLE users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,19 +103,19 @@ function freshDb() {
   const db = new DatabaseSync(':memory:');
   db.exec(USERS_DDL);
   db.exec(UUID_TRIGGER);
-  // Stub tables the 0022 trigger bodies reference: SQLite resolves trigger-body
+  // Stub tables the schema-migration trigger bodies reference: SQLite resolves trigger-body
   // table names when preparing any DML on the trigger's table, even when the
   // WHEN clause is false, so these must exist in every test DB.
   db.exec(`CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, aggregate_type TEXT, aggregate_key TEXT,
     op TEXT, payload_json TEXT, sync_version INTEGER, occurred_at TEXT, gateway_device_eui TEXT)`);
   db.exec(`CREATE TABLE sync_link_state (peer_node TEXT, gateway_device_eui TEXT)`);
-  db.exec(MIG_0022);
+  db.exec(MIG_SCHEMA);
   return db;
 }
 const objs = (db, type) =>
   db.prepare(`SELECT name FROM sqlite_master WHERE type=? AND name LIKE ? ORDER BY name`).all(type, '%').map(r => r.name);
 
-test('0022 creates assignment tables, indexes, gate table, 7 triggers', () => {
+test('schema migration creates assignment tables, indexes, gate table, 7 triggers', () => {
   const db = freshDb();
   const tables = objs(db, 'table');
   for (const t of ['user_zone_assignments', 'user_plot_assignments', 'scoped_access_emit'])
@@ -124,35 +155,77 @@ test('USER trigger arms: uuid assigned by sibling trigger still emits non-null u
   // Path 2: uuid supplied at insert -> ai arm fires exactly once more.
   db.exec(`INSERT INTO users (username, password_hash, created_at, user_uuid) VALUES ('dave','h','2026-01-01', lower(hex(randomblob(16))))`);
   assert.equal(db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_UPSERTED'`).get().n, 2);
-  // Path 3: role mutation -> role_au arm fires.
-  db.exec(`UPDATE users SET role='admin' WHERE username='carol'`);
+  // Path 3: role mutation and its version increment are one write.
+  db.exec(`UPDATE users
+              SET role='admin', sync_version=sync_version+1
+            WHERE username='carol'`);
   assert.equal(db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_UPSERTED'`).get().n, 3);
+  db.close();
+});
+
+test('USER events carry positive versions that increase on successive mutations', () => {
+  const db = freshDb();
+  db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');
+  db.exec(`INSERT INTO users (username, password_hash, created_at)
+           VALUES ('erin','h','2026-01-01')`);
+  db.exec(`UPDATE users
+              SET role='admin', sync_version=sync_version+1
+            WHERE username='erin'`);
+  db.exec(`UPDATE users
+              SET username='erin-renamed', sync_version=sync_version+1
+            WHERE username='erin'`);
+  const versions = db.prepare(
+    `SELECT sync_version, json_extract(payload_json, '$.sync_version') payload_version
+       FROM sync_outbox
+      WHERE op='USER_UPSERTED'
+      ORDER BY rowid`
+  ).all();
+  assert.deepEqual(versions.map((row) => row.sync_version), [1, 2, 3]);
+  assert.deepEqual(versions.map((row) => row.payload_version), [1, 2, 3]);
+  db.close();
+});
+
+test('USER uuid arm emits only for first assignment, not a no-op rewrite', () => {
+  const db = freshDb();
+  db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');
+  db.exec(`INSERT INTO users (username, password_hash, created_at)
+           VALUES ('frank','h','2026-01-01')`);
+  assert.equal(
+    db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_UPSERTED'`).get().n,
+    1
+  );
+  db.exec(`UPDATE users SET user_uuid=user_uuid WHERE username='frank'`);
+  assert.equal(
+    db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_UPSERTED'`).get().n,
+    1
+  );
   db.close();
 });
 
 test('assignment triggers emit upsert on grant and delete on tombstone', () => {
   const db = freshDb();
   db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');
-  db.exec(`INSERT INTO user_zone_assignments (assignment_uuid, user_uuid, zone_uuid, created_at)
-           VALUES ('as1','u1','z1','2026-01-01')`);
+  db.exec(`INSERT INTO user_zone_assignments
+             (assignment_uuid, user_uuid, zone_uuid, sync_version, created_at)
+           VALUES ('as1','u1','z1',1,'2026-01-01')`);
   assert.equal(db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_ZONE_ASSIGNMENT_UPSERTED'`).get().n, 1);
   db.exec(`UPDATE user_zone_assignments SET deleted_at='2026-01-02', sync_version=sync_version+1 WHERE assignment_uuid='as1'`);
   assert.equal(db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_ZONE_ASSIGNMENT_DELETED'`).get().n, 1);
   db.close();
 });
 
-test('0023 backfills null user_uuid and promotes lowest-id admin; no-op on empty users', () => {
+test('backfill migration fills null user_uuid and promotes lowest-id admin; no-op on empty users', () => {
   const db = freshDb();
   db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('legacy1','h','2026-01-01')`);
   db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('legacy2','h','2026-01-01')`);
   db.exec(`UPDATE users SET user_uuid=NULL`); // simulate pre-trigger-era rows
-  db.exec(MIG_0023);
+  db.exec(MIG_BACKFILL);
   const nulls = db.prepare(`SELECT COUNT(*) n FROM users WHERE user_uuid IS NULL OR user_uuid=''`).get().n;
   assert.equal(nulls, 0);
   const admins = db.prepare(`SELECT username FROM users WHERE role='admin'`).all().map(r => r.username);
   assert.deepEqual(admins, ['legacy1']); // lowest id promoted when no input
   const db2 = freshDb();
-  db2.exec(MIG_0023);
+  db2.exec(MIG_BACKFILL);
   assert.equal(db2.prepare('SELECT COUNT(*) n FROM users').get().n, 0); // fresh image: no crash, no rows
   db.close(); db2.close();
 });
@@ -161,20 +234,20 @@ test('0023 backfills null user_uuid and promotes lowest-id admin; no-op on empty
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `node --test scripts/rehearse-scoped-access-migration.test.js`
-Expected: FAIL — `ENOENT` reading `0022__scoped_access_schema.sql`.
+Expected: FAIL — the schema-migration suffix has no matching file.
 
 ---
 
-## Task 2: Migration 0022 (additive schema)
+## Task 2: Selected additive schema migration
 
 **Files:**
-- Create: `database/migrations/ordered/0022__scoped_access_schema.sql`
+- Create: `database/migrations/ordered/$SCHEMA_MIGRATION` after repeating the allocation preflight
 
 - [ ] **Step 1: Write the migration**
 
 ```sql
 -- risk: additive
--- 0022: Scoped multi-user access (AgroLink) — roles, grants, emit gate,
+-- Scoped multi-user access (AgroLink) — roles, grants, emit gate,
 -- migration-owned outbox triggers. Spec:
 -- docs/superpowers/specs/2026-07-19-agrolink-scoped-multiuser-design.md §5.
 -- All triggers here are migration-owned: registered in
@@ -184,6 +257,7 @@ Expected: FAIL — `ENOENT` reading `0022__scoped_access_schema.sql`.
 ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'researcher'
   CHECK (role IN ('admin','researcher','viewer'));
 ALTER TABLE users ADD COLUMN disabled_at TEXT;
+ALTER TABLE users ADD COLUMN sync_version INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS user_zone_assignments (
   assignment_uuid       TEXT PRIMARY KEY,
@@ -191,7 +265,7 @@ CREATE TABLE IF NOT EXISTS user_zone_assignments (
   zone_uuid             TEXT NOT NULL,
   assigned_by_user_uuid TEXT,
   gateway_device_eui    TEXT,
-  sync_version          INTEGER NOT NULL DEFAULT 0,
+  sync_version          INTEGER NOT NULL DEFAULT 1,
   created_at            TEXT NOT NULL,
   updated_at            TEXT,
   deleted_at            TEXT
@@ -207,7 +281,7 @@ CREATE TABLE IF NOT EXISTS user_plot_assignments (
   plot_uuid             TEXT NOT NULL,
   assigned_by_user_uuid TEXT,
   gateway_device_eui    TEXT,
-  sync_version          INTEGER NOT NULL DEFAULT 0,
+  sync_version          INTEGER NOT NULL DEFAULT 1,
   created_at            TEXT NOT NULL,
   updated_at            TEXT,
   deleted_at            TEXT
@@ -218,7 +292,8 @@ CREATE INDEX IF NOT EXISTS idx_user_plot_by_plot
   ON user_plot_assignments(plot_uuid) WHERE deleted_at IS NULL;
 
 -- Single-row emit gate: Phase A installs schema with producers OFF.
--- Phase E flips enabled=1 only after the cloud accepts the new aggregates.
+-- Phase E flips enabled=1 only after the server accepts the aggregates and
+-- both sides support the versioned access-command contract.
 CREATE TABLE IF NOT EXISTS scoped_access_emit (
   id      INTEGER PRIMARY KEY CHECK (id = 1),
   enabled INTEGER NOT NULL DEFAULT 0
@@ -366,10 +441,13 @@ END;
 -- verified against both node:sqlite (bundled SQLite) and the on-device
 -- sqlite3 npm binding during review: the cascade fires correctly under
 -- default settings, no PRAGMA change required anywhere in this codebase.
+-- Emit only on first assignment. A no-op rewrite at the same sync_version
+-- would produce a different occurred_at and cause an equal-version conflict.
 CREATE TRIGGER IF NOT EXISTS trg_dp_users_outbox_uuid_au
 AFTER UPDATE OF user_uuid ON users
 FOR EACH ROW
 WHEN NEW.user_uuid IS NOT NULL AND NEW.user_uuid != ''
+AND (OLD.user_uuid IS NULL OR OLD.user_uuid = '')
 AND (SELECT enabled FROM scoped_access_emit WHERE id = 1) = 1
 BEGIN
   INSERT INTO sync_outbox(
@@ -387,10 +465,11 @@ BEGIN
       'username', NEW.username,
       'role', NEW.role,
       'disabled_at', NEW.disabled_at,
+      'sync_version', NEW.sync_version,
       'gateway_device_eui', (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'),
       'occurred_at', strftime('%Y-%m-%dT%H:%M:%fZ','now')
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
   );
@@ -417,17 +496,18 @@ BEGIN
       'username', NEW.username,
       'role', NEW.role,
       'disabled_at', NEW.disabled_at,
+      'sync_version', NEW.sync_version,
       'gateway_device_eui', (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'),
       'occurred_at', strftime('%Y-%m-%dT%H:%M:%fZ','now')
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
   );
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_dp_users_outbox_role_au
-AFTER UPDATE OF role, disabled_at ON users
+AFTER UPDATE OF username, role, disabled_at ON users
 FOR EACH ROW
 WHEN NEW.user_uuid IS NOT NULL AND NEW.user_uuid != ''
 AND (SELECT enabled FROM scoped_access_emit WHERE id = 1) = 1
@@ -447,10 +527,11 @@ BEGIN
       'username', NEW.username,
       'role', NEW.role,
       'disabled_at', NEW.disabled_at,
+      'sync_version', NEW.sync_version,
       'gateway_device_eui', (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'),
       'occurred_at', strftime('%Y-%m-%dT%H:%M:%fZ','now')
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
   );
@@ -462,23 +543,25 @@ Note: the rehearsal's in-memory DB creates `sync_outbox` itself; on real DBs the
 - [ ] **Step 2: Run rehearsal — expect progress, still failing**
 
 Run: `node --test scripts/rehearse-scoped-access-migration.test.js`
-Expected: first 4 tests PASS, last test FAILS (0023 file missing).
+Expected: first 6 tests PASS, last test FAILS because the backfill migration is missing.
 
 ---
 
-## Task 3: Migration 0023 (data backfill)
+## Task 3: Selected data-backfill migration
 
 **Files:**
-- Create: `database/migrations/ordered/0023__scoped_access_backfill.sql`
+- Create: `database/migrations/ordered/$BACKFILL_MIGRATION` from the same allocation
 
 - [ ] **Step 1: Write the migration**
 
 ```sql
 -- risk: data
--- 0023: Scoped access backfill (AgroLink), two idempotent jobs (spec §5.3):
+-- Scoped access backfill (AgroLink), three idempotent jobs (spec §5.3):
 -- 1. Assign user_uuid to any legacy user row missing one (the shipped
 --    trg_sync_users_uuid_ai covers inserts; this closes the pre-trigger era).
--- 2. In-place-upgrade admin promotion: when at least one user exists and no
+-- 2. Normalize legacy user versions to the positive initial version required
+--    before scoped USER producers can be enabled.
+-- 3. In-place-upgrade admin promotion: when at least one user exists and no
 --    admin does, promote the lowest-id active account. On a fresh image the
 --    users table is empty and both jobs are no-ops; the fresh-hub admin path
 --    is registration-time bootstrap (spec §10/§13).
@@ -488,7 +571,12 @@ UPDATE users
  WHERE user_uuid IS NULL OR user_uuid = '';
 
 UPDATE users
-   SET role = 'admin'
+   SET sync_version = 1
+ WHERE sync_version < 1;
+
+UPDATE users
+   SET role = 'admin',
+       sync_version = sync_version + 1
  WHERE id = (SELECT MIN(id) FROM users WHERE disabled_at IS NULL)
    AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin');
 ```
@@ -496,7 +584,7 @@ UPDATE users
 - [ ] **Step 2: Run rehearsal — expect all green**
 
 Run: `node --test scripts/rehearse-scoped-access-migration.test.js`
-Expected: 5/5 PASS.
+Expected: 7/7 PASS.
 
 ---
 
@@ -513,8 +601,16 @@ node -e "
 const fs=require('fs'),crypto=require('crypto');
 const p='database/migrations/ordered/CHECKSUMS.json';
 const m=JSON.parse(fs.readFileSync(p,'utf8'));
-for (const f of ['0022__scoped_access_schema.sql','0023__scoped_access_backfill.sql']) {
-  m[f]=crypto.createHash('sha256').update(fs.readFileSync('database/migrations/ordered/'+f)).digest('hex');
+const dir='database/migrations/ordered';
+const files=fs.readdirSync(dir);
+const suffixes=['__scoped_access_schema.sql','__scoped_access_backfill.sql'];
+const selected=suffixes.map((suffix) => {
+  const matches=files.filter((file) => file.endsWith(suffix));
+  if (matches.length !== 1) throw new Error('expected one migration ending '+suffix);
+  return matches[0];
+});
+for (const f of selected) {
+  m[f]=crypto.createHash('sha256').update(fs.readFileSync(dir+'/'+f)).digest('hex');
 }
 fs.writeFileSync(p, JSON.stringify(m,null,2)+'\n');
 console.log('entries:', Object.keys(m).length);
@@ -524,14 +620,14 @@ console.log('entries:', Object.keys(m).length);
 - [ ] **Step 2: Verify**
 
 Run: `node scripts/verify-migrations.js`
-Expected: exit 0 (well-formed, contiguous 0001–0023, checksum entries present).
+Expected: exit 0 (well-formed and contiguous through `$BACKFILL_VERSION`, with both checksum entries present).
 
 ---
 
 ## Task 5: Seed parity, bundled DBs, parity allowlist, consistency contract
 
 **Files:**
-- Modify: `database/seed-blank.sql` (append the full DDL from Task 2's migration, minus the `-- risk:` header: tables, indexes, gate table + its seed row, all 7 triggers; place `role`/`disabled_at` columns into the `CREATE TABLE users` body instead of ALTER)
+- Modify: `database/seed-blank.sql` (append the full DDL from Task 2's migration, minus the `-- risk:` header: tables, indexes, gate table + its seed row, all 7 triggers; place `role`/`disabled_at`/`sync_version` columns into the `CREATE TABLE users` body instead of ALTER)
 - Modify: `scripts/verify-runtime-schema-parity.js` (extend `MIGRATION_OWNED_TRIGGERS`)
 - Modify: `scripts/verify-db-schema-consistency.js` (extend hand-maintained contract)
 - Modify: all 7 bundled `farming.db` copies (via migration apply + mirror copy)
@@ -545,7 +641,7 @@ const MIGRATION_OWNED_TRIGGERS = new Set([
   // 0005__field_work_requests.sql is delivered by seed DBs and deploy.sh's
   // additive migration repair. Do not add it to the frozen sync-init-fn boot DDL.
   'trg_improvement_requests_outbox_ai',
-  // 0022__scoped_access_schema.sql (AgroLink scoped access): migration-owned,
+  // The scoped-access schema migration is migration-owned,
   // emit-gated by scoped_access_emit, never in the frozen boot node.
   'trg_dp_user_zone_assign_outbox_ai',
   'trg_dp_user_zone_assign_outbox_au',
@@ -559,12 +655,13 @@ const MIGRATION_OWNED_TRIGGERS = new Set([
 
 - [ ] **Step 2: Update `database/seed-blank.sql`**
 
-Add `role` and `disabled_at` to the `CREATE TABLE users` column list (after `last_auth_sync_error`):
+Add `role`, `disabled_at`, and `sync_version` to the `CREATE TABLE users` column list (after `last_auth_sync_error`):
 
 ```sql
   last_auth_sync_error            TEXT,
   role                            TEXT NOT NULL DEFAULT 'researcher' CHECK (role IN ('admin','researcher','viewer')),
-  disabled_at                     TEXT
+  disabled_at                     TEXT,
+  sync_version                    INTEGER NOT NULL DEFAULT 1
 ```
 
 Append the assignment tables, indexes, `scoped_access_emit` (+ seed row), and all 7 triggers verbatim from the migration file (drop only the `-- risk:` header lines).
@@ -580,16 +677,16 @@ for db in \
   conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
   database/farming.db \
   web/react-gui/farming.db
-do sqlite3 -bail "$db" < database/migrations/ordered/0022__scoped_access_schema.sql && echo "OK $db"; done
+do sqlite3 -bail "$db" < "database/migrations/ordered/$SCHEMA_MIGRATION" && echo "OK $db"; done
 cp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
    conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db
 ```
 
-Note: 0023 is a data migration: do **not** apply it to bundled DBs (they ship zero users; the runner applies it at deploy).
+Do **not** apply `$BACKFILL_MIGRATION` to bundled DBs. It is a data migration; bundled DBs ship zero users, and the runner applies it at deploy.
 
 - [ ] **Step 4: Extend the consistency contract**
 
-In `scripts/verify-db-schema-consistency.js`, add to the hand-maintained contract: `users.role`, `users.disabled_at`; tables `user_zone_assignments`, `user_plot_assignments`, `scoped_access_emit`; indexes `uq_user_zone_active`, `idx_user_zone_by_zone`, `uq_user_plot_active`, `idx_user_plot_by_plot`; trigger-name fragments for the 7 new triggers. Follow the existing declaration pattern in that file.
+In `scripts/verify-db-schema-consistency.js`, add to the hand-maintained contract: `users.role`, `users.disabled_at`, `users.sync_version`; tables `user_zone_assignments`, `user_plot_assignments`, `scoped_access_emit`; indexes `uq_user_zone_active`, `idx_user_zone_by_zone`, `uq_user_plot_active`, `idx_user_plot_by_plot`; trigger-name fragments for the 7 new triggers. Follow the existing declaration pattern in that file.
 
 - [ ] **Step 5: Run the migration gate set**
 
@@ -608,7 +705,7 @@ Expected: each prints its OK line; profile parity ends `All parity checks passed
 ```bash
 git add database/ scripts/verify-runtime-schema-parity.js scripts/verify-db-schema-consistency.js \
   conf/*/files/usr/share/db/farming.db web/react-gui/farming.db scripts/rehearse-scoped-access-migration.test.js
-git commit -m "feat(schema): scoped access migrations 0022-0023 with migration-owned triggers"
+git commit -m "feat(schema): add scoped access migrations with owned triggers"
 ```
 
 ---
@@ -829,7 +926,7 @@ async function loadUser(db, userUuid) {
     [userUuid]
   );
   if (!row) throw httpError(403, 'unknown user');
-  if (!row.user_uuid) throw httpError(500, 'user row has null user_uuid (0023 backfill incomplete)');
+  if (!row.user_uuid) throw httpError(500, 'user row has null user_uuid (scoped-access backfill incomplete)');
   return row;
 }
 
@@ -1190,14 +1287,16 @@ test('conditional bootstrap insert: exactly one admin, loser gets zero rows', ()
   assert.equal(db.prepare(`SELECT COUNT(*) n FROM users WHERE role='admin'`).get().n, 1);
   assert.equal(db.prepare(`SELECT COUNT(*) n FROM users WHERE username='second'`).get().n, 0);
   // A disabled admin still blocks bootstrap (spec §10: any-state count).
-  db.exec(`UPDATE users SET disabled_at='2026-01-02' WHERE role='admin'`);
+  db.exec(`UPDATE users
+              SET disabled_at='2026-01-02', sync_version=sync_version+1
+            WHERE role='admin'`);
   db.prepare(BOOT).run('third', 'h', '2026-01-01');
   assert.equal(db.prepare(`SELECT COUNT(*) n FROM users WHERE username='third'`).get().n, 0);
   db.close();
 });
 ```
 
-Run: `node --test scripts/rehearse-scoped-access-migration.test.js` — expect 6/6 PASS.
+Run: `node --test scripts/rehearse-scoped-access-migration.test.js` — expect 8/8 PASS.
 
 - [ ] **Step 4: Pre-commit checklist + commit**
 
@@ -1263,8 +1362,9 @@ Expected: every command exit 0 with its documented OK line.
 - [ ] **Step 2: Acceptance against spec §15 Phase A gate**
 
 - Migration + parity verifiers green: Step 1 output.
-- Fresh-image rehearsal: rehearsal test covers zero-users 0023 no-op + conditional bootstrap producing exactly one admin.
-- In-place rehearsal: rehearsal test covers 0023 uuid backfill + lowest-id promotion.
+- Fresh-image rehearsal: the backfill is a zero-user no-op and conditional bootstrap produces exactly one admin.
+- In-place rehearsal: the data migration covers uuid/version backfill and lowest-id promotion.
+- Version rehearsal: every emitted user event is positive, and two successive synced mutations increase its version.
 - Restart-reversion: boot-survival test green.
 
 ---
@@ -1274,6 +1374,6 @@ Expected: every command exit 0 with its documented OK line.
 - **No DDL in flows.json.** All schema lives in Tasks 2–5. `verify-no-stray-ddl.js` must stay green; the conditional INSERT in Task 10 is DML, not DDL.
 - **The emit gate stays off.** Nothing in Phase A sets `scoped_access_emit.enabled=1`. If any test or node does, that is a defect; Phase E owns the flip.
 - **Profile parity is byte-level.** Every `conf/.../bcm2712/...` change has a `bcm2709` counterpart in the same commit.
-- **Do not edit merged migrations 0001–0021.** Checksum enforcement will reject the run.
+- **Do not edit any migration present at `LAST_VERSION`.** Checksum enforcement will reject the run.
 - If `verify-flows-size-ratchet.js` fails in a way this plan did not predict, stop and surface it; do not buy green with a larger unexplained allowance.
-- **Program context.** The program phasing in spec §15 (v5) folds two Train-A hardening efforts in as Phases F (edge-owned sync contract + cross-repo CI) and G (witnessed-ledger / protocol activation). Neither touches Phase A tasks; both are sequenced after this plan (F after A, G last).
+- **Program context.** The 2026-07-23 parity orchestrator owns cross-repository contract CI, desired state, scoped cloud administration, and protocol activation after this Phase A rebase. Do not pull those later slices into this plan.
