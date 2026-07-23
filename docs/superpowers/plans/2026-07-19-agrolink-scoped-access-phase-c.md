@@ -10,6 +10,8 @@
 
 **Prerequisites:** Phase B complete and green. Load `osi-flows-json-editing` before any flow task.
 
+**Sync_version bump contract (spec §11; carried forward from Phase B's plan, line 9):** every `UPDATE users` that changes `role`, `disabled_at`, or `username` bumps `sync_version = COALESCE(sync_version,0)+1` in that same statement, because `trg_dp_users_outbox_role_au` reads `NEW.sync_version` and never bumps it itself. Account-creation `INSERT`s set `sync_version = 1`; grant `INSERT`s do too. Grant tombstones bump `sync_version` alongside `deleted_at` in the same statement, not a follow-up one.
+
 **Write-endpoint families (from the verified inventory):**
 
 | Family | Endpoints | Check |
@@ -90,13 +92,13 @@ async function assertFreshRole(db, userUuid, role, { scopedMode } = {}) {
 // Single conditional write (spec §10): refuses to disable the last enabled
 // admin. Zero rows affected -> caller maps to 409.
 function buildDisableUserGuardedSql() {
-  return "UPDATE users SET disabled_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') " +
+  return "UPDATE users SET disabled_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), sync_version = COALESCE(sync_version,0)+1 " +
     "WHERE user_uuid = ? AND disabled_at IS NULL " +
     "AND (SELECT COUNT(*) FROM users WHERE role='admin' AND disabled_at IS NULL) > 1";
 }
 
 function buildDeriveUserGuardedSql(newRolePlaceholders) {
-  return "UPDATE users SET role = ? " +
+  return "UPDATE users SET role = ?, sync_version = COALESCE(sync_version,0)+1 " +
     "WHERE user_uuid = ? AND role = 'admin' " +
     "AND (SELECT COUNT(*) FROM users WHERE role='admin' AND disabled_at IS NULL) > 1";
 }
@@ -271,8 +273,8 @@ await run(
   [name, creatorId, zoneUuid, now, now]
 );
 await run(
-  `INSERT INTO user_zone_assignments (assignment_uuid, user_uuid, zone_uuid, assigned_by_user_uuid, created_at)
-   VALUES (?, ?, ?, ?, ?)`,
+  `INSERT INTO user_zone_assignments (assignment_uuid, user_uuid, zone_uuid, assigned_by_user_uuid, created_at, sync_version)
+   VALUES (?, ?, ?, ?, ?, 1)`,
   [lowerHexRandom(16), creatorUuid, zoneUuid, creatorUuid, now]
 );
 scopeLib.invalidateScope(creatorUuid);
