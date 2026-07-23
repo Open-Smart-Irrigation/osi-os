@@ -118,6 +118,24 @@ test('USER trigger arms emit users.sync_version, not literal 0 (issue #10 boot-d
   db.close();
 });
 
+test('uuid_au arm: no-op user_uuid rewrite must not re-emit (terminal-conflict hazard)', () => {
+  const db = freshDb();
+  db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');
+  // First assignment (unset -> set): sibling boot trigger fills user_uuid on
+  // insert, which is exactly the transition this arm exists to catch.
+  db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('frank','h','2026-01-01')`);
+  assert.equal(db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_UPSERTED'`).get().n, 1,
+    'first assignment (null/empty -> set) must emit exactly one USER_UPSERTED');
+  // No-op rewrite of an already-assigned uuid must NOT emit a second event at
+  // the same sync_version with a different occurred_at -- that is the
+  // equal_version_payload_conflict hazard the cloud watermark rejects
+  // terminally.
+  db.exec(`UPDATE users SET user_uuid = user_uuid WHERE username='frank'`);
+  assert.equal(db.prepare(`SELECT COUNT(*) n FROM sync_outbox WHERE op='USER_UPSERTED'`).get().n, 1,
+    'no-op user_uuid rewrite (OLD=NEW, non-empty) must not produce a second USER_UPSERTED');
+  db.close();
+});
+
 test('assignment triggers emit upsert on grant and delete on tombstone', () => {
   const db = freshDb();
   db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');

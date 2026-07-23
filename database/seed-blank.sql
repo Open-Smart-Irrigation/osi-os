@@ -5185,10 +5185,19 @@ END;
 -- USER aggregate, three arms (spec §5.2: sibling-trigger UPDATEs are
 -- invisible to other AFTER INSERT triggers, so no bare-INSERT arm may rely
 -- on trg_sync_users_uuid_ai having filled user_uuid).
+-- user_uuid is treated as write-once: this arm intentionally only emits on
+-- the unset->assigned transition (OLD null/empty -> NEW set), never on a
+-- no-op rewrite (OLD=NEW, both non-empty) -- a no-op would otherwise re-emit
+-- USER_UPSERTED at the same sync_version with a different payload
+-- occurred_at, which the cloud watermark rejects terminally as
+-- equal_version_payload_conflict (same issue-#10 class as the literal-0 fix).
+-- A dedicated uuid-immutability guard (reject any user_uuid change post
+-- first-assignment) is left as a follow-up; this arm only controls emission.
 CREATE TRIGGER IF NOT EXISTS trg_dp_users_outbox_uuid_au
 AFTER UPDATE OF user_uuid ON users
 FOR EACH ROW
 WHEN NEW.user_uuid IS NOT NULL AND NEW.user_uuid != ''
+AND (OLD.user_uuid IS NULL OR OLD.user_uuid = '')
 AND (SELECT enabled FROM scoped_access_emit WHERE id = 1) = 1
 BEGIN
   INSERT INTO sync_outbox(

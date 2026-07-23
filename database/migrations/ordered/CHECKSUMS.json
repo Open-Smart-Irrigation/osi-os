@@ -20,6 +20,6 @@
   "0019__journal_catalog_v1.sql": "c7cb59d92908926c6b3ed2222dc4a81d45df113ef31a7c1ebb2b3935944b19c7",
   "0020__journal_resource_owner_scope.sql": "85249a25aa9ed6d0cfdca029a35efc249e1f0f3152817357b37d884b5dff1ad2",
   "0021__journal_plot_lookup_indexes.sql": "21591c7a050c46331f1d2ed9494d6883a0c421866f5f65168b7c5fccd9862c8c",
-  "0022__scoped_access_schema.sql": "a639024a7a73436d25454de907aea90f176293d06e0dec45498e7981867552f2",
+  "0022__scoped_access_schema.sql": "44ff9e1a8f892ee2c29e284b3f2437aad88631dd3add7480ab9bb14161f2f1e4",
   "0023__scoped_access_backfill.sql": "df784ef7494830831fb232bfd83129b8eb8d629408f9a8077966b8fbced17f2f"
 }
