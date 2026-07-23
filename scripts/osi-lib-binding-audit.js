@@ -5,13 +5,14 @@ const crypto = require('node:crypto');
 const DB_BINDING = Object.freeze({ variable: 'osiDb', module: 'osi-db-helper' });
 const JOURNAL_BINDING = Object.freeze({ variable: 'osiJournal', module: 'osi-journal' });
 const LEDGER_BINDING = Object.freeze({ variable: 'osiCommandLedger', module: 'osi-command-ledger' });
+const SCOPE_BINDING = Object.freeze({ variable: 'scope', module: 'scope' });
 
 // Fail closed on complete reviewed sources. Any function change must be reviewed
 // and explicitly re-pinned here before either executable flow audit accepts it.
 const TASK9_OSI_LIB_NODE_POLICIES = Object.freeze({
   'journal-api-router-fn': Object.freeze({
-    funcSha256: 'fc2b8358de0bacd30d409baf4be3f281ad01008808039697a2b7a4cc9b7812e3',
-    bindings: Object.freeze([DB_BINDING, JOURNAL_BINDING]),
+    funcSha256: '37750504f6b809837a456060ba18546a8f84ab5792bd988886ab07b5f7fa9e13',
+    bindings: Object.freeze([DB_BINDING, JOURNAL_BINDING, SCOPE_BINDING]),
   }),
   'command-dedupe-dispatch': Object.freeze({
     funcSha256: '70a8766e6a01346d248fb1a4244910ab86b1659f3840aed48298dc986af1e0c7',
