@@ -31,11 +31,7 @@ const PHASE_C_PENDING = new Set([
   'sys-fan-in',
   'al-link-in',
   'al-unlink-in',
-  'dendro-tz-http',
-  'dendro-location-http',
-  'zone-config-http',
   'sync-force-http',
-  'zone-calibration-http',
   'history-rollups-run-http',
 ]);
 const ALLOWLIST = new Set([...PUBLIC_ALLOWLIST, ...PHASE_C_PENDING]);

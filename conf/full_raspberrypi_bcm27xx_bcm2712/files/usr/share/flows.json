@@ -5381,7 +5381,7 @@
     "y": 500,
     "wires": [
       [
-        "dendro-tz-fn"
+        "scoped-zone-config-guard"
       ]
     ]
   },
@@ -5719,7 +5719,7 @@
     "y": 760,
     "wires": [
       [
-        "dendro-location-fn"
+        "scoped-zone-config-guard"
       ]
     ]
   },
@@ -5728,7 +5728,7 @@
     "type": "function",
     "z": "dendro-analytics-tab",
     "name": "Set Zone Location",
-    "func": "return (async()=>{\nfunction getAuthSecret() {\n  const configured = String(env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET') || '').trim();\n  if (configured) return configured;\n  const fs = global.get('fs');\n  const secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];\n  if (fs) {\n    for (const secretPath of secretPaths) {\n      try {\n        const existing = String(fs.readFileSync(secretPath, 'utf8') || '').trim();\n        if (existing) return existing;\n      } catch (_) {}\n    }\n    const generated = crypto.randomBytes(48).toString('hex');\n    for (const secretPath of secretPaths) {\n      try {\n        fs.writeFileSync(secretPath, generated + '\\n', { mode: 0o600 });\n        return generated;\n      } catch (_) {}\n    }\n  }\n  const err = new Error('AUTH_TOKEN_SECRET or JWT_SECRET must be configured');\n  err.statusCode = 500;\n  throw err;\n}\nfunction toBase64Url(input) {\n  return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');\n}\nfunction fromBase64Url(input) {\n  let value = String(input || '').replace(/-/g, '+').replace(/_/g, '/');\n  while (value.length % 4) value += '=';\n  return Buffer.from(value, 'base64');\n}\nfunction verifyBearer(authHeader) {\n  if (!authHeader || !authHeader.startsWith('Bearer ')) {\n    const err = new Error('Unauthorized'); err.statusCode = 401; throw err;\n  }\n  const token = authHeader.substring(7).trim();\n  const parts = token.split('.');\n  if (parts.length !== 2 || !parts[0] || !parts[1]) {\n    const err = new Error('Invalid token'); err.statusCode = 401; throw err;\n  }\n  const payloadB64 = parts[0];\n  const sig = parts[1];\n  const expectedSig = toBase64Url(crypto.createHmac('sha256', getAuthSecret()).update(payloadB64).digest());\n  const sigBuf = Buffer.from(sig, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    const err = new Error('Invalid token'); err.statusCode = 401; throw err;\n  }\n  const payload = JSON.parse(fromBase64Url(payloadB64).toString('utf8'));\n  const userId = Number(payload.userId);\n  const username = String(payload.username || '').trim();\n  const exp = Number(payload.exp || 0);\n  if (!Number.isFinite(userId) || !username || (exp && Date.now() > exp)) {\n    const err = new Error(exp && Date.now() > exp ? 'Token expired' : 'Invalid token'); err.statusCode = 401; throw err;\n  }\n  return { userId, username };\n}\nconst _db  = new osiDb.Database('/data/db/farming.db');\nconst q    = (sql) => new Promise((res,rej) => _db.all(sql, (e,r) => e?rej(e):res(r||[])));\nconst exec = (sql) => new Promise((res,rej) => _db.run(sql, e => e?rej(e):res(true)));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction respond(data,code){\n  msg.statusCode=code||200; msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\ntry{\nconst auth = verifyBearer(msg.req?.headers?.authorization);\nconst zoneId=parseInt(msg.req.params.zone_id,10);\nconst body=msg.req.body||msg.payload||{};\nconst lat=parseFloat(body.latitude), lon=parseFloat(body.longitude);\nif(!Number.isFinite(zoneId)) return respond({error:'Invalid zone ID'},400);\nif(!isFinite(lat)||lat<-90||lat>90)return respond({error:'Invalid latitude'},400);\nif(!isFinite(lon)||lon<-180||lon>180)return respond({error:'Invalid longitude'},400);\nconst rows = await q(`SELECT id FROM irrigation_zones WHERE id=${zoneId} AND user_id=${auth.userId} AND deleted_at IS NULL`);\nif(!rows.length){ await close(); return respond({error:'Zone not found or access denied'},404); }\nawait exec(`UPDATE irrigation_zones SET latitude=${n(lat)},longitude=${n(lon)},updated_at='${new Date().toISOString()}' WHERE id=${zoneId} AND user_id=${auth.userId}`);\nawait close(); return respond({success:true,zone_id:zoneId,latitude:lat,longitude:lon});\n}catch(e){try{await close();}catch(_){} return respond({error:e.message},e.statusCode||500);}\n})();",
+    "func": "return (async()=>{\nfunction getAuthSecret() {\n  const configured = String(env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET') || '').trim();\n  if (configured) return configured;\n  const fs = global.get('fs');\n  const secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];\n  if (fs) {\n    for (const secretPath of secretPaths) {\n      try {\n        const existing = String(fs.readFileSync(secretPath, 'utf8') || '').trim();\n        if (existing) return existing;\n      } catch (_) {}\n    }\n    const generated = crypto.randomBytes(48).toString('hex');\n    for (const secretPath of secretPaths) {\n      try {\n        fs.writeFileSync(secretPath, generated + '\\n', { mode: 0o600 });\n        return generated;\n      } catch (_) {}\n    }\n  }\n  const err = new Error('AUTH_TOKEN_SECRET or JWT_SECRET must be configured');\n  err.statusCode = 500;\n  throw err;\n}\nfunction toBase64Url(input) {\n  return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');\n}\nfunction fromBase64Url(input) {\n  let value = String(input || '').replace(/-/g, '+').replace(/_/g, '/');\n  while (value.length % 4) value += '=';\n  return Buffer.from(value, 'base64');\n}\nfunction verifyBearer(authHeader) {\n  if (!authHeader || !authHeader.startsWith('Bearer ')) {\n    const err = new Error('Unauthorized'); err.statusCode = 401; throw err;\n  }\n  const token = authHeader.substring(7).trim();\n  const parts = token.split('.');\n  if (parts.length !== 2 || !parts[0] || !parts[1]) {\n    const err = new Error('Invalid token'); err.statusCode = 401; throw err;\n  }\n  const payloadB64 = parts[0];\n  const sig = parts[1];\n  const expectedSig = toBase64Url(crypto.createHmac('sha256', getAuthSecret()).update(payloadB64).digest());\n  const sigBuf = Buffer.from(sig, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    const err = new Error('Invalid token'); err.statusCode = 401; throw err;\n  }\n  const payload = JSON.parse(fromBase64Url(payloadB64).toString('utf8'));\n  const userId = Number(payload.userId);\n  const username = String(payload.username || '').trim();\n  const exp = Number(payload.exp || 0);\n  if (!Number.isFinite(userId) || !username || (exp && Date.now() > exp)) {\n    const err = new Error(exp && Date.now() > exp ? 'Token expired' : 'Invalid token'); err.statusCode = 401; throw err;\n  }\n  return { userId, username };\n}\nconst _db  = new osiDb.Database('/data/db/farming.db');\nconst q    = (sql) => new Promise((res,rej) => _db.all(sql, (e,r) => e?rej(e):res(r||[])));\nconst exec = (sql) => new Promise((res,rej) => _db.run(sql, e => e?rej(e):res(true)));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction respond(data,code){\n  msg.statusCode=code||200; msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\ntry{\nconst auth = verifyBearer(msg.req?.headers?.authorization);\nconst zoneId=parseInt(msg.req.params.zone_id,10);\nconst body=msg.req.body||msg.payload||{};\nconst lat=parseFloat(body.latitude), lon=parseFloat(body.longitude);\nif(!Number.isFinite(zoneId)) return respond({error:'Invalid zone ID'},400);\nif(!isFinite(lat)||lat<-90||lat>90)return respond({error:'Invalid latitude'},400);\nif(!isFinite(lon)||lon<-180||lon>180)return respond({error:'Invalid longitude'},400);\nconst rows = await q(`SELECT id FROM irrigation_zones WHERE id=${zoneId} AND user_id=${(msg._scopedZoneWriteAuthorized ? msg._scopedZoneOwnerId : auth.userId)} AND deleted_at IS NULL`);\nif(!rows.length){ await close(); return respond({error:'Zone not found or access denied'},404); }\nawait exec(`UPDATE irrigation_zones SET latitude=${n(lat)},longitude=${n(lon)},updated_at='${new Date().toISOString()}' WHERE id=${zoneId} AND user_id=${(msg._scopedZoneWriteAuthorized ? msg._scopedZoneOwnerId : auth.userId)}`);\nawait close(); return respond({success:true,zone_id:zoneId,latitude:lat,longitude:lon});\n}catch(e){try{await close();}catch(_){} return respond({error:e.message},e.statusCode||500);}\n})();",
     "outputs": 1,
     "x": 420,
     "y": 760,
@@ -5795,7 +5795,7 @@
     "y": 580,
     "wires": [
       [
-        "zone-config-fn"
+        "scoped-zone-config-guard"
       ]
     ]
   },
@@ -5816,7 +5816,7 @@
         "module": "crypto"
       }
     ],
-    "func": "return (async()=>{\nfunction getAuthSecret() {\n  const configured = String(env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET') || '').trim();\n  if (configured) return configured;\n  const fs = global.get('fs');\n  const secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];\n  if (fs) {\n    for (const secretPath of secretPaths) {\n      try {\n        const existing = String(fs.readFileSync(secretPath, 'utf8') || '').trim();\n        if (existing) return existing;\n      } catch (_) {}\n    }\n    const generated = crypto.randomBytes(48).toString('hex');\n    for (const secretPath of secretPaths) {\n      try {\n        fs.writeFileSync(secretPath, generated + '\\n', { mode: 0o600 });\n        return generated;\n      } catch (_) {}\n    }\n  }\n  const err = new Error('AUTH_TOKEN_SECRET or JWT_SECRET must be configured');\n  err.statusCode = 500;\n  throw err;\n}\nfunction toBase64Url(input) {\n  return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');\n}\nfunction fromBase64Url(input) {\n  let value = String(input || '').replace(/-/g, '+').replace(/_/g, '/');\n  while (value.length % 4) value += '=';\n  return Buffer.from(value, 'base64');\n}\nfunction verifyBearer(authHeader) {\n  if (!authHeader || !authHeader.startsWith('Bearer ')) {\n    const err = new Error('Unauthorized'); err.statusCode = 401; throw err;\n  }\n  const token = authHeader.substring(7).trim();\n  const parts = token.split('.');\n  if (parts.length !== 2 || !parts[0] || !parts[1]) {\n    const err = new Error('Invalid token'); err.statusCode = 401; throw err;\n  }\n  const payloadB64 = parts[0];\n  const sig = parts[1];\n  const expectedSig = toBase64Url(crypto.createHmac('sha256', getAuthSecret()).update(payloadB64).digest());\n  const sigBuf = Buffer.from(sig, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    const err = new Error('Invalid token'); err.statusCode = 401; throw err;\n  }\n  const payload = JSON.parse(fromBase64Url(payloadB64).toString('utf8'));\n  const userId = Number(payload.userId);\n  const username = String(payload.username || '').trim();\n  const exp = Number(payload.exp || 0);\n  if (!Number.isFinite(userId) || !username || (exp && Date.now() > exp)) {\n    const err = new Error(exp && Date.now() > exp ? 'Token expired' : 'Invalid token'); err.statusCode = 401; throw err;\n  }\n  return { userId, username };\n}\nconst _db  = new osiDb.Database('/data/db/farming.db');\nconst q    = (sql) => new Promise((res,rej) => _db.all(sql, (e,r) => e?rej(e):res(r||[])));\nconst exec = (sql) => new Promise((res,rej) => _db.run(sql, e => e?rej(e):res(true)));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction respond(data,code){\n  msg.statusCode=code||200; msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\ntry{\nconst auth = verifyBearer(msg.req?.headers?.authorization);\nconst zoneId=parseInt(msg.req.params.zone_id,10);\nconst b = msg.req.body || msg.payload || {};\nconst areaM2 = b.areaM2 !== undefined ? b.areaM2 : b.area_m2;\nconst irrigationEfficiencyPct = b.irrigationEfficiencyPct !== undefined ? b.irrigationEfficiencyPct : b.irrigation_efficiency_pct;\nconst schedulingMode = b.schedulingMode !== undefined ? b.schedulingMode : b.scheduling_mode;\nconst predictionCardEnabled = b.predictionCardEnabled !== undefined ? b.predictionCardEnabled : b.prediction_card_enabled;\nif(!Number.isFinite(zoneId)) return respond({error:'Invalid zone ID'},400);\nconst colSql = [\n  \"ALTER TABLE irrigation_zones ADD COLUMN crop_type TEXT\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN variety TEXT\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN soil_type TEXT\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN irrigation_method TEXT\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN area_m2 REAL\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN irrigation_efficiency_pct REAL\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN scheduling_mode TEXT DEFAULT 'local'\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN prediction_card_enabled INTEGER DEFAULT 0\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN notes TEXT\"\n];\nfor(const sql of colSql){ try{ await exec(sql); }catch(e2){} }\nconst owned = await q(`SELECT id,name FROM irrigation_zones WHERE id=${zoneId} AND user_id=${auth.userId} AND deleted_at IS NULL`);\nif(!owned.length){ await close(); return respond({error:'Zone not found or access denied'},404); }\nconst sets=[];\nif(b.cropType!==undefined)        sets.push(\"crop_type=\"+s(b.cropType));\nif(b.variety!==undefined)         sets.push(\"variety=\"+s(b.variety));\nif(b.soilType!==undefined)        sets.push(\"soil_type=\"+s(b.soilType));\nif(b.irrigationMethod!==undefined)sets.push(\"irrigation_method=\"+s(b.irrigationMethod));\nif(areaM2!==undefined){\n  const numericArea = areaM2 === null || areaM2 === \"\" ? null : Number(areaM2);\n  if (numericArea != null && (!Number.isFinite(numericArea) || numericArea <= 0)) { await close(); return respond({error:\"Area must be greater than 0\"},400); }\n  sets.push(\"area_m2=\" + (numericArea == null ? \"NULL\" : numericArea));\n}\nif(irrigationEfficiencyPct!==undefined){\n  const numericEfficiency = irrigationEfficiencyPct === null || irrigationEfficiencyPct === \"\" ? null : Number(irrigationEfficiencyPct);\n  if (numericEfficiency != null && (!Number.isFinite(numericEfficiency) || numericEfficiency <= 0 || numericEfficiency > 100)) { await close(); return respond({error:\"Irrigation efficiency must be between 0 and 100\"},400); }\n  sets.push(\"irrigation_efficiency_pct=\" + (numericEfficiency == null ? \"NULL\" : numericEfficiency));\n}\nif(schedulingMode!==undefined){\n  const normalizedSchedulingMode = String(schedulingMode == null ? '' : schedulingMode).trim().toLowerCase();\n  if (normalizedSchedulingMode && normalizedSchedulingMode !== 'local' && normalizedSchedulingMode !== 'server_preferred') {\n    await close();\n    return respond({error:\"Scheduling mode must be local or server_preferred\"},400);\n  }\n  sets.push(\"scheduling_mode=\" + s(normalizedSchedulingMode || 'local'));\n}\nif(predictionCardEnabled!==undefined){\n  sets.push(\"prediction_card_enabled=\" + ((predictionCardEnabled === true || predictionCardEnabled === 1 || String(predictionCardEnabled).toLowerCase() === 'true') ? 1 : 0));\n}\nif(b.notes!==undefined)           sets.push(\"notes=\"+s(b.notes));\nif(b.timezone!==undefined)        sets.push(\"timezone=\"+s(b.timezone));\nif(b.phenologicalStage!==undefined)sets.push(\"phenological_stage=\"+s(b.phenologicalStage));\nif(b.calibrationKey!==undefined)  sets.push(\"calibration_key=\"+s(b.calibrationKey));\nif(sets.length>0){\n  sets.push(\"updated_at=\"+s(new Date().toISOString()));\n  sets.push(\"sync_version=COALESCE(sync_version,0)+1\");\n  await exec(\"UPDATE irrigation_zones SET \"+sets.join(\",\")+\" WHERE id=\"+zoneId+\" AND user_id=\"+auth.userId);\n}\nconst rows=await q(\"SELECT id,name,timezone,latitude,longitude,phenological_stage,calibration_key,crop_type,variety,soil_type,irrigation_method,area_m2,irrigation_efficiency_pct,scheduling_mode,COALESCE(prediction_card_enabled, 0) AS prediction_card_enabled,notes FROM irrigation_zones WHERE id=\"+zoneId+\" AND user_id=\"+auth.userId);\nawait close();\nif(!rows.length) return respond({error:'Zone not found'},404);\nconst z=rows[0];\nreturn respond({\n  id:z.id,name:z.name,timezone:z.timezone,latitude:z.latitude,longitude:z.longitude,\n  phenological_stage:z.phenological_stage,calibration_key:z.calibration_key,\n  crop_type:z.crop_type,variety:z.variety,soil_type:z.soil_type,\n  irrigation_method:z.irrigation_method,area_m2:z.area_m2,\n  irrigation_efficiency_pct:z.irrigation_efficiency_pct,scheduling_mode:z.scheduling_mode || 'local',prediction_card_enabled:Boolean(Number(z.prediction_card_enabled || 0)),notes:z.notes\n});\n}catch(e){try{await close();}catch(_){} return respond({error:e.message},e.statusCode||500);}\n})();\n",
+    "func": "return (async()=>{\nfunction getAuthSecret() {\n  const configured = String(env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET') || '').trim();\n  if (configured) return configured;\n  const fs = global.get('fs');\n  const secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];\n  if (fs) {\n    for (const secretPath of secretPaths) {\n      try {\n        const existing = String(fs.readFileSync(secretPath, 'utf8') || '').trim();\n        if (existing) return existing;\n      } catch (_) {}\n    }\n    const generated = crypto.randomBytes(48).toString('hex');\n    for (const secretPath of secretPaths) {\n      try {\n        fs.writeFileSync(secretPath, generated + '\\n', { mode: 0o600 });\n        return generated;\n      } catch (_) {}\n    }\n  }\n  const err = new Error('AUTH_TOKEN_SECRET or JWT_SECRET must be configured');\n  err.statusCode = 500;\n  throw err;\n}\nfunction toBase64Url(input) {\n  return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');\n}\nfunction fromBase64Url(input) {\n  let value = String(input || '').replace(/-/g, '+').replace(/_/g, '/');\n  while (value.length % 4) value += '=';\n  return Buffer.from(value, 'base64');\n}\nfunction verifyBearer(authHeader) {\n  if (!authHeader || !authHeader.startsWith('Bearer ')) {\n    const err = new Error('Unauthorized'); err.statusCode = 401; throw err;\n  }\n  const token = authHeader.substring(7).trim();\n  const parts = token.split('.');\n  if (parts.length !== 2 || !parts[0] || !parts[1]) {\n    const err = new Error('Invalid token'); err.statusCode = 401; throw err;\n  }\n  const payloadB64 = parts[0];\n  const sig = parts[1];\n  const expectedSig = toBase64Url(crypto.createHmac('sha256', getAuthSecret()).update(payloadB64).digest());\n  const sigBuf = Buffer.from(sig, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    const err = new Error('Invalid token'); err.statusCode = 401; throw err;\n  }\n  const payload = JSON.parse(fromBase64Url(payloadB64).toString('utf8'));\n  const userId = Number(payload.userId);\n  const username = String(payload.username || '').trim();\n  const exp = Number(payload.exp || 0);\n  if (!Number.isFinite(userId) || !username || (exp && Date.now() > exp)) {\n    const err = new Error(exp && Date.now() > exp ? 'Token expired' : 'Invalid token'); err.statusCode = 401; throw err;\n  }\n  return { userId, username };\n}\nconst _db  = new osiDb.Database('/data/db/farming.db');\nconst q    = (sql) => new Promise((res,rej) => _db.all(sql, (e,r) => e?rej(e):res(r||[])));\nconst exec = (sql) => new Promise((res,rej) => _db.run(sql, e => e?rej(e):res(true)));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction respond(data,code){\n  msg.statusCode=code||200; msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\ntry{\nconst auth = verifyBearer(msg.req?.headers?.authorization);\nconst zoneId=parseInt(msg.req.params.zone_id,10);\nconst b = msg.req.body || msg.payload || {};\nconst areaM2 = b.areaM2 !== undefined ? b.areaM2 : b.area_m2;\nconst irrigationEfficiencyPct = b.irrigationEfficiencyPct !== undefined ? b.irrigationEfficiencyPct : b.irrigation_efficiency_pct;\nconst schedulingMode = b.schedulingMode !== undefined ? b.schedulingMode : b.scheduling_mode;\nconst predictionCardEnabled = b.predictionCardEnabled !== undefined ? b.predictionCardEnabled : b.prediction_card_enabled;\nif(!Number.isFinite(zoneId)) return respond({error:'Invalid zone ID'},400);\nconst colSql = [\n  \"ALTER TABLE irrigation_zones ADD COLUMN crop_type TEXT\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN variety TEXT\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN soil_type TEXT\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN irrigation_method TEXT\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN area_m2 REAL\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN irrigation_efficiency_pct REAL\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN scheduling_mode TEXT DEFAULT 'local'\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN prediction_card_enabled INTEGER DEFAULT 0\",\n  \"ALTER TABLE irrigation_zones ADD COLUMN notes TEXT\"\n];\nfor(const sql of colSql){ try{ await exec(sql); }catch(e2){} }\nconst owned = await q(`SELECT id,name FROM irrigation_zones WHERE id=${zoneId} AND user_id=${(msg._scopedZoneWriteAuthorized ? msg._scopedZoneOwnerId : auth.userId)} AND deleted_at IS NULL`);\nif(!owned.length){ await close(); return respond({error:'Zone not found or access denied'},404); }\nconst sets=[];\nif(b.cropType!==undefined)        sets.push(\"crop_type=\"+s(b.cropType));\nif(b.variety!==undefined)         sets.push(\"variety=\"+s(b.variety));\nif(b.soilType!==undefined)        sets.push(\"soil_type=\"+s(b.soilType));\nif(b.irrigationMethod!==undefined)sets.push(\"irrigation_method=\"+s(b.irrigationMethod));\nif(areaM2!==undefined){\n  const numericArea = areaM2 === null || areaM2 === \"\" ? null : Number(areaM2);\n  if (numericArea != null && (!Number.isFinite(numericArea) || numericArea <= 0)) { await close(); return respond({error:\"Area must be greater than 0\"},400); }\n  sets.push(\"area_m2=\" + (numericArea == null ? \"NULL\" : numericArea));\n}\nif(irrigationEfficiencyPct!==undefined){\n  const numericEfficiency = irrigationEfficiencyPct === null || irrigationEfficiencyPct === \"\" ? null : Number(irrigationEfficiencyPct);\n  if (numericEfficiency != null && (!Number.isFinite(numericEfficiency) || numericEfficiency <= 0 || numericEfficiency > 100)) { await close(); return respond({error:\"Irrigation efficiency must be between 0 and 100\"},400); }\n  sets.push(\"irrigation_efficiency_pct=\" + (numericEfficiency == null ? \"NULL\" : numericEfficiency));\n}\nif(schedulingMode!==undefined){\n  const normalizedSchedulingMode = String(schedulingMode == null ? '' : schedulingMode).trim().toLowerCase();\n  if (normalizedSchedulingMode && normalizedSchedulingMode !== 'local' && normalizedSchedulingMode !== 'server_preferred') {\n    await close();\n    return respond({error:\"Scheduling mode must be local or server_preferred\"},400);\n  }\n  sets.push(\"scheduling_mode=\" + s(normalizedSchedulingMode || 'local'));\n}\nif(predictionCardEnabled!==undefined){\n  sets.push(\"prediction_card_enabled=\" + ((predictionCardEnabled === true || predictionCardEnabled === 1 || String(predictionCardEnabled).toLowerCase() === 'true') ? 1 : 0));\n}\nif(b.notes!==undefined)           sets.push(\"notes=\"+s(b.notes));\nif(b.timezone!==undefined)        sets.push(\"timezone=\"+s(b.timezone));\nif(b.phenologicalStage!==undefined)sets.push(\"phenological_stage=\"+s(b.phenologicalStage));\nif(b.calibrationKey!==undefined)  sets.push(\"calibration_key=\"+s(b.calibrationKey));\nif(sets.length>0){\n  sets.push(\"updated_at=\"+s(new Date().toISOString()));\n  sets.push(\"sync_version=COALESCE(sync_version,0)+1\");\n  await exec(\"UPDATE irrigation_zones SET \"+sets.join(\",\")+\" WHERE id=\"+zoneId+\" AND user_id=\"+(msg._scopedZoneWriteAuthorized ? msg._scopedZoneOwnerId : auth.userId));\n}\nconst rows=await q(\"SELECT id,name,timezone,latitude,longitude,phenological_stage,calibration_key,crop_type,variety,soil_type,irrigation_method,area_m2,irrigation_efficiency_pct,scheduling_mode,COALESCE(prediction_card_enabled, 0) AS prediction_card_enabled,notes FROM irrigation_zones WHERE id=\"+zoneId+\" AND user_id=\"+(msg._scopedZoneWriteAuthorized ? msg._scopedZoneOwnerId : auth.userId));\nawait close();\nif(!rows.length) return respond({error:'Zone not found'},404);\nconst z=rows[0];\nreturn respond({\n  id:z.id,name:z.name,timezone:z.timezone,latitude:z.latitude,longitude:z.longitude,\n  phenological_stage:z.phenological_stage,calibration_key:z.calibration_key,\n  crop_type:z.crop_type,variety:z.variety,soil_type:z.soil_type,\n  irrigation_method:z.irrigation_method,area_m2:z.area_m2,\n  irrigation_efficiency_pct:z.irrigation_efficiency_pct,scheduling_mode:z.scheduling_mode || 'local',prediction_card_enabled:Boolean(Number(z.prediction_card_enabled || 0)),notes:z.notes\n});\n}catch(e){try{await close();}catch(_){} return respond({error:e.message},e.statusCode||500);}\n})();\n",
     "wires": [
       [
         "dendro-http-resp"
@@ -9745,7 +9745,7 @@
     "y": 640,
     "wires": [
       [
-        "zone-calibration-fn"
+        "scoped-zone-config-guard"
       ]
     ]
   },
@@ -9754,7 +9754,7 @@
     "type": "function",
     "z": "dendro-analytics-tab",
     "name": "Save Zone Irrigation Calibration",
-    "func": "return (async()=>{\nfunction getAuthSecret() {\n  const configured = String(env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET') || '').trim();\n  if (configured) return configured;\n  const fs = global.get('fs');\n  const secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];\n  if (fs) {\n    for (const secretPath of secretPaths) {\n      try {\n        const existing = String(fs.readFileSync(secretPath, 'utf8') || '').trim();\n        if (existing) return existing;\n      } catch (_) {}\n    }\n    const generated = crypto.randomBytes(48).toString('hex');\n    for (const secretPath of secretPaths) {\n      try {\n        fs.writeFileSync(secretPath, generated + '\\n', { mode: 0o600 });\n        return generated;\n      } catch (_) {}\n    }\n  }\n  const err = new Error('AUTH_TOKEN_SECRET or JWT_SECRET must be configured');\n  err.statusCode = 500;\n  throw err;\n}\nfunction toBase64Url(input) {\n  return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');\n}\nfunction fromBase64Url(input) {\n  let value = String(input || '').replace(/-/g, '+').replace(/_/g, '/');\n  while (value.length % 4) value += '=';\n  return Buffer.from(value, 'base64');\n}\nfunction verifyBearer(authHeader) {\n  if (!authHeader || !authHeader.startsWith('Bearer ')) {\n    const err = new Error('Unauthorized'); err.statusCode = 401; throw err;\n  }\n  const token = authHeader.substring(7).trim();\n  const parts = token.split('.');\n  if (parts.length !== 2 || !parts[0] || !parts[1]) {\n    const err = new Error('Invalid token'); err.statusCode = 401; throw err;\n  }\n  const payloadB64 = parts[0];\n  const sig = parts[1];\n  const expectedSig = toBase64Url(crypto.createHmac('sha256', getAuthSecret()).update(payloadB64).digest());\n  const sigBuf = Buffer.from(sig, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    const err = new Error('Invalid token'); err.statusCode = 401; throw err;\n  }\n  let payload;\n  try { payload = JSON.parse(fromBase64Url(payloadB64).toString('utf8')); }\n  catch (_) { const err = new Error('Invalid token'); err.statusCode = 401; throw err; }\n  const userId = Number(payload.userId);\n  const username = String(payload.username || '').trim();\n  const exp = Number(payload.exp || 0);\n  if (!Number.isFinite(userId) || !username || (exp && Date.now() > exp)) {\n    const err = new Error(exp && Date.now() > exp ? 'Token expired' : 'Invalid token'); err.statusCode = 401; throw err;\n  }\n  return { userId, username };\n}\nconst _db = new osiDb.Database('/data/db/farming.db');\nconst q = (sql, params = []) => new Promise((res, rej) => _db.all(sql, params, (e, r) => e ? rej(e) : res(r || [])));\nconst run = (sql, params = []) => new Promise((res, rej) => _db.run(sql, params, function(e) { return e ? rej(e) : res(this && typeof this.changes === 'number' ? this.changes : 0); }));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction respond(data, code) {\n  msg.statusCode = code || 200;\n  msg.payload = data;\n  msg.headers = {\n    'Access-Control-Allow-Origin': '*',\n    'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',\n    'Access-Control-Allow-Headers': 'Authorization,Content-Type',\n    'Content-Type': 'application/json'\n  };\n  return msg;\n}\nfunction firstDefined() {\n  for (const value of arguments) if (value !== undefined) return value;\n  return undefined;\n}\nfunction parseFlowRate(value) {\n  if (value === undefined || value === null || value === '') {\n    const err = new Error('Flow rate (L/min) is required'); err.statusCode = 400; throw err;\n  }\n  const parsed = Number(value);\n  if (!Number.isFinite(parsed) || parsed <= 0) {\n    const err = new Error('Flow rate (L/min) must be greater than 0'); err.statusCode = 400; throw err;\n  }\n  return Math.round(parsed * 1000) / 1000;\n}\nfunction parseMethod(value) {\n  const method = String(value == null ? '' : value).trim();\n  if (method.length > 200) {\n    const err = new Error('Measurement method must be 200 characters or fewer'); err.statusCode = 400; throw err;\n  }\n  return method;\n}\nasync function ensureCalibrationTable() {\n  await run('CREATE TABLE IF NOT EXISTS zone_irrigation_calibration (' +\n    'zone_id INTEGER PRIMARY KEY,' +\n    'valve_device_eui TEXT,' +\n    'measured_flow_rate_lpm REAL,' +\n    'measurement_method TEXT,' +\n    'measured_at TEXT,' +\n    'created_at TEXT,' +\n    'updated_at TEXT)');\n}\ntry {\n  const auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);\n  const zoneId = parseInt((msg.req.params || {}).id, 10);\n  if (!Number.isFinite(zoneId)) return respond({ error: 'Invalid zone ID' }, 400);\n  const body = msg.req.body || msg.payload || {};\n  const measuredFlowRateLpm = parseFlowRate(firstDefined(body.measuredFlowRateLpm, body.measured_flow_rate_lpm, body.flowRateLpm, body.flow_rate_lpm));\n  const measurementMethod = parseMethod(firstDefined(body.measurementMethod, body.measurement_method));\n  await ensureCalibrationTable();\n  const owned = await q('SELECT id FROM irrigation_zones WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1', [zoneId, auth.userId]);\n  if (!owned.length) {\n    await close();\n    return respond({ error: 'Zone not found or access denied' }, 404);\n  }\n  const now = new Date().toISOString();\n  await run(\n    'INSERT INTO zone_irrigation_calibration(zone_id, measured_flow_rate_lpm, measurement_method, measured_at, created_at, updated_at) VALUES(?,?,?,?,?,?) ' +\n    'ON CONFLICT(zone_id) DO UPDATE SET measured_flow_rate_lpm=excluded.measured_flow_rate_lpm, measurement_method=excluded.measurement_method, measured_at=excluded.measured_at, updated_at=excluded.updated_at',\n    [zoneId, measuredFlowRateLpm, measurementMethod, now, now, now]\n  );\n  await close();\n  return respond({\n    zone_id: zoneId,\n    measured_flow_rate_lpm: measuredFlowRateLpm,\n    measurement_method: measurementMethod,\n    updated_at: now,\n    measuredFlowRateLpm,\n    measurementMethod\n  }, 200);\n} catch (e) {\n  try { await close(); } catch (_) {}\n  return respond({ error: e.message }, e.statusCode || 500);\n}\n})();",
+    "func": "return (async()=>{\nfunction getAuthSecret() {\n  const configured = String(env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET') || '').trim();\n  if (configured) return configured;\n  const fs = global.get('fs');\n  const secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];\n  if (fs) {\n    for (const secretPath of secretPaths) {\n      try {\n        const existing = String(fs.readFileSync(secretPath, 'utf8') || '').trim();\n        if (existing) return existing;\n      } catch (_) {}\n    }\n    const generated = crypto.randomBytes(48).toString('hex');\n    for (const secretPath of secretPaths) {\n      try {\n        fs.writeFileSync(secretPath, generated + '\\n', { mode: 0o600 });\n        return generated;\n      } catch (_) {}\n    }\n  }\n  const err = new Error('AUTH_TOKEN_SECRET or JWT_SECRET must be configured');\n  err.statusCode = 500;\n  throw err;\n}\nfunction toBase64Url(input) {\n  return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');\n}\nfunction fromBase64Url(input) {\n  let value = String(input || '').replace(/-/g, '+').replace(/_/g, '/');\n  while (value.length % 4) value += '=';\n  return Buffer.from(value, 'base64');\n}\nfunction verifyBearer(authHeader) {\n  if (!authHeader || !authHeader.startsWith('Bearer ')) {\n    const err = new Error('Unauthorized'); err.statusCode = 401; throw err;\n  }\n  const token = authHeader.substring(7).trim();\n  const parts = token.split('.');\n  if (parts.length !== 2 || !parts[0] || !parts[1]) {\n    const err = new Error('Invalid token'); err.statusCode = 401; throw err;\n  }\n  const payloadB64 = parts[0];\n  const sig = parts[1];\n  const expectedSig = toBase64Url(crypto.createHmac('sha256', getAuthSecret()).update(payloadB64).digest());\n  const sigBuf = Buffer.from(sig, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    const err = new Error('Invalid token'); err.statusCode = 401; throw err;\n  }\n  let payload;\n  try { payload = JSON.parse(fromBase64Url(payloadB64).toString('utf8')); }\n  catch (_) { const err = new Error('Invalid token'); err.statusCode = 401; throw err; }\n  const userId = Number(payload.userId);\n  const username = String(payload.username || '').trim();\n  const exp = Number(payload.exp || 0);\n  if (!Number.isFinite(userId) || !username || (exp && Date.now() > exp)) {\n    const err = new Error(exp && Date.now() > exp ? 'Token expired' : 'Invalid token'); err.statusCode = 401; throw err;\n  }\n  return { userId, username };\n}\nconst _db = new osiDb.Database('/data/db/farming.db');\nconst q = (sql, params = []) => new Promise((res, rej) => _db.all(sql, params, (e, r) => e ? rej(e) : res(r || [])));\nconst run = (sql, params = []) => new Promise((res, rej) => _db.run(sql, params, function(e) { return e ? rej(e) : res(this && typeof this.changes === 'number' ? this.changes : 0); }));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction respond(data, code) {\n  msg.statusCode = code || 200;\n  msg.payload = data;\n  msg.headers = {\n    'Access-Control-Allow-Origin': '*',\n    'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',\n    'Access-Control-Allow-Headers': 'Authorization,Content-Type',\n    'Content-Type': 'application/json'\n  };\n  return msg;\n}\nfunction firstDefined() {\n  for (const value of arguments) if (value !== undefined) return value;\n  return undefined;\n}\nfunction parseFlowRate(value) {\n  if (value === undefined || value === null || value === '') {\n    const err = new Error('Flow rate (L/min) is required'); err.statusCode = 400; throw err;\n  }\n  const parsed = Number(value);\n  if (!Number.isFinite(parsed) || parsed <= 0) {\n    const err = new Error('Flow rate (L/min) must be greater than 0'); err.statusCode = 400; throw err;\n  }\n  return Math.round(parsed * 1000) / 1000;\n}\nfunction parseMethod(value) {\n  const method = String(value == null ? '' : value).trim();\n  if (method.length > 200) {\n    const err = new Error('Measurement method must be 200 characters or fewer'); err.statusCode = 400; throw err;\n  }\n  return method;\n}\nasync function ensureCalibrationTable() {\n  await run('CREATE TABLE IF NOT EXISTS zone_irrigation_calibration (' +\n    'zone_id INTEGER PRIMARY KEY,' +\n    'valve_device_eui TEXT,' +\n    'measured_flow_rate_lpm REAL,' +\n    'measurement_method TEXT,' +\n    'measured_at TEXT,' +\n    'created_at TEXT,' +\n    'updated_at TEXT)');\n}\ntry {\n  const auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);\n  const zoneId = parseInt((msg.req.params || {}).id, 10);\n  if (!Number.isFinite(zoneId)) return respond({ error: 'Invalid zone ID' }, 400);\n  const body = msg.req.body || msg.payload || {};\n  const measuredFlowRateLpm = parseFlowRate(firstDefined(body.measuredFlowRateLpm, body.measured_flow_rate_lpm, body.flowRateLpm, body.flow_rate_lpm));\n  const measurementMethod = parseMethod(firstDefined(body.measurementMethod, body.measurement_method));\n  await ensureCalibrationTable();\n  const owned = await q('SELECT id FROM irrigation_zones WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1', [zoneId, (msg._scopedZoneWriteAuthorized ? msg._scopedZoneOwnerId : auth.userId)]);\n  if (!owned.length) {\n    await close();\n    return respond({ error: 'Zone not found or access denied' }, 404);\n  }\n  const now = new Date().toISOString();\n  await run(\n    'INSERT INTO zone_irrigation_calibration(zone_id, measured_flow_rate_lpm, measurement_method, measured_at, created_at, updated_at) VALUES(?,?,?,?,?,?) ' +\n    'ON CONFLICT(zone_id) DO UPDATE SET measured_flow_rate_lpm=excluded.measured_flow_rate_lpm, measurement_method=excluded.measurement_method, measured_at=excluded.measured_at, updated_at=excluded.updated_at',\n    [zoneId, measuredFlowRateLpm, measurementMethod, now, now, now]\n  );\n  await close();\n  return respond({\n    zone_id: zoneId,\n    measured_flow_rate_lpm: measuredFlowRateLpm,\n    measurement_method: measurementMethod,\n    updated_at: now,\n    measuredFlowRateLpm,\n    measurementMethod\n  }, 200);\n} catch (e) {\n  try { await close(); } catch (_) {}\n  return respond({ error: e.message }, e.statusCode || 500);\n}\n})();",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -12265,6 +12265,235 @@
       ],
       [
         "device-response"
+      ]
+    ]
+  },
+  {
+    "id": "scoped-zone-config-guard",
+    "type": "function",
+    "z": "dendro-analytics-tab",
+    "name": "Fresh Zone Config Scope",
+    "func": "return (async () => {\nconst routes = [{\"method\":\"PUT\",\"url\":\"/api/irrigation-zones/:zone_id/timezone\",\"index\":0},{\"method\":\"PUT\",\"url\":\"/api/irrigation-zones/:zone_id/location\",\"index\":1},{\"method\":\"PUT\",\"url\":\"/api/irrigation-zones/:zone_id/config\",\"index\":2},{\"method\":\"POST\",\"url\":\"/api/irrigation-zones/:id/calibration\",\"index\":3}];\nconst method = String(msg.req && msg.req.method || '').toUpperCase();\nconst requestPath = String(msg.req && (msg.req.path || msg.req.url) || '').split('?')[0];\nconst route = routes.find(function(candidate) {\n  if (candidate.method !== method) return false;\n  const pattern = '^' + candidate.url.replace(/:[^/]+/g, '[^/]+') + '$';\n  return new RegExp(pattern).test(requestPath);\n});\nconst outputs = new Array(routes.length + 1).fill(null);\nconst errorOutput = routes.length;\nif (!route) {\n  msg.statusCode = 404;\n  msg.payload = { error: 'Zone config route not found' };\n  outputs[errorOutput] = msg;\n  return outputs;\n}\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n  outputs[route.index] = msg;\n  return outputs;\n}\nlet db;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('zone config scope: module unavailable: ' + scopeLoad.error, msg);\n    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const actor = await db.get(\n    'SELECT user_uuid,role FROM users WHERE id=? AND username=? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!actor || !actor.user_uuid) {\n    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });\n  }\n  const actorScope = await scope.assertFreshRole(\n    db,\n    actor.user_uuid,\n    actor.role,\n    { scopedMode: true }\n  );\n  if (actorScope.role === 'viewer') {\n    throw Object.assign(new Error('insufficient role'), { statusCode: 403 });\n  }\n  const zoneId = Number(msg.req && msg.req.params &&\n    (msg.req.params.zone_id == null ? msg.req.params.id : msg.req.params.zone_id));\n  if (!Number.isInteger(zoneId)) {\n    throw Object.assign(new Error('Invalid zone ID'), { statusCode: 400 });\n  }\n  const zone = await db.get(\n    'SELECT id,user_id,zone_uuid FROM irrigation_zones WHERE id=? AND deleted_at IS NULL LIMIT 1',\n    [zoneId]\n  );\n  if (!zone || !zone.zone_uuid) {\n    throw Object.assign(new Error('zone not found'), { statusCode: 404 });\n  }\n  await scope.assertFreshZoneAccess(\n    db,\n    actor.user_uuid,\n    zone.zone_uuid,\n    { scopedMode: true }\n  );\n  msg._scopedZoneWriteAuthorized = true;\n  msg._scopedZoneOwnerId = Number(zone.user_id);\n  msg.actor_user_uuid = actor.user_uuid;\n  flow.set('actor_user_uuid', actor.user_uuid);\n  outputs[route.index] = msg;\n  return outputs;\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    error: msg.statusCode === 404 ? 'Zone not found' :\n      (msg.statusCode === 403 ? 'Forbidden' : String(error && error.message || error))\n  };\n  outputs[errorOutput] = msg;\n  return outputs;\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('zone config scope close: ' + String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
+    "outputs": 5,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 340,
+    "y": 500,
+    "wires": [
+      [
+        "dendro-tz-fn"
+      ],
+      [
+        "dendro-location-fn"
+      ],
+      [
+        "zone-config-fn"
+      ],
+      [
+        "zone-calibration-fn"
+      ],
+      [
+        "dendro-http-resp"
+      ]
+    ]
+  },
+  {
+    "id": "admin-users-list-http",
+    "type": "http in",
+    "z": "auth-tab",
+    "name": "GET /api/users",
+    "url": "/api/users",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 900,
+    "wires": [
+      [
+        "scoped-admin-account-router"
+      ]
+    ]
+  },
+  {
+    "id": "admin-users-create-http",
+    "type": "http in",
+    "z": "auth-tab",
+    "name": "POST /api/users",
+    "url": "/api/users",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 940,
+    "wires": [
+      [
+        "scoped-admin-account-router"
+      ]
+    ]
+  },
+  {
+    "id": "admin-users-password-http",
+    "type": "http in",
+    "z": "auth-tab",
+    "name": "POST /api/users/:uuid/password-reset",
+    "url": "/api/users/:uuid/password-reset",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 980,
+    "wires": [
+      [
+        "scoped-admin-account-router"
+      ]
+    ]
+  },
+  {
+    "id": "admin-users-role-http",
+    "type": "http in",
+    "z": "auth-tab",
+    "name": "PUT /api/users/:uuid/role",
+    "url": "/api/users/:uuid/role",
+    "method": "put",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 1020,
+    "wires": [
+      [
+        "scoped-admin-account-router"
+      ]
+    ]
+  },
+  {
+    "id": "admin-users-disabled-http",
+    "type": "http in",
+    "z": "auth-tab",
+    "name": "PUT /api/users/:uuid/disabled",
+    "url": "/api/users/:uuid/disabled",
+    "method": "put",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 1060,
+    "wires": [
+      [
+        "scoped-admin-account-router"
+      ]
+    ]
+  },
+  {
+    "id": "admin-zone-grant-http",
+    "type": "http in",
+    "z": "auth-tab",
+    "name": "POST /api/grants/zone",
+    "url": "/api/grants/zone",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 1100,
+    "wires": [
+      [
+        "scoped-admin-account-router"
+      ]
+    ]
+  },
+  {
+    "id": "admin-zone-grant-delete-http",
+    "type": "http in",
+    "z": "auth-tab",
+    "name": "DELETE /api/grants/zone/:assignmentUuid",
+    "url": "/api/grants/zone/:assignmentUuid",
+    "method": "delete",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 1140,
+    "wires": [
+      [
+        "scoped-admin-account-router"
+      ]
+    ]
+  },
+  {
+    "id": "admin-plot-grant-http",
+    "type": "http in",
+    "z": "auth-tab",
+    "name": "POST /api/grants/plot",
+    "url": "/api/grants/plot",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 1180,
+    "wires": [
+      [
+        "scoped-admin-account-router"
+      ]
+    ]
+  },
+  {
+    "id": "admin-plot-grant-delete-http",
+    "type": "http in",
+    "z": "auth-tab",
+    "name": "DELETE /api/grants/plot/:assignmentUuid",
+    "url": "/api/grants/plot/:assignmentUuid",
+    "method": "delete",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 1220,
+    "wires": [
+      [
+        "scoped-admin-account-router"
+      ]
+    ]
+  },
+  {
+    "id": "scoped-admin-account-router",
+    "type": "function",
+    "z": "auth-tab",
+    "name": "Admin Account + Grant API",
+    "func": "return (async () => {\nconst respond = function(statusCode, payload) {\n  msg.statusCode = statusCode;\n  msg.payload = payload;\n  msg.headers = {\n    'Content-Type': 'application/json',\n    'Access-Control-Allow-Origin': '*'\n  };\n  return msg;\n};\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n  return respond(404, { message: 'Not found' });\n}\nlet db;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\nconst run = function(sql, params) {\n  return new Promise(function(resolve, reject) {\n    db.run(sql, params || [], function(error) {\n      if (error) return reject(error);\n      resolve({ changes: Number(this && this.changes || 0), lastID: Number(this && this.lastID || 0) });\n    });\n  });\n};\nconst all = function(sql, params) {\n  return new Promise(function(resolve, reject) {\n    db.all(sql, params || [], function(error, rows) {\n      error ? reject(error) : resolve(rows || []);\n    });\n  });\n};\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('admin account API: scope module unavailable: ' + scopeLoad.error, msg);\n    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const actor = await db.get(\n    'SELECT user_uuid,role FROM users WHERE id=? AND username=? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!actor || !actor.user_uuid) {\n    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });\n  }\n  await scope.assertFreshRole(\n    db,\n    actor.user_uuid,\n    'admin',\n    { scopedMode: true }\n  );\n  const method = String(msg.req && msg.req.method || '').toUpperCase();\n  const requestPath = String(msg.req && (msg.req.path || msg.req.url) || '').split('?')[0];\n  const body = msg.req && msg.req.body || msg.payload || {};\n  const now = new Date().toISOString();\n\n  if (method === 'GET' && requestPath === '/api/users') {\n    const users = await all(\n      'SELECT username,user_uuid,role,disabled_at,created_at FROM users ORDER BY username'\n    );\n    return respond(200, { users });\n  }\n  if (method === 'POST' && requestPath === '/api/users') {\n    const username = String(body.username || '').trim();\n    const password = String(body.password || '');\n    const role = String(body.role || 'researcher').trim().toLowerCase();\n    if (!username || password.length < 6 || !['admin', 'researcher', 'viewer'].includes(role)) {\n      throw Object.assign(new Error('Valid username, password, and role are required'), { statusCode: 400 });\n    }\n    const userUuid = crypto.randomUUID();\n    await run(\n      'INSERT INTO users ' +\n        '(username,password_hash,created_at,updated_at,user_uuid,role,edge_originated,sync_version) ' +\n        'VALUES(?,?,?,?,?,?,1,1)',\n      [username, bcrypt.hashSync(password, 10), now, now, userUuid, role]\n    );\n    scope.invalidateScope(userUuid);\n    return respond(201, {\n      username,\n      user_uuid: userUuid,\n      role,\n      disabled_at: null,\n      created_at: now\n    });\n  }\n  const userUuid = String(msg.req && msg.req.params && msg.req.params.uuid || '').trim();\n  if (method === 'POST' && /\\/api\\/users\\/[^/]+\\/password-reset$/.test(requestPath)) {\n    const password = String(body.password || body.temporary_password || '');\n    if (password.length < 6) {\n      throw Object.assign(new Error('Password must be at least 6 characters'), { statusCode: 400 });\n    }\n    const changed = await run(\n      'UPDATE users SET password_hash=?,updated_at=?,sync_version=sync_version+1 WHERE user_uuid=?',\n      [bcrypt.hashSync(password, 10), now, userUuid]\n    );\n    if (!changed.changes) throw Object.assign(new Error('User not found'), { statusCode: 404 });\n    return respond(200, { success: true });\n  }\n  if (method === 'PUT' && /\\/api\\/users\\/[^/]+\\/role$/.test(requestPath)) {\n    const role = String(body.role || '').trim().toLowerCase();\n    if (!['admin', 'researcher', 'viewer'].includes(role)) {\n      throw Object.assign(new Error('Invalid role'), { statusCode: 400 });\n    }\n    const guardedSql = scope.buildDeroleUserGuardedSql().replace(\n      'SET role = ?',\n      'SET role = ?, updated_at = ?, sync_version = sync_version + 1'\n    );\n    const changed = await run(guardedSql, [role, now, userUuid, role]);\n    if (!changed.changes) {\n      const exists = await db.get('SELECT 1 AS found FROM users WHERE user_uuid=?', [userUuid]);\n      throw Object.assign(\n        new Error(exists ? 'Cannot remove the last enabled admin' : 'User not found'),\n        { statusCode: exists ? 409 : 404 }\n      );\n    }\n    scope.invalidateScope(userUuid);\n    return respond(200, { success: true, user_uuid: userUuid, role });\n  }\n  if (method === 'PUT' && /\\/api\\/users\\/[^/]+\\/disabled$/.test(requestPath)) {\n    if (typeof body.disabled !== 'boolean') {\n      throw Object.assign(new Error('disabled must be boolean'), { statusCode: 400 });\n    }\n    let changed;\n    if (body.disabled) {\n      const guardedSql = scope.buildDisableUserGuardedSql().replace(\n        'SET disabled_at =',\n        'SET updated_at = ?, sync_version = sync_version + 1, disabled_at ='\n      );\n      changed = await run(guardedSql, [now, userUuid]);\n    } else {\n      changed = await run(\n        'UPDATE users SET disabled_at=NULL,updated_at=?,sync_version=sync_version+1 WHERE user_uuid=?',\n        [now, userUuid]\n      );\n    }\n    if (!changed.changes) {\n      const exists = await db.get('SELECT 1 AS found FROM users WHERE user_uuid=?', [userUuid]);\n      throw Object.assign(\n        new Error(exists ? 'Cannot disable the last enabled admin' : 'User not found'),\n        { statusCode: exists ? 409 : 404 }\n      );\n    }\n    scope.invalidateScope(userUuid);\n    return respond(200, { success: true, user_uuid: userUuid, disabled: body.disabled });\n  }\n  const isZoneGrant = requestPath === '/api/grants/zone';\n  const isPlotGrant = requestPath === '/api/grants/plot';\n  if (method === 'POST' && (isZoneGrant || isPlotGrant)) {\n    const targetUserUuid = String(body.user_uuid || '').trim();\n    const resourceUuid = String(isZoneGrant ? body.zone_uuid : body.plot_uuid || '').trim();\n    const user = await db.get(\n      'SELECT user_uuid FROM users WHERE user_uuid=? LIMIT 1',\n      [targetUserUuid]\n    );\n    const resource = await db.get(\n      isZoneGrant\n        ? 'SELECT zone_uuid FROM irrigation_zones WHERE zone_uuid=? AND deleted_at IS NULL LIMIT 1'\n        : 'SELECT plot_uuid FROM journal_plots WHERE plot_uuid=? AND deleted_at IS NULL LIMIT 1',\n      [resourceUuid]\n    );\n    if (!user || !resource) {\n      throw Object.assign(new Error('User or resource not found'), { statusCode: 404 });\n    }\n    const assignmentUuid = crypto.randomBytes(16).toString('hex');\n    const table = isZoneGrant ? 'user_zone_assignments' : 'user_plot_assignments';\n    const column = isZoneGrant ? 'zone_uuid' : 'plot_uuid';\n    await run(\n      'INSERT INTO ' + table + ' ' +\n        '(assignment_uuid,user_uuid,' + column + ',assigned_by_user_uuid,' +\n        'gateway_device_eui,sync_version,created_at,updated_at) VALUES(?,?,?,?,?,1,?,?)',\n      [\n        assignmentUuid,\n        targetUserUuid,\n        resourceUuid,\n        actor.user_uuid,\n        String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase(),\n        now,\n        now\n      ]\n    );\n    scope.invalidateScope(targetUserUuid);\n    return respond(201, {\n      assignment_uuid: assignmentUuid,\n      user_uuid: targetUserUuid,\n      [column]: resourceUuid\n    });\n  }\n  const zoneGrantDelete = method === 'DELETE' && /\\/api\\/grants\\/zone\\/[^/]+$/.test(requestPath);\n  const plotGrantDelete = method === 'DELETE' && /\\/api\\/grants\\/plot\\/[^/]+$/.test(requestPath);\n  if (zoneGrantDelete || plotGrantDelete) {\n    const assignmentUuid = String(\n      msg.req && msg.req.params && msg.req.params.assignmentUuid || ''\n    ).trim();\n    const table = zoneGrantDelete ? 'user_zone_assignments' : 'user_plot_assignments';\n    const assignment = await db.get(\n      'SELECT user_uuid FROM ' + table + ' WHERE assignment_uuid=? AND deleted_at IS NULL LIMIT 1',\n      [assignmentUuid]\n    );\n    if (!assignment) {\n      throw Object.assign(new Error('Grant not found'), { statusCode: 404 });\n    }\n    await run(\n      'UPDATE ' + table + ' SET deleted_at=?,updated_at=?,sync_version=sync_version+1 ' +\n        'WHERE assignment_uuid=? AND deleted_at IS NULL',\n      [now, now, assignmentUuid]\n    );\n    scope.invalidateScope(assignment.user_uuid);\n    return respond(200, { success: true, assignment_uuid: assignmentUuid });\n  }\n  return respond(404, { message: 'Not found' });\n} catch (error) {\n  const statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  const constraint = /(?:SQLITE_CONSTRAINT|UNIQUE constraint)/.test(String(error && error.message || error));\n  return respond(constraint ? 409 : statusCode, {\n    message: statusCode === 403 ? 'Forbidden' : String(error && error.message || error)\n  });\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('admin account API close: ' + String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
+      },
+      {
+        "var": "bcrypt",
+        "module": "bcryptjs"
+      }
+    ],
+    "x": 500,
+    "y": 1060,
+    "wires": [
+      [
+        "auth-response"
       ]
     ]
   }

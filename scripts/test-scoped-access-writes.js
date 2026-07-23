@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   executeFunction,
+  facadeDb,
   loadNode,
   makeAuthHeader,
   seedScopedDb,
@@ -730,6 +731,293 @@ test('W5: flag-off device-config routing preserves each legacy branch', async ()
       });
       assert.equal(response.result[index].req.path, path);
       assert.equal(response.result.filter(Boolean).length, 1);
+    }
+  } finally {
+    db.close();
+  }
+});
+
+const ZONE_CONFIG_ROUTES = [
+  ['PUT', '/api/irrigation-zones/1/timezone', { zone_id: '1' }],
+  ['PUT', '/api/irrigation-zones/1/location', { zone_id: '1' }],
+  ['PUT', '/api/irrigation-zones/1/config', { zone_id: '1' }],
+  ['POST', '/api/irrigation-zones/1/calibration', { id: '1' }],
+];
+
+test('W7: every zone-config route fresh-checks scope and records the actor', async () => {
+  const db = seedScopedDb();
+  try {
+    for (const [index, [method, path, params]] of ZONE_CONFIG_ROUTES.entries()) {
+      scopeHelper._resetForTests();
+      const allowed = await executeFunction(loadNode('scoped-zone-config-guard'), {
+        msg: scopedRequest(2, 'res1', method, path, params),
+        env: ENV,
+        db,
+      });
+      assert.equal(allowed.result[index].actor_user_uuid, 'u-res1');
+      assert.equal(allowed.result[index]._scopedZoneOwnerId, 2);
+      assert.equal(allowed.flowState.actor_user_uuid, 'u-res1');
+
+      scopeHelper._resetForTests();
+      const foreignAdmin = await executeFunction(loadNode('scoped-zone-config-guard'), {
+        msg: scopedRequest(1, 'admin1', method, path, params),
+        env: ENV,
+        db,
+      });
+      assert.equal(foreignAdmin.result.at(-1).statusCode, 404);
+
+      scopeHelper._resetForTests();
+      const viewer = await executeFunction(loadNode('scoped-zone-config-guard'), {
+        msg: scopedRequest(3, 'view1', method, path, params),
+        env: ENV,
+        db,
+      });
+      assert.equal(viewer.result.at(-1).statusCode, 403);
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('W7: a grantee reaches the legacy zone write as the resource owner', async () => {
+  const db = seedScopedDb();
+  try {
+    const guarded = await executeFunction(loadNode('scoped-zone-config-guard'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/irrigation-zones/2/location',
+        { zone_id: '2' },
+        { latitude: 47.1, longitude: 8.2 }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(guarded.result[1]._scopedZoneOwnerId, 1);
+    const written = await executeFunction(loadNode('dendro-location-fn'), {
+      msg: guarded.result[1],
+      env: ENV,
+      db,
+    });
+    assert.equal(written.result.statusCode, 200);
+    const zone = db.prepare(
+      'SELECT latitude,longitude FROM irrigation_zones WHERE id=2'
+    ).get();
+    assert.equal(zone.latitude, 47.1);
+    assert.equal(zone.longitude, 8.2);
+  } finally {
+    db.close();
+  }
+});
+
+async function adminApi(db, userId, username, method, path, params = {}, body = {}) {
+  scopeHelper._resetForTests();
+  return executeFunction(loadNode('scoped-admin-account-router'), {
+    msg: scopedRequest(userId, username, method, path, params, body),
+    env: { ...ENV, DEVICE_EUI: '0016C001F1000001' },
+    db,
+  });
+}
+
+test('W8: admin account CRUD omits hashes and protects the last enabled admin', async () => {
+  const db = seedScopedDb();
+  try {
+    const created = await adminApi(
+      db,
+      1,
+      'admin1',
+      'POST',
+      '/api/users',
+      {},
+      { username: 'research2', password: 'temporary-pass', role: 'researcher' }
+    );
+    assert.equal(created.result.statusCode, 201);
+    const userUuid = created.result.payload.user_uuid;
+
+    const listed = await adminApi(db, 1, 'admin1', 'GET', '/api/users');
+    assert.equal(listed.result.statusCode, 200);
+    assert.ok(listed.result.payload.users.some((user) => user.user_uuid === userUuid));
+    assert.ok(
+      listed.result.payload.users.every(
+        (user) => !Object.prototype.hasOwnProperty.call(user, 'password_hash')
+      )
+    );
+
+    const reset = await adminApi(
+      db,
+      1,
+      'admin1',
+      'POST',
+      `/api/users/${userUuid}/password-reset`,
+      { uuid: userUuid },
+      { password: 'new-temporary-pass' }
+    );
+    assert.deepEqual(reset.result.payload, { success: true });
+
+    const promoted = await adminApi(
+      db,
+      1,
+      'admin1',
+      'PUT',
+      `/api/users/${userUuid}/role`,
+      { uuid: userUuid },
+      { role: 'viewer' }
+    );
+    assert.equal(promoted.result.statusCode, 200);
+    assert.equal(
+      db.prepare('SELECT role FROM users WHERE user_uuid=?').get(userUuid).role,
+      'viewer'
+    );
+
+    const disabledResearcher = await adminApi(
+      db,
+      1,
+      'admin1',
+      'PUT',
+      `/api/users/${userUuid}/disabled`,
+      { uuid: userUuid },
+      { disabled: true }
+    );
+    assert.equal(disabledResearcher.result.statusCode, 200);
+
+    const lastAdmin = await adminApi(
+      db,
+      1,
+      'admin1',
+      'PUT',
+      '/api/users/u-admin/disabled',
+      { uuid: 'u-admin' },
+      { disabled: true }
+    );
+    assert.equal(lastAdmin.result.statusCode, 409);
+    assert.equal(
+      db.prepare("SELECT disabled_at FROM users WHERE user_uuid='u-admin'").get().disabled_at,
+      null
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('W8: serialized admin disable attempts leave at least one enabled admin', async () => {
+  const db = seedScopedDb();
+  try {
+    const created = await adminApi(
+      db,
+      1,
+      'admin1',
+      'POST',
+      '/api/users',
+      {},
+      { username: 'admin2', password: 'temporary-pass', role: 'admin' }
+    );
+    const admin2Uuid = created.result.payload.user_uuid;
+    const first = await adminApi(
+      db,
+      1,
+      'admin1',
+      'PUT',
+      `/api/users/${admin2Uuid}/disabled`,
+      { uuid: admin2Uuid },
+      { disabled: true }
+    );
+    assert.equal(first.result.statusCode, 200);
+    const second = await adminApi(
+      db,
+      1,
+      'admin1',
+      'PUT',
+      '/api/users/u-admin/disabled',
+      { uuid: 'u-admin' },
+      { disabled: true }
+    );
+    assert.equal(second.result.statusCode, 409);
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS count FROM users WHERE role='admin' AND disabled_at IS NULL"
+      ).get().count,
+      1
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('W8: zone and plot grants invalidate into the next resolved scope', async () => {
+  const db = seedScopedDb();
+  const scopedDb = facadeDb(db);
+  try {
+    const zoneGrant = await adminApi(
+      db,
+      1,
+      'admin1',
+      'POST',
+      '/api/grants/zone',
+      {},
+      { user_uuid: 'u-view1', zone_uuid: 'z-2' }
+    );
+    assert.equal(zoneGrant.result.statusCode, 201);
+    let resolved = await scopeHelper.resolveScope(scopedDb, 'u-view1', { scopedMode: true });
+    assert.ok(resolved.zoneUuids.has('z-2'));
+    const zoneAssignment = zoneGrant.result.payload.assignment_uuid;
+    const zoneDelete = await adminApi(
+      db,
+      1,
+      'admin1',
+      'DELETE',
+      `/api/grants/zone/${zoneAssignment}`,
+      { assignmentUuid: zoneAssignment }
+    );
+    assert.equal(zoneDelete.result.statusCode, 200);
+    resolved = await scopeHelper.resolveScope(scopedDb, 'u-view1', { scopedMode: true });
+    assert.ok(!resolved.zoneUuids.has('z-2'));
+
+    const plotGrant = await adminApi(
+      db,
+      1,
+      'admin1',
+      'POST',
+      '/api/grants/plot',
+      {},
+      { user_uuid: 'u-view1', plot_uuid: 'p-2' }
+    );
+    assert.equal(plotGrant.result.statusCode, 201);
+    resolved = await scopeHelper.resolveScope(scopedDb, 'u-view1', { scopedMode: true });
+    assert.ok(resolved.plotUuids.has('p-2'));
+    const plotAssignment = plotGrant.result.payload.assignment_uuid;
+    await adminApi(
+      db,
+      1,
+      'admin1',
+      'DELETE',
+      `/api/grants/plot/${plotAssignment}`,
+      { assignmentUuid: plotAssignment }
+    );
+    resolved = await scopeHelper.resolveScope(scopedDb, 'u-view1', { scopedMode: true });
+    assert.ok(!resolved.plotUuids.has('p-2'));
+  } finally {
+    db.close();
+  }
+});
+
+test('W8: every account and grant endpoint rejects non-admins', async () => {
+  const db = seedScopedDb();
+  const endpoints = [
+    ['GET', '/api/users', {}],
+    ['POST', '/api/users', {}],
+    ['POST', '/api/users/u-view1/password-reset', { uuid: 'u-view1' }],
+    ['PUT', '/api/users/u-view1/role', { uuid: 'u-view1' }],
+    ['PUT', '/api/users/u-view1/disabled', { uuid: 'u-view1' }],
+    ['POST', '/api/grants/zone', {}],
+    ['DELETE', '/api/grants/zone/g-1', { assignmentUuid: 'g-1' }],
+    ['POST', '/api/grants/plot', {}],
+    ['DELETE', '/api/grants/plot/g-plot', { assignmentUuid: 'g-plot' }],
+  ];
+  try {
+    for (const [method, path, params] of endpoints) {
+      const response = await adminApi(db, 2, 'res1', method, path, params);
+      assert.equal(response.result.statusCode, 403, `${method} ${path}`);
     }
   } finally {
     db.close();
