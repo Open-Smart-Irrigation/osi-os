@@ -63,6 +63,7 @@ const OSI_DB_BINDING = { variable: 'osiDb', module: 'osi-db-helper' };
 const OSI_JOURNAL_BINDING = { variable: 'osiJournal', module: 'osi-journal' };
 const OSI_COMMAND_LEDGER_BINDING = { variable: 'osiCommandLedger', module: 'osi-command-ledger' };
 const OSI_ZONE_COMMAND_BINDING = { variable: 'osiZoneCommands', module: 'zone-commands' };
+const OSI_SCOPE_BINDING = { variable: 'scope', module: 'scope' };
 
 function requireOsiLibContract(node, expectedBindings, label, unavailableErrorPrefix = 'Journal helpers unavailable:') {
     if (!node || typeof node.func !== 'string') return false;
@@ -210,7 +211,7 @@ if (!journalRouter) {
 } else {
     requireOsiLibContract(
         journalRouter,
-        [OSI_DB_BINDING, OSI_JOURNAL_BINDING],
+        [OSI_DB_BINDING, OSI_JOURNAL_BINDING, OSI_SCOPE_BINDING],
         'journal routes: journal-api-router-fn'
     );
     if (JSON.stringify(journalRouter.wires) !== JSON.stringify([['journal-api-response']])) {
@@ -249,7 +250,7 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     }
     const router = profileById['journal-api-router-fn'];
     if (!router || router.func.length > 4096 ||
-        !auditOsiLibBindings(router, [OSI_DB_BINDING, OSI_JOURNAL_BINDING]).ok ||
+        !auditOsiLibBindings(router, [OSI_DB_BINDING, OSI_JOURNAL_BINDING, OSI_SCOPE_BINDING]).ok ||
         JSON.stringify(router.wires) !== JSON.stringify([['journal-api-response']])) {
         failures.push(`journal routes ${profile}: router surface is not exact`);
     }
