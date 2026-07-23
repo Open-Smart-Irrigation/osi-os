@@ -261,7 +261,10 @@ function verifyAnalysisRouterImplementation(flows, failures) {
   const source = String(router.func || '');
   assertContains(failures, source, 'verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization)', 'analysis bearer auth gate');
   assertContains(failures, source, 'osiHistory.buildAnalysisCatalog', 'analysis /channels calls buildAnalysisCatalog');
-  assertContains(failures, source, 'buildAnalysisCatalog(db, { deviceEui: deviceEui, userId: auth.userId })', 'analysis /channels scopes catalog to authenticated user');
+  // Wave 3 scoped-access port (AgroLink d49e1cd28): buildAnalysisCatalog also
+  // threads zoneUuids through when OSI_SCOPED_ACCESS=1 (osi-scope-helper's
+  // listScopeZoneUuids); the literal call site gained a trailing property.
+  assertContains(failures, source, 'buildAnalysisCatalog(db, { deviceEui: deviceEui, userId: auth.userId, zoneUuids: scopeZoneUuids })', 'analysis /channels scopes catalog to authenticated user');
   assertContains(failures, source, 'osiHistory.resolveAnalysisSeries', 'analysis /series calls resolveAnalysisSeries');
   assertContains(failures, source, 'userId: auth.userId', 'analysis /series scopes resolver to authenticated user');
   assertContains(failures, source, 'osiHistory.listAnalysisViews', 'analysis /views calls listAnalysisViews');

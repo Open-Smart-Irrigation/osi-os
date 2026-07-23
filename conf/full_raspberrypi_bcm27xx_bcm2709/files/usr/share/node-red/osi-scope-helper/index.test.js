@@ -307,3 +307,37 @@ test('authorizeAdminRead verifies, authorizes, and closes its database handle', 
   });
   assert.equal(closeCalls, 1);
 });
+
+test('assertEnabledAccount accepts every enabled role and rejects disabled accounts', async () => {
+  const enabled = fakeDb({
+    get: () => ({
+      id: 3,
+      username: 'viewer',
+      role: 'viewer',
+      disabled_at: null,
+      user_uuid: 'u-viewer',
+    }),
+    all: () => [],
+  });
+  const resolved = await scope.assertEnabledAccount(
+    enabled,
+    'u-viewer',
+    { scopedMode: true }
+  );
+  assert.equal(resolved.role, 'viewer');
+
+  const disabled = fakeDb({
+    get: () => ({
+      id: 4,
+      username: 'disabled',
+      role: 'researcher',
+      disabled_at: '2026-07-01',
+      user_uuid: 'u-disabled',
+    }),
+    all: () => [],
+  });
+  await assert.rejects(
+    () => scope.assertEnabledAccount(disabled, 'u-disabled', { scopedMode: true }),
+    (error) => error.status === 403
+  );
+});

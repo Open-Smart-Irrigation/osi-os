@@ -134,8 +134,8 @@
       "reason": "Measured on port/sdi12-edge with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 482 -> branch base a38c9db6 482 -> HEAD 551 = +69, all +69 of it this SDI-12 port. SDI-12 contribution: the device catalog gains the DRAGINO_SDI12 row."
     },
     "get-actuations-query": {
-      "delta": 54,
-      "reason": "valve control: recent-actuations SELECT exposes valve_actuation_expectations.trigger (+20); final-fix-wave MINOR 3: defensive CREATE TABLE IF NOT EXISTS fallback for never-migrated Pis was missing the trigger column entirely, 500ing the SELECT vae.trigger on those gateways - added `trigger TEXT` to the fallback DDL to match the real (migrated) schema (+34) [re-measured on port/sdi12-edge: origin/main 2957 -> HEAD 3011 = +54, all of it the pre-existing feat/valve-control baseline; this port did not touch the node]"
+      "delta": 1299,
+      "reason": "Wave 3 scoped-access port (AgroLink d49e1cd28, feat(api): scope shared analysis reads): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 3011 -> HEAD 4310 = +1299, superseding the previous +54 entry (fully subsumed: the vae.trigger column, added on main after AgroLink's fork, is preserved verbatim in both the CREATE TABLE and SELECT). When OSI_SCOPED_ACCESS=1, resolves the caller's zone scope via osi-scope-helper (assertEnabledAccount + listScopeZoneUuids) and scopes the recent-actuations query to iz.zone_uuid IN (...) instead of d.user_id =; unscoped mode keeps the owner-id predicate. Adds osiLib to libs; the CREATE TABLE catch is now visible via the function-level catch/node.warn."
     },
     "zone-env-fn": {
       "delta": 854,
@@ -296,11 +296,15 @@
     "journal-api-router-fn": {
       "delta": 229,
       "reason": "Wave 3 scoped-access port (AgroLink 46f1d0fc, feat(journal): apply union rule to reads, auto-merged cleanly): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 1020 -> HEAD 1249 = +229. Journal HTTP requests now resolve an optional scope module (osiLib.require('scope'), gated on OSI_SCOPED_ACCESS) and pass it through to osiJournal.handleHttpRequest as scope/scopedMode, replacing the previous direct osiJournal-only dispatch."
+    },
+    "analysis-api-router-fn": {
+      "delta": 664,
+      "reason": "Wave 3 scoped-access port (AgroLink d49e1cd28, feat(api): scope shared analysis reads): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 7532 -> HEAD 8196 = +664. When OSI_SCOPED_ACCESS=1, resolves the caller's zone scope via osi-scope-helper (assertEnabledAccount + listScopeZoneUuids) and threads zoneUuids through to buildAnalysisCatalog/resolveAnalysisSeries/listAnalysisViews; adds osiLib to libs."
     }
   },
   "total_allowance": {
-    "delta": 147060,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress -- re-tightened again at the end of the slice. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink 708e11410, feat(api): require admin for diagnostic reads) 1,220,034 chars = 147,060. Measured, not estimated, and not a sum-of-sums. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: +39,486 is this scope port so far (commits through 708e11410) -- six new nodes (api-me-auth 3,530 + api-me-fn 1,745 + four *-admin-read-guard nodes at 1,145 each = 4,580) summing to 9,855; plus existing-node growth totalling 29,631 across auth-register-func, auth-login-func, auth-process-result, auth-db-insert, get-devices-query, device-api-http500, get-zones-query, fn_build_sensor_sql_params, dendro-history-fn, sensor-history-fn, rain-history-fn, al-status-decode, dendro-daily-fn, dendro-zone-rec-fn, dendro-raw-fn, get-gateway-location-auth-fn, zone-env-fn, s2120-zones-get-fn, strega-today-liters-fn, history-api-router-fn, improvement-requests-api-router, and journal-api-router-fn. 9,855 + 29,631 = 39,486 exactly."
+    "delta": 150632,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink d49e1cd28, feat(api): scope shared analysis reads) 1,223,606 chars = 150,632. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: +43,058 is this scope port so far -- seven new nodes (api-me-auth 3,530 + api-me-fn 1,745 + four *-admin-read-guard nodes at 1,145 each = 4,580 + catalog-authenticated-read-guard 1,609) summing to 11,464; plus existing-node growth totalling 31,594 across the nodes listed in node_allowances for this port (auth-*, get-devices-query, device-api-http500, get-zones-query, fn_build_sensor_sql_params, dendro/sensor/rain-history-fn, al-status-decode, dendro-daily-fn, dendro-zone-rec-fn, dendro-raw-fn, get-gateway-location-auth-fn, zone-env-fn, s2120-zones-get-fn, strega-today-liters-fn, history-api-router-fn, improvement-requests-api-router, journal-api-router-fn, get-actuations-query, analysis-api-router-fn). 11,464 + 31,594 = 43,058 exactly."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {

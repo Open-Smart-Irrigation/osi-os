@@ -254,6 +254,17 @@ function historyRequest(userId, username, method, path, params = {}, body = {}) 
   return msg;
 }
 
+function seedAnalysisDevices(db) {
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id,
+      dendro_enabled, created_at, updated_at
+    ) VALUES
+      ('A84041D000000001', 'Scoped tree', 'DRAGINO_LSN50', 2, 1, 1, '2026-01-01', '2026-01-01'),
+      ('A84041D000000002', 'Granted tree', 'DRAGINO_LSN50', 1, 2, 1, '2026-01-01', '2026-01-01');
+  `);
+}
+
 test('F4: history zone reads allow owned and granted zones but hide foreign zones', async () => {
   const ownDb = seedScopedDb();
   try {
@@ -523,6 +534,186 @@ test('F6: database download remains disabled after the admin guard', async () =>
     assert.deepEqual(response.result && response.result.payload, {
       error: 'Database download is disabled',
     });
+  } finally {
+    db.close();
+  }
+});
+
+test('F7: catalog is available to every enabled authenticated role', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const enabled = await executeFunction(loadNode('catalog-authenticated-read-guard'), {
+      msg: historyRequest(3, 'view1', 'GET', '/api/catalog'),
+      env: ENV,
+      db,
+    });
+    assert.ok(enabled.result && enabled.result[0], 'enabled viewer reaches the catalog');
+
+    db.prepare("UPDATE users SET disabled_at = '2026-07-01' WHERE id = 3").run();
+    scopeHelper._resetForTests();
+    const disabled = await executeFunction(loadNode('catalog-authenticated-read-guard'), {
+      msg: historyRequest(3, 'view1', 'GET', '/api/catalog'),
+      env: ENV,
+      db,
+    });
+    assert.equal(disabled.result && disabled.result[1].statusCode, 403);
+  } finally {
+    db.close();
+  }
+});
+
+test('F7: analysis channels include grants and exclude foreign zones', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  seedAnalysisDevices(db);
+  try {
+    const granted = await executeFunction(loadNode('analysis-api-router-fn'), {
+      msg: historyRequest(2, 'res1', 'GET', '/api/analysis/channels'),
+      env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
+      db,
+    });
+    const grantedZoneIds = new Set(
+      (granted.result.payload.channels || []).map((channel) => channel.zoneId)
+    );
+    assert.ok(grantedZoneIds.has(2), 'granted zone appears in the analysis catalog');
+
+    scopeHelper._resetForTests();
+    const viewer = await executeFunction(loadNode('analysis-api-router-fn'), {
+      msg: historyRequest(3, 'view1', 'GET', '/api/analysis/channels'),
+      env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
+      db,
+    });
+    const viewerZoneIds = new Set(
+      (viewer.result.payload.channels || []).map((channel) => channel.zoneId)
+    );
+    assert.ok(!viewerZoneIds.has(2), 'foreign zone is absent from the analysis catalog');
+  } finally {
+    db.close();
+  }
+});
+
+test('F7: analysis series cannot resolve a selector from a foreign zone', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  seedAnalysisDevices(db);
+  try {
+    const catalog = await executeFunction(loadNode('analysis-api-router-fn'), {
+      msg: historyRequest(2, 'res1', 'GET', '/api/analysis/channels'),
+      env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
+      db,
+    });
+    const foreign = (catalog.result.payload.channels || []).find(
+      (channel) => channel.zoneId === 2
+    );
+    assert.ok(foreign, 'granted user fixture exposes a zone-two selector');
+
+    scopeHelper._resetForTests();
+    const response = await executeFunction(loadNode('analysis-api-router-fn'), {
+      msg: historyRequest(
+        3,
+        'view1',
+        'POST',
+        '/api/analysis/series',
+        {},
+        {
+          selectors: [{ seriesId: foreign.seriesId }],
+          range: { from: '2026-01-01', to: '2026-01-03' },
+        }
+      ),
+      env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
+      db,
+    });
+    assert.deepEqual(response.result.payload.series, []);
+    assert.deepEqual(response.result.payload.dropped, [
+      { seriesId: foreign.seriesId, reason: 'unknown' },
+    ]);
+  } finally {
+    db.close();
+  }
+});
+
+test('F7: analysis views remain per-user and drop foreign selectors', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  seedAnalysisDevices(db);
+  try {
+    const catalog = await executeFunction(loadNode('analysis-api-router-fn'), {
+      msg: historyRequest(2, 'res1', 'GET', '/api/analysis/channels'),
+      env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
+      db,
+    });
+    const foreign = (catalog.result.payload.channels || []).find(
+      (channel) => channel.zoneId === 2
+    );
+    assert.ok(foreign);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS analysis_views (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        owner_user_uuid TEXT,
+        name TEXT NOT NULL,
+        view_json TEXT NOT NULL,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    db.prepare(
+      'INSERT INTO analysis_views(user_id, owner_user_uuid, name, view_json) VALUES (?,?,?,?)'
+    ).run(3, 'u-view1', 'Viewer view', JSON.stringify({
+      schemaVersion: 1,
+      name: 'Viewer view',
+      selectors: [{ seriesId: foreign.seriesId }],
+    }));
+    db.prepare(
+      'INSERT INTO analysis_views(user_id, owner_user_uuid, name, view_json) VALUES (?,?,?,?)'
+    ).run(2, 'u-res1', 'Other user view', JSON.stringify({
+      schemaVersion: 1,
+      name: 'Other user view',
+      selectors: [],
+    }));
+
+    scopeHelper._resetForTests();
+    const response = await executeFunction(loadNode('analysis-api-router-fn'), {
+      msg: historyRequest(3, 'view1', 'GET', '/api/analysis/views'),
+      env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
+      db,
+    });
+    assert.equal(response.result.payload.views.length, 1);
+    assert.equal(response.result.payload.views[0].name, 'Viewer view');
+    assert.deepEqual(response.result.payload.views[0].selectors, []);
+    assert.deepEqual(response.result.payload.views[0].droppedSeriesIds, [foreign.seriesId]);
+  } finally {
+    db.close();
+  }
+});
+
+test('F7: recent actuations use owned-plus-granted zone visibility', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO valve_actuation_expectations (
+      expectation_id, device_eui, zone_id, commanded_at,
+      commanded_duration_seconds, expected_close_at, volume_source, created_at
+    ) VALUES
+      ('a-owned', 'VALVE1', 1, '2026-01-01', 60, '2026-01-01T00:01:00Z', 'unknown', '2026-01-01'),
+      ('a-granted', 'DENDRO2', 2, '2026-01-02', 60, '2026-01-02T00:01:00Z', 'unknown', '2026-01-02');
+  `);
+  try {
+    const response = await executeFunction(loadNode('get-actuations-query'), {
+      msg: {
+        payload: [{ id: 2 }],
+        authUsername: 'res1',
+      },
+      env: ENV,
+      db,
+    });
+    assert.deepEqual(
+      response.result[0].payload.map((row) => row.expectation_id).sort(),
+      ['a-granted', 'a-owned']
+    );
   } finally {
     db.close();
   }
