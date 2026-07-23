@@ -114,8 +114,9 @@ closed contract schema without changing legacy command payloads.
 
 The response is HTTP 202 with the desired resource and desired-state
 operation. Lists return the canonical mirror plus the caller's latest active
-desired operation. Continued editing while pending therefore uses the latest
-desired base and remains explicit about canonical versus desired values.
+desired operation. Continued editing while pending rewrites against the
+unchanged canonical base version and remains explicit about canonical versus
+desired values.
 
 `CONFLICT`, permanent rejection, retryable failure, ACK-before-mirror, and
 mirror-before-ACK use the Task 4 state machine unchanged.
@@ -129,9 +130,13 @@ All endpoints are under `/api/v1/journal/gateways/{gatewayEui}`:
 - `PUT /entries/{uuid}`, `/plots/{uuid}`, `/plot-groups/{uuid}`,
   `/custom-vocab/{uuid}`;
 - `POST /entries/{uuid}/void`;
-- `POST /operations/{operationUuid}/retry`;
 - `GET /export.json`;
 - `GET /export.csv`.
+
+`FAILED_RETRYABLE` keeps the existing command pending for automatic lease
+retry. Conflict, permanent rejection, and expiry recovery use an edited
+resubmission against the latest canonical base. Journal does not add a second
+retry endpoint beside the Task 4 state machine.
 
 JSON export contains the canonical aggregate objects selected by the same
 filters as the list endpoint. CSV uses UTF-8, CRLF, RFC 4180 quoting, and
@@ -152,7 +157,8 @@ in dashboard navigation. The cloud workspace provides:
 - plot, plot-group, and custom-vocabulary editors;
 - JSON and CSV exports;
 - immediate desired rendering through the shared pending-state component;
-- conflict, rejection, expiry, and retry controls.
+- conflict, rejection, and expiry recovery controls plus visible automatic
+  retry state.
 
 The UI calls a journal-specific API adapter, but response normalization remains
 in `frontend/src/services/api.ts`. Draft persistence is local browser state.
@@ -177,8 +183,8 @@ Acceptance requires:
 - migration and index tests on PostgreSQL;
 - applier tests for replay, duplicate, stale, equal-version conflict, and
   tombstones;
-- command tests for all five mutations, continued editing, conflict, retry,
-  rejection, and void;
+- command tests for all five mutations, continued editing, conflict,
+  automatic retry, rejection recovery, and void;
 - byte-identical contract vendor gates;
 - comparison against canonical edge command and aggregate fixtures;
 - controller authorization and export tests;

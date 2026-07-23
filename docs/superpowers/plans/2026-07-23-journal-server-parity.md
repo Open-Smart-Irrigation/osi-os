@@ -81,8 +81,8 @@ models.
 - Create `backend/src/test/java/org/osi/server/journal/JournalControllerTest.java`
 - Create `backend/src/test/java/org/osi/server/journal/JournalExportTest.java`
 
-1. Add failing authorization, list, filter, create, update, void, retry, and
-   rejection-recovery tests.
+1. Add failing authorization, list, create, update, void, automatic-retry,
+   and rejection-recovery tests.
 2. Implement the gateway-scoped routes in the design.
 3. Add deterministic JSON and formula-safe CRLF CSV export.
 4. Compare controller command payloads and exported resource fields with the
@@ -115,8 +115,9 @@ models.
 - Modify `frontend/src/App.tsx`, navigation, route tests, and locale catalogs
 
 1. Add failing tests for snake/camel normalization, canonical-versus-desired
-   rendering, pending/conflict/rejected states, continued edit, retry, void,
-   plot and group editing, filters, and exports.
+   rendering, pending/conflict/rejected states, continued edit, automatic
+   retry, edit-and-resubmit recovery, void, plot and group editing, and
+   exports.
 2. Implement the API adapter and compact responsive workspace.
 3. Reuse `PendingStateNotice`; do not duplicate desired-state labels.
 4. Add accessible navigation and all supported locales.

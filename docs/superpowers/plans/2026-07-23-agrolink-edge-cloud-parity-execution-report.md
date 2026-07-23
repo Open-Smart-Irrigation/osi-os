@@ -2,11 +2,13 @@
 
 ## Preparation record: 2026-07-23
 
-**State:** Tasks 0 through 4 complete and pushed. Launch heads were fetched,
+**State:** Tasks 0 through 5 complete and pushed. Launch heads were fetched,
 base gates run, one server frontend base defect repaired, the route/contract
 inventory regenerated, the scoped-access governing documents reconciled, the
 cross-repository contract gate and edge scoped-access foundation landed, and
 the cloud desired-state ledger now reconciles command ACKs with edge mirrors.
+The five journal event and command operations are enabled end to end, with
+cloud mirrors, queued edits, exports, and a responsive journal workspace.
 
 ### Repository bases
 
@@ -257,6 +259,75 @@ Server commits `7c009da` through
 Governing design and plan commits `412267fe`, `722fd160`, and `ce19950b`
 were pushed to `design-sync/agrolink`.
 
+### Task 5 journal parity
+
+The cloud now mirrors journal entries, vocabulary, plots, and plot groups in
+four Flyway-owned JSONB aggregate tables with selected indexed fields. Five
+per-resource appliers enforce gateway identity, replay idempotence, monotonic
+versions, equal-version equality, tombstones, and desired-state convergence.
+The event dispatcher maps each journal operation to its actual resource type
+and key, so watermarks and desired-state observations share the canonical
+aggregate identity.
+
+Cloud mutations issue the exact five edge commands through the Task 4 desired
+state ledger. The server overwrites owner, author, gateway, origin, status,
+target version, and effect-key fields from the authenticated link context.
+The trusted command owner is the gateway-local user UUID rather than the cloud
+user UUID. Commands use canonical `command_type`; the legacy camel-case alias
+is suppressed when that field is present.
+
+Gateway-scoped journal APIs expose canonical mirrors alongside the latest
+desired operation. Unsupported gateways remain readable but cannot accept
+mutations until bootstrap advertises `field_journal_v1`. Linked-gateway
+summaries now expose that capability to the UI. JSON export returns canonical
+entry aggregates. CSV export is UTF-8 with a BOM, uses CRLF records, and
+protects spreadsheet formula cells.
+
+The `/journal` workspace selects among linked gateways, overlays desired
+values immediately, keeps pending edits on the unchanged canonical base
+version, shows conflict and rejection detail, supports edit-and-resubmit
+recovery, and leaves retryable failures on the automatic command lease path.
+New cloud records are final-only. Plot, plot-group, and custom-vocabulary
+forms build the complete portable resource shapes expected by edge command
+validation. JSON and CSV downloads, dashboard navigation, responsive layouts,
+and matching keys in all seven locale catalogs are included.
+
+The contract rollout removed the five journal commands from
+`commands.cloudDeferred` and the five journal events from
+`eventOps.cloudDeferred`. Journal module ownership remains an audited closed
+set. The five scoped-access events remain deferred on the cloud axis; their
+already-shipped Phase A producers are allowed behind the rollout flag.
+
+The first frontend API and route tests were intentionally red because
+`journalAPI` and `/journal` did not exist. The first linked-gateway summary
+test failed to compile because `fieldJournalSupported` was not exposed. The
+first promoted parity test failed because the verifier still excluded journal
+server handlers. Each failure cleared after the corresponding implementation.
+One Gradle command was invoked from the server repository root and exited 127
+because the wrapper lives in `backend/`; it was immediately rerun from the
+correct directory. No application failure was hidden.
+
+Task 5 verification:
+
+| Command | Result |
+|---|---|
+| `node --test scripts/verify-sync-op-parity.test.js` with the server source override | exit 0; 44 tests passed |
+| `node scripts/verify-sync-contract.js` | exit 0; 40 command types, journal enabled, golden rollout verified |
+| `node scripts/verify-sync-op-parity.js` with the server source override | exit 0; 23 enabled server operations, scoped operations cloud-deferred |
+| `node scripts/test-contract-schemas.js` | exit 0; canonical journal command and aggregate fixtures passed |
+| Focused server journal, vendor, and linked-gateway selection | exit 0; `BUILD SUCCESSFUL in 55s` |
+| `NODE_OPTIONS=--max-old-space-size=2048 ./gradlew test --no-daemon --max-workers=2` | exit 0; 1,105 tests, no failures or skips, `BUILD SUCCESSFUL in 1m 26s` |
+| `npm run test:unit` | exit 0; TAP 45 tests plus 71 Vitest files and 278 tests passed |
+| `NODE_OPTIONS=--max-old-space-size=2048 npm run build` | exit 0; 1,729 modules transformed |
+| `node .claude/skills/anti-slop-writing/slop-check.js` on journal locale copy | exit 0 |
+| `git diff --check` in both repositories | exit 0 |
+
+The edge design commit `6fd5d7fd`, contract rollout commit `af274c9c`, and
+server commits `4bf1c67` through `1c953c7` were pushed to their target
+branches. The vendored golden fixture is byte-identical to the canonical edge
+fixture. No production host, live gateway, or external network drive was
+accessed.
+
 ### Memory samples
 
 Every heavyweight command started above the 4,096 MiB threshold. Recorded
@@ -281,6 +352,11 @@ gate.
 Task 4 samples recorded between 13,907 MiB and 14,148 MiB available. The final
 full backend suite started with 13,920 MiB available. Every sample included
 the swap counters and cleared the 4,096 MiB gate.
+
+Task 5 samples recorded between 12,172 MiB and 13,442 MiB available. The final
+frontend build started with 13,217 MiB available,
+`pswpin 726934797`, and `pswpout 892359280`. Every heavyweight command cleared
+the 4,096 MiB gate.
 
 ### Program ownership
 
