@@ -341,3 +341,104 @@ test('assertEnabledAccount accepts every enabled role and rejects disabled accou
     (error) => error.status === 403
   );
 });
+
+test('assertFreshDeviceAccess bypasses cache and honors zone scope', async () => {
+  let deviceReads = 0;
+  const db = fakeDb({
+    get: (sql) => {
+      if (sql.includes('FROM devices')) {
+        deviceReads += 1;
+        return {
+          deveui: 'D1',
+          type_id: 'DRAGINO_LSN50',
+          zone_uuid: 'z1',
+        };
+      }
+      if (sql.includes('FROM users')) {
+        return {
+          id: 7,
+          username: 'researcher',
+          role: 'researcher',
+          disabled_at: null,
+          user_uuid: 'u1',
+        };
+      }
+      return undefined;
+    },
+    all: (sql) => sql.includes('user_zone_assignments')
+      ? [{ zone_uuid: 'z1' }]
+      : [],
+  });
+
+  await scope.assertFreshDeviceAccess(db, 'u1', 'D1', { scopedMode: true });
+  await scope.assertFreshDeviceAccess(db, 'u1', 'D1', { scopedMode: true });
+  assert.equal(deviceReads, 2);
+});
+
+test('assertFreshDeviceAccess gives admins no zone-scope bypass', async () => {
+  const db = fakeDb({
+    get: (sql) => {
+      if (sql.includes('FROM devices')) {
+        return {
+          deveui: 'D1',
+          type_id: 'DRAGINO_LSN50',
+          zone_uuid: 'z-foreign',
+        };
+      }
+      if (sql.includes('FROM users')) {
+        return {
+          id: 1,
+          username: 'admin',
+          role: 'admin',
+          disabled_at: null,
+          user_uuid: 'u-admin',
+        };
+      }
+      return undefined;
+    },
+    all: () => [],
+  });
+
+  await assert.rejects(
+    () => scope.assertFreshDeviceAccess(
+      db,
+      'u-admin',
+      'D1',
+      { scopedMode: true }
+    ),
+    (error) => error.status === 404
+  );
+});
+
+test('buildDisableUserGuardedSql protects only the last enabled admin', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_uuid TEXT UNIQUE,
+      role TEXT NOT NULL DEFAULT 'researcher',
+      disabled_at TEXT
+    );
+    INSERT INTO users (user_uuid, role)
+    VALUES ('u-admin','admin'), ('u-res','researcher');
+  `);
+  const sql = scope.buildDisableUserGuardedSql();
+  assert.match(sql, /role != 'admin'/);
+
+  assert.equal(db.prepare(sql).run('u-res').changes, 1);
+  assert.ok(
+    db.prepare("SELECT disabled_at FROM users WHERE user_uuid='u-res'").get().disabled_at
+  );
+  assert.equal(db.prepare(sql).run('u-admin').changes, 0);
+
+  db.exec("INSERT INTO users (user_uuid, role) VALUES ('u-admin2','admin')");
+  assert.equal(db.prepare(sql).run('u-admin').changes, 1);
+  db.close();
+});
+
+test('buildDeroleUserGuardedSql protects the last enabled admin', () => {
+  const sql = scope.buildDeroleUserGuardedSql();
+  assert.match(sql, /^UPDATE users SET role = \?/);
+  assert.match(sql, /COUNT\(\*\).*role='admin'/);
+});
