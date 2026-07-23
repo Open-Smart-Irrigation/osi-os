@@ -11448,5 +11448,90 @@
         "9d5e3035c3d069c4"
       ]
     ]
+  },
+  {
+    "id": "api-me-http",
+    "type": "http in",
+    "z": "device-api-tab",
+    "name": "GET /api/me",
+    "url": "/api/me",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 2570,
+    "wires": [
+      [
+        "api-me-auth"
+      ]
+    ]
+  },
+  {
+    "id": "api-me-auth",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Decode Token",
+    "func": "function getAuthSecret() {\n  const configured = String(env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET') || '').trim();\n  if (configured) return configured;\n  const fs = global.get('fs');\n  const secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];\n  if (fs) {\n    for (const secretPath of secretPaths) {\n      try {\n        const existing = String(fs.readFileSync(secretPath, 'utf8') || '').trim();\n        if (existing) return existing;\n      } catch (e) { node.warn('api-me: secret read failed: ' + e.message); }\n    }\n    const generated = crypto.randomBytes(48).toString('hex');\n    for (const secretPath of secretPaths) {\n      try {\n        fs.writeFileSync(secretPath, generated + '\\n', { mode: 0o600 });\n        return generated;\n      } catch (e) { node.warn('api-me: secret write failed: ' + e.message); }\n    }\n  }\n  const err = new Error('AUTH_TOKEN_SECRET or JWT_SECRET must be configured');\n  err.statusCode = 500;\n  throw err;\n}\nfunction toBase64Url(input) {\n  return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');\n}\nfunction fromBase64Url(input) {\n  let value = String(input || '').replace(/-/g, '+').replace(/_/g, '/');\n  while (value.length % 4) value += '=';\n  return Buffer.from(value, 'base64');\n}\nfunction verifyBearer(authHeader) {\n  if (!authHeader || !authHeader.startsWith('Bearer ')) {\n    const err = new Error('Unauthorized');\n    err.statusCode = 401;\n    throw err;\n  }\n  const token = authHeader.substring(7).trim();\n  const parts = token.split('.');\n  if (parts.length !== 2 || !parts[0] || !parts[1]) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  const payloadB64 = parts[0];\n  const sig = parts[1];\n  const expectedSig = toBase64Url(crypto.createHmac('sha256', getAuthSecret()).update(payloadB64).digest());\n  const sigBuf = Buffer.from(sig, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  let payload;\n  try {\n    payload = JSON.parse(fromBase64Url(payloadB64).toString('utf8'));\n  } catch (_) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  const userId = Number(payload.userId);\n  const username = String(payload.username || '').trim();\n  const exp = Number(payload.exp || 0);\n  if (!Number.isFinite(userId) || !username) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  if (exp && Date.now() > exp) {\n    const err = new Error('Token expired');\n    err.statusCode = 401;\n    throw err;\n  }\n  return { userId, username };\n}\n\nlet username = null;\ntry { username = verifyBearer(msg.req?.headers?.authorization).username; } catch (e) { username = null; }\nmsg.username = username;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 380,
+    "y": 2570,
+    "wires": [
+      [
+        "api-me-fn"
+      ]
+    ]
+  },
+  {
+    "id": "api-me-fn",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Resolve Current User Scope",
+    "func": "const username = msg.username;\nif (!username) { msg.statusCode = 401; msg.payload = { message: 'Unauthorized' }; return msg; }\n\nconst scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';\nconst load = osiLib.require('scope');\nif (!load.ok) {\n  node.error('api-me: scope module unavailable: ' + load.error, msg);\n  msg.statusCode = 500; msg.payload = { message: 'scope resolver unavailable' }; return msg;\n}\nconst S = load.value;\n\nreturn (async () => {\n  const db = new osiDb.Database('/data/db/farming.db');\n  const close = () => new Promise((res) => db.close(() => res()));\n  try {\n    const user = await db.get(\n      'SELECT username, user_uuid, role, disabled_at FROM users WHERE username = ?', [username]);\n    if (!user || user.disabled_at) { msg.statusCode = 403; msg.payload = { message: 'Forbidden' }; return msg; }\n    let body;\n    if (!scopedOn) {\n      body = { username: user.username, user_uuid: user.user_uuid, role: 'admin',\n               zone_uuids: null, plot_uuids: null, features: { scoped_access: false } };\n    } else {\n      const scope = await S.resolveScope(db, user.user_uuid, { scopedMode: true });\n      body = { username: user.username, user_uuid: user.user_uuid, role: scope.role,\n               zone_uuids: [...scope.zoneUuids], plot_uuids: [...scope.plotUuids],\n               features: { scoped_access: true } };\n    }\n    msg.statusCode = 200;\n    msg.payload = body;\n    return msg;\n  } catch (e) {\n    node.warn('api-me failed: ' + (e && e.message ? e.message : e));\n    msg.statusCode = 500; msg.payload = { message: 'unable to resolve scope' };\n    return msg;\n  } finally {\n    try { await close(); } catch (e) { node.warn('api-me close failed: ' + (e && e.message ? e.message : e)); }\n  }\n})();",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 660,
+    "y": 2570,
+    "wires": [
+      [
+        "api-me-resp"
+      ]
+    ]
+  },
+  {
+    "id": "api-me-resp",
+    "type": "http response",
+    "z": "device-api-tab",
+    "name": "Response",
+    "statusCode": "",
+    "headers": {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization"
+    },
+    "x": 940,
+    "y": 2570,
+    "wires": []
   }
 ]
