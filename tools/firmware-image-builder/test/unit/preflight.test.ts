@@ -46,7 +46,7 @@ function capabilities(overrides: Partial<PreflightCapabilities> = {}) {
     repository: { inspect: async () => { count('repository'); return { isGitWorktree: true }; } },
     fileSystem: { statfs: async () => { count('statfs'); return { freeBytes: 25 * 1024 ** 3 }; } }, paths,
     executables: { check: async (name) => { count(`executable:${name}`); return { path: TRUSTED_PREFLIGHT_EXECUTABLES[name], version: `${name} 1.0` }; } },
-    docker: { inspectLockedImage: async (imageReference) => { count('docker'); return { available: true, imageReference, imageDigest: digest, imageId: `sha256:${digest}`, clientVersion: '27.0', serverVersion: '27.0' }; } },
+    docker: { inspectLockedImage: async (imageReference) => { count('docker'); return { available: true, imageReference, imageDigest: digest, imageId: `sha256:${digest}`, clientVersion: '27.0', serverVersion: '27.0', architecture: 'amd64', os: 'linux' }; } },
     systemd: { checkUserManager: async () => { count('systemd'); return { available: true, runnerActive: false }; } },
     lock: { read: async () => { count('lock'); return JSON.stringify(validLock()); } },
     ...overrides,
@@ -109,7 +109,7 @@ describe('typed preflight checks', () => {
     }
     await expect(service(capabilities()).run(request)).resolves.toBeDefined();
     const optional = validLock(); optional.publisherSha256 = '1'.repeat(64); optional.imageId = digest;
-    await expect(service(capabilities({ lock: { read: async () => JSON.stringify(optional) }, docker: { inspectLockedImage: async (imageReference) => ({ available: true, imageReference, imageDigest: digest, imageId: `sha256:${digest}`, clientVersion: '27', serverVersion: '27' }) } })).run(request)).resolves.toBeDefined();
+    await expect(service(capabilities({ lock: { read: async () => JSON.stringify(optional) }, docker: { inspectLockedImage: async (imageReference) => ({ available: true, imageReference, imageDigest: digest, imageId: `sha256:${digest}`, clientVersion: '27', serverVersion: '27', architecture: 'amd64', os: 'linux' }) } })).run(request)).resolves.toBeDefined();
     const legitimateRepository = validLock(); legitimateRepository.imageRepository = 'registry.osi.invalid/contest/test';
     expect(validateBuilderLock(legitimateRepository, '2026.07.23.1')).toMatchObject({ ok: true });
   });
@@ -218,8 +218,8 @@ describe('typed preflight checks', () => {
     const calls: Array<{ executable: string; argv: readonly string[]; options: unknown }> = [];
     const exec: PreflightExecCapability = { run: async (executable, argv, options) => {
       calls.push({ executable, argv, options });
-      if (argv[0] === 'version') return { stdout: JSON.stringify({ Client: { Version: '27' }, Server: { Version: '27' } }), stderr: '', exitCode: 0 };
-      if (argv[0] === 'image') return { stdout: JSON.stringify({ Id: `sha256:${digest}`, RepoDigests: [`registry.osi.example/builder@sha256:${digest}`] }), stderr: '', exitCode: 0 };
+      if (argv[0] === 'version') return { stdout: JSON.stringify({ Client: { Version: '27' }, Server: { Version: '27', Arch: 'amd64' } }), stderr: '', exitCode: 0 };
+      if (argv[0] === 'image') return { stdout: JSON.stringify({ Id: `sha256:${digest}`, Architecture: 'amd64', Os: 'linux', RepoDigests: [`registry.osi.example/builder@sha256:${digest}`] }), stderr: '', exitCode: 0 };
       if (argv[0] === '--user') return { stdout: argv[1] === 'is-system-running' ? 'running\n' : 'active\n', stderr: '', exitCode: 0 };
       return { stdout: argv[0] === '-C' ? 'true\n' : `${executable} 27\n`, stderr: '', exitCode: 0 };
     } };
@@ -251,10 +251,28 @@ describe('typed preflight checks', () => {
   });
 
   it('classifies unavailable Docker evidence separately from a valid digest mismatch', async () => {
-    const unavailable = capabilities({ docker: { inspectLockedImage: async (imageReference) => ({ available: false, imageReference, imageDigest: null, imageId: null, clientVersion: null, serverVersion: null }) } });
+    const unavailable = capabilities({ docker: { inspectLockedImage: async (imageReference) => ({ available: false, imageReference, imageDigest: null, imageId: null, clientVersion: null, serverVersion: null, architecture: null, os: null }) } });
     await expect(service(unavailable).run(request)).rejects.toMatchObject({ code: 'DOCKER_UNAVAILABLE' });
-    const mismatch = capabilities({ docker: { inspectLockedImage: async (imageReference) => ({ available: true, imageReference, imageDigest: '1'.repeat(64), imageId: `sha256:${digest}`, clientVersion: '27', serverVersion: '27' }) } });
+    const mismatch = capabilities({ docker: { inspectLockedImage: async (imageReference) => ({ available: true, imageReference, imageDigest: '1'.repeat(64), imageId: `sha256:${digest}`, clientVersion: '27', serverVersion: '27', architecture: 'amd64', os: 'linux' }) } });
     await expect(service(mismatch).run(request)).rejects.toMatchObject({ code: 'BUILDER_DIGEST_MISMATCH' });
+  });
+
+  it('requires locked image architecture and rejects daemon/image disagreement without mutation', async () => {
+    for (const image of [{ Architecture: 'arm64', Os: 'linux' }, { Os: 'linux' }] as const) {
+      const calls: Array<{ executable: string; argv: readonly string[] }> = [];
+      const exec: PreflightExecCapability = { run: async (executable, argv) => {
+        calls.push({ executable, argv });
+        if (argv[0] === 'version') return { stdout: JSON.stringify({ Client: { Version: '27' }, Server: { Version: '27', Arch: 'amd64' } }), stderr: '', exitCode: 0 };
+        return { stdout: JSON.stringify({ Id: `sha256:${digest}`, RepoDigests: [`registry.osi.invalid/builder@sha256:${digest}`], ...image }), stderr: '', exitCode: 0 };
+      } };
+      const defaults = createReadOnlyPreflightDefaults({ exec });
+      await expect(service(capabilities({ docker: defaults.docker })).run(request), image.Architecture ?? 'missing image architecture').rejects.toMatchObject({ code: 'DOCKER_UNAVAILABLE' });
+      expect(calls.map(({ executable, argv }) => [executable, argv])).toEqual([
+        ['/usr/bin/docker', ['version', '--format', '{{json .}}']],
+        ['/usr/bin/docker', ['image', 'inspect', '--format', '{{json .}}', `registry.osi.invalid/builder@sha256:${digest}`]],
+      ]);
+      expect(calls.flatMap(({ argv }) => argv).some((argument) => new Set(['build', 'run', 'rm', 'create', 'push']).has(argument))).toBe(false);
+    }
   });
 
   it('reserves cache capacity and IDs before concurrent evaluation begins', async () => {

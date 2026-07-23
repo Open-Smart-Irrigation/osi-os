@@ -25,6 +25,22 @@ export function validateRustToolchain(value: unknown): RustToolchainValidation {
 
 export const RUST_CI_LLVM_ARTIFACT = 'rust-ci-llvm';
 
+export type OpenWrtRustFeedValidation =
+  | { readonly ok: true; readonly policy: 'system-llvm-only' }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * The builder image proves its own compiler path; the firmware feed must be
+ * checked separately before OpenWrt configuration so that proof is not
+ * mistaken for proof of the eventual firmware compiler.
+ */
+export function validateOpenWrtRustFeed(source: string): OpenWrtRustFeedValidation {
+  if (typeof source !== 'string' || source.length === 0) return { ok: false, reason: 'OpenWrt Rust feed source is missing' };
+  if (/download-ci-llvm\s*=\s*true/iu.test(source)) return { ok: false, reason: 'OpenWrt Rust feed enables the mutable Rust CI LLVM artifact' };
+  if (!/download-ci-llvm\s*=\s*false/iu.test(source)) return { ok: false, reason: 'OpenWrt Rust feed does not explicitly disable Rust CI LLVM downloads' };
+  return { ok: true, policy: 'system-llvm-only' };
+}
+
 export interface RustToolchainEvidence {
   readonly rustcVersion: string;
   readonly llvmVersion: string;

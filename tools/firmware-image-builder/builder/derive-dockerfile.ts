@@ -14,11 +14,16 @@ export class BuilderSourceError extends Error {
 }
 
 const PACKAGE_ALIASES: Readonly<Record<string, string>> = Object.freeze({ 'libncurses5-dev': 'libncurses-dev' });
+export const BUILDER_ONLY_PACKAGES = Object.freeze([
+  'gcc-14', 'g++-14', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev', 'rustc', 'cargo', 'rust-src', 'rust-llvm', 'xz-utils',
+  'musl:arm64', 'musl-dev:arm64', 'musl:armhf', 'musl-dev:armhf',
+] as const);
 
 function packageTokens(source: string): Set<string> {
   const tokens: string[] = [];
-  for (const match of source.matchAll(/apt-get\s+install\b([\s\S]*?)(?=\s+&&|\n\s*&&|$)/gu)) {
-    tokens.push(...(match[1]!.match(/[A-Za-z0-9][A-Za-z0-9+_.-]*/gu) ?? []));
+  for (const match of source.matchAll(/apt-get\s+(?:install|download)\b([\s\S]*?)(?=\s+&&|\n\s*&&|$)/gu)) {
+    const packageArguments = match[1]!.replace(/=\$\{[A-Z0-9_]+\}/gu, '');
+    tokens.push(...(packageArguments.match(/[A-Za-z0-9][A-Za-z0-9+_.:-]*/gu) ?? []));
   }
   const flags = new Set(['no-install-recommends', 'no-install-suggests', 'yes']);
   return new Set(tokens.map((token) => PACKAGE_ALIASES[token] ?? token).filter((token) => !flags.has(token)));
@@ -30,10 +35,18 @@ export function supportedPackageTokens(source: string): readonly string[] {
 
 export async function assertSupportedPackageParity(rootDockerfilePath: string, toolDockerfilePath: string): Promise<void> {
   const [root, tool] = await Promise.all([readFile(rootDockerfilePath, 'utf8'), readFile(toolDockerfilePath, 'utf8')]);
+  assertExactPackageParity(root, tool);
+}
+
+export function assertExactPackageParity(root: string, tool: string): void {
   const rootPackages = packageTokens(root);
   const toolPackages = packageTokens(tool);
+  const allowedExtras = new Set<string>(BUILDER_ONLY_PACKAGES);
   const missing = [...rootPackages].filter((pkg) => !toolPackages.has(pkg));
-  if (missing.length > 0) throw new BuilderSourceError('BUILDER_SOURCE_DRIFT', `Tool-owned builder is missing Dockerfile-devel tools: ${missing.join(', ')}`);
+  const unexpected = [...toolPackages].filter((pkg) => !rootPackages.has(pkg) && !allowedExtras.has(pkg));
+  if (missing.length > 0 || unexpected.length > 0) {
+    throw new BuilderSourceError('BUILDER_SOURCE_DRIFT', `Dockerfile-devel parity mismatch; missing=${missing.sort().join(',') || 'none'} unexpected=${unexpected.sort().join(',') || 'none'}`);
+  }
 }
 
 export async function deriveDockerfile(options: {
@@ -54,14 +67,13 @@ export async function deriveDockerfile(options: {
     await assertSupportedPackageParity(options.rootDockerfilePath, toolDockerfilePath);
     root = await readFile(options.rootDockerfilePath, 'utf8');
     tool = await readFile(toolDockerfilePath, 'utf8');
-    if (!/^FROM\s+\S+@sha256:[0-9a-f]{64}\s*$/mu.test(tool)) throw new BuilderSourceError('BUILDER_DOCKERFILE_INVALID', 'The tool-owned Dockerfile must use a digest-pinned base image');
+    if (!/^FROM\s+--platform=linux\/amd64\s+\S+@sha256:[0-9a-f]{64}\s*$/mu.test(tool)) throw new BuilderSourceError('BUILDER_DOCKERFILE_INVALID', 'The tool-owned Dockerfile must use a digest-pinned linux/amd64 base image');
     await mkdir(dirname(options.destinationPath), { recursive: true });
     await copyFile(toolDockerfilePath, options.destinationPath);
   }
   const rootPackages = packageTokens(root);
   const toolPackages = packageTokens(tool);
-  const missing = [...rootPackages].filter((pkg) => !toolPackages.has(pkg));
-  if (missing.length > 0) throw new BuilderSourceError('BUILDER_SOURCE_DRIFT', `Tool-owned builder is missing Dockerfile-devel tools: ${missing.join(', ')}`);
+  assertExactPackageParity(root, tool);
   const polly = [...toolPackages].find((pkg) => /^libpolly-\d+-dev$/u.test(pkg));
   if (!polly) throw new BuilderSourceError('BUILDER_DOCKERFILE_INVALID', 'Tool-owned builder has no matching Polly development package');
   const packageNames = Object.freeze([...toolPackages].sort());

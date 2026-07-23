@@ -1,49 +1,40 @@
 {
   "schemaVersion": 1,
+  "runtime": "docker",
+  "architecture": "linux/amd64",
   "image": {
     "reference": "{{imageRepository}}@sha256:{{imageDigest}}",
     "pullPolicy": "never"
   },
+  "user": "<uid>:<gid>",
   "workdir": "/workdir",
-  "user": "{{uid}}:{{gid}}",
   "network": "bridge",
   "environment": {
-    "HOME": "/home/buildbot",
-    "LANG": "C",
-    "LC_ALL": "C",
-    "NO_COLOR": "1",
+    "HOME": "/workdir/.builder-home",
+    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     "CARGO_BUILD_JOBS": "2",
-    "SOURCE_DATE_EPOCH": "{{sourceDateEpoch}}",
-    "RUST_LLVM_CONFIG": "/usr/bin/llvm-config"
+    "TZ": "UTC",
+    "SOURCE_DATE_EPOCH": "<pinned-commit-time>"
+  },
+  "mount": {
+    "type": "bind",
+    "source": "<job-worktree>",
+    "destination": "/workdir",
+    "readOnly": false
   },
   "security": {
     "capDrop": ["ALL"],
+    "capAdd": [],
     "devices": [],
+    "sockets": [],
     "privileged": false,
-    "readOnlyRootfs": false
+    "noNewPrivileges": true,
+    "pidsLimit": 4096,
+    "ulimit": "nofile=1024:4096"
   },
-  "mounts": [
-    { "source": "{{jobWorktree}}", "destination": "/workdir", "readOnly": false }
-  ],
-  "operations": {
-    "activate-target": ["make", "target/linux/prepare"],
-    "copy-feed-config": ["make", "package/feeds/osi/install"],
-    "update-feeds": ["./scripts/feeds", "update", "-a"],
-    "install-feeds": ["./scripts/feeds", "install", "-a"],
-    "resolve-config": ["make", "defconfig"],
-    "build-image": ["make", "-j2"],
-    "verify-image": ["/usr/bin/file", "--brief", "--mime-type", "{{artifact}}"],
-    "verify-profile-parity": ["/usr/bin/node", "scripts/verify-profile-parity.js"],
-    "verify-chameleon": ["/usr/bin/node", "scripts/verify-chameleon.js"],
-    "verify-db-schema": ["/usr/bin/node", "scripts/verify-db-schema-consistency.js"],
-    "verify-sync-flow": ["/usr/bin/node", "scripts/verify-sync-flow.js"],
-    "verify-strega": ["/usr/bin/node", "scripts/verify-strega-gen1.js"],
-    "verify-communication": ["/usr/bin/node", "scripts/verify-communication-contract.js"],
-    "check-mqtt-topics": ["/usr/bin/bash", "scripts/check-mqtt-topics.sh"],
-    "frontend-install": ["/usr/local/bin/npm", "ci", "--ignore-scripts"],
-    "frontend-test": ["/usr/local/bin/npm", "run", "test:unit", "--prefix", "web/react-gui"],
-    "frontend-typecheck": ["/usr/local/bin/npm", "run", "typecheck", "--prefix", "web/react-gui"],
-    "frontend-build": ["/usr/local/bin/npm", "run", "build", "--prefix", "web/react-gui"],
-    "mirror-gui": ["/usr/bin/node", "scripts/mirror-gui.js"]
-  }
+  "operationIds": [
+    "activate-target", "copy-feed-config", "update-feeds", "install-feeds", "resolve-config", "build-image", "verify-image",
+    "verify-profile-parity", "verify-chameleon", "verify-db-schema", "verify-sync-flow", "verify-strega", "verify-communication",
+    "check-mqtt-topics", "frontend-install", "frontend-test", "frontend-typecheck", "frontend-build", "mirror-gui"
+  ]
 }
