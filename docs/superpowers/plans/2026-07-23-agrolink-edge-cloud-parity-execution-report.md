@@ -2,10 +2,10 @@
 
 ## Preparation record: 2026-07-23
 
-**State:** Tasks 0 through 2 complete and pushed. Launch heads were fetched,
+**State:** Tasks 0 through 3 complete and pushed. Launch heads were fetched,
 base gates run, one server frontend base defect repaired, the route/contract
 inventory regenerated, the scoped-access governing documents reconciled, and
-the cross-repository contract gate landed.
+the cross-repository contract gate and edge scoped-access foundation landed.
 
 ### Repository bases
 
@@ -156,6 +156,61 @@ Edge commit `8a06e630bd9dadc315c917f18850a19a1959e930` and server commit
 `04e60bf669cfd02c4ac756ddf956b8b8acefa8bf` were pushed separately. Remote
 branch lookups returned the same SHAs.
 
+### Task 3 scoped-access Phase A
+
+`SCOPED_PHASE_A_READY=4eb055229b31ecfedb41478b9f7a316b09e09e58`
+
+The rebased schema uses migrations `0033` and `0034`. The schema migration
+adds durable positive user and assignment versions, seven migration-owned
+outbox triggers, and the disabled `scoped_access_emit` gate. The data migration
+backfills identifiers and versions and promotes the lowest-id active user to
+admin in the same versioned write. The user trigger emits `NEW.sync_version`;
+the user UUID trigger only fires on the first assignment.
+
+The registered `osi-scope-helper` resolves admin, zone, and plot scope and
+supports a fresh-role check that does not trust a stale cached admin role.
+The flow slice adds `/api/me`, exposes `scoped_access` through
+`/api/system/features`, persists the disabled-by-default UCI flag into the
+Node-RED environment, and keeps registration and login credentials on the
+request message. Scoped bootstrap uses one conditional insert and its own
+change count, so a same-username race loser returns 403. Disabled scoped users
+cannot obtain new tokens.
+
+The first auth harness run was intentionally red: all four tests reproduced
+credential cross-contamination, registration identity replacement, bootstrap
+race handling, and disabled-user token issuance. The completed implementation
+passes all four. The full sweep also exposed two stale test contracts. The
+journal feature response expected the old exact object; it now checks
+`scoped_access` in both flag states. The seed replay found that the fresh
+`users` declaration did not match SQLite's stored DDL after three
+`ALTER TABLE ... ADD COLUMN` operations; the seed now matches the replayed
+fingerprint.
+
+Task 3 verification:
+
+| Command | Result |
+|---|---|
+| `node scripts/verify-migrations.js` | exit 0; 34 migrations and checksum manifest verified |
+| `node scripts/verify-seed-replay.js` | exit 0; replay matches `seed-blank.sql` |
+| `node scripts/verify-runtime-schema-parity.js` | exit 0 |
+| `node scripts/verify-db-schema-consistency.js` | exit 0; all seven bundled databases passed |
+| `node scripts/verify-no-stray-ddl.js` | exit 0 |
+| `node scripts/verify-profile-parity.js` | exit 0 |
+| `node scripts/verify-boot-ddl-interpolation.js` | exit 0 |
+| `node scripts/verify-trigger-body-parity.js` | exit 0 |
+| `node scripts/test-journal-schema.js` | exit 0 |
+| `node scripts/verify-sync-flow.js` | exit 0 |
+| `node --test scripts/rehearse-scoped-access-migration.test.js` | exit 0; 8 tests passed |
+| `node --test scripts/rehearse-scoped-trigger-boot-survival.test.js` | exit 0; 2 tests passed |
+| `node --test .../osi-scope-helper/index.test.js` | exit 0; 8 tests passed |
+| `node --test scripts/test-auth-credential-isolation.js` | exit 0; 4 tests passed |
+| `node scripts/test-flows-wiring.js` | exit 0; 62 journal/bootstrap cases and aggregate wiring passed |
+| Flow parse, bare-require, size, silent-catch, MQTT, and helper-registration gates | exit 0 |
+
+Commits `1f6f0933` (schema), `d5882543` (scope helper), and `4eb05522`
+(auth, API, durable flag, and tests) were pushed to `design-sync/agrolink`.
+The remote branch resolved to the same Phase A head.
+
 ### Memory samples
 
 Every heavyweight command started above the 4,096 MiB threshold. Recorded
@@ -171,6 +226,11 @@ available. The final sample after both pushes recorded 14,655 MiB available,
 the required `/proc/vmstat` counters; this is an evidence gap, not an inferred
 zero-swap claim. The only terminated process was the owned, unguarded targeted
 Gradle invocation described above.
+
+Task 3 samples recorded between 13,638 MiB and 14,812 MiB available. The final
+heavyweight sample before `verify-sync-flow.js` recorded 13,638 MiB available,
+`pswpin 721693780`, and `pswpout 883231112`. Every sample cleared the 4,096 MiB
+gate.
 
 ### Program ownership
 
