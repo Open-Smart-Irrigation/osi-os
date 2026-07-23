@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { buildCatalogModel } from '../../journal/catalogModel';
+import { allowedProductKindsForOperation, buildCatalogModel } from '../../journal/catalogModel';
 import { firstMissingRequiredFieldCode } from '../../journal/draftResume';
-import { buildCorrectionPayload } from '../../journal/entryCorrection';
+import { buildCorrectionPayload, currentNoteValue, scalarSelectionsFromValues } from '../../journal/entryCorrection';
 import { deriveFieldStates } from '../../journal/templateEngine';
 import { useDraftsQueue } from '../../journal/useDraftsQueue';
 import { useJournalCatalog } from '../../journal/useJournalCatalog';
@@ -89,7 +89,7 @@ function initialResumeSeed(
     layout,
     fieldStates,
     inputs: draft.values,
-    selections: { activity_code: draft.activity_code },
+    selections: { activity_code: draft.activity_code, ...scalarSelectionsFromValues(draft.values) },
     numberInputErrors: new Map(),
     products,
     t,
@@ -101,12 +101,25 @@ const DraftResumePanel: React.FC<DraftResumePanelProps> = ({ draft, model, produ
   const { t } = useTranslation('journal');
   const layout = model.layouts.get(draft.layout_code ?? '');
   const template = model.templates.get(draft.template_code);
-  const [values, setValues] = useState<CaptureEntryValueInput[]>(draft.values);
+  // M1 fix (2026-07-23): mirrors DetailPanel's EntryCorrectionForm — the
+  // top-level `note` column is not stored as a journal_entry_values row, so
+  // it must be injected into the form's `values` seed here or the note
+  // textarea renders empty on resume even when the draft has a stored note.
+  const [values, setValues] = useState<CaptureEntryValueInput[]>(() => (
+    draft.note ? [...draft.values, { attribute_code: 'note', value: draft.note }] : draft.values
+  ));
   const focusedRef = useRef(false);
 
+  // Deviation 3 fix (2026-07-23): mirrors DetailPanel's EntryCorrectionForm —
+  // `selections` is derived from the LIVE `values` state (not just
+  // `draft.values` at mount), so an in-resume operation change re-scopes the
+  // operation-level field/requirement/product maps the same way the
+  // correction form already does. Previously this was activity-code-only,
+  // so resuming a draft always fell back to the (overloaded) activity-level
+  // field set regardless of which operation the draft actually carried.
   const selections: JournalSelections = useMemo(
-    () => ({ activity_code: draft.activity_code }),
-    [draft.activity_code],
+    () => ({ activity_code: draft.activity_code, ...scalarSelectionsFromValues(values) }),
+    [draft.activity_code, values],
   );
   const fieldStates = useMemo(
     () => draftFieldStates(layout, template, selections),
@@ -115,6 +128,15 @@ const DraftResumePanel: React.FC<DraftResumePanelProps> = ({ draft, model, produ
   const focusFieldCode = useMemo(
     () => firstMissingRequiredFieldCode(fieldStates, draft.values),
     [fieldStates, draft.values],
+  );
+  // Operation-level field/requirement/product scoping plan (full_record@10,
+  // spec §2): `selections` above is now live (derived from `values`), so
+  // operation_product_kinds (and operation_fields_by_operation/
+  // operation_requirements in the engine) resolve against the draft's
+  // actual stored/current operation, mirroring DetailPanel's correction form.
+  const allowedProductKinds = useMemo(
+    () => allowedProductKindsForOperation(template, selections),
+    [selections, template],
   );
   // Mirrors EntryCorrectionForm's ownership rule exactly (see the comment on
   // formOwnedAttributeCodes in DetailPanel.tsx / I2): the shared EntryForm
@@ -177,9 +199,14 @@ const DraftResumePanel: React.FC<DraftResumePanelProps> = ({ draft, model, produ
     setStaleError(false);
     setGenericError(false);
     try {
+      // M1 fix: buildCorrectionPayload defaults note to draft.note (the
+      // unedited stored value) since 'note' is never form-owned/attribute-
+      // carried — override it with whatever the textarea currently holds so
+      // an edited note persists (`?? null` allows clearing it).
       const finalizePayload: CreateEntryPayload = {
         ...buildCorrectionPayload(draft, formOwnedAttributeCodes, payload),
         base_sync_version: 0,
+        note: currentNoteValue(values) ?? null,
       };
       await journalApi.createEntry(finalizePayload);
       await retry();
@@ -220,6 +247,7 @@ const DraftResumePanel: React.FC<DraftResumePanelProps> = ({ draft, model, produ
         locale={locale}
         showValidation
         templateCode={template.code}
+        allowedProductKinds={allowedProductKinds}
       />
       {staleError && (
         <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">
@@ -263,7 +291,8 @@ export const DraftsQueue: React.FC<DraftsQueueProps> = ({ enabled = true, onResu
   const focusCodeFor = (draft: EntryAggregate): string | null => {
     const layout = model?.layouts.get(draft.layout_code ?? '');
     const template = model?.templates.get(draft.template_code);
-    const fieldStates = draftFieldStates(layout, template, { activity_code: draft.activity_code });
+    const selections = { activity_code: draft.activity_code, ...scalarSelectionsFromValues(draft.values) };
+    const fieldStates = draftFieldStates(layout, template, selections);
     return firstMissingRequiredFieldCode(fieldStates, draft.values);
   };
 

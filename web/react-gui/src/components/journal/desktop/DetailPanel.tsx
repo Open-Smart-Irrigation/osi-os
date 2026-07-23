@@ -2,9 +2,19 @@ import type { TFunction } from 'i18next';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { buildCatalogModel, catalogLabel, vocabLabelOrCode } from '../../../journal/catalogModel';
+import {
+  allowedProductKindsForOperation,
+  buildCatalogModel,
+  catalogLabel,
+  vocabLabelOrCode,
+} from '../../../journal/catalogModel';
 import { cycleDependentsFromError } from '../../../journal/cropCycle';
-import { buildCorrectionPayload, parseContextSnapshot } from '../../../journal/entryCorrection';
+import {
+  buildCorrectionPayload,
+  currentNoteValue,
+  parseContextSnapshot,
+  scalarSelectionsFromValues,
+} from '../../../journal/entryCorrection';
 import { deriveFieldStates } from '../../../journal/templateEngine';
 import { useJournalEntries } from '../../../journal/useJournalEntries';
 import { journalApi } from '../../../services/journalApi';
@@ -20,7 +30,6 @@ import type {
   CaptureEntryValueOutput,
   JournalCaptureCatalogModel,
   JournalLayoutDefinition,
-  JournalScalar,
   JournalSelections,
   JournalTemplateDefinition,
 } from '../../../types/journalCapture';
@@ -86,17 +95,6 @@ function formatStoredValue(
     return unit ? `${numberText} ${catalogLabel(unit, locale)}` : numberText;
   }
   return '';
-}
-
-function scalarSelectionsFromValues(values: readonly CaptureEntryValueInput[]): Record<string, JournalScalar> {
-  const result: Record<string, JournalScalar> = {};
-  for (const value of values) {
-    const scalar = value.value ?? value.value_text ?? value.entered_value_num ?? value.value_num;
-    if (typeof scalar === 'string' || typeof scalar === 'number' || typeof scalar === 'boolean') {
-      result[value.attribute_code] = scalar;
-    }
-  }
-  return result;
 }
 
 // EntryForm only calls onChange on user interaction, never on mount, so a
@@ -631,7 +629,16 @@ function EntryCorrectionForm({
   onSaved,
 }: EntryCorrectionFormProps) {
   const { t } = useTranslation('journal');
-  const [values, setValues] = useState<CaptureEntryValueInput[]>(() => aggregate.values);
+  // M1 fix (2026-07-23): the top-level `note` column is not stored as a
+  // journal_entry_values row (see semanticInput shape in EntryForm.tsx), so
+  // it must be injected into the form's `values` seed here or the note
+  // textarea renders empty on correction even when the entry has a stored
+  // note. Matches the shape EntryForm's own onChange path writes.
+  const [values, setValues] = useState<CaptureEntryValueInput[]>(() => (
+    aggregate.note
+      ? [...aggregate.values, { attribute_code: 'note', value: aggregate.note }]
+      : aggregate.values
+  ));
   const [payload, setPayload] = useState<CaptureEntryValueOutput[]>(
     () => initialCorrectionSeed(model, template, layout, aggregate, products, t).payload,
   );
@@ -651,6 +658,14 @@ function EntryCorrectionForm({
   const fieldStates = useMemo(
     () => deriveFieldStates(template, layout, selections),
     [template, layout, selections],
+  );
+  // Operation-level field/requirement/product scoping plan (full_record@10,
+  // spec §2): `selections` above is already live (derived from `values`, the
+  // in-form-editable state) so no extra merge is needed here beyond the
+  // engine fix in templateEngine.ts.
+  const allowedProductKinds = useMemo(
+    () => allowedProductKindsForOperation(template, selections),
+    [selections, template],
   );
   // Ownership must mirror EntryForm's own visibleAttributeStates filter: the
   // form only ever emits values for visible attribute fields, so a field
@@ -678,7 +693,15 @@ function EntryCorrectionForm({
     setStaleError(false);
     setGenericError(false);
     try {
-      const updatePayload = buildCorrectionPayload(aggregate, formOwnedAttributeCodes, payload);
+      // M1 fix: buildCorrectionPayload defaults note to aggregate.note
+      // (the unedited stored value) since 'note' is never form-owned/
+      // attribute-carried — override it with whatever the textarea
+      // currently holds so an edited note persists (`?? null` allows the
+      // user to clear it, matching every other nullable correction field).
+      const updatePayload = {
+        ...buildCorrectionPayload(aggregate, formOwnedAttributeCodes, payload),
+        note: currentNoteValue(values) ?? null,
+      };
       await journalApi.updateEntry(aggregate.entry_uuid, updatePayload);
       await onSaved();
     } catch (failure) {
@@ -710,6 +733,7 @@ function EntryCorrectionForm({
           locale={locale}
           showValidation={showValidation}
           templateCode={template?.code}
+          allowedProductKinds={allowedProductKinds}
         />
       </div>
       {staleError && (

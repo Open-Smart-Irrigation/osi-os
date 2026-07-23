@@ -235,6 +235,92 @@ function parseOperationFieldsByActivity(
   return result;
 }
 
+// Operation-level field/requirement/product scoping plan (full_record@10,
+// spec §0.6): the GUI-side twin of parseOperationFieldsByActivity above, but
+// PARTIAL by design — unlike that map (and quick_fields), this one must NOT
+// require covering every operation choice in vocab. A future OSI-terms
+// operation addition must never retroactively null-reject this pinned
+// template row; the generator (generate-journal-catalog.js's
+// validateOperationFieldsByOperation) is the one place that asserts exact
+// coverage of the 25 CURRENT operations, at generation time. Returns
+// `undefined` when the definition simply doesn't declare it (every
+// template/version before full_record@10); `null` when present but
+// malformed (an unknown key, an out-of-section field, or no
+// scoped_by_activity section to scope at all) — the caller must treat `null`
+// as "reject this definition".
+function parseOperationFieldsByOperation(
+  value: unknown,
+  domain: DefinitionDomain,
+  sections: JournalTemplateSection[],
+): Record<string, string[]> | null | undefined {
+  if (value == null) return undefined;
+  const scopedSections = sections.filter((section) => section.scoped_by_activity);
+  if (scopedSections.length !== 1 || !isRecord(value)) return null;
+  const allowedFields = new Set(
+    scopedSections[0].fields
+      .map((field) => fieldCode(field))
+      .filter((code): code is string => code != null),
+  );
+  const result: Record<string, string[]> = {};
+  for (const [opCode, rawFields] of Object.entries(value)) {
+    const choice = domain.vocabByCode.get(opCode);
+    if (choice?.kind !== 'choice' || choice.parent_code !== 'attr.agroscope.operation') return null;
+    const fields = stringArray(rawFields);
+    if (!fields || fields.length === 0 ||
+        fields.some((code) => !knownField(domain.vocabByCode, code) || !allowedFields.has(code))) {
+      return null;
+    }
+    result[opCode] = fields;
+  }
+  return result;
+}
+
+// Operation-level field/requirement/product scoping plan (full_record@10):
+// the operation-keyed twin of activity_requirements — same partial-by-design
+// rule as parseOperationFieldsByOperation above (no completeness check
+// against vocab). Returns `undefined` when absent, `null` when malformed.
+function parseOperationRequirements(
+  value: unknown,
+  vocabByCode: Map<string, JournalVocabRow>,
+): Record<string, JournalRequirement> | null | undefined {
+  if (value == null) return undefined;
+  if (!isRecord(value)) return null;
+  const result: Record<string, JournalRequirement> = {};
+  for (const [opCode, raw] of Object.entries(value)) {
+    const choice = vocabByCode.get(opCode);
+    if (choice?.kind !== 'choice' || choice.parent_code !== 'attr.agroscope.operation') return null;
+    const parsed = parseRequirement(raw, vocabByCode);
+    if (!parsed) return null;
+    result[opCode] = parsed;
+  }
+  return result;
+}
+
+const JOURNAL_PRODUCT_KINDS = new Set(['mineral', 'organic_amendment', 'plant_protection', 'other']);
+
+// Operation-level field/requirement/product scoping plan (full_record@10,
+// spec §2): operation-CHOICE-CODE -> allowed journal_products.kind[], a
+// GUI-only product-picker filter (the edge never enforces it). Partial by
+// design, same as the two parsers above — most operations carry no product
+// field at all and simply have no key here. Kinds must be one of the four
+// frozen journal_products.kind CHECK values; anything else is malformed.
+function parseOperationProductKinds(
+  value: unknown,
+  vocabByCode: Map<string, JournalVocabRow>,
+): Record<string, string[]> | null | undefined {
+  if (value == null) return undefined;
+  if (!isRecord(value)) return null;
+  const result: Record<string, string[]> = {};
+  for (const [opCode, rawKinds] of Object.entries(value)) {
+    const choice = vocabByCode.get(opCode);
+    if (choice?.kind !== 'choice' || choice.parent_code !== 'attr.agroscope.operation') return null;
+    const kinds = stringArray(rawKinds);
+    if (!kinds || kinds.length === 0 || kinds.some((kind) => !JOURNAL_PRODUCT_KINDS.has(kind))) return null;
+    result[opCode] = kinds;
+  }
+  return result;
+}
+
 // The set of field codes a template actually shows the user: its top-level
 // `fields` plus every (already-expanded) section's `fields`. Used to guard
 // `carry_forward` below — see that call site for why.
@@ -347,6 +433,22 @@ function parseTemplate(
     sections,
   );
   if (operationFieldsByActivity === null) return null;
+  const operationFieldsByOperation = parseOperationFieldsByOperation(
+    definition.operation_fields_by_operation,
+    domain,
+    sections,
+  );
+  if (operationFieldsByOperation === null) return null;
+  const operationRequirements = parseOperationRequirements(
+    definition.operation_requirements,
+    domain.vocabByCode,
+  );
+  if (operationRequirements === null) return null;
+  const operationProductKinds = parseOperationProductKinds(
+    definition.operation_product_kinds,
+    domain.vocabByCode,
+  );
+  if (operationProductKinds === null) return null;
   return {
     code: row.code,
     version: row.version,
@@ -356,6 +458,9 @@ function parseTemplate(
     ...(typeof maxPrimaryFields === 'number' ? { max_primary_fields: maxPrimaryFields } : {}),
     ...(quickFields ? { quick_fields: quickFields } : {}),
     ...(operationFieldsByActivity ? { operation_fields_by_activity: operationFieldsByActivity } : {}),
+    ...(operationFieldsByOperation ? { operation_fields_by_operation: operationFieldsByOperation } : {}),
+    ...(operationRequirements ? { operation_requirements: operationRequirements } : {}),
+    ...(operationProductKinds ? { operation_product_kinds: operationProductKinds } : {}),
     require_explicit_choices: requireExplicitChoices,
     show_standard_mappings: showStandardMappings,
     activity_requirements: activityRequirements,
@@ -900,18 +1005,24 @@ export function deriveActivityLeaves(
 }
 
 // Slice F (F2): full_record@6's manual weather-at-application fallback
-// fields (plant_protection_application only). The catalog's
-// operation_fields_by_activity/conditional_groups mechanisms only ever
-// condition on the selected activity — they cannot express "hide this group
-// when the plot already has a linked weather source," because that fact is
-// plot/zone data, not an activity or another field's value. This is the
-// GUI-side resolution the weather_at_application conditional_group's doc
-// comment in journal-catalog-core.js refers to: JournalCaptureFlow.tsx
-// already computes `zoneLinked` (Boolean(selectedPlot?.zone_uuid)) for its
-// crop-hint fallback, and parent spec §4.8 only ever populates
-// context_json's wind/temperature/humidity channels for a zone-linked plot
-// (osi-journal/context.js buildContext returns null otherwise) — so
-// "zone-linked" and "has a weather source" are the same question.
+// fields. Gates purely by field code on the already-resolved states, so it
+// is source-agnostic: in @6-@9 these four codes reach `states` via the
+// activity-keyed weather_at_application conditional_group
+// (plant_protection_application only); in @10 that conditional_group is
+// gone and the same four codes instead reach `states` per-operation via
+// operation_fields_by_operation for the 5 chemical-spray operations (see
+// journal-catalog-core.js). Either way, the catalog's
+// operation_fields_by_activity/operation_fields_by_operation/
+// conditional_groups mechanisms only ever condition on the selected
+// activity/operation — they cannot express "hide this group when the plot
+// already has a linked weather source," because that fact is plot/zone
+// data, not an activity, operation, or another field's value. This is the
+// GUI-side resolution: JournalCaptureFlow.tsx already computes `zoneLinked`
+// (Boolean(selectedPlot?.zone_uuid)) for its crop-hint fallback, and parent
+// spec §4.8 only ever populates context_json's wind/temperature/humidity
+// channels for a zone-linked plot (osi-journal/context.js buildContext
+// returns null otherwise) — so "zone-linked" and "has a weather source" are
+// the same question.
 export const WEATHER_AT_APPLICATION_FIELD_CODES: ReadonlySet<string> = new Set([
   'attr.wind_speed', 'attr.wind_direction', 'attr.air_temperature', 'attr.rel_humidity',
 ]);
@@ -926,4 +1037,27 @@ export function withWeatherAtApplicationVisibility(
       ? { ...state, visible: false, required: false }
       : state
   ));
+}
+
+// Operation-level field/requirement/product scoping plan (full_record@10,
+// spec §2): resolves the EntryForm `allowedProductKinds` prop from a
+// template's operation_product_kinds map + the current
+// attr.agroscope.operation selection. Shared by the three EntryForm call
+// sites (JournalCaptureFlow, DetailPanel's correction form, DraftsQueue's
+// DraftResumePanel) so the resolution rule lives in one place. Returns
+// undefined (no restriction — every active kind shown) when the template
+// declares no operation_product_kinds map, no operation is currently
+// selected, or the selected operation has no entry (15 of the 25 operations
+// carry no product field at all and simply have no key here).
+export function allowedProductKindsForOperation(
+  template: JournalTemplateDefinition | undefined,
+  selections: JournalSelections,
+): readonly string[] | undefined {
+  const productKinds = template?.operation_product_kinds;
+  if (!productKinds) return undefined;
+  const selected = selections['attr.agroscope.operation'];
+  const opCode = typeof selected === 'string'
+    ? selected
+    : Array.isArray(selected) && typeof selected[0] === 'string' ? selected[0] : undefined;
+  return opCode ? productKinds[opCode] : undefined;
 }

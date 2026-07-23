@@ -678,6 +678,299 @@ const FULL_RECORD_V9_OPERATION_FIELDS_BY_ACTIVITY = Object.fromEntries(
   }),
 );
 
+// v10 (operation-level field/requirement/product scoping plan, 2026-07-23):
+// the 9 activities with no Agroscope operation coverage at all (16 minus the
+// 7 in AGROSCOPE_COVERED_ACTIVITIES above) get attr.equipment back as a
+// free-text device/equipment field — v9 retired it fleet-wide on the
+// assumption the operation/device pair would replace it everywhere, but that
+// pair only ever existed for the 7 covered activities; these 9 never had a
+// dropdown alternative and lost their only device field for nothing.
+const NINE_UNCOVERED_ACTIVITIES = [
+  'fertigation', 'weed_control_nonchemical', 'planting_transplanting',
+  'pruning', 'crop_care', 'mowing', 'sampling', 'pest_disease_observation',
+  'equipment_maintenance',
+];
+
+// v10: FULL_RECORD_V9_OPERATION_FIELDS_BY_ACTIVITY (this stays byte-identical
+// above so full_record@9 keeps resolving unchanged for historical entries)
+// plus attr.equipment appended to exactly the 9 uncovered activities' lists.
+// The 7 Agroscope-covered activities' lists are untouched (they already have
+// a scoped device dropdown; a free-text field would duplicate it) — this map
+// remains the fallback full_record@10 consults for those 7 (no operation
+// selected, or a to-be-added operation this row's operation_requirements/
+// operation_fields_by_operation maps don't cover) and for the 9 uncovered
+// ones unconditionally (they have no operation to select at all).
+const FULL_RECORD_V10_OPERATION_FIELDS_BY_ACTIVITY = Object.fromEntries(
+  Object.entries(FULL_RECORD_V9_OPERATION_FIELDS_BY_ACTIVITY).map(([activityCode, fields]) => {
+    const fields10 = NINE_UNCOVERED_ACTIVITIES.includes(activityCode)
+      ? [...fields, 'attr.equipment']
+      : fields;
+    return [activityCode, fields10];
+  }),
+);
+
+// v10: operation-keyed field lists, consulted by templateEngine.deriveFieldStates
+// INSTEAD of (REPLACING, not merging with) FULL_RECORD_V10_OPERATION_FIELDS_BY_ACTIVITY
+// whenever selections['attr.agroscope.operation'] names one of these 25 keys.
+// Keys are FULL choice codes (`agroscope.operation.<op>`, matching what
+// EntryForm/the picker actually store for attr.agroscope.operation) — the
+// generator asserts this map covers exactly the 25 current Agroscope
+// operations. Every list leads with attr.agroscope.operation +
+// attr.agroscope.device (REPLACE semantics: omitting either drops that
+// dropdown from the form). `note` (the comment field) is deliberately never
+// a member here — see the top-level `notes` section below; it renders via a
+// separate GUI-only mechanism (EntryForm's comment textarea), not this map.
+// Transcribed verbatim from the authoritative per-operation spec (§1); do not
+// re-derive the agronomy.
+const FULL_RECORD_V10_OPERATION_FIELDS_BY_OPERATION = {
+  'agroscope.operation.primary_tillage': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.amount_operation_depth', 'attr.treated_area', 'attr.operator',
+  ],
+  'agroscope.operation.seedbed_preparation': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.amount_operation_depth', 'attr.treated_area', 'attr.operator',
+  ],
+  'agroscope.operation.stubble_cultivation': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.amount_operation_depth', 'attr.treated_area', 'attr.operator',
+  ],
+  'agroscope.operation.sowing_main_crop': [
+    'attr.agroscope.operation', 'attr.agroscope.device', 'attr.crop',
+    'attr.amount_mass_area_product', 'attr.amount_count_area',
+    'attr.amount_operation_depth', 'attr.treated_area', 'attr.operator',
+  ],
+  'agroscope.operation.sowing_cover_crop': [
+    'attr.agroscope.operation', 'attr.agroscope.device', 'attr.crop',
+    'attr.amount_mass_area_product', 'attr.amount_count_area',
+    'attr.amount_operation_depth', 'attr.treated_area', 'attr.operator',
+  ],
+  'agroscope.operation.organic_fertilization': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+    'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
+    'attr.treated_area', 'attr.operator',
+  ],
+  'agroscope.operation.mineral_fertilization': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+    'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
+    'attr.treated_area', 'attr.operator',
+  ],
+  'agroscope.operation.other_fertilization': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+    'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
+    'attr.treated_area', 'attr.operator',
+  ],
+  'agroscope.operation.fungicide': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+    'attr.amount_volume_area_product', 'attr.treated_area', 'attr.target',
+    'attr.waiting_period_days', 'attr.growth_stage_bbch', 'attr.wind_speed',
+    'attr.wind_direction', 'attr.air_temperature', 'attr.rel_humidity',
+    'attr.operator',
+  ],
+  'agroscope.operation.insecticide': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+    'attr.amount_volume_area_product', 'attr.treated_area', 'attr.target',
+    'attr.waiting_period_days', 'attr.growth_stage_bbch', 'attr.wind_speed',
+    'attr.wind_direction', 'attr.air_temperature', 'attr.rel_humidity',
+    'attr.operator',
+  ],
+  'agroscope.operation.growth_regulator': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+    'attr.amount_volume_area_product', 'attr.treated_area', 'attr.target',
+    'attr.waiting_period_days', 'attr.growth_stage_bbch', 'attr.wind_speed',
+    'attr.wind_direction', 'attr.air_temperature', 'attr.rel_humidity',
+    'attr.operator',
+  ],
+  'agroscope.operation.weed_herbicide': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+    'attr.amount_volume_area_product', 'attr.treated_area', 'attr.target',
+    'attr.waiting_period_days', 'attr.growth_stage_bbch', 'attr.wind_speed',
+    'attr.wind_direction', 'attr.air_temperature', 'attr.rel_humidity',
+    'attr.operator',
+  ],
+  'agroscope.operation.total_herbicide': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+    'attr.amount_volume_area_product', 'attr.treated_area', 'attr.target',
+    'attr.waiting_period_days', 'attr.growth_stage_bbch', 'attr.wind_speed',
+    'attr.wind_direction', 'attr.air_temperature', 'attr.rel_humidity',
+    'attr.operator',
+  ],
+  'agroscope.operation.biocontrol': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.product_uuid', 'attr.product', 'attr.amount_biological_count_area',
+    'attr.amount_mass_area_product', 'attr.amount_volume_area_product',
+    'attr.treated_area', 'attr.target', 'attr.growth_stage_bbch', 'attr.operator',
+  ],
+  'agroscope.operation.weed_mechanical': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.amount_operation_depth', 'attr.treated_area',
+    'attr.growth_stage_bbch', 'attr.operator',
+  ],
+  'agroscope.operation.weed_other': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.treated_area', 'attr.operator',
+  ],
+  'agroscope.operation.pest_control': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
+    'attr.treated_area', 'attr.target', 'attr.operator',
+  ],
+  'agroscope.operation.harvest_main_crop': [
+    'attr.agroscope.operation', 'attr.agroscope.device', 'attr.crop',
+    'attr.harvest_yield_area', 'attr.harvest_area', 'attr.growth_stage_bbch',
+    'attr.operator',
+  ],
+  'agroscope.operation.harvest_cover_crop': [
+    'attr.agroscope.operation', 'attr.agroscope.device', 'attr.crop',
+    'attr.harvest_yield_area', 'attr.harvest_area', 'attr.operator',
+  ],
+  'agroscope.operation.hay_removal': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.harvest_yield_area', 'attr.harvest_area', 'attr.operator',
+  ],
+  'agroscope.operation.straw_removal': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.harvest_yield_area', 'attr.harvest_area', 'attr.operator',
+  ],
+  'agroscope.operation.cleaning_cut': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.treated_area', 'attr.operator',
+  ],
+  'agroscope.operation.watering': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.irrigation_amount_kind', 'attr.irrigation_depth',
+    'attr.irrigation_volume_area', 'attr.per_plant_volume',
+    'attr.measurement_source', 'attr.denominator',
+    'attr.actuation_expectation_id', 'attr.treated_area', 'attr.operator',
+  ],
+  'agroscope.operation.sampling': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.observation_text', 'attr.growth_stage_bbch', 'attr.operator',
+  ],
+  'agroscope.operation.note': [
+    'attr.agroscope.operation', 'attr.agroscope.device',
+    'attr.observation_text', 'attr.growth_stage_bbch', 'attr.operator',
+  ],
+};
+
+// v10: shared requirement shape for the five identical chemical-spray
+// operations (fungicide/insecticide/growth_regulator/weed_herbicide/
+// total_herbicide) — device+operation required, plus a product and a dose
+// family, same as v9's plant_protection_application activity_requirements
+// entry minus the biological-count family (dropped from the dose family here
+// per spec §1: bio count is not a chemical dose).
+const CHEM_SPRAY_V10_OPERATION_REQUIREMENT = {
+  required: ['attr.agroscope.operation', 'attr.agroscope.device'],
+  required_any: [
+    ['attr.product_uuid', 'attr.product'],
+    ['attr.amount_mass_area_product', 'attr.amount_volume_area_product'],
+  ],
+};
+
+// v10: operation-keyed requirements, REPLACING (not merging with)
+// activity_requirements[activity] whenever selections['attr.agroscope.operation']
+// names one of these 25 keys. An empty entry ({required:[],required_any:[]})
+// is meaningful — it un-requires whatever the activity map would otherwise
+// require (e.g. weed_mechanical un-requires product+dose, cleaning_cut
+// un-requires yield). watering's entry is deliberately empty: requiredness
+// for irrigation still comes from the activity-keyed, additive
+// `irrigation_details` conditional_groups entry below (§0.2) — duplicating
+// its rules here would desync the two. Transcribed verbatim from the
+// authoritative per-operation spec (§1/§4); do not re-derive the agronomy.
+const FULL_RECORD_V10_OPERATION_REQUIREMENTS = {
+  'agroscope.operation.primary_tillage': {
+    required: ['attr.agroscope.operation', 'attr.agroscope.device'], required_any: [],
+  },
+  'agroscope.operation.seedbed_preparation': {
+    required: ['attr.agroscope.operation', 'attr.agroscope.device'], required_any: [],
+  },
+  'agroscope.operation.stubble_cultivation': {
+    required: ['attr.agroscope.operation', 'attr.agroscope.device'], required_any: [],
+  },
+  'agroscope.operation.sowing_main_crop': {
+    required: ['attr.agroscope.operation', 'attr.agroscope.device', 'attr.crop'],
+    required_any: [['attr.amount_mass_area_product', 'attr.amount_count_area']],
+  },
+  'agroscope.operation.sowing_cover_crop': {
+    required: ['attr.agroscope.operation', 'attr.agroscope.device', 'attr.crop'],
+    required_any: [['attr.amount_mass_area_product', 'attr.amount_count_area']],
+  },
+  'agroscope.operation.organic_fertilization': {
+    required: [],
+    required_any: [
+      ['attr.product_uuid', 'attr.product'],
+      ['attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate'],
+    ],
+  },
+  'agroscope.operation.mineral_fertilization': {
+    required: [],
+    required_any: [
+      ['attr.product_uuid', 'attr.product'],
+      ['attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate'],
+    ],
+  },
+  'agroscope.operation.other_fertilization': {
+    required: [],
+    required_any: [
+      ['attr.product_uuid', 'attr.product'],
+      ['attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate'],
+    ],
+  },
+  'agroscope.operation.fungicide': CHEM_SPRAY_V10_OPERATION_REQUIREMENT,
+  'agroscope.operation.insecticide': CHEM_SPRAY_V10_OPERATION_REQUIREMENT,
+  'agroscope.operation.growth_regulator': CHEM_SPRAY_V10_OPERATION_REQUIREMENT,
+  'agroscope.operation.weed_herbicide': CHEM_SPRAY_V10_OPERATION_REQUIREMENT,
+  'agroscope.operation.total_herbicide': CHEM_SPRAY_V10_OPERATION_REQUIREMENT,
+  'agroscope.operation.biocontrol': {
+    required: ['attr.agroscope.operation', 'attr.agroscope.device'],
+    required_any: [
+      ['attr.product_uuid', 'attr.product'],
+      ['attr.amount_biological_count_area', 'attr.amount_mass_area_product', 'attr.amount_volume_area_product'],
+    ],
+  },
+  'agroscope.operation.weed_mechanical': { required: [], required_any: [] },
+  'agroscope.operation.weed_other': { required: [], required_any: [] },
+  'agroscope.operation.pest_control': { required: [], required_any: [] },
+  'agroscope.operation.harvest_main_crop': {
+    required: ['attr.crop', 'attr.harvest_yield_area'], required_any: [],
+  },
+  'agroscope.operation.harvest_cover_crop': { required: [], required_any: [] },
+  'agroscope.operation.hay_removal': { required: [], required_any: [] },
+  'agroscope.operation.straw_removal': { required: [], required_any: [] },
+  'agroscope.operation.cleaning_cut': { required: [], required_any: [] },
+  'agroscope.operation.watering': { required: [], required_any: [] },
+  'agroscope.operation.sampling': { required: [], required_any: [] },
+  'agroscope.operation.note': { required: [], required_any: [] },
+};
+
+// v10: per-operation allowed product kinds (GUI product-picker filter only —
+// the edge does not enforce this, see spec §2; the free-text attr.product
+// escape is always available regardless of kind). Kinds are exactly the
+// frozen journal_products.kind CHECK values (seed-blank.sql):
+// mineral | organic_amendment | plant_protection | other. Only the 10
+// operations that carry a product field appear here; the other 15 have no
+// key (no product field at all, per operation_fields_by_operation above).
+const FULL_RECORD_V10_OPERATION_PRODUCT_KINDS = {
+  'agroscope.operation.organic_fertilization': ['organic_amendment'],
+  'agroscope.operation.mineral_fertilization': ['mineral'],
+  'agroscope.operation.other_fertilization': ['mineral', 'organic_amendment', 'other'],
+  'agroscope.operation.fungicide': ['plant_protection'],
+  'agroscope.operation.insecticide': ['plant_protection'],
+  'agroscope.operation.growth_regulator': ['plant_protection'],
+  'agroscope.operation.weed_herbicide': ['plant_protection'],
+  'agroscope.operation.total_herbicide': ['plant_protection'],
+  'agroscope.operation.biocontrol': ['plant_protection'],
+  'agroscope.operation.pest_control': ['plant_protection', 'other'],
+};
+
 const templates = [
   {
     code: 'farmer_quick',
@@ -1567,6 +1860,158 @@ const templates = [
             'attr.air_temperature',
             'attr.rel_humidity',
           ],
+        },
+      ],
+      certified_compliance_profile: null,
+    },
+  },
+  // v10 (operation-level field/requirement/product scoping plan, 2026-07-23):
+  // v9 scoped the operation section's visible fields (and, via
+  // activity_requirements, its required fields) by the 16 ACTIVITIES, not the
+  // 25 Agroscope OPERATIONS a farmer actually picks — so e.g. mechanical
+  // weeding (weed_mechanical, one of 9 plant_protection_application
+  // operations) still required a product+dose from an unfiltered product
+  // list, and every harvest operation (incl. cleaning_cut, which has no yield
+  // at all agronomically) required a yield. Adds three new operation-keyed
+  // maps consulted by templateEngine.deriveFieldStates/the edge ONLY when
+  // selections['attr.agroscope.operation'] is set AND has an entry in the
+  // relevant map — REPLACING (never merging with) the activity-keyed map for
+  // that one lookup; no operation selected, or the selected operation has no
+  // override, falls back to the activity map exactly as v9 already did (see
+  // FULL_RECORD_V10_OPERATION_FIELDS_BY_OPERATION/_REQUIREMENTS above for the
+  // mechanism detail). `conditional_groups` stays activity-keyed and
+  // ADDITIVE on top of either map — load-bearing for watering, whose
+  // operation_requirements entry is deliberately empty because
+  // `irrigation_details` below still supplies its requiredness.
+  //
+  // The operation section's own `fields` superset gains exactly one entry vs
+  // @9: attr.equipment (needed again by operation_fields_by_activity's 9
+  // now-restored uncovered-activity lists; the map-subseteq-fields validators
+  // — generate-journal-catalog.js and catalogModel.ts — fail generation
+  // without it). operation_fields_by_activity switches to
+  // FULL_RECORD_V10_OPERATION_FIELDS_BY_ACTIVITY (v9's map + attr.equipment
+  // appended to exactly the 9 uncovered activities; the 7 Agroscope-covered
+  // activities' lists stay byte-identical to v9). activity_requirements /
+  // conditional_groups / certified_compliance_profile are copied verbatim
+  // from @9 (the fallback path for no-operation entries, and for the 9
+  // uncovered activities, is unchanged). The comment-everywhere decision
+  // (maintainer decision 4) is a GUI-only render of the existing top-level
+  // `note` field state — see EntryForm.tsx — not a change to any map here;
+  // `note` is not and cannot be a member of operation_fields_by_operation/
+  // operation_fields_by_activity (the generator's attribute validator rejects
+  // it — it is not a real attribute code).
+  {
+    code: 'full_record',
+    version: 10,
+    label: 'Full record',
+    definition: {
+      sections: [
+        { code: 'identity', fields: ['activity_code', 'plot_uuid', 'occurred_start', 'occurred_end'] },
+        {
+          code: 'operation',
+          scoped_by_activity: true,
+          fields: [
+            'attr.crop',
+            'attr.product_uuid',
+            'attr.product',
+            'attr.treated_area',
+            'attr.harvest_area',
+            'attr.harvest_yield_area',
+            'attr.amount_mass_area_product',
+            'attr.amount_volume_area_product',
+            'attr.amount_nutrient_rate',
+            'attr.amount_count_area',
+            'attr.amount_biological_count_area',
+            'attr.irrigation_amount_kind',
+            'attr.measurement_source',
+            'attr.denominator',
+            'attr.irrigation_depth',
+            'attr.irrigation_volume_area',
+            'attr.per_plant_volume',
+            'attr.actuation_expectation_id',
+            'attr.operator',
+            'attr.target',
+            'attr.waiting_period_days',
+            'attr.amount_operation_depth',
+            'attr.observation_text',
+            'attr.growth_stage_bbch',
+            'attr.wind_speed',
+            'attr.wind_direction',
+            'attr.air_temperature',
+            'attr.rel_humidity',
+            'attr.agroscope.operation',
+            'attr.agroscope.device',
+            'attr.equipment',
+          ],
+        },
+        { code: 'notes', fields: ['note'] },
+      ],
+      operation_fields_by_activity: FULL_RECORD_V10_OPERATION_FIELDS_BY_ACTIVITY,
+      operation_fields_by_operation: FULL_RECORD_V10_OPERATION_FIELDS_BY_OPERATION,
+      operation_requirements: FULL_RECORD_V10_OPERATION_REQUIREMENTS,
+      operation_product_kinds: FULL_RECORD_V10_OPERATION_PRODUCT_KINDS,
+      activity_requirements: {
+        fertilization: {
+          required: [],
+          required_any: [
+            ['attr.product_uuid', 'attr.product'],
+            [
+              'attr.amount_mass_area_product',
+              'attr.amount_volume_area_product',
+              'attr.amount_nutrient_rate',
+            ],
+          ],
+        },
+        fertigation: {
+          required: [],
+          required_any: [
+            ['attr.product_uuid', 'attr.product'],
+            [
+              'attr.amount_mass_area_product',
+              'attr.amount_volume_area_product',
+              'attr.amount_nutrient_rate',
+            ],
+          ],
+        },
+        plant_protection_application: {
+          required: ['attr.agroscope.device', 'attr.agroscope.operation'],
+          required_any: [
+            ['attr.product_uuid', 'attr.product'],
+            [
+              'attr.amount_mass_area_product',
+              'attr.amount_volume_area_product',
+              'attr.amount_biological_count_area',
+            ],
+          ],
+        },
+        seeding: {
+          required: ['attr.crop', 'attr.agroscope.device', 'attr.agroscope.operation'],
+          required_any: [['attr.amount_mass_area_product', 'attr.amount_count_area']],
+        },
+        planting_transplanting: {
+          required: ['attr.crop'],
+          required_any: [['attr.amount_count_area']],
+        },
+        harvest: {
+          required: ['attr.crop', 'attr.harvest_area', 'attr.harvest_yield_area'],
+          required_any: [],
+        },
+        tillage_soil_work: {
+          required: ['attr.agroscope.device', 'attr.agroscope.operation'],
+          required_any: [],
+        },
+      },
+      conditional_groups: [
+        {
+          code: 'irrigation_details',
+          activity_codes: ['irrigation', 'fertigation'],
+          required: ['attr.irrigation_amount_kind'],
+          required_any: [[
+            'attr.irrigation_depth',
+            'attr.irrigation_volume_area',
+            'attr.per_plant_volume',
+          ]],
+          optional: ['attr.measurement_source', 'attr.denominator', 'attr.actuation_expectation_id'],
         },
       ],
       certified_compliance_profile: null,

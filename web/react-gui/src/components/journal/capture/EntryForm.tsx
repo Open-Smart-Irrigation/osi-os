@@ -55,6 +55,18 @@ export interface EntryFormProps {
   // Business-logic-free here -- EntryForm has no idea which attribute this
   // is "for" or why; the caller decides both.
   fieldHints?: Readonly<Record<string, string>>;
+  // Operation-level field/requirement/product scoping plan (full_record@10,
+  // spec §2): an optional allow-list of journal_products.kind values to
+  // narrow the product picker to (e.g. weeding operations offer none;
+  // mineral_fertilization offers only 'mineral'). Undefined (every caller
+  // that omits this prop, and any operation with no operation_product_kinds
+  // entry) means no restriction — every active product shown, unchanged
+  // behavior. The caller resolves this from the template's
+  // operation_product_kinds map + the current attr.agroscope.operation
+  // selection (allowedProductKindsForOperation in catalogModel.ts) — EntryForm
+  // itself stays business-logic-free about what a "kind" means, same spirit
+  // as fieldHints above.
+  allowedProductKinds?: readonly string[];
 }
 
 export interface EntryFormValidationResult {
@@ -429,6 +441,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
   showValidation = false,
   templateCode,
   fieldHints,
+  allowedProductKinds,
 }) => {
   const { t, i18n } = useTranslation('journal');
   const locale = localeOverride || i18n.resolvedLanguage || i18n.language;
@@ -444,6 +457,15 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     () => productFirst(visibleAttributeStates(model, fieldStates)),
     [fieldStates, model],
   );
+  // v10 comment-everywhere decision (spec §0.4): `note` is not a real
+  // attribute (it is not in model.vocabByCode at all, so visibleAttributeStates
+  // above always excludes it — kind !== 'attribute'). It already resolves a
+  // visible field state for every activity via full_record's unscoped `notes`
+  // section (and via quick_fields on Quick) — this is a GUI-only render of
+  // that EXISTING state, not a new map member anywhere in the catalog. Render
+  // it whenever deriveFieldStates produced a visible `note` state, for both
+  // Full and Quick (whatever fieldStates the caller passes in).
+  const noteState = fieldStates.find((state) => state.code === 'note' && state.visible);
   // Slice E (R5, E3): full_record's operation section is a per-activity-
   // scoped superset (E2) that can still run to a dozen-plus fields for one
   // activity — progressive disclosure splits it into an always-open "Key
@@ -478,8 +500,17 @@ export const EntryForm: React.FC<EntryFormProps> = ({
   const activeProducts = useMemo(
     () => products
       .filter(({ active, deleted_at: deletedAt }) => active === 1 && deletedAt == null)
+      // Operation-level field/requirement/product scoping plan (full_record@10,
+      // spec §2): undefined allowedProductKinds means no restriction (every
+      // caller/template before v10, and any operation with no
+      // operation_product_kinds entry) — unchanged behavior. When present,
+      // narrow to only those kinds; an empty result degrades to the existing
+      // noProducts message below plus the free-text attr.product escape, not
+      // a dead end (the edge never enforces kind — attr.product free text is
+      // always available regardless).
+      .filter((product) => allowedProductKinds == null || allowedProductKinds.includes(product.kind))
       .sort((left, right) => left.name.localeCompare(right.name, locale)),
-    [locale, products],
+    [allowedProductKinds, locale, products],
   );
   const selectedProductUuid = semanticValue(fieldValues(values, 'attr.product_uuid')[0]);
   const selectedProduct = typeof selectedProductUuid === 'string'
@@ -873,6 +904,38 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     );
   };
 
+  // v10 comment-everywhere decision (spec §0.4): stores its text into
+  // `values` under attribute_code 'note' via the same updateSingle/emit path
+  // every other field uses. Safe: 'note' is not a member of
+  // visibleAttributeStates (kind !== 'attribute' — model.vocabByCode has no
+  // 'note' row), so it is filtered out of visibleInputs before
+  // buildEntryValues ever sees it (buildEntryValues would otherwise throw:
+  // "Unknown journal attribute: note"). The caller reads it back out of the
+  // raw `values` array to thread onto the entry's top-level `note` field
+  // (JournalCaptureFlow's currentNoteValue).
+  const renderNote = (): React.ReactNode => {
+    if (!noteState) return null;
+    const existing = fieldValues(values, 'note')[0];
+    const current = semanticValue(existing);
+    return (
+      <div key="note" className="space-y-2">
+        <label htmlFor="note" className="text-sm font-bold text-[var(--text)]">
+          {t('capture.form.note')}
+        </label>
+        <textarea
+          id="note"
+          rows={3}
+          value={typeof current === 'string' ? current : ''}
+          onChange={(event) => updateSingle(
+            'note',
+            semanticInput('note', event.target.value, existing),
+          )}
+          className={`w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[var(--text)] ${FOCUS_RING}`}
+        />
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-4">
       {groupOperationDetail ? (
@@ -919,6 +982,8 @@ export const EntryForm: React.FC<EntryFormProps> = ({
       ) : (
         visibleStates.map(renderField)
       )}
+
+      {renderNote()}
 
       {validation.errors.has('form') && (
         <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">

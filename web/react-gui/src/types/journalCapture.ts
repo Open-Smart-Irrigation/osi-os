@@ -81,6 +81,28 @@ export interface JournalTemplateDefinition {
   // one `scoped_by_activity` section's visibility (see that flag above).
   // Present only alongside a scoped_by_activity section; absent otherwise.
   operation_fields_by_activity?: Record<string, string[]>;
+  // Operation-level field/requirement/product scoping plan (full_record@10,
+  // 2026-07-23): operation-CHOICE-CODE -> field-code list, consulted by
+  // deriveFieldStates INSTEAD OF (replacing, never merging with)
+  // operation_fields_by_activity[activity] whenever the current
+  // attr.agroscope.operation selection names a key present here. Partial by
+  // design (spec §0.6) — a key absent here falls back to the activity map,
+  // so a future vocab addition never invalidates a pinned template row. Keys
+  // are FULL choice codes (`agroscope.operation.<op>`), matching what
+  // EntryForm/the picker store for attr.agroscope.operation.
+  operation_fields_by_operation?: Record<string, string[]>;
+  // Operation-level field/requirement/product scoping plan (full_record@10):
+  // the operation-keyed twin of activity_requirements — REPLACES (never
+  // merges with) activity_requirements[activity] when the selected
+  // operation has an entry here. Same partial-by-design rule as
+  // operation_fields_by_operation.
+  operation_requirements?: Record<string, JournalRequirement>;
+  // Operation-level field/requirement/product scoping plan (full_record@10):
+  // operation-CHOICE-CODE -> allowed journal_products.kind[] — a GUI-only
+  // product-picker filter (the edge never enforces it; attr.product free
+  // text is always an escape). Absent key or absent map -> no restriction
+  // (every active kind shown), matching today's behavior.
+  operation_product_kinds?: Record<string, string[]>;
 }
 
 export interface JournalDependencyCondition {

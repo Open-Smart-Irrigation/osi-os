@@ -926,7 +926,23 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
   }
   const definition = templateDefinition;
   const activityRequirements = definition.activity_requirements;
-  const requirements = activityRequirements && activityRequirements[entryInput.activity_code];
+  // Operation-level field/requirement/product scoping plan (full_record@10,
+  // spec §0.2/§0.7): when a semantically-present attr.agroscope.operation
+  // value resolves to an entry in definition.operation_requirements, that
+  // entry REPLACES (never merges with) activity_requirements[activity_code]
+  // for this validation — an empty entry ({required:[],required_any:[]}, e.g.
+  // weed_mechanical/cleaning_cut) is meaningful and un-requires whatever the
+  // activity would otherwise require. No operation present, or the template
+  // has no operation_requirements map at all (every version before @10, and
+  // any @9-pinned entry), falls back to activityRequirements unchanged.
+  // conditional_groups below stays activity-keyed and additive regardless of
+  // which branch fires here (load-bearing for watering/irrigation_details).
+  const operationValue = normalizedValues.find(function(value) {
+    return value.attribute_code === 'attr.agroscope.operation' && isSemanticallyPresentValue(value);
+  });
+  const operationRequirements = definition.operation_requirements;
+  const requirements = (operationValue && operationRequirements && operationRequirements[operationValue.value]) ||
+    (activityRequirements && activityRequirements[entryInput.activity_code]);
   const errors = requiredErrors(requirements, present);
   errors.push(...requiredGroupErrors(requirements, normalizedValues));
   for (const group of definition.conditional_groups || []) {
