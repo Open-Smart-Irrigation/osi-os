@@ -175,6 +175,6 @@ flows.push({
   ],
 });
 
-const serialized = `${JSON.stringify(flows, null, 4)}\n`;
+const serialized = `${JSON.stringify(flows, null, 2)}\n`;
 fs.writeFileSync(canonicalPath, serialized);
 fs.writeFileSync(mirrorPath, serialized);

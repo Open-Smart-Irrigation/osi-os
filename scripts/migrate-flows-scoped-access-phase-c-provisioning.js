@@ -372,6 +372,6 @@ responseNode.func = responseNode.func.replace(
   '  irrigation_zone_id: Number.isInteger(msg._scopedTargetZoneId) ? msg._scopedTargetZoneId : null,'
 );
 
-const serialized = `${JSON.stringify(flows, null, 4)}\n`;
+const serialized = `${JSON.stringify(flows, null, 2)}\n`;
 fs.writeFileSync(canonicalPath, serialized);
 fs.writeFileSync(mirrorPath, serialized);
