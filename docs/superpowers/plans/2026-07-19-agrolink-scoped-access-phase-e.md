@@ -166,18 +166,182 @@ The server PR states: contract files consumed (vendored, byte-identical), paired
 
 Confirm: server deployed with Task E3+E4; edge image with Phase A–E schema installed is flashed on the hub; `scoped_access_emit` reads `enabled=0`.
 
-- [ ] **Step 2: Enable and verify**
+- [ ] **Step 2: Activate with a snapshot transaction, then verify**
+
+A bare `UPDATE scoped_access_emit SET enabled=1` only makes *future* mutations emit. Every user and every zone/plot grant created during Phases A–D — the entire pre-Phase-E operating history of the hub — was written while the gate read `enabled=0`, so none of it ever reached `sync_outbox`. Flipping the gate alone leaves the cloud mirror blind to all of it until each row happens to be touched again. The activation step must instead snapshot that backlog into the outbox in the same transaction that flips the gate, so the flip and the backlog land atomically and no concurrent write can slip through the gap between them.
+
+Run this single transaction against `/data/db/farming.db`:
+
+```sql
+BEGIN IMMEDIATE;
+
+-- Snapshot every user with an assigned user_uuid as USER_UPSERTED, mirroring
+-- trg_dp_users_outbox_ai / _uuid_au / _role_au's payload shape (migration
+-- 0022). Guarded by "gate currently disabled" so a second run selects 0 rows.
+INSERT INTO sync_outbox(
+  event_uuid, aggregate_type, aggregate_key, op, payload_json,
+  sync_version, occurred_at, gateway_device_eui
+)
+SELECT
+  lower(hex(randomblob(16))),
+  'USER',
+  u.user_uuid,
+  'USER_UPSERTED',
+  json_object(
+    'contract_version', 1,
+    'schema_version', 1,
+    'user_uuid', u.user_uuid,
+    'username', u.username,
+    'role', u.role,
+    'disabled_at', u.disabled_at,
+    'sync_version', u.sync_version,
+    'gateway_device_eui', (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'),
+    'occurred_at', strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  ),
+  u.sync_version,
+  strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+  (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
+FROM users u
+WHERE u.user_uuid IS NOT NULL AND u.user_uuid != ''
+  AND (SELECT enabled FROM scoped_access_emit WHERE id = 1) = 0;
+
+-- Active zone grants -> USER_ZONE_ASSIGNMENT_UPSERTED, mirroring
+-- trg_dp_user_zone_assign_outbox_ai.
+INSERT INTO sync_outbox(
+  event_uuid, aggregate_type, aggregate_key, op, payload_json,
+  sync_version, occurred_at, gateway_device_eui
+)
+SELECT
+  lower(hex(randomblob(16))),
+  'USER_ZONE_ASSIGNMENT',
+  a.assignment_uuid,
+  'USER_ZONE_ASSIGNMENT_UPSERTED',
+  json_object(
+    'contract_version', 1,
+    'schema_version', 1,
+    'assignment_uuid', a.assignment_uuid,
+    'user_uuid', a.user_uuid,
+    'zone_uuid', a.zone_uuid,
+    'assigned_by_user_uuid', a.assigned_by_user_uuid,
+    'gateway_device_eui', a.gateway_device_eui,
+    'sync_version', a.sync_version,
+    'occurred_at', a.created_at
+  ),
+  a.sync_version,
+  a.created_at,
+  a.gateway_device_eui
+FROM user_zone_assignments a
+WHERE a.deleted_at IS NULL
+  AND (SELECT enabled FROM scoped_access_emit WHERE id = 1) = 0;
+
+-- Tombstoned zone grants -> USER_ZONE_ASSIGNMENT_DELETED, mirroring
+-- trg_dp_user_zone_assign_outbox_au, so a grant revoked before activation
+-- still propagates its removal instead of silently vanishing from history.
+INSERT INTO sync_outbox(
+  event_uuid, aggregate_type, aggregate_key, op, payload_json,
+  sync_version, occurred_at, gateway_device_eui
+)
+SELECT
+  lower(hex(randomblob(16))),
+  'USER_ZONE_ASSIGNMENT',
+  a.assignment_uuid,
+  'USER_ZONE_ASSIGNMENT_DELETED',
+  json_object(
+    'contract_version', 1,
+    'schema_version', 1,
+    'assignment_uuid', a.assignment_uuid,
+    'user_uuid', a.user_uuid,
+    'zone_uuid', a.zone_uuid,
+    'deleted_at', a.deleted_at,
+    'gateway_device_eui', a.gateway_device_eui,
+    'sync_version', a.sync_version,
+    'occurred_at', a.deleted_at
+  ),
+  a.sync_version,
+  a.deleted_at,
+  a.gateway_device_eui
+FROM user_zone_assignments a
+WHERE a.deleted_at IS NOT NULL
+  AND (SELECT enabled FROM scoped_access_emit WHERE id = 1) = 0;
+
+-- Active plot grants -> USER_PLOT_ASSIGNMENT_UPSERTED, mirroring
+-- trg_dp_user_plot_assign_outbox_ai.
+INSERT INTO sync_outbox(
+  event_uuid, aggregate_type, aggregate_key, op, payload_json,
+  sync_version, occurred_at, gateway_device_eui
+)
+SELECT
+  lower(hex(randomblob(16))),
+  'USER_PLOT_ASSIGNMENT',
+  a.assignment_uuid,
+  'USER_PLOT_ASSIGNMENT_UPSERTED',
+  json_object(
+    'contract_version', 1,
+    'schema_version', 1,
+    'assignment_uuid', a.assignment_uuid,
+    'user_uuid', a.user_uuid,
+    'plot_uuid', a.plot_uuid,
+    'assigned_by_user_uuid', a.assigned_by_user_uuid,
+    'gateway_device_eui', a.gateway_device_eui,
+    'sync_version', a.sync_version,
+    'occurred_at', a.created_at
+  ),
+  a.sync_version,
+  a.created_at,
+  a.gateway_device_eui
+FROM user_plot_assignments a
+WHERE a.deleted_at IS NULL
+  AND (SELECT enabled FROM scoped_access_emit WHERE id = 1) = 0;
+
+-- Tombstoned plot grants -> USER_PLOT_ASSIGNMENT_DELETED, mirroring
+-- trg_dp_user_plot_assign_outbox_au.
+INSERT INTO sync_outbox(
+  event_uuid, aggregate_type, aggregate_key, op, payload_json,
+  sync_version, occurred_at, gateway_device_eui
+)
+SELECT
+  lower(hex(randomblob(16))),
+  'USER_PLOT_ASSIGNMENT',
+  a.assignment_uuid,
+  'USER_PLOT_ASSIGNMENT_DELETED',
+  json_object(
+    'contract_version', 1,
+    'schema_version', 1,
+    'assignment_uuid', a.assignment_uuid,
+    'user_uuid', a.user_uuid,
+    'plot_uuid', a.plot_uuid,
+    'deleted_at', a.deleted_at,
+    'gateway_device_eui', a.gateway_device_eui,
+    'sync_version', a.sync_version,
+    'occurred_at', a.deleted_at
+  ),
+  a.sync_version,
+  a.deleted_at,
+  a.gateway_device_eui
+FROM user_plot_assignments a
+WHERE a.deleted_at IS NOT NULL
+  AND (SELECT enabled FROM scoped_access_emit WHERE id = 1) = 0;
+
+-- Flip the gate last, in the same transaction, gated on it still reading
+-- disabled.
+UPDATE scoped_access_emit SET enabled = 1 WHERE id = 1 AND enabled = 0;
+
+COMMIT;
+```
+
+Snapshot-then-enable-then-commit closes the write gap: `BEGIN IMMEDIATE` takes the write lock before any row is read, so no other connection can insert a user or grant between the snapshot and the flip. Every snapshot row carries the row's *current* `sync_version` — the same value the live triggers would have used had the gate been on at write time. The cloud watermark keyed on `(aggregate_type, aggregate_key)` has no prior row for these aggregates (the gate was off, so nothing ever arrived), so the first event at that version applies unconditionally; any later mutation bumps `sync_version` again and its event arrives after the snapshot's, ordering correctly with no `equal_version_payload_conflict`.
+
+The five `(SELECT enabled …) = 0` guards make the whole block idempotent: on a second run the gate already reads `enabled=1`, so every `INSERT … SELECT` selects zero rows and the final `UPDATE` matches zero rows. Re-running the transaction after a successful activation is safe and does nothing.
 
 ```bash
-sqlite3 /data/db/farming.db "UPDATE scoped_access_emit SET enabled=1 WHERE id=1;"
 sqlite3 /data/db/farming.db "SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='USER';"
 ```
 
-Create one test grant via the admin API; confirm: one `USER_ZONE_ASSIGNMENT_UPSERTED` row in the edge outbox, delivery without `rejected_at`, the mirror row on the server, and a scoped remote login seeing exactly the granted zone.
+Confirm the count matches the number of users with a non-empty `user_uuid` at snapshot time. Create one *new* test grant via the admin API; confirm: one `USER_ZONE_ASSIGNMENT_UPSERTED` row in the edge outbox, delivery without `rejected_at`, the mirror row on the server, and a scoped remote login seeing exactly the granted zone.
 
 - [ ] **Step 3: Rollback path**
 
-`UPDATE scoped_access_emit SET enabled=0 WHERE id=1;` stops emission immediately; delivered rows stay mirrored harmlessly. Record the operator runbook entry under `docs/operations/`.
+`UPDATE scoped_access_emit SET enabled=0 WHERE id=1;` stops emission immediately. Rollback after activation does not un-send the snapshot rows already delivered to the server — they stay mirrored and cause no harm, since a later grant or role change simply upserts over them at a higher `sync_version`. Re-running the Step 2 transaction *without an intervening disable* is a pure no-op, per the enabled-guard above. Re-running it *after* a rollback (`enabled` back to 0) is not the same case: the guard is gate-level, not row-level, so it re-snapshots the full current table state, including rows already delivered once. That re-send is still safe — the applier upserts membership/grants by `(gateway_device_eui, user_uuid)` or `assignment_uuid` and treats a same-or-stale `sync_version` as `DUPLICATE`, per Task E3 — but it is a second delivery, not a no-op, and the operator should expect it. Record the operator runbook entry under `docs/operations/`.
 
 ---
 
@@ -186,6 +350,7 @@ Create one test grant via the admin API; confirm: one `USER_ZONE_ASSIGNMENT_UPSE
 - [ ] Contract schemas green on both repos; vendored copies byte-identical (Phase F CI proves it continuously).
 - [ ] Full backend suite green; `verify-sync-contract.js`, `test-contract-schemas.js`, `verify-sync-op-parity.js`, `verify-sync-flow.js` green on the edge.
 - [ ] Acceptance per spec §15: cloud accepts all three aggregates; scoped remote login verified end-to-end on the hub.
+- [ ] Backfill completeness: after Task E5 Step 2's activation transaction and delivery, the server mirror holds exactly one row per pre-existing user with a `user_uuid` and exactly one row per pre-existing `user_zone_assignments`/`user_plot_assignments` row (active and tombstoned counted separately, matching `SELECT COUNT(*) FROM users WHERE user_uuid IS NOT NULL AND user_uuid != ''` and the equivalent per-assignment-table counts taken immediately before Step 2 ran). Spot-check: pick one user account created and one grant assigned during Phase A–D operation (before Phase E started), confirm both are visible on the server after activation and delivery — this is the case the pre-fix bare `UPDATE … enabled=1` reproducibly missed.
 
 ## Notes for the executor
 
