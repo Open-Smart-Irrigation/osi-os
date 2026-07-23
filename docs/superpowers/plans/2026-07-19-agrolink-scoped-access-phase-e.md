@@ -341,7 +341,15 @@ Confirm the count matches the number of users with a non-empty `user_uuid` at sn
 
 - [ ] **Step 3: Rollback path**
 
-`UPDATE scoped_access_emit SET enabled=0 WHERE id=1;` stops emission immediately. Rollback after activation does not un-send the snapshot rows already delivered to the server — they stay mirrored and cause no harm, since a later grant or role change simply upserts over them at a higher `sync_version`. Re-running the Step 2 transaction *without an intervening disable* is a pure no-op, per the enabled-guard above. Re-running it *after* a rollback (`enabled` back to 0) is not the same case: the guard is gate-level, not row-level, so it re-snapshots the full current table state, including rows already delivered once. That re-send is still safe — the applier upserts membership/grants by `(gateway_device_eui, user_uuid)` or `assignment_uuid` and treats a same-or-stale `sync_version` as `DUPLICATE`, per Task E3 — but it is a second delivery, not a no-op, and the operator should expect it. Record the operator runbook entry under `docs/operations/`.
+`UPDATE scoped_access_emit SET enabled=0 WHERE id=1;` stops emission immediately. Rollback after activation does not un-send the snapshot rows already delivered to the server — they stay mirrored and cause no harm, since a later grant or role change simply upserts over them at a higher `sync_version`. Re-running the Step 2 transaction *without an intervening disable* is a pure no-op, per the enabled-guard above.
+
+To re-enable after a rollback, run the bare guarded flip, **not** the full Step 2 transaction:
+
+```bash
+sqlite3 /data/db/farming.db "UPDATE scoped_access_emit SET enabled=1 WHERE id=1 AND enabled=0;"
+```
+
+Re-running the full Step 2 transaction after a rollback re-snapshots the whole table (the guard is gate-level, not row-level) and re-sends events for rows already delivered once. For assignments that is harmless — their payloads are fully row-derived, so a re-send is byte-identical and the applier dedups it. For USER rows it is not: each USER snapshot stamps a fresh `occurred_at` (`strftime … 'now'`), so a re-sent event for a user unchanged since the first snapshot carries a different payload at an equal `sync_version`, which the `SyncEventTxExecutor` watermark rejects terminally as `equal_version_payload_conflict` (spec §11) before the applier runs — the exact issue-#10 class this phase's design avoids. The bare flip re-enables live emission without re-snapshotting, so already-mirrored rows are left alone and only genuine post-rollback mutations emit. Record the operator runbook entry under `docs/operations/`.
 
 ---
 
