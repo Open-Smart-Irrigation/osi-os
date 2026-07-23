@@ -2,10 +2,11 @@
 
 ## Preparation record: 2026-07-23
 
-**State:** Tasks 0 through 3 complete and pushed. Launch heads were fetched,
+**State:** Tasks 0 through 4 complete and pushed. Launch heads were fetched,
 base gates run, one server frontend base defect repaired, the route/contract
-inventory regenerated, the scoped-access governing documents reconciled, and
-the cross-repository contract gate and edge scoped-access foundation landed.
+inventory regenerated, the scoped-access governing documents reconciled, the
+cross-repository contract gate and edge scoped-access foundation landed, and
+the cloud desired-state ledger now reconciles command ACKs with edge mirrors.
 
 ### Repository bases
 
@@ -211,6 +212,51 @@ Commits `1f6f0933` (schema), `d5882543` (scope helper), and `4eb05522`
 (auth, API, durable flag, and tests) were pushed to `design-sync/agrolink`.
 The remote branch resolved to the same Phase A head.
 
+### Task 4 cloud desired state
+
+The server now records each cloud-originated desired effect in
+`desired_state_operations`. Configuration commands may coalesce only while an
+unleased operation is pending or sent; physical effects remain immutable and
+require a future expiry. Retry and coalescing preserve command identity,
+event UUID, and effect key.
+
+Command ACKs and accepted edge mirror events reconcile the same operation in
+either order. An operation reaches `APPLIED` only after an `APPLIED` ACK and a
+recursive subset match against the canonical edge mirror. Mismatches become
+`CONFLICTED`; rejected and expired operations stay terminal. Duplicate, stale,
+rejected, and retryable sync events do not advance convergence.
+
+Zone configuration is the first consumer. Its API creates the durable
+operation, exposes creator-authorized status, and overlays non-applied desired
+values without presenting them as canonical edge state. The React zone card
+shows an accessible pending-state notice and normalizes snake-case and
+camel-case API forms. All seven locale catalogs carry the new copy.
+
+The implementation review found that edge events encode
+`prediction_card_enabled` as `0` or `1` and do not mirror the cloud-only
+weather-source field. The desired subset was corrected to use the numeric
+representation and exclude weather source, avoiding false conflicts. A full
+architecture run also detected the new package's participation in the
+existing frozen core-package cycle. The ArchUnit baseline was regenerated
+once with store creation enabled, then locked again; the architecture gate
+passes with store creation disabled.
+
+Task 4 verification:
+
+| Command | Result |
+|---|---|
+| Focused desired-state integration selection | exit 0 |
+| `NODE_OPTIONS=--max-old-space-size=2048 ./gradlew test --no-daemon --max-workers=2` | exit 0; 1,091 tests, `BUILD SUCCESSFUL in 1m 13s` |
+| Final architecture and desired-state selection | exit 0; `BUILD SUCCESSFUL in 19s` |
+| `npm run test:unit` | exit 0; TAP 45 tests plus 67 Vitest files and 270 tests passed |
+| `NODE_OPTIONS=--max-old-space-size=2048 npm run build` | exit 0; 1,725 modules transformed |
+| `git diff --check origin/AgroLink...HEAD` | exit 0 |
+
+Server commits `7c009da` through
+`b86473e88a173f68ef04c39f9265a2837887cfc0` were pushed to `AgroLink`.
+Governing design and plan commits `412267fe`, `722fd160`, and `ce19950b`
+were pushed to `design-sync/agrolink`.
+
 ### Memory samples
 
 Every heavyweight command started above the 4,096 MiB threshold. Recorded
@@ -231,6 +277,10 @@ Task 3 samples recorded between 13,638 MiB and 14,812 MiB available. The final
 heavyweight sample before `verify-sync-flow.js` recorded 13,638 MiB available,
 `pswpin 721693780`, and `pswpout 883231112`. Every sample cleared the 4,096 MiB
 gate.
+
+Task 4 samples recorded between 13,907 MiB and 14,148 MiB available. The final
+full backend suite started with 13,920 MiB available. Every sample included
+the swap counters and cleared the 4,096 MiB gate.
 
 ### Program ownership
 
