@@ -30,5 +30,7 @@
   "0029__journal_catalog_v7.sql": "0e55d79344833aeb7f27c05b1cf444b86c9dcbd86e7509be26ed0425437e27dd",
   "0030__journal_catalog_v8.sql": "5ff1b6a9ea8b064b7b59eadb76a6d9703e4221868b306ccc10044a54670f4aac",
   "0031__journal_catalog_v9.sql": "2be950f69a6973560ad8cda794e2e7ef7067ee4f1999a955eb9dc6fd3226d975",
-  "0032__journal_catalog_v10.sql": "f27d351f23d63b9ae3dcab44cb90541e3144af29c47d98ab60efa7a22af37b86"
+  "0032__journal_catalog_v10.sql": "f27d351f23d63b9ae3dcab44cb90541e3144af29c47d98ab60efa7a22af37b86",
+  "0033__scoped_access_schema.sql": "79f4acead913ad84edeb3c4dead4c67599f0047ae6f4af27c876c7ab117a667f",
+  "0034__scoped_access_backfill.sql": "3c2960d0575e60642ddf56c50f5f406254b1c1ffb35b3b9d58925b9e67e8a5e8"
 }

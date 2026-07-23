@@ -690,6 +690,57 @@ const schemaContract = {
     'computed_at',
     'sync_version',
   ],
+  users: [
+    'id',
+    'username',
+    'password_hash',
+    'created_at',
+    'updated_at',
+    'auth_mode',
+    'server_username',
+    'server_password_hash',
+    'server_linked_at',
+    'user_uuid',
+    'cloud_user_id',
+    'server_url',
+    'server_sync_token',
+    'server_sync_token_expires_at',
+    'server_offline_verifier',
+    'edge_originated',
+    'server_offline_verifier_version',
+    'last_auth_sync_at',
+    'last_auth_sync_status',
+    'last_auth_sync_error',
+    'role',
+    'disabled_at',
+    'sync_version',
+  ],
+  user_zone_assignments: [
+    'assignment_uuid',
+    'user_uuid',
+    'zone_uuid',
+    'assigned_by_user_uuid',
+    'gateway_device_eui',
+    'sync_version',
+    'created_at',
+    'updated_at',
+    'deleted_at',
+  ],
+  user_plot_assignments: [
+    'assignment_uuid',
+    'user_uuid',
+    'plot_uuid',
+    'assigned_by_user_uuid',
+    'gateway_device_eui',
+    'sync_version',
+    'created_at',
+    'updated_at',
+    'deleted_at',
+  ],
+  scoped_access_emit: [
+    'id',
+    'enabled',
+  ],
 };
 
 const requiredIndexes = {
@@ -761,6 +812,14 @@ const requiredIndexes = {
   ],
   journal_crop_cycle_plots: [
     'idx_ccp_plot_open',
+  ],
+  user_zone_assignments: [
+    'uq_user_zone_active',
+    'idx_user_zone_by_zone',
+  ],
+  user_plot_assignments: [
+    'uq_user_plot_active',
+    'idx_user_plot_by_plot',
   ],
 };
 
@@ -893,6 +952,24 @@ const requiredIndexSqlFragments = {
   idx_ccp_plot_open: [
     'on journal_crop_cycle_plots(plot_uuid)',
     'where ends_on is null',
+  ],
+  uq_user_zone_active: [
+    'unique index',
+    'on user_zone_assignments(user_uuid, zone_uuid)',
+    'where deleted_at is null',
+  ],
+  idx_user_zone_by_zone: [
+    'on user_zone_assignments(zone_uuid)',
+    'where deleted_at is null',
+  ],
+  uq_user_plot_active: [
+    'unique index',
+    'on user_plot_assignments(user_uuid, plot_uuid)',
+    'where deleted_at is null',
+  ],
+  idx_user_plot_by_plot: [
+    'on user_plot_assignments(plot_uuid)',
+    'where deleted_at is null',
   ],
 };
 
@@ -1035,6 +1112,47 @@ const requiredTriggerSqlFragments = {
     "'sync_version', new.sync_version",
     "'occurred_at', new.submitted_at",
     "'work-request-' || new.request_uuid",
+  ],
+  trg_dp_user_zone_assign_outbox_ai: [
+    '(select enabled from scoped_access_emit where id = 1) = 1',
+    "'user_zone_assignment_upserted'",
+    "'assignment_uuid', new.assignment_uuid",
+    "'zone_uuid', new.zone_uuid",
+  ],
+  trg_dp_user_zone_assign_outbox_au: [
+    'after update of deleted_at on user_zone_assignments',
+    'new.deleted_at is not null and old.deleted_at is null',
+    '(select enabled from scoped_access_emit where id = 1) = 1',
+    "'user_zone_assignment_deleted'",
+  ],
+  trg_dp_user_plot_assign_outbox_ai: [
+    '(select enabled from scoped_access_emit where id = 1) = 1',
+    "'user_plot_assignment_upserted'",
+    "'plot_uuid', new.plot_uuid",
+  ],
+  trg_dp_user_plot_assign_outbox_au: [
+    'after update of deleted_at on user_plot_assignments',
+    'new.deleted_at is not null and old.deleted_at is null',
+    '(select enabled from scoped_access_emit where id = 1) = 1',
+    "'user_plot_assignment_deleted'",
+  ],
+  trg_dp_users_outbox_uuid_au: [
+    'after update of user_uuid on users',
+    "(old.user_uuid is null or old.user_uuid = '')",
+    "'sync_version', new.sync_version",
+    "'user_upserted'",
+  ],
+  trg_dp_users_outbox_ai: [
+    'after insert on users',
+    "new.user_uuid is not null and new.user_uuid != ''",
+    "'sync_version', new.sync_version",
+    "'user_upserted'",
+  ],
+  trg_dp_users_outbox_role_au: [
+    'after update of username, role, disabled_at on users',
+    "new.user_uuid is not null and new.user_uuid != ''",
+    "'sync_version', new.sync_version",
+    "'user_upserted'",
   ],
 };
 

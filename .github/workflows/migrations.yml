@@ -83,6 +83,8 @@ jobs:
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis.test.js
       - run: node scripts/capture-zone-env-vectors.js --verify
       - run: node --test scripts/rehearse-devices-rebuild.test.js
+      - run: node --test scripts/rehearse-scoped-access-migration.test.js
+      - run: node --test scripts/rehearse-scoped-trigger-boot-survival.test.js
       - run: node --test scripts/soak/rig.test.js scripts/soak/scenario-outbox-replay.test.js scripts/soak/scenario-clock-jump.test.js scripts/soak/scenario-kill9-migration.test.js scripts/soak/scenario-sd-full.test.js
       - run: node --test scripts/test-gateway-health-persistence.js
       - run: node --test scripts/deploy-canary-gate.test.js

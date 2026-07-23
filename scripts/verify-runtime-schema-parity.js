@@ -15,6 +15,14 @@ const MIGRATION_OWNED_TRIGGERS = new Set([
   // 0005__field_work_requests.sql is delivered by seed DBs and deploy.sh's
   // additive migration repair. Do not add it to the frozen sync-init-fn boot DDL.
   'trg_improvement_requests_outbox_ai',
+  // 0033__scoped_access_schema.sql is migration-owned and emit-gated.
+  'trg_dp_user_zone_assign_outbox_ai',
+  'trg_dp_user_zone_assign_outbox_au',
+  'trg_dp_user_plot_assign_outbox_ai',
+  'trg_dp_user_plot_assign_outbox_au',
+  'trg_dp_users_outbox_uuid_au',
+  'trg_dp_users_outbox_ai',
+  'trg_dp_users_outbox_role_au',
 ]);
 
 function q(db, sql) {
