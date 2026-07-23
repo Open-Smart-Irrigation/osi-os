@@ -110,18 +110,37 @@ const JOURNAL_EVENT_OPS = [
   'JOURNAL_PLOT_UPSERTED',
   'JOURNAL_PLOT_GROUP_UPSERTED',
 ];
+// Scoped-access admin commands and outbox events (port/wave3-edge-scope), staged pending
+// osi-server PR #83 -- see the long-form rationale next to the matching EXACT_ constants in
+// verify-sync-op-parity.js.
+const SCOPED_ACCESS_COMMANDS = [
+  'DELETE_USER_PLOT_ASSIGNMENT',
+  'DELETE_USER_ZONE_ASSIGNMENT',
+  'RESET_SCOPED_USER_PASSWORD',
+  'UPSERT_SCOPED_USER',
+  'UPSERT_USER_PLOT_ASSIGNMENT',
+  'UPSERT_USER_ZONE_ASSIGNMENT',
+];
+const SCOPED_ACCESS_EVENT_OPS = [
+  'USER_PLOT_ASSIGNMENT_DELETED',
+  'USER_PLOT_ASSIGNMENT_UPSERTED',
+  'USER_UPSERTED',
+  'USER_ZONE_ASSIGNMENT_DELETED',
+  'USER_ZONE_ASSIGNMENT_UPSERTED',
+];
 
 function exactJournalStaging() {
   return {
     version: 1,
     commands: {
-      edgeDeferred: [],
+      edgeDeferred: SCOPED_ACCESS_COMMANDS.slice(),
       cloudDeferred: [
         'UPSERT_JOURNAL_ENTRY',
         'VOID_JOURNAL_ENTRY',
         'UPSERT_JOURNAL_CUSTOM_VOCAB',
         'UPSERT_JOURNAL_PLOT',
         'UPSERT_JOURNAL_PLOT_GROUP',
+        ...SCOPED_ACCESS_COMMANDS,
       ],
     },
     eventOps: {
@@ -136,7 +155,7 @@ function exactJournalStaging() {
       // Cloud-before-edge deploy order: osi-server is sanctioned to land its landing
       // applier for each of these ops before the edge activates real emission of it.
       edgeStaged: JOURNAL_EVENT_OPS.slice(),
-      cloudDeferred: JOURNAL_EVENT_OPS.slice(),
+      cloudDeferred: [...JOURNAL_EVENT_OPS, ...SCOPED_ACCESS_EVENT_OPS],
     },
   };
 }

@@ -75,14 +75,20 @@ test('public endpoint exemption is exact and remove-one controlled', () => {
 });
 
 test('temporary Phase C debt is exact and remove-one controlled', () => {
+  // port/wave3-edge-scope: post-devices-http (AgroLink's original pick for this test) is
+  // no longer in PHASE_C_PENDING -- it already carries a real scope call on this branch
+  // (ported in the wave-2 scoped device provisioning work). sys-reboot-in is a stable,
+  // pre-existing Phase C entry unrelated to the scoped-access arc, so it isn't at risk of
+  // being resolved by a later commit in this same port slice the way the SDI-12 entries
+  // above are documented to be.
   const flows = loadFlows();
-  assert.ok(PHASE_C_PENDING.has('post-devices-http'));
+  assert.ok(PHASE_C_PENDING.has('sys-reboot-in'));
   const withoutProvisioning = new Set(ALLOWLIST);
-  withoutProvisioning.delete('post-devices-http');
+  withoutProvisioning.delete('sys-reboot-in');
 
   assert.match(
     findFailures(flows, 'mutation', withoutProvisioning).join('\n'),
-    /post-devices-http.*has no scope call/
+    /sys-reboot-in.*has no scope call/
   );
 });
 
