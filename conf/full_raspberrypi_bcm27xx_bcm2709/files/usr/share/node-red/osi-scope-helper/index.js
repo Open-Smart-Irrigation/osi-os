@@ -117,8 +117,24 @@ async function assertFreshPlotAccess(db, userUuid, plotUuid, { scopedMode } = {}
   return scope;
 }
 
+// Cached: resolveScope() may serve a role that is up to CACHE_TTL_MS (30s)
+// stale, so a just-demoted admin keeps privileged access until the cache
+// entry expires or is explicitly invalidated. Reads that can tolerate that
+// staleness may keep using this. Privilege/system/account paths (e.g. a
+// database download or any other admin-only action with an immediate
+// real-world effect) must use assertFreshRole instead.
 async function assertRole(db, userUuid, role, opts) {
   const scope = await resolveScope(db, userUuid, opts);
+  if (scope.disabled) throw httpError(403, 'account disabled');
+  if (!scope.wildcard && scope.role !== role) throw httpError(403, 'insufficient role');
+  return scope;
+}
+
+// Uncached variant of assertRole for privilege checks that must observe a
+// demotion/disable immediately (mirrors assertFreshZoneAccess/assertFreshPlotAccess).
+async function assertFreshRole(db, userUuid, role, { scopedMode } = {}) {
+  if (!isScopedMode() && scopedMode !== true) return { role: 'admin', wildcard: true };
+  const scope = await loadScope(db, userUuid); // no cache
   if (scope.disabled) throw httpError(403, 'account disabled');
   if (!scope.wildcard && scope.role !== role) throw httpError(403, 'insufficient role');
   return scope;
@@ -141,5 +157,5 @@ function _resetForTests() { cache.clear(); }
 module.exports = {
   isScopedMode, resolveScope, invalidateScope,
   assertZoneAccess, assertPlotAccess, assertFreshZoneAccess, assertFreshPlotAccess,
-  assertRole, isAdmin, filterZoneUuids, _resetForTests,
+  assertRole, assertFreshRole, isAdmin, filterZoneUuids, _resetForTests,
 };

@@ -93,3 +93,23 @@ test('disabled account fails closed on fresh paths', async () => {
     () => scope.assertFreshZoneAccess(db, 'u1', 'z1', { scopedMode: true }),
     (e) => e.status === 403 && /disabled/.test(e.message));
 });
+
+test('assertFreshRole bypasses the cache; a cached assertRole would not see the demotion', async () => {
+  let userReads = 0;
+  const db = fakeDb({
+    get: () => {
+      userReads += 1;
+      // First read (cached by resolveScope) reports 'admin'; every read after
+      // a demotion in the underlying db reports 'viewer'.
+      return { id: 7, role: userReads === 1 ? 'admin' : 'viewer', disabled_at: null };
+    },
+  });
+  await scope.resolveScope(db, 'u1', { scopedMode: true }); // caches role=admin, read #1
+  await scope.assertRole(db, 'u1', 'admin', { scopedMode: true }); // cached: still sees admin
+  assert.equal(userReads, 1, 'assertRole must not issue a fresh read within the TTL');
+  await assert.rejects(
+    () => scope.assertFreshRole(db, 'u1', 'admin', { scopedMode: true }),
+    (e) => e.status === 403 && /insufficient role/.test(e.message),
+    'assertFreshRole must see the demotion instead of the stale cached admin role');
+  assert.equal(userReads, 2, 'assertFreshRole must bypass the cache with a fresh read');
+});

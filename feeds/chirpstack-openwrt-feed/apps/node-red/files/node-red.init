@@ -81,6 +81,7 @@ start_service() {
     local mqtt_password=$(uci -q get osi-server.cloud.mqtt_password 2>/dev/null || echo "")
     local server_host=$(uci -q get osi-server.cloud.server_host 2>/dev/null || echo "")
     local allow_private_server_urls=$(uci -q get osi-server.cloud.allow_private_target 2>/dev/null || echo "0")
+    local scoped_access_enabled=$(uci -q get osi-server.cloud.scoped_access_enabled 2>/dev/null || echo "0")
     local fw_version=$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || echo "0.7.0")
     local openagri_weather_url=$(uci -q get osi-server.cloud.openagri_weather_url 2>/dev/null || echo "")
     local openagri_weather_username=$(uci -q get osi-server.cloud.openagri_weather_username 2>/dev/null || echo "")
@@ -217,6 +218,7 @@ NODE
         DEVICE_MQTT_PASSWORD="$mqtt_password" \
         OSI_SERVER_HOST="$server_host" \
         ALLOW_PRIVATE_SERVER_URLS="$allow_private_server_urls" \
+        OSI_SCOPED_ACCESS="$scoped_access_enabled" \
         FIRMWARE_VERSION="$fw_version" \
         OPENAGRI_WEATHER_URL="$openagri_weather_url" \
         OPENAGRI_WEATHER_USERNAME="$openagri_weather_username" \
