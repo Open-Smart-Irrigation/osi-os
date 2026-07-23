@@ -17,6 +17,20 @@ const NAME_TO_PATH = {
   'osi-db-helper': 'osi-db-helper',
   'osi-command-ledger': 'osi-command-ledger',
   'osi-journal': 'osi-journal',
+  // osi-scope-helper caches per-user authorization decisions (30s TTL) in a
+  // module-local Map. The on-device seed copies this helper to BOTH
+  // /srv/node-red/osi-scope-helper (fetched directly) AND
+  // /srv/node-red/node_modules/osi-scope-helper (fetched separately for npm
+  // resolution) — two distinct files on disk, not a symlink, so Node's
+  // require cache treats them as two independent module instances with two
+  // independent caches. If one consumer resolves the helper through this
+  // loader while another reaches it via a bare/relative require that
+  // resolves to the node_modules copy, invalidateScope() on one instance
+  // leaves the other instance serving stale ALLOWs for up to 30s — a real
+  // authorization-staleness hazard, not a cosmetic one.
+  // MUST be loaded only via osiLib.require('scope'). Never
+  // require('osi-scope-helper') or a relative path to it from a flow.
+  'scope': 'osi-scope-helper',
   'dendro-analytics': 'osi-dendro-analytics',
   'zone-env': 'osi-zone-env',
   'device-writer': 'osi-device-writer',

@@ -419,6 +419,14 @@ fetch_required "osi-dendro-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/index.js" \
     "/srv/node-red/osi-dendro-helper/index.js"
 
+fetch_required "osi-scope-helper package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/package.json" \
+    "/srv/node-red/osi-scope-helper/package.json"
+
+fetch_required "osi-scope-helper index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/index.js" \
+    "/srv/node-red/osi-scope-helper/index.js"
+
 fetch_required "osi-dendro-analytics package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-analytics/package.json" \
     "/srv/node-red/osi-dendro-analytics/package.json"
