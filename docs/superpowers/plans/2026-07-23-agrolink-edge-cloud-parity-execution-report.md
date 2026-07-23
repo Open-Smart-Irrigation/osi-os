@@ -2,10 +2,10 @@
 
 ## Preparation record: 2026-07-23
 
-**State:** Tasks 0 and 1 complete and pushed. Launch heads were fetched, base
-gates run, one server frontend base defect repaired, the route/contract
-inventory regenerated, and the scoped-access governing documents reconciled
-with the current cloud-administration decision.
+**State:** Tasks 0 through 2 complete and pushed. Launch heads were fetched,
+base gates run, one server frontend base defect repaired, the route/contract
+inventory regenerated, the scoped-access governing documents reconciled, and
+the cross-repository contract gate landed.
 
 ### Repository bases
 
@@ -106,6 +106,56 @@ Commit `459cf73f010a390c10b6dbb707de891f0179775e` was pushed to
 `design-sync/agrolink`; `git ls-remote --exit-code origin
 refs/heads/design-sync/agrolink` returned the same SHA.
 
+### Task 2 cross-repository contract gate
+
+OSI OS now owns six canonical contract files: the command, event, and resource
+schemas; effect-key and canonicalization rules; and a golden rollout fixture.
+The fixture records accepted, enabled, and staged event and command sets plus
+the command ACK result vocabulary. Schema acceptance is independent from edge
+producer and cloud issuer enablement. Five journal event and command operations
+remain staged. Five scoped-access events are newly accepted but remain disabled
+on both sides. `CONFLICT` is accepted as a future ACK result but its server
+handler remains disabled.
+
+The first server tests were intentionally red. The vendor mutation test exited
+127 because its verifier did not exist, and
+`SyncContractVendorTest` failed two of three tests because the vendored
+resources did not exist. The completed implementation vendors all six files
+under `backend/src/test/resources/sync-contract/`, compares every byte against
+the edge checkout, tests each drift and missing-file case, parses every
+accepted event into `EdgeSyncService.SyncEventRecord`, and parses and
+serializes every golden ACK through the server request and response DTOs.
+
+Edge CI now runs the canonical contract and schema-fixture gates. Server CI
+checks out `osi-os` at `design-sync/agrolink`, runs the mutation test, and
+rejects a missing, empty, or byte-different vendor. The server guidance records
+that this temporary integration ref must switch to `osi-os/main` when the
+branch merges.
+
+Task 2 verification:
+
+| Command | Result |
+|---|---|
+| `node scripts/verify-sync-contract.js` | exit 0; 28 accepted event operations and rollout metadata verified |
+| `node scripts/test-contract-schemas.js` | exit 0; exact journal and scoped staging sets verified |
+| `OSI_SERVER_EDGE_SYNC_SERVICE=… node scripts/verify-sync-op-parity.js` | exit 0; 18 enabled server operations and 10 staged operations |
+| `node scripts/verify-communication-contract.js` | exit 0 |
+| `node scripts/verify-sync-flow.js` | exit 0; chained schema, flow, and profile gates passed |
+| `sh scripts/verify-edge-sync-contract-vendor.test.sh` | exit 0; all six drift cases and a missing vendor fail closed |
+| `EDGE_CONTRACT_ROOT=… sh scripts/verify-edge-sync-contract-vendor.sh` | exit 0; six vendors byte-identical |
+| `./gradlew test --tests org.osi.server.sync.SyncContractVendorTest --no-daemon --max-workers=2 -x buildFrontend -x buildTerraIntelligenceFrontend` | exit 0 after the expected red run |
+| `NODE_OPTIONS=--max-old-space-size=2048 ./gradlew test --tests org.osi.server.sync.GatewayLocationApplierIT --tests org.osi.server.sync.SyncEventApplierTest --no-daemon --max-workers=2` | exit 0; `BUILD SUCCESSFUL in 37s` |
+| `NODE_OPTIONS=--max-old-space-size=2048 ./gradlew test --no-daemon --max-workers=2` | exit 0; `BUILD SUCCESSFUL in 1m 1s` |
+
+The first targeted integration-smoke invocation entered its frontend build
+without the required Node heap guard. It was terminated before completion and
+rerun with `NODE_OPTIONS=--max-old-space-size=2048`; the guarded run passed.
+No application failure was hidden.
+
+Edge commit `8a06e630bd9dadc315c917f18850a19a1959e930` and server commit
+`04e60bf669cfd02c4ac756ddf956b8b8acefa8bf` were pushed separately. Remote
+branch lookups returned the same SHAs.
+
 ### Memory samples
 
 Every heavyweight command started above the 4,096 MiB threshold. Recorded
@@ -114,6 +164,13 @@ one-minute backend suite, availability fell by 705 MiB between the first two
 samples while `pswpout` rose, below the 1,024 MiB termination threshold. No
 owned process was terminated. Task 1 prose verification started with 14,113
 MiB available.
+
+Task 2 pre-command samples recorded between 14,631 MiB and 15,092 MiB
+available. The final sample after both pushes recorded 14,655 MiB available,
+`pswpin 720618313`, and `pswpout 881901826`. The earlier Task 2 samples omitted
+the required `/proc/vmstat` counters; this is an evidence gap, not an inferred
+zero-swap claim. The only terminated process was the owned, unguarded targeted
+Gradle invocation described above.
 
 ### Program ownership
 
@@ -138,10 +195,10 @@ The live matrix now records:
 - 118 edge HTTP nodes and 14 edge GUI routes;
 - 24 server controller classes with 150 mapped methods and 13 server GUI
   routes;
-- 23 event operations, 40 command types, and 18 non-primitive resource schema
-  definitions;
-- the two current sync capabilities and the missing acceptance-versus-enablement
-  split owned by Task 2.
+- 28 accepted event operations, 40 command types, and 18 non-primitive resource
+  schema definitions;
+- 18 enabled event operations, five staged journal events, five staged
+  scoped-access events, and explicit acceptance-versus-enablement metadata.
 
 All orchestrator, cross-contract, and Phase A-E documents referenced by the
 program are present in `git ls-tree -r --name-only HEAD`. Ordered edge

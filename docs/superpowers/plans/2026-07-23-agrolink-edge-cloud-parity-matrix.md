@@ -17,6 +17,7 @@ come from the fetched integration heads, not the earlier planning audit.
 |---|---|---|
 | 0 | Launch inventory recorded; stale server frontend manifest pin repaired and all baseline suites passed | Edge `ed89dc010cfcccfea001b81583a0690608d1c3d9`; server `3179df875204ac2c9d38e6d9c96cb2beaa15a1b4` |
 | 1 | Scoped authority, per-gateway cloud membership, dynamic migration allocation, and the accepted user-version contract reconciled in governing documents | Edge `459cf73f010a390c10b6dbb707de891f0179775e` |
+| 2 | Edge-owned sync contracts, golden rollout metadata, byte-identical server vendors, and drift gates landed | Edge `8a06e630bd9dadc315c917f18850a19a1959e930`; server `04e60bf669cfd02c4ac756ddf956b8b8acefa8bf` |
 
 ## Status rules
 
@@ -64,9 +65,15 @@ come from the fetched integration heads, not the earlier planning audit.
 
 - The launch-head edge flow contains 17 active event operation strings.
 - The edge seed and server operation mirror contain 18 operation strings.
-- The governed event schema contains 23 operation strings.
+- The governed event schema contains 28 operation strings.
 - Five journal operations are intentionally staged but not enabled for cloud
   production until server acceptance is proven.
+- Five scoped-access event operations are schema-accepted and staged. Edge
+  production and server handling remain disabled until their implementation
+  slices pass.
+- The edge-owned golden fixture separates schema acceptance from edge-producer
+  and cloud-issuer enablement. It also closes the current command ACK result
+  vocabulary, with `CONFLICT` accepted but staged.
 - The supported device baseline is KIWI, TEKTELIC CLOVER, DRAGINO LSN50,
   SENSECAP S2120, AQUASCOPE LORAIN, and STREGA.
 - UC512 remains schema-compatible but hidden from the supported parity catalog.
@@ -281,7 +288,7 @@ The server router exposes 13 paths:
 
 ### Event operations
 
-The governed schema contains 23 operations:
+The governed schema contains 28 operations:
 
 ```text
 CHAMELEON_READING_APPENDED
@@ -300,6 +307,11 @@ JOURNAL_PLOT_GROUP_UPSERTED
 JOURNAL_PLOT_UPSERTED
 JOURNAL_VOCAB_UPSERTED
 SCHEDULE_UPSERTED
+USER_PLOT_ASSIGNMENT_DELETED
+USER_PLOT_ASSIGNMENT_UPSERTED
+USER_UPSERTED
+USER_ZONE_ASSIGNMENT_DELETED
+USER_ZONE_ASSIGNMENT_UPSERTED
 WORK_REQUEST_SUBMITTED
 ZONE_CONFIG_UPSERTED
 ZONE_DELETED
@@ -309,8 +321,10 @@ ZONE_RECOMMENDATION_UPSERTED
 ZONE_UPSERTED
 ```
 
-The five journal operations are `cloudDeferred`. The other 18 match the server
-operation mirror. The runtime flow emits 17 because
+The five journal and five scoped-access operations are `cloudDeferred`. The
+scoped-access operations are also `edgeDeferred`; the journal operations are
+implemented by edge modules but not enabled for cloud delivery. The other 18
+match the server operation mirror. The runtime flow emits 17 because
 `WORK_REQUEST_SUBMITTED` is seed/module-owned.
 
 ### Command operations
