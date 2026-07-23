@@ -12,6 +12,9 @@ import { HistoryCardDetailPage } from './pages/HistoryCardDetailPage';
 import { AccountLink } from './pages/AccountLink';
 import { SettingsPage } from './pages/SettingsPage';
 import { GatewayRestartBanner } from './components/GatewayRestartBanner';
+import { AdminOnly } from './components/AdminOnly';
+import { UsersPage } from './pages/admin/UsersPage';
+import { GrantsPage } from './pages/admin/GrantsPage';
 
 const AnalysisRoute = lazy(() =>
   import('./pages/AnalysisRoute').then((module) => ({ default: module.AnalysisRoute })),
@@ -64,6 +67,9 @@ function App() {
               </PrivateRoute>
             }
           />
+
+          <Route path="/admin/users" element={<PrivateRoute><AdminOnly><UsersPage /></AdminOnly></PrivateRoute>} />
+          <Route path="/admin/grants" element={<PrivateRoute><AdminOnly><GrantsPage /></AdminOnly></PrivateRoute>} />
 
           <Route
             path="/history"
