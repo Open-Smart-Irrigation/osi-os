@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import useSWR from 'swr';
 import { devicesAPI, irrigationOutcomesAPI, irrigationZonesAPI, valvesAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useScope } from '../contexts/ScopeContext';
 import { useTranslation } from 'react-i18next';
 import { DashboardHeader } from '../components/DashboardHeader';
 import { KiwiSensorCard } from '../components/farming/KiwiSensorCard';
@@ -31,6 +32,7 @@ const valvesFetcher = () => valvesAPI.list();
 
 export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
+  const { isScoped, isZoneVisible, loading: scopeLoading } = useScope();
   const { t } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
   const { modules } = useDisplayPreferences();
@@ -98,6 +100,18 @@ export const FarmingDashboard: React.FC = () => {
     }
   );
 
+  const visibleZones = useMemo(
+    () => (zones ?? []).filter((zone) => {
+      const uuid = zone.zone_uuid ?? zone.zoneUuid;
+      return typeof uuid === 'string' ? isZoneVisible(uuid) : !isScoped;
+    }),
+    [isScoped, isZoneVisible, zones],
+  );
+  const visibleZoneIds = useMemo(
+    () => new Set(visibleZones.map((zone) => zone.id)),
+    [visibleZones],
+  );
+
   const handleUpdate = () => {
     mutateDevices();
     mutateZones();
@@ -122,17 +136,19 @@ export const FarmingDashboard: React.FC = () => {
     const unassigned: Device[] = [];
 
     devices.forEach((device) => {
-      if (device.irrigation_zone_id) {
+      const weatherDevice =
+        device.type_id === 'SENSECAP_S2120' || device.type_id === 'AQUASCOPE_LORAIN';
+      if (device.irrigation_zone_id && visibleZoneIds.has(device.irrigation_zone_id)) {
         const zoneDevices = byZone.get(device.irrigation_zone_id) || [];
         zoneDevices.push(device);
         byZone.set(device.irrigation_zone_id, zoneDevices);
-      } else {
+      } else if (!device.irrigation_zone_id || weatherDevice) {
         unassigned.push(device);
       }
     });
 
     return { devicesByZone: byZone, unassignedDevices: unassigned };
-  }, [devices, zones]);
+  }, [devices, visibleZoneIds, zones]);
 
   const unassignedSensors = unassignedDevices.filter((d) => d.type_id === 'KIWI_SENSOR' || d.type_id === 'TEKTELIC_CLOVER');
   const unassignedValves = unassignedDevices.filter((d) => d.type_id === 'STREGA_VALVE');
@@ -142,8 +158,8 @@ export const FarmingDashboard: React.FC = () => {
   const unassignedSdi12 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_SDI12');
   const irrigationActuations = irrigationActuationsResponse?.actuations ?? [];
   const zoneTimezones = useMemo(
-    () => new Map((zones ?? []).map((zone) => [zone.id, zone.timezone])),
-    [zones],
+    () => new Map(visibleZones.map((zone) => [zone.id, zone.timezone])),
+    [visibleZones],
   );
   // deviceEui is always uppercased by normaliseValveSummary; Device.deveui is always
   // uppercased by normaliseDevice — so a plain-string key match is safe.
@@ -161,7 +177,7 @@ export const FarmingDashboard: React.FC = () => {
     [devices],
   );
   const irrigationOutcomeZoneContexts = useMemo(
-    () => new Map<number, IrrigationOutcomeZoneContext>((zones ?? []).map((zone) => [
+    () => new Map<number, IrrigationOutcomeZoneContext>(visibleZones.map((zone) => [
       zone.id,
       {
         timeZone: zone.timezone ?? null,
@@ -169,10 +185,10 @@ export const FarmingDashboard: React.FC = () => {
         irrigationEfficiencyPct: zone.irrigationEfficiencyPct ?? zone.irrigation_efficiency_pct ?? null,
       },
     ])),
-    [zones],
+    [visibleZones],
   );
 
-  const isLoading = !devices && !devicesError && !zones && !zonesError;
+  const isLoading = scopeLoading || (!devices && !devicesError && !zones && !zonesError);
   const error = devicesError || zonesError;
 
   return (
@@ -209,10 +225,10 @@ export const FarmingDashboard: React.FC = () => {
         )}
 
         {/* Dashboard Content */}
-        {devices && zones && (
+        {!scopeLoading && devices && zones && (
           <>
             {/* Empty State */}
-            {devices.length === 0 && zones.length === 0 && (
+            {devices.length === 0 && visibleZones.length === 0 && (
               <div className="text-center py-12 bg-[var(--surface)] rounded-xl border-2 border-[var(--border)]">
                 <p className="text-[var(--text)] text-2xl font-bold mb-4">{t('emptyState.title')}</p>
                 <p className="text-[var(--text-tertiary)] text-lg mb-6">
@@ -236,19 +252,19 @@ export const FarmingDashboard: React.FC = () => {
             )}
 
             {/* Irrigation Zones Section */}
-            {zones.length > 0 && (
+            {visibleZones.length > 0 && (
               <div className="mb-8">
                 <h2 className="text-2xl font-bold text-[var(--text)] mb-4 high-contrast-text">
                   {t('irrigationZones')}
                 </h2>
-                {zones.map((zone) => (
+                {visibleZones.map((zone) => (
                   <IrrigationZoneCard
                     key={zone.id}
                     zone={zone}
                     devices={devicesByZone.get(zone.id) || []}
                     unassignedDevices={unassignedDevices}
                     onUpdate={handleUpdate}
-                    allZones={(zones ?? []).map((z) => ({ id: z.id, name: z.name }))}
+                    allZones={visibleZones.map((z) => ({ id: z.id, name: z.name }))}
                     irrigationActuations={irrigationActuations}
                     valvesByEui={valvesByEui}
                   />
@@ -359,7 +375,7 @@ export const FarmingDashboard: React.FC = () => {
                           <SenseCapWeatherCard
                             key={device.deveui}
                             device={device}
-                            allZones={(zones ?? []).map((z) => ({ id: z.id, name: z.name }))}
+                            allZones={visibleZones.map((z) => ({ id: z.id, name: z.name }))}
                             onUpdate={handleUpdate}
                           />
                         ))}

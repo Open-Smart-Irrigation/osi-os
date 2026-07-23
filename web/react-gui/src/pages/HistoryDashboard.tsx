@@ -7,6 +7,7 @@ import { HistoryDesktopShell } from '../components/history/HistoryDesktopShell';
 import { HistoryMobileShell } from '../components/history/HistoryMobileShell';
 import { HistoryMobileHeader } from '../components/history/mobile/HistoryMobileHeader';
 import { useAuth } from '../contexts/AuthContext';
+import { useScope } from '../contexts/ScopeContext';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCards } from '../history/useHistoryCards';
 import {
@@ -72,6 +73,7 @@ function mergeLiveWorkspaceViewport(
 
 export const HistoryDashboard: React.FC = () => {
   const { username, logout } = useAuth();
+  const { isScoped, isZoneVisible, loading: scopeLoading } = useScope();
   const { t } = useTranslation('history');
   const { t: tc } = useTranslation('common');
   const featureFlags = useFeatureFlags();
@@ -107,11 +109,22 @@ export const HistoryDashboard: React.FC = () => {
     },
   );
 
+  const availableZones = useMemo(
+    () => (zones ?? []).filter((zone) => {
+      const uuid = zone.zone_uuid ?? zone.zoneUuid;
+      return typeof uuid === 'string' ? isZoneVisible(uuid) : !isScoped;
+    }),
+    [isScoped, isZoneVisible, zones],
+  );
+
   useEffect(() => {
-    if (selectedZoneId === null && zones && zones.length > 0) {
-      setSelectedZoneId(zones[0].id);
+    if (
+      availableZones.length > 0
+      && (selectedZoneId === null || !availableZones.some((zone) => zone.id === selectedZoneId))
+    ) {
+      setSelectedZoneId(availableZones[0].id);
     }
-  }, [selectedZoneId, zones]);
+  }, [availableZones, selectedZoneId]);
 
   const {
     cards,
@@ -386,9 +399,9 @@ export const HistoryDashboard: React.FC = () => {
     }));
   };
 
-  const availableZones = zones ?? [];
-  const shellReady = featureFlags.historyEnabled && availableZones.length > 0 && !zonesError;
-  const loadingMessage = featureFlags.historyEnabled && (zonesLoading || cardsLoading)
+  const shellReady =
+    featureFlags.historyEnabled && !scopeLoading && availableZones.length > 0 && !zonesError;
+  const loadingMessage = featureFlags.historyEnabled && (scopeLoading || zonesLoading || cardsLoading)
     ? t('history.shell.loadingLocalCards')
     : null;
 
@@ -468,7 +481,7 @@ export const HistoryDashboard: React.FC = () => {
           </section>
         )}
 
-        {featureFlags.historyEnabled && !zonesError && availableZones.length === 0 && !zonesLoading && (
+        {featureFlags.historyEnabled && !zonesError && availableZones.length === 0 && !zonesLoading && !scopeLoading && (
           <section className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] p-6 text-center">
             <h2 className="text-xl font-bold text-[var(--text)]">
               {t('history.shell.noZonesTitle')}
