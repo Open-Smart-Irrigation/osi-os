@@ -358,6 +358,49 @@ frontend build started with 13,217 MiB available,
 `pswpin 726934797`, and `pswpout 892359280`. Every heavyweight command cleared
 the 4,096 MiB gate.
 
+### Task 6 scoped edge access
+
+Phase B applies the owner-plus-grant union to zone, device, history, analysis,
+environment, recent-actuation, and journal reads. Weather-class devices remain
+shared reads. Phase C applies fresh role and membership checks to every
+portable write, physical effect, provisioning route, scheduler path, system
+write, account mutation, and grant mutation. Out-of-scope resources remain
+indistinguishable from missing resources; wrong-role actions return 403.
+
+Phase D loads `/api/me` once per authenticated session and filters zone and
+plot navigation while scope is unresolved. Viewer sessions retain scoped data
+but do not render mutation controls or settings. Scoped administrators receive
+user lifecycle and grant-management routes. The edge grant contract can
+create and revoke zone or plot assignments but cannot list assignments, so the
+GUI identifies that limitation and shows only grants created during the
+current page session. Existing grant enumeration remains a contract gap for
+Task 7.
+
+The active `.worktrees/i18n-review-repairs` worktree still owns the locale
+trees. Phase D's locale step was therefore blocked under the program ownership
+rule. New administration and disabled-account copy remains English source
+text; no locale or generated feed file was edited.
+
+Task 6 verification:
+
+| Command | Result |
+|---|---|
+| `node scripts/test-scoped-access-writes.js` | exit 0; 24 tests passed |
+| `node scripts/test-scoped-access-reads.js` | exit 0; 23 tests passed |
+| `node --test scripts/test-scope-helper.js` | exit 0; 20 tests passed |
+| Flow parse, wiring, size, silent-catch, bare-require, profile, runtime-schema, MQTT, and sync gates | exit 0 |
+| `NODE_OPTIONS=--max-old-space-size=2048 npm run typecheck` | exit 0 |
+| `NODE_OPTIONS=--max-old-space-size=2048 npm run test:unit` | exit 0; 94 TSX-runner tests and 1,663 Vitest tests passed |
+| `NODE_OPTIONS=--max-old-space-size=2048 npm run build` | exit 0; 1,711 modules transformed |
+| `git diff --check` | exit 0 |
+
+Phase B is edge commit `31fd939d`. Phase C spans `b279d932` through
+`f712efb9`. Phase D spans `19d68c12` through `b4b6c1a8`. All commits were
+pushed to `design-sync/agrolink`.
+
+The final GUI gate started with 12,575 MiB available,
+`pswpin 730460840`, and `pswpout 897557888`, above the 4,096 MiB threshold.
+
 ### Program ownership
 
 The network planning program is finished. Its final local commit is `8f73306f`
