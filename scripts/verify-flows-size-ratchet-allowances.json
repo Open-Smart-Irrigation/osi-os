@@ -331,8 +331,8 @@
     }
   },
   "total_allowance": {
-    "delta": 162582,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink a6289e96, feat(api): enforce schedule scope and authority) 1,235,556 chars = 162,582. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: +55,008 is this scope port so far, itemized in node_allowances for every node this port has touched or that auto-merged cleanly as a consequence."
+    "delta": 171557,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink bc156fb2, feat(api): enforce scoped zone lifecycle) 1,244,531 chars = 171,557. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: +63,983 is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
@@ -362,6 +362,10 @@
     "sdi12-identify-fn": {
       "max_chars": 4101,
       "reason": "SDI-12 port: new function node measured at exactly 4101 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Ported as-is from the source SDI-12 arc rather than re-architected mid-port; extracting these bodies into osi-lib seam modules is the standing follow-up. The upstream ratchet (refactor-program A0) replaced the ceiling with exactly this shape -- a committed, reviewed absolute max_chars per node."
+    },
+    "scoped-zone-delete-router": {
+      "max_chars": 5018,
+      "reason": "Wave 3 scoped-access port (AgroLink bc156fb2, feat(api): enforce scoped zone lifecycle): new function node measured at exactly 5018 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Zone delete under OSI_SCOPED_ACCESS=1 is inherently larger than a typical scoped-gate wrapper: it resolves the target zone and its grantees, requires either sole ownership/grant or an admin role for non-owner deletion, and runs a 5-statement transaction (devices, journal_plots, user_zone_assignments, irrigation_schedules, irrigation_zones) with per-grantee scope-cache invalidation. Ported as-is rather than re-architected mid-port."
     }
   }
 }

@@ -298,3 +298,142 @@ test('W2: scheduler query counts enabled scope holders and disables an empty zon
     db.close();
   }
 });
+
+test('W3: scoped zone creation atomically grants the creator', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('scoped-zone-create-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'POST',
+        '/api/irrigation-zones',
+        {},
+        { name: 'New scoped zone' }
+      ),
+      env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 201);
+    const zoneUuid = response.result[1].payload.zone_uuid;
+    assert.equal(
+      db.prepare(
+        'SELECT user_id FROM irrigation_zones WHERE zone_uuid = ?'
+      ).get(zoneUuid).user_id,
+      2
+    );
+    const grant = db.prepare(
+      'SELECT user_uuid, assigned_by_user_uuid FROM user_zone_assignments WHERE zone_uuid = ? AND deleted_at IS NULL'
+    ).get(zoneUuid);
+    assert.equal(grant.user_uuid, 'u-res1');
+    assert.equal(grant.assigned_by_user_uuid, 'u-res1');
+
+    const viewer = await executeFunction(loadNode('scoped-zone-create-router'), {
+      msg: scopedRequest(
+        3,
+        'view1',
+        'POST',
+        '/api/irrigation-zones',
+        {},
+        { name: 'Forbidden zone' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(viewer.result[1].statusCode, 403);
+  } finally {
+    db.close();
+  }
+});
+
+test('W3: sole-scope-holder delete tombstones grants and preserves detached plots', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO irrigation_zones (id, name, user_id, zone_uuid)
+    VALUES (10, 'Delete me', 2, 'z-delete');
+    INSERT INTO user_zone_assignments (
+      assignment_uuid, user_uuid, zone_uuid, assigned_by_user_uuid, created_at
+    ) VALUES ('g-delete', 'u-res1', 'z-delete', 'u-res1', '2026-01-01');
+    INSERT INTO journal_plots (
+      plot_uuid, plot_code, name, zone_uuid, owner_user_uuid
+    ) VALUES ('p-delete', 'PD', 'Surviving plot', 'z-delete', 'u-res1');
+  `);
+  try {
+    const response = await executeFunction(loadNode('scoped-zone-delete-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'DELETE',
+        '/api/irrigation-zones/10',
+        { id: '10' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result[1].statusCode, 200);
+    assert.ok(
+      db.prepare('SELECT deleted_at FROM irrigation_zones WHERE id=10').get().deleted_at
+    );
+    assert.ok(
+      db.prepare(
+        "SELECT deleted_at FROM user_zone_assignments WHERE assignment_uuid='g-delete'"
+      ).get().deleted_at
+    );
+    assert.equal(
+      db.prepare("SELECT zone_uuid FROM journal_plots WHERE plot_uuid='p-delete'").get().zone_uuid,
+      null
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('W3: researcher cannot delete a multi-holder zone; admin can', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO irrigation_zones (id, name, user_id, zone_uuid)
+    VALUES (11, 'Shared zone', 2, 'z-shared');
+    INSERT INTO user_zone_assignments (
+      assignment_uuid, user_uuid, zone_uuid, assigned_by_user_uuid, created_at
+    ) VALUES
+      ('g-shared-1', 'u-res1', 'z-shared', 'u-res1', '2026-01-01'),
+      ('g-shared-2', 'u-view1', 'z-shared', 'u-res1', '2026-01-01');
+  `);
+  try {
+    const researcher = await executeFunction(loadNode('scoped-zone-delete-router'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'DELETE',
+        '/api/irrigation-zones/11',
+        { id: '11' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(researcher.result[1].statusCode, 409);
+    assert.equal(
+      db.prepare('SELECT deleted_at FROM irrigation_zones WHERE id=11').get().deleted_at,
+      null
+    );
+
+    scopeHelper._resetForTests();
+    const admin = await executeFunction(loadNode('scoped-zone-delete-router'), {
+      msg: scopedRequest(
+        1,
+        'admin1',
+        'DELETE',
+        '/api/irrigation-zones/11',
+        { id: '11' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(admin.result[1].statusCode, 200);
+  } finally {
+    db.close();
+  }
+});
