@@ -201,6 +201,14 @@ describe('locked builder source', () => {
     await expect(validateBuiltBuilderImage(canonical, { run: async () => { throw unavailable; } })).rejects.toMatchObject({ code: 'DOCKER_UNAVAILABLE' });
   });
 
+  it('classifies missing images and malformed inspect output separately from Docker availability', async () => {
+    const canonical = `registry.example.invalid/osi-builder@sha256:${digest('a')}`;
+    const missingImage = Object.assign(new Error('image lookup failed'), { code: 1, stderr: `Error response from daemon: No such image: ${canonical}` });
+    await expect(validateBuiltBuilderImage(canonical, { run: async () => { throw missingImage; } })).rejects.toMatchObject({ code: 'BUILDER_IMAGE_DIGEST_INVALID' });
+
+    await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => argv[0] === 'image' ? { stdout: '{not-json', stderr: '' } : { stdout: '', stderr: '' } })).rejects.toMatchObject({ code: 'BUILDER_VALIDATION_EVIDENCE_INVALID' });
+  });
+
   it('rejects build-only values in the inspected runtime environment', async () => {
     const canonical = `registry.example.invalid/osi-builder@sha256:${digest('a')}`;
     const inspect = JSON.stringify({ Id: `sha256:${digest('b')}`, Architecture: 'amd64', Os: 'linux', Size: 1, RepoDigests: [canonical], Config: { Env: ['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'CARGO_HOME=/opt/cargo'] } });

@@ -352,7 +352,14 @@ function isDockerUnavailable(error: unknown): boolean {
   const value = error as { code?: unknown; stderr?: unknown; message?: unknown };
   if (typeof value.code === 'string' && ['ENOENT', 'EACCES', 'ETIMEDOUT', 'ECONNREFUSED'].includes(value.code)) return true;
   const text = `${typeof value.stderr === 'string' ? value.stderr : ''}\n${typeof value.message === 'string' ? value.message : ''}`;
-  return /Cannot connect to the Docker daemon|Is the docker daemon running|No such image|permission denied/u.test(text);
+  return /Cannot connect to the Docker daemon|Is the docker daemon running|permission denied/iu.test(text);
+}
+
+function isMissingImage(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const value = error as { stderr?: unknown; message?: unknown };
+  const text = `${typeof value.stderr === 'string' ? value.stderr : ''}\n${typeof value.message === 'string' ? value.message : ''}`;
+  return /No such image|manifest unknown|reference not found/iu.test(text);
 }
 
 export async function validateBuiltBuilderImage(imageReference: string, options: DockerImageValidationOptions = {}): Promise<{ readonly imageId: string; readonly selfTest: 'passed'; readonly versions: Readonly<Record<string, string>>; readonly evidence: BuilderValidationEvidence }> {
@@ -364,7 +371,9 @@ export async function validateBuiltBuilderImage(imageReference: string, options:
     try {
       return await command(argv, { timeout, maxBuffer: purpose === 'inspect' ? 64 * 1024 : 256 * 1024, env: environment });
     } catch (error) {
-      if (purpose === 'inspect' || isDockerUnavailable(error)) throw new BuilderValidationError('DOCKER_UNAVAILABLE', dockerErrorMessage(error));
+      if (isDockerUnavailable(error)) throw new BuilderValidationError('DOCKER_UNAVAILABLE', dockerErrorMessage(error));
+      if (purpose === 'inspect' && isMissingImage(error)) throw new BuilderValidationError('BUILDER_IMAGE_DIGEST_INVALID', dockerErrorMessage(error));
+      if (purpose === 'inspect') throw new BuilderValidationError('BUILDER_IMAGE_DIGEST_INVALID', dockerErrorMessage(error));
       throw new BuilderValidationError('RUST_BOOTSTRAP_UNAVAILABLE', dockerErrorMessage(error));
     }
   };
@@ -372,7 +381,7 @@ export async function validateBuiltBuilderImage(imageReference: string, options:
   try { inspect = await invoke(['image', 'inspect', '--format', '{{json .}}', imageReference], 10_000, 'inspect'); }
   catch (error) { throw error; }
   let image: { Id?: unknown; Architecture?: unknown; Os?: unknown; RepoDigests?: unknown; Size?: unknown; Config?: { Env?: unknown } };
-  try { image = JSON.parse(inspect.stdout) as typeof image; } catch (error) { throw new BuilderValidationError('DOCKER_UNAVAILABLE', `Docker image inspect was not valid JSON: ${dockerErrorMessage(error)}`); }
+  try { image = JSON.parse(inspect.stdout) as typeof image; } catch (error) { throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', `Docker image inspect was not valid JSON: ${dockerErrorMessage(error)}`); }
   if (typeof image.Id !== 'string' || !IMAGE_ID.test(image.Id)) throw new BuilderValidationError('BUILDER_IMAGE_DIGEST_INVALID', 'Docker image ID is invalid');
   if (image.Architecture !== 'amd64' || image.Os !== 'linux') throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Docker image architecture is not linux/amd64');
   if (typeof image.Size !== 'number' || image.Size <= 0 || image.Size > 4 * 1024 * 1024 * 1024) throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Docker image size is outside the builder limit');
