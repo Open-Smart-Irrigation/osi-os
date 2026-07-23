@@ -39,6 +39,26 @@ function valveRequest(userId, username, deveui = 'VALVE1') {
   };
 }
 
+function scopedRequest(userId, username, method, path, params = {}, body = {}) {
+  return {
+    req: {
+      method,
+      path,
+      headers: {
+        authorization: makeAuthHeader({
+          userId,
+          username,
+          secret: AUTH_SECRET,
+        }),
+      },
+      params,
+      query: {},
+      body,
+    },
+    payload: body,
+  };
+}
+
 async function executeValveBoundary(db, userId, username, deveui) {
   scopeHelper._resetForTests();
   return executeFunction(loadNode('83bb4a452dd9ae37'), {
@@ -142,6 +162,138 @@ test('W1: revocation immediately stops enqueue before physical effect', async ()
       ).get().count,
       0
     );
+  } finally {
+    db.close();
+  }
+});
+
+test('W2: schedule mutation allows grants, hides foreign zones, and rejects viewers', async () => {
+  const db = seedScopedDb();
+  try {
+    const granted = await executeFunction(loadNode('70fcbea336401bd1'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        '/api/irrigation-zones/2/schedule',
+        { id: '2' },
+        { trigger_metric: 'SWT_1', threshold_kpa: 20 }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.ok(granted.result[0]);
+    assert.equal(granted.result[0].actor_user_uuid, 'u-res1');
+
+    scopeHelper._resetForTests();
+    const foreign = await executeFunction(loadNode('70fcbea336401bd1'), {
+      msg: scopedRequest(
+        1,
+        'admin1',
+        'PUT',
+        '/api/irrigation-zones/1/schedule',
+        { id: '1' },
+        { trigger_metric: 'SWT_1', threshold_kpa: 20 }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(foreign.result[1].statusCode, 404);
+
+    scopeHelper._resetForTests();
+    const viewer = await executeFunction(loadNode('70fcbea336401bd1'), {
+      msg: scopedRequest(
+        3,
+        'view1',
+        'PUT',
+        '/api/irrigation-zones/1/schedule',
+        { id: '1' },
+        { trigger_metric: 'SWT_1', threshold_kpa: 20 }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(viewer.result[1].statusCode, 403);
+  } finally {
+    db.close();
+  }
+});
+
+test('W2: disable-all updates only researcher scope and rejects viewers', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO irrigation_schedules (
+      irrigation_zone_id, trigger_metric, threshold_kpa,
+      duration_minutes, enabled, created_at, updated_at
+    ) VALUES
+      (1, 'SWT_1', 20, 10, 1, '2026-01-01', '2026-01-01'),
+      (2, 'SWT_1', 20, 10, 1, '2026-01-01', '2026-01-01');
+  `);
+  try {
+    const response = await executeFunction(loadNode('settings-disable-schedules-fn'), {
+      msg: scopedRequest(
+        3,
+        'view1',
+        'POST',
+        '/api/irrigation-zones/schedules/disable-all'
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result.statusCode, 403);
+
+    scopeHelper._resetForTests();
+    db.prepare(
+      "UPDATE user_zone_assignments SET deleted_at='2026-07-01' WHERE assignment_uuid='g-3'"
+    ).run();
+    const researcher = await executeFunction(loadNode('settings-disable-schedules-fn'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'POST',
+        '/api/irrigation-zones/schedules/disable-all'
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(researcher.result.statusCode, 200);
+    assert.equal(
+      db.prepare('SELECT enabled FROM irrigation_schedules WHERE irrigation_zone_id=1').get().enabled,
+      0
+    );
+    assert.equal(
+      db.prepare('SELECT enabled FROM irrigation_schedules WHERE irrigation_zone_id=2').get().enabled,
+      1
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('W2: scheduler query counts enabled scope holders and disables an empty zone', async () => {
+  const queryNode = loadNode('a0a61f4b7dca1c2e');
+  assert.match(queryNode.func, /enabled_scope_holders/);
+  assert.match(queryNode.func, /user_zone_assignments/);
+
+  const db = seedScopedDb();
+  try {
+    const decision = await executeFunction(loadNode('5f0d2b7e9b9b1b3a'), {
+      msg: {
+        zone: {
+          zone_id: 1,
+          user_id: 2,
+          trigger_metric: 'SWT_1',
+          threshold_kpa: 20,
+          duration_minutes: 10,
+          enabled_scope_holders: 0,
+        },
+        payload: [],
+      },
+      env: ENV,
+      db,
+    });
+    assert.equal(decision.result[0], null);
+    assert.match(decision.result[2].topic, /SET enabled = 0/);
   } finally {
     db.close();
   }
