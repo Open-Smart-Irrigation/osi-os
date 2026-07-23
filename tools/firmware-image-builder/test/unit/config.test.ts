@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -102,6 +102,8 @@ function fakeDirectoryStats(overrides: Partial<RootStats> = {}): RootStats {
     isSymbolicLink: () => false,
     isDirectory: () => true,
     isBlockDevice: () => false,
+    uid: process.geteuid?.() ?? -1,
+    mode: 0o755,
     ...overrides,
   };
 }
@@ -150,6 +152,27 @@ describe('builder configuration', () => {
 
     expect(await snapshotTree(workspace.directory)).toEqual(before);
     await expect(readFile(join(workspace.stateHome, 'osi-image-builder', 'jobs.sqlite'))).rejects.toThrow();
+  });
+
+  it.each([
+    ['approved root overlaps repository', { approvedOutputRoots: [{ id: 'sdcard-images', label: 'images', path: 'repository' }] }],
+    ['approved root overlaps state root', { approvedOutputRoots: [{ id: 'sdcard-images', label: 'images', path: 'state' }] }],
+    ['approved roots are equal', { approvedOutputRoots: [{ id: 'a', label: 'a', path: 'images' }, { id: 'b', label: 'b', path: 'images' }] }],
+  ])('rejects %s with typed overlap and does not create state', async (_name, override) => {
+    const workspace = await createWorkspace();
+    const statePath = resolve(workspace.stateHome, 'osi-image-builder');
+    const approvedOutputRoots = override.approvedOutputRoots.map((root) => ({
+      ...root,
+      path: root.path === 'repository' ? workspace.repositoryPath : root.path === 'state' ? workspace.stateHome : workspace.outputRoot,
+    }));
+    await writeConfig(workspace, configFor(workspace, { approvedOutputRoots }));
+
+    await expect(loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      git: sshOrigin,
+      rootFs: { statfs: ampleDisk },
+    })).rejects.toMatchObject({ code: 'OUTPUT_ROOT_OVERLAP' });
+    await expect(lstat(statePath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it.each([
@@ -320,6 +343,36 @@ describe('builder configuration', () => {
       git: sshOrigin,
       rootFs: { statfs: ampleDisk, access: async () => { throw new Error('access denied'); } },
     })).rejects.toMatchObject({ code: 'OUTPUT_ROOT_NOT_WRITABLE' });
+  });
+
+  it('rejects insecure output-root modes and unexpected owners', async () => {
+    const workspace = await createWorkspace();
+    await writeConfig(workspace, configFor(workspace));
+    await chmod(workspace.outputRoot, 0o775);
+    await expect(loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      git: sshOrigin,
+      rootFs: { statfs: ampleDisk },
+    })).rejects.toMatchObject({ code: 'OUTPUT_ROOT_MODE' });
+    await chmod(workspace.outputRoot, 0o755);
+    await expect(loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      git: sshOrigin,
+      rootFs: { lstat: async () => fakeDirectoryStats({ uid: (process.geteuid?.() ?? -1) + 1 }), statfs: ampleDisk },
+    })).rejects.toMatchObject({ code: 'OUTPUT_ROOT_OWNER' });
+  });
+
+  it('rejects an existing insecure state root without granting authority', async () => {
+    const workspace = await createWorkspace();
+    const statePath = resolve(workspace.stateHome, 'osi-image-builder');
+    await mkdir(statePath);
+    await chmod(statePath, 0o755);
+    await writeConfig(workspace, configFor(workspace));
+    await expect(loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      git: sshOrigin,
+      rootFs: { statfs: ampleDisk },
+    })).rejects.toMatchObject({ code: 'STATE_ROOT_MODE' });
   });
 
   it('uses effective access instead of requiring root ownership', async () => {

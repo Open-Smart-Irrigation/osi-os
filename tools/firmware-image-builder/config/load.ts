@@ -1,6 +1,8 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { access, lstat, readFile, realpath, statfs } from 'node:fs/promises';
+import { access, lstat, mkdir, open, readFile, readlink, realpath, rmdir, statfs } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
+import type { BigIntStats, Stats } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -51,7 +53,14 @@ export type ConfigErrorCode =
   | 'DISK_THRESHOLD_INVALID'
   | 'BUILDER_LOCK_PATH_INVALID'
   | 'OUTPUT_ROOT_ID_UNKNOWN'
-  | 'OUTPUT_PATH_NOT_ALLOWED';
+  | 'OUTPUT_PATH_NOT_ALLOWED'
+  | 'OUTPUT_ROOT_OVERLAP'
+  | 'OUTPUT_ROOT_OWNER'
+  | 'OUTPUT_ROOT_MODE'
+  | 'STATE_ROOT_OWNER'
+  | 'STATE_ROOT_MODE'
+  | 'STATE_ROOT_NOT_FOUND'
+  | 'STATE_ROOT_CREATE_FAILED';
 
 export class ConfigValidationError extends Error {
   readonly code: ConfigErrorCode;
@@ -86,6 +95,68 @@ export interface ApprovedOutputRoot {
   readonly quarantinePath: string;
 }
 
+export interface ApprovedRootRegistry {
+  readonly __opaqueApprovedRootRegistry: unique symbol;
+}
+
+export interface StateRootAuthority {
+  readonly __opaqueStateRootAuthority: unique symbol;
+}
+
+export interface PathAuthorities {
+  readonly approvedRoots: ApprovedRootRegistry;
+  readonly stateRoot: StateRootAuthority;
+}
+
+export interface PathAuthorityDependencies {
+  readonly close: (handle: FileHandle) => Promise<void>;
+  readonly stat: (handle: FileHandle) => Promise<Stats>;
+  readonly statBigInt: (handle: FileHandle) => Promise<BigIntStats>;
+  readonly readlink: (path: string) => Promise<string>;
+  readonly mountId: (handle: FileHandle) => Promise<number>;
+  readonly beforeRead: (handle: FileHandle) => Promise<void>;
+}
+
+interface AuthorityRootRecord {
+  readonly id: string;
+  readonly path: string;
+  readonly quarantinePath: string;
+  readonly device: number;
+  readonly inode: number;
+}
+
+interface AuthorityStateRecord {
+  readonly path: string;
+  readonly device: number;
+  readonly inode: number;
+}
+
+interface AuthorityData {
+  readonly roots: ReadonlyMap<string, AuthorityRootRecord>;
+  readonly state: AuthorityStateRecord;
+  readonly dependencies: PathAuthorityDependencies;
+}
+
+const authorityBrand = new WeakSet<object>();
+const authorityData = new WeakMap<object, AuthorityData>();
+const stateAuthorityBrand = new WeakSet<object>();
+const defaultPathAuthorityDependencies: PathAuthorityDependencies = Object.freeze({
+  close: async (handle: FileHandle) => handle.close(),
+  stat: async (handle: FileHandle) => handle.stat(),
+  statBigInt: async (handle: FileHandle) => handle.stat({ bigint: true }),
+  readlink,
+  mountId: async (handle: FileHandle) => {
+    if (process.platform !== 'linux') throw new Error('Linux fdinfo mount IDs are unavailable');
+    const contents = await readFile(`/proc/self/fdinfo/${handle.fd}`, 'utf8');
+    const match = contents.match(/^mnt_id:\s*(\d+)\s*$/m);
+    if (!match) throw new Error('Linux fdinfo mount ID is malformed');
+    const mountId = Number(match[1]);
+    if (!Number.isSafeInteger(mountId) || mountId < 0) throw new Error('Linux fdinfo mount ID is invalid');
+    return mountId;
+  },
+  beforeRead: async () => undefined,
+});
+
 export interface BuilderConfig {
   readonly repository: {
     readonly path: string;
@@ -110,6 +181,7 @@ export interface LoadedConfig {
   readonly redacted: RedactedConfig;
   readonly configRoot: string;
   readonly stateRoot: string;
+  readonly pathAuthorities: PathAuthorities;
 }
 
 export interface StatFsResult {
@@ -122,12 +194,15 @@ export interface ConfigLoadOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly git?: GitOriginProbe;
   readonly rootFs?: Partial<RootFileSystem>;
+  readonly pathAuthorityDependencies?: Partial<PathAuthorityDependencies>;
 }
 
 export interface RootStats {
   readonly isSymbolicLink: () => boolean;
   readonly isDirectory: () => boolean;
   readonly isBlockDevice: () => boolean;
+  readonly uid: number;
+  readonly mode: number;
 }
 
 export interface RootFileSystem {
@@ -147,6 +222,124 @@ export interface RootValidationOptions {
 }
 
 const execFile = promisify(execFileCallback);
+
+export class ConfigAuthorityError extends Error {
+  readonly code?: ConfigErrorCode;
+
+  constructor(message: string, options?: ErrorOptions, code?: ConfigErrorCode) {
+    super(message, options);
+    this.name = 'ConfigAuthorityError';
+    this.code = code;
+  }
+}
+
+type RootSnapshot = Readonly<AuthorityRootRecord>;
+type StateSnapshot = Readonly<AuthorityStateRecord>;
+type AuthorityContext = Readonly<{ snapshot: RootSnapshot; dependencies: PathAuthorityDependencies }>;
+type StateAuthorityContext = Readonly<{ snapshot: StateSnapshot; dependencies: PathAuthorityDependencies }>;
+
+function authorityReject(message: string, cause?: unknown, code?: ConfigErrorCode): never {
+  throw new ConfigAuthorityError(message, cause === undefined ? undefined : { cause }, code);
+}
+
+function pathsOverlap(first: string, second: string): boolean {
+  return first === second || first.startsWith(`${second}/`) || second.startsWith(`${first}/`);
+}
+
+type DirectoryPolicy = 'output' | 'state';
+
+function validateDirectoryPolicy(stats: Pick<RootStats, 'uid' | 'mode'>, field: string, policy: DirectoryPolicy, fail: (message: string, code: ConfigErrorCode) => never): void {
+  const expectedUid = typeof process.geteuid === 'function' ? process.geteuid() : undefined;
+  if (expectedUid === undefined || stats.uid !== expectedUid) fail(`${field} must be owned by the effective user`, policy === 'state' ? 'STATE_ROOT_OWNER' : 'OUTPUT_ROOT_OWNER');
+  const permissions = stats.mode & 0o777;
+  const valid = policy === 'state'
+    ? permissions === 0o700
+    : (permissions & 0o700) === 0o700 && (permissions & 0o022) === 0;
+  if (!valid) fail(`${field} has an insecure mode`, policy === 'state' ? 'STATE_ROOT_MODE' : 'OUTPUT_ROOT_MODE');
+}
+
+async function inspectAuthorityDirectory(path: string, field: string, policy: DirectoryPolicy): Promise<{ path: string; device: number; inode: number }> {
+  let stats;
+  try { stats = await lstat(path); } catch (error) { return authorityReject(`${field} cannot be inspected`, error); }
+  if (stats.isSymbolicLink() || !stats.isDirectory()) return authorityReject(`${field} must be a non-symlink directory`);
+  validateDirectoryPolicy(stats, field, policy, (message, code) => authorityReject(message, undefined, code));
+  let canonical: string;
+  try {
+    canonical = await realpath(path);
+    await access(canonical, fsConstants.W_OK);
+  } catch (error) { return authorityReject(`${field} is not canonical and writable`, error); }
+  if (canonical !== resolve(path)) return authorityReject(`${field} resolves through a symlink`);
+  const flags = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW | (typeof (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC === 'number' ? (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC! : 0);
+  let handle: FileHandle;
+  try { handle = await open(canonical, flags); } catch (error) { return authorityReject(`${field} could not be opened no-follow`, error); }
+  try {
+    const held = await handle.stat();
+    if (!held.isDirectory() || held.dev !== stats.dev || held.ino !== stats.ino) return authorityReject(`${field} identity changed while opening`);
+    validateDirectoryPolicy(held, field, policy, (message, code) => authorityReject(message, undefined, code));
+  } finally {
+    await handle.close();
+  }
+  return { path: canonical, device: stats.dev, inode: stats.ino };
+}
+
+async function issuePathAuthorities(
+  roots: readonly ApprovedOutputRoot[],
+  statePath: string,
+  repositoryPath: string,
+  dependencies: PathAuthorityDependencies,
+): Promise<PathAuthorities> {
+  const inspectedRoots: Array<AuthorityRootRecord> = [];
+  const ids = new Set<string>();
+  for (const root of roots) {
+    if (ids.has(root.id)) return authorityReject(`duplicate approved root ID: ${root.id}`);
+    ids.add(root.id);
+    const inspected = await inspectAuthorityDirectory(root.path, `approved root ${root.id}`, 'output');
+    if (inspectedRoots.some((candidate) => pathsOverlap(candidate.path, inspected.path))) return authorityReject('approved roots may not overlap', undefined, 'OUTPUT_ROOT_OVERLAP');
+    inspectedRoots.push({ id: root.id, path: inspected.path, quarantinePath: join(inspected.path, '.osi-image-builder', 'quarantine'), device: inspected.device, inode: inspected.inode });
+  }
+  const state = await inspectAuthorityDirectory(statePath, 'state root', 'state');
+  const repository = await inspectAuthorityDirectory(repositoryPath, 'repository/work root', 'output');
+  if (inspectedRoots.some((root) => pathsOverlap(root.path, state.path) || pathsOverlap(root.path, repository.path))) return authorityReject('approved root overlaps a protected state/work root', undefined, 'OUTPUT_ROOT_OVERLAP');
+  if (pathsOverlap(state.path, repository.path)) return authorityReject('state and work roots may not overlap', undefined, 'OUTPUT_ROOT_OVERLAP');
+
+  const registry = Object.freeze({}) as ApprovedRootRegistry;
+  const stateAuthority = Object.freeze({}) as StateRootAuthority;
+  authorityBrand.add(registry);
+  stateAuthorityBrand.add(stateAuthority);
+  authorityData.set(registry, { roots: new Map(inspectedRoots.map((root) => [root.id, Object.freeze(root)])), state: Object.freeze(state), dependencies });
+  authorityData.set(stateAuthority, { roots: new Map(), state: Object.freeze(state), dependencies });
+  return Object.freeze({ approvedRoots: registry, stateRoot: stateAuthority });
+}
+
+function authorityLookup(registry: ApprovedRootRegistry, rootId: string): AuthorityData {
+  if (!registry || typeof registry !== 'object' || !authorityBrand.has(registry)) return authorityReject('approved root authority was not issued by config');
+  if (typeof rootId !== 'string' || !ROOT_ID_PATTERN.test(rootId)) return authorityReject('root ID is not canonical');
+  const data = authorityData.get(registry);
+  if (!data || !data.roots.has(rootId)) return authorityReject('unknown approved root ID');
+  return data;
+}
+
+function stateAuthorityLookup(stateRoot: StateRootAuthority): AuthorityData {
+  if (!stateRoot || typeof stateRoot !== 'object' || !stateAuthorityBrand.has(stateRoot)) return authorityReject('state root authority was not issued by config');
+  const data = authorityData.get(stateRoot);
+  if (!data) return authorityReject('state root authority is unavailable');
+  return data;
+}
+
+export async function withApprovedRootSnapshot<T>(registry: ApprovedRootRegistry, rootId: string, callback: (context: AuthorityContext) => Promise<T>): Promise<T> {
+  const data = authorityLookup(registry, rootId);
+  const record = data.roots.get(rootId)!;
+  const current = await inspectAuthorityDirectory(record.path, 'approved root', 'output');
+  if (current.path !== record.path || current.device !== record.device || current.inode !== record.inode) return authorityReject('approved root identity changed');
+  return callback({ snapshot: record, dependencies: data.dependencies });
+}
+
+export async function withStateRootSnapshot<T>(stateRoot: StateRootAuthority, callback: (context: StateAuthorityContext) => Promise<T>): Promise<T> {
+  const data = stateAuthorityLookup(stateRoot);
+  const current = await inspectAuthorityDirectory(data.state.path, 'state root', 'state');
+  if (current.path !== data.state.path || current.device !== data.state.device || current.inode !== data.state.inode) return authorityReject('state root identity changed');
+  return callback({ snapshot: data.state, dependencies: data.dependencies });
+}
 
 const defaultGitOriginProbe: GitOriginProbe = {
   async getOriginUrl(repositoryPath, remote) {
@@ -209,6 +402,28 @@ export async function loadConfig(options: ConfigLoadOptions = {}): Promise<Loade
     rootFs: options.rootFs,
     minimumFreeBytes: diskFreeMinimumBytes,
   });
+  await validateAuthorityOverlaps(approvedOutputRoots, directories.stateRoot, repositoryPath);
+  await validateStateRootPreflight(directories.stateRoot);
+  const stateCreated = await createStateRoot(directories.stateRoot);
+  let pathAuthorities: PathAuthorities;
+  try {
+    pathAuthorities = await issuePathAuthorities(
+      approvedOutputRoots,
+      directories.stateRoot,
+      repositoryPath,
+      Object.freeze({ ...defaultPathAuthorityDependencies, ...options.pathAuthorityDependencies }),
+    );
+  } catch (error) {
+    if (stateCreated.length > 0) {
+      try {
+        for (const createdPath of stateCreated) await rmdir(createdPath);
+      } catch (cleanupError) {
+        if (error && typeof error === 'object' && Object.isExtensible(error)) Object.defineProperty(error, 'cleanupError', { value: cleanupError, enumerable: false });
+      }
+    }
+    if (error instanceof ConfigAuthorityError && error.code) throw new ConfigValidationError(error.code, error.message);
+    throw error;
+  }
 
   const config: BuilderConfig = {
     repository: { path: repositoryPath, remote: DEFAULT_REMOTE },
@@ -222,7 +437,81 @@ export async function loadConfig(options: ConfigLoadOptions = {}): Promise<Loade
     config,
     redacted: { ...config },
     ...directories,
+    pathAuthorities,
   };
+}
+
+async function validateAuthorityOverlaps(
+  roots: readonly ApprovedOutputRoot[],
+  statePath: string,
+  repositoryPath: string,
+): Promise<void> {
+  let repositoryCanonical: string;
+  try { repositoryCanonical = await realpath(repositoryPath); } catch (error) { throw new ConfigValidationError('OUTPUT_ROOT_OVERLAP', `Cannot canonicalize protected work root: ${error instanceof Error ? error.message : String(error)}`); }
+  let stateCanonical = resolve(statePath);
+  try { stateCanonical = await realpath(statePath); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new ConfigValidationError('OUTPUT_ROOT_OVERLAP', 'Cannot canonicalize protected state root.');
+  }
+  const rootsOverlap = roots.some((root, index) => roots.slice(index + 1).some((other) => pathsOverlap(root.path, other.path)));
+  if (rootsOverlap || roots.some((root) => pathsOverlap(root.path, repositoryCanonical) || pathsOverlap(root.path, stateCanonical)) || pathsOverlap(stateCanonical, repositoryCanonical)) {
+    throw new ConfigValidationError('OUTPUT_ROOT_OVERLAP', 'Approved output, state, and work roots may not overlap.');
+  }
+}
+
+async function validateStateRootPreflight(statePath: string): Promise<void> {
+  let exists = true;
+  try {
+    await lstat(statePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') exists = false;
+    else throw new ConfigValidationError('STATE_ROOT_NOT_FOUND', 'State root cannot be inspected.');
+  }
+  try {
+    if (exists) await inspectAuthorityDirectory(statePath, 'state root', 'state');
+    else {
+      let parent = resolve(statePath, '..');
+      while (true) {
+        try {
+          await inspectAuthorityDirectory(parent, 'state parent', 'output');
+          break;
+        } catch (parentError) {
+          if (!(parentError instanceof ConfigAuthorityError) || !String(parentError.message).includes('cannot be inspected')) throw parentError;
+          const next = resolve(parent, '..');
+          if (next === parent) throw parentError;
+          parent = next;
+        }
+      }
+    }
+  } catch (error) {
+    if (error instanceof ConfigAuthorityError) throw new ConfigValidationError(error.code ?? 'STATE_ROOT_NOT_FOUND', error.message);
+    throw error;
+  }
+}
+
+async function createStateRoot(statePath: string): Promise<string[]> {
+  const missing: string[] = [];
+  let current = statePath;
+  while (true) {
+    try {
+      await lstat(current);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new ConfigValidationError('STATE_ROOT_CREATE_FAILED', 'State root cannot be inspected.');
+      missing.push(current);
+      const parent = resolve(current, '..');
+      if (parent === current) throw new ConfigValidationError('STATE_ROOT_CREATE_FAILED', 'State root has no existing parent.');
+      current = parent;
+    }
+  }
+  try {
+    for (const directory of [...missing].reverse()) await mkdir(directory, { mode: 0o700 });
+    return missing;
+  } catch (error) {
+    for (const directory of missing) {
+      try { await rmdir(directory); } catch (cleanupError) { void cleanupError; }
+    }
+    throw new ConfigValidationError('STATE_ROOT_CREATE_FAILED', `State root could not be created: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export async function validateApprovedRoots(
@@ -274,6 +563,7 @@ export async function validateApprovedRoots(
     if (!rootStats.isDirectory()) {
       throw new ConfigValidationError('OUTPUT_ROOT_NOT_DIRECTORY', `Approved output root must be a directory: ${root.path}`, root.id);
     }
+    validateDirectoryPolicy(rootStats, `Approved output root ${root.id}`, 'output', (message, code) => { throw new ConfigValidationError(code, message, root.id); });
 
     let canonicalPath: string;
     try {
