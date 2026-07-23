@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { SWRConfig } from 'swr';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FarmingDashboard } from '../FarmingDashboard';
 
-const { headerProps, logoutSpy } = vi.hoisted(() => ({
+const { headerProps, logoutSpy, getDevices, getZones, scopeState } = vi.hoisted(() => ({
   headerProps: [] as Array<{
     username: string | null;
     onAddZone: () => void;
@@ -14,6 +14,14 @@ const { headerProps, logoutSpy } = vi.hoisted(() => ({
     onLogout: () => void;
   }>,
   logoutSpy: vi.fn(),
+  getDevices: vi.fn(),
+  getZones: vi.fn(),
+  scopeState: {
+    loading: false,
+    isScoped: true,
+    role: 'researcher',
+    isZoneVisible: vi.fn((zoneUuid: string) => zoneUuid === 'zone-visible'),
+  },
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -21,6 +29,10 @@ vi.mock('../../contexts/AuthContext', () => ({
     username: 'operator',
     logout: logoutSpy,
   }),
+}));
+
+vi.mock('../../contexts/ScopeContext', () => ({
+  useScope: () => scopeState,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -48,10 +60,10 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../../services/api', () => ({
   devicesAPI: {
-    getAll: vi.fn(() => Promise.resolve([])),
+    getAll: getDevices,
   },
   irrigationZonesAPI: {
-    getAll: vi.fn(() => Promise.resolve([])),
+    getAll: getZones,
   },
   irrigationOutcomesAPI: {
     recentActuations: vi.fn(() => Promise.resolve({ actuations: [] })),
@@ -95,6 +107,10 @@ vi.mock('../../components/farming/IrrigationOutcomesPanel', () => ({
   IrrigationOutcomesPanel: () => <div data-testid="irrigation-outcomes-panel" />,
 }));
 
+vi.mock('../../components/farming/IrrigationZoneCard', () => ({
+  IrrigationZoneCard: ({ zone }: { zone: { name: string } }) => <article>{zone.name}</article>,
+}));
+
 vi.mock('../../components/farming/SystemPanel', () => ({
   SystemPanel: () => <div data-testid="system-panel" />,
 }));
@@ -111,6 +127,14 @@ function renderDashboard() {
 
 beforeEach(() => {
   headerProps.length = 0;
+  getDevices.mockResolvedValue([]);
+  getZones.mockResolvedValue([]);
+  scopeState.loading = false;
+  scopeState.isScoped = true;
+  scopeState.role = 'researcher';
+  scopeState.isZoneVisible.mockImplementation(
+    (zoneUuid: string) => zoneUuid === 'zone-visible',
+  );
 });
 
 afterEach(() => {
@@ -134,4 +158,49 @@ describe('FarmingDashboard header wiring', () => {
     fireEvent.click(screen.getByRole('button', { name: 'header logout' }));
     expect(logoutSpy).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ['researcher', true, ['Visible zone']],
+    ['viewer', true, ['Visible zone']],
+    ['admin', false, ['Visible zone', 'Foreign zone']],
+  ])(
+    'renders only permitted zones for a %s when scoped=%s',
+    async (role, isScoped, expectedZones) => {
+      scopeState.role = role;
+      scopeState.isScoped = isScoped;
+      scopeState.isZoneVisible.mockImplementation(
+        (zoneUuid: string) => !isScoped || zoneUuid === 'zone-visible',
+      );
+      getZones.mockResolvedValue([
+        {
+          id: 1,
+          name: 'Visible zone',
+          zone_uuid: 'zone-visible',
+          device_count: 0,
+          created_at: '2026-01-01',
+          updated_at: '2026-01-01',
+          schedule: null,
+        },
+        {
+          id: 2,
+          name: 'Foreign zone',
+          zone_uuid: 'zone-foreign',
+          device_count: 0,
+          created_at: '2026-01-01',
+          updated_at: '2026-01-01',
+          schedule: null,
+        },
+      ]);
+
+      renderDashboard();
+
+      await waitFor(() => expect(screen.getByText('Visible zone')).toBeInTheDocument());
+      for (const zoneName of expectedZones) {
+        expect(screen.getByText(zoneName)).toBeInTheDocument();
+      }
+      if (!expectedZones.includes('Foreign zone')) {
+        expect(screen.queryByText('Foreign zone')).not.toBeInTheDocument();
+      }
+    },
+  );
 });

@@ -8,6 +8,7 @@ import { JournalTimeline } from '../components/journal/JournalTimeline';
 import { JournalCaptureFlow } from '../components/journal/capture/JournalCaptureFlow';
 import { JournalWorkspace } from '../components/journal/desktop/JournalWorkspace';
 import { useAuth } from '../contexts/AuthContext';
+import { useScope } from '../contexts/ScopeContext';
 import { catalogLabel } from '../journal/catalogModel';
 import { useJournalCatalog } from '../journal/useJournalCatalog';
 import { useJournalEntries } from '../journal/useJournalEntries';
@@ -44,6 +45,12 @@ export const JournalPage: React.FC = () => {
   const { t, i18n } = useTranslation('journal');
   const locale = i18n.resolvedLanguage || i18n.language;
   const { username, logout } = useAuth();
+  const {
+    isPlotVisible,
+    isScoped,
+    isZoneVisible,
+    loading: scopeLoading,
+  } = useScope();
   const isDesktop = isDesktopBrowser();
   const [searchParams, setSearchParams] = useSearchParams();
   const [captureOpen, setCaptureOpen] = useState(false);
@@ -79,40 +86,56 @@ export const JournalPage: React.FC = () => {
 
   const requestedZoneUuid = searchParams.get('zone_uuid')?.trim() || null;
   const captureRequested = searchParams.get('capture') === '1';
+  const visibleZones = useMemo(
+    () => (zonesState.data ?? []).filter((zone) => {
+      const uuid = zoneUuid(zone);
+      return uuid ? isZoneVisible(uuid) : !isScoped;
+    }),
+    [isScoped, isZoneVisible, zonesState.data],
+  );
+  const visiblePlots = useMemo(
+    () => plotState.plots.filter((plot) => isPlotVisible(plot.plot_uuid)),
+    [isPlotVisible, plotState.plots],
+  );
+  const scopedPlotState = useMemo(
+    () => ({ ...plotState, plots: visiblePlots }),
+    [plotState, visiblePlots],
+  );
   const zonesByUuid = useMemo(() => new Map(
-    (zonesState.data ?? [])
+    visibleZones
       .map((zone) => [zoneUuid(zone), zone] as const)
       .filter(([uuid]) => uuid != null),
-  ), [zonesState.data]);
-  const capturePlots = useMemo(() => plotState.plots.map((plot) => {
+  ), [visibleZones]);
+  const capturePlots = useMemo(() => visiblePlots.map((plot) => {
     const cropHint = zoneCropHint(
       plot.zone_uuid ? zonesByUuid.get(plot.zone_uuid) : undefined,
     ) || plot.crop_hint?.trim() || null;
     return { ...plot, crop_hint: cropHint };
-  }), [plotState.plots, zonesByUuid]);
+  }), [visiblePlots, zonesByUuid]);
   const zoneCrops = useMemo(() => Object.fromEntries(
-    (zonesState.data ?? []).flatMap((zone) => {
+    visibleZones.flatMap((zone) => {
       const uuid = zoneUuid(zone);
       const crop = zoneCropHint(zone);
       return uuid && crop ? [[uuid, crop] as const] : [];
     }),
-  ), [zonesState.data]);
+  ), [visibleZones]);
   const zoneTimezones = useMemo(() => Object.fromEntries(
-    (zonesState.data ?? []).flatMap((zone) => {
+    visibleZones.flatMap((zone) => {
       const uuid = zoneUuid(zone);
       const timezone = zoneTimezone(zone);
       return uuid && timezone ? [[uuid, timezone] as const] : [];
     }),
-  ), [zonesState.data]);
+  ), [visibleZones]);
   const initialPlot = useMemo(() => requestedZoneUuid
     ? capturePlots.find((plot) => plot.zone_uuid === requestedZoneUuid)
     : undefined, [capturePlots, requestedZoneUuid]);
   const initialZone = useMemo(() => {
     if (!initialPlot?.zone_uuid) return undefined;
-    return (zonesState.data ?? []).find((zone) => zoneUuid(zone) === initialPlot.zone_uuid);
-  }, [initialPlot, zonesState.data]);
+    return visibleZones.find((zone) => zoneUuid(zone) === initialPlot.zone_uuid);
+  }, [initialPlot, visibleZones]);
   const captureReady = catalogState.available && !catalogState.error && !timelineReadError && !captureEnrichmentError &&
-    !plotState.loading && !groupState.loading && Array.isArray(zonesState.data) && !zonesState.isLoading && !zonesState.error;
+    !scopeLoading && !plotState.loading && !groupState.loading &&
+    Array.isArray(zonesState.data) && !zonesState.isLoading && !zonesState.error;
 
   React.useEffect(() => {
     if (!captureRequested) {
@@ -175,7 +198,7 @@ export const JournalPage: React.FC = () => {
   };
 
   const showCapture = captureOpen && captureReady && catalogState.catalog;
-  const reachedTimelineBranch = !catalogState.loading && !catalogState.unavailable && !catalogState.error &&
+  const reachedTimelineBranch = !scopeLoading && !catalogState.loading && !catalogState.unavailable && !catalogState.error &&
     !timelineReadError && !((captureRequested || captureOpen) && captureEnrichmentError) && !showCapture;
   const showWorkspace = isDesktop && reachedTimelineBranch;
 
@@ -211,7 +234,7 @@ export const JournalPage: React.FC = () => {
       />
 
       <main className={showWorkspace ? 'mx-auto max-w-[1600px]' : 'mx-auto max-w-3xl px-4 py-8'}>
-        {catalogState.loading ? (
+        {scopeLoading || catalogState.loading ? (
           <p className="text-[var(--text-secondary)]">{t('timeline.loading')}</p>
         ) : catalogState.unavailable ? (
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-8">
@@ -236,7 +259,7 @@ export const JournalPage: React.FC = () => {
             initialTimezone={zoneTimezone(initialZone)}
             zoneCrops={zoneCrops}
             zoneTimezones={zoneTimezones}
-            plotState={plotState}
+            plotState={scopedPlotState}
             groupState={groupState}
             onClose={closeCapture}
             onOpenExisting={onOpenExisting}
@@ -244,9 +267,9 @@ export const JournalPage: React.FC = () => {
           />
         ) : showWorkspace ? (
           <JournalWorkspace
-            plots={plotState.plots}
+            plots={visiblePlots}
             activeGroups={groupState.activeGroups}
-            zones={zonesState.data ?? []}
+            zones={visibleZones}
             activities={activities}
             catalog={catalogState.catalog!}
             plotGroups={groupState.groups}
@@ -254,7 +277,7 @@ export const JournalPage: React.FC = () => {
             initialTimezone={zoneTimezone(initialZone)}
             zoneCrops={zoneCrops}
             zoneTimezones={zoneTimezones}
-            plotState={plotState}
+            plotState={scopedPlotState}
             groupState={groupState}
           />
         ) : (
@@ -272,7 +295,7 @@ export const JournalPage: React.FC = () => {
                   }}
                 >
                   <option value="">{t('filters.allPlots')}</option>
-                  {plotState.plots.map((plot) => (
+                  {visiblePlots.map((plot) => (
                     <option key={plot.plot_uuid} value={plot.plot_uuid}>
                       {plot.name?.trim() || plot.plot_code}
                     </option>
@@ -313,7 +336,7 @@ export const JournalPage: React.FC = () => {
             {timelineReadError ? errorCard(retryTimelineReads) : (
               <JournalTimeline
                 entries={entryState.entries}
-                plots={plotState.plots}
+                plots={visiblePlots}
                 loading={entryState.loading || plotState.loading}
                 catalog={catalogState.catalog}
                 listBatchEntries={listBatchEntries}

@@ -26,6 +26,13 @@ const mocks = vi.hoisted(() => ({
   retryZones: vi.fn(),
   isDesktopBrowser: vi.fn(() => false),
   workspace: vi.fn(),
+  scopeState: {
+    loading: false,
+    isScoped: false,
+    role: 'admin',
+    isZoneVisible: vi.fn<(zoneUuid: string) => boolean>(() => true),
+    isPlotVisible: vi.fn<(plotUuid: string) => boolean>(() => true),
+  },
 }));
 
 vi.mock('react-i18next', () => ({
@@ -36,6 +43,9 @@ vi.mock('react-i18next', () => ({
 }));
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ username: 'farmer', logout: vi.fn() }),
+}));
+vi.mock('../../contexts/ScopeContext', () => ({
+  useScope: () => mocks.scopeState,
 }));
 vi.mock('../../components/AppHeader', () => ({ AppHeader: () => <header /> }));
 vi.mock('../../journal/useJournalCatalog', () => ({
@@ -522,6 +532,11 @@ describe('JournalPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.useRealCaptureFlow = false;
+    mocks.scopeState.loading = false;
+    mocks.scopeState.isScoped = false;
+    mocks.scopeState.role = 'admin';
+    mocks.scopeState.isZoneVisible.mockReturnValue(true);
+    mocks.scopeState.isPlotVisible.mockReturnValue(true);
     mocks.getZones.mockResolvedValue(zones);
     mocks.useSWR.mockReturnValue({
       data: zones,
@@ -600,6 +615,50 @@ describe('JournalPage', () => {
     expect(screen.queryByTestId('journal-workspace')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'logActivity' })).toBeInTheDocument();
   });
+
+  it.each([
+    ['researcher', true, false],
+    ['viewer', true, false],
+    ['admin', false, true],
+  ])(
+    'filters journal plot choices for a %s when scoped=%s',
+    (role, isScoped, showsForeign) => {
+      mocks.isDesktopBrowser.mockReturnValue(false);
+      mocks.scopeState.role = role;
+      mocks.scopeState.isScoped = isScoped;
+      mocks.scopeState.isPlotVisible.mockImplementation(
+        (plotUuid: string) => !isScoped || plotUuid === ROUTE_FIXTURE_IDS.primaryPlot,
+      );
+      mocks.useJournalPlots.mockReturnValue({
+        plots: [
+          plots[0],
+          {
+            ...plots[0],
+            plot_uuid: ROUTE_FIXTURE_IDS.secondaryPlot,
+            plot_code: 'S-2',
+            name: 'Foreign field',
+          },
+        ],
+        loading: false,
+        error: undefined,
+        retry: mocks.retryPlots,
+        revalidate: mocks.retryPlots,
+        createPlot: vi.fn(),
+        updatePlot: vi.fn(),
+      });
+
+      renderPage();
+
+      expect(
+        screen.getByRole('option', { name: plots[0].name ?? plots[0].plot_code }),
+      ).toBeInTheDocument();
+      if (showsForeign) {
+        expect(screen.getByRole('option', { name: 'Foreign field' })).toBeInTheDocument();
+      } else {
+        expect(screen.queryByRole('option', { name: 'Foreign field' })).not.toBeInTheDocument();
+      }
+    },
+  );
 
   it('keeps reads disabled while the catalog probe is loading', () => {
     mocks.useJournalCatalog.mockReturnValue({
