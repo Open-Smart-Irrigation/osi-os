@@ -96,6 +96,7 @@ function moduleByName(name) {
   const directory = {
     scope: 'osi-scope-helper',
     journal: 'osi-journal',
+    'osi-db-helper': 'osi-db-helper',
   }[name] || `osi-${name}`;
   const modulePath = path.join(NODE_RED_MODULES, directory, 'index.js');
   if (!fs.existsSync(modulePath)) return null;
@@ -122,6 +123,7 @@ async function executeFunction(node, options) {
     msg,
     env = {},
     flowState = {},
+    globals = {},
     db,
     osiLibModules = {},
   } = options;
@@ -143,11 +145,12 @@ async function executeFunction(node, options) {
       set: (key, value) => flowStore.set(key, value),
     },
     global: {
-      get: (key) => globalStore.has(key) ? globalStore.get(key) : ({
+      get: (key) => globalStore.has(key) ? globalStore.get(key) :
+        (Object.prototype.hasOwnProperty.call(globals, key) ? globals[key] : ({
         fs,
         os: require('node:os'),
         cp: require('node:child_process'),
-      })[key],
+      })[key]),
       set: (key, value) => globalStore.set(key, value),
     },
     env: { get: (key) => env[key] },
@@ -157,7 +160,10 @@ async function executeFunction(node, options) {
     osiDb: { Database: function Database() { return databaseFacade; } },
     osiLib: {
       require(name) {
-        const value = osiLibModules[name] || moduleByName(name);
+        const value = osiLibModules[name] ||
+          (name === 'osi-db-helper'
+            ? { Database: function Database() { return databaseFacade; } }
+            : moduleByName(name));
         return value
           ? { ok: true, value }
           : { ok: false, error: `unregistered in harness: ${name}` };

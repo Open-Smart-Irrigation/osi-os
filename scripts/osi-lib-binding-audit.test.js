@@ -12,9 +12,10 @@ const bindings = {
   journal: { variable: 'osiJournal', module: 'osi-journal' },
   ledger: { variable: 'osiCommandLedger', module: 'osi-command-ledger' },
   zoneCommands: { variable: 'osiZoneCommands', module: 'zone-commands' },
+  scope: { variable: 'scope', module: 'scope' },
 };
 const expectedById = {
-  'journal-api-router-fn': [bindings.db, bindings.journal],
+  'journal-api-router-fn': [bindings.db, bindings.journal, bindings.scope],
   'command-dedupe-dispatch': [bindings.db, bindings.journal, bindings.ledger],
   'journal-command-apply-fn': [bindings.db, bindings.journal],
   'terra-zone-config-command-apply-fn': [bindings.db, bindings.zoneCommands],

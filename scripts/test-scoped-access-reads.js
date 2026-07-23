@@ -9,6 +9,9 @@ const {
   makeAuthHeader,
   seedScopedDb,
 } = require('./lib/scoped-access-harness');
+const scopeHelper = require(
+  '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper'
+);
 
 const AUTH_SECRET = 'scoped-access-test-secret';
 const ENV = {
@@ -366,5 +369,178 @@ test('F4: flag-off history behavior remains owner-only', async () => {
     assert.equal(response.result && response.result.statusCode, 404);
   } finally {
     db.close();
+  }
+});
+
+function responseMessage(result) {
+  if (!Array.isArray(result)) return result;
+  for (const value of result.flat(Infinity)) {
+    if (value && typeof value === 'object' && value.statusCode !== undefined) return value;
+  }
+  return result.flat(Infinity).find((value) => value && typeof value === 'object');
+}
+
+const ADMIN_READ_CASES = [
+  {
+    label: 'database download',
+    nodeId: 'database-download-admin-read-guard',
+    path: '/download/database',
+  },
+  {
+    label: 'sync state',
+    nodeId: 'sync-state-admin-read-guard',
+    path: '/api/sync/state',
+  },
+  {
+    label: 'system stats',
+    nodeId: 'system-stats-admin-read-guard',
+    path: '/api/system/stats',
+  },
+  {
+    label: 'account-link status',
+    nodeId: 'al-status-decode',
+    path: '/api/account-link/status',
+  },
+  {
+    label: 'improvement requests',
+    nodeId: 'improvement-requests-api-router',
+    path: '/api/improvement-requests',
+  },
+  {
+    label: 'improvement diagnostics preview',
+    nodeId: 'improvement-requests-api-router',
+    path: '/api/improvement-requests/diagnostics-preview',
+  },
+  {
+    label: 'field-test export',
+    nodeId: 'fieldtest-download-admin-read-guard',
+    path: '/download-fieldtest',
+  },
+  {
+    label: 'gateway location',
+    nodeId: 'get-gateway-location-auth-fn',
+    path: '/api/gateway/location',
+    params: {},
+  },
+  {
+    label: 'gateway location by EUI',
+    nodeId: 'get-gateway-location-auth-fn',
+    path: '/api/gateways/A84041ABCDEF0002/location',
+    params: { gatewayEui: 'A84041ABCDEF0002' },
+  },
+];
+
+const TEST_FS = {
+  existsSync: () => false,
+  readFileSync(filePath) {
+    if (String(filePath).includes('/thermal/')) return '42000\n';
+    if (String(filePath).endsWith('/period')) return '100\n';
+    if (String(filePath).endsWith('/duty_cycle')) return '50\n';
+    return '';
+  },
+  readdirSync: () => [],
+  accessSync() {
+    const error = new Error('not found');
+    error.code = 'ENOENT';
+    throw error;
+  },
+};
+const TEST_OS = {
+  loadavg: () => [0.1, 0.2, 0.3],
+  totalmem: () => 1024 * 1024 * 1024,
+  freemem: () => 512 * 1024 * 1024,
+  cpus: () => [{}, {}],
+};
+
+async function executeAdminRead(testCase, userId, username, mutateDb) {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  if (mutateDb) mutateDb(db);
+  try {
+    const msg = historyRequest(
+      userId,
+      username,
+      'GET',
+      testCase.path,
+      testCase.params || {}
+    );
+    const response = await executeFunction(loadNode(testCase.nodeId), {
+      msg,
+      env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
+      globals: { fs: TEST_FS, os: TEST_OS },
+      db,
+    });
+    return responseMessage(response.result);
+  } finally {
+    db.close();
+  }
+}
+
+test('F6: every diagnostic and gateway read rejects non-admin accounts', async () => {
+  for (const testCase of ADMIN_READ_CASES) {
+    const response = await executeAdminRead(testCase, 2, 'res1');
+    assert.equal(
+      response && response.statusCode,
+      403,
+      `${testCase.label} must reject a researcher`
+    );
+  }
+});
+
+test('F6: every diagnostic and gateway read rejects a disabled admin', async () => {
+  for (const testCase of ADMIN_READ_CASES) {
+    const response = await executeAdminRead(testCase, 1, 'admin1', (db) => {
+      db.prepare("UPDATE users SET disabled_at = '2026-07-01' WHERE id = 1").run();
+    });
+    assert.equal(
+      response && response.statusCode,
+      403,
+      `${testCase.label} must reject a disabled admin`
+    );
+  }
+});
+
+test('F6: enabled admins pass every route guard', async () => {
+  for (const testCase of ADMIN_READ_CASES) {
+    const response = await executeAdminRead(testCase, 1, 'admin1');
+    assert.notEqual(
+      response && response.statusCode,
+      403,
+      `${testCase.label} must pass the admin guard`
+    );
+  }
+});
+
+test('F6: database download remains disabled after the admin guard', async () => {
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('a85523a4041eb6f4'), {
+      msg: historyRequest(1, 'admin1', 'GET', '/download/database'),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result && response.result.statusCode, 403);
+    assert.deepEqual(response.result && response.result.payload, {
+      error: 'Database download is disabled',
+    });
+  } finally {
+    db.close();
+  }
+});
+
+test('F6: flag-off field-test and system-stat routes remain unauthenticated', async () => {
+  for (const nodeId of ['fn_build_sql_params', 'sys-stats-fn']) {
+    const db = seedScopedDb();
+    try {
+      const response = await executeFunction(loadNode(nodeId), {
+        msg: { req: { headers: {}, params: {}, query: {}, method: 'GET' } },
+        env: { OSI_SCOPED_ACCESS: '0' },
+        globals: { fs: TEST_FS, os: TEST_OS },
+        db,
+      });
+      assert.notEqual(responseMessage(response.result).statusCode, 401);
+    } finally {
+      db.close();
+    }
   }
 });

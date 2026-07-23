@@ -269,7 +269,7 @@ const queueAckSource = `return (async () => {
   }
 })();`;
 
-const apiRouterSource = `const dbLoad = osiLib.require('osi-db-helper');
+const priorApiRouterSource = `const dbLoad = osiLib.require('osi-db-helper');
 const journalLoad = osiLib.require('osi-journal');
 if (!dbLoad.ok || !journalLoad.ok) {
   const detail = [dbLoad, journalLoad]
@@ -298,11 +298,44 @@ return osiJournal.handleHttpRequest({
   warn: function(message) { node.warn(message); }
 });`;
 
+const apiRouterSource = `const dbLoad = osiLib.require('osi-db-helper');
+const journalLoad = osiLib.require('osi-journal');
+const scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';
+const scopeLoad = scopedOn ? osiLib.require('scope') : { ok: true, value: null };
+if (!dbLoad.ok || !journalLoad.ok || !scopeLoad.ok) {
+  const detail = [dbLoad, journalLoad, scopeLoad]
+    .filter(function(load) { return !load.ok; })
+    .map(function(load) { return load.error; })
+    .join('; ');
+  node.error('Journal helpers unavailable: ' + detail, msg);
+  msg.statusCode = 503;
+  msg.payload = { error: 'journal_helpers_unavailable', message: detail };
+  return msg;
+}
+const osiDb = dbLoad.value;
+const osiJournal = journalLoad.value;
+return osiJournal.handleHttpRequest({
+  msg: msg,
+  Database: osiDb.Database,
+  scope: scopeLoad.value,
+  scopedMode: scopedOn,
+  environment: {
+    authTokenSecret: env.get('AUTH_TOKEN_SECRET'),
+    jwtSecret: env.get('JWT_SECRET'),
+    deviceEui: env.get('DEVICE_EUI'),
+    deviceEuiConfidence: env.get('DEVICE_EUI_CONFIDENCE'),
+    deviceEuiSource: env.get('DEVICE_EUI_SOURCE'),
+    edgeBuildVersion: env.get('FIRMWARE_VERSION'),
+    edgeBuildCommit: env.get('FIRMWARE_COMMIT')
+  },
+  warn: function(message) { node.warn(message); }
+});`;
+
 const PRIOR_CURRENT_HELPER_SURFACES = Object.freeze({
   'command-dedupe-dispatch': Object.freeze({ func: priorCurrentDedupeSource, libs: osiLibOnly }),
   'journal-command-apply-fn': Object.freeze({ func: priorCurrentJournalApplySource, libs: osiLibOnly }),
   'command-ack-queue-rest': Object.freeze({ func: queueAckSource, libs: osiLibOnly }),
-  'journal-api-router-fn': Object.freeze({ func: apiRouterSource, libs: osiLibOnly }),
+  'journal-api-router-fn': Object.freeze({ func: priorApiRouterSource, libs: osiLibOnly }),
 });
 
 const targetSpecs = {

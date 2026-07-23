@@ -1,6 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const scope = require('./index.js');
 
 function fakeDb(handlers) {
@@ -221,4 +222,88 @@ test('listScopeZoneUuids: wildcard returns null (no filter), scoped returns arra
     (await scope.listScopeZoneUuids(scopedDb, 'u1', { scopedMode: true })).sort(),
     ['z0', 'z1']
   );
+});
+
+test('verifyBearer accepts the edge two-part HMAC token and rejects forged tokens', () => {
+  const secret = 'scope-auth-test-secret';
+  const payload = Buffer.from(JSON.stringify({
+    userId: 7,
+    username: 'researcher',
+    exp: Date.now() + 60000,
+  })).toString('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  assert.deepEqual(
+    scope.verifyBearer(`Bearer ${payload}.${signature}`, { configuredSecret: secret }),
+    { userId: 7, username: 'researcher' }
+  );
+  assert.throws(
+    () => scope.verifyBearer(`Bearer ${payload}.forged`, { configuredSecret: secret }),
+    (error) => error.statusCode === 401
+  );
+});
+
+test('assertAuthenticatedRole binds token id and username before checking role', async () => {
+  const db = fakeDb({
+    get: (sql) => {
+      if (sql.includes('id = ? AND username = ?')) return { user_uuid: 'u-admin' };
+      return {
+        id: 7,
+        username: 'admin',
+        role: 'admin',
+        disabled_at: null,
+        user_uuid: 'u-admin',
+      };
+    },
+    all: () => [],
+  });
+  await scope.assertAuthenticatedRole(
+    db,
+    { userId: 7, username: 'admin' },
+    'admin',
+    { scopedMode: true }
+  );
+  const missingDb = fakeDb({ get: () => undefined });
+  await assert.rejects(
+    () => scope.assertAuthenticatedRole(
+      missingDb,
+      { userId: 7, username: 'admin' },
+      'admin',
+      { scopedMode: true }
+    ),
+    (error) => error.statusCode === 401
+  );
+});
+
+test('authorizeAdminRead verifies, authorizes, and closes its database handle', async () => {
+  const secret = 'admin-read-test-secret';
+  const payload = Buffer.from(JSON.stringify({
+    userId: 7,
+    username: 'admin',
+    exp: Date.now() + 60000,
+  })).toString('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  let closeCalls = 0;
+  const db = fakeDb({
+    get: (sql) => {
+      if (sql.includes('id = ? AND username = ?')) return { user_uuid: 'u-admin' };
+      return {
+        id: 7,
+        username: 'admin',
+        role: 'admin',
+        disabled_at: null,
+        user_uuid: 'u-admin',
+      };
+    },
+    all: () => [],
+  });
+  db.close = (callback) => {
+    closeCalls += 1;
+    callback();
+  };
+  await scope.authorizeAdminRead({
+    Database: function Database() { return db; },
+    authorization: `Bearer ${payload}.${signature}`,
+    configuredSecret: secret,
+  });
+  assert.equal(closeCalls, 1);
 });

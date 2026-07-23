@@ -166,8 +166,8 @@
       "reason": "outbox pruning overhaul with eviction-index awareness (1.A5)"
     },
     "history-api-router-fn": {
-      "delta": 462,
-      "reason": "history API card-data source field passthrough (1.A6, +150); Field Journal Task 12: fieldJournalUxEnabled feature flag, visible touched-node catches, rejecting DB-close wrapper (+312)"
+      "delta": 2671,
+      "reason": "Wave 3 scoped-access port: cumulative through AgroLink 708e11410 (feat(api): require admin for diagnostic reads). Measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 60554 -> HEAD 63225 = +2671, superseding the previous +462 entry (fully subsumed: the card-data source field passthrough and Field Journal Task 12 additions are preserved verbatim). The remaining +2209 auto-merged in cleanly across the wave-3 scope commits (7 scope history reads, 9 admin diagnostic reads) without needing manual conflict resolution on this node."
     },
     "sync-pending-split": {
       "delta": 401,
@@ -246,8 +246,8 @@
       "reason": "issue #10: zone_daily_environment upsert bumps sync_version"
     },
     "device-api-http500": {
-      "delta": 1982,
-      "reason": "Wave 3 scoped-access port (AgroLink c034b2893, feat(api): enforce device scope on read paths): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 293 -> HEAD 2275 = +1982, superseding the previous +45 entry (fully subsumed). Adds the _osiAuthFailure tagging convention: a shared device-api-tab catch-all node now classifies a caught error as a public 401 (Unauthorized/Invalid token/Token expired) only when the failing auth-checking node set an exact-shape { format: 1, code, sourceId } tag matching a fixed, closed authSources allowlist of every real bearer-auth node id on device-api-tab (including the two SDI-12 auth nodes, sdi12-config-auth-fn and sdi12-identify-action-fn, added post-fork so the allowlist stays complete); any other failure (including a forged tag) still falls back to a generic 500."
+      "delta": 2550,
+      "reason": "Wave 3 scoped-access port: cumulative through AgroLink 708e11410 (feat(api): require admin for diagnostic reads). Measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 293 -> HEAD 2843 = +2550, superseding the previous +1982 entry (fully subsumed: the authSources allowlist, publicByCode map, and the merged fallback-to-thrown-statusCode design from c034b2893 are preserved verbatim). 708e11410 adds api-me-auth to the authSources allowlist (api-me-auth's own Decode Token node now also sets _osiAuthFailure) and no further structural change to this node beyond the earlier merge."
     },
     "dendro-raw-fn": {
       "delta": 874,
@@ -280,11 +280,27 @@
     "s2120-zones-get-fn": {
       "delta": 1340,
       "reason": "Wave 3 scoped-access port (AgroLink c034b2893, feat(api): enforce device scope on read paths): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 2967 -> HEAD 4307 = +1340. One silent catch (auth-secret read) converted to visible node.warn; verifyBearer now tags msg._osiAuthFailure; when OSI_SCOPED_ACCESS=1, asserts device access via osi-scope-helper and switches the device-ownership SELECT to drop ' AND user_id=' (relies on the assertion instead); one close() catch converted to visible node.warn."
+    },
+    "al-status-decode": {
+      "delta": 761,
+      "reason": "Wave 3 scoped-access port (AgroLink 708e11410, feat(api): require admin for diagnostic reads): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 3714 -> HEAD 4475 = +761. account-link-status now requires the admin role when OSI_SCOPED_ACCESS=1 via osi-scope-helper's assertAuthenticatedRole before returning server-link status; three silent catches converted to visible node.warn; adds osiLib to libs."
+    },
+    "get-gateway-location-auth-fn": {
+      "delta": 1591,
+      "reason": "Wave 3 scoped-access port (AgroLink 708e11410, feat(api): require admin for diagnostic reads): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 4040 -> HEAD 5631 = +1591. Wraps the whole handler in an admin-only gate when OSI_SCOPED_ACCESS=1, via osi-scope-helper's authorizeAdminRead (shared with the four new *-admin-read-guard nodes); verifyBearer now tags msg._osiAuthFailure on each 401 path; adds osiLib and osiDb to libs."
+    },
+    "improvement-requests-api-router": {
+      "delta": 635,
+      "reason": "Wave 3 scoped-access port (AgroLink 708e11410, feat(api): require admin for diagnostic reads): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 18025 -> HEAD 18660 = +635. GET /api/improvement-requests and /api/improvement-requests/diagnostics-preview require the admin role when OSI_SCOPED_ACCESS=1, via osi-scope-helper's assertAuthenticatedRole; adds osiLib to libs."
+    },
+    "journal-api-router-fn": {
+      "delta": 229,
+      "reason": "Wave 3 scoped-access port (AgroLink 46f1d0fc, feat(journal): apply union rule to reads, auto-merged cleanly): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 1020 -> HEAD 1249 = +229. Journal HTTP requests now resolve an optional scope module (osiLib.require('scope'), gated on OSI_SCOPED_ACCESS) and pass it through to osiJournal.handleHttpRequest as scope/scopedMode, replacing the previous direct osiJournal-only dispatch."
     }
   },
   "total_allowance": {
-    "delta": 136100,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress -- re-tightened again at the end of the slice. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink c034b2893, feat(api): enforce device scope on read paths) 1,209,074 chars = 136,100. Measured, not estimated, and not a sum-of-sums. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: +28,526 is this scope port so far -- two new nodes (api-me-auth 3,530 + api-me-fn 1,745 = 5,275) plus seventeen existing nodes growing, summing to 23,251: auth-register-func +251, auth-login-func +54, auth-process-result +810, auth-db-insert +1167 (AgroLink 4eb05522); get-devices-query +1595, get-zones-query +1124, dendro-zone-rec-fn +783, zone-env-fn +854, history-api-router-fn +75 -- covered by its own larger pre-existing allowance -- (AgroLink 29ff9d08); device-api-http500 +1982, fn_build_sensor_sql_params +3890, dendro-history-fn +1553, sensor-history-fn +1553, rain-history-fn +1535, dendro-daily-fn +777, dendro-raw-fn +874, s2120-zones-get-fn +1340, strega-today-liters-fn +3034 (AgroLink c034b2893). 5,275 + 23,251 = 28,526 exactly."
+    "delta": 147060,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress -- re-tightened again at the end of the slice. Re-measured directly in the port worktree with verify-flows-size-ratchet's totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after AgroLink 708e11410, feat(api): require admin for diagnostic reads) 1,220,034 chars = 147,060. Measured, not estimated, and not a sum-of-sums. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: +39,486 is this scope port so far (commits through 708e11410) -- six new nodes (api-me-auth 3,530 + api-me-fn 1,745 + four *-admin-read-guard nodes at 1,145 each = 4,580) summing to 9,855; plus existing-node growth totalling 29,631 across auth-register-func, auth-login-func, auth-process-result, auth-db-insert, get-devices-query, device-api-http500, get-zones-query, fn_build_sensor_sql_params, dendro-history-fn, sensor-history-fn, rain-history-fn, al-status-decode, dendro-daily-fn, dendro-zone-rec-fn, dendro-raw-fn, get-gateway-location-auth-fn, zone-env-fn, s2120-zones-get-fn, strega-today-liters-fn, history-api-router-fn, improvement-requests-api-router, and journal-api-router-fn. 9,855 + 29,631 = 39,486 exactly."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {

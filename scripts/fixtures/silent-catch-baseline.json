@@ -1,15 +1,15 @@
 {
   "description": "Ratchet baseline for empty catch blocks in maintained Node-RED function nodes. Update counts downward in the same commit that removes silent catches.",
-  "generatedFrom": "Live gateway identity Task 5 removed three silent fan-detection catches from sys-stats-fn; valve-control Phase B Task 6 converted strega-reconciliation-monitor's close() catch to a visible node.warn. Count re-measured on integration/valve-focused-portback-20260831 after merging both lineages. SDI-12 port: the Sentek field-hardening wave converted merge-device-data's remaining silent catch to a visible node.warn, taking both profiles 214 -> 213. Wave 3 scoped-access port: api-me's Decode Token/Resolve Current User Scope nodes use visible node.warn catches throughout (213 unchanged); AgroLink 29ff9d08/c034b2893 (feat(api): enforce scope on zone/device reads) convert 17 remaining silent catches to visible node.warn while merging scoped-read enforcement into device-api-http500, fn_build_sensor_sql_params, dendro/sensor/rain-history-fn, s2120-zones-get-fn, and strega-today-liters-fn, taking both profiles 213 -> 193.",
+  "generatedFrom": "Live gateway identity Task 5 removed three silent fan-detection catches from sys-stats-fn; valve-control Phase B Task 6 converted strega-reconciliation-monitor's close() catch to a visible node.warn. Count re-measured on integration/valve-focused-portback-20260831 after merging both lineages. SDI-12 port: the Sentek field-hardening wave converted merge-device-data's remaining silent catch to a visible node.warn, taking both profiles 214 -> 213. Wave 3 scoped-access port: api-me's Decode Token/Resolve Current User Scope nodes use visible node.warn catches throughout (213 unchanged); AgroLink 29ff9d08/c034b2893 (feat(api): enforce scope on zone/device reads) convert 17 remaining silent catches to visible node.warn while merging scoped-read enforcement into device-api-http500, fn_build_sensor_sql_params, dendro/sensor/rain-history-fn, s2120-zones-get-fn, and strega-today-liters-fn, taking both profiles 213 -> 193. AgroLink 708e11410 (feat(api): require admin for diagnostic reads) converts 3 more: get-gateway-location-auth-fn and al-status-decode close()/secret-read catches, and improvement-requests-api-router, taking both profiles 193 -> 190.",
   "pattern": "catch\\s*(?:\\([^)]*\\))?\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}  |  \\.catch\\s*\\(\\s*(?:(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}|function\\s*[A-Za-z_$][\\w$]*?\\s*\\([^)]*\\)\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\})\\s*\\)",
   "profiles": {
     "bcm2712": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json",
-      "silentCatchCount": 193
+      "silentCatchCount": 190
     },
     "bcm2709": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json",
-      "silentCatchCount": 193
+      "silentCatchCount": 190
     }
   }
 }
