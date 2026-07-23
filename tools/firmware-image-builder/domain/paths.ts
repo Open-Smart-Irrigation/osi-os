@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstat, open, readlink } from 'node:fs/promises';
+import { access, lstat, open, readlink } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
@@ -70,6 +70,12 @@ export interface ReadCapability {
 
 export interface HeldParentCapability {
   readonly openRead: <T>(basename: string, callback: (reader: ReadCapability) => Promise<T>) => Promise<T>;
+  readonly inspectDirectory: (basename: string) => Promise<{ readonly device: number; readonly inode: number; readonly mountId: number; readonly writable: boolean }>;
+  readonly inspectChild: (basename: string) => Promise<
+    | { readonly status: 'missing'; readonly parentWritable: boolean }
+    | { readonly status: 'symlink' | 'not-directory'; readonly parentWritable: boolean }
+    | { readonly status: 'directory'; readonly device: number; readonly inode: number; readonly mountId: number; readonly writable: boolean }
+  >;
 }
 
 export type PathErrorCode = 'INVALID_PATH' | 'OUTPUT_COLLISION' | 'NON_REGULAR_TARGET' | 'MOUNT_CROSSING' | 'HARDLINK_TARGET' | 'CAPABILITY_EXPIRED' | 'PROC_UNAVAILABLE';
@@ -409,6 +415,55 @@ async function openHeldReader<T>(parent: FileHandle, basename: string, snapshot:
   return callback(capability(readable, dependencies, scope));
 }
 
+async function inspectHeldDirectory(
+  parent: FileHandle,
+  basename: string,
+  snapshot: { readonly device: number; readonly mountId: number },
+  dependencies: PathAuthorityDependencies,
+  scope: OperationScope,
+  token: ScopeToken,
+): Promise<{ readonly device: number; readonly inode: number; readonly mountId: number; readonly writable: boolean }> {
+  const inspected = await inspectHeldChild(parent, basename, snapshot, dependencies, scope, token);
+  if (inspected.status !== 'directory') return reject('INVALID_PATH', 'path is not an existing directory');
+  return inspected;
+}
+
+async function inspectHeldChild(
+  parent: FileHandle,
+  basename: string,
+  snapshot: { readonly device: number; readonly mountId: number },
+  dependencies: PathAuthorityDependencies,
+  scope: OperationScope,
+  token: ScopeToken,
+): Promise<
+  | { readonly status: 'missing'; readonly parentWritable: boolean }
+  | { readonly status: 'symlink' | 'not-directory'; readonly parentWritable: boolean }
+  | { readonly status: 'directory'; readonly device: number; readonly inode: number; readonly mountId: number; readonly writable: boolean }
+> {
+  const finalName = boundedSegment(basename, 'basename');
+  let directory: FileHandle;
+  try { directory = await open(join(PROC_FD_ROOT, String(parent.fd), finalName), requiredFlags(fsConstants.O_RDONLY | fsConstants.O_DIRECTORY)); }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    const parentWritable = await access(join(PROC_FD_ROOT, String(parent.fd)), fsConstants.W_OK).then(() => true, () => false);
+    if (code === 'ENOENT') return { status: 'missing', parentWritable };
+    if (code === 'ELOOP') return { status: 'symlink', parentWritable };
+    if (code === 'ENOTDIR') {
+      try { if ((await lstat(join(PROC_FD_ROOT, String(parent.fd), finalName))).isSymbolicLink()) return { status: 'symlink', parentWritable }; } catch (inspectionError) { void inspectionError; }
+    }
+    if (code === 'ENOTDIR') return { status: 'not-directory', parentWritable };
+    return reject('INVALID_PATH', 'directory could not be inspected no-follow', error);
+  }
+  token.addHandle(directory);
+  const stats = await dependencies.stat(directory);
+  if (!stats.isDirectory()) return { status: 'not-directory', parentWritable: false };
+  if (stats.dev !== snapshot.device) return reject('MOUNT_CROSSING', 'directory crosses a filesystem boundary');
+  if (await descriptorMountId(directory, dependencies) !== snapshot.mountId) return reject('MOUNT_CROSSING', 'directory crosses a mount boundary');
+  await dependencies.beforeDirectoryAccess?.(directory);
+  const writable = await access(join(PROC_FD_ROOT, String(directory.fd)), fsConstants.W_OK).then(() => true, () => false);
+  return { status: 'directory', device: stats.dev, inode: stats.ino, mountId: snapshot.mountId, writable };
+}
+
 export async function withHeldParentUnderRoot<T>(registry: ApprovedRootRegistry, rootId: string, relativeParent: string, callback: (parent: HeldParentCapability) => Promise<T>): Promise<T> {
   const components = relativeParent.length === 0 ? [] : scanRelative(relativeParent, 'relative parent');
   const scope = new OperationScope();
@@ -439,6 +494,8 @@ export async function withHeldParentUnderRoot<T>(registry: ApprovedRootRegistry,
       }
       const parentCapability: HeldParentCapability = Object.freeze({
         openRead: <V>(basename: string, readerCallback: (reader: ReadCapability) => Promise<V>) => scope.start((token) => openHeldReader(parent, basename, { device: snapshot.device, mountId: rootMountId }, dependencies, scope, token, readerCallback)),
+        inspectDirectory: (basename: string) => scope.start((token) => inspectHeldDirectory(parent, basename, { device: snapshot.device, mountId: rootMountId }, dependencies, scope, token)),
+        inspectChild: (basename: string) => scope.start((token) => inspectHeldChild(parent, basename, { device: snapshot.device, mountId: rootMountId }, dependencies, scope, token)),
       });
       result = await callback(parentCapability);
     });
@@ -454,6 +511,25 @@ export async function withHeldParentUnderRoot<T>(registry: ApprovedRootRegistry,
     hasPrimary = true;
   }
   return await closeAll(scope.handles, closeDependencies, primary, hasPrimary, result!, operationErrors.filter((error) => error !== primary));
+}
+
+export async function inspectReleasePathUnderRoot(
+  registry: ApprovedRootRegistry,
+  rootId: string,
+  relativeComponents: readonly string[],
+): Promise<{ readonly finalExists: boolean; readonly finalSymlink: boolean; readonly parentWritable: boolean; readonly unsafeAncestor?: 'symlink' | 'not-directory' }> {
+  if (relativeComponents.length === 0) return reject('INVALID_PATH', 'release path is empty');
+  for (let index = 0; index < relativeComponents.length; index += 1) {
+    const parent = relativeComponents.slice(0, index).join('/');
+    const child = relativeComponents[index]!;
+    const inspected = await withHeldParentUnderRoot(registry, rootId, parent, (held) => held.inspectChild(child));
+    if (inspected.status === 'missing') return { finalExists: false, finalSymlink: false, parentWritable: inspected.parentWritable };
+    if (inspected.status === 'symlink') return { finalExists: index === relativeComponents.length - 1, finalSymlink: true, parentWritable: inspected.parentWritable, unsafeAncestor: index === relativeComponents.length - 1 ? undefined : 'symlink' };
+    if (inspected.status === 'not-directory') return { finalExists: index === relativeComponents.length - 1, finalSymlink: false, parentWritable: inspected.parentWritable, unsafeAncestor: index === relativeComponents.length - 1 ? undefined : 'not-directory' };
+    if (inspected.status !== 'directory') return reject('INVALID_PATH', 'release path inspection status is invalid');
+    if (index === relativeComponents.length - 1) return { finalExists: true, finalSymlink: false, parentWritable: inspected.writable };
+  }
+  return reject('INVALID_PATH', 'release path is empty');
 }
 
 export async function withNoFollowFileUnderRoot<T>(registry: ApprovedRootRegistry, rootId: string, relative: string, callback: (reader: ReadCapability) => Promise<T>): Promise<T> {

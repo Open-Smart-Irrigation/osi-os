@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
-import { link, mkdir, mkdtemp, open, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, open, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -12,6 +12,7 @@ import { ConfigAuthorityError, loadConfig, type PathAuthorityDependencies } from
 import {
   PathSecurityError,
   encodeBranchSlug,
+  inspectReleasePathUnderRoot,
   previewEvidencePath,
   previewQuarantinePath,
   previewReleasePath,
@@ -68,6 +69,51 @@ async function createRoot(dependencies?: Partial<PathAuthorityDependencies>) {
 }
 
 describe('deterministic path previews', () => {
+  it('inspects release ancestors and collisions through held no-follow descriptors', async () => {
+    const { root, registry } = await createRoot();
+    const components = ['feature%2Fbranch', SHA, 'rpi-5'] as const;
+    await mkdir(join(root.path, '.osi-image-builder'), { recursive: true });
+    await symlink('/tmp', join(root.path, components[0]));
+    await expect(inspectReleasePathUnderRoot(registry, root.id, components)).resolves.toMatchObject({ finalSymlink: true, unsafeAncestor: 'symlink' });
+    await rm(join(root.path, components[0]));
+    await writeFile(join(root.path, components[0]), 'not a directory');
+    await expect(inspectReleasePathUnderRoot(registry, root.id, components)).resolves.toMatchObject({ unsafeAncestor: 'not-directory' });
+    await rm(join(root.path, components[0]));
+    await mkdir(join(root.path, ...components), { recursive: true });
+    await expect(inspectReleasePathUnderRoot(registry, root.id, components)).resolves.toMatchObject({ finalExists: true });
+    await rm(join(root.path, ...components), { recursive: true });
+    await mkdir(join(root.path, components[0], components[1]), { recursive: true });
+    await writeFile(join(root.path, components[0], components[1], components[2]), 'occupied by a regular file');
+    await expect(inspectReleasePathUnderRoot(registry, root.id, components)).resolves.toMatchObject({ finalExists: true, finalSymlink: false });
+  });
+
+  it('inspects staging through a held parent and rejects a replaced root authority', async () => {
+    const { root, registry, base } = await createRoot();
+    await mkdir(join(root.path, '.osi-image-builder', 'staging'), { recursive: true });
+    await expect(withHeldParentUnderRoot(registry, root.id, '.osi-image-builder', (parent) => parent.inspectDirectory('staging'))).resolves.toMatchObject({ writable: true, mountId: expect.any(Number) });
+    const moved = join(base, 'moved-images');
+    await rename(root.path, moved);
+    await mkdir(root.path);
+    await expect(inspectReleasePathUnderRoot(registry, root.id, ['branch', SHA, 'rpi-5'])).rejects.toBeInstanceOf(PathSecurityError);
+  });
+
+  it('reports the held staging child after a path replacement, not the replacement directory', async () => {
+    let movedPath = '';
+    const fixture = await createRoot({ beforeDirectoryAccess: async () => {
+      const staging = join(fixture.root.path, '.osi-image-builder', 'staging');
+      movedPath = join(fixture.base, 'held-staging');
+      await rename(staging, movedPath);
+      await mkdir(staging);
+    } });
+    await mkdir(join(fixture.root.path, '.osi-image-builder', 'staging'), { recursive: true });
+    const original = await stat(join(fixture.root.path, '.osi-image-builder', 'staging'));
+    const inspected = await withHeldParentUnderRoot(fixture.registry, fixture.root.id, '.osi-image-builder', (parent) => parent.inspectDirectory('staging'));
+    const replacement = await stat(join(fixture.root.path, '.osi-image-builder', 'staging'));
+    expect(inspected.inode).toBe(original.ino);
+    expect(inspected.inode).not.toBe(replacement.ino);
+    expect(inspected.inode).toBe((await stat(movedPath)).ino);
+  });
+
   it('percent-encodes UTF-8 bytes and preserves non-normalized forms', () => {
     expect(encodeBranchSlug('feature/agrolink-branding')).toBe('feature%2Fagrolink-branding');
     expect(encodeBranchSlug('A-z_0.9~')).toBe('A-z_0.9~');

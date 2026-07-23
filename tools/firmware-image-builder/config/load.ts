@@ -129,6 +129,7 @@ export interface PathAuthorityDependencies {
   readonly readlink: (path: string) => Promise<string>;
   readonly mountId: (handle: FileHandle) => Promise<number>;
   readonly beforeRead: (handle: FileHandle) => Promise<void>;
+  readonly beforeDirectoryAccess?: (handle: FileHandle) => Promise<void>;
 }
 
 interface AuthorityRootRecord {
