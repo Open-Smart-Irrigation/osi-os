@@ -15,7 +15,7 @@ Add a separate desired-state operation per user edit, linked to a command.
 convergence, and expiry. Zone configuration is the first domain consumer;
 journal and scoped-access controllers consume the same service later.
 
-**Tech stack:** Java 21, Spring Boot, Spring Data JPA, PostgreSQL/Flyway,
+**Tech stack:** Java 17, Spring Boot, Spring Data JPA, PostgreSQL/Flyway,
 JUnit 5, Mockito, Testcontainers, React, TypeScript, Axios, Vitest, Testing
 Library.
 
@@ -297,7 +297,7 @@ Inside one `@Transactional` method:
 long target = Math.addExact(request.baseSyncVersion(), 1L);
 List<DesiredStateOperation> active =
         repository.lockActiveConfig(gatewayEui, resourceType, resourceId);
-DesiredStateOperation prior = active.isEmpty() ? null : active.getFirst();
+DesiredStateOperation prior = active.isEmpty() ? null : active.get(0);
 DeviceCommand command = canRewrite(prior, request)
         ? rewriteCommand(prior.getCommand(), request, target)
         : issueCommand(gateway, actor, request, target);
