@@ -1008,6 +1008,20 @@ export const systemAPI = {
   },
 };
 
+export interface ScopeProfile {
+  username: string;
+  user_uuid: string;
+  role: 'admin' | 'researcher' | 'viewer';
+  zone_uuids: string[] | null;
+  plot_uuids: string[] | null;
+  features: { scoped_access: boolean };
+}
+
+export async function fetchScopeProfile(): Promise<ScopeProfile> {
+  const response = await api.get<ScopeProfile>('/api/me');
+  return response.data;
+}
+
 export interface AccountLinkRequest {
   serverUrl: string;
   action: 'login' | 'register';

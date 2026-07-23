@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
+import { ScopeProvider } from './contexts/ScopeContext';
 import { PrivateRoute } from './components/PrivateRoute';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
@@ -19,9 +20,10 @@ const AnalysisRoute = lazy(() =>
 function App() {
   return (
     <AuthProvider>
-      <GatewayRestartBanner />
-      <HashRouter>
-        <Routes>
+      <ScopeProvider>
+        <GatewayRestartBanner />
+        <HashRouter>
+          <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
@@ -124,8 +126,9 @@ function App() {
           {/* Unknown routes (incl. /journal until the field-journal feature
               lands) fall back to the dashboard instead of a blank screen */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
-      </HashRouter>
+          </Routes>
+        </HashRouter>
+      </ScopeProvider>
     </AuthProvider>
   );
 }
