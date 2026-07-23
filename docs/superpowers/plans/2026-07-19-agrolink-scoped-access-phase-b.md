@@ -6,6 +6,8 @@
 
 **Architecture:** Per spec §4 (union rule), §7 lifecycle, §8 enforcement (cached reads). All scope logic lives in `osi-scope-helper` (Phase A module, extended here); flow-node edits are thin call-outs that satisfy the size ratchet. Journal filtering changes live in the `osi-journal` seam module (outside flows.json). A behavioral harness executes shipped function text against a seeded DB — the same harness Phase C reuses for write paths.
 
+**Write-path requirement carried forward to Phase C (spec §11 writer-bumped contract):** every mutation of `role`, `disabled_at`, or `username` on `users` must set `sync_version = COALESCE(sync_version,0)+1` in the same `UPDATE` statement that changes those columns — same-statement is load-bearing for the `trg_dp_users_outbox_role_au` arm, which only reads `NEW.sync_version` and never bumps it itself. Account-creation `INSERT`s set `sync_version = 1`. Grant tombstones bump `sync_version` in the same statement as the tombstone write (`deleted_at`), not in a follow-up statement.
+
 **Tech Stack:** Node-RED function nodes (one-shot mutation scripts only), `node:test` + `node:sqlite`, `osi-scope-helper`.
 
 **Prerequisites:** Phase A complete (migrations 0022–0023 applied, `osi-scope-helper` registered, `/api/me` live, flag exists). Load `osi-flows-json-editing` before any flow task.

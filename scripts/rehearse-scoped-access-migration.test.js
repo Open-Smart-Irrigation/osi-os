@@ -93,6 +93,31 @@ test('USER trigger arms: uuid assigned by sibling trigger still emits non-null u
   db.close();
 });
 
+test('USER trigger arms emit users.sync_version, not literal 0 (issue #10 boot-ddl gate)', () => {
+  const db = freshDb();
+  db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');
+  // (a) insert path: a fresh row's sync_version (0) must appear in both the
+  // outbox column and the payload json, not be silently dropped.
+  db.exec(`INSERT INTO users (username, password_hash, created_at) VALUES ('erin','h','2026-01-01')`);
+  const insertRow = db.prepare(
+    `SELECT sync_version, payload_json FROM sync_outbox WHERE op='USER_UPSERTED' ORDER BY rowid`
+  ).get();
+  assert.equal(insertRow.sync_version, 0, 'outbox column must carry the row sync_version, not a disconnected literal');
+  assert.equal(JSON.parse(insertRow.payload_json).sync_version, 0, 'payload must carry sync_version');
+  // (b) writer-bumped update: the same UPDATE statement that changes role
+  // also bumps sync_version (spec §11 writer-bumped contract); the trigger
+  // must emit that bumped value, in both places, not literal 0.
+  db.exec(`UPDATE users SET role='admin', sync_version = COALESCE(sync_version,0)+1 WHERE username='erin'`);
+  const rows = db.prepare(
+    `SELECT sync_version, payload_json FROM sync_outbox WHERE op='USER_UPSERTED' ORDER BY rowid`
+  ).all();
+  assert.equal(rows.length, 2, 'role update must emit exactly one more USER_UPSERTED event');
+  const bumped = rows[1];
+  assert.equal(bumped.sync_version, 1, 'outbox column must carry the bumped sync_version');
+  assert.equal(JSON.parse(bumped.payload_json).sync_version, 1, 'payload must carry the bumped sync_version');
+  db.close();
+});
+
 test('assignment triggers emit upsert on grant and delete on tombstone', () => {
   const db = freshDb();
   db.exec('UPDATE scoped_access_emit SET enabled=1 WHERE id=1');

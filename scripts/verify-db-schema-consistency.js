@@ -691,6 +691,7 @@ const schemaContract = {
     'last_auth_sync_error',
     'role',
     'disabled_at',
+    'sync_version',
   ],
   user_zone_assignments: [
     'assignment_uuid',

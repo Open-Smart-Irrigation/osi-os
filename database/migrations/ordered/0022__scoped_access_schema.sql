@@ -9,6 +9,7 @@
 ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'researcher'
   CHECK (role IN ('admin','researcher','viewer'));
 ALTER TABLE users ADD COLUMN disabled_at TEXT;
+ALTER TABLE users ADD COLUMN sync_version INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS user_zone_assignments (
   assignment_uuid       TEXT PRIMARY KEY,
@@ -197,10 +198,11 @@ BEGIN
       'username', NEW.username,
       'role', NEW.role,
       'disabled_at', NEW.disabled_at,
+      'sync_version', NEW.sync_version,
       'gateway_device_eui', (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'),
       'occurred_at', strftime('%Y-%m-%dT%H:%M:%fZ','now')
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
   );
@@ -227,10 +229,11 @@ BEGIN
       'username', NEW.username,
       'role', NEW.role,
       'disabled_at', NEW.disabled_at,
+      'sync_version', NEW.sync_version,
       'gateway_device_eui', (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'),
       'occurred_at', strftime('%Y-%m-%dT%H:%M:%fZ','now')
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
   );
@@ -257,10 +260,11 @@ BEGIN
       'username', NEW.username,
       'role', NEW.role,
       'disabled_at', NEW.disabled_at,
+      'sync_version', NEW.sync_version,
       'gateway_device_eui', (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'),
       'occurred_at', strftime('%Y-%m-%dT%H:%M:%fZ','now')
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
   );

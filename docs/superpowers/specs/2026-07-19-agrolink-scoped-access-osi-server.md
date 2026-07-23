@@ -13,7 +13,7 @@ The cloud learns three new edge aggregates (`USER`, `USER_ZONE_ASSIGNMENT`, `USE
 
 Added to `docs/contracts/sync-schema/events.schema.json` op enum and to `resources.schema.json` definitions, byte-mirrored into the server test resources per the Phase F vendoring rule:
 
-- `USER_UPSERTED`. Payload: `user_uuid`, `username`, `role` (`admin|researcher|viewer`), `disabled_at` (nullable), `gateway_device_eui`, `occurred_at`.
+- `USER_UPSERTED`. Payload: `user_uuid`, `username`, `role` (`admin|researcher|viewer`), `disabled_at` (nullable), `sync_version`, `gateway_device_eui`, `occurred_at`.
 - `USER_ZONE_ASSIGNMENT_UPSERTED` / `USER_ZONE_ASSIGNMENT_DELETED`. Payload: `assignment_uuid`, `user_uuid`, `zone_uuid`, `assigned_by_user_uuid`, `gateway_device_eui`, `sync_version`, plus `deleted_at` on the delete op.
 - `USER_PLOT_ASSIGNMENT_UPSERTED` / `USER_PLOT_ASSIGNMENT_DELETED`. Same shape with `plot_uuid`.
 

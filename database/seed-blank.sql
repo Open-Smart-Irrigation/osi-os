@@ -42,7 +42,7 @@ CREATE TABLE users (
   last_auth_sync_at               TEXT,
   last_auth_sync_status           TEXT,
   last_auth_sync_error            TEXT
-, role TEXT NOT NULL DEFAULT 'researcher' CHECK (role IN ('admin','researcher','viewer')), disabled_at TEXT);
+, role TEXT NOT NULL DEFAULT 'researcher' CHECK (role IN ('admin','researcher','viewer')), disabled_at TEXT, sync_version INTEGER NOT NULL DEFAULT 0);
 
 CREATE UNIQUE INDEX idx_users_user_uuid ON users(user_uuid);
 
@@ -5206,10 +5206,11 @@ BEGIN
       'username', NEW.username,
       'role', NEW.role,
       'disabled_at', NEW.disabled_at,
+      'sync_version', NEW.sync_version,
       'gateway_device_eui', (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'),
       'occurred_at', strftime('%Y-%m-%dT%H:%M:%fZ','now')
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
   );
@@ -5236,10 +5237,11 @@ BEGIN
       'username', NEW.username,
       'role', NEW.role,
       'disabled_at', NEW.disabled_at,
+      'sync_version', NEW.sync_version,
       'gateway_device_eui', (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'),
       'occurred_at', strftime('%Y-%m-%dT%H:%M:%fZ','now')
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
   );
@@ -5266,10 +5268,11 @@ BEGIN
       'username', NEW.username,
       'role', NEW.role,
       'disabled_at', NEW.disabled_at,
+      'sync_version', NEW.sync_version,
       'gateway_device_eui', (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'),
       'occurred_at', strftime('%Y-%m-%dT%H:%M:%fZ','now')
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
   );
