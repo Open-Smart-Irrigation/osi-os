@@ -285,12 +285,35 @@ function createAnalysis(deps) {
   async function buildAnalysisCatalog(db, options = {}) {
     const hubEui = String(options.deviceEui || options.device_eui || '').trim().toUpperCase();
     const userId = userIdFor(options);
-    const zones = await dbAll(db, 'SELECT * FROM irrigation_zones WHERE deleted_at IS NULL AND user_id = ? ORDER BY id ASC', [userId]);
+    const zoneUuids = Array.isArray(options.zoneUuids) ? options.zoneUuids : null;
+    const zones = zoneUuids === null
+      ? await dbAll(
+        db,
+        'SELECT * FROM irrigation_zones WHERE deleted_at IS NULL AND user_id = ? ORDER BY id ASC',
+        [userId]
+      )
+      : zoneUuids.length
+        ? await dbAll(
+          db,
+          `SELECT * FROM irrigation_zones WHERE deleted_at IS NULL AND zone_uuid IN (${zoneUuids.map(() => '?').join(',')}) ORDER BY id ASC`,
+          zoneUuids
+        )
+        : [];
     const channels = [];
     const entriesById = new Map();
 
     for (const zone of zones) {
-      const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? AND user_id = ? ORDER BY deveui ASC', [zone.id, userId]);
+      const devices = zoneUuids === null
+        ? await dbAll(
+          db,
+          'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? AND user_id = ? ORDER BY deveui ASC',
+          [zone.id, userId]
+        )
+        : await dbAll(
+          db,
+          'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC',
+          [zone.id]
+        );
       const cards = deriveCardsForZone(zone, devices);
       for (const card of cards) {
         const sourceDevices = sourceDevicesForCard(card, devices)

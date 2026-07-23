@@ -55,3 +55,57 @@ test('createAnalysis works without deps supplied (pure structural check)', () =>
   assert.equal(typeof analysis.listAnalysisViews, 'function');
   assert.equal(typeof analysis.saveAnalysisView, 'function');
 });
+
+test('buildAnalysisCatalog filters zones by supplied owned-plus-granted UUIDs', async () => {
+  const calls = [];
+  const analysis = analysisModule.createAnalysis({
+    aggregateRows: () => ({ series: {}, buckets: [] }),
+    dbAll: async (_db, sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes('FROM irrigation_zones')) {
+        return [{ id: 2, zone_uuid: 'z-granted', name: 'Granted' }];
+      }
+      return [];
+    },
+    deriveCardsForZone: () => [],
+    displayDeviceName: () => 'Device',
+    normalizeDeveui: (value) => value,
+    resolveAggregation: () => ({ requested: 'raw', level: 'raw', bucketSizeSeconds: null }),
+    soilDepthCm: () => null,
+    sourceDevicesForCard: () => [],
+    sourceKeyForCsv: () => 'source-key',
+  });
+
+  await analysis.buildAnalysisCatalog({}, {
+    userId: 2,
+    zoneUuids: ['z-owned', 'z-granted'],
+  });
+
+  assert.match(calls[0].sql, /zone_uuid IN \(\?,\?\)/);
+  assert.deepEqual(calls[0].params, ['z-owned', 'z-granted']);
+  assert.doesNotMatch(calls[1].sql, /user_id = \?/);
+  assert.deepEqual(calls[1].params, [2]);
+});
+
+test('buildAnalysisCatalog preserves the legacy owner filter without a scope list', async () => {
+  const calls = [];
+  const analysis = analysisModule.createAnalysis({
+    aggregateRows: () => ({ series: {}, buckets: [] }),
+    dbAll: async (_db, sql, params) => {
+      calls.push({ sql, params });
+      return [];
+    },
+    deriveCardsForZone: () => [],
+    displayDeviceName: () => 'Device',
+    normalizeDeveui: (value) => value,
+    resolveAggregation: () => ({ requested: 'raw', level: 'raw', bucketSizeSeconds: null }),
+    soilDepthCm: () => null,
+    sourceDevicesForCard: () => [],
+    sourceKeyForCsv: () => 'source-key',
+  });
+
+  await analysis.buildAnalysisCatalog({}, { userId: 7 });
+
+  assert.match(calls[0].sql, /user_id = \?/);
+  assert.deepEqual(calls[0].params, [7]);
+});

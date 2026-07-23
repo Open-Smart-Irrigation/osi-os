@@ -213,6 +213,12 @@ async function assertRole(db, userUuid, role, options) {
   return scope;
 }
 
+async function assertEnabledAccount(db, userUuid, options) {
+  const scope = await resolveScope(db, userUuid, options);
+  if (scope.disabled) throw httpError(403, 'account disabled');
+  return scope;
+}
+
 async function assertAuthenticatedRole(db, auth, role, options) {
   if (!auth || !Number.isFinite(Number(auth.userId)) || !String(auth.username || '').trim()) {
     throw httpError(401, 'Unauthorized');
@@ -318,6 +324,7 @@ module.exports = {
   assertFreshZoneAccess,
   assertFreshPlotAccess,
   assertRole,
+  assertEnabledAccount,
   assertAuthenticatedRole,
   authorizeAdminRead,
   assertFreshRole,
