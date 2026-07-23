@@ -138,6 +138,14 @@ export interface User {
   token: string;
 }
 
+export interface AdminUser {
+  username: string;
+  user_uuid: string;
+  role: 'admin' | 'researcher' | 'viewer';
+  disabled_at: string | null;
+  created_at: string;
+}
+
 export interface DeviceCatalogItem {
   id: DeviceType;
   name: string;
