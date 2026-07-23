@@ -30,6 +30,8 @@ jobs:
       # break on main invisibly (it chains comm-contract, DB-schema consistency,
       # history schema/worker tests, history API contract, helper tests, and
       # profile parity). Must end with "All parity checks passed."
+      - name: Scoped-access endpoint ratchet
+        run: node scripts/verify-scoped-access.js
       - run: node scripts/verify-sync-flow.js
       # Parse-checks every function node's func/initialize/finalize in all
       # shipped flows.json profiles. Added after issue #6: dendro-raw-fn
