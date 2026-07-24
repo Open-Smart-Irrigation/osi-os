@@ -754,18 +754,20 @@ describe('DockerExecutor', () => {
       StartedAt: '0001-01-01T00:00:00Z',
       FinishedAt: '0001-01-01T00:00:00Z',
     };
-    const responses = successfulResponses({ exitCode: 127 });
-    responses[5] = { exitCode: 127, signal: null, stdout: '', stderr: 'exec: "node": executable file not found in $PATH', timedOut: false, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:01.100Z' };
+    const responses = successfulResponses({ exitCode: 1 });
+    responses[5] = { exitCode: 1, signal: null, stdout: '', stderr: 'exec: "node": executable file not found in $PATH', timedOut: false, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:01.100Z' };
     responses[6] = { stdout: JSON.stringify(failedCreated) };
     const docker = fakeDocker(responses);
     const writes: RunnerWriteCommand[] = [];
+    let evidenceValue: Record<string, unknown> | undefined;
     const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
-    const result = await createDockerExecutor(options(docker, { ownership })).run();
-    expect(result).toMatchObject({ available: true, outcome: 'failed', exitCode: 127, mutationCount: 4 });
+    const result = await createDockerExecutor(options(docker, { ownership, evidence: async (value) => { evidenceValue = value; return { path: 'evidence/operation-1.json', sha256: 'c'.repeat(64) }; } })).run();
+    expect(result).toMatchObject({ available: true, outcome: 'failed', exitCode: 1, mutationCount: 4 });
     expect(writes.map((write) => write.kind)).toEqual(['operation-begin', 'container', 'operation-complete', 'operation-cleanup']);
     expect(writes.filter((write): write is Extract<RunnerWriteCommand, { kind: 'container' }> => write.kind === 'container').map((write) => write.lifecycle)).toEqual(['created']);
     const completion = writes.find((write): write is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => write.kind === 'operation-complete');
     expect(completion?.input).toMatchObject({ lifecyclePhase: 'created', outcome: 'failed', errorCode: 'DOCKER_EXECUTION_DEFINITION_MISMATCH' });
+    expect(evidenceValue).toMatchObject({ inspection: { container: { dockerExitCode: 127 } }, command: { exitCode: 1 } });
     expect(writes.some((write) => write.kind === 'operation-cleanup')).toBe(true);
   });
 
