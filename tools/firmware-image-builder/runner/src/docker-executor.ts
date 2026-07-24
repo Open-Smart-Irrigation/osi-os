@@ -376,7 +376,7 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
       let persisted = false;
       try {
         const labels: JsonObject = { [JOB_LABEL]: options.jobId, [MANIFEST_LABEL]: options.manifestSha256 };
-        const created = await runDocker(options, ['create', `--name=${options.containerName}`, `--label=${JOB_LABEL}=${options.jobId}`, `--label=${MANIFEST_LABEL}=${options.manifestSha256}`, `--mount=type=bind,source=${options.worktreePath},destination=/workdir,rw`, `--user=${options.uid}:${options.gid}`, '--workdir=/workdir', '--network=bridge', '--platform=linux/amd64', '--cap-drop=ALL', '--security-opt=no-new-privileges:true', '--pids-limit=4096', '--ulimit=nofile=1024:4096', '--pull=never', ...Object.entries(env(options)).map(([key, value]) => `--env=${key}=${value}`), options.imageReference, ...argv]);
+        const created = await runDocker(options, ['create', `--name=${options.containerName}`, `--label=${JOB_LABEL}=${options.jobId}`, `--label=${MANIFEST_LABEL}=${options.manifestSha256}`, `--mount=type=bind,source=${options.worktreePath},destination=/workdir`, `--user=${options.uid}:${options.gid}`, '--workdir=/workdir', '--network=bridge', '--platform=linux/amd64', '--cap-drop=ALL', '--security-opt=no-new-privileges:true', '--pids-limit=4096', '--ulimit=nofile=1024:4096', '--pull=never', ...Object.entries(env(options)).map(([key, value]) => `--env=${key}=${value}`), options.imageReference, ...argv]);
         id = containerId(requireSuccess(created, 'Docker create'));
         const inspected = normalizeInspection(parseJson(requireSuccess(await runDocker(options, ['inspect', '--type=container', '--format={{json .}}', id]), 'Docker inspect'), 'Docker inspect'));
         validateInspection(inspected, id, image, options);

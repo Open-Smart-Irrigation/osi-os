@@ -189,7 +189,12 @@ describe('DockerExecutor', () => {
     expect(create).toContain('--security-opt=no-new-privileges:true');
     expect(create).toContain('--pids-limit=4096');
     expect(create).toContain('--ulimit=nofile=1024:4096');
-    expect(create?.filter((value) => value.startsWith('--mount=')).length).toBe(1);
+    const mountArg = create?.find((value) => value.startsWith('--mount='));
+    expect(mountArg).toBe('--mount=type=bind,source=/tmp/worktree,destination=/workdir');
+    expect(mountArg).toBeDefined();
+    const mountSegments = mountArg!.slice('--mount='.length).split(',');
+    expect(mountSegments.every((segment) => /^(type|source|destination)=[^,]+$/u.test(segment))).toBe(true);
+    expect(mountSegments).not.toContain('rw');
     expect(create).toContain('--user=1000:1000');
     expect(create).toContain(`registry.example/builder@sha256:${DIGEST}`);
     expect(create).not.toContain('/var/run/docker.sock');
