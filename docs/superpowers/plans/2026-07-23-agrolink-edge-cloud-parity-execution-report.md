@@ -2,13 +2,15 @@
 
 ## Preparation record: 2026-07-23
 
-**State:** Tasks 0 through 5 complete and pushed. Launch heads were fetched,
+**State:** Tasks 0 through 7 complete and pushed. Launch heads were fetched,
 base gates run, one server frontend base defect repaired, the route/contract
 inventory regenerated, the scoped-access governing documents reconciled, the
 cross-repository contract gate and edge scoped-access foundation landed, and
 the cloud desired-state ledger now reconciles command ACKs with edge mirrors.
 The five journal event and command operations are enabled end to end, with
 cloud mirrors, queued edits, exports, and a responsive journal workspace.
+Scoped users and grants now follow the same edge-authoritative convergence
+model, with per-installation cloud authorization and administration.
 
 ### Repository bases
 
@@ -400,6 +402,65 @@ pushed to `design-sync/agrolink`.
 
 The final GUI gate started with 12,575 MiB available,
 `pswpin 730460840`, and `pswpout 897557888`, above the 4,096 MiB threshold.
+
+### Task 7 scoped cloud access
+
+The server now stores gateway-local users, zone grants, and plot grants as
+versioned mirrors. Five scoped event appliers enforce gateway identity,
+monotonic versions, equal-version equality, tombstones, and desired-state
+convergence. Server authorization resolves the selected linked installation
+to its local `user_uuid`, role, and enabled state. Global cloud roles do not
+grant farm access, and one cloud user may be an administrator on one gateway
+and a viewer on another.
+
+Cloud access changes use six versioned pending commands. They remain desired
+state until the edge applies them. The edge helper validates gateway and
+effect-key bindings, protects the last enabled administrator, applies the
+resource mutation and terminal ACK in one transaction, and invalidates cached
+scope after success. Conflicts and permanent rejections remain recoverable
+terminal states rather than false success.
+
+The `/gateway-access` cloud workspace switches among linked installations,
+filters actions by the selected membership, lists mirrored users and grants,
+and overlays pending changes. It supports user lifecycle, password reset, and
+zone or plot grant changes, with distinct pending, conflicted, and rejected
+feedback. Cloud grant enumeration comes from the canonical mirrors; the edge
+administration page still shows only grants created during its current page
+session because the local API has no grant-list route.
+
+Contract activation removed all scoped commands and events from the staging
+manifest. The operation scanner was corrected to walk the complete Java source
+root, so appliers in the `scopedaccess` package cannot be missed. The server now
+matches all 28 governed event operations. The `CONFLICT` ACK result is active
+for desired-state recovery.
+
+Task 7 verification:
+
+| Command | Result |
+|---|---|
+| Scoped server mirror, applier, authorization, desired-state, and controller selections | exit 0 |
+| `NODE_OPTIONS=--max-old-space-size=2048 ./gradlew test --no-daemon --max-workers=2` | exit 0; `BUILD SUCCESSFUL in 1m 10s` |
+| Focused cloud access frontend selection | exit 0; 4 files and 17 tests passed |
+| `npm run test:unit` | exit 0; 73 files and 288 tests passed |
+| `NODE_OPTIONS=--max-old-space-size=2048 npm run build` | exit 0 |
+| Edge scope helper, command path, scoped write, scoped read, and endpoint ratchet suites | exit 0; 20, 5, 24, 23, and 6 tests passed |
+| `node --test scripts/verify-sync-op-parity.test.js` | exit 0; 44 tests passed |
+| `node scripts/test-contract-schemas.js` | exit 0 |
+| `node scripts/verify-sync-contract.js` | exit 0 |
+| `node scripts/verify-sync-op-parity.js` with the server source override | exit 0; all 28 event operations matched |
+| `node scripts/verify-sync-flow.js` with the server source override | exit 0; umbrella sync and profile gates passed |
+| Server vendor unit and byte-comparison scripts | exit 0; six files matched |
+| `./gradlew test --tests org.osi.server.sync.SyncContractVendorTest --no-daemon --max-workers=2` | exit 0 |
+
+Server commits `e8268566`, `89fd0ad0`, `7e4d013e`, `f07d0879`,
+`c55375e7`, and `5ca86425` were pushed to `AgroLink`. Edge commits
+`b4cb078c`, `0303e68e`, `95c6f5c8`, and `0f17892f` were pushed to
+`design-sync/agrolink`. Remote branch lookups returned the exact local heads
+after each push.
+
+Task 7 heavyweight samples recorded between 11,552 MiB and 12,128 MiB
+available during final contract verification. All samples cleared the
+4,096 MiB threshold. No owned or unrelated process was terminated.
 
 ### Program ownership
 

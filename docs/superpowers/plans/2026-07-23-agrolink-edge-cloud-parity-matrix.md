@@ -18,6 +18,11 @@ come from the fetched integration heads, not the earlier planning audit.
 | 0 | Launch inventory recorded; stale server frontend manifest pin repaired and all baseline suites passed | Edge `ed89dc010cfcccfea001b81583a0690608d1c3d9`; server `3179df875204ac2c9d38e6d9c96cb2beaa15a1b4` |
 | 1 | Scoped authority, per-gateway cloud membership, dynamic migration allocation, and the accepted user-version contract reconciled in governing documents | Edge `459cf73f010a390c10b6dbb707de891f0179775e` |
 | 2 | Edge-owned sync contracts, golden rollout metadata, byte-identical server vendors, and drift gates landed | Edge `8a06e630bd9dadc315c917f18850a19a1959e930`; server `04e60bf669cfd02c4ac756ddf956b8b8acefa8bf` |
+| 3 | Scoped edge schema, scope helper, authentication, feature flag, and `/api/me` landed with migration and replay coverage | Edge `1f6f0933` through `4eb05522` |
+| 4 | Durable cloud desired state, ACK and mirror convergence, zone-config overlay, and conflict handling landed | Server `7c009dad` through `b86473e8` |
+| 5 | Journal mirrors, commands, exports, UI, and contract activation landed | Edge `6fd5d7fd`, `af274c9c`, and `9a2bcb09`; server `4bf1c67c` through `1c953c77` |
+| 6 | Scoped edge reads, writes, physical effects, administration, and read-only GUI enforcement landed | Edge `31fd939d` through `b4b6c1a8`; report `0e5319a0` |
+| 7 | Per-gateway cloud membership, scoped mirrors, authorization, desired access commands, edge application, administration UI, and contract activation landed | Edge `b4cb078c` through `0f17892f`; server `e8268566` through `5ca86425` |
 
 ## Status rules
 
@@ -40,13 +45,13 @@ come from the fetched integration heads, not the earlier planning audit.
 | Irrigation schedules | `partial` | Edge schedule mutations and cloud pending commands exist; current route, field, version, and conflict parity require inventory | Tasks 4 and 8 |
 | Device provisioning and registration | `partial` | Bootstrap, registration, bulk claim, assignment, and command paths exist; authorization and six-family parity remain | Tasks 7 and 8 |
 | Device assignment, flags, configuration, and unclaim | `partial` | Multiple pending command types exist; Task 0 must map device-family coverage and authorization | Tasks 7 and 8 |
-| Journal entries | `cloud-missing` | Edge storage, UI, five event operations, and five command handlers exist; full server mirror/API/UI/issuer does not | Task 5 |
+| Journal entries | `parity` | Five edge events and five cloud commands are active; mirror, replay, desired-state conflict, exports, and cloud workspace suites pass | Task 5 |
 | Farm history mirror | `partial` | Legacy durable delivery remains; the new batch mapper covers `device_data` only | Task 9 |
 | Analysis and recommendations | `partial` | Both repositories contain analysis surfaces; input, scope, missing-data, and result semantics need route-level comparison | Task 8 |
-| Account scope and per-gateway grants | `partial` | Task 1 reconciled the governing model and Phase A rebase instructions; implementation, Phases B-D, and server enforcement remain open | Tasks 3, 6, and 7 |
-| Cloud access administration | `cloud-missing` | Task 1 now governs this as durable desired state plus versioned edge-applied commands; implementation remains in Tasks 4 and 7 | Tasks 4 and 7 |
+| Account scope and per-gateway grants | `parity` | Edge owner-plus-grant enforcement and server per-gateway membership authorization pass for reads, writes, and effects; mirrors retain local user and assignment UUIDs | Tasks 3, 6, and 7 |
+| Cloud access administration | `parity` | Cloud desired state queues six versioned commands; edge applies or rejects them transactionally; ACK plus mirror convergence drives pending, conflict, and rejection UI | Tasks 4 and 7 |
 | Installation recovery | `cloud-missing` | No stable `installation_uuid` recovery model or encrypted recovery bundle exists | Task 10 |
-| Optimistic zone and journal edits | `cloud-missing` | UX decision is immediate local desired state with background sync; durable state machine is not complete | Tasks 4 and 5 |
+| Optimistic zone edits | `partial` | Zone configuration uses durable desired state; lifecycle, location, and soil-profile mutations still require Task 8 convergence evidence | Tasks 4 and 8 |
 
 ## Deliberate product split
 
@@ -63,17 +68,16 @@ come from the fetched integration heads, not the earlier planning audit.
 
 ## Contract and catalog baseline
 
-- The launch-head edge flow contains 17 active event operation strings.
-- The edge seed and server operation mirror contain 18 operation strings.
+- The current edge flow contains 17 active event operation strings.
+- The edge seed contains 23 operation strings; five journal operations are
+  module owned.
+- The server operation mirror contains all 28 governed operations.
 - The governed event schema contains 28 operation strings.
-- Five journal operations are intentionally staged but not enabled for cloud
-  production until server acceptance is proven.
-- Five scoped-access event operations are schema-accepted and staged. Edge
-  production and server handling remain disabled until their implementation
-  slices pass.
+- Five journal operations and five scoped-access operations are active. The
+  server operation scanner sees all 28 governed event operations.
 - The edge-owned golden fixture separates schema acceptance from edge-producer
-  and cloud-issuer enablement. It also closes the current command ACK result
-  vocabulary, with `CONFLICT` accepted but staged.
+  and cloud-issuer enablement. It closes the current command ACK result
+  vocabulary, with `CONFLICT` enabled for desired-state recovery.
 - The supported device baseline is KIWI, TEKTELIC CLOVER, DRAGINO LSN50,
   SENSECAP S2120, AQUASCOPE LORAIN, and STREGA.
 - UC512 remains schema-compatible but hidden from the supported parity catalog.
@@ -321,15 +325,15 @@ ZONE_RECOMMENDATION_UPSERTED
 ZONE_UPSERTED
 ```
 
-The five journal and five scoped-access operations are `cloudDeferred`. The
-scoped-access operations are also `edgeDeferred`; the journal operations are
-implemented by edge modules but not enabled for cloud delivery. The other 18
-match the server operation mirror. The runtime flow emits 17 because
-`WORK_REQUEST_SUBMITTED` is seed/module-owned.
+No event operation is deferred. The five journal operations are emitted by
+edge modules, the five scoped-access operations by migration-owned triggers,
+and the other 18 by flows or seed-owned modules. All 28 match the server
+operation mirror. The runtime flow emits 17 because journal, scoped access,
+and `WORK_REQUEST_SUBMITTED` are module or seed owned.
 
 ### Command operations
 
-The governed schema contains 40 command types:
+The governed schema contains 46 command types:
 
 ```text
 OPEN_FOR_DURATION
@@ -372,20 +376,32 @@ VOID_JOURNAL_ENTRY
 UPSERT_JOURNAL_CUSTOM_VOCAB
 UPSERT_JOURNAL_PLOT
 UPSERT_JOURNAL_PLOT_GROUP
+UPSERT_SCOPED_USER
+RESET_SCOPED_USER_PASSWORD
+UPSERT_USER_ZONE_ASSIGNMENT
+DELETE_USER_ZONE_ASSIGNMENT
+UPSERT_USER_PLOT_ASSIGNMENT
+DELETE_USER_PLOT_ASSIGNMENT
 ```
 
-The five journal commands are `cloudDeferred`. `UC512_OPEN_FOR_DURATION` stays
-schema-compatible but is excluded from the supported catalog.
+No command type is deferred. `UC512_OPEN_FOR_DURATION` stays schema-compatible
+but is excluded from the supported catalog.
 
 ### Resource schemas
 
-The resource file contains 18 domain definitions after excluding UUID,
+The resource file contains 24 domain definitions after excluding UUID,
 timestamp, and EUI primitives:
 
 ```text
 Zone
 Device
 Schedule
+ScopedUser
+ScopedUserCommand
+UserZoneAssignment
+UserZoneAssignmentCommand
+UserPlotAssignment
+UserPlotAssignmentCommand
 JournalEntryValue
 JournalEntry
 JournalEntryAggregate
@@ -405,11 +421,10 @@ JournalPlotGroupCommand
 
 ### Capabilities
 
-The edge currently advertises `linked_auth_sync_v1` and
-`force_edge_sync_v1` during account link and bootstrap. No capability yet
-distinguishes schema acceptance from event production or command issuance;
-Task 2 owns that gap. The edge system-feature response separately exposes
-history feature flags and keeps the journal UI flag off until Task 5.
+The golden contract records schema acceptance, edge production, and cloud
+issuance independently. Journal event production and cloud issuance are
+enabled. Scoped-access event production and command issuance are enabled on
+their separate capability axes. Desired-state conflict handling is enabled.
 
 ## Ownership ledger
 
