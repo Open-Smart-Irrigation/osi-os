@@ -1,7 +1,7 @@
 import { CommandExecutionError, createCommandExecutor, type CommandResult, type CommandRunOptions } from './command-executor.js';
 import { createOperationArgv, hashOperationArgv, type OperationArgvContext } from './operation-registry.js';
 import { parseCanonicalBuilderImageReference, selectExactRepositoryDigest } from '../../builder/validate-builder.js';
-import type { JobState, TrustedOperationId } from '../../domain/types.js';
+import type { BuilderErrorCode, JobState, TrustedOperationId } from '../../domain/types.js';
 import type { LogCleanupProof, OperationCleanupProof, RunnerWriteCommand } from '../../api/src/ownership.js';
 import type { JobRecord, JsonObject, OperationInput } from '../../api/src/store.js';
 
@@ -10,9 +10,10 @@ const JOB_LABEL = 'org.osi.image-builder.job-id';
 const MANIFEST_LABEL = 'org.osi.image-builder.manifest-sha';
 const IMAGE_ID = /^sha256:[0-9a-f]{64}$/u;
 const HASH = /^[0-9a-f]{64}$/u;
-const SAFE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/u;
+const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/u;
 const SAFE_ABSOLUTE_PATH = /^\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/u;
 const DOCKER_PATH = /^\/(?:[A-Za-z0-9._-]+\/)*docker$/u;
+const CONTAINER_NAME = /^osi-image-builder-[a-z0-9-]{8,64}$/u;
 const DOCKER_CONTROL_TIMEOUT_MS = 30_000;
 
 export interface DockerCommandExecutor {
@@ -295,7 +296,7 @@ function validateOptions(options: DockerExecutorOptions): readonly string[] {
   if (!SAFE_ID.test(options.jobId) || !HASH.test(options.manifestSha256) || !Number.isSafeInteger(options.attempt) || options.attempt < 1) fail('job identity is invalid');
   if (!SAFE_ABSOLUTE_PATH.test(options.worktreePath) || options.worktreePath.includes('..') || options.worktreePath.includes('//') || options.worktreePath.includes(',')) fail('worktree path is not a safe canonical absolute path');
   if (!Number.isSafeInteger(options.uid) || options.uid < 0 || options.uid > 65535 || !Number.isSafeInteger(options.gid) || options.gid < 0 || options.gid > 65535) fail('UID/GID is invalid');
-  if (options.containerName !== `osi-image-builder-${options.jobId}-attempt-${options.attempt}`) fail('container name is invalid');
+  if (!CONTAINER_NAME.test(options.containerName)) fail('container name is invalid');
   if (!Number.isSafeInteger(options.operationTimeoutMs) || options.operationTimeoutMs < 1) fail('operation timeout is invalid');
   if (!Number.isSafeInteger(options.maxCaptureBytes) || options.maxCaptureBytes < 1 || options.maxCaptureBytes > 16 * 1024 * 1024) fail('operation capture limit is invalid');
   if (typeof options.evidence !== 'function') fail('immutable evidence writer is required');
@@ -386,16 +387,16 @@ function identityIsNull(job: DockerJobRead): boolean {
   return [job.containerId, job.containerName, job.containerImageDigest, job.containerLabelJobId, job.containerLabelManifestSha, job.containerLabels, job.containerMount, job.containerEnvironment, job.containerSecurity, job.containerInspection, job.containerCreatedAt, job.containerStartedAt, job.containerStoppedAt, job.containerRemovedAt, job.containerCleanupOutcome].every((value) => value === null);
 }
 
-async function proveLabelAbsent(options: DockerExecutorOptions): Promise<void> {
+async function proveLabelAbsent(options: DockerExecutorOptions): Promise<string> {
   const labels = await runDocker(options, ['ps', '--all', `--filter=label=${JOB_LABEL}=${options.jobId}`, '--format={{.ID}}']);
   if (!noLabel(requireSuccess(labels, 'Docker label verification'))) fail('a Docker container still owns this job label');
+  return now(options);
 }
 
 async function proveAbsent(options: DockerExecutorOptions, id: string): Promise<string> {
   const exact = await runDocker(options, ['inspect', '--type=container', '--format={{json .}}', id]);
   if (exact.exitCode === 0 || !/no such container/iu.test(`${exact.stderr}\n${exact.stdout}`)) fail('Docker rm did not prove exact container absence');
-  await proveLabelAbsent(options);
-  return now(options);
+  return proveLabelAbsent(options);
 }
 
 async function cleanupOrphan(options: DockerExecutorOptions, id: string): Promise<{ readonly removedAt: string; readonly observedAt: string }> {
@@ -406,27 +407,33 @@ async function cleanupOrphan(options: DockerExecutorOptions, id: string): Promis
   return { removedAt, observedAt };
 }
 
-async function inspectContainer(options: DockerExecutorOptions, id: string, image: ImageIdentity, sourceEpoch: string, requireStopped: boolean): Promise<DockerInspection> {
-  const inspected = normalizeInspection(parseJson(requireSuccess(await runDocker(options, ['inspect', '--type=container', '--format={{json .}}', id]), 'Docker inspect'), 'Docker inspect'));
+async function inspectContainer(options: DockerExecutorOptions, id: string, image: ImageIdentity, sourceEpoch: string, requireStopped: boolean): Promise<{ readonly inspection: DockerInspection; readonly observedAt: string }> {
+  const response = await runDocker(options, ['inspect', '--type=container', '--format={{json .}}', id]);
+  const observedAt = now(options);
+  const inspected = normalizeInspection(parseJson(requireSuccess(response, 'Docker inspect'), 'Docker inspect'));
   validateInspection(inspected, id, image, options, sourceEpoch, requireStopped);
-  return inspected;
+  return { inspection: inspected, observedAt };
 }
 
-async function recoverStopped(options: DockerExecutorOptions, id: string, image: ImageIdentity, sourceEpoch: string): Promise<DockerInspection> {
+async function recoverStopped(options: DockerExecutorOptions, id: string, image: ImageIdentity, sourceEpoch: string): Promise<{ readonly inspection: DockerInspection; readonly observedAt: string }> {
   let inspected = await inspectContainer(options, id, image, sourceEpoch, false);
-  if (!inspected.running) return inspected;
+  if (!inspected.inspection.running) return inspected;
   const failures: unknown[] = [];
   try { requireSuccess(await runDocker(options, ['stop', '--time=10', id]), 'Docker stop'); } catch (error) { failures.push(error); }
   inspected = await inspectContainer(options, id, image, sourceEpoch, false);
-  if (!inspected.running) return inspected;
+  if (!inspected.inspection.running) return inspected;
   try { requireSuccess(await runDocker(options, ['kill', id]), 'Docker kill escalation'); } catch (error) { failures.push(error); }
   inspected = await inspectContainer(options, id, image, sourceEpoch, false);
-  if (inspected.running) throw new AggregateError(failures, 'Docker attach ended but the exact container could not be stopped');
+  if (inspected.inspection.running) throw new AggregateError(failures, 'Docker attach ended but the exact container could not be stopped');
   return inspected;
 }
 
+function failureCode(error: unknown): BuilderErrorCode {
+  return error instanceof DockerLifecycleError ? 'DOCKER_EXECUTION_DEFINITION_MISMATCH' : 'BUILD_FAILED';
+}
+
 function errorJson(error: unknown): JsonObject {
-  return { code: 'BUILD_FAILED', message: error instanceof Error ? error.message : String(error) };
+  return { code: failureCode(error), message: error instanceof Error ? error.message : String(error) };
 }
 
 function validateLogProof(proof: LogCleanupProof, operationFinishedAt: string): LogCleanupProof {
@@ -436,15 +443,16 @@ function validateLogProof(proof: LogCleanupProof, operationFinishedAt: string): 
   return { ...proof, verifiedAt };
 }
 
-async function completeNotCreated(options: DockerExecutorOptions, sourceEpoch: string, argv: readonly string[], argvHash: string, startedAt: string, primary: unknown, cleanupEvidence: JsonObject | null): Promise<void> {
+async function completeNotCreated(options: DockerExecutorOptions, sourceEpoch: string, argv: readonly string[], argvHash: string, startedAt: string, primary: unknown, cleanupEvidence: JsonObject | null, observedAt: string): Promise<void> {
   const finishedAt = now(options);
   const logs = validateLogProof(await options.finalizeLogs({ operationFinishedAt: finishedAt }), finishedAt);
   const evidence = await options.evidence({ operationId: options.operationId, attempt: options.attempt, argv, argvHash, lifecyclePhase: 'not_created', outcome: 'failed', error: errorJson(primary), cleanup: cleanupEvidence ?? {} });
-  const input: OperationInput = { operationId: options.operationId, attempt: options.attempt, argvHash, argv, startedAt, finishedAt, timedOut: primary instanceof CommandExecutionError ? Boolean(primary.result?.timedOut) : false, lifecyclePhase: 'not_created', exitCode: primary instanceof CommandExecutionError ? primary.result?.exitCode ?? null : null, signal: primary instanceof CommandExecutionError ? primary.result?.signal ?? null : null, outcome: 'failed', evidencePath: evidence.path, evidenceSha256: evidence.sha256, errorCode: 'BUILD_FAILED', error: errorJson(primary) };
+  const input: OperationInput = { operationId: options.operationId, attempt: options.attempt, argvHash, argv, startedAt, finishedAt, timedOut: primary instanceof CommandExecutionError ? Boolean(primary.result?.timedOut) : false, lifecyclePhase: 'not_created', exitCode: primary instanceof CommandExecutionError ? primary.result?.exitCode ?? null : null, signal: primary instanceof CommandExecutionError ? primary.result?.signal ?? null : null, outcome: 'failed', evidencePath: evidence.path, evidenceSha256: evidence.sha256, errorCode: failureCode(primary), error: errorJson(primary) };
   runner(options, (snapshot) => ({ kind: 'operation-complete', jobId: options.jobId, owner: snapshot.owner, runnerUnit: snapshot.unit, leaseExpiresAt: snapshot.leaseExpiresAt, at: finishedAt, expectedState: snapshot.expectedState, operationId: options.operationId, attempt: options.attempt, input }));
   const cleanupAt = now(options);
+  if (observedAt > cleanupAt) fail('Docker null-identity observation is from the future relative to cleanup');
   if (logs.verifiedAt > cleanupAt) fail('log proof is from the future relative to cleanup');
-  const proof: OperationCleanupProof = { kind: 'null-identity', container: { kind: 'absent', globalLabelResult: 'no-match', observedAt: cleanupAt }, logs };
+  const proof: OperationCleanupProof = { kind: 'null-identity', container: { kind: 'absent', globalLabelResult: 'no-match', observedAt }, logs };
   runner(options, (snapshot) => ({ kind: 'operation-cleanup', jobId: options.jobId, owner: snapshot.owner, runnerUnit: snapshot.unit, leaseExpiresAt: snapshot.leaseExpiresAt, at: cleanupAt, expectedState: snapshot.expectedState, operationId: options.operationId, attempt: options.attempt, proof }));
   void sourceEpoch;
 }
@@ -477,7 +485,8 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
         const labels: JsonObject = { [JOB_LABEL]: options.jobId, [MANIFEST_LABEL]: options.manifestSha256 };
         const created = await runDocker(options, ['create', `--name=${options.containerName}`, `--label=${JOB_LABEL}=${options.jobId}`, `--label=${MANIFEST_LABEL}=${options.manifestSha256}`, `--mount=type=bind,source=${options.worktreePath},destination=/workdir`, `--user=${options.uid}:${options.gid}`, '--workdir=/workdir', '--network=bridge', '--platform=linux/amd64', '--cap-drop=ALL', '--security-opt=no-new-privileges:true', '--pids-limit=4096', '--ulimit=nofile=1024:4096', '--pull=never', ...Object.entries(env(sourceEpoch)).map(([key, value]) => `--env=${key}=${value}`), options.imageReference, ...argv]);
         id = containerId(requireSuccess(created, 'Docker create'));
-        const inspected = await inspectContainer(options, id, image, sourceEpoch, true);
+        const inspectedResult = await inspectContainer(options, id, image, sourceEpoch, true);
+        const inspected = inspectedResult.inspection;
         const inspectedJson = inspectionJson(inspected, image);
         const createdAt = now(options);
         runner(options, (snapshot) => containerCommand(options, sourceEpoch, snapshot, 'created', id!, labels, inspectedJson, createdAt, createdAt));
@@ -494,11 +503,11 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
         }
         const commandTimes = validateStartResult(result, startArgv);
         const stoppedInspection = await recoverStopped(options, id, image, sourceEpoch);
-        const stoppedJson = inspectionJson(stoppedInspection, image);
+        const stoppedJson = inspectionJson(stoppedInspection.inspection, image);
         const startedWriteAt = now(options);
         runner(options, (snapshot) => containerCommand(options, sourceEpoch, snapshot, 'started', id!, labels, stoppedJson, startedWriteAt, createdAt, commandTimes.startedAt));
         const stoppedWriteAt = now(options);
-        runner(options, (snapshot) => containerCommand(options, sourceEpoch, snapshot, 'stopped', id!, labels, stoppedJson, stoppedWriteAt, createdAt, commandTimes.startedAt, commandTimes.finishedAt));
+        runner(options, (snapshot) => containerCommand(options, sourceEpoch, snapshot, 'stopped', id!, labels, stoppedJson, stoppedWriteAt, createdAt, commandTimes.startedAt, stoppedInspection.observedAt));
         const outcome: 'passed' | 'failed' = !attachError && result.exitCode === 0 && result.signal === null && !result.timedOut ? 'passed' : 'failed';
         const commandEvidence: JsonObject = { argv: result.argv, exitCode: result.exitCode, signal: result.signal, stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut, startedAt: result.startedAt, finishedAt: result.finishedAt, ...(attachError ? { attachError: errorJson(attachError) } : {}) };
         const operationFinishedAt = now(options);
@@ -514,25 +523,28 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
         const removedAt = now(options);
         const observedAt = await proveAbsent(options, id);
         if (logs.verifiedAt > observedAt) fail('log proof is from the future relative to cleanup');
-        const proof: OperationCleanupProof = { kind: 'container-removed', id, name: options.containerName, imageDigest: options.imageDigest, labels, stoppedAt: commandTimes.finishedAt, removedAt, observedAt, globalLabelResult: 'no-match', logs };
+        const proof: OperationCleanupProof = { kind: 'container-removed', id, name: options.containerName, imageDigest: options.imageDigest, labels, stoppedAt: stoppedInspection.observedAt, removedAt, observedAt, globalLabelResult: 'no-match', logs };
         runner(options, (snapshot) => ({ kind: 'operation-cleanup', jobId: options.jobId, owner: snapshot.owner, runnerUnit: snapshot.unit, leaseExpiresAt: snapshot.leaseExpiresAt, at: observedAt, expectedState: snapshot.expectedState, operationId: options.operationId, attempt: options.attempt, proof }));
         return { available: true, outcome, containerId: id, exitCode: result.exitCode, mutationCount: 6 };
       } catch (error) {
         if (!persisted) {
           let cleanupEvidence: JsonObject | null = null;
+          let cleanupObservedAt: string | null = null;
           try {
             if (id !== null) {
               const cleanup = await cleanupOrphan(options, id);
+              cleanupObservedAt = cleanup.observedAt;
               cleanupEvidence = { kind: 'container-removed', id, removedAt: cleanup.removedAt, observedAt: cleanup.observedAt, exactIdAbsent: true, globalLabelResult: 'no-match' };
               const current = options.store.getJob(options.jobId);
               if (!identityIsNull(current)) fail('orphan cleanup did not leave null persisted identity');
             } else {
               const current = options.store.getJob(options.jobId);
               if (!identityIsNull(current)) fail('failed create left persisted container identity');
-              await proveLabelAbsent(options);
-              cleanupEvidence = { kind: 'null-identity', exactIdAbsent: true, globalLabelResult: 'no-match' };
+              cleanupObservedAt = await proveLabelAbsent(options);
+              cleanupEvidence = { kind: 'null-identity', exactIdAbsent: true, globalLabelResult: 'no-match', observedAt: cleanupObservedAt };
             }
-            await completeNotCreated(options, sourceEpoch, argv, argvHash, startedAt, error, cleanupEvidence);
+            if (cleanupObservedAt === null) fail('safe failure cleanup did not produce an observation timestamp');
+            await completeNotCreated(options, sourceEpoch, argv, argvHash, startedAt, error, cleanupEvidence, cleanupObservedAt);
           } catch (cleanupError) {
             throw new AggregateError([error, cleanupError], 'Docker operation failed and failure cleanup could not be committed');
           }

@@ -39,7 +39,7 @@ function fakeDocker(): DockerCommandExecutor & { readonly calls: readonly (reado
     { stdout: '' },
     { stdout: `${CONTAINER_ID}\n` },
     { stdout: JSON.stringify(rawInspection()) },
-    { stdout: 'build output', startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' },
+    { stdout: 'build output', startedAt: '2026-07-24T10:00:03.000Z', finishedAt: '2026-07-24T10:00:04.000Z' },
     { stdout: JSON.stringify(rawInspection()) },
     { stdout: '' },
     { exitCode: 1, stderr: 'No such container: integration\n' },
