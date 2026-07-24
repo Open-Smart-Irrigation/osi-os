@@ -1,22 +1,8 @@
 {
   "version": 1,
   "commands": {
-    "edgeDeferred": [
-      "DELETE_USER_PLOT_ASSIGNMENT",
-      "DELETE_USER_ZONE_ASSIGNMENT",
-      "RESET_SCOPED_USER_PASSWORD",
-      "UPSERT_SCOPED_USER",
-      "UPSERT_USER_PLOT_ASSIGNMENT",
-      "UPSERT_USER_ZONE_ASSIGNMENT"
-    ],
-    "cloudDeferred": [
-      "DELETE_USER_PLOT_ASSIGNMENT",
-      "DELETE_USER_ZONE_ASSIGNMENT",
-      "RESET_SCOPED_USER_PASSWORD",
-      "UPSERT_SCOPED_USER",
-      "UPSERT_USER_PLOT_ASSIGNMENT",
-      "UPSERT_USER_ZONE_ASSIGNMENT"
-    ]
+    "edgeDeferred": [],
+    "cloudDeferred": []
   },
   "eventOps": {
     "edgeModuleOwned": [
@@ -26,19 +12,7 @@
       "JOURNAL_PLOT_UPSERTED",
       "JOURNAL_PLOT_GROUP_UPSERTED"
     ],
-    "edgeDeferred": [
-      "USER_PLOT_ASSIGNMENT_DELETED",
-      "USER_PLOT_ASSIGNMENT_UPSERTED",
-      "USER_UPSERTED",
-      "USER_ZONE_ASSIGNMENT_DELETED",
-      "USER_ZONE_ASSIGNMENT_UPSERTED"
-    ],
-    "cloudDeferred": [
-      "USER_PLOT_ASSIGNMENT_DELETED",
-      "USER_PLOT_ASSIGNMENT_UPSERTED",
-      "USER_UPSERTED",
-      "USER_ZONE_ASSIGNMENT_DELETED",
-      "USER_ZONE_ASSIGNMENT_UPSERTED"
-    ]
+    "edgeDeferred": [],
+    "cloudDeferred": []
   }
 }

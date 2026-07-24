@@ -73,6 +73,26 @@ function copyFixtureTree() {
       fs.copyFileSync(entryPath, path.join(serverDir, entry));
     }
   }
+  const scopedApplierDir = path.join(serverDir, 'scopedaccess');
+  fs.mkdirSync(scopedApplierDir, { recursive: true });
+  fs.writeFileSync(path.join(scopedApplierDir, 'ScopedAccessApplier.java'), `
+class ScopedAccessApplier implements SyncEventApplier {
+  public Set<String> supportedOps() {
+    return Set.of(
+      "JOURNAL_ENTRY_UPSERTED",
+      "JOURNAL_ENTRY_VOIDED",
+      "JOURNAL_VOCAB_UPSERTED",
+      "JOURNAL_PLOT_UPSERTED",
+      "JOURNAL_PLOT_GROUP_UPSERTED",
+      "USER_UPSERTED",
+      "USER_ZONE_ASSIGNMENT_UPSERTED",
+      "USER_ZONE_ASSIGNMENT_DELETED",
+      "USER_PLOT_ASSIGNMENT_UPSERTED",
+      "USER_PLOT_ASSIGNMENT_DELETED"
+    );
+  }
+}
+`);
   fs.copyFileSync(
     path.join(ROOT, 'scripts/fixtures/sync-contract-staging.json'),
     path.join(stagingDir, 'sync-contract-staging.json')
@@ -126,8 +146,8 @@ function exactRolloutStaging() {
         'JOURNAL_PLOT_UPSERTED',
         'JOURNAL_PLOT_GROUP_UPSERTED',
       ],
-      edgeDeferred: SCOPED_ACCESS_EVENT_OPS.slice(),
-      cloudDeferred: SCOPED_ACCESS_EVENT_OPS.slice(),
+      edgeDeferred: [],
+      cloudDeferred: [],
     },
   };
 }
@@ -142,6 +162,7 @@ function createStagedParityFixture(overrides) {
   );
   const modulePath = path.join(moduleDir, 'lifecycle.js');
   const apiModulePath = path.join(moduleDir, 'api.js');
+  const scopedSqlPath = path.join(tmp, 'scoped-access.sql');
   const serverSource = path.join(tmp, 'EdgeSyncService.java');
   fs.mkdirSync(moduleDir, { recursive: true });
   fs.writeFileSync(schemaPath, JSON.stringify({
@@ -184,6 +205,15 @@ async function emitResourceEvents(tx, aggregate) {
   await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_GROUP_UPSERTED');
 }
 `);
+  fs.writeFileSync(scopedSqlPath, SCOPED_ACCESS_EVENT_OPS.map((op, index) => `
+INSERT INTO sync_outbox (
+  event_uuid, aggregate_type, aggregate_key, op, payload_json,
+  sync_version, occurred_at
+) VALUES (
+  'scoped-event-${index}', 'SCOPED_ACCESS', 'resource-${index}', '${op}',
+  json_object('contract_version', 1), 1, '2026-07-23T00:00:00.000Z'
+);
+`).join('\n'));
   fs.writeFileSync(serverSource, `
 class EdgeSyncService {
   private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
@@ -197,13 +227,28 @@ class EdgeSyncService {
   }
 }
 `);
+  const scopedServerDir = path.join(tmp, 'scopedaccess');
+  fs.mkdirSync(scopedServerDir, { recursive: true });
+  fs.writeFileSync(path.join(scopedServerDir, 'ScopedAccessApplier.java'), `
+class ScopedAccessApplier implements SyncEventApplier {
+  public Set<String> supportedOps() {
+    return Set.of(
+      "USER_UPSERTED",
+      "USER_ZONE_ASSIGNMENT_UPSERTED",
+      "USER_ZONE_ASSIGNMENT_DELETED",
+      "USER_PLOT_ASSIGNMENT_UPSERTED",
+      "USER_PLOT_ASSIGNMENT_DELETED"
+    );
+  }
+}
+`);
 
   return Object.assign({
     root: tmp,
     schemaPath,
     serverSource,
     flowSources: [{ name: 'fixture', path: flowPath }],
-    sqlSources: [],
+    sqlSources: [{ name: 'scoped-access', path: scopedSqlPath }],
     databaseSources: [],
     sqlOwnedEventOps: [],
     moduleSources: [
@@ -364,7 +409,7 @@ class EdgeSyncService {
   assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED', 'ZONE_CONFIG_UPSERTED', 'ZONE_UPSERTED']);
 });
 
-test('server extractor unions SyncEventApplier supportedOps implementations', () => {
+test('server extractor unions sibling and nested SyncEventApplier implementations', () => {
   const serverSource = writeServerFixture(`
 class EdgeSyncService {
   private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
@@ -382,11 +427,24 @@ class GatewayLocationApplier implements SyncEventApplier {
   }
 }
 `);
+  const scopedDir = path.join(path.dirname(serverSource), 'scopedaccess');
+  fs.mkdirSync(scopedDir, { recursive: true });
+  fs.writeFileSync(path.join(scopedDir, 'ScopedAccessUserApplier.java'), `
+class ScopedAccessUserApplier implements SyncEventApplier {
+  public Set<String> supportedOps() {
+    return Set.of("USER_UPSERTED");
+  }
+}
+`);
 
   const result = extractServerOps(serverSource);
 
   assert.deepEqual(result.errors, []);
-  assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED', 'GATEWAY_LOCATION_UPSERTED']);
+  assert.deepEqual(result.ops, [
+    'DEVICE_DATA_APPENDED',
+    'GATEWAY_LOCATION_UPSERTED',
+    'USER_UPSERTED',
+  ]);
 });
 
 test('default server lookup reaches a sibling repo from a nested worktree', () => {
@@ -409,7 +467,7 @@ test('default server lookup reaches a sibling repo from a nested worktree', () =
   }
 });
 
-test('parity accepts enabled journal operations with only scoped access staged', () => {
+test('parity accepts active journal and scoped-access operations', () => {
   const result = checkSyncOpParity(createStagedParityFixture());
 
   assert.equal(result.ok, true, result.message);
@@ -1032,7 +1090,13 @@ END;
   const result = checkSyncOpParity({
     root: fixtureRoot,
     serverSource: path.join(fixtureRoot, 'server/EdgeSyncService.java'),
-    sqlSources: [{ name: 'seed-sql:fixture', path: seedPath }],
+    sqlSources: [
+      { name: 'seed-sql:fixture', path: seedPath },
+      {
+        name: 'seed-sql:active-scoped-access',
+        path: path.join(ROOT, 'database/seed-blank.sql'),
+      },
+    ],
     databaseSources: [],
   });
 
@@ -1059,7 +1123,13 @@ END;
   const result = checkSyncOpParity({
     root: fixtureRoot,
     serverSource: path.join(fixtureRoot, 'server/EdgeSyncService.java'),
-    sqlSources: [{ name: 'seed-sql:fixture', path: seedPath }],
+    sqlSources: [
+      { name: 'seed-sql:fixture', path: seedPath },
+      {
+        name: 'seed-sql:active-scoped-access',
+        path: path.join(ROOT, 'database/seed-blank.sql'),
+      },
+    ],
     databaseSources: [],
   });
 

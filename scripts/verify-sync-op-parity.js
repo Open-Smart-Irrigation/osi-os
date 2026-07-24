@@ -14,14 +14,7 @@ const AUDITED_JOURNAL_OUTBOX_EMITTER = {
   file: 'lifecycle.js',
   functionName: 'emitJournalOutbox',
 };
-const EXACT_STAGED_COMMANDS = [
-  'DELETE_USER_PLOT_ASSIGNMENT',
-  'DELETE_USER_ZONE_ASSIGNMENT',
-  'RESET_SCOPED_USER_PASSWORD',
-  'UPSERT_SCOPED_USER',
-  'UPSERT_USER_PLOT_ASSIGNMENT',
-  'UPSERT_USER_ZONE_ASSIGNMENT',
-];
+const EXACT_STAGED_COMMANDS = [];
 const EXACT_EDGE_DEFERRED_COMMANDS = [...EXACT_STAGED_COMMANDS];
 const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_ENTRY_UPSERTED',
@@ -30,16 +23,8 @@ const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_PLOT_UPSERTED',
   'JOURNAL_PLOT_GROUP_UPSERTED',
 ];
-const EXACT_EDGE_DEFERRED_OPS = [
-  'USER_PLOT_ASSIGNMENT_DELETED',
-  'USER_PLOT_ASSIGNMENT_UPSERTED',
-  'USER_UPSERTED',
-  'USER_ZONE_ASSIGNMENT_DELETED',
-  'USER_ZONE_ASSIGNMENT_UPSERTED',
-];
-const EXACT_CLOUD_DEFERRED_OPS = [
-  ...EXACT_EDGE_DEFERRED_OPS,
-];
+const EXACT_EDGE_DEFERRED_OPS = [];
+const EXACT_CLOUD_DEFERRED_OPS = [];
 const FLOW_SOURCES = [
   {
     name: 'bcm2712',
@@ -1178,10 +1163,9 @@ function findJavaMethodBody(source, methodName) {
 // switch(event.op()) block: see foldSyncEventAppliers()/appliersByOp, which
 // is consulted before the switch and, when it claims an op, the switch is
 // never reached for that op (DD12, first case: GatewayLocationApplier /
-// GATEWAY_LOCATION_UPSERTED). Sibling files in the same package directory
-// that `implements SyncEventApplier` declare their ops via supportedOps();
-// those must count as server-supported ops too, or parity checks report a
-// false gap for correctly-dispatched, fully-implemented ops.
+// GATEWAY_LOCATION_UPSERTED). Implementations can live in another package,
+// such as scopedaccess, so the extractor walks the Java source root rather
+// than assuming every applier is a sibling of EdgeSyncService.
 function extractSyncEventApplierOps(source) {
   if (!/\bimplements\b[^{;]*\bSyncEventApplier\b/.test(source)) return null;
   const body = findJavaMethodBody(source, 'supportedOps');
@@ -1190,33 +1174,40 @@ function extractSyncEventApplierOps(source) {
 }
 
 function collectSyncEventApplierOps(serverSource) {
-  const dir = path.dirname(serverSource);
+  let root = path.dirname(serverSource);
+  for (let cursor = root; path.dirname(cursor) !== cursor; cursor = path.dirname(cursor)) {
+    if (path.basename(cursor) === 'java') {
+      root = cursor;
+      break;
+    }
+  }
   const ops = new Set();
   const errors = [];
-  let entries = [];
-  try {
-    entries = fs.readdirSync(dir);
-  } catch (error) {
-    return { ops: [], errors: [] };
-  }
-  for (const entry of entries) {
-    if (!entry.endsWith('.java')) continue;
-    const filePath = path.join(dir, entry);
-    if (path.resolve(filePath) === path.resolve(serverSource)) continue;
-    let stat;
+  const pending = [root];
+  while (pending.length) {
+    const directory = pending.pop();
+    let entries;
     try {
-      stat = fs.statSync(filePath);
+      entries = fs.readdirSync(directory, { withFileTypes: true });
     } catch (error) {
       continue;
     }
-    if (!stat.isFile()) continue;
-    const result = extractSyncEventApplierOps(readUtf8(filePath));
-    if (!result) continue;
-    if (result.error) {
-      errors.push(`${entry}: ${result.error}`);
-      continue;
+    for (const entry of entries) {
+      const filePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(filePath);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith('.java')) continue;
+      if (path.resolve(filePath) === path.resolve(serverSource)) continue;
+      const result = extractSyncEventApplierOps(readUtf8(filePath));
+      if (!result) continue;
+      if (result.error) {
+        errors.push(`${path.relative(root, filePath)}: ${result.error}`);
+        continue;
+      }
+      for (const op of result.ops) ops.add(op);
     }
-    for (const op of result.ops) ops.add(op);
   }
   return { ops: [...ops], errors };
 }
@@ -1413,9 +1404,9 @@ function checkSyncOpParity(options = {}) {
   }
 
   const deployedEdgeOps = sortedUnique(nonModuleRuntimeOps.concat(moduleUnion));
-  // edgeDeferred is a rollout flag, not a source-absence promise. Phase A may
-  // ship producers before the feature flag enables the writes that exercise
-  // them. cloudDeferred still excludes those operations from the required
+  // edgeDeferred is a rollout flag, not a source-absence promise. A future
+  // staged producer may ship behind a feature flag before it is activated.
+  // cloudDeferred excludes only reviewed staged operations from the required
   // server-handler set.
   const expectedSchemaOps = sortedUnique(deployedEdgeOps.concat(staging.edgeDeferred));
   const schemaDiffLines = formatDiff('schema', 'deployed edge plus staged union', diffSets(expectedSchemaOps, schemaResult.ops));

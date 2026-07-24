@@ -1639,10 +1639,10 @@ expectIncludesById('scoped-access-command-apply-fn', 'Scoped access command help
 expectIncludesById('scoped-access-command-apply-fn', '.close(', 'closes the scoped-access command database handle');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1', 'looks up exact command IDs before payload validation');
 expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'result_detail', 'reconstructs ACK facts from canonical replay-ledger detail');
-expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'db.transaction(async (tx) => {', 'applies scoped-access mutations and terminal ACK persistence in one transaction');
+expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'db.transaction(async function(tx) {', 'applies scoped-access mutations and terminal ACK persistence in one transaction');
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'base_version_conflict', 'rejects stale scoped-access commands with a terminal conflict');
-expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'Cannot disable or demote the last enabled local admin', 'protects the final enabled gateway admin');
-expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'invalidateGateway', 'invalidates cached scope after an applied mutation');
+expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'Cannot disable or demote the last enabled admin', 'protects the final enabled gateway admin');
+expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'scope.invalidateScope()', 'invalidates cached scope after an applied mutation');
 expectIncludes('Queue REST Command ACK', 'osiCommandLedger.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing via the shared command ledger');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'ON CONFLICT(command_id) DO NOTHING', 'never rewrites an existing terminal command result');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs in the shared transaction helper');

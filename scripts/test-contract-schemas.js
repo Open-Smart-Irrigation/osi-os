@@ -74,12 +74,32 @@ const EXPECTED_COMMAND_SEMANTIC_BINDINGS = {
         effect_key: { prefix: 'scoped_plot_assignment', uuid_path: 'assignment_uuid', version_path: 'base_sync_version' },
     },
 };
-const EXPECTED_EVENT_SEMANTIC_BINDINGS = Object.fromEntries(
-    Object.entries(JOURNAL_EVENT_BINDINGS).map(([op, binding]) => [op, {
+const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
+    ...Object.fromEntries(Object.entries(JOURNAL_EVENT_BINDINGS).map(([op, binding]) => [op, {
         aggregate_key_path: `payload.${binding[2]}`,
         sync_version_path: 'payload.sync_version',
-    }])
-);
+    }])),
+    USER_UPSERTED: {
+        aggregate_key_path: 'payload.user_uuid',
+        sync_version_path: 'payload.sync_version',
+    },
+    USER_ZONE_ASSIGNMENT_UPSERTED: {
+        aggregate_key_path: 'payload.assignment_uuid',
+        sync_version_path: 'payload.sync_version',
+    },
+    USER_ZONE_ASSIGNMENT_DELETED: {
+        aggregate_key_path: 'payload.assignment_uuid',
+        sync_version_path: 'payload.sync_version',
+    },
+    USER_PLOT_ASSIGNMENT_UPSERTED: {
+        aggregate_key_path: 'payload.assignment_uuid',
+        sync_version_path: 'payload.sync_version',
+    },
+    USER_PLOT_ASSIGNMENT_DELETED: {
+        aggregate_key_path: 'payload.assignment_uuid',
+        sync_version_path: 'payload.sync_version',
+    },
+};
 
 function loadSchema(name) {
     return JSON.parse(fs.readFileSync(path.join(SCHEMA_DIR, name), 'utf8'));
@@ -936,8 +956,8 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
 } else {
     staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
     const exactStaging = staging && staging.version === 1 &&
-        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([...SCOPED_ACCESS_COMMANDS].sort()) &&
-        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify([...SCOPED_ACCESS_COMMANDS].sort()) &&
+        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
+        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify([]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',
             'JOURNAL_ENTRY_VOIDED',
@@ -945,9 +965,9 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_UPSERTED',
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify(SCOPED_ACCESS_EVENT_OPS) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(SCOPED_ACCESS_EVENT_OPS);
-    reportCheck(exactStaging, 'staging manifest enables journal and pins scoped-access deferrals', 'staging manifest drifted from the journal rollout and scoped-access deferrals');
+        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([]);
+    reportCheck(exactStaging, 'staging manifest records active journal and scoped access', 'staging manifest drifted from the active journal and scoped-access rollout');
 }
 
 const scopedUserCommand = {
@@ -1881,6 +1901,10 @@ for (const format of [
     'journal_vocab:{custom_field_uuid}:{base_sync_version}',
     'journal_plot:{plot_uuid}:{base_sync_version}',
     'journal_plot_group:{group_uuid}:{base_sync_version}',
+    'scoped_user:{user_uuid}:{base_sync_version}',
+    'scoped_user_password:{user_uuid}:{base_sync_version}',
+    'scoped_zone_assignment:{assignment_uuid}:{base_sync_version}',
+    'scoped_plot_assignment:{assignment_uuid}:{base_sync_version}',
 ]) {
     reportCheck(
         effectKeyDoc.includes(format),

@@ -74,14 +74,18 @@ test('public endpoint exemption is exact and remove-one controlled', () => {
   );
 });
 
-test('temporary Phase C debt is exact and remove-one controlled', () => {
+test('Phase C debt is empty and provisioning remains guarded', () => {
   const flows = loadFlows();
-  assert.ok(PHASE_C_PENDING.has('post-devices-http'));
-  const withoutProvisioning = new Set(ALLOWLIST);
-  withoutProvisioning.delete('post-devices-http');
+  assert.deepEqual([...PHASE_C_PENDING], []);
+  const route = flows.find((node) => node.id === 'post-devices-http');
+  assert.ok(route, 'post-devices-http fixture exists');
+  const byId = new Map(flows.map((node) => [node.id, node]));
+  const guard = byId.get(route.wires.flat()[0]);
+  assert.ok(guard, 'device provisioning guard exists');
+  guard.func = guard.func.replace("osiLib.require('scope')", 'undefined');
 
   assert.match(
-    findFailures(flows, 'mutation', withoutProvisioning).join('\n'),
+    findFailures(flows, 'mutation', ALLOWLIST).join('\n'),
     /post-devices-http.*has no scope call/
   );
 });

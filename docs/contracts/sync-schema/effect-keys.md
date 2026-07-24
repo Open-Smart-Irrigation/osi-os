@@ -41,12 +41,36 @@ Plot upserts, including the plot's layout binding. The base version is the plot 
 
 Plot-group upserts, including membership and resolve state. The base version is the group aggregate version observed by the command originator. Creates use `0`.
 
+### `scoped_user:{user_uuid}:{base_sync_version}`
+
+Local account creation, role changes, and enabled-state changes. The UUID
+identifies the gateway-local account. Creates use base version `0`.
+
+### `scoped_user_password:{user_uuid}:{base_sync_version}`
+
+Credential reset for a gateway-local account. The command carries a bcrypt
+hash, never plaintext. The base version must match the account version observed
+by the cloud administrator.
+
+### `scoped_zone_assignment:{assignment_uuid}:{base_sync_version}`
+
+Zone-grant upserts and revocations. The stable assignment UUID identifies the
+grant, and the base version identifies the edge-confirmed state being replaced.
+Creates use `0`.
+
+### `scoped_plot_assignment:{assignment_uuid}:{base_sync_version}`
+
+Plot-grant upserts and revocations. The stable assignment UUID identifies the
+grant, and the base version identifies the edge-confirmed state being replaced.
+Creates use `0`.
+
 ## Normalization
 
 - `device_eui` is uppercase EUI-64 with no separators.
 - `zone_id` is the canonical integer zone id.
 - `command_uuid` is lowercase, hyphenated 8-4-4-4-12.
 - Journal resource UUIDs use lowercase, hyphenated 8-4-4-4-12 form.
+- Scoped user and assignment UUIDs use lowercase, hyphenated 8-4-4-4-12 form.
 - `base_sync_version` is a non-negative decimal integer without padding.
 - `scheduled_for_iso` and any timestamps use canonical ISO-8601 UTC with millisecond precision (`YYYY-MM-DDTHH:MM:SS.sssZ`), matching `canonicalization.md`.
 
@@ -69,9 +93,12 @@ the same effect key.
 that was applied. Rejected commands therefore store `payloadHash: null`; when a
 current aggregate exists, `currentPayloadHash` describes that edge state.
 
-## Journal binding enforcement
+## Versioned resource binding enforcement
 
-The command schema's `x-semantic-bindings` object is executable contract metadata. A journal command is valid only when its effect-key prefix, UUID segment, and unpadded version segment equal the referenced payload fields. Pattern matching alone is insufficient.
+The command schema's `x-semantic-bindings` object is executable contract
+metadata. Journal and scoped-access commands are valid only when the effect-key
+prefix, UUID segment, and unpadded version segment equal the referenced payload
+fields. Pattern matching alone is insufficient.
 
 The entry lifecycle repeats that check inside its transaction before it records the terminal command. For an applied entry version `N`, `assertJournalEntryEffectKey` requires base version `N - 1`; a mismatch rolls back the entry, values, event, terminal ledger row, and ACK together.
 

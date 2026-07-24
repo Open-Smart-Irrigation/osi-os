@@ -19,15 +19,8 @@ const SEPARATE_ROUTE_SPECS = [
         applierName: 'Apply Work Request Status',
     },
 ];
-const EXACT_STAGED_JOURNAL_COMMANDS = [
-    'DELETE_USER_PLOT_ASSIGNMENT',
-    'DELETE_USER_ZONE_ASSIGNMENT',
-    'RESET_SCOPED_USER_PASSWORD',
-    'UPSERT_SCOPED_USER',
-    'UPSERT_USER_PLOT_ASSIGNMENT',
-    'UPSERT_USER_ZONE_ASSIGNMENT',
-];
-const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [...EXACT_STAGED_JOURNAL_COMMANDS];
+const EXACT_STAGED_COMMANDS = [];
+const EXACT_EDGE_DEFERRED_COMMANDS = [...EXACT_STAGED_COMMANDS];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
@@ -69,6 +62,11 @@ const EXACT_EVENT_SEMANTIC_BINDINGS = {
     JOURNAL_VOCAB_UPSERTED: { aggregate_key_path: 'payload.custom_field_uuid', sync_version_path: 'payload.sync_version' },
     JOURNAL_PLOT_UPSERTED: { aggregate_key_path: 'payload.plot_uuid', sync_version_path: 'payload.sync_version' },
     JOURNAL_PLOT_GROUP_UPSERTED: { aggregate_key_path: 'payload.group_uuid', sync_version_path: 'payload.sync_version' },
+    USER_UPSERTED: { aggregate_key_path: 'payload.user_uuid', sync_version_path: 'payload.sync_version' },
+    USER_ZONE_ASSIGNMENT_UPSERTED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
+    USER_ZONE_ASSIGNMENT_DELETED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
+    USER_PLOT_ASSIGNMENT_UPSERTED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
+    USER_PLOT_ASSIGNMENT_DELETED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
 };
 
 function loadSchema(name) {
@@ -166,8 +164,8 @@ function loadStagedCommands() {
     if (commandKeys.join(',') !== 'cloudDeferred,edgeDeferred') {
         throw new Error(`sync-contract staging command axes must be cloudDeferred,edgeDeferred; got ${commandKeys.join(',') || '(none)'}`);
     }
-    assertExactList('staging commands.edgeDeferred', staging.commands.edgeDeferred, EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS);
-    assertExactList('staging commands.cloudDeferred', staging.commands.cloudDeferred, EXACT_STAGED_JOURNAL_COMMANDS);
+    assertExactList('staging commands.edgeDeferred', staging.commands.edgeDeferred, EXACT_EDGE_DEFERRED_COMMANDS);
+    assertExactList('staging commands.cloudDeferred', staging.commands.cloudDeferred, EXACT_STAGED_COMMANDS);
     return staging.commands.edgeDeferred;
 }
 
@@ -270,8 +268,8 @@ function verifyGoldenFixture(commandSchema, eventsSchema) {
         }
     }
     const conflict = ackResults.find((entry) => entry.result === 'CONFLICT');
-    if (!conflict || conflict.serverHandlerEnabled || conflict.desiredStateStatus !== 'conflicted') {
-        throw new Error('golden CONFLICT result must remain staged for desired-state conflict handling');
+    if (!conflict || !conflict.serverHandlerEnabled || conflict.desiredStateStatus !== 'conflicted') {
+        throw new Error('golden CONFLICT result must be handled as recoverable desired-state conflict');
     }
     console.log('  ok golden operations, ACK results, and capability rollout metadata');
 }
@@ -313,7 +311,7 @@ function main() {
         eventsSchema['x-semantic-bindings'],
         EXACT_EVENT_SEMANTIC_BINDINGS
     );
-    console.log('  ok journal semantic bindings are exact and machine-readable');
+    console.log('  ok journal and scoped-access semantic bindings are exact and machine-readable');
     verifyGoldenFixture(schema, eventsSchema);
 
     // 2. Verify schema files exist

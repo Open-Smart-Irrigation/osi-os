@@ -10,19 +10,19 @@
     {
       "name": "scoped_access_sync_v1",
       "schemaAccepted": true,
-      "edgeProducerEnabled": false,
+      "edgeProducerEnabled": true,
       "cloudIssuerEnabled": false
     },
     {
       "name": "scoped_access_commands_v1",
       "schemaAccepted": true,
       "edgeProducerEnabled": false,
-      "cloudIssuerEnabled": false
+      "cloudIssuerEnabled": true
     },
     {
       "name": "desired_state_conflicts_v1",
       "schemaAccepted": true,
-      "edgeProducerEnabled": false,
+      "edgeProducerEnabled": true,
       "cloudIssuerEnabled": false
     },
     {
@@ -80,6 +80,11 @@
       "JOURNAL_PLOT_UPSERTED",
       "JOURNAL_VOCAB_UPSERTED",
       "SCHEDULE_UPSERTED",
+      "USER_PLOT_ASSIGNMENT_DELETED",
+      "USER_PLOT_ASSIGNMENT_UPSERTED",
+      "USER_UPSERTED",
+      "USER_ZONE_ASSIGNMENT_DELETED",
+      "USER_ZONE_ASSIGNMENT_UPSERTED",
       "WORK_REQUEST_SUBMITTED",
       "ZONE_CONFIG_UPSERTED",
       "ZONE_DELETED",
@@ -105,6 +110,11 @@
       "JOURNAL_PLOT_UPSERTED",
       "JOURNAL_VOCAB_UPSERTED",
       "SCHEDULE_UPSERTED",
+      "USER_PLOT_ASSIGNMENT_DELETED",
+      "USER_PLOT_ASSIGNMENT_UPSERTED",
+      "USER_UPSERTED",
+      "USER_ZONE_ASSIGNMENT_DELETED",
+      "USER_ZONE_ASSIGNMENT_UPSERTED",
       "WORK_REQUEST_SUBMITTED",
       "ZONE_CONFIG_UPSERTED",
       "ZONE_DELETED",
@@ -113,13 +123,7 @@
       "ZONE_RECOMMENDATION_UPSERTED",
       "ZONE_UPSERTED"
     ],
-    "staged": [
-      "USER_PLOT_ASSIGNMENT_DELETED",
-      "USER_PLOT_ASSIGNMENT_UPSERTED",
-      "USER_UPSERTED",
-      "USER_ZONE_ASSIGNMENT_DELETED",
-      "USER_ZONE_ASSIGNMENT_UPSERTED"
-    ]
+    "staged": []
   },
   "commandTypes": {
     "accepted": [
@@ -210,16 +214,15 @@
       "VOID_JOURNAL_ENTRY",
       "UPSERT_JOURNAL_CUSTOM_VOCAB",
       "UPSERT_JOURNAL_PLOT",
-      "UPSERT_JOURNAL_PLOT_GROUP"
-    ],
-    "staged": [
-      "DELETE_USER_PLOT_ASSIGNMENT",
-      "DELETE_USER_ZONE_ASSIGNMENT",
-      "RESET_SCOPED_USER_PASSWORD",
+      "UPSERT_JOURNAL_PLOT_GROUP",
       "UPSERT_SCOPED_USER",
+      "RESET_SCOPED_USER_PASSWORD",
+      "UPSERT_USER_ZONE_ASSIGNMENT",
+      "DELETE_USER_ZONE_ASSIGNMENT",
       "UPSERT_USER_PLOT_ASSIGNMENT",
-      "UPSERT_USER_ZONE_ASSIGNMENT"
-    ]
+      "DELETE_USER_PLOT_ASSIGNMENT"
+    ],
+    "staged": []
   },
   "commandAckResults": [
     {
@@ -269,7 +272,7 @@
       "responseStatus": "CONFLICT",
       "terminal": true,
       "leasedAgain": false,
-      "serverHandlerEnabled": false,
+      "serverHandlerEnabled": true,
       "desiredStateStatus": "conflicted"
     }
   ]
