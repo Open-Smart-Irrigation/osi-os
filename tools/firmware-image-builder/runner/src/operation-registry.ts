@@ -1,30 +1,28 @@
 import { createHash } from 'node:crypto';
-import { posix } from 'node:path';
 import { TRUSTED_OPERATION_IDS, type TrustedOperationId } from '../../domain/types.js';
 
 export interface OperationArgvContext {
   readonly environment: string;
-  readonly installedToolPath: string;
 }
 
 const ENVIRONMENT = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
-const ABSOLUTE_PATH = /^\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/u;
+export const INTERNAL_OPERATION_TOOL_PATH = '/opt/osi-image-builder/operations/osi-image-builder-tool.js';
 
 function validateContext(context: OperationArgvContext): void {
+  if (context === null || typeof context !== 'object' || JSON.stringify(Object.keys(context).sort()) !== JSON.stringify(['environment'])) throw new Error('operation context contains unexpected caller-controlled fields');
   if (!ENVIRONMENT.test(context.environment)) throw new Error('validated manifest environment is invalid');
-  if (!ABSOLUTE_PATH.test(context.installedToolPath) || context.installedToolPath.includes('..') || posix.normalize(context.installedToolPath) !== context.installedToolPath) throw new Error('installed operation tool path is not canonical');
 }
 
 type OperationFactory = (context: OperationArgvContext) => readonly string[];
 
 const factories: Readonly<Record<TrustedOperationId, OperationFactory>> = Object.freeze({
   'activate-target': (context) => ['make', 'switch-env', `ENV=${context.environment}`],
-  'copy-feed-config': (context) => ['node', context.installedToolPath, 'copy-feed-config'],
+  'copy-feed-config': () => ['node', INTERNAL_OPERATION_TOOL_PATH, 'copy-feed-config'],
   'update-feeds': () => ['openwrt/scripts/feeds', 'update', '-a'],
   'install-feeds': () => ['openwrt/scripts/feeds', 'install', '-a'],
   'resolve-config': () => ['make', '-C', 'openwrt', 'defconfig'],
   'build-image': () => ['make', '-C', 'openwrt', '-j4'],
-  'verify-image': (context) => ['node', context.installedToolPath, 'verify-image'],
+  'verify-image': () => ['node', INTERNAL_OPERATION_TOOL_PATH, 'verify-image'],
   'verify-profile-parity': () => ['node', 'scripts/verify-profile-parity.js'],
   'verify-chameleon': () => ['node', 'scripts/verify-chameleon-calibration.js'],
   'verify-db-schema': () => ['node', 'scripts/verify-db-schema-consistency.js'],
@@ -36,7 +34,7 @@ const factories: Readonly<Record<TrustedOperationId, OperationFactory>> = Object
   'frontend-test': () => ['npm', 'run', 'test:unit'],
   'frontend-typecheck': () => ['npm', 'run', 'typecheck'],
   'frontend-build': () => ['npm', 'run', 'build'],
-  'mirror-gui': (context) => ['node', context.installedToolPath, 'mirror-gui'],
+  'mirror-gui': () => ['node', INTERNAL_OPERATION_TOOL_PATH, 'mirror-gui'],
 });
 
 export function assertOperationRegistryCoverage(operationIds: readonly string[]): true {

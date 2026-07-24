@@ -6,9 +6,12 @@ import {
   type DockerCommandExecutor,
   type DockerExecutorOptions,
   type DockerInspection,
+  type PersistedContainerIdentity,
 } from '../../runner/src/docker-executor.js';
-import { createOperationArgv, assertOperationRegistryCoverage } from '../../runner/src/operation-registry.js';
+import { createOperationArgv, assertOperationRegistryCoverage, INTERNAL_OPERATION_TOOL_PATH } from '../../runner/src/operation-registry.js';
 import { CommandExecutionError, createCommandExecutor, type CommandResult, type CommandRunOptions } from '../../runner/src/command-executor.js';
+import type { OperationInput } from '../../api/src/store.js';
+import type { RunnerWriteCommand } from '../../api/src/ownership.js';
 
 const DIGEST = 'a'.repeat(64);
 const MANIFEST = 'b'.repeat(64);
@@ -40,7 +43,7 @@ function inspection(overrides: Partial<DockerInspection> = {}): DockerInspection
       PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
       CARGO_BUILD_JOBS: '2',
       TZ: 'UTC',
-      SOURCE_DATE_EPOCH: '1782208800',
+      SOURCE_DATE_EPOCH: '1784887200',
     },
     readonlyRootfs: false,
     running: false,
@@ -62,7 +65,7 @@ function realisticRawInspection(): Record<string, unknown> {
         'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
         'CARGO_BUILD_JOBS=2',
         'TZ=UTC',
-        'SOURCE_DATE_EPOCH=1782208800',
+        'SOURCE_DATE_EPOCH=1784887200',
       ],
       Labels: {
         'org.osi.image-builder.job-id': 'job-1',
@@ -85,7 +88,18 @@ function realisticRawInspection(): Record<string, unknown> {
   };
 }
 
-function options(executor: DockerCommandExecutor, overrides: Partial<DockerExecutorOptions> = {}): DockerExecutorOptions {
+function options(executor: DockerCommandExecutor, overrides: Partial<DockerExecutorOptions> & { readonly ownership?: { readonly runnerWrite: DockerExecutorOptions['ownership']['runnerWrite']; readonly getJob?: () => ReturnType<typeof emptyIdentityForTest> } } = {}): DockerExecutorOptions {
+  const { ownership: suppliedOwnership, store: suppliedStore, ...rest } = overrides;
+  const activeIdentity = { ...emptyIdentityForTest() };
+  const suppliedWriter = suppliedOwnership?.runnerWrite ?? vi.fn(() => ({ ok: true, kind: 'committed', eventSeq: 1 }));
+  const ownershipWriter = (command: RunnerWriteCommand) => {
+    const result = suppliedWriter(command);
+    if (result.ok && command.kind === 'container') {
+      Object.assign(activeIdentity, { containerId: command.containerId, containerName: command.containerName, containerImageDigest: command.imageDigest, containerLabelJobId: command.labels['org.osi.image-builder.job-id'], containerLabelManifestSha: command.labels['org.osi.image-builder.manifest-sha'], containerLabels: command.labels, containerMount: command.mount, containerEnvironment: command.environment, containerSecurity: command.security, containerInspection: command.inspection, containerCreatedAt: command.createdAt, containerStartedAt: command.startedAt ?? null, containerStoppedAt: command.stoppedAt ?? null });
+    }
+    if (result.ok && command.kind === 'operation-cleanup') Object.assign(activeIdentity, { containerId: null, containerName: null, containerImageDigest: null, containerLabelJobId: null, containerLabelManifestSha: null, containerLabels: null, containerMount: null, containerEnvironment: null, containerSecurity: null, containerInspection: null, containerCreatedAt: null, containerStartedAt: null, containerStoppedAt: null, containerRemovedAt: null, containerCleanupOutcome: null });
+    return result;
+  };
   return {
     commandExecutor: executor,
     dockerPath: '/usr/bin/docker',
@@ -97,18 +111,18 @@ function options(executor: DockerCommandExecutor, overrides: Partial<DockerExecu
     worktreePath: '/tmp/worktree',
     uid: 1000,
     gid: 1000,
-    sourceDateEpoch: '1782208800',
     operationId: 'verify-image',
-    operationContext: { environment: 'full_raspberrypi_bcm27xx_bcm2712', installedToolPath: '/usr/local/libexec/osi-image-builder-tool' },
+    operationContext: { environment: 'full_raspberrypi_bcm27xx_bcm2712' },
     operationTimeoutMs: 60_000,
     maxCaptureBytes: 16 * 1024,
     containerName: 'osi-image-builder-job-1-attempt-1',
-    runner: { owner: 'runner-a', unit: 'osi-image-builder-runner@job-1.service', leaseExpiresAt: '2026-07-24T10:10:00.000Z', expectedState: 'starting' },
-    ownership: { runnerWrite: vi.fn(() => ({ ok: true, kind: 'committed', eventSeq: 1 })), getJob: vi.fn(() => emptyIdentityForTest()) },
+    store: suppliedStore ?? { getJob: suppliedOwnership?.getJob ?? (() => activeIdentity) },
+    ownership: { runnerWrite: ownershipWriter },
+    leaseSnapshot: () => ({ owner: 'runner-a', unit: 'osi-image-builder-runner@job-1.service', leaseExpiresAt: '2026-07-24T10:10:00.000Z', expectedState: 'starting' }),
     clock: () => NOW,
     evidence: async () => ({ path: 'evidence/operation-1.json', sha256: 'c'.repeat(64) }),
-    logs: { runner: 'absent', docker: 'absent', verifiedAt: NOW },
-    ...overrides,
+    finalizeLogs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt: NOW }),
+    ...rest,
   };
 }
 
@@ -140,15 +154,38 @@ function fakeDocker(responses: ReadonlyArray<Error | Partial<CommandResult>>, tr
   };
 }
 
+function successfulResponses(start: Partial<CommandResult> = {}): Array<Error | Partial<CommandResult>> {
+  return [
+    { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+    { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+    { stdout: '' },
+    { stdout: `${'1'.repeat(64)}\n` },
+    { stdout: JSON.stringify(realisticRawInspection()) },
+    { stdout: 'build output\n', ...start },
+    { stdout: JSON.stringify(realisticRawInspection()) },
+    { stdout: '' },
+    { exitCode: 1, stderr: 'No such container: one\n' },
+    { stdout: '' },
+  ];
+}
+
 describe('operation registry', () => {
   it('covers every trusted execution-definition operation and rejects unknown IDs', () => {
     expect(assertOperationRegistryCoverage(TRUSTED_OPERATION_IDS)).toBe(true);
     for (const operationId of TRUSTED_OPERATION_IDS) {
-      const argv = createOperationArgv(operationId, { environment: 'full_raspberrypi_bcm27xx_bcm2712', installedToolPath: '/usr/local/libexec/osi-image-builder-tool' });
+      const argv = createOperationArgv(operationId, { environment: 'full_raspberrypi_bcm27xx_bcm2712' });
       expect(argv.length).toBeGreaterThan(0);
       expect(argv.some((part) => part.includes('&&') || part.includes(';') || part.includes('\n'))).toBe(false);
     }
-    expect(() => createOperationArgv('unknown-operation' as 'verify-image', { environment: 'x', installedToolPath: '/tool' })).toThrow(/unknown operation/i);
+    expect(() => createOperationArgv('unknown-operation' as 'verify-image', { environment: 'x' })).toThrow(/unknown operation/i);
+  });
+
+  it.each(['copy-feed-config', 'verify-image', 'mirror-gui'] as const)('cannot derive %s helper argv from caller or worktree input', (operationId) => {
+    const trusted = createOperationArgv(operationId, { environment: 'full_raspberrypi_bcm27xx_bcm2712' });
+    expect(trusted).toEqual(['node', INTERNAL_OPERATION_TOOL_PATH, operationId]);
+    expect(trusted.join(' ')).not.toContain('/workdir');
+    expect(trusted.join(' ')).not.toContain('evil.js');
+    expect(() => createOperationArgv(operationId, { environment: '/workdir/evil.js' })).toThrow();
   });
 });
 
@@ -164,6 +201,7 @@ describe('DockerExecutor', () => {
       { exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: JSON.stringify(realisticRawInspection()), stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: 'build output\n', stderr: '', timedOut: false, startedAt: '2026-07-24T10:00:01.500Z', finishedAt: '2026-07-24T10:00:02.500Z' },
+      { exitCode: 0, signal: null, stdout: JSON.stringify(realisticRawInspection()), stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false },
       { exitCode: 1, signal: null, stdout: '', stderr: 'No such container: container-1\n', timedOut: false },
       { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false },
@@ -173,7 +211,7 @@ describe('DockerExecutor', () => {
     let evidenceValue: Record<string, unknown> | undefined;
     const lifecycleCommands: Array<{ lifecycle: string; occurredAt: string; startedAt?: string | null; stoppedAt?: string | null }> = [];
     const ownership = { runnerWrite: vi.fn((command: { kind: string; containerId?: string; lifecycle?: string; occurredAt?: string; startedAt?: string | null; stoppedAt?: string | null }) => { trace.push(command.kind); if (command.kind === 'container') { persistedId = command.containerId ?? null; lifecycleCommands.push({ lifecycle: command.lifecycle ?? '', occurredAt: command.occurredAt ?? '', startedAt: command.startedAt, stoppedAt: command.stoppedAt }); } return { ok: true, kind: 'committed', eventSeq: 1 }; }), getJob: vi.fn(() => ({ ...emptyIdentityForTest(), containerId: persistedId, containerName: persistedId ? 'osi-image-builder-job-1-attempt-1' : null, containerImageDigest: persistedId ? DIGEST : null, containerLabelJobId: persistedId ? 'job-1' : null, containerLabelManifestSha: persistedId ? MANIFEST : null, containerLabels: persistedId ? { 'org.osi.image-builder.job-id': 'job-1', 'org.osi.image-builder.manifest-sha': MANIFEST } : null, containerMount: persistedId ? {} : null, containerEnvironment: persistedId ? {} : null, containerSecurity: persistedId ? {} : null, containerInspection: persistedId ? {} : null, containerCreatedAt: persistedId ? NOW : null })) };
-    const result = await createDockerExecutor(options(docker, { ownership, clock: () => new Date(Date.parse(NOW) + clockTick++ * 1000).toISOString(), evidence: async (value) => { trace.push('evidence'); evidenceValue = value; return { path: 'evidence/operation-1.json', sha256: 'c'.repeat(64) }; } })).run();
+    const result = await createDockerExecutor(options(docker, { ownership, clock: () => new Date(Date.parse(NOW) + clockTick++ * 1000).toISOString(), finalizeLogs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt: new Date(Date.parse(NOW) + 4_000).toISOString() }), evidence: async (value) => { trace.push('evidence'); evidenceValue = value; return { path: 'evidence/operation-1.json', sha256: 'c'.repeat(64) }; } })).run();
 
     expect(result.available).toBe(true);
     if (!result.available) throw new Error('Docker should be available in fake lifecycle');
@@ -201,9 +239,9 @@ describe('DockerExecutor', () => {
     const startIndex = docker.calls.findIndex((call) => call[1] === 'start');
     expect(docker.runOptions[startIndex]).toMatchObject({ timeoutMs: 60_000, maxCaptureBytes: 16 * 1024 });
     expect(docker.runOptions.every((runOptions, index) => docker.calls[index]![1] === 'start' ? runOptions.timeoutMs === 60_000 : runOptions.timeoutMs === 30_000 && runOptions.maxCaptureBytes === 16 * 1024)).toBe(true);
-    expect(docker.calls.map((call) => call[1])).toEqual(['version', 'image', 'ps', 'create', 'inspect', 'start', 'rm', 'inspect', 'ps']);
+    expect(docker.calls.map((call) => call[1])).toEqual(['version', 'image', 'ps', 'create', 'inspect', 'start', 'inspect', 'rm', 'inspect', 'ps']);
     expect(docker.calls.findIndex((call) => call[1] === 'rm')).toBeGreaterThan(docker.calls.findIndex((call) => call[1] === 'start'));
-    expect(trace).toEqual(['docker:version', 'docker:image', 'docker:ps', 'operation-begin', 'docker:create', 'docker:inspect', 'container', 'docker:start', 'container', 'container', 'evidence', 'operation-complete', 'docker:rm', 'docker:inspect', 'docker:ps', 'operation-cleanup']);
+    expect(trace).toEqual(['docker:version', 'docker:image', 'docker:ps', 'operation-begin', 'docker:create', 'docker:inspect', 'container', 'docker:start', 'docker:inspect', 'container', 'container', 'evidence', 'operation-complete', 'docker:rm', 'docker:inspect', 'docker:ps', 'operation-cleanup']);
     expect(trace.indexOf('operation-complete')).toBeLessThan(trace.indexOf('docker:rm'));
     expect(trace.indexOf('docker:inspect', trace.indexOf('docker:rm'))).toBeGreaterThan(trace.indexOf('docker:rm'));
     expect(trace.indexOf('docker:ps', trace.indexOf('docker:rm'))).toBeGreaterThan(trace.indexOf('docker:inspect', trace.indexOf('docker:rm')));
@@ -281,14 +319,18 @@ describe('DockerExecutor', () => {
       { stdout: '' },
       { stdout: `${'1'.repeat(64)}\n` },
       { stdout: JSON.stringify(realisticRawInspection()) },
-      { stdout: '' },
       { timedOut: true },
+      { stdout: JSON.stringify(realisticRawInspection()) },
+      { stdout: '' },
+      { exitCode: 1, stderr: 'No such container: one\n' },
+      { stdout: '' },
     ]);
     let persistedId: string | null = null;
     const ownership = { runnerWrite: vi.fn((command: { kind: string; containerId?: string }) => { if (command.kind === 'container') persistedId = command.containerId ?? null; return { ok: true }; }), getJob: vi.fn(() => ({ ...emptyIdentityForTest(), containerId: persistedId, containerName: persistedId ? 'osi-image-builder-job-1-attempt-1' : null })) };
-    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toBeInstanceOf(DockerLifecycleError);
+    const result = await createDockerExecutor(options(docker, { ownership })).run();
+    expect(result).toMatchObject({ available: true, outcome: 'failed' });
     expect(persistedId).toBe('1'.repeat(64));
-    expect(docker.calls.map((call) => call[1])).toEqual(['version', 'image', 'ps', 'create', 'inspect', 'start', 'rm']);
+    expect(docker.calls.map((call) => call[1])).toEqual(['version', 'image', 'ps', 'create', 'inspect', 'start', 'inspect', 'rm', 'inspect', 'ps']);
     expect(docker.runOptions.at(-1)).toMatchObject({ timeoutMs: 30_000, maxCaptureBytes: 16 * 1024 });
   });
 
@@ -300,6 +342,7 @@ describe('DockerExecutor', () => {
       { exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: JSON.stringify([inspection()]), stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false },
+      { exitCode: 0, signal: null, stdout: JSON.stringify([inspection()]), stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false },
       { exitCode: 1, signal: null, stdout: '', stderr: 'No such container: one\n', timedOut: false },
       { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false },
@@ -307,10 +350,10 @@ describe('DockerExecutor', () => {
     const injected = { ...options(docker), operationArgv: ['sh', '-c', 'echo injected'] };
     let persistedId: string | null = null;
     const ownership = { runnerWrite: vi.fn((command: { kind: string; containerId?: string }) => { if (command.kind === 'container') persistedId = command.containerId ?? null; return { ok: true, kind: 'committed', eventSeq: 1 }; }), getJob: vi.fn(() => ({ ...emptyIdentityForTest(), containerId: persistedId, containerName: persistedId ? 'osi-image-builder-job-1-attempt-1' : null, containerImageDigest: persistedId ? DIGEST : null, containerLabelJobId: persistedId ? 'job-1' : null, containerLabelManifestSha: persistedId ? MANIFEST : null, containerLabels: persistedId ? { 'org.osi.image-builder.job-id': 'job-1', 'org.osi.image-builder.manifest-sha': MANIFEST } : null, containerMount: persistedId ? {} : null, containerEnvironment: persistedId ? {} : null, containerSecurity: persistedId ? {} : null, containerInspection: persistedId ? {} : null, containerCreatedAt: persistedId ? NOW : null })) };
-    await createDockerExecutor({ ...injected, ownership }).run();
+    await createDockerExecutor({ ...options(docker, { ownership }), operationArgv: injected.operationArgv } as DockerExecutorOptions).run();
     const create = docker.calls.find((call) => call[1] === 'create')!;
-    expect(create.slice(-4)).toEqual([`registry.example/builder@sha256:${DIGEST}`, 'node', '/usr/local/libexec/osi-image-builder-tool', 'verify-image']);
-    expect(() => createOperationArgv('verify-image', { environment: '../branch', installedToolPath: '/usr/local/../bin/tool' })).toThrow();
+    expect(create.slice(-4)).toEqual([`registry.example/builder@sha256:${DIGEST}`, 'node', INTERNAL_OPERATION_TOOL_PATH, 'verify-image']);
+    expect(() => createOperationArgv('verify-image', { environment: '../branch' })).toThrow();
   });
 
   it('rejects an unknown runtime operation before any Docker command', async () => {
@@ -324,10 +367,10 @@ describe('DockerExecutor', () => {
     const docker = fakeDocker([{ exitCode: 0, signal: null, stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}', stderr: '', timedOut: false }]);
     const missingEvidence = { ...options(docker) } as { evidence?: DockerExecutorOptions['evidence'] };
     delete missingEvidence.evidence;
-    const missingLogs = { ...options(docker) } as { logs?: DockerExecutorOptions['logs'] };
-    delete missingLogs.logs;
+    const missingLogs = { ...options(docker) } as { finalizeLogs?: DockerExecutorOptions['finalizeLogs'] };
+    delete missingLogs.finalizeLogs;
     await expect(createDockerExecutor(missingEvidence as DockerExecutorOptions).run()).rejects.toThrow(/evidence/i);
-    await expect(createDockerExecutor(missingLogs as DockerExecutorOptions).run()).rejects.toThrow(/log proof/i);
+    await expect(createDockerExecutor(missingLogs as DockerExecutorOptions).run()).rejects.toThrow(/log finalizer/i);
     expect(docker.calls).toHaveLength(0);
   });
 
@@ -423,6 +466,100 @@ describe('DockerExecutor', () => {
     expect(docker.calls).toHaveLength(0);
   });
 
+  it('derives SOURCE_DATE_EPOCH from the persisted source commit time and ignores caller overrides', async () => {
+    const docker = fakeDocker(successfulResponses());
+    const untrusted = { ...options(docker), sourceDateEpoch: '1' } as DockerExecutorOptions & { readonly sourceDateEpoch: string };
+    await createDockerExecutor(untrusted).run();
+    const create = docker.calls.find((call) => call[1] === 'create')!;
+    expect(create).toContain('--env=SOURCE_DATE_EPOCH=1784887200');
+    expect(create).not.toContain('--env=SOURCE_DATE_EPOCH=1');
+  });
+
+  it('uses a fresh coordinated lease snapshot for every ownership CAS', async () => {
+    const docker = fakeDocker(successfulResponses());
+    const expiries = [
+      '2026-07-24T10:10:00.000Z', '2026-07-24T10:11:00.000Z', '2026-07-24T10:12:00.000Z',
+      '2026-07-24T10:13:00.000Z', '2026-07-24T10:14:00.000Z', '2026-07-24T10:15:00.000Z',
+    ];
+    let index = 0;
+    const writes: Array<{ kind: string; leaseExpiresAt?: string }> = [];
+    const ownership = { runnerWrite: vi.fn((command: { kind: string; leaseExpiresAt?: string }) => { writes.push(command); return { ok: true }; }) };
+    await createDockerExecutor(options(docker, { ownership, leaseSnapshot: () => ({ owner: 'runner-a', unit: 'osi-image-builder-runner@job-1.service', leaseExpiresAt: expiries[index++]!, expectedState: 'starting' }) })).run();
+    expect(writes.map((write) => write.leaseExpiresAt)).toEqual(expiries);
+  });
+
+  it('stops an exact still-running container after attach timeout before persisting stopped evidence', async () => {
+    const running = { ...realisticRawInspection(), State: { Running: true } };
+    const responses = successfulResponses({ timedOut: true, exitCode: null });
+    responses[5] = new CommandExecutionError('attach timed out', { result: { argv: ['/usr/bin/docker', 'start', '--attach', '1'.repeat(64)], exitCode: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' } });
+    responses.splice(6, 4, { stdout: JSON.stringify(running) }, { stdout: '' }, { stdout: JSON.stringify(realisticRawInspection()) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' });
+    const docker = fakeDocker(responses);
+    const writes: Array<{ kind: string; lifecycle?: string }> = [];
+    const ownership = { runnerWrite: vi.fn((command: { kind: string; lifecycle?: string }) => { writes.push(command); return { ok: true }; }) };
+    const result = await createDockerExecutor(options(docker, { ownership })).run();
+    expect(result).toMatchObject({ available: true, outcome: 'failed' });
+    expect(docker.calls.map((call) => call[1])).toContain('stop');
+    expect(docker.calls.find((call) => call[1] === 'stop')).toEqual(['/usr/bin/docker', 'stop', '--time=10', '1'.repeat(64)]);
+    expect(writes.filter((write) => write.lifecycle !== undefined).map((write) => write.lifecycle)).toEqual(['created', 'started', 'stopped']);
+  });
+
+  it('retains created identity when stop and kill cannot prove the exact container stopped', async () => {
+    const running = { ...realisticRawInspection(), State: { Running: true } };
+    const responses = successfulResponses({ timedOut: true, exitCode: null });
+    responses[5] = new CommandExecutionError('attach timed out', { result: { argv: ['/usr/bin/docker', 'start', '--attach', '1'.repeat(64)], exitCode: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' } });
+    responses.splice(6, 4, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'stop failed' }, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'kill failed' }, { stdout: JSON.stringify(running) });
+    const docker = fakeDocker(responses);
+    const writes: Array<{ kind: string; lifecycle?: string }> = [];
+    const ownership = { runnerWrite: vi.fn((command: { kind: string; lifecycle?: string }) => { writes.push(command); return { ok: true }; }) };
+    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toBeInstanceOf(AggregateError);
+    expect(writes.filter((write) => write.lifecycle !== undefined).map((write) => write.lifecycle)).toEqual(['created']);
+    expect(docker.calls.some((call) => call[1] === 'rm')).toBe(false);
+    expect(writes.some((write) => write.kind === 'operation-complete')).toBe(false);
+  });
+
+  it('recovers an observer failure with its real command result and records a failed operation only after stop proof', async () => {
+    const startArgv = ['/usr/bin/docker', 'start', '--attach', '1'.repeat(64)];
+    const responses = successfulResponses();
+    responses[5] = new CommandExecutionError('output observer failed', { result: { argv: startArgv, exitCode: null, signal: 'SIGTERM', stdout: 'partial', stderr: '', timedOut: false, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' } });
+    const docker = fakeDocker(responses);
+    const writes: Array<{ kind: string; lifecycle?: string }> = [];
+    const ownership = { runnerWrite: vi.fn((command: { kind: string; lifecycle?: string }) => { writes.push(command); return { ok: true }; }) };
+    const result = await createDockerExecutor(options(docker, { ownership })).run();
+    expect(result).toMatchObject({ available: true, outcome: 'failed' });
+    expect(writes.filter((write) => write.lifecycle !== undefined).map((write) => write.lifecycle)).toEqual(['created', 'started', 'stopped']);
+  });
+
+  it('finalizes a safe create failure as immutable not_created evidence with null cleanup', async () => {
+    const trace: string[] = [];
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { stdout: '' },
+      { exitCode: 1, stderr: 'create failed' },
+      { stdout: '' },
+    ]);
+    const writes: Array<{ kind: string; input?: OperationInput }> = [];
+    const ownership = { runnerWrite: vi.fn((command: { kind: string; input?: OperationInput }) => { writes.push(command); return { ok: true }; }) };
+    const result = await createDockerExecutor(options(docker, { ownership, finalizeLogs: async () => { trace.push('logs'); return { runner: 'absent', docker: 'absent', verifiedAt: NOW }; }, evidence: async (value) => { trace.push('evidence'); return { path: 'evidence/failure.json', sha256: 'c'.repeat(64) }; } })).run().catch((error) => error);
+    expect(result).toBeInstanceOf(DockerLifecycleError);
+    expect(writes.map((write) => write.kind)).toEqual(['operation-begin', 'operation-complete', 'operation-cleanup']);
+    expect(writes[1]!.input).toMatchObject({ lifecyclePhase: 'not_created', outcome: 'failed' });
+    expect(writes[1]!.input).not.toHaveProperty('containerId');
+    expect(trace).toEqual(['logs', 'evidence']);
+  });
+
+  it.each([
+    ['stale', '2026-07-24T09:59:59.999Z'],
+    ['future', '2026-07-24T11:00:00.000Z'],
+  ] as const)('rejects %s log proof and does not claim cleanup', async (label, verifiedAt) => {
+    const docker = fakeDocker(successfulResponses());
+    const writes: Array<{ kind: string }> = [];
+    const ownership = { runnerWrite: vi.fn((command: { kind: string }) => { writes.push(command); return { ok: true }; }) };
+    await expect(createDockerExecutor(options(docker, { ownership, finalizeLogs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt }) })).run()).rejects.toThrow(/log proof/i);
+    expect(label).toBeTruthy();
+    expect(writes.some((write) => write.kind === 'operation-cleanup')).toBe(false);
+  });
+
   it('proves orphan cleanup and lifecycle ordering after an inspected mismatch', async () => {
     const docker = fakeDocker([
       { exitCode: 0, signal: null, stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}', stderr: '', timedOut: false },
@@ -434,9 +571,28 @@ describe('DockerExecutor', () => {
       { exitCode: 1, signal: null, stdout: '', stderr: 'No such container: one\n', timedOut: false },
       { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false },
     ]);
-    const ownership = { runnerWrite: vi.fn(() => ({ ok: true, kind: 'committed', eventSeq: 1 })), getJob: vi.fn(() => emptyIdentityForTest()) };
+    const writes: Array<{ kind: string; input?: OperationInput }> = [];
+    const ownership = { runnerWrite: vi.fn((command: { kind: string; input?: OperationInput }) => { writes.push(command); return { ok: true, kind: 'committed', eventSeq: 1 }; }), getJob: vi.fn(() => emptyIdentityForTest()) };
     await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toThrow(DockerLifecycleError);
     expect(docker.calls.map((call) => call[1])).toEqual(['version', 'image', 'ps', 'create', 'inspect', 'rm', 'inspect', 'ps']);
+    expect(docker.calls.some((call) => call[1] === 'start')).toBe(false);
+    expect(writes.map((write) => write.kind)).toEqual(['operation-begin', 'operation-complete', 'operation-cleanup']);
+    expect(writes[1]!.input).toMatchObject({ lifecyclePhase: 'not_created', outcome: 'failed' });
+  });
+
+  it('retains the unfinished operation when rejected-container cleanup cannot prove removal', async () => {
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { stdout: '' },
+      { stdout: `${'1'.repeat(64)}\n` },
+      { stdout: JSON.stringify([inspection({ imageId: `sha256:${'f'.repeat(64)}` })]) },
+      { exitCode: 1, stderr: 'rm failed' },
+    ]);
+    const writes: Array<{ kind: string }> = [];
+    const ownership = { runnerWrite: vi.fn((command: { kind: string }) => { writes.push(command); return { ok: true }; }), getJob: vi.fn(() => emptyIdentityForTest()) };
+    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toBeInstanceOf(AggregateError);
+    expect(writes.map((write) => write.kind)).toEqual(['operation-begin']);
     expect(docker.calls.some((call) => call[1] === 'start')).toBe(false);
   });
 
@@ -445,6 +601,6 @@ describe('DockerExecutor', () => {
   });
 });
 
-function emptyIdentityForTest() {
-  return { containerId: null, containerName: null, containerImageDigest: null, containerLabelJobId: null, containerLabelManifestSha: null, containerLabels: null, containerMount: null, containerEnvironment: null, containerSecurity: null, containerInspection: null, containerCreatedAt: null, containerStartedAt: null, containerStoppedAt: null, containerRemovedAt: null, containerCleanupOutcome: null };
+function emptyIdentityForTest(): PersistedContainerIdentity & { readonly sourceCommitTime: string } {
+  return { sourceCommitTime: NOW, containerId: null, containerName: null, containerImageDigest: null, containerLabelJobId: null, containerLabelManifestSha: null, containerLabels: null, containerMount: null, containerEnvironment: null, containerSecurity: null, containerInspection: null, containerCreatedAt: null, containerStartedAt: null, containerStoppedAt: null, containerRemovedAt: null, containerCleanupOutcome: null };
 }
