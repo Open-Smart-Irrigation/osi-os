@@ -18,6 +18,8 @@ const commandLedgerPath = path.join(nodeRedRoot, 'osi-command-ledger', 'index.js
 const commandLedgerSource = fs.readFileSync(commandLedgerPath, 'utf8');
 const scopedAccessCommandsPath = path.join(nodeRedRoot, 'osi-scoped-access-commands', 'index.js');
 const scopedAccessCommandsSource = fs.readFileSync(scopedAccessCommandsPath, 'utf8');
+const zoneCommandsPath = path.join(nodeRedRoot, 'osi-zone-commands', 'index.js');
+const zoneCommandsSource = fs.readFileSync(zoneCommandsPath, 'utf8');
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
 const chirpstackInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'chirpstack', 'chirpstack', 'files', 'chirpstack.init');
@@ -1637,12 +1639,27 @@ expectOrderedIncludesById('scoped-access-command-apply-fn', [
 ], 'passes protected scoped-access commands through the transactional helper');
 expectIncludesById('scoped-access-command-apply-fn', 'Scoped access command helpers unavailable:', 'fails closed when scoped-access helpers are unavailable');
 expectIncludesById('scoped-access-command-apply-fn', '.close(', 'closes the scoped-access command database handle');
+expectOrderedIncludesById('zone-command-apply-fn', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const zoneLoad = osiLib.require('zone-commands');",
+  "const scopeLoad = osiLib.require('scope');",
+  'applyZoneCommand(db, envelope, {',
+], 'passes protected zone commands through the transactional helper');
+expectIncludesById('zone-command-apply-fn', 'Zone command helpers unavailable:', 'fails closed when zone helpers are unavailable');
+expectIncludesById('zone-command-apply-fn', 'invalidateScope', 'invalidates cached scope after an applied zone mutation');
+expectIncludesById('zone-command-apply-fn', '.close(', 'closes the zone command database handle');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1', 'looks up exact command IDs before payload validation');
 expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'result_detail', 'reconstructs ACK facts from canonical replay-ledger detail');
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'db.transaction(async function(tx) {', 'applies scoped-access mutations and terminal ACK persistence in one transaction');
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'base_version_conflict', 'rejects stale scoped-access commands with a terminal conflict');
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'Cannot disable or demote the last enabled admin', 'protects the final enabled gateway admin');
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'scope.invalidateScope()', 'invalidates cached scope after an applied mutation');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'db.transaction(async function(tx) {', 'applies zone mutations and terminal ACK persistence in one transaction');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'base_version_conflict', 'rejects stale zone commands with a terminal conflict');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'UPDATE devices SET irrigation_zone_id=NULL', 'detaches devices before tombstoning a zone');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'INSERT INTO command_ack_outbox', 'persists the terminal zone ACK atomically with the mutation');
 expectIncludes('Queue REST Command ACK', 'osiCommandLedger.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing via the shared command ledger');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'ON CONFLICT(command_id) DO NOTHING', 'never rewrites an existing terminal command result');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs in the shared transaction helper');
@@ -1775,8 +1792,10 @@ expectWireById('command-dedupe-dispatch', 'journal-command-apply-fn', 'routes no
 expectWireById('command-dedupe-dispatch', '9d5e3035c3d069c4', 'publishes already-persisted exact replay ACKs without reclassification');
 expectWireById('journal-command-apply-fn', '934bf2bc19a8ce22', 'preserves the legacy output while routing non-journal commands onward');
 expectWireById('journal-command-apply-fn', 'scoped-access-command-apply-fn', 'routes non-journal commands through scoped-access handling');
-expectWireById('scoped-access-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-access commands to the existing router');
+expectWireById('scoped-access-command-apply-fn', 'zone-command-apply-fn', 'routes non-access commands through protected zone handling');
 expectWireById('scoped-access-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted scoped-access ACKs');
+expectWireById('zone-command-apply-fn', '934bf2bc19a8ce22', 'falls through legacy zone commands to the existing router');
+expectWireById('zone-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted zone ACKs');
 expectWireById('c8628cffe45f64f7', 'command-ack-queue-rest', 'routes STREGA command ACKs through the durable ACK queue');
 expectWireById('cs-reg-cloud-ack-fn', 'command-ack-queue-rest', 'routes special command ACKs through the durable ACK queue');
 expectWireById('lsn50-mode-ack-link-in', 'command-ack-queue-rest', 'routes LSN50 command ACKs through the durable ACK queue');

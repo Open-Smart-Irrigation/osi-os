@@ -9,6 +9,7 @@
 // wrapper) lives in scripts/test-journal-command-path.js.
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -21,6 +22,24 @@ const repoRoot = path.resolve(__dirname, '../../../../../../..');
 const seedSql = fs.readFileSync(path.join(repoRoot, 'database/seed-blank.sql'), 'utf8');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-command-ledger-test-'));
 const GATEWAY_EUI = '0016C001F11715E2';
+const ZONE_UUID = '22222222-2222-4222-8222-222222222222';
+
+function canonicalHash(value) {
+  function canonical(item) {
+    if (Array.isArray(item)) return item.map(canonical);
+    if (item && typeof item === 'object') {
+      return Object.keys(item).sort().reduce((out, key) => {
+        if (key !== 'command_id') out[key] = canonical(item[key]);
+        return out;
+      }, {});
+    }
+    return item;
+  }
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(canonical(value)))
+    .digest('hex');
+}
 
 let dbCounter = 0;
 const openDatabases = [];
@@ -137,6 +156,94 @@ test('validEffectBinding recognizes the built-in non-journal grammar', async () 
   );
 });
 
+test('validEffectBinding binds protected zone commands to UUID and base version', async () => {
+  const zone = {
+    zone_uuid: ZONE_UUID,
+    gateway_device_eui: GATEWAY_EUI,
+    sync_version: 5,
+  };
+  const envelope = {
+    commandType: 'UPSERT_ZONE',
+    payload: {
+      effect_key: `zone:${ZONE_UUID}:4`,
+      zone_uuid: ZONE_UUID,
+      gateway_device_eui: GATEWAY_EUI,
+      base_sync_version: 4,
+      target_sync_version: 5,
+      zone,
+    },
+  };
+  assert.equal(
+    await ledger.validEffectBinding(
+      envelope,
+      {
+        command_type_recognized: true,
+        gateway_device_eui: GATEWAY_EUI,
+      }
+    ),
+    true
+  );
+  assert.equal(
+    await ledger.validEffectBinding(
+      {
+        ...envelope,
+        payload: {
+          ...envelope.payload,
+          effect_key: `zone:${ZONE_UUID}:3`,
+        },
+      },
+      {
+        command_type_recognized: true,
+        gateway_device_eui: GATEWAY_EUI,
+      }
+    ),
+    false
+  );
+  assert.equal(
+    await ledger.validEffectBinding(
+      {
+        ...envelope,
+        payload: {
+          ...envelope.payload,
+          gateway_device_eui: 'FFFFFFFFFFFFFFFF',
+        },
+      },
+      {
+        command_type_recognized: true,
+        gateway_device_eui: GATEWAY_EUI,
+      }
+    ),
+    false,
+    'zone effect replay must remain bound to the runtime gateway'
+  );
+
+  const deletion = {
+    commandType: 'DELETE_ZONE',
+    payload: {
+      effect_key: `zone_delete:${ZONE_UUID}:5`,
+      zone_uuid: ZONE_UUID,
+      gateway_device_eui: GATEWAY_EUI,
+      base_sync_version: 5,
+      target_sync_version: 6,
+      zone: {
+        zone_uuid: ZONE_UUID,
+        gateway_device_eui: GATEWAY_EUI,
+        sync_version: 6,
+      },
+    },
+  };
+  assert.equal(
+    await ledger.validEffectBinding(
+      deletion,
+      {
+        command_type_recognized: true,
+        gateway_device_eui: GATEWAY_EUI,
+      }
+    ),
+    true
+  );
+});
+
 test('validEffectBinding defers journal-shaped types to the injected validator only', async () => {
   const envelope = { commandType: 'UPSERT_JOURNAL_ENTRY', payload: {} };
 
@@ -212,6 +319,98 @@ test('deduplicatePendingCommand finds a non-journal duplicate by effect key + co
   assert.equal(replay.ack.commandId, 703);
   assert.equal(replay.ack.result, 'APPLIED');
   assert.equal(replay.ack.duplicate, true);
+});
+
+test('zone effect replay requires the same submitted payload hash', async () => {
+  const db = new TestDb();
+  const payload = {
+    command_id: '11111111-1111-4111-8111-111111111111',
+    command_type: 'UPSERT_ZONE',
+    effect_key: `zone:${ZONE_UUID}:0`,
+    zone_uuid: ZONE_UUID,
+    gateway_device_eui: GATEWAY_EUI,
+    base_sync_version: 0,
+    target_sync_version: 1,
+    zone: {
+      zone_uuid: ZONE_UUID,
+      gateway_device_eui: GATEWAY_EUI,
+      sync_version: 1,
+      name: 'North',
+    },
+  };
+  insertAppliedCommand(db, {
+    commandId: '709',
+    deviceEui: GATEWAY_EUI,
+    commandType: 'UPSERT_ZONE',
+    effectKey: `zone:${ZONE_UUID}:0`,
+    appliedAt: '2026-07-24T01:00:00.000Z',
+    result: 'APPLIED',
+    resultDetail: {
+      commandId: 709,
+      commandType: 'UPSERT_ZONE',
+      result: 'APPLIED',
+      status: 'ACKED',
+      duplicate: false,
+      payloadHash: canonicalHash(payload),
+    },
+  });
+
+  const duplicate = await ledger.deduplicatePendingCommand(
+    db,
+    {
+      commandId: 710,
+      commandType: 'UPSERT_ZONE',
+      payload,
+    },
+    {
+      gateway_device_eui: GATEWAY_EUI,
+      command_type_recognized: true,
+    }
+  );
+  assert.equal(duplicate.handled, true);
+  assert.equal(duplicate.ack.commandId, 710);
+  assert.equal(duplicate.ack.duplicate, true);
+
+  const sameIntentNewLogicalId =
+    await ledger.deduplicatePendingCommand(
+      db,
+      {
+        commandId: 711,
+        commandType: 'UPSERT_ZONE',
+        payload: {
+          ...payload,
+          command_id: '22222222-2222-4222-8222-222222222222',
+        },
+      },
+      {
+        gateway_device_eui: GATEWAY_EUI,
+        command_type_recognized: true,
+      }
+    );
+  assert.equal(sameIntentNewLogicalId.handled, true);
+  assert.equal(sameIntentNewLogicalId.ack.commandId, 711);
+
+  const changed = await ledger.deduplicatePendingCommand(
+    db,
+    {
+      commandId: 712,
+      commandType: 'UPSERT_ZONE',
+      payload: {
+        ...payload,
+        command_id: '33333333-3333-4333-8333-333333333333',
+        zone: { ...payload.zone, name: 'South' },
+      },
+    },
+    {
+      gateway_device_eui: GATEWAY_EUI,
+      command_type_recognized: true,
+    }
+  );
+  assert.equal(
+    changed.handled,
+    false,
+    'same effect with different zone intent must reach the applier and conflict'
+  );
 });
 
 test('deduplicatePendingCommand fails closed when the effect binding is not recognized', async () => {

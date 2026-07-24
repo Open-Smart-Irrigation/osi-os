@@ -12704,6 +12704,34 @@
     "y": 1100,
     "wires": [
       [
+        "zone-command-apply-fn"
+      ],
+      [
+        "9d5e3035c3d069c4"
+      ]
+    ]
+  },
+  {
+    "id": "zone-command-apply-fn",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Apply Zone Command",
+    "func": "return (async () => {\n  let cmd;\n  try {\n    cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});\n  } catch (parseError) {\n    node.error('Zone command parse failed closed: ' + String(parseError && parseError.message ? parseError.message : parseError), msg);\n    return [null, null];\n  }\n  const envelope = cmd._pendingCommandEnvelope;\n  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {\n    node.error('Zone command has no protected delivery envelope', msg);\n    return [null, null];\n  }\n  const commandType = String(envelope.commandType || '').trim().toUpperCase();\n  const zoneTypes = new Set([\n    'UPSERT_ZONE',\n    'DELETE_ZONE',\n    'UPSERT_ZONE_CONFIG',\n    'UPSERT_ZONE_LOCATION'\n  ]);\n  if (!zoneTypes.has(commandType)) return [msg, null];\n  const dbLoad = osiLib.require('osi-db-helper');\n  const zoneLoad = osiLib.require('zone-commands');\n  const scopeLoad = osiLib.require('scope');\n  if (!dbLoad.ok || !zoneLoad.ok || !scopeLoad.ok) {\n    const detail = [dbLoad, zoneLoad, scopeLoad]\n      .filter(function(load) { return !load.ok; })\n      .map(function(load) { return load.error; })\n      .join('; ');\n    node.error('Zone command helpers unavailable: ' + detail, msg);\n    return [null, null];\n  }\n  const gatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();\n  const db = new dbLoad.value.Database('/data/db/farming.db');\n  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));\n  try {\n    const result = await zoneLoad.value.applyZoneCommand(db, envelope, {\n      gateway_device_eui: gatewayEui,\n      command_type_recognized: msg._commandTypeRecognized === true\n    });\n    if (!result.handled) return [msg, null];\n    if (result.ack && result.ack.result === 'APPLIED' &&\n        typeof scopeLoad.value.invalidateScope === 'function') {\n      scopeLoad.value.invalidateScope();\n    }\n    return [null, {\n      topic: 'devices/' + gatewayEui + '/command_ack',\n      payload: JSON.stringify(result.ack),\n      qos: 1\n    }];\n  } catch (error) {\n    node.error('Zone command apply failed closed: ' + String(error && error.message ? error.message : error), msg);\n    return [null, null];\n  } finally {\n    try {\n      await close();\n    } catch (closeError) {\n      node.warn('Zone command DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));\n    }\n  }\n})();",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 1960,
+    "y": 1100,
+    "wires": [
+      [
         "934bf2bc19a8ce22"
       ],
       [

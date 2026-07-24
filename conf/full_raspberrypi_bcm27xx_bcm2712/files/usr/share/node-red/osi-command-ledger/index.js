@@ -1,4 +1,5 @@
 'use strict';
+const crypto = require('node:crypto');
 // osi-command-ledger — the fleet-wide pending-command dedupe/ACK pipeline.
 //
 // Extracted from osi-journal/commands.js (2026-07-14): this pipeline (exact
@@ -22,8 +23,8 @@
 //     skipped (falls through to "not a duplicate"); exact command-ID replay
 //     (the primary/most common replay path) is unaffected either way.
 // Non-journal command families never hit either hook: their effect-key
-// grammar lives in validNonJournalEffectBinding below and their duplicate
-// lookup is a plain effect_key+command_type match.
+// grammar lives in validNonJournalEffectBinding below. Zone replays also bind
+// the canonical submitted intent to the runtime gateway.
 
 function commandError(code, message) {
   const error = new Error(message);
@@ -54,6 +55,15 @@ function commandType(envelope) {
 
 function isJournalCommandType(type) {
   return /(?:^|_)JOURNAL(?:_|$)/.test(type);
+}
+
+function isZoneCommandType(type) {
+  return [
+    'UPSERT_ZONE',
+    'DELETE_ZONE',
+    'UPSERT_ZONE_CONFIG',
+    'UPSERT_ZONE_LOCATION',
+  ].includes(type);
 }
 
 function hasOwn(value, key) {
@@ -110,6 +120,23 @@ async function persistReplayAck(tx, row, deliveryId, exactDelivery) {
   return ack;
 }
 
+function canonicalIntentHash(value) {
+  function canonical(item) {
+    if (Array.isArray(item)) return item.map(canonical);
+    if (item && typeof item === 'object') {
+      return Object.keys(item).sort().reduce(function(out, key) {
+        if (key !== 'command_id') out[key] = canonical(item[key]);
+        return out;
+      }, {});
+    }
+    return item;
+  }
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(canonical(value)))
+    .digest('hex');
+}
+
 function validNonJournalEffectBinding(envelope, runtime) {
   if (!runtime || runtime.command_type_recognized !== true) return false;
   const payload = envelope.payload;
@@ -133,6 +160,39 @@ function validNonJournalEffectBinding(envelope, runtime) {
     const deviceEui = String(payload.device_eui || payload.deviceEui || payload.devEui || '')
       .trim().toUpperCase();
     return deviceEui === match[1];
+  }
+  const type = commandType(envelope);
+  if (isZoneCommandType(type)) {
+    const zoneUuid = String(payload.zone_uuid || '').trim().toLowerCase();
+    const base = payload.base_sync_version;
+    const target = payload.target_sync_version;
+    const zone = payload.zone;
+    const runtimeGateway = String(
+      runtime.gateway_device_eui || ''
+    ).trim().toUpperCase();
+    const payloadGateway = String(
+      payload.gateway_device_eui || ''
+    ).trim().toUpperCase();
+    const zoneGateway = String(
+      zone && zone.gateway_device_eui || ''
+    ).trim().toUpperCase();
+    if (!/^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(zoneUuid) ||
+        !/^[0-9A-F]{16}$/.test(runtimeGateway) ||
+        payloadGateway !== runtimeGateway ||
+        zoneGateway !== runtimeGateway ||
+        !Number.isSafeInteger(base) ||
+        base < 0 ||
+        !Number.isSafeInteger(target) ||
+        target !== base + 1 ||
+        !zone ||
+        typeof zone !== 'object' ||
+        Array.isArray(zone) ||
+        String(zone.zone_uuid || '').trim().toLowerCase() !== zoneUuid ||
+        zone.sync_version !== target) {
+      return false;
+    }
+    const prefix = type === 'DELETE_ZONE' ? 'zone_delete' : 'zone';
+    return effectKey === prefix + ':' + zoneUuid + ':' + base;
   }
   const scopedBindings = {
     UPSERT_SCOPED_USER: ['scoped_user', payload.user, 'user_uuid'],
@@ -201,6 +261,7 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
     }
     const type = commandType(envelope);
     const journalType = isJournalCommandType(type);
+    const zoneType = isZoneCommandType(type);
     const validEffect = await validEffectBinding(envelope, Object.assign({}, opts, { db: tx }));
     if (!validEffect) {
       return { handled: false };
@@ -224,6 +285,17 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
       );
       row = candidates.find(function(candidate) {
         return journalEffectProvenanceMatches(candidate, envelope.payload, gateway, type, intentHash);
+      });
+    } else if (zoneType) {
+      const candidates = await tx.all(
+        'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? AND device_eui=? ' +
+          'ORDER BY applied_at,command_id',
+        [effectKey, type, gateway]
+      );
+      const intentHash = canonicalIntentHash(envelope.payload);
+      row = candidates.find(function(candidate) {
+        const facts = parsedResultDetail(candidate);
+        return facts && facts.payloadHash === intentHash;
       });
     } else {
       row = await tx.get(
