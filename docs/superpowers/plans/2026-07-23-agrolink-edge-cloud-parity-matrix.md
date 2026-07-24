@@ -24,6 +24,7 @@ come from the fetched integration heads, not the earlier planning audit.
 | 6 | Scoped edge reads, writes, physical effects, administration, and read-only GUI enforcement landed | Edge `31fd939d` through `b4b6c1a8`; report `0e5319a0` |
 | 7 | Per-gateway cloud membership, scoped mirrors, authorization, desired access commands, edge application, administration UI, and contract activation landed | Edge `b4cb078c` through `0f17892f`; server `e8268566` through `5ca86425` |
 | 8a | Zone create, aggregate update, location, portable configuration, and delete converge through protected desired state; legacy gateways retain their prior command path | Edge `b7787c17` through `be66dad6`; server `e860ed93` through `f83ef56a` |
+| 8b | Schedules and measured irrigation calibration converge through separate protected desired-state resources; legacy gateways retain schedule compatibility and receive no calibration command | Edge `64d72f90` through `e1d487dd`; server `90b7553a` through `1d32cfc8` |
 
 ## Status rules
 
@@ -43,7 +44,7 @@ come from the fetched integration heads, not the earlier planning audit.
 |---|---|---|---|
 | Gateway identity and location mirror | `partial` | Live EUI verification and server applier tests pass; complete create/update/replay parity remains in Task 8 | Task 8 |
 | Zones, zone configuration, and zone location | `parity` | Local inserts now emit the complete mirror event. Capable gateways apply create, full-aggregate update, location, configuration, and delete with exact versions; cloud desired state remains visible through ACK and mirror convergence. Portable `soil_type` travels in the aggregate. | Tasks 4 and 8 |
-| Irrigation schedules | `partial` | Edge schedule mutations and cloud pending commands exist; current route, field, version, and conflict parity require inventory | Tasks 4 and 8 |
+| Irrigation schedules and measured flow calibration | `parity` | Edge changes emit versioned schedule and calibration mirrors. Capable gateways apply separate protected desired-state commands with independent effect keys; ACK and returning mirrors settle pending operations. Legacy gateways retain their schedule path and never receive calibration commands. Valve assignment and scheduler runtime timestamps remain edge-local. | Tasks 4 and 8 |
 | Device provisioning and registration | `partial` | Bootstrap, registration, bulk claim, assignment, and command paths exist; authorization and six-family parity remain | Tasks 7 and 8 |
 | Device assignment, flags, configuration, and unclaim | `partial` | Multiple pending command types exist; Task 0 must map device-family coverage and authorization | Tasks 7 and 8 |
 | Journal entries | `parity` | Five edge events and five cloud commands are active; mirror, replay, desired-state conflict, exports, and cloud workspace suites pass | Task 5 |

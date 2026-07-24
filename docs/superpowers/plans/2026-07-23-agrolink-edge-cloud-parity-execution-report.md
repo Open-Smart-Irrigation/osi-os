@@ -539,6 +539,88 @@ backend suite started with 12,025 MiB available. Both samples included
 threshold. No process was terminated. No production host, live gateway,
 external key provider, or AgroLink SMB share was accessed.
 
+### Task 8b schedule and irrigation-calibration parity
+
+Schedules and measured irrigation calibration now converge as separate
+zone-keyed resources. Edge migrations add calibration sync metadata and an
+initial backfill event without changing scheduler or valve behavior. Local
+schedule and calibration writes emit canonical events. The protected command
+helper validates the selected gateway, zone UUID, exact base and target
+versions, canonical timestamps, finite values, and supported schedule fields
+before applying either resource in the command-ledger transaction.
+
+The effect families remain independent:
+`schedule:<zone_uuid>:<base_sync_version>` and
+`irrigation_calibration:<zone_uuid>:<base_sync_version>`. Desired schedule
+payloads omit `last_triggered_at`. Desired calibration payloads omit the
+edge-local valve EUI; a new edge calibration row stores `NULL` in that column
+until local hardware configuration supplies it. Every protected SQL write
+uses bound parameters.
+
+OSI Server records
+`irrigation_config_desired_state_v1` per linked gateway. Capable gateways
+receive protected schedule and calibration commands; gateways without the
+capability keep the existing schedule command path and receive no calibration
+command. The server does not write either canonical edge mirror when it queues
+desired state. ACK and returning event convergence settle the operation, while
+base-version drift remains a recoverable conflict. Per-gateway zone scope
+guards both mutations.
+
+The cloud UI overlays pending schedule and calibration values immediately,
+shows pending, conflict, and rejection state, and blocks unsupported mirrored
+schedule metrics until the user chooses one of the seven governed values.
+Irrigation flow calibration is edited separately from dendrometer
+calibration. All seven maintained locales include the new label.
+
+Contract activation moved
+`ZONE_IRRIGATION_CALIBRATION_UPSERTED` and
+`UPSERT_ZONE_IRRIGATION_CALIBRATION` out of the staging manifest only after
+both consumers passed. The calibration command is verified as a separately
+routed protected command rather than being added to the legacy command-type
+registry. The two maintained flow profiles and helper copies compare
+byte-for-byte.
+
+Task 8b verification:
+
+| Command | Result |
+|---|---|
+| `node --test scripts/rehearse-irrigation-calibration-sync.test.js` | exit 0; 2 tests passed |
+| Command-ledger, irrigation helper, and protected path Node selections | exit 0; 25 tests passed |
+| Flow wiring and scoped-write suites | exit 0; 25 scoped-write tests passed |
+| Migration, seed replay, runtime schema, bundled DB, DDL, trigger, and profile gates | exit 0 |
+| `node scripts/test-contract-schemas.js` and `node scripts/verify-sync-contract.js` | exit 0; 29 governed event operations and 47 accepted commands, including two separately routed commands |
+| `node --test scripts/verify-sync-op-parity.test.js` with the server source override | exit 0; 44 tests passed |
+| `node scripts/verify-sync-op-parity.js` with the server source override | exit 0; all 29 event operations matched |
+| `node scripts/verify-sync-flow.js` with the server source override | exit 0; umbrella sync and profile gates passed |
+| Server vendor unit, byte-comparison, and `SyncContractVendorTest` gates | exit 0; all six contract files matched |
+| Focused server capability, mirror, protected mutation, controller, desired-state, authorization, ACK, convergence, conflict, replay, and legacy-fallback selections | exit 0 |
+| Focused cloud irrigation frontend selection | exit 0; 17 tests passed |
+| `npx tsc --noEmit` | exit 0 |
+| `NODE_OPTIONS=--max-old-space-size=2048 npm run test:unit` | exit 0; 45 TAP tests and 307 Vitest tests passed |
+| `NODE_OPTIONS=--max-old-space-size=2048 npm run build` | exit 0; production build passed with the existing chunk-size warning |
+| `NODE_OPTIONS=--max-old-space-size=2048 ./gradlew test --no-daemon --max-workers=2` | exit 0; 1,181 tests in 220 suites, zero failures, errors, or skips; `BUILD SUCCESSFUL in 1m 14s` |
+| Full-diff invariant review and `git diff --check` in both repositories | exit 0 |
+
+The vendor plan's example passed the schema directory to
+`EDGE_CONTRACT_ROOT`, although the verifier appends that directory itself.
+The run used the repository root after the literal example failed its
+canonical-file precondition. The first operation-parity invocation also found
+the unrelated sibling checkout because no server source override was set.
+Repeating it with the integration worktree's `EdgeSyncService.java` passed.
+Neither environment-selection failure changed product files.
+
+Edge commits `64d72f90`, `7bac1443`, `bd2cf3a3`, and `e1d487dd` and server
+commits `90b7553a`, `2cc46512`, `9e517872`, `93752df1`, and `1d32cfc8` were
+pushed to their target branches. Remote branch lookups matched the exact local
+heads after every push.
+
+The final backend suite started with 11,554 MiB available and ended with
+11,980 MiB available. Swap counters moved from `pswpin=742671693` and
+`pswpout=915546860` to `pswpin=742988801` and `pswpout=916119623`. Every
+heavyweight sample cleared the 4,096 MiB threshold. No process was terminated.
+No production host, live gateway, external key provider, or AgroLink SMB share
+was accessed.
+
 ### Program ownership
 
 The network planning program is finished. Its final local commit is `8f73306f`
