@@ -28,7 +28,8 @@ function rawInspection(): Record<string, unknown> {
     Config: { Image: `registry.example/builder@sha256:${DIGEST}`, User: '1000:1000', WorkingDir: '/workdir', Env: ['HOME=/workdir/.builder-home', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'CARGO_BUILD_JOBS=2', 'TZ=UTC', 'SOURCE_DATE_EPOCH=1784887200'], Labels: { 'org.osi.image-builder.job-id': 'integration-job', 'org.osi.image-builder.manifest-sha': MANIFEST } },
     HostConfig: { NetworkMode: 'bridge', CapDrop: ['ALL'], CapAdd: null, Privileged: false, Devices: null, SecurityOpt: ['no-new-privileges:true'], ReadonlyRootfs: false, PidsLimit: 4096, Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 4096 }] },
     Mounts: [{ Type: 'bind', Source: '/tmp/worktree', Destination: '/workdir', RW: true }],
-    State: { Running: false },
+    Created: '2026-07-24T10:00:03.000000000Z',
+    State: { Running: false, StartedAt: '2026-07-24T10:00:03.000000000Z', FinishedAt: '2026-07-24T10:00:04.000000000Z', ExitCode: 0 },
   };
 }
 

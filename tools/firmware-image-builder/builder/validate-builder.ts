@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { validateBuilderLock, type BuilderLock } from '../domain/builder-lock.js';
@@ -20,6 +21,7 @@ const IMAGE_ID = /^sha256:[0-9a-f]{64}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const DOCKER_REPOSITORY = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9]\d{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/u;
+export const TRUSTED_OPERATION_TOOL_RELATIVE_PATH = 'operations/osi-image-builder-tool.js';
 export const RUST_TARGETS = Object.freeze(['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const);
 const TARGET_PACKAGE_NAMES = Object.freeze(['musl:arm64', 'musl-dev:arm64', 'musl:armhf', 'musl-dev:armhf'] as const);
 
@@ -157,7 +159,14 @@ function dockerfileMetadata(contents: string): BuilderSourceMetadata {
   const packages = supportedPackageTokens(contents);
   const packageSet = ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', `libpolly-${llvmMajor}-dev`, 'libzstd-dev'] as const;
   if (!packages.includes('gcc-14') || !packages.includes('g++-14') || !packages.includes('clang') || !packages.includes('git') || !/apt-get download "musl:arm64=\$\{MUSL_VERSION\}" "musl-dev:arm64=\$\{MUSL_VERSION\}" "musl:armhf=\$\{MUSL_VERSION\}" "musl-dev:armhf=\$\{MUSL_VERSION\}"/u.test(contents) || !/ARG MUSL_ARM64_SHA256=[0-9a-f]{64}/u.test(contents) || !/ARG MUSL_DEV_ARM64_SHA256=[0-9a-f]{64}/u.test(contents) || !/ARG MUSL_ARMHF_SHA256=[0-9a-f]{64}/u.test(contents) || !/ARG MUSL_DEV_ARMHF_SHA256=[0-9a-f]{64}/u.test(contents) || !/musl-libdir\s*=\s*"\/opt\/target-sysroots\/aarch64\/usr\/lib\/aarch64-linux-musl"/u.test(contents) || !/musl-libdir\s*=\s*"\/opt\/target-sysroots\/armv7\/usr\/lib\/arm-linux-musleabihf"/u.test(contents) || !/--sysroot=\/opt\/target-sysroots\/aarch64/u.test(contents) || !/--sysroot=\/opt\/target-sysroots\/armv7/u.test(contents) || !/\/opt\/target-sysroots\/aarch64\/usr\/include\/aarch64-linux-musl/u.test(contents) || !/\/opt\/target-sysroots\/armv7\/usr\/include\/arm-linux-musleabihf/u.test(contents) || /__clang_major__=0/u.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile lacks complete target musl toolchains');
+  if (!/^COPY --chown=root:root --chmod=0555 builder\/operations\/osi-image-builder-tool\.js \/opt\/osi-image-builder\/operations\/osi-image-builder-tool\.js$/mu.test(contents) || !/stat -c '%u:%g'.*0:0/u.test(contents) || !/stat -c '%a'.*555/u.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile does not bake the immutable trusted operation tool');
   return { baseImage: base[1]!, baseImageDigest: base[2]!, dockerfileSha256: sha256(contents), executionDefinitionSha256: '', packageSet, rustConfig: rust.config, nodeVersion: node, architecture: 'linux/amd64', packageSource: 'snapshot.debian.org/archive/debian/20260715T000000Z' };
+}
+
+export function validateTrustedOperationToolSource(contents: string): void {
+  if (!contents.startsWith('#!/usr/bin/env node\n') || !contents.includes("new Set(['copy-feed-config', 'verify-image', 'mirror-gui'])") || !contents.includes('args.length !== 1') || !contents.includes('FEED_CONFIG_SOURCE') || !contents.includes('GUI_SOURCE') || !contents.includes('IMAGE_DIRECTORY') || contents.includes('process.argv.slice(2).join')) {
+    throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted operation tool is not a closed, fail-closed implementation');
+  }
 }
 
 export function validateExecutionDefinition(value: unknown, imageTemplate = '{{imageRepository}}@sha256:{{imageDigest}}'): void {
@@ -253,6 +262,7 @@ export async function validateBuilderSource(options: { readonly dockerfile: stri
   try {
     await assertSupportedPackageParity(options.rootDockerfile, options.dockerfile);
     const dockerfileContents = await readFile(options.dockerfile, 'utf8');
+    validateTrustedOperationToolSource(await readFile(join(dirname(options.dockerfile), TRUSTED_OPERATION_TOOL_RELATIVE_PATH), 'utf8'));
     const definitionContents = await readFile(options.executionDefinitionPath, 'utf8');
     const metadata = dockerfileMetadata(dockerfileContents);
     validateExecutionDefinition(JSON.parse(definitionContents), '{{imageRepository}}@sha256:{{imageDigest}}');

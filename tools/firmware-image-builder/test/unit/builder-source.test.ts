@@ -1,6 +1,8 @@
 import { readFile, mkdtemp, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
 import { BUILDER_LOCK_OPTIONAL_KEYS, BUILDER_LOCK_REQUIRED_KEYS, validateBuilderLock } from '../../domain/builder-lock.js';
@@ -18,6 +20,7 @@ import {
   validateProductionBuilderLock,
   validationEvidenceSha256,
   validateExecutionDefinition,
+  validateTrustedOperationToolSource,
   type BuilderValidationEvidence,
 } from '../../builder/validate-builder.js';
 import { enforceOpenWrtRustFeed, OPENWRT_RUST_FEED_CONTRACT, validateOpenWrtRustFeed, validateRustToolchain, validateRustToolchainEvidence } from '../../builder/validate-rust-toolchain.js';
@@ -31,6 +34,8 @@ const fixturePath = new URL('../fixtures/builder/non-installable-lock.json', imp
 const rustMakefileFixturePath = new URL('../fixtures/openwrt-packages-d8cd30f4/lang/rust/Makefile', import.meta.url).pathname;
 const definitionPath = new URL('../../builder/execution-definition.json', import.meta.url).pathname;
 const targetNames = ['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const;
+const execFileAsync = promisify(execFile);
+const operationToolPath = new URL('../../builder/operations/osi-image-builder-tool.js', import.meta.url).pathname;
 const evidence: BuilderValidationEvidence = {
   imageId: `sha256:${digest('f')}`, imageDigest: digest('a'), architecture: 'linux/amd64',
   rustc: 'rustc 1.85.0', llvm: '19.1.7', polly: '19.1.7', zstd: '1.5.7', node: 'v22.14.0',
@@ -147,6 +152,21 @@ describe('locked builder source', () => {
       expect(await readFile(destination, 'utf8')).toBe(original);
     }
     expect(supportedPackageTokens(rootContents)).toContain('libncurses-dev');
+  });
+
+  it('bakes and validates the immutable operation tool with a closed runtime surface', async () => {
+    const dockerfileContents = await readFile(dockerfile, 'utf8');
+    const toolContents = await readFile(operationToolPath, 'utf8');
+    expect(dockerfileContents).toContain('COPY --chown=root:root --chmod=0555 builder/operations/osi-image-builder-tool.js /opt/osi-image-builder/operations/osi-image-builder-tool.js');
+    expect(dockerfileContents).toContain("stat -c '%u:%g' /opt/osi-image-builder/operations/osi-image-builder-tool.js");
+    expect(dockerfileContents).toContain("stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-tool.js");
+    expect(() => validateTrustedOperationToolSource(toolContents)).not.toThrow();
+    expect(toolContents).not.toMatch(/process\.argv\.slice\(2\).*join/u);
+    for (const operation of ['copy-feed-config', 'verify-image', 'mirror-gui']) {
+      await expect(execFileAsync(process.execPath, [operationToolPath, operation], { cwd: new URL('../../../../', import.meta.url).pathname, maxBuffer: 32 * 1024 })).rejects.toMatchObject({ code: 2 });
+    }
+    await expect(execFileAsync(process.execPath, [operationToolPath, 'verify-image', '/workdir/evil.js'], { maxBuffer: 32 * 1024 })).rejects.toMatchObject({ code: 2 });
+    await expect(execFileAsync(process.execPath, [operationToolPath, 'unknown-operation'], { maxBuffer: 32 * 1024 })).rejects.toMatchObject({ code: 2 });
   });
 
   it('keeps the system LLVM probe bound to rustc -vV semantic output', async () => {

@@ -5,6 +5,11 @@ export interface OperationArgvContext {
   readonly environment: string;
 }
 
+export interface OperationDefinition {
+  readonly argv: readonly string[];
+  readonly workingDirectory: '/workdir' | '/workdir/web/react-gui';
+}
+
 const ENVIRONMENT = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 export const INTERNAL_OPERATION_TOOL_PATH = '/opt/osi-image-builder/operations/osi-image-builder-tool.js';
 
@@ -14,6 +19,8 @@ function validateContext(context: OperationArgvContext): void {
 }
 
 type OperationFactory = (context: OperationArgvContext) => readonly string[];
+
+const FRONTEND_OPERATION_IDS = new Set<TrustedOperationId>(['frontend-install', 'frontend-test', 'frontend-typecheck', 'frontend-build']);
 
 const factories: Readonly<Record<TrustedOperationId, OperationFactory>> = Object.freeze({
   'activate-target': (context) => ['make', 'switch-env', `ENV=${context.environment}`],
@@ -44,13 +51,21 @@ export function assertOperationRegistryCoverage(operationIds: readonly string[])
 }
 
 export function createOperationArgv(operationId: TrustedOperationId, context: OperationArgvContext): readonly string[] {
+  return createOperationDefinition(operationId, context).argv;
+}
+
+export function createOperationDefinition(operationId: TrustedOperationId, context: OperationArgvContext): OperationDefinition {
   if (!(TRUSTED_OPERATION_IDS as readonly string[]).includes(operationId) || !(operationId in factories)) throw new Error(`unknown operation ID: ${String(operationId)}`);
   validateContext(context);
   const argv = factories[operationId](context);
   if (argv.length === 0 || argv.some((value) => value.length === 0 || /[;&|`$()\n\r]/u.test(value))) throw new Error(`trusted operation ${operationId} produced unsafe argv`);
-  return Object.freeze([...argv]);
+  return Object.freeze({ argv: Object.freeze([...argv]), workingDirectory: FRONTEND_OPERATION_IDS.has(operationId) ? '/workdir/web/react-gui' : '/workdir' });
 }
 
 export function hashOperationArgv(argv: readonly string[]): string {
   return createHash('sha256').update(JSON.stringify(argv)).digest('hex');
+}
+
+export function hashOperationDefinition(definition: OperationDefinition): string {
+  return createHash('sha256').update(JSON.stringify({ argv: definition.argv, workingDirectory: definition.workingDirectory })).digest('hex');
 }

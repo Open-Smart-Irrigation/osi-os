@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
-import { probeDocker, validateBuiltBuilderImage } from '../../builder/validate-builder.js';
+import { probeDocker, validateBuiltBuilderImage, validateTrustedOperationToolSource } from '../../builder/validate-builder.js';
 import { BUILD_OUTPUT_TAIL_BYTES, BUILD_TIMEOUT_MS, runStreamingBuild } from '../support/run-streaming-build.js';
 
 const exec = promisify(execFile);
@@ -31,6 +32,16 @@ async function cleanupImageTag(tag: string): Promise<void> {
 }
 
 describe('builder image integration boundary', () => {
+  it('binds the canonical image contract to the root-owned trusted operation tool', async () => {
+    const context = new URL('../..', import.meta.url).pathname;
+    const dockerfile = await readFile(`${context}/builder/Dockerfile`, 'utf8');
+    const tool = await readFile(`${context}/builder/operations/osi-image-builder-tool.js`, 'utf8');
+    expect(dockerfile).toContain('COPY --chown=root:root --chmod=0555 builder/operations/osi-image-builder-tool.js /opt/osi-image-builder/operations/osi-image-builder-tool.js');
+    expect(dockerfile).toContain("test \"$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-image-builder-tool.js)\" = '0:0'");
+    expect(dockerfile).toContain("test \"$(stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-tool.js)\" = '555'");
+    expect(() => validateTrustedOperationToolSource(tool)).not.toThrow();
+  });
+
   it('always reports Docker capability and preserves zero mutation when unavailable', async () => {
     const calls: string[][] = [];
     const capability = await probeDocker({ run: async (_executable, argv) => { calls.push([...argv]); throw Object.assign(new Error('docker unavailable'), { code: 'ENOENT' }); } });

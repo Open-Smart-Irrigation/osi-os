@@ -8,7 +8,7 @@ import {
   type DockerInspection,
   type PersistedContainerIdentity,
 } from '../../runner/src/docker-executor.js';
-import { createOperationArgv, assertOperationRegistryCoverage, INTERNAL_OPERATION_TOOL_PATH } from '../../runner/src/operation-registry.js';
+import { createOperationArgv, createOperationDefinition, assertOperationRegistryCoverage, INTERNAL_OPERATION_TOOL_PATH } from '../../runner/src/operation-registry.js';
 import { CommandExecutionError, createCommandExecutor, type CommandResult, type CommandRunOptions } from '../../runner/src/command-executor.js';
 import type { OperationInput } from '../../api/src/store.js';
 import type { OperationCleanupProof, RunnerWriteCommand } from '../../api/src/ownership.js';
@@ -47,6 +47,10 @@ function inspection(overrides: Partial<DockerInspection> = {}): DockerInspection
     },
     readonlyRootfs: false,
     running: false,
+    createdAt: '2026-07-24T09:59:59.000Z',
+    startedAt: '2026-07-24T10:00:01.500Z',
+    finishedAt: '2026-07-24T10:00:02.500Z',
+    exitCode: 0,
     ...overrides,
   };
 }
@@ -84,7 +88,8 @@ function realisticRawInspection(): Record<string, unknown> {
       Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 4096 }],
     },
     Mounts: [{ Type: 'bind', Source: '/tmp/worktree', Destination: '/workdir', RW: true }],
-    State: { Running: false },
+    Created: '2026-07-24T09:59:59.000000000Z',
+    State: { Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:02.500000000Z', ExitCode: 0 },
   };
 }
 
@@ -187,6 +192,17 @@ describe('operation registry', () => {
     expect(trusted.join(' ')).not.toContain('evil.js');
     expect(() => createOperationArgv(operationId, { environment: '/workdir/evil.js' })).toThrow();
   });
+
+  it.each(['activate-target', 'copy-feed-config', 'update-feeds', 'install-feeds', 'resolve-config', 'build-image', 'verify-image', 'verify-profile-parity', 'verify-chameleon', 'verify-db-schema', 'verify-sync-flow', 'verify-strega', 'verify-communication', 'check-mqtt-topics', 'mirror-gui'] as const)('uses /workdir for normal operation %s', (operationId) => {
+    expect(createOperationDefinition(operationId, { environment: 'full_raspberrypi_bcm27xx_bcm2712' }).workingDirectory).toBe('/workdir');
+  });
+
+  it.each(['frontend-install', 'frontend-test', 'frontend-typecheck', 'frontend-build'] as const)('uses the fixed frontend cwd for %s', (operationId) => {
+    const definition = createOperationDefinition(operationId, { environment: 'full_raspberrypi_bcm27xx_bcm2712' });
+    expect(definition.workingDirectory).toBe('/workdir/web/react-gui');
+    expect(Object.isFrozen(definition)).toBe(true);
+    expect(Object.isFrozen(definition.argv)).toBe(true);
+  });
 });
 
 describe('DockerExecutor', () => {
@@ -247,10 +263,14 @@ describe('DockerExecutor', () => {
     expect(trace.indexOf('docker:inspect', trace.indexOf('docker:rm'))).toBeGreaterThan(trace.indexOf('docker:rm'));
     expect(trace.indexOf('docker:ps', trace.indexOf('docker:rm'))).toBeGreaterThan(trace.indexOf('docker:inspect', trace.indexOf('docker:rm')));
     expect(trace.indexOf('operation-cleanup')).toBeGreaterThan(trace.indexOf('docker:ps', trace.indexOf('docker:rm')));
+    const complete = ownership.runnerWrite.mock.calls.map(([command]) => command).find((command): command is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => command.kind === 'operation-complete');
+    expect(complete).toBeDefined();
+    expect(Date.parse(complete!.at)).toBeGreaterThan(Date.parse(complete!.input.finishedAt!));
+    expect(trace.indexOf('evidence')).toBeLessThan(trace.indexOf('operation-complete'));
     expect(lifecycleCommands.map((command) => command.lifecycle)).toEqual(['created', 'started', 'stopped']);
     expect(lifecycleCommands[1]).toMatchObject({ startedAt: '2026-07-24T10:00:01.500Z' });
     expect(lifecycleCommands[2]).toMatchObject({ startedAt: '2026-07-24T10:00:01.500Z' });
-    expect(lifecycleCommands[2]!.stoppedAt).toBe('2026-07-24T10:00:04.000Z');
+    expect(lifecycleCommands[2]!.stoppedAt).toBe('2026-07-24T10:00:02.500Z');
     expect(cleanupProof?.stoppedAt).toBe(lifecycleCommands[2]!.stoppedAt);
     expect(Date.parse(lifecycleCommands[2]!.stoppedAt!)).toBeLessThanOrEqual(Date.parse(cleanupProof!.observedAt!));
     expect(Date.parse(lifecycleCommands[1]!.occurredAt)).toBeGreaterThanOrEqual(Date.parse(lifecycleCommands[1]!.startedAt!));
@@ -364,6 +384,29 @@ describe('DockerExecutor', () => {
     const create = docker.calls.find((call) => call[1] === 'create')!;
     expect(create.slice(-4)).toEqual([`registry.example/builder@sha256:${DIGEST}`, 'node', INTERNAL_OPERATION_TOOL_PATH, 'verify-image']);
     expect(() => createOperationArgv('verify-image', { environment: '../branch' })).toThrow();
+  });
+
+  it('uses the registry frontend definition for create, inspection, security, and executed argv', async () => {
+    const frontendRaw = (): Record<string, unknown> => {
+      const value = realisticRawInspection();
+      (value.Config as Record<string, unknown>).WorkingDir = '/workdir/web/react-gui';
+      return value;
+    };
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { stdout: '' }, { stdout: `${'1'.repeat(64)}\n` }, { stdout: JSON.stringify(frontendRaw()) }, { stdout: '' }, { stdout: JSON.stringify(frontendRaw()) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' },
+    ]);
+    const writes: RunnerWriteCommand[] = [];
+    const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
+    await createDockerExecutor(options(docker, { operationId: 'frontend-test', ownership })).run();
+    const create = docker.calls.find((call) => call[1] === 'create')!;
+    expect(create).toContain('--workdir=/workdir/web/react-gui');
+    expect(create.slice(-3)).toEqual(['npm', 'run', 'test:unit']);
+    const container = writes.find((command): command is Extract<RunnerWriteCommand, { kind: 'container' }> => command.kind === 'container')!;
+    expect(container.security).toMatchObject({ workdir: '/workdir/web/react-gui' });
+    const operation = writes.find((command): command is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => command.kind === 'operation-complete')!;
+    expect(operation.input.argv).toEqual(['npm', 'run', 'test:unit']);
   });
 
   it('rejects an unknown runtime operation before any Docker command', async () => {
@@ -502,7 +545,9 @@ describe('DockerExecutor', () => {
     const running = { ...realisticRawInspection(), State: { Running: true } };
     const responses = successfulResponses({ timedOut: true, exitCode: null });
     responses[5] = new CommandExecutionError('attach timed out', { result: { argv: ['/usr/bin/docker', 'start', '--attach', '1'.repeat(64)], exitCode: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' } });
-    responses.splice(6, 4, { stdout: JSON.stringify(running) }, { stdout: '' }, { stdout: JSON.stringify(realisticRawInspection()) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' });
+    const stoppedRaw = realisticRawInspection();
+    stoppedRaw.State = { Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:08.000000000Z', ExitCode: 143 };
+    responses.splice(6, 4, { stdout: JSON.stringify(running) }, { stdout: '' }, { stdout: JSON.stringify(stoppedRaw) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' });
     const docker = fakeDocker(responses);
     const writes: RunnerWriteCommand[] = [];
     const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
@@ -528,10 +573,50 @@ describe('DockerExecutor', () => {
     const docker = fakeDocker(responses);
     const writes: Array<{ kind: string; lifecycle?: string }> = [];
     const ownership = { runnerWrite: vi.fn((command: { kind: string; lifecycle?: string }) => { writes.push(command); return { ok: true }; }) };
-    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toBeInstanceOf(AggregateError);
+    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof CommandExecutionError) && error.errors.some((cause) => cause instanceof AggregateError));
     expect(writes.filter((write) => write.lifecycle !== undefined).map((write) => write.lifecycle)).toEqual(['created']);
     expect(docker.calls.some((call) => call[1] === 'rm')).toBe(false);
     expect(writes.some((write) => write.kind === 'operation-complete')).toBe(false);
+  });
+
+  it('retains the timeout command result when stopped-state recovery also fails', async () => {
+    const running = { ...realisticRawInspection(), State: { Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
+    const responses = successfulResponses({ timedOut: true, exitCode: null });
+    responses[5] = { stdout: '', stderr: '', exitCode: null, signal: 'SIGKILL', timedOut: true, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' };
+    responses.splice(6, 4, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'stop failed' }, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'kill failed' }, { stdout: JSON.stringify(running) });
+    const docker = fakeDocker(responses);
+    const writes: RunnerWriteCommand[] = [];
+    const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }), getJob: vi.fn(() => emptyIdentityForTest()) };
+    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof CommandExecutionError) && error.errors.some((cause) => cause instanceof AggregateError));
+    expect(docker.calls.some((call) => call[1] === 'rm')).toBe(false);
+    expect(writes.map((command) => command.kind)).toEqual(['operation-begin', 'container']);
+  });
+
+  it('retains the observer command result when stopped-state recovery also fails', async () => {
+    const running = { ...realisticRawInspection(), State: { Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
+    const startArgv = ['/usr/bin/docker', 'start', '--attach', '1'.repeat(64)];
+    const responses = successfulResponses();
+    responses[5] = new CommandExecutionError('output observer failed', { result: { argv: startArgv, exitCode: null, signal: 'SIGTERM', stdout: 'partial', stderr: '', timedOut: false, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' } });
+    responses.splice(6, 4, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'stop failed' }, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'kill failed' }, { stdout: JSON.stringify(running) });
+    const docker = fakeDocker(responses);
+    const writes: RunnerWriteCommand[] = [];
+    const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }), getJob: vi.fn(() => emptyIdentityForTest()) };
+    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof CommandExecutionError) && error.errors.some((cause) => cause instanceof AggregateError));
+    expect(docker.calls.some((call) => call[1] === 'rm')).toBe(false);
+    expect(writes.map((command) => command.kind)).toEqual(['operation-begin', 'container']);
+  });
+
+  it('does not emit a started lifecycle when Docker reports a failed start without a start instant', async () => {
+    const stopped = { ...realisticRawInspection(), State: { Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 1 } };
+    const responses = successfulResponses({ exitCode: 1 });
+    responses[5] = { exitCode: 1, signal: null, stdout: '', stderr: 'start failed', timedOut: false, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' };
+    responses[6] = { stdout: JSON.stringify(stopped) };
+    const docker = fakeDocker(responses);
+    const writes: RunnerWriteCommand[] = [];
+    const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
+    const result = await createDockerExecutor(options(docker, { ownership })).run();
+    expect(result).toMatchObject({ available: true, outcome: 'failed' });
+    expect(writes.filter((command): command is Extract<RunnerWriteCommand, { kind: 'container' }> => command.kind === 'container').map((command) => command.lifecycle)).toEqual(['created', 'stopped']);
   });
 
   it('recovers an observer failure with its real command result and records a failed operation only after stop proof', async () => {
