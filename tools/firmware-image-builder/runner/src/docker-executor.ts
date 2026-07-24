@@ -447,21 +447,28 @@ async function inspectContainer(options: DockerExecutorOptions, definition: Oper
   return { inspection: inspected, observedAt };
 }
 
-async function recoverStopped(options: DockerExecutorOptions, definition: OperationDefinition, id: string, image: ImageIdentity, sourceEpoch: string, primaryFailure: unknown | null): Promise<{ readonly inspection: DockerInspection; readonly observedAt: string }> {
+async function recoverStopped(options: DockerExecutorOptions, definition: OperationDefinition, id: string, image: ImageIdentity, sourceEpoch: string, primaryFailure: unknown | null): Promise<{ readonly inspection: DockerInspection; readonly observedAt: string; readonly recoveryFailures: readonly unknown[] }> {
   try {
     let inspected = await inspectContainer(options, definition, id, image, sourceEpoch, false);
-    if (!inspected.inspection.running) return inspected;
+    if (!inspected.inspection.running) return { ...inspected, recoveryFailures: [] };
     const failures: unknown[] = [];
     try { requireSuccess(await runDocker(options, ['stop', '--time=10', id]), 'Docker stop'); } catch (error) { failures.push(error); }
-    inspected = await inspectContainer(options, definition, id, image, sourceEpoch, false);
-    if (!inspected.inspection.running) return inspected;
+    try {
+      inspected = await inspectContainer(options, definition, id, image, sourceEpoch, false);
+      if (!inspected.inspection.running) return { ...inspected, recoveryFailures: failures };
+    } catch (error) { failures.push(error); }
     try { requireSuccess(await runDocker(options, ['kill', id]), 'Docker kill escalation'); } catch (error) { failures.push(error); }
-    inspected = await inspectContainer(options, definition, id, image, sourceEpoch, false);
+    try {
+      inspected = await inspectContainer(options, definition, id, image, sourceEpoch, false);
+    } catch (error) {
+      failures.push(error);
+      throw new AggregateError([...(primaryFailure === null ? [] : [primaryFailure]), ...failures], 'Docker attach ended and recovery could not prove a final container state');
+    }
     if (inspected.inspection.running) failures.push(new DockerLifecycleError('Docker attach ended but the exact container could not be stopped'));
-    if (failures.length > 0) throw new AggregateError(failures, 'Docker attach ended and recovery did not prove a stopped container');
-    return inspected;
+    if (failures.length > 0) throw new AggregateError([...(primaryFailure === null ? [] : [primaryFailure]), ...failures], 'Docker attach ended and recovery did not prove a stopped container');
+    return { ...inspected, recoveryFailures: [] };
   } catch (error) {
-    if (primaryFailure !== null) throw new AggregateError([primaryFailure, error], 'Docker attach failed and stopped-state recovery failed');
+    if (primaryFailure !== null && !(error instanceof AggregateError)) throw new AggregateError([primaryFailure, error], 'Docker attach failed and stopped-state recovery failed');
     throw error;
   }
 }
@@ -472,6 +479,10 @@ function failureCode(error: unknown): BuilderErrorCode {
 
 function errorJson(error: unknown): JsonObject {
   return { code: failureCode(error), message: error instanceof Error ? error.message : String(error) };
+}
+
+function recoveryEvidence(errors: readonly unknown[]): readonly JsonObject[] {
+  return errors.map((error) => errorJson(error));
 }
 
 function validateLogProof(proof: LogCleanupProof, operationFinishedAt: string): LogCleanupProof {
@@ -545,7 +556,8 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
         const commandTimes = validateStartResult(result, startArgv);
         const primaryFailure = attachError ?? (result.timedOut ? new CommandExecutionError('Docker attach timed out', { result }) : null);
         const stoppedInspection = await recoverStopped(options, definition, id, image, sourceEpoch, primaryFailure);
-        const stoppedJson = inspectionJson(stoppedInspection.inspection, image);
+        const stoppedJsonBase = inspectionJson(stoppedInspection.inspection, image);
+        const stoppedJson: JsonObject = stoppedInspection.recoveryFailures.length > 0 ? { ...stoppedJsonBase, recoveryFailures: recoveryEvidence(stoppedInspection.recoveryFailures) } : stoppedJsonBase;
         const createdAt = inspected.createdAt;
         if (stoppedInspection.inspection.startedAt !== null) {
           const startedWriteAt = now(options);
@@ -553,7 +565,7 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
         }
         const stoppedWriteAt = now(options);
         runner(options, (snapshot) => containerCommand(options, definition, sourceEpoch, snapshot, 'stopped', id!, labels, stoppedJson, stoppedWriteAt, createdAt, stoppedInspection.inspection.startedAt, stoppedInspection.inspection.finishedAt));
-        const outcome: 'passed' | 'failed' = !attachError && result.exitCode === 0 && result.signal === null && !result.timedOut ? 'passed' : 'failed';
+        const outcome: 'passed' | 'failed' = !attachError && result.exitCode === 0 && result.signal === null && !result.timedOut && stoppedInspection.inspection.startedAt !== null && stoppedInspection.inspection.exitCode === result.exitCode ? 'passed' : 'failed';
         const commandEvidence: JsonObject = { argv: result.argv, exitCode: result.exitCode, signal: result.signal, stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut, startedAt: result.startedAt, finishedAt: result.finishedAt, ...(attachError ? { attachError: errorJson(attachError) } : {}) };
         const operationFinishedAt = now(options);
         const logs = validateLogProof(await options.finalizeLogs({ operationFinishedAt }), operationFinishedAt);

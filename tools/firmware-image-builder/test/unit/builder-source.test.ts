@@ -1,4 +1,4 @@
-import { readFile, mkdtemp, writeFile } from 'node:fs/promises';
+import { readFile, mkdtemp, writeFile, mkdir, rm, symlink, access } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,6 +36,7 @@ const definitionPath = new URL('../../builder/execution-definition.json', import
 const targetNames = ['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const;
 const execFileAsync = promisify(execFile);
 const operationToolPath = new URL('../../builder/operations/osi-image-builder-tool.js', import.meta.url).pathname;
+const operationToolModule = async () => await import(operationToolPath) as unknown as { readonly createOperationHandlersForTesting: (root: string) => { readonly copyFeedConfig: () => Promise<{ readonly sha256: string }>; readonly mirrorGui: () => Promise<{ readonly fileCount: number }> } };
 const evidence: BuilderValidationEvidence = {
   imageId: `sha256:${digest('f')}`, imageDigest: digest('a'), architecture: 'linux/amd64',
   rustc: 'rustc 1.85.0', llvm: '19.1.7', polly: '19.1.7', zstd: '1.5.7', node: 'v22.14.0',
@@ -47,6 +48,7 @@ const evidence: BuilderValidationEvidence = {
     ...Array.from({ length: 5 }, (_, index) => ({ argv: ['dpkg-query', '--show', String(index)], exitCode: 0 as const, stdoutSha256: digest('1'), stderrSha256: digest('2') })),
   ],
     rustTargets: targetNames.map((target, index) => ({ target, standardLibraryPath: `/opt/rust-system/toolchains/1.85.0-x86_64-unknown-linux-gnu/lib/rustlib/${target}/lib/libstd-${index}.rlib`, standardLibrarySha256: digest('3'), standardLibraryArchitecture: target === 'x86_64-unknown-linux-gnu' ? 'ELF 64-bit LSB relocatable, x86-64' : target === 'aarch64-unknown-linux-musl' ? 'ELF 64-bit LSB relocatable, ARM aarch64' : 'ELF 32-bit LSB relocatable, ARM, EABI5', compileArtifact: `/tmp/osi-rust-validation/${index}.o`, compileSha256: digest('4'), compileArchitecture: target === 'x86_64-unknown-linux-gnu' ? 'ELF 64-bit LSB relocatable, x86-64' : target === 'aarch64-unknown-linux-musl' ? 'ELF 64-bit LSB relocatable, ARM aarch64' : 'ELF 32-bit LSB relocatable, ARM, EABI5', result: 'passed' as const })),
+  operationTool: { path: '/opt/osi-image-builder/operations/osi-image-builder-tool.js', owner: '0:0', mode: '0555', user: 'buildbot', result: 'passed' },
   executionSelfTest: 'passed',
 };
 
@@ -169,6 +171,46 @@ describe('locked builder source', () => {
     await expect(execFileAsync(process.execPath, [operationToolPath, 'unknown-operation'], { maxBuffer: 32 * 1024 })).rejects.toMatchObject({ code: 2 });
   });
 
+  it('copies feed config by exact hash and rejects symlink escapes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-feed-'));
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await writeFile(join(root, 'feeds.conf.default'), 'src-git local ./feeds/chirpstack-openwrt-feed\n');
+      const handlers = (await operationToolModule()).createOperationHandlersForTesting(root);
+      const result = await handlers.copyFeedConfig();
+      expect(result.sha256).toBe(sha256(await readFile(join(root, 'openwrt/feeds.conf.default'))));
+      await rm(join(root, 'feeds.conf.default'));
+      await symlink('/etc/passwd', join(root, 'feeds.conf.default'));
+      await expect(handlers.copyFeedConfig()).rejects.toThrow(/symbolic|symlink|escape/i);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('mirrors GUI through a clean staging replacement, compares exact files, and rejects symlinks', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-gui-'));
+    const source = join(root, 'web/react-gui/build');
+    const destination = join(root, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui');
+    try {
+      await mkdir(source, { recursive: true });
+      await mkdir(destination, { recursive: true });
+      await writeFile(join(source, 'index.html'), '<title>OSI</title>');
+      await writeFile(join(source, 'assets.js'), 'new asset');
+      await writeFile(join(destination, 'stale.js'), 'must disappear');
+      const handlers = (await operationToolModule()).createOperationHandlersForTesting(root);
+      await expect(handlers.mirrorGui()).resolves.toMatchObject({ fileCount: 2 });
+      await expect(access(join(destination, 'stale.js'))).rejects.toThrow();
+      expect(await readFile(join(destination, 'index.html'), 'utf8')).toBe('<title>OSI</title>');
+      await symlink('/etc/passwd', join(destination, 'escape.js'));
+      await expect(handlers.mirrorGui()).rejects.toThrow(/symbolic|symlink|escape/i);
+      await rm(join(destination, 'escape.js'), { force: true });
+      await symlink('/etc/passwd', join(source, 'escape.js'));
+      await expect(handlers.mirrorGui()).rejects.toThrow(/symbolic|symlink|escape/i);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps the system LLVM probe bound to rustc -vV semantic output', async () => {
     const source = await readFile(validatorSource, 'utf8');
     expect(source).toContain("sed -n 's/^LLVM version: *//p'");
@@ -187,6 +229,49 @@ describe('locked builder source', () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('production validation unexpectedly accepted an unbuilt image');
     expect(result.reason).toMatch(/No such image|manifest unknown|reference not found/u);
+  });
+
+  it('requires the canonical image validator to execute the installed helper self-test', async () => {
+    const canonical = `registry.example.invalid/osi-builder@sha256:${digest('a')}`;
+    const inspect = JSON.stringify({ Id: `sha256:${digest('b')}`, Architecture: 'amd64', Os: 'linux', Size: 1, RepoDigests: [canonical], Config: { Env: [`PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`] } });
+    const calls: string[][] = [];
+    const result = await validateBuiltBuilderImage(canonical, { run: async (argv) => {
+      calls.push([...argv]);
+      if (argv[0] === 'image') return { stdout: inspect, stderr: '' };
+      const command = argv.join(' ');
+      if (argv.includes('/opt/osi-image-builder/operations/osi-image-builder-tool.js')) return { stdout: 'helper self-test passed\n', stderr: '' };
+      const runtime = argv.slice(7);
+      if (runtime[0] === 'node') return { stdout: 'v22.14.0\n', stderr: '' };
+      if (runtime[0] === 'npm') return { stdout: '10.9.2\n', stderr: '' };
+      if (runtime[0] === 'gcc-14') return { stdout: 'gcc (Debian 14.2.0) 14.2.0\n', stderr: '' };
+      if (runtime[0] === '/usr/bin/rustc' && runtime[1] === '-vV') return { stdout: 'rustc 1.85.0\nLLVM version: 19.1.7\n', stderr: '' };
+      if (runtime[0] === '/usr/bin/llvm-config') return { stdout: '19.1.7\n', stderr: '' };
+      if (command.includes('--showformat=${Package}=${Version')) return { stdout: 'gcc-14=14.2.0\nnodejs=22.14.0\nnpm=10.9.2\nllvm-dev=19.1.7\nlibpolly-19-dev=19.1.7\nlibzstd-dev=1.5.7\n', stderr: '' };
+      if (runtime[0] === 'dpkg-query' && command.includes('libpolly-19-dev')) return { stdout: '19.1.7\n', stderr: '' };
+      if (runtime[0] === 'pkg-config') return { stdout: '1.5.7\n', stderr: '' };
+      if (command.includes('cat /opt/target-sysroots/package-versions')) return { stdout: 'musl:arm64=1.2.5\nmusl-dev:arm64=1.2.5\nmusl:armhf=1.2.5\nmusl-dev:armhf=1.2.5\n', stderr: '' };
+      if (command.includes('/usr/bin/rustc --target')) return { stdout: ['x86_64-unknown-linux-gnu|/opt/rust-system/toolchains/1.85.0-x86_64-unknown-linux-gnu|/opt/rust-system/toolchains/std|'.concat(digest('1'), '|x86-64|/tmp/osi-rust-validation/x.o|', digest('2'), '|x86-64'), 'aarch64-unknown-linux-musl|/opt/rust-system/toolchains/1.85.0-x86_64-unknown-linux-gnu|/opt/rust-system/toolchains/std|'.concat(digest('1'), '|aarch64|/tmp/osi-rust-validation/a.o|', digest('2'), '|aarch64'), 'armv7-unknown-linux-musleabihf|/opt/rust-system/toolchains/1.85.0-x86_64-unknown-linux-gnu|/opt/rust-system/toolchains/std|'.concat(digest('1'), '|ARM|/tmp/osi-rust-validation/arm.o|', digest('2'), '|ARM')].join('\n') + '\n', stderr: '' };
+      if (command.includes('llvm_version=')) return { stdout: '19.1.7\nrustc 1.85.0\nLLVM version: 19.1.7\n/usr/lib/llvm-19/lib/libPolly.a /usr/lib/llvm-19/lib/libPollyISL.a\n1.5.7\n', stderr: '' };
+      return { stdout: 'ok\n', stderr: '' };
+    } });
+    expect(result.evidence.operationTool).toEqual({ path: '/opt/osi-image-builder/operations/osi-image-builder-tool.js', owner: '0:0', mode: '0555', user: 'buildbot', result: 'passed' });
+    expect(calls.some((argv) => argv.join(' ').includes('/opt/osi-image-builder/operations/osi-image-builder-tool.js'))).toBe(true);
+    const helperCall = calls.find((argv) => argv.join(' ').includes('/opt/osi-image-builder/operations/osi-image-builder-tool.js'))!;
+    expect(helperCall).toContain('--platform=linux/amd64');
+    expect(helperCall).toContain('--pull=never');
+    expect(helperCall.join(' ')).toContain('node "$tool" copy-feed-config');
+    expect(helperCall.join(' ')).toContain('node "$tool" mirror-gui');
+    expect(helperCall.join(' ')).toContain('node "$tool" verify-image');
+  });
+
+  it.each(['absent', 'wrong-owner', 'wrong-mode', 'unrunnable'] as const)('rejects an installed helper self-test failure: %s', async (failure) => {
+    const canonical = `registry.example.invalid/osi-builder@sha256:${digest('a')}`;
+    const inspect = JSON.stringify({ Id: `sha256:${digest('b')}`, Architecture: 'amd64', Os: 'linux', Size: 1, RepoDigests: [canonical], Config: { Env: [`PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`] } });
+    await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => {
+      if (argv[0] === 'image') return { stdout: inspect, stderr: '' };
+      if (argv.join(' ').includes('/opt/osi-image-builder/operations/osi-image-builder-tool.js')) throw Object.assign(new Error(`helper ${failure}`), { code: 1, stderr: failure });
+      return { stdout: 'ok\n', stderr: '' };
+    } })).rejects.toMatchObject({ code: 'RUST_BOOTSTRAP_UNAVAILABLE' });
   });
 
   it('requires resolved Rust LLVM evidence and rejects Rust CI artifacts', async () => {

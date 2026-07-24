@@ -81,6 +81,8 @@ describe('builder image integration boundary', () => {
       expect(canonical).toMatch(new RegExp(`^${repository.replaceAll('.', '\\.') }@sha256:[0-9a-f]{64}$`, 'u'));
       const validated = await validateBuiltBuilderImage(canonical!);
       expect(validated).toMatchObject({ imageId: image.Id, selfTest: 'passed' });
+      expect(validated.evidence.operationTool).toEqual({ path: '/opt/osi-image-builder/operations/osi-image-builder-tool.js', owner: '0:0', mode: '0555', user: 'buildbot', result: 'passed' });
+      expect(validated.evidence.commands.some(({ argv }) => argv.join(' ').includes('/opt/osi-image-builder/operations/osi-image-builder-tool.js'))).toBe(true);
       expect(validated.evidence.rustTargets.map(({ target }) => target).sort()).toEqual(['aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf', 'x86_64-unknown-linux-gnu']);
       expect(validated.evidence.commands.some(({ argv }) => argv.join(' ').includes('test ! -e /tmp/rust-source'))).toBe(true);
     } catch (error) {

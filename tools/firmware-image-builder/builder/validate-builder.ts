@@ -50,6 +50,7 @@ export interface BuilderValidationEvidence {
   readonly packageVersions: Readonly<Record<string, string>>;
   readonly commands: readonly BuilderEvidenceCommand[];
   readonly rustTargets: readonly RustArtifactEvidence[];
+  readonly operationTool: Readonly<{ readonly path: '/opt/osi-image-builder/operations/osi-image-builder-tool.js'; readonly owner: '0:0'; readonly mode: '0555'; readonly user: 'buildbot'; readonly result: 'passed' }>;
   readonly executionSelfTest: 'passed';
 }
 
@@ -122,6 +123,7 @@ function exactKeys(value: object, expected: readonly string[]): boolean {
 
 function completeEvidence(evidence: BuilderValidationEvidence, expectedPackages: readonly string[], lock?: BuilderLock): void {
   if (!evidence || evidence.executionSelfTest !== 'passed' || !IMAGE_ID.test(evidence.imageId) || !DIGEST.test(evidence.imageDigest) || /^0+$/u.test(evidence.imageDigest) || evidence.architecture !== 'linux/amd64') throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Builder validation evidence is incomplete or unbound');
+  if (!evidence.operationTool || evidence.operationTool.path !== '/opt/osi-image-builder/operations/osi-image-builder-tool.js' || evidence.operationTool.owner !== '0:0' || evidence.operationTool.mode !== '0555' || evidence.operationTool.user !== 'buildbot' || evidence.operationTool.result !== 'passed') throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Trusted operation tool evidence is incomplete');
   if (lock !== undefined && (evidence.imageDigest !== lock.imageDigest || (lock.imageId !== undefined && evidence.imageId !== `sha256:${lock.imageId}`))) throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Builder validation evidence is bound to a different image');
   if (!/^rustc\s+\d+\.\d+\.\d+/u.test(evidence.rustc) || !/^\d+\.\d+\.\d+/u.test(evidence.llvm) || !/^(?:\d+:)?\d+\.\d+\.\d+/u.test(evidence.polly) || !/^\d+\.\d+/u.test(evidence.zstd) || !/^v22\.\d+\.\d+$/u.test(evidence.node)) throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Toolchain version evidence is not semantic');
   if (!Array.isArray(evidence.packages) || expectedPackages.some((pkg) => !evidence.packages.includes(pkg))) throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Builder validation evidence omits required packages');
@@ -164,7 +166,7 @@ function dockerfileMetadata(contents: string): BuilderSourceMetadata {
 }
 
 export function validateTrustedOperationToolSource(contents: string): void {
-  if (!contents.startsWith('#!/usr/bin/env node\n') || !contents.includes("new Set(['copy-feed-config', 'verify-image', 'mirror-gui'])") || !contents.includes('args.length !== 1') || !contents.includes('FEED_CONFIG_SOURCE') || !contents.includes('GUI_SOURCE') || !contents.includes('IMAGE_DIRECTORY') || contents.includes('process.argv.slice(2).join')) {
+  if (!contents.startsWith('#!/usr/bin/env node\n') || !contents.includes("new Set(['copy-feed-config', 'verify-image', 'mirror-gui'])") || !contents.includes('args.length !== 1') || !contents.includes('feedSource') || !contents.includes('guiSource') || !contents.includes('imageDirectory') || contents.includes('process.argv.slice(2).join')) {
     throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted operation tool is not a closed, fail-closed implementation');
   }
 }
@@ -350,6 +352,32 @@ for spec in x86_64-unknown-linux-gnu:x86_64 aarch64-unknown-linux-musl:aarch64 a
   printf '%s|%s|%s|%s|%s|%s|%s|%s\\n' "$target" "$libdir" "$std" "$(sha256sum "$std" | cut -d' ' -f1)" "$std_arch" "$out" "$(sha256sum "$out" | cut -d' ' -f1)" "$out_arch"
 done`;
 
+const OPERATION_TOOL_SELF_TEST = `set -eu
+tool=/opt/osi-image-builder/operations/osi-image-builder-tool.js
+test "$(id -u)" != 0
+test "$(id -un)" = buildbot
+test -f "$tool"
+test "$(stat -c '%u:%g' "$tool")" = '0:0'
+test "$(stat -c '%a' "$tool")" = '555'
+node --check "$tool"
+rm -rf /workdir/openwrt /workdir/web /workdir/feeds /workdir/feeds.conf.default
+mkdir -p /workdir/openwrt /workdir/web/react-gui/build /workdir/feeds/chirpstack-openwrt-feed/apps/node-red/files
+printf '%s\n' 'src-git local ./feeds/chirpstack-openwrt-feed' > /workdir/feeds.conf.default
+printf '%s\n' '<!doctype html>' > /workdir/web/react-gui/build/index.html
+node "$tool" copy-feed-config >/tmp/osi-operation-tool-self-test.out
+test -s /workdir/openwrt/feeds.conf.default
+node "$tool" mirror-gui >/tmp/osi-operation-tool-self-test.out
+test -s /workdir/feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/index.html
+mkdir -p /workdir/openwrt/bin/targets/self/profile
+truncate -s 67108864 /workdir/openwrt/bin/targets/self/profile/validation.img
+node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out
+rm -rf /workdir/openwrt /workdir/web /workdir/feeds /workdir/feeds.conf.default
+status=0; node "$tool" unknown-operation >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?; test "$status" -eq 2
+for operation in copy-feed-config verify-image mirror-gui; do
+  status=0; node "$tool" "$operation" /unexpected-argument >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?; test "$status" -eq 2
+done
+printf '%s\n' 'trusted operation tool: path owner mode syntax and closed argv surface passed'`;
+
 function dockerErrorMessage(error: unknown): string {
   if (!error || typeof error !== 'object') return 'Docker command failed';
   const value = error as { message?: unknown; stderr?: unknown };
@@ -416,6 +444,7 @@ export async function validateBuiltBuilderImage(imageReference: string, options:
     commands.push(evidenceCommand(argv, result.stdout, result.stderr));
     return result;
   };
+  await run(['/bin/sh', '-c', OPERATION_TOOL_SELF_TEST]);
   for (const [name, argv] of Object.entries({ node: ['node', '--version'], npm: ['npm', '--version'], gcc14: ['gcc-14', '--version'], rustc: ['/usr/bin/rustc', '-vV'], llvm: ['/usr/bin/llvm-config', '--version'], polly: ['dpkg-query', '--show', '--showformat=${Version}', 'libpolly-19-dev'], zstd: ['pkg-config', '--modversion', 'libzstd'] })) {
     const result = await run(argv);
     versions[name] = result.stdout.trim();
@@ -437,7 +466,7 @@ export async function validateBuiltBuilderImage(imageReference: string, options:
     if (fields.length !== 8 || !RUST_TARGETS.includes(fields[0] as (typeof RUST_TARGETS)[number]) || !DIGEST.test(fields[3]!) || !DIGEST.test(fields[6]!)) throw new BuilderValidationError('RUST_BOOTSTRAP_UNAVAILABLE', 'Rust target validation evidence is malformed');
     return { target: fields[0] as (typeof RUST_TARGETS)[number], standardLibraryPath: fields[2]!, standardLibrarySha256: fields[3]!, standardLibraryArchitecture: fields[4]!, compileArtifact: fields[5]!, compileSha256: fields[6]!, compileArchitecture: fields[7]!, result: 'passed' as const };
   });
-  const evidence: BuilderValidationEvidence = { imageId: image.Id, imageDigest, architecture: 'linux/amd64', rustc: versions.rustc!, llvm: systemLines[0]!, polly: packageVersions['libpolly-19-dev']!, zstd: packageVersions['libzstd-dev']!, node: versions.node!, packages: ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev'], packageVersions, commands, rustTargets, executionSelfTest: 'passed' };
+  const evidence: BuilderValidationEvidence = { imageId: image.Id, imageDigest, architecture: 'linux/amd64', rustc: versions.rustc!, llvm: systemLines[0]!, polly: packageVersions['libpolly-19-dev']!, zstd: packageVersions['libzstd-dev']!, node: versions.node!, packages: ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev'], packageVersions, commands, rustTargets, operationTool: { path: '/opt/osi-image-builder/operations/osi-image-builder-tool.js', owner: '0:0', mode: '0555', user: 'buildbot', result: 'passed' }, executionSelfTest: 'passed' };
   completeEvidence(evidence, evidence.packages);
   return { imageId: image.Id, selfTest: 'passed', versions, evidence };
 }

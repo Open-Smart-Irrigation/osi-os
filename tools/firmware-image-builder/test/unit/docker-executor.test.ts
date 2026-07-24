@@ -573,7 +573,7 @@ describe('DockerExecutor', () => {
     const docker = fakeDocker(responses);
     const writes: Array<{ kind: string; lifecycle?: string }> = [];
     const ownership = { runnerWrite: vi.fn((command: { kind: string; lifecycle?: string }) => { writes.push(command); return { ok: true }; }) };
-    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof CommandExecutionError) && error.errors.some((cause) => cause instanceof AggregateError));
+    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof CommandExecutionError) && error.errors.length >= 3);
     expect(writes.filter((write) => write.lifecycle !== undefined).map((write) => write.lifecycle)).toEqual(['created']);
     expect(docker.calls.some((call) => call[1] === 'rm')).toBe(false);
     expect(writes.some((write) => write.kind === 'operation-complete')).toBe(false);
@@ -587,7 +587,7 @@ describe('DockerExecutor', () => {
     const docker = fakeDocker(responses);
     const writes: RunnerWriteCommand[] = [];
     const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }), getJob: vi.fn(() => emptyIdentityForTest()) };
-    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof CommandExecutionError) && error.errors.some((cause) => cause instanceof AggregateError));
+    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof CommandExecutionError) && error.errors.length >= 3);
     expect(docker.calls.some((call) => call[1] === 'rm')).toBe(false);
     expect(writes.map((command) => command.kind)).toEqual(['operation-begin', 'container']);
   });
@@ -601,7 +601,7 @@ describe('DockerExecutor', () => {
     const docker = fakeDocker(responses);
     const writes: RunnerWriteCommand[] = [];
     const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }), getJob: vi.fn(() => emptyIdentityForTest()) };
-    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof CommandExecutionError) && error.errors.some((cause) => cause instanceof AggregateError));
+    await expect(createDockerExecutor(options(docker, { ownership })).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof CommandExecutionError) && error.errors.length >= 3);
     expect(docker.calls.some((call) => call[1] === 'rm')).toBe(false);
     expect(writes.map((command) => command.kind)).toEqual(['operation-begin', 'container']);
   });
@@ -617,6 +617,50 @@ describe('DockerExecutor', () => {
     const result = await createDockerExecutor(options(docker, { ownership })).run();
     expect(result).toMatchObject({ available: true, outcome: 'failed' });
     expect(writes.filter((command): command is Extract<RunnerWriteCommand, { kind: 'container' }> => command.kind === 'container').map((command) => command.lifecycle)).toEqual(['created', 'stopped']);
+  });
+
+  it('allows a failed stop when a later exact inspect proves the container stopped', async () => {
+    const running = { ...realisticRawInspection(), State: { Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
+    const stopped = { ...realisticRawInspection(), State: { Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:08.000000000Z', ExitCode: 143 } };
+    const responses = successfulResponses({ timedOut: true, exitCode: null });
+    responses[5] = { exitCode: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' };
+    responses.splice(6, 4, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'stop failed' }, { stdout: JSON.stringify(stopped) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' });
+    const docker = fakeDocker(responses);
+    const result = await createDockerExecutor(options(docker)).run();
+    expect(result).toMatchObject({ available: true, outcome: 'failed' });
+    expect(docker.calls.some((call) => call[1] === 'kill')).toBe(false);
+  });
+
+  it('rejects an apparent successful exit when Docker proves the container never started', async () => {
+    const stopped = { ...realisticRawInspection(), State: { Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 0 } };
+    const responses = successfulResponses({ exitCode: 0 });
+    responses[4] = { stdout: JSON.stringify(stopped) };
+    responses[6] = { stdout: JSON.stringify(stopped) };
+    const docker = fakeDocker(responses);
+    const result = await createDockerExecutor(options(docker)).run();
+    expect(result).toMatchObject({ available: true, outcome: 'failed' });
+  });
+
+  it('rejects a successful operation when Docker exit code differs from attach result', async () => {
+    const stopped = { ...realisticRawInspection(), State: { Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:02.500000000Z', ExitCode: 7 } };
+    const responses = successfulResponses({ exitCode: 0 });
+    responses[4] = { stdout: JSON.stringify(stopped) };
+    responses[6] = { stdout: JSON.stringify(stopped) };
+    const docker = fakeDocker(responses);
+    const result = await createDockerExecutor(options(docker)).run();
+    expect(result).toMatchObject({ available: true, outcome: 'failed' });
+  });
+
+  it.each([
+    ['created-after-started', { Created: '2026-07-24T10:00:03.000000000Z', State: { Running: false, StartedAt: '2026-07-24T10:00:01.000000000Z', FinishedAt: '2026-07-24T10:00:02.000000000Z', ExitCode: 0 } }],
+    ['finished-before-started', { Created: '2026-07-24T10:00:00.000000000Z', State: { Running: false, StartedAt: '2026-07-24T10:00:03.000000000Z', FinishedAt: '2026-07-24T10:00:02.000000000Z', ExitCode: 0 } }],
+  ] as const)('rejects invalid Docker lifecycle chronology: %s', (_name, raw) => {
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { stdout: '' }, { stdout: `${'1'.repeat(64)}\n` }, { stdout: JSON.stringify({ ...realisticRawInspection(), ...raw }) },
+    ]);
+    return expect(createDockerExecutor(options(docker)).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof DockerLifecycleError));
   });
 
   it('recovers an observer failure with its real command result and records a failed operation only after stop proof', async () => {
