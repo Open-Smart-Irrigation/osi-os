@@ -744,6 +744,31 @@ describe('DockerExecutor', () => {
     expect(writes.find((write): write is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => write.kind === 'operation-complete')?.input).toMatchObject({ errorCode: 'DOCKER_EXECUTION_DEFINITION_MISMATCH', error: { code: 'DOCKER_EXECUTION_DEFINITION_MISMATCH' } });
   });
 
+  it('accounts for a real Docker created-state exec failure with exit 127', async () => {
+    const failedCreated = realisticCreatedRawInspection();
+    failedCreated.State = {
+      Status: 'created',
+      Running: false,
+      ExitCode: 127,
+      Error: 'OCI runtime exec failed: exec failed: unable to start container process: exec: "node": executable file not found in $PATH: unknown',
+      StartedAt: '0001-01-01T00:00:00Z',
+      FinishedAt: '0001-01-01T00:00:00Z',
+    };
+    const responses = successfulResponses({ exitCode: 127 });
+    responses[5] = { exitCode: 127, signal: null, stdout: '', stderr: 'exec: "node": executable file not found in $PATH', timedOut: false, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:01.100Z' };
+    responses[6] = { stdout: JSON.stringify(failedCreated) };
+    const docker = fakeDocker(responses);
+    const writes: RunnerWriteCommand[] = [];
+    const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
+    const result = await createDockerExecutor(options(docker, { ownership })).run();
+    expect(result).toMatchObject({ available: true, outcome: 'failed', exitCode: 127, mutationCount: 4 });
+    expect(writes.map((write) => write.kind)).toEqual(['operation-begin', 'container', 'operation-complete', 'operation-cleanup']);
+    expect(writes.filter((write): write is Extract<RunnerWriteCommand, { kind: 'container' }> => write.kind === 'container').map((write) => write.lifecycle)).toEqual(['created']);
+    const completion = writes.find((write): write is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => write.kind === 'operation-complete');
+    expect(completion?.input).toMatchObject({ lifecyclePhase: 'created', outcome: 'failed', errorCode: 'DOCKER_EXECUTION_DEFINITION_MISMATCH' });
+    expect(writes.some((write) => write.kind === 'operation-cleanup')).toBe(true);
+  });
+
   it('rejects a successful operation when Docker exit code differs from attach result', async () => {
     const stopped = { ...realisticRawInspection(), State: { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:02.500000000Z', ExitCode: 7 } };
     const responses = successfulResponses({ exitCode: 0 });

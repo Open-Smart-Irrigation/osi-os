@@ -399,7 +399,7 @@ function validateInspection(actual: DockerInspection, createdId: string, image: 
   } else if (actual.running) {
     if (actual.status !== 'running' || actual.startedAt === null || actual.finishedAt !== null) fail('running Docker inspection is incoherent');
   } else if (actual.status === 'created') {
-    if (actual.startedAt !== null || actual.finishedAt !== null || (actual.exitCode !== null && actual.exitCode !== 0)) fail('created Docker inspection shows execution evidence');
+    if (actual.startedAt !== null || actual.finishedAt !== null) fail('created Docker inspection shows execution evidence');
   } else if (actual.status !== 'exited' || actual.startedAt === null || actual.finishedAt === null || actual.exitCode === null) {
     fail('stopped Docker inspection lacks coherent execution evidence');
   }
