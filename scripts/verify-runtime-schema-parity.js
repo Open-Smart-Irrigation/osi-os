@@ -36,6 +36,14 @@ const MIGRATION_OWNED_TRIGGERS = new Map([
     'trg_sync_zone_irrigation_calibration_outbox_au',
     '0036__zone_irrigation_calibration_sync.sql',
   ],
+  [
+    'trg_sync_weather_station_zone_state_defaults_ai',
+    '0038__weather_station_zone_sync.sql',
+  ],
+  [
+    'trg_sync_weather_station_zones_outbox_au',
+    '0038__weather_station_zone_sync.sql',
+  ],
 ]);
 
 function q(db, sql) {

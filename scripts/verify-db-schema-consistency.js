@@ -418,6 +418,12 @@ const schemaContract = {
     'deleted_at',
     'last_applied_at',
   ],
+  weather_station_zone_state: [
+    'deveui',
+    'sync_version',
+    'last_applied_at',
+    'updated_at',
+  ],
   lsn50_shadow_diff: [
     'id',
     'deveui',
