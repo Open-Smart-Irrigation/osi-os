@@ -77,6 +77,17 @@ Zone deletion. The base version is the live edge version observed before the
 delete. The command carries a tombstone whose target version is exactly one
 greater than that base.
 
+### `schedule:{zone_uuid}:{base_sync_version}`
+
+Protected schedule upserts. A missing schedule is version `0`; later commands
+replace the exact edge-confirmed version. The target version is always the base
+plus one.
+
+### `irrigation_calibration:{zone_uuid}:{base_sync_version}`
+
+Protected zone irrigation-calibration upserts. Calibration is versioned
+independently from the zone and schedule. A missing calibration is version `0`.
+
 ## Normalization
 
 - `device_eui` is uppercase EUI-64 with no separators.
@@ -92,9 +103,10 @@ greater than that base.
 
 - Force-sync replay must preserve the original `effect_key` from the source command.
 - Two non-journal commands sharing an `effect_key` are deduplicated to a single
-  applied effect, regardless of `command_id`. Zone commands additionally
-  require the same gateway-bound canonical intent hash; a changed payload at
-  the same base reaches the applier and returns a version conflict.
+  applied effect, regardless of `command_id`. Zone and irrigation-config
+  commands additionally require the same gateway-bound canonical intent hash;
+  a changed payload at the same base reaches the applier and returns a version
+  conflict.
 - `command_id` still identifies one delivery record. Retrying that record preserves both `command_id` and `effect_key`; recreating a delivery for the same versioned journal mutation changes `command_id` but preserves `effect_key`.
 
 Journal effect-key replay also requires an exact `submittedIntentHash` match. The
@@ -113,7 +125,8 @@ current aggregate exists, `currentPayloadHash` describes that edge state.
 ## Versioned resource binding enforcement
 
 The command schema's `x-semantic-bindings` object is executable contract
-metadata. Journal, scoped-access, and protected zone commands are valid only
+metadata. Journal, scoped-access, protected zone, and protected
+irrigation-config commands are valid only
 when the effect-key prefix, UUID segment, and unpadded version segment equal the
 referenced payload fields. Pattern matching alone is insufficient.
 

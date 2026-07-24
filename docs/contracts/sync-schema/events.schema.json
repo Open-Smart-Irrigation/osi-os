@@ -12,7 +12,8 @@
         "USER_ZONE_ASSIGNMENT_UPSERTED": {"aggregate_key_path": "payload.assignment_uuid", "sync_version_path": "payload.sync_version"},
         "USER_ZONE_ASSIGNMENT_DELETED": {"aggregate_key_path": "payload.assignment_uuid", "sync_version_path": "payload.sync_version"},
         "USER_PLOT_ASSIGNMENT_UPSERTED": {"aggregate_key_path": "payload.assignment_uuid", "sync_version_path": "payload.sync_version"},
-        "USER_PLOT_ASSIGNMENT_DELETED": {"aggregate_key_path": "payload.assignment_uuid", "sync_version_path": "payload.sync_version"}
+        "USER_PLOT_ASSIGNMENT_DELETED": {"aggregate_key_path": "payload.assignment_uuid", "sync_version_path": "payload.sync_version"},
+        "ZONE_IRRIGATION_CALIBRATION_UPSERTED": {"aggregate_key_path": "payload.zone_uuid", "sync_version_path": "payload.sync_version"}
     },
     "type": "object",
     "required": ["eventUuid", "aggregateType", "aggregateKey", "op", "syncVersion", "payload"],
@@ -52,6 +53,7 @@
                 "ZONE_LOCATION_UPSERTED",
                 "ZONE_RECOMMENDATION_UPSERTED",
                 "ZONE_UPSERTED",
+                "ZONE_IRRIGATION_CALIBRATION_UPSERTED",
                 "JOURNAL_ENTRY_UPSERTED",
                 "JOURNAL_ENTRY_VOIDED",
                 "JOURNAL_VOCAB_UPSERTED",
@@ -180,6 +182,19 @@
                     "aggregateType": {"const": "JOURNAL_PLOT_GROUP"},
                     "aggregateKey": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
                     "payload": {"$ref": "resources.schema.json#/definitions/JournalPlotGroupAggregate"}
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {"op": {"const": "ZONE_IRRIGATION_CALIBRATION_UPSERTED"}},
+                "required": ["op"]
+            },
+            "then": {
+                "properties": {
+                    "aggregateType": {"const": "IRRIGATION_CALIBRATION"},
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+                    "payload": {"$ref": "resources.schema.json#/definitions/IrrigationCalibrationDesiredState"}
                 }
             }
         }

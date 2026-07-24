@@ -19,7 +19,7 @@ const SEPARATE_ROUTE_SPECS = [
         applierName: 'Apply Work Request Status',
     },
 ];
-const EXACT_STAGED_COMMANDS = [];
+const EXACT_STAGED_COMMANDS = ['UPSERT_ZONE_IRRIGATION_CALIBRATION'];
 const EXACT_EDGE_DEFERRED_COMMANDS = [...EXACT_STAGED_COMMANDS];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
@@ -67,6 +67,12 @@ const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     DELETE_ZONE: {
         effect_key: { prefix: 'zone_delete', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
     },
+    UPSERT_SCHEDULE: {
+        effect_key: { prefix: 'schedule', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_ZONE_IRRIGATION_CALIBRATION: {
+        effect_key: { prefix: 'irrigation_calibration', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
 };
 const EXACT_EVENT_SEMANTIC_BINDINGS = {
     JOURNAL_ENTRY_UPSERTED: { aggregate_key_path: 'payload.entry_uuid', sync_version_path: 'payload.sync_version' },
@@ -79,6 +85,7 @@ const EXACT_EVENT_SEMANTIC_BINDINGS = {
     USER_ZONE_ASSIGNMENT_DELETED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
     USER_PLOT_ASSIGNMENT_UPSERTED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
     USER_PLOT_ASSIGNMENT_DELETED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
+    ZONE_IRRIGATION_CALIBRATION_UPSERTED: { aggregate_key_path: 'payload.zone_uuid', sync_version_path: 'payload.sync_version' },
 };
 
 function loadSchema(name) {
@@ -230,6 +237,7 @@ function verifyGoldenFixture(commandSchema, eventsSchema) {
         'command_ack_results_v1',
         'desired_state_conflicts_v1',
         'journal_sync_v1',
+        'irrigation_config_desired_state_v1',
         'scoped_access_commands_v1',
         'scoped_access_sync_v1',
         'zone_desired_state_v1',

@@ -47,6 +47,12 @@
         },
         "DELETE_ZONE": {
             "effect_key": {"prefix": "zone_delete", "uuid_path": "zone_uuid", "version_path": "base_sync_version"}
+        },
+        "UPSERT_SCHEDULE": {
+            "effect_key": {"prefix": "schedule", "uuid_path": "zone_uuid", "version_path": "base_sync_version"}
+        },
+        "UPSERT_ZONE_IRRIGATION_CALIBRATION": {
+            "effect_key": {"prefix": "irrigation_calibration", "uuid_path": "zone_uuid", "version_path": "base_sync_version"}
         }
     },
     "type": "object",
@@ -95,6 +101,7 @@
                 "UPSERT_DEVICE_SOIL_DEPTHS",
                 "UPDATE_SCHEDULE",
                 "UPSERT_SCHEDULE",
+                "UPSERT_ZONE_IRRIGATION_CALIBRATION",
                 "WORK_REQUEST_STATUS",
                 "UPSERT_JOURNAL_ENTRY",
                 "VOID_JOURNAL_ENTRY",
@@ -141,7 +148,9 @@
         "zone_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
         "gateway_device_eui": {"$ref": "resources.schema.json#/definitions/Eui64"},
         "target_sync_version": {"type": "integer", "minimum": 1},
-        "zone": {}
+        "zone": {},
+        "schedule": {"$ref": "resources.schema.json#/definitions/IrrigationScheduleDesiredState"},
+        "irrigation_calibration": {"$ref": "resources.schema.json#/definitions/IrrigationCalibrationDesiredState"}
     },
     "allOf": [
         {
@@ -163,7 +172,9 @@
                             "UPSERT_ZONE",
                             "DELETE_ZONE",
                             "UPSERT_ZONE_CONFIG",
-                            "UPSERT_ZONE_LOCATION"
+                            "UPSERT_ZONE_LOCATION",
+                            "UPSERT_SCHEDULE",
+                            "UPSERT_ZONE_IRRIGATION_CALIBRATION"
                         ]
                     }
                 },
@@ -190,7 +201,9 @@
                             "UPSERT_ZONE",
                             "DELETE_ZONE",
                             "UPSERT_ZONE_CONFIG",
-                            "UPSERT_ZONE_LOCATION"
+                            "UPSERT_ZONE_LOCATION",
+                            "UPSERT_SCHEDULE",
+                            "UPSERT_ZONE_IRRIGATION_CALIBRATION"
                         ]
                     }
                 },
@@ -478,6 +491,65 @@
                         "pattern": "^zone_delete:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
                     },
                     "zone": {"$ref": "resources.schema.json#/definitions/ZoneDeleteState"}
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {"command_type": {"const": "UPSERT_SCHEDULE"}},
+                "required": ["command_type"],
+                "anyOf": [
+                    {"required": ["effect_key"]},
+                    {"required": ["base_sync_version"]},
+                    {"required": ["target_sync_version"]},
+                    {"required": ["schedule"]}
+                ]
+            },
+            "then": {
+                "required": [
+                    "effect_key", "zone_uuid", "gateway_device_eui",
+                    "base_sync_version", "target_sync_version", "schedule"
+                ],
+                "propertyNames": {
+                    "enum": [
+                        "command_id", "command_type", "effect_key", "zone_uuid",
+                        "gateway_device_eui", "base_sync_version",
+                        "target_sync_version", "schedule"
+                    ]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^schedule:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+                    },
+                    "schedule": {"$ref": "resources.schema.json#/definitions/IrrigationScheduleDesiredState"}
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {"command_type": {"const": "UPSERT_ZONE_IRRIGATION_CALIBRATION"}},
+                "required": ["command_type"]
+            },
+            "then": {
+                "required": [
+                    "effect_key", "zone_uuid", "gateway_device_eui",
+                    "base_sync_version", "target_sync_version",
+                    "irrigation_calibration"
+                ],
+                "propertyNames": {
+                    "enum": [
+                        "command_id", "command_type", "effect_key", "zone_uuid",
+                        "gateway_device_eui", "base_sync_version",
+                        "target_sync_version", "irrigation_calibration"
+                    ]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^irrigation_calibration:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+                    },
+                    "irrigation_calibration": {"$ref": "resources.schema.json#/definitions/IrrigationCalibrationDesiredState"}
                 }
             }
         }

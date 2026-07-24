@@ -56,6 +56,18 @@ Uppercase, no separators. Example: `0016C001F11715E2`. EUI-48 input is expanded 
 ### Booleans
 `true` and `false` lowercase, as standard JSON.
 
+### Irrigation configuration
+
+Protected schedule payloads use numeric `enabled` (`0` or `1`) because that is
+the persisted edge representation. Trigger metrics are limited to `SWT_WM1`,
+`SWT_WM2`, `SWT_AVG`, `SWT_1`, `SWT_2`, `SWT_3`, and `DENDRO`.
+`last_triggered_at` is runtime state and is not part of desired state.
+
+Protected calibration payloads carry a positive finite
+`measured_flow_rate_lpm`, a method no longer than 200 characters, and a
+canonical `measured_at`. `valve_device_eui` is edge-local and is never
+overwritten by cloud desired state.
+
 ## Test Vectors
 
 The following pairs are normative. A runtime is conformant if its hash matches the expected value for every input.

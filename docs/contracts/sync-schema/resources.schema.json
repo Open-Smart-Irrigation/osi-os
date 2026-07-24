@@ -170,6 +170,49 @@
                 "deleted_at": {"type": ["string", "null"], "format": "date-time"}
             }
         },
+        "IrrigationScheduleDesiredState": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "contract_version", "zone_uuid", "gateway_device_eui",
+                "trigger_metric", "threshold_kpa", "enabled",
+                "duration_minutes", "response_mode", "sync_version",
+                "deleted_at", "last_applied_at"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "zone_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "trigger_metric": {"type": "string", "enum": ["SWT_WM1", "SWT_WM2", "SWT_AVG", "SWT_1", "SWT_2", "SWT_3", "DENDRO"]},
+                "threshold_kpa": {"type": "number"},
+                "enabled": {"type": "integer", "enum": [0, 1]},
+                "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 240},
+                "response_mode": {"type": "string", "enum": ["proportional", "fixed", "aggressive"]},
+                "sync_version": {"type": "integer", "minimum": 1},
+                "deleted_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "last_applied_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"}
+            }
+        },
+        "IrrigationCalibrationDesiredState": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "contract_version", "zone_uuid", "gateway_device_eui",
+                "measured_flow_rate_lpm", "measurement_method", "measured_at",
+                "sync_version", "deleted_at", "last_applied_at"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "zone_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "measured_flow_rate_lpm": {"type": "number", "minimum": 0, "not": {"const": 0}},
+                "measurement_method": {"type": "string", "minLength": 1, "maxLength": 200},
+                "measured_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "sync_version": {"type": "integer", "minimum": 1},
+                "deleted_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "last_applied_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"}
+            }
+        },
         "ScopedUser": {
             "type": "object",
             "required": ["user_uuid", "username", "role", "disabled_at", "sync_version", "gateway_device_eui"],

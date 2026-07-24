@@ -30,10 +30,15 @@ const ZONE_COMMANDS = [
     'UPSERT_ZONE_CONFIG',
     'UPSERT_ZONE_LOCATION',
 ];
+const IRRIGATION_CONFIG_COMMANDS = [
+    'UPSERT_SCHEDULE',
+    'UPSERT_ZONE_IRRIGATION_CALIBRATION',
+];
 const DEVICE_EUI_EXEMPT_COMMANDS = [
     ...JOURNAL_COMMANDS,
     ...SCOPED_ACCESS_COMMANDS,
     ...ZONE_COMMANDS,
+    ...IRRIGATION_CONFIG_COMMANDS,
 ];
 const JOURNAL_EVENT_BINDINGS = {
     JOURNAL_ENTRY_UPSERTED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
@@ -95,6 +100,12 @@ const EXPECTED_COMMAND_SEMANTIC_BINDINGS = {
     DELETE_ZONE: {
         effect_key: { prefix: 'zone_delete', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
     },
+    UPSERT_SCHEDULE: {
+        effect_key: { prefix: 'schedule', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_ZONE_IRRIGATION_CALIBRATION: {
+        effect_key: { prefix: 'irrigation_calibration', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
 };
 const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
     ...Object.fromEntries(Object.entries(JOURNAL_EVENT_BINDINGS).map(([op, binding]) => [op, {
@@ -119,6 +130,10 @@ const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
     },
     USER_PLOT_ASSIGNMENT_DELETED: {
         aggregate_key_path: 'payload.assignment_uuid',
+        sync_version_path: 'payload.sync_version',
+    },
+    ZONE_IRRIGATION_CALIBRATION_UPSERTED: {
+        aggregate_key_path: 'payload.zone_uuid',
         sync_version_path: 'payload.sync_version',
     },
 };
@@ -459,12 +474,36 @@ function semanticBindingErrors(schema, value) {
     const discriminator = value && (value.command_type || value.op);
     const binding = bindings && bindings[discriminator];
     if (!binding) return errors;
+    if (IRRIGATION_CONFIG_COMMANDS.includes(discriminator) &&
+        !['effect_key', 'base_sync_version', 'target_sync_version', 'schedule',
+            'irrigation_calibration'].some((key) =>
+            Object.prototype.hasOwnProperty.call(value, key))) {
+        return errors;
+    }
     if (binding.effect_key) {
         const uuid = valueAtPath(value, binding.effect_key.uuid_path);
         const version = valueAtPath(value, binding.effect_key.version_path);
         const expected = `${binding.effect_key.prefix}:${uuid}:${version}`;
         if (value.effect_key !== expected) {
             errors.push(`$.effect_key: must equal ${expected}`);
+        }
+        if (IRRIGATION_CONFIG_COMMANDS.includes(discriminator)) {
+            const target = value.target_sync_version;
+            const resource = discriminator === 'UPSERT_SCHEDULE'
+                ? value.schedule
+                : value.irrigation_calibration;
+            if (target !== version + 1) {
+                errors.push('$.target_sync_version: must equal base_sync_version + 1');
+            }
+            if (resource && resource.zone_uuid !== uuid) {
+                errors.push('$.zone_uuid: must equal desired-state zone_uuid');
+            }
+            if (resource && resource.gateway_device_eui !== value.gateway_device_eui) {
+                errors.push('$.gateway_device_eui: must equal desired-state gateway_device_eui');
+            }
+            if (resource && resource.sync_version !== target) {
+                errors.push('$.target_sync_version: must equal desired-state sync_version');
+            }
         }
     }
     if (binding.aggregate_key_path) {
@@ -978,8 +1017,12 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
 } else {
     staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
     const exactStaging = staging && staging.version === 1 &&
-        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify([]) &&
+        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([
+            'UPSERT_ZONE_IRRIGATION_CALIBRATION',
+        ]) &&
+        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify([
+            'UPSERT_ZONE_IRRIGATION_CALIBRATION',
+        ]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',
             'JOURNAL_ENTRY_VOIDED',
@@ -988,8 +1031,10 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([]);
-    reportCheck(exactStaging, 'staging manifest records active journal and scoped access', 'staging manifest drifted from the active journal and scoped-access rollout');
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([
+            'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
+        ]);
+    reportCheck(exactStaging, 'staging manifest records irrigation calibration rollout', 'staging manifest drifted from the reviewed irrigation calibration rollout');
 }
 
 const scopedUserCommand = {
@@ -1175,6 +1220,249 @@ expectInvalid(
     },
     /effect_key.*(?:equal|match)/,
     cmdSchema
+);
+
+const scheduleDesiredState = {
+    contract_version: 1,
+    zone_uuid: UUID,
+    gateway_device_eui: '0123456789ABCDEF',
+    trigger_metric: 'SWT_1',
+    threshold_kpa: 35.5,
+    enabled: 1,
+    duration_minutes: 20,
+    response_mode: 'proportional',
+    sync_version: 1,
+    deleted_at: null,
+    last_applied_at: null,
+};
+const scheduleUpsertCommand = {
+    command_id: UUID,
+    command_type: 'UPSERT_SCHEDULE',
+    effect_key: `schedule:${UUID}:0`,
+    zone_uuid: UUID,
+    gateway_device_eui: '0123456789ABCDEF',
+    base_sync_version: 0,
+    target_sync_version: 1,
+    schedule: scheduleDesiredState,
+};
+const calibrationDesiredState = {
+    contract_version: 1,
+    zone_uuid: UUID,
+    gateway_device_eui: '0123456789ABCDEF',
+    measured_flow_rate_lpm: 12.5,
+    measurement_method: 'Timed bucket test',
+    measured_at: '2026-07-24T10:00:00.000Z',
+    sync_version: 1,
+    deleted_at: null,
+    last_applied_at: null,
+};
+const calibrationUpsertCommand = {
+    command_id: UUID,
+    command_type: 'UPSERT_ZONE_IRRIGATION_CALIBRATION',
+    effect_key: `irrigation_calibration:${UUID}:0`,
+    zone_uuid: UUID,
+    gateway_device_eui: '0123456789ABCDEF',
+    base_sync_version: 0,
+    target_sync_version: 1,
+    irrigation_calibration: calibrationDesiredState,
+};
+expectValid(
+    'UPSERT_SCHEDULE protected desired-state command',
+    cmdSchema,
+    scheduleUpsertCommand,
+    cmdSchema
+);
+expectValid(
+    'UPSERT_SCHEDULE legacy device command remains accepted',
+    cmdSchema,
+    {
+        command_id: UUID,
+        command_type: 'UPSERT_SCHEDULE',
+        device_eui: '0123456789ABCDEF',
+        zone_id: 12,
+        duration_minutes: 20,
+    },
+    cmdSchema
+);
+expectValid(
+    'UPSERT_ZONE_IRRIGATION_CALIBRATION protected desired-state command',
+    cmdSchema,
+    calibrationUpsertCommand,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_SCHEDULE rejects non-consecutive target version',
+    cmdSchema,
+    { ...scheduleUpsertCommand, target_sync_version: 2 },
+    /target_sync_version.*base_sync_version/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_SCHEDULE rejects unsupported edge metric',
+    cmdSchema,
+    {
+        ...scheduleUpsertCommand,
+        schedule: { ...scheduleDesiredState, trigger_metric: 'VWC' },
+    },
+    /trigger_metric.*enum/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_SCHEDULE rejects wrong desired-state gateway',
+    cmdSchema,
+    {
+        ...scheduleUpsertCommand,
+        schedule: {
+            ...scheduleDesiredState,
+            gateway_device_eui: 'FFFFFFFFFFFFFFFF',
+        },
+    },
+    /gateway_device_eui.*desired-state/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_SCHEDULE rejects wrong desired-state UUID',
+    cmdSchema,
+    {
+        ...scheduleUpsertCommand,
+        zone_uuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        effect_key: 'schedule:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:0',
+    },
+    /zone_uuid.*desired-state/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_SCHEDULE rejects non-finite threshold',
+    cmdSchema,
+    {
+        ...scheduleUpsertCommand,
+        schedule: { ...scheduleDesiredState, threshold_kpa: Infinity },
+    },
+    /threshold_kpa.*type number/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_SCHEDULE rejects invalid duration',
+    cmdSchema,
+    {
+        ...scheduleUpsertCommand,
+        schedule: { ...scheduleDesiredState, duration_minutes: 0 },
+    },
+    /duration_minutes.*minimum/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_SCHEDULE rejects invalid response mode',
+    cmdSchema,
+    {
+        ...scheduleUpsertCommand,
+        schedule: { ...scheduleDesiredState, response_mode: 'adaptive' },
+    },
+    /response_mode.*enum/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_SCHEDULE rejects camel-case protected envelope fields',
+    cmdSchema,
+    {
+        command_id: UUID,
+        command_type: 'UPSERT_SCHEDULE',
+        effectKey: `schedule:${UUID}:0`,
+        zone_uuid: UUID,
+        gateway_device_eui: '0123456789ABCDEF',
+        baseSyncVersion: 0,
+        targetSyncVersion: 1,
+        schedule: scheduleDesiredState,
+    },
+    /effectKey.*(?:forbidden|property)/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_SCHEDULE rejects unknown desired-state fields',
+    cmdSchema,
+    {
+        ...scheduleUpsertCommand,
+        schedule: { ...scheduleDesiredState, last_triggered_at: null },
+    },
+    /last_triggered_at.*(?:forbidden|property)/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_ZONE_IRRIGATION_CALIBRATION rejects non-positive rate',
+    cmdSchema,
+    {
+        ...calibrationUpsertCommand,
+        irrigation_calibration: {
+            ...calibrationDesiredState,
+            measured_flow_rate_lpm: 0,
+        },
+    },
+    /measured_flow_rate_lpm/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_ZONE_IRRIGATION_CALIBRATION rejects non-finite rate',
+    cmdSchema,
+    {
+        ...calibrationUpsertCommand,
+        irrigation_calibration: {
+            ...calibrationDesiredState,
+            measured_flow_rate_lpm: NaN,
+        },
+    },
+    /measured_flow_rate_lpm.*type number/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_ZONE_IRRIGATION_CALIBRATION rejects non-canonical timestamp',
+    cmdSchema,
+    {
+        ...calibrationUpsertCommand,
+        irrigation_calibration: {
+            ...calibrationDesiredState,
+            measured_at: '2026-07-24T10:00:00Z',
+        },
+    },
+    /measured_at.*match/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_ZONE_IRRIGATION_CALIBRATION rejects an unknown field',
+    cmdSchema,
+    {
+        ...calibrationUpsertCommand,
+        irrigation_calibration: {
+            ...calibrationDesiredState,
+            valve_device_eui: '0123456789ABCDEF',
+        },
+    },
+    /valve_device_eui.*(?:forbidden|property)/,
+    cmdSchema
+);
+const calibrationEvent = {
+    eventUuid: UUID,
+    aggregateType: 'IRRIGATION_CALIBRATION',
+    aggregateKey: UUID,
+    op: 'ZONE_IRRIGATION_CALIBRATION_UPSERTED',
+    syncVersion: 1,
+    occurredAt: '2026-07-24T10:01:00.000Z',
+    payload: calibrationDesiredState,
+};
+expectValid(
+    'ZONE_IRRIGATION_CALIBRATION_UPSERTED canonical event',
+    eventsSchema,
+    calibrationEvent,
+    eventsSchema
+);
+expectInvalid(
+    'ZONE_IRRIGATION_CALIBRATION_UPSERTED rejects mismatched aggregate key',
+    eventsSchema,
+    {
+        ...calibrationEvent,
+        aggregateKey: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    },
+    /aggregateKey.*payload.zone_uuid/,
+    eventsSchema
 );
 
 const journalEntry = {

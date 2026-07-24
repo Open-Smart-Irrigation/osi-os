@@ -602,6 +602,14 @@ fetch_required "osi-zone-commands index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-commands/index.js" \
     "/srv/node-red/osi-zone-commands/index.js"
 
+fetch_required "osi-irrigation-config-commands package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-config-commands/package.json" \
+    "/srv/node-red/osi-irrigation-config-commands/package.json"
+
+fetch_required "osi-irrigation-config-commands index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-config-commands/index.js" \
+    "/srv/node-red/osi-irrigation-config-commands/index.js"
+
 fetch_required "osi-dendro-analytics package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-analytics/package.json" \
     "/srv/node-red/osi-dendro-analytics/package.json"

@@ -66,6 +66,13 @@ function isZoneCommandType(type) {
   ].includes(type);
 }
 
+function isIrrigationConfigCommandType(type) {
+  return [
+    'UPSERT_SCHEDULE',
+    'UPSERT_ZONE_IRRIGATION_CALIBRATION',
+  ].includes(type);
+}
+
 function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -194,6 +201,43 @@ function validNonJournalEffectBinding(envelope, runtime) {
     const prefix = type === 'DELETE_ZONE' ? 'zone_delete' : 'zone';
     return effectKey === prefix + ':' + zoneUuid + ':' + base;
   }
+  if (isIrrigationConfigCommandType(type)) {
+    const zoneUuid = String(payload.zone_uuid || '').trim().toLowerCase();
+    const base = payload.base_sync_version;
+    const target = payload.target_sync_version;
+    const scheduleType = type === 'UPSERT_SCHEDULE';
+    const resource = scheduleType
+      ? payload.schedule
+      : payload.irrigation_calibration;
+    const runtimeGateway = String(
+      runtime.gateway_device_eui || ''
+    ).trim().toUpperCase();
+    const payloadGateway = String(
+      payload.gateway_device_eui || ''
+    ).trim().toUpperCase();
+    const resourceGateway = String(
+      resource && resource.gateway_device_eui || ''
+    ).trim().toUpperCase();
+    if (!/^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(zoneUuid) ||
+        !/^[0-9A-F]{16}$/.test(runtimeGateway) ||
+        payloadGateway !== runtimeGateway ||
+        resourceGateway !== runtimeGateway ||
+        !Number.isSafeInteger(base) ||
+        base < 0 ||
+        !Number.isSafeInteger(target) ||
+        target !== base + 1 ||
+        !resource ||
+        typeof resource !== 'object' ||
+        Array.isArray(resource) ||
+        String(resource.zone_uuid || '').trim().toLowerCase() !== zoneUuid ||
+        resource.sync_version !== target) {
+      return false;
+    }
+    const prefix = scheduleType
+      ? 'schedule'
+      : 'irrigation_calibration';
+    return effectKey === prefix + ':' + zoneUuid + ':' + base;
+  }
   const scopedBindings = {
     UPSERT_SCOPED_USER: ['scoped_user', payload.user, 'user_uuid'],
     RESET_SCOPED_USER_PASSWORD: ['scoped_user_password', payload, 'user_uuid'],
@@ -262,6 +306,7 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
     const type = commandType(envelope);
     const journalType = isJournalCommandType(type);
     const zoneType = isZoneCommandType(type);
+    const irrigationConfigType = isIrrigationConfigCommandType(type);
     const validEffect = await validEffectBinding(envelope, Object.assign({}, opts, { db: tx }));
     if (!validEffect) {
       return { handled: false };
@@ -286,7 +331,7 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
       row = candidates.find(function(candidate) {
         return journalEffectProvenanceMatches(candidate, envelope.payload, gateway, type, intentHash);
       });
-    } else if (zoneType) {
+    } else if (zoneType || irrigationConfigType) {
       const candidates = await tx.all(
         'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? AND device_eui=? ' +
           'ORDER BY applied_at,command_id',

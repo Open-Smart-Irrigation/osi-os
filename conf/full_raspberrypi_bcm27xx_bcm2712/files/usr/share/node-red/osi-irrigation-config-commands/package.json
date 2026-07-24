@@ -1,0 +1,5 @@
+{
+  "name": "osi-irrigation-config-commands",
+  "private": true,
+  "main": "index.js"
+}

@@ -20,6 +20,15 @@ const scopedAccessCommandsPath = path.join(nodeRedRoot, 'osi-scoped-access-comma
 const scopedAccessCommandsSource = fs.readFileSync(scopedAccessCommandsPath, 'utf8');
 const zoneCommandsPath = path.join(nodeRedRoot, 'osi-zone-commands', 'index.js');
 const zoneCommandsSource = fs.readFileSync(zoneCommandsPath, 'utf8');
+const irrigationConfigCommandsPath = path.join(
+  nodeRedRoot,
+  'osi-irrigation-config-commands',
+  'index.js'
+);
+const irrigationConfigCommandsSource = fs.readFileSync(
+  irrigationConfigCommandsPath,
+  'utf8'
+);
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
 const chirpstackInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'chirpstack', 'chirpstack', 'files', 'chirpstack.init');
@@ -1664,6 +1673,10 @@ expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'zone.contr
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'base_version_conflict', 'rejects stale zone commands with a terminal conflict');
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'UPDATE devices SET irrigation_zone_id=NULL', 'detaches devices before tombstoning a zone');
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'INSERT INTO command_ack_outbox', 'persists the terminal zone ACK atomically with the mutation');
+expectFileIncludes('osi-irrigation-config-commands/index.js', irrigationConfigCommandsSource, 'db.transaction(async (tx) => {', 'applies irrigation config and its terminal ACK in one transaction');
+expectFileIncludes('osi-irrigation-config-commands/index.js', irrigationConfigCommandsSource, 'target_sync_version must equal base_sync_version + 1', 'requires consecutive irrigation config versions');
+expectFileIncludes('osi-irrigation-config-commands/index.js', irrigationConfigCommandsSource, 'UPSERT_ZONE_IRRIGATION_CALIBRATION', 'registers protected calibration desired state');
+expectFileIncludes('osi-irrigation-config-commands/index.js', irrigationConfigCommandsSource, 'INSERT INTO command_ack_outbox', 'persists irrigation config ACKs atomically');
 expectIncludes('Queue REST Command ACK', 'osiCommandLedger.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing via the shared command ledger');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'ON CONFLICT(command_id) DO NOTHING', 'never rewrites an existing terminal command result');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs in the shared transaction helper');

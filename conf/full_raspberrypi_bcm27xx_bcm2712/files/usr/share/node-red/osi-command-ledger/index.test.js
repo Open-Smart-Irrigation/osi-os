@@ -244,6 +244,51 @@ test('validEffectBinding binds protected zone commands to UUID and base version'
   );
 });
 
+test('validEffectBinding binds protected irrigation config to zone UUID and base', async () => {
+  for (const [commandType, resourceKey, prefix] of [
+    ['UPSERT_SCHEDULE', 'schedule', 'schedule'],
+    [
+      'UPSERT_ZONE_IRRIGATION_CALIBRATION',
+      'irrigation_calibration',
+      'irrigation_calibration',
+    ],
+  ]) {
+    const payload = {
+      effect_key: `${prefix}:${ZONE_UUID}:2`,
+      zone_uuid: ZONE_UUID,
+      gateway_device_eui: GATEWAY_EUI,
+      base_sync_version: 2,
+      target_sync_version: 3,
+      [resourceKey]: {
+        zone_uuid: ZONE_UUID,
+        gateway_device_eui: GATEWAY_EUI,
+        sync_version: 3,
+      },
+    };
+    const envelope = { commandType, payload };
+    assert.equal(
+      await ledger.validEffectBinding(envelope, {
+        command_type_recognized: true,
+        gateway_device_eui: GATEWAY_EUI,
+      }),
+      true
+    );
+    assert.equal(
+      await ledger.validEffectBinding(
+        {
+          ...envelope,
+          payload: { ...payload, effect_key: `${prefix}:${ZONE_UUID}:1` },
+        },
+        {
+          command_type_recognized: true,
+          gateway_device_eui: GATEWAY_EUI,
+        }
+      ),
+      false
+    );
+  }
+});
+
 test('validEffectBinding defers journal-shaped types to the injected validator only', async () => {
   const envelope = { commandType: 'UPSERT_JOURNAL_ENTRY', payload: {} };
 
@@ -411,6 +456,69 @@ test('zone effect replay requires the same submitted payload hash', async () => 
     false,
     'same effect with different zone intent must reach the applier and conflict'
   );
+});
+
+test('irrigation config effect replay requires equivalent submitted intent', async () => {
+  const db = new TestDb();
+  const payload = {
+    command_id: '33333333-3333-4333-8333-333333333333',
+    effect_key: `schedule:${ZONE_UUID}:0`,
+    zone_uuid: ZONE_UUID,
+    gateway_device_eui: GATEWAY_EUI,
+    base_sync_version: 0,
+    target_sync_version: 1,
+    schedule: {
+      zone_uuid: ZONE_UUID,
+      gateway_device_eui: GATEWAY_EUI,
+      sync_version: 1,
+      threshold_kpa: 30,
+    },
+  };
+  insertAppliedCommand(db, {
+    commandId: '41',
+    deviceEui: GATEWAY_EUI,
+    commandType: 'UPSERT_SCHEDULE',
+    effectKey: payload.effect_key,
+    appliedAt: '2026-07-24T10:00:00.000Z',
+    result: 'APPLIED',
+    resultDetail: {
+      commandId: 41,
+      commandType: 'UPSERT_SCHEDULE',
+      effectKey: payload.effect_key,
+      status: 'ACKED',
+      result: 'APPLIED',
+      duplicate: false,
+      payloadHash: canonicalHash(payload),
+    },
+  });
+
+  const equivalent = await ledger.deduplicatePendingCommand(
+    db,
+    { commandId: 42, commandType: 'UPSERT_SCHEDULE', payload },
+    {
+      command_type_recognized: true,
+      gateway_device_eui: GATEWAY_EUI,
+    }
+  );
+  assert.equal(equivalent.handled, true);
+  assert.equal(equivalent.ack.duplicate, true);
+
+  const changed = await ledger.deduplicatePendingCommand(
+    db,
+    {
+      commandId: 43,
+      commandType: 'UPSERT_SCHEDULE',
+      payload: {
+        ...payload,
+        schedule: { ...payload.schedule, threshold_kpa: 31 },
+      },
+    },
+    {
+      command_type_recognized: true,
+      gateway_device_eui: GATEWAY_EUI,
+    }
+  );
+  assert.equal(changed.handled, false);
 });
 
 test('deduplicatePendingCommand fails closed when the effect binding is not recognized', async () => {
