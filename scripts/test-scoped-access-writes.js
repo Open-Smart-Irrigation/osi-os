@@ -546,6 +546,7 @@ test('W4: assignment and removal fresh-check both the device and zone', async ()
       db,
     });
     assert.equal(assigned.result[1].statusCode, 200);
+    assert.equal(assigned.result[1].payload.sync_version, 2);
     assert.equal(
       db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get()
         .irrigation_zone_id,
@@ -565,6 +566,7 @@ test('W4: assignment and removal fresh-check both the device and zone', async ()
       db,
     });
     assert.equal(removed.result[1].statusCode, 200);
+    assert.equal(removed.result[1].payload.sync_version, 3);
     assert.equal(
       db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get()
         .irrigation_zone_id,

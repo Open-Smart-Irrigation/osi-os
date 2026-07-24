@@ -1381,6 +1381,7 @@ expectIncludes('Build server auth request', 'linked_auth_sync_v1', 'advertises t
 expectIncludes('Build server auth request', 'force_edge_sync_v1', 'advertises the force-edge-sync capability');
 expectIncludes('Build server auth request', 'zone_desired_state_v1', 'advertises the versioned zone desired-state capability');
 expectIncludes('Build server auth request', 'irrigation_config_desired_state_v1', 'advertises the irrigation-config desired-state capability');
+expectIncludes('Build server auth request', 'device_desired_state_v1', 'advertises the protected device desired-state capability');
 expectIncludes('Handle server auth response', "const claimed = Array.isArray(data.claimed)", 'accepts claimed device results directly from local-sync');
 expectIncludes('Handle server auth response', 'offlineVerifierVersion', 'requires and stores the offline verifier version from local-sync');
 expectIncludes('Decode token & build query', 'server_offline_verifier_version', 'loads linked-auth verifier metadata for account-link status');
@@ -1597,6 +1598,7 @@ expectIncludes('Build Cloud Bootstrap', 'previousGatewayDeviceEuis: migration.pr
 expectIncludes('Build Cloud Bootstrap', 'edgeBuildVersion,', 'includes the edge build version in bootstrap gateway metadata');
 expectIncludes('Build Cloud Bootstrap', 'syncCapabilities', 'includes sync capabilities in bootstrap gateway metadata');
 expectIncludes('Build Cloud Bootstrap', 'zone_desired_state_v1', 'includes the versioned zone desired-state capability in bootstrap metadata');
+expectIncludes('Build Cloud Bootstrap', 'device_desired_state_v1', 'includes the protected device desired-state capability in bootstrap metadata');
 expectIncludes('Build Cloud Bootstrap', 'runGatewayMigrationPreflight', 'runs local gateway migration preflight before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'gatewayMigrationPaused: true', 'pauses normal sync while a gateway migration repair bootstrap is pending');
 expectIncludes('Build Cloud Bootstrap', 'UPDATE irrigation_zones SET gateway_device_eui = ?', 'rewrites active zone gateway bindings during local migration');
@@ -1679,6 +1681,19 @@ expectOrderedIncludesById('irrigation-config-command-apply-fn', [
 ], 'routes only protected irrigation-config commands through the transactional helper');
 expectIncludesById('irrigation-config-command-apply-fn', 'Irrigation config command helpers unavailable:', 'fails closed when irrigation-config helpers are unavailable');
 expectIncludesById('irrigation-config-command-apply-fn', '.close(', 'closes the irrigation-config command database handle');
+expectOrderedIncludesById('device-command-apply-fn', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  "const protectedTypes = new Set(['UPSERT_DEVICE', 'UNCLAIM_DEVICE']);",
+  'if (!protectedTypes.has(commandType) || !protectedShape) return [msg, null];',
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const helper = osiLib.require('device-commands');",
+  "const scopeLoad = osiLib.require('scope');",
+  'helper.value.applyDeviceCommand(db, envelope, {',
+], 'routes only protected device commands through the transactional helper');
+expectIncludesById('device-command-apply-fn', 'Device command helpers unavailable:', 'fails closed when protected device helpers are unavailable');
+expectIncludesById('device-command-apply-fn', 'invalidateScope', 'invalidates cached scope after an applied protected device mutation');
+expectIncludesById('device-command-apply-fn', '.close(', 'closes the protected device command database handle');
 expectIncludesById('d7e5c762c820aa16', 'nextScheduleSyncVersion = Number(zone.schedule_sync_version', 'increments the schedule aggregate version for local writes');
 expectIncludesById('d7e5c762c820aa16', 'sync_version = ${nextScheduleSyncVersion}', 'persists the independent schedule aggregate version');
 expectExcludesById('d7e5c762c820aa16', 'UPDATE irrigation_zones SET sync_version', 'parent-zone version mutation from local schedule writes');
@@ -1845,8 +1860,10 @@ expectWireById('scoped-access-command-apply-fn', 'zone-command-apply-fn', 'route
 expectWireById('scoped-access-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted scoped-access ACKs');
 expectWireById('zone-command-apply-fn', 'irrigation-config-command-apply-fn', 'routes non-zone commands through protected irrigation-config handling');
 expectWireById('zone-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted zone ACKs');
-expectWireById('irrigation-config-command-apply-fn', '934bf2bc19a8ce22', 'falls through unprotected irrigation-config commands to the existing router');
+expectWireById('irrigation-config-command-apply-fn', 'device-command-apply-fn', 'routes non-irrigation commands through protected device handling');
 expectWireById('irrigation-config-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted irrigation-config ACKs');
+expectWireById('device-command-apply-fn', '934bf2bc19a8ce22', 'falls through legacy device commands to the existing router');
+expectWireById('device-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted protected device ACKs');
 expectWireById('c8628cffe45f64f7', 'command-ack-queue-rest', 'routes STREGA command ACKs through the durable ACK queue');
 expectWireById('cs-reg-cloud-ack-fn', 'command-ack-queue-rest', 'routes special command ACKs through the durable ACK queue');
 expectWireById('lsn50-mode-ack-link-in', 'command-ack-queue-rest', 'routes LSN50 command ACKs through the durable ACK queue');
@@ -1960,6 +1977,7 @@ expectIncludes('Run Force Sync', 'edgeBuildVersion,', 'includes the edge build v
 expectIncludes('Run Force Sync', 'syncCapabilities', 'includes sync capabilities in forced bootstrap gateway metadata');
 expectIncludes('Run Force Sync', 'zone_desired_state_v1', 'includes the versioned zone desired-state capability in forced bootstrap metadata');
 expectIncludes('Run Force Sync', 'irrigation_config_desired_state_v1', 'includes the irrigation-config desired-state capability in forced bootstrap metadata');
+expectIncludes('Run Force Sync', 'device_desired_state_v1', 'includes the protected device desired-state capability in forced bootstrap metadata');
 expectIncludes('Run Force Sync', 'const sensorDataRows = await q([', 'loads force-sync sensor history before reordering it');
 expectIncludes('Run Force Sync', 'const sensorData = sensorDataRows.slice().reverse();', 'replays force-sync sensor history oldest-to-newest');
 expectIncludes('Run Force Sync', 'const dendroReadingsRows = await q([', 'loads force-sync dendro history before reordering it');
@@ -3249,6 +3267,16 @@ expectIncludes('Sync Init Schema + Triggers', "'chameleon_swt2_depth_cm', NEW.ch
 expectIncludes('Sync Init Schema + Triggers', "'chameleon_swt3_depth_cm', NEW.chameleon_swt3_depth_cm", 'mirrors Chameleon SWT3 depth in device outbox payloads');
 expectIncludes('Auth + Save Soil Moisture Depths', 'soil_moisture_probe_depths_json = ', 'stores Kiwi soil depth JSON through the local edge endpoint');
 expectIncludes('Auth + Save Soil Moisture Depths', 'soil_moisture_probe_depths_configured = 1', 'marks Kiwi soil depths as configured through the local edge endpoint');
+expectIncludesById('put-dendro-format', 'sync_version:', 'returns the resulting device version from local dendrometer flag writes');
+expectIncludesById('put-temp-format', 'sync_version:', 'returns the resulting device version from local temperature flag writes');
+expectIncludesById('put-rain-gauge-resp-fn', 'sync_version:', 'returns the resulting device version from rain-gauge flag writes');
+expectIncludesById('put-flow-meter-resp-fn', 'sync_version:', 'returns the resulting device version from flow-meter flag writes');
+expectIncludesById('dendro-ref-tree-fn', 'sync_version:', 'returns the resulting device version from reference-tree writes');
+expectIncludesById('put-chameleon-enabled-auth-fn', 'sync_version:', 'returns the resulting device version from Chameleon flag writes');
+expectIncludesById('bf93cd55db0eb57f', 'sync_version:', 'returns the resulting device version from Chameleon depth writes');
+expectIncludesById('post-devices-response', 'sync_version:', 'returns the resulting device version from local name and claim writes');
+expectIncludesById('assign-device-response', 'sync_version:', 'returns the resulting device version from local assignment writes');
+expectIncludesById('unassign-device-response', 'sync_version:', 'returns the resulting device version from local unassignment writes');
 expectExcludes('Auth + Save Soil Moisture Depths', "node.error('Failed to save soil moisture depths: ' + e.message, msg);", 'soil-depth error forwarding into the tab-wide HTTP catch path');
 expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_STREGA_INTERVAL') {", 'accepts synced STREGA interval commands on the gateway');
 expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_STREGA_MODEL') {", 'accepts synced STREGA model updates on the gateway');

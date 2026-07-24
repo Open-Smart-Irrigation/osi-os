@@ -1013,8 +1013,32 @@ if (!irrigationConfigApplier) {
         failures.push('irrigation config: protected commands must run after zone handling');
     }
     if (JSON.stringify(irrigationConfigApplier.wires) !==
-        JSON.stringify([['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']])) {
+        JSON.stringify([['device-command-apply-fn'], ['9d5e3035c3d069c4']])) {
         failures.push('irrigation config: unprotected schedules must fall through unchanged');
+    }
+}
+const deviceApplier = byId['device-command-apply-fn'];
+if (!deviceApplier) {
+    failures.push('device desired state: protected command applier is missing');
+} else {
+    requireFuncIncludes(
+        deviceApplier,
+        "osiLib.require('device-commands')",
+        'device desired state: applier must load the helper through osi-lib'
+    );
+    requireFuncIncludes(
+        deviceApplier,
+        "'UPSERT_DEVICE'",
+        'device desired state: applier must route protected upserts'
+    );
+    requireFuncIncludes(
+        deviceApplier,
+        "'UNCLAIM_DEVICE'",
+        'device desired state: applier must route strict protected unclaims'
+    );
+    if (JSON.stringify(deviceApplier.wires) !==
+        JSON.stringify([['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']])) {
+        failures.push('device desired state: legacy device commands must fall through unchanged');
     }
 }
 for (const id of ['al-link-build-req', 'sync-bootstrap-build', 'sync-force-build']) {
@@ -1023,12 +1047,36 @@ for (const id of ['al-link-build-req', 'sync-bootstrap-build', 'sync-force-build
         'irrigation_config_desired_state_v1',
         `irrigation config: ${id} must advertise the capability`
     );
+    requireFuncIncludes(
+        byId[id],
+        'device_desired_state_v1',
+        `device desired state: ${id} must advertise the capability`
+    );
 }
 for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
     requireFuncIncludes(
         byId[id],
         'irrigationCalibrations',
         `irrigation config: ${id} must include calibration rows`
+    );
+}
+for (const id of [
+    'post-devices-response',
+    'assign-device-response',
+    'unassign-device-response',
+    'put-soil-depth-fn',
+    'put-dendro-format',
+    'put-temp-format',
+    'dendro-ref-tree-fn',
+    'put-rain-gauge-resp-fn',
+    'put-flow-meter-resp-fn',
+    'put-chameleon-enabled-auth-fn',
+    'bf93cd55db0eb57f',
+]) {
+    requireFuncIncludes(
+        byId[id],
+        'sync_version:',
+        `device desired state: ${id} response must expose the resulting aggregate version`
     );
 }
 
