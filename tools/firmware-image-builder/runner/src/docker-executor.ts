@@ -1,4 +1,4 @@
-import { createCommandExecutor, type CommandResult, type CommandRunOptions } from './command-executor.js';
+import { CommandExecutionError, createCommandExecutor, type CommandResult, type CommandRunOptions } from './command-executor.js';
 import { createOperationArgv, hashOperationArgv, type OperationArgvContext } from './operation-registry.js';
 import { parseCanonicalBuilderImageReference, selectExactRepositoryDigest } from '../../builder/validate-builder.js';
 import type { JobState, TrustedOperationId } from '../../domain/types.js';
@@ -14,6 +14,7 @@ const SAFE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 const SAFE_ABSOLUTE_PATH = /^\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/u;
 const DOCKER_PATH = /^\/(?:[A-Za-z0-9._-]+\/)*docker$/u;
 const CONTAINER_NAME = /^osi-image-builder-[a-z0-9-]{8,64}$/u;
+const DOCKER_CONTROL_TIMEOUT_MS = 30_000;
 
 export interface DockerCommandExecutor {
   run(argv: readonly string[], options: CommandRunOptions): Promise<CommandResult>;
@@ -73,6 +74,10 @@ export interface PersistedContainerIdentity {
   readonly containerSecurity: JsonObject | null;
   readonly containerInspection: JsonObject | null;
   readonly containerCreatedAt: string | null;
+  readonly containerStartedAt: string | null;
+  readonly containerStoppedAt: string | null;
+  readonly containerRemovedAt: string | null;
+  readonly containerCleanupOutcome: 'passed' | 'failed' | 'blocking' | null;
 }
 
 export interface DockerExecutorOptions {
@@ -120,7 +125,10 @@ function dockerEnv(): Readonly<Record<string, string>> {
 
 function runDocker(options: DockerExecutorOptions, args: readonly string[], callbacks: { readonly onStdout?: (chunk: string) => void; readonly onStderr?: (chunk: string) => void } = {}, commandOptions: Pick<CommandRunOptions, 'timeoutMs'> = {}): Promise<CommandResult> {
   const executor = options.commandExecutor ?? createCommandExecutor();
-  return executor.run([options.dockerPath, ...args], { env: dockerEnv(), maxCaptureBytes: options.maxCaptureBytes, timeoutMs: commandOptions.timeoutMs, onStdout: callbacks.onStdout, onStderr: callbacks.onStderr });
+  return executor.run([options.dockerPath, ...args], { env: dockerEnv(), maxCaptureBytes: options.maxCaptureBytes, timeoutMs: commandOptions.timeoutMs ?? DOCKER_CONTROL_TIMEOUT_MS, onStdout: callbacks.onStdout, onStderr: callbacks.onStderr }).catch((error) => {
+    if (error instanceof CommandExecutionError && error.result?.timedOut) throw new DockerLifecycleError('Docker control command timed out', { cause: error });
+    throw error;
+  });
 }
 
 function fail(message: string): never { throw new DockerLifecycleError(message); }
@@ -353,13 +361,13 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
       const argv = validateOptions(options);
       const executor = options.commandExecutor ?? createCommandExecutor();
       let version: CommandResult;
-      try { version = await executor.run([options.dockerPath, 'version', '--format', '{{json .}}'], { env: dockerEnv() }); }
-      catch (error) { if (['ENOENT', 'EACCES', 'ECONNREFUSED'].includes(String((error as { code?: string }).code))) return { available: false, mutationCount: 0, reason: 'docker-unavailable' }; throw error; }
+      try { version = await executor.run([options.dockerPath, 'version', '--format', '{{json .}}'], { env: dockerEnv(), maxCaptureBytes: options.maxCaptureBytes, timeoutMs: DOCKER_CONTROL_TIMEOUT_MS }); }
+      catch (error) { if (error instanceof CommandExecutionError && error.result?.timedOut || ['ENOENT', 'EACCES', 'ECONNREFUSED'].includes(String((error as { code?: string }).code))) return { available: false, mutationCount: 0, reason: 'docker-unavailable' }; throw error; }
       if (version.exitCode !== 0 || version.signal !== null || version.timedOut) return { available: false, mutationCount: 0, reason: 'docker-unavailable' };
       parseServer(version.stdout);
       const image = inspectImage(requireSuccess(await runDocker(options, ['image', 'inspect', '--format={{json .}}', options.imageReference]), 'Docker image inspect'), options);
       const initial = options.ownership.getJob(options.jobId);
-      if ([initial.containerId, initial.containerName, initial.containerImageDigest, initial.containerLabelJobId, initial.containerLabelManifestSha, initial.containerLabels, initial.containerMount, initial.containerEnvironment, initial.containerSecurity, initial.containerInspection, initial.containerCreatedAt].some((value) => value !== null)) fail('persisted Docker identity is not clear before create');
+      if ([initial.containerId, initial.containerName, initial.containerImageDigest, initial.containerLabelJobId, initial.containerLabelManifestSha, initial.containerLabels, initial.containerMount, initial.containerEnvironment, initial.containerSecurity, initial.containerInspection, initial.containerCreatedAt, initial.containerStartedAt, initial.containerStoppedAt, initial.containerRemovedAt, initial.containerCleanupOutcome].some((value) => value !== null)) fail('persisted Docker identity is not clear before create');
       if (!noLabel(requireSuccess(await runDocker(options, ['ps', '--all', `--filter=label=${JOB_LABEL}=${options.jobId}`, '--format={{.ID}}']), 'Docker label preflight'))) fail('a Docker container already owns this job label');
       const startedAt = options.clock?.() ?? new Date().toISOString();
       const argvHash = hashOperationArgv(argv);
