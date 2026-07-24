@@ -1096,3 +1096,25 @@ test('W9: flag-off system writes preserve every legacy branch', async () => {
     db.close();
   }
 });
+
+test('W10: local irrigation config writes version only their own aggregate', () => {
+  const schedule = loadNode('d7e5c762c820aa16').func;
+  assert.match(schedule, /nextScheduleSyncVersion\s*=\s*Number\(zone\.schedule_sync_version/);
+  assert.match(schedule, /sync_version\s*=\s*\$\{nextScheduleSyncVersion\}/);
+  assert.doesNotMatch(schedule, /UPDATE irrigation_zones SET sync_version/);
+
+  const calibration = loadNode('zone-calibration-fn').func;
+  assert.match(calibration, /calibration_sync_version/);
+  assert.match(calibration, /nextCalibrationSyncVersion/);
+  assert.match(calibration, /sync_version=excluded\.sync_version/);
+  assert.match(calibration, /run\(\s*[\s\S]*\[\s*zoneId,/);
+  assert.doesNotMatch(calibration, /UPDATE irrigation_zones SET sync_version/);
+  const upsertStart = calibration.indexOf("'INSERT INTO zone_irrigation_calibration(");
+  const upsertEnd = calibration.indexOf('  await close();', upsertStart);
+  assert.ok(upsertStart >= 0 && upsertEnd > upsertStart);
+  assert.doesNotMatch(
+    calibration.slice(upsertStart, upsertEnd),
+    /valve_device_eui/,
+    'local calibration upsert preserves the existing valve binding'
+  );
+});

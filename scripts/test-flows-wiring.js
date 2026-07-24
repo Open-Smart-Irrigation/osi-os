@@ -262,11 +262,11 @@ if (!scopedAccessApply || !requireOsiLibContract(
     'scoped access commands: applier',
     'Scoped access command helpers unavailable:'
 ) || JSON.stringify(scopedAccessApply.wires) !== JSON.stringify([
-    ['934bf2bc19a8ce22'],
+    ['zone-command-apply-fn'],
     ['9d5e3035c3d069c4'],
 ]) || !/applyScopedAccessCommand/.test(scopedAccessApply.func || '') ||
     !/\.close\s*\(/.test(scopedAccessApply.func || '')) {
-    failures.push('scoped access commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
+    failures.push('scoped access commands: applier must delegate, close DB, and route fallback through desired-state handlers');
 }
 if (!ackQueue || !requireOsiLibContract(
     ackQueue,
@@ -997,6 +997,39 @@ if (!disableAllSchedulesFn || typeof disableAllSchedulesFn.func !== 'string') {
     if (!libs.some((lib) => lib.var === 'osiDb' && lib.module === 'osi-db-helper')) {
         failures.push('settings modules: Disable All Schedules must use osi-db-helper');
     }
+}
+
+const irrigationConfigApplier = byId['irrigation-config-command-apply-fn'];
+if (!irrigationConfigApplier) {
+    failures.push('irrigation config: protected command applier is missing');
+} else {
+    requireFuncIncludes(
+        irrigationConfigApplier,
+        "osiLib.require('irrigation-config-commands')",
+        'irrigation config: applier must load the helper through osi-lib'
+    );
+    if (JSON.stringify(byId['zone-command-apply-fn'].wires) !==
+        JSON.stringify([['irrigation-config-command-apply-fn'], ['9d5e3035c3d069c4']])) {
+        failures.push('irrigation config: protected commands must run after zone handling');
+    }
+    if (JSON.stringify(irrigationConfigApplier.wires) !==
+        JSON.stringify([['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']])) {
+        failures.push('irrigation config: unprotected schedules must fall through unchanged');
+    }
+}
+for (const id of ['al-link-build-req', 'sync-bootstrap-build', 'sync-force-build']) {
+    requireFuncIncludes(
+        byId[id],
+        'irrigation_config_desired_state_v1',
+        `irrigation config: ${id} must advertise the capability`
+    );
+}
+for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
+    requireFuncIncludes(
+        byId[id],
+        'irrigationCalibrations',
+        `irrigation config: ${id} must include calibration rows`
+    );
 }
 
 runJournalHelperFailureMatrix()

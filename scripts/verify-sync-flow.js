@@ -1328,7 +1328,7 @@ if (!refreshInject) {
 
 const bootstrapNode = findNodeByName('Build Cloud Bootstrap');
 if (bootstrapNode) {
-  for (const key of ['sensorData', 'dendroReadings', 'chameleonReadings', 'dendroDaily', 'zoneRecommendations', 'zoneEnvironments', 'gatewayLocations', 'irrigationEvents']) {
+  for (const key of ['sensorData', 'dendroReadings', 'chameleonReadings', 'dendroDaily', 'zoneRecommendations', 'zoneEnvironments', 'gatewayLocations', 'irrigationEvents', 'irrigationCalibrations']) {
     if (!bootstrapNode.func.includes(`${key}:`) && !bootstrapNode.func.includes(`${key},`) && !bootstrapNode.func.includes(`const ${key} =`)) {
       fail(`bootstrap payload missing ${key}`);
     } else {
@@ -1374,6 +1374,7 @@ expectIncludes('Build server auth request', 'syncCapabilities', 'advertises link
 expectIncludes('Build server auth request', 'linked_auth_sync_v1', 'advertises the linked-auth sync capability');
 expectIncludes('Build server auth request', 'force_edge_sync_v1', 'advertises the force-edge-sync capability');
 expectIncludes('Build server auth request', 'zone_desired_state_v1', 'advertises the versioned zone desired-state capability');
+expectIncludes('Build server auth request', 'irrigation_config_desired_state_v1', 'advertises the irrigation-config desired-state capability');
 expectIncludes('Handle server auth response', "const claimed = Array.isArray(data.claimed)", 'accepts claimed device results directly from local-sync');
 expectIncludes('Handle server auth response', 'offlineVerifierVersion', 'requires and stores the offline verifier version from local-sync');
 expectIncludes('Decode token & build query', 'server_offline_verifier_version', 'loads linked-auth verifier metadata for account-link status');
@@ -1661,6 +1662,25 @@ expectOrderedIncludesById('zone-command-apply-fn', [
 expectIncludesById('zone-command-apply-fn', 'Zone command helpers unavailable:', 'fails closed when zone helpers are unavailable');
 expectIncludesById('zone-command-apply-fn', 'invalidateScope', 'invalidates cached scope after an applied zone mutation');
 expectIncludesById('zone-command-apply-fn', '.close(', 'closes the zone command database handle');
+expectOrderedIncludesById('irrigation-config-command-apply-fn', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  'const protectedShape = payload.effect_key != null',
+  'if (!protectedTypes.has(commandType) || !protectedShape) return [msg, null];',
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const helper = osiLib.require('irrigation-config-commands');",
+  'helper.value.applyIrrigationConfigCommand(db, envelope, {',
+], 'routes only protected irrigation-config commands through the transactional helper');
+expectIncludesById('irrigation-config-command-apply-fn', 'Irrigation config command helpers unavailable:', 'fails closed when irrigation-config helpers are unavailable');
+expectIncludesById('irrigation-config-command-apply-fn', '.close(', 'closes the irrigation-config command database handle');
+expectIncludesById('d7e5c762c820aa16', 'nextScheduleSyncVersion = Number(zone.schedule_sync_version', 'increments the schedule aggregate version for local writes');
+expectIncludesById('d7e5c762c820aa16', 'sync_version = ${nextScheduleSyncVersion}', 'persists the independent schedule aggregate version');
+expectExcludesById('d7e5c762c820aa16', 'UPDATE irrigation_zones SET sync_version', 'parent-zone version mutation from local schedule writes');
+expectIncludesById('zone-calibration-fn', 'COALESCE(zic.sync_version, 0) AS calibration_sync_version', 'loads the calibration aggregate version for local writes');
+expectIncludesById('zone-calibration-fn', 'nextCalibrationSyncVersion', 'increments the independent calibration aggregate version');
+expectIncludesById('zone-calibration-fn', 'sync_version=excluded.sync_version, deleted_at=NULL, last_applied_at=NULL', 'persists local calibration desired state without marking it cloud-applied');
+expectIncludesById('zone-calibration-fn', '[zoneId, measuredFlowRateLpm, measurementMethod, now, now, now, nextCalibrationSyncVersion, null]', 'binds local calibration write parameters');
+expectExcludesById('zone-calibration-fn', 'UPDATE irrigation_zones SET sync_version', 'parent-zone version mutation from local calibration writes');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1', 'looks up exact command IDs before payload validation');
 expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'result_detail', 'reconstructs ACK facts from canonical replay-ledger detail');
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'db.transaction(async function(tx) {', 'applies scoped-access mutations and terminal ACK persistence in one transaction');
@@ -1811,8 +1831,10 @@ expectWireById('journal-command-apply-fn', '934bf2bc19a8ce22', 'preserves the le
 expectWireById('journal-command-apply-fn', 'scoped-access-command-apply-fn', 'routes non-journal commands through scoped-access handling');
 expectWireById('scoped-access-command-apply-fn', 'zone-command-apply-fn', 'routes non-access commands through protected zone handling');
 expectWireById('scoped-access-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted scoped-access ACKs');
-expectWireById('zone-command-apply-fn', '934bf2bc19a8ce22', 'falls through legacy zone commands to the existing router');
+expectWireById('zone-command-apply-fn', 'irrigation-config-command-apply-fn', 'routes non-zone commands through protected irrigation-config handling');
 expectWireById('zone-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted zone ACKs');
+expectWireById('irrigation-config-command-apply-fn', '934bf2bc19a8ce22', 'falls through unprotected irrigation-config commands to the existing router');
+expectWireById('irrigation-config-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted irrigation-config ACKs');
 expectWireById('c8628cffe45f64f7', 'command-ack-queue-rest', 'routes STREGA command ACKs through the durable ACK queue');
 expectWireById('cs-reg-cloud-ack-fn', 'command-ack-queue-rest', 'routes special command ACKs through the durable ACK queue');
 expectWireById('lsn50-mode-ack-link-in', 'command-ack-queue-rest', 'routes LSN50 command ACKs through the durable ACK queue');
@@ -1846,6 +1868,9 @@ expectIncludes('Build Cloud Bootstrap', 'deleted_at: normalizeIsoTimestamp(z.del
 expectIncludes('Build Cloud Bootstrap', 'prediction_card_enabled: !!Number(z.prediction_card_enabled || 0)', 'exports the prediction-card flag in bootstrap payloads');
 expectIncludes('Build Cloud Bootstrap', 'devices: devices.map(sanitizeSyncRow)', 'normalizes device tombstone timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'schedules: schedules.map(sanitizeSyncRow)', 'normalizes schedule timestamps before bootstrap sync');
+expectIncludes('Build Cloud Bootstrap', 'const irrigationCalibrations = await q(', 'loads irrigation calibration desired state for bootstrap sync');
+expectIncludes('Build Cloud Bootstrap', 'irrigationCalibrations: irrigationCalibrations.map(sanitizeSyncRow)', 'includes irrigation calibration desired state in bootstrap payloads');
+expectIncludes('Build Cloud Bootstrap', 'irrigation_config_desired_state_v1', 'includes the irrigation-config desired-state capability in bootstrap metadata');
 expectIncludes('Build Cloud Bootstrap', 'LEFT JOIN devices d ON d.deveui = dd.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting bootstrap sensor history');
 expectIncludes('Build Cloud Bootstrap', 'LEFT JOIN devices d ON d.deveui = dr.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting bootstrap dendro history');
 expectIncludes('Build Cloud Bootstrap', 'LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL', 'ignores deleted zones when exporting bootstrap history');
@@ -1922,6 +1947,7 @@ expectIncludes('Run Force Sync', 'gatewayLocations,', 'includes gateway GPS stat
 expectIncludes('Run Force Sync', 'edgeBuildVersion,', 'includes the edge build version in forced bootstrap gateway metadata');
 expectIncludes('Run Force Sync', 'syncCapabilities', 'includes sync capabilities in forced bootstrap gateway metadata');
 expectIncludes('Run Force Sync', 'zone_desired_state_v1', 'includes the versioned zone desired-state capability in forced bootstrap metadata');
+expectIncludes('Run Force Sync', 'irrigation_config_desired_state_v1', 'includes the irrigation-config desired-state capability in forced bootstrap metadata');
 expectIncludes('Run Force Sync', 'const sensorDataRows = await q([', 'loads force-sync sensor history before reordering it');
 expectIncludes('Run Force Sync', 'const sensorData = sensorDataRows.slice().reverse();', 'replays force-sync sensor history oldest-to-newest');
 expectIncludes('Run Force Sync', 'const dendroReadingsRows = await q([', 'loads force-sync dendro history before reordering it');
@@ -1931,6 +1957,8 @@ expectIncludes('Run Force Sync', 'deleted_at: normalizeIsoTimestamp(z.deleted_at
 expectIncludes('Run Force Sync', 'prediction_card_enabled: !!Number(z.prediction_card_enabled || 0)', 'exports the prediction-card flag in forced bootstrap payloads');
 expectIncludes('Run Force Sync', 'devices: devices.map(sanitizeSyncRow)', 'normalizes device tombstone timestamps before forced bootstrap sync');
 expectIncludes('Run Force Sync', 'schedules: schedules.map(sanitizeSyncRow)', 'normalizes schedule timestamps before forced bootstrap sync');
+expectIncludes('Run Force Sync', 'const irrigationCalibrations = await q(', 'loads irrigation calibration desired state for force sync');
+expectIncludes('Run Force Sync', 'irrigationCalibrations: irrigationCalibrations.map(sanitizeSyncRow)', 'includes irrigation calibration desired state in force-sync payloads');
 expectIncludes('Run Force Sync', 'LEFT JOIN devices d ON d.deveui = dd.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting force-sync sensor history');
 expectIncludes('Run Force Sync', 'LEFT JOIN devices d ON d.deveui = dr.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting force-sync dendro history');
 expectIncludes('Run Force Sync', 'LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL', 'ignores deleted zones when exporting force-sync history');
