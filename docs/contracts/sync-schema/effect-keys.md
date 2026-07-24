@@ -101,6 +101,11 @@ Protected device ownership removal. This separate family prevents a safe
 metadata edit from superseding an unclaim request. The desired aggregate has
 null owner and primary-zone UUIDs.
 
+### `weather_station_zones:{device_eui}:{base_sync_version}`
+
+Protected replacement of one S2120 weather station's complete zone set. The
+assignment set has its own version; it does not use `devices.sync_version`.
+
 ## Normalization
 
 - `device_eui` is uppercase EUI-64 with no separators.
@@ -138,8 +143,8 @@ current aggregate exists, `currentPayloadHash` describes that edge state.
 ## Versioned resource binding enforcement
 
 The command schema's `x-semantic-bindings` object is executable contract
-metadata. Journal, scoped-access, protected zone, and protected
-irrigation-config commands are valid only
+metadata. Journal, scoped-access, protected zone, protected
+irrigation-config, device, and weather-assignment commands are valid only
 when the effect-key prefix, UUID segment, and unpadded version segment equal the
 referenced payload fields. Pattern matching alone is insufficient.
 

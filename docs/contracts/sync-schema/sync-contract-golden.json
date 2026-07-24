@@ -48,6 +48,12 @@
       "schemaAccepted": true,
       "edgeProducerEnabled": false,
       "cloudIssuerEnabled": false
+    },
+    {
+      "name": "weather_station_zones_desired_state_v1",
+      "schemaAccepted": true,
+      "edgeProducerEnabled": false,
+      "cloudIssuerEnabled": false
     }
   ],
   "eventOperations": {
@@ -80,7 +86,8 @@
       "ZONE_LOCATION_UPSERTED",
       "ZONE_RECOMMENDATION_UPSERTED",
       "ZONE_UPSERTED",
-      "ZONE_IRRIGATION_CALIBRATION_UPSERTED"
+      "ZONE_IRRIGATION_CALIBRATION_UPSERTED",
+      "WEATHER_STATION_ZONES_REPLACED"
     ],
     "edgeProducerEnabled": [
       "CHAMELEON_READING_APPENDED",
@@ -144,7 +151,9 @@
       "ZONE_UPSERTED",
       "ZONE_IRRIGATION_CALIBRATION_UPSERTED"
     ],
-    "staged": []
+    "staged": [
+      "WEATHER_STATION_ZONES_REPLACED"
+    ]
   },
   "commandTypes": {
     "accepted": [
@@ -195,7 +204,8 @@
       "UPSERT_USER_ZONE_ASSIGNMENT",
       "DELETE_USER_ZONE_ASSIGNMENT",
       "UPSERT_USER_PLOT_ASSIGNMENT",
-      "DELETE_USER_PLOT_ASSIGNMENT"
+      "DELETE_USER_PLOT_ASSIGNMENT",
+      "REPLACE_WEATHER_STATION_ZONES"
     ],
     "cloudIssuerEnabled": [
       "OPEN_FOR_DURATION",
@@ -247,7 +257,8 @@
       "DELETE_USER_PLOT_ASSIGNMENT"
     ],
     "staged": [
-      "UPSERT_DEVICE"
+      "UPSERT_DEVICE",
+      "REPLACE_WEATHER_STATION_ZONES"
     ]
   },
   "commandAckResults": [

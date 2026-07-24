@@ -2,10 +2,12 @@
   "version": 1,
   "commands": {
     "edgeDeferred": [
-      "UPSERT_DEVICE"
+      "UPSERT_DEVICE",
+      "REPLACE_WEATHER_STATION_ZONES"
     ],
     "cloudDeferred": [
-      "UPSERT_DEVICE"
+      "UPSERT_DEVICE",
+      "REPLACE_WEATHER_STATION_ZONES"
     ]
   },
   "eventOps": {
@@ -16,7 +18,11 @@
       "JOURNAL_PLOT_UPSERTED",
       "JOURNAL_PLOT_GROUP_UPSERTED"
     ],
-    "edgeDeferred": [],
-    "cloudDeferred": []
+    "edgeDeferred": [
+      "WEATHER_STATION_ZONES_REPLACED"
+    ],
+    "cloudDeferred": [
+      "WEATHER_STATION_ZONES_REPLACED"
+    ]
   }
 }

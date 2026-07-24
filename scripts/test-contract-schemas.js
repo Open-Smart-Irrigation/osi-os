@@ -38,12 +38,16 @@ const DEVICE_DESIRED_STATE_COMMANDS = [
     'UPSERT_DEVICE',
     'UNCLAIM_DEVICE',
 ];
+const WEATHER_STATION_ZONE_COMMANDS = [
+    'REPLACE_WEATHER_STATION_ZONES',
+];
 const DEVICE_EUI_EXEMPT_COMMANDS = [
     ...JOURNAL_COMMANDS,
     ...SCOPED_ACCESS_COMMANDS,
     ...ZONE_COMMANDS,
     ...IRRIGATION_CONFIG_COMMANDS,
     'UPSERT_DEVICE',
+    ...WEATHER_STATION_ZONE_COMMANDS,
 ];
 const JOURNAL_EVENT_BINDINGS = {
     JOURNAL_ENTRY_UPSERTED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
@@ -117,6 +121,9 @@ const EXPECTED_COMMAND_SEMANTIC_BINDINGS = {
     UNCLAIM_DEVICE: {
         effect_key: { prefix: 'device_unclaim', uuid_path: 'device_eui', version_path: 'base_sync_version' },
     },
+    REPLACE_WEATHER_STATION_ZONES: {
+        effect_key: { prefix: 'weather_station_zones', uuid_path: 'device_eui', version_path: 'base_sync_version' },
+    },
 };
 const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
     ...Object.fromEntries(Object.entries(JOURNAL_EVENT_BINDINGS).map(([op, binding]) => [op, {
@@ -145,6 +152,10 @@ const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
     },
     ZONE_IRRIGATION_CALIBRATION_UPSERTED: {
         aggregate_key_path: 'payload.zone_uuid',
+        sync_version_path: 'payload.sync_version',
+    },
+    WEATHER_STATION_ZONES_REPLACED: {
+        aggregate_key_path: 'payload.device_eui',
         sync_version_path: 'payload.sync_version',
     },
 };
@@ -496,6 +507,12 @@ function semanticBindingErrors(schema, value) {
             Object.prototype.hasOwnProperty.call(value, key))) {
         return errors;
     }
+    if (WEATHER_STATION_ZONE_COMMANDS.includes(discriminator) &&
+        !['effect_key', 'base_sync_version', 'target_sync_version',
+            'weather_station_zones'].some((key) =>
+            Object.prototype.hasOwnProperty.call(value, key))) {
+        return errors;
+    }
     if (binding.effect_key) {
         const uuid = valueAtPath(value, binding.effect_key.uuid_path);
         const version = valueAtPath(value, binding.effect_key.version_path);
@@ -524,6 +541,22 @@ function semanticBindingErrors(schema, value) {
         if (DEVICE_DESIRED_STATE_COMMANDS.includes(discriminator)) {
             const target = value.target_sync_version;
             const resource = value.device;
+            if (target !== version + 1) {
+                errors.push('$.target_sync_version: must equal base_sync_version + 1');
+            }
+            if (resource && resource.device_eui !== uuid) {
+                errors.push('$.device_eui: must equal desired-state device_eui');
+            }
+            if (resource && resource.gateway_device_eui !== value.gateway_device_eui) {
+                errors.push('$.gateway_device_eui: must equal desired-state gateway_device_eui');
+            }
+            if (resource && resource.sync_version !== target) {
+                errors.push('$.target_sync_version: must equal desired-state sync_version');
+            }
+        }
+        if (WEATHER_STATION_ZONE_COMMANDS.includes(discriminator)) {
+            const target = value.target_sync_version;
+            const resource = value.weather_station_zones;
             if (target !== version + 1) {
                 errors.push('$.target_sync_version: must equal base_sync_version + 1');
             }
@@ -1051,9 +1084,11 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
     const exactStaging = staging && staging.version === 1 &&
         JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([
             'UPSERT_DEVICE',
+            'REPLACE_WEATHER_STATION_ZONES',
         ]) &&
         JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify([
             'UPSERT_DEVICE',
+            'REPLACE_WEATHER_STATION_ZONES',
         ]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',
@@ -1062,8 +1097,12 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_UPSERTED',
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([]);
+        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([
+            'WEATHER_STATION_ZONES_REPLACED',
+        ]) &&
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([
+            'WEATHER_STATION_ZONES_REPLACED',
+        ]);
     reportCheck(
         exactStaging,
         'staging manifest records protected device rollout',
@@ -2527,6 +2566,64 @@ expectInvalid(
     /op.*enum/
 );
 
+const weatherStationZones = {
+    contract_version: 1,
+    device_eui: '0123456789ABCDEF',
+    gateway_device_eui: 'FEDCBA9876543210',
+    zone_uuids: [
+        '11111111-1111-4111-8111-111111111111',
+        '22222222-2222-4222-8222-222222222222',
+    ],
+    sync_version: 2,
+    last_applied_at: null,
+};
+const replaceWeatherZones = {
+    command_id: UUID,
+    command_type: 'REPLACE_WEATHER_STATION_ZONES',
+    effect_key: 'weather_station_zones:0123456789ABCDEF:1',
+    device_eui: '0123456789ABCDEF',
+    gateway_device_eui: 'FEDCBA9876543210',
+    base_sync_version: 1,
+    target_sync_version: 2,
+    weather_station_zones: weatherStationZones,
+};
+expectValid(
+    'REPLACE_WEATHER_STATION_ZONES protected desired-state command',
+    cmdSchema,
+    replaceWeatherZones,
+    cmdSchema
+);
+expectInvalid(
+    'REPLACE_WEATHER_STATION_ZONES rejects duplicate zones',
+    cmdSchema,
+    {
+        ...replaceWeatherZones,
+        weather_station_zones: {
+            ...weatherStationZones,
+            zone_uuids: [
+                weatherStationZones.zone_uuids[0],
+                weatherStationZones.zone_uuids[0],
+            ],
+        },
+    },
+    /duplicate/,
+    cmdSchema
+);
+expectValid(
+    'WEATHER_STATION_ZONES_REPLACED canonical event',
+    eventsSchema,
+    {
+        eventUuid: UUID,
+        aggregateType: 'WEATHER_STATION_ZONES',
+        aggregateKey: weatherStationZones.device_eui,
+        op: 'WEATHER_STATION_ZONES_REPLACED',
+        syncVersion: 2,
+        occurredAt: '2026-07-24T10:01:00.000Z',
+        payload: weatherStationZones,
+    },
+    eventsSchema
+);
+
 const effectKeyDoc = fs.readFileSync(path.join(SCHEMA_DIR, 'effect-keys.md'), 'utf8');
 for (const format of [
     'journal_entry:{entry_uuid}:{base_sync_version}',
@@ -2539,6 +2636,7 @@ for (const format of [
     'scoped_plot_assignment:{assignment_uuid}:{base_sync_version}',
     'zone:{zone_uuid}:{base_sync_version}',
     'zone_delete:{zone_uuid}:{base_sync_version}',
+    'weather_station_zones:{device_eui}:{base_sync_version}',
 ]) {
     reportCheck(
         effectKeyDoc.includes(format),

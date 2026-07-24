@@ -32,8 +32,11 @@ const SEPARATE_ROUTE_SPECS = [
         applierCommandPattern: /['"]UPSERT_ZONE_IRRIGATION_CALIBRATION['"]/,
     },
 ];
-const EXACT_STAGED_COMMANDS = ['UPSERT_DEVICE'];
-const EXACT_EDGE_DEFERRED_COMMANDS = ['UPSERT_DEVICE'];
+const EXACT_STAGED_COMMANDS = [
+    'UPSERT_DEVICE',
+    'REPLACE_WEATHER_STATION_ZONES',
+];
+const EXACT_EDGE_DEFERRED_COMMANDS = [...EXACT_STAGED_COMMANDS];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
@@ -92,6 +95,9 @@ const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UNCLAIM_DEVICE: {
         effect_key: { prefix: 'device_unclaim', uuid_path: 'device_eui', version_path: 'base_sync_version' },
     },
+    REPLACE_WEATHER_STATION_ZONES: {
+        effect_key: { prefix: 'weather_station_zones', uuid_path: 'device_eui', version_path: 'base_sync_version' },
+    },
 };
 const EXACT_EVENT_SEMANTIC_BINDINGS = {
     JOURNAL_ENTRY_UPSERTED: { aggregate_key_path: 'payload.entry_uuid', sync_version_path: 'payload.sync_version' },
@@ -105,6 +111,7 @@ const EXACT_EVENT_SEMANTIC_BINDINGS = {
     USER_PLOT_ASSIGNMENT_UPSERTED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
     USER_PLOT_ASSIGNMENT_DELETED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
     ZONE_IRRIGATION_CALIBRATION_UPSERTED: { aggregate_key_path: 'payload.zone_uuid', sync_version_path: 'payload.sync_version' },
+    WEATHER_STATION_ZONES_REPLACED: { aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version' },
 };
 
 function loadSchema(name) {
@@ -264,6 +271,7 @@ function verifyGoldenFixture(commandSchema, eventsSchema) {
         'irrigation_config_desired_state_v1',
         'scoped_access_commands_v1',
         'scoped_access_sync_v1',
+        'weather_station_zones_desired_state_v1',
         'zone_desired_state_v1',
     ];
     const capabilities = golden.capabilities || [];

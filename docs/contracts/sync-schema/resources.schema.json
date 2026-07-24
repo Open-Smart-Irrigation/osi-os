@@ -334,6 +334,26 @@
                 }
             ]
         },
+        "WeatherStationZonesDesiredState": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "contract_version", "device_eui", "gateway_device_eui",
+                "zone_uuids", "sync_version", "last_applied_at"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "device_eui": {"$ref": "#/definitions/Eui64"},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "zone_uuids": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {"$ref": "#/definitions/CanonicalUuid"}
+                },
+                "sync_version": {"type": "integer", "minimum": 1},
+                "last_applied_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"}
+            }
+        },
         "Schedule": {
             "type": "object",
             "required": ["zone_id", "trigger_metric"],

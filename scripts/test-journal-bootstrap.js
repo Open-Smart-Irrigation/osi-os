@@ -19,6 +19,7 @@ const EXPECTED_CAPABILITIES = [
   'zone_desired_state_v1',
   'irrigation_config_desired_state_v1',
   'device_desired_state_v1',
+  'weather_station_zones_desired_state_v1',
   'field_journal_v1',
 ];
 const JOURNAL_FIELDS = [

@@ -1052,7 +1052,32 @@ for (const id of ['al-link-build-req', 'sync-bootstrap-build', 'sync-force-build
         'device_desired_state_v1',
         `device desired state: ${id} must advertise the capability`
     );
+    requireFuncIncludes(
+        byId[id],
+        'weather_station_zones_desired_state_v1',
+        `weather station zones: ${id} must advertise the capability`
+    );
 }
+requireFuncIncludes(
+    byId['device-command-apply-fn'],
+    'REPLACE_WEATHER_STATION_ZONES',
+    'weather station zones: protected command must route through the device applier'
+);
+requireFuncIncludes(
+    byId['device-command-apply-fn'],
+    'applyWeatherStationZonesCommand',
+    'weather station zones: protected route must call the transactional helper'
+);
+requireFuncIncludes(
+    byId['s2120-zones-put-auth-fn'],
+    'replaceLocalWeatherStationZones',
+    'weather station zones: local replacement must use the versioned helper'
+);
+requireFuncIncludes(
+    byId['s2120-zones-put-auth-fn'],
+    'sync_version: result.sync_version',
+    'weather station zones: local response must expose the aggregate version'
+);
 for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
     requireFuncIncludes(
         byId[id],

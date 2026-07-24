@@ -138,6 +138,13 @@ producing a canonical body or hash.
 - Input: `{"note": "2026-05-03T12:00:00.1234567890Z"}`
 - Result: invalid
 
+## Weather-station zone sets
+
+`zone_uuids` is the complete assignment set, encoded as a duplicate-free array
+of lowercase canonical UUIDs in ascending lexical order. An empty array removes
+every assignment. Producers sort before hashing; consumers reject unsorted or
+duplicate input.
+
 ## SWT pF Derivation
 
 pF is never stored or synced for measurements; every consumer derives it from

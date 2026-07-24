@@ -88,7 +88,8 @@ class ScopedAccessApplier implements SyncEventApplier {
       "USER_ZONE_ASSIGNMENT_UPSERTED",
       "USER_ZONE_ASSIGNMENT_DELETED",
       "USER_PLOT_ASSIGNMENT_UPSERTED",
-      "USER_PLOT_ASSIGNMENT_DELETED"
+      "USER_PLOT_ASSIGNMENT_DELETED",
+      "ZONE_IRRIGATION_CALIBRATION_UPSERTED"
     );
   }
 }
@@ -135,8 +136,14 @@ function exactRolloutStaging() {
   return {
     version: 1,
     commands: {
-      edgeDeferred: [],
-      cloudDeferred: [],
+      edgeDeferred: [
+        'UPSERT_DEVICE',
+        'REPLACE_WEATHER_STATION_ZONES',
+      ],
+      cloudDeferred: [
+        'UPSERT_DEVICE',
+        'REPLACE_WEATHER_STATION_ZONES',
+      ],
     },
     eventOps: {
       edgeModuleOwned: [
@@ -146,8 +153,8 @@ function exactRolloutStaging() {
         'JOURNAL_PLOT_UPSERTED',
         'JOURNAL_PLOT_GROUP_UPSERTED',
       ],
-      edgeDeferred: [],
-      cloudDeferred: [],
+      edgeDeferred: ['WEATHER_STATION_ZONES_REPLACED'],
+      cloudDeferred: ['WEATHER_STATION_ZONES_REPLACED'],
     },
   };
 }
@@ -168,7 +175,10 @@ function createStagedParityFixture(overrides) {
   fs.writeFileSync(schemaPath, JSON.stringify({
     type: 'object',
     properties: {
-      op: { enum: ['DEVICE_DATA_APPENDED'].concat(JOURNAL_EVENT_OPS, SCOPED_ACCESS_EVENT_OPS) },
+      op: {
+        enum: ['DEVICE_DATA_APPENDED', 'WEATHER_STATION_ZONES_REPLACED']
+          .concat(JOURNAL_EVENT_OPS, SCOPED_ACCESS_EVENT_OPS),
+      },
       payload: {
         type: 'object',
         required: ['contract_version'],

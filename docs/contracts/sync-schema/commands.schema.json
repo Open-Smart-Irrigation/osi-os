@@ -59,6 +59,9 @@
         },
         "UNCLAIM_DEVICE": {
             "effect_key": {"prefix": "device_unclaim", "uuid_path": "device_eui", "version_path": "base_sync_version"}
+        },
+        "REPLACE_WEATHER_STATION_ZONES": {
+            "effect_key": {"prefix": "weather_station_zones", "uuid_path": "device_eui", "version_path": "base_sync_version"}
         }
     },
     "type": "object",
@@ -120,7 +123,8 @@
                 "UPSERT_USER_ZONE_ASSIGNMENT",
                 "DELETE_USER_ZONE_ASSIGNMENT",
                 "UPSERT_USER_PLOT_ASSIGNMENT",
-                "DELETE_USER_PLOT_ASSIGNMENT"
+                "DELETE_USER_PLOT_ASSIGNMENT",
+                "REPLACE_WEATHER_STATION_ZONES"
             ]
         },
         "device_eui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
@@ -158,7 +162,8 @@
         "zone": {},
         "schedule": {"$ref": "resources.schema.json#/definitions/IrrigationScheduleDesiredState"},
         "irrigation_calibration": {"$ref": "resources.schema.json#/definitions/IrrigationCalibrationDesiredState"},
-        "device": {"$ref": "resources.schema.json#/definitions/DeviceDesiredState"}
+        "device": {"$ref": "resources.schema.json#/definitions/DeviceDesiredState"},
+        "weather_station_zones": {"$ref": "resources.schema.json#/definitions/WeatherStationZonesDesiredState"}
     },
     "allOf": [
         {
@@ -183,7 +188,8 @@
                             "UPSERT_ZONE_LOCATION",
                             "UPSERT_SCHEDULE",
                             "UPSERT_ZONE_IRRIGATION_CALIBRATION",
-                            "UPSERT_DEVICE"
+                            "UPSERT_DEVICE",
+                            "REPLACE_WEATHER_STATION_ZONES"
                         ]
                     }
                 },
@@ -213,7 +219,8 @@
                             "UPSERT_ZONE_LOCATION",
                             "UPSERT_SCHEDULE",
                             "UPSERT_ZONE_IRRIGATION_CALIBRATION",
-                            "UPSERT_DEVICE"
+                            "UPSERT_DEVICE",
+                            "REPLACE_WEATHER_STATION_ZONES"
                         ]
                     }
                 },
@@ -627,6 +634,38 @@
                                 }
                             }
                         ]
+                    }
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {
+                    "command_type": {"const": "REPLACE_WEATHER_STATION_ZONES"}
+                },
+                "required": ["command_type"]
+            },
+            "then": {
+                "required": [
+                    "effect_key", "device_eui", "gateway_device_eui",
+                    "base_sync_version", "target_sync_version",
+                    "weather_station_zones"
+                ],
+                "propertyNames": {
+                    "enum": [
+                        "command_id", "command_type", "effect_key",
+                        "device_eui", "gateway_device_eui",
+                        "base_sync_version", "target_sync_version",
+                        "weather_station_zones"
+                    ]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^weather_station_zones:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"
+                    },
+                    "weather_station_zones": {
+                        "$ref": "resources.schema.json#/definitions/WeatherStationZonesDesiredState"
                     }
                 }
             }

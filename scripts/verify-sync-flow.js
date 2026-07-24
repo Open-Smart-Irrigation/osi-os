@@ -35,6 +35,15 @@ const deviceCommandsPath = path.join(
   'index.js'
 );
 const deviceCommandsSource = fs.readFileSync(deviceCommandsPath, 'utf8');
+const weatherZoneCommandsPath = path.join(
+  nodeRedRoot,
+  'osi-device-commands',
+  'weather.js'
+);
+const weatherZoneCommandsSource = fs.readFileSync(
+  weatherZoneCommandsPath,
+  'utf8'
+);
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
 const chirpstackInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'chirpstack', 'chirpstack', 'files', 'chirpstack.init');
@@ -1382,6 +1391,7 @@ expectIncludes('Build server auth request', 'force_edge_sync_v1', 'advertises th
 expectIncludes('Build server auth request', 'zone_desired_state_v1', 'advertises the versioned zone desired-state capability');
 expectIncludes('Build server auth request', 'irrigation_config_desired_state_v1', 'advertises the irrigation-config desired-state capability');
 expectIncludes('Build server auth request', 'device_desired_state_v1', 'advertises the protected device desired-state capability');
+expectIncludes('Build server auth request', 'weather_station_zones_desired_state_v1', 'advertises the weather-station zone desired-state capability');
 expectIncludes('Handle server auth response', "const claimed = Array.isArray(data.claimed)", 'accepts claimed device results directly from local-sync');
 expectIncludes('Handle server auth response', 'offlineVerifierVersion', 'requires and stores the offline verifier version from local-sync');
 expectIncludes('Decode token & build query', 'server_offline_verifier_version', 'loads linked-auth verifier metadata for account-link status');
@@ -1599,6 +1609,7 @@ expectIncludes('Build Cloud Bootstrap', 'edgeBuildVersion,', 'includes the edge 
 expectIncludes('Build Cloud Bootstrap', 'syncCapabilities', 'includes sync capabilities in bootstrap gateway metadata');
 expectIncludes('Build Cloud Bootstrap', 'zone_desired_state_v1', 'includes the versioned zone desired-state capability in bootstrap metadata');
 expectIncludes('Build Cloud Bootstrap', 'device_desired_state_v1', 'includes the protected device desired-state capability in bootstrap metadata');
+expectIncludes('Build Cloud Bootstrap', 'weather_station_zones_desired_state_v1', 'includes the weather-station zone desired-state capability in bootstrap metadata');
 expectIncludes('Build Cloud Bootstrap', 'runGatewayMigrationPreflight', 'runs local gateway migration preflight before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'gatewayMigrationPaused: true', 'pauses normal sync while a gateway migration repair bootstrap is pending');
 expectIncludes('Build Cloud Bootstrap', 'UPDATE irrigation_zones SET gateway_device_eui = ?', 'rewrites active zone gateway bindings during local migration');
@@ -1684,12 +1695,13 @@ expectIncludesById('irrigation-config-command-apply-fn', '.close(', 'closes the 
 expectOrderedIncludesById('device-command-apply-fn', [
   'const envelope = cmd._pendingCommandEnvelope;',
   "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
-  "const protectedTypes = new Set(['UPSERT_DEVICE', 'UNCLAIM_DEVICE']);",
+  "const protectedTypes = new Set(['UPSERT_DEVICE', 'UNCLAIM_DEVICE', 'REPLACE_WEATHER_STATION_ZONES']);",
   'if (!protectedTypes.has(commandType) || !protectedShape) return [msg, null];',
   "const dbLoad = osiLib.require('osi-db-helper');",
   "const helper = osiLib.require('device-commands');",
   "const scopeLoad = osiLib.require('scope');",
-  'helper.value.applyDeviceCommand(db, envelope, {',
+  "const applyCommand = commandType === 'REPLACE_WEATHER_STATION_ZONES'",
+  'const result = await applyCommand(db, envelope, {',
 ], 'routes only protected device commands through the transactional helper');
 expectIncludesById('device-command-apply-fn', 'Device command helpers unavailable:', 'fails closed when protected device helpers are unavailable');
 expectIncludesById('device-command-apply-fn', 'invalidateScope', 'invalidates cached scope after an applied protected device mutation');
@@ -1724,6 +1736,12 @@ expectFileIncludes('osi-device-commands/index.js', deviceCommandsSource, 'UPDATE
 expectFileIncludes('osi-device-commands/index.js', deviceCommandsSource, 'INSERT INTO command_ack_outbox', 'persists protected device ACKs atomically');
 expectFileExcludes('osi-device-commands/index.js', deviceCommandsSource, 'current_state=?', 'runtime valve observations from protected device writes');
 expectFileExcludes('osi-device-commands/index.js', deviceCommandsSource, 'target_state=?', 'runtime valve targets from protected device writes');
+expectFileIncludes('osi-device-commands/weather.js', weatherZoneCommandsSource, 'db.transaction(async (tx) => {', 'replaces weather assignments and persists the terminal ACK in one transaction');
+expectFileIncludes('osi-device-commands/weather.js', weatherZoneCommandsSource, "device.type_id !== 'SENSECAP_S2120'", 'rejects weather assignment commands for other device families');
+expectFileIncludes('osi-device-commands/weather.js', weatherZoneCommandsSource, 'DELETE FROM weather_station_zones WHERE deveui=?', 'replaces the complete weather assignment set');
+expectFileIncludes('osi-device-commands/weather.js', weatherZoneCommandsSource, 'INSERT INTO command_ack_outbox', 'persists weather assignment ACKs atomically');
+expectIncludesById('s2120-zones-put-auth-fn', 'replaceLocalWeatherStationZones', 'uses the versioned aggregate helper for local weather assignment writes');
+expectIncludesById('s2120-zones-put-auth-fn', 'sync_version: result.sync_version', 'returns the weather assignment aggregate version');
 expectIncludes('Queue REST Command ACK', 'osiCommandLedger.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing via the shared command ledger');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'ON CONFLICT(command_id) DO NOTHING', 'never rewrites an existing terminal command result');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs in the shared transaction helper');
@@ -1978,6 +1996,7 @@ expectIncludes('Run Force Sync', 'syncCapabilities', 'includes sync capabilities
 expectIncludes('Run Force Sync', 'zone_desired_state_v1', 'includes the versioned zone desired-state capability in forced bootstrap metadata');
 expectIncludes('Run Force Sync', 'irrigation_config_desired_state_v1', 'includes the irrigation-config desired-state capability in forced bootstrap metadata');
 expectIncludes('Run Force Sync', 'device_desired_state_v1', 'includes the protected device desired-state capability in forced bootstrap metadata');
+expectIncludes('Run Force Sync', 'weather_station_zones_desired_state_v1', 'includes the weather-station zone desired-state capability in forced bootstrap metadata');
 expectIncludes('Run Force Sync', 'const sensorDataRows = await q([', 'loads force-sync sensor history before reordering it');
 expectIncludes('Run Force Sync', 'const sensorData = sensorDataRows.slice().reverse();', 'replays force-sync sensor history oldest-to-newest');
 expectIncludes('Run Force Sync', 'const dendroReadingsRows = await q([', 'loads force-sync dendro history before reordering it');
@@ -2044,6 +2063,7 @@ expectFileIncludes('deploy.sh', deployScript, 'database/migrations/ordered/$migr
 expectFileIncludes('deploy.sh', deployScript, 'scripts/migrate-cli.js', 'fetches the deploy-time migration CLI');
 expectFileIncludes('deploy.sh', deployScript, 'scripts/baseline-existing-db.js', 'fetches the semantic baseline tool for first-run devices');
 expectFileIncludes('deploy.sh', deployScript, 'scripts/repair-sync-outbox-v2.js', 'fetches the pre-baseline sync_outbox repair');
+expectFileIncludes('deploy.sh', deployScript, 'osi-device-commands/weather.js', 'deploys the weather-station assignment command helper');
 expectFileExcludes('deploy.sh', deployScript, 'CREATE TABLE IF NOT EXISTS zone_irrigation_calibration', 'inline zone irrigation calibration DDL in deploy.sh');
 expectFileExcludes('deploy.sh', deployScript, 'measured_flow_rate_lpm REAL,', 'inline nullable measured flow rate deploy repair');
 expectFileExcludes('deploy.sh', deployScript, 'measurement_method     TEXT,', 'inline nullable measurement method deploy repair');
