@@ -23,6 +23,7 @@ come from the fetched integration heads, not the earlier planning audit.
 | 5 | Journal mirrors, commands, exports, UI, and contract activation landed | Edge `6fd5d7fd`, `af274c9c`, and `9a2bcb09`; server `4bf1c67c` through `1c953c77` |
 | 6 | Scoped edge reads, writes, physical effects, administration, and read-only GUI enforcement landed | Edge `31fd939d` through `b4b6c1a8`; report `0e5319a0` |
 | 7 | Per-gateway cloud membership, scoped mirrors, authorization, desired access commands, edge application, administration UI, and contract activation landed | Edge `b4cb078c` through `0f17892f`; server `e8268566` through `5ca86425` |
+| 8a | Zone create, aggregate update, location, portable configuration, and delete converge through protected desired state; legacy gateways retain their prior command path | Edge `b7787c17` through `be66dad6`; server `e860ed93` through `f83ef56a` |
 
 ## Status rules
 
@@ -41,7 +42,7 @@ come from the fetched integration heads, not the earlier planning audit.
 | Surface | Launch status | Evidence and gap | Owning task |
 |---|---|---|---|
 | Gateway identity and location mirror | `partial` | Live EUI verification and server applier tests pass; complete create/update/replay parity remains in Task 8 | Task 8 |
-| Zones, zone configuration, and zone location | `partial` | Edge APIs, outbox operations, and pending command handlers exist; cloud optimistic desired-state and conflict behavior remain incomplete | Tasks 4 and 8 |
+| Zones, zone configuration, and zone location | `parity` | Local inserts now emit the complete mirror event. Capable gateways apply create, full-aggregate update, location, configuration, and delete with exact versions; cloud desired state remains visible through ACK and mirror convergence. Portable `soil_type` travels in the aggregate. | Tasks 4 and 8 |
 | Irrigation schedules | `partial` | Edge schedule mutations and cloud pending commands exist; current route, field, version, and conflict parity require inventory | Tasks 4 and 8 |
 | Device provisioning and registration | `partial` | Bootstrap, registration, bulk claim, assignment, and command paths exist; authorization and six-family parity remain | Tasks 7 and 8 |
 | Device assignment, flags, configuration, and unclaim | `partial` | Multiple pending command types exist; Task 0 must map device-family coverage and authorization | Tasks 7 and 8 |
@@ -51,7 +52,7 @@ come from the fetched integration heads, not the earlier planning audit.
 | Account scope and per-gateway grants | `parity` | Edge owner-plus-grant enforcement and server per-gateway membership authorization pass for reads, writes, and effects; mirrors retain local user and assignment UUIDs | Tasks 3, 6, and 7 |
 | Cloud access administration | `parity` | Cloud desired state queues six versioned commands; edge applies or rejects them transactionally; ACK plus mirror convergence drives pending, conflict, and rejection UI | Tasks 4 and 7 |
 | Installation recovery | `cloud-missing` | No stable `installation_uuid` recovery model or encrypted recovery bundle exists | Task 10 |
-| Optimistic zone edits | `partial` | Zone configuration uses durable desired state; lifecycle, location, and soil-profile mutations still require Task 8 convergence evidence | Tasks 4 and 8 |
+| Optimistic zone edits | `parity` | Selected-gateway create, aggregate update, location, and delete use durable desired state. Pending creates remain visible, stale versions conflict, and canonical mirrors settle applied operations. | Tasks 4 and 8 |
 
 ## Deliberate product split
 
@@ -62,6 +63,7 @@ come from the fetched integration heads, not the earlier planning audit.
 | Fan, filesystem, database download, and firmware controls | `edge-only` | Gateway operations, not portable farm workflows |
 | Fleet administration and server operations | `cloud-only` | Cross-installation operational scope |
 | Encrypted recovery storage | `cloud-only` | Server custody; restored state still becomes edge-canonical |
+| Detailed SoilHive hydraulic profile | `cloud-only` | The canonical portable zone field is `soil_type`. Hydraulic catalog values are derived cloud data and are not written back to the edge aggregate. Missing values render as absent, never numeric zero. |
 | Incremental bootstrap snapshots | `deferred` | Existing plan defers until scale or measured load justifies the complexity |
 | Schema-driven DTO generation | `deferred` | Superseded by the narrow schema/contract ownership ADR; do not execute |
 | Legacy history-path removal | `deferred` | Requires maintainer approval after the durable batch path converges |

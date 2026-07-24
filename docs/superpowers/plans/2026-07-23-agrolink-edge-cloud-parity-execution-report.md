@@ -462,6 +462,83 @@ Task 7 heavyweight samples recorded between 11,552 MiB and 12,128 MiB
 available during final contract verification. All samples cleared the
 4,096 MiB threshold. No owned or unrelated process was terminated.
 
+### Task 8a zone parity
+
+Zone lifecycle and portable configuration now converge through one protected
+aggregate. Edge migration `0035__zone_insert_outbox.sql` adds the missing
+insert trigger, so a locally created zone emits one complete
+`ZONE_UPSERTED` event after its identity fields exist. The protected edge
+consumer validates the gateway, local owner UUID, effect key, command shape,
+and exact base and target versions before changing SQLite. Create, update, and
+delete apply atomically with the terminal command ledger result. Delete first
+detaches assigned devices and then tombstones the zone.
+
+The governed contract accepts `UPSERT_ZONE`, `UPSERT_ZONE_CONFIG`,
+`UPSERT_ZONE_LOCATION`, and `DELETE_ZONE`. All non-delete edits share the
+`zone:<zone_uuid>:<base_version>` effect family, allowing the server to
+replace an unleased config command with one full-zone aggregate instead of
+issuing deterministically conflicting config and location versions. Delete
+uses its separate `zone_delete:` family. The edge advertises
+`zone_desired_state_v1` from local link, bootstrap, and force-sync payloads
+only after the protected consumer and contract passed.
+
+OSI Server persists that capability per linked gateway and uses the selected
+gateway's local user UUID for cloud-originated creates. Per-gateway scope
+controls create, update, and delete authorization. A capable gateway receives
+one durable desired-state command; older gateways keep the existing raw
+config and location commands. ACK and canonical mirror observations settle an
+operation as applied only when both agree. Exact-version drift reaches the
+recoverable conflicted state.
+
+The cloud create modal loads enabled linked gateways, selects the sole gateway
+automatically, and requires a choice when several are available. No linked
+gateway retains cloud-local creation. Pending creates remain in zone lists but
+do not expose actions that require a canonical numeric ID. Configuration and
+location now travel in one request. Missing SoilHive field capacity, wilting
+point, saturation, conductivity, readily evaporable water, and curve number
+render as `—`. The portable edge field remains `soil_type`; the detailed
+hydraulic profile is cloud-derived.
+
+The first focused frontend runs failed on the missing gateway selection,
+pending-card, aggregate-update, and missing-data behavior. The first backend
+run failed to compile after the request contract changed. Those failures
+cleared after implementation. The full backend suite then exposed 102
+ArchUnit frozen samples displaced by one additional dependency on the
+already-frozen `zone -> command` edge. The 102 removed and 102 reported cycle
+paths had the same SHA-256 and zero set differences. A reviewed refreeze
+replaced exactly 102 lines with 102 lines; a normal architecture run preserved
+the resulting file hash, and the full suite passed.
+
+Task 8a verification:
+
+| Command | Result |
+|---|---|
+| `node --test scripts/test-zone-insert-outbox.js scripts/test-zone-command-path.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.test.js` | exit 0; 24 tests passed |
+| `node scripts/test-contract-schemas.js` and `node scripts/verify-sync-contract.js` | exit 0; protected zone schemas, effects, and rollout metadata passed |
+| `node scripts/verify-sync-flow.js` | exit 0; capability, flow, schema, and profile-parity gates passed |
+| Zone flow migration run twice | exit 0; the second run was byte-identical |
+| Server vendor mutation script and `SyncContractVendorTest` | exit 0; all six contract files were byte-identical |
+| Focused server capability, mutation, controller, desired-state, scope, ACK, and convergence selections | exit 0 |
+| `NODE_OPTIONS=--max-old-space-size=2048 npm run test:unit` | exit 0; 45 TAP tests plus 75 Vitest files and 296 tests passed |
+| `NODE_OPTIONS=--max-old-space-size=2048 npm run build` | exit 0; production build passed with the existing chunk-size warning |
+| `npx tsc --noEmit` | exit 0 |
+| Locale JSON parsing and anti-slop checks | exit 0 |
+| Normal `ArchitectureTest` after the reviewed sample replacement | exit 0; baseline SHA-256 remained `586e6ca967e4b7e525ecd6688d973df561fd897e27c911711bd3f94cd244b28a` |
+| `NODE_OPTIONS=--max-old-space-size=2048 ./gradlew test --no-daemon --max-workers=2` | exit 0; 1,145 tests, zero failures or errors, `BUILD SUCCESSFUL in 1m 9s` |
+| `git diff --check` in both repositories | exit 0 |
+
+Edge commits `b7787c17`, `9016d220`, `568d7f52`, and `be66dad6`
+and server commits `e860ed93`, `f141dfb3`, `4bac172d`, and
+`f83ef56a1e5b04824850b8cddf353fde4946b001` were pushed to their target
+branches. Remote branch lookups matched the exact local heads after every
+push.
+
+The architecture refreeze started with 11,789 MiB available. The final full
+backend suite started with 12,025 MiB available. Both samples included
+`pswpin`, `pswpout`, and the highest-RSS processes and cleared the 4,096 MiB
+threshold. No process was terminated. No production host, live gateway,
+external key provider, or AgroLink SMB share was accessed.
+
 ### Program ownership
 
 The network planning program is finished. Its final local commit is `8f73306f`
