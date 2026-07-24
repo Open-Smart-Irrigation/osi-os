@@ -26,6 +26,16 @@ const MIGRATION_OWNED_TRIGGERS = new Map([
   // 0035__zone_insert_outbox.sql repairs local-create sync through the
   // deploy-time migration runner. The frozen boot DDL must not duplicate it.
   ['trg_sync_zones_outbox_ai', '0035__zone_insert_outbox.sql'],
+  // 0036__zone_irrigation_calibration_sync.sql versions and mirrors the
+  // calibration aggregate. These triggers stay out of the frozen boot DDL.
+  [
+    'trg_sync_zone_irrigation_calibration_defaults_ai',
+    '0036__zone_irrigation_calibration_sync.sql',
+  ],
+  [
+    'trg_sync_zone_irrigation_calibration_outbox_au',
+    '0036__zone_irrigation_calibration_sync.sql',
+  ],
 ]);
 
 function q(db, sql) {

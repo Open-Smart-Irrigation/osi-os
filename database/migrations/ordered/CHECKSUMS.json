@@ -33,5 +33,7 @@
   "0032__journal_catalog_v10.sql": "f27d351f23d63b9ae3dcab44cb90541e3144af29c47d98ab60efa7a22af37b86",
   "0033__scoped_access_schema.sql": "79f4acead913ad84edeb3c4dead4c67599f0047ae6f4af27c876c7ab117a667f",
   "0034__scoped_access_backfill.sql": "3c2960d0575e60642ddf56c50f5f406254b1c1ffb35b3b9d58925b9e67e8a5e8",
-  "0035__zone_insert_outbox.sql": "0fe1ed57289932578f8651b9823a0d137cc97aadca9802e0ca81dd0196c40677"
+  "0035__zone_insert_outbox.sql": "0fe1ed57289932578f8651b9823a0d137cc97aadca9802e0ca81dd0196c40677",
+  "0036__zone_irrigation_calibration_sync.sql": "d8d9091b26be3ea21f1d2bb7ac16664968340cafa1e4783d7c76a5834386a37d",
+  "0037__zone_irrigation_calibration_backfill.sql": "1f326f32aa5f296d5f7b64c941d88455ea8e71daeb8cffc02ed1aec859fc959a"
 }

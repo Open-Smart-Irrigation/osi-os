@@ -406,6 +406,18 @@ const schemaContract = {
     'valve_channel',
     'created_at',
   ],
+  zone_irrigation_calibration: [
+    'zone_id',
+    'valve_device_eui',
+    'measured_flow_rate_lpm',
+    'measurement_method',
+    'measured_at',
+    'created_at',
+    'updated_at',
+    'sync_version',
+    'deleted_at',
+    'last_applied_at',
+  ],
   lsn50_shadow_diff: [
     'id',
     'deveui',

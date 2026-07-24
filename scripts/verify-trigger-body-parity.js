@@ -49,6 +49,10 @@ const DEFAULT_FLOWS = [
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
 ].map((p) => path.join(repoRoot, p));
 const DEFAULT_SEED = path.join(repoRoot, 'database/seed-blank.sql');
+const MIGRATION_OWNED_TRIGGER_NAMES = new Set([
+  'trg_sync_zone_irrigation_calibration_defaults_ai',
+  'trg_sync_zone_irrigation_calibration_outbox_au',
+]);
 
 // Rule 1: the interpolated test EUI and the seed's hardcoded fallback EUI.
 const GATEWAY_EUI_LITERALS = [TEST_GATEWAY_SQL, "'0016C001F11715E2'"];
@@ -88,6 +92,14 @@ function verifyFlows(flowsPath, seedPath) {
   try {
     db.exec(fs.readFileSync(seedPath, 'utf8'));
     const seedTriggers = snapshotTriggers(db);
+    for (const name of MIGRATION_OWNED_TRIGGER_NAMES) {
+      if (!seedTriggers.has(name)) {
+        failures.push(`${name}: migration-owned trigger absent from seed-blank.sql`);
+      }
+      if (bootManaged.has(name)) {
+        failures.push(`${name}: migration-owned trigger duplicated in frozen boot DDL`);
+      }
+    }
     for (const sql of stmts) {
       try { db.exec(sql); } catch (_) { /* execution failures are verify-boot-ddl-interpolation's job */ }
     }
