@@ -1648,6 +1648,32 @@ expectInvalid(
     /chameleon_swt1_depth_cm.*type number/,
     cmdSchema
 );
+expectInvalid(
+    'UPSERT_DEVICE rejects reference-tree flag without dendrometer',
+    cmdSchema,
+    {
+        ...deviceUpsertCommand,
+        device: {
+            ...deviceDesiredState,
+            dendro_enabled: 0,
+        },
+    },
+    /is_reference_tree/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_DEVICE rejects Chameleon depths when Chameleon is disabled',
+    cmdSchema,
+    {
+        ...deviceUpsertCommand,
+        device: {
+            ...deviceDesiredState,
+            chameleon_enabled: 0,
+        },
+    },
+    /chameleon_swt1_depth_cm/,
+    cmdSchema
+);
 
 const journalEntry = {
     contract_version: 1,

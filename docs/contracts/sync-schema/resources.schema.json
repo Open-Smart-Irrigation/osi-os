@@ -259,6 +259,36 @@
                 },
                 {
                     "if": {
+                        "properties": {
+                            "type": {"const": "DRAGINO_LSN50"},
+                            "dendro_enabled": {"const": 0}
+                        },
+                        "required": ["type", "dendro_enabled"]
+                    },
+                    "then": {
+                        "properties": {
+                            "is_reference_tree": {"const": 0}
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {"const": "DRAGINO_LSN50"},
+                            "chameleon_enabled": {"const": 0}
+                        },
+                        "required": ["type", "chameleon_enabled"]
+                    },
+                    "then": {
+                        "properties": {
+                            "chameleon_swt1_depth_cm": {"const": null},
+                            "chameleon_swt2_depth_cm": {"const": null},
+                            "chameleon_swt3_depth_cm": {"const": null}
+                        }
+                    }
+                },
+                {
+                    "if": {
                         "properties": {"type": {"const": "STREGA_VALVE"}},
                         "required": ["type"]
                     },

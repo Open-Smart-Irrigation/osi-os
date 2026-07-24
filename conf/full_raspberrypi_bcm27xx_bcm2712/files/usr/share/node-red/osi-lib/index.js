@@ -19,6 +19,7 @@ const NAME_TO_PATH = {
   'scoped-access-commands': 'osi-scoped-access-commands',
   'zone-commands': 'osi-zone-commands',
   'irrigation-config-commands': 'osi-irrigation-config-commands',
+  'device-commands': 'osi-device-commands',
   'osi-journal': 'osi-journal',
   // Authorization cache must have one module instance. Flow consumers load it
   // only through osiLib.require('scope'), never with a bare/relative require.

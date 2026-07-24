@@ -29,6 +29,12 @@ const irrigationConfigCommandsSource = fs.readFileSync(
   irrigationConfigCommandsPath,
   'utf8'
 );
+const deviceCommandsPath = path.join(
+  nodeRedRoot,
+  'osi-device-commands',
+  'index.js'
+);
+const deviceCommandsSource = fs.readFileSync(deviceCommandsPath, 'utf8');
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
 const chirpstackInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'chirpstack', 'chirpstack', 'files', 'chirpstack.init');
@@ -1697,6 +1703,12 @@ expectFileIncludes('osi-irrigation-config-commands/index.js', irrigationConfigCo
 expectFileIncludes('osi-irrigation-config-commands/index.js', irrigationConfigCommandsSource, 'target_sync_version must equal base_sync_version + 1', 'requires consecutive irrigation config versions');
 expectFileIncludes('osi-irrigation-config-commands/index.js', irrigationConfigCommandsSource, 'UPSERT_ZONE_IRRIGATION_CALIBRATION', 'registers protected calibration desired state');
 expectFileIncludes('osi-irrigation-config-commands/index.js', irrigationConfigCommandsSource, 'INSERT INTO command_ack_outbox', 'persists irrigation config ACKs atomically');
+expectFileIncludes('osi-device-commands/index.js', deviceCommandsSource, 'db.transaction(async (tx) => {', 'applies protected device state and its terminal ACK in one transaction');
+expectFileIncludes('osi-device-commands/index.js', deviceCommandsSource, 'target_sync_version must equal base_sync_version + 1', 'requires consecutive protected device versions');
+expectFileIncludes('osi-device-commands/index.js', deviceCommandsSource, 'UPDATE devices SET ', 'updates the canonical device aggregate');
+expectFileIncludes('osi-device-commands/index.js', deviceCommandsSource, 'INSERT INTO command_ack_outbox', 'persists protected device ACKs atomically');
+expectFileExcludes('osi-device-commands/index.js', deviceCommandsSource, 'current_state=?', 'runtime valve observations from protected device writes');
+expectFileExcludes('osi-device-commands/index.js', deviceCommandsSource, 'target_state=?', 'runtime valve targets from protected device writes');
 expectIncludes('Queue REST Command ACK', 'osiCommandLedger.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing via the shared command ledger');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'ON CONFLICT(command_id) DO NOTHING', 'never rewrites an existing terminal command result');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs in the shared transaction helper');

@@ -13,6 +13,7 @@
     "osi-scoped-access-commands": "file:osi-scoped-access-commands",
     "osi-zone-commands": "file:osi-zone-commands",
     "osi-irrigation-config-commands": "file:osi-irrigation-config-commands",
+    "osi-device-commands": "file:osi-device-commands",
     "osi-dendro-helper": "file:osi-dendro-helper",
     "osi-db-helper": "file:osi-db-helper",
     "osi-history-helper": "file:osi-history-helper",

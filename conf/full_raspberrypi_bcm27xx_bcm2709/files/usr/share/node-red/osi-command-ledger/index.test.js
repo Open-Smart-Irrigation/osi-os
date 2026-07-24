@@ -22,6 +22,7 @@ const repoRoot = path.resolve(__dirname, '../../../../../../..');
 const seedSql = fs.readFileSync(path.join(repoRoot, 'database/seed-blank.sql'), 'utf8');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-command-ledger-test-'));
 const GATEWAY_EUI = '0016C001F11715E2';
+const DEVICE_EUI = '0123456789ABCDEF';
 const ZONE_UUID = '22222222-2222-4222-8222-222222222222';
 
 function canonicalHash(value) {
@@ -289,6 +290,53 @@ test('validEffectBinding binds protected irrigation config to zone UUID and base
   }
 });
 
+test('validEffectBinding binds protected device commands to EUI, gateway, and base', async () => {
+  for (const [commandType, prefix] of [
+    ['UPSERT_DEVICE', 'device'],
+    ['UNCLAIM_DEVICE', 'device_unclaim'],
+  ]) {
+    const payload = {
+      effect_key: `${prefix}:${DEVICE_EUI}:2`,
+      device_eui: DEVICE_EUI,
+      gateway_device_eui: GATEWAY_EUI,
+      base_sync_version: 2,
+      target_sync_version: 3,
+      device: {
+        device_eui: DEVICE_EUI,
+        gateway_device_eui: GATEWAY_EUI,
+        sync_version: 3,
+      },
+    };
+    const envelope = { commandType, payload };
+    assert.equal(
+      await ledger.validEffectBinding(envelope, {
+        command_type_recognized: true,
+        gateway_device_eui: GATEWAY_EUI,
+      }),
+      true
+    );
+    assert.equal(
+      await ledger.validEffectBinding(
+        {
+          ...envelope,
+          payload: {
+            ...payload,
+            device: {
+              ...payload.device,
+              gateway_device_eui: 'FFFFFFFFFFFFFFFF',
+            },
+          },
+        },
+        {
+          command_type_recognized: true,
+          gateway_device_eui: GATEWAY_EUI,
+        }
+      ),
+      false
+    );
+  }
+});
+
 test('validEffectBinding defers journal-shaped types to the injected validator only', async () => {
   const envelope = { commandType: 'UPSERT_JOURNAL_ENTRY', payload: {} };
 
@@ -519,6 +567,75 @@ test('irrigation config effect replay requires equivalent submitted intent', asy
     }
   );
   assert.equal(changed.handled, false);
+});
+
+test('device effect replay requires equivalent submitted intent', async () => {
+  const db = new TestDb();
+  const payload = {
+    command_id: '44444444-4444-4444-8444-444444444444',
+    command_type: 'UPSERT_DEVICE',
+    effect_key: `device:${DEVICE_EUI}:1`,
+    device_eui: DEVICE_EUI,
+    gateway_device_eui: GATEWAY_EUI,
+    base_sync_version: 1,
+    target_sync_version: 2,
+    device: {
+      device_eui: DEVICE_EUI,
+      gateway_device_eui: GATEWAY_EUI,
+      sync_version: 2,
+      name: 'North sensor',
+    },
+  };
+  insertAppliedCommand(db, {
+    commandId: '51',
+    deviceEui: GATEWAY_EUI,
+    commandType: 'UPSERT_DEVICE',
+    effectKey: payload.effect_key,
+    appliedAt: '2026-07-24T10:00:00.000Z',
+    result: 'APPLIED',
+    resultDetail: {
+      commandId: 51,
+      commandType: 'UPSERT_DEVICE',
+      effectKey: payload.effect_key,
+      status: 'ACKED',
+      result: 'APPLIED',
+      duplicate: false,
+      payloadHash: canonicalHash(payload),
+    },
+  });
+
+  const equivalent = await ledger.deduplicatePendingCommand(
+    db,
+    { commandId: 52, commandType: 'UPSERT_DEVICE', payload },
+    {
+      command_type_recognized: true,
+      gateway_device_eui: GATEWAY_EUI,
+    }
+  );
+  assert.equal(equivalent.handled, true);
+  assert.equal(equivalent.ack.duplicate, true);
+
+  const changed = await ledger.deduplicatePendingCommand(
+    db,
+    {
+      commandId: 53,
+      commandType: 'UPSERT_DEVICE',
+      payload: {
+        ...payload,
+        command_id: '55555555-5555-4555-8555-555555555555',
+        device: { ...payload.device, name: 'South sensor' },
+      },
+    },
+    {
+      command_type_recognized: true,
+      gateway_device_eui: GATEWAY_EUI,
+    }
+  );
+  assert.equal(
+    changed.handled,
+    false,
+    'same effect with changed device intent must reach the applier and conflict'
+  );
 });
 
 test('deduplicatePendingCommand fails closed when the effect binding is not recognized', async () => {
