@@ -32,8 +32,8 @@ const SEPARATE_ROUTE_SPECS = [
         applierCommandPattern: /['"]UPSERT_ZONE_IRRIGATION_CALIBRATION['"]/,
     },
 ];
-const EXACT_STAGED_COMMANDS = [];
-const EXACT_EDGE_DEFERRED_COMMANDS = [];
+const EXACT_STAGED_COMMANDS = ['UPSERT_DEVICE'];
+const EXACT_EDGE_DEFERRED_COMMANDS = ['UPSERT_DEVICE'];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
@@ -85,6 +85,12 @@ const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     },
     UPSERT_ZONE_IRRIGATION_CALIBRATION: {
         effect_key: { prefix: 'irrigation_calibration', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_DEVICE: {
+        effect_key: { prefix: 'device', uuid_path: 'device_eui', version_path: 'base_sync_version' },
+    },
+    UNCLAIM_DEVICE: {
+        effect_key: { prefix: 'device_unclaim', uuid_path: 'device_eui', version_path: 'base_sync_version' },
     },
 };
 const EXACT_EVENT_SEMANTIC_BINDINGS = {
@@ -253,6 +259,7 @@ function verifyGoldenFixture(commandSchema, eventsSchema) {
     const expectedCapabilities = [
         'command_ack_results_v1',
         'desired_state_conflicts_v1',
+        'device_desired_state_v1',
         'journal_sync_v1',
         'irrigation_config_desired_state_v1',
         'scoped_access_commands_v1',

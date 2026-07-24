@@ -158,6 +158,152 @@
                 "deleted_at": {"type": ["string", "null"], "format": "date-time"}
             }
         },
+        "DeviceDesiredState": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "contract_version", "device_eui", "name", "type",
+                "claimed_user_uuid", "zone_uuid", "dendro_enabled",
+                "temp_enabled", "rain_gauge_enabled", "flow_meter_enabled",
+                "is_reference_tree", "chameleon_enabled",
+                "soil_moisture_probe_depths_json",
+                "soil_moisture_probe_depths_configured",
+                "chameleon_swt1_depth_cm", "chameleon_swt2_depth_cm",
+                "chameleon_swt3_depth_cm", "strega_model",
+                "gateway_device_eui", "sync_version", "deleted_at"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "device_eui": {"$ref": "#/definitions/Eui64"},
+                "name": {"type": "string", "minLength": 1, "maxLength": 128},
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "KIWI_SENSOR", "TEKTELIC_CLOVER", "DRAGINO_LSN50",
+                        "SENSECAP_S2120", "AQUASCOPE_LORAIN", "STREGA_VALVE"
+                    ]
+                },
+                "claimed_user_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
+                "zone_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
+                "dendro_enabled": {"type": "integer", "enum": [0, 1]},
+                "temp_enabled": {"type": "integer", "enum": [0, 1]},
+                "rain_gauge_enabled": {"type": "integer", "enum": [0, 1]},
+                "flow_meter_enabled": {"type": "integer", "enum": [0, 1]},
+                "is_reference_tree": {"type": "integer", "enum": [0, 1]},
+                "chameleon_enabled": {"type": "integer", "enum": [0, 1]},
+                "soil_moisture_probe_depths_json": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "swt_1": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "swt_2": {"type": "integer", "minimum": 1, "maximum": 1000},
+                        "swt_3": {"type": "integer", "minimum": 1, "maximum": 1000}
+                    }
+                },
+                "soil_moisture_probe_depths_configured": {"type": "integer", "enum": [0, 1]},
+                "chameleon_swt1_depth_cm": {
+                    "type": ["number", "null"],
+                    "minimum": 0,
+                    "not": {"const": 0}
+                },
+                "chameleon_swt2_depth_cm": {
+                    "type": ["number", "null"],
+                    "minimum": 0,
+                    "not": {"const": 0}
+                },
+                "chameleon_swt3_depth_cm": {
+                    "type": ["number", "null"],
+                    "minimum": 0,
+                    "not": {"const": 0}
+                },
+                "strega_model": {"type": ["string", "null"], "enum": ["STANDARD", "MOTORIZED", null]},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "sync_version": {"type": "integer", "minimum": 1},
+                "deleted_at": {"type": "null"}
+            },
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {
+                            "type": {"enum": ["KIWI_SENSOR", "TEKTELIC_CLOVER"]}
+                        },
+                        "required": ["type"]
+                    },
+                    "then": {
+                        "properties": {
+                            "dendro_enabled": {"const": 0},
+                            "temp_enabled": {"const": 0},
+                            "rain_gauge_enabled": {"const": 0},
+                            "flow_meter_enabled": {"const": 0},
+                            "is_reference_tree": {"const": 0},
+                            "chameleon_enabled": {"const": 0},
+                            "chameleon_swt1_depth_cm": {"const": null},
+                            "chameleon_swt2_depth_cm": {"const": null},
+                            "chameleon_swt3_depth_cm": {"const": null},
+                            "strega_model": {"const": null}
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {"type": {"const": "DRAGINO_LSN50"}},
+                        "required": ["type"]
+                    },
+                    "then": {
+                        "properties": {
+                            "soil_moisture_probe_depths_json": {"const": {}},
+                            "soil_moisture_probe_depths_configured": {"const": 0},
+                            "strega_model": {"const": null}
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {"type": {"const": "STREGA_VALVE"}},
+                        "required": ["type"]
+                    },
+                    "then": {
+                        "properties": {
+                            "dendro_enabled": {"const": 0},
+                            "temp_enabled": {"const": 0},
+                            "rain_gauge_enabled": {"const": 0},
+                            "flow_meter_enabled": {"const": 0},
+                            "is_reference_tree": {"const": 0},
+                            "chameleon_enabled": {"const": 0},
+                            "soil_moisture_probe_depths_json": {"const": {}},
+                            "soil_moisture_probe_depths_configured": {"const": 0},
+                            "chameleon_swt1_depth_cm": {"const": null},
+                            "chameleon_swt2_depth_cm": {"const": null},
+                            "chameleon_swt3_depth_cm": {"const": null}
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {"enum": ["SENSECAP_S2120", "AQUASCOPE_LORAIN"]}
+                        },
+                        "required": ["type"]
+                    },
+                    "then": {
+                        "properties": {
+                            "dendro_enabled": {"const": 0},
+                            "temp_enabled": {"const": 0},
+                            "rain_gauge_enabled": {"const": 0},
+                            "flow_meter_enabled": {"const": 0},
+                            "is_reference_tree": {"const": 0},
+                            "chameleon_enabled": {"const": 0},
+                            "soil_moisture_probe_depths_json": {"const": {}},
+                            "soil_moisture_probe_depths_configured": {"const": 0},
+                            "chameleon_swt1_depth_cm": {"const": null},
+                            "chameleon_swt2_depth_cm": {"const": null},
+                            "chameleon_swt3_depth_cm": {"const": null},
+                            "strega_model": {"const": null}
+                        }
+                    }
+                }
+            ]
+        },
         "Schedule": {
             "type": "object",
             "required": ["zone_id", "trigger_metric"],

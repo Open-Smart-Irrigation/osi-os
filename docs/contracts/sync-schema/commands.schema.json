@@ -53,6 +53,12 @@
         },
         "UPSERT_ZONE_IRRIGATION_CALIBRATION": {
             "effect_key": {"prefix": "irrigation_calibration", "uuid_path": "zone_uuid", "version_path": "base_sync_version"}
+        },
+        "UPSERT_DEVICE": {
+            "effect_key": {"prefix": "device", "uuid_path": "device_eui", "version_path": "base_sync_version"}
+        },
+        "UNCLAIM_DEVICE": {
+            "effect_key": {"prefix": "device_unclaim", "uuid_path": "device_eui", "version_path": "base_sync_version"}
         }
     },
     "type": "object",
@@ -102,6 +108,7 @@
                 "UPDATE_SCHEDULE",
                 "UPSERT_SCHEDULE",
                 "UPSERT_ZONE_IRRIGATION_CALIBRATION",
+                "UPSERT_DEVICE",
                 "WORK_REQUEST_STATUS",
                 "UPSERT_JOURNAL_ENTRY",
                 "VOID_JOURNAL_ENTRY",
@@ -150,7 +157,8 @@
         "target_sync_version": {"type": "integer", "minimum": 1},
         "zone": {},
         "schedule": {"$ref": "resources.schema.json#/definitions/IrrigationScheduleDesiredState"},
-        "irrigation_calibration": {"$ref": "resources.schema.json#/definitions/IrrigationCalibrationDesiredState"}
+        "irrigation_calibration": {"$ref": "resources.schema.json#/definitions/IrrigationCalibrationDesiredState"},
+        "device": {"$ref": "resources.schema.json#/definitions/DeviceDesiredState"}
     },
     "allOf": [
         {
@@ -174,7 +182,8 @@
                             "UPSERT_ZONE_CONFIG",
                             "UPSERT_ZONE_LOCATION",
                             "UPSERT_SCHEDULE",
-                            "UPSERT_ZONE_IRRIGATION_CALIBRATION"
+                            "UPSERT_ZONE_IRRIGATION_CALIBRATION",
+                            "UPSERT_DEVICE"
                         ]
                     }
                 },
@@ -203,7 +212,8 @@
                             "UPSERT_ZONE_CONFIG",
                             "UPSERT_ZONE_LOCATION",
                             "UPSERT_SCHEDULE",
-                            "UPSERT_ZONE_IRRIGATION_CALIBRATION"
+                            "UPSERT_ZONE_IRRIGATION_CALIBRATION",
+                            "UPSERT_DEVICE"
                         ]
                     }
                 },
@@ -550,6 +560,74 @@
                         "pattern": "^irrigation_calibration:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
                     },
                     "irrigation_calibration": {"$ref": "resources.schema.json#/definitions/IrrigationCalibrationDesiredState"}
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {"command_type": {"const": "UPSERT_DEVICE"}},
+                "required": ["command_type"]
+            },
+            "then": {
+                "required": [
+                    "effect_key", "device_eui", "gateway_device_eui",
+                    "base_sync_version", "target_sync_version", "device"
+                ],
+                "propertyNames": {
+                    "enum": [
+                        "command_id", "command_type", "effect_key",
+                        "device_eui", "gateway_device_eui",
+                        "base_sync_version", "target_sync_version", "device"
+                    ]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^device:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"
+                    },
+                    "device": {"$ref": "resources.schema.json#/definitions/DeviceDesiredState"}
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {"command_type": {"const": "UNCLAIM_DEVICE"}},
+                "required": ["command_type"],
+                "anyOf": [
+                    {"required": ["effect_key"]},
+                    {"required": ["base_sync_version"]},
+                    {"required": ["target_sync_version"]},
+                    {"required": ["device"]}
+                ]
+            },
+            "then": {
+                "required": [
+                    "effect_key", "device_eui", "gateway_device_eui",
+                    "base_sync_version", "target_sync_version", "device"
+                ],
+                "propertyNames": {
+                    "enum": [
+                        "command_id", "command_type", "effect_key",
+                        "device_eui", "gateway_device_eui",
+                        "base_sync_version", "target_sync_version", "device"
+                    ]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^device_unclaim:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"
+                    },
+                    "device": {
+                        "allOf": [
+                            {"$ref": "resources.schema.json#/definitions/DeviceDesiredState"},
+                            {
+                                "properties": {
+                                    "claimed_user_uuid": {"const": null},
+                                    "zone_uuid": {"const": null}
+                                }
+                            }
+                        ]
+                    }
                 }
             }
         }

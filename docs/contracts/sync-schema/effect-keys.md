@@ -88,6 +88,19 @@ plus one.
 Protected zone irrigation-calibration upserts. Calibration is versioned
 independently from the zone and schedule. A missing calibration is version `0`.
 
+### `device:{device_eui}:{base_sync_version}`
+
+Protected portable device-aggregate edits. The base version is the
+edge-confirmed device version being replaced. Safe metadata, primary-zone,
+flag, and depth edits share this family so one unleased edit can replace an
+older desired aggregate at the same base.
+
+### `device_unclaim:{device_eui}:{base_sync_version}`
+
+Protected device ownership removal. This separate family prevents a safe
+metadata edit from superseding an unclaim request. The desired aggregate has
+null owner and primary-zone UUIDs.
+
 ## Normalization
 
 - `device_eui` is uppercase EUI-64 with no separators.

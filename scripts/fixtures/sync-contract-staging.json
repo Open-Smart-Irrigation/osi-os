@@ -1,8 +1,12 @@
 {
   "version": 1,
   "commands": {
-    "edgeDeferred": [],
-    "cloudDeferred": []
+    "edgeDeferred": [
+      "UPSERT_DEVICE"
+    ],
+    "cloudDeferred": [
+      "UPSERT_DEVICE"
+    ]
   },
   "eventOps": {
     "edgeModuleOwned": [

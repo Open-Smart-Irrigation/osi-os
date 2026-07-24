@@ -34,11 +34,16 @@ const IRRIGATION_CONFIG_COMMANDS = [
     'UPSERT_SCHEDULE',
     'UPSERT_ZONE_IRRIGATION_CALIBRATION',
 ];
+const DEVICE_DESIRED_STATE_COMMANDS = [
+    'UPSERT_DEVICE',
+    'UNCLAIM_DEVICE',
+];
 const DEVICE_EUI_EXEMPT_COMMANDS = [
     ...JOURNAL_COMMANDS,
     ...SCOPED_ACCESS_COMMANDS,
     ...ZONE_COMMANDS,
     ...IRRIGATION_CONFIG_COMMANDS,
+    'UPSERT_DEVICE',
 ];
 const JOURNAL_EVENT_BINDINGS = {
     JOURNAL_ENTRY_UPSERTED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
@@ -105,6 +110,12 @@ const EXPECTED_COMMAND_SEMANTIC_BINDINGS = {
     },
     UPSERT_ZONE_IRRIGATION_CALIBRATION: {
         effect_key: { prefix: 'irrigation_calibration', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_DEVICE: {
+        effect_key: { prefix: 'device', uuid_path: 'device_eui', version_path: 'base_sync_version' },
+    },
+    UNCLAIM_DEVICE: {
+        effect_key: { prefix: 'device_unclaim', uuid_path: 'device_eui', version_path: 'base_sync_version' },
     },
 };
 const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
@@ -480,6 +491,11 @@ function semanticBindingErrors(schema, value) {
             Object.prototype.hasOwnProperty.call(value, key))) {
         return errors;
     }
+    if (DEVICE_DESIRED_STATE_COMMANDS.includes(discriminator) &&
+        !['effect_key', 'base_sync_version', 'target_sync_version', 'device'].some((key) =>
+            Object.prototype.hasOwnProperty.call(value, key))) {
+        return errors;
+    }
     if (binding.effect_key) {
         const uuid = valueAtPath(value, binding.effect_key.uuid_path);
         const version = valueAtPath(value, binding.effect_key.version_path);
@@ -497,6 +513,22 @@ function semanticBindingErrors(schema, value) {
             }
             if (resource && resource.zone_uuid !== uuid) {
                 errors.push('$.zone_uuid: must equal desired-state zone_uuid');
+            }
+            if (resource && resource.gateway_device_eui !== value.gateway_device_eui) {
+                errors.push('$.gateway_device_eui: must equal desired-state gateway_device_eui');
+            }
+            if (resource && resource.sync_version !== target) {
+                errors.push('$.target_sync_version: must equal desired-state sync_version');
+            }
+        }
+        if (DEVICE_DESIRED_STATE_COMMANDS.includes(discriminator)) {
+            const target = value.target_sync_version;
+            const resource = value.device;
+            if (target !== version + 1) {
+                errors.push('$.target_sync_version: must equal base_sync_version + 1');
+            }
+            if (resource && resource.device_eui !== uuid) {
+                errors.push('$.device_eui: must equal desired-state device_eui');
             }
             if (resource && resource.gateway_device_eui !== value.gateway_device_eui) {
                 errors.push('$.gateway_device_eui: must equal desired-state gateway_device_eui');
@@ -1017,8 +1049,12 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
 } else {
     staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
     const exactStaging = staging && staging.version === 1 &&
-        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify([]) &&
+        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([
+            'UPSERT_DEVICE',
+        ]) &&
+        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify([
+            'UPSERT_DEVICE',
+        ]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',
             'JOURNAL_ENTRY_VOIDED',
@@ -1030,8 +1066,8 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
         JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([]);
     reportCheck(
         exactStaging,
-        'staging manifest records activated irrigation calibration rollout',
-        'staging manifest drifted from the activated irrigation calibration rollout'
+        'staging manifest records protected device rollout',
+        'staging manifest drifted from the protected device rollout'
     );
 }
 
@@ -1461,6 +1497,156 @@ expectInvalid(
     },
     /aggregateKey.*payload.zone_uuid/,
     eventsSchema
+);
+
+const deviceDesiredState = {
+    contract_version: 1,
+    device_eui: '0123456789ABCDEF',
+    name: 'North LSN50',
+    type: 'DRAGINO_LSN50',
+    claimed_user_uuid: UUID,
+    zone_uuid: UUID,
+    dendro_enabled: 1,
+    temp_enabled: 1,
+    rain_gauge_enabled: 0,
+    flow_meter_enabled: 0,
+    is_reference_tree: 1,
+    chameleon_enabled: 1,
+    soil_moisture_probe_depths_json: {},
+    soil_moisture_probe_depths_configured: 0,
+    chameleon_swt1_depth_cm: 15.5,
+    chameleon_swt2_depth_cm: 35,
+    chameleon_swt3_depth_cm: null,
+    strega_model: null,
+    gateway_device_eui: 'FEDCBA9876543210',
+    sync_version: 4,
+    deleted_at: null,
+};
+const deviceUpsertCommand = {
+    command_id: UUID,
+    command_type: 'UPSERT_DEVICE',
+    effect_key: 'device:0123456789ABCDEF:3',
+    device_eui: '0123456789ABCDEF',
+    gateway_device_eui: 'FEDCBA9876543210',
+    base_sync_version: 3,
+    target_sync_version: 4,
+    device: deviceDesiredState,
+};
+expectValid(
+    'UPSERT_DEVICE protected aggregate command',
+    cmdSchema,
+    deviceUpsertCommand,
+    cmdSchema
+);
+expectValid(
+    'UNCLAIM_DEVICE protected aggregate command',
+    cmdSchema,
+    {
+        ...deviceUpsertCommand,
+        command_type: 'UNCLAIM_DEVICE',
+        effect_key: 'device_unclaim:0123456789ABCDEF:3',
+        device: {
+            ...deviceDesiredState,
+            claimed_user_uuid: null,
+            zone_uuid: null,
+        },
+    },
+    cmdSchema
+);
+expectValid(
+    'UNCLAIM_DEVICE legacy command remains accepted',
+    cmdSchema,
+    {
+        command_id: UUID,
+        command_type: 'UNCLAIM_DEVICE',
+        device_eui: '0123456789ABCDEF',
+    },
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_DEVICE rejects non-consecutive target version',
+    cmdSchema,
+    { ...deviceUpsertCommand, target_sync_version: 5 },
+    /target_sync_version.*base_sync_version/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_DEVICE rejects wrong desired-state EUI',
+    cmdSchema,
+    {
+        ...deviceUpsertCommand,
+        device: {
+            ...deviceDesiredState,
+            device_eui: 'AAAAAAAAAAAAAAAA',
+        },
+    },
+    /device_eui.*desired-state/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_DEVICE rejects wrong desired-state gateway',
+    cmdSchema,
+    {
+        ...deviceUpsertCommand,
+        device: {
+            ...deviceDesiredState,
+            gateway_device_eui: 'AAAAAAAAAAAAAAAA',
+        },
+    },
+    /gateway_device_eui.*desired-state/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_DEVICE rejects runtime observations',
+    cmdSchema,
+    {
+        ...deviceUpsertCommand,
+        device: {
+            ...deviceDesiredState,
+            current_state: 'OPEN',
+        },
+    },
+    /current_state.*(?:forbidden|property)/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_DEVICE rejects numeric zone identity',
+    cmdSchema,
+    {
+        ...deviceUpsertCommand,
+        device: {
+            ...deviceDesiredState,
+            zone_id: 12,
+        },
+    },
+    /zone_id.*(?:forbidden|property)/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_DEVICE rejects LSN50 fields on Kiwi',
+    cmdSchema,
+    {
+        ...deviceUpsertCommand,
+        device: {
+            ...deviceDesiredState,
+            type: 'KIWI_SENSOR',
+        },
+    },
+    /(?:chameleon_enabled|dendro_enabled|oneOf|not)/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_DEVICE rejects non-finite Chameleon depth',
+    cmdSchema,
+    {
+        ...deviceUpsertCommand,
+        device: {
+            ...deviceDesiredState,
+            chameleon_swt1_depth_cm: Infinity,
+        },
+    },
+    /chameleon_swt1_depth_cm.*type number/,
+    cmdSchema
 );
 
 const journalEntry = {

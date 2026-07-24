@@ -42,6 +42,12 @@
       "schemaAccepted": true,
       "edgeProducerEnabled": true,
       "cloudIssuerEnabled": true
+    },
+    {
+      "name": "device_desired_state_v1",
+      "schemaAccepted": true,
+      "edgeProducerEnabled": false,
+      "cloudIssuerEnabled": false
     }
   ],
   "eventOperations": {
@@ -177,6 +183,7 @@
       "UPDATE_SCHEDULE",
       "UPSERT_SCHEDULE",
       "UPSERT_ZONE_IRRIGATION_CALIBRATION",
+      "UPSERT_DEVICE",
       "WORK_REQUEST_STATUS",
       "UPSERT_JOURNAL_ENTRY",
       "VOID_JOURNAL_ENTRY",
@@ -239,7 +246,9 @@
       "UPSERT_USER_PLOT_ASSIGNMENT",
       "DELETE_USER_PLOT_ASSIGNMENT"
     ],
-    "staged": []
+    "staged": [
+      "UPSERT_DEVICE"
+    ]
   },
   "commandAckResults": [
     {

@@ -68,6 +68,18 @@ Protected calibration payloads carry a positive finite
 canonical `measured_at`. `valve_device_eui` is edge-local and is never
 overwritten by cloud desired state.
 
+## Device desired-state normalization
+
+Protected device aggregates use uppercase EUI-64 keys and lowercase canonical
+UUIDs. Boolean metadata is serialized as integer `0` or `1` to match the
+SQLite aggregate. Soil-depth object keys are sorted by the normal JSON
+canonicalizer; an unconfigured device uses `{}` plus configured flag `0`.
+Chameleon depths are finite positive centimetres or `null`.
+
+Runtime observations are excluded: `current_state`, `target_state`, last-seen
+timestamps, decoder values, device-mode observations, dendrometer ratios, and
+calibration state do not contribute to desired intent or its hash.
+
 ## Test Vectors
 
 The following pairs are normative. A runtime is conformant if its hash matches the expected value for every input.
