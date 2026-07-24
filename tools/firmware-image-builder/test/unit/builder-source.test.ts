@@ -338,6 +338,122 @@ describe('locked builder source', () => {
     }
   });
 
+  it('rejects a GUI staging swap during destination removal without publishing the outside symlink', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-gui-publish-race-'));
+    const outside = await mkdtemp(join(tmpdir(), 'osi-operation-tool-gui-publish-outside-'));
+    const destination = join(root, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui');
+    const staging = join(root, '.osi-image-builder-gui-staging');
+    try {
+      await mkdir(join(root, 'web/react-gui/build'), { recursive: true });
+      await writeFile(join(root, 'web/react-gui/build/index.html'), '<title>replacement</title>');
+      await mkdir(destination, { recursive: true });
+      await writeFile(join(destination, 'stale.js'), 'stale');
+      await mkdir(join(outside, 'gui'), { recursive: true });
+      await writeFile(join(outside, 'gui/outside.js'), 'outside');
+      let swapped = false;
+      const handlers = (await operationToolModule()).createOperationHandlersForTesting(root, { onStep: async (point, path) => {
+        if (!swapped && point === 'before-remove' && path.endsWith('/gui')) {
+          swapped = true;
+          await rename(staging, `${staging}.original`);
+          await symlink(join(outside, 'gui'), staging);
+        }
+      } });
+      await expect(handlers.mirrorGui()).rejects.toThrow(/identity|staging|symbolic|symlink/i);
+      await expect(lstat(destination)).rejects.toThrow();
+      expect((await lstat(staging)).isSymbolicLink()).toBe(true);
+      expect(await readFile(join(outside, 'gui/outside.js'), 'utf8')).toBe('outside');
+      await expect(handlers.mirrorGui()).resolves.toMatchObject({ fileCount: 1 });
+      expect((await lstat(destination)).isDirectory()).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('removes a GUI destination symlink after a post-rename identity swap', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-gui-post-race-'));
+    const outside = await mkdtemp(join(tmpdir(), 'osi-operation-tool-gui-post-outside-'));
+    const destination = join(root, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui');
+    try {
+      await mkdir(join(root, 'web/react-gui/build'), { recursive: true });
+      await writeFile(join(root, 'web/react-gui/build/index.html'), '<title>replacement</title>');
+      await mkdir(destination, { recursive: true });
+      await writeFile(join(destination, 'stale.js'), 'stale');
+      await mkdir(join(outside, 'gui'), { recursive: true });
+      await writeFile(join(outside, 'gui/outside.js'), 'outside');
+      let swapped = false;
+      const handlers = (await operationToolModule()).createOperationHandlersForTesting(root, { onStep: async (point, path) => {
+        if (!swapped && point === 'after-rename' && path.endsWith('/gui')) {
+          swapped = true;
+          await rename(destination, `${destination}.published`);
+          await symlink(join(outside, 'gui'), destination);
+        }
+      } });
+      await expect(handlers.mirrorGui()).rejects.toThrow(/identity|stable|symbolic|symlink/i);
+      await expect(lstat(destination)).rejects.toThrow();
+      expect(await readFile(join(outside, 'gui/outside.js'), 'utf8')).toBe('outside');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a feed staging swap during destination removal without publishing the outside symlink', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-feed-publish-race-'));
+    const outside = await mkdtemp(join(tmpdir(), 'osi-operation-tool-feed-publish-outside-'));
+    const destination = join(root, 'openwrt/feeds.conf.default');
+    const staging = join(root, '.osi-image-builder-feed-config-staging');
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await writeFile(join(root, 'feeds.conf.default'), 'src-git local ./feeds/chirpstack-openwrt-feed\n');
+      await writeFile(destination, 'stale\n');
+      await writeFile(join(outside, 'outside.conf'), 'outside\n');
+      let swapped = false;
+      const handlers = (await operationToolModule()).createOperationHandlersForTesting(root, { onStep: async (point, path) => {
+        if (!swapped && point === 'before-remove' && path.endsWith('/feeds.conf.default')) {
+          swapped = true;
+          await rename(staging, `${staging}.original`);
+          await symlink(join(outside, 'outside.conf'), staging);
+        }
+      } });
+      await expect(handlers.copyFeedConfig()).rejects.toThrow(/identity|staging|symbolic|symlink/i);
+      await expect(lstat(destination)).rejects.toThrow();
+      expect((await lstat(staging)).isSymbolicLink()).toBe(true);
+      expect(await readFile(join(outside, 'outside.conf'), 'utf8')).toBe('outside\n');
+      await expect(handlers.copyFeedConfig()).resolves.toMatchObject({ operation: 'copy-feed-config' });
+      expect((await lstat(destination)).isFile()).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('removes a feed destination symlink after a post-rename identity swap', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-feed-post-race-'));
+    const outside = await mkdtemp(join(tmpdir(), 'osi-operation-tool-feed-post-outside-'));
+    const destination = join(root, 'openwrt/feeds.conf.default');
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await writeFile(join(root, 'feeds.conf.default'), 'src-git local ./feeds/chirpstack-openwrt-feed\n');
+      await writeFile(destination, 'stale\n');
+      await writeFile(join(outside, 'outside.conf'), 'outside\n');
+      let swapped = false;
+      const handlers = (await operationToolModule()).createOperationHandlersForTesting(root, { onStep: async (point, path) => {
+        if (!swapped && point === 'after-rename' && path.endsWith('/feeds.conf.default')) {
+          swapped = true;
+          await rename(destination, `${destination}.published`);
+          await symlink(join(outside, 'outside.conf'), destination);
+        }
+      } });
+      await expect(handlers.copyFeedConfig()).rejects.toThrow(/identity|stable|symbolic|symlink/i);
+      await expect(lstat(destination)).rejects.toThrow();
+      expect(await readFile(join(outside, 'outside.conf'), 'utf8')).toBe('outside\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it('hashes firmware through a bounded no-follow stream rather than readFile', async () => {
     const toolContents = await readFile(operationToolPath, 'utf8');
     expect(toolContents).toContain('hashHandle');

@@ -194,20 +194,87 @@ async function removeEntry(parent, name, hooks) {
   } finally { await child.close(); }
 }
 
+async function removeUntrustedEntry(parent, name) {
+  const path = entryPath(parent, name);
+  let value;
+  try { value = await lstat(path); }
+  catch (error) { if (error?.code === 'ENOENT') return; throw error; }
+  if (value.isSymbolicLink() || value.isFile()) { await unlink(path); return; }
+  if (!value.isDirectory()) throw new Error(`cannot quarantine non-regular path ${path}`);
+  for (let index = 0; index < 100; index += 1) {
+    const quarantine = `${name}.quarantine${index === 0 ? '' : `-${index}`}`;
+    try { await lstat(entryPath(parent, quarantine)); continue; }
+    catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      try { await rename(path, entryPath(parent, quarantine)); return; }
+      catch (renameError) {
+        if (renameError?.code === 'ENOENT') return;
+        if (renameError?.code !== 'EEXIST') throw renameError;
+      }
+    }
+  }
+  throw new Error(`could not quarantine untrusted path ${path}`);
+}
+
+function sameIdentity(named, held, kind) {
+  return named.dev === held.dev && named.ino === held.ino && (kind === 'directory' ? named.isDirectory() : named.isFile());
+}
+
+async function assertNamedIdentity(parent, name, held, kind, field) {
+  const named = await lstat(entryPath(parent, name));
+  const heldInfo = await held.stat();
+  if (!sameIdentity(named, heldInfo, kind)) throw new Error(`${field} identity changed before publication`);
+}
+
+async function publishVerified(sourceParent, sourceName, sourceHandle, destinationParent, destinationName, kind, field, hooks, verify) {
+  await assertNamedIdentity(sourceParent, sourceName, sourceHandle, kind, field);
+  await step(hooks, 'before-rename', entryPath(sourceParent, sourceName));
+  await assertNamedIdentity(sourceParent, sourceName, sourceHandle, kind, field);
+  let renamed = false;
+  try {
+    await rename(entryPath(sourceParent, sourceName), entryPath(destinationParent, destinationName));
+    renamed = true;
+    await step(hooks, 'after-rename', entryPath(destinationParent, destinationName));
+    const destination = kind === 'directory'
+      ? await openDirectoryAt(destinationParent, destinationName, `${field} destination`, hooks)
+      : await openFileAt(destinationParent, destinationName, `${field} destination`, hooks);
+    try {
+      const publishedInfo = await destination.stat();
+      const sourceInfo = await sourceHandle.stat();
+      if (!sameIdentity(publishedInfo, sourceInfo, kind)) throw new Error(`${field} destination identity does not match verified staging`);
+      const result = await verify(destination);
+      await assertNamedIdentity(destinationParent, destinationName, destination, kind, field);
+      return result;
+    } finally { await destination.close(); }
+  } catch (error) {
+    if (renamed) {
+      try { await removeUntrustedEntry(destinationParent, destinationName); }
+      catch (cleanupError) { throw new AggregateError([error, cleanupError], `${field} publication failed and untrusted destination cleanup failed`); }
+    }
+    throw error;
+  }
+}
+
 async function copyFeedConfig(root, hooks) {
   const rootHandle = await openRoot(root);
   let openwrt;
   try {
     openwrt = await openDirectoryChain(rootHandle, 'openwrt', true, 'OpenWrt directory', hooks);
     const source = await hashFileAt(rootHandle, FIXED_PATHS.feedSource, 'feed configuration source', hooks);
-    await removeEntry(rootHandle, FIXED_PATHS.feedStaging, hooks);
+    await removeUntrustedEntry(rootHandle, FIXED_PATHS.feedStaging);
     await copyFileAt(rootHandle, FIXED_PATHS.feedSource, rootHandle, FIXED_PATHS.feedStaging, 'feed configuration', hooks);
-    const staged = await hashFileAt(rootHandle, FIXED_PATHS.feedStaging, 'feed configuration staging', hooks);
-    if (source.sha256 !== staged.sha256 || source.size !== staged.size) throw new Error('feed configuration hash changed during staging');
-    await removeEntry(openwrt.handle, 'feeds.conf.default', hooks);
-    await rename(entryPath(rootHandle, FIXED_PATHS.feedStaging), entryPath(openwrt.handle, 'feeds.conf.default'));
-    const destination = await hashFileAt(openwrt.handle, 'feeds.conf.default', 'feed configuration destination', hooks);
-    if (source.sha256 !== destination.sha256 || source.size !== destination.size) throw new Error('feed configuration hash changed during publication');
+    const staging = await openFileAt(rootHandle, FIXED_PATHS.feedStaging, 'feed configuration staging', hooks);
+    try {
+      const stagingInfo = await staging.stat();
+      const staged = { size: stagingInfo.size, sha256: await hashHandle(staging) };
+      if (source.sha256 !== staged.sha256 || source.size !== staged.size) throw new Error('feed configuration hash changed during staging');
+      await removeEntry(openwrt.handle, 'feeds.conf.default', hooks);
+      await publishVerified(rootHandle, FIXED_PATHS.feedStaging, staging, openwrt.handle, 'feeds.conf.default', 'file', 'feed configuration', hooks, async (destination) => {
+        const destinationInfo = await destination.stat();
+        const destinationHash = await hashHandle(destination);
+        if (source.sha256 !== destinationHash || source.size !== destinationInfo.size) throw new Error('feed configuration hash changed during publication');
+      });
+    } finally { await staging.close(); }
     return { operation: 'copy-feed-config', source: FIXED_PATHS.feedSource, destination: FIXED_PATHS.feedDestination, sha256: source.sha256 };
   } finally { if (openwrt) await closeChain(openwrt); await rootHandle.close(); }
 }
@@ -221,21 +288,19 @@ async function mirrorGui(root, hooks) {
     destinationParent = await openDirectoryChain(rootHandle, 'feeds/chirpstack-openwrt-feed/apps/node-red/files', true, 'GUI destination parent', hooks);
     const sourceManifest = await fileManifest(source.handle, '', hooks);
     if (sourceManifest.size === 0) throw new Error('GUI build output contains no regular files');
-    await removeEntry(rootHandle, FIXED_PATHS.guiStaging, hooks);
+    await removeUntrustedEntry(rootHandle, FIXED_PATHS.guiStaging);
     await mkdir(entryPath(rootHandle, FIXED_PATHS.guiStaging));
     const staging = await openDirectoryAt(rootHandle, FIXED_PATHS.guiStaging, 'GUI staging', hooks);
     try {
       await copyManifest(source.handle, staging, sourceManifest, hooks);
       const stagedManifest = await fileManifest(staging, '', hooks);
       if (!equalManifest(sourceManifest, stagedManifest)) throw new Error('GUI staging manifest does not match source');
+      await removeEntry(destinationParent.handle, 'gui', hooks);
+      await publishVerified(rootHandle, FIXED_PATHS.guiStaging, staging, destinationParent.handle, 'gui', 'directory', 'GUI staging', hooks, async (destination) => {
+        const destinationManifest = await fileManifest(destination, '', hooks);
+        if (!equalManifest(sourceManifest, destinationManifest)) throw new Error('GUI destination manifest does not match source');
+      });
     } finally { await staging.close(); }
-    await removeEntry(destinationParent.handle, 'gui', hooks);
-    await rename(entryPath(rootHandle, FIXED_PATHS.guiStaging), entryPath(destinationParent.handle, 'gui'));
-    const destination = await openDirectoryAt(destinationParent.handle, 'gui', 'GUI destination', hooks);
-    try {
-      const destinationManifest = await fileManifest(destination, '', hooks);
-      if (!equalManifest(sourceManifest, destinationManifest)) throw new Error('GUI destination manifest does not match source');
-    } finally { await destination.close(); }
     return { operation: 'mirror-gui', source: FIXED_PATHS.guiSource, destination: FIXED_PATHS.guiDestination, fileCount: sourceManifest.size, manifestSha256: manifestHash(sourceManifest) };
   } finally { if (destinationParent) await closeChain(destinationParent); if (source) await closeChain(source); await rootHandle.close(); }
 }
