@@ -155,6 +155,31 @@ test('validEffectBinding recognizes the built-in non-journal grammar', async () 
     false,
     'device EUI in the effect key must match the payload'
   );
+
+  const actionEnvelope = {
+    commandType: 'SET_STREGA_TIMED_ACTION',
+    payload: {
+      effect_key: 'action:' + DEVICE_EUI +
+        ':timed_action:11111111-1111-4111-8111-111111111111',
+      deviceEui: DEVICE_EUI,
+    },
+  };
+  assert.equal(
+    await ledger.validEffectBinding(actionEnvelope, { command_type_recognized: true }),
+    true
+  );
+  assert.equal(
+    await ledger.validEffectBinding(
+      Object.assign({}, actionEnvelope, {
+        payload: Object.assign({}, actionEnvelope.payload, {
+          effect_key: actionEnvelope.payload.effect_key.replace('timed_action', 'flushing'),
+        }),
+      }),
+      { command_type_recognized: true }
+    ),
+    false,
+    'physical action effect must match the command type'
+  );
 });
 
 test('validEffectBinding binds protected zone commands to UUID and base version', async () => {

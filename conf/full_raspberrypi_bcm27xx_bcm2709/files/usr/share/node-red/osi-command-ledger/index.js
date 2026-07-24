@@ -81,6 +81,24 @@ function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+const hardwareConfigurationEffects = {
+  SET_LSN50_MODE: 'mode',
+  SET_LSN50_INTERVAL: 'uplink_interval',
+  SET_LSN50_INTERRUPT_MODE: 'interrupt_mode',
+  SET_LSN50_5V_WARMUP: '5v_warmup',
+  SET_KIWI_INTERVAL: 'uplink_interval',
+  ENABLE_KIWI_TEMP_HUMIDITY: 'temperature_humidity',
+  SET_STREGA_INTERVAL: 'reporting_interval',
+  SET_STREGA_MODEL: 'model',
+  SET_STREGA_MAGNET_MODE: 'magnet_mode',
+};
+
+const physicalActionEffects = {
+  SET_STREGA_TIMED_ACTION: 'timed_action',
+  SET_STREGA_PARTIAL_OPENING: 'partial_opening',
+  SET_STREGA_FLUSHING: 'flushing',
+};
+
 function replayStatus(result) {
   if (result === 'APPLIED') return 'ACKED';
   if (result === 'FAILED_RETRYABLE') return 'FAILED_RETRYABLE';
@@ -170,7 +188,15 @@ function validNonJournalEffectBinding(envelope, runtime) {
   if (match) {
     const deviceEui = String(payload.device_eui || payload.deviceEui || payload.devEui || '')
       .trim().toUpperCase();
-    return deviceEui === match[1];
+    const expectedSetting = hardwareConfigurationEffects[commandType(envelope)];
+    return deviceEui === match[1] && (!expectedSetting || expectedSetting === match[2]);
+  }
+  match = /^action:([0-9A-F]{16}):([a-z0-9_.-]+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(effectKey);
+  if (match) {
+    const deviceEui = String(payload.device_eui || payload.deviceEui || payload.devEui || '')
+      .trim().toUpperCase();
+    return deviceEui === match[1] &&
+      physicalActionEffects[commandType(envelope)] === match[2];
   }
   const type = commandType(envelope);
   if (isZoneCommandType(type)) {
@@ -318,7 +344,7 @@ function journalEffectProvenanceMatches(row, payload, gatewayDeviceEui, type, in
 // type it defers entirely to opts.extraEffectBindingValidator (osi-journal's
 // validJournalEffectBinding, injected by the caller); every other type is
 // validated against the built-in irrigation:scheduler / irrigation:manual /
-// config: grammar.
+// config: / action: grammar.
 async function validEffectBinding(envelope, opts) {
   opts = opts || {};
   const type = commandType(envelope);
