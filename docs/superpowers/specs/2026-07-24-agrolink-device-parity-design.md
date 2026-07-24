@@ -244,4 +244,3 @@ Completion requires:
 - server focused and full backend suites;
 - frontend typecheck, focused tests, full tests, and build; and
 - byte-identical server contract vendors.
-
