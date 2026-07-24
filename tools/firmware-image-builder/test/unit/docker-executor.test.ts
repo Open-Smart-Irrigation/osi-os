@@ -237,6 +237,7 @@ describe('DockerExecutor', () => {
     let cleanupProof: Extract<OperationCleanupProof, { kind: 'container-removed' }> | undefined;
     const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { trace.push(command.kind); if (command.kind === 'container') { persistedId = command.containerId; lifecycleCommands.push({ lifecycle: command.lifecycle, occurredAt: command.occurredAt, startedAt: command.startedAt, stoppedAt: command.stoppedAt }); } if (command.kind === 'operation-cleanup' && command.proof.kind === 'container-removed') cleanupProof = command.proof; return { ok: true, kind: 'committed', eventSeq: 1 }; }), getJob: vi.fn(() => ({ ...emptyIdentityForTest(), containerId: persistedId, containerName: persistedId ? 'osi-image-builder-job-1-attempt-1' : null, containerImageDigest: persistedId ? DIGEST : null, containerLabelJobId: persistedId ? 'job-1' : null, containerLabelManifestSha: persistedId ? MANIFEST : null, containerLabels: persistedId ? { 'org.osi.image-builder.job-id': 'job-1', 'org.osi.image-builder.manifest-sha': MANIFEST } : null, containerMount: persistedId ? {} : null, containerEnvironment: persistedId ? {} : null, containerSecurity: persistedId ? {} : null, containerInspection: persistedId ? {} : null, containerCreatedAt: persistedId ? NOW : null })) };
     const result = await createDockerExecutor(options(docker, { ownership, clock: () => new Date(Date.parse(NOW) + clockTick++ * 1000).toISOString(), finalizeLogs: async ({ operationFinishedAt }) => ({ runner: 'absent', docker: 'absent', verifiedAt: operationFinishedAt }), evidence: async (value) => { trace.push('evidence'); evidenceValue = value; return { path: 'evidence/operation-1.json', sha256: 'c'.repeat(64) }; } })).run();
+    expect(result.mutationCount).toBe(6);
 
     expect(result.available).toBe(true);
     if (!result.available) throw new Error('Docker should be available in fake lifecycle');
@@ -736,7 +737,7 @@ describe('DockerExecutor', () => {
     responses[6] = { stdout: JSON.stringify(stopped) };
     const docker = fakeDocker(responses);
     const result = await createDockerExecutor(options(docker)).run();
-    expect(result).toMatchObject({ available: true, outcome: 'failed' });
+    expect(result).toMatchObject({ available: true, outcome: 'failed', mutationCount: 4 });
     const writes: RunnerWriteCommand[] = [];
     const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
     await createDockerExecutor(options(fakeDocker(responses), { ownership })).run();

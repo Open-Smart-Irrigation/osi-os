@@ -617,7 +617,7 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
         const stoppedAt = stoppedInspection.inspection.finishedAt ?? stoppedInspection.observedAt;
         const proof: OperationCleanupProof = { kind: 'container-removed', id, name: options.containerName, imageDigest: options.imageDigest, labels, stoppedAt, removedAt, observedAt, globalLabelResult: 'no-match', logs };
         runner(options, (snapshot) => ({ kind: 'operation-cleanup', jobId: options.jobId, owner: snapshot.owner, runnerUnit: snapshot.unit, leaseExpiresAt: snapshot.leaseExpiresAt, at: observedAt, expectedState: snapshot.expectedState, operationId: options.operationId, attempt: options.attempt, proof }));
-        return { available: true, outcome, containerId: id, exitCode: result.exitCode, mutationCount: 6 };
+        return { available: true, outcome, containerId: id, exitCode: result.exitCode, mutationCount: hasStarted ? 6 : 4 };
       } catch (error) {
         if (!persisted) {
           let cleanupEvidence: JsonObject | null = null;
