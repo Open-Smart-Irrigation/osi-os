@@ -8,7 +8,10 @@ const SCHEMA_DIR = path.join(ROOT, 'docs/contracts/sync-schema');
 const FLOWS = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 const STAGING_MANIFEST = path.join(ROOT, 'scripts/fixtures/sync-contract-staging.json');
 const GOLDEN_FIXTURE = path.join(SCHEMA_DIR, 'sync-contract-golden.json');
-const SEPARATELY_ROUTED_COMMANDS = ['WORK_REQUEST_STATUS'];
+const SEPARATELY_ROUTED_COMMANDS = [
+    'UPSERT_ZONE_IRRIGATION_CALIBRATION',
+    'WORK_REQUEST_STATUS',
+];
 const SEPARATE_ROUTE_SPECS = [
     {
         commandType: 'WORK_REQUEST_STATUS',
@@ -18,9 +21,19 @@ const SEPARATE_ROUTE_SPECS = [
         applierId: 'work-request-status-apply',
         applierName: 'Apply Work Request Status',
     },
+    {
+        commandType: 'UPSERT_ZONE_IRRIGATION_CALIBRATION',
+        splitterId: 'zone-command-apply-fn',
+        splitterName: 'Apply Zone Command',
+        outputIndex: 0,
+        applierId: 'irrigation-config-command-apply-fn',
+        applierName: 'Apply Irrigation Config Command',
+        splitterCommandPattern: /if\s*\(!zoneTypes\.has\(commandType\)\)\s*return\s*\[msg,\s*null\]/,
+        applierCommandPattern: /['"]UPSERT_ZONE_IRRIGATION_CALIBRATION['"]/,
+    },
 ];
-const EXACT_STAGED_COMMANDS = ['UPSERT_ZONE_IRRIGATION_CALIBRATION'];
-const EXACT_EDGE_DEFERRED_COMMANDS = [...EXACT_STAGED_COMMANDS];
+const EXACT_STAGED_COMMANDS = [];
+const EXACT_EDGE_DEFERRED_COMMANDS = [];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
@@ -125,10 +138,14 @@ function extractSeparatelyRoutedCommandTypes() {
         const splitterSource = functionNodeSource(splitter);
         const applierSource = functionNodeSource(applier);
         const quotedType = spec.commandType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        if (!(new RegExp(`commandType\\s*===\\s*['"]${quotedType}['"]`)).test(splitterSource)) {
+        const splitterCommandPattern = spec.splitterCommandPattern
+            || new RegExp(`commandType\\s*===\\s*['"]${quotedType}['"]`);
+        const applierCommandPattern = spec.applierCommandPattern
+            || new RegExp(`commandType\\s*:\\s*['"]${quotedType}['"]`);
+        if (!splitterCommandPattern.test(splitterSource)) {
             throw new Error(`${spec.splitterName} does not dispatch ${spec.commandType}`);
         }
-        if (!(new RegExp(`commandType\\s*:\\s*['"]${quotedType}['"]`)).test(applierSource)) {
+        if (!applierCommandPattern.test(applierSource)) {
             throw new Error(`${spec.applierName} does not ACK ${spec.commandType}`);
         }
         routed.push(spec.commandType);

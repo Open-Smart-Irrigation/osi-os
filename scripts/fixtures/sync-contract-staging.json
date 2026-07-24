@@ -1,12 +1,8 @@
 {
   "version": 1,
   "commands": {
-    "edgeDeferred": [
-      "UPSERT_ZONE_IRRIGATION_CALIBRATION"
-    ],
-    "cloudDeferred": [
-      "UPSERT_ZONE_IRRIGATION_CALIBRATION"
-    ]
+    "edgeDeferred": [],
+    "cloudDeferred": []
   },
   "eventOps": {
     "edgeModuleOwned": [
@@ -17,8 +13,6 @@
       "JOURNAL_PLOT_GROUP_UPSERTED"
     ],
     "edgeDeferred": [],
-    "cloudDeferred": [
-      "ZONE_IRRIGATION_CALIBRATION_UPSERTED"
-    ]
+    "cloudDeferred": []
   }
 }

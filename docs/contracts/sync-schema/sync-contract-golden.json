@@ -40,8 +40,8 @@
     {
       "name": "irrigation_config_desired_state_v1",
       "schemaAccepted": true,
-      "edgeProducerEnabled": false,
-      "cloudIssuerEnabled": false
+      "edgeProducerEnabled": true,
+      "cloudIssuerEnabled": true
     }
   ],
   "eventOperations": {
@@ -104,7 +104,8 @@
       "ZONE_ENVIRONMENT_APPENDED",
       "ZONE_LOCATION_UPSERTED",
       "ZONE_RECOMMENDATION_UPSERTED",
-      "ZONE_UPSERTED"
+      "ZONE_UPSERTED",
+      "ZONE_IRRIGATION_CALIBRATION_UPSERTED"
     ],
     "serverHandlerEnabled": [
       "CHAMELEON_READING_APPENDED",
@@ -134,11 +135,10 @@
       "ZONE_ENVIRONMENT_APPENDED",
       "ZONE_LOCATION_UPSERTED",
       "ZONE_RECOMMENDATION_UPSERTED",
-      "ZONE_UPSERTED"
-    ],
-    "staged": [
+      "ZONE_UPSERTED",
       "ZONE_IRRIGATION_CALIBRATION_UPSERTED"
-    ]
+    ],
+    "staged": []
   },
   "commandTypes": {
     "accepted": [
@@ -225,6 +225,7 @@
       "UPSERT_DEVICE_SOIL_DEPTHS",
       "UPDATE_SCHEDULE",
       "UPSERT_SCHEDULE",
+      "UPSERT_ZONE_IRRIGATION_CALIBRATION",
       "WORK_REQUEST_STATUS",
       "UPSERT_JOURNAL_ENTRY",
       "VOID_JOURNAL_ENTRY",
@@ -238,9 +239,7 @@
       "UPSERT_USER_PLOT_ASSIGNMENT",
       "DELETE_USER_PLOT_ASSIGNMENT"
     ],
-    "staged": [
-      "UPSERT_ZONE_IRRIGATION_CALIBRATION"
-    ]
+    "staged": []
   },
   "commandAckResults": [
     {
