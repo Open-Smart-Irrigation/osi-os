@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { posix } from 'node:path';
 import { TRUSTED_OPERATION_IDS, type TrustedOperationId } from '../../domain/types.js';
 
 export interface OperationArgvContext {
@@ -6,12 +7,12 @@ export interface OperationArgvContext {
   readonly installedToolPath: string;
 }
 
-const ENVIRONMENT = /^[A-Za-z0-9_./-]+$/u;
-const ABSOLUTE_PATH = /^\/[A-Za-z0-9_./-]+$/u;
+const ENVIRONMENT = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
+const ABSOLUTE_PATH = /^\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/u;
 
 function validateContext(context: OperationArgvContext): void {
   if (!ENVIRONMENT.test(context.environment)) throw new Error('validated manifest environment is invalid');
-  if (!ABSOLUTE_PATH.test(context.installedToolPath)) throw new Error('installed operation tool path is invalid');
+  if (!ABSOLUTE_PATH.test(context.installedToolPath) || context.installedToolPath.includes('..') || posix.normalize(context.installedToolPath) !== context.installedToolPath) throw new Error('installed operation tool path is not canonical');
 }
 
 type OperationFactory = (context: OperationArgvContext) => readonly string[];
@@ -45,8 +46,8 @@ export function assertOperationRegistryCoverage(operationIds: readonly string[])
 }
 
 export function createOperationArgv(operationId: TrustedOperationId, context: OperationArgvContext): readonly string[] {
-  validateContext(context);
   if (!(TRUSTED_OPERATION_IDS as readonly string[]).includes(operationId) || !(operationId in factories)) throw new Error(`unknown operation ID: ${String(operationId)}`);
+  validateContext(context);
   const argv = factories[operationId](context);
   if (argv.length === 0 || argv.some((value) => value.length === 0 || /[;&|`$()\n\r]/u.test(value))) throw new Error(`trusted operation ${operationId} produced unsafe argv`);
   return Object.freeze([...argv]);

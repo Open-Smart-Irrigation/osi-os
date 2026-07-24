@@ -16,10 +16,12 @@ describe('Docker lifecycle integration capability', () => {
       gid: 1000,
       sourceDateEpoch: '1782208800',
       operationId: 'verify-image',
-      operationArgv: ['node', 'verify.js', 'verify-image'],
+      operationContext: { environment: 'full_raspberrypi_bcm27xx_bcm2712', installedToolPath: '/usr/local/libexec/osi-image-builder-tool' },
       containerName: 'osi-image-builder-integration-job-attempt-1',
       runner: { owner: 'runner', unit: 'osi-image-builder-runner@integration-job.service', leaseExpiresAt: '2026-07-24T10:10:00.000Z', expectedState: 'starting' },
-      ownership: ownership as never,
+      ownership,
+      evidence: async () => ({ path: 'evidence/integration.json', sha256: 'c'.repeat(64) }),
+      logs: { runner: 'absent', docker: 'absent', verifiedAt: '2026-07-24T10:00:00.000Z' },
     }).run();
     expect(result.available).toBe(false);
     expect(result.mutationCount).toBe(0);

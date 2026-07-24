@@ -80,12 +80,12 @@ export function createCommandExecutor(): CommandExecutor {
         child.stdout?.on('data', (chunk: Buffer | string) => {
           const text = chunk.toString();
           appendBounded(stdout, text, maxCaptureBytes);
-          options.onStdout?.(text);
+          try { options.onStdout?.(text); } catch (error) { void error; }
         });
         child.stderr?.on('data', (chunk: Buffer | string) => {
           const text = chunk.toString();
           appendBounded(stderr, text, maxCaptureBytes);
-          options.onStderr?.(text);
+          try { options.onStderr?.(text); } catch (error) { void error; }
         });
         child.once('error', (error: NodeJS.ErrnoException) => {
           if (timeout) clearTimeout(timeout);
