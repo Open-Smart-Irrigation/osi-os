@@ -27,6 +27,7 @@ const nodeContracts = {
     installedHash: '55d7ea47694d8f6f0863e793c6a40bbfcf7a442e79b6a25d6d7be4fcd842b6c0',
     correctedHash: '30fd59f6f57519113752b7fb9728d086e10d51eabd9dbcc740cd1222d27bad49',
     hardenedHash: 'c1bfd92a13a8021757c390d15b764277522eae604a21e2985f2f1c9378985663',
+    activatedHash: 'a08a6b3bb80c907e603c1b746f3314acb8c8e0f504bd59bfe6521091199b1b9b',
   },
   'sync-force-build': {
     name: 'Run Force Sync',
@@ -36,6 +37,7 @@ const nodeContracts = {
     installedHash: 'e240ff936f17899b1414f8b1dd473462d53bceb842e4ca942ff7946f53b3482a',
     correctedHash: 'b17b2801f706adebd6832f053133c12e4535e6e4a51240c7e641e98c60811a45',
     hardenedHash: 'fb682aaef9ebf3f851f0f8c7ef6ee1602e2e7fe5281eaa2f7bf51576c919ec0c',
+    activatedHash: 'af899e4f76182dfdf7d97b0420d0e7124ec571aaaa2a9d49d961cf6c1b519cbc',
   },
   'history-api-router-fn': {
     name: 'History API Router',
@@ -45,6 +47,7 @@ const nodeContracts = {
     installedHash: 'b12ad483f807672f6fbef6040b3e44eb612fb778fe00e6059a8ae0a4702212eb',
     correctedHash: 'b12ad483f807672f6fbef6040b3e44eb612fb778fe00e6059a8ae0a4702212eb',
     hardenedHash: 'b12ad483f807672f6fbef6040b3e44eb612fb778fe00e6059a8ae0a4702212eb',
+    activatedHash: 'a5146bc5ab4f75a23f227ee583e05bcf68a2c086955f38fb5b530505f6b4326f',
   },
 };
 
@@ -391,6 +394,7 @@ function migrate(buffer) {
   const flows = JSON.parse(buffer.toString('utf8'));
   const byId = indexNodes(flows);
   const beforeHashes = currentHashes(byId);
+  if (matchesState(beforeHashes, 'activatedHash')) return buffer;
   if (matchesState(beforeHashes, 'hardenedHash')) {
     if (!correctedLibrariesInstalled(byId)) {
       throw new Error('Refusing hardened Task 12 source without exact crypto libraries');

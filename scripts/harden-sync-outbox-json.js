@@ -17,24 +17,28 @@ const nodeContracts = {
     type: 'function',
     preimageHash: '30fd59f6f57519113752b7fb9728d086e10d51eabd9dbcc740cd1222d27bad49',
     postimageHash: 'c1bfd92a13a8021757c390d15b764277522eae604a21e2985f2f1c9378985663',
+    activatedPostimageHash: 'a08a6b3bb80c907e603c1b746f3314acb8c8e0f504bd59bfe6521091199b1b9b',
   },
   'sync-outbox-build': {
     name: 'Build Edge Event Batch',
     type: 'function',
     preimageHash: 'd655dda7815505cae6670607d901321938f13f0aed40ef277f931ebd9dd66f16',
     postimageHash: 'fdc984c160e9aa62c46a131361c0bde25c2f3cb399e05ee0776b7ac250a2fdf1',
+    activatedPostimageHash: 'a7ece161a0b7cf618ef7a99984dcc479ebe6f3ca0c9f52756a6944cff449860d',
   },
   'sync-force-build': {
     name: 'Run Force Sync',
     type: 'function',
     preimageHash: 'b17b2801f706adebd6832f053133c12e4535e6e4a51240c7e641e98c60811a45',
     postimageHash: 'fb682aaef9ebf3f851f0f8c7ef6ee1602e2e7fe5281eaa2f7bf51576c919ec0c',
+    activatedPostimageHash: 'af899e4f76182dfdf7d97b0420d0e7124ec571aaaa2a9d49d961cf6c1b519cbc',
   },
   'write-strega-expectation': {
     name: 'Write STREGA Expectation',
     type: 'function',
     preimageHash: 'b2813630cecb860bc0a03429c58c068c56c3538379898deb0e455b0efa77a89a',
     postimageHash: 'c51de010940bdb799e2e40146523544c60bf51cab51ea0b733e2c2a515b87762',
+    activatedPostimageHash: 'db09a24c6b15fe615c0cf9fffb8d289d8ef57a6e45322593aa30d17bce97f2ae',
   },
 };
 
@@ -209,6 +213,7 @@ function migrate(buffer) {
   const flows = JSON.parse(buffer.toString('utf8'));
   const byId = indexNodes(flows);
   const beforeHashes = currentHashes(byId);
+  if (matchesState(beforeHashes, 'activatedPostimageHash')) return buffer;
   if (matchesState(beforeHashes, 'postimageHash')) return buffer;
   if (!matchesState(beforeHashes, 'preimageHash')) {
     throw new Error('Refusing unexpected sync outbox hardening source: ' + JSON.stringify(beforeHashes));

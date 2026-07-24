@@ -16,6 +16,7 @@ const HISTORY_AUTH_SECRET = 'fixture-history-auth-secret';
 const EXPECTED_CAPABILITIES = [
   'linked_auth_sync_v1',
   'force_edge_sync_v1',
+  'zone_desired_state_v1',
   'field_journal_v1',
 ];
 const JOURNAL_FIELDS = [
@@ -434,7 +435,7 @@ function assertReadyAdvertisement(payload) {
 
 function assertSuppressedAdvertisement(payload) {
   assert.ok(payload, 'ordinary core bootstrap must continue');
-  assert.deepEqual(payload.gatewayIdentity.syncCapabilities, EXPECTED_CAPABILITIES.slice(0, 2));
+  assert.deepEqual(payload.gatewayIdentity.syncCapabilities, EXPECTED_CAPABILITIES.slice(0, 3));
   for (const field of JOURNAL_FIELDS) {
     assert.equal(Object.prototype.hasOwnProperty.call(payload.gatewayIdentity, field), false, field);
   }

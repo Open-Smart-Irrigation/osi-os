@@ -1364,6 +1364,7 @@ expectIncludes('Build server auth request', 'edgeBuildVersion', 'sends the edge 
 expectIncludes('Build server auth request', 'syncCapabilities', 'advertises linked-auth sync capabilities during local-sync');
 expectIncludes('Build server auth request', 'linked_auth_sync_v1', 'advertises the linked-auth sync capability');
 expectIncludes('Build server auth request', 'force_edge_sync_v1', 'advertises the force-edge-sync capability');
+expectIncludes('Build server auth request', 'zone_desired_state_v1', 'advertises the versioned zone desired-state capability');
 expectIncludes('Handle server auth response', "const claimed = Array.isArray(data.claimed)", 'accepts claimed device results directly from local-sync');
 expectIncludes('Handle server auth response', 'offlineVerifierVersion', 'requires and stores the offline verifier version from local-sync');
 expectIncludes('Decode token & build query', 'server_offline_verifier_version', 'loads linked-auth verifier metadata for account-link status');
@@ -1579,6 +1580,7 @@ expectIncludes('Build Cloud Bootstrap', 'gatewayLocations,', 'includes gateway G
 expectIncludes('Build Cloud Bootstrap', 'previousGatewayDeviceEuis: migration.previousGatewayDeviceEuis', 'includes previous gateway identities during bootstrap migration');
 expectIncludes('Build Cloud Bootstrap', 'edgeBuildVersion,', 'includes the edge build version in bootstrap gateway metadata');
 expectIncludes('Build Cloud Bootstrap', 'syncCapabilities', 'includes sync capabilities in bootstrap gateway metadata');
+expectIncludes('Build Cloud Bootstrap', 'zone_desired_state_v1', 'includes the versioned zone desired-state capability in bootstrap metadata');
 expectIncludes('Build Cloud Bootstrap', 'runGatewayMigrationPreflight', 'runs local gateway migration preflight before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'gatewayMigrationPaused: true', 'pauses normal sync while a gateway migration repair bootstrap is pending');
 expectIncludes('Build Cloud Bootstrap', 'UPDATE irrigation_zones SET gateway_device_eui = ?', 'rewrites active zone gateway bindings during local migration');
@@ -1906,6 +1908,7 @@ expectIncludes('Run Force Sync', 'AS event_uuid', 'synthesizes stable irrigation
 expectIncludes('Run Force Sync', 'gatewayLocations,', 'includes gateway GPS state in forced sync payloads');
 expectIncludes('Run Force Sync', 'edgeBuildVersion,', 'includes the edge build version in forced bootstrap gateway metadata');
 expectIncludes('Run Force Sync', 'syncCapabilities', 'includes sync capabilities in forced bootstrap gateway metadata');
+expectIncludes('Run Force Sync', 'zone_desired_state_v1', 'includes the versioned zone desired-state capability in forced bootstrap metadata');
 expectIncludes('Run Force Sync', 'const sensorDataRows = await q([', 'loads force-sync sensor history before reordering it');
 expectIncludes('Run Force Sync', 'const sensorData = sensorDataRows.slice().reverse();', 'replays force-sync sensor history oldest-to-newest');
 expectIncludes('Run Force Sync', 'const dendroReadingsRows = await q([', 'loads force-sync dendro history before reordering it');

@@ -34,8 +34,8 @@
     {
       "name": "zone_desired_state_v1",
       "schemaAccepted": true,
-      "edgeProducerEnabled": false,
-      "cloudIssuerEnabled": false
+      "edgeProducerEnabled": true,
+      "cloudIssuerEnabled": true
     }
   ],
   "eventOperations": {
