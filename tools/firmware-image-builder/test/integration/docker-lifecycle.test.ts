@@ -17,6 +17,8 @@ describe('Docker lifecycle integration capability', () => {
       sourceDateEpoch: '1782208800',
       operationId: 'verify-image',
       operationContext: { environment: 'full_raspberrypi_bcm27xx_bcm2712', installedToolPath: '/usr/local/libexec/osi-image-builder-tool' },
+      operationTimeoutMs: 60_000,
+      maxCaptureBytes: 16 * 1024,
       containerName: 'osi-image-builder-integration-job-attempt-1',
       runner: { owner: 'runner', unit: 'osi-image-builder-runner@integration-job.service', leaseExpiresAt: '2026-07-24T10:10:00.000Z', expectedState: 'starting' },
       ownership,

@@ -73,31 +73,51 @@ export function createCommandExecutor(): CommandExecutor {
       return new Promise<CommandResult>((resolve, reject) => {
         let timedOut = false;
         let settled = false;
+        let observerFailed = false;
+        let observerError: unknown;
+        let spawnError: NodeJS.ErrnoException | undefined;
+        let observerKillTimer: NodeJS.Timeout | undefined;
         const timeout = options.timeoutMs === undefined ? undefined : setTimeout(() => {
           timedOut = true;
           child.kill('SIGKILL');
         }, options.timeoutMs);
+        const failObserver = (error: unknown): void => {
+          if (observerFailed) return;
+          observerFailed = true;
+          observerError = error;
+          child.kill('SIGTERM');
+          observerKillTimer = setTimeout(() => { if (!settled) child.kill('SIGKILL'); }, 1_000);
+        };
         child.stdout?.on('data', (chunk: Buffer | string) => {
           const text = chunk.toString();
           appendBounded(stdout, text, maxCaptureBytes);
-          try { options.onStdout?.(text); } catch (error) { void error; }
+          if (!observerFailed) {
+            try { options.onStdout?.(text); } catch (error) { failObserver(error); }
+          }
         });
         child.stderr?.on('data', (chunk: Buffer | string) => {
           const text = chunk.toString();
           appendBounded(stderr, text, maxCaptureBytes);
-          try { options.onStderr?.(text); } catch (error) { void error; }
+          if (!observerFailed) {
+            try { options.onStderr?.(text); } catch (error) { failObserver(error); }
+          }
         });
         child.once('error', (error: NodeJS.ErrnoException) => {
-          if (timeout) clearTimeout(timeout);
-          if (settled) return;
-          settled = true;
-          reject(new CommandExecutionError(`command could not start: ${argv[0]}`, { code: error.code, cause: error }));
+          spawnError = error;
         });
         child.once('close', (exitCode, signal) => {
           if (timeout) clearTimeout(timeout);
+          if (observerKillTimer) clearTimeout(observerKillTimer);
           if (settled) return;
           settled = true;
-          resolve({ argv: [...argv], exitCode, signal, stdout: stdout.join(''), stderr: stderr.join(''), timedOut, startedAt, finishedAt: new Date().toISOString() });
+          const result = { argv: [...argv], exitCode, signal, stdout: stdout.join(''), stderr: stderr.join(''), timedOut, startedAt, finishedAt: new Date().toISOString() };
+          if (observerFailed) {
+            reject(new CommandExecutionError(`command output observer failed: ${argv[0]}`, { result, cause: observerError }));
+          } else if (spawnError) {
+            reject(new CommandExecutionError(`command could not start: ${argv[0]}`, { code: spawnError.code, result, cause: spawnError }));
+          } else {
+            resolve(result);
+          }
         });
       });
     },
