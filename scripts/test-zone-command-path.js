@@ -106,6 +106,7 @@ function runtime() {
 
 function zoneResource(target, overrides = {}) {
   return {
+    contract_version: 1,
     zone_uuid: ZONE_UUID,
     name: 'North',
     gateway_device_eui: GATEWAY,
@@ -136,6 +137,15 @@ function zoneResource(target, overrides = {}) {
 function envelope(commandId, type, base, zoneOverrides = {}) {
   const effectPrefix = type === 'DELETE_ZONE' ? 'zone_delete' : 'zone';
   const effectKey = `${effectPrefix}:${ZONE_UUID}:${base}`;
+  const zone = type === 'DELETE_ZONE'
+    ? {
+        contract_version: 1,
+        zone_uuid: ZONE_UUID,
+        gateway_device_eui: GATEWAY,
+        sync_version: base + 1,
+        deleted_at: zoneOverrides.deleted_at,
+      }
+    : zoneResource(base + 1, zoneOverrides);
   return {
     commandId,
     commandType: type,
@@ -148,7 +158,7 @@ function envelope(commandId, type, base, zoneOverrides = {}) {
       gateway_device_eui: GATEWAY,
       base_sync_version: base,
       target_sync_version: base + 1,
-      zone: zoneResource(base + 1, zoneOverrides),
+      zone,
     },
   };
 }
@@ -422,7 +432,7 @@ test('delete detaches devices, tombstones the zone, and reports target version',
   }
 });
 
-test('missing owner, wrong gateway, and malformed numeric fields reject permanently', async () => {
+test('missing owner, wrong gateway, malformed numeric fields, and shape drift reject permanently', async () => {
   commands._resetForTests();
   const db = database();
   try {
@@ -462,6 +472,20 @@ test('missing owner, wrong gateway, and malformed numeric fields reject permanen
         await commands.applyZoneCommand(
           db.facade,
           badLatitude,
+          runtime()
+        )
+      ).ack.result,
+      'REJECTED_PERMANENT'
+    );
+
+    const cloudOnlyField = envelope(12, 'UPSERT_ZONE', 0, {
+      weather_source: 'meteoblue',
+    });
+    assert.equal(
+      (
+        await commands.applyZoneCommand(
+          db.facade,
+          cloudOnlyField,
           runtime()
         )
       ).ack.result,

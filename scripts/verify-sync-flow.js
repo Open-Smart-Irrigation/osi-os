@@ -1657,6 +1657,8 @@ expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSo
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'Cannot disable or demote the last enabled admin', 'protects the final enabled gateway admin');
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'scope.invalidateScope()', 'invalidates cached scope after an applied mutation');
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'db.transaction(async function(tx) {', 'applies zone mutations and terminal ACK persistence in one transaction');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'shape mismatch; missing=', 'rejects protected zone payload shape drift');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'zone.contract_version must equal 1', 'pins the protected zone aggregate contract version');
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'base_version_conflict', 'rejects stale zone commands with a terminal conflict');
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'UPDATE devices SET irrigation_zone_id=NULL', 'detaches devices before tombstoning a zone');
 expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'INSERT INTO command_ack_outbox', 'persists the terminal zone ACK atomically with the mutation');

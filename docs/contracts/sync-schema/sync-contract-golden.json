@@ -30,6 +30,12 @@
       "schemaAccepted": true,
       "edgeProducerEnabled": true,
       "cloudIssuerEnabled": false
+    },
+    {
+      "name": "zone_desired_state_v1",
+      "schemaAccepted": true,
+      "edgeProducerEnabled": false,
+      "cloudIssuerEnabled": false
     }
   ],
   "eventOperations": {

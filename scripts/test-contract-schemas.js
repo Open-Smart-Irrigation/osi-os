@@ -24,7 +24,17 @@ const SCOPED_ACCESS_COMMANDS = [
     'UPSERT_USER_PLOT_ASSIGNMENT',
     'DELETE_USER_PLOT_ASSIGNMENT',
 ];
-const DEVICE_EUI_EXEMPT_COMMANDS = [...JOURNAL_COMMANDS, ...SCOPED_ACCESS_COMMANDS];
+const ZONE_COMMANDS = [
+    'UPSERT_ZONE',
+    'DELETE_ZONE',
+    'UPSERT_ZONE_CONFIG',
+    'UPSERT_ZONE_LOCATION',
+];
+const DEVICE_EUI_EXEMPT_COMMANDS = [
+    ...JOURNAL_COMMANDS,
+    ...SCOPED_ACCESS_COMMANDS,
+    ...ZONE_COMMANDS,
+];
 const JOURNAL_EVENT_BINDINGS = {
     JOURNAL_ENTRY_UPSERTED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
     JOURNAL_ENTRY_VOIDED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
@@ -72,6 +82,18 @@ const EXPECTED_COMMAND_SEMANTIC_BINDINGS = {
     },
     DELETE_USER_PLOT_ASSIGNMENT: {
         effect_key: { prefix: 'scoped_plot_assignment', uuid_path: 'assignment_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_ZONE: {
+        effect_key: { prefix: 'zone', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_ZONE_CONFIG: {
+        effect_key: { prefix: 'zone', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_ZONE_LOCATION: {
+        effect_key: { prefix: 'zone', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
+    DELETE_ZONE: {
+        effect_key: { prefix: 'zone_delete', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
     },
 };
 const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
@@ -1043,6 +1065,118 @@ expectValid(
     cmdSchema
 );
 
+const zoneDesiredState = {
+    contract_version: 1,
+    zone_uuid: UUID,
+    name: 'North block',
+    gateway_device_eui: '0123456789ABCDEF',
+    timezone: 'Europe/Zurich',
+    latitude: 47.3769,
+    longitude: 8.5417,
+    phenological_stage: 'flowering',
+    calibration_key: 'pear-v1',
+    crop_type: 'pear',
+    variety: 'conference',
+    soil_type: 'loam',
+    irrigation_method: 'drip',
+    area_m2: 1500,
+    irrigation_efficiency_pct: 87.5,
+    scheduling_mode: 'server_preferred',
+    prediction_card_enabled: 1,
+    notes: 'north block',
+    sync_version: 1,
+    deleted_at: null,
+    user: {
+        user_uuid: UUID,
+        cloudUserId: 41,
+    },
+};
+const zoneUpsertCommand = {
+    command_id: UUID,
+    command_type: 'UPSERT_ZONE',
+    effect_key: `zone:${UUID}:0`,
+    zone_uuid: UUID,
+    gateway_device_eui: '0123456789ABCDEF',
+    base_sync_version: 0,
+    target_sync_version: 1,
+    zone: zoneDesiredState,
+};
+expectValid(
+    'UPSERT_ZONE protected desired-state command',
+    cmdSchema,
+    zoneUpsertCommand,
+    cmdSchema
+);
+expectValid(
+    'UPSERT_ZONE_CONFIG protected full aggregate command',
+    cmdSchema,
+    {
+        ...zoneUpsertCommand,
+        command_type: 'UPSERT_ZONE_CONFIG',
+    },
+    cmdSchema
+);
+expectValid(
+    'UPSERT_ZONE_LOCATION protected full aggregate command',
+    cmdSchema,
+    {
+        ...zoneUpsertCommand,
+        command_type: 'UPSERT_ZONE_LOCATION',
+    },
+    cmdSchema
+);
+expectValid(
+    'DELETE_ZONE protected tombstone command',
+    cmdSchema,
+    {
+        command_id: UUID,
+        command_type: 'DELETE_ZONE',
+        effect_key: `zone_delete:${UUID}:1`,
+        zone_uuid: UUID,
+        gateway_device_eui: '0123456789ABCDEF',
+        base_sync_version: 1,
+        target_sync_version: 2,
+        zone: {
+            contract_version: 1,
+            zone_uuid: UUID,
+            gateway_device_eui: '0123456789ABCDEF',
+            sync_version: 2,
+            deleted_at: '2026-07-24T02:00:00.000Z',
+        },
+    },
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_ZONE rejects cloud-only weather source',
+    cmdSchema,
+    {
+        ...zoneUpsertCommand,
+        zone: {
+            ...zoneDesiredState,
+            weather_source: 'meteoblue',
+        },
+    },
+    /weather_source.*(?:forbidden|enum|property)/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_ZONE rejects a missing target version',
+    cmdSchema,
+    (({ target_sync_version, ...command }) => command)(zoneUpsertCommand),
+    /target_sync_version.*required/,
+    cmdSchema
+);
+expectInvalid(
+    'UPSERT_ZONE rejects mismatched effect identity',
+    cmdSchema,
+    {
+        ...zoneUpsertCommand,
+        effect_key: `zone:${UUID}:1`,
+    },
+    /effect_key.*(?:equal|match)/,
+    cmdSchema
+);
+
 const journalEntry = {
     contract_version: 1,
     entry_uuid: UUID,
@@ -1905,6 +2039,8 @@ for (const format of [
     'scoped_user_password:{user_uuid}:{base_sync_version}',
     'scoped_zone_assignment:{assignment_uuid}:{base_sync_version}',
     'scoped_plot_assignment:{assignment_uuid}:{base_sync_version}',
+    'zone:{zone_uuid}:{base_sync_version}',
+    'zone_delete:{zone_uuid}:{base_sync_version}',
 ]) {
     reportCheck(
         effectKeyDoc.includes(format),

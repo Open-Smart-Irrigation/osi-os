@@ -54,6 +54,84 @@
                 "deleted_at": {"type": ["string", "null"], "format": "date-time"}
             }
         },
+        "ZoneDesiredStateUser": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["user_uuid"],
+            "properties": {
+                "user_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "username": {"type": ["string", "null"], "maxLength": 64},
+                "cloudUserId": {"type": ["integer", "null"], "minimum": 1}
+            }
+        },
+        "ZoneDesiredState": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "contract_version",
+                "zone_uuid",
+                "name",
+                "gateway_device_eui",
+                "timezone",
+                "latitude",
+                "longitude",
+                "phenological_stage",
+                "calibration_key",
+                "crop_type",
+                "variety",
+                "soil_type",
+                "irrigation_method",
+                "area_m2",
+                "irrigation_efficiency_pct",
+                "scheduling_mode",
+                "prediction_card_enabled",
+                "notes",
+                "sync_version",
+                "deleted_at",
+                "user"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "zone_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "name": {"type": "string", "minLength": 1, "maxLength": 128},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "timezone": {"type": "string", "minLength": 1, "maxLength": 64},
+                "latitude": {"type": ["number", "null"], "minimum": -90, "maximum": 90},
+                "longitude": {"type": ["number", "null"], "minimum": -180, "maximum": 180},
+                "phenological_stage": {"type": ["string", "null"], "maxLength": 64},
+                "calibration_key": {"type": ["string", "null"], "maxLength": 128},
+                "crop_type": {"type": ["string", "null"], "maxLength": 128},
+                "variety": {"type": ["string", "null"], "maxLength": 128},
+                "soil_type": {"type": ["string", "null"], "maxLength": 128},
+                "irrigation_method": {"type": ["string", "null"], "maxLength": 128},
+                "area_m2": {"type": ["number", "null"], "minimum": 0},
+                "irrigation_efficiency_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                "scheduling_mode": {"type": "string", "enum": ["local", "server_preferred"]},
+                "prediction_card_enabled": {"type": "integer", "enum": [0, 1]},
+                "notes": {"type": ["string", "null"], "maxLength": 4096},
+                "sync_version": {"type": "integer", "minimum": 1},
+                "deleted_at": {"type": "null"},
+                "user": {"$ref": "#/definitions/ZoneDesiredStateUser"}
+            }
+        },
+        "ZoneDeleteState": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "contract_version",
+                "zone_uuid",
+                "gateway_device_eui",
+                "sync_version",
+                "deleted_at"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "zone_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "sync_version": {"type": "integer", "minimum": 1},
+                "deleted_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"}
+            }
+        },
         "Device": {
             "type": "object",
             "required": ["deveui", "type_id"],

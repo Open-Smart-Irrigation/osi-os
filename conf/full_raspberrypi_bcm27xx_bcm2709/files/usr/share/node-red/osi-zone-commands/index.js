@@ -39,6 +39,26 @@ function object(value, field) {
   return value;
 }
 
+function exactObject(value, field, required, optional) {
+  const resource = object(value, field);
+  const allowed = new Set(required.concat(optional || []));
+  const missing = required.filter(function(key) {
+    return !Object.prototype.hasOwnProperty.call(resource, key);
+  });
+  const extra = Object.keys(resource).filter(function(key) {
+    return !allowed.has(key);
+  });
+  if (missing.length || extra.length) {
+    throw commandError(
+      'malformed_command',
+      field + ' shape mismatch; missing=' +
+        (missing.join(',') || 'none') + ', extra=' +
+        (extra.join(',') || 'none')
+    );
+  }
+  return resource;
+}
+
 function typeOf(envelope) {
   return String(envelope && envelope.commandType || '').trim().toUpperCase();
 }
@@ -210,6 +230,20 @@ function validateIdentity(envelope, runtime) {
   if (!TYPES.has(type)) return null;
   const payload = object(envelope.payload, 'Pending command payload');
   if (!protectedCandidate(payload)) return null;
+  exactObject(
+    payload,
+    'Pending command payload',
+    [
+      'command_id',
+      'command_type',
+      'effect_key',
+      'zone_uuid',
+      'gateway_device_eui',
+      'base_sync_version',
+      'target_sync_version',
+      'zone',
+    ]
+  );
   deliveryId(envelope);
   if (payload.command_type !== type ||
       !UUID.test(String(payload.command_id || '').toLowerCase())) {
@@ -269,7 +303,42 @@ function validateIdentity(envelope, runtime) {
 }
 
 function normalizedZone(input, type) {
-  const zone = object(input, 'zone');
+  const common = [
+    'contract_version',
+    'zone_uuid',
+    'gateway_device_eui',
+    'sync_version',
+    'deleted_at',
+  ];
+  const portable = [
+    'name',
+    'timezone',
+    'latitude',
+    'longitude',
+    'phenological_stage',
+    'calibration_key',
+    'crop_type',
+    'variety',
+    'soil_type',
+    'irrigation_method',
+    'area_m2',
+    'irrigation_efficiency_pct',
+    'scheduling_mode',
+    'prediction_card_enabled',
+    'notes',
+    'user',
+  ];
+  const zone = exactObject(
+    input,
+    'zone',
+    type === 'DELETE_ZONE' ? common : common.concat(portable)
+  );
+  if (zone.contract_version !== 1) {
+    throw commandError(
+      'malformed_command',
+      'zone.contract_version must equal 1'
+    );
+  }
   const result = {
     zoneUuid: uuid(zone.zone_uuid, 'zone.zone_uuid'),
     gatewayDeviceEui: String(
@@ -342,6 +411,25 @@ function normalizedZone(input, type) {
       'zone.prediction_card_enabled'
     );
     result.notes = nullableText(zone.notes, 'zone.notes', 4096);
+    const user = exactObject(
+      zone.user,
+      'zone.user',
+      ['user_uuid'],
+      ['username', 'cloudUserId']
+    );
+    result.ownerUserUuid = uuid(
+      user.user_uuid,
+      'zone.user.user_uuid'
+    );
+    nullableText(user.username, 'zone.user.username', 64);
+    if (user.cloudUserId != null &&
+        (!Number.isSafeInteger(user.cloudUserId) ||
+         user.cloudUserId <= 0)) {
+      throw commandError(
+        'malformed_command',
+        'zone.user.cloudUserId must be a positive integer or null'
+      );
+    }
     if (zone.deleted_at != null) {
       throw commandError(
         'malformed_command',
@@ -370,9 +458,7 @@ async function currentZone(tx, zoneUuid) {
   );
 }
 
-async function ownerId(tx, user) {
-  const resource = object(user, 'zone.user');
-  const ownerUuid = uuid(resource.user_uuid, 'zone.user.user_uuid');
+async function ownerId(tx, ownerUuid) {
   const row = await tx.get(
     'SELECT id FROM users WHERE user_uuid=? AND disabled_at IS NULL LIMIT 1',
     [ownerUuid]
@@ -385,7 +471,7 @@ async function ownerId(tx, user) {
 
 async function insertZone(tx, command, zone) {
   assertBase(0, command.base);
-  const owner = await ownerId(tx, command.zone.user);
+  const owner = await ownerId(tx, zone.ownerUserUuid);
   const now = new Date().toISOString();
   await tx.run(
     'INSERT INTO irrigation_zones (' +
@@ -421,18 +507,18 @@ async function insertZone(tx, command, zone) {
   );
 }
 
-async function assertExistingOwner(tx, current, command) {
+async function assertExistingOwner(tx, current, zone) {
   if (current.deleted_at != null) {
     throw commandError('missing_resource', 'Zone is deleted');
   }
-  const owner = await ownerId(tx, command.zone.user);
+  const owner = await ownerId(tx, zone.ownerUserUuid);
   if (Number(current.user_id) !== owner.id) {
     throw commandError('owner_mismatch', 'Zone owner cannot be changed');
   }
 }
 
 async function updateFullZone(tx, command, current, zone) {
-  await assertExistingOwner(tx, current, command);
+  await assertExistingOwner(tx, current, zone);
   await tx.run(
     'UPDATE irrigation_zones SET ' +
       'name=?,timezone=?,latitude=?,longitude=?,phenological_stage=?,' +
@@ -464,7 +550,7 @@ async function updateFullZone(tx, command, current, zone) {
 }
 
 async function updateConfig(tx, command, current, zone) {
-  await assertExistingOwner(tx, current, command);
+  await assertExistingOwner(tx, current, zone);
   const values = {
     timezone: zone.timezone,
     phenological_stage: zone.phenologicalStage,
@@ -496,7 +582,7 @@ async function updateConfig(tx, command, current, zone) {
 }
 
 async function updateLocation(tx, command, current, zone) {
-  await assertExistingOwner(tx, current, command);
+  await assertExistingOwner(tx, current, zone);
   await tx.run(
     'UPDATE irrigation_zones SET latitude=?,longitude=?,sync_version=?,updated_at=? ' +
       'WHERE zone_uuid=?',

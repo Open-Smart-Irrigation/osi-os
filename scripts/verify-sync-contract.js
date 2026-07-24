@@ -55,6 +55,18 @@ const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     DELETE_USER_PLOT_ASSIGNMENT: {
         effect_key: { prefix: 'scoped_plot_assignment', uuid_path: 'assignment_uuid', version_path: 'base_sync_version' },
     },
+    UPSERT_ZONE: {
+        effect_key: { prefix: 'zone', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_ZONE_CONFIG: {
+        effect_key: { prefix: 'zone', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_ZONE_LOCATION: {
+        effect_key: { prefix: 'zone', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
+    DELETE_ZONE: {
+        effect_key: { prefix: 'zone_delete', uuid_path: 'zone_uuid', version_path: 'base_sync_version' },
+    },
 };
 const EXACT_EVENT_SEMANTIC_BINDINGS = {
     JOURNAL_ENTRY_UPSERTED: { aggregate_key_path: 'payload.entry_uuid', sync_version_path: 'payload.sync_version' },
@@ -220,6 +232,7 @@ function verifyGoldenFixture(commandSchema, eventsSchema) {
         'journal_sync_v1',
         'scoped_access_commands_v1',
         'scoped_access_sync_v1',
+        'zone_desired_state_v1',
     ];
     const capabilities = golden.capabilities || [];
     assertExactList(
@@ -311,7 +324,7 @@ function main() {
         eventsSchema['x-semantic-bindings'],
         EXACT_EVENT_SEMANTIC_BINDINGS
     );
-    console.log('  ok journal and scoped-access semantic bindings are exact and machine-readable');
+    console.log('  ok journal, scoped-access, and zone semantic bindings are exact and machine-readable');
     verifyGoldenFixture(schema, eventsSchema);
 
     // 2. Verify schema files exist

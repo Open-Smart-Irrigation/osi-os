@@ -64,6 +64,19 @@ Plot-grant upserts and revocations. The stable assignment UUID identifies the
 grant, and the base version identifies the edge-confirmed state being replaced.
 Creates use `0`.
 
+### `zone:{zone_uuid}:{base_sync_version}`
+
+Zone creation and non-delete edits. Creates use base version `0`; later edits
+use the mirrored edge version being replaced. Configuration and location edits
+share this key family because capable cloud producers submit the full portable
+zone aggregate.
+
+### `zone_delete:{zone_uuid}:{base_sync_version}`
+
+Zone deletion. The base version is the live edge version observed before the
+delete. The command carries a tombstone whose target version is exactly one
+greater than that base.
+
 ## Normalization
 
 - `device_eui` is uppercase EUI-64 with no separators.
@@ -71,13 +84,17 @@ Creates use `0`.
 - `command_uuid` is lowercase, hyphenated 8-4-4-4-12.
 - Journal resource UUIDs use lowercase, hyphenated 8-4-4-4-12 form.
 - Scoped user and assignment UUIDs use lowercase, hyphenated 8-4-4-4-12 form.
+- Zone UUIDs use lowercase, hyphenated 8-4-4-4-12 form.
 - `base_sync_version` is a non-negative decimal integer without padding.
 - `scheduled_for_iso` and any timestamps use canonical ISO-8601 UTC with millisecond precision (`YYYY-MM-DDTHH:MM:SS.sssZ`), matching `canonicalization.md`.
 
 ## Replay rules
 
 - Force-sync replay must preserve the original `effect_key` from the source command.
-- Two non-journal commands sharing an `effect_key` are deduplicated to a single applied effect, regardless of `command_id`.
+- Two non-journal commands sharing an `effect_key` are deduplicated to a single
+  applied effect, regardless of `command_id`. Zone commands additionally
+  require the same gateway-bound canonical intent hash; a changed payload at
+  the same base reaches the applier and returns a version conflict.
 - `command_id` still identifies one delivery record. Retrying that record preserves both `command_id` and `effect_key`; recreating a delivery for the same versioned journal mutation changes `command_id` but preserves `effect_key`.
 
 Journal effect-key replay also requires an exact `submittedIntentHash` match. The
@@ -96,9 +113,9 @@ current aggregate exists, `currentPayloadHash` describes that edge state.
 ## Versioned resource binding enforcement
 
 The command schema's `x-semantic-bindings` object is executable contract
-metadata. Journal and scoped-access commands are valid only when the effect-key
-prefix, UUID segment, and unpadded version segment equal the referenced payload
-fields. Pattern matching alone is insufficient.
+metadata. Journal, scoped-access, and protected zone commands are valid only
+when the effect-key prefix, UUID segment, and unpadded version segment equal the
+referenced payload fields. Pattern matching alone is insufficient.
 
 The entry lifecycle repeats that check inside its transaction before it records the terminal command. For an applied entry version `N`, `assertJournalEntryEffectKey` requires base version `N - 1`; a mismatch rolls back the entry, values, event, terminal ledger row, and ACK together.
 

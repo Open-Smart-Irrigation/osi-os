@@ -35,6 +35,18 @@
         },
         "DELETE_USER_PLOT_ASSIGNMENT": {
             "effect_key": {"prefix": "scoped_plot_assignment", "uuid_path": "assignment_uuid", "version_path": "base_sync_version"}
+        },
+        "UPSERT_ZONE": {
+            "effect_key": {"prefix": "zone", "uuid_path": "zone_uuid", "version_path": "base_sync_version"}
+        },
+        "UPSERT_ZONE_CONFIG": {
+            "effect_key": {"prefix": "zone", "uuid_path": "zone_uuid", "version_path": "base_sync_version"}
+        },
+        "UPSERT_ZONE_LOCATION": {
+            "effect_key": {"prefix": "zone", "uuid_path": "zone_uuid", "version_path": "base_sync_version"}
+        },
+        "DELETE_ZONE": {
+            "effect_key": {"prefix": "zone_delete", "uuid_path": "zone_uuid", "version_path": "base_sync_version"}
         }
     },
     "type": "object",
@@ -125,7 +137,11 @@
         "plot_assignment": {"$ref": "resources.schema.json#/definitions/UserPlotAssignmentCommand"},
         "assignment_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
         "user_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
-        "password_hash": {"type": "string", "pattern": "^\\$2[aby]\\$[0-9]{2}\\$.{53}$"}
+        "password_hash": {"type": "string", "pattern": "^\\$2[aby]\\$[0-9]{2}\\$.{53}$"},
+        "zone_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+        "gateway_device_eui": {"$ref": "resources.schema.json#/definitions/Eui64"},
+        "target_sync_version": {"type": "integer", "minimum": 1},
+        "zone": {}
     },
     "allOf": [
         {
@@ -143,7 +159,11 @@
                             "UPSERT_USER_ZONE_ASSIGNMENT",
                             "DELETE_USER_ZONE_ASSIGNMENT",
                             "UPSERT_USER_PLOT_ASSIGNMENT",
-                            "DELETE_USER_PLOT_ASSIGNMENT"
+                            "DELETE_USER_PLOT_ASSIGNMENT",
+                            "UPSERT_ZONE",
+                            "DELETE_ZONE",
+                            "UPSERT_ZONE_CONFIG",
+                            "UPSERT_ZONE_LOCATION"
                         ]
                     }
                 },
@@ -166,7 +186,11 @@
                             "UPSERT_USER_ZONE_ASSIGNMENT",
                             "DELETE_USER_ZONE_ASSIGNMENT",
                             "UPSERT_USER_PLOT_ASSIGNMENT",
-                            "DELETE_USER_PLOT_ASSIGNMENT"
+                            "DELETE_USER_PLOT_ASSIGNMENT",
+                            "UPSERT_ZONE",
+                            "DELETE_ZONE",
+                            "UPSERT_ZONE_CONFIG",
+                            "UPSERT_ZONE_LOCATION"
                         ]
                     }
                 },
@@ -379,6 +403,81 @@
                 },
                 "properties": {
                     "effect_key": {"type": "string", "pattern": "^scoped_plot_assignment:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"}
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {
+                    "command_type": {
+                        "enum": [
+                            "UPSERT_ZONE",
+                            "UPSERT_ZONE_CONFIG",
+                            "UPSERT_ZONE_LOCATION"
+                        ]
+                    }
+                },
+                "required": ["command_type"]
+            },
+            "then": {
+                "required": [
+                    "effect_key",
+                    "zone_uuid",
+                    "gateway_device_eui",
+                    "base_sync_version",
+                    "target_sync_version",
+                    "zone"
+                ],
+                "propertyNames": {
+                    "enum": [
+                        "command_id",
+                        "command_type",
+                        "effect_key",
+                        "zone_uuid",
+                        "gateway_device_eui",
+                        "base_sync_version",
+                        "target_sync_version",
+                        "zone"
+                    ]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^zone:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+                    },
+                    "zone": {"$ref": "resources.schema.json#/definitions/ZoneDesiredState"}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "DELETE_ZONE"}}},
+            "then": {
+                "required": [
+                    "effect_key",
+                    "zone_uuid",
+                    "gateway_device_eui",
+                    "base_sync_version",
+                    "target_sync_version",
+                    "zone"
+                ],
+                "propertyNames": {
+                    "enum": [
+                        "command_id",
+                        "command_type",
+                        "effect_key",
+                        "zone_uuid",
+                        "gateway_device_eui",
+                        "base_sync_version",
+                        "target_sync_version",
+                        "zone"
+                    ]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^zone_delete:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+                    },
+                    "zone": {"$ref": "resources.schema.json#/definitions/ZoneDeleteState"}
                 }
             }
         }
