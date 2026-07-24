@@ -351,8 +351,9 @@ function isDockerUnavailable(error: unknown, purpose: 'inspect' | 'runtime'): bo
   const value = error as { code?: unknown; stderr?: unknown; message?: unknown };
   const text = `${typeof value.stderr === 'string' ? value.stderr : ''}\n${typeof value.message === 'string' ? value.message : ''}`;
   if (/Cannot connect to the Docker daemon|Is the docker daemon running|docker\.sock|failed to connect to.*daemon/iu.test(text)) return true;
+  if (typeof value.code === 'string' && ['ENOENT', 'EACCES', 'ECONNREFUSED'].includes(value.code)) return true;
   if (purpose === 'inspect') {
-    if (typeof value.code === 'string' && ['ENOENT', 'EACCES', 'ETIMEDOUT', 'ECONNREFUSED'].includes(value.code)) return true;
+    if (typeof value.code === 'string' && ['ETIMEDOUT'].includes(value.code)) return true;
     return /permission denied/iu.test(text);
   }
   return false;
@@ -365,6 +366,10 @@ function isMissingImage(error: unknown): boolean {
   return /No such image|manifest unknown|reference not found/iu.test(text);
 }
 
+export function builderRuntimeArguments(imageReference: string, commandArguments: readonly string[]): readonly string[] {
+  return ['run', '--platform=linux/amd64', '--pull=never', '--rm', '--network', 'none', imageReference, ...commandArguments];
+}
+
 export async function validateBuiltBuilderImage(imageReference: string, options: DockerImageValidationOptions = {}): Promise<{ readonly imageId: string; readonly selfTest: 'passed'; readonly versions: Readonly<Record<string, string>>; readonly evidence: BuilderValidationEvidence }> {
   const canonical = parseCanonicalBuilderImageReference(imageReference);
   const executable = options.executable ?? '/usr/bin/docker';
@@ -374,8 +379,9 @@ export async function validateBuiltBuilderImage(imageReference: string, options:
     try {
       return await command(argv, { timeout, maxBuffer: purpose === 'inspect' ? 64 * 1024 : 256 * 1024, env: environment });
     } catch (error) {
-      if (isDockerUnavailable(error, purpose)) throw new BuilderValidationError('DOCKER_UNAVAILABLE', dockerErrorMessage(error));
       if (purpose === 'inspect' && isMissingImage(error)) throw new BuilderValidationError('BUILDER_IMAGE_DIGEST_INVALID', dockerErrorMessage(error));
+      if (purpose === 'runtime' && isMissingImage(error)) throw new BuilderValidationError('BUILDER_IMAGE_DIGEST_INVALID', dockerErrorMessage(error));
+      if (isDockerUnavailable(error, purpose)) throw new BuilderValidationError('DOCKER_UNAVAILABLE', dockerErrorMessage(error));
       if (purpose === 'inspect') throw new BuilderValidationError('BUILDER_IMAGE_DIGEST_INVALID', dockerErrorMessage(error));
       throw new BuilderValidationError('RUST_BOOTSTRAP_UNAVAILABLE', dockerErrorMessage(error));
     }
@@ -396,7 +402,7 @@ export async function validateBuiltBuilderImage(imageReference: string, options:
   const commands: BuilderEvidenceCommand[] = [];
   const packageVersions: Record<string, string> = {};
   const run = async (argv: readonly string[], timeout = 60_000): Promise<{ stdout: string; stderr: string }> => {
-    const result = await invoke(['run', '--platform=linux/amd64', '--rm', '--network', 'none', imageReference, ...argv], timeout, 'runtime');
+    const result = await invoke(builderRuntimeArguments(imageReference, argv), timeout, 'runtime');
     commands.push(evidenceCommand(argv, result.stdout, result.stderr));
     return result;
   };

@@ -7,6 +7,7 @@ import { BUILDER_LOCK_OPTIONAL_KEYS, BUILDER_LOCK_REQUIRED_KEYS, validateBuilder
 import { BuilderSourceError, deriveDockerfile, supportedPackageTokens } from '../../builder/derive-dockerfile.js';
 import {
   builderImageReference,
+  builderRuntimeArguments,
   parseCanonicalBuilderImageReference,
   selectExactRepositoryDigest,
   sha256,
@@ -200,12 +201,22 @@ describe('locked builder source', () => {
     const unavailable = Object.assign(new Error('docker missing'), { code: 'ENOENT' });
     await expect(validateBuiltBuilderImage(canonical, { run: async () => { throw unavailable; } })).rejects.toMatchObject({ code: 'DOCKER_UNAVAILABLE' });
 
+    for (const code of ['ENOENT', 'EACCES'] as const) {
+      const runtimeSpawnFailure = Object.assign(new Error(`docker ${code}`), { code });
+      await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => argv[0] === 'image' ? { stdout: inspect, stderr: '' } : Promise.reject(runtimeSpawnFailure) })).rejects.toMatchObject({ code: 'DOCKER_UNAVAILABLE' });
+    }
+    const runtimeMissingImage = Object.assign(new Error('image disappeared'), { code: 1, stderr: `Error response from daemon: No such image: ${canonical}` });
+    await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => argv[0] === 'image' ? { stdout: inspect, stderr: '' } : Promise.reject(runtimeMissingImage) })).rejects.toMatchObject({ code: 'BUILDER_IMAGE_DIGEST_INVALID' });
+
     const runtimePermission = Object.assign(new Error('rustc permission denied'), { code: 1, stderr: 'rustc: permission denied' });
     await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => argv[0] === 'image' ? { stdout: inspect, stderr: '' } : Promise.reject(runtimePermission) })).rejects.toMatchObject({ code: 'RUST_BOOTSTRAP_UNAVAILABLE' });
     const runtimeTimeout = Object.assign(new Error('container command timed out'), { code: 'ETIMEDOUT', stderr: 'rustc timed out' });
     await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => argv[0] === 'image' ? { stdout: inspect, stderr: '' } : Promise.reject(runtimeTimeout) })).rejects.toMatchObject({ code: 'RUST_BOOTSTRAP_UNAVAILABLE' });
     const socketPermission = Object.assign(new Error('Docker socket permission denied'), { code: 1, stderr: '/var/run/docker.sock: permission denied' });
     await expect(validateBuiltBuilderImage(canonical, { run: async (argv) => argv[0] === 'image' ? { stdout: inspect, stderr: '' } : Promise.reject(socketPermission) })).rejects.toMatchObject({ code: 'DOCKER_UNAVAILABLE' });
+    const runtimeArgs = builderRuntimeArguments(canonical, ['/usr/bin/rustc', '-vV']);
+    expect(runtimeArgs).toEqual(['run', '--platform=linux/amd64', '--pull=never', '--rm', '--network', 'none', canonical, '/usr/bin/rustc', '-vV']);
+    expect(runtimeArgs.slice(0, 7)).toEqual(['run', '--platform=linux/amd64', '--pull=never', '--rm', '--network', 'none', canonical]);
   });
 
   it('classifies missing images and malformed inspect output separately from Docker availability', async () => {
