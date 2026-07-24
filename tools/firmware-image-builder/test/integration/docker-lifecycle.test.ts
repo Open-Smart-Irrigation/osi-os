@@ -29,8 +29,15 @@ function rawInspection(): Record<string, unknown> {
     HostConfig: { NetworkMode: 'bridge', CapDrop: ['ALL'], CapAdd: null, Privileged: false, Devices: null, SecurityOpt: ['no-new-privileges:true'], ReadonlyRootfs: false, PidsLimit: 4096, Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 4096 }] },
     Mounts: [{ Type: 'bind', Source: '/tmp/worktree', Destination: '/workdir', RW: true }],
     Created: '2026-07-24T10:00:03.000000000Z',
-    State: { Running: false, StartedAt: '2026-07-24T10:00:03.000000000Z', FinishedAt: '2026-07-24T10:00:04.000000000Z', ExitCode: 0 },
+    State: { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:03.000000000Z', FinishedAt: '2026-07-24T10:00:04.000000000Z', ExitCode: 0 },
   };
+}
+
+function createdInspection(): Record<string, unknown> {
+  const value = rawInspection();
+  value.Created = '2026-07-24T10:00:03.000000000Z';
+  value.State = { Status: 'created', Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 0 };
+  return value;
 }
 
 function fakeDocker(): DockerCommandExecutor & { readonly calls: readonly (readonly string[])[] } {
@@ -39,7 +46,7 @@ function fakeDocker(): DockerCommandExecutor & { readonly calls: readonly (reado
     { stdout: JSON.stringify({ Id: IMAGE_ID, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
     { stdout: '' },
     { stdout: `${CONTAINER_ID}\n` },
-    { stdout: JSON.stringify(rawInspection()) },
+    { stdout: JSON.stringify(createdInspection()) },
     { stdout: 'build output', startedAt: '2026-07-24T10:00:03.000Z', finishedAt: '2026-07-24T10:00:04.000Z' },
     { stdout: JSON.stringify(rawInspection()) },
     { stdout: '' },

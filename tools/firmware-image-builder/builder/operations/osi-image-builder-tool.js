@@ -3,124 +3,144 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, rename, rmdir, unlink } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const WORKTREE = '/workdir';
 const OPERATIONS = new Set(['copy-feed-config', 'verify-image', 'mirror-gui']);
+const FIXED_PATHS = Object.freeze({
+  feedSource: 'feeds.conf.default',
+  feedDestination: 'openwrt/feeds.conf.default',
+  feedStaging: '.osi-image-builder-feed-config-staging',
+  guiSource: 'web/react-gui/build',
+  guiDestination: 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui',
+  guiStaging: '.osi-image-builder-gui-staging',
+  imageDirectory: 'openwrt/bin/targets',
+});
+const PROC_FD = '/proc/self/fd';
+const DIRECTORY_FLAGS = constants.O_DIRECTORY | constants.O_NOFOLLOW;
+const FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW;
 
 function fail(message) {
   process.stderr.write(`osi-image-builder-tool: ${message}\n`);
   process.exitCode = 2;
 }
 
-function paths(root) {
-  return {
-    feedSource: join(root, 'feeds.conf.default'),
-    feedDestination: join(root, 'openwrt/feeds.conf.default'),
-    feedStaging: join(root, '.osi-image-builder-feed-config-staging'),
-    guiSource: join(root, 'web/react-gui/build'),
-    guiDestination: join(root, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui'),
-    guiStaging: join(root, '.osi-image-builder-gui-staging'),
-    imageDirectory: join(root, 'openwrt/bin/targets'),
-  };
-}
-
-async function existing(path) {
-  try { return await lstat(path); }
-  catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
-}
-
 function requireAbsoluteRoot(root) {
   if (typeof root !== 'string' || !root.startsWith('/') || root.includes('\0')) throw new Error('operation root is not a canonical absolute path');
 }
 
-async function requireDirectory(path, field) {
-  const value = await lstat(path);
-  if (value.isSymbolicLink()) throw new Error(`${field} contains a symbolic link`);
-  if (!value.isDirectory()) throw new Error(`${field} is not a directory`);
+function entryPath(directory, name = '') {
+  return name.length === 0 ? `${PROC_FD}/${directory.fd}` : `${PROC_FD}/${directory.fd}/${name}`;
 }
 
-async function requireFixedDirectory(root, relativePath, field) {
-  await requireDirectory(root, 'operation root');
-  let current = root;
-  for (const part of relativePath.split('/').filter(Boolean)) {
-    current = join(current, part);
-    const value = await lstat(current);
-    if (value.isSymbolicLink()) throw new Error(`${field} contains a symbolic link at ${current}`);
-    if (!value.isDirectory()) throw new Error(`${field} is not a directory at ${current}`);
+async function step(hooks, point, path) {
+  await hooks?.onStep?.(point, path);
+}
+
+async function openRoot(root) {
+  return open(root, DIRECTORY_FLAGS);
+}
+
+async function openDirectoryAt(parent, name, field, hooks) {
+  const path = entryPath(parent, name);
+  await step(hooks, 'before-directory-open', path);
+  try { return await open(path, DIRECTORY_FLAGS); }
+  catch (error) { if (error?.code === 'ELOOP') throw new Error(`${field} contains a symbolic link`, { cause: error });
+    throw new Error(`${field} is not a stable directory or symbolic link`, { cause: error }); }
+}
+
+async function openFileAt(parent, name, field, hooks) {
+  const path = entryPath(parent, name);
+  await step(hooks, 'before-file-open', path);
+  try { return await open(path, FILE_FLAGS); }
+  catch (error) { if (error?.code === 'ELOOP') throw new Error(`${field} contains a symbolic link`, { cause: error });
+    throw new Error(`${field} is not a stable regular file or symbolic link`, { cause: error }); }
+}
+
+async function openDirectoryChain(parent, relativePath, create, field, hooks) {
+  const handles = [];
+  let current = parent;
+  try {
+    for (const name of relativePath.split('/').filter(Boolean)) {
+      let child;
+      try { child = await openDirectoryAt(current, name, field, hooks); }
+      catch (error) {
+        if (!create || error?.cause?.code !== 'ENOENT') throw error;
+        await step(hooks, 'before-directory-create', entryPath(current, name));
+        await mkdir(entryPath(current, name));
+        child = await openDirectoryAt(current, name, field, hooks);
+      }
+      handles.push(child);
+      current = child;
+    }
+    return { handle: current, handles };
+  } catch (error) {
+    for (const handle of handles.reverse()) await handle.close();
+    throw error;
   }
-  return current;
 }
 
-async function ensureDirectoryTree(root, relativePath) {
-  await requireDirectory(root, 'operation root');
-  let current = root;
-  for (const part of relativePath.split('/').filter(Boolean)) {
-    current = join(current, part);
-    const value = await existing(current);
-    if (value === null) await mkdir(current);
-    const checked = await lstat(current);
-    if (checked.isSymbolicLink() || !checked.isDirectory()) throw new Error(`directory path escapes through ${current}`);
-  }
+async function closeChain(chain) {
+  for (const handle of [...chain.handles].reverse()) await handle.close();
 }
 
-async function removeNoFollow(path) {
-  const value = await existing(path);
-  if (value === null) return;
-  if (value.isSymbolicLink() || value.isFile()) { await unlink(path); return; }
-  if (!value.isDirectory()) throw new Error(`cannot remove non-regular path ${path}`);
-  for (const name of await readdir(path)) await removeNoFollow(join(path, name));
-  await rmdir(path);
-}
-
-async function rejectSymlink(path, field) {
-  const value = await existing(path);
-  if (value?.isSymbolicLink()) throw new Error(`${field} is a symbolic link`);
-  return value;
-}
-
-async function rejectSymlinkTree(path, field) {
-  const value = await existing(path);
-  if (value === null) return;
-  if (value.isSymbolicLink()) throw new Error(`${field} contains a symbolic link`);
-  if (!value.isDirectory()) return;
-  for (const name of await readdir(path)) await rejectSymlinkTree(join(path, name), field);
-}
-
-async function sha256RegularNoFollow(path, field) {
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+async function hashHandle(handle) {
   const hash = createHash('sha256');
   const buffer = Buffer.allocUnsafe(1024 * 1024);
+  while (true) {
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+    if (bytesRead === 0) break;
+    hash.update(buffer.subarray(0, bytesRead));
+  }
+  return hash.digest('hex');
+}
+
+async function hashFileAt(parent, name, field, hooks) {
+  const handle = await openFileAt(parent, name, field, hooks);
   try {
-    while (true) {
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
-      if (bytesRead === 0) break;
-      hash.update(buffer.subarray(0, bytesRead));
-    }
-    return hash.digest('hex');
+    const info = await handle.stat();
+    if (!info.isFile()) throw new Error(`${field} is not a regular file`);
+    return { size: info.size, sha256: await hashHandle(handle) };
   } finally { await handle.close(); }
 }
 
-async function copyRegularNoFollow(source, destination) {
-  const sourceHandle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+async function copyFileAt(sourceParent, sourceName, destinationParent, destinationName, field, hooks) {
+  const source = await openFileAt(sourceParent, sourceName, `${field} source`, hooks);
   try {
-    const destinationHandle = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o644);
-    try { await destinationHandle.writeFile(await sourceHandle.readFile()); }
-    finally { await destinationHandle.close(); }
-  } finally { await sourceHandle.close(); }
+    const sourceInfo = await source.stat();
+    if (!sourceInfo.isFile()) throw new Error(`${field} source is not a regular file`);
+    await step(hooks, 'before-destination-create', entryPath(destinationParent, destinationName));
+    const destination = await open(entryPath(destinationParent, destinationName), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    try {
+      let position = 0;
+      while (position < sourceInfo.size) {
+        const length = Math.min(buffer.length, sourceInfo.size - position);
+        const result = await source.read(buffer, 0, length, position);
+        if (result.bytesRead === 0) throw new Error(`${field} source ended during copy`);
+        await destination.write(buffer, 0, result.bytesRead);
+        position += result.bytesRead;
+      }
+    } finally { await destination.close(); }
+  } finally { await source.close(); }
 }
 
-async function fileManifest(path, relativePath = '') {
-  const value = await lstat(path);
-  if (value.isSymbolicLink()) throw new Error(`source contains a symbolic link at ${relativePath || path}`);
-  if (value.isFile()) {
-    return new Map([[relativePath, { size: value.size, sha256: await sha256RegularNoFollow(path, `source file ${relativePath || path}`) }]]);
-  }
-  if (!value.isDirectory()) throw new Error(`source contains a non-regular path at ${relativePath || path}`);
+async function fileManifest(directory, relativePath = '', hooks) {
   const result = new Map();
-  for (const name of (await readdir(path)).sort()) {
-    for (const [file, metadata] of await fileManifest(join(path, name), relativePath ? `${relativePath}/${name}` : name)) result.set(file, metadata);
+  for (const entry of (await readdir(entryPath(directory), { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
+    const currentPath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
+    if (entry.isSymbolicLink()) throw new Error(`source contains a symbolic link at ${currentPath}`);
+    if (entry.isDirectory()) {
+      const child = await openDirectoryAt(directory, entry.name, `source directory ${currentPath}`, hooks);
+      try {
+        for (const [file, metadata] of await fileManifest(child, currentPath, hooks)) result.set(file, metadata);
+      } finally { await child.close(); }
+    } else if (entry.isFile()) {
+      const metadata = await hashFileAt(directory, entry.name, `source file ${currentPath}`, hooks);
+      result.set(currentPath, metadata);
+    } else {
+      throw new Error(`source contains a non-regular path at ${currentPath}`);
+    }
   }
   return result;
 }
@@ -139,78 +159,128 @@ function equalManifest(left, right) {
   return true;
 }
 
-async function copyManifest(source, destination, manifest) {
-  await ensureDirectoryTree(destination, '');
+async function copyManifest(source, destination, manifest, hooks) {
   for (const path of [...manifest.keys()].sort()) {
-    const parent = dirname(path) === '.' ? '' : dirname(path);
-    await ensureDirectoryTree(destination, parent);
-    await copyRegularNoFollow(join(source, path), join(destination, path));
+    const parts = path.split('/');
+    const file = parts.pop();
+    const sourceChain = await openDirectoryChain(source, parts.join('/'), false, `source ${path}`, hooks);
+    try {
+      const destinationChain = await openDirectoryChain(destination, parts.join('/'), true, `destination ${path}`, hooks);
+      try { await copyFileAt(sourceChain.handle, file, destinationChain.handle, file, path, hooks); }
+      finally { await closeChain(destinationChain); }
+    } finally { await closeChain(sourceChain); }
   }
 }
 
-async function copyFeedConfig(root) {
-  const target = paths(root);
-  await requireDirectory(root, 'operation root');
-  const source = await rejectSymlink(target.feedSource, 'feed configuration source');
-  if (!source?.isFile()) throw new Error('feed configuration source is missing or not regular');
-  await ensureDirectoryTree(root, 'openwrt');
-  await rejectSymlink(target.feedDestination, 'feed configuration destination');
-  await rejectSymlinkTree(target.feedStaging, 'feed configuration staging');
-  await removeNoFollow(target.feedStaging);
-  const sourceHash = await sha256RegularNoFollow(target.feedSource, 'feed configuration source');
-  await copyRegularNoFollow(target.feedSource, target.feedStaging);
-  const stagedHash = await sha256RegularNoFollow(target.feedStaging, 'feed configuration staging');
-  if (sourceHash !== stagedHash) throw new Error('feed configuration hash changed during staging');
-  await removeNoFollow(target.feedDestination);
-  await rename(target.feedStaging, target.feedDestination);
-  const destinationHash = await sha256RegularNoFollow(target.feedDestination, 'feed configuration destination');
-  if (sourceHash !== destinationHash) throw new Error('feed configuration hash changed during publication');
-  return { operation: 'copy-feed-config', source: 'feeds.conf.default', destination: 'openwrt/feeds.conf.default', sha256: sourceHash };
+async function removeEntry(parent, name, hooks) {
+  const path = entryPath(parent, name);
+  let value;
+  try { value = await lstat(path); }
+  catch (error) { if (error?.code === 'ENOENT') return; throw error; }
+  await step(hooks, 'before-remove', path);
+  if (value.isSymbolicLink()) throw new Error(`cannot remove symbolic link: ${path}`);
+  if (value.isFile()) { await unlink(path); return; }
+  if (!value.isDirectory()) throw new Error(`cannot remove non-regular path ${path}`);
+  const child = await openDirectoryAt(parent, name, 'removal directory', hooks);
+  const identity = await child.stat();
+  try {
+    for (const entry of await readdir(entryPath(child), { withFileTypes: true })) await removeEntry(child, entry.name, hooks);
+    const current = await lstat(path);
+    if (!current.isDirectory() || current.dev !== identity.dev || current.ino !== identity.ino) throw new Error(`directory changed during removal: ${path}`);
+    await step(hooks, 'before-remove-directory', path);
+    const stable = await lstat(path);
+    if (!stable.isDirectory() || stable.dev !== identity.dev || stable.ino !== identity.ino) throw new Error(`directory changed before removal: ${path}`);
+    await rmdir(path);
+  } finally { await child.close(); }
 }
 
-async function mirrorGui(root) {
-  const target = paths(root);
-  await requireFixedDirectory(root, 'web/react-gui/build', 'GUI source');
-  const sourceManifest = await fileManifest(target.guiSource);
-  if (sourceManifest.size === 0) throw new Error('GUI build output contains no regular files');
-  await ensureDirectoryTree(root, 'feeds/chirpstack-openwrt-feed/apps/node-red/files');
-  await rejectSymlinkTree(target.guiDestination, 'GUI destination');
-  await rejectSymlinkTree(target.guiStaging, 'GUI staging');
-  await removeNoFollow(target.guiStaging);
-  await mkdir(target.guiStaging);
-  await copyManifest(target.guiSource, target.guiStaging, sourceManifest);
-  const stagedManifest = await fileManifest(target.guiStaging);
-  if (!equalManifest(sourceManifest, stagedManifest)) throw new Error('GUI staging manifest does not match source');
-  await removeNoFollow(target.guiDestination);
-  await rename(target.guiStaging, target.guiDestination);
-  const destinationManifest = await fileManifest(target.guiDestination);
-  if (!equalManifest(sourceManifest, destinationManifest)) throw new Error('GUI destination manifest does not match source');
-  return { operation: 'mirror-gui', source: 'web/react-gui/build', destination: 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui', fileCount: sourceManifest.size, manifestSha256: manifestHash(sourceManifest) };
+async function copyFeedConfig(root, hooks) {
+  const rootHandle = await openRoot(root);
+  let openwrt;
+  try {
+    openwrt = await openDirectoryChain(rootHandle, 'openwrt', true, 'OpenWrt directory', hooks);
+    const source = await hashFileAt(rootHandle, FIXED_PATHS.feedSource, 'feed configuration source', hooks);
+    await removeEntry(rootHandle, FIXED_PATHS.feedStaging, hooks);
+    await copyFileAt(rootHandle, FIXED_PATHS.feedSource, rootHandle, FIXED_PATHS.feedStaging, 'feed configuration', hooks);
+    const staged = await hashFileAt(rootHandle, FIXED_PATHS.feedStaging, 'feed configuration staging', hooks);
+    if (source.sha256 !== staged.sha256 || source.size !== staged.size) throw new Error('feed configuration hash changed during staging');
+    await removeEntry(openwrt.handle, 'feeds.conf.default', hooks);
+    await rename(entryPath(rootHandle, FIXED_PATHS.feedStaging), entryPath(openwrt.handle, 'feeds.conf.default'));
+    const destination = await hashFileAt(openwrt.handle, 'feeds.conf.default', 'feed configuration destination', hooks);
+    if (source.sha256 !== destination.sha256 || source.size !== destination.size) throw new Error('feed configuration hash changed during publication');
+    return { operation: 'copy-feed-config', source: FIXED_PATHS.feedSource, destination: FIXED_PATHS.feedDestination, sha256: source.sha256 };
+  } finally { if (openwrt) await closeChain(openwrt); await rootHandle.close(); }
 }
 
-async function verifyImage(root) {
-  const target = paths(root);
-  await requireFixedDirectory(root, 'openwrt/bin/targets', 'OpenWrt target directory');
-  const candidates = [];
-  for (const platform of await readdir(target.imageDirectory, { withFileTypes: true })) {
-    if (!platform.isDirectory()) continue;
-    for (const profile of await readdir(join(target.imageDirectory, platform.name), { withFileTypes: true })) {
-      if (!profile.isDirectory()) continue;
-      for (const file of await readdir(join(target.imageDirectory, platform.name, profile.name), { withFileTypes: true })) {
-        if (/\.(?:img|img\.gz)$/u.test(file.name)) candidates.push(join(platform.name, profile.name, file.name));
-      }
+async function mirrorGui(root, hooks) {
+  const rootHandle = await openRoot(root);
+  let source;
+  let destinationParent;
+  try {
+    source = await openDirectoryChain(rootHandle, FIXED_PATHS.guiSource, false, 'GUI source', hooks);
+    destinationParent = await openDirectoryChain(rootHandle, 'feeds/chirpstack-openwrt-feed/apps/node-red/files', true, 'GUI destination parent', hooks);
+    const sourceManifest = await fileManifest(source.handle, '', hooks);
+    if (sourceManifest.size === 0) throw new Error('GUI build output contains no regular files');
+    await removeEntry(rootHandle, FIXED_PATHS.guiStaging, hooks);
+    await mkdir(entryPath(rootHandle, FIXED_PATHS.guiStaging));
+    const staging = await openDirectoryAt(rootHandle, FIXED_PATHS.guiStaging, 'GUI staging', hooks);
+    try {
+      await copyManifest(source.handle, staging, sourceManifest, hooks);
+      const stagedManifest = await fileManifest(staging, '', hooks);
+      if (!equalManifest(sourceManifest, stagedManifest)) throw new Error('GUI staging manifest does not match source');
+    } finally { await staging.close(); }
+    await removeEntry(destinationParent.handle, 'gui', hooks);
+    await rename(entryPath(rootHandle, FIXED_PATHS.guiStaging), entryPath(destinationParent.handle, 'gui'));
+    const destination = await openDirectoryAt(destinationParent.handle, 'gui', 'GUI destination', hooks);
+    try {
+      const destinationManifest = await fileManifest(destination, '', hooks);
+      if (!equalManifest(sourceManifest, destinationManifest)) throw new Error('GUI destination manifest does not match source');
+    } finally { await destination.close(); }
+    return { operation: 'mirror-gui', source: FIXED_PATHS.guiSource, destination: FIXED_PATHS.guiDestination, fileCount: sourceManifest.size, manifestSha256: manifestHash(sourceManifest) };
+  } finally { if (destinationParent) await closeChain(destinationParent); if (source) await closeChain(source); await rootHandle.close(); }
+}
+
+async function verifyImage(root, hooks) {
+  const rootHandle = await openRoot(root);
+  let targetDirectory;
+  try {
+    targetDirectory = await openDirectoryChain(rootHandle, FIXED_PATHS.imageDirectory, false, 'OpenWrt target directory', hooks);
+    const candidates = [];
+    for (const platform of await readdir(entryPath(targetDirectory.handle), { withFileTypes: true })) {
+      if (platform.isSymbolicLink()) throw new Error(`image platform contains a symbolic link: ${platform.name}`);
+      if (!platform.isDirectory()) continue;
+      const platformHandle = await openDirectoryAt(targetDirectory.handle, platform.name, 'image platform', hooks);
+      try {
+        for (const profile of await readdir(entryPath(platformHandle), { withFileTypes: true })) {
+          if (profile.isSymbolicLink()) throw new Error(`image profile contains a symbolic link: ${profile.name}`);
+          if (!profile.isDirectory()) continue;
+          const profileHandle = await openDirectoryAt(platformHandle, profile.name, 'image profile', hooks);
+          try {
+            for (const file of await readdir(entryPath(profileHandle), { withFileTypes: true })) {
+              if (file.isSymbolicLink()) throw new Error(`image artifact contains a symbolic link: ${file.name}`);
+              if (file.isFile() && /\.(?:img|img\.gz)$/u.test(file.name)) candidates.push({ platform: platform.name, profile: profile.name, name: file.name });
+            }
+          } finally { await profileHandle.close(); }
+        }
+      } finally { await platformHandle.close(); }
     }
-  }
-  if (candidates.length !== 1) throw new Error(`expected exactly one firmware image, found ${candidates.length}`);
-  const imagePath = join(target.imageDirectory, candidates[0]);
-  const image = await lstat(imagePath);
-  if (image.isSymbolicLink() || !image.isFile() || image.size < 64 * 1024 * 1024) throw new Error('firmware image is missing, symbolic, or below the 64 MiB minimum');
-  return { operation: 'verify-image', relativePath: `openwrt/bin/targets/${candidates[0]}`, size: image.size, sha256: await sha256RegularNoFollow(imagePath, 'firmware image') };
+    if (candidates.length !== 1) throw new Error(`expected exactly one firmware image, found ${candidates.length}`);
+    const candidate = candidates[0];
+    const profile = await openDirectoryChain(targetDirectory.handle, `${candidate.platform}/${candidate.profile}`, false, 'firmware image profile', hooks);
+    try {
+      const image = await openFileAt(profile.handle, candidate.name, 'firmware image', hooks);
+      try {
+        const info = await image.stat();
+        if (!info.isFile() || info.size < 64 * 1024 * 1024) throw new Error('firmware image is missing or below the 64 MiB minimum');
+        return { operation: 'verify-image', relativePath: `openwrt/bin/targets/${candidate.platform}/${candidate.profile}/${candidate.name}`, size: info.size, sha256: await hashHandle(image) };
+      } finally { await image.close(); }
+    } finally { await closeChain(profile); }
+  } finally { if (targetDirectory) await closeChain(targetDirectory); await rootHandle.close(); }
 }
 
-export function createOperationHandlersForTesting(root) {
+export function createOperationHandlersForTesting(root, hooks = {}) {
   requireAbsoluteRoot(root);
-  return Object.freeze({ copyFeedConfig: () => copyFeedConfig(root), mirrorGui: () => mirrorGui(root), verifyImage: () => verifyImage(root) });
+  return Object.freeze({ copyFeedConfig: () => copyFeedConfig(root, hooks), mirrorGui: () => mirrorGui(root, hooks), verifyImage: () => verifyImage(root, hooks) });
 }
 
 async function main() {

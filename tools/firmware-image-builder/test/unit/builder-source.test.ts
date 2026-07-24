@@ -1,4 +1,4 @@
-import { readFile, mkdtemp, writeFile, mkdir, rm, symlink, access, truncate, lstat } from 'node:fs/promises';
+import { readFile, mkdtemp, writeFile, mkdir, rm, symlink, access, truncate, lstat, rename } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,7 +36,7 @@ const definitionPath = new URL('../../builder/execution-definition.json', import
 const targetNames = ['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const;
 const execFileAsync = promisify(execFile);
 const operationToolPath = new URL('../../builder/operations/osi-image-builder-tool.js', import.meta.url).pathname;
-const operationToolModule = async () => await import(operationToolPath) as unknown as { readonly createOperationHandlersForTesting: (root: string) => { readonly copyFeedConfig: () => Promise<{ readonly sha256: string }>; readonly mirrorGui: () => Promise<{ readonly fileCount: number }>; readonly verifyImage: () => Promise<{ readonly sha256: string }> } };
+const operationToolModule = async () => await import(operationToolPath) as unknown as { readonly createOperationHandlersForTesting: (root: string, hooks?: { readonly onStep?: (point: string, path: string) => void | Promise<void> }) => { readonly copyFeedConfig: () => Promise<{ readonly sha256: string }>; readonly mirrorGui: () => Promise<{ readonly fileCount: number }>; readonly verifyImage: () => Promise<{ readonly sha256: string }> } };
 const evidence: BuilderValidationEvidence = {
   imageId: `sha256:${digest('f')}`, imageDigest: digest('a'), architecture: 'linux/amd64',
   rustc: 'rustc 1.85.0', llvm: '19.1.7', polly: '19.1.7', zstd: '1.5.7', node: 'v22.14.0',
@@ -257,9 +257,90 @@ describe('locked builder source', () => {
     }
   });
 
+  it('keeps GUI reads inside held source descriptors across a fixed-path swap', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-gui-race-'));
+    const outside = await mkdtemp(join(tmpdir(), 'osi-operation-tool-gui-race-outside-'));
+    let swapped = false;
+    try {
+      const source = join(root, 'web/react-gui/build');
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, 'index.html'), '<title>held source</title>');
+      await mkdir(join(outside, 'react-gui/build'), { recursive: true });
+      await writeFile(join(outside, 'react-gui/build/index.html'), '<title>outside</title>');
+      const handlers = (await operationToolModule()).createOperationHandlersForTesting(root, { onStep: async (point) => {
+        if (!swapped && point === 'before-file-open') {
+          swapped = true;
+          await rename(join(root, 'web'), join(root, 'web-original'));
+          await symlink(outside, join(root, 'web'));
+        }
+      } });
+      await expect(handlers.mirrorGui()).resolves.toMatchObject({ fileCount: 1 });
+      expect(await readFile(join(root, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/index.html'), 'utf8')).toBe('<title>held source</title>');
+      expect((await lstat(join(outside, 'react-gui/build/index.html'))).isFile()).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an artifact swapped to an outside symlink before open without reading outside', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-image-race-'));
+    const outside = await mkdtemp(join(tmpdir(), 'osi-operation-tool-image-race-outside-'));
+    let swapped = false;
+    try {
+      const image = join(root, 'openwrt/bin/targets/self/profile/race.img');
+      await mkdir(join(root, 'openwrt/bin/targets/self/profile'), { recursive: true });
+      await writeFile(image, '');
+      await truncate(image, 64 * 1024 * 1024);
+      const outsideImage = join(outside, 'outside.img');
+      await writeFile(outsideImage, 'outside');
+      const handlers = (await operationToolModule()).createOperationHandlersForTesting(root, { onStep: async (point, path) => {
+        if (!swapped && point === 'before-file-open' && path.endsWith('/race.img')) {
+          swapped = true;
+          await rename(image, `${image}.original`);
+          await symlink(outsideImage, image);
+        }
+      } });
+      await expect(handlers.verifyImage()).rejects.toThrow(/stable regular|symbolic|symlink/i);
+      expect(await readFile(outsideImage, 'utf8')).toBe('outside');
+      expect((await lstat(`${image}.original`)).size).toBe(64 * 1024 * 1024);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('aborts recursive destination removal when the held entry is swapped before rmdir', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-remove-race-'));
+    const outside = await mkdtemp(join(tmpdir(), 'osi-operation-tool-remove-race-outside-'));
+    let swapped = false;
+    try {
+      const source = join(root, 'web/react-gui/build');
+      const destination = join(root, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui');
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, 'index.html'), '<title>replacement</title>');
+      await mkdir(destination, { recursive: true });
+      await writeFile(join(destination, 'stale.js'), 'stale');
+      await writeFile(join(outside, 'outside.js'), 'outside');
+      const handlers = (await operationToolModule()).createOperationHandlersForTesting(root, { onStep: async (point, path) => {
+        if (!swapped && point === 'before-remove-directory' && path.endsWith('/gui')) {
+          swapped = true;
+          await rename(destination, `${destination}.original`);
+          await symlink(outside, destination);
+        }
+      } });
+      await expect(handlers.mirrorGui()).rejects.toThrow(/changed|symbolic|symlink/i);
+      expect(await readFile(join(outside, 'outside.js'), 'utf8')).toBe('outside');
+      expect((await lstat(`${destination}.original`)).isDirectory()).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it('hashes firmware through a bounded no-follow stream rather than readFile', async () => {
     const toolContents = await readFile(operationToolPath, 'utf8');
-    expect(toolContents).toContain('sha256RegularNoFollow');
+    expect(toolContents).toContain('hashHandle');
     expect(toolContents).toContain('Buffer.allocUnsafe(1024 * 1024)');
     expect(toolContents).not.toContain('readFile(imagePath)');
   });

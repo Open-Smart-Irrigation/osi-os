@@ -47,6 +47,7 @@ export interface DockerInspection {
   readonly ulimits: readonly { readonly name: string; readonly soft: number; readonly hard: number }[];
   readonly environment: Readonly<Record<string, string>>;
   readonly running: boolean;
+  readonly status: string;
   readonly createdAt: string;
   readonly startedAt: string | null;
   readonly finishedAt: string | null;
@@ -268,8 +269,8 @@ function normalizeInspection(value: unknown): DockerInspection {
   const root = Array.isArray(value) ? (value.length === 1 ? record(value[0], 'docker inspect result') : fail('docker inspect must return exactly one container')) : record(value, 'docker inspect result');
   if (root.Config === undefined && root.config === undefined && root.imageId !== undefined) {
     const direct = root as unknown as DockerInspection;
-    if (!Array.isArray(direct.mounts) || !Array.isArray(direct.capDrop) || !Array.isArray(direct.capAdd) || !Array.isArray(direct.devices) || !Array.isArray(direct.securityOpt) || !Array.isArray(direct.ulimits) || !direct.environment || typeof direct.readonlyRootfs !== 'boolean' || typeof direct.pidsLimit !== 'number' || !Number.isFinite(direct.pidsLimit) || typeof direct.createdAt !== 'string' || (direct.startedAt !== null && typeof direct.startedAt !== 'string') || (direct.finishedAt !== null && typeof direct.finishedAt !== 'string') || (direct.exitCode !== null && !Number.isSafeInteger(direct.exitCode)) || direct.ulimits.some((limit) => typeof limit !== 'object' || limit === null || typeof limit.name !== 'string' || typeof limit.soft !== 'number' || typeof limit.hard !== 'number' || !Number.isFinite(limit.soft) || !Number.isFinite(limit.hard))) fail('normalized Docker inspection is incomplete');
-    canonicalInstant(direct.createdAt, 'normalized Docker Created');
+    if (!Array.isArray(direct.mounts) || !Array.isArray(direct.capDrop) || !Array.isArray(direct.capAdd) || !Array.isArray(direct.devices) || !Array.isArray(direct.securityOpt) || !Array.isArray(direct.ulimits) || !direct.environment || typeof direct.readonlyRootfs !== 'boolean' || typeof direct.pidsLimit !== 'number' || !Number.isFinite(direct.pidsLimit) || typeof direct.status !== 'string' || typeof direct.createdAt !== 'string' || (direct.startedAt !== null && typeof direct.startedAt !== 'string') || (direct.finishedAt !== null && typeof direct.finishedAt !== 'string') || (direct.exitCode !== null && !Number.isSafeInteger(direct.exitCode)) || direct.ulimits.some((limit) => typeof limit !== 'object' || limit === null || typeof limit.name !== 'string' || typeof limit.soft !== 'number' || typeof limit.hard !== 'number' || !Number.isFinite(limit.soft) || !Number.isFinite(limit.hard))) fail('normalized Docker inspection is incomplete');
+    if (normalizeDockerInstant(direct.createdAt, 'normalized Docker Created', true) === null) fail('normalized Docker Created cannot be a zero instant');
     if (direct.startedAt !== null) canonicalInstant(direct.startedAt, 'normalized Docker StartedAt');
     if (direct.finishedAt !== null) canonicalInstant(direct.finishedAt, 'normalized Docker FinishedAt');
     return direct;
@@ -282,6 +283,8 @@ function normalizeInspection(value: unknown): DockerInspection {
   for (const value of Object.values(labels)) requiredString(value, 'container label');
   const rawUlimits = host.Ulimits ?? root.ulimits;
   if (!Array.isArray(rawUlimits)) fail('container ulimits are missing');
+  const createdAt = normalizeDockerInstant(root.Created ?? root.createdAt, 'container Created', true);
+  if (createdAt === null) fail('container Created cannot be a zero instant');
   return {
     id: requiredString(root.Id ?? root.id, 'container ID'),
     name: requiredString(root.Name ?? root.name, 'container name').replace(/^\//u, ''),
@@ -302,7 +305,8 @@ function normalizeInspection(value: unknown): DockerInspection {
     ulimits: rawUlimits.map((item) => { const limit = record(item, 'container ulimit'); return { name: requiredString(limit.Name ?? limit.name, 'container ulimit name'), soft: requiredNumber(limit.Soft ?? limit.soft, 'container ulimit soft'), hard: requiredNumber(limit.Hard ?? limit.hard, 'container ulimit hard') }; }),
     environment: normalizeEnvironment(config.Env ?? root.environment),
     running: requiredBoolean(state.Running ?? root.running, 'container running state'),
-    createdAt: normalizeDockerInstant(root.Created ?? root.createdAt, 'container Created', true)!,
+    status: requiredString(state.Status ?? state.status ?? root.status, 'container status'),
+    createdAt,
     startedAt: normalizeDockerInstant(state.StartedAt ?? state.startedAt ?? root.startedAt, 'container State.StartedAt', false),
     finishedAt: normalizeDockerInstant(state.FinishedAt ?? state.finishedAt ?? root.finishedAt, 'container State.FinishedAt', false),
     exitCode: normalizeExitCode(state.ExitCode ?? state.exitCode ?? root.exitCode),
@@ -369,21 +373,36 @@ function validateStartResult(result: CommandResult, expectedArgv: readonly strin
   return { startedAt, finishedAt };
 }
 
+function startFailure(result: CommandResult): CommandExecutionError | null {
+  if (!result.timedOut && result.signal === null && result.exitCode === 0) return null;
+  return new CommandExecutionError('Docker start --attach returned an unsuccessful result', { result });
+}
+
 function containerId(stdout: string): string {
   const values = stdout.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
   if (values.length !== 1 || !/^[a-f0-9]{12,64}$/u.test(values[0]!)) fail('docker create returned an invalid container ID');
   return values[0]!;
 }
 
-function validateInspection(actual: DockerInspection, createdId: string, image: ImageIdentity, definition: OperationDefinition, options: DockerExecutorOptions, sourceEpoch: string, requireStopped: boolean): void {
+type InspectionPhase = 'created' | 'recovery';
+
+function validateInspection(actual: DockerInspection, createdId: string, image: ImageIdentity, definition: OperationDefinition, options: DockerExecutorOptions, sourceEpoch: string, phase: InspectionPhase): void {
   const labels = { [JOB_LABEL]: options.jobId, [MANIFEST_LABEL]: options.manifestSha256 };
   if (actual.id !== createdId || actual.name !== options.containerName || actual.image !== options.imageReference || actual.imageId !== image.imageId) fail('Docker container identity or image proof does not match the locked definition');
   if (!exactRecord(actual.labels, labels)) fail('Docker container labels do not match');
   if (actual.mounts.length !== 1 || actual.mounts[0]!.type !== 'bind' || actual.mounts[0]!.source !== options.worktreePath || actual.mounts[0]!.destination !== '/workdir' || actual.mounts[0]!.readOnly) fail('Docker container mount does not match the locked worktree bind');
   if (actual.user !== `${options.uid}:${options.gid}` || actual.workingDir !== definition.workingDirectory || actual.networkMode !== 'bridge') fail('Docker container user, workdir, or network does not match');
   if (JSON.stringify(actual.capDrop) !== JSON.stringify(['ALL']) || actual.capAdd.length !== 0 || actual.privileged || actual.devices.length !== 0 || actual.securityOpt.length !== 1 || actual.securityOpt[0] !== 'no-new-privileges:true' || actual.readonlyRootfs || actual.pidsLimit !== 4096 || JSON.stringify(actual.ulimits) !== JSON.stringify([{ name: 'nofile', soft: 1024, hard: 4096 }])) fail('Docker container security does not match the locked definition');
-  if (requireStopped && actual.running) fail('Docker container is still running');
   if (!exactRecord(actual.environment, env(sourceEpoch))) fail('Docker container environment is not the exact fixed environment');
+  if (phase === 'created') {
+    if (actual.running || actual.status !== 'created' || actual.startedAt !== null || actual.finishedAt !== null || (actual.exitCode !== null && actual.exitCode !== 0)) fail('Docker create did not produce a pristine created container');
+  } else if (actual.running) {
+    if (actual.status !== 'running' || actual.startedAt === null || actual.finishedAt !== null) fail('running Docker inspection is incoherent');
+  } else if (actual.status === 'created') {
+    if (actual.startedAt !== null || actual.finishedAt !== null || (actual.exitCode !== null && actual.exitCode !== 0)) fail('created Docker inspection shows execution evidence');
+  } else if (actual.status !== 'exited' || actual.startedAt === null || actual.finishedAt === null || actual.exitCode === null) {
+    fail('stopped Docker inspection lacks coherent execution evidence');
+  }
   if (actual.startedAt !== null && Date.parse(actual.startedAt) < Date.parse(actual.createdAt)) fail('Docker lifecycle timestamps are not chronological');
   if (actual.finishedAt !== null && (actual.startedAt === null || Date.parse(actual.finishedAt) < Date.parse(actual.startedAt))) fail('Docker lifecycle timestamps are not chronological');
 }
@@ -392,7 +411,7 @@ function inspectionJson(actual: DockerInspection, image: ImageIdentity): JsonObj
   const mounts: readonly JsonObject[] = actual.mounts.map((mount) => ({ type: mount.type, source: mount.source, destination: mount.destination, readOnly: mount.readOnly }));
   const ulimits: readonly JsonObject[] = actual.ulimits.map((limit) => ({ name: limit.name, soft: limit.soft, hard: limit.hard }));
   const imageEvidence: JsonObject = { imageId: image.imageId, imageDigest: image.imageDigest, repoDigests: image.repoDigests, architecture: image.architecture, os: image.os };
-  return { container: { id: actual.id, name: actual.name, configImage: actual.image, rootImageId: actual.imageId, labels: actual.labels, mounts, user: actual.user, workingDir: actual.workingDir, networkMode: actual.networkMode, capDrop: actual.capDrop, capAdd: actual.capAdd, privileged: actual.privileged, devices: actual.devices, securityOpt: actual.securityOpt, readonlyRootfs: actual.readonlyRootfs, pidsLimit: actual.pidsLimit, ulimits, environment: actual.environment, running: actual.running, dockerCreatedAt: actual.createdAt, dockerStartedAt: actual.startedAt, dockerFinishedAt: actual.finishedAt, dockerExitCode: actual.exitCode }, imagePreflight: imageEvidence };
+  return { container: { id: actual.id, name: actual.name, configImage: actual.image, rootImageId: actual.imageId, labels: actual.labels, mounts, user: actual.user, workingDir: actual.workingDir, networkMode: actual.networkMode, capDrop: actual.capDrop, capAdd: actual.capAdd, privileged: actual.privileged, devices: actual.devices, securityOpt: actual.securityOpt, readonlyRootfs: actual.readonlyRootfs, pidsLimit: actual.pidsLimit, ulimits, environment: actual.environment, running: actual.running, status: actual.status, dockerCreatedAt: actual.createdAt, dockerStartedAt: actual.startedAt, dockerFinishedAt: actual.finishedAt, dockerExitCode: actual.exitCode }, imagePreflight: imageEvidence };
 }
 
 function lease(options: DockerExecutorOptions): RunnerLeaseSnapshot {
@@ -439,32 +458,39 @@ async function cleanupOrphan(options: DockerExecutorOptions, id: string): Promis
   return { removedAt, observedAt };
 }
 
-async function inspectContainer(options: DockerExecutorOptions, definition: OperationDefinition, id: string, image: ImageIdentity, sourceEpoch: string, requireStopped: boolean): Promise<{ readonly inspection: DockerInspection; readonly observedAt: string }> {
+async function inspectContainer(options: DockerExecutorOptions, definition: OperationDefinition, id: string, image: ImageIdentity, sourceEpoch: string, phase: InspectionPhase): Promise<{ readonly inspection: DockerInspection; readonly observedAt: string }> {
   const response = await runDocker(options, ['inspect', '--type=container', '--format={{json .}}', id]);
   const observedAt = now(options);
   const inspected = normalizeInspection(parseJson(requireSuccess(response, 'Docker inspect'), 'Docker inspect'));
-  validateInspection(inspected, id, image, definition, options, sourceEpoch, requireStopped);
+  validateInspection(inspected, id, image, definition, options, sourceEpoch, phase);
   return { inspection: inspected, observedAt };
 }
 
-async function recoverStopped(options: DockerExecutorOptions, definition: OperationDefinition, id: string, image: ImageIdentity, sourceEpoch: string, primaryFailure: unknown | null): Promise<{ readonly inspection: DockerInspection; readonly observedAt: string; readonly recoveryFailures: readonly unknown[] }> {
+type RecoveryAction = 'inspect' | 'stop' | 'kill';
+
+async function recoverStopped(options: DockerExecutorOptions, definition: OperationDefinition, id: string, image: ImageIdentity, sourceEpoch: string, primaryFailure: unknown | null): Promise<{ readonly inspection: DockerInspection; readonly observedAt: string; readonly recoveryAttempted: boolean; readonly recoveryActions: readonly RecoveryAction[]; readonly recoveryFailures: readonly unknown[] }> {
   try {
-    let inspected = await inspectContainer(options, definition, id, image, sourceEpoch, false);
-    if (!inspected.inspection.running) return { ...inspected, recoveryFailures: [] };
+    const actions: RecoveryAction[] = ['inspect'];
+    let inspected = await inspectContainer(options, definition, id, image, sourceEpoch, 'recovery');
+    if (!inspected.inspection.running) return { ...inspected, recoveryAttempted: false, recoveryActions: actions, recoveryFailures: [] };
     const failures: unknown[] = [];
+    actions.push('stop');
     try { requireSuccess(await runDocker(options, ['stop', '--time=10', id]), 'Docker stop'); } catch (error) { failures.push(error); }
+    actions.push('inspect');
     try {
-      inspected = await inspectContainer(options, definition, id, image, sourceEpoch, false);
-      if (!inspected.inspection.running) return { ...inspected, recoveryFailures: failures };
+      inspected = await inspectContainer(options, definition, id, image, sourceEpoch, 'recovery');
+      if (!inspected.inspection.running) return { ...inspected, recoveryAttempted: true, recoveryActions: actions, recoveryFailures: failures };
     } catch (error) { failures.push(error); }
+    actions.push('kill');
     try { requireSuccess(await runDocker(options, ['kill', id]), 'Docker kill escalation'); } catch (error) { failures.push(error); }
+    actions.push('inspect');
     try {
-      inspected = await inspectContainer(options, definition, id, image, sourceEpoch, false);
+      inspected = await inspectContainer(options, definition, id, image, sourceEpoch, 'recovery');
     } catch (error) {
       failures.push(error);
       throw new AggregateError([...(primaryFailure === null ? [] : [primaryFailure]), ...failures], 'Docker attach ended and recovery could not prove a final container state');
     }
-    if (!inspected.inspection.running) return { ...inspected, recoveryFailures: failures };
+    if (!inspected.inspection.running) return { ...inspected, recoveryAttempted: true, recoveryActions: actions, recoveryFailures: failures };
     failures.push(new DockerLifecycleError('Docker attach ended but the exact container could not be stopped'));
     throw new AggregateError([...(primaryFailure === null ? [] : [primaryFailure]), ...failures], 'Docker attach ended and recovery did not prove a stopped container');
   } catch (error) {
@@ -537,7 +563,7 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
         const labels: JsonObject = { [JOB_LABEL]: options.jobId, [MANIFEST_LABEL]: options.manifestSha256 };
         const created = await runDocker(options, ['create', `--name=${options.containerName}`, `--label=${JOB_LABEL}=${options.jobId}`, `--label=${MANIFEST_LABEL}=${options.manifestSha256}`, `--mount=type=bind,source=${options.worktreePath},destination=/workdir`, `--user=${options.uid}:${options.gid}`, `--workdir=${definition.workingDirectory}`, '--network=bridge', '--platform=linux/amd64', '--cap-drop=ALL', '--security-opt=no-new-privileges:true', '--pids-limit=4096', '--ulimit=nofile=1024:4096', '--pull=never', ...Object.entries(env(sourceEpoch)).map(([key, value]) => `--env=${key}=${value}`), options.imageReference, ...argv]);
         id = containerId(requireSuccess(created, 'Docker create'));
-        const inspectedResult = await inspectContainer(options, definition, id, image, sourceEpoch, true);
+        const inspectedResult = await inspectContainer(options, definition, id, image, sourceEpoch, 'created');
         const inspected = inspectedResult.inspection;
         const inspectedJson = inspectionJson(inspected, image);
         const createdWriteAt = now(options);
@@ -554,26 +580,30 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
           result = error.result;
         }
         const commandTimes = validateStartResult(result, startArgv);
-        const primaryFailure = attachError ?? (result.timedOut ? new CommandExecutionError('Docker attach timed out', { result }) : null);
+        const primaryFailure = attachError ?? startFailure(result);
         const stoppedInspection = await recoverStopped(options, definition, id, image, sourceEpoch, primaryFailure);
         const stoppedJsonBase = inspectionJson(stoppedInspection.inspection, image);
-        const stoppedJson: JsonObject = stoppedInspection.recoveryFailures.length > 0 ? { ...stoppedJsonBase, recoveryFailures: recoveryEvidence(stoppedInspection.recoveryFailures) } : stoppedJsonBase;
+        const stoppedJson: JsonObject = { ...stoppedJsonBase, recoveryAttempted: stoppedInspection.recoveryAttempted, recoveryActions: stoppedInspection.recoveryActions, ...(stoppedInspection.recoveryFailures.length > 0 ? { recoveryFailures: recoveryEvidence(stoppedInspection.recoveryFailures) } : {}) };
         const createdAt = inspected.createdAt;
-        if (stoppedInspection.inspection.startedAt !== null) {
+        const hasStarted = stoppedInspection.inspection.startedAt !== null;
+        if (hasStarted) {
           const startedWriteAt = now(options);
           runner(options, (snapshot) => containerCommand(options, definition, sourceEpoch, snapshot, 'started', id!, labels, stoppedJson, startedWriteAt, createdAt, stoppedInspection.inspection.startedAt));
         }
-        const stoppedWriteAt = now(options);
-        runner(options, (snapshot) => containerCommand(options, definition, sourceEpoch, snapshot, 'stopped', id!, labels, stoppedJson, stoppedWriteAt, createdAt, stoppedInspection.inspection.startedAt, stoppedInspection.inspection.finishedAt));
-        const outcome: 'passed' | 'failed' = !attachError && result.exitCode === 0 && result.signal === null && !result.timedOut && stoppedInspection.inspection.startedAt !== null && stoppedInspection.inspection.exitCode === result.exitCode ? 'passed' : 'failed';
+        if (hasStarted) {
+          const stoppedWriteAt = now(options);
+          runner(options, (snapshot) => containerCommand(options, definition, sourceEpoch, snapshot, 'stopped', id!, labels, stoppedJson, stoppedWriteAt, createdAt, stoppedInspection.inspection.startedAt, stoppedInspection.inspection.finishedAt));
+        }
+        const protocolMismatch = !hasStarted || (!attachError && !result.timedOut && stoppedInspection.recoveryAttempted);
+        const outcome: 'passed' | 'failed' = !protocolMismatch && !attachError && result.exitCode === 0 && result.signal === null && !result.timedOut && stoppedInspection.inspection.exitCode === result.exitCode ? 'passed' : 'failed';
         const commandEvidence: JsonObject = { argv: result.argv, exitCode: result.exitCode, signal: result.signal, stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut, startedAt: result.startedAt, finishedAt: result.finishedAt, ...(attachError ? { attachError: errorJson(attachError) } : {}) };
         const operationFinishedAt = now(options);
         const logs = validateLogProof(await options.finalizeLogs({ operationFinishedAt }), operationFinishedAt);
-        const lifecycleMismatch = !attachError && !result.timedOut && result.exitCode !== null && (stoppedInspection.inspection.startedAt === null || stoppedInspection.inspection.exitCode !== result.exitCode);
+        const lifecycleMismatch = !hasStarted || (!attachError && !result.timedOut && stoppedInspection.recoveryAttempted) || (!attachError && !result.timedOut && result.exitCode !== null && stoppedInspection.inspection.exitCode !== result.exitCode);
         const operationError = outcome === 'failed' ? { code: lifecycleMismatch ? 'DOCKER_EXECUTION_DEFINITION_MISMATCH' : 'BUILD_FAILED', message: lifecycleMismatch ? 'Docker lifecycle inspection contradicts the attach result' : attachError ? 'Docker attach failed' : 'Docker operation exited unsuccessfully' } as const : null;
         const evidenceValue: JsonObject = { operationId: options.operationId, attempt: options.attempt, argv, argvHash, workingDirectory: definition.workingDirectory, containerId: id, inspection: stoppedJson, command: commandEvidence, outcome, ...(operationError === null ? {} : { errorCode: operationError.code, error: operationError }) };
         const evidence = await options.evidence(evidenceValue);
-        const input: OperationInput = { operationId: options.operationId, attempt: options.attempt, argvHash, argv, startedAt, finishedAt: operationFinishedAt, containerId: id, containerName: options.containerName, containerImageDigest: options.imageDigest, containerLabelJobId: options.jobId, containerLabelManifestSha: options.manifestSha256, containerMount: { type: 'bind', source: options.worktreePath, destination: '/workdir', readOnly: false }, containerEnvironment: env(sourceEpoch), containerSecurity: security(options, definition), inspection: stoppedJson, timedOut: result.timedOut, lifecyclePhase: 'stopped', exitCode: result.exitCode, signal: result.signal, outcome, evidencePath: evidence.path, evidenceSha256: evidence.sha256, ...(operationError === null ? {} : { errorCode: operationError.code, error: operationError }) };
+        const input: OperationInput = { operationId: options.operationId, attempt: options.attempt, argvHash, argv, startedAt, finishedAt: operationFinishedAt, containerId: id, containerName: options.containerName, containerImageDigest: options.imageDigest, containerLabelJobId: options.jobId, containerLabelManifestSha: options.manifestSha256, containerMount: { type: 'bind', source: options.worktreePath, destination: '/workdir', readOnly: false }, containerEnvironment: env(sourceEpoch), containerSecurity: security(options, definition), inspection: stoppedJson, timedOut: result.timedOut, lifecyclePhase: hasStarted ? 'stopped' : 'created', exitCode: result.exitCode, signal: result.signal, outcome, evidencePath: evidence.path, evidenceSha256: evidence.sha256, ...(operationError === null ? {} : { errorCode: operationError.code, error: operationError }) };
         const completionAt = now(options);
         if (logs.verifiedAt > completionAt) fail('log proof is from the future relative to operation completion');
         runner(options, (snapshot) => ({ kind: 'operation-complete', jobId: options.jobId, owner: snapshot.owner, runnerUnit: snapshot.unit, leaseExpiresAt: snapshot.leaseExpiresAt, at: completionAt, expectedState: snapshot.expectedState, operationId: options.operationId, attempt: options.attempt, input }));

@@ -47,9 +47,10 @@ function inspection(overrides: Partial<DockerInspection> = {}): DockerInspection
     },
     readonlyRootfs: false,
     running: false,
+    status: 'created',
     createdAt: '2026-07-24T09:59:59.000Z',
-    startedAt: '2026-07-24T10:00:01.500Z',
-    finishedAt: '2026-07-24T10:00:02.500Z',
+    startedAt: null,
+    finishedAt: null,
     exitCode: 0,
     ...overrides,
   };
@@ -89,8 +90,15 @@ function realisticRawInspection(): Record<string, unknown> {
     },
     Mounts: [{ Type: 'bind', Source: '/tmp/worktree', Destination: '/workdir', RW: true }],
     Created: '2026-07-24T09:59:59.000000000Z',
-    State: { Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:02.500000000Z', ExitCode: 0 },
+    State: { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:02.500000000Z', ExitCode: 0 },
   };
+}
+
+function realisticCreatedRawInspection(): Record<string, unknown> {
+  const value = realisticRawInspection();
+  value.Created = '2026-07-24T09:59:59.000000000Z';
+  value.State = { Status: 'created', Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 0 };
+  return value;
 }
 
 function options(executor: DockerCommandExecutor, overrides: Partial<DockerExecutorOptions> & { readonly ownership?: { readonly runnerWrite: DockerExecutorOptions['ownership']['runnerWrite']; readonly getJob?: () => ReturnType<typeof emptyIdentityForTest> } } = {}): DockerExecutorOptions {
@@ -147,8 +155,8 @@ function fakeDocker(responses: ReadonlyArray<Error | Partial<CommandResult>>, tr
       if (response instanceof Error) throw response;
       return {
         argv: [...argv],
-        exitCode: response.exitCode ?? 0,
-        signal: response.signal ?? null,
+        exitCode: response.exitCode === undefined ? 0 : response.exitCode,
+        signal: response.signal === undefined ? null : response.signal,
         stdout: response.stdout ?? '',
         stderr: response.stderr ?? '',
         timedOut: response.timedOut ?? false,
@@ -165,7 +173,7 @@ function successfulResponses(start: Partial<CommandResult> = {}): Array<Error | 
     { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
     { stdout: '' },
     { stdout: `${'1'.repeat(64)}\n` },
-    { stdout: JSON.stringify(realisticRawInspection()) },
+    { stdout: JSON.stringify(realisticCreatedRawInspection()) },
     { stdout: 'build output\n', ...start },
     { stdout: JSON.stringify(realisticRawInspection()) },
     { stdout: '' },
@@ -215,7 +223,7 @@ describe('DockerExecutor', () => {
       { exitCode: 0, signal: null, stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }), stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false },
-      { exitCode: 0, signal: null, stdout: JSON.stringify(realisticRawInspection()), stderr: '', timedOut: false },
+      { exitCode: 0, signal: null, stdout: JSON.stringify(realisticCreatedRawInspection()), stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: 'build output\n', stderr: '', timedOut: false, startedAt: '2026-07-24T10:00:01.500Z', finishedAt: '2026-07-24T10:00:02.500Z' },
       { exitCode: 0, signal: null, stdout: JSON.stringify(realisticRawInspection()), stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false },
@@ -342,7 +350,7 @@ describe('DockerExecutor', () => {
       { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
       { stdout: '' },
       { stdout: `${'1'.repeat(64)}\n` },
-      { stdout: JSON.stringify(realisticRawInspection()) },
+      { stdout: JSON.stringify(realisticCreatedRawInspection()) },
       { timedOut: true },
       { stdout: JSON.stringify(realisticRawInspection()) },
       { stdout: '' },
@@ -372,7 +380,7 @@ describe('DockerExecutor', () => {
       { exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: JSON.stringify([inspection()]), stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false },
-      { exitCode: 0, signal: null, stdout: JSON.stringify([inspection()]), stderr: '', timedOut: false },
+      { exitCode: 0, signal: null, stdout: JSON.stringify([inspection({ status: 'exited', startedAt: '2026-07-24T10:00:01.500Z', finishedAt: '2026-07-24T10:00:02.500Z' })]), stderr: '', timedOut: false },
       { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false },
       { exitCode: 1, signal: null, stdout: '', stderr: 'No such container: one\n', timedOut: false },
       { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false },
@@ -392,10 +400,11 @@ describe('DockerExecutor', () => {
       (value.Config as Record<string, unknown>).WorkingDir = '/workdir/web/react-gui';
       return value;
     };
+    const frontendCreatedRaw = (): Record<string, unknown> => ({ ...frontendRaw(), State: { Status: 'created', Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 0 } });
     const docker = fakeDocker([
       { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
       { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
-      { stdout: '' }, { stdout: `${'1'.repeat(64)}\n` }, { stdout: JSON.stringify(frontendRaw()) }, { stdout: '' }, { stdout: JSON.stringify(frontendRaw()) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' },
+      { stdout: '' }, { stdout: `${'1'.repeat(64)}\n` }, { stdout: JSON.stringify(frontendCreatedRaw()) }, { stdout: '' }, { stdout: JSON.stringify(frontendRaw()) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' },
     ]);
     const writes: RunnerWriteCommand[] = [];
     const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
@@ -542,11 +551,11 @@ describe('DockerExecutor', () => {
   });
 
   it('stops an exact still-running container after attach timeout before persisting stopped evidence', async () => {
-    const running = { ...realisticRawInspection(), State: { Running: true } };
+    const running = { ...realisticRawInspection(), State: { Status: 'running', Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
     const responses = successfulResponses({ timedOut: true, exitCode: null });
     responses[5] = new CommandExecutionError('attach timed out', { result: { argv: ['/usr/bin/docker', 'start', '--attach', '1'.repeat(64)], exitCode: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' } });
     const stoppedRaw = realisticRawInspection();
-    stoppedRaw.State = { Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:08.000000000Z', ExitCode: 143 };
+    stoppedRaw.State = { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:08.000000000Z', ExitCode: 143 };
     responses.splice(6, 4, { stdout: JSON.stringify(running) }, { stdout: '' }, { stdout: JSON.stringify(stoppedRaw) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' });
     const docker = fakeDocker(responses);
     const writes: RunnerWriteCommand[] = [];
@@ -566,7 +575,7 @@ describe('DockerExecutor', () => {
   });
 
   it('retains created identity when stop and kill cannot prove the exact container stopped', async () => {
-    const running = { ...realisticRawInspection(), State: { Running: true } };
+    const running = { ...realisticRawInspection(), State: { Status: 'running', Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
     const responses = successfulResponses({ timedOut: true, exitCode: null });
     responses[5] = new CommandExecutionError('attach timed out', { result: { argv: ['/usr/bin/docker', 'start', '--attach', '1'.repeat(64)], exitCode: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' } });
     responses.splice(6, 4, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'stop failed' }, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'kill failed' }, { stdout: JSON.stringify(running) });
@@ -580,7 +589,7 @@ describe('DockerExecutor', () => {
   });
 
   it('retains the timeout command result when stopped-state recovery also fails', async () => {
-    const running = { ...realisticRawInspection(), State: { Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
+    const running = { ...realisticRawInspection(), State: { Status: 'running', Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
     const responses = successfulResponses({ timedOut: true, exitCode: null });
     responses[5] = { stdout: '', stderr: '', exitCode: null, signal: 'SIGKILL', timedOut: true, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' };
     responses.splice(6, 4, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'stop failed' }, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'kill failed' }, { stdout: JSON.stringify(running) });
@@ -593,7 +602,7 @@ describe('DockerExecutor', () => {
   });
 
   it('retains the observer command result when stopped-state recovery also fails', async () => {
-    const running = { ...realisticRawInspection(), State: { Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
+    const running = { ...realisticRawInspection(), State: { Status: 'running', Running: true, StartedAt: '2026-07-24T10:00:01.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
     const startArgv = ['/usr/bin/docker', 'start', '--attach', '1'.repeat(64)];
     const responses = successfulResponses();
     responses[5] = new CommandExecutionError('output observer failed', { result: { argv: startArgv, exitCode: null, signal: 'SIGTERM', stdout: 'partial', stderr: '', timedOut: false, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' } });
@@ -607,7 +616,7 @@ describe('DockerExecutor', () => {
   });
 
   it('does not emit a started lifecycle when Docker reports a failed start without a start instant', async () => {
-    const stopped = { ...realisticRawInspection(), State: { Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 1 } };
+    const stopped = { ...realisticRawInspection(), State: { Status: 'created', Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 0 } };
     const responses = successfulResponses({ exitCode: 1 });
     responses[5] = { exitCode: 1, signal: null, stdout: '', stderr: 'start failed', timedOut: false, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' };
     responses[6] = { stdout: JSON.stringify(stopped) };
@@ -616,12 +625,17 @@ describe('DockerExecutor', () => {
     const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
     const result = await createDockerExecutor(options(docker, { ownership })).run();
     expect(result).toMatchObject({ available: true, outcome: 'failed' });
-    expect(writes.filter((command): command is Extract<RunnerWriteCommand, { kind: 'container' }> => command.kind === 'container').map((command) => command.lifecycle)).toEqual(['created', 'stopped']);
+    expect(writes.filter((command): command is Extract<RunnerWriteCommand, { kind: 'container' }> => command.kind === 'container').map((command) => command.lifecycle)).toEqual(['created']);
+    const completion = writes.find((command): command is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => command.kind === 'operation-complete')!;
+    expect(completion.input).toMatchObject({ lifecyclePhase: 'created', errorCode: 'DOCKER_EXECUTION_DEFINITION_MISMATCH' });
+    const cleanup = writes.find((command): command is Extract<RunnerWriteCommand, { kind: 'operation-cleanup' }> => command.kind === 'operation-cleanup')!;
+    if (cleanup.proof.kind !== 'container-removed') throw new Error('expected container cleanup proof');
+    expect(cleanup.proof.stoppedAt).toBe(cleanup.proof.observedAt);
   });
 
   it('allows a failed stop when a later exact inspect proves the container stopped', async () => {
-    const running = { ...realisticRawInspection(), State: { Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
-    const stopped = { ...realisticRawInspection(), State: { Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:08.000000000Z', ExitCode: 143 } };
+    const running = { ...realisticRawInspection(), State: { Status: 'running', Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
+    const stopped = { ...realisticRawInspection(), State: { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:08.000000000Z', ExitCode: 143 } };
     const responses = successfulResponses({ timedOut: true, exitCode: null });
     responses[5] = { exitCode: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' };
     responses.splice(6, 4, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'stop failed' }, { stdout: JSON.stringify(stopped) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' });
@@ -632,8 +646,8 @@ describe('DockerExecutor', () => {
   });
 
   it('records stop and intermediate inspect failures when kill escalation proves stopped', async () => {
-    const running = { ...realisticRawInspection(), State: { Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
-    const stopped = { ...realisticRawInspection(), State: { Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:08.000000000Z', ExitCode: 143 } };
+    const running = { ...realisticRawInspection(), State: { Status: 'running', Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
+    const stopped = { ...realisticRawInspection(), State: { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:08.000000000Z', ExitCode: 143 } };
     const responses = successfulResponses({ timedOut: true, exitCode: null });
     responses[5] = { exitCode: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' };
     responses.splice(6, 4, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'stop failed' }, { stdout: JSON.stringify(running) }, { stdout: '' }, { stdout: JSON.stringify(stopped) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' });
@@ -648,10 +662,77 @@ describe('DockerExecutor', () => {
     expect(writes.some((write) => write.kind === 'operation-cleanup')).toBe(true);
   });
 
-  it('rejects an apparent successful exit when Docker proves the container never started', async () => {
-    const stopped = { ...realisticRawInspection(), State: { Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 0 } };
+  it('fails a clean attach when the first exact post-attach inspect still reports running', async () => {
+    const running = { ...realisticRawInspection(), State: { Status: 'running', Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
+    const stopped = { ...realisticRawInspection(), State: { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:02.500000000Z', ExitCode: 0 } };
     const responses = successfulResponses({ exitCode: 0 });
-    responses[4] = { stdout: JSON.stringify(stopped) };
+    responses.splice(6, 4, { stdout: JSON.stringify(running) }, { stdout: '' }, { stdout: JSON.stringify(stopped) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' });
+    const docker = fakeDocker(responses);
+    const writes: RunnerWriteCommand[] = [];
+    const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
+    const result = await createDockerExecutor(options(docker, { ownership })).run();
+    expect(result).toMatchObject({ available: true, outcome: 'failed' });
+    const completion = writes.find((write): write is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => write.kind === 'operation-complete')!;
+    expect(completion.input).toMatchObject({ errorCode: 'DOCKER_EXECUTION_DEFINITION_MISMATCH', error: { code: 'DOCKER_EXECUTION_DEFINITION_MISMATCH' } });
+    expect(completion.input.inspection).toMatchObject({ recoveryAttempted: true, recoveryActions: ['inspect', 'stop', 'inspect'] });
+    expect(writes.some((write) => write.kind === 'operation-cleanup')).toBe(true);
+  });
+
+  it.each([
+    ['nonzero', { exitCode: 7, signal: null }],
+    ['signal', { exitCode: null, signal: 'SIGTERM' as const }],
+  ] as const)('retains a returned %s start result with every recovery failure', (_label, startResult) => {
+    const running = { ...realisticRawInspection(), State: { Status: 'running', Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
+    const responses = successfulResponses();
+    responses[5] = { ...startResult, stdout: 'partial output', stderr: 'start failure', timedOut: false, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' };
+    responses.splice(6, 4, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'stop failed' }, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'kill failed' }, { stdout: JSON.stringify(running) });
+    const docker = fakeDocker(responses);
+    return createDockerExecutor(options(docker)).run().then(() => { throw new Error('expected recovery failure'); }, (error: unknown) => {
+      expect(error).toBeInstanceOf(AggregateError);
+      const primary = error instanceof AggregateError ? error.errors.find((cause) => cause instanceof CommandExecutionError) : undefined;
+      expect(primary).toBeInstanceOf(CommandExecutionError);
+      expect((primary as CommandExecutionError).result).toMatchObject({ exitCode: startResult.exitCode, signal: startResult.signal, stdout: 'partial output', stderr: 'start failure' });
+      expect(error instanceof AggregateError ? error.errors.length : 0).toBeGreaterThanOrEqual(4);
+    });
+  });
+
+  it('rejects an already-executed immediate post-create inspection', async () => {
+    const responses = successfulResponses();
+    responses[4] = { stdout: JSON.stringify(realisticRawInspection()) };
+    const docker = fakeDocker(responses);
+    await expect(createDockerExecutor(options(docker)).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof DockerLifecycleError));
+  });
+
+  it('rejects a zero Docker Created instant instead of normalizing it to null', async () => {
+    const created = realisticCreatedRawInspection();
+    created.Created = '0001-01-01T00:00:00.000000000Z';
+    const responses = successfulResponses();
+    responses[4] = { stdout: JSON.stringify(created) };
+    const docker = fakeDocker(responses);
+    await expect(createDockerExecutor(options(docker)).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof DockerLifecycleError));
+  });
+
+  it('rejects a zero Created instant in normalized inspection input too', async () => {
+    const created = inspection({ createdAt: '0001-01-01T00:00:00.000Z' });
+    const responses = successfulResponses();
+    responses[4] = { stdout: JSON.stringify(created) };
+    const docker = fakeDocker(responses);
+    await expect(createDockerExecutor(options(docker)).run()).rejects.toSatisfy((error: unknown) => error instanceof AggregateError && error.errors.some((cause) => cause instanceof DockerLifecycleError));
+  });
+
+  it('rejects a started final inspection with no Docker FinishedAt', async () => {
+    const missingFinished = realisticRawInspection();
+    missingFinished.State = { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 0 };
+    const responses = successfulResponses();
+    responses[6] = { stdout: JSON.stringify(missingFinished) };
+    const docker = fakeDocker(responses);
+    await expect(createDockerExecutor(options(docker)).run()).rejects.toBeInstanceOf(DockerLifecycleError);
+  });
+
+  it('rejects an apparent successful exit when Docker proves the container never started', async () => {
+    const stopped = { ...realisticRawInspection(), State: { Status: 'created', Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 0 } };
+    const responses = successfulResponses({ exitCode: 0 });
+    responses[4] = { stdout: JSON.stringify(realisticCreatedRawInspection()) };
     responses[6] = { stdout: JSON.stringify(stopped) };
     const docker = fakeDocker(responses);
     const result = await createDockerExecutor(options(docker)).run();
@@ -663,9 +744,9 @@ describe('DockerExecutor', () => {
   });
 
   it('rejects a successful operation when Docker exit code differs from attach result', async () => {
-    const stopped = { ...realisticRawInspection(), State: { Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:02.500000000Z', ExitCode: 7 } };
+    const stopped = { ...realisticRawInspection(), State: { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:02.500000000Z', ExitCode: 7 } };
     const responses = successfulResponses({ exitCode: 0 });
-    responses[4] = { stdout: JSON.stringify(stopped) };
+    responses[4] = { stdout: JSON.stringify(realisticCreatedRawInspection()) };
     responses[6] = { stdout: JSON.stringify(stopped) };
     const docker = fakeDocker(responses);
     const result = await createDockerExecutor(options(docker)).run();
@@ -677,8 +758,8 @@ describe('DockerExecutor', () => {
   });
 
   it.each([
-    ['created-after-started', { Created: '2026-07-24T10:00:03.000000000Z', State: { Running: false, StartedAt: '2026-07-24T10:00:01.000000000Z', FinishedAt: '2026-07-24T10:00:02.000000000Z', ExitCode: 0 } }],
-    ['finished-before-started', { Created: '2026-07-24T10:00:00.000000000Z', State: { Running: false, StartedAt: '2026-07-24T10:00:03.000000000Z', FinishedAt: '2026-07-24T10:00:02.000000000Z', ExitCode: 0 } }],
+    ['created-after-started', { Created: '2026-07-24T10:00:03.000000000Z', State: { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:01.000000000Z', FinishedAt: '2026-07-24T10:00:02.000000000Z', ExitCode: 0 } }],
+    ['finished-before-started', { Created: '2026-07-24T10:00:00.000000000Z', State: { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:03.000000000Z', FinishedAt: '2026-07-24T10:00:02.000000000Z', ExitCode: 0 } }],
   ] as const)('rejects invalid Docker lifecycle chronology: %s', (_name, raw) => {
     const docker = fakeDocker([
       { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
