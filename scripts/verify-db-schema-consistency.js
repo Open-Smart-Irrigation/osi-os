@@ -974,6 +974,15 @@ const requiredIndexSqlFragments = {
 };
 
 const requiredTriggerSqlFragments = {
+  trg_sync_zones_outbox_ai: [
+    "where peer_node = 'cloud' and linked = 1",
+    "new.zone_uuid is not null",
+    "new.gateway_device_eui is not null",
+    "'zone_upserted'",
+    "'soil_type', new.soil_type",
+    "'sync_version', new.sync_version",
+    "'user', json_object(",
+  ],
   trg_sync_irrigation_events_uuid_ai: [
     'missing_gateway_device_eui',
     "where peer_node = 'cloud' and linked = 1",

@@ -11,18 +11,21 @@ const FLOWS = [
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json',
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
 ].map((p) => path.join(repo, p));
-const MIGRATION_OWNED_TRIGGERS = new Set([
+const MIGRATION_OWNED_TRIGGERS = new Map([
   // 0005__field_work_requests.sql is delivered by seed DBs and deploy.sh's
   // additive migration repair. Do not add it to the frozen sync-init-fn boot DDL.
-  'trg_improvement_requests_outbox_ai',
+  ['trg_improvement_requests_outbox_ai', '0005__field_work_requests.sql'],
   // 0033__scoped_access_schema.sql is migration-owned and emit-gated.
-  'trg_dp_user_zone_assign_outbox_ai',
-  'trg_dp_user_zone_assign_outbox_au',
-  'trg_dp_user_plot_assign_outbox_ai',
-  'trg_dp_user_plot_assign_outbox_au',
-  'trg_dp_users_outbox_uuid_au',
-  'trg_dp_users_outbox_ai',
-  'trg_dp_users_outbox_role_au',
+  ['trg_dp_user_zone_assign_outbox_ai', '0033__scoped_access_schema.sql'],
+  ['trg_dp_user_zone_assign_outbox_au', '0033__scoped_access_schema.sql'],
+  ['trg_dp_user_plot_assign_outbox_ai', '0033__scoped_access_schema.sql'],
+  ['trg_dp_user_plot_assign_outbox_au', '0033__scoped_access_schema.sql'],
+  ['trg_dp_users_outbox_uuid_au', '0033__scoped_access_schema.sql'],
+  ['trg_dp_users_outbox_ai', '0033__scoped_access_schema.sql'],
+  ['trg_dp_users_outbox_role_au', '0033__scoped_access_schema.sql'],
+  // 0035__zone_insert_outbox.sql repairs local-create sync through the
+  // deploy-time migration runner. The frozen boot DDL must not duplicate it.
+  ['trg_sync_zones_outbox_ai', '0035__zone_insert_outbox.sql'],
 ]);
 
 function q(db, sql) {
@@ -48,9 +51,19 @@ const setEq = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
 const diff = (a, b) => [...a].filter((x) => !b.has(x));
 
 const problems = [];
-for (const triggerName of MIGRATION_OWNED_TRIGGERS) {
+for (const [triggerName, migrationName] of MIGRATION_OWNED_TRIGGERS) {
   if (!canonTriggers.has(triggerName)) {
     problems.push(`migration-owned trigger ${triggerName} is not present in the canonical seed`);
+  }
+  const migrationPath = path.join(
+    repo,
+    'database/migrations/ordered',
+    migrationName
+  );
+  if (!fs.existsSync(migrationPath)) {
+    problems.push(`migration-owned trigger ${triggerName} has no migration ${migrationName}`);
+  } else if (!triggerNames(fs.readFileSync(migrationPath, 'utf8')).has(triggerName)) {
+    problems.push(`migration ${migrationName} does not create ${triggerName}`);
   }
 }
 for (const flowPath of FLOWS) {
