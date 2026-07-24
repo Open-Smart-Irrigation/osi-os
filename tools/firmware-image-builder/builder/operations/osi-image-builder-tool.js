@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, readFile, readdir, rename, rmdir, stat, unlink } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, rename, rmdir, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -41,6 +41,18 @@ async function requireDirectory(path, field) {
   if (!value.isDirectory()) throw new Error(`${field} is not a directory`);
 }
 
+async function requireFixedDirectory(root, relativePath, field) {
+  await requireDirectory(root, 'operation root');
+  let current = root;
+  for (const part of relativePath.split('/').filter(Boolean)) {
+    current = join(current, part);
+    const value = await lstat(current);
+    if (value.isSymbolicLink()) throw new Error(`${field} contains a symbolic link at ${current}`);
+    if (!value.isDirectory()) throw new Error(`${field} is not a directory at ${current}`);
+  }
+  return current;
+}
+
 async function ensureDirectoryTree(root, relativePath) {
   await requireDirectory(root, 'operation root');
   let current = root;
@@ -76,10 +88,18 @@ async function rejectSymlinkTree(path, field) {
   for (const name of await readdir(path)) await rejectSymlinkTree(join(path, name), field);
 }
 
-async function readRegularNoFollow(path, field) {
+async function sha256RegularNoFollow(path, field) {
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try { return await handle.readFile(); }
-  finally { await handle.close(); }
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    while (true) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+    return hash.digest('hex');
+  } finally { await handle.close(); }
 }
 
 async function copyRegularNoFollow(source, destination) {
@@ -95,8 +115,7 @@ async function fileManifest(path, relativePath = '') {
   const value = await lstat(path);
   if (value.isSymbolicLink()) throw new Error(`source contains a symbolic link at ${relativePath || path}`);
   if (value.isFile()) {
-    const bytes = await readRegularNoFollow(path, `source file ${relativePath || path}`);
-    return new Map([[relativePath, { size: value.size, sha256: createHash('sha256').update(bytes).digest('hex') }]]);
+    return new Map([[relativePath, { size: value.size, sha256: await sha256RegularNoFollow(path, `source file ${relativePath || path}`) }]]);
   }
   if (!value.isDirectory()) throw new Error(`source contains a non-regular path at ${relativePath || path}`);
   const result = new Map();
@@ -138,19 +157,20 @@ async function copyFeedConfig(root) {
   await rejectSymlink(target.feedDestination, 'feed configuration destination');
   await rejectSymlinkTree(target.feedStaging, 'feed configuration staging');
   await removeNoFollow(target.feedStaging);
-  const sourceHash = createHash('sha256').update(await readRegularNoFollow(target.feedSource, 'feed configuration source')).digest('hex');
+  const sourceHash = await sha256RegularNoFollow(target.feedSource, 'feed configuration source');
   await copyRegularNoFollow(target.feedSource, target.feedStaging);
-  const stagedHash = createHash('sha256').update(await readRegularNoFollow(target.feedStaging, 'feed configuration staging')).digest('hex');
+  const stagedHash = await sha256RegularNoFollow(target.feedStaging, 'feed configuration staging');
   if (sourceHash !== stagedHash) throw new Error('feed configuration hash changed during staging');
   await removeNoFollow(target.feedDestination);
   await rename(target.feedStaging, target.feedDestination);
-  const destinationHash = createHash('sha256').update(await readRegularNoFollow(target.feedDestination, 'feed configuration destination')).digest('hex');
+  const destinationHash = await sha256RegularNoFollow(target.feedDestination, 'feed configuration destination');
   if (sourceHash !== destinationHash) throw new Error('feed configuration hash changed during publication');
   return { operation: 'copy-feed-config', source: 'feeds.conf.default', destination: 'openwrt/feeds.conf.default', sha256: sourceHash };
 }
 
 async function mirrorGui(root) {
   const target = paths(root);
+  await requireFixedDirectory(root, 'web/react-gui/build', 'GUI source');
   const sourceManifest = await fileManifest(target.guiSource);
   if (sourceManifest.size === 0) throw new Error('GUI build output contains no regular files');
   await ensureDirectoryTree(root, 'feeds/chirpstack-openwrt-feed/apps/node-red/files');
@@ -170,8 +190,7 @@ async function mirrorGui(root) {
 
 async function verifyImage(root) {
   const target = paths(root);
-  const rootStat = await stat(target.imageDirectory);
-  if (!rootStat.isDirectory()) throw new Error('OpenWrt target directory is not a directory');
+  await requireFixedDirectory(root, 'openwrt/bin/targets', 'OpenWrt target directory');
   const candidates = [];
   for (const platform of await readdir(target.imageDirectory, { withFileTypes: true })) {
     if (!platform.isDirectory()) continue;
@@ -184,9 +203,9 @@ async function verifyImage(root) {
   }
   if (candidates.length !== 1) throw new Error(`expected exactly one firmware image, found ${candidates.length}`);
   const imagePath = join(target.imageDirectory, candidates[0]);
-  const image = await stat(imagePath);
-  if (!image.isFile() || image.size < 64 * 1024 * 1024) throw new Error('firmware image is missing or below the 64 MiB minimum');
-  return { operation: 'verify-image', relativePath: `openwrt/bin/targets/${candidates[0]}`, size: image.size, sha256: createHash('sha256').update(await readFile(imagePath)).digest('hex') };
+  const image = await lstat(imagePath);
+  if (image.isSymbolicLink() || !image.isFile() || image.size < 64 * 1024 * 1024) throw new Error('firmware image is missing, symbolic, or below the 64 MiB minimum');
+  return { operation: 'verify-image', relativePath: `openwrt/bin/targets/${candidates[0]}`, size: image.size, sha256: await sha256RegularNoFollow(imagePath, 'firmware image') };
 }
 
 export function createOperationHandlersForTesting(root) {

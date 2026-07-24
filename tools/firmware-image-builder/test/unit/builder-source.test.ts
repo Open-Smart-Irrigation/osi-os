@@ -1,4 +1,4 @@
-import { readFile, mkdtemp, writeFile, mkdir, rm, symlink, access } from 'node:fs/promises';
+import { readFile, mkdtemp, writeFile, mkdir, rm, symlink, access, truncate, lstat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,7 +36,7 @@ const definitionPath = new URL('../../builder/execution-definition.json', import
 const targetNames = ['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const;
 const execFileAsync = promisify(execFile);
 const operationToolPath = new URL('../../builder/operations/osi-image-builder-tool.js', import.meta.url).pathname;
-const operationToolModule = async () => await import(operationToolPath) as unknown as { readonly createOperationHandlersForTesting: (root: string) => { readonly copyFeedConfig: () => Promise<{ readonly sha256: string }>; readonly mirrorGui: () => Promise<{ readonly fileCount: number }> } };
+const operationToolModule = async () => await import(operationToolPath) as unknown as { readonly createOperationHandlersForTesting: (root: string) => { readonly copyFeedConfig: () => Promise<{ readonly sha256: string }>; readonly mirrorGui: () => Promise<{ readonly fileCount: number }>; readonly verifyImage: () => Promise<{ readonly sha256: string }> } };
 const evidence: BuilderValidationEvidence = {
   imageId: `sha256:${digest('f')}`, imageDigest: digest('a'), architecture: 'linux/amd64',
   rustc: 'rustc 1.85.0', llvm: '19.1.7', polly: '19.1.7', zstd: '1.5.7', node: 'v22.14.0',
@@ -209,6 +209,59 @@ describe('locked builder source', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it.each(['web', 'react-gui'] as const)('rejects GUI source intermediate symlink escapes: %s', async (component) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-gui-link-'));
+    const outside = await mkdtemp(join(tmpdir(), 'osi-operation-tool-gui-outside-'));
+    try {
+      const outsideBuild = join(outside, 'react-gui/build');
+      await mkdir(outsideBuild, { recursive: true });
+      await writeFile(join(outsideBuild, 'index.html'), '<title>outside</title>');
+      if (component === 'web') {
+        await symlink(outside, join(root, 'web'));
+      } else {
+        await mkdir(join(root, 'web'), { recursive: true });
+        await symlink(join(outside, 'react-gui'), join(root, 'web/react-gui'));
+      }
+      const handlers = (await operationToolModule()).createOperationHandlersForTesting(root);
+      await expect(handlers.mirrorGui()).rejects.toThrow(/symbolic|symlink|escape/i);
+      await expect(access(join(root, 'feeds'))).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['openwrt', 'bin'] as const)('rejects image directory intermediate symlink escapes: %s', async (component) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-image-link-'));
+    const outside = await mkdtemp(join(tmpdir(), 'osi-operation-tool-image-outside-'));
+    try {
+      const outsideBin = join(outside, 'bin');
+      await mkdir(join(outsideBin, 'targets/self/profile'), { recursive: true });
+      await writeFile(join(outsideBin, 'targets/self/profile/outside.img'), '');
+      await truncate(join(outsideBin, 'targets/self/profile/outside.img'), 64 * 1024 * 1024);
+      if (component === 'openwrt') {
+        await symlink(outside, join(root, 'openwrt'));
+      } else {
+        await mkdir(join(root, 'openwrt'), { recursive: true });
+        await symlink(outsideBin, join(root, 'openwrt/bin'));
+      }
+      const handlers = (await operationToolModule()).createOperationHandlersForTesting(root);
+      await expect(handlers.verifyImage()).rejects.toThrow(/symbolic|symlink|escape/i);
+      const escapedComponent = component === 'openwrt' ? join(root, 'openwrt') : join(root, 'openwrt/bin');
+      expect((await lstat(escapedComponent)).isSymbolicLink()).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('hashes firmware through a bounded no-follow stream rather than readFile', async () => {
+    const toolContents = await readFile(operationToolPath, 'utf8');
+    expect(toolContents).toContain('sha256RegularNoFollow');
+    expect(toolContents).toContain('Buffer.allocUnsafe(1024 * 1024)');
+    expect(toolContents).not.toContain('readFile(imagePath)');
   });
 
   it('keeps the system LLVM probe bound to rustc -vV semantic output', async () => {

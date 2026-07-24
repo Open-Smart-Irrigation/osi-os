@@ -631,6 +631,23 @@ describe('DockerExecutor', () => {
     expect(docker.calls.some((call) => call[1] === 'kill')).toBe(false);
   });
 
+  it('records stop and intermediate inspect failures when kill escalation proves stopped', async () => {
+    const running = { ...realisticRawInspection(), State: { Running: true, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: null } };
+    const stopped = { ...realisticRawInspection(), State: { Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:08.000000000Z', ExitCode: 143 } };
+    const responses = successfulResponses({ timedOut: true, exitCode: null });
+    responses[5] = { exitCode: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, startedAt: '2026-07-24T10:00:01.000Z', finishedAt: '2026-07-24T10:00:02.000Z' };
+    responses.splice(6, 4, { stdout: JSON.stringify(running) }, { exitCode: 1, stderr: 'stop failed' }, { stdout: JSON.stringify(running) }, { stdout: '' }, { stdout: JSON.stringify(stopped) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' });
+    const docker = fakeDocker(responses);
+    const writes: RunnerWriteCommand[] = [];
+    const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
+    const result = await createDockerExecutor(options(docker, { ownership })).run();
+    expect(result).toMatchObject({ available: true, outcome: 'failed' });
+    expect(docker.calls.map((call) => call[1])).toEqual(expect.arrayContaining(['stop', 'kill']));
+    const stoppedWrite = writes.find((write): write is Extract<RunnerWriteCommand, { kind: 'container' }> => write.kind === 'container' && write.lifecycle === 'stopped')!;
+    expect(stoppedWrite.inspection).toMatchObject({ recoveryFailures: [{ code: 'DOCKER_EXECUTION_DEFINITION_MISMATCH' }] });
+    expect(writes.some((write) => write.kind === 'operation-cleanup')).toBe(true);
+  });
+
   it('rejects an apparent successful exit when Docker proves the container never started', async () => {
     const stopped = { ...realisticRawInspection(), State: { Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 0 } };
     const responses = successfulResponses({ exitCode: 0 });
@@ -639,6 +656,10 @@ describe('DockerExecutor', () => {
     const docker = fakeDocker(responses);
     const result = await createDockerExecutor(options(docker)).run();
     expect(result).toMatchObject({ available: true, outcome: 'failed' });
+    const writes: RunnerWriteCommand[] = [];
+    const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
+    await createDockerExecutor(options(fakeDocker(responses), { ownership })).run();
+    expect(writes.find((write): write is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => write.kind === 'operation-complete')?.input).toMatchObject({ errorCode: 'DOCKER_EXECUTION_DEFINITION_MISMATCH', error: { code: 'DOCKER_EXECUTION_DEFINITION_MISMATCH' } });
   });
 
   it('rejects a successful operation when Docker exit code differs from attach result', async () => {
@@ -649,6 +670,10 @@ describe('DockerExecutor', () => {
     const docker = fakeDocker(responses);
     const result = await createDockerExecutor(options(docker)).run();
     expect(result).toMatchObject({ available: true, outcome: 'failed' });
+    const writes: RunnerWriteCommand[] = [];
+    const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
+    await createDockerExecutor(options(fakeDocker(responses), { ownership })).run();
+    expect(writes.find((write): write is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => write.kind === 'operation-complete')?.input).toMatchObject({ errorCode: 'DOCKER_EXECUTION_DEFINITION_MISMATCH', error: { code: 'DOCKER_EXECUTION_DEFINITION_MISMATCH' } });
   });
 
   it.each([

@@ -464,9 +464,9 @@ async function recoverStopped(options: DockerExecutorOptions, definition: Operat
       failures.push(error);
       throw new AggregateError([...(primaryFailure === null ? [] : [primaryFailure]), ...failures], 'Docker attach ended and recovery could not prove a final container state');
     }
-    if (inspected.inspection.running) failures.push(new DockerLifecycleError('Docker attach ended but the exact container could not be stopped'));
-    if (failures.length > 0) throw new AggregateError([...(primaryFailure === null ? [] : [primaryFailure]), ...failures], 'Docker attach ended and recovery did not prove a stopped container');
-    return { ...inspected, recoveryFailures: [] };
+    if (!inspected.inspection.running) return { ...inspected, recoveryFailures: failures };
+    failures.push(new DockerLifecycleError('Docker attach ended but the exact container could not be stopped'));
+    throw new AggregateError([...(primaryFailure === null ? [] : [primaryFailure]), ...failures], 'Docker attach ended and recovery did not prove a stopped container');
   } catch (error) {
     if (primaryFailure !== null && !(error instanceof AggregateError)) throw new AggregateError([primaryFailure, error], 'Docker attach failed and stopped-state recovery failed');
     throw error;
@@ -569,9 +569,11 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
         const commandEvidence: JsonObject = { argv: result.argv, exitCode: result.exitCode, signal: result.signal, stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut, startedAt: result.startedAt, finishedAt: result.finishedAt, ...(attachError ? { attachError: errorJson(attachError) } : {}) };
         const operationFinishedAt = now(options);
         const logs = validateLogProof(await options.finalizeLogs({ operationFinishedAt }), operationFinishedAt);
-        const evidenceValue: JsonObject = { operationId: options.operationId, attempt: options.attempt, argv, argvHash, workingDirectory: definition.workingDirectory, containerId: id, inspection: stoppedJson, command: commandEvidence, outcome };
+        const lifecycleMismatch = !attachError && !result.timedOut && result.exitCode !== null && (stoppedInspection.inspection.startedAt === null || stoppedInspection.inspection.exitCode !== result.exitCode);
+        const operationError = outcome === 'failed' ? { code: lifecycleMismatch ? 'DOCKER_EXECUTION_DEFINITION_MISMATCH' : 'BUILD_FAILED', message: lifecycleMismatch ? 'Docker lifecycle inspection contradicts the attach result' : attachError ? 'Docker attach failed' : 'Docker operation exited unsuccessfully' } as const : null;
+        const evidenceValue: JsonObject = { operationId: options.operationId, attempt: options.attempt, argv, argvHash, workingDirectory: definition.workingDirectory, containerId: id, inspection: stoppedJson, command: commandEvidence, outcome, ...(operationError === null ? {} : { errorCode: operationError.code, error: operationError }) };
         const evidence = await options.evidence(evidenceValue);
-        const input: OperationInput = { operationId: options.operationId, attempt: options.attempt, argvHash, argv, startedAt, finishedAt: operationFinishedAt, containerId: id, containerName: options.containerName, containerImageDigest: options.imageDigest, containerLabelJobId: options.jobId, containerLabelManifestSha: options.manifestSha256, containerMount: { type: 'bind', source: options.worktreePath, destination: '/workdir', readOnly: false }, containerEnvironment: env(sourceEpoch), containerSecurity: security(options, definition), inspection: stoppedJson, timedOut: result.timedOut, lifecyclePhase: 'stopped', exitCode: result.exitCode, signal: result.signal, outcome, evidencePath: evidence.path, evidenceSha256: evidence.sha256, ...(outcome === 'failed' ? { errorCode: 'BUILD_FAILED', error: { code: 'BUILD_FAILED', message: attachError ? 'Docker attach failed' : 'Docker operation exited unsuccessfully' } } : {}) };
+        const input: OperationInput = { operationId: options.operationId, attempt: options.attempt, argvHash, argv, startedAt, finishedAt: operationFinishedAt, containerId: id, containerName: options.containerName, containerImageDigest: options.imageDigest, containerLabelJobId: options.jobId, containerLabelManifestSha: options.manifestSha256, containerMount: { type: 'bind', source: options.worktreePath, destination: '/workdir', readOnly: false }, containerEnvironment: env(sourceEpoch), containerSecurity: security(options, definition), inspection: stoppedJson, timedOut: result.timedOut, lifecyclePhase: 'stopped', exitCode: result.exitCode, signal: result.signal, outcome, evidencePath: evidence.path, evidenceSha256: evidence.sha256, ...(operationError === null ? {} : { errorCode: operationError.code, error: operationError }) };
         const completionAt = now(options);
         if (logs.verifiedAt > completionAt) fail('log proof is from the future relative to operation completion');
         runner(options, (snapshot) => ({ kind: 'operation-complete', jobId: options.jobId, owner: snapshot.owner, runnerUnit: snapshot.unit, leaseExpiresAt: snapshot.leaseExpiresAt, at: completionAt, expectedState: snapshot.expectedState, operationId: options.operationId, attempt: options.attempt, input }));
