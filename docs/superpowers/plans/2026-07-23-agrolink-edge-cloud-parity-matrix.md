@@ -25,6 +25,7 @@ come from the fetched integration heads, not the earlier planning audit.
 | 7 | Per-gateway cloud membership, scoped mirrors, authorization, desired access commands, edge application, administration UI, and contract activation landed | Edge `b4cb078c` through `0f17892f`; server `e8268566` through `5ca86425` |
 | 8a | Zone create, aggregate update, location, portable configuration, and delete converge through protected desired state; legacy gateways retain their prior command path | Edge `b7787c17` through `be66dad6`; server `e860ed93` through `f83ef56a` |
 | 8b | Schedules and measured irrigation calibration converge through separate protected desired-state resources; legacy gateways retain schedule compatibility and receive no calibration command | Edge `64d72f90` through `e1d487dd`; server `90b7553a` through `1d32cfc8` |
+| 8c | Device assignment, portable flags and metadata, S2120 multi-zone assignments, unclaim, and all six supported cloud presentations converge without moving canonical state off the edge | Edge `1f861ed0` through `ced1e8dc`; server `3d3ed114` through `97b330e4` |
 
 ## Status rules
 
@@ -45,8 +46,8 @@ come from the fetched integration heads, not the earlier planning audit.
 | Gateway identity and location mirror | `partial` | Live EUI verification and server applier tests pass; complete create/update/replay parity remains in Task 8 | Task 8 |
 | Zones, zone configuration, and zone location | `parity` | Local inserts now emit the complete mirror event. Capable gateways apply create, full-aggregate update, location, configuration, and delete with exact versions; cloud desired state remains visible through ACK and mirror convergence. Portable `soil_type` travels in the aggregate. | Tasks 4 and 8 |
 | Irrigation schedules and measured flow calibration | `parity` | Edge changes emit versioned schedule and calibration mirrors. Capable gateways apply separate protected desired-state commands with independent effect keys; ACK and returning mirrors settle pending operations. Legacy gateways retain their schedule path and never receive calibration commands. Valve assignment and scheduler runtime timestamps remain edge-local. | Tasks 4 and 8 |
-| Device provisioning and registration | `partial` | Bootstrap, registration, bulk claim, assignment, and command paths exist; authorization and six-family parity remain | Tasks 7 and 8 |
-| Device assignment, flags, configuration, and unclaim | `partial` | Multiple pending command types exist; Task 0 must map device-family coverage and authorization | Tasks 7 and 8 |
+| Device provisioning and registration | `parity` | Existing registration, bootstrap, bulk claim, and assignment paths now use gateway membership and resource scope. The supported cloud catalog is limited to Kiwi, Clover, LSN50, S2120, LoRain, and STREGA; UC512 remains hidden. | Tasks 7 and 8 |
+| Device assignment, flags, configuration, and unclaim | `parity` | Capable gateways apply complete versioned device aggregates and independent S2120 assignment sets. Cloud desired state covers assignment, unassignment, names, supported flags, depth metadata, STREGA model, and unclaim. ACK plus returning mirrors settle operations; stale bases conflict, replay is idempotent, and legacy gateways retain their prior paths. | Tasks 7 and 8 |
 | Journal entries | `parity` | Five edge events and five cloud commands are active; mirror, replay, desired-state conflict, exports, and cloud workspace suites pass | Task 5 |
 | Farm history mirror | `partial` | Legacy durable delivery remains; the new batch mapper covers `device_data` only | Task 9 |
 | Analysis and recommendations | `partial` | Both repositories contain analysis surfaces; input, scope, missing-data, and result semantics need route-level comparison | Task 8 |
@@ -72,15 +73,17 @@ come from the fetched integration heads, not the earlier planning audit.
 ## Contract and catalog baseline
 
 - The current edge flow contains 17 active event operation strings.
-- The edge seed contains 23 operation strings; five journal operations are
+- The edge seed contains 25 operation strings; five journal operations are
   module owned.
-- The server operation mirror contains all 28 governed operations.
-- The governed event schema contains 28 operation strings.
+- The server operation mirror contains all 30 governed operations.
+- The governed event schema contains 30 operation strings.
 - Five journal operations and five scoped-access operations are active. The
-  server operation scanner sees all 28 governed event operations.
+  server operation scanner sees all 30 governed event operations.
 - The edge-owned golden fixture separates schema acceptance from edge-producer
   and cloud-issuer enablement. It closes the current command ACK result
-  vocabulary, with `CONFLICT` enabled for desired-state recovery.
+  vocabulary, with `CONFLICT` enabled for desired-state recovery. The command
+  contract contains 45 registry commands and four separately routed protected
+  commands; no device command or event remains staged.
 - The supported device baseline is KIWI, TEKTELIC CLOVER, DRAGINO LSN50,
   SENSECAP S2120, AQUASCOPE LORAIN, and STREGA.
 - UC512 remains schema-compatible but hidden from the supported parity catalog.

@@ -621,6 +621,87 @@ heavyweight sample cleared the 4,096 MiB threshold. No process was terminated.
 No production host, live gateway, external key provider, or AgroLink SMB share
 was accessed.
 
+### Task 8c device parity
+
+The protected device aggregate now covers assignment, unassignment, names,
+supported flags, soil-moisture and Chameleon depths, STREGA model metadata,
+and unclaim. The edge validates the selected gateway, device family, local
+owner UUID, zone UUID, exact base and target versions, effect key, and complete
+family-specific shape before applying bound SQL in the command-ledger
+transaction. Replays return the recorded result; changed intent under the same
+effect key, stale bases, wrong families, missing zones, and inaccessible owners
+fail without a partial canonical write.
+
+S2120 multi-zone assignments use their own versioned resource and sorted zone
+UUID set. Local assignment changes emit
+`WEATHER_STATION_ZONES_REPLACED`. Cloud changes queue
+`REPLACE_WEATHER_STATION_ZONES` and remain desired state until the edge ACK and
+returning mirror agree. Neither this resource nor the device aggregate is
+pre-written into the canonical server mirror.
+
+OSI Server records both device capabilities per linked gateway. Selected
+gateway membership and resource scope guard every protected mutation.
+Gateways without the device capability keep the previous device-command path;
+legacy S2120 assignment writes return a capability conflict instead of
+changing the server junction table. Pending device and assignment values
+remain visible through convergence, while conflict and permanent rejection
+stay recoverable.
+
+The cloud catalog renders the six supported families: Kiwi, Tektelic Clover,
+Dragino LSN50, SenseCAP S2120, Aqua-Scope LoRain, and STREGA. Clover reuses the
+Kiwi presentation with only its supported controls. LoRain has an
+interval-rain presentation and no soil controls. UC512 remains hidden.
+Family-specific control tests cover all six presentations.
+
+The hardware-command audit found nine durable configuration commands and
+three short-lived STREGA physical actions. The server now owns their effect
+keys and expiry: configuration keys bind the device, setting, and unique
+version without expiry; timed action keys bind the device and exact action
+kind and expire after five minutes. Caller-supplied effect keys and expiry are
+overwritten. The edge ledger independently binds the effect key to the command
+device, setting, or action before dispatch.
+
+Contract activation enabled `device_desired_state_v1` and
+`weather_station_zones_desired_state_v1`, promoted `UPSERT_DEVICE`,
+`REPLACE_WEATHER_STATION_ZONES`, and
+`WEATHER_STATION_ZONES_REPLACED`, and emptied the device staging sets. The six
+server vendor files match the canonical edge bytes.
+
+The complete backend run first exhausted the default 512 MiB test heap while
+ArchUnit rendered a package-cycle failure. A 1,536 MiB rerun exposed the
+actual issues: the weather mutation service introduced the forbidden
+`analytics -> sync` direction and displaced frozen samples along existing
+package directions. The service moved to the device write boundary, and
+narrow reader and overlay ports removed the forbidden dependency. The
+reviewed cycle samples were re-frozen once. Store updates are now disabled;
+the normal architecture gate passes with baseline SHA-256
+`7f50f350fe86271a07908045113c22715c7cd69b03b2f0872caa01d79ce81fc6`.
+
+Task 8c verification:
+
+| Command | Result |
+|---|---|
+| Device helper, command-ledger, protected route, weather-assignment rehearsal, flow wiring, and command-safety selections | exit 0 |
+| Migration, seed, runtime-schema, bundled-DB, profile, sync-flow, and scoped-access gates | exit 0 |
+| Contract schema, golden rollout, operation-parity, vendor unit, and byte-comparison gates | exit 0; 30 governed events, 45 registry commands, four separately routed commands, zero staged device operations |
+| Focused server capability, device mutation, weather assignment, controller, response mapper, desired-state, hardware command, and architecture selections | exit 0 |
+| `_JAVA_OPTIONS=-Xmx1536m NODE_OPTIONS=--max-old-space-size=2048 ./gradlew test --no-daemon --max-workers=2` | exit 0; 1,224 tests in 225 suites, zero failures or skips; `BUILD SUCCESSFUL in 1m 12s` |
+| `NODE_OPTIONS=--max-old-space-size=2048 npm run test:unit` | exit 0; 45 TAP tests plus 79 Vitest files and 319 tests passed |
+| `NODE_OPTIONS=--max-old-space-size=2048 npm run build` | exit 0; TypeScript and production build passed with the existing chunk-size warning |
+| Full-diff invariant review and `git diff --check` in both repositories | exit 0 |
+
+Edge commits `1f861ed0`, `9937ac6c`, `083cff10`, `ae974188`,
+`33eb12b9`, `80d5b2da`, and
+`ced1e8dcf8b616c446a4bae545d440a0da02ac9c` and server commits
+`3d3ed114`, `bf56a52d`, `d7b6b4b6`, `1b4140a6`, `a57b9a96`, and
+`97b330e45e129c1a9e7f11646538172dd99558b1` were pushed to their target
+branches. Remote branch lookups matched the exact activation heads.
+
+Heavyweight samples recorded between 9,986 MiB and 11,484 MiB available and
+always cleared the 4,096 MiB threshold. No process was terminated. No
+production host, live gateway, external key provider, or AgroLink SMB share
+was accessed.
+
 ### Program ownership
 
 The network planning program is finished. Its final local commit is `8f73306f`
