@@ -9,7 +9,9 @@ const FLOWS = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/s
 const STAGING_MANIFEST = path.join(ROOT, 'scripts/fixtures/sync-contract-staging.json');
 const GOLDEN_FIXTURE = path.join(SCHEMA_DIR, 'sync-contract-golden.json');
 const SEPARATELY_ROUTED_COMMANDS = [
+    'REPLACE_WEATHER_STATION_ZONES',
     'UPSERT_ZONE_IRRIGATION_CALIBRATION',
+    'UPSERT_DEVICE',
     'WORK_REQUEST_STATUS',
 ];
 const SEPARATE_ROUTE_SPECS = [
@@ -31,11 +33,28 @@ const SEPARATE_ROUTE_SPECS = [
         splitterCommandPattern: /if\s*\(!zoneTypes\.has\(commandType\)\)\s*return\s*\[msg,\s*null\]/,
         applierCommandPattern: /['"]UPSERT_ZONE_IRRIGATION_CALIBRATION['"]/,
     },
+    {
+        commandType: 'UPSERT_DEVICE',
+        splitterId: 'irrigation-config-command-apply-fn',
+        splitterName: 'Apply Irrigation Config Command',
+        outputIndex: 0,
+        applierId: 'device-command-apply-fn',
+        applierName: 'Apply Device Command',
+        splitterCommandPattern: /if\s*\(!protectedTypes\.has\(commandType\)\s*\|\|\s*!protectedShape\)\s*return\s*\[msg,\s*null\]/,
+        applierCommandPattern: /['"]UPSERT_DEVICE['"]/,
+    },
+    {
+        commandType: 'REPLACE_WEATHER_STATION_ZONES',
+        splitterId: 'irrigation-config-command-apply-fn',
+        splitterName: 'Apply Irrigation Config Command',
+        outputIndex: 0,
+        applierId: 'device-command-apply-fn',
+        applierName: 'Apply Device Command',
+        splitterCommandPattern: /if\s*\(!protectedTypes\.has\(commandType\)\s*\|\|\s*!protectedShape\)\s*return\s*\[msg,\s*null\]/,
+        applierCommandPattern: /['"]REPLACE_WEATHER_STATION_ZONES['"]/,
+    },
 ];
-const EXACT_STAGED_COMMANDS = [
-    'UPSERT_DEVICE',
-    'REPLACE_WEATHER_STATION_ZONES',
-];
+const EXACT_STAGED_COMMANDS = [];
 const EXACT_EDGE_DEFERRED_COMMANDS = [...EXACT_STAGED_COMMANDS];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {

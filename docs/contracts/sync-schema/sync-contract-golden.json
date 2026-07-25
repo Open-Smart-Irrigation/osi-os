@@ -46,14 +46,14 @@
     {
       "name": "device_desired_state_v1",
       "schemaAccepted": true,
-      "edgeProducerEnabled": false,
-      "cloudIssuerEnabled": false
+      "edgeProducerEnabled": true,
+      "cloudIssuerEnabled": true
     },
     {
       "name": "weather_station_zones_desired_state_v1",
       "schemaAccepted": true,
-      "edgeProducerEnabled": false,
-      "cloudIssuerEnabled": false
+      "edgeProducerEnabled": true,
+      "cloudIssuerEnabled": true
     }
   ],
   "eventOperations": {
@@ -118,7 +118,8 @@
       "ZONE_LOCATION_UPSERTED",
       "ZONE_RECOMMENDATION_UPSERTED",
       "ZONE_UPSERTED",
-      "ZONE_IRRIGATION_CALIBRATION_UPSERTED"
+      "ZONE_IRRIGATION_CALIBRATION_UPSERTED",
+      "WEATHER_STATION_ZONES_REPLACED"
     ],
     "serverHandlerEnabled": [
       "CHAMELEON_READING_APPENDED",
@@ -149,11 +150,10 @@
       "ZONE_LOCATION_UPSERTED",
       "ZONE_RECOMMENDATION_UPSERTED",
       "ZONE_UPSERTED",
-      "ZONE_IRRIGATION_CALIBRATION_UPSERTED"
-    ],
-    "staged": [
+      "ZONE_IRRIGATION_CALIBRATION_UPSERTED",
       "WEATHER_STATION_ZONES_REPLACED"
-    ]
+    ],
+    "staged": []
   },
   "commandTypes": {
     "accepted": [
@@ -243,6 +243,7 @@
       "UPDATE_SCHEDULE",
       "UPSERT_SCHEDULE",
       "UPSERT_ZONE_IRRIGATION_CALIBRATION",
+      "UPSERT_DEVICE",
       "WORK_REQUEST_STATUS",
       "UPSERT_JOURNAL_ENTRY",
       "VOID_JOURNAL_ENTRY",
@@ -254,12 +255,10 @@
       "UPSERT_USER_ZONE_ASSIGNMENT",
       "DELETE_USER_ZONE_ASSIGNMENT",
       "UPSERT_USER_PLOT_ASSIGNMENT",
-      "DELETE_USER_PLOT_ASSIGNMENT"
-    ],
-    "staged": [
-      "UPSERT_DEVICE",
+      "DELETE_USER_PLOT_ASSIGNMENT",
       "REPLACE_WEATHER_STATION_ZONES"
-    ]
+    ],
+    "staged": []
   },
   "commandAckResults": [
     {

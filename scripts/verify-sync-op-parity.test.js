@@ -136,14 +136,8 @@ function exactRolloutStaging() {
   return {
     version: 1,
     commands: {
-      edgeDeferred: [
-        'UPSERT_DEVICE',
-        'REPLACE_WEATHER_STATION_ZONES',
-      ],
-      cloudDeferred: [
-        'UPSERT_DEVICE',
-        'REPLACE_WEATHER_STATION_ZONES',
-      ],
+      edgeDeferred: [],
+      cloudDeferred: [],
     },
     eventOps: {
       edgeModuleOwned: [
@@ -153,8 +147,8 @@ function exactRolloutStaging() {
         'JOURNAL_PLOT_UPSERTED',
         'JOURNAL_PLOT_GROUP_UPSERTED',
       ],
-      edgeDeferred: ['WEATHER_STATION_ZONES_REPLACED'],
-      cloudDeferred: ['WEATHER_STATION_ZONES_REPLACED'],
+      edgeDeferred: [],
+      cloudDeferred: [],
     },
   };
 }
@@ -192,6 +186,7 @@ function createStagedParityFixture(overrides) {
     type: 'function',
     func: `
 msg.topic = "INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at) VALUES ('evt-1', 'DEVICE_DATA', 'dev-1', 'DEVICE_DATA_APPENDED', json_object('contract_version', 1), 1, '2026-07-05T00:00:00Z')";
+msg.weatherTopic = "INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at) VALUES ('evt-2', 'WEATHER_STATION_ZONES', 'dev-1', 'WEATHER_STATION_ZONES_REPLACED', json_object('contract_version', 1), 1, '2026-07-05T00:00:00Z')";
 return msg;
 `,
   }]));
@@ -229,6 +224,7 @@ class EdgeSyncService {
   private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
     switch (event.op()) {
       case "DEVICE_DATA_APPENDED" -> { return true; }
+      case "WEATHER_STATION_ZONES_REPLACED" -> { return true; }
       case "JOURNAL_ENTRY_UPSERTED", "JOURNAL_ENTRY_VOIDED",
            "JOURNAL_VOCAB_UPSERTED", "JOURNAL_PLOT_UPSERTED",
            "JOURNAL_PLOT_GROUP_UPSERTED" -> { return true; }

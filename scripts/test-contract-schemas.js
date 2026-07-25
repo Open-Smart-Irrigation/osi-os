@@ -1082,14 +1082,8 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
 } else {
     staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
     const exactStaging = staging && staging.version === 1 &&
-        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([
-            'UPSERT_DEVICE',
-            'REPLACE_WEATHER_STATION_ZONES',
-        ]) &&
-        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify([
-            'UPSERT_DEVICE',
-            'REPLACE_WEATHER_STATION_ZONES',
-        ]) &&
+        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
+        JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify([]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',
             'JOURNAL_ENTRY_VOIDED',
@@ -1097,16 +1091,12 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_UPSERTED',
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([
-            'WEATHER_STATION_ZONES_REPLACED',
-        ]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([
-            'WEATHER_STATION_ZONES_REPLACED',
-        ]);
+        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify([]);
     reportCheck(
         exactStaging,
-        'staging manifest records protected device rollout',
-        'staging manifest drifted from the protected device rollout'
+        'staging manifest records activated device rollout',
+        'staging manifest drifted from the activated device rollout'
     );
 }
 
