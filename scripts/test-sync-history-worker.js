@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -65,6 +66,8 @@ const advertisedTableRows = {
     computed_at: '2026-06-28T23:01:00Z'
   },
   irrigation_events: {
+    id: 13,
+    zone_uuid: 'zone-uuid-1',
     event_uuid: 'irrig-0016C001F11715E2-000000000001',
     created_at: '2026-06-28T23:02:00Z',
     action: 'OPEN',
@@ -74,10 +77,54 @@ const advertisedTableRows = {
     duration_minutes: 20,
     valve_deveui: 'A84041VALVE0001',
     payload_json: '{"b":2,"a":1}'
+  },
+  zone_daily_recommendations: {
+    zone_uuid: 'zone-uuid-1',
+    date: '2026-06-28',
+    recommendation_json: '{"action":"WAIT"}'
+  },
+  valve_actuation_expectations: {
+    expectation_id: 'expectation-1',
+    device_eui: 'A84041VALVE0001',
+    zone_uuid: 'zone-uuid-1',
+    commanded_at: '2026-06-28T23:03:00Z',
+    commanded_duration_seconds: 900,
+    expected_close_at: '2026-06-28T23:18:00Z',
+    estimated_gross_liters: 31.5,
+    volume_source: 'zone_calibration',
+    observed_open_at: '2026-06-28T23:04:00Z',
+    observed_close_at: null,
+    reconciliation_state: 'OBSERVED_RUNNING',
+    cancel_reason: null,
+    valve_channel: 1,
+    created_at: '2026-06-28T23:03:00Z'
   }
 };
 
 function runHelperAssertions(helper, label) {
+  assert.deepStrictEqual(helper.tableNames(), [
+    'device_data',
+    'chameleon_readings',
+    'dendrometer_readings',
+    'dendrometer_daily',
+    'zone_daily_environment',
+    'zone_daily_recommendations',
+    'irrigation_events',
+    'valve_actuation_expectations'
+  ], `${label} table registry`);
+  assert.strictEqual(helper.nextTable(null), 'device_data', label);
+  assert.strictEqual(helper.nextTable('device_data'), 'chameleon_readings', label);
+  assert.strictEqual(helper.nextTable('valve_actuation_expectations'), 'device_data', label);
+  assert.strictEqual(helper.cursorKind('irrigation_events'), 'id', label);
+  assert.strictEqual(helper.cursorKind('dendrometer_daily'), 'key', label);
+  assert.match(helper.snapshotHighQuery('zone_daily_environment'), /MAX.*zone_uuid/i, label);
+  assert.match(helper.batchQuery('device_data', 'backfill'), /id > \? AND id <= \?/i, label);
+  assert.match(helper.batchQuery('device_data', 'tail'), /id > \?/i, label);
+  assert.match(helper.batchQuery('dendrometer_daily', 'backfill'), /deveui.*date.*> \?.*<= \?/i, label);
+  assert.match(helper.rowByHistoryKeyQuery(
+    'valve_actuation_expectations',
+    'VALVE_ACTUATION|0016C001F11715E2|expectation-1').sql, /expectation_id = \?/i, label);
+
   assert.strictEqual(helper.historyKey('device_data', '0016C001F11715E2', row), 'DEVICE_DATA|0016C001F11715E2|123', label);
   assert.strictEqual(helper.nextRawQuery('device_data'), 'SELECT * FROM device_data WHERE id > ? ORDER BY id ASC LIMIT ?', label);
   assert.deepStrictEqual(helper.buildCanonicalColumns('device_data', row), [
@@ -136,13 +183,52 @@ function runHelperAssertions(helper, label) {
 
   assert.strictEqual(helper.isBackfillComplete({ snapshot_high_id: 123, last_acked_id: 123 }), true, label);
   assert.strictEqual(helper.isBackfillComplete({ snapshot_high_id: 124, last_acked_id: 123 }), false, label);
+  assert.strictEqual(helper.isCursorComplete('dendrometer_daily', {
+    snapshot_high_key: 'DEV|2026-06-28',
+    last_acked_key: 'DEV|2026-06-28'
+  }, false), true, label);
+  assert.strictEqual(helper.isCursorComplete('dendrometer_daily', {
+    snapshot_high_key: 'DEV|2026-06-28',
+    last_shadow_acked_key: 'DEV|2026-06-27'
+  }, true), false, label);
 
-  assert.strictEqual(helper.shouldApplyDurableAck({ phase: 'shadow' }, { history_mirror_write_v1_confirmed: true }), false, label);
-  assert.strictEqual(helper.shouldApplyDurableAck({ phase: 'backfill' }, { history_mirror_write_v1_confirmed: false }), false, label);
-  assert.strictEqual(helper.shouldApplyDurableAck({ phase: 'backfill' }, { history_mirror_write_v1_confirmed: true }), true, label);
+  assert.strictEqual(helper.serverConfirmsDurable({
+    phase: 'shadow',
+    durableMirrorConfirmed: true
+  }), true, label);
+  assert.strictEqual(helper.serverConfirmsDurable({
+    phase: 'shadow',
+    durableMirrorConfirmed: false
+  }), false, label);
+  assert.strictEqual(helper.shouldApplyDurableAck(
+    { phase: 'shadow' },
+    { phase: 'shadow', durableMirrorConfirmed: true }), false, label);
+  assert.strictEqual(helper.shouldApplyDurableAck(
+    { phase: 'backfill' },
+    { phase: 'backfill', durableMirrorConfirmed: false }), false, label);
+  assert.strictEqual(helper.shouldApplyDurableAck(
+    { phase: 'backfill' },
+    { phase: 'backfill', durableMirrorConfirmed: true }), true, label);
 
   const segment = helper.segmentKey('device_data', { deveui: 'A84041CAFECAFE01', recorded_at: '2026-06-28T10:00:00.000Z' });
   assert.strictEqual(segment, 'A84041CAFECAFE01|2026-06-28', label);
+  assert.strictEqual(
+    helper.segmentKey('irrigation_events', advertisedTableRows.irrigation_events),
+    'zone-uuid-1|2026-06-28',
+    label);
+  assert.strictEqual(
+    helper.segmentKey(
+      'valve_actuation_expectations',
+      advertisedTableRows.valve_actuation_expectations),
+    'A84041VALVE0001|2026-06-28',
+    label);
+  assert.strictEqual(
+    helper.historyKey(
+      'valve_actuation_expectations',
+      '0016C001F11715E2',
+      advertisedTableRows.valve_actuation_expectations),
+    'VALVE_ACTUATION|0016C001F11715E2|expectation-1',
+    label);
 
   for (const [tableName, sourceRow] of Object.entries(advertisedTableRows)) {
     assert.doesNotThrow(() => helper.buildCanonicalColumns(tableName, sourceRow), `${label} ${tableName}`);
@@ -154,6 +240,36 @@ function runHelperAssertions(helper, label) {
     'JSON',
     '{"a":1,"b":2}'
   ], label);
+
+  const segmentRows = [
+    {
+      historyKey: 'DEVICE_DATA|0016C001F11715E2|124',
+      payloadHash: 'hash-2'
+    },
+    {
+      historyKey: 'DEVICE_DATA|0016C001F11715E2|123',
+      payloadHash: 'hash-1'
+    }
+  ];
+  const expectedSegmentHash = crypto.createHash('sha256')
+    .update('DEVICE_DATA|0016C001F11715E2|123\0hash-1\n', 'utf8')
+    .update('DEVICE_DATA|0016C001F11715E2|124\0hash-2\n', 'utf8')
+    .digest('hex');
+  assert.strictEqual(helper.segmentHash(segmentRows), expectedSegmentHash, label);
+
+  const builtSegment = helper.buildSegment(
+    'device_data',
+    '0016C001F11715E2',
+    'A84041CAFECAFE01|2026-06-28',
+    [
+      row,
+      { ...row, id: 'bad-id' }
+    ]);
+  assert.strictEqual(builtSegment.manifest.canonicalRowCount, 2, label);
+  assert.strictEqual(builtSegment.manifest.syncableRowCount, 1, label);
+  assert.strictEqual(builtSegment.manifest.quarantinedCount, 1, label);
+  assert.strictEqual(builtSegment.manifest.tombstoneCount, 0, label);
+  assert.strictEqual(builtSegment.quarantine.length, 1, label);
 }
 
 for (const helperPath of helperPaths) {

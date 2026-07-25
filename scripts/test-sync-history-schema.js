@@ -7,6 +7,15 @@ const { execFileSync } = require('child_process');
 const repoRoot = path.resolve(__dirname, '..');
 const currentSchema = fs.readFileSync(path.join(repoRoot, 'database', 'seed-blank.sql'), 'utf8');
 const migrationSql = fs.readFileSync(path.join(repoRoot, 'database', 'migrations', '2026-06-28-history-sync-v1.sql'), 'utf8');
+const durableMigrationSql = fs.readFileSync(
+  path.join(repoRoot, 'database', 'migrations', 'ordered', '0040__durable_history_batch.sql'),
+  'utf8'
+);
+const preDurableSchema = execFileSync(
+  'git',
+  ['show', 'HEAD:database/seed-blank.sql'],
+  { cwd: repoRoot, encoding: 'utf8' }
+);
 // Upgrade-path baseline: last main commit whose seed-blank.sql predates the
 // 2026-06-28 history-sync-v1 migration (682f7c1f^1). 'main' stopped being a
 // valid baseline when PR #70 merged the migrated schema into the seed itself.
@@ -211,9 +220,56 @@ function assertHistorySchemaAndTriggers(label) {
   console.log(`OK sync history schema ${label}`);
 }
 
+function assertDurableHistorySchema(label) {
+  const cursorColumns = columnNames('sync_history_cursors');
+  for (const name of ['snapshot_high_key', 'shadow_completed_at', 'durable_enabled_at']) {
+    if (!cursorColumns.includes(name)) {
+      throw new Error(`${label}: missing sync_history_cursors.${name}`);
+    }
+  }
+  if (!columnNames('sync_history_segments').includes('tombstone_count')) {
+    throw new Error(`${label}: missing sync_history_segments.tombstone_count`);
+  }
+  const triggerNames = new Set(tableNamesWhere("type='trigger'"));
+  for (const name of [
+    'trg_sync_irrigation_events_dirty_ai',
+    'trg_sync_irrigation_events_dirty_au',
+    'trg_sync_valve_actuation_dirty_ai',
+    'trg_sync_valve_actuation_dirty_au'
+  ]) {
+    if (!triggerNames.has(name)) throw new Error(`${label}: missing ${name}`);
+  }
+
+  exec("INSERT INTO users(id, username, password_hash, created_at, user_uuid) VALUES(801, 'durable', 'x', '2026-07-25T10:00:00.000Z', 'user-durable')");
+  exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(801, 801, 'Durable Zone', 'zone-durable', '0016C001F11715E2', 1)");
+  exec("INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES('cloud', 1, '0016C001F11715E2', '2026-07-25T10:00:00.000Z') ON CONFLICT(peer_node) DO UPDATE SET linked=1, gateway_device_eui=excluded.gateway_device_eui, updated_at=excluded.updated_at");
+  exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json, event_uuid) VALUES(801, 801, 801, 'OPEN', '{}', 'irrig-durable-801')");
+  exec("INSERT INTO valve_actuation_expectations(expectation_id, device_eui, zone_id, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, created_at) VALUES('expectation-durable-1', 'A84041VALVE0001', 801, '2026-07-25T10:00:00.000Z', 900, '2026-07-25T10:15:00.000Z', 'zone_calibration', 'PENDING_OBSERVATION', '2026-07-25T10:00:00.000Z')");
+  if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='irrigation_events' AND row_key='IRRIGATION_EVENT|irrig-durable-801|801';") !== 1) {
+    throw new Error(`${label}: irrigation event insert did not create durable dirty key`);
+  }
+  if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='valve_actuation_expectations' AND row_key='VALVE_ACTUATION|0016C001F11715E2|expectation-durable-1';") !== 1) {
+    throw new Error(`${label}: valve actuation insert did not create durable dirty key`);
+  }
+  exec("UPDATE irrigation_events SET reason='corrected' WHERE id=801");
+  exec("UPDATE valve_actuation_expectations SET reconciliation_state='OBSERVED_RUNNING' WHERE expectation_id='expectation-durable-1'");
+  if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE status='pending' AND ((table_name='irrigation_events' AND row_key='IRRIGATION_EVENT|irrig-durable-801|801') OR (table_name='valve_actuation_expectations' AND row_key='VALVE_ACTUATION|0016C001F11715E2|expectation-durable-1'));") !== 2) {
+    throw new Error(`${label}: durable history updates did not refresh dirty keys`);
+  }
+  exec("INSERT INTO sync_history_segments(peer_node, table_name, segment_key, hash_version, canonical_row_count, syncable_row_count, syncable_payload_hash, quarantined_count, covered_max_id, computed_at) VALUES('cloud', 'device_data', 'DEV|2026-07-25', 1, 0, 0, '', 0, 0, '2026-07-25T10:00:00.000Z')");
+  if (scalar("SELECT tombstone_count FROM sync_history_segments WHERE table_name='device_data';") !== 0) {
+    throw new Error(`${label}: history tombstone default is not zero`);
+  }
+  console.log(`OK durable history schema ${label}`);
+}
+
 try {
   createDb('fresh', [currentSchema]);
   assertHistorySchemaAndTriggers('fresh seed');
+  assertDurableHistorySchema('fresh seed');
+
+  createDb('durable-upgrade', [preDurableSchema, durableMigrationSql]);
+  assertDurableHistorySchema('ordered migration');
 
   if (mainSchema) {
     createDb('upgrade', [

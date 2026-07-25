@@ -780,6 +780,9 @@ CREATE TABLE sync_history_cursors (
   retry_count INTEGER NOT NULL DEFAULT 0,
   next_attempt_at TEXT,
   last_error TEXT,
+  snapshot_high_key TEXT,
+  shadow_completed_at TEXT,
+  durable_enabled_at TEXT,
   PRIMARY KEY (peer_node, table_name)
 );
 
@@ -808,6 +811,7 @@ CREATE TABLE sync_history_segments (
   quarantined_count INTEGER NOT NULL DEFAULT 0,
   covered_max_id INTEGER,
   computed_at TEXT NOT NULL,
+  tombstone_count INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (peer_node, table_name, segment_key, hash_version)
 );
 
@@ -1093,6 +1097,127 @@ CREATE INDEX idx_valve_act_exp_active
   ON valve_actuation_expectations(reconciliation_state)
   WHERE reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING');
 CREATE INDEX idx_valve_act_exp_effect_key ON valve_actuation_expectations(effect_key);
+
+-- Durable history corrections for irrigation and actuation rows.
+CREATE TRIGGER trg_sync_irrigation_events_dirty_ai
+AFTER INSERT ON irrigation_events
+FOR EACH ROW
+WHEN NEW.event_uuid IS NOT NULL
+  AND trim(NEW.event_uuid) <> ''
+  AND EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+BEGIN
+  INSERT INTO sync_history_dirty_keys(
+    peer_node, table_name, row_key, change_kind, source_row_id, changed_at
+  ) VALUES (
+    'cloud',
+    'irrigation_events',
+    'IRRIGATION_EVENT|' || NEW.event_uuid || '|' || NEW.id,
+    'correction',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_irrigation_events_dirty_au
+AFTER UPDATE ON irrigation_events
+FOR EACH ROW
+WHEN NEW.event_uuid IS NOT NULL
+  AND trim(NEW.event_uuid) <> ''
+  AND EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+BEGIN
+  INSERT INTO sync_history_dirty_keys(
+    peer_node, table_name, row_key, change_kind, source_row_id, changed_at
+  ) VALUES (
+    'cloud',
+    'irrigation_events',
+    'IRRIGATION_EVENT|' || NEW.event_uuid || '|' || NEW.id,
+    'correction',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_valve_actuation_dirty_ai
+AFTER INSERT ON valve_actuation_expectations
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(
+    peer_node, table_name, row_key, change_kind, changed_at
+  ) VALUES (
+    'cloud',
+    'valve_actuation_expectations',
+    'VALVE_ACTUATION|' ||
+      COALESCE(
+        NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), ''),
+        'UNKNOWN'
+      ) || '|' || NEW.expectation_id,
+    'correction',
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_valve_actuation_dirty_au
+AFTER UPDATE ON valve_actuation_expectations
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(
+    peer_node, table_name, row_key, change_kind, changed_at
+  ) VALUES (
+    'cloud',
+    'valve_actuation_expectations',
+    'VALVE_ACTUATION|' ||
+      COALESCE(
+        NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), ''),
+        'UNKNOWN'
+      ) || '|' || NEW.expectation_id,
+    'correction',
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
 
 -- ---------------------------------------------------------------------------
 -- zone_valve_assignments  (3.1 channel-per-zone for multi-channel valves)

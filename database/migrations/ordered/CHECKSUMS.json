@@ -37,5 +37,6 @@
   "0036__zone_irrigation_calibration_sync.sql": "d8d9091b26be3ea21f1d2bb7ac16664968340cafa1e4783d7c76a5834386a37d",
   "0037__zone_irrigation_calibration_backfill.sql": "1f326f32aa5f296d5f7b64c941d88455ea8e71daeb8cffc02ed1aec859fc959a",
   "0038__weather_station_zone_sync.sql": "692585322a917e75c8264b05c59b4f15adb4865c037d5a1e9094702db1070665",
-  "0039__weather_station_zone_backfill.sql": "aaa3ce9af69a24068180ab2a5749ebec2c0fb99f2962062493c07ebb7a8bf5af"
+  "0039__weather_station_zone_backfill.sql": "aaa3ce9af69a24068180ab2a5749ebec2c0fb99f2962062493c07ebb7a8bf5af",
+  "0040__durable_history_batch.sql": "020c37d9ad563d970bd43c40f7dc760590e28c320a03f8a502381b88d8b18cad"
 }

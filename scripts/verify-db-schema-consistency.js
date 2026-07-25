@@ -327,6 +327,9 @@ const schemaContract = {
     'retry_count',
     'next_attempt_at',
     'last_error',
+    'snapshot_high_key',
+    'shadow_completed_at',
+    'durable_enabled_at',
   ],
   sync_history_dirty_keys: [
     'peer_node',
@@ -351,6 +354,7 @@ const schemaContract = {
     'quarantined_count',
     'covered_max_id',
     'computed_at',
+    'tombstone_count',
   ],
   sync_history_quarantine: [
     'peer_node',
