@@ -2,7 +2,7 @@
 
 ## Preparation record: 2026-07-23
 
-**State:** Tasks 0 through 7 complete and pushed. Launch heads were fetched,
+**State:** Tasks 0 through 9 complete and pushed. Launch heads were fetched,
 base gates run, one server frontend base defect repaired, the route/contract
 inventory regenerated, the scoped-access governing documents reconciled, the
 cross-repository contract gate and edge scoped-access foundation landed, and
@@ -811,6 +811,89 @@ lookups matched the exact implementation head after each accepted slice.
 Heavyweight row-5 checks started with 13,907-14,020 MiB available, clearing the
 4,096 MiB threshold. No process was terminated. No production host, live
 gateway, external key provider, or AgroLink SMB share was accessed.
+
+### Task 9 durable history batch
+
+The edge worker now rotates across eight history families:
+`device_data`, `chameleon_readings`, `dendrometer_readings`,
+`dendrometer_daily`, `zone_daily_environment`,
+`zone_daily_recommendations`, `irrigation_events`, and
+`valve_actuation_expectations`. Migration `0040__durable_history_batch.sql`
+adds persisted shadow and durable cursor state plus dirty-key triggers for
+irrigation and actuation corrections. It is additive and applied to all seven
+bundled databases. The frozen boot-DDL block was not changed.
+
+Each table has a stable history key, natural key, segment key, canonical
+hash-v1 column set, bounded snapshot query, and durable target. The worker
+validates a captured range in `shadow`, promotes that table only after the
+shadow cursor reaches its high-water mark, then runs bounded `backfill` and
+`tail`. Correction, derived, and repair batches drain the persistent dirty-key
+ledger. ACK handling advances only the consecutive prefix confirmed with the
+same phase and durable capability. Cursor state survives restart.
+
+The server accepts the five durable phases, writes all eight canonical mirror
+targets, and indexes each history key and payload hash. Same-hash replay is a
+duplicate; a valid changed hash overwrites the mirror and records the
+edge-wins conflict state. Invalid rows enter quarantine. A later valid replay
+removes the stale quarantine record before returning a committed result.
+Interrupted cleanup returns only a retryable result and does not advance the
+ACK prefix.
+
+Manifest comparison uses canonical, syncable, quarantine, and tombstone
+counts plus SHA-256 over ordered history-key and payload-hash tuples. A
+mismatch requests edge repair and does not delete a server row. Version 1
+requires zero tombstones. The server adds no retention policy for canonical
+mirrored history.
+
+The measured fixture produced eight canonical rows, eight syncable rows, zero
+quarantines, and zero tombstones. The edge JavaScript and server Java
+canonicalizers produced the same segment hashes:
+
+| Family | History key | Segment hash |
+|---|---|---|
+| `device_data` | `DEVICE_DATA\|0016C001F11715E2\|101` | `3a76d2a1b1065241248ab477ccd7dfbb0fb36f77e7500a5c5a9c08b605f56d8b` |
+| `chameleon_readings` | `CHAMELEON_READING\|0016C001F11715E2\|201` | `8a893bd8fbf2dccc3248fafcd7fd2c0799bd0dadfe5a90edf4fface294066696` |
+| `dendrometer_readings` | `DENDRO_READING\|0016C001F11715E2\|301` | `871121dece33e24cbc3617afedb6b5cd696aaa5e114465c14dcebe053357720f` |
+| `dendrometer_daily` | `DENDRO_DAILY\|A84041SENSOR0001\|2026-07-25` | `1edb27a925ba6b893be14f1f5e6439986f93cbcba970933e86564a15f1cf1211` |
+| `zone_daily_environment` | `ZONE_ENVIRONMENT\|zone-history\|2026-07-25` | `0b6abb9e19b597c6643ef6168308d4ffe7b11a9721a6d78f2a56614f749f4529` |
+| `zone_daily_recommendations` | `ZONE_RECOMMENDATION\|zone-history\|2026-07-25` | `794f27dc628f4174ea56254af6eb6a42fe6bf20b07906b69b9eb9695550058e7` |
+| `irrigation_events` | `IRRIGATION_EVENT\|irrig-history-601\|601` | `1107c798c380ccb14a5e49366b2d34a3852fa241424a205edb64a83a526e5f52` |
+| `valve_actuation_expectations` | `VALVE_ACTUATION\|0016C001F11715E2\|expectation-history-1` | `6fdd49b8f4ee5489f6d056dad0d728af8ac779f851539c6b14398cae70af4cab` |
+
+Task 9 verification:
+
+| Command | Result |
+|---|---|
+| Edge worker, schema, durable-flow, and SQLite integration tests | exit 0; eight families, eight canonical rows, zero quarantines, zero tombstones |
+| `node scripts/verify-migrations.js --base-ref origin/main` | exit 0; 40 migrations, checksum manifest, and base immutability passed |
+| `node scripts/verify-seed-replay.js` | exit 0 |
+| `node scripts/verify-db-schema-consistency.js` | exit 0; all seven bundled databases passed |
+| `node scripts/verify-no-new-silent-catch.js` | exit 0; 166 per maintained profile equals the ratchet |
+| `node scripts/verify-profile-parity.js` | exit 0; maintained payloads are byte-identical |
+| `node scripts/verify-sync-flow.js` | exit 0; umbrella sync, schema, contract, and profile gates passed |
+| Focused server history, controller, data-plane, architecture, and parity-fixture tests | exit 0 |
+| Server PostgreSQL `FlywayMigrationIT` | exit 0; two container-backed migration tests passed |
+| `_JAVA_OPTIONS=-Xmx1536m NODE_OPTIONS=--max-old-space-size=2048 ./gradlew test --no-daemon --max-workers=2` | exit 0; `BUILD SUCCESSFUL in 1m 8s` |
+| `_JAVA_OPTIONS=-Xmx1536m NODE_OPTIONS=--max-old-space-size=2048 ./gradlew build --no-daemon --max-workers=2` | exit 0 |
+
+The first seed replay exposed a fresh-seed column order that differed from the
+ordered `ALTER TABLE` replay. The seed declaration was reordered without
+changing the migration. The first bundled-schema gate then exposed stale
+expected column lists in its verifier; those expectations were updated and
+all seven databases passed. No test was weakened.
+
+Edge planning commit `0803eccbb3c72e603becd6f0526b2ac7cb91b765`
+and implementation commit
+`7e30e6a49f493887f6058a568b648d15d7cb20b2` were pushed to
+`design-sync/agrolink`. Server commits
+`ad997b889ec70ef39e9e1fad9854ee58855cb7da`,
+`5339120b5f4a7ca3e6366d1734a4deffac2be252`, and
+`9cecd0af52db4ddaf4819e010a89847f0bbbcfee` were pushed to `AgroLink`.
+Every remote branch lookup matched the local SHA.
+
+The legacy event and bootstrap paths remain enabled. Their removal and
+incremental bootstrap remain deferred. No production host, live gateway,
+external recovery-key provider, or AgroLink SMB share was accessed.
 
 ### Program ownership
 
