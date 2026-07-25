@@ -11,11 +11,23 @@ const durableMigrationSql = fs.readFileSync(
   path.join(repoRoot, 'database', 'migrations', 'ordered', '0040__durable_history_batch.sql'),
   'utf8'
 );
-const preDurableSchema = execFileSync(
-  'git',
-  ['show', 'HEAD:database/seed-blank.sql'],
-  { cwd: repoRoot, encoding: 'utf8' }
-);
+const durableMigrationPath = 'database/migrations/ordered/0040__durable_history_batch.sql';
+let preDurableSchema = null;
+try {
+  const durableIntroduction = execFileSync(
+    'git',
+    ['log', '--diff-filter=A', '--format=%H', '-1', 'HEAD', '--', durableMigrationPath],
+    { cwd: repoRoot, encoding: 'utf8' }
+  ).trim();
+  if (!durableIntroduction) throw new Error(`cannot find introduction commit for ${durableMigrationPath}`);
+  preDurableSchema = execFileSync(
+    'git',
+    ['show', `${durableIntroduction}^:database/seed-blank.sql`],
+    { cwd: repoRoot, encoding: 'utf8' }
+  );
+} catch (error) {
+  console.warn(`SKIP durable upgrade-path test: cannot read pre-0040 seed (${error.message})`);
+}
 // Upgrade-path baseline: last main commit whose seed-blank.sql predates the
 // 2026-06-28 history-sync-v1 migration (682f7c1f^1). 'main' stopped being a
 // valid baseline when PR #70 merged the migrated schema into the seed itself.
@@ -268,8 +280,10 @@ try {
   assertHistorySchemaAndTriggers('fresh seed');
   assertDurableHistorySchema('fresh seed');
 
-  createDb('durable-upgrade', [preDurableSchema, durableMigrationSql]);
-  assertDurableHistorySchema('ordered migration');
+  if (preDurableSchema) {
+    createDb('durable-upgrade', [preDurableSchema, durableMigrationSql]);
+    assertDurableHistorySchema('ordered migration');
+  }
 
   if (mainSchema) {
     createDb('upgrade', [

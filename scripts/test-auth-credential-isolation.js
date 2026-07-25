@@ -36,6 +36,10 @@ const helperPath = path.join(
   root,
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js'
 );
+const installationHelperPath = path.join(
+  root,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js'
+);
 const bcryptjsPath = path.join(
   root,
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs'
@@ -43,6 +47,14 @@ const bcryptjsPath = path.join(
 
 const bcryptjs = require(bcryptjsPath);
 const cryptoModule = require('node:crypto');
+const installationHelper = require(installationHelperPath);
+const osiLib = {
+  require(name) {
+    return name === 'installation'
+      ? { ok: true, value: installationHelper }
+      : { ok: false, error: `unexpected helper ${name}` };
+  },
+};
 
 // Real users table shape, copied from database/seed-blank.sql so the test
 // exercises the actual production column set (SELECT * relies on it).
@@ -68,6 +80,10 @@ const USERS_TABLE_SQL = `CREATE TABLE users (
   last_auth_sync_status           TEXT,
   last_auth_sync_error            TEXT
 , role TEXT NOT NULL DEFAULT 'researcher' CHECK (role IN ('admin','researcher','viewer')), disabled_at TEXT, sync_version INTEGER NOT NULL DEFAULT 1)`;
+const INSTALLATION_TABLE_SQL = `CREATE TABLE installation_identity (
+  singleton_id INTEGER PRIMARY KEY,
+  installation_uuid TEXT NOT NULL
+)`;
 
 function readFlows() {
   return JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
@@ -155,6 +171,10 @@ function freshSeededDb(seedFn) {
   const native = new DatabaseSync(dbPath);
   native.exec('PRAGMA journal_mode=WAL;');
   native.exec(USERS_TABLE_SQL + ';');
+  native.exec(INSTALLATION_TABLE_SQL + ';');
+  native
+    .prepare('INSERT INTO installation_identity(singleton_id, installation_uuid) VALUES(1, ?)')
+    .run('123e4567-e89b-42d3-a456-426614174000');
   if (seedFn) seedFn(native);
   native.close();
   const helper = loadOsiDbHelperFresh(dbPath);
@@ -228,7 +248,7 @@ test('login credential isolation: attacker cannot ride a victim request\'s passw
     const resultNode = findNode(flows, 'auth-process-result');
     const flowStore = new Map();
     const dbScope = { osiDb: helper };
-    const resultScope = { bcrypt: bcryptjs, crypto: cryptoModule };
+    const resultScope = { bcrypt: bcryptjs, crypto: cryptoModule, osiLib };
 
     // Step 1: attacker's request starts first, with the right username but a
     // wrong guessed password. Its login-func write lands first.
@@ -296,7 +316,7 @@ test('register credential isolation: one request must not create an account unde
     const resultNode = findNode(flows, 'auth-process-result');
     const flowStore = new Map();
     const dbScope = { osiDb: helper };
-    const resultScope = { bcrypt: bcryptjs, crypto: cryptoModule };
+    const resultScope = { bcrypt: bcryptjs, crypto: cryptoModule, osiLib };
 
     // Step 1: Alice's register request lands first.
     const aliceAfterRegister = (
@@ -418,7 +438,7 @@ test('scoped-mode login rejects a disabled account before issuing a token; scope
     const queryNode = findNode(flows, 'auth-db-query');
     const resultNode = findNode(flows, 'auth-process-result');
     const dbScope = { osiDb: helper };
-    const resultScope = { bcrypt: bcryptjs, crypto: cryptoModule };
+    const resultScope = { bcrypt: bcryptjs, crypto: cryptoModule, osiLib };
 
     async function attemptLogin(env) {
       const flowStore = new Map();

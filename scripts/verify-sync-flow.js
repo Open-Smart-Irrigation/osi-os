@@ -1613,7 +1613,9 @@ expectIncludes('Build Cloud Bootstrap', "'  dd.rain_mm_per_10min,'", 'includes n
 expectIncludes('Build Cloud Bootstrap', "'  dd.flow_liters_per_10min,'", 'includes normalized flow telemetry in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', 'AS event_uuid', 'synthesizes stable irrigation event UUIDs for bootstrap snapshots');
 expectIncludes('Build Cloud Bootstrap', 'gatewayLocations,', 'includes gateway GPS state in bootstrap payloads');
-expectIncludes('Build Cloud Bootstrap', 'previousGatewayDeviceEuis: migration.previousGatewayDeviceEuis', 'includes previous gateway identities during bootstrap migration');
+expectIncludes('Build Cloud Bootstrap', 'previousGatewayDeviceEuis: mergedInstallation.previousGatewayDeviceEuis', 'includes installation gateway history during bootstrap migration');
+expectIncludes('Build Cloud Bootstrap', 'installationUuid,', 'includes the stable installation identity in bootstrap metadata');
+expectIncludes('Build Cloud Bootstrap', 'installation_recovery_v1', 'advertises the installation recovery capability in bootstrap metadata');
 expectIncludes('Build Cloud Bootstrap', 'edgeBuildVersion,', 'includes the edge build version in bootstrap gateway metadata');
 expectIncludes('Build Cloud Bootstrap', 'syncCapabilities', 'includes sync capabilities in bootstrap gateway metadata');
 expectIncludes('Build Cloud Bootstrap', 'zone_desired_state_v1', 'includes the versioned zone desired-state capability in bootstrap metadata');

@@ -205,15 +205,15 @@ function migrate(relative) {
   applier.func = replaceOnce(
     applier.func,
     '    || payload.device != null;',
-    '    || payload.device != null\\n    || payload.weather_station_zones != null;',
+    '    || payload.device != null\n    || payload.weather_station_zones != null;',
     'device protected shape'
   );
   applier.func = replaceOnce(
     applier.func,
     '    const result = await helper.value.applyDeviceCommand(db, envelope, {',
-    "    const applyCommand = commandType === 'REPLACE_WEATHER_STATION_ZONES'\\n" +
-      '      ? helper.value.applyWeatherStationZonesCommand\\n' +
-      '      : helper.value.applyDeviceCommand;\\n' +
+    "    const applyCommand = commandType === 'REPLACE_WEATHER_STATION_ZONES'\n" +
+      '      ? helper.value.applyWeatherStationZonesCommand\n' +
+      '      : helper.value.applyDeviceCommand;\n' +
       '    const result = await applyCommand(db, envelope, {',
     'device helper dispatch'
   );

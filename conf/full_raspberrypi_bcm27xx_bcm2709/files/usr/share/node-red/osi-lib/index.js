@@ -13,6 +13,7 @@ const COOLDOWN_MS = Number(process.env.OSI_LIB_COOLDOWN_MS || 30000); // test ov
 // codec entries ride the wholesale codecs copy/fetch.
 const NAME_TO_PATH = {
   'history-sync': 'osi-history-sync-helper',
+  'installation': 'osi-installation-helper',
   'history-router': 'osi-history-router',
   'osi-db-helper': 'osi-db-helper',
   'osi-command-ledger': 'osi-command-ledger',

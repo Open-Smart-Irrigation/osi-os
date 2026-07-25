@@ -306,13 +306,13 @@ const restartOwnerContracts = [
   ['al-unlink-restart-node-red', 'account_unlink', 2],
 ];
 const expectedNodeLibs = {
-  'sync-bootstrap-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }],
+  'sync-bootstrap-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   'sync-outbox-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
   'sync-pending-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
   'sync-force-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiCloudHttp', module: 'osi-cloud-http' }],
   'command-ack-build-batch': [{ var: 'osiDb', module: 'osi-db-helper' }],
   'sync-state-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }],
-  'al-link-build-req': [{ var: 'osiDb', module: 'osi-db-helper' }],
+  'al-link-build-req': [{ var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   'al-link-restart-node-red': [],
   'al-unlink-restart-node-red': [],
 };
@@ -894,9 +894,16 @@ for (const flowRelativePath of flowRelativePaths) {
     expectCondition(JSON.stringify(node.libs) === JSON.stringify(expectedNodeLibs[nodeId]),
       `${flowRelativePath}:${nodeId}: preserves its reviewed libs`,
       `${flowRelativePath}:${nodeId}: libs changed from ${JSON.stringify(expectedNodeLibs[nodeId])}`);
-    for (const banned of ["global.get('cp')", 'spawn(', 'require(']) {
+    for (const banned of ["global.get('cp')", 'spawn(']) {
       expectExcludes(`${flowRelativePath}:${nodeId}`, node.func, banned, `does not use ${banned}`);
     }
+    const withoutGuardedHelperLoads = node.func.replace(/\bosiLib\.require\(/g, '');
+    expectExcludes(
+      `${flowRelativePath}:${nodeId}`,
+      withoutGuardedHelperLoads,
+      'require(',
+      'does not use bare require('
+    );
   }
   for (const nodeId of syncBuilderIds) {
     const func = byId.get(nodeId) && byId.get(nodeId).func;
@@ -985,9 +992,9 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 166 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 166,
-    'silent-catch baseline records 166 for both maintained profiles',
-    'silent-catch baseline must be 166 for both maintained profiles after weather-assignment capability routing');
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 164 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 164,
+    'silent-catch baseline records 164 for both maintained profiles',
+    'silent-catch baseline must be 164 for both maintained profiles after installation-recovery auth cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'registration compensation now reports failures instead of swallowing them', 'records the PR #149 compensation cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'AgroLink Phase A', 'records the scoped-access auth cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'AgroLink Phase B shared reads', 'records the scoped-access shared-read cleanup');
