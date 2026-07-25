@@ -1003,3 +1003,68 @@ next two free versions after another fetch and ownership check.
 
 No production host, live gateway, external key provider, or AgroLink SMB share
 was accessed.
+
+### Task 11 verification and handoff
+
+The verification freeze is edge
+`5ff203728f9c45aff985cb89b314ae885e868674` and server
+`adba3c660618d130a75a06889e23f866881933d2`. Both commits were present on
+their named remote branches before this report-only handoff edit.
+
+All ten Task 0 edge baseline commands passed. The operation-parity verifier
+was pinned to the AgroLink server worktree; its default sibling lookup points
+at a separate checkout and would otherwise inspect the wrong branch. The
+outbox-retention test initially found a stale 17-trigger expectation after the
+program added ten protected triggers. The test now extracts the actual second
+INSERT value, expects all 27 triggers, and classifies irrigation calibration,
+weather-station assignments, users, and plot and zone grants as protected.
+The corrected test, profile parity, silent-catch ratchet, and umbrella sync
+gate passed before commit `5ff20372` was pushed.
+
+Task 11 verification:
+
+| Surface | Result |
+|---|---|
+| Edge baseline | All Task 0 contract, schema, operation, flow, silent-catch, profile, trigger, journal, retention, and live-identity commands exited 0 |
+| Edge GUI | Typecheck passed; TSX runner passed 94 tests; Vitest passed 1,667 tests; production build passed |
+| Server backend | Fresh `./gradlew test --rerun-tasks` passed in 1 minute 57 seconds with Docker available; `./gradlew build` passed |
+| Server main frontend | Source runner passed 45 tests; Vitest passed 339 tests; production build passed |
+| Terra Intelligence frontend | Vitest passed 111 tests; production build passed |
+| Disconnect and replay | The deterministic edge soak rig passed 16 tests, including weeks-offline drain and idempotent re-drain; PostgreSQL `BacklogDrainIT` applied a 5,000-event, 50-batch backlog with isolated poison events |
+| Stale version | `EdgeSyncServiceDataPlaneTest.applyEventsV2_rejectsStaleResourceVersionsWithoutApplying` passed |
+| Expired effect | `DesiredStateExpiryJobTest` passed, including atomic expiry of overdue physical effects and commands |
+| Edge restart | Durable-history SQLite integration passed with its persisted-cursor restart check and all eight families |
+| Server restart | `CommandLeaseServiceTest` passed; abandoned leases are reclaimed to their retryable or terminal durable state after the owning process disappears |
+
+The matrix audit has no `cloud-missing` or `edge-missing` row. Its only
+portable `partial` row is installation recovery, with the external key-provider
+and reverted restore-verb limits written explicitly. Every `edge-only`,
+`cloud-only`, and `deferred` row has a reason. Capability-gated issuance and
+the complete legacy test suite passed, so gateways that do not advertise new
+capabilities retain their old command and event behavior.
+
+The network-drive boundary remained intact. No
+`0024__network_drive.sql`, `osi-drive-helper`, drive execution report, import
+ledger, SMB implementation, or export fixture exists in the parity branch or
+its implementation history. The reviewed design and future plan remain
+documentation only, and no file was copied from the quarantined worktree.
+
+Remaining risks and deliberate deferrals:
+
+- Legacy event and bootstrap history delivery remains enabled. Decommissioning
+  needs maintainer approval after production convergence evidence; no history
+  row or path was deleted in this program.
+- Production recovery key custody still needs an approved provider, credential
+  lifecycle, rotation policy, cost decision, and operations runbook.
+- Production restore execution remains disabled because the stop-loss
+  `prepare-database-restore` and reconciliation verbs are pinned but reverted.
+  The edge adapter remains non-mutating.
+- Frontend builds retain their existing large-chunk warnings. Java compilation
+  retains existing deprecation warnings.
+- Production cloud, `osicloud.ch`, live gateways, live database restore,
+  external bundle upload, SMB shares, and Agroscope IT systems were not tested
+  or accessed.
+
+Heavyweight checks began with 12,806-14,499 MiB available and stayed above the
+4,096 MiB guard. No process was terminated. Final anti-slop, diff, status,
+push, and exact remote-head checks follow this evidence freeze.
