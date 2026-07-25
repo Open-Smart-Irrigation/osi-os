@@ -26,6 +26,7 @@ come from the fetched integration heads, not the earlier planning audit.
 | 8a | Zone create, aggregate update, location, portable configuration, and delete converge through protected desired state; legacy gateways retain their prior command path | Edge `b7787c17` through `be66dad6`; server `e860ed93` through `f83ef56a` |
 | 8b | Schedules and measured irrigation calibration converge through separate protected desired-state resources; legacy gateways retain schedule compatibility and receive no calibration command | Edge `64d72f90` through `e1d487dd`; server `90b7553a` through `1d32cfc8` |
 | 8c | Device assignment, portable flags and metadata, S2120 multi-zone assignments, unclaim, and all six supported cloud presentations converge without moving canonical state off the edge | Edge `1f861ed0` through `ced1e8dc`; server `3d3ed114` through `97b330e4` |
+| 8d | History and analysis lifecycle parity, account-wide tidy export, per-zone local-day bounds, SWT-derived pF rows, and browser-local cloud display settings landed without adding canonical mutations | Edge `d1db6fda` and `3a1ad5c7`; server `de36cd52` and `767e1b18` |
 
 ## Status rules
 
@@ -50,7 +51,9 @@ come from the fetched integration heads, not the earlier planning audit.
 | Device assignment, flags, configuration, and unclaim | `parity` | Capable gateways apply complete versioned device aggregates and independent S2120 assignment sets. Cloud desired state covers assignment, unassignment, names, supported flags, depth metadata, STREGA model, and unclaim. ACK plus returning mirrors settle operations; stale bases conflict, replay is idempotent, and legacy gateways retain their prior paths. | Tasks 7 and 8 |
 | Journal entries | `parity` | Five edge events and five cloud commands are active; mirror, replay, desired-state conflict, exports, and cloud workspace suites pass | Task 5 |
 | Farm history mirror | `partial` | Legacy durable delivery remains; the new batch mapper covers `device_data` only | Task 9 |
-| Analysis and recommendations | `partial` | Both repositories contain analysis surfaces; input, scope, missing-data, and result semantics need route-level comparison | Task 8 |
+| Portable history views and exports | `parity` | Both deployments expose scoped zone and account-wide tidy CSV export, resolve date-only bounds in each zone's IANA timezone, preserve source identity, and emit derived pF rows only for positive SWT kPa. Saved history workspace and card preference state remains presentation-local by design. | Task 8 |
+| Analysis and recommendations | `parity` | Both deployments expose scoped channel discovery, series reads, and owner-scoped saved-view create, update, list, and delete. Missing measurements remain absent or null. Analysis views remain presentation-local and do not enter farm sync. | Task 8 |
+| Portable display settings | `parity` | Both deployments use the same browser keys for language, theme, SWT unit, dashboard refresh, and display-only module visibility. Cloud settings issue no API mutations; hiding scheduling UI does not deactivate edge schedules. | Task 8 |
 | Account scope and per-gateway grants | `parity` | Edge owner-plus-grant enforcement and server per-gateway membership authorization pass for reads, writes, and effects; mirrors retain local user and assignment UUIDs | Tasks 3, 6, and 7 |
 | Cloud access administration | `parity` | Cloud desired state queues six versioned commands; edge applies or rejects them transactionally; ACK plus mirror convergence drives pending, conflict, and rejection UI | Tasks 4 and 7 |
 | Installation recovery | `cloud-missing` | No stable `installation_uuid` recovery model or encrypted recovery bundle exists | Task 10 |

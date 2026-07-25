@@ -702,6 +702,66 @@ always cleared the 4,096 MiB threshold. No process was terminated. No
 production host, live gateway, external key provider, or AgroLink SMB share
 was accessed.
 
+### Task 8d history, analysis, export, and settings parity
+
+The edge now exposes account-wide history export through the canonical history
+helper and `GET /api/history/export.csv?scope=allZones`. The route selects only
+zones visible to the authenticated account, orders zones deterministically,
+uses each zone's IANA timezone for local-day bounds, and preserves the tidy CSV
+schema, source identity, and positive-SWT pF derivative rows. The two
+maintained flow profiles remain byte-identical.
+
+The edge saved-analysis lifecycle now includes
+`DELETE /api/analysis/views/:id`. Deletion binds both view ID and authenticated
+user ID, returning not found for a view outside the caller's ownership.
+Channel and series reads remain constrained to visible zones. Saved history
+workspaces, card preferences, and analysis views remain presentation state
+local to each deployment; none creates a sync event or pending command.
+
+The server account-wide export now resolves raw and aggregated dates through
+the mirrored zone's timezone instead of UTC midnight. A history-owned timezone
+reader avoids adding a package dependency on zone mutation code. Exports add a
+four-decimal pF row for every positive SWT kPa row and omit pF for zero,
+negative, non-finite, or absent measurements. Tests cover Europe/Zurich and
+UTC zones in the same export.
+
+Cloud `/settings` stores language, light/dark/system theme, SWT unit, dashboard
+auto-refresh, and module visibility in the same `osi.*` browser keys as the
+edge. Theme initializes before render, polling honors the refresh preference,
+and live SWT sensor surfaces use the shared formatter. Module switches only
+hide matching dashboard sections. In particular, hiding scheduling UI neither
+calls an API nor deactivates canonical edge schedules. Journal capture detail
+remains edge-local, and support requests remain in Task 8e.
+
+Task 8d verification:
+
+| Command | Result |
+|---|---|
+| Edge history helper and history API contract suites | exit 0 |
+| Edge scoped-access selection | exit 0; 25 tests passed |
+| `node scripts/verify-profile-parity.js` and `node scripts/verify-sync-flow.js` | exit 0; maintained profiles and umbrella sync gates passed |
+| Edge `npm run test:unit` | exit 0; 94 source-contract tests and 1,667 Vitest tests passed |
+| Edge `npm run build` | exit 0 |
+| Focused server history service, controller, and architecture selections | exit 0 |
+| Focused cloud settings, refresh, module, locale, theme, and SWT tests | exit 0; 24 tests passed |
+| Cloud `NODE_OPTIONS=--max-old-space-size=2048 npm run test:unit` | exit 0; 45 source-contract tests and 331 Vitest tests passed |
+| Cloud production build | exit 0; 1,733 modules transformed with the existing chunk-size warning |
+| Cloud `_JAVA_OPTIONS=-Xmx1536m NODE_OPTIONS=--max-old-space-size=2048 ./gradlew test --no-daemon --max-workers=2` | exit 0; `BUILD SUCCESSFUL in 1m 25s`, including a fresh production frontend build |
+| Locale key parity, anti-slop checks, full-diff review, and `git diff --check` | exit 0 |
+
+Edge commits `d1db6fda` and
+`3a1ad5c79886a0b19aa2da24e3a0013c8575fe9b` and server commits
+`de36cd52ca0cc84aaa8fa98dfd01ebbad8f281b4` and
+`767e1b18253c175eac3e637d89ad569a4b35187a` were pushed to their target
+branches. Remote lookups matched the exact implementation heads.
+
+The final server gate started with 13,854 MiB available and monitored between
+12,688 MiB and 14,512 MiB. Every sample cleared the 4,096 MiB threshold. The
+first invocation used the repository root, which has no Gradle wrapper, and
+exited before starting tests; rerunning from `backend/` passed. No process was
+terminated. No production host, live gateway, external key provider, or
+AgroLink SMB share was accessed.
+
 ### Program ownership
 
 The network planning program is finished. Its final local commit is `8f73306f`
