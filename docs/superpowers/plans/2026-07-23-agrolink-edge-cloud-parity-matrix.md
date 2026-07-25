@@ -29,6 +29,7 @@ come from the fetched integration heads, not the earlier planning audit.
 | 8d | History and analysis lifecycle parity, account-wide tidy export, per-zone local-day bounds, SWT-derived pF rows, and browser-local cloud display settings landed without adding canonical mutations | Edge `d1db6fda` and `3a1ad5c7`; server `de36cd52` and `767e1b18` |
 | 8e | Authenticated cloud accounts can submit portable support requests against a confirmed linked gateway and follow account-owned status history; edge diagnostics remain edge-only | Edge design `9335297e`; server `13e539a4` and `f15d1661` |
 | 9 | Eight history families converge through shadow validation, bounded durable backfill, tailing, correction, and repair; manifests match ordered keys and hashes with zero tombstones | Edge `0803eccb` and `7e30e6a4`; server `ad997b88`, `5339120b`, and `9cecd0af` |
+| 10 | Stable installation identity, verifier v2, encrypted local/test bundle custody, preview, interruption, reconciliation gating, and rollback scaffolding landed; production key custody and the stop-loss restore verbs remain deferred | Edge `0c742a52`, `77d3c52a`, and `45e2a57e`; server `5b4eff4f`, `fe197132`, and `adba3c66` |
 
 ## Status rules
 
@@ -59,7 +60,7 @@ come from the fetched integration heads, not the earlier planning audit.
 | Support request submission and status | `parity` | Edge submissions remain locally durable and deliver through `WORK_REQUEST_SUBMITTED`. Authenticated cloud accounts submit the same portable fields directly into the existing intake and operator queue after linked-gateway validation, then list only their own direct requests. Cloud submission emits no farm sync event or edge command and does not claim to collect Pi diagnostics. | Task 8 |
 | Account scope and per-gateway grants | `parity` | Edge owner-plus-grant enforcement and server per-gateway membership authorization pass for reads, writes, and effects; mirrors retain local user and assignment UUIDs | Tasks 3, 6, and 7 |
 | Cloud access administration | `parity` | Cloud desired state queues six versioned commands; edge applies or rejects them transactionally; ACK plus mirror convergence drives pending, conflict, and rejection UI | Tasks 4 and 7 |
-| Installation recovery | `cloud-missing` | No stable `installation_uuid` recovery model or encrypted recovery bundle exists | Task 10 |
+| Installation recovery | `partial` | Both sides bind a stable `installation_uuid` across EUI replacement. The server supports verifier-v2 links, envelope-encrypted local/test bundles, in-memory SQLite preview, durable recovery state, audit, short-lived bound download tokens, interruption, receipt-gated completion, and rollback. The edge adapter validates a temporary download and emits the exact `prepare-database-restore` invocation without granting mutation authority. Production key custody and the currently reverted stop-loss restore verbs remain deferred. | Task 10 |
 | Optimistic zone edits | `parity` | Selected-gateway create, aggregate update, location, and delete use durable desired state. Pending creates remain visible, stale versions conflict, and canonical mirrors settle applied operations. | Tasks 4 and 8 |
 
 ## Deliberate product split
@@ -70,11 +71,13 @@ come from the fetched integration heads, not the earlier planning audit.
 | Local network and AgroLink network-drive transport | `edge-only` | Final design and plan are boundary inputs; future tables and imported readings do not enter sync |
 | Fan, filesystem, database download, and firmware controls | `edge-only` | Gateway operations, not portable farm workflows |
 | Fleet administration and server operations | `cloud-only` | Cross-installation operational scope |
-| Encrypted recovery storage | `cloud-only` | Server custody; restored state still becomes edge-canonical |
+| Encrypted recovery storage | `cloud-only` | Server custody is implemented behind explicit local/test key properties. No production provider is selected; restored state still becomes edge-canonical. |
 | Detailed SoilHive hydraulic profile | `cloud-only` | The canonical portable zone field is `soil_type`. Hydraulic catalog values are derived cloud data and are not written back to the edge aggregate. Missing values render as absent, never numeric zero. |
 | Incremental bootstrap snapshots | `deferred` | Existing plan defers until scale or measured load justifies the complexity |
 | Schema-driven DTO generation | `deferred` | Superseded by the narrow schema/contract ownership ADR; do not execute |
 | Legacy history-path removal | `deferred` | Requires maintainer approval after the durable batch path converges |
+| Production recovery-key provider | `deferred` | Requires an explicit provider, credential, cost, rotation, and operational decision outside Task 10 |
+| Production database restore execution | `deferred` | The edge adapter is non-mutating because `prepare-database-restore` and `complete-database-restore-reconciliation` remain pinned but reverted in the stop-loss protocol CLI |
 
 ## Contract and catalog baseline
 

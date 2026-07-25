@@ -895,6 +895,79 @@ The legacy event and bootstrap paths remain enabled. Their removal and
 incremental bootstrap remain deferred. No production host, live gateway,
 external recovery-key provider, or AgroLink SMB share was accessed.
 
+### Task 10 installation-bound recovery
+
+The edge now persists one UUIDv4 installation identity independently of the
+gateway EUI. Migration `0041__installation_identity.sql` adds the identity,
+link reference, recovery state, and local audit table. Data migration
+`0042__installation_identity_backfill.sql` creates an identity only for an
+already-provisioned database. Blank release seeds remain unprovisioned.
+Account link and bootstrap advertise `installation_recovery_v1`; offline
+verifier v2 binds the password verifier to the installation UUID while old
+gateways retain the EUI-bound v1 path.
+
+The server installation registry owns the current EUI and ordered previous
+EUIs. Linked accounts record whether installation recovery is supported.
+Password changes issue verifier v2 only for a capable installation-bound
+link. Operational aggregates remain keyed by gateway EUI.
+
+Recovery bundles use a random AES-256-GCM data key and authenticated metadata.
+`RecoveryKeyProvider` wraps that key. Durable rows contain ciphertext, nonces,
+wrapped-key material, provider reference, metadata, hash, and length; they
+contain no plaintext database column. The only provider in this task is a
+property-gated local AES-GCM provider. Preview decrypts into memory, runs
+SQLite `PRAGMA integrity_check` against an in-memory deserialized database,
+checks ownership, installation and current EUI, age, migration head, hash,
+length, and witness metadata, then records a preview operation and audit row.
+
+Starting recovery requires the exact preview hash and a rollback bundle.
+`RESTORING`, `RECONCILING`, and `BLOCKED` survive process restart in PostgreSQL.
+Only a bound `DATABASE_RESTORE_RECONCILED` receipt with protocol state `CLEAR`
+returns the installation to `ACTIVE`. Interruption leaves it blocked.
+Rollback selects the recorded rollback bundle and uses the same gateway and
+short-lived operation-token boundary.
+
+The local/test endpoints are absent unless both local key properties are
+configured. The edge adapter accepts only a regular temporary SQLite file,
+rejects symlinks and `/data/db/farming.db`, verifies identity, EUI, length,
+hash, metadata, and every pinned protocol argument, then emits the future
+`prepare-database-restore` command with `mutationAuthorized: false`. It does
+not execute the command or replace a database.
+
+Task 10 verification:
+
+| Command | Result |
+|---|---|
+| Server focused recovery tests | exit 0; 20 bundle, key, token, SQLite, controller-order, and operation-state tests passed |
+| Server PostgreSQL `FlywayMigrationIT` | exit 0; migration and entity mappings passed on PostgreSQL 16 |
+| `_JAVA_OPTIONS=-Xmx1536m NODE_OPTIONS=--max-old-space-size=2048 ./gradlew test --no-daemon --max-workers=2` | exit 0; `BUILD SUCCESSFUL in 1m 10s` |
+| `_JAVA_OPTIONS=-Xmx1536m NODE_OPTIONS=--max-old-space-size=2048 ./gradlew build --no-daemon --max-workers=2` | exit 0; `BUILD SUCCESSFUL in 9s` |
+| `node --test scripts/installation-recovery-adapter.test.js` | exit 0; five temporary-database and fail-closed adapter tests passed |
+| Edge installation schema and flow tests | exit 0; blank seed, provisioned upgrade, link/bootstrap, recovery state, and verifier v1/v2 passed |
+| Edge DB schema, silent-catch, profile-parity, and umbrella sync verifiers | exit 0; seven DBs passed, maintained profiles matched, and 164 empty catches equalled the ratchet |
+
+The tracked `sync-protocol-capability-cli.test.js` is not an accepted Task 10
+gate. Commit `ee3c29ad` reverted the implementation that its positive
+`initialize` and `status` tests still expect, while the tracked CLI now
+returns `NOT_IMPLEMENTED_IN_THIS_SLICE`. Task 10 did not reverse that safety
+decision. The adapter records `PINNED_NOT_IMPLEMENTED` and cannot authorize
+database mutation.
+
+Edge design and implementation commits
+`0c742a524847d461622481de45f41c5f3201bdf3`,
+`77d3c52a03dff0c1db431b27f693597d8f70aff0`, and
+`45e2a57e98688eab62f20e2e3127a49dea7cbf15` were pushed to
+`design-sync/agrolink`. Server commits
+`5b4eff4f57347baed50790f28d94faaefaaea5b9`,
+`fe19713262f359001c75c35dcf069b97132885d1`, and
+`adba3c660618d130a75a06889e23f866881933d2` were pushed to
+`AgroLink`. Every remote lookup matched the local SHA.
+
+Heavyweight checks started with 13,804-14,493 MiB available and remained above
+13,000 MiB while sampled. No process was terminated. No production host, live
+gateway, external key provider, recovery bundle upload, or AgroLink SMB share
+was accessed.
+
 ### Program ownership
 
 The network planning program is finished. Its final local commit is `8f73306f`
