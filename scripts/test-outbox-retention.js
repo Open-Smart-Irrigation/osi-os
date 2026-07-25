@@ -20,7 +20,18 @@ const FLOW_PATHS = [
 ].map((rel) => path.join(REPO, rel));
 
 const TELEMETRY = ['DEVICE_DATA', 'CHAMELEON_READING', 'DENDRO_READING', 'DENDRO_DAILY', 'ZONE_ENVIRONMENT', 'ZONE_RECOMMENDATION'];
-const PROTECTED = ['IRRIGATION_EVENT', 'SCHEDULE', 'ZONE', 'DEVICE', 'GATEWAY_LOCATION'];
+const PROTECTED = [
+  'IRRIGATION_EVENT',
+  'SCHEDULE',
+  'ZONE',
+  'DEVICE',
+  'GATEWAY_LOCATION',
+  'IRRIGATION_CALIBRATION',
+  'WEATHER_STATION_ZONES',
+  'USER',
+  'USER_ZONE_ASSIGNMENT',
+  'USER_PLOT_ASSIGNMENT',
+];
 
 function nodeById(flowPath, id) {
   return JSON.parse(fs.readFileSync(flowPath, 'utf8')).find((n) => n.id === id);
@@ -73,36 +84,26 @@ test('both profiles have byte-identical prune-sync-outbox func', () => {
 });
 
 // The aggregate-partition guard: the node's declared telemetry ∪ protected sets
-// must equal EXACTLY the distinct aggregate_type literals across all 17
+// must equal EXACTLY the distinct aggregate_type literals across all 27
 // INSERT-INTO-sync_outbox triggers. Extract aggregate_type from each trigger by
-// reading the value in the position/label following the `aggregate_type` column —
-// robust to new types the node hasn't classified (the point of the guard).
+// reading the second INSERT value (the position of `aggregate_type`) — robust to
+// unrelated uppercase literals in trigger predicates and payloads.
 function triggerAggregateTypes(seed) {
   const blocks = seed.split(/CREATE TRIGGER/).filter((b) => b.includes('INSERT INTO sync_outbox'));
   const types = new Set();
   for (const b of blocks) {
-    // Case A: `INSERT INTO sync_outbox(... aggregate_type ...) VALUES (<uuid>, 'TYPE', ...)`
-    //   — the 2nd column is aggregate_type; the first caps string literal after VALUES is it.
-    // Case B: a CASE expression producing the aggregate_type — capture every caps literal
-    //   that is used as an aggregate_type (they are the ones NOT ending in an op-ish suffix
-    //   AND appearing before the `op` position). To stay robust we collect ALL caps string
-    //   literals in the INSERT column/VALUES region and let the assertion below flag any not
-    //   in the declared union — a genuinely new, unclassified type WILL surface.
-    const region = b.slice(0, b.indexOf('json_object') === -1 ? b.length : b.indexOf('json_object'));
-    for (const m of region.matchAll(/'([A-Z][A-Z0-9_]+)'/g)) {
-      const lit = m[1];
-      // aggregate_type literals are the short subjects (DEVICE_DATA), not the op verbs
-      // (DEVICE_DATA_APPENDED). Heuristic: an aggregate_type has no trailing op suffix.
-      if (!/_(APPENDED|UPSERTED|DELETED|UNCLAIMED|UNASSIGNED|ASSIGNED|UPDATED)$/.test(lit)) types.add(lit);
-    }
+    const insert = b.slice(b.indexOf('INSERT INTO sync_outbox'));
+    const match = insert.match(/\)\s*(?:VALUES\s*\(|SELECT)\s*[\s\S]*?,\s*'([A-Z][A-Z0-9_]+)'/);
+    assert.ok(match, 'could not extract aggregate_type from outbox trigger');
+    types.add(match[1]);
   }
   return types;
 }
 
-test('declared sets partition exactly the trigger set aggregate_types (17 triggers)', () => {
+test('declared sets partition exactly the trigger set aggregate_types (27 triggers)', () => {
   const seed = fs.readFileSync(SEED, 'utf8');
   const blocks = seed.split(/CREATE TRIGGER/).filter((b) => b.includes('INSERT INTO sync_outbox'));
-  assert.equal(blocks.length, 17, `expected 17 outbox triggers, found ${blocks.length}`);
+  assert.equal(blocks.length, 27, `expected 27 outbox triggers, found ${blocks.length}`);
   const declared = new Set([...TELEMETRY, ...PROTECTED]);
   const types = triggerAggregateTypes(seed);
   // Every aggregate_type a trigger writes MUST be classified (this is what forces a
