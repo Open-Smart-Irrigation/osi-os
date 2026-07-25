@@ -66,7 +66,8 @@
     },
     "export": {
       "csv": "CSV exportieren",
-      "png": "PNG exportieren"
+      "png": "PNG exportieren",
+      "allZonesCsv": "CSV für alle Zonen exportieren"
     },
     "legend": {
       "label": "Diagrammlegende",

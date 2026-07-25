@@ -1975,6 +1975,27 @@ async function buildZoneExportCsv(db, options = {}) {
   return { columns: AGG_CSV_COLUMNS, rows: await aggregateZoneExportRows(db, scope) };
 }
 
+async function buildAllZonesExportCsv(db, options = {}) {
+  const zoneIds = Array.from(new Set(
+    (Array.isArray(options.zoneIds) ? options.zoneIds : [])
+      .map(Number)
+      .filter((zoneId) => Number.isInteger(zoneId) && zoneId > 0)
+  )).sort((left, right) => left - right);
+  const rows = [];
+
+  for (const zoneId of zoneIds) {
+    const result = await buildZoneExportCsv(db, { ...options, zoneId });
+    rows.push(...result.rows);
+  }
+
+  rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
+    || String(left.zone).localeCompare(String(right.zone))
+    || String(left.card_type).localeCompare(String(right.card_type))
+    || String(left.source_key).localeCompare(String(right.source_key))
+    || String(left.channel_key).localeCompare(String(right.channel_key)));
+  return { columns: RAW_CSV_COLUMNS, rows };
+}
+
 async function writeZoneCsv(options = {}) {
   const fs = require('fs');
   const path = require('path');
@@ -2657,6 +2678,7 @@ module.exports = {
   listAnalysisViews: analysis.listAnalysisViews,
   resolveAnalysisSeries: analysis.resolveAnalysisSeries,
   saveAnalysisView: analysis.saveAnalysisView,
+  deleteAnalysisView: analysis.deleteAnalysisView,
   deriveCardId,
   deriveCardsForZone,
   deriveGatewayCard,
@@ -2678,6 +2700,7 @@ module.exports = {
   rollupRowsToResult,
   startOfLocalDayMs,
   buildZoneExportCsv,
+  buildAllZonesExportCsv,
   RAW_CSV_COLUMNS,
   AGG_CSV_COLUMNS,
   toCsv,

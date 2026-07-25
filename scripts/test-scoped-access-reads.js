@@ -303,6 +303,41 @@ test('F4: history zone reads allow owned and granted zones but hide foreign zone
   }
 });
 
+test('F4: account-wide history export contains only visible zones', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('AA00000000000001', 'Zone one sensor', 'KIWI_SENSOR', 2, 1, '2026-01-01', '2026-01-01'),
+      ('AA00000000000002', 'Zone two sensor', 'KIWI_SENSOR', 1, 2, '2026-01-01', '2026-01-01');
+    INSERT INTO device_data(deveui, recorded_at, swt_1) VALUES
+      ('AA00000000000001', '2026-01-02T08:00:00.000Z', 20),
+      ('AA00000000000002', '2026-01-02T09:00:00.000Z', 40);
+  `);
+  try {
+    const msg = historyRequest(3, 'view1', 'GET', '/api/history/export.csv');
+    msg.req.query = {
+      scope: 'allZones',
+      from: '2026-01-02',
+      to: '2026-01-02',
+      granularity: 'raw',
+    };
+    const response = await executeFunction(loadNode('history-api-router-fn'), {
+      msg,
+      env: ENV,
+      db,
+    });
+
+    assert.equal(response.result && response.result.statusCode, 200);
+    assert.match(response.result.payload, /Z One/);
+    assert.doesNotMatch(response.result.payload, /Z Two/);
+  } finally {
+    db.close();
+  }
+});
+
 test('F4b: gateway history is admin-only while scoped access is enabled', async () => {
   const researcherDb = seedScopedDb();
   researcherDb.exec("UPDATE irrigation_zones SET gateway_device_eui = 'A84041ABCDEF0002' WHERE id = 2");
@@ -685,6 +720,46 @@ test('F7: analysis views remain per-user and drop foreign selectors', async () =
     assert.equal(response.result.payload.views[0].name, 'Viewer view');
     assert.deepEqual(response.result.payload.views[0].selectors, []);
     assert.deepEqual(response.result.payload.views[0].droppedSeriesIds, [foreign.seriesId]);
+  } finally {
+    db.close();
+  }
+});
+
+test('F7: analysis view deletion cannot cross user ownership', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS analysis_views (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      owner_user_uuid TEXT,
+      name TEXT NOT NULL,
+      view_json TEXT NOT NULL,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO analysis_views(user_id, owner_user_uuid, name, view_json) VALUES
+      (2, 'u-res1', 'Researcher view', '{"schemaVersion":1,"selectors":[]}'),
+      (3, 'u-view1', 'Viewer view', '{"schemaVersion":1,"selectors":[]}');
+  `);
+  try {
+    const foreign = await executeFunction(loadNode('analysis-api-router-fn'), {
+      msg: historyRequest(3, 'view1', 'DELETE', '/api/analysis/views/1', { id: '1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(foreign.result && foreign.result.statusCode, 404);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM analysis_views WHERE id = 1').get().count, 1);
+
+    scopeHelper._resetForTests();
+    const own = await executeFunction(loadNode('analysis-api-router-fn'), {
+      msg: historyRequest(3, 'view1', 'DELETE', '/api/analysis/views/2', { id: '2' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(own.result && own.result.statusCode, 204);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM analysis_views WHERE id = 2').get().count, 0);
   } finally {
     db.close();
   }

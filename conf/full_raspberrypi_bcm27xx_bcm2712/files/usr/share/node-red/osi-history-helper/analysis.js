@@ -491,6 +491,25 @@ function createAnalysis(deps) {
     return parseViewRow(rows[0]);
   }
 
+  async function deleteAnalysisView(db, user = {}, viewId) {
+    const userId = userIdFor(user);
+    const id = Number(viewId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw badRequest('analysis view id must be a positive integer');
+    }
+    const rows = await dbAll(
+      db,
+      'SELECT id FROM analysis_views WHERE id = ? AND user_id = ?',
+      [id, userId]
+    );
+    if (!rows.length) {
+      const error = new Error('analysis view not found');
+      error.statusCode = 404;
+      throw error;
+    }
+    await dbRun(db, 'DELETE FROM analysis_views WHERE id = ? AND user_id = ?', [id, userId]);
+  }
+
   return {
     ANALYSIS_VIEWS_SCHEMA,
     analysisSeriesId,
@@ -498,6 +517,7 @@ function createAnalysis(deps) {
     listAnalysisViews,
     resolveAnalysisSeries,
     saveAnalysisView,
+    deleteAnalysisView,
   };
 }
 

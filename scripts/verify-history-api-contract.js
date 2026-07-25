@@ -17,6 +17,7 @@ const DEFAULT_FLOW_PATH = path.resolve(
 const REQUIRED_ENDPOINTS = [
   ['GET', '/api/history/zones/:zoneId/cards'],
   ['GET', '/api/history/zones/:zoneId/export.csv'],
+  ['GET', '/api/history/export.csv'],
   ['GET', '/api/history/zones/:zoneId/cards/:cardId/data'],
   ['GET', '/api/history/zones/:zoneId/cards/:cardId/advanced'],
   ['GET', '/api/history/gateways/:gatewayEui/cards'],
@@ -35,7 +36,8 @@ const REQUIRED_ENDPOINTS = [
   ['GET', '/api/analysis/channels'],
   ['POST', '/api/analysis/series'],
   ['GET', '/api/analysis/views'],
-  ['POST', '/api/analysis/views']
+  ['POST', '/api/analysis/views'],
+  ['DELETE', '/api/analysis/views/:id']
 ].map(([method, url]) => ({ method, url }));
 
 const REQUIRED_ENDPOINT_KEYS = new Set(REQUIRED_ENDPOINTS.map(endpointKey));
@@ -198,6 +200,9 @@ function verifyHistoryRouterImplementation(flows, failures, extractedModuleSourc
   assertContains(failures, adapterSource, 'osiHistory.buildLocalInterpretations', 'helper-owned local interpretations');
   assertContains(failures, adapterSource, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
   assertContains(failures, adapterSource, 'osiHistory.buildZoneExportCsv', 'helper-owned zone CSV export');
+  assertContains(failures, adapterSource, 'osiHistory.buildAllZonesExportCsv', 'helper-owned account-wide CSV export');
+  assertContains(failures, adapterSource, 'listScopeZoneUuids', 'account-wide CSV export zone-scope resolver');
+  assertContains(failures, adapterSource, "query.scope !== 'allZones'", 'account-wide CSV export scope validation');
   assertContains(failures, adapterSource, 'channels', 'zone CSV export forwards channels query param');
   assertContains(failures, adapterSource, 'site:', 'zone CSV export forwards gateway site id');
   assertContains(failures, adapterSource, 'respondCsv(200, filename, osiHistory.toCsv(result.columns, result.rows))', 'CSV download response');
@@ -269,6 +274,7 @@ function verifyAnalysisRouterImplementation(flows, failures) {
   assertContains(failures, source, 'osiHistory.listAnalysisViews', 'analysis /views calls listAnalysisViews');
   assertContains(failures, source, 'deviceEui: deviceEui, zoneUuids: scopeZoneUuids', 'analysis /views filters saved selectors to owned-plus-granted zones');
   assertContains(failures, source, 'osiHistory.saveAnalysisView', 'analysis /views POST calls saveAnalysisView');
+  assertContains(failures, source, 'osiHistory.deleteAnalysisView', 'analysis /views DELETE calls deleteAnalysisView');
   assertContains(failures, source, 'payload.suggestion = error.suggestion', 'structured analysis suggestions');
   assertNotContains(failures, source, 'sync_outbox', 'edge sync outbox mutation from local-only analysis views');
 }

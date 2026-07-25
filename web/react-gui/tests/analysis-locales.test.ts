@@ -24,10 +24,11 @@ test('all edge locales expose the same analysis translation key shape', () => {
     const common = JSON.parse(readFileSync(join(localesRoot, language, 'common.json'), 'utf8'));
     assert.ok(common.analysis, `${language}/common.json must contain analysis translations`);
     assert.equal(
-      common.analysis.export.allZonesCsv,
-      undefined,
-      `${language}/common.json must not expose server-only all-zones analysis export text`,
+      typeof common.analysis.export.allZonesCsv,
+      'string',
+      `${language}/common.json must translate the portable all-zones export action`,
     );
+    assert.ok(common.analysis.export.allZonesCsv.trim().length > 0);
     assert.deepEqual(keyPaths(common.analysis).sort(), expected, `${language} analysis keys drifted from en`);
   }
 });

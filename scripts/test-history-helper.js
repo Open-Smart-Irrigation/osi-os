@@ -28,6 +28,7 @@ const expectedExports = [
   'resolveAnalysisSeries',
   'listAnalysisViews',
   'saveAnalysisView',
+  'deleteAnalysisView',
   'deriveCardId',
   'deriveCardsForZone',
   'deriveGatewayCard',
@@ -48,6 +49,7 @@ const expectedExports = [
   'legacySensorHistory',
   'legacyRainDailyHistory',
   'buildZoneExportCsv',
+  'buildAllZonesExportCsv',
   'toCsv',
   'writeZoneCsv',
   'rotateZoneCsv',
@@ -436,6 +438,39 @@ test('saveAnalysisView rejects an empty or oversized name', async () => {
         return true;
       }
     );
+  } finally {
+    db.close();
+  }
+});
+
+test('deleteAnalysisView enforces owner scope and removes only the requested view', async () => {
+  const db = await multiUserAnalysisFixtureDb();
+  try {
+    db.runSql(helper.ANALYSIS_VIEWS_SCHEMA);
+    const first = await helper.saveAnalysisView(db, { userId: 1, ownerUserUuid: 'user-one-uuid' }, {
+      name: 'User one view',
+      selectors: [],
+      schemaVersion: 1,
+    });
+    await helper.saveAnalysisView(db, { userId: 2, ownerUserUuid: 'user-two-uuid' }, {
+      name: 'User two view',
+      selectors: [],
+      schemaVersion: 1,
+    });
+
+    await assert.rejects(
+      () => helper.deleteAnalysisView(db, { userId: 2 }, first.id),
+      (error) => {
+        assert.strictEqual(error.statusCode, 404);
+        return true;
+      },
+    );
+    assert.strictEqual((await helper.listAnalysisViews(db, { userId: 1, deviceEui: 'EUI' })).length, 1);
+
+    await helper.deleteAnalysisView(db, { userId: 1 }, first.id);
+
+    assert.deepStrictEqual(await helper.listAnalysisViews(db, { userId: 1, deviceEui: 'EUI' }), []);
+    assert.strictEqual((await helper.listAnalysisViews(db, { userId: 2, deviceEui: 'EUI' })).length, 1);
   } finally {
     db.close();
   }
@@ -1687,6 +1722,46 @@ test('buildZoneExportCsv returns header-only row sets for empty valid ranges', a
     assert.deepStrictEqual(res.columns, helper.RAW_CSV_COLUMNS);
     assert.deepStrictEqual(res.rows, []);
     assert.strictEqual(helper.toCsv(res.columns, res.rows), `${TIDY_CSV_COLUMNS.join(',')}\n`);
+  } finally {
+    db.close();
+  }
+});
+
+test('buildAllZonesExportCsv limits zones, uses local-day boundaries, and sorts the combined rows', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at)
+        VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES
+        (12,'Zurich',1,'zurich','Europe/Zurich','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z'),
+        (13,'UTC',1,'utc','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z'),
+        (14,'Excluded',1,'excluded','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,created_at,updated_at) VALUES
+        ('AA00000000000001','Zurich sensor','DRAGINO_LSN50',1,12,1,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z'),
+        ('AA00000000000002','UTC sensor','DRAGINO_LSN50',1,13,1,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z'),
+        ('AA00000000000003','Excluded sensor','DRAGINO_LSN50',1,14,1,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-30T22:30:00.000Z',10),
+        ('AA00000000000002','2026-07-01T00:30:00.000Z',20),
+        ('AA00000000000003','2026-07-01T00:15:00.000Z',30);
+    `);
+
+    const result = await helper.buildAllZonesExportCsv(db, {
+      zoneIds: [12, 13],
+      from: '2026-07-01',
+      to: '2026-07-01',
+      granularity: 'raw',
+      nowMs: Date.parse('2026-07-03T00:00:00.000Z'),
+    });
+    const kpaRows = result.rows.filter((row) => row.channel_key === 'swt_1');
+
+    assert.deepStrictEqual(result.columns, TIDY_CSV_COLUMNS);
+    assert.deepStrictEqual(kpaRows.map((row) => [row.timestamp, row.zone, row.value]), [
+      ['2026-06-30T22:30:00.000Z', 'Zurich', 10],
+      ['2026-07-01T00:30:00.000Z', 'UTC', 20],
+    ]);
+    assert.ok(!result.rows.some((row) => row.zone === 'Excluded'));
   } finally {
     db.close();
   }

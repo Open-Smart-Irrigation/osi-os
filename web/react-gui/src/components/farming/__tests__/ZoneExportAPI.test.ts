@@ -76,4 +76,28 @@ describe('zoneExportAPI', () => {
     });
     click.mockRestore();
   });
+
+  it('downloads account-wide CSV exports with the canonical scope parameter', async () => {
+    axiosMocks.get.mockResolvedValue({ data: 'timestamp,site,zone\n' });
+    const { historyExportAPI } = await import('../../../services/api');
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    await historyExportAPI.downloadAllZones({
+      from: '2026-06-01',
+      to: '2026-06-03',
+      granularity: 'daily',
+    });
+
+    expect(axiosMocks.get).toHaveBeenCalledWith('/api/history/export.csv', {
+      params: {
+        scope: 'allZones',
+        from: '2026-06-01',
+        to: '2026-06-03',
+        granularity: 'daily',
+      },
+      responseType: 'blob',
+    });
+    expect(click).toHaveBeenCalledTimes(1);
+    click.mockRestore();
+  });
 });

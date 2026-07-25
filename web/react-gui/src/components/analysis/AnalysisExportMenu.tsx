@@ -4,6 +4,7 @@ import type { AnalysisCatalogEntry, AnalysisSeries } from '../../analysis/types'
 import { toTidyCsv } from '../../analysis/csv';
 import { downloadBlob, downloadDataUrl } from '../../analysis/download';
 import { exportFileName } from '../../analysis/exportName';
+import { historyExportAPI, type HistoryExportGranularity } from '../../services/api';
 import type { EChartHandle } from './EChart';
 
 type AnalysisTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -13,6 +14,8 @@ interface AnalysisExportMenuProps {
   catalogById: Map<string, AnalysisCatalogEntry>;
   chartRef: RefObject<EChartHandle | null>;
   username: string | null;
+  exportRange: { from: string; to: string } | null;
+  exportGranularity: HistoryExportGranularity;
 }
 
 export function AnalysisExportMenu({
@@ -20,6 +23,8 @@ export function AnalysisExportMenu({
   catalogById,
   chartRef,
   username,
+  exportRange,
+  exportGranularity,
 }: AnalysisExportMenuProps) {
   const { t: translate } = useTranslation();
   const t = translate as AnalysisTranslate;
@@ -32,6 +37,14 @@ export function AnalysisExportMenu({
   const exportPng = () => {
     const dataUrl = chartRef.current?.getExportDataURL();
     if (dataUrl) downloadDataUrl(exportFileName(username, 'png'), dataUrl);
+  };
+
+  const exportAllZonesCsv = () => {
+    if (!exportRange) return;
+    void historyExportAPI.downloadAllZones({
+      ...exportRange,
+      granularity: exportGranularity,
+    });
   };
 
   return (
@@ -51,6 +64,14 @@ export function AnalysisExportMenu({
         className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--secondary-bg)] disabled:opacity-50"
       >
         {t('analysis.export.png')}
+      </button>
+      <button
+        type="button"
+        disabled={!exportRange}
+        onClick={exportAllZonesCsv}
+        className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--secondary-bg)] disabled:opacity-50"
+      >
+        {t('analysis.export.allZonesCsv')}
       </button>
     </div>
   );

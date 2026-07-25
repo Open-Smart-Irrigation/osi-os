@@ -114,6 +114,7 @@ vi.mock('../../analysis/useAnalysisViews', () => ({
     isLoading: false,
     error: undefined,
     saveView: saveViewMock,
+    deleteView: vi.fn(),
     refresh: vi.fn(),
   }),
 }));
@@ -254,14 +255,16 @@ describe('CrossZoneAnalysisPage', () => {
     expect(exportMenuProps).toHaveBeenCalledWith(expect.objectContaining({ username: 'field-admin' }));
   });
 
-  it('does not pass server-only history export props to the edge export menu', () => {
+  it('passes the resolved range and aggregation to account-wide export', () => {
     catalogState = loadedCatalogState();
     render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
 
     fireEvent.click(screen.getByText('SWT 1'));
 
-    expect(exportMenuProps.mock.lastCall?.[0]).not.toHaveProperty('exportRange');
-    expect(exportMenuProps.mock.lastCall?.[0]).not.toHaveProperty('exportGranularity');
+    expect(exportMenuProps.mock.lastCall?.[0]).toEqual(expect.objectContaining({
+      exportRange: { from: '2026-06-01', to: '2026-06-07' },
+      exportGranularity: 'hourly',
+    }));
   });
 
   it('hydrates saved custom range values into the page controls', () => {

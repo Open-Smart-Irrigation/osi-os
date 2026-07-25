@@ -8,7 +8,7 @@ import { analysisAPI } from '../../services/api';
 import type { AnalysisViewResponse } from '../types';
 
 vi.mock('../../services/api', () => ({
-  analysisAPI: { listViews: vi.fn(), saveView: vi.fn() },
+  analysisAPI: { listViews: vi.fn(), saveView: vi.fn(), deleteView: vi.fn() },
 }));
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -34,13 +34,13 @@ const view = (id: number, name: string): AnalysisViewResponse => ({
 describe('useAnalysisViews', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('lists views without exposing unsupported delete actions', async () => {
+  it('lists views and exposes the portable delete action', async () => {
     (analysisAPI.listViews as ReturnType<typeof vi.fn>).mockResolvedValue([view(1, 'A'), view(2, 'B')]);
 
     const { result } = renderHook(() => useAnalysisViews(), { wrapper });
     await waitFor(() => expect(result.current.views).toHaveLength(2));
 
-    expect(result.current).not.toHaveProperty('deleteView');
+    expect(result.current.deleteView).toEqual(expect.any(Function));
   });
 
   it('prepends a saved view to the cache', async () => {
@@ -54,5 +54,20 @@ describe('useAnalysisViews', () => {
       await result.current.saveView({ name: 'C', viewJson: view(3, 'C').viewJson, isDefault: false });
     });
     expect(result.current.views.map((v) => v.id)).toEqual([3, 2]);
+  });
+
+  it('deletes a view and removes it from the cache', async () => {
+    (analysisAPI.listViews as ReturnType<typeof vi.fn>).mockResolvedValue([view(1, 'A'), view(2, 'B')]);
+    (analysisAPI.deleteView as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useAnalysisViews(), { wrapper });
+    await waitFor(() => expect(result.current.views).toHaveLength(2));
+
+    await act(async () => {
+      await result.current.deleteView(1);
+    });
+
+    expect(analysisAPI.deleteView).toHaveBeenCalledWith(1);
+    expect(result.current.views.map((v) => v.id)).toEqual([2]);
   });
 });

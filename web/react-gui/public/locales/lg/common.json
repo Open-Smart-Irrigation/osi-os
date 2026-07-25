@@ -66,7 +66,8 @@
     },
     "export": {
       "csv": "Gyamu CSV",
-      "png": "Gyamu PNG"
+      "png": "Gyamu PNG",
+      "allZonesCsv": "Gyamu CSV ya zone zonna"
     },
     "legend": {
       "label": "Ekiraga ebiri ku chart",
