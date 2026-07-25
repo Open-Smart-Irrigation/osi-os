@@ -17,9 +17,14 @@ const backfillMigration = fs.readFileSync(
   'utf8'
 );
 const currentSeed = fs.readFileSync(path.join(root, 'database/seed-blank.sql'), 'utf8');
+const installationMigrationCommit = execFileSync(
+  'git',
+  ['log', '-1', '--format=%H', '--diff-filter=A', '--', 'database/migrations/ordered/0041__installation_identity.sql'],
+  { cwd: root, encoding: 'utf8' }
+).trim();
 const preMigrationSeed = execFileSync(
   'git',
-  ['show', 'HEAD:database/seed-blank.sql'],
+  ['show', `${installationMigrationCommit}^:database/seed-blank.sql`],
   { cwd: root, encoding: 'utf8' }
 );
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-installation-schema-'));
