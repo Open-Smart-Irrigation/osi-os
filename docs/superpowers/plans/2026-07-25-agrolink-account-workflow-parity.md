@@ -1,7 +1,7 @@
 # AgroLink account workflow parity plan
 
 **Date:** 2026-07-25
-**Status:** Approved
+**Status:** Complete
 **Repositories:** `osi-os` and `osi-server`
 
 ## Rebaseline
@@ -33,8 +33,10 @@ server.
 2. Require submission against a currently linked, enabled gateway. Any
    per-gateway role may submit support because this does not read farm data or
    cause a physical effect.
-3. Derive the cloud submitter identity from the authenticated user. Ignore
-   caller-supplied gateway, provenance, request ID, and user identity.
+3. Derive the cloud submitter identity from the authenticated user. Treat the
+   caller-supplied gateway as a selection only, and require it to match a
+   current linked membership. Ignore caller-supplied provenance, request ID,
+   and user identity.
 4. Store direct cloud submissions with `CLOUD_ACCOUNT` provenance and the
    stable private reference `cloud_user_id:<id>`. Edge-delivered submissions
    retain `LINKED_SYNC`; the two account histories do not merge because

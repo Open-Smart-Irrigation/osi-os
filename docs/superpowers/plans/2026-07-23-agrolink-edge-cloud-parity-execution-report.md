@@ -762,6 +762,56 @@ exited before starting tests; rerunning from `backend/` passed. No process was
 terminated. No production host, live gateway, external key provider, or
 AgroLink SMB share was accessed.
 
+### Task 8e account support workflow parity
+
+The cloud now exposes authenticated list and submit routes at
+`/api/v1/support/work-requests`. Submission accepts a selected gateway only
+after confirming the authenticated user's active linked membership and local
+edge identity. The server generates the request UUID, timestamp, provenance,
+and stable account owner reference. Listing binds `CLOUD_ACCOUNT` provenance
+to that owner reference, so it cannot cross account boundaries and remains
+available if the gateway is later unlinked.
+
+Direct cloud requests reuse the existing validation, redaction, rate limits,
+classification, persistence, state transitions, and operator queue. They do
+not emit a farm-sync event or pending command. The cloud UI provides the
+portable request fields and account-owned status history in all seven
+supported locales. It does not offer a diagnostics consent control and states
+that Pi diagnostics are available only from OSI OS.
+
+The canonical edge path remains unchanged: requests are durable in
+`improvement_requests` before the `WORK_REQUEST_SUBMITTED` outbox event is
+delivered. Its one-time status secret and optional diagnostic collection
+remain edge-specific.
+
+Task 8e verification:
+
+| Command | Result |
+|---|---|
+| `node scripts/test-improvement-requests-schema.js` | exit 0; durable outbox payload passed |
+| `node scripts/test-flows-wiring.js` | exit 0; intake, delivery, status, and helper wiring passed |
+| `node scripts/test-scoped-access-reads.js` | exit 0; 25 tests passed |
+| `node scripts/verify-sync-flow.js` | exit 0; sync, schema, contract, and maintained-profile parity gates passed |
+| Edge focused support and settings UI tests | exit 0; 25 tests passed |
+| Focused server service, controller, API, route, form, menu, settings, locale, and architecture tests | exit 0 |
+| Cloud `NODE_OPTIONS=--max-old-space-size=2048 npm run test:unit` | exit 0; 45 source-contract tests and 339 Vitest tests passed |
+| Cloud production build | exit 0; 1,734 modules transformed with the existing chunk-size warning |
+| Cloud `_JAVA_OPTIONS=-Xmx1536m NODE_OPTIONS=--max-old-space-size=2048 ./gradlew test --no-daemon --max-workers=2` | exit 0; `BUILD SUCCESSFUL in 1m 28s`, including a fresh production frontend build |
+| Seven-locale JSON/key parity, anti-slop checks, caller-identity and sync-boundary review, and `git diff --check` | exit 0 |
+
+The canonical edge support implementation is present in
+`c81748402ff7ee271b3cffb39bf671f9ed7d3320`,
+`b4cbb6eeab323811fc6c8f578a28edeb1e11dc00`, and
+`81ddd329a03a40a17b9995758b8a8d6690c1b001`. The row design was pushed in
+`9335297ea539b7300aab00779a50dcd612f679a9`. Server commits
+`13e539a4acf22e327cee0892be1e2ee45abdb73f` and
+`f15d16611a18cc50822429a221eed019e4f38d2e` were pushed to `AgroLink`; remote
+lookups matched the exact implementation head after each accepted slice.
+
+Heavyweight row-5 checks started with 13,907-14,020 MiB available, clearing the
+4,096 MiB threshold. No process was terminated. No production host, live
+gateway, external key provider, or AgroLink SMB share was accessed.
+
 ### Program ownership
 
 The network planning program is finished. Its final local commit is `8f73306f`
