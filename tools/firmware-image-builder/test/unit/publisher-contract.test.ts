@@ -17,7 +17,7 @@ describe('native publisher build contract', () => {
 
   it('keeps publication descriptor-relative and no-follow', async () => {
     const source = await readFile(join(publisherDirectory, 'osi-image-publish.c'), 'utf8');
-    for (const required of ['openat', 'O_NOFOLLOW', 'O_DIRECTORY', 'fsync', 'renameat2', 'RENAME_NOREPLACE', 'S_ISBLK', 'st_dev']) {
+    for (const required of ['openat', 'O_NOFOLLOW', 'O_DIRECTORY', 'fsync', 'renameat2', 'RENAME_NOREPLACE', 'S_ISBLK', 'st_dev', 'fstat(child', 'opened_item', 'errno != 0']) {
       expect(source, required).toContain(required);
     }
     expect(source).toContain('RENAME_NOREPLACE');

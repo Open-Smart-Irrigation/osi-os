@@ -5,6 +5,8 @@ import type { CommandResult, CommandRunOptions } from '../../runner/src/command-
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
 const ROOT = '/tmp/osi-image-builder-images';
+const VERSION = '0.1.0';
+const SOURCE_HASH = 'a'.repeat(64);
 
 function result(stdout: string, overrides: Partial<CommandResult> = {}): CommandResult {
   return {
@@ -29,9 +31,25 @@ function fakeExecutor(reply: CommandResult): PublisherCommandExecutor & { calls:
     run: async (argv, runOptions) => {
       calls.push([...argv]);
       options.push(runOptions);
-      return { ...reply, argv: [...argv] };
+      return { ...reply, argv: reply.argv.length > 0 ? [...reply.argv] : [...argv] };
     },
   };
+}
+
+function validPublishOutput(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    available: true,
+    published: true,
+    quarantined: false,
+    selfTest: false,
+    mutationCount: 1,
+    publisherVersion: VERSION,
+    publisherSourceSha256: SOURCE_HASH,
+    sourceRelativePath: '.osi-image-builder/staging/job-123',
+    destinationRelativePath: 'feature%2Fpublisher/0123456789abcdef0123456789abcdef01234567/rpi-5',
+    renameResult: 'RENAME_NOREPLACE',
+    ...overrides,
+  });
 }
 
 function client(executor: PublisherCommandExecutor) {
@@ -52,25 +70,21 @@ const request = {
 
 describe('publisher client', () => {
   it('rejects arbitrary paths and unsafe publication components before invoking the helper', async () => {
-    const executor = fakeExecutor(result('{"available":true,"published":true}'));
+    const executor = fakeExecutor(result(validPublishOutput()));
     const publisher = client(executor);
     await expect(publisher.publish({ ...request, rootId: ROOT })).rejects.toThrow(/approved root/i);
     await expect(publisher.publish({ ...request, jobId: '../escape' })).rejects.toThrow(/job/i);
     await expect(publisher.publish({ ...request, branchSlug: '../escape' })).rejects.toThrow(/branch/i);
+    await expect(publisher.publish({ ...request, branchSlug: '.' })).rejects.toThrow(/branch/i);
+    await expect(publisher.publish({ ...request, branchSlug: '..' })).rejects.toThrow(/branch/i);
+    await expect(publisher.publish({ ...request, branchSlug: 'a'.repeat(256) })).rejects.toThrow(/branch/i);
     await expect(publisher.publish({ ...request, sourceSha: 'not-a-sha' })).rejects.toThrow(/sha/i);
     await expect(publisher.publish({ ...request, targetId: 'rpi-5/evil' as never })).rejects.toThrow(/target/i);
     expect(executor.calls).toHaveLength(0);
   });
 
   it('passes only the fixed validated argv and parses structured publication output', async () => {
-    const executor = fakeExecutor(result(JSON.stringify({
-      available: true,
-      published: true,
-      mutationCount: 1,
-      sourceRelativePath: '.osi-image-builder/staging/job-123',
-      destinationRelativePath: 'feature%2Fpublisher/0123456789abcdef0123456789abcdef01234567/rpi-5',
-      renameResult: 'RENAME_NOREPLACE',
-    })));
+    const executor = fakeExecutor(result(validPublishOutput()));
     const published = await client(executor).publish(request);
     expect(published).toMatchObject({ available: true, published: true, mutationCount: 1 });
     expect(executor.calls).toEqual([[
@@ -86,13 +100,24 @@ describe('publisher client', () => {
   });
 
   it('returns typed unsupported capability without claiming publication', async () => {
-    const executor = fakeExecutor(result(JSON.stringify({ available: false, published: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' })));
+    const executor = fakeExecutor(result(JSON.stringify({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' })));
     const response = await client(executor).publish(request);
     expect(response).toMatchObject({ available: false, published: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' });
   });
 
   it('exposes quarantine and non-destructive recheck through fixed operations', async () => {
-    const executor = fakeExecutor(result(JSON.stringify({ available: true, mutationCount: 1, quarantined: true })));
+    const executor = fakeExecutor(result(JSON.stringify({
+      available: true,
+      published: false,
+      quarantined: true,
+      selfTest: false,
+      mutationCount: 1,
+      publisherVersion: VERSION,
+      publisherSourceSha256: SOURCE_HASH,
+      sourceRelativePath: '.osi-image-builder/staging/job-123',
+      destinationRelativePath: '.osi-image-builder/quarantine/job-123',
+      renameResult: 'RENAME_NOREPLACE',
+    })));
     const publisher = client(executor);
     await expect(publisher.quarantine(request)).resolves.toMatchObject({ quarantined: true });
     expect(executor.calls[0]).toEqual([
@@ -102,7 +127,7 @@ describe('publisher client', () => {
     executor.run = async (argv, options) => {
       executor.calls.push([...argv]);
       executor.options.push(options);
-      return { ...result(JSON.stringify({ available: true, destination: 'mismatched', staging: 'present', mutationCount: 0 })), argv: [...argv] };
+      return { ...result(JSON.stringify({ available: true, published: false, quarantined: false, selfTest: false, destination: 'mismatched', staging: 'present', mutationCount: 0, errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' })), argv: [...argv] };
     };
     await expect(publisher.recheck(request)).resolves.toMatchObject({ destination: 'mismatched', staging: 'present', mutationCount: 0 });
     expect(executor.calls[1]).toEqual([
@@ -112,12 +137,27 @@ describe('publisher client', () => {
   });
 
   it('keeps the runner adapter on the same production client contract', async () => {
-    const executor = fakeExecutor(result(JSON.stringify({ available: true, published: true, mutationCount: 1 })));
+    const executor = fakeExecutor(result(validPublishOutput()));
     const published = await createRunnerPublisherClient({
       executable: '/opt/osi-image-builder/bin/osi-image-publish',
       approvedRoots: [{ id: 'images', label: 'Images', path: ROOT, quarantinePath: `${ROOT}/.osi-image-builder/quarantine` }],
       commandExecutor: executor,
     }).publish(request);
     expect(published).toMatchObject({ available: true, published: true });
+  });
+
+  it('rejects duplicate roots and contradictory or incomplete helper results', async () => {
+    const root = { id: 'images', label: 'Images', path: ROOT, quarantinePath: `${ROOT}/.osi-image-builder/quarantine` };
+    expect(() => createPublisherClient({ executable: '/opt/osi-image-builder/bin/osi-image-publish', approvedRoots: [root, root], commandExecutor: fakeExecutor(result(validPublishOutput())) })).toThrow(/duplicate/i);
+
+    const cases = [
+      result(validPublishOutput({ extra: true })),
+      result(validPublishOutput(), { argv: ['wrong'], }),
+      result(validPublishOutput(), { signal: 'SIGTERM' }),
+      result(validPublishOutput(), { timedOut: true }),
+      result(JSON.stringify({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 1, errorCode: 'PUBLISHER_UNSUPPORTED' })),
+      result(JSON.stringify({ available: true, published: true, quarantined: false, selfTest: false, mutationCount: 1, renameResult: 'RENAME_NOREPLACE' })),
+    ];
+    for (const reply of cases) await expect(client(fakeExecutor(reply)).publish(request)).rejects.toThrow();
   });
 });
