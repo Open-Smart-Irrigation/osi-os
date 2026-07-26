@@ -7,8 +7,8 @@ import { promisify } from 'node:util';
 import { BuilderError, type BuilderErrorCode } from '../../domain/errors.js';
 import { validateBuilderLock, type BuilderLock } from '../../domain/builder-lock.js';
 import { encodeBranchSlug, inspectReleasePathUnderRoot, withHeldParentUnderRoot } from '../../domain/paths.js';
-import { resolveApprovedRoot, withApprovedRootSnapshot, withStateRootSnapshot, type ApprovedOutputRoot, type BuilderConfig, type LoadedConfig } from '../../config/load.js';
-import { SourceResolverError, type GitResolutionMetadata, type SourceResolverCode } from './git/source-resolver.js';
+import { resolveApprovedRoot, withApprovedRootSnapshot, withStateRootSnapshot, type ApprovedOutputRoot, type BuilderConfig, type LoadedConfig, type StateRootAuthority } from '../../config/load.js';
+import { SourceResolverError, type GitResolutionMetadata, type OfflineFeedPreparation, type SourceResolverCode } from './git/source-resolver.js';
 import type { TargetId } from '../../domain/types.js';
 import type { LoadedManifest, TargetManifest } from '../../manifest/schema.js';
 
@@ -16,6 +16,7 @@ export const PREFLIGHT_TTL_MS = 10 * 60 * 1000;
 const SHA40 = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const PREFLIGHT_ID = /^pf_[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
+const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const PREFLIGHT_COMMAND_TIMEOUT_MS = 5_000;
 const PREFLIGHT_COMMAND_MAX_BUFFER = 8 * 1024;
 
@@ -185,7 +186,10 @@ export interface PreflightSystemdCapability {
 
 export interface PreflightLockCapability { readonly read: (path: string) => Promise<string>; }
 export interface PreflightClockCapability { readonly now: () => Date; }
-export interface PreflightSourceCapability { readonly resolveAtAcceptance: (branch: unknown, expectedSha: unknown) => Promise<Readonly<GitResolutionMetadata>>; }
+export interface PreflightSourceCapability {
+  readonly resolveAtAcceptance: (branch: unknown, expectedSha: unknown) => Promise<Readonly<GitResolutionMetadata>>;
+  readonly prepareOfflineFeeds: (sourceSha: string, stateRoot: StateRootAuthority, jobId: string) => Promise<OfflineFeedPreparation>;
+}
 
 export interface PreflightCapabilities {
   readonly clock: PreflightClockCapability;
@@ -221,6 +225,11 @@ export interface PreflightResult {
   readonly createdAt: string;
   readonly expiresAt: string;
   readonly checks: readonly PreflightCheckRecord[];
+}
+
+export interface AcceptedPreflightResult extends PreflightResult {
+  readonly jobId: string;
+  readonly offlineFeedPreparation: OfflineFeedPreparation;
 }
 
 function passed(id: PreflightCheckId, details: PreflightDetails): PreflightCheckRecord {
@@ -275,8 +284,9 @@ export class PreflightService {
     }
   }
 
-  async accept(preflightId: string, request: PreflightRequest): Promise<PreflightResult> {
+  async accept(preflightId: string, request: PreflightRequest, jobId: string): Promise<AcceptedPreflightResult> {
     if (!PREFLIGHT_ID.test(preflightId)) throw this.#error('PREFLIGHT_INVALID_ID', { preflightId });
+    if (!JOB_ID.test(jobId)) throw this.#error('SOURCE_UNAVAILABLE', { reason: 'invalid job ID' });
     const previous = this.#results.get(preflightId);
     if (previous === undefined) throw this.#error('PREFLIGHT_NOT_FOUND', { preflightId });
     const now = this.#validNow();
@@ -293,7 +303,29 @@ export class PreflightService {
     if (completedAt.getTime() >= Date.parse(previous.expiresAt)) {
       throw this.#error('PREFLIGHT_EXPIRED', { preflightId, expiresAt: previous.expiresAt, checkedAt: completedAt.toISOString() }, rechecked.checks);
     }
-    return immutable({ ...rechecked, preflightId, createdAt: previous.createdAt, expiresAt: previous.expiresAt });
+    let offlineFeedPreparation: OfflineFeedPreparation;
+    try {
+      offlineFeedPreparation = await this.#capabilities.sourceResolver.prepareOfflineFeeds(
+        rechecked.source.sha,
+        this.#loadedConfig.pathAuthorities.stateRoot,
+        jobId,
+      );
+    } catch (error) {
+      const details = {
+        ...(error instanceof SourceResolverError ? error.details : {}),
+        sourceSha: rechecked.source.sha,
+        jobId,
+      };
+      throw this.#error('SOURCE_UNAVAILABLE', details, rechecked.checks);
+    }
+    return immutable({
+      ...rechecked,
+      preflightId,
+      createdAt: previous.createdAt,
+      expiresAt: previous.expiresAt,
+      jobId,
+      offlineFeedPreparation,
+    });
   }
 
   #validNow(): Date {

@@ -35,6 +35,7 @@ import { createOperationDefinition } from '../../runner/src/operation-registry.j
 
 const manifest = loadManifest(new URL('../../manifest/targets.json', import.meta.url).pathname).manifest;
 const targets = manifest.targets;
+const sourceSha = 'a'.repeat(40);
 const packagesCommit = 'd8cd30f4e281d6853b3de134c4f147a807583e43';
 const rustFixture = new URL('../fixtures/openwrt-packages-d8cd30f4/lang/rust/Makefile', import.meta.url).pathname;
 const rootfsFixture = new URL('../../../../openwrt/target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh', import.meta.url).pathname;
@@ -104,6 +105,7 @@ interface Fixture {
   readonly statePath: string;
   readonly stateRoot: StateRootAuthority;
   readonly jobId: string;
+  readonly sourceSha: string;
   readonly workspace: string;
   readonly preparedRoot: string;
   readonly preparedFeeds: OfflineFeedPreparation;
@@ -179,8 +181,12 @@ async function authorityFixture(pathAuthorityDependencies?: Partial<PathAuthorit
       name: feed.name,
       location: feed.location,
       commit: feed.commit,
+      detached: true,
+      clean: true,
       treeSha256: await feedTreeSha256(directory),
       recursiveSubmodulesPrepared: true,
+      recursiveSubmodules: [],
+      recursiveSubmoduleStatusSha256: sha256(''),
     });
   }
   return {
@@ -188,11 +194,16 @@ async function authorityFixture(pathAuthorityDependencies?: Partial<PathAuthorit
     statePath: loaded.stateRoot,
     stateRoot: loaded.pathAuthorities.stateRoot,
     jobId,
+    sourceSha,
     workspace,
     preparedRoot,
     preparedFeeds: {
+      schemaVersion: 1,
       boundary: 'api-prepared-pinned-feeds-v1',
       networkPolicy: 'runner-offline',
+      jobId,
+      sourceSha,
+      preparedAt: '2026-07-26T10:00:00.000Z',
       feeds: prepared,
     },
   };
@@ -220,38 +231,39 @@ function operations(fixture: Fixture, options: OperationsOptions = {}): {
   const calls: Array<{ operationId: TargetSetupOperationId; argv: readonly string[]; environment: string }> = [];
   let activeTarget = targets[0]!;
   const runner: LockedTargetSetupOperations = {
-    async run(operationId, definition) {
+    async run(operationId, definition, workspaceCapability) {
+      const workspace = workspaceCapability.descriptorPath;
       const environment = definition.argv.find((value) => value.startsWith('ENV='))?.slice(4) ?? activeTarget.environment;
       calls.push({ operationId, argv: definition.argv, environment });
-      if (options.commandFailure?.operation === operationId) return options.commandFailure.result;
+      if (options.commandFailure?.operation === operationId) return { ...options.commandFailure.result, workspaceCapability };
       if (operationId === 'activate-target') {
         activeTarget = targets.find((target) => target.environment === environment)!;
-        await removeIfPresent(join(fixture.workspace, 'openwrt/feeds'));
-        await removeIfPresent(join(fixture.workspace, 'openwrt/package/feeds'));
-        await removeIfPresent(join(fixture.workspace, 'openwrt/.pc'));
-        await mkdir(join(fixture.workspace, 'openwrt/.pc'), { recursive: true });
-        await mkdir(join(fixture.workspace, 'openwrt/target/linux/bcm27xx/image'), { recursive: true });
-        const series = await readFile(join(fixture.workspace, 'conf', environment, 'patches/series'));
-        await writeFile(join(fixture.workspace, 'openwrt/.pc/series'), series);
-        await writeFile(join(fixture.workspace, 'openwrt/.pc/applied-patches'), series);
-        await copyFile(rootfsFixture, join(fixture.workspace, 'openwrt/target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh'));
-        await removeIfPresent(join(fixture.workspace, 'conf/.config'));
-        await removeIfPresent(join(fixture.workspace, 'openwrt/.config'));
-        await symlink(`${environment}/.config`, join(fixture.workspace, 'conf/.config'));
-        await symlink('../conf/.config', join(fixture.workspace, 'openwrt/.config'));
+        await removeIfPresent(join(workspace, 'openwrt/feeds'));
+        await removeIfPresent(join(workspace, 'openwrt/package/feeds'));
+        await removeIfPresent(join(workspace, 'openwrt/.pc'));
+        await mkdir(join(workspace, 'openwrt/.pc'), { recursive: true });
+        await mkdir(join(workspace, 'openwrt/target/linux/bcm27xx/image'), { recursive: true });
+        const series = await readFile(join(workspace, 'conf', environment, 'patches/series'));
+        await writeFile(join(workspace, 'openwrt/.pc/series'), series);
+        await writeFile(join(workspace, 'openwrt/.pc/applied-patches'), series);
+        await copyFile(rootfsFixture, join(workspace, 'openwrt/target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh'));
+        await removeIfPresent(join(workspace, 'conf/.config'));
+        await removeIfPresent(join(workspace, 'openwrt/.config'));
+        await symlink(`${environment}/.config`, join(workspace, 'conf/.config'));
+        await symlink('../conf/.config', join(workspace, 'openwrt/.config'));
         const sourceOverride = options.sourceConfigOverride?.[activeTarget.id];
-        if (sourceOverride !== undefined) await writeFile(join(fixture.workspace, 'conf', activeTarget.environment, '.config'), sourceOverride);
+        if (sourceOverride !== undefined) await writeFile(join(workspace, 'conf', activeTarget.environment, '.config'), sourceOverride);
       }
       if (operationId === 'copy-feed-config') {
-        await copyFile(join(fixture.workspace, 'feeds.conf.default'), join(fixture.workspace, 'openwrt/feeds.conf.default'));
-        if (options.corruptCopy) await writeFile(join(fixture.workspace, 'openwrt/feeds.conf.default'), 'changed\n');
+        await copyFile(join(workspace, 'feeds.conf.default'), join(workspace, 'openwrt/feeds.conf.default'));
+        if (options.corruptCopy) await writeFile(join(workspace, 'openwrt/feeds.conf.default'), 'changed\n');
       }
       if (operationId === 'update-feeds') {
-        await symlink('../../feeds/chirpstack-openwrt-feed', join(fixture.workspace, 'openwrt/feeds/chirpstack'));
-        if (options.mutateRustAfter === operationId) await writeFile(join(fixture.workspace, 'openwrt/feeds/packages/lang/rust/Makefile'), 'changed\n');
+        await symlink('../../feeds/chirpstack-openwrt-feed', join(workspace, 'openwrt/feeds/chirpstack'));
+        if (options.mutateRustAfter === operationId) await writeFile(join(workspace, 'openwrt/feeds/packages/lang/rust/Makefile'), 'changed\n');
       }
       if (operationId === 'install-feeds') {
-        const parent = join(fixture.workspace, 'openwrt/package/feeds/chirpstack');
+        const parent = join(workspace, 'openwrt/package/feeds/chirpstack');
         await mkdir(parent, { recursive: true });
         for (const packageName of requiredPackages) {
           if (options.missingLink === packageName) continue;
@@ -260,14 +272,14 @@ function operations(fixture: Fixture, options: OperationsOptions = {}): {
             : `../../../feeds/chirpstack/apps/${packageName}`;
           await symlink(options.wrongLink === packageName ? '../../../feeds/chirpstack/apps/node-red' : targetPath, join(parent, packageName));
         }
-        if (options.mutateRustAfter === operationId) await writeFile(join(fixture.workspace, 'openwrt/feeds/packages/lang/rust/Makefile'), 'changed\n');
+        if (options.mutateRustAfter === operationId) await writeFile(join(workspace, 'openwrt/feeds/packages/lang/rust/Makefile'), 'changed\n');
       }
       if (operationId === 'resolve-config') {
         const resolved = options.resolvedConfigOverride?.[activeTarget.id] ?? configFor(activeTarget);
-        await writeFile(join(fixture.workspace, 'openwrt/.config'), resolved);
+        await writeFile(join(workspace, 'openwrt/.config'), resolved);
       }
       await options.afterOperation?.(operationId);
-      return result(definition.argv);
+      return { ...result(definition.argv), workspaceCapability };
     },
   };
   return { runner, calls };
@@ -277,6 +289,7 @@ function input(fixture: Fixture, runner: LockedTargetSetupOperations, target = t
   return {
     stateRoot: fixture.stateRoot,
     jobId: fixture.jobId,
+    sourceSha: fixture.sourceSha,
     target,
     targets,
     preparedFeeds: fixture.preparedFeeds,
@@ -352,6 +365,21 @@ describe('target setup', () => {
     await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({ code, operationId });
   });
 
+  it('rejects operation evidence that reconstructs instead of returning the held capability', async () => {
+    const fixture = await authorityFixture();
+    const base = operations(fixture);
+    const runner: LockedTargetSetupOperations = {
+      async run(operationId, definition, capability) {
+        const command = await base.runner.run(operationId, definition, capability);
+        return { ...command, workspaceCapability: { ...capability } };
+      },
+    };
+    await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({
+      code: 'PATCH_STATE_AMBIGUOUS',
+      operationId: 'activate-target',
+    });
+  });
+
   it('accepts the exact approved rootfs implementation in the named reverse-applicable state', async () => {
     const approved = await readFile(rootfsFixture, 'utf8');
     const inputValue = {
@@ -384,6 +412,16 @@ describe('target setup', () => {
       series: ['other.patch', ROOTFS_PADDING_PATCH],
       applied: ['other.patch'],
       output: 'Reversed (or previously applied) patch detected: other.patch',
+      rootfsScript: approved,
+    })).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
+  });
+
+  it('does not attribute an evil reversed patch to an adjacent approved patch line', async () => {
+    const approved = await readFile(rootfsFixture, 'utf8');
+    expect(() => decideRootfsPatchState({
+      series: ['evil.patch', ROOTFS_PADDING_PATCH],
+      applied: ['evil.patch'],
+      output: `Applying ${ROOTFS_PADDING_PATCH}\nReversed (or previously applied) patch detected: evil.patch\n`,
       rootfsScript: approved,
     })).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
   });
@@ -428,6 +466,40 @@ describe('target setup', () => {
   it('rejects a preparation handoff that omits one pinned Git feed', async () => {
     const fixture = await authorityFixture();
     const preparedFeeds = { ...fixture.preparedFeeds, feeds: fixture.preparedFeeds.feeds.filter((feed) => feed.name !== 'routing') };
+    const { runner, calls } = operations(fixture);
+    await expect(resolveTargetSetup({ ...input(fixture, runner), preparedFeeds })).rejects.toMatchObject({ code: 'FEED_INSTALL_FAILED' });
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    ['job ID', { jobId: 'job-other' }],
+    ['source SHA', { sourceSha: 'f'.repeat(40) }],
+  ])('rejects an offline preparation attestation bound to another %s', async (_case, changed) => {
+    const fixture = await authorityFixture();
+    const { runner, calls } = operations(fixture);
+    await expect(resolveTargetSetup({
+      ...input(fixture, runner),
+      preparedFeeds: { ...fixture.preparedFeeds, ...changed },
+    })).rejects.toMatchObject({ code: 'FEED_INSTALL_FAILED' });
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    ['attached checkout', (feed: ApiPreparedFeed) => ({ ...feed, detached: false })],
+    ['dirty checkout', (feed: ApiPreparedFeed) => ({ ...feed, clean: false })],
+    ['unprepared recursion', (feed: ApiPreparedFeed) => ({ ...feed, recursiveSubmodulesPrepared: false })],
+    ['unbound recursion digest', (feed: ApiPreparedFeed) => ({ ...feed, recursiveSubmoduleStatusSha256: 'f'.repeat(64) })],
+    ['escaping submodule path', (feed: ApiPreparedFeed) => ({
+      ...feed,
+      recursiveSubmodules: [{ path: '../escape', commit: 'e'.repeat(40) }],
+      recursiveSubmoduleStatusSha256: sha256(`e${'e'.repeat(39)}\0../escape\n`),
+    })],
+  ])('rejects a prepared feed with %s attestation', async (_case, change) => {
+    const fixture = await authorityFixture();
+    const preparedFeeds = {
+      ...fixture.preparedFeeds,
+      feeds: fixture.preparedFeeds.feeds.map((feed, index) => index === 1 ? change(feed) : feed),
+    } as OfflineFeedPreparation;
     const { runner, calls } = operations(fixture);
     await expect(resolveTargetSetup({ ...input(fixture, runner), preparedFeeds })).rejects.toMatchObject({ code: 'FEED_INSTALL_FAILED' });
     expect(calls).toEqual([]);
@@ -501,6 +573,68 @@ describe('target setup', () => {
     const { runner, calls } = operations(fixture);
     await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({ code: 'WORKTREE_CREATE_FAILED' });
     expect(calls).toEqual([]);
+  });
+
+  it('binds every registered operation to one held workspace descriptor capability', async () => {
+    const fixture = await authorityFixture();
+    const base = operations(fixture);
+    const capabilities: unknown[] = [];
+    const runner: LockedTargetSetupOperations = {
+      async run(operationId, definition, capability) {
+        capabilities.push(capability);
+        if (!capability || !capability.descriptorPath.startsWith(`/proc/${process.pid}/fd/`)) {
+          throw new Error('operation has no held workspace capability');
+        }
+        return base.runner.run(operationId, definition, capability);
+      },
+    };
+
+    await expect(resolveTargetSetup(input(fixture, runner))).resolves.toMatchObject({ target: 'rpi-5' });
+    expect(capabilities).toHaveLength(10);
+    expect(new Set(capabilities).size).toBe(1);
+  });
+
+  it('cannot redirect an operation when the named workspace is replaced at the command boundary', async () => {
+    const fixture = await authorityFixture();
+    const base = operations(fixture);
+    const heldWorkspace = `${fixture.workspace}.held`;
+    let replaced = false;
+    const runner: LockedTargetSetupOperations = {
+      async run(operationId, definition, capability) {
+        if (!replaced) {
+          replaced = true;
+          await rename(fixture.workspace, heldWorkspace);
+          await mkdir(join(fixture.workspace, 'openwrt'), { recursive: true });
+        }
+        return base.runner.run(operationId, definition, capability);
+      },
+    };
+
+    await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({ code: 'WORKTREE_CREATE_FAILED' });
+    expect(replaced).toBe(true);
+    expect(await lstat(join(fixture.workspace, 'openwrt/.pc')).catch(() => null)).toBeNull();
+    expect((await lstat(join(heldWorkspace, 'openwrt/.pc'))).isDirectory()).toBe(true);
+  });
+
+  it('rejects replacement of the state-root parent chain at the command boundary', async () => {
+    const fixture = await authorityFixture();
+    const base = operations(fixture);
+    const stateParent = join(fixture.root, 'state-home');
+    const heldStateParent = `${stateParent}.held`;
+    let replaced = false;
+    const runner: LockedTargetSetupOperations = {
+      async run(operationId, definition, capability) {
+        if (!replaced) {
+          replaced = true;
+          await rename(stateParent, heldStateParent);
+          await mkdir(fixture.statePath, { recursive: true });
+        }
+        return base.runner.run(operationId, definition, capability);
+      },
+    };
+
+    await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({ code: 'WORKTREE_CREATE_FAILED' });
+    expect(replaced).toBe(true);
   });
 
   it('rejects replacement of the workspace binding after its descriptor is held', async () => {

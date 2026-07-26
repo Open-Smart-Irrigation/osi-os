@@ -44,6 +44,23 @@ function validSource() {
   };
 }
 
+function sourceCapability(
+  resolveAtAcceptance: PreflightCapabilities['sourceResolver']['resolveAtAcceptance'] = async () => validSource(),
+): PreflightCapabilities['sourceResolver'] {
+  return {
+    resolveAtAcceptance,
+    prepareOfflineFeeds: async (sourceSha, _stateRoot, jobId) => ({
+      schemaVersion: 1,
+      boundary: 'api-prepared-pinned-feeds-v1',
+      networkPolicy: 'runner-offline',
+      jobId,
+      sourceSha,
+      preparedAt: fixedNow,
+      feeds: [],
+    }),
+  };
+}
+
 function validLock(): Record<string, unknown> {
   return {
     schemaVersion: 1, packageVersion: '2026.07.23.1', imageRepository: 'registry.osi.invalid/builder', imageDigest: digest,
@@ -64,7 +81,7 @@ function capabilities(overrides: Partial<PreflightCapabilities> = {}) {
   };
   const result: PreflightCapabilities & { readonly calls: Record<string, number> } = {
     calls, clock: { now: () => new Date(fixedNow) },
-    sourceResolver: { resolveAtAcceptance: async () => { count('sourceResolver'); return validSource(); } },
+    sourceResolver: sourceCapability(async () => { count('sourceResolver'); return validSource(); }),
     manifest: { inspect: (loaded, targetId) => { count('manifest'); return { sha256: loaded.sha256, target: loaded.manifest.targets.find((candidate) => candidate.id === targetId) }; } },
     repository: { inspect: async () => { count('repository'); return { isGitWorktree: true }; } },
     fileSystem: { statfs: async () => { count('statfs'); return { freeBytes: 25 * 1024 ** 3 }; } }, paths,
@@ -82,6 +99,38 @@ function service(caps: PreflightCapabilities, options: { idFactory?: () => strin
 }
 
 describe('typed preflight checks', () => {
+  it('keeps preflight read-only and prepares offline feeds only for the accepted real job ID', async () => {
+    const prepared = Object.freeze({
+      schemaVersion: 1 as const,
+      boundary: 'api-prepared-pinned-feeds-v1' as const,
+      networkPolicy: 'runner-offline' as const,
+      jobId: 'job-prepared-01',
+      sourceSha: sha,
+      preparedAt: fixedNow,
+      feeds: Object.freeze([]),
+    });
+    const preparationCalls: unknown[][] = [];
+    const caps = capabilities({
+      sourceResolver: {
+        resolveAtAcceptance: async () => validSource(),
+        prepareOfflineFeeds: async (...args: unknown[]) => {
+          preparationCalls.push(args);
+          return prepared;
+        },
+      },
+    } as Partial<PreflightCapabilities>);
+    const preflight = service(caps);
+
+    const checked = await preflight.run(request);
+    expect(preparationCalls).toEqual([]);
+
+    await expect(preflight.accept(checked.preflightId, request, 'job-prepared-01')).resolves.toMatchObject({
+      jobId: 'job-prepared-01',
+      offlineFeedPreparation: prepared,
+    });
+    expect(preparationCalls).toEqual([[sha, loadedConfig.pathAuthorities.stateRoot, 'job-prepared-01']]);
+  });
+
   it('pins source, selects approved target/root, and expires exactly ten minutes later', async () => {
     const caps = capabilities();
     const result = await service(caps).run(request);
@@ -102,7 +151,7 @@ describe('typed preflight checks', () => {
   it('preserves SourceResolver stable codes and observed SHA details', async () => {
     for (const code of ['INVALID_BRANCH', 'BRANCH_MOVED', 'GIT_FETCH_FAILED', 'ORIGIN_NOT_SSH', 'SOURCE_NOT_COMMIT'] as const) {
       const details = code === 'BRANCH_MOVED' ? { observedSha: '9'.repeat(40) } : { reason: code };
-      const caps = capabilities({ sourceResolver: { resolveAtAcceptance: async () => { throw new SourceResolverError(code, details as unknown as Record<string, string>); } } });
+      const caps = capabilities({ sourceResolver: sourceCapability(async () => { throw new SourceResolverError(code, details as unknown as Record<string, string>); }) });
       await expect(service(caps).run(request)).rejects.toMatchObject({ code, details: expect.objectContaining(details) });
     }
   });
@@ -197,13 +246,13 @@ describe('typed preflight checks', () => {
     const first = await preflight.run(request);
     const initial = { ...caps.calls };
     now = new Date('2026-07-23T12:09:59.999Z');
-    await expect(preflight.accept(first.preflightId, request)).resolves.toBeDefined();
+    await expect(preflight.accept(first.preflightId, request, 'job-accept-valid')).resolves.toBeDefined();
     for (const name of ['sourceResolver', 'repository', 'manifest', 'lock', 'worktree', 'root', 'staging', 'release']) expect(caps.calls[name]).toBeGreaterThan(initial[name] ?? 0);
     const afterValid = { ...caps.calls };
-    await expect(preflight.accept(first.preflightId, { ...request, targetId: 'rpi-2' })).rejects.toMatchObject({ code: 'PREFLIGHT_REQUEST_MISMATCH' });
+    await expect(preflight.accept(first.preflightId, { ...request, targetId: 'rpi-2' }, 'job-accept-valid')).rejects.toMatchObject({ code: 'PREFLIGHT_REQUEST_MISMATCH' });
     expect(caps.calls).toEqual(afterValid);
     now = new Date('2026-07-23T12:10:00.000Z');
-    await expect(preflight.accept(first.preflightId, request)).rejects.toMatchObject({ code: 'PREFLIGHT_EXPIRED' });
+    await expect(preflight.accept(first.preflightId, request, 'job-accept-valid')).rejects.toMatchObject({ code: 'PREFLIGHT_EXPIRED' });
     expect(caps.calls).toEqual(afterValid);
   });
 
@@ -213,7 +262,7 @@ describe('typed preflight checks', () => {
     const caps = capabilities({ clock: { now: () => new Date(times[Math.min(index++, times.length - 1)]!) } });
     const preflight = service(caps);
     const first = await preflight.run(request);
-    await expect(preflight.accept(first.preflightId, request)).rejects.toMatchObject({ code: 'PREFLIGHT_EXPIRED' });
+    await expect(preflight.accept(first.preflightId, request, 'job-accept-expiring')).rejects.toMatchObject({ code: 'PREFLIGHT_EXPIRED' });
     expect(caps.calls.sourceResolver).toBe(2);
   });
 
@@ -223,7 +272,7 @@ describe('typed preflight checks', () => {
     const duplicate = service(caps, { idFactory: () => 'pf_same' });
     const first = await duplicate.run(request);
     await expect(duplicate.run(request)).rejects.toMatchObject({ code: 'PREFLIGHT_CACHE_DUPLICATE' });
-    await expect(duplicate.accept(first.preflightId, request)).resolves.toBeDefined();
+    await expect(duplicate.accept(first.preflightId, request, 'job-accept-duplicate')).resolves.toBeDefined();
     await expect(service(capabilities(), { idFactory: () => 'bad id' }).run(request)).rejects.toMatchObject({ code: 'PREFLIGHT_INVALID_ID' });
     let boundedNow = new Date(fixedNow);
     const boundedCaps = capabilities({ clock: { now: () => new Date(boundedNow) } });
@@ -305,7 +354,7 @@ describe('typed preflight checks', () => {
     const sourceStarted = new Promise<void>((resolve) => { started = resolve; });
     const sourceRelease = new Promise<void>((resolve) => { release = resolve; });
     let id = 0;
-    const caps = capabilities({ sourceResolver: { resolveAtAcceptance: async () => { started(); await sourceRelease; return validSource(); } } });
+    const caps = capabilities({ sourceResolver: sourceCapability(async () => { started(); await sourceRelease; return validSource(); }) });
     const concurrent = service(caps, { maxCacheEntries: 1, idFactory: () => `pf_concurrent_${++id}` });
     const first = concurrent.run(request);
     await sourceStarted;
@@ -315,7 +364,7 @@ describe('typed preflight checks', () => {
 
     let duplicateRelease!: () => void;
     const duplicateStarted = new Promise<void>((resolve) => { duplicateRelease = resolve; });
-    const duplicateCaps = capabilities({ sourceResolver: { resolveAtAcceptance: async () => { await duplicateStarted; return validSource(); } } });
+    const duplicateCaps = capabilities({ sourceResolver: sourceCapability(async () => { await duplicateStarted; return validSource(); }) });
     let duplicateIdCalls = 0;
     const duplicate = service(duplicateCaps, { idFactory: () => { duplicateIdCalls += 1; return 'pf_duplicate'; } });
     const duplicateFirst = duplicate.run(request);
@@ -326,7 +375,7 @@ describe('typed preflight checks', () => {
   });
 
   it('serializes retryability from the approved preflight taxonomy', async () => {
-    const moved = capabilities({ sourceResolver: { resolveAtAcceptance: async () => { throw new SourceResolverError('BRANCH_MOVED', { observedSha: '9'.repeat(40) }); } } });
+    const moved = capabilities({ sourceResolver: sourceCapability(async () => { throw new SourceResolverError('BRANCH_MOVED', { observedSha: '9'.repeat(40) }); }) });
     await expect(service(moved).run(request)).rejects.toMatchObject({ code: 'BRANCH_MOVED', retryable: true, diagnosis: 'The branch no longer points at the expected SHA.' });
   });
 
@@ -384,11 +433,11 @@ describe('typed preflight checks', () => {
   it('releases a failed reservation so the next request can use capacity immediately', async () => {
     let sourceCalls = 0;
     let ids = 0;
-    const caps = capabilities({ sourceResolver: { resolveAtAcceptance: async () => {
+    const caps = capabilities({ sourceResolver: sourceCapability(async () => {
       sourceCalls += 1;
       if (sourceCalls === 1) throw new Error('temporary source failure');
       return validSource();
-    } } });
+    }) });
     const oneSlot = service(caps, { maxCacheEntries: 1, idFactory: () => `pf_failure_${++ids}` });
     await expect(oneSlot.run(request)).rejects.toMatchObject({ code: 'SOURCE_UNAVAILABLE' });
     await expect(oneSlot.run(request)).resolves.toMatchObject({ preflightId: 'pf_failure_2' });

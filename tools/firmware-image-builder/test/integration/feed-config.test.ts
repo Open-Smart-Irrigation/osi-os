@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { execFile as execFileCallback } from 'node:child_process';
 import {
   chmod,
   copyFile,
@@ -13,12 +14,14 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadConfig } from '../../config/load.js';
 import { loadManifest } from '../../manifest/validate.js';
 import { createCommandExecutor } from '../../runner/src/command-executor.js';
+import { INTERNAL_OPERATION_TOOL_PATH } from '../../runner/src/operation-registry.js';
 import {
   resolveTargetSetup,
   type ApiPreparedFeed,
@@ -30,7 +33,9 @@ const manifest = loadManifest(new URL('../../manifest/targets.json', import.meta
 const fixtureRoot = new URL('../fixtures/target-setup/', import.meta.url).pathname;
 const rustFixture = new URL('../fixtures/openwrt-packages-d8cd30f4/lang/rust/Makefile', import.meta.url).pathname;
 const rootfsFixture = new URL('../../../../openwrt/target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh', import.meta.url).pathname;
+const operationTool = new URL('../../builder/operations/osi-image-builder-tool.js', import.meta.url).pathname;
 const temporaryDirectories: string[] = [];
+const execFile = promisify(execFileCallback);
 
 afterEach(async () => {
   for (const directory of temporaryDirectories.splice(0)) await rm(directory, { recursive: true, force: true });
@@ -47,7 +52,7 @@ function configFor(target: (typeof manifest.targets)[number]): string {
 async function feedTreeSha256(root: string): Promise<string> {
   const hash = createHash('sha256');
   const visit = async (directory: string, prefix: string): Promise<void> => {
-    for (const entry of (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
+    for (const entry of (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)) {
       const path = join(directory, entry.name);
       const relativePath = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
       const stats = await lstat(path);
@@ -90,6 +95,7 @@ describe('feed configuration integration boundary', () => {
     });
 
     const jobId = 'job-feed-integration';
+    const sourceSha = 'a'.repeat(40);
     const workspace = join(loaded.stateRoot, 'jobs', jobId, 'workspace', 'source');
     const preparedRoot = join(loaded.stateRoot, 'jobs', jobId, 'prepared-feeds');
     await mkdir(join(workspace, 'openwrt/scripts'), { recursive: true });
@@ -131,6 +137,18 @@ describe('feed configuration integration boundary', () => {
       { name: 'routing', location: 'https://git.openwrt.org/feed/routing.git', commit: 'c9b636698881059a3c981032770968f5a98ff201' },
     ] as const;
     const preparedFeeds: ApiPreparedFeed[] = [];
+    const fixtureGitEnv = {
+      PATH: '/usr/bin:/bin',
+      HOME: join(root, 'fixture-git-home'),
+      LANG: 'C',
+      LC_ALL: 'C',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_SYSTEM: '/dev/null',
+      GIT_ALLOW_PROTOCOL: 'file',
+    };
+    await mkdir(fixtureGitEnv.HOME);
+    const fixtureGit = async (cwd: string, argv: readonly string[]) => execFile('/usr/bin/git', [...argv], { cwd, env: fixtureGitEnv });
     for (const feed of feeds) {
       const directory = join(preparedRoot, feed.name);
       await mkdir(join(directory, '.git'), { recursive: true });
@@ -140,10 +158,34 @@ describe('feed configuration integration boundary', () => {
         await mkdir(join(directory, 'lang/rust'), { recursive: true });
         await copyFile(rustFixture, join(directory, 'lang/rust/Makefile'));
       }
+      if (feed.name === 'luci') {
+        const nested = join(root, 'nested-feed-repository');
+        const recursive = join(directory, '.offline-recursive');
+        await mkdir(nested);
+        await fixtureGit(nested, ['init', '--quiet']);
+        await fixtureGit(nested, ['config', 'user.name', 'Fixture Author']);
+        await fixtureGit(nested, ['config', 'user.email', 'fixture@example.test']);
+        await writeFile(join(nested, 'nested.txt'), 'nested offline object\n');
+        await fixtureGit(nested, ['add', 'nested.txt']);
+        await fixtureGit(nested, ['commit', '--quiet', '-m', 'nested fixture']);
+        await mkdir(recursive);
+        await fixtureGit(recursive, ['init', '--quiet']);
+        await fixtureGit(recursive, ['config', 'user.name', 'Fixture Author']);
+        await fixtureGit(recursive, ['config', 'user.email', 'fixture@example.test']);
+        await writeFile(join(recursive, 'README'), 'recursive fixture\n');
+        await fixtureGit(recursive, ['add', 'README']);
+        await fixtureGit(recursive, ['commit', '--quiet', '-m', 'recursive fixture']);
+        await fixtureGit(recursive, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', nested, 'nested']);
+        await fixtureGit(recursive, ['commit', '--quiet', '-am', 'pin nested fixture']);
+      }
       preparedFeeds.push({
         ...feed,
+        detached: true,
+        clean: true,
         treeSha256: await feedTreeSha256(directory),
         recursiveSubmodulesPrepared: true,
+        recursiveSubmodules: [],
+        recursiveSubmoduleStatusSha256: createHash('sha256').update('').digest('hex'),
       });
     }
 
@@ -152,41 +194,82 @@ describe('feed configuration integration boundary', () => {
     const calls: TargetSetupOperationId[] = [];
     const noNetworkBin = join(root, 'no-network-bin');
     await mkdir(noNetworkBin);
-    for (const command of ['git', 'ssh']) {
+    for (const command of ['ssh', 'curl', 'wget']) {
       await writeFile(join(noNetworkBin, command), `#!/bin/sh\necho ${command} >> "${join(root, 'network-command.log')}"\nexit 97\n`);
       await chmod(join(noNetworkBin, command), 0o755);
     }
     const operations: LockedTargetSetupOperations = {
-      async run(operationId, definition) {
+      async run(operationId, definition, workspaceCapability) {
         calls.push(operationId);
-        if (operationId === 'copy-feed-config') {
-          await copyFile(join(workspace, 'feeds.conf.default'), join(workspace, 'openwrt/feeds.conf.default'));
-          const now = new Date().toISOString();
-          return { argv: definition.argv, exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: now, finishedAt: now };
-        }
-        return executor.run(definition.argv, {
-          cwd: workspace,
-          env: {
-            PATH: `${noNetworkBin}:/usr/bin:/bin`,
-            HOME: join(root, 'offline-home'),
-            LANG: 'C',
-            LC_ALL: 'C',
-            OSI_FIXTURE_LOG: join(workspace, 'operation.log'),
-          },
+        const operationEnvironment = {
+          PATH: '/no-network-bin:/usr/bin:/bin',
+          HOME: '/offline-home',
+          LANG: 'C',
+          LC_ALL: 'C',
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_SYSTEM: '/dev/null',
+          GIT_ALLOW_PROTOCOL: 'file',
+          OSI_FIXTURE_LOG: '/workdir/operation.log',
+        };
+        const command = await executor.run([
+          '/usr/bin/bwrap',
+          '--die-with-parent',
+          '--unshare-net',
+          '--tmpfs', '/',
+          '--ro-bind', '/usr', '/usr',
+          '--symlink', 'usr/bin', '/bin',
+          '--ro-bind', '/lib', '/lib',
+          '--ro-bind', '/lib64', '/lib64',
+          '--proc', '/proc',
+          '--dev', '/dev',
+          '--dir', '/workdir',
+          '--bind', '.', '/workdir',
+          '--dir', '/offline-home',
+          '--dir', '/no-network-bin',
+          '--ro-bind', noNetworkBin, '/no-network-bin',
+          '--dir', '/opt',
+          '--dir', '/opt/osi-image-builder',
+          '--dir', '/opt/osi-image-builder/operations',
+          '--ro-bind', operationTool, INTERNAL_OPERATION_TOOL_PATH,
+          '--chdir', workspaceCapability.containerWorkingDirectory,
+          ...definition.argv,
+        ], {
+          cwd: workspaceCapability.descriptorPath,
+          env: operationEnvironment,
           timeoutMs: 10_000,
           maxCaptureBytes: 64 * 1024,
         });
+        expect(command, `${operationId}: ${command.stderr}`).toMatchObject({
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+        });
+        if (operationId === 'copy-feed-config') {
+          expect(JSON.parse(command.stdout)).toMatchObject({
+            operation: 'copy-feed-config',
+            source: 'feeds.conf.default',
+            destination: 'openwrt/feeds.conf.default',
+            sha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+          });
+        }
+        return { ...command, argv: definition.argv, workspaceCapability };
       },
     };
 
     const setup = await resolveTargetSetup({
       stateRoot: loaded.pathAuthorities.stateRoot,
       jobId,
+      sourceSha,
       target: manifest.targets[1]!,
       targets: manifest.targets,
       preparedFeeds: {
+        schemaVersion: 1,
         boundary: 'api-prepared-pinned-feeds-v1',
         networkPolicy: 'runner-offline',
+        jobId,
+        sourceSha,
+        preparedAt: '2026-07-26T10:00:00.000Z',
         feeds: preparedFeeds,
       },
       operations,

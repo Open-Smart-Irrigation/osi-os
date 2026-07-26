@@ -29,6 +29,16 @@ import {
   type OperationDefinition,
 } from './operation-registry.js';
 import type { CommandResult } from './command-executor.js';
+import type {
+  ApiPreparedFeed,
+  OfflineFeedPreparation,
+} from '../../api/src/git/source-resolver.js';
+import { hashRecursiveSubmoduleAttestation } from '../../api/src/git/source-resolver.js';
+
+export type {
+  ApiPreparedFeed,
+  OfflineFeedPreparation,
+} from '../../api/src/git/source-resolver.js';
 
 export const ROOTFS_PADDING_PATCH = 'image-with-padded-rootfs.patch';
 export const APPROVED_ROOTFS_SCRIPT_SHA256 = 'c1a646a136a4ccd3ddd279ec8d861c8c1768ab4a9b2cdbe8a681ab6fb9310817';
@@ -47,6 +57,17 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const HTTPS_FEED = /^https:\/\/[^\s^]+$/u;
 
 export type TargetSetupOperationId = (typeof TARGET_SETUP_OPERATIONS)[number];
+
+export interface HeldWorkspaceCapability {
+  readonly descriptorPath: string;
+  readonly device: number;
+  readonly inode: number;
+  readonly containerWorkingDirectory: '/workdir';
+}
+
+export interface WorkspaceBoundCommandResult extends CommandResult {
+  readonly workspaceCapability: HeldWorkspaceCapability;
+}
 
 export class TargetSetupError extends BuilderError {
   constructor(
@@ -77,28 +98,11 @@ export class TargetSetupError extends BuilderError {
 }
 
 export interface LockedTargetSetupOperations {
-  readonly run: (operationId: TargetSetupOperationId, definition: OperationDefinition) => Promise<CommandResult>;
-}
-
-/**
- * This is the consumer side of the API-to-runner trust boundary. The API must
- * populate jobs/<jobId>/prepared-feeds/<name> recursively and attest the exact
- * tree before the offline runner starts. The runner accepts no feed path or
- * network fallback from this value. The v1 tree digest hashes sorted records:
- * D\0path\0mode\0, F\0path\0mode\0bytes\0, and L\0path\0target\0.
- */
-export interface ApiPreparedFeed {
-  readonly name: string;
-  readonly location: string;
-  readonly commit: string;
-  readonly treeSha256: string;
-  readonly recursiveSubmodulesPrepared: true;
-}
-
-export interface OfflineFeedPreparation {
-  readonly boundary: 'api-prepared-pinned-feeds-v1';
-  readonly networkPolicy: 'runner-offline';
-  readonly feeds: readonly ApiPreparedFeed[];
+  readonly run: (
+    operationId: TargetSetupOperationId,
+    definition: OperationDefinition,
+    workspace: HeldWorkspaceCapability,
+  ) => Promise<WorkspaceBoundCommandResult>;
 }
 
 export interface RootfsPatchStateInput {
@@ -312,6 +316,44 @@ async function openDirectoryPath(
   }
 }
 
+async function openAbsoluteDirectoryChain(
+  absolutePath: string,
+  dependencies: PathAuthorityDependencies,
+  requestId: string,
+): Promise<{
+  readonly directory: HeldDirectory;
+  readonly handles: readonly FileHandle[];
+  readonly bindings: readonly HeldDirectory[];
+}> {
+  if (!absolutePath.startsWith('/') || absolutePath.includes('\0')) {
+    fail('WORKTREE_CREATE_FAILED', 'The configured state root path is not canonical.', requestId);
+  }
+  const handles: FileHandle[] = [];
+  const bindings: HeldDirectory[] = [];
+  let current: HeldDirectory;
+  try {
+    const rootHandle = await open('/', DIR_FLAGS);
+    handles.push(rootHandle);
+    current = { handle: rootHandle, parent: null, name: null, relativePath: '' };
+    for (const segment of absolutePath.split('/').filter(Boolean)) {
+      current = await openBoundDirectory(
+        current,
+        segment,
+        dependencies,
+        requestId,
+        'WORKTREE_CREATE_FAILED',
+        'The configured state-root parent chain is unavailable, replaced, or symlinked.',
+      );
+      handles.push(current.handle);
+      bindings.push(current);
+    }
+    return { directory: current, handles, bindings };
+  } catch (error) {
+    await closeHandles(handles);
+    throw error;
+  }
+}
+
 async function readHandle(handle: FileHandle): Promise<Buffer> {
   const stats = await handle.stat();
   if (!stats.isFile() || !Number.isSafeInteger(stats.size) || stats.size < 0) throw new Error('held entry is not a bounded regular file');
@@ -464,6 +506,26 @@ function hasExactList(actual: readonly string[], expected: readonly string[]): b
   return actual.length === expected.length && actual.every((item, index) => item === expected[index]);
 }
 
+function isCanonicalInstant(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && new Date(time).toISOString() === value;
+}
+
+function reversedPatchAttributions(output: string): readonly (string | null)[] {
+  const attributions: Array<string | null> = [];
+  let applyingPatch: string | null = null;
+  for (const rawLine of output.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    const applying = /^Applying(?: patch)? ([A-Za-z0-9][A-Za-z0-9._+-]*\.patch)$/u.exec(line);
+    if (applying) applyingPatch = applying[1]!;
+    if (!/revers(?:ed|e)|previously applied/iu.test(line)) continue;
+    const named = line.match(/[A-Za-z0-9][A-Za-z0-9._+-]*\.patch/gu) ?? [];
+    attributions.push(named.length === 1 ? named[0]! : named.length === 0 ? applyingPatch : null);
+  }
+  return Object.freeze(attributions);
+}
+
 export function decideRootfsPatchState(input: RootfsPatchStateInput, requestId = 'target-setup'): RootfsPatchDecision {
   const series = parsePatchNames(input.series);
   const applied = parsePatchNames(input.applied);
@@ -475,15 +537,10 @@ export function decideRootfsPatchState(input: RootfsPatchStateInput, requestId =
   ) {
     fail('PATCH_STATE_AMBIGUOUS', 'The rootfs padding patch series or implementation hash is not approved.', requestId);
   }
-  const outputLines = input.output.split(/\r?\n/u);
-  const reverseWindows = outputLines.flatMap((line, index) => /revers(?:ed|e)|previously applied/iu.test(line)
-    ? [`${outputLines[index - 1] ?? ''}\n${line}\n${outputLines[index + 1] ?? ''}`]
-    : []);
-  const namedReverse = reverseWindows.filter((window) => window.includes(ROOTFS_PADDING_PATCH));
-  const unknownReverse = reverseWindows.filter((window) => !window.includes(ROOTFS_PADDING_PATCH));
+  const reversed = reversedPatchAttributions(input.output);
   const expectedApplied = series.filter((patch) => patch !== ROOTFS_PADDING_PATCH);
-  if (namedReverse.length === 1 && unknownReverse.length === 0 && hasExactList(applied, expectedApplied)) return 'already-present';
-  if (reverseWindows.length > 0) {
+  if (reversed.length === 1 && reversed[0] === ROOTFS_PADDING_PATCH && hasExactList(applied, expectedApplied)) return 'already-present';
+  if (reversed.length > 0) {
     fail('PATCH_STATE_AMBIGUOUS', 'OpenWrt reported an unapproved reverse-applicable patch state.', requestId, { patch: ROOTFS_PADDING_PATCH });
   }
   if (hasExactList(applied, series)) return 'applied';
@@ -528,25 +585,52 @@ function parseFeedConfig(contents: string, requestId: string): {
 function validatePreparedInput(
   preparation: OfflineFeedPreparation,
   feeds: readonly PinnedGitFeed[],
+  jobId: string,
+  sourceSha: string,
   requestId: string,
 ): ReadonlyMap<string, ApiPreparedFeed> {
   if (
-    preparation?.boundary !== 'api-prepared-pinned-feeds-v1'
+    !preparation
+    || Object.keys(preparation).sort().join(',') !== 'boundary,feeds,jobId,networkPolicy,preparedAt,schemaVersion,sourceSha'
+    || preparation.schemaVersion !== 1
+    || preparation.boundary !== 'api-prepared-pinned-feeds-v1'
     || preparation.networkPolicy !== 'runner-offline'
+    || preparation.jobId !== jobId
+    || preparation.sourceSha !== sourceSha
+    || !SHA40.test(preparation.sourceSha)
+    || !isCanonicalInstant(preparation.preparedAt)
     || !Array.isArray(preparation.feeds)
   ) {
     fail('FEED_INSTALL_FAILED', 'The API-prepared offline feed handoff is invalid.', requestId);
   }
   const records = new Map<string, ApiPreparedFeed>();
-  for (const record of preparation.feeds) {
+  for (const candidate of preparation.feeds as readonly unknown[]) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      fail('FEED_INSTALL_FAILED', 'An API-prepared feed attestation is invalid.', requestId);
+    }
+    const record = candidate as ApiPreparedFeed;
     const keys = Object.keys(record).sort();
     if (
-      keys.join(',') !== 'commit,location,name,recursiveSubmodulesPrepared,treeSha256'
+      keys.join(',') !== 'clean,commit,detached,location,name,recursiveSubmoduleStatusSha256,recursiveSubmodules,recursiveSubmodulesPrepared,treeSha256'
       || !SAFE_IDENTIFIER.test(record.name)
       || !HTTPS_FEED.test(record.location)
       || !SHA40.test(record.commit)
       || !SHA256.test(record.treeSha256)
+      || !SHA256.test(record.recursiveSubmoduleStatusSha256)
+      || record.detached !== true
+      || record.clean !== true
       || record.recursiveSubmodulesPrepared !== true
+      || !Array.isArray(record.recursiveSubmodules)
+      || record.recursiveSubmodules.some((submodule: ApiPreparedFeed['recursiveSubmodules'][number]) => (
+        !submodule
+        || typeof submodule !== 'object'
+        || Array.isArray(submodule)
+        || Object.keys(submodule).sort().join(',') !== 'commit,path'
+        || !SHA40.test(submodule.commit)
+        || submodule.path.split('/').some((part: string) => part.length === 0 || part === '.' || part === '..')
+      ))
+      || new Set(record.recursiveSubmodules.map(({ path }: ApiPreparedFeed['recursiveSubmodules'][number]) => path)).size !== record.recursiveSubmodules.length
+      || record.recursiveSubmoduleStatusSha256 !== hashRecursiveSubmoduleAttestation(record.recursiveSubmodules)
       || records.has(record.name)
     ) {
       fail(record.name === 'packages' ? 'RUST_BOOTSTRAP_UNAVAILABLE' : 'FEED_INSTALL_FAILED', 'An API-prepared feed attestation is invalid.', requestId, { feed: record.name ?? null });
@@ -971,24 +1055,35 @@ async function runOperation(
   operations: LockedTargetSetupOperations,
   operationId: TargetSetupOperationId,
   definition: OperationDefinition,
+  workspace: HeldWorkspaceCapability,
+  verifyWorkspaceBinding: () => Promise<void>,
   requestId: string,
 ): Promise<CommandResult> {
-  let result: CommandResult;
+  await verifyWorkspaceBinding();
+  let result: WorkspaceBoundCommandResult | undefined;
+  let operationError: unknown;
   try {
-    result = await operations.run(operationId, definition);
+    result = await operations.run(operationId, definition, workspace);
   } catch (error) {
-    fail(operationFailureCode(operationId), operationFailureMessage(operationId), requestId, { cause: error instanceof Error ? error.message : String(error) }, operationId);
+    operationError = error;
   }
+  await verifyWorkspaceBinding();
+  if (operationError !== undefined) {
+    fail(operationFailureCode(operationId), operationFailureMessage(operationId), requestId, { cause: operationError instanceof Error ? operationError.message : String(operationError) }, operationId);
+  }
+  if (result === undefined) fail(operationFailureCode(operationId), operationFailureMessage(operationId), requestId, {}, operationId);
   if (
     result.exitCode !== 0
     || result.signal !== null
     || result.timedOut !== false
+    || result.workspaceCapability !== workspace
     || !hasExactList(result.argv, definition.argv)
   ) {
     fail(operationFailureCode(operationId), operationFailureMessage(operationId), requestId, {
       exitCode: result.exitCode,
       signal: result.signal,
       timedOut: result.timedOut,
+      workspaceCapabilityMatches: result.workspaceCapability === workspace,
       argvMatches: hasExactList(result.argv, definition.argv),
     }, operationId);
   }
@@ -1030,6 +1125,7 @@ function validateTargets(input: TargetSetupInput): {
 export interface TargetSetupInput {
   readonly stateRoot: StateRootAuthority;
   readonly jobId: string;
+  readonly sourceSha: string;
   readonly target: TargetManifest;
   readonly targets: readonly TargetManifest[];
   readonly preparedFeeds: OfflineFeedPreparation;
@@ -1056,6 +1152,9 @@ export interface TargetSetupResult {
 
 export async function resolveTargetSetup(input: TargetSetupInput): Promise<TargetSetupResult> {
   const jobId = assertJobId(input.jobId, input.requestId);
+  if (!SHA40.test(input.sourceSha)) {
+    fail('FEED_INSTALL_FAILED', 'The persisted source SHA is not an exact Git commit identity.', input.requestId);
+  }
   const targetState = validateTargets(input);
   if (process.platform !== 'linux' || typeof fsConstants.O_NOFOLLOW !== 'number' || typeof fsConstants.O_DIRECTORY !== 'number') {
     fail('WORKTREE_CREATE_FAILED', 'Target setup requires Linux no-follow descriptor traversal.', input.requestId);
@@ -1066,13 +1165,14 @@ export async function resolveTargetSetup(input: TargetSetupInput): Promise<Targe
     const bindings: HeldDirectory[] = [];
     let root: HeldDirectory;
     try {
-      const rootHandle = await open(snapshot.path, DIR_FLAGS);
-      handles.push(rootHandle);
-      const rootStats = await rootHandle.stat();
+      const rootChain = await openAbsoluteDirectoryChain(snapshot.path, dependencies, input.requestId);
+      handles.push(...rootChain.handles);
+      bindings.push(...rootChain.bindings);
+      root = rootChain.directory;
+      const rootStats = await root.handle.stat();
       if (!rootStats.isDirectory() || rootStats.dev !== snapshot.device || rootStats.ino !== snapshot.inode) {
         fail('WORKTREE_CREATE_FAILED', 'The configured state root identity changed before target setup.', input.requestId);
       }
-      root = { handle: rootHandle, parent: null, name: null, relativePath: '' };
     } catch (error) {
       if (error instanceof BuilderError) throw error;
       fail('WORKTREE_CREATE_FAILED', 'The configured state root cannot be held safely for target setup.', input.requestId, { cause: error instanceof Error ? error.message : String(error) });
@@ -1103,7 +1203,13 @@ export async function resolveTargetSetup(input: TargetSetupInput): Promise<Targe
 
       const sourceFeed = await readTextFile(workspace, 'feeds.conf.default', dependencies, input.requestId, 'FEED_INSTALL_FAILED', 'The pinned repository feed configuration is unavailable or unsafe.');
       const parsedFeeds = parseFeedConfig(sourceFeed, input.requestId);
-      const preparedRecords = validatePreparedInput(input.preparedFeeds, parsedFeeds.gitFeeds, input.requestId);
+      const preparedRecords = validatePreparedInput(
+        input.preparedFeeds,
+        parsedFeeds.gitFeeds,
+        jobId,
+        input.sourceSha,
+        input.requestId,
+      );
       const preparedRoot = await openBoundDirectory(job, 'prepared-feeds', dependencies, input.requestId, 'FEED_INSTALL_FAILED', 'The API-prepared feed directory is unavailable or unsafe.');
       handles.push(preparedRoot.handle);
       bindings.push(preparedRoot);
@@ -1148,17 +1254,25 @@ export async function resolveTargetSetup(input: TargetSetupInput): Promise<Targe
         });
       }
       await assertBindings(bindings, dependencies, input.requestId);
+      const workspaceStats = await workspace.handle.stat();
+      const workspaceCapability: HeldWorkspaceCapability = Object.freeze({
+        descriptorPath: `/proc/${process.pid}/fd/${workspace.handle.fd}`,
+        device: workspaceStats.dev,
+        inode: workspaceStats.ino,
+        containerWorkingDirectory: '/workdir',
+      });
 
       const profileResults = new Map<TargetManifest['id'], ProfileResolution>();
       let selectedFeed: FeedResolution | undefined;
       let selectedRust: RustResolution | undefined;
       for (const target of targetState.ordered) {
         const definitions = targetState.definitions.get(target.id)!;
+        const verifyWorkspaceBinding = () => assertBindings(bindings, dependencies, input.requestId);
         await assertBindings(bindings, dependencies, input.requestId);
-        const activation = await runOperation(input.operations, 'activate-target', definitions.get('activate-target')!, input.requestId);
+        const activation = await runOperation(input.operations, 'activate-target', definitions.get('activate-target')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
         await assertBindings(bindings, dependencies, input.requestId);
 
-        await runOperation(input.operations, 'copy-feed-config', definitions.get('copy-feed-config')!, input.requestId);
+        await runOperation(input.operations, 'copy-feed-config', definitions.get('copy-feed-config')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
         await assertBindings(bindings, dependencies, input.requestId);
         const immediateSourceFeed = await readTextFile(workspace, 'feeds.conf.default', dependencies, input.requestId, 'FEED_INSTALL_FAILED', 'The repository feed configuration changed after target activation.');
         const immediateDestinationFeed = await readTextFile(openwrt, 'feeds.conf.default', dependencies, input.requestId, 'FEED_INSTALL_FAILED', 'The copied feed configuration is missing or unsafe.');
@@ -1171,10 +1285,10 @@ export async function resolveTargetSetup(input: TargetSetupInput): Promise<Targe
         const preparedEvidence = await materializeFeeds(openwrt, prepared, dependencies, input.requestId);
         const rust = await rustFeed(openwrt, input.requestId, dependencies);
 
-        await runOperation(input.operations, 'update-feeds', definitions.get('update-feeds')!, input.requestId);
+        await runOperation(input.operations, 'update-feeds', definitions.get('update-feeds')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
         await verifyRustTransform(openwrt, rust, input.requestId, dependencies, 'update-feeds');
         await assertBindings(bindings, dependencies, input.requestId);
-        await runOperation(input.operations, 'install-feeds', definitions.get('install-feeds')!, input.requestId);
+        await runOperation(input.operations, 'install-feeds', definitions.get('install-feeds')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
         await verifyRustTransform(openwrt, rust, input.requestId, dependencies, 'install-feeds');
         const installedPackages = await verifyLinks(workspace, localFeed, input.requestId, dependencies);
 
@@ -1182,7 +1296,7 @@ export async function resolveTargetSetup(input: TargetSetupInput): Promise<Targe
         const sourceConfig = await readProfileConfig(workspace, target, dependencies, input.requestId);
         checkConfig(sourceConfig, target, input.requestId, `${target.id} source`);
         const sourceConfigSha256 = sha256(sourceConfig);
-        await runOperation(input.operations, 'resolve-config', definitions.get('resolve-config')!, input.requestId);
+        await runOperation(input.operations, 'resolve-config', definitions.get('resolve-config')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
         await verifySelectedConfigLinks(workspace, target, dependencies, input.requestId);
         const resolvedConfig = await readProfileConfig(workspace, target, dependencies, input.requestId);
         checkConfig(resolvedConfig, target, input.requestId, `${target.id} resolved`, 'resolve-config');

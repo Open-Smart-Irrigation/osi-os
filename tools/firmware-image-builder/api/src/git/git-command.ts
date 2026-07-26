@@ -47,6 +47,8 @@ export interface GitProcessResult {
 export interface GitRunOptions {
   readonly cwd?: string;
   readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
+  readonly allowedProtocols?: 'ssh' | 'https';
 }
 
 export interface GitProcessReply {
@@ -232,11 +234,15 @@ export class GitCommand {
 
   async run(argv: readonly string[], options: GitRunOptions = {}): Promise<GitProcessResult> {
     const safeArgv = validateArgv(argv);
+    const timeoutMs = options.timeoutMs ?? GIT_TIMEOUT_MS;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30 * 60 * 1000) {
+      throw new TypeError('Git timeout must be a safe positive integer no greater than 30 minutes.');
+    }
     const started = Date.now();
     let reply: GitProcessReply;
     let environment: Readonly<Record<string, string>>;
     try {
-      environment = await this.#buildEnvironment();
+      environment = await this.#buildEnvironment(options.allowedProtocols ?? 'ssh');
     } catch {
       throw new GitCommandError({ code: 'GIT_SSH_AUTH_UNAVAILABLE', argv: safeArgv, redactions: this.#sshAuthSock ? [this.#sshAuthSock] : [] });
     }
@@ -245,7 +251,7 @@ export class GitCommand {
         cwd: options.cwd,
         env: environment,
         encoding: 'utf8',
-        timeout: GIT_TIMEOUT_MS,
+        timeout: timeoutMs,
         maxBuffer: GIT_MAX_OUTPUT_BYTES,
         windowsHide: true,
         signal: options.signal,
@@ -284,9 +290,20 @@ export class GitCommand {
     return result;
   }
 
-  async #buildEnvironment(): Promise<Readonly<Record<string, string>>> {
+  async #buildEnvironment(allowedProtocols: 'ssh' | 'https'): Promise<Readonly<Record<string, string>>> {
+    if (allowedProtocols === 'https') {
+      return Object.freeze({
+        ...FIXED_GIT_ENV,
+        GIT_ALLOW_PROTOCOL: allowedProtocols,
+      });
+    }
     const socket = await this.#validateSshAuthSocket();
-    return Object.freeze({ ...FIXED_GIT_ENV, ...FIXED_SSH_ENV, ...(socket === null ? {} : { SSH_AUTH_SOCK: socket }) });
+    return Object.freeze({
+      ...FIXED_GIT_ENV,
+      GIT_ALLOW_PROTOCOL: allowedProtocols,
+      ...FIXED_SSH_ENV,
+      ...(socket === null ? {} : { SSH_AUTH_SOCK: socket }),
+    });
   }
 
   async #validateSshAuthSocket(): Promise<string | null> {

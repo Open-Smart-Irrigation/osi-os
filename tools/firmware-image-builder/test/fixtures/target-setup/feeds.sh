@@ -10,6 +10,10 @@ case "$action" in
     for feed in packages luci routing; do
       test -d "openwrt/feeds/$feed/.git"
       test -f "openwrt/feeds/$feed/.offline-prepared"
+      if test -d "openwrt/feeds/$feed/.offline-recursive/.git"; then
+        git -C "openwrt/feeds/$feed/.offline-recursive" submodule update --init --recursive --no-fetch
+        git -C "openwrt/feeds/$feed/.offline-recursive" submodule status --recursive
+      fi
     done
     test -f openwrt/feeds/packages/lang/rust/Makefile
     ln -s ../../feeds/chirpstack-openwrt-feed openwrt/feeds/chirpstack

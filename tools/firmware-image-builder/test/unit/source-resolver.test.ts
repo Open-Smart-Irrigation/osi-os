@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { chmod, lstat, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -20,6 +20,7 @@ import {
   type GitResolutionMetadata,
 } from '../../api/src/git/source-resolver.js';
 import { CANONICAL_FETCH_REFSPEC } from '../../config/origin-policy.js';
+import { loadConfig } from '../../config/load.js';
 
 const SHA_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const SHA_B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -112,6 +113,12 @@ describe('Git command boundary', () => {
       GIT_NO_REPLACE_OBJECTS: '1', GIT_ALLOW_PROTOCOL: 'ssh',
       GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null',
     }));
+
+    await command.run(['status'], { allowedProtocols: 'https' });
+    expect(observed?.options.env).toEqual(expect.objectContaining({ GIT_ALLOW_PROTOCOL: 'https' }));
+    expect(observed?.options.env).not.toHaveProperty('GIT_SSH_COMMAND');
+    expect(observed?.options.env).not.toHaveProperty('GIT_SSH_VARIANT');
+    expect(observed?.options.env).not.toHaveProperty('SSH_AUTH_SOCK');
   });
 
   it('returns only bounded diagnostics for a failed command', async () => {
@@ -286,6 +293,151 @@ describe('Git command boundary', () => {
 });
 
 describe('API-owned source resolver', () => {
+  it('prepares exact detached feed checkouts with nested submodules under the real job path', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'osi-builder-prepared-feeds-'));
+    temporaryDirectories.push(directory);
+    const nested = join(directory, 'nested');
+    const packages = join(directory, 'packages');
+    const luci = join(directory, 'luci');
+    const routing = join(directory, 'routing');
+    const repository = join(directory, 'repository');
+    const gitEnvironment = {
+      PATH: '/usr/bin:/bin',
+      HOME: join(directory, 'git-home'),
+      LANG: 'C',
+      LC_ALL: 'C',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_SYSTEM: '/dev/null',
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_ALLOW_PROTOCOL: 'file',
+    };
+    await mkdir(gitEnvironment.HOME);
+    const git = async (cwd: string, argv: readonly string[]): Promise<string> => {
+      const result = await execFile('/usr/bin/git', [...argv], { cwd, env: gitEnvironment });
+      return result.stdout;
+    };
+    const init = async (path: string, file: string, contents: string): Promise<string> => {
+      await mkdir(path);
+      await git(path, ['init', '--quiet']);
+      await git(path, ['config', 'user.name', 'Fixture Author']);
+      await git(path, ['config', 'user.email', 'fixture@example.test']);
+      await writeFile(join(path, file), contents);
+      await git(path, ['add', '--', file]);
+      await git(path, ['commit', '--quiet', '-m', `${file} fixture`]);
+      return (await git(path, ['rev-parse', 'HEAD'])).trim();
+    };
+    const nestedSha = await init(nested, 'nested.txt', 'nested checkout\n');
+    await init(packages, 'README', 'packages\n');
+    await mkdir(join(packages, 'lang/rust'), { recursive: true });
+    await writeFile(join(packages, 'lang/rust/Makefile'), 'fixture rust\n');
+    await git(packages, ['add', 'lang/rust/Makefile']);
+    await git(packages, ['commit', '--quiet', '-m', 'rust fixture']);
+    await git(packages, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', nested, 'vendor/nested']);
+    await git(packages, ['commit', '--quiet', '-am', 'nested submodule']);
+    const packagesSha = (await git(packages, ['rev-parse', 'HEAD'])).trim();
+    const luciSha = await init(luci, 'luci.txt', 'luci\n');
+    const routingSha = await init(routing, 'routing.txt', 'routing\n');
+    await init(repository, 'README', 'source\n');
+    const locations = Object.freeze({
+      packages: 'https://fixtures.invalid/packages.git',
+      luci: 'https://fixtures.invalid/luci.git',
+      routing: 'https://fixtures.invalid/routing.git',
+    });
+    await writeFile(join(repository, 'feeds.conf.default'), [
+      `src-git packages ${locations.packages}^${packagesSha}`,
+      `src-git luci ${locations.luci}^${luciSha}`,
+      `src-git routing ${locations.routing}^${routingSha}`,
+      'src-link chirpstack feeds/chirpstack-openwrt-feed',
+      '',
+    ].join('\n'));
+    await git(repository, ['add', 'feeds.conf.default']);
+    await git(repository, ['commit', '--quiet', '-m', 'pin fixture feeds']);
+    const sourceSha = (await git(repository, ['rev-parse', 'HEAD'])).trim();
+
+    const configHome = join(directory, 'config');
+    const images = join(directory, 'images');
+    await mkdir(configHome);
+    await mkdir(images);
+    await writeFile(join(configHome, 'config.json'), JSON.stringify({
+      repositoryPath: repository,
+      approvedOutputRoots: [{ id: 'images', label: 'images', path: images }],
+      builderLockPath: '/opt/osi-image-builder/2026.07.22.1/builder.lock.json',
+      maxQueueLength: 50,
+      diskFreeMinimumBytes: 20 * 1024 ** 3,
+    }));
+    const loaded = await loadConfig({
+      configPath: join(configHome, 'config.json'),
+      env: { HOME: directory, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: join(directory, 'state-home') },
+      git: { getOriginPolicy: async () => ({ url: ORIGIN, fetchRefspec: CANONICAL_FETCH_REFSPEC }) },
+      rootFs: { statfs: async () => ({ bavail: 30, bsize: 1024 ** 3 }) },
+    });
+    const urlMap = new Map<string, string>([
+      [locations.packages, packages],
+      [locations.luci, luci],
+      [locations.routing, routing],
+    ]);
+    const feedGit: GitExecutor = {
+      async run(argv, options) {
+        expect(options?.allowedProtocols).toBe('https');
+        const executed = argv.map((value) => urlMap.get(value) ?? value);
+        try {
+          const result = await execFile('/usr/bin/git', executed, {
+            cwd: options?.cwd,
+            env: gitEnvironment,
+            timeout: options?.timeoutMs,
+            maxBuffer: 128 * 1024,
+          });
+          if (argv[0] === 'clone') {
+            const destination = argv.at(-1)!;
+            const logicalUrl = argv.at(-2)!;
+            await execFile('/usr/bin/git', ['remote', 'set-url', 'origin', logicalUrl], {
+              cwd: join(options!.cwd!, destination),
+              env: gitEnvironment,
+            });
+          }
+          return { argv, exitCode: 0, signal: null, stdout: result.stdout, stderr: result.stderr, durationMs: 1, timedOut: false, aborted: false };
+        } catch (error) {
+          const failure = error as { stdout?: string; stderr?: string; code?: number; signal?: string };
+          return { argv, exitCode: failure.code ?? 1, signal: failure.signal ?? null, stdout: failure.stdout ?? '', stderr: failure.stderr ?? '', durationMs: 1, timedOut: false, aborted: false };
+        }
+      },
+    };
+    const preparedPath = join(loaded.stateRoot, 'jobs/job-source-producer/prepared-feeds');
+    expect(await lstat(preparedPath).catch(() => null)).toBeNull();
+
+    const preparation = await new SourceResolver({
+      repositoryPath: repository,
+      git: new GitCommand({ sshAuthSock: null }),
+      feedGit,
+      now: () => '2026-07-26T20:00:00.000Z',
+    }).prepareOfflineFeeds(sourceSha, loaded.pathAuthorities.stateRoot, 'job-source-producer');
+
+    expect(preparation).toMatchObject({
+      schemaVersion: 1,
+      jobId: 'job-source-producer',
+      sourceSha,
+      preparedAt: '2026-07-26T20:00:00.000Z',
+      feeds: [
+        {
+          name: 'packages',
+          commit: packagesSha,
+          detached: true,
+          clean: true,
+          recursiveSubmodulesPrepared: true,
+          recursiveSubmodules: [{ path: 'vendor/nested', commit: nestedSha }],
+        },
+        { name: 'luci', commit: luciSha, recursiveSubmodules: [] },
+        { name: 'routing', commit: routingSha, recursiveSubmodules: [] },
+      ],
+    });
+    expect(await readFile(join(preparedPath, 'packages/vendor/nested/nested.txt'), 'utf8')).toBe('nested checkout\n');
+    expect((await git(join(preparedPath, 'packages'), ['rev-parse', 'HEAD'])).trim()).toBe(packagesSha);
+    await expect(git(join(preparedPath, 'packages'), ['symbolic-ref', '--quiet', 'HEAD'])).rejects.toThrow();
+    expect(preparation.feeds.every((feed) => /^[0-9a-f]{64}$/u.test(feed.treeSha256))).toBe(true);
+    expect(Object.isFrozen(preparation)).toBe(true);
+  });
+
   it('prepares the actual repository vendored-tree layout before runner handoff', async () => {
     const repositoryPath = resolve(process.cwd(), '../..');
     const localGit = new GitCommand({ sshAuthSock: null });
