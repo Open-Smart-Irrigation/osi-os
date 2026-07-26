@@ -386,7 +386,7 @@ static int directory_binding_matches(int parent, const char *name, int directory
 
 #if defined(PUBLISHER_TEST_ROOT_ANCESTOR_BEFORE) || defined(PUBLISHER_TEST_ROOT_ANCESTOR_AFTER)
 static int test_swap_root_ancestor(struct directory_chain *chain, const char *job_id) {
-    char hidden[96];
+    char hidden[MAX_JOB_ID + 64];
     size_t component;
     size_t offset = 1;
     size_t job_length = strlen(job_id);
@@ -394,7 +394,7 @@ static int test_swap_root_ancestor(struct directory_chain *chain, const char *jo
     if (job_length >= 2 && job_id[job_length - 2] == '-' && job_id[job_length - 1] >= '1' && job_id[job_length - 1] <= '9') offset = (size_t)(job_id[job_length - 1] - '0');
     if (chain->component_count <= offset) return -1;
     component = chain->component_count - 1 - offset;
-    length = snprintf(hidden, sizeof(hidden), ".publisher-test-root-ancestor-hidden-%ld", (long)getpid());
+    length = snprintf(hidden, sizeof(hidden), ".publisher-test-root-ancestor-hidden-%s", job_id);
     if (length < 0 || (size_t)length >= sizeof(hidden)) return -1;
     if (renameat(chain->descriptors[component], chain->names[component], chain->descriptors[component], hidden) < 0) return -1;
     if (mkdirat(chain->descriptors[component], chain->names[component], 0750) < 0) return -1;
@@ -402,7 +402,7 @@ static int test_swap_root_ancestor(struct directory_chain *chain, const char *jo
 }
 #endif
 
-#if defined(PUBLISHER_TEST_METADATA_BEFORE) || defined(PUBLISHER_TEST_METADATA_AFTER)
+#if defined(PUBLISHER_TEST_METADATA_BEFORE) || defined(PUBLISHER_TEST_METADATA_AFTER) || defined(PUBLISHER_TEST_METADATA_AFTER_QUARANTINE_CREATE)
 static int test_swap_metadata(int root) {
     char hidden[96];
     int length = snprintf(hidden, sizeof(hidden), ".publisher-test-metadata-hidden-%ld", (long)getpid());
@@ -432,7 +432,7 @@ static int test_swap_destination(int parent, const char *name) {
 }
 #endif
 
-#if defined(PUBLISHER_TEST_ANCESTOR_BEFORE) || defined(PUBLISHER_TEST_ANCESTOR_AFTER) || defined(PUBLISHER_TEST_RECHECK_LATE_SWAP)
+#if defined(PUBLISHER_TEST_ANCESTOR_BEFORE) || defined(PUBLISHER_TEST_ANCESTOR_AFTER) || defined(PUBLISHER_TEST_RECHECK_LATE_SWAP) || defined(PUBLISHER_TEST_STAGING_PARENT_AFTER) || defined(PUBLISHER_TEST_BRANCH_PARENT_AFTER)
 static int test_swap_ancestor(int parent, const char *name) {
     if (renameat(parent, name, parent, ".publisher-test-ancestor-hidden") < 0) return -1;
     if (mkdirat(parent, name, 0750) < 0) return -1;
@@ -552,13 +552,14 @@ static int required_release_files(int directory) {
             return 0;
         }
     }
+    errno = 0;
     while ((entry = readdir(stream)) != NULL) {
         size_t length = strlen(entry->d_name);
         struct stat item;
         if (length > 7 && strcmp(entry->d_name + length - 7, ".img.gz") == 0 &&
             fstatat(directory, entry->d_name, &item, AT_SYMLINK_NOFOLLOW) == 0 && S_ISREG(item.st_mode)) image_count += 1;
     }
-    closedir(stream);
+    if (errno != 0 || closedir(stream) < 0) return 0;
     return image_count == 1;
 }
 
@@ -678,6 +679,9 @@ static int publish_operation(const char *root_path, const char *job_id, const ch
     if (source < 0) goto invalid;
     if (fstat(source, &source_identity) < 0 || !S_ISDIR(source_identity.st_mode)) goto invalid;
     if (fsync_tree(source) < 0 || fsync(staging_parent) < 0) goto invalid;
+#ifdef PUBLISHER_TEST_STAGING_PARENT_AFTER
+    if (test_swap_ancestor(metadata, "staging") < 0) goto invalid;
+#endif
 #ifdef PUBLISHER_TEST_SWAP_BEFORE
     if (test_swap_source(staging_parent, job_id) < 0) goto invalid;
 #endif
@@ -697,6 +701,9 @@ static int publish_operation(const char *root_path, const char *job_id, const ch
     destination_parent = open_directory_at(branch_parent, sha, 1, &destination_created);
     result->mutation_count += destination_created;
     if (destination_parent < 0) goto invalid;
+#ifdef PUBLISHER_TEST_BRANCH_PARENT_AFTER
+    if (test_swap_ancestor(root, branch) < 0) goto invalid;
+#endif
     if (!same_device(source, destination_parent)) {
         result->error_code = "STAGING_FILESYSTEM_MISMATCH";
         goto done;
@@ -806,6 +813,9 @@ static int quarantine_operation(const char *root_path, const char *job_id, struc
     }
     if (capability < 0) goto invalid;
     staging_parent = open_directory_at(metadata, "staging", 0, NULL);
+#ifdef PUBLISHER_TEST_STAGING_PARENT_AFTER
+    if (staging_parent >= 0 && test_swap_ancestor(metadata, "staging") < 0) goto invalid;
+#endif
     if (!root_metadata_bindings_match(&root_chain, root, metadata) ||
         !directory_binding_matches(metadata, "staging", staging_parent)) goto invalid;
 #ifdef PUBLISHER_TEST_ROOT_ANCESTOR_BEFORE
@@ -816,6 +826,9 @@ static int quarantine_operation(const char *root_path, const char *job_id, struc
     quarantine_parent = open_directory_at(metadata, "quarantine", 1, &quarantine_created);
     result->mutation_count += quarantine_created;
     if (staging_parent < 0 || quarantine_parent < 0) goto invalid;
+#ifdef PUBLISHER_TEST_METADATA_AFTER_QUARANTINE_CREATE
+    if (test_swap_metadata(root) < 0) goto invalid;
+#endif
     source = openat(staging_parent, job_id, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (source < 0 || fstat(source, &source_identity) < 0 || !S_ISDIR(source_identity.st_mode) || fsync_tree(source) < 0 || !same_device(source, quarantine_parent)) goto invalid;
 #ifdef PUBLISHER_TEST_SWAP_BEFORE
@@ -936,6 +949,12 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
             destination_matches = destination_identity_matches(destination_parent, target, &destination_identity);
         }
     } else destination_state = 0;
+#ifdef PUBLISHER_TEST_STAGING_PARENT_AFTER
+    if (test_swap_ancestor(metadata, "staging") < 0) goto invalid;
+#endif
+#ifdef PUBLISHER_TEST_BRANCH_PARENT_AFTER
+    if (branch_parent >= 0 && test_swap_ancestor(root, branch) < 0) goto invalid;
+#endif
     parent_bindings_match = directory_chain_matches(&root_chain) &&
         directory_binding_matches(root, ".osi-image-builder", metadata) &&
         directory_binding_matches(metadata, "staging", staging_parent) &&

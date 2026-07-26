@@ -18,6 +18,9 @@ const ancestorAfterBinary = join(publisherDirectory, 'osi-image-publish-test-anc
 const rootAncestorBeforeBinary = join(publisherDirectory, 'osi-image-publish-test-root-ancestor-before');
 const rootAncestorAfterBinary = join(publisherDirectory, 'osi-image-publish-test-root-ancestor-after');
 const metadataAfterBinary = join(publisherDirectory, 'osi-image-publish-test-metadata-after');
+const metadataAfterQuarantineBinary = join(publisherDirectory, 'osi-image-publish-test-metadata-after-quarantine');
+const stagingParentAfterBinary = join(publisherDirectory, 'osi-image-publish-test-staging-parent-after');
+const branchParentAfterBinary = join(publisherDirectory, 'osi-image-publish-test-branch-parent-after');
 const recheckLateSwapBinary = join(publisherDirectory, 'osi-image-publish-test-recheck-late-swap');
 const preRenameFsyncFailureBinary = join(publisherDirectory, 'osi-image-publish-test-pre-rename-fsync-failure');
 const unsupportedBinary = join(publisherDirectory, 'osi-image-publish-test-unsupported');
@@ -78,6 +81,9 @@ describe('native publisher integration', () => {
     await rm(rootAncestorBeforeBinary, { force: true });
     await rm(rootAncestorAfterBinary, { force: true });
     await rm(metadataAfterBinary, { force: true });
+    await rm(metadataAfterQuarantineBinary, { force: true });
+    await rm(stagingParentAfterBinary, { force: true });
+    await rm(branchParentAfterBinary, { force: true });
     await rm(recheckLateSwapBinary, { force: true });
     await rm(preRenameFsyncFailureBinary, { force: true });
     await rm(unsupportedBinary, { force: true });
@@ -302,7 +308,7 @@ describe('native publisher integration', () => {
 
   it('retains and revalidates the complete approved-root descriptor chain', async () => {
     for (const [phase, executable] of [['before', rootAncestorBeforeBinary], ['after', rootAncestorAfterBinary]] as const) {
-      for (const offset of [1, 2, 3, 4]) {
+      for (const offset of [1, 2, 3, 4, 5]) {
         const chainBase = await mkdtemp('/tmp/osi-image-publisher-chain-');
         const selectedRoot = join(chainBase, 'stable', 'level-one', 'level-two', 'level-three', 'images');
         const jobId = `job-root-${phase}-${offset}`;
@@ -317,32 +323,34 @@ describe('native publisher integration', () => {
             ...(phase === 'after' ? { renameResult: 'RENAMED' } : {}),
           });
           await expect(access(join(selectedRoot, `feature%2Froot-${phase}-${offset}`, SHA, TARGET))).rejects.toMatchObject({ code: 'ENOENT' });
-          expect((await readdir(chainBase, { recursive: true })).some((entry) => entry.includes('.publisher-test-root-ancestor-hidden-'))).toBe(true);
+          const hiddenParent = offset === 5 ? '/tmp' : chainBase;
+          expect((await readdir(hiddenParent, { recursive: offset !== 5 })).some((entry) => entry.includes(`.publisher-test-root-ancestor-hidden-${jobId}`))).toBe(true);
         } finally {
           await rm(chainBase, { recursive: true, force: true });
+          if (offset === 5) await rm(join('/tmp', `.publisher-test-root-ancestor-hidden-${jobId}`), { recursive: true, force: true });
         }
       }
     }
 
-    const chainBase = await mkdtemp('/tmp/osi-image-publisher-chain-operations-');
-    const selectedRoot = join(chainBase, 'stable', 'level-one', 'level-two', 'images');
-    try {
-      const quarantineJob = 'job-chain-quarantine-1';
-      await createStaging(quarantineJob, selectedRoot);
-      const quarantine = await runBinary(rootAncestorBeforeBinary, 'quarantine', '--root', selectedRoot, '--job-id', quarantineJob);
-      expect(parsed(quarantine)).toMatchObject({ quarantined: false, mutationCount: 0, errorCode: 'QUARANTINE_PENDING' });
-    } finally {
-      await rm(chainBase, { recursive: true, force: true });
-    }
-
-    const recheckBase = await mkdtemp('/tmp/osi-image-publisher-chain-recheck-');
-    const recheckRoot = join(recheckBase, 'stable', 'level-one', 'level-two', 'images');
-    try {
-      await createStaging('job-chain-recheck-1', recheckRoot);
-      const recheck = await runBinary(rootAncestorBeforeBinary, 'recheck', '--root', recheckRoot, '--job-id', 'job-chain-recheck-1', '--branch', 'feature%2Fchain-recheck', '--sha', SHA, '--target', TARGET);
-      expect(parsed(recheck)).toMatchObject({ destination: 'unknown', staging: 'unknown', errorCode: 'PUBLISH_RECOVERY_FAILED' });
-    } finally {
-      await rm(recheckBase, { recursive: true, force: true });
+    for (const operation of ['quarantine', 'recheck'] as const) {
+      for (const offset of [1, 2, 3, 4, 5]) {
+        const operationBase = await mkdtemp(`/tmp/osi-image-publisher-chain-${operation}-`);
+        const selectedRoot = join(operationBase, 'stable', 'level-one', 'level-two', 'level-three', 'images');
+        const jobId = `job-chain-${operation}-${offset}`;
+        try {
+          await createStaging(jobId, selectedRoot);
+          const response = operation === 'quarantine'
+            ? await runBinary(rootAncestorBeforeBinary, operation, '--root', selectedRoot, '--job-id', jobId)
+            : await runBinary(rootAncestorBeforeBinary, operation, '--root', selectedRoot, '--job-id', jobId, '--branch', `feature%2Fchain-${offset}`, '--sha', SHA, '--target', TARGET);
+          expect(response.code).toBe(2);
+          expect(parsed(response)).toMatchObject(operation === 'quarantine'
+            ? { quarantined: false, mutationCount: 0, errorCode: 'QUARANTINE_PENDING' }
+            : { destination: 'unknown', staging: 'unknown', mutationCount: 0, errorCode: 'PUBLISH_RECOVERY_FAILED' });
+        } finally {
+          await rm(operationBase, { recursive: true, force: true });
+          if (offset === 5) await rm(join('/tmp', `.publisher-test-root-ancestor-hidden-${jobId}`), { recursive: true, force: true });
+        }
+      }
     }
   });
 
@@ -366,6 +374,63 @@ describe('native publisher integration', () => {
       } finally {
         await rm(operationBase, { recursive: true, force: true });
       }
+    }
+
+    const quarantineBase = await mkdtemp('/tmp/osi-image-publisher-metadata-quarantine-parent-');
+    const quarantineRoot = join(quarantineBase, 'images');
+    try {
+      await createStaging('job-metadata-after-quarantine', quarantineRoot);
+      const response = await runBinary(metadataAfterQuarantineBinary, 'quarantine', '--root', quarantineRoot, '--job-id', 'job-metadata-after-quarantine');
+      expect(response.code).toBe(2);
+      expect(parsed(response)).toMatchObject({ quarantined: false, mutationCount: 1, errorCode: 'QUARANTINE_PENDING' });
+    } finally {
+      await rm(quarantineBase, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects staging and branch parent replacement across publication and recovery', async () => {
+    for (const operation of ['publish', 'quarantine', 'recheck'] as const) {
+      const operationBase = await mkdtemp(`/tmp/osi-image-publisher-staging-parent-${operation}-`);
+      const selectedRoot = join(operationBase, 'images');
+      const jobId = `job-staging-parent-${operation}`;
+      try {
+        await createStaging(jobId, selectedRoot);
+        const response = operation === 'quarantine'
+          ? await runBinary(stagingParentAfterBinary, operation, '--root', selectedRoot, '--job-id', jobId)
+          : await runBinary(stagingParentAfterBinary, operation, '--root', selectedRoot, '--job-id', jobId, '--branch', `feature%2Fstaging-${operation}`, '--sha', SHA, '--target', TARGET);
+        expect(response.code).toBe(2);
+        expect(parsed(response)).toMatchObject(operation === 'publish'
+          ? { published: false, mutationCount: 0, errorCode: 'PUBLISH_FAILED' }
+          : operation === 'quarantine'
+            ? { quarantined: false, mutationCount: 0, errorCode: 'QUARANTINE_PENDING' }
+            : { destination: 'unknown', staging: 'unknown', mutationCount: 0, errorCode: 'PUBLISH_RECOVERY_FAILED' });
+      } finally {
+        await rm(operationBase, { recursive: true, force: true });
+      }
+    }
+
+    const publishBase = await mkdtemp('/tmp/osi-image-publisher-branch-parent-publish-');
+    const publishRoot = join(publishBase, 'images');
+    try {
+      await createStaging('job-branch-parent-publish', publishRoot);
+      const response = await runBinary(branchParentAfterBinary, 'publish', '--root', publishRoot, '--job-id', 'job-branch-parent-publish', '--branch', 'feature%2Fbranch-parent', '--sha', SHA, '--target', TARGET);
+      expect(response.code).toBe(2);
+      expect(parsed(response)).toMatchObject({ published: false, mutationCount: 2, errorCode: 'PUBLISH_FAILED' });
+    } finally {
+      await rm(publishBase, { recursive: true, force: true });
+    }
+
+    const recheckBase = await mkdtemp('/tmp/osi-image-publisher-branch-parent-recheck-');
+    const recheckRoot = join(recheckBase, 'images');
+    try {
+      await createStaging('job-branch-parent-seed', recheckRoot);
+      const seeded = await runBinary(binary, 'publish', '--root', recheckRoot, '--job-id', 'job-branch-parent-seed', '--branch', 'feature%2Fbranch-recheck', '--sha', SHA, '--target', TARGET);
+      expect(seeded.code).toBe(0);
+      const response = await runBinary(branchParentAfterBinary, 'recheck', '--root', recheckRoot, '--job-id', 'job-branch-parent-seed', '--branch', 'feature%2Fbranch-recheck', '--sha', SHA, '--target', TARGET);
+      expect(response.code).toBe(2);
+      expect(parsed(response)).toMatchObject({ destination: 'unknown', staging: 'unknown', errorCode: 'PUBLISH_RECOVERY_FAILED' });
+    } finally {
+      await rm(recheckBase, { recursive: true, force: true });
     }
   });
 

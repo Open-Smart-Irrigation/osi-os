@@ -14,6 +14,9 @@ TEST_BINARIES := \
 	osi-image-publish-test-root-ancestor-before \
 	osi-image-publish-test-root-ancestor-after \
 	osi-image-publish-test-metadata-after \
+	osi-image-publish-test-metadata-after-quarantine \
+	osi-image-publish-test-staging-parent-after \
+	osi-image-publish-test-branch-parent-after \
 	osi-image-publish-test-recheck-late-swap \
 	osi-image-publish-test-pre-rename-fsync-failure \
 	osi-image-publish-test-unsupported \
@@ -21,7 +24,7 @@ TEST_BINARIES := \
 	osi-image-publish-test-fsync-failure \
 	osi-image-publish-test-block-root
 
-.PHONY: all clean test test-hooks test-before test-after test-destination test-ancestor-before test-ancestor-after test-root-ancestor-before test-root-ancestor-after test-metadata-after test-recheck-late-swap test-pre-rename-fsync-failure test-unsupported test-cross-device test-fsync-failure test-block-root
+.PHONY: all clean test test-hooks test-before test-after test-destination test-ancestor-before test-ancestor-after test-root-ancestor-before test-root-ancestor-after test-metadata-after test-metadata-after-quarantine test-staging-parent-after test-branch-parent-after test-recheck-late-swap test-pre-rename-fsync-failure test-unsupported test-cross-device test-fsync-failure test-block-root
 
 all: $(PUBLISHER)
 
@@ -33,7 +36,7 @@ $(PUBLISHER): $(SOURCE) Makefile
 test: all
 	./test-publisher.sh
 
-test-hooks: test-before test-after test-destination test-ancestor-before test-ancestor-after test-root-ancestor-before test-root-ancestor-after test-metadata-after test-recheck-late-swap test-pre-rename-fsync-failure test-unsupported test-cross-device test-fsync-failure test-block-root
+test-hooks: test-before test-after test-destination test-ancestor-before test-ancestor-after test-root-ancestor-before test-root-ancestor-after test-metadata-after test-metadata-after-quarantine test-staging-parent-after test-branch-parent-after test-recheck-late-swap test-pre-rename-fsync-failure test-unsupported test-cross-device test-fsync-failure test-block-root
 
 test-before: $(SOURCE) Makefile
 	SOURCE_SHA256=$$(sha256sum $(SOURCE) | awk '{print $$1}'); \
@@ -74,6 +77,21 @@ test-metadata-after: $(SOURCE) Makefile
 	SOURCE_SHA256=$$(sha256sum $(SOURCE) | awk '{print $$1}'); \
 	$(CC) $(CFLAGS) -DPUBLISHER_TESTING -DPUBLISHER_TEST_METADATA_AFTER -DPUBLISHER_VERSION=\"$(VERSION)\" -DPUBLISHER_SOURCE_SHA256=\"$$SOURCE_SHA256\" -o osi-image-publish-test-metadata-after $(SOURCE)
 	chmod 0555 osi-image-publish-test-metadata-after
+
+test-metadata-after-quarantine: $(SOURCE) Makefile
+	SOURCE_SHA256=$$(sha256sum $(SOURCE) | awk '{print $$1}'); \
+	$(CC) $(CFLAGS) -DPUBLISHER_TESTING -DPUBLISHER_TEST_METADATA_AFTER_QUARANTINE_CREATE -DPUBLISHER_VERSION=\"$(VERSION)\" -DPUBLISHER_SOURCE_SHA256=\"$$SOURCE_SHA256\" -o osi-image-publish-test-metadata-after-quarantine $(SOURCE)
+	chmod 0555 osi-image-publish-test-metadata-after-quarantine
+
+test-staging-parent-after: $(SOURCE) Makefile
+	SOURCE_SHA256=$$(sha256sum $(SOURCE) | awk '{print $$1}'); \
+	$(CC) $(CFLAGS) -DPUBLISHER_TESTING -DPUBLISHER_TEST_STAGING_PARENT_AFTER -DPUBLISHER_VERSION=\"$(VERSION)\" -DPUBLISHER_SOURCE_SHA256=\"$$SOURCE_SHA256\" -o osi-image-publish-test-staging-parent-after $(SOURCE)
+	chmod 0555 osi-image-publish-test-staging-parent-after
+
+test-branch-parent-after: $(SOURCE) Makefile
+	SOURCE_SHA256=$$(sha256sum $(SOURCE) | awk '{print $$1}'); \
+	$(CC) $(CFLAGS) -DPUBLISHER_TESTING -DPUBLISHER_TEST_BRANCH_PARENT_AFTER -DPUBLISHER_VERSION=\"$(VERSION)\" -DPUBLISHER_SOURCE_SHA256=\"$$SOURCE_SHA256\" -o osi-image-publish-test-branch-parent-after $(SOURCE)
+	chmod 0555 osi-image-publish-test-branch-parent-after
 
 test-recheck-late-swap: $(SOURCE) Makefile
 	SOURCE_SHA256=$$(sha256sum $(SOURCE) | awk '{print $$1}'); \
