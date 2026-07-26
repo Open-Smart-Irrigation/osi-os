@@ -1,4 +1,5 @@
 import { execFile as execFileCallback } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmod,
   copyFile,
@@ -38,7 +39,13 @@ const loadedManifest = loadManifest(new URL('../../manifest/targets.json', impor
 const manifest = loadedManifest.manifest;
 const fixtureRoot = new URL('../fixtures/target-setup/', import.meta.url).pathname;
 const rustFixture = new URL('../fixtures/openwrt-packages-d8cd30f4/lang/rust/Makefile', import.meta.url).pathname;
+const packagesGitFixtureRoot = new URL('../fixtures/openwrt-packages-d8cd30f4/git/', import.meta.url).pathname;
 const rootfsFixture = new URL('../../../../openwrt/target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh', import.meta.url).pathname;
+const packagesCommit = 'd8cd30f4e281d6853b3de134c4f147a807583e43';
+const packagesRustBlob = 'f63c5a5a8a75b7e2f2ab2b06114c1a25413d0ae1';
+const packagesGitignoreBlob = '5e2eb9a79195dc242db25c07c782372a3f5dcf01';
+const packagesSnapshotPackSha256 = '41c9cecc99835f1d2fda29133d9683bc07d8437f28fd24415ed6ad1d81380db6';
+const packagesSnapshotIndexSha256 = 'd988fb93e92117964e0ef7365a30e6f120d894982aae69a768cf9882559d9ee3';
 const operationTool = new URL('../../builder/operations/osi-image-builder-tool.js', import.meta.url).pathname;
 const temporaryDirectories: string[] = [];
 const execFile = promisify(execFileCallback);
@@ -123,12 +130,50 @@ describe('feed configuration integration boundary', () => {
     const luciDonor = join(root, 'luci-feed');
     const packagesDonor = join(root, 'packages-feed');
     const routingDonor = join(root, 'routing-feed');
-    for (const donor of [nestedDonor, luciDonor, packagesDonor, routingDonor]) {
+    for (const donor of [nestedDonor, luciDonor, routingDonor]) {
       await mkdir(donor);
       await fixtureGit(donor, ['init', '--quiet']);
       await fixtureGit(donor, ['config', 'user.name', 'Fixture Author']);
       await fixtureGit(donor, ['config', 'user.email', 'fixture@example.test']);
     }
+    await fixtureGit(root, ['init', '--quiet', '--bare', packagesDonor]);
+    const packagesPack = await readFile(join(packagesGitFixtureRoot, 'snapshot.pack'));
+    const packagesIndex = await readFile(join(packagesGitFixtureRoot, 'snapshot.idx'));
+    expect(createHash('sha256').update(packagesPack).digest('hex')).toBe(packagesSnapshotPackSha256);
+    expect(createHash('sha256').update(packagesIndex).digest('hex')).toBe(packagesSnapshotIndexSha256);
+    await writeFile(join(packagesDonor, 'objects/pack/fixture.pack'), packagesPack);
+    await writeFile(join(packagesDonor, 'objects/pack/fixture.idx'), packagesIndex);
+    await writeFile(
+      join(packagesDonor, 'shallow'),
+      `${packagesCommit}\n`,
+    );
+    await fixtureGit(packagesDonor, ['config', 'uploadpack.allowFilter', 'true']);
+    await fixtureGit(packagesDonor, [
+      'update-ref',
+      'refs/heads/main',
+      packagesCommit,
+    ]);
+    await fixtureGit(packagesDonor, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+    const verifiedPack = (await fixtureGit(packagesDonor, [
+      'verify-pack',
+      '-v',
+      'objects/pack/fixture.idx',
+    ])).stdout.split('\n').flatMap((line) => {
+      const match = /^([0-9a-f]{40}) (blob|commit|tree) /u.exec(line);
+      return match === null ? [] : [{ object: match[1]!, type: match[2]! }];
+    });
+    expect(verifiedPack.filter(({ type }) => type === 'commit')).toEqual([
+      { object: packagesCommit, type: 'commit' },
+    ]);
+    expect(verifiedPack.filter(({ type }) => type === 'blob').sort((left, right) => left.object.localeCompare(right.object))).toEqual([
+      { object: packagesGitignoreBlob, type: 'blob' },
+      { object: packagesRustBlob, type: 'blob' },
+    ].sort((left, right) => left.object.localeCompare(right.object)));
+    expect(verifiedPack.filter(({ type }) => type === 'tree')).toHaveLength(2_688);
+    expect((await fixtureGit(packagesDonor, [
+      'show',
+      `${packagesCommit}:lang/rust/Makefile`,
+    ])).stdout).toBe(await readFile(rustFixture, 'utf8'));
     await writeFile(join(nestedDonor, 'nested.txt'), 'attached recursive dependency\n');
     await fixtureGit(nestedDonor, ['add', 'nested.txt']);
     await fixtureGit(nestedDonor, ['commit', '--quiet', '-m', 'nested dependency']);
@@ -139,17 +184,12 @@ describe('feed configuration integration boundary', () => {
     await fixtureGit(luciDonor, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', nestedDonor, 'deps/nested']);
     await fixtureGit(luciDonor, ['commit', '--quiet', '-am', 'attach nested dependency']);
     const luciCommit = (await fixtureGit(luciDonor, ['rev-parse', 'HEAD'])).stdout.trim();
-    await mkdir(join(packagesDonor, 'lang/rust'), { recursive: true });
-    await copyFile(rustFixture, join(packagesDonor, 'lang/rust/Makefile'));
-    await fixtureGit(packagesDonor, ['add', 'lang/rust/Makefile']);
-    await fixtureGit(packagesDonor, ['commit', '--quiet', '-m', 'pinned packages Rust fixture']);
-    const packagesFixtureCommit = (await fixtureGit(packagesDonor, ['rev-parse', 'HEAD'])).stdout.trim();
     await writeFile(join(routingDonor, 'README'), 'fixture routing feed\n');
     await fixtureGit(routingDonor, ['add', 'README']);
     await fixtureGit(routingDonor, ['commit', '--quiet', '-m', 'fixture routing feed']);
     const routingCommit = (await fixtureGit(routingDonor, ['rev-parse', 'HEAD'])).stdout.trim();
     const feeds = [
-      { name: 'packages' as const, location: 'https://git.openwrt.org/feed/packages.git', commit: 'd8cd30f4e281d6853b3de134c4f147a807583e43' },
+      { name: 'packages' as const, location: 'https://git.openwrt.org/feed/packages.git', commit: packagesCommit },
       { name: 'luci' as const, location: 'https://git.openwrt.org/project/luci.git', commit: luciCommit },
       { name: 'routing' as const, location: 'https://git.openwrt.org/feed/routing.git', commit: routingCommit },
     ];
@@ -195,7 +235,7 @@ describe('feed configuration integration boundary', () => {
       [feeds[2]!.location, routingDonor],
     ]);
     const donorCommitByUrl = new Map<string, string>([
-      [feeds[0]!.location, packagesFixtureCommit],
+      [feeds[0]!.location, feeds[0]!.commit],
       [feeds[1]!.location, luciCommit],
       [feeds[2]!.location, routingCommit],
     ]);
@@ -208,23 +248,18 @@ describe('feed configuration integration boundary', () => {
       sshAuthSock: null,
       async execFile(_executable, argv, options) {
         const environment = options.env as Readonly<Record<string, string>>;
-        const checkoutPath = typeof options.cwd === 'string' && options.cwd.startsWith('/proc/')
+        const workingDirectory = typeof options.cwd === 'string' && options.cwd.startsWith('/proc/')
           ? await readlink(options.cwd)
           : String(options.cwd);
-        if (
-          checkoutPath.endsWith('/packages')
-          && JSON.stringify(argv) === JSON.stringify([
-            'rev-parse',
-            '--verify',
-            '--end-of-options',
-            'HEAD^{commit}',
-          ])
-        ) {
-          return { exitCode: 0, signal: null, stdout: `${feeds[0]!.commit}\n`, stderr: '' };
-        }
-        const executed = argv.map((value) => donorByUrl.get(value) ?? value);
+        const executed = argv.map((value) => {
+          const donor = donorByUrl.get(value);
+          return donor === undefined ? value : `file://${donor}`;
+        });
         const separator = executed.indexOf('--');
-        if (executed[0] === 'clone' && separator >= 0) executed.splice(separator, 0, '--shared');
+        const cloningPackages = executed[0] === 'clone' && argv.at(-2) === feeds[0]!.location;
+        if (cloningPackages && separator >= 0) {
+          executed.splice(separator, 0, '--filter=blob:none', '--depth=1', '--sparse');
+        }
         try {
           const command = await execFile('/usr/bin/git', executed, {
             cwd: options.cwd as string | undefined,
@@ -235,24 +270,22 @@ describe('feed configuration integration boundary', () => {
           if (argv[0] === 'clone') {
             const location = argv.at(-2)!;
             const checkout = join(options.cwd as string, argv.at(-1)!);
-            const feed = feeds.find((candidate) => candidate.location === location)!;
-            const fixtureCommit = donorCommitByUrl.get(location)!;
-            if (fixtureCommit !== feed.commit) {
-              // A minimal fixture cannot reproduce the upstream commit hash; alias
-              // only its loose commit object while every checkout/tree operation stays real.
-              const fixtureObject = join(
-                donorByUrl.get(location)!,
-                '.git/objects',
-                fixtureCommit.slice(0, 2),
-                fixtureCommit.slice(2),
-              );
-              const aliasDirectory = join(checkout, '.git/objects', feed.commit.slice(0, 2));
-              await mkdir(aliasDirectory, { recursive: true });
-              await copyFile(fixtureObject, join(aliasDirectory, feed.commit.slice(2)));
+            if (location === feeds[0]!.location) {
+              await fixtureGit(checkout, [
+                'sparse-checkout',
+                'set',
+                '--no-cone',
+                '.gitignore',
+                'lang/rust/Makefile',
+              ]);
+            } else {
+              await fixtureGit(checkout, ['remote', 'set-url', 'origin', location]);
             }
+          }
+          if (argv[0] === 'checkout' && workingDirectory.endsWith('/packages')) {
             await fixtureGit(
-              checkout,
-              ['remote', 'set-url', 'origin', location],
+              workingDirectory,
+              ['remote', 'set-url', 'origin', feeds[0]!.location],
             );
           }
           return { exitCode: 0, signal: null, stdout: command.stdout, stderr: command.stderr };
