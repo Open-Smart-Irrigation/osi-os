@@ -42,7 +42,7 @@ export interface StageEvidenceInput {
   readonly startedAt: string;
   readonly finishedAt: string;
   readonly outcome: 'passed' | 'failed';
-  /** Source setup is a stage-only contract; it does not impersonate a target operation. */
+  /** Null identifies a stage summary; non-null records remain bound to one trusted operation. */
   readonly operationId: TrustedOperationId | null;
   readonly commands: readonly EvidenceCommand[];
   readonly inputs: Readonly<Record<string, unknown>>;
@@ -231,8 +231,7 @@ function validateInput(input: StageEvidenceInput): StageEvidence {
   if (jobId.includes('/')) return invalid('jobId must be one stable path segment');
   if (!isPipelineStageName(input.stage)
     || (input.operationId !== null && !isTrustedOperationId(input.operationId))
-    || (input.stage === 'source' && input.operationId !== null)
-    || (input.stage !== 'source' && input.operationId === null)) {
+    || (input.stage === 'source' && input.operationId !== null)) {
     return invalid('stage or operation is not trusted');
   }
   let startedAt: string;

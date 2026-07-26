@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { access, chmod, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -78,6 +78,8 @@ async function createFixture(options: {
   readonly collision?: boolean;
   readonly gitmodulesUrl?: string;
   readonly checkoutFilter?: 'smudge' | 'process';
+  readonly coreSymlinks?: boolean;
+  readonly declaredGitlink?: boolean;
   readonly race?: RaceControl;
   readonly pathAuthorityDependencies?: Partial<PathAuthorityDependencies>;
 } = {}) {
@@ -93,6 +95,9 @@ async function createFixture(options: {
   await mkdir(join(active, 'openwrt'), { recursive: true });
   await mkdir(join(active, 'feeds', 'chirpstack-openwrt-feed'), { recursive: true });
   await writeFile(join(active, 'README.md'), 'active\n');
+  await writeFile(join(active, 'executable.sh'), '#!/bin/sh\nexit 0\n');
+  await chmod(join(active, 'executable.sh'), 0o755);
+  await symlink('README.md', join(active, 'README.link'));
   const filterMarker = join(root, 'checkout-filter-invoked');
   const filterHelper = join(root, 'checkout-filter-helper');
   if (options.checkoutFilter !== undefined) {
@@ -123,6 +128,9 @@ async function createFixture(options: {
     await writeFile(join(active, 'openwrt', 'bin', 'targets', 'bcm27xx', 'bcm2712', 'old.img.gz'), 'old output\n');
   }
   await gitRaw(active, 'add', '.');
+  if (options.declaredGitlink === true) {
+    await gitRaw(active, 'update-index', '--add', '--cacheinfo', '160000,0123456789abcdef0123456789abcdef01234567,declared-dependency');
+  }
   await gitRaw(active, 'commit', '-m', 'pinned vendored source');
   const sha = await git(active, 'rev-parse', 'HEAD');
   await gitRaw(active, 'update-ref', 'refs/remotes/origin/main', sha);
@@ -146,6 +154,9 @@ async function createFixture(options: {
   } else if (options.checkoutFilter === 'process') {
     await gitRaw(active, 'config', 'filter.adversarial.process', filterHelper);
     await gitRaw(active, 'config', 'filter.adversarial.required', 'true');
+  }
+  if (options.coreSymlinks !== undefined) {
+    await gitRaw(active, 'config', 'core.symlinks', String(options.coreSymlinks));
   }
   const configHome = join(root, 'config');
   await mkdir(join(root, 'images'), { recursive: true });
@@ -296,6 +307,93 @@ describe('source worktree integration', () => {
       expect(await readFile(join(workspacePath, 'filtered.txt'), 'utf8')).toBe('committed source bytes\n');
     },
   );
+
+  it('forces tracked symlinks to materialize as symlinks when repository config disables them', async () => {
+    const fixture = await createFixture({ coreSymlinks: false });
+    const workspacePath = join(fixture.statePath, 'jobs', 'job-core-symlinks', 'workspace', 'source');
+
+    await expect(setupSourceWorktree({
+      repositoryPath: fixture.active,
+      stateRoot: fixture.stateRoot,
+      jobId: 'job-core-symlinks',
+      source: fixture.source!,
+      target: { openwrtTarget: 'bcm27xx/bcm2712' },
+    })).resolves.toMatchObject({ workspacePath });
+
+    expect((await lstat(join(workspacePath, 'README.link'))).isSymbolicLink()).toBe(true);
+    expect(await readlink(join(workspacePath, 'README.link'))).toBe('README.md');
+  });
+
+  it.each([
+    ['regular file made executable', async (workspacePath: string) => chmod(join(workspacePath, 'README.md'), 0o755)],
+    ['executable file stripped of execution', async (workspacePath: string) => chmod(join(workspacePath, 'executable.sh'), 0o644)],
+    ['regular file content changed', async (workspacePath: string) => writeFile(join(workspacePath, 'README.md'), 'changed after status\n')],
+    ['tracked symlink replaced by a regular file', async (workspacePath: string) => {
+      await rm(join(workspacePath, 'README.link'));
+      await writeFile(join(workspacePath, 'README.link'), 'README.md');
+    }],
+    ['tracked symlink target changed', async (workspacePath: string) => {
+      await rm(join(workspacePath, 'README.link'));
+      await symlink('executable.sh', join(workspacePath, 'README.link'));
+    }],
+  ] as const)('rejects a materialized %s after the final Git status check', async (_name, mutate) => {
+    const fixture = await createFixture();
+    const realGit = createSourceGitCommand();
+    let mutated = false;
+    await expect(setupSourceWorktree({
+      repositoryPath: fixture.active,
+      stateRoot: fixture.stateRoot,
+      jobId: `job-materialized-${_name.replaceAll(' ', '-')}`,
+      source: fixture.source!,
+      target: { openwrtTarget: 'bcm27xx/bcm2712' },
+      git: {
+        async run(args, options) {
+          const result = await realGit.run(args, options);
+          if (!mutated && args.includes('status')) {
+            mutated = true;
+            await mutate(options.cwd);
+          }
+          return result;
+        },
+      },
+    })).rejects.toMatchObject({ code: 'WORKTREE_CREATE_FAILED' });
+  });
+
+  it('rejects an unprepared gitlink declaration from the fully materialized vendored source', async () => {
+    const fixture = await createFixture({ declaredGitlink: true });
+
+    await expect(setupSourceWorktree({
+      repositoryPath: fixture.active,
+      stateRoot: fixture.stateRoot,
+      jobId: 'job-declared-gitlink',
+      source: fixture.source!,
+      target: { openwrtTarget: 'bcm27xx/bcm2712' },
+    })).rejects.toMatchObject({ code: 'SOURCE_NOT_COMMIT' });
+  });
+
+  it('rejects unsupported pinned tree modes before accepting the worktree', async () => {
+    const fixture = await createFixture();
+    const realGit = createSourceGitCommand();
+    await expect(setupSourceWorktree({
+      repositoryPath: fixture.active,
+      stateRoot: fixture.stateRoot,
+      jobId: 'job-unsupported-tree-mode',
+      source: fixture.source!,
+      target: { openwrtTarget: 'bcm27xx/bcm2712' },
+      git: {
+        async run(args, options) {
+          const result = await realGit.run(args, options);
+          if (args[0] === 'ls-tree' && args.includes('-r')) {
+            return {
+              ...result,
+              stdout: result.stdout.replace(/^100644 blob /u, '100664 blob '),
+            };
+          }
+          return result;
+        },
+      },
+    })).rejects.toMatchObject({ code: 'SOURCE_NOT_COMMIT' });
+  });
 
   it('rejects production-shape provenance drift during API preparation before checkout', async () => {
     const fixture = await createFixture({ gitmodulesUrl: 'https://example.invalid/openwrt.git' });

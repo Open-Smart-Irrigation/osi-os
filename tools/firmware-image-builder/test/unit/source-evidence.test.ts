@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadConfig, type PathAuthorityDependencies, type StateRootAuthority } from '../../config/load.js';
+import { PIPELINE_STAGE_NAMES, type PipelineStageName, type TrustedOperationId } from '../../domain/types.js';
 import { createEvidenceWriter, type EvidenceFileSystem, type StageEvidenceInput } from '../../runner/src/evidence.js';
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
@@ -98,6 +99,32 @@ function failedInput(jobId = 'job-2'): StageEvidenceInput {
   };
 }
 
+function summaryInput(
+  stage: PipelineStageName,
+  outcome: 'passed' | 'failed',
+  jobId = `job-${stage}-${outcome}`,
+): StageEvidenceInput {
+  const index = PIPELINE_STAGE_NAMES.indexOf(stage);
+  return {
+    ...passedInput(jobId),
+    stage,
+    outcome,
+    operationId: null,
+    error: outcome === 'passed'
+      ? null
+      : {
+          code: 'BUILD_FAILED',
+          stage,
+          details: { stage },
+          retryable: false,
+          requestId: 'req-summary',
+          diagnosis: `${stage} failed.`,
+          recovery: `Retry ${stage}.`,
+          evidencePath: `jobs/${jobId}/evidence/${String(index).padStart(2, '0')}-${stage}.json`,
+        },
+  };
+}
+
 async function replaceEvidenceAncestor(statePath: string, jobId: string, ancestor: 'state' | 'jobs' | 'job' | 'evidence'): Promise<void> {
   if (ancestor === 'state') {
     await rename(statePath, `${statePath}-held`);
@@ -139,6 +166,54 @@ describe('stage evidence', () => {
     });
   });
 
+  it.each(PIPELINE_STAGE_NAMES)('publishes passed %s stage-summary evidence without an operation identity', async (stage) => {
+    const fileSystem = new MemoryEvidenceFileSystem();
+    const authority = await authorityFixture();
+    const result = await createEvidenceWriter({ stateRoot: authority.stateRoot, fileSystem })
+      .write(summaryInput(stage, 'passed'));
+    const evidence = JSON.parse(fileSystem.files.get(result.path)!.toString('utf8'));
+
+    expect(evidence).toMatchObject({ stage, outcome: 'passed', operationId: null, error: null });
+    expect(result.path).toBe(`jobs/job-${stage}-passed/evidence/${String(PIPELINE_STAGE_NAMES.indexOf(stage)).padStart(2, '0')}-${stage}.json`);
+  });
+
+  it.each(PIPELINE_STAGE_NAMES)('publishes failed %s stage-summary evidence without an operation identity', async (stage) => {
+    const fileSystem = new MemoryEvidenceFileSystem();
+    const authority = await authorityFixture();
+    const result = await createEvidenceWriter({ stateRoot: authority.stateRoot, fileSystem })
+      .write(summaryInput(stage, 'failed'));
+    const evidence = JSON.parse(fileSystem.files.get(result.path)!.toString('utf8'));
+
+    expect(evidence).toMatchObject({
+      stage,
+      outcome: 'failed',
+      operationId: null,
+      error: { stage },
+    });
+    expect(evidence.error).not.toHaveProperty('operationId');
+  });
+
+  it('retains an exact trusted operation identity for pipeline-compatible operation-bound stage evidence', async () => {
+    const fileSystem = new MemoryEvidenceFileSystem();
+    const authority = await authorityFixture();
+    const writer = createEvidenceWriter({ stateRoot: authority.stateRoot, fileSystem });
+    const passed = await writer.write({
+      ...summaryInput('build', 'passed', 'job-operation-passed'),
+      operationId: 'build-image',
+    });
+    const failed = await writer.write({
+      ...summaryInput('build', 'failed', 'job-operation-failed'),
+      operationId: 'build-image',
+      error: {
+        ...summaryInput('build', 'failed', 'job-operation-failed').error!,
+        operationId: 'build-image',
+      },
+    });
+
+    expect(JSON.parse(fileSystem.files.get(passed.path)!.toString('utf8')).operationId).toBe('build-image');
+    expect(JSON.parse(fileSystem.files.get(failed.path)!.toString('utf8')).error.operationId).toBe('build-image');
+  });
+
   it('serializes the normalized exact error rather than the caller object', async () => {
     const fileSystem = new MemoryEvidenceFileSystem();
     const authority = await authorityFixture();
@@ -176,7 +251,7 @@ describe('stage evidence', () => {
     })).rejects.toMatchObject({ code: 'EVIDENCE_INVALID' });
   });
 
-  it('rejects incomplete command evidence and incoherent source operation identity', async () => {
+  it('rejects incomplete command evidence and incoherent operation identities', async () => {
     const authority = await authorityFixture();
     const writer = createEvidenceWriter({ stateRoot: authority.stateRoot });
     await expect(writer.write({
@@ -186,6 +261,18 @@ describe('stage evidence', () => {
     await expect(writer.write({
       ...passedInput('job-operation'),
       operationId: 'activate-target',
+    })).rejects.toMatchObject({ code: 'EVIDENCE_INVALID' });
+    await expect(writer.write({
+      ...summaryInput('build', 'passed', 'job-untrusted-operation'),
+      operationId: 'not-a-trusted-operation' as TrustedOperationId,
+    })).rejects.toMatchObject({ code: 'EVIDENCE_INVALID' });
+    await expect(writer.write({
+      ...summaryInput('build', 'failed', 'job-operation-mismatch'),
+      operationId: 'build-image',
+      error: {
+        ...summaryInput('build', 'failed', 'job-operation-mismatch').error!,
+        operationId: 'verify-image',
+      },
     })).rejects.toMatchObject({ code: 'EVIDENCE_INVALID' });
   });
 

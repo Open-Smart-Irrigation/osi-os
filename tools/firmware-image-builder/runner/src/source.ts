@@ -1,6 +1,7 @@
 import { execFile as execFileCallback } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { lstat, mkdir, open } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, readlink } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -24,8 +25,13 @@ const SAFE_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u;
 const PROC_FD = `/proc/${String(process.pid)}/fd`;
 const DIR_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW;
 const READ_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
+const SOURCE_FILE_FLAGS = READ_FLAGS | fsConstants.O_NONBLOCK;
 const SOURCE_COMPONENT_PATHS = Object.freeze(['feeds/chirpstack-openwrt-feed', 'openwrt'] as const);
 const SAFE_FILTER_DRIVER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+const SOURCE_TREE_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+const SOURCE_TREE_RECORD = /^(040000 tree|100644 blob|100755 blob|120000 blob|160000 commit) ([0-9a-f]{40})\t(.+)$/u;
+const SOURCE_TREE_MODES = Object.freeze(['040000', '100644', '100755', '120000', '160000'] as const);
+const SOURCE_TREE_TYPES = Object.freeze(['tree', 'blob', 'commit'] as const);
 
 export const SOURCE_GIT_ENV = Object.freeze({
   PATH: '/usr/bin:/bin',
@@ -84,7 +90,10 @@ export interface SourceGitResult extends SourceCommandEvidence {
 }
 
 export interface SourceGitCommand {
-  run(args: readonly string[], options: { readonly cwd: string }): Promise<SourceGitResult>;
+  run(args: readonly string[], options: {
+    readonly cwd: string;
+    readonly maxOutputBytes?: number;
+  }): Promise<SourceGitResult>;
 }
 
 export interface SourceComponentObservation {
@@ -162,6 +171,16 @@ interface DirectoryBinding {
   readonly inode: number;
 }
 
+type SourceTreeMode = (typeof SOURCE_TREE_MODES)[number];
+type SourceTreeType = (typeof SOURCE_TREE_TYPES)[number];
+
+interface SourceTreeEntry {
+  readonly mode: SourceTreeMode;
+  readonly type: SourceTreeType;
+  readonly objectId: string;
+  readonly path: string;
+}
+
 function truncateUtf8(value: string, limit: number): string {
   let result = '';
   let used = 0;
@@ -204,9 +223,14 @@ export function createSourceGitCommand(options: {
   const execute = options.execFile ?? defaultSourceExecFile;
   const now = options.now ?? (() => new Date().toISOString());
   return Object.freeze({
-    async run(args: readonly string[], runOptions: { readonly cwd: string }): Promise<SourceGitResult> {
+    async run(args: readonly string[], runOptions: {
+      readonly cwd: string;
+      readonly maxOutputBytes?: number;
+    }): Promise<SourceGitResult> {
       if (!Array.isArray(args) || args.length === 0 || args.some((arg) => typeof arg !== 'string' || arg.length === 0 || arg.includes('\0'))) throw new TypeError('source Git arguments are invalid');
       if (typeof runOptions.cwd !== 'string' || !runOptions.cwd.startsWith('/') || runOptions.cwd.includes('\0')) throw new TypeError('source Git cwd is invalid');
+      const maxOutputBytes = runOptions.maxOutputBytes ?? GIT_MAX_OUTPUT_BYTES;
+      if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1 || maxOutputBytes > SOURCE_TREE_MAX_OUTPUT_BYTES) throw new TypeError('source Git output bound is invalid');
       const argv = Object.freeze([GIT_EXECUTABLE, ...args]);
       const startedAt = canonicalInstant(now(), 'source command startedAt');
       let reply: SourceExecReply;
@@ -216,7 +240,7 @@ export function createSourceGitCommand(options: {
           env: SOURCE_GIT_ENV,
           encoding: 'utf8',
           timeout: GIT_TIMEOUT_MS,
-          maxBuffer: GIT_MAX_OUTPUT_BYTES,
+          maxBuffer: maxOutputBytes,
           windowsHide: true,
         });
       } catch {
@@ -226,8 +250,8 @@ export function createSourceGitCommand(options: {
       const stdout = typeof reply.stdout === 'string' ? reply.stdout : '';
       const stderr = typeof reply.stderr === 'string' ? reply.stderr : '';
       const outputLimit = reply.outputLimit === true
-        || Buffer.byteLength(stdout, 'utf8') > GIT_MAX_OUTPUT_BYTES
-        || Buffer.byteLength(stderr, 'utf8') > GIT_MAX_OUTPUT_BYTES;
+        || Buffer.byteLength(stdout, 'utf8') > maxOutputBytes
+        || Buffer.byteLength(stderr, 'utf8') > maxOutputBytes;
       return Object.freeze({
         argv,
         startedAt,
@@ -236,8 +260,8 @@ export function createSourceGitCommand(options: {
         signal: typeof reply.signal === 'string' ? reply.signal : null,
         timedOut: reply.timedOut === true,
         outputLimit,
-        stdout: truncateUtf8(stdout, GIT_MAX_OUTPUT_BYTES),
-        stderr: truncateUtf8(stderr, GIT_MAX_OUTPUT_BYTES),
+        stdout: truncateUtf8(stdout, maxOutputBytes),
+        stderr: truncateUtf8(stderr, maxOutputBytes),
       });
     },
   });
@@ -572,6 +596,7 @@ function checkoutConfig(drivers: readonly string[]): readonly string[] {
     '-c', 'core.attributesFile=/dev/null',
     '-c', 'core.autocrlf=false',
     '-c', 'core.eol=lf',
+    '-c', 'core.symlinks=true',
     '-c', 'core.sparseCheckout=false',
     '-c', 'core.sparseCheckoutCone=false',
     ...drivers.flatMap((driver) => [
@@ -581,6 +606,214 @@ function checkoutConfig(drivers: readonly string[]): readonly string[] {
       '-c', `filter.${driver}.required=false`,
     ]),
   ]);
+}
+
+function parseSourceTree(contents: string, preparation: RecursiveSourcePreparation): ReadonlyMap<string, SourceTreeEntry> {
+  if (!contents.endsWith('\0')) throw new Error('pinned tree manifest is not NUL terminated');
+  const entries = new Map<string, SourceTreeEntry>();
+  for (const record of contents.slice(0, -1).split('\0')) {
+    const match = SOURCE_TREE_RECORD.exec(record);
+    if (match === null) throw new Error('pinned tree contains an unsupported mode, type, or malformed entry');
+    const mode = match[1]!.slice(0, 6) as SourceTreeMode;
+    const type = match[1]!.slice(7) as SourceTreeType;
+    const objectId = match[2]!;
+    const path = stableRelativePath(match[3]!, 'pinned tree path');
+    if (path === '.git' || path.startsWith('.git/') || entries.has(path)) throw new Error('pinned tree contains an unsafe or duplicate path');
+    entries.set(path, Object.freeze({ mode, type, objectId, path }));
+  }
+  if (entries.size === 0) throw new Error('pinned tree is empty');
+
+  for (const entry of entries.values()) {
+    const segments = entry.path.split('/');
+    for (let index = 1; index < segments.length; index += 1) {
+      const parent = entries.get(segments.slice(0, index).join('/'));
+      if (parent?.mode !== '040000' || parent.type !== 'tree') throw new Error('pinned tree directory structure is incoherent');
+    }
+    if (entry.mode === '160000') {
+      const prepared = preparation.components.find((component) => component.path === entry.path);
+      if (prepared === undefined || prepared.objectId !== entry.objectId) {
+        throw new Error('pinned tree contains an unprepared gitlink declaration');
+      }
+    }
+  }
+
+  for (const component of preparation.components) {
+    const entry = entries.get(component.path);
+    if (entry?.mode !== '040000' || entry.type !== 'tree' || entry.objectId !== component.objectId) {
+      throw new Error('prepared vendored component is not the exact pinned tree declaration');
+    }
+  }
+  return entries;
+}
+
+async function validateMaterializedBindings(
+  bindings: readonly DirectoryBinding[],
+  validateAuthority: () => Promise<void>,
+): Promise<void> {
+  await validateAuthority();
+  for (const binding of bindings) {
+    const named = await lstat(procChild(binding.parent!, binding.basename!));
+    const held = await binding.handle.stat();
+    if (!named.isDirectory() || named.isSymbolicLink() || !held.isDirectory()
+      || named.dev !== binding.device || named.ino !== binding.inode
+      || held.dev !== binding.device || held.ino !== binding.inode) {
+      throw new Error('materialized source directory binding changed');
+    }
+  }
+  await validateAuthority();
+}
+
+async function gitBlobHash(handle: FileHandle, size: number): Promise<string> {
+  if (!Number.isSafeInteger(size) || size < 0) throw new Error('materialized source file size is invalid');
+  const hash = createHash('sha1');
+  hash.update(`blob ${String(size)}\0`);
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  let offset = 0;
+  while (offset < size) {
+    const length = Math.min(buffer.length, size - offset);
+    const result = await handle.read(buffer, 0, length, offset);
+    if (result.bytesRead === 0) throw new Error('materialized source file ended before its declared size');
+    hash.update(buffer.subarray(0, result.bytesRead));
+    offset += result.bytesRead;
+  }
+  return hash.digest('hex');
+}
+
+function gitBlobHashBuffer(contents: Buffer): string {
+  return createHash('sha1')
+    .update(`blob ${String(contents.length)}\0`)
+    .update(contents)
+    .digest('hex');
+}
+
+async function verifyMaterializedRegularFile(
+  parent: FileHandle,
+  basename: string,
+  entry: SourceTreeEntry,
+  bindings: readonly DirectoryBinding[],
+  validateAuthority: () => Promise<void>,
+): Promise<void> {
+  await validateMaterializedBindings(bindings, validateAuthority);
+  let handle: FileHandle | undefined;
+  try {
+    const path = procChild(parent, basename);
+    const initial = await lstat(path);
+    if (!initial.isFile() || initial.isSymbolicLink()) throw new Error('materialized source blob is not a regular file');
+    handle = await open(path, SOURCE_FILE_FLAGS);
+    const named = await lstat(path);
+    const before = await handle.stat();
+    if (!named.isFile() || named.isSymbolicLink() || !before.isFile()
+      || named.dev !== before.dev || named.ino !== before.ino) {
+      throw new Error('materialized source blob is not a bound regular file');
+    }
+    const materializedMode = (before.mode & 0o111) === 0 ? '100644' : '100755';
+    if (materializedMode !== entry.mode) throw new Error('materialized source file mode differs from the pinned tree');
+    const objectId = await gitBlobHash(handle, before.size);
+    const after = await handle.stat();
+    const finalNamed = await lstat(path);
+    const finalMode = (after.mode & 0o111) === 0 ? '100644' : '100755';
+    if (!finalNamed.isFile() || finalNamed.isSymbolicLink() || !after.isFile()
+      || finalNamed.dev !== after.dev || finalNamed.ino !== after.ino
+      || before.dev !== after.dev || before.ino !== after.ino
+      || before.size !== after.size || finalMode !== entry.mode || objectId !== entry.objectId) {
+      throw new Error('materialized source file contents differ from the pinned blob');
+    }
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await validateMaterializedBindings(bindings, validateAuthority);
+  }
+}
+
+async function verifyMaterializedSymlink(
+  parent: FileHandle,
+  basename: string,
+  entry: SourceTreeEntry,
+  bindings: readonly DirectoryBinding[],
+  validateAuthority: () => Promise<void>,
+): Promise<void> {
+  await validateMaterializedBindings(bindings, validateAuthority);
+  const path = procChild(parent, basename);
+  const before = await lstat(path);
+  if (!before.isSymbolicLink()) throw new Error('materialized source symlink became another file type');
+  const target = await readlink(path, { encoding: 'buffer' });
+  const after = await lstat(path);
+  if (!after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino
+    || gitBlobHashBuffer(target) !== entry.objectId) {
+    throw new Error('materialized source symlink target differs from the pinned blob');
+  }
+  await validateMaterializedBindings(bindings, validateAuthority);
+}
+
+async function verifyMaterializedDirectory(
+  parent: FileHandle,
+  basename: string,
+  expected: SourceTreeEntry,
+  manifest: ReadonlyMap<string, SourceTreeEntry>,
+  seen: Set<string>,
+  bindings: readonly DirectoryBinding[],
+  validateAuthority: () => Promise<void>,
+): Promise<void> {
+  await validateMaterializedBindings(bindings, validateAuthority);
+  const handle = await open(procChild(parent, basename), DIR_FLAGS);
+  const binding = await bindDirectory(handle, parent, basename);
+  const childBindings = [...bindings, binding];
+  try {
+    await validateMaterializedBindings(childBindings, validateAuthority);
+    const children = await readdir(join(PROC_FD, String(handle.fd)), { withFileTypes: true });
+    await validateMaterializedBindings(childBindings, validateAuthority);
+    if (expected.mode === '160000') {
+      if (children.length !== 0) throw new Error('materialized gitlink declaration contains unprepared files');
+      return;
+    }
+    for (const child of children) {
+      const path = `${expected.path}/${child.name}`;
+      const entry = manifest.get(path);
+      if (entry === undefined || seen.has(path)) throw new Error('materialized source contains an unpinned or duplicate path');
+      seen.add(path);
+      if (entry.mode === '040000' || entry.mode === '160000') {
+        await verifyMaterializedDirectory(handle, child.name, entry, manifest, seen, childBindings, validateAuthority);
+      } else if (entry.mode === '120000') {
+        await verifyMaterializedSymlink(handle, child.name, entry, childBindings, validateAuthority);
+      } else {
+        await verifyMaterializedRegularFile(handle, child.name, entry, childBindings, validateAuthority);
+      }
+    }
+  } finally {
+    await handle.close().catch(() => undefined);
+    await validateMaterializedBindings(bindings, validateAuthority);
+  }
+}
+
+async function verifyMaterializedTree(
+  source: FileHandle,
+  manifest: ReadonlyMap<string, SourceTreeEntry>,
+  validateAuthority: () => Promise<void>,
+): Promise<void> {
+  await validateAuthority();
+  const children = await readdir(join(PROC_FD, String(source.fd)), { withFileTypes: true });
+  await validateAuthority();
+  const seen = new Set<string>();
+  for (const child of children) {
+    if (child.name === '.git') {
+      const metadata = await lstat(procChild(source, child.name));
+      if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('detached worktree metadata is unsafe');
+      continue;
+    }
+    const entry = manifest.get(child.name);
+    if (entry === undefined || seen.has(entry.path)) throw new Error('materialized source contains an unpinned or duplicate root path');
+    seen.add(entry.path);
+    if (entry.mode === '040000' || entry.mode === '160000') {
+      await verifyMaterializedDirectory(source, child.name, entry, manifest, seen, [], validateAuthority);
+    } else if (entry.mode === '120000') {
+      await verifyMaterializedSymlink(source, child.name, entry, [], validateAuthority);
+    } else {
+      await verifyMaterializedRegularFile(source, child.name, entry, [], validateAuthority);
+    }
+  }
+  if (seen.size !== manifest.size || [...manifest.keys()].some((path) => !seen.has(path))) {
+    throw new Error('materialized source is missing a pinned tree path');
+  }
+  await validateAuthority();
 }
 
 export async function setupSourceWorktree(input: SourceSetupInput): Promise<SourceSetupResult> {
@@ -599,12 +832,13 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
     commandPhase: SourcePhase,
     validateAuthority?: () => Promise<void>,
     acceptedExitCodes: readonly number[] = [0],
+    maxOutputBytes?: number,
   ): Promise<SourceGitResult> => {
     phase = commandPhase;
     await validateAuthority?.();
     let result: SourceGitResult;
     try {
-      result = await git.run(args, { cwd });
+      result = await git.run(args, { cwd, ...(maxOutputBytes === undefined ? {} : { maxOutputBytes }) });
     } catch (error) {
       const timestamp = canonicalInstant(input.now?.() ?? new Date().toISOString(), 'source command failure');
       result = Object.freeze({
@@ -658,6 +892,14 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
     if (observedTree !== expectedSourceTree(preparation)) {
       throw sourceError({ code: 'SOURCE_NOT_COMMIT', diagnosis: 'The pinned source tree differs from the API preparation record.', recovery: 'Re-run API source preparation and queue a new job.', requestId, details: { phase: 'preparation' }, commands });
     }
+    const pinnedTree = parseSourceTree((await run([
+      'ls-tree',
+      '-r',
+      '-t',
+      '-z',
+      '--full-tree',
+      input.source.pinnedSha,
+    ], repositoryPath, 'preparation', undefined, [0], SOURCE_TREE_MAX_OUTPUT_BYTES)).stdout, preparation);
     const attributes = await run([
       'grep',
       '-a',
@@ -730,6 +972,7 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
       if (statusResult.stdout !== '') {
         throw sourceError({ code: 'WORKTREE_CREATE_FAILED', diagnosis: 'The detached recursive source worktree is dirty.', recovery: 'Use a clean API-prepared source commit and retry.', requestId, details: { status: statusResult.stdout }, commands });
       }
+      await verifyMaterializedTree(sourceHandle, pinnedTree, workspace.validate);
       await workspace.validate();
       return Object.freeze({
         workspacePath: workspace.path,
