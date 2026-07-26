@@ -14,7 +14,7 @@ import {
   TRUSTED_OPERATION_IDS,
   type TrustedOperationId,
 } from '../../domain/types.js';
-import { type ArtifactInput, type CreateJobInput, type FreshnessInput, type JsonObject, type JsonValue, type OperationInput } from './store.js';
+import { encodeSourcePreparation, type ArtifactInput, type CreateJobInput, type FreshnessInput, type JsonObject, type JsonValue, type OperationInput } from './store.js';
 import { TEXT_LIMITS, boundedText, canonicalInstant as sharedCanonicalInstant, encodeJson, normalizeCommand, normalizeJson, requireChronology as sharedRequireChronology, SharedValidationError } from './validation.js';
 
 const HASH64 = /^[0-9a-f]{64}$/;
@@ -312,11 +312,21 @@ function preparedRunnerCommon(command: PreparedRecord): void {
   preparedCommon(command, 'runner'); preparedString(command.owner, 'runner owner', TEXT_LIMITS.maxIdentifierBytes); runnerUnit(String(command.jobId), preparedString(command.runnerUnit, 'runner unit', TEXT_LIMITS.maxIdentifierBytes)); preparedInstant(command.leaseExpiresAt, 'runner lease expiry');
 }
 
+function sourcePreparationJson(value: unknown, pinnedSha: unknown): string {
+  if (typeof pinnedSha !== 'string') throw new OwnershipValidationError('enqueue pinnedSha is invalid');
+  try {
+    return encodeSourcePreparation(value, pinnedSha);
+  } catch (error) {
+    throw new OwnershipValidationError('enqueue sourcePreparation is invalid', { cause: error });
+  }
+}
+
 function validateCreateJobInput(input: unknown): void {
   const value = preparedObject(input, 'enqueue input');
   for (const field of ['jobId', 'requestId', 'sourceRemote', 'sourceRef', 'sourceBranch', 'branch', 'rootId', 'sourceAuthor', 'sourceSubject']) preparedString(value[field], `enqueue ${field}`, TEXT_LIMITS.maxIdentifierBytes);
   preparedJsonObject(value.request, 'enqueue request'); preparedEnum(value.targetId, TARGET_IDS, 'enqueue targetId');
   for (const field of ['expectedSha', 'pinnedSha']) preparedHash(value[field], `enqueue ${field}`, true);
+  sourcePreparationJson(value.sourcePreparation, value.pinnedSha);
   preparedHash(value.targetManifestSha256, 'enqueue targetManifestSha256'); preparedInstant(value.sourceCommitTime, 'enqueue sourceCommitTime'); preparedInstant(value.acceptedAt, 'enqueue acceptedAt');
   preparedOptionalHash(value.preflightSha, 'enqueue preflightSha', true); preparedOptionalInstant(value.preflightCheckedAt, 'enqueue preflightCheckedAt'); preparedOptionalInstant(value.preflightExpiresAt, 'enqueue preflightExpiresAt');
   const preflightFields = [value.preflightSha, value.preflightCheckedAt, value.preflightExpiresAt].filter((field) => field !== undefined && field !== null);
@@ -1250,6 +1260,7 @@ export class OwnershipStore {
     if (input.expectedSha !== input.pinnedSha || input.sourceBranch !== input.branch || input.sourceRef !== `refs/remotes/origin/${input.branch}`) {
       throw new OwnershipValidationError('accepted source identity is incoherent');
     }
+    const sourcePreparation = sourcePreparationJson(input.sourcePreparation, input.pinnedSha);
     const request = jsonValue(input.request, 'request', 'object');
     const preflight = input.preflightSha ?? null;
     const checked = input.preflightCheckedAt ?? null;
@@ -1260,12 +1271,12 @@ export class OwnershipStore {
     if (queued >= MAX_QUEUE_LENGTH) conflict('queue-full', `queue is limited to ${MAX_QUEUE_LENGTH} jobs`);
     const fifo = Number((this.#db.prepare('SELECT COALESCE(MAX(fifo_seq) + 1, 0) AS next FROM queue_entries').get() as Row).next);
     const position = Number((this.#db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE queue_state='queued'").get() as Row).count);
-    this.#db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha,
+    this.#db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json,
       target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, preflight_sha, preflight_checked_at,
       preflight_expires_at, accepted_at, state, queue_state, queue_position, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', ?, ?, ?)`).run(
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', ?, ?, ?)`).run(
       input.jobId, input.requestId, request, input.sourceRemote, input.sourceRef, input.sourceBranch, input.branch, input.expectedSha, input.pinnedSha,
-      input.targetId, input.rootId, input.targetManifestSha256, input.sourceCommitTime, input.sourceAuthor, input.sourceSubject,
+      sourcePreparation, input.targetId, input.rootId, input.targetManifestSha256, input.sourceCommitTime, input.sourceAuthor, input.sourceSubject,
       preflight, checked, expires, input.acceptedAt, position, input.acceptedAt, input.acceptedAt,
     );
     this.#db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run(input.jobId, fifo, input.acceptedAt);

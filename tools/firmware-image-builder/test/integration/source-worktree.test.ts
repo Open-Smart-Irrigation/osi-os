@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { access, mkdir, mkdtemp, readlink, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -77,6 +77,7 @@ function raceDependencies(control: RaceControl): Partial<PathAuthorityDependenci
 async function createFixture(options: {
   readonly collision?: boolean;
   readonly gitmodulesUrl?: string;
+  readonly checkoutFilter?: 'smudge' | 'process';
   readonly race?: RaceControl;
   readonly pathAuthorityDependencies?: Partial<PathAuthorityDependencies>;
 } = {}) {
@@ -92,6 +93,19 @@ async function createFixture(options: {
   await mkdir(join(active, 'openwrt'), { recursive: true });
   await mkdir(join(active, 'feeds', 'chirpstack-openwrt-feed'), { recursive: true });
   await writeFile(join(active, 'README.md'), 'active\n');
+  const filterMarker = join(root, 'checkout-filter-invoked');
+  const filterHelper = join(root, 'checkout-filter-helper');
+  if (options.checkoutFilter !== undefined) {
+    await writeFile(join(active, '.gitattributes'), 'filtered.txt filter=adversarial\n');
+    await writeFile(join(active, 'filtered.txt'), 'committed source bytes\n');
+    await writeFile(filterHelper, [
+      '#!/bin/sh',
+      `printf invoked > '${filterMarker}'`,
+      options.checkoutFilter === 'smudge' ? "printf 'altered checkout bytes\\n'" : 'exit 1',
+      '',
+    ].join('\n'));
+    await chmod(filterHelper, 0o700);
+  }
   await writeFile(join(active, 'openwrt', 'Makefile'), 'vendored openwrt tree\n');
   await writeFile(join(active, 'feeds', 'chirpstack-openwrt-feed', 'README.md'), 'vendored chirpstack feed tree\n');
   await writeFile(join(active, '.gitmodules'), [
@@ -126,6 +140,13 @@ async function createFixture(options: {
   await writeFile(join(active, 'README.md'), 'dirty active checkout\n');
   await writeFile(join(active, 'untracked.txt'), 'must remain\n');
   const dirtyStatusBefore = await git(active, 'status', '--porcelain=v1', '--untracked-files=all');
+  if (options.checkoutFilter === 'smudge') {
+    await gitRaw(active, 'config', 'filter.adversarial.smudge', filterHelper);
+    await gitRaw(active, 'config', 'filter.adversarial.required', 'true');
+  } else if (options.checkoutFilter === 'process') {
+    await gitRaw(active, 'config', 'filter.adversarial.process', filterHelper);
+    await gitRaw(active, 'config', 'filter.adversarial.required', 'true');
+  }
   const configHome = join(root, 'config');
   await mkdir(join(root, 'images'), { recursive: true });
   await mkdir(configHome, { recursive: true });
@@ -150,6 +171,7 @@ async function createFixture(options: {
     sha,
     preparation,
     dirtyStatusBefore,
+    filterMarker,
     stateRoot: loaded.pathAuthorities.stateRoot,
     statePath: loaded.stateRoot,
     source: preparation === null ? null : {
@@ -256,6 +278,25 @@ describe('source worktree integration', () => {
     expect(await git(fixture.active, 'status', '--porcelain=v1', '--untracked-files=all')).toBe(fixture.dirtyStatusBefore);
   });
 
+  it.each(['smudge', 'process'] as const)(
+    'does not invoke a repository-configured %s filter and preserves exact committed bytes',
+    async (checkoutFilter) => {
+      const fixture = await createFixture({ checkoutFilter });
+      const workspacePath = join(fixture.statePath, 'jobs', `job-filter-${checkoutFilter}`, 'workspace', 'source');
+
+      await expect(setupSourceWorktree({
+        repositoryPath: fixture.active,
+        stateRoot: fixture.stateRoot,
+        jobId: `job-filter-${checkoutFilter}`,
+        source: fixture.source!,
+        target: { openwrtTarget: 'bcm27xx/bcm2712' },
+      })).resolves.toMatchObject({ workspacePath });
+
+      await expect(access(fixture.filterMarker)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(join(workspacePath, 'filtered.txt'), 'utf8')).toBe('committed source bytes\n');
+    },
+  );
+
   it('rejects production-shape provenance drift during API preparation before checkout', async () => {
     const fixture = await createFixture({ gitmodulesUrl: 'https://example.invalid/openwrt.git' });
     await expect(new SourceResolver({
@@ -347,7 +388,7 @@ describe('source worktree integration', () => {
   it.each([
     ['after worktree add', { trigger: 5 }],
     ['during target inspection', { heldPathSuffix: '/workspace/source/openwrt' }],
-    ['during final verification', { trigger: 15 }],
+    ['during final verification', { trigger: 19 }],
   ] as const)('retains every ancestor binding %s', async (_phase, injection) => {
     for (const ancestor of ['state', 'jobs', 'job', 'workspace'] as const) {
       const race: RaceControl = { ancestor, ...injection, statePath: '', validations: 0, swapped: false };

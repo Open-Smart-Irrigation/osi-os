@@ -25,6 +25,7 @@ const PROC_FD = `/proc/${String(process.pid)}/fd`;
 const DIR_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW;
 const READ_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
 const SOURCE_COMPONENT_PATHS = Object.freeze(['feeds/chirpstack-openwrt-feed', 'openwrt'] as const);
+const SAFE_FILTER_DRIVER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 
 export const SOURCE_GIT_ENV = Object.freeze({
   PATH: '/usr/bin:/bin',
@@ -34,6 +35,9 @@ export const SOURCE_GIT_ENV = Object.freeze({
   GIT_CONFIG_NOSYSTEM: '1',
   GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_CONFIG_SYSTEM: '/dev/null',
+  GIT_ATTR_NOSYSTEM: '1',
+  GIT_ATTR_GLOBAL: '/dev/null',
+  GIT_ATTR_SYSTEM: '/dev/null',
   GIT_CONFIG_COUNT: '3',
   GIT_CONFIG_KEY_0: 'core.hooksPath',
   GIT_CONFIG_VALUE_0: '/dev/null',
@@ -527,6 +531,58 @@ function expectedSourceTree(preparation: RecursiveSourcePreparation): string {
   ].join('');
 }
 
+function checkoutFilterDrivers(contents: string): readonly string[] {
+  if (contents.includes('\0')) throw new Error('committed checkout attributes are binary');
+  const drivers = new Set<string>();
+  for (const rawLine of contents.split('\n')) {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    const trimmed = line.trimStart();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    for (const token of line.trim().split(/\s+/u).slice(1)) {
+      if (token === '-filter' || token === '!filter') continue;
+      if (token === 'filter') throw new Error('boolean filter attributes are not supported');
+      if (token.startsWith('filter=')) {
+        const driver = token.slice('filter='.length);
+        if (!SAFE_FILTER_DRIVER.test(driver)) throw new Error('filter driver name is unsafe');
+        drivers.add(driver);
+        continue;
+      }
+      if (/^(?:ident|eol|working-tree-encoding|crlf)(?:=|$)/u.test(token)
+        || /^(?:text|crlf)(?:=|$)/u.test(token)) {
+        throw new Error('checkout conversion attributes are not supported');
+      }
+    }
+  }
+  return Object.freeze([...drivers].sort());
+}
+
+function configuredFilterDrivers(contents: string): readonly string[] {
+  if (contents === '') return Object.freeze([]);
+  const records = contents.endsWith('\0') ? contents.slice(0, -1).split('\0') : [];
+  const drivers = records.map((key) => {
+    const match = /^filter\.([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.(?:clean|smudge|process|required)$/u.exec(key);
+    if (match === null) throw new Error('configured filter driver name is unsafe');
+    return match[1]!;
+  });
+  return Object.freeze([...new Set(drivers)].sort());
+}
+
+function checkoutConfig(drivers: readonly string[]): readonly string[] {
+  return Object.freeze([
+    '-c', 'core.attributesFile=/dev/null',
+    '-c', 'core.autocrlf=false',
+    '-c', 'core.eol=lf',
+    '-c', 'core.sparseCheckout=false',
+    '-c', 'core.sparseCheckoutCone=false',
+    ...drivers.flatMap((driver) => [
+      '-c', `filter.${driver}.clean=`,
+      '-c', `filter.${driver}.smudge=`,
+      '-c', `filter.${driver}.process=`,
+      '-c', `filter.${driver}.required=false`,
+    ]),
+  ]);
+}
+
 export async function setupSourceWorktree(input: SourceSetupInput): Promise<SourceSetupResult> {
   const requestId = input.requestId ?? input.jobId;
   const jobId = assertJobId(input.jobId);
@@ -537,7 +593,13 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
   const commands: SourceCommandEvidence[] = [];
   let phase: SourcePhase = 'identity';
 
-  const run = async (args: readonly string[], cwd: string, commandPhase: SourcePhase, validateAuthority?: () => Promise<void>): Promise<SourceGitResult> => {
+  const run = async (
+    args: readonly string[],
+    cwd: string,
+    commandPhase: SourcePhase,
+    validateAuthority?: () => Promise<void>,
+    acceptedExitCodes: readonly number[] = [0],
+  ): Promise<SourceGitResult> => {
     phase = commandPhase;
     await validateAuthority?.();
     let result: SourceGitResult;
@@ -561,7 +623,7 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
     }
     commands.push(commandEvidence(result));
     await validateAuthority?.();
-    if (result.exitCode !== 0 || result.signal !== null || result.timedOut || result.outputLimit) throw new SourceCommandFailure(result, commandPhase);
+    if (result.exitCode === null || !acceptedExitCodes.includes(result.exitCode) || result.signal !== null || result.timedOut || result.outputLimit) throw new SourceCommandFailure(result, commandPhase);
     return result;
   };
 
@@ -596,12 +658,59 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
     if (observedTree !== expectedSourceTree(preparation)) {
       throw sourceError({ code: 'SOURCE_NOT_COMMIT', diagnosis: 'The pinned source tree differs from the API preparation record.', recovery: 'Re-run API source preparation and queue a new job.', requestId, details: { phase: 'preparation' }, commands });
     }
+    const attributes = await run([
+      'grep',
+      '-a',
+      '-h',
+      '-e',
+      '^',
+      input.source.pinnedSha,
+      '--',
+      '.gitattributes',
+      '*/.gitattributes',
+    ], repositoryPath, 'preparation', undefined, [0, 1]);
+    const configuredFilters = await run([
+      'config',
+      '--local',
+      '--null',
+      '--name-only',
+      '--get-regexp',
+      '^filter\\..*\\.(clean|smudge|process|required)$',
+    ], repositoryPath, 'preparation', undefined, [0, 1]);
+    const infoAttributesPath = outputLine(await run([
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'info/attributes',
+    ], repositoryPath, 'preparation'), 'repository info attributes path', requestId, commands);
+    try {
+      await lstat(infoAttributesPath);
+      throw sourceError({
+        code: 'SOURCE_NOT_COMMIT',
+        diagnosis: 'Repository-local info attributes are not allowed for source checkout.',
+        recovery: 'Remove the repository info attributes file and prepare the source again.',
+        requestId,
+        details: { phase: 'preparation' },
+        commands,
+      });
+    } catch (error) {
+      if (error instanceof BuilderError) throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    const conversionConfig = checkoutConfig([
+      ...new Set([
+        ...checkoutFilterDrivers(attributes.stdout),
+        ...configuredFilterDrivers(configuredFilters.stdout),
+      ]),
+    ].sort());
 
     return await withWorkspaceAuthority(input.stateRoot, jobId, requestId, async (workspace) => {
       phase = 'workspace';
-      await run(['worktree', 'add', '--detach', workspace.destination, input.source.pinnedSha], repositoryPath, 'workspace', workspace.validate);
+      await run(['worktree', 'add', '--no-checkout', '--detach', workspace.destination, input.source.pinnedSha], repositoryPath, 'workspace', workspace.validate);
       const sourceHandle = await workspace.bindSource();
       const sourceCwd = join(PROC_FD, String(sourceHandle.fd));
+      await run([...conversionConfig, 'read-tree', '--reset', input.source.pinnedSha], sourceCwd, 'workspace', workspace.validate);
+      await run([...conversionConfig, 'checkout-index', '--all', '--force', '--ignore-skip-worktree-bits'], sourceCwd, 'workspace', workspace.validate);
       const components: SourceComponentObservation[] = [];
       for (const component of preparation.components) {
         const observed = outputLine(await run(['rev-parse', '--verify', `HEAD:${component.path}`], sourceCwd, 'preparation', workspace.validate), `${component.path} tree`, requestId, commands);
@@ -617,7 +726,7 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
       if (worktreeHead !== input.source.pinnedSha) {
         throw sourceError({ code: 'WORKTREE_CREATE_FAILED', diagnosis: 'The detached worktree HEAD differs from the pinned SHA.', recovery: 'Remove the incomplete job-owned worktree and retry.', requestId, commands });
       }
-      const statusResult = await run(['status', '--porcelain=v1', '--untracked-files=all', '--ignore-submodules=none'], sourceCwd, 'verification', workspace.validate);
+      const statusResult = await run([...conversionConfig, 'status', '--porcelain=v1', '--untracked-files=all', '--ignore-submodules=none'], sourceCwd, 'verification', workspace.validate);
       if (statusResult.stdout !== '') {
         throw sourceError({ code: 'WORKTREE_CREATE_FAILED', diagnosis: 'The detached recursive source worktree is dirty.', recovery: 'Use a clean API-prepared source commit and retry.', requestId, details: { status: statusResult.stdout }, commands });
       }

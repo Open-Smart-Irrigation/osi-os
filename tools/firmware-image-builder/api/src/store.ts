@@ -24,6 +24,10 @@ import {
   type JsonValue,
   SharedValidationError,
 } from './validation.js';
+import {
+  validateRecursiveSourcePreparation,
+  type RecursiveSourcePreparation,
+} from './git/source-resolver.js';
 
 export { JSON_LIMITS } from './validation.js';
 export type { JsonObject, JsonPrimitive, JsonValue } from './validation.js';
@@ -134,6 +138,29 @@ export class StoreValidationError extends StoreError {
   }
 }
 
+export function encodeSourcePreparation(value: unknown, pinnedSha: string): string {
+  try {
+    return encodeJson(
+      validateRecursiveSourcePreparation(value as RecursiveSourcePreparation, pinnedSha),
+      'source preparation',
+      true,
+    );
+  } catch (error) {
+    throw new StoreValidationError('source preparation is invalid', { cause: error });
+  }
+}
+
+function persistedSourcePreparation(value: string | null, pinnedSha: string): RecursiveSourcePreparation {
+  if (value === null) throw new StoreDataError('persisted source preparation is missing');
+  try {
+    const parsed = parseJson(value, 'source_preparation_json', true);
+    return validateRecursiveSourcePreparation(parsed as unknown as RecursiveSourcePreparation, pinnedSha);
+  } catch (error) {
+    if (error instanceof StoreDataError) throw error;
+    throw new StoreDataError('persisted source preparation is invalid', { cause: error });
+  }
+}
+
 export interface CreateJobInput {
   readonly jobId: string;
   readonly requestId: string;
@@ -144,6 +171,7 @@ export interface CreateJobInput {
   readonly branch: string;
   readonly expectedSha: string;
   readonly pinnedSha: string;
+  readonly sourcePreparation: RecursiveSourcePreparation;
   readonly targetId: TargetId;
   readonly rootId: string;
   readonly targetManifestSha256: string;
@@ -163,6 +191,7 @@ export interface SourceIdentity {
   readonly branch: string;
   readonly expectedSha: string;
   readonly pinnedSha: string;
+  readonly sourcePreparation: RecursiveSourcePreparation;
   readonly sourceCommitTime: string;
   readonly sourceAuthor: string;
   readonly sourceSubject: string;
@@ -497,7 +526,7 @@ export class BuilderStore {
     return {
       sourceRemote: job.sourceRemote, sourceRef: job.sourceRef, sourceBranch: job.sourceBranch, branch: job.branch,
       expectedSha: job.expectedSha, pinnedSha: job.pinnedSha, sourceCommitTime: job.sourceCommitTime,
-      sourceAuthor: job.sourceAuthor, sourceSubject: job.sourceSubject,
+      sourcePreparation: job.sourcePreparation, sourceAuthor: job.sourceAuthor, sourceSubject: job.sourceSubject,
     };
   }
 
@@ -555,6 +584,8 @@ export class BuilderStore {
     const state = persistedEnum(row, 'state', JOB_STATES, false)! as JobState;
     const publishState = persistedEnum(row, 'publish_state', PUBLISH_STATES) as PublishState | null;
     const freshnessStatus = persistedEnum(row, 'freshness_status', FRESHNESS_STATES) as FreshnessState | null;
+    const pinnedSha = readHash(row, 'pinned_sha', HASH40)!;
+    const sourcePreparation = persistedSourcePreparation(nullableString(row, 'source_preparation_json'), pinnedSha);
     nullableGroup(row, ['preflight_sha', 'preflight_checked_at', 'preflight_expires_at'], 'preflight evidence');
     nullableGroup(row, ['cancel_requested_at', 'cancel_reason'], 'cancellation request');
     nullableGroup(row, ['dispatched_at', 'runner_unit'], 'dispatch evidence');
@@ -613,7 +644,7 @@ export class BuilderStore {
     return {
       jobId: asString(row, 'job_id'), requestId: asString(row, 'request_id'), request: parseJsonObject(nullableString(row, 'request_json'), 'request_json'),
       sourceRemote: asString(row, 'source_remote'), sourceRef: asString(row, 'source_ref'), sourceBranch: asString(row, 'source_branch'), branch: asString(row, 'branch'),
-      expectedSha: readHash(row, 'expected_sha', HASH40)!, pinnedSha: readHash(row, 'pinned_sha', HASH40)!, targetId: persistedEnum(row, 'target_id', TARGET_IDS, false)! as TargetId, rootId: asString(row, 'root_id'),
+      expectedSha: readHash(row, 'expected_sha', HASH40)!, pinnedSha, sourcePreparation, targetId: persistedEnum(row, 'target_id', TARGET_IDS, false)! as TargetId, rootId: asString(row, 'root_id'),
       targetManifestSha256: readHash(row, 'target_manifest_sha256', HASH64)!, sourceCommitTime: canonicalInstant(asString(row, 'source_commit_time'), 'source_commit_time'), sourceAuthor: asString(row, 'source_author'), sourceSubject: asString(row, 'source_subject'),
       acceptedAt: canonicalInstant(asString(row, 'accepted_at'), 'accepted_at'), state, currentStage: persistedEnum(row, 'current_stage', PIPELINE_STAGE_NAMES) as PipelineStageName | null,
       queueState: persistedEnum(row, 'queue_state', QUEUE_STATES, false)!, queuePosition: queuePosition(row), cancelRequestedAt: nullableInstant(row, 'cancel_requested_at'), cancelReason: nullableString(row, 'cancel_reason'),

@@ -64,7 +64,7 @@ export interface EvidenceFileSystem {
 }
 
 export class EvidenceError extends Error {
-  readonly code: 'EVIDENCE_PATH_INVALID' | 'EVIDENCE_EXISTS' | 'EVIDENCE_PUBLICATION_FAILED' | 'EVIDENCE_INVALID';
+  readonly code: 'EVIDENCE_PATH_INVALID' | 'EVIDENCE_EXISTS' | 'EVIDENCE_PUBLICATION_FAILED' | 'EVIDENCE_TEMPORARY_BLOCKER' | 'EVIDENCE_INVALID';
 
   constructor(code: EvidenceError['code'], message: string, options?: ErrorOptions) {
     super(message, options);
@@ -84,6 +84,12 @@ interface DirectoryBinding {
   readonly handle: FileHandle;
   readonly parent: FileHandle | null;
   readonly basename: string | null;
+  readonly device: number;
+  readonly inode: number;
+}
+
+interface FileBinding {
+  readonly handle: FileHandle;
   readonly device: number;
   readonly inode: number;
 }
@@ -367,14 +373,81 @@ async function verifyFinalBinding(parent: FileHandle, basename: string, finalHan
   }
 }
 
-async function removeTemporaryLinks(parent: FileHandle, basename: string): Promise<void> {
+async function bindFile(handle: FileHandle): Promise<FileBinding> {
+  const stats = await handle.stat();
+  if (!stats.isFile()) throw new EvidenceError('EVIDENCE_TEMPORARY_BLOCKER', 'temporary evidence inode is not a file');
+  return Object.freeze({ handle, device: stats.dev, inode: stats.ino });
+}
+
+async function validateFileBinding(parent: FileHandle, basename: string, binding: FileBinding): Promise<void> {
+  try {
+    const named = await lstat(procChild(parent, basename));
+    const held = await binding.handle.stat();
+    if (!named.isFile() || named.isSymbolicLink() || !held.isFile()
+      || named.dev !== binding.device || named.ino !== binding.inode
+      || held.dev !== binding.device || held.ino !== binding.inode) {
+      throw new EvidenceError('EVIDENCE_TEMPORARY_BLOCKER', 'temporary evidence pathname no longer names its held inode');
+    }
+  } catch (error) {
+    if (error instanceof EvidenceError) throw error;
+    throw new EvidenceError('EVIDENCE_TEMPORARY_BLOCKER', 'temporary evidence pathname could not be revalidated', { cause: error });
+  }
+}
+
+async function assertTemporaryAbsent(parent: FileHandle, basename: string): Promise<void> {
+  try {
+    await lstat(procChild(parent, basename));
+    throw new EvidenceError('EVIDENCE_TEMPORARY_BLOCKER', 'temporary evidence pathname survived cleanup');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    if (error instanceof EvidenceError) throw error;
+    throw new EvidenceError('EVIDENCE_TEMPORARY_BLOCKER', 'temporary evidence cleanup could not be verified', { cause: error });
+  }
+}
+
+function isTemporaryEntry(entry: string, basename: string): boolean {
+  return entry.startsWith(`.${basename}.`) && entry.endsWith('.tmp');
+}
+
+async function assertNoTemporaryEntries(parent: FileHandle, basename: string): Promise<void> {
+  if ((await readdir(join(PROC_FD, String(parent.fd)))).some((entry) => isTemporaryEntry(entry, basename))) {
+    throw new EvidenceError('EVIDENCE_TEMPORARY_BLOCKER', 'unexpected temporary evidence survivor blocks publication');
+  }
+}
+
+async function reconcileTemporaryLinks(
+  parent: FileHandle,
+  basename: string,
+  finalHandle: FileHandle,
+  contents: Buffer,
+  excluded = '',
+): Promise<void> {
+  const finalIdentity = await finalHandle.stat();
   for (const entry of await readdir(join(PROC_FD, String(parent.fd)))) {
-    if (entry.startsWith(`.${basename}.`) && entry.endsWith('.tmp')) {
-      try {
-        await unlink(procChild(parent, entry));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    if (!isTemporaryEntry(entry, basename) || entry === excluded) continue;
+    let temporaryHandle: FileHandle | undefined;
+    try {
+      temporaryHandle = await open(procChild(parent, entry), READ_FLAGS);
+      const named = await lstat(procChild(parent, entry));
+      const held = await temporaryHandle.stat();
+      if (!named.isFile() || named.isSymbolicLink() || !held.isFile()
+        || named.dev !== held.dev || named.ino !== held.ino
+        || held.dev !== finalIdentity.dev || held.ino !== finalIdentity.ino
+        || !(await readHandleExact(temporaryHandle, contents))) {
+        throw new EvidenceError('EVIDENCE_TEMPORARY_BLOCKER', 'unexpected temporary evidence survivor blocks publication');
       }
+      await validateFileBinding(parent, entry, Object.freeze({
+        handle: temporaryHandle,
+        device: held.dev,
+        inode: held.ino,
+      }));
+      await unlink(procChild(parent, entry));
+      await assertTemporaryAbsent(parent, entry);
+    } catch (error) {
+      if (error instanceof EvidenceError) throw error;
+      throw new EvidenceError('EVIDENCE_TEMPORARY_BLOCKER', 'temporary evidence survivor could not be reconciled', { cause: error });
+    } finally {
+      await temporaryHandle?.close().catch(() => undefined);
     }
   }
 }
@@ -412,14 +485,16 @@ async function reconcileExisting(
   basename: string,
   contents: Buffer,
   dependencies: PathAuthorityDependencies,
+  excludedTemporary = '',
 ): Promise<boolean> {
   const finalHandle = await bindFinalExact(parent, basename, contents);
   if (finalHandle === null) return false;
   try {
     await validateBindings(bindings, rootPath, dependencies);
-    await removeTemporaryLinks(parent, basename);
+    await reconcileTemporaryLinks(parent, basename, finalHandle, contents, excludedTemporary);
     await syncDirectory(parent, dependencies);
     await verifyFinalBinding(parent, basename, finalHandle, contents);
+    await assertNoTemporaryEntries(parent, basename);
     await validateBindings(bindings, rootPath, dependencies);
     return true;
   } finally {
@@ -442,6 +517,7 @@ async function publishExclusive(root: StateRootAuthority, relativePath: string, 
       const bindings: DirectoryBinding[] = [];
       let temporary = '';
       let temporaryHandle: FileHandle | undefined;
+      let temporaryBinding: FileBinding | undefined;
       let finalHandle: FileHandle | undefined;
       let primaryError: unknown;
       try {
@@ -482,19 +558,21 @@ async function publishExclusive(root: StateRootAuthority, relativePath: string, 
 
         temporary = `.${basename}.${randomUUID()}.tmp`;
         temporaryHandle = await open(procChild(parent, temporary), FILE_FLAGS, 0o600);
+        temporaryBinding = await bindFile(temporaryHandle);
         await temporaryHandle.writeFile(contents);
         await temporaryHandle.sync();
         await validateBindings(bindings, snapshot.path, dependencies);
+        await validateFileBinding(parent, temporary, temporaryBinding);
         try {
           await link(procChild(parent, temporary), procChild(parent, basename));
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === 'EEXIST'
-            && await reconcileExisting(bindings, snapshot.path, parent, basename, contents, dependencies)) return;
+            && await reconcileExisting(bindings, snapshot.path, parent, basename, contents, dependencies, temporary)) return;
           if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new EvidenceError('EVIDENCE_EXISTS', 'canonical evidence already exists', { cause: error });
           throw error;
         }
         finalHandle = await open(procChild(parent, basename), READ_FLAGS);
-        const temporaryIdentity = await temporaryHandle.stat();
+        const temporaryIdentity = await temporaryBinding.handle.stat();
         const finalIdentity = await finalHandle.stat();
         if (!temporaryIdentity.isFile() || !finalIdentity.isFile()
           || temporaryIdentity.dev !== finalIdentity.dev || temporaryIdentity.ino !== finalIdentity.ino
@@ -509,15 +587,22 @@ async function publishExclusive(root: StateRootAuthority, relativePath: string, 
       } finally {
         const parent = bindings.at(-1)?.handle;
         let cleanupError: unknown;
-        if (parent !== undefined && temporary !== '') {
+        if (parent !== undefined && temporary !== '' && temporaryBinding !== undefined) {
           try {
+            await validateFileBinding(parent, temporary, temporaryBinding);
             await unlink(procChild(parent, temporary));
+            await assertTemporaryAbsent(parent, temporary);
           } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') cleanupError = error;
+            cleanupError = error instanceof EvidenceError
+              ? error
+              : new EvidenceError('EVIDENCE_TEMPORARY_BLOCKER', 'temporary evidence cleanup failed', { cause: error });
           }
           try {
+            if (finalHandle !== undefined) await reconcileTemporaryLinks(parent, basename, finalHandle, contents);
+            else await assertNoTemporaryEntries(parent, basename);
             await syncDirectory(parent, dependencies);
             if (finalHandle !== undefined) await verifyFinalBinding(parent, basename, finalHandle, contents);
+            await assertNoTemporaryEntries(parent, basename);
           } catch (error) {
             cleanupError ??= error;
           }
@@ -530,8 +615,8 @@ async function publishExclusive(root: StateRootAuthority, relativePath: string, 
         await finalHandle?.close().catch(() => undefined);
         await temporaryHandle?.close().catch(() => undefined);
         for (const handle of handles.reverse()) await handle.close().catch(() => undefined);
-        if (primaryError !== undefined) throw primaryError;
         if (cleanupError !== undefined) throw cleanupError;
+        if (primaryError !== undefined) throw primaryError;
       }
     });
   } catch (error) {

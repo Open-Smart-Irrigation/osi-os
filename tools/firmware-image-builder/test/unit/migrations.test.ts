@@ -13,6 +13,19 @@ const SHA40 = 'a'.repeat(40);
 const HASH64 = 'b'.repeat(64);
 const ADMISSION_ID = `cln_${'a'.repeat(26)}`;
 
+function sourcePreparationJson(sourceSha = SHA40): string {
+  return JSON.stringify({
+    schemaVersion: 1,
+    sourceSha,
+    gitmodulesBlobSha: 'c'.repeat(40),
+    preparedAt: '2026-07-23T00:00:00.000Z',
+    components: [
+      { path: 'feeds/chirpstack-openwrt-feed', mode: '040000', type: 'tree', objectId: 'd'.repeat(40), provenanceUrl: 'https://github.com/chirpstack/chirpstack-openwrt-feed.git' },
+      { path: 'openwrt', mode: '040000', type: 'tree', objectId: 'e'.repeat(40), provenanceUrl: 'https://github.com/openwrt/openwrt.git' },
+    ],
+  });
+}
+
 async function temporaryDatabase(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'osi-image-builder-migrations-'));
   tempPaths.push(directory);
@@ -65,11 +78,13 @@ function expectMigrationError(action: () => unknown, message: RegExp, causeMessa
 function insertValidJob(db: DatabaseSync, jobId = 'job-valid', state = 'queued'): void {
   db.prepare(`INSERT INTO jobs (
     job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id,
-    target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at,
+    source_preparation_json
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     jobId, `request-${jobId}`, 'git@example:repo.git', 'refs/remotes/origin/main', 'main', 'main', SHA40, SHA40,
     'rpi-5', 'release', HASH64, '2026-07-23T00:00:00.000Z', 'author', 'subject', '2026-07-23T00:00:00.000Z',
     state, state === 'queued' ? 'queued' : 'dispatched', '2026-07-23T00:00:00.000Z', '2026-07-23T00:00:00.000Z',
+    sourcePreparationJson(),
   );
 }
 
@@ -141,6 +156,7 @@ describe('versioned builder database migrations', () => {
       { version: 1, filename: '001_initial.sql' },
       { version: 2, filename: '002_recovery.sql' },
       { version: 3, filename: '003_freshness_and_logs.sql' },
+      { version: 4, filename: '004_source_preparation.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
       .toEqual(['cleanup_leases', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'queue_entries', 'schema_migrations']);
@@ -160,6 +176,7 @@ describe('versioned builder database migrations', () => {
       'verification_sha256', 'publish_state', 'publish_started_at', 'published_at', 'publish_blocker_code', 'publish_blocker_json',
       'freshness_status', 'freshness_observed_sha', 'newer_source_available', 'freshness_requested_at', 'freshness_checked_at',
       'freshness_error_code', 'freshness_error_json', 'freshness_error_evidence_path', 'freshness_error_evidence_sha256',
+      'source_preparation_json',
     ]);
     expectColumns(db, 'job_stages', [
       'job_id', 'stage', 'outcome', 'started_at', 'finished_at', 'evidence_path', 'evidence_sha256', 'error_code',
@@ -228,7 +245,8 @@ describe('versioned builder database migrations', () => {
       'jobs_freshness_null_guard', 'jobs_freshness_null_guard_update', 'jobs_freshness_timestamp_guard',
       'jobs_freshness_timestamp_guard_update', 'jobs_publish_guard', 'jobs_publish_guard_insert', 'jobs_publish_null_guard',
       'jobs_publish_null_guard_update', 'jobs_publish_pairs_guard', 'jobs_publish_pairs_guard_update',
-      'jobs_request_immutable_guard', 'jobs_runner_lease_guard', 'jobs_runner_lease_guard_update', 'jobs_terminal_guard',
+      'jobs_request_immutable_guard', 'jobs_runner_lease_guard', 'jobs_runner_lease_guard_update',
+      'jobs_source_preparation_immutable_guard', 'jobs_source_preparation_insert_guard', 'jobs_terminal_guard',
       'jobs_terminal_guard_update',
     ].sort());
     db.close();
@@ -244,7 +262,7 @@ describe('versioned builder database migrations', () => {
     const second = openBuilderDatabase(path);
     expect(second.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name").all())
       .toEqual(schema);
-    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 3 });
+    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 4 });
     second.close();
   });
 
@@ -254,10 +272,12 @@ describe('versioned builder database migrations', () => {
     const db = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
     db.prepare(`INSERT INTO jobs (
       job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id,
-      target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at,
+      source_preparation_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       'job-existing', 'request-existing', 'git@example:repo.git', 'refs/remotes/origin/main', 'main', 'main', 'a'.repeat(40), 'a'.repeat(40),
       'rpi-5', 'release', 'b'.repeat(64), '2026-07-23T00:00:00.000Z', 'author', 'subject', '2026-07-23T00:00:00.000Z', 'queued', 'queued', '2026-07-23T00:00:00.000Z', '2026-07-23T00:00:00.000Z',
+      sourcePreparationJson(),
     );
     db.close();
 
@@ -268,8 +288,8 @@ describe('versioned builder database migrations', () => {
     unchanged.close();
 
     const unknownDir = await copyMigrations();
-    await writeFile(join(unknownDir, '004_unknown.sql'), 'CREATE TABLE should_not_exist (id INTEGER);');
-    expect(() => openBuilderDatabase(path, { migrationsDirectory: unknownDir })).toThrow(/unknown migration file: 004_unknown\.sql/);
+    await writeFile(join(unknownDir, '005_unknown.sql'), 'CREATE TABLE should_not_exist (id INTEGER);');
+    expect(() => openBuilderDatabase(path, { migrationsDirectory: unknownDir })).toThrow(/unknown migration file: 005_unknown\.sql/);
     const afterUnknown = new DatabaseSync(path);
     expect(afterUnknown.prepare("SELECT name FROM sqlite_master WHERE name='should_not_exist'").get()).toBeUndefined();
     afterUnknown.close();
@@ -345,7 +365,7 @@ describe('versioned builder database migrations', () => {
     physicalOrderDb.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(1, '001_initial.sql', MIGRATION_REGISTRY[0].sha256, 'x');
     physicalOrderDb.close();
     const accepted = openBuilderDatabase(physicalOrderPath);
-    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 3 });
+    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 4 });
     accepted.close();
   });
 
@@ -451,7 +471,7 @@ describe('versioned builder database migrations', () => {
     const path = await temporaryDatabase();
     const db = openBuilderDatabase(path);
     const job = ['job-1', 'req-1', 'git@example:repo.git', 'refs/remotes/origin/main', 'main', 'main', 'a'.repeat(40), 'a'.repeat(40), 'rpi-5', 'release', 'b'.repeat(64), '2026-07-23T00:00:00.000Z', 'author', 'subject', '2026-07-23T00:00:00.000Z', 'queued', 'queued', '2026-07-23T00:00:00.000Z', '2026-07-23T00:00:00.000Z'] as const;
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(...job);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, source_preparation_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(...job, sourcePreparationJson());
     db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run('job-1', 0, job[17]);
     check(db, "INSERT INTO queue_entries VALUES ('unknown', 1, 'x', NULL)", /FOREIGN KEY constraint failed/);
     insertValidJob(db, 'bad-state');
@@ -472,7 +492,7 @@ describe('versioned builder database migrations', () => {
   it('keeps committed operation evidence immutable while allowing an uncommitted result to be completed', async () => {
     const path = await temporaryDatabase();
     const db = openBuilderDatabase(path);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at) VALUES ('job-1', 'req-1', 'git@example:repo.git', 'refs/remotes/origin/main', 'main', 'main', '${'a'.repeat(40)}', '${'a'.repeat(40)}', 'rpi-5', 'release', '${'b'.repeat(64)}', 'x', 'author', 'subject', 'x', 'building', 'dispatched', 'x', 'x')`).run();
+    insertValidJob(db, 'job-1', 'building');
     db.prepare(`INSERT INTO job_operations (job_id, operation_id, attempt, argv_hash, argv_json, started_at) VALUES ('job-1', 'verify-image', 1, '${'a'.repeat(64)}', '[]', 'x')`).run();
     check(db, "UPDATE job_operations SET container_id='cid', container_name='builder', container_image_digest='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', container_label_job_id='job-1', container_label_manifest_sha='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', container_mount_json='{}', container_env_json='{}', container_security_json='{}', inspection_json='{}', lifecycle_phase='started', exit_code=0, outcome='passed', finished_at='y', evidence_path='e', evidence_sha256='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' WHERE job_id='job-1' AND operation_id='verify-image' AND attempt=1", /operation Docker manifest label is invalid/);
     db.prepare(`INSERT INTO job_operations (job_id, operation_id, attempt, argv_hash, argv_json, started_at, outcome) VALUES ('job-1', 'build-image', 1, '${'a'.repeat(64)}', '["make"]', 'x', NULL)`).run();
@@ -482,14 +502,21 @@ describe('versioned builder database migrations', () => {
     db.close();
   });
 
-  it('upgrades a real v1 database to the exact fresh v3 schema without losing the job row', async () => {
+  it('upgrades a real v1 database to the exact fresh v4 schema without losing the job row', async () => {
     const partialPath = await temporaryDatabase();
     const freshPath = await temporaryDatabase();
     const migrationDir = await copyMigrations();
     const partial = new DatabaseSync(partialPath);
     partial.exec(await readFile(join(migrationDir, '001_initial.sql'), 'utf8'));
     partial.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(1, '001_initial.sql', MIGRATION_REGISTRY[0].sha256, '2026-07-23T00:00:00.000Z');
-    insertValidJob(partial, 'preserve-me');
+    partial.prepare(`INSERT INTO jobs (
+      job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id,
+      target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      'preserve-me', 'request-preserve-me', 'git@example:repo.git', 'refs/remotes/origin/main', 'main', 'main', SHA40, SHA40,
+      'rpi-5', 'release', HASH64, '2026-07-23T00:00:00.000Z', 'author', 'subject', '2026-07-23T00:00:00.000Z',
+      'queued', 'queued', '2026-07-23T00:00:00.000Z', '2026-07-23T00:00:00.000Z',
+    );
     partial.close();
 
     const upgraded = openBuilderDatabase(partialPath, { migrationsDirectory: migrationDir });

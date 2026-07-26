@@ -234,6 +234,49 @@ describe('stage evidence', () => {
     expect(await readdir(join(authority.statePath, 'jobs', 'job-cleanup', 'evidence'))).toEqual(['01-source.json']);
   });
 
+  it('blocks same-UID temporary pathname substitution immediately before the final link', async () => {
+    const jobId = 'job-temp-substitution';
+    let statePath = '';
+    let validations = 0;
+    const authority = await authorityFixture({
+      beforeDirectoryAccess: async (handle) => {
+        const heldPath = await readlink(`/proc/self/fd/${handle.fd}`);
+        if (!heldPath.endsWith('/evidence')) return;
+        validations += 1;
+        if (validations !== 2) return;
+        const directory = join(statePath, 'jobs', jobId, 'evidence');
+        const temporary = (await readdir(directory)).find((entry) => entry.startsWith('.01-source.json.') && entry.endsWith('.tmp'));
+        if (temporary === undefined) throw new Error('temporary evidence link was not present');
+        await rename(join(directory, temporary), join(directory, `${temporary}.survivor.tmp`));
+        await writeFile(join(directory, temporary), 'same-uid substitute\n');
+      },
+    });
+    statePath = authority.statePath;
+    const writer = createEvidenceWriter({ stateRoot: authority.stateRoot });
+
+    await expect(writer.write(passedInput(jobId))).rejects.toMatchObject({ code: 'EVIDENCE_TEMPORARY_BLOCKER' });
+    await expect(writer.write(passedInput(jobId))).rejects.toMatchObject({ code: 'EVIDENCE_TEMPORARY_BLOCKER' });
+  });
+
+  it('blocks an unexpected temporary survivor injected during cleanup and on retry', async () => {
+    const jobId = 'job-cleanup-survivor';
+    let statePath = '';
+    let syncCalls = 0;
+    const authority = await authorityFixture({
+      beforeDirectorySync: async () => {
+        syncCalls += 1;
+        if (syncCalls !== 2) return;
+        const directory = join(statePath, 'jobs', jobId, 'evidence');
+        await writeFile(join(directory, '.01-source.json.unexpected.tmp'), 'unexpected survivor\n');
+      },
+    });
+    statePath = authority.statePath;
+    const writer = createEvidenceWriter({ stateRoot: authority.stateRoot });
+
+    await expect(writer.write(passedInput(jobId))).rejects.toMatchObject({ code: 'EVIDENCE_TEMPORARY_BLOCKER' });
+    await expect(writer.write(passedInput(jobId))).rejects.toMatchObject({ code: 'EVIDENCE_TEMPORARY_BLOCKER' });
+  });
+
   it('rejects replacement of the bound final file after its first successful fsync', async () => {
     const jobId = 'job-final-race';
     let statePath = '';
