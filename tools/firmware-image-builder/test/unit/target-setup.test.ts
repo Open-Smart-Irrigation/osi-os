@@ -62,6 +62,64 @@ const NO_UART_REVERSE_OUTPUT = [
   '',
 ].join('\n');
 const EXPECTED_MAKE_REVERSE_ERROR = 'make: *** [Makefile:60: switch-env] Error 1\n';
+const EXPECTED_FRESH_MAKE_REVERSE_ERROR = `No series file found\n${EXPECTED_MAKE_REVERSE_ERROR}`;
+
+function fullMakeReverseOutput(
+  environment: string,
+  cleanup = false,
+): string {
+  return [
+    'Cleaning patch state',
+    'cd openwrt && quilt pop -af || true',
+    ...(cleanup
+      ? [
+          'Removing patch patches/boot-config.patch',
+          'Restoring target/linux/bcm27xx/image/config.txt',
+          '',
+          'Removing patch patches/no-uart-console.patch',
+          'Restoring target/linux/bcm27xx/image/cmdline.txt',
+          '',
+          'No patches applied',
+        ]
+      : []),
+    'rm -rf openwrt/.pc',
+    'Restoring clean source tree',
+    'cd openwrt && git checkout -- . || true',
+    'cd openwrt && git clean -fd || true',
+    ...(cleanup ? ['Removing .config', 'Removing files', 'Removing patches'] : []),
+    'Switching configuration',
+    'rm -f conf/files conf/patches conf/.config',
+    `ln -s ${environment}/files conf/files`,
+    `ln -s ${environment}/patches conf/patches`,
+    `ln -s ${environment}/.config conf/.config`,
+    'Recreating openwrt symlinks',
+    'rm -f openwrt/.config openwrt/files openwrt/patches',
+    'ln -s ../conf/.config openwrt/.config',
+    'ln -s ../conf/files openwrt/files',
+    'ln -s ../conf/patches openwrt/patches',
+    'Initializing quilt',
+    'mkdir -p openwrt/.pc',
+    'echo "patches" > openwrt/.pc/.quilt_patches',
+    'cd openwrt && quilt upgrade || true',
+    'Converting meta-data to version 2',
+    'Applying patches',
+    'cd openwrt && quilt push -a || [ $? -eq 2 ]',
+    'Applying patch patches/no-uart-console.patch',
+    'patching file target/linux/bcm27xx/image/cmdline.txt',
+    '',
+    'Applying patch patches/boot-config.patch',
+    'patching file target/linux/bcm27xx/image/config.txt',
+    '',
+    ...(environment === targets[0]!.environment
+      ? [
+          'Applying patch patches/add_designware_spi_kmod.patch',
+          'patching file target/linux/bcm27xx/bcm2712/config-6.6',
+          '',
+        ]
+      : []),
+    ROOTFS_REVERSE_OUTPUT,
+  ].join('\n');
+}
 
 afterEach(async () => {
   for (const directory of temporaryDirectories.splice(0)) await rm(directory, { recursive: true, force: true });
@@ -580,6 +638,26 @@ describe('target setup', () => {
     });
   });
 
+  it.each([
+    ['Pi 5 fresh workspace', targets[0]!, false, EXPECTED_FRESH_MAKE_REVERSE_ERROR],
+    ['Pi 4 fresh workspace', targets[1]!, false, EXPECTED_FRESH_MAKE_REVERSE_ERROR],
+    ['Pi 4 prior patch cleanup', targets[1]!, true, EXPECTED_MAKE_REVERSE_ERROR],
+  ])('classifies the complete structurally approved make transcript for a %s', (_case, target, cleanup, stderr) => {
+    const definition = createOperationDefinition('activate-target', {
+      environment: target.environment,
+    });
+    const command = result(definition.argv, {
+      exitCode: 2,
+      stdout: fullMakeReverseOutput(target.environment, cleanup),
+      stderr,
+    });
+
+    expect(classifyTargetSetupOperationResult('activate-target', definition, command)).toEqual({
+      disposition: 'expected-rootfs-already-present',
+      command,
+    });
+  });
+
   it('resolves both profiles when activate-target returns the exact expected rootfs nonzero result', async () => {
     const fixture = await authorityFixture();
     const base = operations(fixture);
@@ -613,6 +691,21 @@ describe('target setup', () => {
     ['extra output', `${ROOTFS_REVERSE_OUTPUT}unexpected output\n`, 2],
     ['extra failure output', `${ROOTFS_REVERSE_OUTPUT}fatal: unrelated failure\n`, 2],
     ['unrelated preceding failure', `fatal: unrelated failure\n${ROOTFS_REVERSE_OUTPUT}`, 2],
+    ['permission-denied prefix', `Permission denied while restoring source\n${ROOTFS_REVERSE_OUTPUT}`, 2],
+    ['missing-file prefix', `No such file or directory\n${ROOTFS_REVERSE_OUTPUT}`, 2],
+    ['unknown prefix', `source tree restored\n${ROOTFS_REVERSE_OUTPUT}`, 2],
+    ['extra command output', `git status --porcelain\n${ROOTFS_REVERSE_OUTPUT}`, 2],
+    ['duplicate prelude', `Applying patches\nApplying patches\n${ROOTFS_REVERSE_OUTPUT}`, 2],
+    ['reordered prelude', [
+      'Cleaning patch state',
+      'Switching configuration',
+      'Restoring clean source tree',
+      'Recreating openwrt symlinks',
+      'Initializing quilt',
+      'Applying patches',
+      ROOTFS_REVERSE_OUTPUT,
+    ].join('\n'), 2],
+    ['alternate make exit', ROOTFS_REVERSE_OUTPUT, 3],
     ['path mismatch', ROOTFS_REVERSE_OUTPUT.replace(
       'Patch patches/image-with-padded-rootfs.patch can be reverse-applied',
       'Patch patches/no-uart-console.patch can be reverse-applied',
@@ -624,6 +717,36 @@ describe('target setup', () => {
     expect(() => classifyTargetSetupOperationResult('activate-target', definition, result(
       definition.argv,
       { exitCode, stdout },
+    ))).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
+  });
+
+  it.each([
+    ['permission denied', `Permission denied while restoring source\n${EXPECTED_MAKE_REVERSE_ERROR}`],
+    ['missing file', `No such file or directory\n${EXPECTED_MAKE_REVERSE_ERROR}`],
+    ['unknown line', `source tree restored\n${EXPECTED_MAKE_REVERSE_ERROR}`],
+    ['extra suffix', `${EXPECTED_MAKE_REVERSE_ERROR}unexpected output\n`],
+    ['duplicate make error', EXPECTED_MAKE_REVERSE_ERROR.repeat(2)],
+  ])('rejects %s in stderr before an exact rootfs reverse transcript', (_case, stderr) => {
+    const definition = createOperationDefinition('activate-target', {
+      environment: targets[0]!.environment,
+    });
+    expect(() => classifyTargetSetupOperationResult('activate-target', definition, result(
+      definition.argv,
+      { exitCode: 2, stdout: ROOTFS_REVERSE_OUTPUT, stderr },
+    ))).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
+  });
+
+  it('rejects a full make transcript bound to another target environment', () => {
+    const definition = createOperationDefinition('activate-target', {
+      environment: targets[1]!.environment,
+    });
+    expect(() => classifyTargetSetupOperationResult('activate-target', definition, result(
+      definition.argv,
+      {
+        exitCode: 2,
+        stdout: fullMakeReverseOutput(targets[0]!.environment),
+        stderr: EXPECTED_FRESH_MAKE_REVERSE_ERROR,
+      },
     ))).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
   });
 
