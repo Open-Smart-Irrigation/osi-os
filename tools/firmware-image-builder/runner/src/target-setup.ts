@@ -1801,6 +1801,334 @@ export async function resolveTargetSetup(
         containerWorkingDirectory: '/workdir',
       });
 
+      if ('phase' in input) {
+        const workspaceResultPath = join(
+          snapshot.path,
+          'jobs',
+          jobId,
+          'workspace',
+          'source',
+        );
+        const verifyWorkspaceBinding = () => assertBindings(
+          bindings,
+          dependencies,
+          input.requestId,
+        );
+        if (input.phase === 'target-setup') {
+          const profiles = new Map<TargetManifest['id'], ProfileResolution>();
+          for (const target of targetState.ordered) {
+            const definitions = targetState.definitions.get(target.id)!;
+            const activation = await runOperation(
+              input.operations,
+              'activate-target',
+              definitions.get('activate-target')!,
+              workspaceCapability,
+              verifyWorkspaceBinding,
+              input.requestId,
+            );
+            await verifySelectedConfigLinks(
+              workspace,
+              target,
+              dependencies,
+              input.requestId,
+            );
+            const sourceConfigBytes = await readProfileConfigBytes(
+              workspace,
+              target,
+              dependencies,
+              input.requestId,
+            );
+            const sourceConfig = sourceConfigBytes.toString('utf8');
+            checkConfig(sourceConfig, target, input.requestId, `${target.id} source`);
+            const sourceConfigSha256 = sha256(sourceConfigBytes);
+            const sourceConfigEvidencePath = `evidence/target-setup/${target.id}.source.config`;
+            const publication = await input.evidenceWriter.writeTargetSetupSourceConfig({
+              jobId,
+              targetId: target.id,
+              contents: sourceConfigBytes,
+            });
+            if (
+              publication.path !== `jobs/${jobId}/${sourceConfigEvidencePath}`
+              || publication.sha256 !== sourceConfigSha256
+            ) {
+              fail(
+                'TARGET_CONFIG_MISMATCH',
+                `The ${target.id} source config evidence does not match the held bytes.`,
+                input.requestId,
+                { target: target.id },
+              );
+            }
+            const decision = await patchState(
+              workspace,
+              `${activation.stdout}${activation.stderr}`,
+              input.requestId,
+              dependencies,
+            );
+            profiles.set(target.id, Object.freeze({
+              target: target.id,
+              environment: target.environment,
+              selectedTarget: target.openwrtTarget,
+              profile: target.profile,
+              rootfsPartSize: target.rootfsPartSize,
+              sourceSha256: sourceConfigSha256,
+              sourceConfigEvidencePath,
+              resolvedSha256: sourceConfigSha256,
+              patchDecision: decision,
+            }));
+          }
+          await assertBindings(bindings, dependencies, input.requestId);
+          const selectedProfile = profiles.get(targetState.selected.id)!;
+          return Object.freeze({
+            phase: 'target-setup' as const,
+            workspacePath: workspaceResultPath,
+            target: targetState.selected.id,
+            patchDecision: selectedProfile.patchDecision,
+            profiles: Object.freeze({
+              'rpi-5': profiles.get('rpi-5')!,
+              'rpi-2': profiles.get('rpi-2')!,
+            }),
+          });
+        }
+
+        if (input.phase === 'feeds') {
+          await verifySelectedConfigLinks(
+            workspace,
+            targetState.selected,
+            dependencies,
+            input.requestId,
+          );
+          const definitions = targetState.definitions.get(targetState.selected.id)!;
+          await runOperation(
+            input.operations,
+            'copy-feed-config',
+            definitions.get('copy-feed-config')!,
+            workspaceCapability,
+            verifyWorkspaceBinding,
+            input.requestId,
+          );
+          const immediateSourceFeed = await readTextFile(
+            workspace,
+            'feeds.conf.default',
+            dependencies,
+            input.requestId,
+            'FEED_INSTALL_FAILED',
+            'The repository feed configuration changed after target activation.',
+          );
+          const immediateDestinationFeed = await readTextFile(
+            openwrt,
+            'feeds.conf.default',
+            dependencies,
+            input.requestId,
+            'FEED_INSTALL_FAILED',
+            'The copied feed configuration is missing or unsafe.',
+          );
+          const sourceSha256 = sha256(immediateSourceFeed);
+          const destinationSha256 = sha256(immediateDestinationFeed);
+          if (immediateSourceFeed !== sourceFeed || sourceSha256 !== destinationSha256) {
+            fail(
+              'FEED_INSTALL_FAILED',
+              'The copied feed configuration hash differs from the pinned repository source.',
+              input.requestId,
+              { sourceSha256, destinationSha256 },
+              'copy-feed-config',
+            );
+          }
+          const preparedEvidence = await materializeFeeds(
+            openwrt,
+            prepared,
+            dependencies,
+            input.requestId,
+          );
+          const rust = await rustFeed(openwrt, input.requestId, dependencies);
+          const materializedFeedHashes = await captureMaterializedFeedHashes(
+            openwrt,
+            prepared,
+            dependencies,
+            input.requestId,
+          );
+          await runOperation(
+            input.operations,
+            'update-feeds',
+            definitions.get('update-feeds')!,
+            workspaceCapability,
+            verifyWorkspaceBinding,
+            input.requestId,
+          );
+          await verifyPreparedAndMaterializedFeeds(
+            openwrt,
+            prepared,
+            materializedFeedHashes,
+            dependencies,
+            input.requestId,
+            'update-feeds',
+          );
+          await verifyRustTransform(
+            openwrt,
+            rust,
+            input.requestId,
+            dependencies,
+            'update-feeds',
+          );
+          await runOperation(
+            input.operations,
+            'install-feeds',
+            definitions.get('install-feeds')!,
+            workspaceCapability,
+            verifyWorkspaceBinding,
+            input.requestId,
+          );
+          await verifyPreparedAndMaterializedFeeds(
+            openwrt,
+            prepared,
+            materializedFeedHashes,
+            dependencies,
+            input.requestId,
+            'install-feeds',
+          );
+          await verifyRustTransform(
+            openwrt,
+            rust,
+            input.requestId,
+            dependencies,
+            'install-feeds',
+          );
+          const installedPackages = await verifyLinks(
+            workspace,
+            localFeed,
+            input.requestId,
+            dependencies,
+          );
+          await assertBindings(bindings, dependencies, input.requestId);
+          return Object.freeze({
+            phase: 'feeds' as const,
+            workspacePath: workspaceResultPath,
+            target: targetState.selected.id,
+            feed: Object.freeze({
+              sourceSha256,
+              destinationSha256,
+              localPath: join(
+                snapshot.path,
+                'jobs',
+                jobId,
+                'workspace',
+                'source',
+                parsedFeeds.chirpstackLocation,
+              ),
+              packagesCommit: PACKAGES_COMMIT,
+              installedPackages,
+              prepared: preparedEvidence,
+            }),
+            rust,
+          });
+        }
+
+        if (input.profiles === undefined) {
+          fail(
+            'TARGET_CONFIG_MISMATCH',
+            'Config resolution requires the held target-setup profile evidence.',
+            input.requestId,
+          );
+        }
+        const profileResults = new Map<TargetManifest['id'], ProfileResolution>();
+        for (const target of targetState.ordered) {
+          const prior = input.profiles[target.id];
+          if (
+            prior === undefined
+            || prior.target !== target.id
+            || prior.environment !== target.environment
+          ) {
+            fail(
+              'TARGET_CONFIG_MISMATCH',
+              'Config resolution profile evidence does not match the target manifest.',
+              input.requestId,
+              { target: target.id },
+            );
+          }
+          await selectConfigProfile(workspace, target, dependencies, input.requestId);
+          const sourceConfigBytes = await readProfileConfigBytes(
+            workspace,
+            target,
+            dependencies,
+            input.requestId,
+          );
+          const sourceConfigSha256 = sha256(sourceConfigBytes);
+          if (sourceConfigSha256 !== prior.sourceSha256) {
+            fail(
+              'TARGET_CONFIG_MISMATCH',
+              `The ${target.id} source config changed after target setup.`,
+              input.requestId,
+              { target: target.id },
+            );
+          }
+          const definitions = targetState.definitions.get(target.id)!;
+          await runOperation(
+            input.operations,
+            'resolve-config',
+            definitions.get('resolve-config')!,
+            workspaceCapability,
+            verifyWorkspaceBinding,
+            input.requestId,
+          );
+          const resolvedConfig = (await readProfileConfigBytes(
+            workspace,
+            target,
+            dependencies,
+            input.requestId,
+          )).toString('utf8');
+          checkConfig(
+            resolvedConfig,
+            target,
+            input.requestId,
+            `${target.id} resolved`,
+            'resolve-config',
+          );
+          const profile = expectedConfigValue(
+            resolvedConfig,
+            'CONFIG_TARGET_PROFILE',
+            'string',
+          );
+          const rootfsPartSize = expectedConfigValue(
+            resolvedConfig,
+            'CONFIG_TARGET_ROOTFS_PARTSIZE',
+            'number',
+          );
+          if (profile !== target.profile || rootfsPartSize !== target.rootfsPartSize) {
+            fail(
+              'TARGET_CONFIG_MISMATCH',
+              'The resolved profile or rootfs size does not exactly match the target manifest.',
+              input.requestId,
+              { target: target.id },
+              'resolve-config',
+            );
+          }
+          profileResults.set(target.id, Object.freeze({
+            ...prior,
+            profile,
+            rootfsPartSize,
+            resolvedSha256: sha256(resolvedConfig),
+          }));
+        }
+        const selectedProfile = profileResults.get(targetState.selected.id)!;
+        await assertBindings(bindings, dependencies, input.requestId);
+        return Object.freeze({
+          phase: 'config' as const,
+          workspacePath: workspaceResultPath,
+          target: targetState.selected.id,
+          config: Object.freeze({
+            selectedTarget: selectedProfile.selectedTarget,
+            profile: selectedProfile.profile,
+            rootfsPartSize: selectedProfile.rootfsPartSize,
+            sourceSha256: selectedProfile.sourceSha256,
+            resolvedSha256: selectedProfile.resolvedSha256,
+            bothProfilesChecked: true as const,
+            profiles: Object.freeze({
+              'rpi-5': profileResults.get('rpi-5')!,
+              'rpi-2': profileResults.get('rpi-2')!,
+            }),
+          }),
+        });
+      }
+
       const profileResults = new Map<TargetManifest['id'], ProfileResolution>();
       let selectedFeed: FeedResolution | undefined;
       let selectedRust: RustResolution | undefined;

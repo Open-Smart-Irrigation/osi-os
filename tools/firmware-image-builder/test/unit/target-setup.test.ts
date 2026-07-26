@@ -303,6 +303,10 @@ function operations(fixture: Fixture, options: OperationsOptions = {}): {
         }
       }
       if (operationId === 'resolve-config') {
+        const activeConfig = await readlink(join(workspace, 'conf/.config'));
+        activeTarget = targets.find((target) => (
+          activeConfig === `${target.environment}/.config`
+        ))!;
         const resolved = options.resolvedConfigOverride?.[activeTarget.id] ?? configFor(activeTarget);
         await writeFile(join(workspace, 'openwrt/.config'), resolved);
       }
@@ -353,6 +357,60 @@ describe('target setup', () => {
     expect(setup.config.profiles['rpi-2'].resolvedSha256).toMatch(/^[0-9a-f]{64}$/u);
     expect(await readlink(join(fixture.workspace, 'conf/.config'))).toBe(`${targets[0]!.environment}/.config`);
     expect(await readFile(join(fixture.workspace, 'openwrt/feeds/packages/lang/rust/Makefile'), 'utf8')).toContain('download-ci-llvm=false');
+  });
+
+  it('executes activation, feed, and both-profile config mutations in separate phases', async () => {
+    const fixture = await authorityFixture();
+    const { runner, calls } = operations(fixture);
+
+    const targetSetup = await resolveTargetSetup({
+      ...input(fixture, runner),
+      phase: 'target-setup',
+    });
+    if (targetSetup.phase !== 'target-setup') throw new Error('unexpected target setup phase');
+    expect(calls.map(({ operationId }) => operationId)).toEqual([
+      'activate-target',
+      'activate-target',
+    ]);
+
+    const feeds = await resolveTargetSetup({
+      ...input(fixture, runner),
+      phase: 'feeds',
+    });
+    if (feeds.phase !== 'feeds') throw new Error('unexpected feeds phase');
+    expect(calls.map(({ operationId }) => operationId)).toEqual([
+      'activate-target',
+      'activate-target',
+      'copy-feed-config',
+      'update-feeds',
+      'install-feeds',
+    ]);
+
+    const config = await resolveTargetSetup({
+      ...input(fixture, runner),
+      phase: 'config',
+      profiles: targetSetup.profiles,
+    });
+    if (config.phase !== 'config') throw new Error('unexpected config phase');
+    expect(calls.map(({ operationId }) => operationId)).toEqual([
+      'activate-target',
+      'activate-target',
+      'copy-feed-config',
+      'update-feeds',
+      'install-feeds',
+      'resolve-config',
+      'resolve-config',
+    ]);
+    expect(feeds.feed).toMatchObject({
+      sourceSha256: feeds.feed.destinationSha256,
+    });
+    expect(config.config).toMatchObject({
+      bothProfilesChecked: true,
+      selectedTarget: targets[0]!.openwrtTarget,
+      profile: targets[0]!.profile,
+    });
+    expect(await readlink(join(fixture.workspace, 'conf/.config')))
+      .toBe(`${targets[0]!.environment}/.config`);
   });
 
   it('removes only held builder feed entries left by a crash before resolving both profiles', async () => {

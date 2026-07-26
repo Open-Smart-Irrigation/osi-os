@@ -743,6 +743,96 @@ describe('actor-owned compare-and-set writes', () => {
     expect(ignored.store.listEvents('publish-ignored-timestamps').events).toHaveLength(ignoredEvents); expect(ignored.store.getJob('publish-ignored-timestamps')).toEqual(ignoredBefore);
   });
 
+  it('atomically starts publishing and atomically commits publish evidence with the terminal', async () => {
+    const jobId = 'atomic-publish';
+    const value = await fixture(jobId);
+    toVerifying(value.ownership, jobId);
+    const beforeStart = value.store.listEvents(jobId).events.length;
+    const rollbackDb = openBuilderDatabase(value.path);
+    let fail = true;
+    const injected = new OwnershipStore(rollbackDb, {
+      now: () => NOW,
+      failBeforeCommit: () => {
+        if (fail) throw new Error('publish transaction crash');
+      },
+    });
+    closers.push(() => rollbackDb.close());
+    const start: RunnerWriteCommand = {
+      ...runnerBase(jobId),
+      kind: 'publish-stage-start',
+      expectedState: 'verifying',
+      startedAt: NOW,
+      finalDirectory: `release/${jobId}`,
+      finalPath: `release/${jobId}/image`,
+      publishStartedAt: NOW,
+    };
+    expect(() => injected.runnerWrite(start)).toThrow(OwnershipTransactionError);
+    expect(value.store.getJob(jobId)).toMatchObject({
+      state: 'verifying',
+      publishState: 'staged',
+      publishStartedAt: null,
+    });
+    expect(value.store.getStage(jobId, 'publish')).toBeNull();
+    expect(value.store.listEvents(jobId).events).toHaveLength(beforeStart);
+
+    fail = false;
+    expect(value.ownership.runnerWrite(start).ok).toBe(true);
+    expect(value.store.getJob(jobId)).toMatchObject({
+      state: 'publishing',
+      publishState: 'publishing',
+      publishStartedAt: NOW,
+    });
+    expect(value.store.getStage(jobId, 'publish')).toMatchObject({
+      outcome: 'running',
+    });
+
+    fail = true;
+    const terminal: RunnerWriteCommand = {
+      ...runnerBase(jobId),
+      at: LATER,
+      kind: 'publish-terminal',
+      expectedState: 'publishing',
+      startedAt: NOW,
+      finishedAt: LATER,
+      evidencePath: 'evidence/09-publish.json',
+      evidenceSha256: SHA64,
+      finalDirectory: `release/${jobId}`,
+      finalPath: `release/${jobId}/image`,
+      publishStartedAt: NOW,
+      publishedAt: LATER,
+      terminalAt: LATER,
+    };
+    const beforeTerminal = value.store.listEvents(jobId).events.length;
+    expect(() => injected.runnerWrite(terminal)).toThrow(OwnershipTransactionError);
+    expect(value.store.getJob(jobId)).toMatchObject({
+      state: 'publishing',
+      publishState: 'publishing',
+      artifactStagingPath: 'staging/image',
+      terminalAt: null,
+    });
+    expect(value.store.getStage(jobId, 'publish')).toMatchObject({
+      outcome: 'running',
+    });
+    expect(value.store.listEvents(jobId).events).toHaveLength(beforeTerminal);
+
+    fail = false;
+    expect(value.ownership.runnerWrite(terminal).ok).toBe(true);
+    expect(value.store.getJob(jobId)).toMatchObject({
+      state: 'succeeded',
+      publishState: 'published',
+      artifactStagingPath: null,
+      artifactFinalPath: `release/${jobId}/image`,
+      terminalAt: LATER,
+    });
+    expect(value.store.getStage(jobId, 'publish')).toMatchObject({
+      outcome: 'passed',
+      evidencePath: 'evidence/09-publish.json',
+      evidenceSha256: SHA64,
+    });
+    expect(value.store.listEvents(jobId).events
+      .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
+  });
+
   it('accepts only typed publishing recovery evidence for success and failure', async () => {
     const success = await fixture('job-2'); toPublishing(success.ownership, 'job-2'); seedLogs(success.path, 'job-2');
     expect(success.ownership.apiWrite({ kind: 'publish-recovery', jobId: 'job-2', expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence: recoveryEvidence('job-2') })).toMatchObject({ ok: true });

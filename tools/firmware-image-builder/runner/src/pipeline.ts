@@ -84,20 +84,6 @@ const STAGE_STATE: Readonly<Record<PipelineStageName, JobState>> = Object.freeze
   publish: 'publishing',
 });
 
-const DEFAULT_STAGE_OPERATION: Readonly<
-  Record<Exclude<PipelineStageName, 'source'>, TrustedOperationId>
-> = Object.freeze({
-  preflight: 'activate-target',
-  'release-gates': 'check-mqtt-topics',
-  frontend: 'mirror-gui',
-  'target-setup': 'activate-target',
-  feeds: 'install-feeds',
-  config: 'resolve-config',
-  build: 'build-image',
-  verify: 'verify-image',
-  publish: 'verify-image',
-});
-
 export interface PipelineClock {
   readonly now: () => string;
 }
@@ -153,6 +139,10 @@ export interface StageActionContext {
   readonly runOperation: (
     operationId: TrustedOperationId,
     requestedDefinition?: OperationDefinition,
+  ) => Promise<PipelineOperationExecution>;
+  readonly runTargetSetupOperation: (
+    operationId: 'activate-target' | 'copy-feed-config' | 'update-feeds' | 'install-feeds' | 'resolve-config',
+    requestedDefinition: OperationDefinition,
   ) => Promise<PipelineOperationExecution>;
 }
 
@@ -238,6 +228,13 @@ export interface ApprovedRootBinding {
 }
 
 export interface PipelineServices {
+  readonly workspace: {
+    readonly revalidate: (input: Readonly<{
+      job: JobRecord;
+      stage: PipelineStageName;
+      phase: 'before' | 'after';
+    }>) => Promise<void>;
+  };
   readonly preflight: {
     readonly recheck: (input: Readonly<{
       job: JobRecord;
@@ -260,7 +257,9 @@ export interface PipelineServices {
     ) => Promise<PipelineOperationExecution>;
   };
   readonly targetSetup: {
-    readonly run: (context: StageActionContext) => Promise<TargetSetupStageResult>;
+    readonly setup: (context: StageActionContext) => Promise<TargetSetupStageResult>;
+    readonly feeds: (context: StageActionContext) => Promise<TargetSetupStageResult>;
+    readonly config: (context: StageActionContext) => Promise<TargetSetupStageResult>;
   };
   readonly verification: {
     readonly verify: (input: Readonly<{
@@ -437,11 +436,14 @@ function canonicalObject(value: unknown, field: string): JsonObject {
 }
 
 function operationIdFor(
-  stage: PipelineStageName,
   executions: readonly PipelineOperationExecution[] = [],
 ): TrustedOperationId | null {
-  if (stage === 'source') return null;
-  return executions.at(-1)?.operationId ?? DEFAULT_STAGE_OPERATION[stage];
+  return executions.at(-1)?.operationId ?? null;
+}
+
+function summaryError(contract: BuilderErrorContract): BuilderErrorContract {
+  const { operationId: _operationId, ...summary } = contract;
+  return Object.freeze(summary);
 }
 
 function commandsFromError(error: unknown): readonly EvidenceCommand[] | null {
@@ -509,10 +511,13 @@ function validateServiceComposition(input: PipelineInput): void {
     [input.evidenceWriter?.write, 'evidenceWriter.write'],
     [input.authoritativeFiles?.readBuilderLock, 'readBuilderLock'],
     [input.authoritativeFiles?.readTargetManifest, 'readTargetManifest'],
+    [input.services?.workspace?.revalidate, 'workspace.revalidate'],
     [input.services?.preflight?.recheck, 'preflight.recheck'],
     [input.services?.source?.setup, 'source.setup'],
     [input.services?.operations?.run, 'operations.run'],
-    [input.services?.targetSetup?.run, 'targetSetup.run'],
+    [input.services?.targetSetup?.setup, 'targetSetup.setup'],
+    [input.services?.targetSetup?.feeds, 'targetSetup.feeds'],
+    [input.services?.targetSetup?.config, 'targetSetup.config'],
     [input.services?.verification?.verify, 'verification.verify'],
     [input.services?.publicationFiles?.prepare, 'publicationFiles.prepare'],
     [input.services?.publicationFiles?.reopenStaging, 'publicationFiles.reopenStaging'],
@@ -1015,7 +1020,9 @@ export function createPipeline(input: PipelineInput): {
   let preparedArtifact: ArtifactInput | null = null;
   let preparedPublication: PreparedPublication | null = null;
   let publicationBinding: PublicationBinding | null = null;
+  let publishStartedAt: string | null = null;
   let provenance: Provenance | null = null;
+  let preflightObservations: Readonly<Record<string, unknown>> | null = null;
   const operationExecutions: PipelineOperationExecution[] = [];
 
   const write = (
@@ -1114,6 +1121,20 @@ export function createPipeline(input: PipelineInput): {
         operationId,
         requestedDefinition,
       ),
+      runTargetSetupOperation: (
+        operationId: 'activate-target' | 'copy-feed-config' | 'update-feeds' | 'install-feeds' | 'resolve-config',
+        requestedDefinition: OperationDefinition,
+      ) => {
+        if (stage !== 'target-setup' && stage !== 'feeds' && stage !== 'config') {
+          throw new TypeError('classifiable target operation is outside target setup stages');
+        }
+        return runOperationResult(
+          job,
+          stage,
+          operationId,
+          requestedDefinition,
+        );
+      },
     });
   };
 
@@ -1144,7 +1165,7 @@ export function createPipeline(input: PipelineInput): {
     }
   };
 
-  const runOperation = async (
+  const runOperationResult = async (
     job: JobRecord,
     stage: PipelineStageName,
     operationId: TrustedOperationId,
@@ -1172,6 +1193,21 @@ export function createPipeline(input: PipelineInput): {
     }
     operationExecutions.push(execution);
     renewLease();
+    return execution;
+  };
+
+  const runOperation = async (
+    job: JobRecord,
+    stage: PipelineStageName,
+    operationId: TrustedOperationId,
+    requestedDefinition?: OperationDefinition,
+  ): Promise<PipelineOperationExecution> => {
+    const execution = await runOperationResult(
+      job,
+      stage,
+      operationId,
+      requestedDefinition,
+    );
     if (execution.outcome !== 'passed') {
       const contract = execution.error ?? errorContract(
         new Error(`${operationId} failed`),
@@ -1194,7 +1230,7 @@ export function createPipeline(input: PipelineInput): {
       executions.push(await runOperation(job, stage, operationId));
     }
     return {
-      operationId: operationIdFor(stage, executions),
+      operationId: operationIdFor(executions),
       commands: executions.map(({ command }) => command),
       observations: {
         operations: executions.map((execution) => ({
@@ -1209,30 +1245,17 @@ export function createPipeline(input: PipelineInput): {
 
   const targetStageResult = (
     stage: 'target-setup' | 'feeds' | 'config',
+    phase: TargetSetupStageResult,
   ): StageResult => {
-    if (targetSetup === null) {
-      throw new Error('target setup results are unavailable');
-    }
-    const selected = targetSetup.executions.filter(({ operationId }) => {
-      if (stage === 'target-setup') return operationId === 'activate-target';
-      if (stage === 'feeds') {
-        return [
-          'copy-feed-config',
-          'update-feeds',
-          'install-feeds',
-        ].includes(operationId);
-      }
-      return operationId === 'resolve-config';
-    });
-    if (selected.length === 0) {
+    if (phase.executions.length === 0) {
       throw new Error(`${stage} has no trusted operation evidence`);
     }
     return {
-      operationId: operationIdFor(stage, selected),
-      commands: selected.map(({ command }) => command),
+      operationId: operationIdFor(phase.executions),
+      commands: phase.executions.map(({ command }) => command),
       observations: {
-        ...targetSetup.observations,
-        operations: selected.map((execution) => ({
+        ...phase.observations,
+        operations: phase.executions.map((execution) => ({
           operationId: execution.operationId,
           attempt: execution.attempt,
           outcome: execution.outcome,
@@ -1253,6 +1276,17 @@ export function createPipeline(input: PipelineInput): {
     readonly checksumBytes: string;
   } => {
     if (provenance === null) throw new Error('builder provenance is unavailable');
+    const preflight = input.store.getStage(job.jobId, 'preflight');
+    if (
+      preflight === null
+      || preflight.outcome !== 'passed'
+      || preflight.finishedAt === null
+      || preflight.evidencePath === null
+      || preflight.evidenceSha256 === null
+      || preflightObservations === null
+    ) {
+      throw new Error('complete preflight tool and timestamp evidence is unavailable');
+    }
     const lock = provenance.lock;
     const exactLock = {
       schemaVersion: 1,
@@ -1294,6 +1328,13 @@ export function createPipeline(input: PipelineInput): {
       config: artifact.config,
       tool: {
         nodeVersion: lock.nodeVersion,
+        preflight: {
+          startedAt: preflight.startedAt,
+          finishedAt: preflight.finishedAt,
+          evidencePath: preflight.evidencePath,
+          evidenceSha256: preflight.evidenceSha256,
+          observations: preflightObservations,
+        },
         operations: operationExecutions.map((execution) => ({
           operationId: execution.operationId,
           attempt: execution.attempt,
@@ -1312,6 +1353,13 @@ export function createPipeline(input: PipelineInput): {
     const verification = canonicalObject({
       ...shared,
       verification: artifact.verification,
+      observations: {
+        stageEvidence: PIPELINE_STAGE_NAMES.map((stage, index) => ({
+          stage,
+          path: `${String(index).padStart(2, '0')}-${stage}.json`,
+          outcome: 'passed',
+        })),
+      },
     }, 'verification manifest');
     const buildBytes = encodeJson(shared, 'build manifest', true);
     const verificationBytes = encodeJson(
@@ -1444,23 +1492,16 @@ export function createPipeline(input: PipelineInput): {
     if (preparedArtifact === null || preparedPublication === null) {
       throw new Error('publication files are incomplete');
     }
-    const binding = createBinding(job);
-    publicationBinding = binding;
+    if (publicationBinding === null || publishStartedAt === null) {
+      throw new Error('publication ownership transaction is incomplete');
+    }
+    const binding = publicationBinding;
     const request: PublisherRequest = Object.freeze({
       rootId: binding.rootId,
       jobId: binding.jobId,
       branchSlug: binding.branchSlug,
       sourceSha: binding.pinnedSha,
       targetId: binding.targetId,
-    });
-    const publishStartedAt = now();
-    write({
-      kind: 'publish',
-      expectedState: 'publishing',
-      state: 'publishing',
-      finalDirectory: binding.finalDirectory,
-      finalPath: binding.finalPath,
-      startedAt: publishStartedAt,
     });
     renewLease();
     let response: PublisherResponse | null = null;
@@ -1511,25 +1552,15 @@ export function createPipeline(input: PipelineInput): {
           details: { staging: outcome.staging },
           retryable: false,
           requestId: job.requestId,
-          operationId: 'verify-image',
         },
         'publish',
         job.requestId,
-        'verify-image',
+        null,
       ));
     }
     const proof = validateFinalProof(outcome.proof, binding);
-    write({
-      kind: 'publish',
-      expectedState: 'publishing',
-      state: 'published',
-      finalDirectory: binding.finalDirectory,
-      finalPath: proof.finalPath,
-      startedAt: publishStartedAt,
-      publishedAt: now(),
-    });
     return {
-      operationId: 'verify-image',
+      operationId: null,
       commands: [],
       observations: {
         native: outcome.response,
@@ -1546,15 +1577,16 @@ export function createPipeline(input: PipelineInput): {
   ): Promise<StageResult> => {
     if (stage === 'preflight') {
       if (provenance === null) throw new Error('preflight provenance is unavailable');
+      preflightObservations = await input.services.preflight.recheck({
+        job,
+        target: input.target,
+        root: input.approvedRoot,
+        lock: provenance.lock,
+      });
       return {
-        operationId: 'activate-target',
+        operationId: null,
         commands: [],
-        observations: await input.services.preflight.recheck({
-          job,
-          target: input.target,
-          root: input.approvedRoot,
-          lock: provenance.lock,
-        }),
+        observations: preflightObservations,
       };
     }
     if (stage === 'source') {
@@ -1573,11 +1605,32 @@ export function createPipeline(input: PipelineInput): {
       return runOperations(job, stage, FRONTEND_OPERATIONS);
     }
     if (stage === 'target-setup') {
-      targetSetup = await input.services.targetSetup.run(context(job, stage));
-      return targetStageResult(stage);
+      targetSetup = await input.services.targetSetup.setup(context(job, stage));
+      return targetStageResult(stage, targetSetup);
     }
-    if (stage === 'feeds' || stage === 'config') {
-      return targetStageResult(stage);
+    if (stage === 'feeds') {
+      const feeds = await input.services.targetSetup.feeds(context(job, stage));
+      if (targetSetup === null) throw new Error('target setup evidence is unavailable');
+      targetSetup = Object.freeze({
+        executions: Object.freeze([...targetSetup.executions, ...feeds.executions]),
+        observations: Object.freeze({
+          ...targetSetup.observations,
+          ...feeds.observations,
+        }),
+      });
+      return targetStageResult(stage, feeds);
+    }
+    if (stage === 'config') {
+      const config = await input.services.targetSetup.config(context(job, stage));
+      if (targetSetup === null) throw new Error('target setup evidence is unavailable');
+      targetSetup = Object.freeze({
+        executions: Object.freeze([...targetSetup.executions, ...config.executions]),
+        observations: Object.freeze({
+          ...targetSetup.observations,
+          ...config.observations,
+        }),
+      });
+      return targetStageResult(stage, config);
     }
     if (stage === 'build') {
       return runOperations(job, stage, ['build-image']);
@@ -1598,9 +1651,43 @@ export function createPipeline(input: PipelineInput): {
         throw new Error('verification returned missing artifact metadata');
       }
       const result = await preparePublication(job, verifiedArtifact);
+      const verificationEvidence = verifiedArtifact.verification.evidence;
+      const evidenceJson = verificationEvidence !== null
+        && typeof verificationEvidence === 'object'
+        && !Array.isArray(verificationEvidence)
+        && 'json' in verificationEvidence
+        && verificationEvidence.json !== null
+        && typeof verificationEvidence.json === 'object'
+        && !Array.isArray(verificationEvidence.json)
+          ? verificationEvidence.json as Readonly<Record<string, unknown>>
+          : null;
+      const observations = evidenceJson?.observations;
+      const freshness = verifiedArtifact.verification.freshness;
+      const freshnessRecord = freshness !== null
+        && typeof freshness === 'object'
+        && !Array.isArray(freshness)
+          ? freshness as Readonly<Record<string, unknown>>
+          : {};
       return {
         ...result,
         commands: [operation.command],
+        observations: {
+          ...result.observations,
+          config: verifiedArtifact.config,
+          verification: verifiedArtifact.verification,
+          rootfs: verifiedArtifact.verification.rootfs,
+          freshnessStatus: freshnessRecord.status ?? null,
+          newerSourceAvailable: freshnessRecord.newerSourceAvailable ?? false,
+          pinnedSha: freshnessRecord.pinnedSha ?? job.pinnedSha,
+          observedSha: freshnessRecord.observedSha ?? null,
+          freshnessCheckedAt: freshnessRecord.checkedAt ?? null,
+          freshnessError: freshnessRecord.error ?? null,
+          ...(observations !== null
+            && typeof observations === 'object'
+            && !Array.isArray(observations)
+              ? observations as Readonly<Record<string, unknown>>
+              : {}),
+        },
       };
     }
     return publish(job);
@@ -1617,13 +1704,14 @@ export function createPipeline(input: PipelineInput): {
     renewLease();
     const finishedAt = now();
     const contract = errorContract(error, stage, job.requestId, operationId);
-    const evidence = await input.evidenceWriter.write({
+    const evidenceError = summaryError(contract);
+    const evidence = await withLeaseHeartbeat(() => input.evidenceWriter.write({
       jobId: job.jobId,
       stage,
       startedAt,
       finishedAt,
       outcome: 'failed',
-      operationId,
+      operationId: null,
       commands,
       inputs: {
         targetId: job.targetId,
@@ -1635,8 +1723,9 @@ export function createPipeline(input: PipelineInput): {
         currentState,
         blockerCode,
       },
-      error: contract,
-    });
+      error: evidenceError,
+    }));
+    renewLease();
     write({
       kind: 'stage',
       expectedState: currentState,
@@ -1674,37 +1763,84 @@ export function createPipeline(input: PipelineInput): {
     renewLease();
     const stageState = STAGE_STATE[stage];
     const startedAt = now();
-    write({
-      kind: 'stage',
-      expectedState: currentState,
-      state: stageState,
-      stage,
-      outcome: 'running',
-      startedAt,
-    });
-    currentState = stageState;
     let result: StageResult | null = null;
     try {
-      result = await withLeaseHeartbeat(() => stageAction(stage, job));
+      if (stage === 'publish') {
+        const binding = createBinding(job);
+        publicationBinding = binding;
+        publishStartedAt = now();
+        write({
+          kind: 'publish-stage-start',
+          expectedState: 'verifying',
+          startedAt,
+          finalDirectory: binding.finalDirectory,
+          finalPath: binding.finalPath,
+          publishStartedAt,
+        });
+      } else {
+        write({
+          kind: 'stage',
+          expectedState: currentState,
+          state: stageState,
+          stage,
+          outcome: 'running',
+          startedAt,
+        });
+      }
+      currentState = stageState;
+      await withLeaseHeartbeat(() => input.services.workspace.revalidate({
+        job,
+        stage,
+        phase: 'before',
+      }));
+      const stageResult = await withLeaseHeartbeat(() => stageAction(stage, job));
+      result = stageResult;
+      await withLeaseHeartbeat(() => input.services.workspace.revalidate({
+        job,
+        stage,
+        phase: 'after',
+      }));
       renewLease();
       const finishedAt = now();
-      const evidence = await input.evidenceWriter.write({
+      const evidence = await withLeaseHeartbeat(() => input.evidenceWriter.write({
         jobId: job.jobId,
         stage,
         startedAt,
         finishedAt,
         outcome: 'passed',
-        operationId: result.operationId,
-        commands: result.commands,
+        operationId: null,
+        commands: stageResult.commands,
         inputs: {
           targetId: job.targetId,
           rootId: job.rootId,
           branch: job.branch,
           pinnedSha: job.pinnedSha,
         },
-        observations: result.observations,
+        observations: stageResult.observations,
         error: null,
-      });
+      }));
+      renewLease();
+      if (stage === 'publish') {
+        if (publicationBinding === null || publishStartedAt === null) {
+          throw new Error('publication terminal binding is incomplete');
+        }
+        const publishedAt = now();
+        const terminalAt = now();
+        write({
+          kind: 'publish-terminal',
+          expectedState: 'publishing',
+          startedAt,
+          finishedAt,
+          evidencePath: evidence.path,
+          evidenceSha256: evidence.sha256,
+          finalDirectory: publicationBinding.finalDirectory,
+          finalPath: publicationBinding.finalPath,
+          publishStartedAt,
+          publishedAt,
+          terminalAt,
+        });
+        return;
+      }
       write({
         kind: 'stage',
         expectedState: currentState,
@@ -1720,8 +1856,12 @@ export function createPipeline(input: PipelineInput): {
     } catch (error) {
       if (error instanceof PipelineOwnershipLostError) throw error;
       const operationId = error instanceof PipelineExpectedError
-        ? error.contract.operationId ?? operationIdFor(stage)
-        : result?.operationId ?? operationIdFor(stage);
+        ? error.contract.operationId ?? null
+        : result?.operationId
+          ?? operationExecutions.filter((execution) => (
+            execution.error !== undefined
+          )).at(-1)?.operationId
+          ?? null;
       const commands = result?.commands
         ?? commandsFromError(error)
         ?? operationExecutions
@@ -1733,11 +1873,40 @@ export function createPipeline(input: PipelineInput): {
   };
 
   const run = async (): Promise<PipelineResult> => {
-    const job = input.store.getJob(input.jobId);
-    validateInitialBinding(input, job);
-    provenance = await loadProvenance(input, job);
+    let job: JobRecord;
+    try {
+      job = input.store.getJob(input.jobId);
+    } catch (error) {
+      return {
+        state: 'recovery-required',
+        buildManifest: null,
+        verificationManifest: null,
+        blockerCode: 'RUNNER_DISAPPEARED',
+        reason: `runner could not establish persisted job ownership: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
     try {
       acquireLease();
+      try {
+        validateInitialBinding(input, job);
+        provenance = await withLeaseHeartbeat(() => loadProvenance(input, job));
+        renewLease();
+      } catch (error) {
+        if (error instanceof PipelineOwnershipLostError) throw error;
+        const startedAt = now();
+        write({
+          kind: 'stage',
+          expectedState: 'starting',
+          state: 'preflight',
+          stage: 'preflight',
+          outcome: 'running',
+          startedAt,
+        });
+        currentState = 'preflight';
+        await completeFailure('preflight', startedAt, error, null, [], job);
+      }
       for (const stage of PIPELINE_STAGE_NAMES) {
         await runStage(stage, job);
       }
@@ -1751,13 +1920,6 @@ export function createPipeline(input: PipelineInput): {
       ) {
         throw new Error('pipeline reached terminal success with incomplete metadata');
       }
-      const terminalAt = now();
-      write({
-        kind: 'normal-terminal',
-        expectedState: 'publishing',
-        state: 'succeeded',
-        terminalAt,
-      });
       return {
         state: 'succeeded',
         buildManifest,

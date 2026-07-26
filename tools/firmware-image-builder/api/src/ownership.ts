@@ -219,6 +219,8 @@ export type RunnerWriteCommand =
   | (CommonRunner & Readonly<{ kind: 'stage'; expectedState: JobState; state: JobState; stage: PipelineStageName; outcome: 'running' | 'passed' | 'failed' | 'cancelled' | 'interrupted'; startedAt: string; finishedAt?: string | null; evidencePath?: string | null; evidenceSha256?: string | null; errorCode?: BuilderErrorCode | null; error?: JsonInput }>)
   | (CommonRunner & Readonly<{ kind: 'container'; lifecycle: 'created' | 'started' | 'stopped' | 'removed'; containerId: string; containerName: string; imageDigest: string; labels: JsonObject; mount: JsonObject; environment: JsonObject; security: JsonObject; inspection: JsonObject; occurredAt: string; createdAt?: string | null; startedAt?: string | null; stoppedAt?: string | null; removedAt?: string | null; cleanupOutcome?: 'passed' | 'failed' | 'blocking' | null }>)
   | (CommonRunner & Readonly<{ kind: 'artifact'; expectedState: JobState; state: JobState; stagingPath: string; artifactSha256: string; artifactSize: number; artifactMtime: string; checksumPath: string; checksumSha256: string; manifestPath: string; manifestSha256: string; verificationPath: string; verificationSha256: string }>)
+  | (CommonRunner & Readonly<{ kind: 'publish-stage-start'; expectedState: 'verifying'; startedAt: string; finalDirectory: string; finalPath: string; publishStartedAt: string }>)
+  | (CommonRunner & Readonly<{ kind: 'publish-terminal'; expectedState: 'publishing'; startedAt: string; finishedAt: string; evidencePath: string; evidenceSha256: string; finalDirectory: string; finalPath: string; publishStartedAt: string; publishedAt: string; terminalAt: string }>)
   | (CommonRunner & Readonly<{ kind: 'publish'; expectedState: JobState; state: 'staged' | 'publishing' | 'published' | 'blocked'; finalDirectory?: string; finalPath?: string; startedAt?: string; publishedAt?: string; blockerCode?: BuilderErrorCode; blocker?: JsonObject }>)
   | (CommonRunner & Readonly<{ kind: 'normal-terminal'; expectedState: JobState; state: 'succeeded' | 'failed'; terminalAt: string; errorCode?: BuilderErrorCode | null; error?: JsonInput }>)
   | (CommonRunner & Readonly<{ kind: 'operation-begin'; expectedState: JobState; operationId: TrustedOperationId; attempt: number; argvHash: string; argv: readonly string[]; startedAt: string }>)
@@ -557,6 +559,8 @@ function validateRunnerCommand(command: RunnerWriteCommand): void {
     case 'stage': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'stage expectedState'); preparedEnum(value.state, JOB_STATES, 'stage state'); preparedEnum(value.stage, PIPELINE_STAGE_NAMES, 'stage name'); preparedEnum(value.outcome, [...COMMAND_OUTCOMES], 'stage outcome'); preparedInstant(value.startedAt, 'stage startedAt'); preparedOptionalInstant(value.finishedAt, 'stage finishedAt'); preparedOptionalPath(value.evidencePath, 'stage evidence path'); preparedOptionalHash(value.evidenceSha256, 'stage evidence SHA'); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'stage errorCode'); preparedJsonObject(value.error, 'stage error', true); shapeStageCommand(value, value.at as string); return;
     case 'container': preparedRunnerCommon(value); preparedEnum(value.lifecycle, CONTAINER_LIFECYCLES, 'container lifecycle'); for (const field of ['containerId', 'containerName']) preparedString(value[field], `container ${field}`, TEXT_LIMITS.maxIdentifierBytes); preparedHash(value.imageDigest, 'container image digest'); preparedJsonObject(value.labels, 'container labels'); preparedJsonObject(value.mount, 'container mount'); preparedJsonObject(value.environment, 'container environment'); preparedJsonObject(value.security, 'container security'); preparedJsonObject(value.inspection, 'container inspection'); preparedInstant(value.occurredAt, 'container occurredAt'); preparedOptionalInstant(value.createdAt, 'container createdAt'); preparedOptionalInstant(value.startedAt, 'container startedAt'); preparedOptionalInstant(value.stoppedAt, 'container stoppedAt'); preparedOptionalInstant(value.removedAt, 'container removedAt'); preparedOptionalEnum(value.cleanupOutcome, ['passed', 'failed', 'blocking'], 'container cleanup outcome'); shapeContainerCommand(value, value.at as string); return;
     case 'artifact': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'artifact expectedState'); preparedEnum(value.state, JOB_STATES, 'artifact state'); for (const field of ['stagingPath', 'checksumPath', 'manifestPath', 'verificationPath']) preparedPath(value[field], `artifact ${field}`); for (const field of ['artifactSha256', 'checksumSha256', 'manifestSha256', 'verificationSha256']) preparedHash(value[field], `artifact ${field}`); if (!Number.isSafeInteger(value.artifactSize) || Number(value.artifactSize) < 0) throw new OwnershipValidationError('artifact size is invalid'); preparedInstant(value.artifactMtime, 'artifact mtime'); shapeChronology([['artifact mtime', value.artifactMtime], ['artifact command.at', value.at]], 'artifact'); return;
+    case 'publish-stage-start': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'verifying', 'publish stage predecessor'); preparedInstant(value.startedAt, 'publish stage startedAt'); preparedPath(value.finalDirectory, 'publish final directory'); preparedPath(value.finalPath, 'publish final path'); preparedInstant(value.publishStartedAt, 'publish startedAt'); shapeChronology([['publish stage startedAt', value.startedAt], ['publish startedAt', value.publishStartedAt], ['publish command.at', value.at]], 'publish stage start'); return;
+    case 'publish-terminal': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'publishing', 'publish terminal predecessor'); preparedInstant(value.startedAt, 'publish stage startedAt'); preparedInstant(value.finishedAt, 'publish stage finishedAt'); preparedPath(value.evidencePath, 'publish stage evidence path'); preparedHash(value.evidenceSha256, 'publish stage evidence SHA'); preparedPath(value.finalDirectory, 'publish final directory'); preparedPath(value.finalPath, 'publish final path'); preparedInstant(value.publishStartedAt, 'publish startedAt'); preparedInstant(value.publishedAt, 'publishedAt'); preparedInstant(value.terminalAt, 'publish terminalAt'); shapeChronology([['publish stage startedAt', value.startedAt], ['publish startedAt', value.publishStartedAt], ['publish stage finishedAt', value.finishedAt], ['publishedAt', value.publishedAt], ['publish terminalAt', value.terminalAt], ['publish terminal command.at', value.at]], 'publish terminal'); return;
     case 'publish': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'publish expectedState'); preparedEnum(value.state, ['staged', 'publishing', 'published', 'blocked'], 'publish state'); if (value.finalDirectory !== undefined && value.finalDirectory !== null) preparedPath(value.finalDirectory, 'publish final directory'); if (value.finalPath !== undefined && value.finalPath !== null) preparedPath(value.finalPath, 'publish final path'); preparedOptionalInstant(value.startedAt, 'publish startedAt'); preparedOptionalInstant(value.publishedAt, 'publish publishedAt'); preparedOptionalEnum(value.blockerCode, BUILDER_ERROR_CODES, 'publish blockerCode'); preparedJsonObject(value.blocker, 'publish blocker', true); shapePublishCommand(value, value.at as string); return;
     case 'normal-terminal': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'terminal expectedState'); preparedEnum(value.state, ['succeeded', 'failed'], 'terminal state'); preparedInstant(value.terminalAt, 'terminal time'); shapeChronology([['terminal time', value.terminalAt], ['terminal command.at', value.at]], 'terminal'); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'terminal errorCode'); preparedJsonObject(value.error, 'terminal error', true); return;
     case 'operation-begin': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'operation expectedState'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation id'); if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) <= 0) throw new OwnershipValidationError('operation attempt is invalid'); preparedHash(value.argvHash, 'operation argv hash'); preparedJsonArray(value.argv, 'operation argv'); preparedInstant(value.startedAt, 'operation startedAt'); shapeChronology([['operation startedAt', value.startedAt], ['operation command.at', value.at]], 'operation begin'); return;
@@ -1163,7 +1167,7 @@ export class OwnershipStore {
   runnerWrite(command: RunnerWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as RunnerWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['acquire-lease', 'renew-lease', 'cancellation-transition', 'cancellation-cleanup', 'cancellation-terminal', 'stage', 'container', 'artifact', 'publish', 'normal-terminal', 'operation-begin', 'operation-complete', 'operation-cleanup'].includes(prepared.kind)) {
+    if (!['acquire-lease', 'renew-lease', 'cancellation-transition', 'cancellation-cleanup', 'cancellation-terminal', 'stage', 'container', 'artifact', 'publish-stage-start', 'publish-terminal', 'publish', 'normal-terminal', 'operation-begin', 'operation-complete', 'operation-cleanup'].includes(prepared.kind)) {
       throw new OwnershipViolationError('runner', prepared.kind);
     }
     validateRunnerCommand(prepared);
@@ -1177,6 +1181,8 @@ export class OwnershipStore {
       case 'stage': return this.#transaction(() => this.#stage(prepared));
       case 'container': return this.#transaction(() => this.#container(prepared));
       case 'artifact': return this.#transaction(() => this.#artifact(prepared));
+      case 'publish-stage-start': return this.#transaction(() => this.#publishStageStart(prepared));
+      case 'publish-terminal': return this.#transaction(() => this.#publishTerminal(prepared));
       case 'publish': return this.#transaction(() => this.#publish(prepared));
       case 'normal-terminal': return this.#transaction(() => this.#normalTerminal(prepared));
       case 'operation-begin': return this.#transaction(() => this.#operationBegin(prepared));
@@ -1654,6 +1660,149 @@ export class OwnershipStore {
       AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(command.stagingPath, command.artifactSha256, command.artifactSize, command.artifactMtime, command.checksumPath, command.checksumSha256, command.manifestPath, command.manifestSha256, command.verificationPath, command.verificationSha256, command.at, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, command.at);
     if (Number(result.changes) !== 1) conflict('cas-lost', 'artifact CAS lost');
     this.#event(command.jobId, 'artifact', { stagingPath: command.stagingPath, artifactSha256: command.artifactSha256 }, command.at);
+  }
+
+  #publishStageStart(command: Extract<RunnerWriteCommand, { kind: 'publish-stage-start' }>): void {
+    this.#runnerGuard(command, 'verifying');
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [
+      ['publish stage command time', command.at],
+      ['publish stage start time', command.startedAt],
+      ['publish start time', command.publishStartedAt],
+    ], true);
+    requireChronology([
+      ['accepted time', String(row.accepted_at)],
+      ['artifact mtime', row.artifact_mtime === null ? null : String(row.artifact_mtime)],
+      ['publish stage start time', command.startedAt],
+      ['publish start time', command.publishStartedAt],
+      ['publish command time', command.at],
+    ]);
+    confinedPath(command.finalDirectory, 'publish final directory');
+    confinedPath(command.finalPath, 'publish final path');
+    if (
+      row.publish_state !== 'staged'
+      || row.artifact_staging_path === null
+      || row.artifact_sha256 === null
+      || row.artifact_size === null
+      || row.checksum_sha256 === null
+      || row.manifest_sha256 === null
+      || row.verification_sha256 === null
+    ) {
+      conflict('identity-mismatch', 'publish stage requires complete staged artifact evidence');
+    }
+    const stage = this.#db.prepare(`INSERT INTO job_stages (
+      job_id, stage, outcome, started_at, finished_at, evidence_path,
+      evidence_sha256, error_code, error_json
+    ) VALUES (?, 'publish', 'running', ?, NULL, NULL, NULL, NULL, NULL)
+      ON CONFLICT(job_id, stage) DO UPDATE SET
+        outcome='running', started_at=excluded.started_at, finished_at=NULL,
+        evidence_path=NULL, evidence_sha256=NULL, error_code=NULL, error_json=NULL`).run(
+      command.jobId,
+      command.startedAt,
+    );
+    if (Number(stage.changes) !== 1) conflict('cas-lost', 'publish stage evidence CAS lost');
+    const update = this.#db.prepare(`UPDATE jobs SET
+      state='publishing', current_stage='publish', publish_state='publishing',
+      artifact_final_directory=?, artifact_final_path=?, publish_started_at=?,
+      published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL,
+      updated_at=?
+      WHERE job_id=? AND state='verifying' AND publish_state='staged'
+        AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=?
+        AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(
+      command.finalDirectory,
+      command.finalPath,
+      command.publishStartedAt,
+      command.at,
+      command.jobId,
+      command.owner,
+      command.runnerUnit,
+      command.leaseExpiresAt,
+      command.at,
+    );
+    if (Number(update.changes) !== 1) conflict('cas-lost', 'publish stage start CAS lost');
+    this.#event(command.jobId, 'publish', { state: 'publishing' }, command.at);
+    this.#event(command.jobId, 'stage', { stage: 'publish', outcome: 'running' }, command.at);
+  }
+
+  #publishTerminal(command: Extract<RunnerWriteCommand, { kind: 'publish-terminal' }>): void {
+    this.#runnerGuard(command, 'publishing');
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [
+      ['publish terminal command time', command.at],
+      ['publish stage start time', command.startedAt],
+      ['publish stage finish time', command.finishedAt],
+      ['publish start time', command.publishStartedAt],
+      ['published time', command.publishedAt],
+      ['terminal time', command.terminalAt],
+    ], true);
+    requireChronology([
+      ['accepted time', String(row.accepted_at)],
+      ['artifact mtime', row.artifact_mtime === null ? null : String(row.artifact_mtime)],
+      ['publish stage start time', command.startedAt],
+      ['publish start time', command.publishStartedAt],
+      ['publish stage finish time', command.finishedAt],
+      ['published time', command.publishedAt],
+      ['terminal time', command.terminalAt],
+      ['publish terminal command time', command.at],
+    ]);
+    confinedPath(command.finalDirectory, 'publish final directory');
+    confinedPath(command.finalPath, 'publish final path');
+    confinedPath(command.evidencePath, 'publish stage evidence path');
+    hash(command.evidenceSha256, 'publish stage evidence SHA-256');
+    if (
+      row.publish_state !== 'publishing'
+      || row.artifact_final_directory !== command.finalDirectory
+      || row.artifact_final_path !== command.finalPath
+      || row.publish_started_at !== command.publishStartedAt
+      || row.container_id !== null
+    ) {
+      conflict('identity-mismatch', 'publish terminal binding differs from publishing recovery state');
+    }
+    const stage = this.#db.prepare(`UPDATE job_stages SET
+      outcome='passed', finished_at=?, evidence_path=?, evidence_sha256=?,
+      error_code=NULL, error_json=NULL
+      WHERE job_id=? AND stage='publish' AND outcome='running' AND started_at=?`).run(
+      command.finishedAt,
+      command.evidencePath,
+      command.evidenceSha256,
+      command.jobId,
+      command.startedAt,
+    );
+    if (Number(stage.changes) !== 1) conflict('cas-lost', 'publish stage completion CAS lost');
+    const update = this.#db.prepare(`UPDATE jobs SET
+      state='succeeded', queue_state='complete', queue_position=NULL,
+      publish_state='published', artifact_staging_path=NULL,
+      artifact_final_directory=?, artifact_final_path=?, published_at=?,
+      terminal_at=?, terminal_error_code=NULL, terminal_error_json=NULL,
+      runner_finished_at=?, updated_at=?
+      WHERE job_id=? AND state='publishing' AND publish_state='publishing'
+        AND artifact_final_directory=? AND artifact_final_path=?
+        AND publish_started_at=? AND artifact_sha256 IS NOT NULL
+        AND artifact_size IS NOT NULL AND artifact_mtime IS NOT NULL
+        AND checksum_path IS NOT NULL AND checksum_sha256 IS NOT NULL
+        AND manifest_path IS NOT NULL AND manifest_sha256 IS NOT NULL
+        AND verification_path IS NOT NULL AND verification_sha256 IS NOT NULL
+        AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=?
+        AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(
+      command.finalDirectory,
+      command.finalPath,
+      command.publishedAt,
+      command.terminalAt,
+      command.terminalAt,
+      command.at,
+      command.jobId,
+      command.finalDirectory,
+      command.finalPath,
+      command.publishStartedAt,
+      command.owner,
+      command.runnerUnit,
+      command.leaseExpiresAt,
+      command.at,
+    );
+    if (Number(update.changes) !== 1) conflict('cas-lost', 'publish terminal CAS lost');
+    this.#event(command.jobId, 'stage', { stage: 'publish', outcome: 'passed' }, command.finishedAt);
+    this.#event(command.jobId, 'publish', { state: 'published' }, command.publishedAt);
+    this.#event(command.jobId, 'terminal', { state: 'succeeded', errorCode: null }, command.terminalAt);
   }
 
   #publish(command: Extract<RunnerWriteCommand, { kind: 'publish' }>): void {

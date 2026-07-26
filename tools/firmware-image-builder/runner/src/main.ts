@@ -6,12 +6,10 @@ import {
   open,
 } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import {
   basename,
   dirname,
   join,
-  relative,
 } from 'node:path';
 
 import {
@@ -68,6 +66,7 @@ import {
   type PipelineResult,
   type PreparedPublication,
   type PublicationFilesPrepareInput,
+  type StageActionContext,
   type TargetSetupStageResult,
   type VerifiedPipelineArtifact,
 } from './pipeline.js';
@@ -76,11 +75,14 @@ import {
   type SourceSetupResult,
 } from './source.js';
 import {
+  classifyTargetSetupOperationResult,
   createLockedTargetSetupOperations,
   resolveTargetSetup,
   type OfflineFeedPreparation,
+  type TargetSetupPhaseResult,
   type TargetSetupResult,
 } from './target-setup.js';
+import type { CommandResult } from './command-executor.js';
 import {
   verifyFirmwareArtifacts,
   type RootfsNodeResolutionRequest,
@@ -99,8 +101,35 @@ const CREATE_FLAGS = fsConstants.O_WRONLY
   | fsConstants.O_CREAT
   | fsConstants.O_EXCL
   | fsConstants.O_NOFOLLOW;
+const CREATE_READ_WRITE_FLAGS = fsConstants.O_RDWR
+  | fsConstants.O_CREAT
+  | fsConstants.O_EXCL
+  | fsConstants.O_NOFOLLOW;
 const LEASE_DURATION_MS = 60_000;
 const MAX_OPERATION_CAPTURE_BYTES = 8 * 1024 * 1024;
+const ROOTFS_NODE_MODULES = Object.freeze([
+  ['@grpc/grpc-js', '@grpc/grpc-js'],
+  ['@chirpstack/chirpstack-api', '@chirpstack/chirpstack-api'],
+  ['google-protobuf', 'google-protobuf'],
+  ['protobufjs', 'protobufjs'],
+  ['osi-chameleon-helper', 'osi-chameleon-helper'],
+  ['osi-chirpstack-helper', 'osi-chirpstack-helper'],
+  ['osi-cloud-http', 'osi-cloud-http'],
+  ['osi-db-helper', 'osi-db-helper'],
+  ['osi-dendro-helper', 'osi-dendro-helper'],
+  ['osi-health-helper', 'osi-health-helper'],
+  ['osi-history-helper', 'osi-history-helper'],
+  ['osi-history-sync-helper', 'osi-history-sync-helper'],
+  ['osi-lib', 'osi-lib'],
+  ['osi-command-ledger', './osi-command-ledger'],
+  ['osi-dendro-analytics', './osi-dendro-analytics'],
+  ['osi-zone-env', './osi-zone-env'],
+  ['osi-history-router', './osi-history-router'],
+  ['osi-journal', './osi-journal'],
+  ['osi-device-writer', './osi-device-writer'],
+  ['osi-uc512-normalize', './osi-uc512-normalize'],
+  ['osi-lsn50-normalize', './osi-lsn50-normalize'],
+] as const);
 
 interface TrustedOperationRequestInput {
   readonly operationId: TrustedOperationId;
@@ -186,7 +215,7 @@ export interface RunnerArguments {
 
 interface ProductionComposition {
   readonly input: PipelineInput;
-  close(): void;
+  close(): Promise<void>;
 }
 
 interface PublicationFileSet {
@@ -341,8 +370,8 @@ async function writeHeldFile(
   }
 }
 
-async function copyArtifact(
-  workspacePath: string,
+export async function stageVerifiedArtifact(
+  workspaceAuthority: string | FileHandle,
   relativePath: string,
   destination: FileHandle,
   destinationName: string,
@@ -352,7 +381,10 @@ async function copyArtifact(
   const components = stable.split('/');
   const sourceName = components.pop();
   if (sourceName === undefined) throw new Error('verified artifact path is incomplete');
-  const workspace = await open(workspacePath, DIRECTORY_FLAGS);
+  const workspace = typeof workspaceAuthority === 'string'
+    ? await open(workspaceAuthority, DIRECTORY_FLAGS)
+    : workspaceAuthority;
+  const ownsWorkspace = typeof workspaceAuthority === 'string';
   let chain: DirectoryChain | null = null;
   try {
     chain = await openDirectoryChain(workspace, components, false);
@@ -372,7 +404,7 @@ async function copyArtifact(
       }
       const destinationHandle = await open(
         fdPath(destination, safeSegment(destinationName, 'artifact basename')),
-        CREATE_FLAGS,
+        CREATE_READ_WRITE_FLAGS,
         0o600,
       );
       try {
@@ -415,7 +447,7 @@ async function copyArtifact(
     }
   } finally {
     if (chain !== null) await closeHandles(chain.handles);
-    await workspace.close();
+    if (ownsWorkspace) await workspace.close();
   }
 }
 
@@ -521,6 +553,22 @@ function mapOperation(
   });
 }
 
+function targetSetupCommand(
+  execution: PipelineOperationExecution,
+): CommandResult {
+  const observations = execution.observations;
+  return Object.freeze({
+    argv: execution.command.argv,
+    exitCode: execution.command.exitCode,
+    signal: execution.command.signal as NodeJS.Signals | null,
+    stdout: typeof observations.stdout === 'string' ? observations.stdout : '',
+    stderr: typeof observations.stderr === 'string' ? observations.stderr : '',
+    timedOut: execution.command.timedOut,
+    startedAt: execution.command.startedAt,
+    finishedAt: execution.command.finishedAt,
+  });
+}
+
 async function writeOperationEvidence(
   stateRoot: StateRootAuthority,
   jobId: string,
@@ -553,9 +601,9 @@ async function writeOperationEvidence(
   return Object.freeze({ path: relativePath, sha256: sha256(bytes) });
 }
 
-function createNodeVerifier(
-  workspacePath: string,
+export function createNodeVerifier(
   target: TargetManifest,
+  execution: () => PipelineOperationExecution,
 ): Readonly<{
   resolve(request: RootfsNodeResolutionRequest): Promise<RootfsNodeResolutionResult>;
 }> {
@@ -564,28 +612,68 @@ function createNodeVerifier(
       if (request.targetId !== target.id) {
         throw new Error('rootfs Node verifier target changed');
       }
-      const nodeRed = join(
-        workspacePath,
-        'openwrt',
-        target.rootfs,
-        'usr/share/node-red',
-      );
-      const require = createRequire(join(nodeRed, '__osi_verification__.cjs'));
+      if (
+        request.modules.length !== ROOTFS_NODE_MODULES.length
+        || request.modules.some(({ packageName, specifier }, index) => (
+          packageName !== ROOTFS_NODE_MODULES[index]?.[0]
+          || specifier !== ROOTFS_NODE_MODULES[index]?.[1]
+        ))
+      ) {
+        throw new Error('rootfs Node verifier request is outside the fixed operation contract');
+      }
+      const trusted = execution();
+      if (trusted.operationId !== 'verify-image' || trusted.outcome !== 'passed') {
+        throw new Error('trusted verify-image operation result is unavailable');
+      }
+      const stdout = trusted.observations.stdout;
+      if (typeof stdout !== 'string' || stdout.trim().split(/\r?\n/u).length !== 1) {
+        throw new Error('trusted verify-image operation output is not one structured result');
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(stdout.trim()) as unknown;
+      } catch (error) {
+        throw new Error('trusted verify-image operation output is not JSON', { cause: error });
+      }
+      if (
+        parsed === null
+        || typeof parsed !== 'object'
+        || Array.isArray(parsed)
+        || (parsed as { operation?: unknown }).operation !== 'verify-image'
+        || (parsed as { targetId?: unknown }).targetId !== target.id
+        || !Array.isArray((parsed as { nodeResolution?: unknown }).nodeResolution)
+      ) {
+        throw new Error('trusted verify-image operation omitted Node resolution evidence');
+      }
+      const observed = (parsed as {
+        nodeResolution: Array<{
+          packageName?: unknown;
+          specifier?: unknown;
+          resolvedRelativePath?: unknown;
+        }>;
+      }).nodeResolution;
+      if (observed.length !== request.modules.length) {
+        throw new Error('trusted verify-image Node resolution count changed');
+      }
       return Object.freeze({
         targetId: request.targetId,
-        modules: Object.freeze(request.modules.map(({ packageName, specifier }) => {
-          const resolved = require.resolve(specifier);
-          const relativePath = relative(nodeRed, resolved).replaceAll('\\', '/');
-          stableRelativePath(relativePath, 'resolved rootfs Node module');
-          const loaded = require(resolved) as unknown;
+        modules: Object.freeze(request.modules.map(({ packageName, specifier }, index) => {
+          const candidate = observed[index];
+          if (
+            candidate?.packageName !== packageName
+            || candidate.specifier !== specifier
+            || typeof candidate.resolvedRelativePath !== 'string'
+          ) {
+            throw new Error('trusted verify-image Node resolution binding changed');
+          }
+          const relativePath = stableRelativePath(
+            candidate.resolvedRelativePath,
+            'resolved rootfs Node module',
+          );
           return Object.freeze({
             packageName,
             resolvedRelativePath: relativePath,
-            exportType: typeof loaded === 'function'
-              ? 'function' as const
-              : loaded !== null && typeof loaded === 'object'
-                ? 'object' as const
-                : 'incompatible' as const,
+            exportType: 'object' as const,
           });
         })),
       });
@@ -642,7 +730,7 @@ async function reopenPublication(
 
 function createPublicationFiles(
   loaded: LoadedConfig,
-  workspace: () => string,
+  workspace: () => FileHandle,
 ): PipelineInput['services']['publicationFiles'] {
   return Object.freeze({
     async prepare(input): Promise<PreparedPublication> {
@@ -671,7 +759,7 @@ function createPublicationFiles(
               fdPath(parent.directory, input.job.jobId),
               DIRECTORY_FLAGS,
             );
-            const image = await copyArtifact(
+            const image = await stageVerifiedArtifact(
               workspace(),
               input.artifact.path,
               staging,
@@ -814,6 +902,10 @@ async function createProductionComposition(
   const manifest = loadManifest(manifestPath);
   const database = openBuilderDatabase(join(loaded.stateRoot, 'jobs.sqlite'));
   const store = new BuilderStore(database);
+  let workspaceHandle: FileHandle | null = null;
+  let stateRootHandle: FileHandle | null = null;
+  let stateRootIdentity: Readonly<{ path: string; device: number; inode: number }> | null = null;
+  let approvedRootHandle: FileHandle | null = null;
   try {
     const ownership = new OwnershipStore(database);
     const job = store.getJob(args.jobId);
@@ -831,16 +923,93 @@ async function createProductionComposition(
         inode: snapshot.inode,
       }),
     );
+    stateRootIdentity = await withStateRootSnapshot(
+      loaded.pathAuthorities.stateRoot,
+      async ({ snapshot }) => Object.freeze({
+        path: snapshot.path,
+        device: snapshot.device,
+        inode: snapshot.inode,
+      }),
+    );
+    stateRootHandle = await open(stateRootIdentity.path, DIRECTORY_FLAGS);
+    approvedRootHandle = await open(approvedRoot.path, DIRECTORY_FLAGS);
     const preflight = createReadOnlyPreflightDefaults();
     const attempts = new Map<TrustedOperationId, number>();
+    const completedExecutions = new Map<TrustedOperationId, PipelineOperationExecution>();
     let source: SourceSetupResult | null = null;
     let setup: TargetSetupResult | null = null;
+    let targetSetupPhase: Extract<
+      TargetSetupPhaseResult,
+      { readonly phase: 'target-setup' }
+    > | null = null;
+    let feedsPhase: Extract<
+      TargetSetupPhaseResult,
+      { readonly phase: 'feeds' }
+    > | null = null;
     let workspacePath: string | null = null;
+    let workspaceIdentity: Readonly<{ device: number; inode: number }> | null = null;
     let heldOperationWorkspacePath: string | null = null;
     let activeTargetSetupEnvironment: string | null = null;
-    const requireWorkspace = (): string => {
-      if (workspacePath === null) throw new Error('held source workspace is unavailable');
-      return workspacePath;
+    const requireWorkspace = (): FileHandle => {
+      if (workspaceHandle === null) throw new Error('held source workspace is unavailable');
+      return workspaceHandle;
+    };
+    const requireWorkspaceDescriptor = (): string => {
+      const handle = requireWorkspace();
+      return `/proc/${String(process.pid)}/fd/${String(handle.fd)}`;
+    };
+    const revalidateWorkspace = async (): Promise<void> => {
+      if (workspacePath === null || workspaceHandle === null || workspaceIdentity === null) {
+        throw new Error('held source workspace chain is unavailable');
+      }
+      const [held, named] = await Promise.all([
+        workspaceHandle.stat(),
+        lstat(workspacePath),
+      ]);
+      if (
+        !held.isDirectory()
+        || !named.isDirectory()
+        || named.isSymbolicLink()
+        || held.dev !== workspaceIdentity.device
+        || held.ino !== workspaceIdentity.inode
+        || named.dev !== workspaceIdentity.device
+        || named.ino !== workspaceIdentity.inode
+      ) {
+        throw new Error('held source workspace chain was replaced');
+      }
+    };
+    const revalidateRoots = async (): Promise<void> => {
+      if (
+        stateRootHandle === null
+        || stateRootIdentity === null
+        || approvedRootHandle === null
+      ) {
+        throw new Error('held runner root authority is unavailable');
+      }
+      const [heldState, namedState, heldApproved, namedApproved] = await Promise.all([
+        stateRootHandle.stat(),
+        lstat(stateRootIdentity.path),
+        approvedRootHandle.stat(),
+        lstat(approvedRoot.path),
+      ]);
+      if (
+        !heldState.isDirectory()
+        || !namedState.isDirectory()
+        || namedState.isSymbolicLink()
+        || heldState.dev !== stateRootIdentity.device
+        || heldState.ino !== stateRootIdentity.inode
+        || namedState.dev !== stateRootIdentity.device
+        || namedState.ino !== stateRootIdentity.inode
+        || !heldApproved.isDirectory()
+        || !namedApproved.isDirectory()
+        || namedApproved.isSymbolicLink()
+        || heldApproved.dev !== approvedRoot.device
+        || heldApproved.ino !== approvedRoot.inode
+        || namedApproved.dev !== approvedRoot.device
+        || namedApproved.ino !== approvedRoot.inode
+      ) {
+        throw new Error('held runner root authority was replaced');
+      }
     };
 
     const operations: PipelineInput['services']['operations'] = Object.freeze({
@@ -853,7 +1022,7 @@ async function createProductionComposition(
         attempts.set(operationId, attempt);
         if (
           requestedDefinition !== undefined
-          && context.stage !== 'target-setup'
+          && !['target-setup', 'feeds', 'config'].includes(context.stage)
         ) {
           throw new Error('held operation definitions are restricted to target setup');
         }
@@ -878,7 +1047,7 @@ async function createProductionComposition(
           jobId: context.job.jobId,
           manifestSha256: manifest.sha256,
           attempt,
-          worktreePath: heldOperationWorkspacePath ?? requireWorkspace(),
+          worktreePath: heldOperationWorkspacePath ?? requireWorkspaceDescriptor(),
           uid: typeof process.getuid === 'function' ? process.getuid() : 1000,
           gid: typeof process.getgid === 'function' ? process.getgid() : 1000,
           operationId,
@@ -950,16 +1119,111 @@ async function createProductionComposition(
         if (
           requestedDefinition !== undefined
           && operationId === 'activate-target'
-          && execution.outcome === 'passed'
         ) {
+          classifyTargetSetupOperationResult(
+            operationId,
+            requestedDefinition,
+            targetSetupCommand(execution),
+            context.job.requestId,
+          );
           activeTargetSetupEnvironment = operation.environment;
         }
+        completedExecutions.set(operationId, execution);
         return execution;
       },
     });
 
+    const runTargetSetupPhase = async (
+      context: StageActionContext,
+      phase: 'target-setup' | 'feeds' | 'config',
+      profiles?: Extract<
+        TargetSetupPhaseResult,
+        { readonly phase: 'target-setup' }
+      >['profiles'],
+    ): Promise<Readonly<{
+      result: TargetSetupPhaseResult;
+      executions: readonly PipelineOperationExecution[];
+    }>> => {
+      const executions: PipelineOperationExecution[] = [];
+      const result = await resolveTargetSetup({
+        stateRoot: loaded.pathAuthorities.stateRoot,
+        jobId: context.job.jobId,
+        sourceSha: context.job.pinnedSha,
+        target: context.target,
+        targets: manifest.manifest.targets,
+        preparedFeeds: offlineFeedPreparation(context.job),
+        evidenceWriter: createEvidenceWriter({
+          stateRoot: loaded.pathAuthorities.stateRoot,
+        }),
+        requestId: context.job.requestId,
+        phase,
+        ...(profiles === undefined ? {} : { profiles }),
+        operations: createLockedTargetSetupOperations(
+          async ({ operationId, definition, cwd }) => {
+            if (heldOperationWorkspacePath !== null) {
+              throw new Error('target setup attempted concurrent operations');
+            }
+            if (phase === 'config' && operationId === 'resolve-config') {
+              const selected = manifest.manifest.targets.find((candidate) => (
+                sameOperationDefinition(
+                  definition,
+                  createOperationDefinition(operationId, {
+                    environment: candidate.environment,
+                  }),
+                )
+              ));
+              if (selected === undefined) {
+                throw new Error('config phase definition is outside the target manifest');
+              }
+              activeTargetSetupEnvironment = selected.environment;
+            }
+            heldOperationWorkspacePath = cwd;
+            let execution: PipelineOperationExecution;
+            try {
+              execution = await context.runTargetSetupOperation(
+                operationId,
+                definition,
+              );
+            } finally {
+              heldOperationWorkspacePath = null;
+            }
+            executions.push(execution);
+            if (
+              execution.command.argv.length !== definition.argv.length
+              || execution.command.argv.some(
+                (value, index) => value !== definition.argv[index],
+              )
+            ) {
+              throw new Error('Docker execution changed the held target setup definition');
+            }
+            return targetSetupCommand(execution);
+          },
+        ),
+      });
+      if (result.phase !== phase) {
+        throw new Error('target setup phase result changed');
+      }
+      workspacePath = result.workspacePath;
+      return Object.freeze({
+        result,
+        executions: Object.freeze(executions),
+      });
+    };
+
     const publicationFiles = createPublicationFiles(loaded, requireWorkspace);
     const services: PipelineInput['services'] = {
+      workspace: {
+        async revalidate({ stage, phase }) {
+          await revalidateRoots();
+          if (
+            workspaceHandle === null
+            && (stage === 'preflight' || stage === 'source' && phase === 'before')
+          ) {
+            return;
+          }
+          await revalidateWorkspace();
+        },
+      },
       preflight: {
         async recheck({ job: current, target: selected, root, lock: currentLock }) {
           const repository = await preflight.repository.inspect(
@@ -1052,6 +1316,14 @@ async function createProductionComposition(
             requestId: current.requestId,
           });
           workspacePath = source.workspacePath;
+          workspaceHandle = await open(source.workspacePath, DIRECTORY_FLAGS);
+          const stats = await workspaceHandle.stat();
+          if (!stats.isDirectory()) throw new Error('source workspace is not a held directory');
+          workspaceIdentity = Object.freeze({
+            device: stats.dev,
+            inode: stats.ino,
+          });
+          await revalidateWorkspace();
           return Object.freeze({
             commands: source.commands,
             observations: source.observations,
@@ -1060,69 +1332,61 @@ async function createProductionComposition(
       },
       operations,
       targetSetup: {
-        async run(context): Promise<TargetSetupStageResult> {
-          const executions: PipelineOperationExecution[] = [];
-          setup = await resolveTargetSetup({
-            stateRoot: loaded.pathAuthorities.stateRoot,
-            jobId: context.job.jobId,
-            sourceSha: context.job.pinnedSha,
-            target: context.target,
-            targets: manifest.manifest.targets,
-            preparedFeeds: offlineFeedPreparation(context.job),
-            evidenceWriter: createEvidenceWriter({
-              stateRoot: loaded.pathAuthorities.stateRoot,
-            }),
-            requestId: context.job.requestId,
-            operations: createLockedTargetSetupOperations(
-              async ({ operationId, definition, cwd }) => {
-                if (heldOperationWorkspacePath !== null) {
-                  throw new Error('target setup attempted concurrent operations');
-                }
-                heldOperationWorkspacePath = cwd;
-                let execution: PipelineOperationExecution;
-                try {
-                  execution = await context.runOperation(
-                    operationId,
-                    definition,
-                  );
-                } finally {
-                  heldOperationWorkspacePath = null;
-                }
-                executions.push(execution);
-                if (
-                  execution.command.argv.length !== definition.argv.length
-                  || execution.command.argv.some(
-                    (value, index) => value !== definition.argv[index],
-                  )
-                ) {
-                  throw new Error('Docker execution changed the held target setup definition');
-                }
-                const observations = execution.observations;
-                return Object.freeze({
-                  argv: execution.command.argv,
-                  exitCode: execution.command.exitCode,
-                  signal: execution.command.signal as NodeJS.Signals | null,
-                  stdout: typeof observations.stdout === 'string'
-                    ? observations.stdout
-                    : '',
-                  stderr: typeof observations.stderr === 'string'
-                    ? observations.stderr
-                    : '',
-                  timedOut: execution.command.timedOut,
-                  startedAt: execution.command.startedAt,
-                  finishedAt: execution.command.finishedAt,
-                });
-              },
-            ),
-          });
-          workspacePath = setup.workspacePath;
+        async setup(context): Promise<TargetSetupStageResult> {
+          const phase = await runTargetSetupPhase(context, 'target-setup');
+          if (phase.result.phase !== 'target-setup') {
+            throw new Error('target setup activation result is incomplete');
+          }
+          targetSetupPhase = phase.result;
           return Object.freeze({
-            executions: Object.freeze(executions),
+            executions: phase.executions,
             observations: Object.freeze({
-              target: setup.target,
-              patchDecision: setup.patchDecision,
-              feed: setup.feed,
-              rust: setup.rust,
+              target: targetSetupPhase.target,
+              patchDecision: targetSetupPhase.patchDecision,
+              profiles: targetSetupPhase.profiles,
+            }),
+          });
+        },
+        async feeds(context): Promise<TargetSetupStageResult> {
+          if (targetSetupPhase === null) {
+            throw new Error('target setup activation evidence is unavailable');
+          }
+          const phase = await runTargetSetupPhase(context, 'feeds');
+          if (phase.result.phase !== 'feeds') {
+            throw new Error('target setup feed result is incomplete');
+          }
+          feedsPhase = phase.result;
+          return Object.freeze({
+            executions: phase.executions,
+            observations: Object.freeze({
+              feed: feedsPhase.feed,
+              rust: feedsPhase.rust,
+            }),
+          });
+        },
+        async config(context): Promise<TargetSetupStageResult> {
+          if (targetSetupPhase === null || feedsPhase === null) {
+            throw new Error('target setup activation or feed evidence is unavailable');
+          }
+          const phase = await runTargetSetupPhase(
+            context,
+            'config',
+            targetSetupPhase.profiles,
+          );
+          if (phase.result.phase !== 'config') {
+            throw new Error('target setup config result is incomplete');
+          }
+          setup = Object.freeze({
+            workspacePath: phase.result.workspacePath,
+            target: phase.result.target,
+            patchDecision: targetSetupPhase.patchDecision,
+            feed: feedsPhase.feed,
+            rust: feedsPhase.rust,
+            config: phase.result.config,
+          });
+          return Object.freeze({
+            executions: phase.executions,
+            observations: Object.freeze({
               config: setup.config,
             }),
           });
@@ -1161,7 +1425,13 @@ async function createProductionComposition(
             config: setup.config,
             pinnedSha: current.pinnedSha,
             branch: current.branch,
-            nodeVerifier: createNodeVerifier(requireWorkspace(), selected),
+            nodeVerifier: createNodeVerifier(selected, () => {
+              const execution = completedExecutions.get('verify-image');
+              if (execution === undefined) {
+                throw new Error('verify-image operation result is unavailable');
+              }
+              return execution;
+            }),
             freshness: {
               client: createApiFreshnessSocketClient(
                 loaded.pathAuthorities.stateRoot,
@@ -1211,9 +1481,16 @@ async function createProductionComposition(
         }),
         services,
       }),
-      close: () => store.close(),
+      close: async () => {
+        await workspaceHandle?.close().catch(() => undefined);
+        await approvedRootHandle?.close().catch(() => undefined);
+        await stateRootHandle?.close().catch(() => undefined);
+        store.close();
+      },
     });
   } catch (error) {
+    await approvedRootHandle?.close().catch(() => undefined);
+    await stateRootHandle?.close().catch(() => undefined);
     store.close();
     throw error;
   }
@@ -1273,6 +1550,6 @@ export async function runRunner(argv: readonly string[]): Promise<PipelineResult
   try {
     return await createPipeline(composition.input).run();
   } finally {
-    composition.close();
+    await composition.close();
   }
 }

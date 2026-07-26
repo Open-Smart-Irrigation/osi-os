@@ -36,6 +36,7 @@ import {
 } from '../../runner/src/pipeline.js';
 import { createEvidenceWriter } from '../../runner/src/evidence.js';
 import { createOperationDefinition, hashOperationDefinition } from '../../runner/src/operation-registry.js';
+import { classifyTargetSetupOperationResult } from '../../runner/src/target-setup.js';
 import type { PublisherClient, PublisherResponse } from '../../publisher/client.js';
 
 const SHA40 = 'a'.repeat(40);
@@ -43,6 +44,14 @@ const HASH_A = 'b'.repeat(64);
 const HASH_B = 'c'.repeat(64);
 const HASH_C = 'd'.repeat(64);
 const ACCEPTED = '2026-07-26T08:00:00.000Z';
+const ROOTFS_ALREADY_PRESENT = [
+  'Applying patch patches/image-with-padded-rootfs.patch',
+  'patching file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+  'Hunk #1 FAILED at 24.',
+  '1 out of 1 hunk FAILED -- rejects in file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+  'Patch patches/image-with-padded-rootfs.patch can be reverse-applied',
+  '',
+].join('\n');
 const SOURCE_PREPARATION = Object.freeze({
   schemaVersion: 1 as const,
   sourceSha: SHA40,
@@ -154,6 +163,7 @@ interface Fixture {
   readonly clock: AdvancingClock;
   readonly input: PipelineInput;
   readonly operationOrder: TrustedOperationId[];
+  readonly workspaceChecks: Array<readonly [PipelineStageName, 'before' | 'after']>;
   readonly publishedMetadata: Array<Readonly<{ build: JsonObject; verification: JsonObject }>>;
   close(): void;
 }
@@ -169,6 +179,12 @@ async function fixture(options: {
   readonly mutateJob?: (job: JobRecord) => JobRecord;
   readonly operationHook?: (operationId: TrustedOperationId, clock: AdvancingClock) => void;
   readonly rejectOwnershipWrite?: RunnerWriteCommand['kind'];
+  readonly expectedPatchAlreadyPresent?: boolean;
+  readonly publicationBindingMismatch?: boolean;
+  readonly workspaceFailureAt?: Readonly<{
+    stage: PipelineStageName;
+    phase: 'before' | 'after';
+  }>;
 } = {}): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), 'osi-pipeline-order-'));
   temporaryDirectories.push(directory);
@@ -301,6 +317,10 @@ async function fixture(options: {
     stateRoot: loaded.pathAuthorities.stateRoot,
   });
   const operationOrder: TrustedOperationId[] = [];
+  const workspaceChecks: Array<readonly [
+    PipelineStageName,
+    'before' | 'after',
+  ]> = [];
   const operationAttempts = new Map<TrustedOperationId, number>();
   const publishedMetadata: Array<Readonly<{ build: JsonObject; verification: JsonObject }>> = [];
   let prepared: PreparedPublication | null = null;
@@ -388,10 +408,13 @@ async function fixture(options: {
       });
       const startedContainerAt = clock.now();
       const stoppedAt = clock.now();
+      const expectedPatch = options.expectedPatchAlreadyPresent === true
+        && operationId === 'activate-target';
+      const failed = options.failOperation === operationId || expectedPatch;
       const inspection = {
         running: false,
         status: 'exited',
-        exitCode: options.failOperation === operationId ? 1 : 0,
+        exitCode: expectedPatch ? 2 : failed ? 1 : 0,
       };
       write({
         kind: 'container',
@@ -414,7 +437,6 @@ async function fixture(options: {
         startedAt: startedContainerAt,
         stoppedAt,
       });
-      const failed = options.failOperation === operationId;
       const finishedAt = clock.now();
       const evidenceRelativePath = `jobs/${jobId}/evidence/operations/${operationId}-${attempt}.json`;
       const evidenceAbsolutePath = join(statePath, evidenceRelativePath);
@@ -443,7 +465,7 @@ async function fixture(options: {
         inspection,
         timedOut: false,
         lifecyclePhase: 'stopped',
-        exitCode: failed ? 1 : 0,
+        exitCode: expectedPatch ? 2 : failed ? 1 : 0,
         signal: null,
         outcome: failed ? 'failed' : 'passed',
         evidencePath: evidenceRelativePath,
@@ -504,7 +526,7 @@ async function fixture(options: {
           argv: definition.argv,
           startedAt,
           finishedAt,
-          exitCode: failed ? 1 : 0,
+          exitCode: expectedPatch ? 2 : failed ? 1 : 0,
           signal: null,
           timedOut: false,
           outputLimit: false,
@@ -512,6 +534,8 @@ async function fixture(options: {
         observations: Object.freeze({
           evidencePath: evidenceRelativePath,
           evidenceSha256: hash(evidenceBytes),
+          stdout: expectedPatch ? ROOTFS_ALREADY_PRESENT : '',
+          stderr: '',
         }),
         ...(failed
           ? {
@@ -658,6 +682,17 @@ async function fixture(options: {
     },
     evidenceWriter,
     services: {
+      workspace: {
+        revalidate: async ({ stage, phase }) => {
+          workspaceChecks.push([stage, phase]);
+          if (
+            options.workspaceFailureAt?.stage === stage
+            && options.workspaceFailureAt.phase === phase
+          ) {
+            throw new Error('held workspace replacement detected');
+          }
+        },
+      },
       preflight: {
         recheck: async ({ job }) => {
           if (options.failStage === 'preflight') {
@@ -697,28 +732,53 @@ async function fixture(options: {
       },
       operations,
       targetSetup: {
-        run: async (context) => {
+        setup: async (context) => {
+          const definition = createOperationDefinition('activate-target', {
+            environment: context.target.environment,
+          });
+          const activation = options.expectedPatchAlreadyPresent === true
+            ? await context.runTargetSetupOperation('activate-target', definition)
+            : await context.runOperation('activate-target');
+          const disposition = options.expectedPatchAlreadyPresent === true
+            ? classifyTargetSetupOperationResult('activate-target', definition, {
+                ...activation.command,
+                signal: activation.command.signal as NodeJS.Signals | null,
+                stdout: String(activation.observations.stdout ?? ''),
+                stderr: String(activation.observations.stderr ?? ''),
+              }).disposition
+            : 'passed';
+          const executions = [activation];
+          return {
+            executions,
+            observations: {
+              target: context.target.id,
+              patchDecision: disposition === 'expected-rootfs-already-present'
+                ? 'already-present'
+                : 'applied',
+            },
+          };
+        },
+        feeds: async (context) => {
           const executions: PipelineOperationExecution[] = [];
           for (const operationId of [
-            'activate-target',
             'copy-feed-config',
             'update-feeds',
             'install-feeds',
-            'resolve-config',
           ] as const) {
             executions.push(await context.runOperation(operationId));
           }
           return {
-            executions: executions.filter(({ operationId }) => (
-              options.failStage === 'feeds'
-                ? !['copy-feed-config', 'update-feeds', 'install-feeds'].includes(operationId)
-                : options.failStage === 'config'
-                  ? operationId !== 'resolve-config'
-                  : true
-            )),
+            executions: options.failStage === 'feeds' ? [] : executions,
             observations: {
-              target: context.target.id,
               feedsPrepared: true,
+            },
+          };
+        },
+        config: async (context) => {
+          const executions = [await context.runOperation('resolve-config')];
+          return {
+            executions: options.failStage === 'config' ? [] : executions,
+            observations: {
               config: {
                 selectedTarget: context.target.openwrtTarget,
                 profile: context.target.profile,
@@ -755,12 +815,24 @@ async function fixture(options: {
       publisher,
     },
   };
+  let pipelineGetJobCalls = 0;
   const input: PipelineInput = options.mutateJob === undefined
+    && options.publicationBindingMismatch !== true
     ? baseInput
     : {
       ...baseInput,
       store: {
-        getJob: (id) => options.mutateJob!(store.getJob(id)),
+        getJob: (id) => {
+          pipelineGetJobCalls += 1;
+          const persisted = store.getJob(id);
+          if (
+            options.publicationBindingMismatch === true
+            && pipelineGetJobCalls > 1
+          ) {
+            return { ...persisted, branch: 'forged/publication' };
+          }
+          return options.mutateJob?.(persisted) ?? persisted;
+        },
         getStage: (id, stage) => store.getStage(id, stage),
         getOperation: (id, operationId, attempt) => (
           store.getOperation(id, operationId, attempt)
@@ -776,6 +848,7 @@ async function fixture(options: {
     clock,
     input,
     operationOrder,
+    workspaceChecks,
     publishedMetadata,
     close: () => store.close(),
   };
@@ -810,6 +883,10 @@ describe('trusted pipeline integration', () => {
         'build-image',
         'verify-image',
       ]);
+      expect(value.workspaceChecks).toEqual(PIPELINE_STAGE_NAMES.flatMap((stage) => [
+        [stage, 'before'] as const,
+        [stage, 'after'] as const,
+      ]));
       for (const stage of PIPELINE_STAGE_NAMES) {
         const row = value.store.getStage(value.input.jobId, stage);
         expect(row).toMatchObject({
@@ -828,18 +905,7 @@ describe('trusted pipeline integration', () => {
           stage,
           outcome: 'passed',
         });
-        expect(evidence.operationId).toBe({
-          preflight: 'activate-target',
-          source: null,
-          'release-gates': 'check-mqtt-topics',
-          frontend: 'mirror-gui',
-          'target-setup': 'activate-target',
-          feeds: 'install-feeds',
-          config: 'resolve-config',
-          build: 'build-image',
-          verify: 'verify-image',
-          publish: 'verify-image',
-        }[stage]);
+        expect(evidence.operationId).toBeNull();
       }
       const events = value.store.listEvents(value.input.jobId, { limit: 500 }).events;
       expect(events.filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
@@ -851,6 +917,25 @@ describe('trusted pipeline integration', () => {
           [operationId, 'begin'],
           [operationId, 'complete'],
         ]));
+      expect(events
+        .filter(({ eventType, payload }) => (
+          eventType === 'operation' && payload.phase === 'begin'
+        ))
+        .filter(({ payload }) => [
+          'activate-target',
+          'copy-feed-config',
+          'update-feeds',
+          'install-feeds',
+          'resolve-config',
+        ].includes(String(payload.operationId)))
+        .map(({ state, payload }) => [payload.operationId, state]))
+        .toEqual([
+          ['activate-target', 'target_setup'],
+          ['copy-feed-config', 'feeds'],
+          ['update-feeds', 'feeds'],
+          ['install-feeds', 'feeds'],
+          ['resolve-config', 'config'],
+        ]);
       expect(events
         .filter(({ eventType, payload }) => (
           eventType === 'cleanup' && payload.kind === 'operation-cleanup'
@@ -906,10 +991,62 @@ describe('trusted pipeline integration', () => {
       });
       expect(verification).toMatchObject({
         ...build,
+        observations: {
+          stageEvidence: PIPELINE_STAGE_NAMES.map((stage, index) => ({
+            stage,
+            path: `${String(index).padStart(2, '0')}-${stage}.json`,
+            outcome: 'passed',
+          })),
+        },
         verification: {
           rootfs: { verified: true },
+          freshness: { status: 'fresh', pinnedSha: SHA40 },
         },
       });
+      expect(build.tool).toMatchObject({
+        preflight: {
+          startedAt: expect.any(String),
+          finishedAt: expect.any(String),
+          evidencePath: expect.stringContaining('00-preflight.json'),
+          evidenceSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+          observations: expect.any(Object),
+        },
+      });
+      const verify = value.store.getStage(value.input.jobId, 'verify')!;
+      const verifyEvidence = JSON.parse(await readFile(
+        join(value.statePath, verify.evidencePath!),
+        'utf8',
+      )) as { observations: Record<string, unknown> };
+      expect(verifyEvidence.observations).toMatchObject({
+        freshnessStatus: 'fresh',
+        pinnedSha: SHA40,
+        rootfs: { verified: true },
+      });
+    } finally {
+      value.close();
+    }
+  });
+
+  it('lets Task15 classify only the exact expected nonzero quilt result', async () => {
+    const value = await fixture({ expectedPatchAlreadyPresent: true });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'succeeded',
+      });
+      expect(value.store.getOperation(
+        value.input.jobId,
+        'activate-target',
+        1,
+      )).toMatchObject({
+        outcome: 'failed',
+        exitCode: 2,
+      });
+      const stage = value.store.getStage(value.input.jobId, 'target-setup')!;
+      const evidence = JSON.parse(await readFile(
+        join(value.statePath, stage.evidencePath!),
+        'utf8',
+      )) as { observations: Record<string, unknown> };
+      expect(evidence.observations.patchDecision).toBe('already-present');
     } finally {
       value.close();
     }
@@ -929,10 +1066,10 @@ describe('trusted pipeline integration', () => {
     ['frontend-build', 'frontend'],
     ['mirror-gui', 'frontend'],
     ['activate-target', 'target-setup'],
-    ['copy-feed-config', 'target-setup'],
-    ['update-feeds', 'target-setup'],
-    ['install-feeds', 'target-setup'],
-    ['resolve-config', 'target-setup'],
+    ['copy-feed-config', 'feeds'],
+    ['update-feeds', 'feeds'],
+    ['install-feeds', 'feeds'],
+    ['resolve-config', 'config'],
     ['build-image', 'build'],
     ['verify-image', 'verify'],
   ] as const)('writes failure evidence and one runner terminal at the %s boundary', async (
@@ -958,8 +1095,12 @@ describe('trusted pipeline integration', () => {
       )) as Record<string, unknown>;
       expect(evidence).toMatchObject({
         outcome: 'failed',
+        operationId: null,
+      });
+      expect((evidence.error as Record<string, unknown>).operationId).toBeUndefined();
+      expect(value.store.getOperation(value.input.jobId, operationId, 1)).toMatchObject({
         operationId,
-        error: { operationId },
+        outcome: 'failed',
       });
       expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
         .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
@@ -990,9 +1131,9 @@ describe('trusted pipeline integration', () => {
       expect(evidence).toMatchObject({
         stage: failStage,
         outcome: 'failed',
-        operationId,
-        error: { operationId },
+        operationId: null,
       });
+      expect((evidence.error as Record<string, unknown>).operationId).toBeUndefined();
       expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
         .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
     } finally {
@@ -1013,9 +1154,9 @@ describe('trusted pipeline integration', () => {
       )) as Record<string, unknown>;
       expect(evidence).toMatchObject({
         outcome: 'failed',
-        operationId: 'verify-profile-parity',
-        error: { operationId: 'verify-profile-parity' },
+        operationId: null,
       });
+      expect((evidence.error as Record<string, unknown>).operationId).toBeUndefined();
       expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
         .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
     } finally {
@@ -1102,6 +1243,25 @@ describe('trusted pipeline integration', () => {
     }
   });
 
+  it('fails once when held workspace authority changes after a major stage', async () => {
+    const value = await fixture({
+      workspaceFailureAt: { stage: 'build', phase: 'after' },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'failed',
+      });
+      expect(value.store.getStage(value.input.jobId, 'build')).toMatchObject({
+        outcome: 'failed',
+      });
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
+      expect(value.operationOrder).not.toContain('verify-image');
+    } finally {
+      value.close();
+    }
+  });
+
   it('returns recovery-required when initial lease acquisition loses its CAS', async () => {
     const value = await fixture({ rejectOwnershipWrite: 'acquire-lease' });
     try {
@@ -1120,15 +1280,21 @@ describe('trusted pipeline integration', () => {
     }
   });
 
-  it('rejects persisted source, target, root, and manifest mismatches before lease mutation', async () => {
+  it('records one guarded terminal for persisted source, target, root, and manifest mismatches', async () => {
     const value = await fixture({
       mutateJob: (job) => ({ ...job, rootId: 'forged-root' }),
     });
     try {
-      await expect(createPipeline(value.input).run()).rejects.toThrow(/persisted job binding/i);
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'failed',
+      });
       const job = value.store.getJob(value.input.jobId);
-      expect(job.runnerLeaseOwner).toBeNull();
-      expect(job.state).toBe('starting');
+      expect(job.state).toBe('failed');
+      expect(value.store.getStage(value.input.jobId, 'preflight')).toMatchObject({
+        outcome: 'failed',
+      });
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
     } finally {
       value.close();
     }
@@ -1151,14 +1317,18 @@ describe('trusted pipeline integration', () => {
           ]),
         }),
       });
-      const eventsBefore = value.store.listEvents(value.input.jobId).events.length;
-
       await expect(createPipeline({
         ...value.input,
         manifest: forgedManifest,
         target: forgedTarget,
-      }).run()).rejects.toThrow(/authoritative target manifest/i);
-      expect(value.store.listEvents(value.input.jobId).events).toHaveLength(eventsBefore);
+      }).run()).resolves.toMatchObject({
+        state: 'failed',
+      });
+      expect(value.store.getStage(value.input.jobId, 'preflight')).toMatchObject({
+        outcome: 'failed',
+      });
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
     } finally {
       value.close();
     }
@@ -1201,8 +1371,56 @@ describe('trusted pipeline integration', () => {
         publishState: 'blocked',
         terminalErrorCode: 'OUTPUT_COLLISION',
       });
+      expect(value.store.getStage(value.input.jobId, 'publish')?.error)
+        .not.toHaveProperty('operationId');
       expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
         .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('records publication binding mismatch evidence and one terminal before native mutation', async () => {
+    const value = await fixture({ publicationBindingMismatch: true });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'failed',
+      });
+      expect(value.input.services.publisher.publish).not.toHaveBeenCalled();
+      expect(value.store.getStage(value.input.jobId, 'publish')).toMatchObject({
+        outcome: 'failed',
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'failed',
+        publishState: 'staged',
+        publishStartedAt: null,
+      });
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('retains explicit publishing recovery state when the atomic publish terminal loses ownership', async () => {
+    const value = await fixture({ rejectOwnershipWrite: 'publish-terminal' });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'RUNNER_DISAPPEARED',
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'publishing',
+        publishState: 'publishing',
+        artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
+        artifactFinalPath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5/factory.img.gz`,
+        terminalAt: null,
+      });
+      expect(value.store.getStage(value.input.jobId, 'publish')).toMatchObject({
+        outcome: 'running',
+      });
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(0);
     } finally {
       value.close();
     }

@@ -3,6 +3,8 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, rename, rmdir, unlink } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const WORKTREE = '/workdir';
@@ -19,6 +21,39 @@ const FIXED_PATHS = Object.freeze({
 const PROC_FD = '/proc/self/fd';
 const DIRECTORY_FLAGS = constants.O_DIRECTORY | constants.O_NOFOLLOW;
 const FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW;
+const NODE_MODULES = Object.freeze([
+  ['@grpc/grpc-js', '@grpc/grpc-js'],
+  ['@chirpstack/chirpstack-api', '@chirpstack/chirpstack-api'],
+  ['google-protobuf', 'google-protobuf'],
+  ['protobufjs', 'protobufjs'],
+  ['osi-chameleon-helper', 'osi-chameleon-helper'],
+  ['osi-chirpstack-helper', 'osi-chirpstack-helper'],
+  ['osi-cloud-http', 'osi-cloud-http'],
+  ['osi-db-helper', 'osi-db-helper'],
+  ['osi-dendro-helper', 'osi-dendro-helper'],
+  ['osi-health-helper', 'osi-health-helper'],
+  ['osi-history-helper', 'osi-history-helper'],
+  ['osi-history-sync-helper', 'osi-history-sync-helper'],
+  ['osi-lib', 'osi-lib'],
+  ['osi-command-ledger', './osi-command-ledger'],
+  ['osi-dendro-analytics', './osi-dendro-analytics'],
+  ['osi-zone-env', './osi-zone-env'],
+  ['osi-history-router', './osi-history-router'],
+  ['osi-journal', './osi-journal'],
+  ['osi-device-writer', './osi-device-writer'],
+  ['osi-uc512-normalize', './osi-uc512-normalize'],
+  ['osi-lsn50-normalize', './osi-lsn50-normalize'],
+]);
+const ROOTFS_BY_PROFILE = Object.freeze({
+  'DEVICE_rpi-5': {
+    targetId: 'rpi-5',
+    path: 'openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx',
+  },
+  'DEVICE_rpi-2': {
+    targetId: 'rpi-2',
+    path: 'openwrt/build_dir/target-arm_cortex-a7+neon-vfpv4_musl_eabi/root-bcm27xx',
+  },
+});
 
 function fail(message) {
   process.stderr.write(`osi-image-builder-tool: ${message}\n`);
@@ -337,7 +372,38 @@ async function verifyImage(root, hooks) {
       try {
         const info = await image.stat();
         if (!info.isFile() || info.size < 64 * 1024 * 1024) throw new Error('firmware image is missing or below the 64 MiB minimum');
-        return { operation: 'verify-image', relativePath: `openwrt/bin/targets/${candidate.platform}/${candidate.profile}/${candidate.name}`, size: info.size, sha256: await hashHandle(image) };
+        const openwrt = await openDirectoryAt(rootHandle, 'openwrt', 'OpenWrt directory', hooks);
+        const config = await openFileAt(openwrt, '.config', 'OpenWrt config', hooks);
+        let rootfs;
+        try {
+          const contents = await config.readFile('utf8');
+          const profiles = Object.entries(ROOTFS_BY_PROFILE).filter(
+            ([profile]) => contents.includes(`CONFIG_TARGET_PROFILE="${profile}"`),
+          );
+          if (profiles.length !== 1) throw new Error('active target profile is not an exact trusted Node resolution target');
+          rootfs = profiles[0][1];
+        } finally {
+          await config.close();
+          await openwrt.close();
+        }
+        const nodeRed = `${root}/${rootfs.path}/usr/share/node-red`;
+        const require = createRequire(`${nodeRed}/__osi_verification__.cjs`);
+        const nodeResolution = NODE_MODULES.map(([packageName, specifier]) => {
+          const resolved = require.resolve(specifier);
+          const resolvedRelativePath = relative(nodeRed, resolved).replaceAll('\\', '/');
+          if (resolvedRelativePath.startsWith('../') || resolvedRelativePath.startsWith('/')) {
+            throw new Error(`resolved Node module escaped the trusted rootfs base: ${packageName}`);
+          }
+          return { packageName, specifier, resolvedRelativePath };
+        });
+        return {
+          operation: 'verify-image',
+          targetId: rootfs.targetId,
+          relativePath: `openwrt/bin/targets/${candidate.platform}/${candidate.profile}/${candidate.name}`,
+          size: info.size,
+          sha256: await hashHandle(image),
+          nodeResolution,
+        };
       } finally { await image.close(); }
     } finally { await closeChain(profile); }
   } finally { if (targetDirectory) await closeChain(targetDirectory); await rootHandle.close(); }

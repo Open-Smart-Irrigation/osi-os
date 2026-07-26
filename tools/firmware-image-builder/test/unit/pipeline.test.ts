@@ -1,4 +1,15 @@
 import { createHash } from 'node:crypto';
+import { constants as fsConstants } from 'node:fs';
+import {
+  mkdtemp,
+  open,
+  readFile,
+  rm,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -6,6 +17,7 @@ import {
   parseRunnerArguments,
   resolveTrustedOperationRequest,
   runRunner,
+  stageVerifiedArtifact,
 } from '../../runner/src/main.js';
 import { createOperationDefinition } from '../../runner/src/operation-registry.js';
 import {
@@ -28,6 +40,49 @@ const JOB_ID = 'job-pipeline-unit';
 describe('production runner composition', () => {
   it('constructs its own production pipeline instead of accepting a bootstrap', () => {
     expect(runRunner).toHaveLength(1);
+  });
+
+  it('stages and hashes a real artifact through a readable held descriptor', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'osi-pipeline-artifact-'));
+    const workspace = join(directory, 'workspace');
+    const staging = join(directory, 'staging');
+    const artifactPath = join(workspace, 'factory.img.gz');
+    const bytes = Buffer.from('real staged firmware bytes');
+    const timestamp = new Date('2026-07-26T12:00:00.000Z');
+    await Promise.all([
+      import('node:fs/promises').then(({ mkdir }) => mkdir(workspace)),
+      import('node:fs/promises').then(({ mkdir }) => mkdir(staging)),
+    ]);
+    await writeFile(artifactPath, bytes);
+    await utimes(artifactPath, timestamp, timestamp);
+    const stagingHandle = await open(
+      staging,
+      fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW,
+    );
+    try {
+      await expect(stageVerifiedArtifact(
+        workspace,
+        'factory.img.gz',
+        stagingHandle,
+        'factory.img.gz',
+        {
+          path: 'factory.img.gz',
+          basename: 'factory.img.gz',
+          size: bytes.byteLength,
+          mtime: timestamp.toISOString(),
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+          gzip: true,
+        },
+      )).resolves.toMatchObject({
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        size: bytes.byteLength,
+        mtime: timestamp.toISOString(),
+      });
+      await expect(readFile(join(staging, 'factory.img.gz'))).resolves.toEqual(bytes);
+    } finally {
+      await stagingHandle.close();
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('accepts only the exact systemd runner argument contract', () => {

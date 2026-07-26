@@ -36,7 +36,7 @@ const definitionPath = new URL('../../builder/execution-definition.json', import
 const targetNames = ['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const;
 const execFileAsync = promisify(execFile);
 const operationToolPath = new URL('../../builder/operations/osi-image-builder-tool.js', import.meta.url).pathname;
-const operationToolModule = async () => await import(operationToolPath) as unknown as { readonly createOperationHandlersForTesting: (root: string, hooks?: { readonly onStep?: (point: string, path: string) => void | Promise<void> }) => { readonly copyFeedConfig: () => Promise<{ readonly sha256: string }>; readonly mirrorGui: () => Promise<{ readonly fileCount: number }>; readonly verifyImage: () => Promise<{ readonly sha256: string }> } };
+const operationToolModule = async () => await import(operationToolPath) as unknown as { readonly createOperationHandlersForTesting: (root: string, hooks?: { readonly onStep?: (point: string, path: string) => void | Promise<void> }) => { readonly copyFeedConfig: () => Promise<{ readonly sha256: string }>; readonly mirrorGui: () => Promise<{ readonly fileCount: number }>; readonly verifyImage: () => Promise<{ readonly sha256: string; readonly targetId: string; readonly nodeResolution: readonly { readonly packageName: string; readonly specifier: string; readonly resolvedRelativePath: string }[] }> } };
 const evidence: BuilderValidationEvidence = {
   imageId: `sha256:${digest('f')}`, imageDigest: digest('a'), architecture: 'linux/amd64',
   rustc: 'rustc 1.85.0', llvm: '19.1.7', polly: '19.1.7', zstd: '1.5.7', node: 'v22.14.0',
@@ -254,6 +254,87 @@ describe('locked builder source', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves the fixed rootfs Node package set without loading target modules', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-node-resolve-'));
+    const rootfs = join(
+      root,
+      'openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx',
+    );
+    const nodeRed = join(rootfs, 'usr/share/node-red');
+    const image = join(root, 'openwrt/bin/targets/bcm27xx/bcm2712/image.img.gz');
+    const packaged = [
+      '@grpc/grpc-js',
+      '@chirpstack/chirpstack-api',
+      'google-protobuf',
+      'protobufjs',
+      'osi-chameleon-helper',
+      'osi-chirpstack-helper',
+      'osi-cloud-http',
+      'osi-db-helper',
+      'osi-dendro-helper',
+      'osi-health-helper',
+      'osi-history-helper',
+      'osi-history-sync-helper',
+      'osi-lib',
+    ];
+    const direct = [
+      'osi-command-ledger',
+      'osi-dendro-analytics',
+      'osi-zone-env',
+      'osi-history-router',
+      'osi-journal',
+      'osi-device-writer',
+      'osi-uc512-normalize',
+      'osi-lsn50-normalize',
+    ];
+    try {
+      await mkdir(join(root, 'openwrt/bin/targets/bcm27xx/bcm2712'), { recursive: true });
+      await mkdir(join(nodeRed, 'node_modules'), { recursive: true });
+      await writeFile(
+        join(root, 'openwrt/.config'),
+        'CONFIG_TARGET_PROFILE="DEVICE_rpi-5"\n',
+      );
+      await writeFile(image, '');
+      await truncate(image, 64 * 1024 * 1024);
+      for (const packageName of packaged) {
+        const packageRoot = join(nodeRed, 'node_modules', packageName);
+        await mkdir(packageRoot, { recursive: true });
+        await writeFile(
+          join(packageRoot, 'package.json'),
+          JSON.stringify({ name: packageName, main: 'index.js' }),
+        );
+        await writeFile(
+          join(packageRoot, 'index.js'),
+          'throw new Error("target module must not execute");\n',
+        );
+      }
+      for (const packageName of direct) {
+        const packageRoot = join(nodeRed, packageName);
+        await mkdir(packageRoot, { recursive: true });
+        await writeFile(
+          join(packageRoot, 'package.json'),
+          JSON.stringify({ name: packageName, main: 'index.js' }),
+        );
+        await writeFile(
+          join(packageRoot, 'index.js'),
+          'throw new Error("target module must not execute");\n',
+        );
+      }
+      const result = await (await operationToolModule())
+        .createOperationHandlersForTesting(root)
+        .verifyImage();
+      expect(result.targetId).toBe('rpi-5');
+      expect(result.nodeResolution).toHaveLength(21);
+      expect(result.nodeResolution.map(({ packageName }) => packageName))
+        .toEqual([...packaged, ...direct]);
+      expect(result.nodeResolution.every(({ resolvedRelativePath }) => (
+        !resolvedRelativePath.startsWith('../')
+      ))).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 
