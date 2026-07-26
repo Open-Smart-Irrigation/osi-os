@@ -25,6 +25,7 @@ function inputFor(targetId: 'rpi-5' | 'rpi-2'): VerificationInput {
     profile: profile.profile,
     rootfsPartSize: profile.rootfsPartSize,
     sourceSha256: SHA256,
+    sourceConfigEvidencePath: `evidence/target-setup/${profile.id}.source.config`,
     resolvedSha256: SHA256,
   }])) as VerificationInput['config']['profiles'];
   return {

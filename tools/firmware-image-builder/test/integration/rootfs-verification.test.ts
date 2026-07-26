@@ -45,6 +45,7 @@ import {
   createApiFreshnessSocketClient,
   requestPersistedFreshness,
 } from '../../runner/src/freshness.js';
+import { createEvidenceWriter } from '../../runner/src/evidence.js';
 
 const SHA40 = '0123456789abcdef0123456789abcdef01234567';
 const ADVANCED_SHA40 = 'fedcba9876543210fedcba9876543210fedcba98';
@@ -122,6 +123,38 @@ function sha256(contents: Buffer | string): string {
   return createHash('sha256').update(contents).digest('hex');
 }
 
+function offlineFeedPreparation(jobId: string) {
+  const recursiveSubmoduleStatusSha256 = sha256('');
+  const feed = (
+    name: string,
+    location: string,
+    commit: string,
+  ) => Object.freeze({
+    name,
+    location,
+    commit,
+    detached: true as const,
+    clean: true as const,
+    recursiveSubmodulesPrepared: true as const,
+    recursiveSubmodules: Object.freeze([]),
+    recursiveSubmoduleStatusSha256,
+    treeSha256: 'e'.repeat(64),
+  });
+  return Object.freeze({
+    schemaVersion: 1 as const,
+    boundary: 'api-prepared-pinned-feeds-v1' as const,
+    networkPolicy: 'runner-offline' as const,
+    jobId,
+    sourceSha: SHA40,
+    preparedAt: '2026-07-26T10:00:00.000Z',
+    feeds: Object.freeze([
+      feed('packages', 'https://git.openwrt.org/feed/packages.git', 'd8cd30f4e281d6853b3de134c4f147a807583e43'),
+      feed('luci', 'https://git.openwrt.org/project/luci.git', '2ac26e56cc55102cb10e7b0867c2b78e0f6d5fd8'),
+      feed('routing', 'https://git.openwrt.org/feed/routing.git', 'c9b636698881059a3c981032770968f5a98ff201'),
+    ]),
+  });
+}
+
 function configFor(target: TargetManifest): string {
   return `${target.configSymbols.map((symbol) => {
     if (symbol.type === 'bool') return `${symbol.name}=${symbol.value ? 'y' : 'n'}`;
@@ -133,8 +166,10 @@ function configFor(target: TargetManifest): string {
 function firstBootSeed(): string {
   const modules = SEED_HELPERS.join(' ');
   return `#!/bin/sh
+set -eu
 SRC=/usr/share/node-red
 DST=/srv/node-red
+rm -rf "$DST/node_modules/sqlite3" "$DST/node_modules/node-red-node-sqlite"
 for module in ${modules}; do
   if [ -d "$SRC/$module" ]; then
     rm -rf "$DST/$module" "$DST/node_modules/$module"
@@ -146,6 +181,7 @@ SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules
 if [ -d "$SQLITE_SRC" ]; then
   ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"
 fi
+exit 0
 `;
 }
 
@@ -196,6 +232,7 @@ async function authorityFixture(pathAuthorityDependencies?: Partial<PathAuthorit
 
 export interface RootfsFixture {
   readonly input: VerificationInput;
+  readonly authorityBase: string;
   readonly statePath: string;
   readonly sourcePath: string;
   readonly artifactDirectory: string;
@@ -225,6 +262,9 @@ export async function createRootfsFixture(
     'evidence/target-setup',
   );
   await mkdir(targetSetupEvidence, { recursive: true });
+  const task15EvidenceWriter = createEvidenceWriter({
+    stateRoot: authority.workspace.stateRoot,
+  });
   await writeFile(
     join(targetSetupEvidence, '..', '01-source.json'),
     JSON.stringify({
@@ -239,10 +279,11 @@ export async function createRootfsFixture(
     }),
   );
   for (const profile of targets) {
-    await writeFile(
-      join(targetSetupEvidence, `${profile.id}.source.config`),
-      configFor(profile),
-    );
+    await task15EvidenceWriter.writeTargetSetupSourceConfig({
+      jobId: authority.workspace.jobId,
+      targetId: profile.id,
+      contents: Buffer.from(configFor(profile), 'utf8'),
+    });
     const profileConfigPath = join(sourcePath, 'conf', profile.environment, '.config');
     await mkdir(join(profileConfigPath, '..'), { recursive: true });
     await writeFile(profileConfigPath, resolvedConfigs[profile.id]);
@@ -251,15 +292,19 @@ export async function createRootfsFixture(
   const sourceProfileRoot = join(sourcePath, 'conf', target.environment, 'files');
   const sourceFlows = join(sourceProfileRoot, 'usr/share/flows.json');
   const sourceDatabase = join(sourceProfileRoot, 'usr/share/db/farming.db');
+  const sourceGui = join(sourcePath, 'web/react-gui/build');
   const feedGui = join(sourcePath, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui');
   await mkdir(join(sourceFlows, '..'), { recursive: true });
   await mkdir(join(sourceDatabase, '..'), { recursive: true });
+  await mkdir(sourceGui, { recursive: true });
   await mkdir(feedGui, { recursive: true });
   await writeFile(sourceFlows, '{"flow":true}\n');
   const sourceDb = new DatabaseSync(sourceDatabase);
   sourceDb.exec('CREATE TABLE chameleon_calibrations (array_id TEXT PRIMARY KEY)');
   sourceDb.close();
-  await writeFile(join(feedGui, 'index.html'), '<html><head><title>OSI Gateway</title></head><body>gui</body></html>\n');
+  const guiIndex = '<html><head><title>OSI Gateway</title></head><body>gui</body></html>\n';
+  await writeFile(join(sourceGui, 'index.html'), guiIndex);
+  await writeFile(join(feedGui, 'index.html'), guiIndex);
 
   const rootfsPath = join(sourcePath, 'openwrt', target.rootfs);
   const writeRootfs = async (path: string, contents: Buffer | string): Promise<void> => {
@@ -273,11 +318,15 @@ export async function createRootfsFixture(
   await copyFile(sourceDatabase, join(rootfsPath, 'usr/share/db/farming.db'));
   await writeRootfs('etc/init.d/node-red', '#!/bin/sh\n');
   await writeRootfs('usr/lib/node-red/gui/index.html', await readFile(join(feedGui, 'index.html')));
-  await writeRootfs('etc/nginx/conf.d/osi.conf', [
-    'location /gui/ {}',
-    'location /auth/ {}',
-    'location /api/ {}',
-    'location /download/ {}',
+  await writeRootfs('etc/nginx/conf.d/node-red.locations', [
+    'location /gui/ {',
+    '}',
+    'location /auth/ {',
+    '}',
+    'location /api/ {',
+    '}',
+    'location /download/ {',
+    '}',
   ].join('\n'));
 
   for (const packageName of THIRD_PARTY_PACKAGES) {
@@ -327,21 +376,27 @@ export async function createRootfsFixture(
       profile: profile.profile,
       rootfsPartSize: profile.rootfsPartSize,
       sourceSha256: sha256(sourceConfig),
+      sourceConfigEvidencePath: `evidence/target-setup/${profile.id}.source.config`,
       resolvedSha256: sha256(resolvedConfigs[profile.id]),
     }];
   })) as VerificationInput['config']['profiles'];
-  await writeFile(
-    join(targetSetupEvidence, '..', '04-target-setup.json'),
-    JSON.stringify({
-      schemaVersion: 1,
-      jobId: authority.workspace.jobId,
-      stage: 'target-setup',
-      outcome: 'passed',
-      observations: {
-        config: { profiles },
-      },
-    }),
-  );
+  await task15EvidenceWriter.write({
+    jobId: authority.workspace.jobId,
+    stage: 'target-setup',
+    startedAt: '2026-07-26T10:00:00.000Z',
+    finishedAt: '2026-07-26T10:01:00.000Z',
+    outcome: 'passed',
+    operationId: 'activate-target',
+    commands: [],
+    inputs: {
+      targetId: target.id,
+      rootId: 'images',
+      branch: 'main',
+      pinnedSha: SHA40,
+    },
+    observations: { config: { profiles } },
+    error: null,
+  });
   const input: VerificationInput = {
     workspace: authority.workspace,
     target,
@@ -401,6 +456,7 @@ export async function createRootfsFixture(
   };
   return {
     input,
+    authorityBase: authority.base,
     statePath: authority.statePath,
     sourcePath,
     artifactDirectory,
@@ -517,6 +573,15 @@ describe('real rootfs verification contract', () => {
 
   it.each(['rpi-5', 'rpi-2'] as const)('accepts the shipped %s helper and payload layout', async (targetId) => {
     const fixture = await createRootfsFixture(targetId);
+    await copyFile(
+      join(
+        process.cwd(),
+        '../../conf',
+        fixture.target.environment,
+        'files/etc/uci-defaults/98_osi_node_red_seed',
+      ),
+      join(fixture.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+    );
     const result = await verifyFirmwareArtifact(fixture.input);
 
     expect(result.artifact.path).toBe(`openwrt/bin/targets/${fixture.target.openwrtTarget}/${fixture.artifactName}`);
@@ -525,8 +590,43 @@ describe('real rootfs verification contract', () => {
     expect(result.rootfs.helpers.firstBootSeedVerified).toBe(true);
     expect(result.rootfs.nodeResolution.protobufjs).toBe(true);
     expect(result.rootfs.database).toEqual({ integrityCheck: 'ok', chameleonCalibrationRows: 0 });
+    expect(result.rootfs.gui).toMatchObject({
+      title: 'OSI Gateway',
+      sourceGuiTreeSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      feedGuiTreeSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      rootfsGuiTreeSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+    });
+    expect(new Set([
+      result.rootfs.gui.sourceGuiTreeSha256,
+      result.rootfs.gui.feedGuiTreeSha256,
+      result.rootfs.gui.rootfsGuiTreeSha256,
+    ]).size).toBe(1);
+    expect(result.rootfs.criticalHashes.gui).toEqual({
+      sourceGuiTreeSha256: result.rootfs.gui.sourceGuiTreeSha256,
+      feedGuiTreeSha256: result.rootfs.gui.feedGuiTreeSha256,
+      rootfsGuiTreeSha256: result.rootfs.gui.rootfsGuiTreeSha256,
+      matched: true,
+    });
+    expect(result.evidence.json).toMatchObject({
+      rootfs: {
+        gui: result.rootfs.gui,
+        criticalHashes: { gui: result.rootfs.criticalHashes.gui },
+      },
+      observations: {
+        rootfs: {
+          gui: result.rootfs.gui,
+          criticalHashes: { gui: result.rootfs.criticalHashes.gui },
+        },
+      },
+    });
     expect(result.config.profiles['rpi-5'].sourceSha256).toMatch(/^[0-9a-f]{64}$/u);
     expect(result.config.profiles['rpi-2'].resolvedSha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(result.config.profiles['rpi-5'].sourceConfigEvidencePath).toBe(
+      'evidence/target-setup/rpi-5.source.config',
+    );
+    expect(result.config.profiles['rpi-2'].sourceConfigEvidencePath).toBe(
+      'evidence/target-setup/rpi-2.source.config',
+    );
     expect(result.checks.generatedSha256sums.contents).toBe(
       `${result.artifact.sha256}  ${fixture.artifactName}\n`,
     );
@@ -661,6 +761,20 @@ describe('real rootfs verification contract', () => {
           profiles: {
             ...fixture.input.config.profiles,
             [targetId]: { ...profile, sourceSha256: 'f'.repeat(64) },
+          },
+        },
+      })).rejects.toMatchObject({ code: 'TARGET_CONFIG_MISMATCH' });
+
+      await expect(verifyFirmwareArtifact({
+        ...fixture.input,
+        config: {
+          ...fixture.input.config,
+          profiles: {
+            ...fixture.input.config.profiles,
+            [targetId]: {
+              ...profile,
+              sourceConfigEvidencePath: `evidence/target-setup/${targetId}.forged.config`,
+            },
           },
         },
       })).rejects.toMatchObject({ code: 'TARGET_CONFIG_MISMATCH' });
@@ -869,21 +983,37 @@ describe('real rootfs verification contract', () => {
     });
   }, 30_000);
 
-  it('requires active exact nginx locations and exact first-boot source/destination actions', async () => {
+  it('requires active routes in only the exact node-red.locations nginx include', async () => {
     const commentedNginx = await createRootfsFixture('rpi-5');
     await writeFile(
-      join(commentedNginx.rootfsPath, 'etc/nginx/conf.d/osi.conf'),
+      join(commentedNginx.rootfsPath, 'etc/nginx/conf.d/node-red.locations'),
       [
-        '# location /gui/ {}',
-        'location /auth/ {}',
-        'location /api/ {}',
-        'location /download/ {}',
+        '# location /gui/ {',
+        'location /auth/ {',
+        'location /api/ {',
+        'location /download/ {',
       ].join('\n'),
     );
     await expect(verifyFirmwareArtifact(commentedNginx.input)).rejects.toMatchObject({
       code: 'ROOTFS_CONTENT_FAILED',
     });
 
+    const disabledNginx = await createRootfsFixture('rpi-2');
+    const activePath = join(disabledNginx.rootfsPath, 'etc/nginx/conf.d/node-red.locations');
+    await rename(activePath, `${activePath}.disabled`);
+    await expect(verifyFirmwareArtifact(disabledNginx.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const arbitraryNginx = await createRootfsFixture('rpi-5');
+    const requiredPath = join(arbitraryNginx.rootfsPath, 'etc/nginx/conf.d/node-red.locations');
+    await rename(requiredPath, join(arbitraryNginx.rootfsPath, 'etc/nginx/routes.conf'));
+    await expect(verifyFirmwareArtifact(arbitraryNginx.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+  }, 30_000);
+
+  it('requires exact reachable first-boot helper and SQLite actions', async () => {
     const wrongAssignment = await createRootfsFixture('rpi-2');
     await writeFile(
       join(wrongAssignment.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
@@ -905,6 +1035,129 @@ describe('real rootfs verification contract', () => {
       ),
     );
     await expect(verifyFirmwareArtifact(commentedCopy.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const falseBranch = await createRootfsFixture('rpi-2');
+    await writeFile(
+      join(falseBranch.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed()
+        .replace('for module in ', 'if false; then\nfor module in ')
+        .replace('\ndone\nSQLITE_SRC=', '\ndone\nfi\nSQLITE_SRC='),
+    );
+    await expect(verifyFirmwareArtifact(falseBranch.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const uncalledFunction = await createRootfsFixture('rpi-5');
+    await writeFile(
+      join(uncalledFunction.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed()
+        .replace('for module in ', 'seed_helpers() {\nfor module in ')
+        .replace('\ndone\nSQLITE_SRC=', '\ndone\n}\nSQLITE_SRC='),
+    );
+    await expect(verifyFirmwareArtifact(uncalledFunction.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const heredoc = await createRootfsFixture('rpi-2');
+    await writeFile(
+      join(heredoc.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed().replace(
+        '    cp -a "$SRC/$module" "$DST/node_modules/$module"',
+        [
+          '    cat <<\'UNREACHABLE\'',
+          '    cp -a "$SRC/$module" "$DST/node_modules/$module"',
+          'UNREACHABLE',
+        ].join('\n'),
+      ),
+    );
+    await expect(verifyFirmwareArtifact(heredoc.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const earlyExit = await createRootfsFixture('rpi-5');
+    await writeFile(
+      join(earlyExit.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed().replace(
+        'for module in ',
+        'exit 0\nfor module in ',
+      ),
+    );
+    await expect(verifyFirmwareArtifact(earlyExit.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const wrongBranch = await createRootfsFixture('rpi-2');
+    await writeFile(
+      join(wrongBranch.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed().replace(
+        '    cp -a "$SRC/$module" "$DST/node_modules/$module"',
+        [
+          '    if false; then',
+          '      :',
+          '    else',
+          '      cp -a "$SRC/$module" "$DST/node_modules/$module"',
+          '    fi',
+        ].join('\n'),
+      ),
+    );
+    await expect(verifyFirmwareArtifact(wrongBranch.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const unreachableSqliteCleanup = await createRootfsFixture('rpi-5');
+    await writeFile(
+      join(unreachableSqliteCleanup.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed().replace(
+        'rm -rf "$DST/node_modules/sqlite3" "$DST/node_modules/node-red-node-sqlite"',
+        [
+          'if false; then',
+          '  rm -rf "$DST/node_modules/sqlite3" "$DST/node_modules/node-red-node-sqlite"',
+          'fi',
+        ].join('\n'),
+      ),
+    );
+    await expect(verifyFirmwareArtifact(unreachableSqliteCleanup.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const quotedAction = await createRootfsFixture('rpi-2');
+    await writeFile(
+      join(quotedAction.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed().replace(
+        '    cp -a "$SRC/$module" "$DST/$module"',
+        '    echo \'cp -a "$SRC/$module" "$DST/$module"\'',
+      ),
+    );
+    await expect(verifyFirmwareArtifact(quotedAction.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const multilineQuotedAction = await createRootfsFixture('rpi-5');
+    await writeFile(
+      join(multilineQuotedAction.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed().replace(
+        '    cp -a "$SRC/$module" "$DST/$module"',
+        [
+          '    echo \'',
+          '    cp -a "$SRC/$module" "$DST/$module"',
+          '    \'',
+        ].join('\n'),
+      ),
+    );
+    await expect(verifyFirmwareArtifact(multilineQuotedAction.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+  }, 30_000);
+
+  it('rejects a source GUI mismatch even when feed and rootfs GUI trees match', async () => {
+    const fixture = await createRootfsFixture('rpi-5');
+    await writeFile(
+      join(fixture.sourcePath, 'web/react-gui/build/index.html'),
+      '<html><head><title>OSI Gateway</title></head><body>different source bytes</body></html>\n',
+    );
+    await expect(verifyFirmwareArtifact(fixture.input)).rejects.toMatchObject({
       code: 'ROOTFS_CONTENT_FAILED',
     });
   }, 30_000);
@@ -1018,6 +1271,7 @@ describe('real rootfs verification contract', () => {
             },
           ],
         },
+        offlineFeedPreparation: offlineFeedPreparation('job-verify'),
         targetId: 'rpi-5',
         rootId: 'images',
         targetManifestSha256: 'e'.repeat(64),
@@ -1308,5 +1562,104 @@ describe('real rootfs verification contract', () => {
       code: 'ROOTFS_CONTENT_FAILED',
     });
     expect(raced).toBe(true);
+  }, 30_000);
+
+  it.each([
+    ['state-root parent', (fixture: RootfsFixture) => join(fixture.statePath, '..')],
+    ['configured-state ancestor', (fixture: RootfsFixture) => fixture.authorityBase],
+  ] as const)(
+    'rejects a same-inode %s rename followed by a symlink at the original name',
+    async (_label, selectAncestor) => {
+      let armed = false;
+      let raced = false;
+      let ancestor = '';
+      let held = '';
+      let statePath = '';
+      let expectedStateDevice = 0;
+      let expectedStateInode = 0;
+      let stateRootIdentityUnchanged = false;
+      const fixture = await createRootfsFixture('rpi-5', {
+        beforeDirectoryAccess: async () => {
+          if (!armed || raced) return;
+          raced = true;
+          held = `${ancestor}.held`;
+          await rename(ancestor, held);
+          await symlink(held, ancestor);
+          const observedState = await lstat(statePath);
+          stateRootIdentityUnchanged = observedState.dev === expectedStateDevice
+            && observedState.ino === expectedStateInode;
+        },
+      });
+      ancestor = selectAncestor(fixture);
+      statePath = fixture.statePath;
+      const expectedState = await lstat(statePath);
+      expectedStateDevice = expectedState.dev;
+      expectedStateInode = expectedState.ino;
+      armed = true;
+      try {
+        await expect(verifyFirmwareArtifact(fixture.input)).rejects.toMatchObject({
+          code: 'ROOTFS_CONTENT_FAILED',
+        });
+        expect(raced).toBe(true);
+        expect(stateRootIdentityUnchanged).toBe(true);
+      } finally {
+        if (raced) {
+          await unlink(ancestor);
+          await rename(held, ancestor);
+        }
+      }
+    },
+    30_000,
+  );
+
+  it('rejects a same-inode absolute ancestor swap at the freshness socket boundary', async () => {
+    let armed = false;
+    let raced = false;
+    let ancestor = '';
+    let held = '';
+    let statePath = '';
+    let expectedStateDevice = 0;
+    let expectedStateInode = 0;
+    let stateRootIdentityUnchanged = false;
+    const authority = await authorityFixture({
+      beforeDirectoryAccess: async () => {
+        if (!armed || raced) return;
+        raced = true;
+        held = `${ancestor}.held`;
+        await rename(ancestor, held);
+        await symlink(held, ancestor);
+        const observedState = await lstat(statePath);
+        stateRootIdentityUnchanged = observedState.dev === expectedStateDevice
+          && observedState.ino === expectedStateInode;
+      },
+    });
+    const socketPath = join(authority.statePath, 'api.sock');
+    const server = createServer((socket) => {
+      socket.resume();
+      socket.once('end', () => {
+        socket.end('{"schemaVersion":1,"accepted":true}\n');
+      });
+    });
+    await listen(server, socketPath);
+    await chmod(socketPath, 0o600);
+    cleanupFunctions.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    ancestor = join(authority.statePath, '..');
+    statePath = authority.statePath;
+    const expectedState = await lstat(statePath);
+    expectedStateDevice = expectedState.dev;
+    expectedStateInode = expectedState.ino;
+    armed = true;
+    try {
+      await expect(
+        createApiFreshnessSocketClient(authority.workspace.stateRoot).signal('job-verify'),
+      ).rejects.toThrow(/binding|ancestor/u);
+      expect(raced).toBe(true);
+      expect(stateRootIdentityUnchanged).toBe(true);
+    } finally {
+      if (raced) {
+        await unlink(ancestor);
+        await rename(held, ancestor);
+      }
+    }
   }, 30_000);
 });

@@ -3,7 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import type { BigIntStats, Stats } from 'node:fs';
 import { lstat, open, readdir, readlink } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip } from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
@@ -112,6 +112,7 @@ export interface ProfileConfigEvidence {
   readonly profile: string;
   readonly rootfsPartSize: number;
   readonly sourceSha256: string;
+  readonly sourceConfigEvidencePath: string;
   readonly resolvedSha256: string;
 }
 
@@ -194,12 +195,30 @@ export interface VerificationResult {
   readonly rootfs: {
     readonly requiredFiles: readonly string[];
     readonly nginxRoutes: Readonly<Record<(typeof ROUTES)[number], boolean>>;
-    readonly gui: { readonly title: string; readonly sha256: string; readonly feedSha256: string };
-    readonly criticalHashes: Readonly<Record<'flows' | 'database' | 'gui', {
-      readonly sourceSha256: string;
-      readonly rootfsSha256: string;
-      readonly matched: true;
-    }>>;
+    readonly gui: {
+      readonly title: string;
+      readonly sourceGuiTreeSha256: string;
+      readonly feedGuiTreeSha256: string;
+      readonly rootfsGuiTreeSha256: string;
+    };
+    readonly criticalHashes: {
+      readonly flows: {
+        readonly sourceSha256: string;
+        readonly rootfsSha256: string;
+        readonly matched: true;
+      };
+      readonly database: {
+        readonly sourceSha256: string;
+        readonly rootfsSha256: string;
+        readonly matched: true;
+      };
+      readonly gui: {
+        readonly sourceGuiTreeSha256: string;
+        readonly feedGuiTreeSha256: string;
+        readonly rootfsGuiTreeSha256: string;
+        readonly matched: true;
+      };
+    };
     readonly helpers: {
       readonly relativeSymlinks: readonly string[];
       readonly directUntilFirstBoot: readonly string[];
@@ -211,6 +230,11 @@ export interface VerificationResult {
   readonly freshness: VerificationFreshnessResult;
   readonly evidence: { readonly json: Record<string, unknown>; readonly bytes: number; readonly sha256: string };
 }
+
+export type TargetSetupVerificationInput = Pick<
+  VerificationInput,
+  'workspace' | 'target' | 'targets' | 'config'
+>;
 
 interface DirectoryBinding {
   readonly handle: FileHandle;
@@ -305,20 +329,20 @@ async function bindDirectory(
 }
 
 class WorkspaceReader {
-  readonly #rootPath: string;
   readonly #dependencies: PathAuthorityDependencies;
   readonly #baseBindings: readonly DirectoryBinding[];
+  readonly #jobBindings: readonly DirectoryBinding[];
   readonly #baseHandles: readonly FileHandle[];
 
   private constructor(
-    rootPath: string,
     dependencies: PathAuthorityDependencies,
     baseBindings: readonly DirectoryBinding[],
+    jobBindings: readonly DirectoryBinding[],
     baseHandles: readonly FileHandle[],
   ) {
-    this.#rootPath = rootPath;
     this.#dependencies = dependencies;
     this.#baseBindings = baseBindings;
+    this.#jobBindings = jobBindings;
     this.#baseHandles = baseHandles;
   }
 
@@ -342,22 +366,40 @@ class WorkspaceReader {
     const handles: FileHandle[] = [];
     const bindings: DirectoryBinding[] = [];
     try {
-      let current = await open(rootPath, DIR_FLAGS);
-      handles.push(current);
-      const rootBinding = await bindDirectory(current, null, null);
-      if (rootBinding.device !== expectedDevice || rootBinding.inode !== expectedInode) {
-        fail('ROOTFS_CONTENT_FAILED', 'state-root identity changed while opening');
+      if (!rootPath.startsWith('/') || resolve(rootPath) !== rootPath) {
+        fail('ROOTFS_CONTENT_FAILED', 'state-root authority path is not canonical and absolute');
       }
-      bindings.push(rootBinding);
-      for (const basename of ['jobs', safeJobId, 'workspace', 'source']) {
-        await WorkspaceReader.validateBindings(rootPath, dependencies, bindings);
+      let current = await open('/', DIR_FLAGS);
+      handles.push(current);
+      bindings.push(await bindDirectory(current, null, null));
+      for (const basename of rootPath.split('/').filter((segment) => segment.length > 0)) {
+        await WorkspaceReader.validateBindings(dependencies, bindings);
         const next = await open(procChild(current, basename), DIR_FLAGS);
         handles.push(next);
         bindings.push(await bindDirectory(next, current, basename));
         current = next;
       }
-      await WorkspaceReader.validateBindings(rootPath, dependencies, bindings);
-      return new WorkspaceReader(rootPath, dependencies, Object.freeze(bindings), Object.freeze(handles));
+      const stateRootBinding = bindings.at(-1)!;
+      if (stateRootBinding.device !== expectedDevice || stateRootBinding.inode !== expectedInode) {
+        fail('ROOTFS_CONTENT_FAILED', 'state-root identity changed while opening');
+      }
+      let jobBindings: readonly DirectoryBinding[] | undefined;
+      for (const basename of ['jobs', safeJobId, 'workspace', 'source']) {
+        await WorkspaceReader.validateBindings(dependencies, bindings);
+        const next = await open(procChild(current, basename), DIR_FLAGS);
+        handles.push(next);
+        bindings.push(await bindDirectory(next, current, basename));
+        current = next;
+        if (basename === safeJobId) jobBindings = Object.freeze([...bindings]);
+      }
+      await WorkspaceReader.validateBindings(dependencies, bindings);
+      if (!jobBindings) fail('ROOTFS_CONTENT_FAILED', 'job workspace authority is incomplete');
+      return new WorkspaceReader(
+        dependencies,
+        Object.freeze(bindings),
+        jobBindings,
+        Object.freeze(handles),
+      );
     } catch (error) {
       for (const handle of handles.reverse()) await handle.close().catch(() => undefined);
       if (error instanceof VerificationError) throw error;
@@ -366,38 +408,31 @@ class WorkspaceReader {
   }
 
   static async validateBindings(
-    rootPath: string,
     dependencies: PathAuthorityDependencies,
     bindings: readonly DirectoryBinding[],
   ): Promise<void> {
     const leaf = bindings.at(-1);
     if (!leaf) fail('ROOTFS_CONTENT_FAILED', 'workspace authority has no bindings');
     await dependencies.beforeDirectoryAccess?.(leaf.handle);
-    const root = bindings[0]!;
-    const namedRoot = await lstat(rootPath);
-    const heldRoot = await root.handle.stat();
-    if (namedRoot.isSymbolicLink()
-      || !namedRoot.isDirectory()
-      || !heldRoot.isDirectory()
-      || namedRoot.dev !== root.device
-      || namedRoot.ino !== root.inode
-      || heldRoot.dev !== root.device
-      || heldRoot.ino !== root.inode) {
-      fail('ROOTFS_CONTENT_FAILED', 'state-root binding was replaced during verification');
-    }
-    for (const binding of bindings.slice(1)) {
-      const named = await lstat(procChild(binding.parent!, binding.basename!));
+    for (const binding of bindings) {
       const held = await binding.handle.stat();
-      if (named.isSymbolicLink()
-        || !named.isDirectory()
-        || !held.isDirectory()
-        || named.dev !== binding.device
-        || named.ino !== binding.inode
+      if (!held.isDirectory()
         || held.dev !== binding.device
         || held.ino !== binding.inode) {
         fail('ROOTFS_CONTENT_FAILED', 'workspace ancestor was replaced during verification', {
-          component: binding.basename,
+          component: binding.basename ?? '/',
         });
+      }
+      if (binding.parent !== null && binding.basename !== null) {
+        const named = await lstat(procChild(binding.parent, binding.basename));
+        if (named.isSymbolicLink()
+          || !named.isDirectory()
+          || named.dev !== binding.device
+          || named.ino !== binding.inode) {
+          fail('ROOTFS_CONTENT_FAILED', 'workspace ancestor was replaced during verification', {
+            component: binding.basename,
+          });
+        }
       }
     }
   }
@@ -413,7 +448,7 @@ class WorkspaceReader {
   }
 
   async #validate(bindings: readonly DirectoryBinding[] = this.#baseBindings): Promise<void> {
-    await WorkspaceReader.validateBindings(this.#rootPath, this.#dependencies, bindings);
+    await WorkspaceReader.validateBindings(this.#dependencies, bindings);
   }
 
   async #withDirectoryBindings<T>(
@@ -661,7 +696,7 @@ class WorkspaceReader {
     relativePath: string,
     callback: (file: HeldFile) => Promise<T>,
   ): Promise<T> {
-    return this.#withFileFrom(this.#baseBindings.slice(0, 3), relativePath, callback);
+    return this.#withFileFrom(this.#jobBindings, relativePath, callback);
   }
 
   async #withFileFrom<T>(
@@ -821,7 +856,7 @@ function globPattern(pattern: string): RegExp {
   return new RegExp(`${expression}$`, 'u');
 }
 
-function validateTargets(input: VerificationInput): Readonly<Record<TargetId, TargetManifest>> {
+function validateTargets(input: Pick<VerificationInput, 'target' | 'targets'>): Readonly<Record<TargetId, TargetManifest>> {
   let authenticated: Readonly<Record<TargetId, TargetManifest>>;
   try {
     authenticated = authenticateTargetManifests(input.targets);
@@ -851,7 +886,7 @@ function validateTargets(input: VerificationInput): Readonly<Record<TargetId, Ta
 
 async function verifyConfig(
   workspace: WorkspaceReader,
-  input: VerificationInput,
+  input: TargetSetupVerificationInput,
   targets: Readonly<Record<TargetId, TargetManifest>>,
 ): Promise<VerificationResult['config']> {
   if (input.config.bothProfilesChecked !== true
@@ -901,12 +936,14 @@ async function verifyConfig(
   for (const targetId of ['rpi-5', 'rpi-2'] as const) {
     const target = targets[targetId];
     const profile = input.config.profiles[targetId];
+    const sourceConfigEvidencePath = `evidence/target-setup/${targetId}.source.config`;
     if (!profile
       || profile.target !== targetId
       || profile.environment !== target.environment
       || profile.selectedTarget !== target.openwrtTarget
       || profile.profile !== target.profile
       || profile.rootfsPartSize !== target.rootfsPartSize
+      || profile.sourceConfigEvidencePath !== sourceConfigEvidencePath
       || !SHA256.test(profile.sourceSha256)
       || !SHA256.test(profile.resolvedSha256)) {
       fail('TARGET_CONFIG_MISMATCH', 'Task 15 profile configuration evidence is incomplete or contradictory', { target: targetId });
@@ -920,13 +957,13 @@ async function verifyConfig(
       || (persistedProfile as Record<string, unknown>).selectedTarget !== profile.selectedTarget
       || (persistedProfile as Record<string, unknown>).profile !== profile.profile
       || (persistedProfile as Record<string, unknown>).rootfsPartSize !== profile.rootfsPartSize
+      || (persistedProfile as Record<string, unknown>).sourceConfigEvidencePath !== sourceConfigEvidencePath
       || (persistedProfile as Record<string, unknown>).sourceSha256 !== profile.sourceSha256
       || (persistedProfile as Record<string, unknown>).resolvedSha256 !== profile.resolvedSha256) {
       fail('TARGET_CONFIG_MISMATCH', 'Task 15 target-setup evidence differs from verification input', {
         target: targetId,
       });
     }
-    const sourceConfigEvidencePath = `evidence/target-setup/${targetId}.source.config`;
     const resolvedConfigPath = `conf/${target.environment}/.config`;
     const sourceHash = await workspace.withJobFile(
       sourceConfigEvidencePath,
@@ -961,6 +998,13 @@ async function verifyConfig(
     ...input.config,
     profiles: Object.freeze(verifiedProfiles),
   });
+}
+
+export async function verifyTargetSetupConfiguration(
+  input: TargetSetupVerificationInput,
+): Promise<VerificationResult['config']> {
+  const targets = validateTargets(input);
+  return withWorkspace(input.workspace, (workspace) => verifyConfig(workspace, input, targets));
 }
 
 function verifyManifestConfigSymbols(
@@ -1236,33 +1280,134 @@ async function verifyHelperLayout(
 
 function verifyFirstBootSeed(contents: string): void {
   const activeSeed = activeShellLines(contents);
-  const sourceAssignments = activeSeed.filter((line) => line.startsWith('SRC='));
-  const destinationAssignments = activeSeed.filter((line) => line.startsWith('DST='));
-  const sqliteAssignments = activeSeed.filter((line) => line.startsWith('SQLITE_SRC='));
+  type ShellFrame = {
+    readonly kind: 'if' | 'for';
+    readonly header: string;
+    branch: 'then' | 'else';
+  };
+  type ShellStatement = {
+    readonly line: string;
+    readonly index: number;
+    readonly context: readonly string[];
+  };
+  const frames: ShellFrame[] = [];
+  const statements: ShellStatement[] = [];
+  const context = (): readonly string[] => frames.map(
+    (frame) => `${frame.kind}:${frame.header}:${frame.branch}`,
+  );
+  for (const [index, line] of activeSeed.entries()) {
+    if (line.includes('<<')
+      || /^(?:function\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{/u.test(line)
+      || /^(?:case|select|while|until)\b/u.test(line)
+      || line === '{'
+      || line === '}'
+      || /^elif\b/u.test(line)) {
+      fail('ROOTFS_CONTENT_FAILED', 'first-boot seed contains an unsupported control structure');
+    }
+    if (line === 'else') {
+      const frame = frames.at(-1);
+      if (!frame || frame.kind !== 'if' || frame.branch !== 'then') {
+        fail('ROOTFS_CONTENT_FAILED', 'first-boot seed has an invalid else branch');
+      }
+      frame.branch = 'else';
+      continue;
+    }
+    if (line === 'fi') {
+      if (frames.at(-1)?.kind !== 'if') {
+        fail('ROOTFS_CONTENT_FAILED', 'first-boot seed has an unbalanced if block');
+      }
+      frames.pop();
+      continue;
+    }
+    if (line === 'done') {
+      if (frames.at(-1)?.kind !== 'for') {
+        fail('ROOTFS_CONTENT_FAILED', 'first-boot seed has an unbalanced loop');
+      }
+      frames.pop();
+      continue;
+    }
+    const statement = Object.freeze({ line, index, context: Object.freeze(context()) });
+    statements.push(statement);
+    if (/^if .+;\s*then$/u.test(line)) {
+      frames.push({ kind: 'if', header: line, branch: 'then' });
+    } else if (/^for .+;\s*do$/u.test(line)) {
+      frames.push({ kind: 'for', header: line, branch: 'then' });
+    }
+  }
+  if (frames.length !== 0) {
+    fail('ROOTFS_CONTENT_FAILED', 'first-boot seed has an unbalanced control structure');
+  }
+  const exits = statements.filter(({ line }) => /^exit(?:\s|$)/u.test(line));
+  const lastStatement = statements.at(-1);
+  if (exits.length !== 1
+    || exits[0]?.line !== 'exit 0'
+    || exits[0]?.context.length !== 0
+    || exits[0]?.index !== lastStatement?.index) {
+    fail('ROOTFS_CONTENT_FAILED', 'first-boot seed does not have one final reachable successful exit');
+  }
+  const atTopLevel = (statement: ShellStatement): boolean => statement.context.length === 0;
+  const sourceAssignments = statements.filter(({ line }) => line.startsWith('SRC='));
+  const destinationAssignments = statements.filter(({ line }) => line.startsWith('DST='));
+  const sqliteAssignments = statements.filter(({ line }) => line.startsWith('SQLITE_SRC='));
   if (sourceAssignments.length !== 1
-    || sourceAssignments[0] !== 'SRC=/usr/share/node-red'
+    || sourceAssignments[0]?.line !== 'SRC=/usr/share/node-red'
+    || sourceAssignments[0]?.context.length !== 0
     || destinationAssignments.length !== 1
-    || destinationAssignments[0] !== 'DST=/srv/node-red'
+    || destinationAssignments[0]?.line !== 'DST=/srv/node-red'
+    || destinationAssignments[0]?.context.length !== 0
     || sqliteAssignments.length !== 1
-    || sqliteAssignments[0] !== 'SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3') {
+    || sqliteAssignments[0]?.line !== 'SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3'
+    || sqliteAssignments[0]?.context.length !== 0) {
     fail('ROOTFS_CONTENT_FAILED', 'first-boot seed source or destination assignments are not exact');
   }
-  const moduleLoop = /^for module in\s+([^;]+);\s*do$/u.exec(
-    activeSeed.find((line) => line.startsWith('for module in ')) ?? '',
-  );
+  const moduleLoops = statements.filter(({ line }) => line.startsWith('for module in '));
+  const moduleLoopStatement = moduleLoops[0];
+  const moduleLoop = /^for module in\s+([^;]+);\s*do$/u.exec(moduleLoopStatement?.line ?? '');
   const seededHelpers = moduleLoop?.[1]?.trim().split(/\s+/u) ?? [];
-  const requiredActions = [
-    'if [ -d "$SRC/$module" ]; then',
-    'rm -rf "$DST/$module" "$DST/node_modules/$module"',
-    'cp -a "$SRC/$module" "$DST/$module"',
-    'cp -a "$SRC/$module" "$DST/node_modules/$module"',
-    'if [ -d "$SQLITE_SRC" ]; then',
-    'ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"',
-  ];
-  if (seededHelpers.length !== ALL_HELPERS.length
+  if (moduleLoops.length !== 1
+    || !moduleLoopStatement
+    || !atTopLevel(moduleLoopStatement)
+    || seededHelpers.length !== ALL_HELPERS.length
     || [...seededHelpers].sort().join('\0') !== [...ALL_HELPERS].sort().join('\0')
-    || requiredActions.some((action) => activeSeed.filter((line) => line === action).length !== 1)) {
+  ) {
     fail('ROOTFS_CONTENT_FAILED', 'first-boot seed does not copy every shipped helper into runtime node_modules');
+  }
+  const helperIf = 'if [ -d "$SRC/$module" ]; then';
+  const sqliteCleanup = 'rm -rf "$DST/node_modules/sqlite3" "$DST/node_modules/node-red-node-sqlite"';
+  const helperContext = Object.freeze([
+    `for:${moduleLoopStatement.line}:then`,
+    `if:${helperIf}:then`,
+  ]);
+  const sqliteIf = 'if [ -d "$SQLITE_SRC" ]; then';
+  const sqliteContext = Object.freeze([`if:${sqliteIf}:then`]);
+  const expectedActions = new Map<string, readonly string[]>([
+    [sqliteCleanup, Object.freeze([])],
+    [helperIf, Object.freeze([`for:${moduleLoopStatement.line}:then`])],
+    ['rm -rf "$DST/$module" "$DST/node_modules/$module"', helperContext],
+    ['cp -a "$SRC/$module" "$DST/$module"', helperContext],
+    ['cp -a "$SRC/$module" "$DST/node_modules/$module"', helperContext],
+    [sqliteIf, Object.freeze([])],
+    ['ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"', sqliteContext],
+  ]);
+  for (const [line, expectedContext] of expectedActions) {
+    const matches = statements.filter((statement) => statement.line === line);
+    if (matches.length !== 1
+      || matches[0]!.context.length !== expectedContext.length
+      || matches[0]!.context.some((frame, index) => frame !== expectedContext[index])) {
+      fail('ROOTFS_CONTENT_FAILED', 'first-boot seed action is absent or unreachable', {
+        action: line,
+      });
+    }
+  }
+  if (sourceAssignments[0]!.index >= moduleLoopStatement.index
+    || destinationAssignments[0]!.index >= moduleLoopStatement.index
+    || destinationAssignments[0]!.index >= statements.find(({ line }) => line === sqliteCleanup)!.index
+    || statements.find(({ line }) => line === sqliteCleanup)!.index >= moduleLoopStatement.index
+    || moduleLoopStatement.index >= sqliteAssignments[0]!.index
+    || sqliteAssignments[0]!.index >= statements.find(
+      ({ line }) => line === 'ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"',
+    )!.index) {
+    fail('ROOTFS_CONTENT_FAILED', 'first-boot seed actions are not in executable order');
   }
 }
 
@@ -1288,6 +1433,9 @@ function activeShellLines(contents: string): readonly string[] {
       if (character === '"' && !singleQuoted) doubleQuoted = !doubleQuoted;
       if (character === '#' && !singleQuoted && !doubleQuoted) break;
       active += character;
+    }
+    if (singleQuoted || doubleQuoted || escaped) {
+      fail('ROOTFS_CONTENT_FAILED', 'first-boot seed contains an unsupported multiline shell token');
     }
     const line = active.trim();
     if (line.length > 0) lines.push(line);
@@ -1369,19 +1517,17 @@ async function verifyNginxRoutes(
   workspace: WorkspaceReader,
   rootfs: string,
 ): Promise<Readonly<Record<(typeof ROUTES)[number], boolean>>> {
-  const nginxRoot = `${rootfs}/etc/nginx`;
-  const activeLines: string[] = [];
-  await workspace.walkTree(nginxRoot, async (_path, file) => {
-    activeLines.push(...(await file.read(MAX_TEXT_BYTES))
-      .toString('utf8')
+  const activeLines = await parseTextFile(
+    workspace,
+    `${rootfs}/etc/nginx/conf.d/node-red.locations`,
+    (contents) => contents
       .split(/\r?\n/u)
       .map((line) => line.replace(/#.*$/u, '').trim())
-      .filter((line) => line.length > 0));
-  });
+      .filter((line) => line.length > 0),
+  );
   const observations = Object.fromEntries(ROUTES.map((route) => {
-    const escaped = route.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-    const declaration = new RegExp(`^location\\s+(?:(?:\\^~|=)\\s+)?${escaped}\\s*\\{`, 'u');
-    const present = activeLines.some((line) => declaration.test(line));
+    const declaration = `location ${route} {`;
+    const present = activeLines.filter((line) => line === declaration).length === 1;
     return [route, present];
   })) as Record<(typeof ROUTES)[number], boolean>;
   const missing = ROUTES.find((route) => !observations[route]);
@@ -1410,14 +1556,21 @@ async function verifyRootfs(
   }
   const nodeResolution = await verifyNodeResolution(input);
 
+  const sourceGui = 'web/react-gui/build';
   const feedGui = 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui';
   const rootfsGui = `${rootfs}/usr/lib/node-red/gui`;
+  const sourceTitle = await parseTextFile(workspace, `${sourceGui}/index.html`, titleOf);
   const feedTitle = await parseTextFile(workspace, `${feedGui}/index.html`, titleOf);
   const rootfsTitle = await parseTextFile(workspace, `${rootfsGui}/index.html`, titleOf);
-  if (feedTitle !== rootfsTitle) fail('ROOTFS_CONTENT_FAILED', 'rootfs GUI title differs from the frontend feed mirror');
+  if (sourceTitle !== feedTitle || feedTitle !== rootfsTitle) {
+    fail('ROOTFS_CONTENT_FAILED', 'source, feed, and rootfs GUI titles differ');
+  }
+  const sourceGuiSha256 = await hashTree(workspace, sourceGui);
   const feedGuiSha256 = await hashTree(workspace, feedGui);
   const rootfsGuiSha256 = await hashTree(workspace, rootfsGui);
-  if (feedGuiSha256 !== rootfsGuiSha256) fail('ROOTFS_CONTENT_FAILED', 'rootfs GUI payload differs from the frontend feed mirror');
+  if (sourceGuiSha256 !== feedGuiSha256 || feedGuiSha256 !== rootfsGuiSha256) {
+    fail('ROOTFS_CONTENT_FAILED', 'source, feed, and rootfs GUI payloads differ');
+  }
 
   const sourceProfile = `conf/${input.target.environment}/files`;
   const sourceFlows = `${sourceProfile}/usr/share/flows.json`;
@@ -1455,13 +1608,19 @@ async function verifyRootfs(
     nginxRoutes: await verifyNginxRoutes(workspace, rootfs),
     gui: Object.freeze({
       title: rootfsTitle,
-      sha256: rootfsGuiSha256,
-      feedSha256: feedGuiSha256,
+      sourceGuiTreeSha256: sourceGuiSha256,
+      feedGuiTreeSha256: feedGuiSha256,
+      rootfsGuiTreeSha256: rootfsGuiSha256,
     }),
     criticalHashes: Object.freeze({
       flows: Object.freeze({ sourceSha256: sourceFlowsSha256, rootfsSha256: rootfsFlowsSha256, matched: true as const }),
       database: Object.freeze({ sourceSha256: sourceDatabaseSha256, rootfsSha256: rootfsDatabaseSha256, matched: true as const }),
-      gui: Object.freeze({ sourceSha256: feedGuiSha256, rootfsSha256: rootfsGuiSha256, matched: true as const }),
+      gui: Object.freeze({
+        sourceGuiTreeSha256: sourceGuiSha256,
+        feedGuiTreeSha256: feedGuiSha256,
+        rootfsGuiTreeSha256: rootfsGuiSha256,
+        matched: true as const,
+      }),
     }),
     helpers,
     nodeResolution: Object.freeze(nodeResolution),

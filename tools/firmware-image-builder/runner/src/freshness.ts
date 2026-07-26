@@ -2,7 +2,7 @@ import { constants as fsConstants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { createConnection } from 'node:net';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import type { JobRecord } from '../../api/src/store.js';
 import {
@@ -14,6 +14,7 @@ import {
 import { canonicalInstant, normalizeJson } from '../../api/src/validation.js';
 import {
   withStateRootSnapshot,
+  type PathAuthorityDependencies,
   type StateRootAuthority,
 } from '../../config/load.js';
 
@@ -75,21 +76,97 @@ function procChild(parent: FileHandle, basename: string): string {
   return join('/proc/self/fd', String(parent.fd), basename);
 }
 
-async function assertRoot(
-  rootPath: string,
-  root: FileHandle,
-  device: number,
-  inode: number,
+interface DirectoryBinding {
+  readonly handle: FileHandle;
+  readonly parent: FileHandle | null;
+  readonly basename: string | null;
+  readonly device: number;
+  readonly inode: number;
+}
+
+async function bindDirectory(
+  handle: FileHandle,
+  parent: FileHandle | null,
+  basename: string | null,
+): Promise<DirectoryBinding> {
+  const info = await handle.stat();
+  if (!info.isDirectory()) throw new Error('freshness authority component is not a directory');
+  return Object.freeze({
+    handle,
+    parent,
+    basename,
+    device: info.dev,
+    inode: info.ino,
+  });
+}
+
+async function assertDirectoryBindings(
+  bindings: readonly DirectoryBinding[],
+  dependencies: PathAuthorityDependencies,
 ): Promise<void> {
-  const [named, held] = await Promise.all([lstat(rootPath), root.stat()]);
-  if (named.isSymbolicLink()
-    || !named.isDirectory()
-    || !held.isDirectory()
-    || named.dev !== device
-    || named.ino !== inode
-    || held.dev !== device
-    || held.ino !== inode) {
-    throw new Error('freshness state-root binding changed');
+  const leaf = bindings.at(-1);
+  if (!leaf) throw new Error('freshness authority has no directory bindings');
+  await dependencies.beforeDirectoryAccess?.(leaf.handle);
+  for (const binding of bindings) {
+    const held = await binding.handle.stat();
+    if (!held.isDirectory()
+      || held.dev !== binding.device
+      || held.ino !== binding.inode) {
+      throw new Error('freshness absolute ancestor binding changed');
+    }
+    if (binding.parent !== null && binding.basename !== null) {
+      const named = await lstat(procChild(binding.parent, binding.basename));
+      if (named.isSymbolicLink()
+        || !named.isDirectory()
+        || named.dev !== binding.device
+        || named.ino !== binding.inode) {
+        throw new Error('freshness absolute ancestor binding changed');
+      }
+    }
+  }
+}
+
+async function openStateRootChain(
+  rootPath: string,
+  dependencies: PathAuthorityDependencies,
+  expectedDevice: number,
+  expectedInode: number,
+): Promise<{
+  readonly root: FileHandle;
+  readonly bindings: readonly DirectoryBinding[];
+  readonly close: () => Promise<void>;
+}> {
+  const handles: FileHandle[] = [];
+  const bindings: DirectoryBinding[] = [];
+  try {
+    if (!rootPath.startsWith('/') || resolve(rootPath) !== rootPath) {
+      throw new Error('freshness state-root path is not canonical and absolute');
+    }
+    let current = await open('/', DIR_FLAGS);
+    handles.push(current);
+    bindings.push(await bindDirectory(current, null, null));
+    for (const basename of rootPath.split('/').filter((segment) => segment.length > 0)) {
+      await assertDirectoryBindings(bindings, dependencies);
+      const next = await open(procChild(current, basename), DIR_FLAGS);
+      handles.push(next);
+      bindings.push(await bindDirectory(next, current, basename));
+      current = next;
+    }
+    const stateRoot = bindings.at(-1)!;
+    if (stateRoot.device !== expectedDevice || stateRoot.inode !== expectedInode) {
+      throw new Error('freshness state-root identity changed');
+    }
+    await assertDirectoryBindings(bindings, dependencies);
+    return Object.freeze({
+      root: stateRoot.handle,
+      bindings: Object.freeze(bindings),
+      close: async () => {
+        for (const handle of [...handles].reverse()) await handle.close().catch(() => undefined);
+      },
+    });
+  } catch (error) {
+    for (const handle of handles.reverse()) await handle.close().catch(() => undefined);
+    throw new Error('freshness absolute ancestor binding could not be established', { cause: error });
   }
 }
 
@@ -130,12 +207,18 @@ export function createApiFreshnessSocketClient(
   }
   return Object.freeze({
     signal: async (jobId: string): Promise<void> => {
-      await withStateRootSnapshot(stateRoot, async ({ snapshot }) => {
-        const root = await open(snapshot.path, DIR_FLAGS);
+      await withStateRootSnapshot(stateRoot, async ({ snapshot, dependencies }) => {
+        const authority = await openStateRootChain(
+          snapshot.path,
+          dependencies,
+          snapshot.device,
+          snapshot.inode,
+        );
         try {
-          await assertRoot(snapshot.path, root, snapshot.device, snapshot.inode);
-          const socketPath = procChild(root, FRESHNESS_SOCKET_BASENAME);
+          await assertDirectoryBindings(authority.bindings, dependencies);
+          const socketPath = procChild(authority.root, FRESHNESS_SOCKET_BASENAME);
           const before = await lstat(socketPath);
+          await assertDirectoryBindings(authority.bindings, dependencies);
           const expectedUid = typeof process.getuid === 'function' ? process.getuid() : before.uid;
           if (!before.isSocket()
             || before.isSymbolicLink()
@@ -148,8 +231,9 @@ export function createApiFreshnessSocketClient(
             encodeFreshnessSignal(jobId),
             timeoutMs,
           );
+          await assertDirectoryBindings(authority.bindings, dependencies);
           const after = await lstat(socketPath);
-          await assertRoot(snapshot.path, root, snapshot.device, snapshot.inode);
+          await assertDirectoryBindings(authority.bindings, dependencies);
           if (!after.isSocket()
             || after.dev !== before.dev
             || after.ino !== before.ino
@@ -158,8 +242,9 @@ export function createApiFreshnessSocketClient(
             throw new Error('freshness API socket identity changed');
           }
           parseFreshnessAck(response);
+          await assertDirectoryBindings(authority.bindings, dependencies);
         } finally {
-          await root.close();
+          await authority.close();
         }
       });
     },
