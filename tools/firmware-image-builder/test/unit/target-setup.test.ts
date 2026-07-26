@@ -23,14 +23,17 @@ import type { TargetManifest } from '../../manifest/schema.js';
 import {
   APPROVED_ROOTFS_SCRIPT_SHA256,
   ROOTFS_PADDING_PATCH,
+  createLockedTargetSetupOperations,
   decideRootfsPatchState,
   resolveTargetSetup,
   type ApiPreparedFeed,
   type LockedTargetSetupOperations,
   type OfflineFeedPreparation,
+  type TargetSetupCommandExecutor,
   type TargetSetupOperationId,
 } from '../../runner/src/target-setup.js';
 import type { CommandResult } from '../../runner/src/command-executor.js';
+import { createEvidenceWriter } from '../../runner/src/evidence.js';
 import { createOperationDefinition } from '../../runner/src/operation-registry.js';
 
 const manifest = loadManifest(new URL('../../manifest/targets.json', import.meta.url).pathname).manifest;
@@ -217,6 +220,10 @@ interface OperationsOptions {
   readonly sourceConfigOverride?: Readonly<Partial<Record<TargetManifest['id'], string>>>;
   readonly resolvedConfigOverride?: Readonly<Partial<Record<TargetManifest['id'], string>>>;
   readonly mutateRustAfter?: 'update-feeds' | 'install-feeds';
+  readonly mutateFeedAfter?: {
+    readonly operation: 'update-feeds' | 'install-feeds';
+    readonly name: 'luci' | 'routing';
+  };
   readonly afterOperation?: (operationId: TargetSetupOperationId) => Promise<void>;
 }
 
@@ -226,16 +233,15 @@ async function removeIfPresent(path: string): Promise<void> {
 
 function operations(fixture: Fixture, options: OperationsOptions = {}): {
   readonly runner: LockedTargetSetupOperations;
+  readonly execute: TargetSetupCommandExecutor;
   readonly calls: Array<{ readonly operationId: TargetSetupOperationId; readonly argv: readonly string[]; readonly environment: string }>;
 } {
   const calls: Array<{ operationId: TargetSetupOperationId; argv: readonly string[]; environment: string }> = [];
   let activeTarget = targets[0]!;
-  const runner: LockedTargetSetupOperations = {
-    async run(operationId, definition, workspaceCapability) {
-      const workspace = workspaceCapability.descriptorPath;
+  const execute: TargetSetupCommandExecutor = async ({ operationId, definition, cwd: workspace }) => {
       const environment = definition.argv.find((value) => value.startsWith('ENV='))?.slice(4) ?? activeTarget.environment;
       calls.push({ operationId, argv: definition.argv, environment });
-      if (options.commandFailure?.operation === operationId) return { ...options.commandFailure.result, workspaceCapability };
+      if (options.commandFailure?.operation === operationId) return options.commandFailure.result;
       if (operationId === 'activate-target') {
         activeTarget = targets.find((target) => target.environment === environment)!;
         await removeIfPresent(join(workspace, 'openwrt/feeds'));
@@ -261,6 +267,9 @@ function operations(fixture: Fixture, options: OperationsOptions = {}): {
       if (operationId === 'update-feeds') {
         await symlink('../../feeds/chirpstack-openwrt-feed', join(workspace, 'openwrt/feeds/chirpstack'));
         if (options.mutateRustAfter === operationId) await writeFile(join(workspace, 'openwrt/feeds/packages/lang/rust/Makefile'), 'changed\n');
+        if (options.mutateFeedAfter?.operation === operationId) {
+          await writeFile(join(workspace, 'openwrt/feeds', options.mutateFeedAfter.name, 'fixture.txt'), 'changed\n');
+        }
       }
       if (operationId === 'install-feeds') {
         const parent = join(workspace, 'openwrt/package/feeds/chirpstack');
@@ -273,16 +282,19 @@ function operations(fixture: Fixture, options: OperationsOptions = {}): {
           await symlink(options.wrongLink === packageName ? '../../../feeds/chirpstack/apps/node-red' : targetPath, join(parent, packageName));
         }
         if (options.mutateRustAfter === operationId) await writeFile(join(workspace, 'openwrt/feeds/packages/lang/rust/Makefile'), 'changed\n');
+        if (options.mutateFeedAfter?.operation === operationId) {
+          await writeFile(join(workspace, 'openwrt/feeds', options.mutateFeedAfter.name, 'fixture.txt'), 'changed\n');
+        }
       }
       if (operationId === 'resolve-config') {
         const resolved = options.resolvedConfigOverride?.[activeTarget.id] ?? configFor(activeTarget);
         await writeFile(join(workspace, 'openwrt/.config'), resolved);
       }
       await options.afterOperation?.(operationId);
-      return { ...result(definition.argv), workspaceCapability };
-    },
+      return result(definition.argv);
   };
-  return { runner, calls };
+  const runner = createLockedTargetSetupOperations(execute);
+  return { runner, execute, calls };
 }
 
 function input(fixture: Fixture, runner: LockedTargetSetupOperations, target = targets[0]!) {
@@ -294,6 +306,7 @@ function input(fixture: Fixture, runner: LockedTargetSetupOperations, target = t
     targets,
     preparedFeeds: fixture.preparedFeeds,
     operations: runner,
+    evidenceWriter: createEvidenceWriter({ stateRoot: fixture.stateRoot }),
     requestId: 'req-target-setup',
   } as const;
 }
@@ -324,6 +337,31 @@ describe('target setup', () => {
     expect(setup.config.profiles['rpi-2'].resolvedSha256).toMatch(/^[0-9a-f]{64}$/u);
     expect(await readlink(join(fixture.workspace, 'conf/.config'))).toBe(`${targets[0]!.environment}/.config`);
     expect(await readFile(join(fixture.workspace, 'openwrt/feeds/packages/lang/rust/Makefile'), 'utf8')).toContain('download-ci-llvm=false');
+  });
+
+  it('publishes exact source config bytes for both profiles before resolution', async () => {
+    const fixture = await authorityFixture();
+    const { runner } = operations(fixture, {
+      resolvedConfigOverride: {
+        'rpi-5': `${configFor(targets[0]!)}# resolved\n`,
+        'rpi-2': `${configFor(targets[1]!)}# resolved\n`,
+      },
+    });
+
+    const setup = await resolveTargetSetup(input(fixture, runner));
+
+    for (const target of targets) {
+      const bytes = await readFile(join(
+        fixture.statePath,
+        'jobs',
+        fixture.jobId,
+        'evidence',
+        'target-setup',
+        `${target.id}.source.config`,
+      ));
+      expect(bytes.toString('utf8')).toBe(configFor(target));
+      expect(setup.config.profiles[target.id].sourceSha256).toBe(sha256(bytes));
+    }
   });
 
   it.each([
@@ -365,19 +403,19 @@ describe('target setup', () => {
     await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({ code, operationId });
   });
 
-  it('rejects operation evidence that reconstructs instead of returning the held capability', async () => {
+  it('rejects a caller-forged operation adapter before invoking it', async () => {
     const fixture = await authorityFixture();
-    const base = operations(fixture);
+    let invoked = false;
     const runner: LockedTargetSetupOperations = {
-      async run(operationId, definition, capability) {
-        const command = await base.runner.run(operationId, definition, capability);
-        return { ...command, workspaceCapability: { ...capability } };
+      async run(_operationId, definition) {
+        invoked = true;
+        return result(definition.argv);
       },
     };
     await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({
-      code: 'PATCH_STATE_AMBIGUOUS',
-      operationId: 'activate-target',
+      code: 'WORKTREE_CREATE_FAILED',
     });
+    expect(invoked).toBe(false);
   });
 
   it('accepts the exact approved rootfs implementation in the named reverse-applicable state', async () => {
@@ -422,6 +460,49 @@ describe('target setup', () => {
       series: ['evil.patch', ROOTFS_PADDING_PATCH],
       applied: ['evil.patch'],
       output: `Applying ${ROOTFS_PADDING_PATCH}\nReversed (or previously applied) patch detected: evil.patch\n`,
+      rootfsScript: approved,
+    })).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
+  });
+
+  it('does not collapse a nested evil patch to the approved patch basename', async () => {
+    const approved = await readFile(rootfsFixture, 'utf8');
+    expect(() => decideRootfsPatchState({
+      series: ['nested/evil.patch', ROOTFS_PADDING_PATCH],
+      applied: ['nested/evil.patch'],
+      output: [
+        'Applying nested/evil.patch',
+        'Reversed (or previously applied) patch detected: nested/evil.patch',
+        `Applying ${ROOTFS_PADDING_PATCH}`,
+      ].join('\n'),
+      rootfsScript: approved,
+    })).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
+  });
+
+  it.each([
+    ['traversal', ['../evil.patch', ROOTFS_PADDING_PATCH]],
+    ['duplicate entry', [ROOTFS_PADDING_PATCH, ROOTFS_PADDING_PATCH]],
+    ['basename collision', ['nested/evil.patch', 'other/evil.patch', ROOTFS_PADDING_PATCH]],
+  ])('rejects a patch series with %s', async (_case, series) => {
+    const approved = await readFile(rootfsFixture, 'utf8');
+    expect(() => decideRootfsPatchState({
+      series,
+      applied: series,
+      output: '',
+      rootfsScript: approved,
+    })).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
+  });
+
+  it.each([
+    `Applying ${ROOTFS_PADDING_PATCH}\nReversed (or previously applied) patch detected\n`,
+    `Applying unknown.patch\nReversed (or previously applied) patch detected: unknown.patch\n`,
+    `Applying nested/evil.patch\nApplying ${ROOTFS_PADDING_PATCH}\nReversed (or previously applied) patch detected: nested/evil.patch\n`,
+    `Applying patch: ${ROOTFS_PADDING_PATCH}\nReversed (or previously applied) patch detected: ${ROOTFS_PADDING_PATCH}\n`,
+  ])('rejects unnamed, unknown, reordered, or unparseable reverse output', async (output) => {
+    const approved = await readFile(rootfsFixture, 'utf8');
+    expect(() => decideRootfsPatchState({
+      series: ['nested/evil.patch', ROOTFS_PADDING_PATCH],
+      applied: ['nested/evil.patch'],
+      output,
       rootfsScript: approved,
     })).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
   });
@@ -565,6 +646,21 @@ describe('target setup', () => {
     expect(calls.at(-1)?.operationId).toBe(operationId);
   });
 
+  it.each([
+    ['update-feeds', 'luci'],
+    ['install-feeds', 'routing'],
+  ] as const)('rejects a non-Rust %s tree changed after %s', async (operationId, name) => {
+    const fixture = await authorityFixture();
+    const { runner, calls } = operations(fixture, {
+      mutateFeedAfter: { operation: operationId, name },
+    });
+    await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({
+      code: 'FEED_INSTALL_FAILED',
+      operationId,
+    });
+    expect(calls.at(-1)?.operationId).toBe(operationId);
+  });
+
   it('rejects a symlinked job workspace', async () => {
     const fixture = await authorityFixture();
     const external = join(fixture.root, 'external-workspace');
@@ -578,20 +674,20 @@ describe('target setup', () => {
   it('binds every registered operation to one held workspace descriptor capability', async () => {
     const fixture = await authorityFixture();
     const base = operations(fixture);
-    const capabilities: unknown[] = [];
-    const runner: LockedTargetSetupOperations = {
-      async run(operationId, definition, capability) {
-        capabilities.push(capability);
-        if (!capability || !capability.descriptorPath.startsWith(`/proc/${process.pid}/fd/`)) {
+    const requests: Parameters<TargetSetupCommandExecutor>[0][] = [];
+    const runner = createLockedTargetSetupOperations(async (request) => {
+        requests.push(request);
+        if (!request.cwd.startsWith(`/proc/${process.pid}/fd/`)) {
           throw new Error('operation has no held workspace capability');
         }
-        return base.runner.run(operationId, definition, capability);
-      },
-    };
+        return base.execute(request);
+    });
 
     await expect(resolveTargetSetup(input(fixture, runner))).resolves.toMatchObject({ target: 'rpi-5' });
-    expect(capabilities).toHaveLength(10);
-    expect(new Set(capabilities).size).toBe(1);
+    expect(requests).toHaveLength(10);
+    expect(new Set(requests.map((request) => request.cwd)).size).toBe(1);
+    expect(new Set(requests.map((request) => `${request.workspaceIdentity.device}:${request.workspaceIdentity.inode}`)).size).toBe(1);
+    expect(requests.every((request) => request.network === 'none')).toBe(true);
   });
 
   it('cannot redirect an operation when the named workspace is replaced at the command boundary', async () => {
@@ -599,16 +695,14 @@ describe('target setup', () => {
     const base = operations(fixture);
     const heldWorkspace = `${fixture.workspace}.held`;
     let replaced = false;
-    const runner: LockedTargetSetupOperations = {
-      async run(operationId, definition, capability) {
+    const runner = createLockedTargetSetupOperations(async (request) => {
         if (!replaced) {
           replaced = true;
           await rename(fixture.workspace, heldWorkspace);
           await mkdir(join(fixture.workspace, 'openwrt'), { recursive: true });
         }
-        return base.runner.run(operationId, definition, capability);
-      },
-    };
+        return base.execute(request);
+    });
 
     await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({ code: 'WORKTREE_CREATE_FAILED' });
     expect(replaced).toBe(true);
@@ -622,16 +716,14 @@ describe('target setup', () => {
     const stateParent = join(fixture.root, 'state-home');
     const heldStateParent = `${stateParent}.held`;
     let replaced = false;
-    const runner: LockedTargetSetupOperations = {
-      async run(operationId, definition, capability) {
+    const runner = createLockedTargetSetupOperations(async (request) => {
         if (!replaced) {
           replaced = true;
           await rename(stateParent, heldStateParent);
           await mkdir(fixture.statePath, { recursive: true });
         }
-        return base.runner.run(operationId, definition, capability);
-      },
-    };
+        return base.execute(request);
+    });
 
     await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({ code: 'WORKTREE_CREATE_FAILED' });
     expect(replaced).toBe(true);

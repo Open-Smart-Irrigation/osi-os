@@ -365,6 +365,18 @@ function inspectImage(stdout: string, options: DockerExecutorOptions): ImageIden
 
 function noLabel(stdout: string): boolean { return stdout.split(/\r?\n/u).every((line) => line.trim().length === 0); }
 
+const OFFLINE_OPERATION_IDS = new Set([
+  'activate-target',
+  'copy-feed-config',
+  'update-feeds',
+  'install-feeds',
+  'resolve-config',
+]);
+
+function operationNetworkMode(options: DockerExecutorOptions): 'bridge' | 'none' {
+  return OFFLINE_OPERATION_IDS.has(options.operationId) ? 'none' : 'bridge';
+}
+
 function validateStartResult(result: CommandResult, expectedArgv: readonly string[]): { readonly startedAt: string; readonly finishedAt: string } {
   if (!Array.isArray(result.argv) || JSON.stringify(result.argv) !== JSON.stringify(expectedArgv) || typeof result.stdout !== 'string' || typeof result.stderr !== 'string' || typeof result.timedOut !== 'boolean' || (typeof result.exitCode !== 'number' && result.exitCode !== null) || (typeof result.signal !== 'string' && result.signal !== null)) fail('Docker start returned an incomplete command result');
   const startedAt = canonicalInstant(result.startedAt, 'Docker start startedAt');
@@ -391,7 +403,7 @@ function validateInspection(actual: DockerInspection, createdId: string, image: 
   if (actual.id !== createdId || actual.name !== options.containerName || actual.image !== options.imageReference || actual.imageId !== image.imageId) fail('Docker container identity or image proof does not match the locked definition');
   if (!exactRecord(actual.labels, labels)) fail('Docker container labels do not match');
   if (actual.mounts.length !== 1 || actual.mounts[0]!.type !== 'bind' || actual.mounts[0]!.source !== options.worktreePath || actual.mounts[0]!.destination !== '/workdir' || actual.mounts[0]!.readOnly) fail('Docker container mount does not match the locked worktree bind');
-  if (actual.user !== `${options.uid}:${options.gid}` || actual.workingDir !== definition.workingDirectory || actual.networkMode !== 'bridge') fail('Docker container user, workdir, or network does not match');
+  if (actual.user !== `${options.uid}:${options.gid}` || actual.workingDir !== definition.workingDirectory || actual.networkMode !== operationNetworkMode(options)) fail('Docker container user, workdir, or network does not match');
   if (JSON.stringify(actual.capDrop) !== JSON.stringify(['ALL']) || actual.capAdd.length !== 0 || actual.privileged || actual.devices.length !== 0 || actual.securityOpt.length !== 1 || actual.securityOpt[0] !== 'no-new-privileges:true' || actual.readonlyRootfs || actual.pidsLimit !== 4096 || JSON.stringify(actual.ulimits) !== JSON.stringify([{ name: 'nofile', soft: 1024, hard: 4096 }])) fail('Docker container security does not match the locked definition');
   if (!exactRecord(actual.environment, env(sourceEpoch))) fail('Docker container environment is not the exact fixed environment');
   if (phase === 'created') {
@@ -427,7 +439,7 @@ function runner(options: DockerExecutorOptions, build: (snapshot: RunnerLeaseSna
 }
 
 function security(options: DockerExecutorOptions, definition: OperationDefinition): JsonObject {
-  return { capDrop: ['ALL'], capAdd: [], devices: [], sockets: [], privileged: false, noNewPrivileges: true, pidsLimit: 4096, ulimit: 'nofile=1024:4096', user: `${options.uid}:${options.gid}`, workdir: definition.workingDirectory, network: 'bridge' };
+  return { capDrop: ['ALL'], capAdd: [], devices: [], sockets: [], privileged: false, noNewPrivileges: true, pidsLimit: 4096, ulimit: 'nofile=1024:4096', user: `${options.uid}:${options.gid}`, workdir: definition.workingDirectory, network: operationNetworkMode(options) };
 }
 
 function containerCommand(options: DockerExecutorOptions, definition: OperationDefinition, sourceEpoch: string, snapshot: RunnerLeaseSnapshot, lifecycle: 'created' | 'started' | 'stopped', id: string, labels: JsonObject, inspection: JsonObject, occurredAt: string, createdAt: string, startedAt?: string | null, stoppedAt?: string | null): RunnerWriteCommand {
@@ -561,7 +573,7 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
       let persisted = false;
       try {
         const labels: JsonObject = { [JOB_LABEL]: options.jobId, [MANIFEST_LABEL]: options.manifestSha256 };
-        const created = await runDocker(options, ['create', `--name=${options.containerName}`, `--label=${JOB_LABEL}=${options.jobId}`, `--label=${MANIFEST_LABEL}=${options.manifestSha256}`, `--mount=type=bind,source=${options.worktreePath},destination=/workdir`, `--user=${options.uid}:${options.gid}`, `--workdir=${definition.workingDirectory}`, '--network=bridge', '--platform=linux/amd64', '--cap-drop=ALL', '--security-opt=no-new-privileges:true', '--pids-limit=4096', '--ulimit=nofile=1024:4096', '--pull=never', ...Object.entries(env(sourceEpoch)).map(([key, value]) => `--env=${key}=${value}`), options.imageReference, ...argv]);
+        const created = await runDocker(options, ['create', `--name=${options.containerName}`, `--label=${JOB_LABEL}=${options.jobId}`, `--label=${MANIFEST_LABEL}=${options.manifestSha256}`, `--mount=type=bind,source=${options.worktreePath},destination=/workdir`, `--user=${options.uid}:${options.gid}`, `--workdir=${definition.workingDirectory}`, `--network=${operationNetworkMode(options)}`, '--platform=linux/amd64', '--cap-drop=ALL', '--security-opt=no-new-privileges:true', '--pids-limit=4096', '--ulimit=nofile=1024:4096', '--pull=never', ...Object.entries(env(sourceEpoch)).map(([key, value]) => `--env=${key}=${value}`), options.imageReference, ...argv]);
         id = containerId(requireSuccess(created, 'Docker create'));
         const inspectedResult = await inspectContainer(options, definition, id, image, sourceEpoch, 'created');
         const inspected = inspectedResult.inspection;

@@ -15,6 +15,7 @@ const migrationRegistry = [
   { version: 2, filename: '002_recovery.sql', sha256: '1f5a01693e1b0ced9fc5676af008099a842d0ecbac709f4b7587a7af6fb878bd' },
   { version: 3, filename: '003_freshness_and_logs.sql', sha256: 'f6bbe6bb8471828c4486e7a29615d8238bc58e5369deaafae39e03560a656d29' },
   { version: 4, filename: '004_source_preparation.sql', sha256: 'c23610252d741721f9e815af35909a0bc80ffd91e226c5ec6f92bb635a57bcd9' },
+  { version: 5, filename: '005_offline_feed_preparation.sql', sha256: '469d8d3cbd1c16cbd2e3b604f3a688726546387d8974f57c5b0c6254c95f7c02' },
 ] as const;
 
 export const MIGRATION_REGISTRY: readonly MigrationDescriptor[] = Object.freeze(

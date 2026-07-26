@@ -101,6 +101,15 @@ function realisticCreatedRawInspection(): Record<string, unknown> {
   return value;
 }
 
+function rawInspectionWithNetwork(
+  state: 'created' | 'exited',
+  networkMode: 'bridge' | 'none',
+): Record<string, unknown> {
+  const value = state === 'created' ? realisticCreatedRawInspection() : realisticRawInspection();
+  (value.HostConfig as Record<string, unknown>).NetworkMode = networkMode;
+  return value;
+}
+
 function options(executor: DockerCommandExecutor, overrides: Partial<DockerExecutorOptions> & { readonly ownership?: { readonly runnerWrite: DockerExecutorOptions['ownership']['runnerWrite']; readonly getJob?: () => ReturnType<typeof emptyIdentityForTest> } } = {}): DockerExecutorOptions {
   const { ownership: suppliedOwnership, store: suppliedStore, ...rest } = overrides;
   const activeIdentity = { ...emptyIdentityForTest() };
@@ -285,6 +294,27 @@ describe('DockerExecutor', () => {
     expect(Date.parse(lifecycleCommands[1]!.occurredAt)).toBeGreaterThanOrEqual(Date.parse(lifecycleCommands[1]!.startedAt!));
     expect(Date.parse(lifecycleCommands[2]!.occurredAt)).toBeGreaterThanOrEqual(Date.parse(lifecycleCommands[2]!.stoppedAt!));
     expect(evidenceValue?.inspection).toEqual(expect.objectContaining({ imagePreflight: expect.objectContaining({ architecture: 'amd64', os: 'linux' }), container: expect.objectContaining({ rootImageId: `sha256:${'e'.repeat(64)}` }) }));
+  });
+
+  it('runs target-setup feed operations with Docker network disabled', async () => {
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}\n' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { stdout: '' },
+      { stdout: `${'1'.repeat(64)}\n` },
+      { stdout: JSON.stringify(rawInspectionWithNetwork('created', 'none')) },
+      { stdout: '', startedAt: '2026-07-24T10:00:01.500Z', finishedAt: '2026-07-24T10:00:02.500Z' },
+      { stdout: JSON.stringify(rawInspectionWithNetwork('exited', 'none')) },
+      { stdout: '' },
+      { exitCode: 1, stderr: 'No such container\n' },
+      { stdout: '' },
+    ]);
+
+    await createDockerExecutor(options(docker, { operationId: 'update-feeds' })).run();
+
+    const create = docker.calls.find((call) => call[1] === 'create');
+    expect(create).toContain('--network=none');
+    expect(create).not.toContain('--network=bridge');
   });
 
   it('rejects every inspected security or identity mismatch before starting the container', async () => {

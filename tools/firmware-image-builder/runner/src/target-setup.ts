@@ -29,6 +29,7 @@ import {
   type OperationDefinition,
 } from './operation-registry.js';
 import type { CommandResult } from './command-executor.js';
+import type { EvidencePublication, EvidenceWriter } from './evidence.js';
 import type {
   ApiPreparedFeed,
   OfflineFeedPreparation,
@@ -65,10 +66,6 @@ export interface HeldWorkspaceCapability {
   readonly containerWorkingDirectory: '/workdir';
 }
 
-export interface WorkspaceBoundCommandResult extends CommandResult {
-  readonly workspaceCapability: HeldWorkspaceCapability;
-}
-
 export class TargetSetupError extends BuilderError {
   constructor(
     code: BuilderErrorCode,
@@ -102,7 +99,48 @@ export interface LockedTargetSetupOperations {
     operationId: TargetSetupOperationId,
     definition: OperationDefinition,
     workspace: HeldWorkspaceCapability,
-  ) => Promise<WorkspaceBoundCommandResult>;
+  ) => Promise<CommandResult>;
+}
+
+export interface TargetSetupCommandRequest {
+  readonly operationId: TargetSetupOperationId;
+  readonly definition: OperationDefinition;
+  readonly cwd: string;
+  readonly containerWorkingDirectory: '/workdir';
+  readonly workspaceIdentity: {
+    readonly device: number;
+    readonly inode: number;
+  };
+  readonly network: 'none';
+}
+
+export type TargetSetupCommandExecutor = (request: TargetSetupCommandRequest) => Promise<CommandResult>;
+
+const LOCKED_OPERATION_ADAPTERS = new WeakSet<object>();
+
+export function createLockedTargetSetupOperations(execute: TargetSetupCommandExecutor): LockedTargetSetupOperations {
+  if (typeof execute !== 'function') throw new TypeError('target setup command executor is required');
+  const operations: LockedTargetSetupOperations = Object.freeze({
+    run(
+      operationId: TargetSetupOperationId,
+      definition: OperationDefinition,
+      workspace: HeldWorkspaceCapability,
+    ) {
+      return execute(Object.freeze({
+        operationId,
+        definition,
+        cwd: workspace.descriptorPath,
+        containerWorkingDirectory: workspace.containerWorkingDirectory,
+        workspaceIdentity: Object.freeze({
+          device: workspace.device,
+          inode: workspace.inode,
+        }),
+        network: 'none' as const,
+      }));
+    },
+  });
+  LOCKED_OPERATION_ADAPTERS.add(operations);
+  return operations;
 }
 
 export interface RootfsPatchStateInput {
@@ -139,6 +177,7 @@ interface ProfileResolution {
   readonly profile: string;
   readonly rootfsPartSize: number;
   readonly sourceSha256: string;
+  readonly sourceConfigEvidencePath: string;
   readonly resolvedSha256: string;
   readonly patchDecision: RootfsPatchDecision;
 }
@@ -498,8 +537,34 @@ async function readLink(
   }
 }
 
-function parsePatchNames(lines: readonly string[]): string[] {
-  return lines.map((line) => line.trim()).filter((line) => line.length > 0 && !line.startsWith('#'));
+function validPatchPath(value: string): boolean {
+  return (
+    value.length > 0
+    && value.length <= 1024
+    && !value.startsWith('/')
+    && !value.includes('\\')
+    && !/[\0-\x20\x7f]/u.test(value)
+    && value.endsWith('.patch')
+    && value.split('/').every((segment) => (
+      segment.length > 0
+      && segment !== '.'
+      && segment !== '..'
+      && /^[A-Za-z0-9][A-Za-z0-9._+-]*$/u.test(segment)
+    ))
+  );
+}
+
+function parsePatchNames(lines: readonly string[]): string[] | null {
+  const names: string[] = [];
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.startsWith('#')) continue;
+    if (!validPatchPath(line)) return null;
+    names.push(line);
+  }
+  const basenames = names.map((name) => posix.basename(name));
+  if (new Set(names).size !== names.length || new Set(basenames).size !== basenames.length) return null;
+  return names;
 }
 
 function hasExactList(actual: readonly string[], expected: readonly string[]): boolean {
@@ -512,16 +577,32 @@ function isCanonicalInstant(value: unknown): value is string {
   return Number.isFinite(time) && new Date(time).toISOString() === value;
 }
 
-function reversedPatchAttributions(output: string): readonly (string | null)[] {
-  const attributions: Array<string | null> = [];
+function reversedPatchAttributions(
+  output: string,
+  series: readonly string[],
+): readonly string[] | null {
+  const attributions: string[] = [];
   let applyingPatch: string | null = null;
+  let applyingIndex = -1;
   for (const rawLine of output.split(/\r?\n/u)) {
     const line = rawLine.trim();
-    const applying = /^Applying(?: patch)? ([A-Za-z0-9][A-Za-z0-9._+-]*\.patch)$/u.exec(line);
-    if (applying) applyingPatch = applying[1]!;
+    if (line.length === 0) continue;
+    const applying = /^Applying(?: patch)? ([^\s]+)$/u.exec(line);
+    if (applying) {
+      const path = applying[1]!;
+      const index = series.indexOf(path);
+      if (!validPatchPath(path) || index < 0 || index <= applyingIndex) return null;
+      applyingPatch = path;
+      applyingIndex = index;
+      continue;
+    }
+    if (/^Applying\b/u.test(line)) return null;
     if (!/revers(?:ed|e)|previously applied/iu.test(line)) continue;
-    const named = line.match(/[A-Za-z0-9][A-Za-z0-9._+-]*\.patch/gu) ?? [];
-    attributions.push(named.length === 1 ? named[0]! : named.length === 0 ? applyingPatch : null);
+    const reversed = /^Reversed \(or previously applied\) patch detected: ([^\s]+)$/u.exec(line);
+    if (!reversed || applyingPatch === null) return null;
+    const path = reversed[1]!;
+    if (!validPatchPath(path) || !series.includes(path) || path !== applyingPatch) return null;
+    attributions.push(path);
   }
   return Object.freeze(attributions);
 }
@@ -530,14 +611,18 @@ export function decideRootfsPatchState(input: RootfsPatchStateInput, requestId =
   const series = parsePatchNames(input.series);
   const applied = parsePatchNames(input.applied);
   if (
-    series.length === 0
+    series === null
+    || applied === null
+    || series.length === 0
     || !series.includes(ROOTFS_PADDING_PATCH)
-    || new Set(series).size !== series.length
     || sha256(input.rootfsScript) !== APPROVED_ROOTFS_SCRIPT_SHA256
   ) {
     fail('PATCH_STATE_AMBIGUOUS', 'The rootfs padding patch series or implementation hash is not approved.', requestId);
   }
-  const reversed = reversedPatchAttributions(input.output);
+  const reversed = reversedPatchAttributions(input.output, series);
+  if (reversed === null) {
+    fail('PATCH_STATE_AMBIGUOUS', 'OpenWrt patch output cannot be bound to the exact ordered patch series.', requestId);
+  }
   const expectedApplied = series.filter((patch) => patch !== ROOTFS_PADDING_PATCH);
   if (reversed.length === 1 && reversed[0] === ROOTFS_PADDING_PATCH && hasExactList(applied, expectedApplied)) return 'already-present';
   if (reversed.length > 0) {
@@ -902,6 +987,98 @@ async function verifyRustTransform(
   }
 }
 
+async function captureMaterializedFeedHashes(
+  openwrt: HeldDirectory,
+  prepared: readonly PreparedFeedAuthority[],
+  dependencies: PathAuthorityDependencies,
+  requestId: string,
+): Promise<ReadonlyMap<string, string>> {
+  const feeds = await openBoundDirectory(
+    openwrt,
+    'feeds',
+    dependencies,
+    requestId,
+    'FEED_INSTALL_FAILED',
+    'The materialized feed directory is unavailable or unsafe.',
+  );
+  try {
+    const hashes = new Map<string, string>();
+    for (const source of prepared) {
+      const code = source.record.name === 'packages' ? 'RUST_BOOTSTRAP_UNAVAILABLE' : 'FEED_INSTALL_FAILED';
+      const destination = await openBoundDirectory(
+        feeds,
+        source.record.name,
+        dependencies,
+        requestId,
+        code,
+        `The materialized ${source.record.name} feed is unavailable or unsafe.`,
+      );
+      try {
+        hashes.set(source.record.name, await hashFeedTree(destination, dependencies, requestId, code));
+      } finally {
+        await destination.handle.close().catch(() => undefined);
+      }
+    }
+    return hashes;
+  } finally {
+    await feeds.handle.close().catch(() => undefined);
+  }
+}
+
+async function verifyPreparedAndMaterializedFeeds(
+  openwrt: HeldDirectory,
+  prepared: readonly PreparedFeedAuthority[],
+  expectedDestinationHashes: ReadonlyMap<string, string>,
+  dependencies: PathAuthorityDependencies,
+  requestId: string,
+  operationId: 'update-feeds' | 'install-feeds',
+): Promise<void> {
+  const feeds = await openBoundDirectory(
+    openwrt,
+    'feeds',
+    dependencies,
+    requestId,
+    'FEED_INSTALL_FAILED',
+    `The materialized feed directory is unavailable after ${operationId}.`,
+  );
+  try {
+    for (const source of prepared) {
+      const code = source.record.name === 'packages' ? 'RUST_BOOTSTRAP_UNAVAILABLE' : 'FEED_INSTALL_FAILED';
+      const sourceHash = await hashFeedTree(source.directory, dependencies, requestId, code);
+      if (sourceHash !== source.record.treeSha256) {
+        fail(code, `The API-prepared ${source.record.name} feed changed after ${operationId}.`, requestId, {
+          feed: source.record.name,
+          expected: source.record.treeSha256,
+          observed: sourceHash,
+        }, operationId);
+      }
+      const destination = await openBoundDirectory(
+        feeds,
+        source.record.name,
+        dependencies,
+        requestId,
+        code,
+        `The materialized ${source.record.name} feed is unavailable after ${operationId}.`,
+      );
+      try {
+        const destinationHash = await hashFeedTree(destination, dependencies, requestId, code);
+        const expected = expectedDestinationHashes.get(source.record.name);
+        if (expected === undefined || destinationHash !== expected) {
+          fail(code, `The materialized ${source.record.name} feed changed after ${operationId}.`, requestId, {
+            feed: source.record.name,
+            expected: expected ?? null,
+            observed: destinationHash,
+          }, operationId);
+        }
+      } finally {
+        await destination.handle.close().catch(() => undefined);
+      }
+    }
+  } finally {
+    await feeds.handle.close().catch(() => undefined);
+  }
+}
+
 async function patchState(
   workspace: HeldDirectory,
   activationOutput: string,
@@ -955,20 +1132,32 @@ function checkConfig(
   }
 }
 
-async function readProfileConfig(
+async function readProfileConfigBytes(
   workspace: HeldDirectory,
   target: TargetManifest,
   dependencies: PathAuthorityDependencies,
   requestId: string,
-): Promise<string> {
-  return readTextPath(
+): Promise<Buffer> {
+  const parent = await openDirectoryPath(
     workspace,
-    ['conf', target.environment, '.config'],
+    ['conf', target.environment],
     dependencies,
     requestId,
     'TARGET_CONFIG_MISMATCH',
     `The ${target.id} profile config is unavailable or unsafe.`,
   );
+  try {
+    return await readRegularFile(
+      parent.directory,
+      '.config',
+      dependencies,
+      requestId,
+      'TARGET_CONFIG_MISMATCH',
+      `The ${target.id} profile config is unavailable or unsafe.`,
+    );
+  } finally {
+    await closeHandles(parent.handles);
+  }
 }
 
 async function verifySelectedConfigLinks(
@@ -1060,7 +1249,7 @@ async function runOperation(
   requestId: string,
 ): Promise<CommandResult> {
   await verifyWorkspaceBinding();
-  let result: WorkspaceBoundCommandResult | undefined;
+  let result: CommandResult | undefined;
   let operationError: unknown;
   try {
     result = await operations.run(operationId, definition, workspace);
@@ -1076,14 +1265,12 @@ async function runOperation(
     result.exitCode !== 0
     || result.signal !== null
     || result.timedOut !== false
-    || result.workspaceCapability !== workspace
     || !hasExactList(result.argv, definition.argv)
   ) {
     fail(operationFailureCode(operationId), operationFailureMessage(operationId), requestId, {
       exitCode: result.exitCode,
       signal: result.signal,
       timedOut: result.timedOut,
-      workspaceCapabilityMatches: result.workspaceCapability === workspace,
       argvMatches: hasExactList(result.argv, definition.argv),
     }, operationId);
   }
@@ -1130,6 +1317,7 @@ export interface TargetSetupInput {
   readonly targets: readonly TargetManifest[];
   readonly preparedFeeds: OfflineFeedPreparation;
   readonly operations: LockedTargetSetupOperations;
+  readonly evidenceWriter: Pick<EvidenceWriter, 'writeTargetSetupSourceConfig'>;
   readonly requestId: string;
 }
 
@@ -1152,6 +1340,9 @@ export interface TargetSetupResult {
 
 export async function resolveTargetSetup(input: TargetSetupInput): Promise<TargetSetupResult> {
   const jobId = assertJobId(input.jobId, input.requestId);
+  if (!input.operations || !LOCKED_OPERATION_ADAPTERS.has(input.operations as object)) {
+    fail('WORKTREE_CREATE_FAILED', 'Target setup requires the module-owned descriptor-bound operation adapter.', input.requestId);
+  }
   if (!SHA40.test(input.sourceSha)) {
     fail('FEED_INSTALL_FAILED', 'The persisted source SHA is not an exact Git commit identity.', input.requestId);
   }
@@ -1271,6 +1462,37 @@ export async function resolveTargetSetup(input: TargetSetupInput): Promise<Targe
         await assertBindings(bindings, dependencies, input.requestId);
         const activation = await runOperation(input.operations, 'activate-target', definitions.get('activate-target')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
         await assertBindings(bindings, dependencies, input.requestId);
+        await verifySelectedConfigLinks(workspace, target, dependencies, input.requestId);
+        const sourceConfigBytes = await readProfileConfigBytes(workspace, target, dependencies, input.requestId);
+        const sourceConfig = sourceConfigBytes.toString('utf8');
+        checkConfig(sourceConfig, target, input.requestId, `${target.id} source`);
+        const sourceConfigSha256 = sha256(sourceConfigBytes);
+        const sourceConfigEvidencePath = `evidence/target-setup/${target.id}.source.config`;
+        let sourceConfigPublication: EvidencePublication;
+        try {
+          sourceConfigPublication = await input.evidenceWriter.writeTargetSetupSourceConfig({
+            jobId,
+            targetId: target.id,
+            contents: sourceConfigBytes,
+          });
+        } catch (error) {
+          fail('TARGET_CONFIG_MISMATCH', `The ${target.id} source config could not be published durably before mutation.`, input.requestId, {
+            target: target.id,
+            cause: error instanceof Error ? error.message : String(error),
+          });
+        }
+        if (
+          sourceConfigPublication.path !== `jobs/${jobId}/${sourceConfigEvidencePath}`
+          || sourceConfigPublication.sha256 !== sourceConfigSha256
+        ) {
+          fail('TARGET_CONFIG_MISMATCH', `The ${target.id} source config evidence does not match the held bytes.`, input.requestId, {
+            target: target.id,
+            expectedPath: `jobs/${jobId}/${sourceConfigEvidencePath}`,
+            observedPath: sourceConfigPublication.path,
+            expectedSha256: sourceConfigSha256,
+            observedSha256: sourceConfigPublication.sha256,
+          });
+        }
 
         await runOperation(input.operations, 'copy-feed-config', definitions.get('copy-feed-config')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
         await assertBindings(bindings, dependencies, input.requestId);
@@ -1284,21 +1506,34 @@ export async function resolveTargetSetup(input: TargetSetupInput): Promise<Targe
         const patchDecision = await patchState(workspace, `${activation.stdout}\n${activation.stderr}`, input.requestId, dependencies);
         const preparedEvidence = await materializeFeeds(openwrt, prepared, dependencies, input.requestId);
         const rust = await rustFeed(openwrt, input.requestId, dependencies);
+        const materializedFeedHashes = await captureMaterializedFeedHashes(openwrt, prepared, dependencies, input.requestId);
 
         await runOperation(input.operations, 'update-feeds', definitions.get('update-feeds')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
+        await verifyPreparedAndMaterializedFeeds(
+          openwrt,
+          prepared,
+          materializedFeedHashes,
+          dependencies,
+          input.requestId,
+          'update-feeds',
+        );
         await verifyRustTransform(openwrt, rust, input.requestId, dependencies, 'update-feeds');
         await assertBindings(bindings, dependencies, input.requestId);
         await runOperation(input.operations, 'install-feeds', definitions.get('install-feeds')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
+        await verifyPreparedAndMaterializedFeeds(
+          openwrt,
+          prepared,
+          materializedFeedHashes,
+          dependencies,
+          input.requestId,
+          'install-feeds',
+        );
         await verifyRustTransform(openwrt, rust, input.requestId, dependencies, 'install-feeds');
         const installedPackages = await verifyLinks(workspace, localFeed, input.requestId, dependencies);
 
-        await verifySelectedConfigLinks(workspace, target, dependencies, input.requestId);
-        const sourceConfig = await readProfileConfig(workspace, target, dependencies, input.requestId);
-        checkConfig(sourceConfig, target, input.requestId, `${target.id} source`);
-        const sourceConfigSha256 = sha256(sourceConfig);
         await runOperation(input.operations, 'resolve-config', definitions.get('resolve-config')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
         await verifySelectedConfigLinks(workspace, target, dependencies, input.requestId);
-        const resolvedConfig = await readProfileConfig(workspace, target, dependencies, input.requestId);
+        const resolvedConfig = (await readProfileConfigBytes(workspace, target, dependencies, input.requestId)).toString('utf8');
         checkConfig(resolvedConfig, target, input.requestId, `${target.id} resolved`, 'resolve-config');
         const profile = expectedConfigValue(resolvedConfig, 'CONFIG_TARGET_PROFILE', 'string');
         const rootfsPartSize = expectedConfigValue(resolvedConfig, 'CONFIG_TARGET_ROOTFS_PARTSIZE', 'number');
@@ -1312,6 +1547,7 @@ export async function resolveTargetSetup(input: TargetSetupInput): Promise<Targe
           profile,
           rootfsPartSize,
           sourceSha256: sourceConfigSha256,
+          sourceConfigEvidencePath,
           resolvedSha256: sha256(resolvedConfig),
           patchDecision,
         });

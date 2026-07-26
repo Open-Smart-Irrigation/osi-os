@@ -219,6 +219,12 @@ async function defaultExecFile(
   }
 }
 
+const GIT_COMMAND_AUTHORITIES = new WeakSet<object>();
+
+export function isGitCommandAuthority(value: unknown): value is GitCommand {
+  return typeof value === 'object' && value !== null && GIT_COMMAND_AUTHORITIES.has(value);
+}
+
 export class GitCommand {
   readonly #executable: string;
   readonly #execFile: GitExecFile;
@@ -230,6 +236,7 @@ export class GitCommand {
     this.#execFile = options.execFile ?? defaultExecFile;
     this.#sshAuthSock = options.sshAuthSock === undefined ? (process.env.SSH_AUTH_SOCK ?? null) : options.sshAuthSock;
     this.#socketFileSystem = Object.freeze({ lstat: options.sshAuthSocketFs?.lstat ?? lstat, realpath: options.sshAuthSocketFs?.realpath ?? realpath });
+    GIT_COMMAND_AUTHORITIES.add(this);
   }
 
   async run(argv: readonly string[], options: GitRunOptions = {}): Promise<GitProcessResult> {
@@ -295,6 +302,9 @@ export class GitCommand {
       return Object.freeze({
         ...FIXED_GIT_ENV,
         GIT_ALLOW_PROTOCOL: allowedProtocols,
+        GIT_CONFIG_COUNT: '2',
+        GIT_CONFIG_KEY_1: 'http.followRedirects',
+        GIT_CONFIG_VALUE_1: 'false',
       });
     }
     const socket = await this.#validateSshAuthSocket();

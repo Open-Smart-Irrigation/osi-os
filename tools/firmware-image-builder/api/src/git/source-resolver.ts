@@ -11,7 +11,7 @@ import {
 import type { FileHandle } from 'node:fs/promises';
 import { join, posix } from 'node:path';
 
-import { GitCommand, GitCommandError, type GitProcessResult, type GitRunOptions } from './git-command.js';
+import { GitCommand, GitCommandError, isGitCommandAuthority, type GitProcessResult, type GitRunOptions } from './git-command.js';
 import {
   CANONICAL_FETCH_REFSPEC,
   EFFECTIVE_ORIGIN_CONFIG_COMMANDS,
@@ -41,6 +41,23 @@ const DIR_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O
 const READ_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
 const SAFE_JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const PREPARED_FEED_NAMES = Object.freeze(['packages', 'luci', 'routing'] as const);
+export const OPENWRT_OFFLINE_FEED_POLICY = Object.freeze([
+  Object.freeze({
+    name: 'packages' as const,
+    location: 'https://git.openwrt.org/feed/packages.git',
+    commit: 'd8cd30f4e281d6853b3de134c4f147a807583e43',
+  }),
+  Object.freeze({
+    name: 'luci' as const,
+    location: 'https://git.openwrt.org/project/luci.git',
+    commit: '2ac26e56cc55102cb10e7b0867c2b78e0f6d5fd8',
+  }),
+  Object.freeze({
+    name: 'routing' as const,
+    location: 'https://git.openwrt.org/feed/routing.git',
+    commit: 'c9b636698881059a3c981032770968f5a98ff201',
+  }),
+] as const);
 const SOURCE_COMPONENTS = Object.freeze([
   Object.freeze({
     path: 'feeds/chirpstack-openwrt-feed',
@@ -247,6 +264,12 @@ function validateCommitMetadata(sha: string, commitTime: string, authorName: str
   }
 }
 
+function canonicalCommitTime(value: string): string {
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) throw new SourceResolverError('SOURCE_NOT_COMMIT');
+  return canonicalInstant(parsed.toISOString(), 'source commit time');
+}
+
 function immutable<T extends object>(value: T): Readonly<T> {
   return Object.freeze(value);
 }
@@ -261,6 +284,45 @@ interface PinnedFeed {
   readonly name: (typeof PREPARED_FEED_NAMES)[number];
   readonly location: string;
   readonly commit: string;
+}
+
+function validateApprovedFeedLocation(name: PinnedFeed['name'], value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+  }
+  const approved = OPENWRT_OFFLINE_FEED_POLICY.find((feed) => feed.name === name);
+  if (
+    approved === undefined
+    || value !== approved.location
+    || parsed.href !== approved.location
+    || parsed.protocol !== 'https:'
+    || parsed.username !== ''
+    || parsed.password !== ''
+    || parsed.port !== ''
+    || parsed.search !== ''
+    || parsed.hash !== ''
+    || parsed.hostname !== 'git.openwrt.org'
+  ) {
+    throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+  }
+  return value;
+}
+
+function validateSubmodulePath(value: unknown): string {
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.startsWith('/')
+    || value.includes('\\')
+    || hasControl(value)
+    || value.split('/').some((part) => part.length === 0 || part === '.' || part === '..')
+  ) {
+    throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+  }
+  return value;
 }
 
 function descriptorPath(handle: FileHandle, name?: string): string {
@@ -296,6 +358,55 @@ async function assertHeldDirectory(directory: HeldDirectory, dependencies: PathA
     }
   } finally {
     await current.close();
+  }
+}
+
+async function assertHeldChain(
+  directory: HeldDirectory,
+  dependencies: PathAuthorityDependencies,
+): Promise<void> {
+  const chain: HeldDirectory[] = [];
+  let current: HeldDirectory | null = directory;
+  while (current !== null) {
+    chain.push(current);
+    current = current.parent;
+  }
+  for (const entry of chain.reverse()) {
+    if (!(await entry.handle.stat()).isDirectory()) {
+      throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    }
+    await assertHeldDirectory(entry, dependencies);
+  }
+}
+
+async function openAbsoluteDirectoryChain(
+  absolutePath: string,
+  dependencies: PathAuthorityDependencies,
+): Promise<{
+  readonly directory: HeldDirectory;
+  readonly handles: readonly FileHandle[];
+}> {
+  if (
+    !absolutePath.startsWith('/')
+    || absolutePath.includes('\0')
+    || absolutePath.split('/').some((segment) => segment === '.' || segment === '..')
+  ) {
+    throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+  }
+  const handles: FileHandle[] = [];
+  try {
+    const rootHandle = await open('/', DIR_FLAGS);
+    handles.push(rootHandle);
+    let directory: HeldDirectory = { handle: rootHandle, parent: null, name: null };
+    for (const segment of absolutePath.split('/').filter(Boolean)) {
+      directory = await openHeldDirectory(directory, segment, dependencies);
+      handles.push(directory.handle);
+    }
+    await assertHeldChain(directory, dependencies);
+    return { directory, handles: Object.freeze(handles) };
+  } catch (error) {
+    for (const handle of handles.reverse()) await handle.close().catch(() => undefined);
+    throw error;
   }
 }
 
@@ -431,7 +542,8 @@ function parsePinnedFeeds(contents: string): readonly PinnedFeed[] {
     if (!PREPARED_FEED_NAMES.includes(name as PinnedFeed['name']) || feeds.has(name)) {
       throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
     }
-    feeds.set(name, immutable({ name: name as PinnedFeed['name'], location: match[2]!, commit: match[3]! }));
+    const location = validateApprovedFeedLocation(name as PinnedFeed['name'], match[2]!);
+    feeds.set(name, immutable({ name: name as PinnedFeed['name'], location, commit: match[3]! }));
   }
   if (
     feeds.size !== PREPARED_FEED_NAMES.length
@@ -532,6 +644,100 @@ export function validateRecursiveSourcePreparation(preparation: RecursiveSourceP
   }
 }
 
+export function validateOfflineFeedPreparation(
+  preparation: OfflineFeedPreparation,
+  jobIdInput: string,
+  sourceShaInput: string,
+): OfflineFeedPreparation {
+  try {
+    const jobId = typeof jobIdInput === 'string' && SAFE_JOB_ID.test(jobIdInput)
+      ? jobIdInput
+      : (() => { throw new SourceResolverError('SOURCE_PREPARATION_FAILED'); })();
+    const sourceSha = validateSha(sourceShaInput);
+    const value = normalizeJson(preparation, 'offlineFeedPreparation');
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    }
+    const normalized = value as unknown as OfflineFeedPreparation;
+    if (
+      Object.keys(normalized).sort().join('\0') !== 'boundary\0feeds\0jobId\0networkPolicy\0preparedAt\0schemaVersion\0sourceSha'
+      || normalized.schemaVersion !== 1
+      || normalized.boundary !== 'api-prepared-pinned-feeds-v1'
+      || normalized.networkPolicy !== 'runner-offline'
+      || normalized.jobId !== jobId
+      || normalized.sourceSha !== sourceSha
+      || !Array.isArray(normalized.feeds)
+      || normalized.feeds.length !== OPENWRT_OFFLINE_FEED_POLICY.length
+    ) {
+      throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    }
+    const preparedAt = canonicalInstant(normalized.preparedAt, 'offlineFeedPreparation.preparedAt');
+    const feeds = OPENWRT_OFFLINE_FEED_POLICY.map((expected, index) => {
+      const feed = normalized.feeds[index];
+      if (
+        !feed
+        || Object.keys(feed).sort().join('\0') !== 'clean\0commit\0detached\0location\0name\0recursiveSubmoduleStatusSha256\0recursiveSubmodules\0recursiveSubmodulesPrepared\0treeSha256'
+        || feed.name !== expected.name
+        || validateApprovedFeedLocation(expected.name, feed.location) !== expected.location
+        || feed.detached !== true
+        || feed.clean !== true
+        || feed.recursiveSubmodulesPrepared !== true
+        || !SHA_PATTERN.test(feed.commit)
+        || !/^[0-9a-f]{64}$/u.test(feed.treeSha256)
+        || !/^[0-9a-f]{64}$/u.test(feed.recursiveSubmoduleStatusSha256)
+        || !Array.isArray(feed.recursiveSubmodules)
+      ) {
+        throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+      }
+      const recursiveSubmodules = feed.recursiveSubmodules.map((submodule) => {
+        if (
+          !submodule
+          || typeof submodule !== 'object'
+          || Array.isArray(submodule)
+          || Object.keys(submodule).sort().join('\0') !== 'commit\0path'
+          || !SHA_PATTERN.test(submodule.commit)
+        ) {
+          throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+        }
+        return immutable({
+          path: validateSubmodulePath(submodule.path),
+          commit: submodule.commit,
+        });
+      });
+      const paths = recursiveSubmodules.map(({ path }) => path);
+      if (
+        new Set(paths).size !== paths.length
+        || paths.some((path, pathIndex) => pathIndex > 0 && path <= paths[pathIndex - 1]!)
+        || feed.recursiveSubmoduleStatusSha256 !== hashRecursiveSubmoduleAttestation(recursiveSubmodules)
+      ) {
+        throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+      }
+      return immutable({
+        name: expected.name,
+        location: expected.location,
+        commit: feed.commit,
+        detached: true as const,
+        clean: true as const,
+        recursiveSubmodulesPrepared: true as const,
+        recursiveSubmodules: Object.freeze(recursiveSubmodules),
+        recursiveSubmoduleStatusSha256: feed.recursiveSubmoduleStatusSha256,
+        treeSha256: feed.treeSha256,
+      });
+    });
+    return immutable({
+      schemaVersion: 1 as const,
+      boundary: 'api-prepared-pinned-feeds-v1' as const,
+      networkPolicy: 'runner-offline' as const,
+      jobId,
+      sourceSha,
+      preparedAt,
+      feeds: Object.freeze(feeds),
+    });
+  } catch {
+    throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+  }
+}
+
 export class SourceResolver {
   readonly #repositoryPath: string;
   readonly #git: GitExecutor;
@@ -543,7 +749,11 @@ export class SourceResolver {
     if (typeof options.repositoryPath !== 'string' || !options.repositoryPath.startsWith('/') || hasControl(options.repositoryPath)) throw new TypeError('Repository path must be an absolute path without control characters.');
     this.#repositoryPath = options.repositoryPath;
     this.#git = options.git ?? new GitCommand();
-    this.#feedGit = options.feedGit ?? this.#git;
+    if (options.feedGit !== undefined && !isGitCommandAuthority(options.feedGit)) {
+      throw new TypeError('Offline feed preparation requires the module-owned Git command authority.');
+    }
+    this.#feedGit = options.feedGit
+      ?? (isGitCommandAuthority(this.#git) ? this.#git : new GitCommand());
     this.#now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -622,13 +832,13 @@ export class SourceResolver {
       return await withStateRootSnapshot(stateRoot, async ({ snapshot, dependencies }) => {
         const handles: FileHandle[] = [];
         try {
-          const rootHandle = await open(snapshot.path, DIR_FLAGS);
-          handles.push(rootHandle);
-          const rootStats = await rootHandle.stat();
+          const rootChain = await openAbsoluteDirectoryChain(snapshot.path, dependencies);
+          handles.push(...rootChain.handles);
+          const root = rootChain.directory;
+          const rootStats = await root.handle.stat();
           if (!rootStats.isDirectory() || rootStats.dev !== snapshot.device || rootStats.ino !== snapshot.inode) {
             throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
           }
-          const root: HeldDirectory = { handle: rootHandle, parent: null, name: null };
           const jobs = await createHeldDirectory(root, 'jobs', dependencies, false);
           handles.push(jobs.handle);
           const job = await createHeldDirectory(jobs, jobId, dependencies, false);
@@ -638,7 +848,8 @@ export class SourceResolver {
           const prepared: ApiPreparedFeed[] = [];
 
           for (const feed of feeds) {
-            await assertHeldDirectory(preparedRoot, dependencies);
+            const verifyPreparedRoot = () => assertHeldChain(preparedRoot, dependencies);
+            await verifyPreparedRoot();
             await this.#runPreparedGit([
               'clone',
               '--quiet',
@@ -649,9 +860,10 @@ export class SourceResolver {
               '--',
               feed.location,
               feed.name,
-            ], descriptorPath(preparedRoot.handle));
+            ], descriptorPath(preparedRoot.handle), verifyPreparedRoot);
             const checkout = await openHeldDirectory(preparedRoot, feed.name, dependencies);
             handles.push(checkout.handle);
+            const verifyCheckout = () => assertHeldChain(checkout, dependencies);
             await this.#runPreparedGit([
               'checkout',
               '--quiet',
@@ -659,8 +871,8 @@ export class SourceResolver {
               '--force',
               '--no-recurse-submodules',
               feed.commit,
-            ], descriptorPath(checkout.handle));
-            await this.#runPreparedGit(['submodule', 'sync', '--recursive'], descriptorPath(checkout.handle));
+            ], descriptorPath(checkout.handle), verifyCheckout);
+            await this.#runPreparedGit(['submodule', 'sync', '--recursive'], descriptorPath(checkout.handle), verifyCheckout);
             await this.#runPreparedGit([
               'submodule',
               'update',
@@ -668,34 +880,34 @@ export class SourceResolver {
               '--init',
               '--recursive',
               '--force',
-            ], descriptorPath(checkout.handle));
+            ], descriptorPath(checkout.handle), verifyCheckout);
 
             const head = (await this.#runPreparedGit([
               'rev-parse',
               '--verify',
               '--end-of-options',
               'HEAD^{commit}',
-            ], descriptorPath(checkout.handle))).stdout;
+            ], descriptorPath(checkout.handle), verifyCheckout)).stdout;
             if (head !== `${feed.commit}\n`) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
             const origin = (await this.#runPreparedGit([
               'remote',
               'get-url',
               '--all',
               REMOTE_NAME,
-            ], descriptorPath(checkout.handle))).stdout;
+            ], descriptorPath(checkout.handle), verifyCheckout)).stdout;
             if (origin !== `${feed.location}\n`) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
             const status = (await this.#runPreparedGit([
               'status',
               '--porcelain=v1',
               '--untracked-files=all',
               '--ignore-submodules=none',
-            ], descriptorPath(checkout.handle))).stdout;
+            ], descriptorPath(checkout.handle), verifyCheckout)).stdout;
             if (status !== '') throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
             const recursiveStatus = (await this.#runPreparedGit([
               'submodule',
               'status',
               '--recursive',
-            ], descriptorPath(checkout.handle))).stdout;
+            ], descriptorPath(checkout.handle), verifyCheckout)).stdout;
             const recursiveSubmodules = parseRecursiveSubmodules(recursiveStatus);
             const gitDirectory = await openHeldDirectory(checkout, '.git', dependencies);
             try {
@@ -705,7 +917,7 @@ export class SourceResolver {
             } finally {
               await gitDirectory.handle.close();
             }
-            await assertHeldDirectory(checkout, dependencies);
+            await verifyCheckout();
             prepared.push(immutable({
               name: feed.name,
               location: feed.location,
@@ -718,7 +930,7 @@ export class SourceResolver {
               treeSha256: await hashPreparedFeedTree(checkout, dependencies),
             }));
           }
-          return immutable({
+          const preparation = immutable({
             schemaVersion: 1 as const,
             boundary: 'api-prepared-pinned-feeds-v1' as const,
             networkPolicy: 'runner-offline' as const,
@@ -727,6 +939,7 @@ export class SourceResolver {
             preparedAt: canonicalInstant(this.#now(), 'offlineFeedPreparation.preparedAt'),
             feeds: Object.freeze(prepared),
           });
+          return validateOfflineFeedPreparation(preparation, jobId, sourceSha);
         } finally {
           for (const handle of handles.reverse()) await handle.close().catch(() => undefined);
         }
@@ -843,12 +1056,30 @@ export class SourceResolver {
         const [fullSha, commitTime, authorName, authorEmail, subject] = fields;
         validateCommitMetadata(fullSha!, commitTime!, authorName!, authorEmail!, subject!);
         if (fullSha !== sha) throw new SourceResolverError('SOURCE_NOT_COMMIT');
-        return immutable({ remote: REMOTE_NAME, originUrl, ref: `refs/remotes/origin/${branch}`, branch, sha: fullSha!, commitTime: commitTime!, author: `${authorName} <${authorEmail}>`, subject: subject! });
+        return immutable({
+          remote: REMOTE_NAME,
+          originUrl,
+          ref: `refs/remotes/origin/${branch}`,
+          branch,
+          sha: fullSha!,
+          commitTime: canonicalCommitTime(commitTime!),
+          author: `${authorName} <${authorEmail}>`,
+          subject: subject!,
+        });
       }
       const [fullSha, commitTime, subject] = fields;
       validateCommitMetadata(fullSha!, commitTime!, '', '', subject!);
       if (fullSha !== sha) throw new SourceResolverError('SOURCE_NOT_COMMIT');
-      return immutable({ remote: REMOTE_NAME, originUrl, ref: '', branch: '', sha: fullSha!, commitTime: commitTime!, author: '', subject: subject! });
+      return immutable({
+        remote: REMOTE_NAME,
+        originUrl,
+        ref: '',
+        branch: '',
+        sha: fullSha!,
+        commitTime: canonicalCommitTime(commitTime!),
+        author: '',
+        subject: subject!,
+      });
     } catch (error) {
       if (error instanceof SourceResolverError) throw error;
       throw new SourceResolverError('SOURCE_NOT_COMMIT');
@@ -867,7 +1098,12 @@ export class SourceResolver {
     }
   }
 
-  async #runPreparedGit(argv: readonly string[], cwd: string): Promise<GitProcessResult> {
+  async #runPreparedGit(
+    argv: readonly string[],
+    cwd: string,
+    verifyBinding: () => Promise<void>,
+  ): Promise<GitProcessResult> {
+    await verifyBinding();
     try {
       const result = await this.#feedGit.run(argv, {
         cwd,
@@ -900,6 +1136,8 @@ export class SourceResolver {
     } catch (error) {
       if (error instanceof GitCommandError) throw error;
       throw new GitCommandError({ code: 'GIT_EXECUTION_FAILED', argv });
+    } finally {
+      await verifyBinding();
     }
   }
 

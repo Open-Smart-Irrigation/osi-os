@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { chmod, lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +15,7 @@ import {
 import {
   SourceResolver,
   SourceResolverError,
+  validateOfflineFeedPreparation,
   validateRecursiveSourcePreparation,
   type GitExecutor,
   type GitResolutionMetadata,
@@ -30,6 +31,55 @@ const ORIGIN = 'git@github.com:Open-Smart-Irrigation/osi-os.git';
 const NUL = '\0';
 const execFile = promisify(execFileCallback);
 const temporaryDirectories: string[] = [];
+const EMPTY_SUBMODULES_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
+function offlinePreparation(locationOverride?: string) {
+  const jobId = 'job-offline-policy';
+  const sourceSha = SHA_A;
+  return {
+    schemaVersion: 1 as const,
+    boundary: 'api-prepared-pinned-feeds-v1' as const,
+    networkPolicy: 'runner-offline' as const,
+    jobId,
+    sourceSha,
+    preparedAt: '2026-07-26T20:00:00.000Z',
+    feeds: [
+      {
+        name: 'packages',
+        location: locationOverride ?? 'https://git.openwrt.org/feed/packages.git',
+        commit: 'd8cd30f4e281d6853b3de134c4f147a807583e43',
+        detached: true as const,
+        clean: true as const,
+        recursiveSubmodulesPrepared: true as const,
+        recursiveSubmodules: [],
+        recursiveSubmoduleStatusSha256: EMPTY_SUBMODULES_SHA256,
+        treeSha256: '1'.repeat(64),
+      },
+      {
+        name: 'luci',
+        location: 'https://git.openwrt.org/project/luci.git',
+        commit: '2ac26e56cc55102cb10e7b0867c2b78e0f6d5fd8',
+        detached: true as const,
+        clean: true as const,
+        recursiveSubmodulesPrepared: true as const,
+        recursiveSubmodules: [],
+        recursiveSubmoduleStatusSha256: EMPTY_SUBMODULES_SHA256,
+        treeSha256: '2'.repeat(64),
+      },
+      {
+        name: 'routing',
+        location: 'https://git.openwrt.org/feed/routing.git',
+        commit: 'c9b636698881059a3c981032770968f5a98ff201',
+        detached: true as const,
+        clean: true as const,
+        recursiveSubmodulesPrepared: true as const,
+        recursiveSubmodules: [],
+        recursiveSubmoduleStatusSha256: EMPTY_SUBMODULES_SHA256,
+        treeSha256: '3'.repeat(64),
+      },
+    ],
+  };
+}
 
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -115,7 +165,12 @@ describe('Git command boundary', () => {
     }));
 
     await command.run(['status'], { allowedProtocols: 'https' });
-    expect(observed?.options.env).toEqual(expect.objectContaining({ GIT_ALLOW_PROTOCOL: 'https' }));
+    expect(observed?.options.env).toEqual(expect.objectContaining({
+      GIT_ALLOW_PROTOCOL: 'https',
+      GIT_CONFIG_COUNT: '2',
+      GIT_CONFIG_KEY_1: 'http.followRedirects',
+      GIT_CONFIG_VALUE_1: 'false',
+    }));
     expect(observed?.options.env).not.toHaveProperty('GIT_SSH_COMMAND');
     expect(observed?.options.env).not.toHaveProperty('GIT_SSH_VARIANT');
     expect(observed?.options.env).not.toHaveProperty('SSH_AUTH_SOCK');
@@ -293,6 +348,108 @@ describe('Git command boundary', () => {
 });
 
 describe('API-owned source resolver', () => {
+  it('rejects a caller-supplied network-capable feed executor', () => {
+    expect(() => new SourceResolver({
+      repositoryPath: '/work/osi-os',
+      git: new FakeGit(),
+      feedGit: new FakeGit(),
+    })).toThrow(/module-owned Git command authority/i);
+  });
+
+  it('rejects a feed executor with a forged GitCommand prototype', () => {
+    const forged = Object.create(GitCommand.prototype) as GitCommand;
+    Object.defineProperty(forged, 'run', {
+      value: async () => ({
+        argv: [],
+        exitCode: 0,
+        signal: null,
+        stdout: '',
+        stderr: '',
+        durationMs: 0,
+        timedOut: false,
+        aborted: false,
+      }),
+    });
+    expect(() => new SourceResolver({
+      repositoryPath: '/work/osi-os',
+      git: new FakeGit(),
+      feedGit: forged,
+    })).toThrow(/module-owned Git command authority/i);
+  });
+
+  it('rejects state-root ancestor replacement at the API Git command boundary', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'osi-feed-authority-race-'));
+    temporaryDirectories.push(directory);
+    const configHome = join(directory, 'config');
+    const repository = join(directory, 'repository');
+    const images = join(directory, 'images');
+    await mkdir(configHome);
+    await mkdir(repository);
+    await mkdir(images);
+    await writeFile(join(configHome, 'config.json'), JSON.stringify({
+      repositoryPath: repository,
+      approvedOutputRoots: [{ id: 'images', label: 'images', path: images }],
+      builderLockPath: '/opt/osi-image-builder/2026.07.22.1/builder.lock.json',
+      maxQueueLength: 50,
+      diskFreeMinimumBytes: 20 * 1024 ** 3,
+    }));
+    const loaded = await loadConfig({
+      configPath: join(configHome, 'config.json'),
+      env: { HOME: directory, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: join(directory, 'state-home') },
+      git: { getOriginPolicy: async () => ({ url: ORIGIN, fetchRefspec: CANONICAL_FETCH_REFSPEC }) },
+      rootFs: { statfs: async () => ({ bavail: 30, bsize: 1024 ** 3 }) },
+    });
+    const source = new FakeGit((argv) => argv[0] === 'show' ? {
+      stdout: [
+        `src-git packages https://git.openwrt.org/feed/packages.git^${SHA_A}`,
+        `src-git luci https://git.openwrt.org/project/luci.git^${SHA_B}`,
+        `src-git routing https://git.openwrt.org/feed/routing.git^${SHA_C}`,
+        'src-link chirpstack feeds/chirpstack-openwrt-feed',
+        '',
+      ].join('\n'),
+    } : { stdout: '' });
+    const stateParent = join(directory, 'state-home');
+    let replaced = false;
+    const feedGit = new GitCommand({
+      sshAuthSock: null,
+      async execFile() {
+        if (!replaced) {
+          replaced = true;
+          await rename(stateParent, `${stateParent}.held`);
+          await mkdir(loaded.stateRoot, { recursive: true });
+        }
+        return { stdout: '', stderr: 'fixture command stopped', exitCode: 1, signal: null };
+      },
+    });
+
+    await expect(new SourceResolver({
+      repositoryPath: repository,
+      git: source,
+      feedGit,
+    }).prepareOfflineFeeds(SHA_A, loaded.pathAuthorities.stateRoot, 'job-race')).rejects.toMatchObject({
+      code: 'SOURCE_PREPARATION_FAILED',
+    });
+    expect(replaced).toBe(true);
+    expect(await lstat(join(loaded.stateRoot, 'jobs/job-race/prepared-feeds')).catch(() => null)).toBeNull();
+  });
+
+  it.each([
+    'https://example.com/feed/packages.git',
+    'https://user@git.openwrt.org/feed/packages.git',
+    'https://git.openwrt.org:8443/feed/packages.git',
+    'https://git.openwrt.org/feed/packages.git#redirect',
+    'https://127.0.0.1/feed/packages.git',
+    'https://localhost/feed/packages.git',
+    'https://osicloud.ch/feed/packages.git',
+  ])('rejects the unapproved feed origin %s', (location) => {
+    const preparation = offlinePreparation(location);
+    expect(() => validateOfflineFeedPreparation(
+      preparation,
+      preparation.jobId,
+      preparation.sourceSha,
+    )).toThrow(SourceResolverError);
+  });
+
   it('prepares exact detached feed checkouts with nested submodules under the real job path', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'osi-builder-prepared-feeds-'));
     temporaryDirectories.push(directory);
@@ -340,9 +497,9 @@ describe('API-owned source resolver', () => {
     const routingSha = await init(routing, 'routing.txt', 'routing\n');
     await init(repository, 'README', 'source\n');
     const locations = Object.freeze({
-      packages: 'https://fixtures.invalid/packages.git',
-      luci: 'https://fixtures.invalid/luci.git',
-      routing: 'https://fixtures.invalid/routing.git',
+      packages: 'https://git.openwrt.org/feed/packages.git',
+      luci: 'https://git.openwrt.org/project/luci.git',
+      routing: 'https://git.openwrt.org/feed/routing.git',
     });
     await writeFile(join(repository, 'feeds.conf.default'), [
       `src-git packages ${locations.packages}^${packagesSha}`,
@@ -377,32 +534,35 @@ describe('API-owned source resolver', () => {
       [locations.luci, luci],
       [locations.routing, routing],
     ]);
-    const feedGit: GitExecutor = {
-      async run(argv, options) {
-        expect(options?.allowedProtocols).toBe('https');
+    const feedGit = new GitCommand({
+      sshAuthSock: null,
+      async execFile(_executable, argv, options) {
+        const environment = options.env as Readonly<Record<string, string>>;
+        expect(environment.GIT_ALLOW_PROTOCOL).toBe('https');
+        expect(environment.GIT_CONFIG_VALUE_1).toBe('false');
         const executed = argv.map((value) => urlMap.get(value) ?? value);
         try {
           const result = await execFile('/usr/bin/git', executed, {
-            cwd: options?.cwd,
-            env: gitEnvironment,
-            timeout: options?.timeoutMs,
+            cwd: options.cwd as string | undefined,
+            env: { ...environment, GIT_ALLOW_PROTOCOL: 'file' },
+            timeout: options.timeout as number | undefined,
             maxBuffer: 128 * 1024,
           });
           if (argv[0] === 'clone') {
             const destination = argv.at(-1)!;
             const logicalUrl = argv.at(-2)!;
             await execFile('/usr/bin/git', ['remote', 'set-url', 'origin', logicalUrl], {
-              cwd: join(options!.cwd!, destination),
+              cwd: join(options.cwd as string, destination),
               env: gitEnvironment,
             });
           }
-          return { argv, exitCode: 0, signal: null, stdout: result.stdout, stderr: result.stderr, durationMs: 1, timedOut: false, aborted: false };
+          return { exitCode: 0, signal: null, stdout: result.stdout, stderr: result.stderr };
         } catch (error) {
           const failure = error as { stdout?: string; stderr?: string; code?: number; signal?: string };
-          return { argv, exitCode: failure.code ?? 1, signal: failure.signal ?? null, stdout: failure.stdout ?? '', stderr: failure.stderr ?? '', durationMs: 1, timedOut: false, aborted: false };
+          return { exitCode: failure.code ?? 1, signal: failure.signal ?? null, stdout: failure.stdout ?? '', stderr: failure.stderr ?? '' };
         }
       },
-    };
+    });
     const preparedPath = join(loaded.stateRoot, 'jobs/job-source-producer/prepared-feeds');
     expect(await lstat(preparedPath).catch(() => null)).toBeNull();
 
@@ -439,7 +599,28 @@ describe('API-owned source resolver', () => {
   });
 
   it('prepares the actual repository vendored-tree layout before runner handoff', async () => {
-    const repositoryPath = resolve(process.cwd(), '../..');
+    const root = await mkdtemp(join(tmpdir(), 'osi-source-layout-'));
+    temporaryDirectories.push(root);
+    const repositoryPath = join(root, 'repository');
+    await mkdir(join(repositoryPath, 'feeds/chirpstack-openwrt-feed'), { recursive: true });
+    await mkdir(join(repositoryPath, 'openwrt'), { recursive: true });
+    await writeFile(join(repositoryPath, 'feeds/chirpstack-openwrt-feed/README'), 'vendored feed tree\n');
+    await writeFile(join(repositoryPath, 'openwrt/README'), 'vendored OpenWrt tree\n');
+    await writeFile(join(repositoryPath, '.gitmodules'), [
+      '[submodule "feeds/chirpstack-openwrt-feed"]',
+      '\tpath = feeds/chirpstack-openwrt-feed',
+      '\turl = https://github.com/chirpstack/chirpstack-openwrt-feed.git',
+      '[submodule "openwrt"]',
+      '\tpath = openwrt',
+      '\turl = https://github.com/openwrt/openwrt.git',
+      '\tbranch = openwrt-24.10',
+      '',
+    ].join('\n'));
+    await execFile('/usr/bin/git', ['init', '--quiet'], { cwd: repositoryPath });
+    await execFile('/usr/bin/git', ['config', 'user.name', 'Fixture Author'], { cwd: repositoryPath });
+    await execFile('/usr/bin/git', ['config', 'user.email', 'fixture@example.test'], { cwd: repositoryPath });
+    await execFile('/usr/bin/git', ['add', '.'], { cwd: repositoryPath });
+    await execFile('/usr/bin/git', ['commit', '--quiet', '-m', 'fixture vendored trees'], { cwd: repositoryPath });
     const localGit = new GitCommand({ sshAuthSock: null });
     const head = (await localGit.run(['rev-parse', '--verify', 'HEAD'], { cwd: repositoryPath })).stdout.trim();
     const preparation = await new SourceResolver({
@@ -486,8 +667,8 @@ describe('API-owned source resolver', () => {
     expect(result).toEqual({
       fetchedAt: '2026-07-23T12:00:00.000Z',
       branches: [
-        { name: 'feature/a', sha: SHA_B, commitTime: '2026-07-22T10:00:00+00:00', subject: 'subject with\nnewline' },
-        { name: 'main', sha: SHA_A, commitTime: '2026-07-22T10:00:00+00:00', subject: 'subject with\nnewline' },
+        { name: 'feature/a', sha: SHA_B, commitTime: '2026-07-22T10:00:00.000Z', subject: 'subject with\nnewline' },
+        { name: 'main', sha: SHA_A, commitTime: '2026-07-22T10:00:00.000Z', subject: 'subject with\nnewline' },
       ],
     });
     expect(fake.calls.some(({ argv }) => argv.includes('fetch') && argv.at(-2) === ORIGIN && argv.at(-1) === CANONICAL_FETCH_REFSPEC)).toBe(true);
@@ -670,7 +851,7 @@ describe('API-owned source resolver', () => {
       ref: 'refs/remotes/origin/main',
       branch: 'main',
       sha: SHA_A,
-      commitTime: '2026-07-22T10:00:00+00:00',
+      commitTime: '2026-07-22T10:00:00.000Z',
       author: 'Alice Example <alice@example.test>',
       subject: 'subject with\nnewline',
       sourcePreparation: {
@@ -764,7 +945,12 @@ describe('API-owned source resolver', () => {
     expect(result.branches).toHaveLength(1);
     expect(result.branches[0]).toMatchObject({ name: 'main', sha, subject: 'real framing subject' });
     const metadata = await new SourceResolver({ repositoryPath: repository, git: hybrid }).resolveAtAcceptance('main', sha);
-    expect(metadata).toMatchObject({ sha, author: 'Real Author <real@example.test>', ref: 'refs/remotes/origin/main' });
+    expect(metadata).toMatchObject({
+      sha,
+      author: 'Real Author <real@example.test>',
+      ref: 'refs/remotes/origin/main',
+      commitTime: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u),
+    });
     await expect(new SourceResolver({ repositoryPath: repository, git: hybrid }).resolveAtAcceptance('alias', sha)).rejects.toMatchObject({ code: 'SOURCE_NOT_COMMIT' });
   });
 

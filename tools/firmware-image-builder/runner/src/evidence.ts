@@ -59,6 +59,12 @@ export interface EvidencePublication {
   readonly sha256: string;
 }
 
+export interface TargetSetupSourceConfigInput {
+  readonly jobId: string;
+  readonly targetId: 'rpi-5' | 'rpi-2';
+  readonly contents: Buffer;
+}
+
 export interface EvidenceFileSystem {
   readonly publishExclusive: (root: StateRootAuthority, relativePath: string, contents: Buffer) => Promise<void>;
 }
@@ -636,6 +642,33 @@ export class EvidenceWriter {
     this.#fileSystem = options.fileSystem ?? DEFAULT_FILE_SYSTEM;
   }
 
+  async #publish(path: string, contents: Buffer): Promise<EvidencePublication> {
+    const sha256 = createHash('sha256').update(contents).digest('hex');
+    if (!SHA256.test(sha256)) throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'evidence hash could not be calculated');
+    try {
+      await this.#fileSystem.publishExclusive(this.#stateRoot, path, contents);
+    } catch (error) {
+      if (error instanceof EvidenceError) throw error;
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new EvidenceError('EVIDENCE_EXISTS', 'canonical evidence already exists', { cause: error });
+      throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'evidence publication failed', { cause: error });
+    }
+    return Object.freeze({ path, sha256 });
+  }
+
+  async writeTargetSetupSourceConfig(input: TargetSetupSourceConfigInput): Promise<EvidencePublication> {
+    let jobId: string;
+    try {
+      jobId = stableRelativePath(input.jobId, 'jobId');
+    } catch (error) {
+      throw new EvidenceError('EVIDENCE_PATH_INVALID', 'jobId is not a stable path segment', { cause: error });
+    }
+    if (jobId.includes('/') || (input.targetId !== 'rpi-5' && input.targetId !== 'rpi-2') || !Buffer.isBuffer(input.contents)) {
+      throw new EvidenceError('EVIDENCE_PATH_INVALID', 'target-setup source config identity is invalid');
+    }
+    const path = `jobs/${jobId}/evidence/target-setup/${input.targetId}.source.config`;
+    return this.#publish(path, Buffer.from(input.contents));
+  }
+
   async write(input: StageEvidenceInput): Promise<EvidencePublication> {
     let evidence: StageEvidence;
     try {
@@ -653,16 +686,7 @@ export class EvidenceWriter {
       throw new EvidenceError('EVIDENCE_INVALID', 'stage evidence is not canonical JSON', { cause: error });
     }
     const contents = Buffer.from(`${encoded}\n`, 'utf8');
-    const sha256 = createHash('sha256').update(contents).digest('hex');
-    if (!SHA256.test(sha256)) throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'evidence hash could not be calculated');
-    try {
-      await this.#fileSystem.publishExclusive(this.#stateRoot, path, contents);
-    } catch (error) {
-      if (error instanceof EvidenceError) throw error;
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new EvidenceError('EVIDENCE_EXISTS', 'canonical evidence already exists', { cause: error });
-      throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'evidence publication failed', { cause: error });
-    }
-    return Object.freeze({ path, sha256 });
+    return this.#publish(path, contents);
   }
 }
 

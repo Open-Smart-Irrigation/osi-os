@@ -30,6 +30,22 @@ const SOURCE_PREPARATION = Object.freeze({
     Object.freeze({ path: 'openwrt' as const, mode: '040000' as const, type: 'tree' as const, objectId: 'e'.repeat(40), provenanceUrl: 'https://github.com/openwrt/openwrt.git' }),
   ]),
 });
+function offlineFeedPreparation(jobId: string) {
+  const recursiveSubmoduleStatusSha256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+  return Object.freeze({
+    schemaVersion: 1 as const,
+    boundary: 'api-prepared-pinned-feeds-v1' as const,
+    networkPolicy: 'runner-offline' as const,
+    jobId,
+    sourceSha: SHA40,
+    preparedAt: NOW,
+    feeds: Object.freeze([
+      Object.freeze({ name: 'packages', location: 'https://git.openwrt.org/feed/packages.git', commit: 'd8cd30f4e281d6853b3de134c4f147a807583e43', detached: true as const, clean: true as const, recursiveSubmodulesPrepared: true as const, recursiveSubmodules: Object.freeze([]), recursiveSubmoduleStatusSha256, treeSha256: SHA64 }),
+      Object.freeze({ name: 'luci', location: 'https://git.openwrt.org/project/luci.git', commit: '2ac26e56cc55102cb10e7b0867c2b78e0f6d5fd8', detached: true as const, clean: true as const, recursiveSubmodulesPrepared: true as const, recursiveSubmodules: Object.freeze([]), recursiveSubmoduleStatusSha256, treeSha256: SHA64 }),
+      Object.freeze({ name: 'routing', location: 'https://git.openwrt.org/feed/routing.git', commit: 'c9b636698881059a3c981032770968f5a98ff201', detached: true as const, clean: true as const, recursiveSubmodulesPrepared: true as const, recursiveSubmodules: Object.freeze([]), recursiveSubmoduleStatusSha256, treeSha256: SHA64 }),
+    ]),
+  });
+}
 const tempPaths: string[] = []; const closers: Array<() => void> = [];
 function workerWrite(path: string, actor: 'api' | 'runner' | 'cleanup', command: object, barrier?: SharedArrayBuffer): Promise<unknown> {
   const ownershipUrl = new URL('../../api/src/ownership.ts', import.meta.url).href;
@@ -64,11 +80,11 @@ const CHECKSUM_CONTENT = `${SHA64}  image\n`;
 function checksumHash(): string { return createHash('sha256').update(CHECKSUM_CONTENT).digest('hex'); }
 
 function seedJob(db: ReturnType<typeof openBuilderDatabase>, jobId: string): void {
-  db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json,
+  db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json, offline_feed_preparation_json,
     target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, queue_position, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', 0, ?, ?)`).run(
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', 0, ?, ?)`).run(
     jobId, `request-${jobId}`, JSON.stringify({ branch: 'main', target: 'rpi-5' }), 'git@example.com:osi-os.git', 'refs/remotes/origin/main', 'main', 'main', SHA40, SHA40,
-    JSON.stringify(SOURCE_PREPARATION), 'rpi-5', 'release', SHA64, NOW, 'Phil', 'build', NOW, NOW, NOW,
+    JSON.stringify(SOURCE_PREPARATION), JSON.stringify(offlineFeedPreparation(jobId)), 'rpi-5', 'release', SHA64, NOW, 'Phil', 'build', NOW, NOW, NOW,
   );
   db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run(jobId, 0, NOW);
   db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at) VALUES (?, 0, 'enqueue', 'queued', NULL, ?, ?)").run(jobId, JSON.stringify({ requestId: `request-${jobId}` }), NOW);
@@ -249,14 +265,14 @@ describe('actor-owned compare-and-set writes', () => {
     const guarded = new OwnershipStore(db, { now: () => NOW, beforeBegin: () => { beginAttempts += 1; } });
     const before = store.listEvents('aggregate-validation').events.length;
     expect(() => guarded.apiWrite({ kind: 'dispatch', runnerUnit: 'osi-image-builder-runner@aggregate-validation.service', at: NOW } as never)).toThrow(OwnershipValidationError);
-    const input = { jobId: 'aggregate-validation-2', requestId: 'aggregate-validation-2', request: { first: 'x'.repeat(40_000), second: 'y'.repeat(40_000) }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'aggregate', acceptedAt: NOW };
+    const input = { jobId: 'aggregate-validation-2', requestId: 'aggregate-validation-2', request: { first: 'x'.repeat(40_000), second: 'y'.repeat(40_000) }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('aggregate-validation-2'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'aggregate', acceptedAt: NOW };
     expect(() => guarded.apiWrite({ kind: 'enqueue', input })).toThrow(OwnershipValidationError);
     expect(beginAttempts).toBe(0); expect(store.listEvents('aggregate-validation').events).toHaveLength(before);
   });
 
   it('does not apply command semantics to arbitrary nested request JSON', async () => {
     const { ownership, store } = await fixture('json-semantic-isolation');
-    const input = { jobId: 'json-semantic-isolation-2', requestId: 'json-semantic-isolation-2', request: { lastSeenAt: 'yesterday', artifactPath: 'free text' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'json', acceptedAt: NOW };
+    const input = { jobId: 'json-semantic-isolation-2', requestId: 'json-semantic-isolation-2', request: { lastSeenAt: 'yesterday', artifactPath: 'free text' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('json-semantic-isolation-2'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'json', acceptedAt: NOW };
     expect(ownership.apiWrite({ kind: 'enqueue', input }).ok).toBe(true);
     expect(store.getJob('json-semantic-isolation-2').request).toEqual({ lastSeenAt: 'yesterday', artifactPath: 'free text' });
   });
@@ -344,7 +360,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(ownership.apiWrite({ kind: 'enqueue', input: {
       jobId: 'job-2', requestId: 'request-job-2', request: { branch: 'main', target: 'rpi-5' },
       sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main',
-      expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64,
+      expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64,
       sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'build', acceptedAt: NOW,
     } }).ok).toBe(true);
     expect(ownership.apiWrite(dispatch('job-2'))).toMatchObject({ ok: false, conflict: { kind: 'stale-predecessor' } });
@@ -358,11 +374,11 @@ describe('actor-owned compare-and-set writes', () => {
     for (let index = 0; index < 49; index += 1) {
       const jobId = `queue-${index}`;
       expect(ownership.apiWrite({ kind: 'enqueue', input: {
-        jobId, requestId: jobId, request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'queue', acceptedAt: NOW,
+        jobId, requestId: jobId, request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation(jobId), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'queue', acceptedAt: NOW,
       } }).ok).toBe(true);
     }
     const events = store.listEvents('queue-48').events.length;
-    expect(ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'queue-overflow', requestId: 'queue-overflow', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'queue', acceptedAt: NOW } })).toMatchObject({ ok: false, conflict: { kind: 'queue-full' } });
+    expect(ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'queue-overflow', requestId: 'queue-overflow', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('queue-overflow'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'queue', acceptedAt: NOW } })).toMatchObject({ ok: false, conflict: { kind: 'queue-full' } });
     expect(store.listEvents('queue-48').events).toHaveLength(events); expect(() => store.getJob('queue-overflow')).toThrow();
   });
 
@@ -416,7 +432,7 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('accepts only canonical real instants and bounded JSON values', async () => {
     const { ownership } = await fixture('validation');
-    const base = { jobId: 'bad-date', requestId: 'bad-date', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: '2026-02-30T10:00:00.000Z', sourceAuthor: 'Phil', sourceSubject: 'date', acceptedAt: NOW };
+    const base = { jobId: 'bad-date', requestId: 'bad-date', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('bad-date'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: '2026-02-30T10:00:00.000Z', sourceAuthor: 'Phil', sourceSubject: 'date', acceptedAt: NOW };
     expect(() => ownership.apiWrite({ kind: 'enqueue', input: base })).toThrow(OwnershipValidationError);
     expect(() => ownership.apiWrite({ kind: 'enqueue', input: { ...base, jobId: 'bad-offset', requestId: 'bad-offset', sourceCommitTime: '2026-07-23T10:00:00+00:00' } })).toThrow(OwnershipValidationError);
     expect(() => encodeJson(['x'.repeat(100_004)], 'root array')).toThrow();
@@ -428,10 +444,10 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('separates malformed validation, stale CAS, and unknown SQLite faults', async () => {
     const malformed = await fixture('malformed-target');
-    expect(() => malformed.ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'bad-target', requestId: 'bad-target', request: {}, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, targetId: 'invalid' as never, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'bad', acceptedAt: NOW } })).toThrow(OwnershipValidationError);
+    expect(() => malformed.ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'bad-target', requestId: 'bad-target', request: {}, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('bad-target'), targetId: 'invalid' as never, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'bad', acceptedAt: NOW } })).toThrow(OwnershipValidationError);
     expect(malformed.ownership.apiWrite(dispatch('missing-job'))).toMatchObject({ ok: false, conflict: { kind: 'stale-predecessor' } });
     malformed.db.exec("CREATE TRIGGER unknown_check BEFORE INSERT ON jobs WHEN NEW.job_id='unknown-check' BEGIN SELECT RAISE(ABORT, 'CHECK constraint failed: injected'); END");
-    const input = { jobId: 'unknown-check', requestId: 'unknown-check', request: {}, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'check', acceptedAt: NOW };
+    const input = { jobId: 'unknown-check', requestId: 'unknown-check', request: {}, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('unknown-check'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'check', acceptedAt: NOW };
     expect(() => malformed.ownership.apiWrite({ kind: 'enqueue', input })).toThrow(OwnershipTransactionError);
     expect(malformed.store.listEvents('malformed-target').events).toHaveLength(1);
   });
@@ -1099,7 +1115,7 @@ describe('actor-owned compare-and-set writes', () => {
     const db = openBuilderDatabase(path); const ownership = new OwnershipStore(db, { now: () => NOW }); closers.push(() => db.close());
     db.exec('BEGIN IMMEDIATE');
     expect(ownership.apiWrite({ kind: 'enqueue', input: {
-      jobId: 'nested-job', requestId: 'nested-request', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'nested', acceptedAt: NOW,
+      jobId: 'nested-job', requestId: 'nested-request', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('nested-job'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'nested', acceptedAt: NOW,
     } }).ok).toBe(true);
     expect(db.isTransaction).toBe(true); db.exec('COMMIT'); expect(store.getJob('nested-job').state).toBe('queued');
   });
@@ -1107,7 +1123,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('rolls back each actor command family without an orphan event', async () => {
     const inject = (path: string): OwnershipStore => { const db = openBuilderDatabase(path); const ownership = new OwnershipStore(db, { now: () => NOW, failBeforeCommit: () => { throw new Error('injected rollback'); } }); closers.push(() => db.close()); return ownership; };
     const enqueue = await fixture('rollback-enqueue'); const enqueueBefore = enqueue.store.listEvents('rollback-enqueue').events.length;
-    expect(() => inject(enqueue.path).apiWrite({ kind: 'enqueue', input: { jobId: 'rollback-enqueued', requestId: 'rollback-enqueued', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'rollback', acceptedAt: NOW } })).toThrow(OwnershipTransactionError); expect(enqueue.store.listEvents('rollback-enqueue').events).toHaveLength(enqueueBefore);
+    expect(() => inject(enqueue.path).apiWrite({ kind: 'enqueue', input: { jobId: 'rollback-enqueued', requestId: 'rollback-enqueued', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('rollback-enqueued'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'rollback', acceptedAt: NOW } })).toThrow(OwnershipTransactionError); expect(enqueue.store.listEvents('rollback-enqueue').events).toHaveLength(enqueueBefore);
 
     const dispatchCase = await fixture('rollback-dispatch'); expect(() => inject(dispatchCase.path).apiWrite(dispatch('rollback-dispatch'))).toThrow(OwnershipTransactionError); expect(dispatchCase.store.getJob('rollback-dispatch').state).toBe('queued');
     const stageCase = await fixture('rollback-stage'); stageCase.ownership.apiWrite(dispatch('rollback-stage')); stageCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-stage')); const stageEvents = stageCase.store.listEvents('rollback-stage').events.length; expect(() => inject(stageCase.path).runnerWrite({ ...runnerBase('rollback-stage'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW })).toThrow(OwnershipTransactionError); expect(stageCase.store.listEvents('rollback-stage').events).toHaveLength(stageEvents);
@@ -1123,14 +1139,14 @@ describe('actor-owned compare-and-set writes', () => {
     const { path } = await fixture();
     const db = openBuilderDatabase(path); let fail = true; const ownership = new OwnershipStore(db, { now: () => NOW, failBeforeCommit: () => { if (fail) throw new Error('nested failure'); } }); closers.push(() => db.close());
     db.exec('BEGIN IMMEDIATE');
-    expect(() => ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'nested-fail', requestId: 'nested-fail', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'nested', acceptedAt: NOW } })).toThrow(OwnershipTransactionError);
+    expect(() => ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'nested-fail', requestId: 'nested-fail', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('nested-fail'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'nested', acceptedAt: NOW } })).toThrow(OwnershipTransactionError);
     expect(db.isTransaction).toBe(true); db.exec('COMMIT'); expect(db.prepare('SELECT 1 FROM jobs WHERE job_id=?').get('nested-fail')).toBeUndefined(); fail = false;
   });
 
   it('returns one conflict shape for duplicate admission, stale CAS, and busy locks', async () => {
     const { path, ownership } = await fixture();
     const duplicate = { kind: 'enqueue' as const, input: {
-      jobId: 'duplicate', requestId: 'duplicate-request', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'duplicate', acceptedAt: NOW,
+      jobId: 'duplicate', requestId: 'duplicate-request', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('duplicate'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'duplicate', acceptedAt: NOW,
     } };
     expect(ownership.apiWrite(duplicate).ok).toBe(true); expect(ownership.apiWrite(duplicate)).toMatchObject({ ok: false, conflict: { kind: 'admission-mismatch' } });
     expect(ownership.apiWrite(dispatch('missing'))).toMatchObject({ ok: false });

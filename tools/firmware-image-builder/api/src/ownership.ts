@@ -14,7 +14,7 @@ import {
   TRUSTED_OPERATION_IDS,
   type TrustedOperationId,
 } from '../../domain/types.js';
-import { encodeSourcePreparation, type ArtifactInput, type CreateJobInput, type FreshnessInput, type JsonObject, type JsonValue, type OperationInput } from './store.js';
+import { encodeOfflineFeedPreparation, encodeSourcePreparation, type ArtifactInput, type CreateJobInput, type FreshnessInput, type JsonObject, type JsonValue, type OperationInput } from './store.js';
 import { TEXT_LIMITS, boundedText, canonicalInstant as sharedCanonicalInstant, encodeJson, normalizeCommand, normalizeJson, requireChronology as sharedRequireChronology, SharedValidationError } from './validation.js';
 
 const HASH64 = /^[0-9a-f]{64}$/;
@@ -321,12 +321,24 @@ function sourcePreparationJson(value: unknown, pinnedSha: unknown): string {
   }
 }
 
+function offlineFeedPreparationJson(value: unknown, jobId: unknown, pinnedSha: unknown): string {
+  if (typeof jobId !== 'string' || typeof pinnedSha !== 'string') {
+    throw new OwnershipValidationError('enqueue offlineFeedPreparation identity is invalid');
+  }
+  try {
+    return encodeOfflineFeedPreparation(value, jobId, pinnedSha);
+  } catch (error) {
+    throw new OwnershipValidationError('enqueue offlineFeedPreparation is invalid', { cause: error });
+  }
+}
+
 function validateCreateJobInput(input: unknown): void {
   const value = preparedObject(input, 'enqueue input');
   for (const field of ['jobId', 'requestId', 'sourceRemote', 'sourceRef', 'sourceBranch', 'branch', 'rootId', 'sourceAuthor', 'sourceSubject']) preparedString(value[field], `enqueue ${field}`, TEXT_LIMITS.maxIdentifierBytes);
   preparedJsonObject(value.request, 'enqueue request'); preparedEnum(value.targetId, TARGET_IDS, 'enqueue targetId');
   for (const field of ['expectedSha', 'pinnedSha']) preparedHash(value[field], `enqueue ${field}`, true);
   sourcePreparationJson(value.sourcePreparation, value.pinnedSha);
+  offlineFeedPreparationJson(value.offlineFeedPreparation, value.jobId, value.pinnedSha);
   preparedHash(value.targetManifestSha256, 'enqueue targetManifestSha256'); preparedInstant(value.sourceCommitTime, 'enqueue sourceCommitTime'); preparedInstant(value.acceptedAt, 'enqueue acceptedAt');
   preparedOptionalHash(value.preflightSha, 'enqueue preflightSha', true); preparedOptionalInstant(value.preflightCheckedAt, 'enqueue preflightCheckedAt'); preparedOptionalInstant(value.preflightExpiresAt, 'enqueue preflightExpiresAt');
   const preflightFields = [value.preflightSha, value.preflightCheckedAt, value.preflightExpiresAt].filter((field) => field !== undefined && field !== null);
@@ -1261,6 +1273,11 @@ export class OwnershipStore {
       throw new OwnershipValidationError('accepted source identity is incoherent');
     }
     const sourcePreparation = sourcePreparationJson(input.sourcePreparation, input.pinnedSha);
+    const offlineFeedPreparation = offlineFeedPreparationJson(
+      input.offlineFeedPreparation,
+      input.jobId,
+      input.pinnedSha,
+    );
     const request = jsonValue(input.request, 'request', 'object');
     const preflight = input.preflightSha ?? null;
     const checked = input.preflightCheckedAt ?? null;
@@ -1272,11 +1289,11 @@ export class OwnershipStore {
     const fifo = Number((this.#db.prepare('SELECT COALESCE(MAX(fifo_seq) + 1, 0) AS next FROM queue_entries').get() as Row).next);
     const position = Number((this.#db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE queue_state='queued'").get() as Row).count);
     this.#db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json,
-      target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, preflight_sha, preflight_checked_at,
+      offline_feed_preparation_json, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, preflight_sha, preflight_checked_at,
       preflight_expires_at, accepted_at, state, queue_state, queue_position, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', ?, ?, ?)`).run(
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', ?, ?, ?)`).run(
       input.jobId, input.requestId, request, input.sourceRemote, input.sourceRef, input.sourceBranch, input.branch, input.expectedSha, input.pinnedSha,
-      sourcePreparation, input.targetId, input.rootId, input.targetManifestSha256, input.sourceCommitTime, input.sourceAuthor, input.sourceSubject,
+      sourcePreparation, offlineFeedPreparation, input.targetId, input.rootId, input.targetManifestSha256, input.sourceCommitTime, input.sourceAuthor, input.sourceSubject,
       preflight, checked, expires, input.acceptedAt, position, input.acceptedAt, input.acceptedAt,
     );
     this.#db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run(input.jobId, fifo, input.acceptedAt);
@@ -1287,8 +1304,13 @@ export class OwnershipStore {
   #dispatch(command: Extract<ApiWriteCommand, { kind: 'dispatch' }>): void {
     string(command.jobId, 'jobId'); runnerUnit(command.jobId, command.runnerUnit); instant(command.at, 'dispatch time');
     requirePersistedTimeline(this.#db, command.jobId, [['dispatch time', command.at]]);
-    const job = this.#db.prepare('SELECT accepted_at FROM jobs WHERE job_id=?').get(command.jobId) as Row | undefined;
+    const job = this.#db.prepare(
+      'SELECT accepted_at, source_preparation_json, offline_feed_preparation_json FROM jobs WHERE job_id=?',
+    ).get(command.jobId) as Row | undefined;
     if (!job) conflict('stale-predecessor', 'queued job does not exist');
+    if (job.source_preparation_json === null || job.offline_feed_preparation_json === null) {
+      conflict('stale-predecessor', 'queued job has no authoritative runnable source preparation');
+    }
     requireChronology([['accepted time', String(job.accepted_at)], ['dispatch time', command.at]]);
     const result = this.#db.prepare("UPDATE jobs SET state='starting', queue_state='dispatched', queue_position=NULL, dispatched_at=?, runner_unit=?, updated_at=? WHERE job_id=? AND state='queued' AND queue_state='queued' AND runner_unit IS NULL AND EXISTS (SELECT 1 FROM queue_entries AS candidate WHERE candidate.job_id=jobs.job_id AND candidate.fifo_seq=(SELECT MIN(first.fifo_seq) FROM queue_entries AS first JOIN jobs AS first_job ON first_job.job_id=first.job_id WHERE first_job.state='queued' AND first_job.queue_state='queued')) AND NOT EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND cleanup_fence_generation IS NOT NULL)").run(command.at, command.runnerUnit, command.at, command.jobId, command.jobId);
     if (Number(result.changes) !== 1) conflict('stale-predecessor', 'queued job was already claimed');
