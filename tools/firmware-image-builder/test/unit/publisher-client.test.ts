@@ -177,6 +177,7 @@ describe('publisher client', () => {
       result(validPublishOutput(), { timedOut: true }),
       result(JSON.stringify({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 1, errorCode: 'PUBLISHER_UNSUPPORTED' })),
       result(JSON.stringify({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' })),
+      result(JSON.stringify({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' }), { exitCode: 99 }),
       result(JSON.stringify({ available: true, published: true, quarantined: false, selfTest: false, mutationCount: 1, renameResult: 'RENAMED' })),
     ];
     for (const reply of cases) await expect(client(fakeExecutor(reply)).publish(request)).rejects.toThrow();
@@ -208,6 +209,7 @@ describe('publisher client', () => {
 
     const contradictory = [
       result(failedBeforeRename),
+      result(failedBeforeRename, { exitCode: 99 }),
       result(JSON.stringify({ ...JSON.parse(failedBeforeRename), renameResult: 'RENAMED' }), { exitCode: 2 }),
       result(validPublishOutput({ published: false, errorCode: 'OUTPUT_COLLISION' }), { exitCode: 2 }),
       result(validPublishOutput({ published: false, errorCode: 'PUBLISH_FAILED' })),
@@ -274,6 +276,8 @@ describe('publisher client', () => {
 
     const contradictoryQuarantine = [
       result(quarantineFailure),
+      result(quarantineFailure, { exitCode: 99 }),
+      result(JSON.stringify({ ...JSON.parse(quarantineFailure), mutationCount: 3 }), { exitCode: 2 }),
       result(JSON.stringify({ ...JSON.parse(quarantineFailure), errorCode: 'PUBLISH_FAILED' }), { exitCode: 2 }),
       result(quarantineAfterRename),
       result(JSON.stringify({ ...JSON.parse(quarantineAfterRename), errorCode: 'PUBLISH_FAILED' }), { exitCode: 2 }),

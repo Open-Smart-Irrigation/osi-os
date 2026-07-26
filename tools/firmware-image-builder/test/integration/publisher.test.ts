@@ -97,6 +97,19 @@ describe('native publisher integration', () => {
     const complete = await runPublisher('recheck', '--root', root, '--job-id', jobId, '--branch', 'feature%2Fpublisher', '--sha', SHA, '--target', TARGET);
     expect(complete.code).toBe(0);
     expect(parsed(complete)).toMatchObject({ available: true, destination: 'candidate', staging: 'absent', mutationCount: 0 });
+    const productionClient = createPublisherClient({
+      executable: binary,
+      approvedRoots: [{ id: 'images', label: 'Images', path: root, quarantinePath: `${root}/.osi-image-builder/quarantine` }],
+    });
+    const clientRecheck = await productionClient.recheck({
+      rootId: 'images',
+      jobId,
+      branchSlug: 'feature%2Fpublisher',
+      sourceSha: SHA,
+      targetId: TARGET,
+    });
+    expect(clientRecheck).toMatchObject({ destination: 'candidate', staging: 'absent' });
+    expect(clientRecheck).not.toHaveProperty('errorCode');
 
     const collisionJob = 'job-collision';
     await createStaging(collisionJob);

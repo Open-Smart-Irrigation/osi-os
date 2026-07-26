@@ -738,7 +738,8 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
     else if (destination_state == 0) result->destination = "absent";
     else if (destination != -1 && structurally_complete && destination_matches && staging_state == 0) result->destination = "candidate";
     else result->destination = "mismatched";
-    if (strcmp(result->destination, "mismatched") == 0) result->error_code = "UNVERIFIED_FINAL_PATH_BLOCKER";
+    if (strcmp(result->destination, "candidate") == 0) result->error_code = NULL;
+    else if (strcmp(result->destination, "mismatched") == 0) result->error_code = "UNVERIFIED_FINAL_PATH_BLOCKER";
     else if (strcmp(result->destination, "absent") == 0) result->error_code = "PUBLISH_RECOVERY_FAILED";
     if (destination >= 0) close(destination);
     if (destination_parent >= 0) close(destination_parent);

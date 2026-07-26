@@ -126,7 +126,7 @@ function parseResponse(result: CommandResult, argv: readonly string[], operation
   const mutationCount = own(value, 'mutationCount');
   if (typeof mutationCount !== 'number' || !Number.isSafeInteger(mutationCount) || mutationCount < 0 || mutationCount > 3) throw new Error('publisher mutation count is invalid');
   if (available === false) {
-    if (result.exitCode === 0 || mutationCount !== 0 || published || quarantined || selfTest || Object.keys(value).some((key) => ['renameResult', 'sourceRelativePath', 'destinationRelativePath', 'publisherVersion', 'publisherSourceSha256', 'destination', 'staging'].includes(key)) || value.errorCode !== 'PUBLISHER_UNSUPPORTED') throw new Error('unsupported publisher result is contradictory');
+    if (result.exitCode !== 2 || mutationCount !== 0 || published || quarantined || selfTest || Object.keys(value).some((key) => ['renameResult', 'sourceRelativePath', 'destinationRelativePath', 'publisherVersion', 'publisherSourceSha256', 'destination', 'staging'].includes(key)) || value.errorCode !== 'PUBLISHER_UNSUPPORTED') throw new Error('unsupported publisher result is contradictory');
     return value as unknown as PublisherResponse;
   }
   if (selfTest || (value.errorCode !== undefined && (typeof value.errorCode !== 'string' || !ERROR_CODES.has(value.errorCode as PublisherErrorCode)))) throw new Error('publisher result error contract is invalid');
@@ -153,7 +153,7 @@ function parseResponse(result: CommandResult, argv: readonly string[], operation
       if (result.exitCode !== 0 || mutationCount < 1 || value.errorCode !== undefined) throw new Error('successful publisher result is contradictory');
       validateRenameEvidence(value, 'RENAMED');
     } else {
-      if (result.exitCode === 0 || typeof value.errorCode !== 'string' || !PUBLISH_PRE_RENAME_ERROR_CODES.has(value.errorCode as PublisherErrorCode)) throw new Error('publisher failure is contradictory');
+      if (result.exitCode !== 2 || typeof value.errorCode !== 'string' || !PUBLISH_PRE_RENAME_ERROR_CODES.has(value.errorCode as PublisherErrorCode)) throw new Error('publisher failure is contradictory');
       if (value.renameResult === undefined) {
         if (value.errorCode === 'OUTPUT_COLLISION' || mutationCount > 2) throw new Error('pre-rename publisher failure is contradictory');
       } else if (value.renameResult === 'RENAMED') {
@@ -168,11 +168,12 @@ function parseResponse(result: CommandResult, argv: readonly string[], operation
     if (published || 'destination' in value || 'staging' in value) throw new Error('publisher quarantine result is contradictory');
     validatePathEvidence(value, sourcePath, destinationPath);
     if (quarantined) {
-      if (result.exitCode !== 0 || mutationCount < 1 || value.errorCode !== undefined) throw new Error('successful quarantine result is contradictory');
+      if (result.exitCode !== 0 || mutationCount < 1 || mutationCount > 2 || value.errorCode !== undefined) throw new Error('successful quarantine result is contradictory');
       validateRenameEvidence(value, 'RENAMED');
     } else {
-      if (result.exitCode === 0 || value.errorCode !== 'QUARANTINE_PENDING') throw new Error('quarantine failure is contradictory');
-      if (value.renameResult === 'RENAMED' && mutationCount < 1) throw new Error('post-rename quarantine failure is contradictory');
+      if (result.exitCode !== 2 || value.errorCode !== 'QUARANTINE_PENDING') throw new Error('quarantine failure is contradictory');
+      if (value.renameResult === undefined && mutationCount > 1) throw new Error('pre-rename quarantine failure is contradictory');
+      if (value.renameResult === 'RENAMED' && (mutationCount < 1 || mutationCount > 2)) throw new Error('post-rename quarantine failure is contradictory');
       if (value.renameResult !== undefined && value.renameResult !== 'RENAMED' && mutationCount > 1) throw new Error('quarantine rename failure is contradictory');
     }
   }
