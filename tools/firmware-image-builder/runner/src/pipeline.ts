@@ -44,6 +44,10 @@ import type {
   StageEvidenceInput,
 } from './evidence.js';
 import type { OperationDefinition } from './operation-registry.js';
+import type {
+  TargetSetupConfigObservations,
+  TargetSetupSourceObservations,
+} from './target-setup.js';
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SHA40 = /^[0-9a-f]{40}$/u;
@@ -151,9 +155,11 @@ export interface SourceStageResult {
   readonly observations: Readonly<Record<string, unknown>>;
 }
 
-export interface TargetSetupStageResult {
+export interface TargetSetupStageResult<
+  Observations extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>,
+> {
   readonly executions: readonly PipelineOperationExecution[];
-  readonly observations: Readonly<Record<string, unknown>>;
+  readonly observations: Observations;
 }
 
 export interface VerifiedPipelineArtifact {
@@ -257,9 +263,13 @@ export interface PipelineServices {
     ) => Promise<PipelineOperationExecution>;
   };
   readonly targetSetup: {
-    readonly setup: (context: StageActionContext) => Promise<TargetSetupStageResult>;
+    readonly setup: (
+      context: StageActionContext,
+    ) => Promise<TargetSetupStageResult<TargetSetupSourceObservations>>;
     readonly feeds: (context: StageActionContext) => Promise<TargetSetupStageResult>;
-    readonly config: (context: StageActionContext) => Promise<TargetSetupStageResult>;
+    readonly config: (
+      context: StageActionContext,
+    ) => Promise<TargetSetupStageResult<TargetSetupConfigObservations>>;
   };
   readonly verification: {
     readonly verify: (input: Readonly<{

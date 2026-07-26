@@ -25,6 +25,8 @@ import {
   ROOTFS_PADDING_PATCH,
   classifyTargetSetupOperationResult,
   createLockedTargetSetupOperations,
+  createTargetSetupConfigObservations,
+  createTargetSetupSourceObservations,
   decideRootfsPatchState,
   resolveTargetSetup,
   type ApiPreparedFeed,
@@ -467,6 +469,47 @@ describe('target setup', () => {
       selectedTarget: targets[0]!.openwrtTarget,
       profile: targets[0]!.profile,
     });
+    const sourceObservations = createTargetSetupSourceObservations(targetSetup);
+    const configObservations = createTargetSetupConfigObservations(config);
+    expect(targetSetup.profiles['rpi-5']).not.toHaveProperty('resolvedSha256');
+    expect(sourceObservations.profiles['rpi-5']).toEqual({
+      target: 'rpi-5',
+      environment: targets[0]!.environment,
+      selectedTarget: targets[0]!.openwrtTarget,
+      profile: targets[0]!.profile,
+      rootfsPartSize: targets[0]!.rootfsPartSize,
+      sourceSha256: targetSetup.profiles['rpi-5'].sourceSha256,
+      sourceConfigEvidencePath: 'evidence/target-setup/rpi-5.source.config',
+    });
+    expect(Object.keys(sourceObservations.profiles['rpi-5']).sort()).toEqual([
+      'environment',
+      'profile',
+      'rootfsPartSize',
+      'selectedTarget',
+      'sourceConfigEvidencePath',
+      'sourceSha256',
+      'target',
+    ]);
+    expect(configObservations.config.profiles['rpi-5']).toEqual({
+      target: 'rpi-5',
+      environment: targets[0]!.environment,
+      selectedTarget: targets[0]!.openwrtTarget,
+      profile: targets[0]!.profile,
+      rootfsPartSize: targets[0]!.rootfsPartSize,
+      sourceSha256: targetSetup.profiles['rpi-5'].sourceSha256,
+      sourceConfigEvidencePath: 'evidence/target-setup/rpi-5.source.config',
+      resolvedSha256: config.config.profiles['rpi-5'].resolvedSha256,
+    });
+    expect(Object.keys(configObservations.config.profiles['rpi-5']).sort()).toEqual([
+      'environment',
+      'profile',
+      'resolvedSha256',
+      'rootfsPartSize',
+      'selectedTarget',
+      'sourceConfigEvidencePath',
+      'sourceSha256',
+      'target',
+    ]);
     expect(await readlink(join(fixture.workspace, 'conf/.config')))
       .toBe(`${targets[0]!.environment}/.config`);
   });

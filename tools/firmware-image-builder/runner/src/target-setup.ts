@@ -250,16 +250,22 @@ interface PinnedGitFeed {
   readonly commit: string;
 }
 
-interface ProfileResolution {
+interface ProfileIdentity {
   readonly target: TargetManifest['id'];
   readonly environment: string;
   readonly selectedTarget: string;
   readonly profile: string;
   readonly rootfsPartSize: number;
+}
+
+interface SourceProfileResolution extends ProfileIdentity {
   readonly sourceSha256: string;
   readonly sourceConfigEvidencePath: string;
-  readonly resolvedSha256: string;
   readonly patchDecision: RootfsPatchDecision;
+}
+
+interface ProfileResolution extends SourceProfileResolution {
+  readonly resolvedSha256: string;
 }
 
 interface FeedResolution {
@@ -1857,7 +1863,7 @@ export interface TargetSetupInput {
 
 export interface TargetSetupPhaseInput extends TargetSetupInput {
   readonly phase: 'target-setup' | 'feeds' | 'config';
-  readonly profiles?: Readonly<Record<TargetManifest['id'], ProfileResolution>>;
+  readonly profiles?: Readonly<Record<TargetManifest['id'], SourceProfileResolution>>;
 }
 
 export type TargetSetupPhaseResult =
@@ -1866,7 +1872,7 @@ export type TargetSetupPhaseResult =
       workspacePath: string;
       target: TargetManifest['id'];
       patchDecision: RootfsPatchDecision;
-      profiles: Readonly<Record<TargetManifest['id'], ProfileResolution>>;
+      profiles: Readonly<Record<TargetManifest['id'], SourceProfileResolution>>;
     }>
   | Readonly<{
       phase: 'feeds';
@@ -1897,6 +1903,102 @@ export interface TargetSetupResult {
     readonly bothProfilesChecked: true;
     readonly profiles: Readonly<Record<TargetManifest['id'], ProfileResolution>>;
   };
+}
+
+export type TargetSetupSourceProfileObservation = Readonly<{
+  target: TargetManifest['id'];
+  environment: string;
+  selectedTarget: string;
+  profile: string;
+  rootfsPartSize: number;
+  sourceSha256: string;
+  sourceConfigEvidencePath: string;
+}>;
+
+export type TargetSetupFinalProfileObservation = Readonly<{
+  target: TargetManifest['id'];
+  environment: string;
+  selectedTarget: string;
+  profile: string;
+  rootfsPartSize: number;
+  sourceSha256: string;
+  sourceConfigEvidencePath: string;
+  resolvedSha256: string;
+}>;
+
+export type TargetSetupSourceObservations = Readonly<{
+  target: TargetManifest['id'];
+  patchDecision: RootfsPatchDecision;
+  profiles: Readonly<Record<TargetManifest['id'], TargetSetupSourceProfileObservation>>;
+}>;
+
+export type TargetSetupConfigObservations = Readonly<{
+  config: Readonly<{
+    selectedTarget: string;
+    profile: string;
+    rootfsPartSize: number;
+    bothProfilesChecked: true;
+    profiles: Readonly<Record<TargetManifest['id'], TargetSetupFinalProfileObservation>>;
+  }>;
+}>;
+
+function sourceProfileObservation(
+  profile: SourceProfileResolution,
+): TargetSetupSourceProfileObservation {
+  return Object.freeze({
+    target: profile.target,
+    environment: profile.environment,
+    selectedTarget: profile.selectedTarget,
+    profile: profile.profile,
+    rootfsPartSize: profile.rootfsPartSize,
+    sourceSha256: profile.sourceSha256,
+    sourceConfigEvidencePath: profile.sourceConfigEvidencePath,
+  });
+}
+
+function resolvedProfileObservation(
+  profile: ProfileResolution,
+): TargetSetupFinalProfileObservation {
+  return Object.freeze({
+    target: profile.target,
+    environment: profile.environment,
+    selectedTarget: profile.selectedTarget,
+    profile: profile.profile,
+    rootfsPartSize: profile.rootfsPartSize,
+    sourceSha256: profile.sourceSha256,
+    sourceConfigEvidencePath: profile.sourceConfigEvidencePath,
+    resolvedSha256: profile.resolvedSha256,
+  });
+}
+
+export function createTargetSetupSourceObservations(
+  result: Extract<TargetSetupPhaseResult, { readonly phase: 'target-setup' }>,
+): TargetSetupSourceObservations {
+  return Object.freeze({
+    target: result.target,
+    patchDecision: result.patchDecision,
+    profiles: Object.freeze({
+      'rpi-5': sourceProfileObservation(result.profiles['rpi-5']),
+      'rpi-2': sourceProfileObservation(result.profiles['rpi-2']),
+    }),
+  });
+}
+
+export function createTargetSetupConfigObservations(
+  result: Extract<TargetSetupPhaseResult, { readonly phase: 'config' }>,
+): TargetSetupConfigObservations {
+  return Object.freeze({
+    config: Object.freeze({
+      selectedTarget: result.config.selectedTarget,
+      profile: result.config.profile,
+      rootfsPartSize: result.config.rootfsPartSize,
+      bothProfilesChecked: true,
+      profiles: Object.freeze({
+        'rpi-5': resolvedProfileObservation(result.config.profiles['rpi-5']),
+        'rpi-2': resolvedProfileObservation(result.config.profiles['rpi-2']),
+      }),
+    }),
+  });
 }
 
 export function resolveTargetSetup(input: TargetSetupPhaseInput): Promise<TargetSetupPhaseResult>;
@@ -2032,7 +2134,7 @@ export async function resolveTargetSetup(
           input.requestId,
         );
         if (input.phase === 'target-setup') {
-          const profiles = new Map<TargetManifest['id'], ProfileResolution>();
+          const profiles = new Map<TargetManifest['id'], SourceProfileResolution>();
           for (const target of targetState.ordered) {
             const definitions = targetState.definitions.get(target.id)!;
             const activation = await runOperation(
@@ -2089,7 +2191,6 @@ export async function resolveTargetSetup(
               rootfsPartSize: target.rootfsPartSize,
               sourceSha256: sourceConfigSha256,
               sourceConfigEvidencePath,
-              resolvedSha256: sourceConfigSha256,
               patchDecision: decision,
             }));
           }

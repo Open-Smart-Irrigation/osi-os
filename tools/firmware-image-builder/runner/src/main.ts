@@ -77,10 +77,14 @@ import {
 import {
   classifyTargetSetupOperationResult,
   createLockedTargetSetupOperations,
+  createTargetSetupConfigObservations,
+  createTargetSetupSourceObservations,
   resolveTargetSetup,
   type OfflineFeedPreparation,
+  type TargetSetupConfigObservations,
   type TargetSetupPhaseResult,
   type TargetSetupResult,
+  type TargetSetupSourceObservations,
 } from './target-setup.js';
 import type { CommandResult } from './command-executor.js';
 import {
@@ -1332,7 +1336,9 @@ async function createProductionComposition(
       },
       operations,
       targetSetup: {
-        async setup(context): Promise<TargetSetupStageResult> {
+        async setup(
+          context,
+        ): Promise<TargetSetupStageResult<TargetSetupSourceObservations>> {
           const phase = await runTargetSetupPhase(context, 'target-setup');
           if (phase.result.phase !== 'target-setup') {
             throw new Error('target setup activation result is incomplete');
@@ -1340,11 +1346,7 @@ async function createProductionComposition(
           targetSetupPhase = phase.result;
           return Object.freeze({
             executions: phase.executions,
-            observations: Object.freeze({
-              target: targetSetupPhase.target,
-              patchDecision: targetSetupPhase.patchDecision,
-              profiles: targetSetupPhase.profiles,
-            }),
+            observations: createTargetSetupSourceObservations(targetSetupPhase),
           });
         },
         async feeds(context): Promise<TargetSetupStageResult> {
@@ -1364,7 +1366,9 @@ async function createProductionComposition(
             }),
           });
         },
-        async config(context): Promise<TargetSetupStageResult> {
+        async config(
+          context,
+        ): Promise<TargetSetupStageResult<TargetSetupConfigObservations>> {
           if (targetSetupPhase === null || feedsPhase === null) {
             throw new Error('target setup activation or feed evidence is unavailable');
           }
@@ -1386,9 +1390,7 @@ async function createProductionComposition(
           });
           return Object.freeze({
             executions: phase.executions,
-            observations: Object.freeze({
-              config: setup.config,
-            }),
+            observations: createTargetSetupConfigObservations(phase.result),
           });
         },
       },

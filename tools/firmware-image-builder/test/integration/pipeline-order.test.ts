@@ -27,6 +27,7 @@ import {
 } from '../../domain/types.js';
 import { encodeBranchSlug } from '../../domain/paths.js';
 import { loadManifest } from '../../manifest/validate.js';
+import type { TargetManifest } from '../../manifest/schema.js';
 import {
   createPipeline,
   type PipelineInput,
@@ -36,7 +37,12 @@ import {
 } from '../../runner/src/pipeline.js';
 import { createEvidenceWriter } from '../../runner/src/evidence.js';
 import { createOperationDefinition, hashOperationDefinition } from '../../runner/src/operation-registry.js';
-import { classifyTargetSetupOperationResult } from '../../runner/src/target-setup.js';
+import {
+  classifyTargetSetupOperationResult,
+  createTargetSetupConfigObservations,
+  createTargetSetupSourceObservations,
+} from '../../runner/src/target-setup.js';
+import { verifyTargetSetupConfiguration } from '../../runner/src/verification.js';
 import type { PublisherClient, PublisherResponse } from '../../publisher/client.js';
 
 const SHA40 = 'a'.repeat(40);
@@ -140,6 +146,16 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function configBytes(target: TargetManifest, kind: 'source' | 'resolved'): Buffer {
+  const lines = target.configSymbols.map((symbol) => {
+    if (symbol.type === 'bool') {
+      return symbol.value ? `${symbol.name}=y` : `# ${symbol.name} is not set`;
+    }
+    return `${symbol.name}=${symbol.type === 'string' ? JSON.stringify(symbol.value) : String(symbol.value)}`;
+  });
+  return Buffer.from(`${lines.join('\n')}\n# ${kind} profile evidence\n`);
+}
+
 function operationState(stage: PipelineStageName): JobState {
   return {
     preflight: 'preflight',
@@ -165,6 +181,9 @@ interface Fixture {
   readonly operationOrder: TrustedOperationId[];
   readonly workspaceChecks: Array<readonly [PipelineStageName, 'before' | 'after']>;
   readonly publishedMetadata: Array<Readonly<{ build: JsonObject; verification: JsonObject }>>;
+  readonly verifiedTargetEvidence: readonly unknown[];
+  readonly sourceObservations: ReturnType<typeof createTargetSetupSourceObservations>;
+  readonly configObservations: ReturnType<typeof createTargetSetupConfigObservations>;
   close(): void;
 }
 
@@ -185,6 +204,7 @@ async function fixture(options: {
     stage: PipelineStageName;
     phase: 'before' | 'after';
   }>;
+  readonly verifyProducedTargetEvidence?: boolean;
 } = {}): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), 'osi-pipeline-order-'));
   temporaryDirectories.push(directory);
@@ -323,6 +343,7 @@ async function fixture(options: {
   ]> = [];
   const operationAttempts = new Map<TrustedOperationId, number>();
   const publishedMetadata: Array<Readonly<{ build: JsonObject; verification: JsonObject }>> = [];
+  const verifiedTargetEvidence: unknown[] = [];
   let prepared: PreparedPublication | null = null;
 
   const write = (command: RunnerWriteCommand): void => {
@@ -556,6 +577,46 @@ async function fixture(options: {
   };
 
   const target = manifest.manifest.targets.find((candidate) => candidate.id === 'rpi-5')!;
+  const rpi2 = manifest.manifest.targets.find((candidate) => candidate.id === 'rpi-2')!;
+  const workspacePath = join(statePath, 'jobs', jobId, 'workspace', 'source');
+  const profileEvidence = (candidate: TargetManifest) => Object.freeze({
+    target: candidate.id,
+    environment: candidate.environment,
+    selectedTarget: candidate.openwrtTarget,
+    profile: candidate.profile,
+    rootfsPartSize: candidate.rootfsPartSize,
+    sourceSha256: hash(configBytes(candidate, 'source')),
+    sourceConfigEvidencePath: `evidence/target-setup/${candidate.id}.source.config`,
+    resolvedSha256: hash(configBytes(candidate, 'resolved')),
+    patchDecision: 'applied' as const,
+  });
+  const profiles = Object.freeze({
+    'rpi-5': profileEvidence(target),
+    'rpi-2': profileEvidence(rpi2),
+  });
+  const sourcePhase = Object.freeze({
+    phase: 'target-setup' as const,
+    workspacePath,
+    target: target.id,
+    patchDecision: 'applied' as const,
+    profiles,
+  });
+  const configPhase = Object.freeze({
+    phase: 'config' as const,
+    workspacePath,
+    target: target.id,
+    config: Object.freeze({
+      selectedTarget: target.openwrtTarget,
+      profile: target.profile,
+      rootfsPartSize: target.rootfsPartSize,
+      sourceSha256: profiles['rpi-5'].sourceSha256,
+      resolvedSha256: profiles['rpi-5'].resolvedSha256,
+      bothProfilesChecked: true as const,
+      profiles,
+    }),
+  });
+  const sourceObservations = createTargetSetupSourceObservations(sourcePhase);
+  const configObservations = createTargetSetupConfigObservations(configPhase);
   const publicationFiles = {
     prepare: async (value: Parameters<PipelineInput['services']['publicationFiles']['prepare']>[0]) => {
       publishedMetadata.push({
@@ -747,15 +808,24 @@ async function fixture(options: {
                 stderr: String(activation.observations.stderr ?? ''),
               }).disposition
             : 'passed';
+          if (options.verifyProducedTargetEvidence === true) {
+            await Promise.all(manifest.manifest.targets.map((candidate) => (
+              evidenceWriter.writeTargetSetupSourceConfig({
+                jobId,
+                targetId: candidate.id,
+                contents: configBytes(candidate, 'source'),
+              })
+            )));
+          }
           const executions = [activation];
           return {
             executions,
-            observations: {
-              target: context.target.id,
-              patchDecision: disposition === 'expected-rootfs-already-present'
-                ? 'already-present'
-                : 'applied',
-            },
+            observations: disposition === 'expected-rootfs-already-present'
+              ? {
+                  ...sourceObservations,
+                  patchDecision: 'already-present',
+                }
+              : sourceObservations,
           };
         },
         feeds: async (context) => {
@@ -776,40 +846,68 @@ async function fixture(options: {
         },
         config: async (context) => {
           const executions = [await context.runOperation('resolve-config')];
+          if (options.verifyProducedTargetEvidence === true) {
+            await Promise.all(manifest.manifest.targets.map(async (candidate) => {
+              const directory = join(workspacePath, 'conf', candidate.environment);
+              await mkdir(directory, { recursive: true });
+              await writeFile(join(directory, '.config'), configBytes(candidate, 'resolved'));
+            }));
+          }
           return {
             executions: options.failStage === 'config' ? [] : executions,
-            observations: {
-              config: {
-                selectedTarget: context.target.openwrtTarget,
-                profile: context.target.profile,
-                rootfsPartSize: context.target.rootfsPartSize,
-                bothProfilesChecked: true,
-              },
-            },
+            observations: configObservations,
           };
         },
       },
       verification: {
-        verify: async () => ({
-          artifact: {
-            path: 'openwrt/bin/targets/factory.img.gz',
-            basename: 'factory.img.gz',
-            size: 100,
-            mtime: clock.now(),
-            sha256: HASH_A,
-            gzip: true,
-          },
-          config: {
-            selectedTarget: target.openwrtTarget,
-            profile: target.profile,
-            rootfsPartSize: target.rootfsPartSize,
-            bothProfilesChecked: true,
-          },
-          verification: {
-            rootfs: { verified: true },
-            freshness: { status: 'fresh', pinnedSha: SHA40 },
-          },
-        }),
+        verify: async () => {
+          const verifiedConfig = options.verifyProducedTargetEvidence === true
+            ? await verifyTargetSetupConfiguration({
+                workspace: {
+                  stateRoot: loaded.pathAuthorities.stateRoot,
+                  jobId,
+                },
+                target,
+                targets: manifest.manifest.targets,
+                config: {
+                  ...configObservations.config,
+                  profiles: {
+                    'rpi-5': {
+                      ...sourceObservations.profiles['rpi-5'],
+                      ...configObservations.config.profiles['rpi-5'],
+                    },
+                    'rpi-2': {
+                      ...sourceObservations.profiles['rpi-2'],
+                      ...configObservations.config.profiles['rpi-2'],
+                    },
+                  },
+                },
+              })
+            : {
+                selectedTarget: target.openwrtTarget,
+                profile: target.profile,
+                rootfsPartSize: target.rootfsPartSize,
+                bothProfilesChecked: true as const,
+              };
+          if (options.verifyProducedTargetEvidence === true) {
+            verifiedTargetEvidence.push(verifiedConfig);
+          }
+          return {
+            artifact: {
+              path: 'openwrt/bin/targets/factory.img.gz',
+              basename: 'factory.img.gz',
+              size: 100,
+              mtime: clock.now(),
+              sha256: HASH_A,
+              gzip: true,
+            },
+            config: verifiedConfig,
+            verification: {
+              rootfs: { verified: true },
+              freshness: { status: 'fresh', pinnedSha: SHA40 },
+            },
+          };
+        },
       },
       publicationFiles,
       publisher,
@@ -850,6 +948,9 @@ async function fixture(options: {
     operationOrder,
     workspaceChecks,
     publishedMetadata,
+    verifiedTargetEvidence,
+    sourceObservations,
+    configObservations,
     close: () => store.close(),
   };
 }
@@ -955,6 +1056,60 @@ describe('trusted pipeline integration', () => {
         artifactStagingPath: null,
         artifactFinalPath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5/factory.img.gz`,
       });
+    } finally {
+      value.close();
+    }
+  });
+
+  it('publishes distinct stage 04 and 06 profile evidence before production verification joins it', async () => {
+    const value = await fixture({ verifyProducedTargetEvidence: true });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'succeeded',
+      });
+      expect(value.verifiedTargetEvidence).toHaveLength(1);
+      const sourceEvidence = JSON.parse(await readFile(
+        join(
+          value.statePath,
+          value.store.getStage(value.input.jobId, 'target-setup')!.evidencePath!,
+        ),
+        'utf8',
+      )) as { observations: Record<string, unknown> };
+      const configEvidence = JSON.parse(await readFile(
+        join(
+          value.statePath,
+          value.store.getStage(value.input.jobId, 'config')!.evidencePath!,
+        ),
+        'utf8',
+      )) as { observations: Record<string, unknown> };
+      expect(sourceEvidence.observations).toMatchObject(value.sourceObservations);
+      expect(configEvidence.observations).toMatchObject(value.configObservations);
+      expect(Object.keys(
+        (sourceEvidence.observations.profiles as Record<string, Record<string, unknown>>)
+          ['rpi-5']!,
+      ).sort()).toEqual([
+        'environment',
+        'profile',
+        'rootfsPartSize',
+        'selectedTarget',
+        'sourceConfigEvidencePath',
+        'sourceSha256',
+        'target',
+      ]);
+      expect(Object.keys(
+        ((configEvidence.observations.config as {
+          profiles: Record<string, Record<string, unknown>>;
+        }).profiles)['rpi-5']!,
+      ).sort()).toEqual([
+        'environment',
+        'profile',
+        'resolvedSha256',
+        'rootfsPartSize',
+        'selectedTarget',
+        'sourceConfigEvidencePath',
+        'sourceSha256',
+        'target',
+      ]);
     } finally {
       value.close();
     }
