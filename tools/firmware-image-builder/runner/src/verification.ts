@@ -940,41 +940,102 @@ async function verifyConfig(
   }
   const keys = Object.keys(input.config.profiles).sort();
   if (keys.join(',') !== 'rpi-2,rpi-5') fail('TARGET_CONFIG_MISMATCH', 'both Task 15 profile hash records are required');
-  const persistedProfiles = await workspace.withJobFile(
-    'evidence/04-target-setup.json',
+  const readStageEvidence = (
+    relativePath: string,
+    stage: 'target-setup' | 'config',
+  ): Promise<Record<string, unknown>> => workspace.withJobFile(
+    relativePath,
     async (file) => {
       let parsed: unknown;
       try {
         parsed = JSON.parse((await file.read(MAX_CONFIG_BYTES)).toString('utf8'));
       } catch (error) {
-        return fail('TARGET_CONFIG_MISMATCH', 'Task 15 target-setup evidence is missing or malformed', {}, error);
+        return fail('TARGET_CONFIG_MISMATCH', `Task 15 ${stage} evidence is missing or malformed`, {}, error);
       }
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        fail('TARGET_CONFIG_MISMATCH', 'Task 15 target-setup evidence is not an object');
+        fail('TARGET_CONFIG_MISMATCH', `Task 15 ${stage} evidence is not an object`);
       }
       const evidence = parsed as Record<string, unknown>;
-      const observations = evidence.observations;
-      const config = observations && typeof observations === 'object' && !Array.isArray(observations)
-        ? (observations as Record<string, unknown>).config
-        : undefined;
-      const profiles = config && typeof config === 'object' && !Array.isArray(config)
-        ? (config as Record<string, unknown>).profiles
-        : undefined;
       if (evidence.schemaVersion !== 1
         || evidence.jobId !== input.workspace.jobId
-        || evidence.stage !== 'target-setup'
+        || evidence.stage !== stage
         || evidence.outcome !== 'passed'
-        || !profiles
-        || typeof profiles !== 'object'
-        || Array.isArray(profiles)) {
-        fail('TARGET_CONFIG_MISMATCH', 'Task 15 target-setup evidence has no authentic profile records');
+        || evidence.error !== null) {
+        fail('TARGET_CONFIG_MISMATCH', `Task 15 ${stage} evidence envelope is not authentic`);
       }
-      return profiles as Record<string, unknown>;
+      return evidence;
     },
   );
-  if (Object.keys(persistedProfiles).sort().join(',') !== 'rpi-2,rpi-5') {
-    fail('TARGET_CONFIG_MISMATCH', 'Task 15 target-setup evidence does not contain both profiles');
+  const targetSetupEvidence = await readStageEvidence(
+    'evidence/04-target-setup.json',
+    'target-setup',
+  );
+  const configEvidence = await readStageEvidence(
+    'evidence/06-config.json',
+    'config',
+  );
+  const targetSetupObservations = targetSetupEvidence.observations;
+  const sourceProfiles = targetSetupObservations
+    && typeof targetSetupObservations === 'object'
+    && !Array.isArray(targetSetupObservations)
+    ? (targetSetupObservations as Record<string, unknown>).profiles
+    : undefined;
+  const configObservations = configEvidence.observations;
+  const persistedConfig = configObservations
+    && typeof configObservations === 'object'
+    && !Array.isArray(configObservations)
+    ? (configObservations as Record<string, unknown>).config
+    : undefined;
+  const resolvedProfiles = persistedConfig
+    && typeof persistedConfig === 'object'
+    && !Array.isArray(persistedConfig)
+    ? (persistedConfig as Record<string, unknown>).profiles
+    : undefined;
+  if (!sourceProfiles
+    || typeof sourceProfiles !== 'object'
+    || Array.isArray(sourceProfiles)
+    || !persistedConfig
+    || typeof persistedConfig !== 'object'
+    || Array.isArray(persistedConfig)
+    || !resolvedProfiles
+    || typeof resolvedProfiles !== 'object'
+    || Array.isArray(resolvedProfiles)) {
+    fail('TARGET_CONFIG_MISMATCH', 'Task 15 stage evidence has no authentic profile records');
   }
+  if ((persistedConfig as Record<string, unknown>).bothProfilesChecked !== true
+    || (persistedConfig as Record<string, unknown>).selectedTarget !== input.config.selectedTarget
+    || (persistedConfig as Record<string, unknown>).profile !== input.config.profile
+    || (persistedConfig as Record<string, unknown>).rootfsPartSize !== input.config.rootfsPartSize) {
+    fail('TARGET_CONFIG_MISMATCH', 'Task 15 config evidence does not match the selected target');
+  }
+  const requireCanonicalProfiles = (
+    profiles: Record<string, unknown>,
+    stage: 'target-setup' | 'config',
+  ): void => {
+    if (Object.keys(profiles).sort().join(',') !== 'rpi-2,rpi-5') {
+      fail('TARGET_CONFIG_MISMATCH', `Task 15 ${stage} evidence does not contain both canonical profiles`);
+    }
+    const seen = new Set<TargetId>();
+    for (const targetId of ['rpi-5', 'rpi-2'] as const) {
+      const profile = profiles[targetId];
+      if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+        fail('TARGET_CONFIG_MISMATCH', `Task 15 ${stage} profile record is invalid`, {
+          target: targetId,
+        });
+      }
+      const recordedTarget = (profile as Record<string, unknown>).target;
+      if ((recordedTarget !== 'rpi-5' && recordedTarget !== 'rpi-2')
+        || recordedTarget !== targetId
+        || seen.has(recordedTarget)) {
+        fail('TARGET_CONFIG_MISMATCH', `Task 15 ${stage} profile target is missing, duplicated, or mismatched`, {
+          target: targetId,
+        });
+      }
+      seen.add(recordedTarget);
+    }
+  };
+  requireCanonicalProfiles(sourceProfiles as Record<string, unknown>, 'target-setup');
+  requireCanonicalProfiles(resolvedProfiles as Record<string, unknown>, 'config');
   const verifiedProfiles = {} as Record<TargetId, VerificationResult['config']['profiles'][TargetId]>;
   for (const targetId of ['rpi-5', 'rpi-2'] as const) {
     const target = targets[targetId];
@@ -991,19 +1052,23 @@ async function verifyConfig(
       || !SHA256.test(profile.resolvedSha256)) {
       fail('TARGET_CONFIG_MISMATCH', 'Task 15 profile configuration evidence is incomplete or contradictory', { target: targetId });
     }
-    const persistedProfile = persistedProfiles[targetId];
-    if (!persistedProfile
-      || typeof persistedProfile !== 'object'
-      || Array.isArray(persistedProfile)
-      || (persistedProfile as Record<string, unknown>).target !== profile.target
-      || (persistedProfile as Record<string, unknown>).environment !== profile.environment
-      || (persistedProfile as Record<string, unknown>).selectedTarget !== profile.selectedTarget
-      || (persistedProfile as Record<string, unknown>).profile !== profile.profile
-      || (persistedProfile as Record<string, unknown>).rootfsPartSize !== profile.rootfsPartSize
-      || (persistedProfile as Record<string, unknown>).sourceConfigEvidencePath !== sourceConfigEvidencePath
-      || (persistedProfile as Record<string, unknown>).sourceSha256 !== profile.sourceSha256
-      || (persistedProfile as Record<string, unknown>).resolvedSha256 !== profile.resolvedSha256) {
-      fail('TARGET_CONFIG_MISMATCH', 'Task 15 target-setup evidence differs from verification input', {
+    const sourceProfile = (sourceProfiles as Record<string, unknown>)[targetId] as Record<string, unknown>;
+    const resolvedProfile = (resolvedProfiles as Record<string, unknown>)[targetId] as Record<string, unknown>;
+    const identityFields = [
+      'target',
+      'environment',
+      'selectedTarget',
+      'profile',
+      'rootfsPartSize',
+    ] as const;
+    if (identityFields.some((field) => (
+      sourceProfile[field] !== profile[field]
+      || resolvedProfile[field] !== profile[field]
+    ))
+      || sourceProfile.sourceSha256 !== profile.sourceSha256
+      || sourceProfile.sourceConfigEvidencePath !== profile.sourceConfigEvidencePath
+      || resolvedProfile.resolvedSha256 !== profile.resolvedSha256) {
+      fail('TARGET_CONFIG_MISMATCH', 'Task 15 source and config evidence differ from verification input', {
         target: targetId,
       });
     }
@@ -1024,10 +1089,10 @@ async function verifyConfig(
         return hashBytes(bytes);
       },
     );
-    if (sourceHash !== profile.sourceSha256) {
+    if (sourceHash !== sourceProfile.sourceSha256) {
       fail('TARGET_CONFIG_MISMATCH', 'Task 15 source configuration hash does not match its immutable bytes', { target: targetId });
     }
-    if (resolvedHash !== profile.resolvedSha256) {
+    if (resolvedHash !== resolvedProfile.resolvedSha256) {
       fail('TARGET_CONFIG_MISMATCH', 'Task 15 resolved configuration hash no longer matches the workspace', { target: targetId });
     }
     verifiedProfiles[targetId] = Object.freeze({

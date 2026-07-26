@@ -282,6 +282,53 @@ export interface RootfsFixture {
   readonly target: TargetManifest;
 }
 
+type ConfigEvidenceStage = 'target-setup' | 'config';
+
+function objectRecord(value: unknown, field: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${field} is not an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function configEvidencePath(fixture: RootfsFixture, stage: ConfigEvidenceStage): string {
+  return join(
+    fixture.statePath,
+    'jobs/job-verify/evidence',
+    stage === 'target-setup' ? '04-target-setup.json' : '06-config.json',
+  );
+}
+
+async function readConfigEvidence(
+  fixture: RootfsFixture,
+  stage: ConfigEvidenceStage,
+): Promise<Record<string, unknown>> {
+  return objectRecord(
+    JSON.parse(await readFile(configEvidencePath(fixture, stage), 'utf8')) as unknown,
+    `${stage} evidence`,
+  );
+}
+
+function configEvidenceProfiles(
+  evidence: Record<string, unknown>,
+  stage: ConfigEvidenceStage,
+): Record<string, unknown> {
+  const observations = objectRecord(evidence.observations, `${stage} observations`);
+  if (stage === 'target-setup') {
+    return objectRecord(observations.profiles, 'target-setup profiles');
+  }
+  const config = objectRecord(observations.config, 'config observations');
+  return objectRecord(config.profiles, 'config profiles');
+}
+
+async function overwriteConfigEvidence(
+  fixture: RootfsFixture,
+  stage: ConfigEvidenceStage,
+  evidence: Record<string, unknown>,
+): Promise<void> {
+  await writeFile(configEvidencePath(fixture, stage), `${JSON.stringify(evidence)}\n`);
+}
+
 export async function createRootfsFixture(
   targetId: TargetManifest['id'],
   pathAuthorityDependencies?: Partial<PathAuthorityDependencies>,
@@ -420,6 +467,36 @@ export async function createRootfsFixture(
       resolvedSha256: sha256(resolvedConfigs[profile.id]),
     }];
   })) as VerificationInput['config']['profiles'];
+  const sourceProfiles = Object.fromEntries(targets.map((profile) => {
+    const record = profiles[profile.id];
+    return [profile.id, {
+      target: record.target,
+      environment: record.environment,
+      selectedTarget: record.selectedTarget,
+      profile: record.profile,
+      rootfsPartSize: record.rootfsPartSize,
+      sourceSha256: record.sourceSha256,
+      sourceConfigEvidencePath: record.sourceConfigEvidencePath,
+    }];
+  }));
+  const resolvedEvidenceProfiles = Object.fromEntries(targets.map((profile) => {
+    const record = profiles[profile.id];
+    return [profile.id, {
+      target: record.target,
+      environment: record.environment,
+      selectedTarget: record.selectedTarget,
+      profile: record.profile,
+      rootfsPartSize: record.rootfsPartSize,
+      resolvedSha256: record.resolvedSha256,
+    }];
+  }));
+  const config = {
+    selectedTarget: target.openwrtTarget,
+    profile: target.profile,
+    rootfsPartSize: target.rootfsPartSize,
+    bothProfilesChecked: true as const,
+    profiles,
+  };
   await task15EvidenceWriter.write({
     jobId: authority.workspace.jobId,
     stage: 'target-setup',
@@ -434,7 +511,36 @@ export async function createRootfsFixture(
       branch: 'main',
       pinnedSha: SHA40,
     },
-    observations: { config: { profiles } },
+    observations: {
+      target: target.id,
+      patchDecision: 'applied',
+      profiles: sourceProfiles,
+    },
+    error: null,
+  });
+  await task15EvidenceWriter.write({
+    jobId: authority.workspace.jobId,
+    stage: 'config',
+    startedAt: '2026-07-26T10:02:00.000Z',
+    finishedAt: '2026-07-26T10:03:00.000Z',
+    outcome: 'passed',
+    operationId: 'resolve-config',
+    commands: [],
+    inputs: {
+      targetId: target.id,
+      rootId: 'images',
+      branch: 'main',
+      pinnedSha: SHA40,
+    },
+    observations: {
+      config: {
+        selectedTarget: config.selectedTarget,
+        profile: config.profile,
+        rootfsPartSize: config.rootfsPartSize,
+        bothProfilesChecked: true,
+        profiles: resolvedEvidenceProfiles,
+      },
+    },
     error: null,
   });
   const input: VerificationInput = {
@@ -448,13 +554,7 @@ export async function createRootfsFixture(
       targetOutputAbsent: true,
       checkedTargetOutputPath: `openwrt/bin/targets/${target.openwrtTarget}/`,
     },
-    config: {
-      selectedTarget: target.openwrtTarget,
-      profile: target.profile,
-      rootfsPartSize: target.rootfsPartSize,
-      bothProfilesChecked: true,
-      profiles,
-    },
+    config,
     pinnedSha: SHA40,
     branch: 'main',
     nodeVerifier: {
@@ -575,6 +675,68 @@ function withFreshness(
 }
 
 describe('real rootfs verification contract', () => {
+  it('joins production stage 04 source identity with stage 06 resolved hashes', async () => {
+    const fixture = await createRootfsFixture('rpi-5');
+    const targetSetupEvidence = JSON.parse(await readFile(
+      join(fixture.statePath, 'jobs/job-verify/evidence/04-target-setup.json'),
+      'utf8',
+    )) as Record<string, unknown>;
+    const configEvidence = JSON.parse(await readFile(
+      join(fixture.statePath, 'jobs/job-verify/evidence/06-config.json'),
+      'utf8',
+    )) as Record<string, unknown>;
+
+    expect(targetSetupEvidence).toMatchObject({
+      stage: 'target-setup',
+      observations: {
+        profiles: {
+          'rpi-5': {
+            target: 'rpi-5',
+            sourceSha256: fixture.input.config.profiles['rpi-5'].sourceSha256,
+          },
+          'rpi-2': {
+            target: 'rpi-2',
+            sourceSha256: fixture.input.config.profiles['rpi-2'].sourceSha256,
+          },
+        },
+      },
+    });
+    expect(targetSetupEvidence).not.toHaveProperty('observations.config');
+    expect(targetSetupEvidence).not.toHaveProperty(
+      'observations.profiles.rpi-5.resolvedSha256',
+    );
+    expect(configEvidence).toMatchObject({
+      stage: 'config',
+      observations: {
+        config: {
+          bothProfilesChecked: true,
+          profiles: {
+            'rpi-5': {
+              resolvedSha256: fixture.input.config.profiles['rpi-5'].resolvedSha256,
+            },
+            'rpi-2': {
+              resolvedSha256: fixture.input.config.profiles['rpi-2'].resolvedSha256,
+            },
+          },
+        },
+      },
+    });
+    expect(configEvidence).not.toHaveProperty(
+      'observations.config.profiles.rpi-5.sourceSha256',
+    );
+    expect(configEvidence).not.toHaveProperty(
+      'observations.config.profiles.rpi-5.sourceConfigEvidencePath',
+    );
+
+    const result = await verifyFirmwareArtifact(fixture.input);
+    expect(result.config.profiles['rpi-5'].resolvedSha256).toBe(
+      fixture.input.config.profiles['rpi-5'].resolvedSha256,
+    );
+    expect(result.config.profiles['rpi-2'].resolvedSha256).toBe(
+      fixture.input.config.profiles['rpi-2'].resolvedSha256,
+    );
+  }, 30_000);
+
   it.each(targets)(
     'matches the checked-in $id helper deployment contract',
     async (target) => {
@@ -837,6 +999,47 @@ describe('real rootfs verification contract', () => {
     });
   }, 30_000);
 
+  it('rejects missing, duplicate, or mismatched profiles across stage 04 and stage 06', async () => {
+    for (const stage of ['target-setup', 'config'] as const) {
+      const missing = await createRootfsFixture('rpi-5');
+      const missingEvidence = await readConfigEvidence(missing, stage);
+      delete configEvidenceProfiles(missingEvidence, stage)['rpi-2'];
+      await overwriteConfigEvidence(missing, stage, missingEvidence);
+      await expect(verifyFirmwareArtifact(missing.input)).rejects.toMatchObject({
+        code: 'TARGET_CONFIG_MISMATCH',
+      });
+
+      const duplicate = await createRootfsFixture('rpi-2');
+      const duplicateEvidence = await readConfigEvidence(duplicate, stage);
+      const duplicateProfiles = configEvidenceProfiles(duplicateEvidence, stage);
+      duplicateProfiles['rpi-2'] = {
+        ...objectRecord(duplicateProfiles['rpi-5'], `${stage} rpi-5 profile`),
+      };
+      await overwriteConfigEvidence(duplicate, stage, duplicateEvidence);
+      await expect(verifyFirmwareArtifact(duplicate.input)).rejects.toMatchObject({
+        code: 'TARGET_CONFIG_MISMATCH',
+      });
+    }
+
+    const mismatch = await createRootfsFixture('rpi-5');
+    const mismatchEvidence = await readConfigEvidence(mismatch, 'config');
+    const mismatchProfiles = configEvidenceProfiles(mismatchEvidence, 'config');
+    mismatchProfiles['rpi-2'] = {
+      ...objectRecord(mismatchProfiles['rpi-2'], 'config rpi-2 profile'),
+      environment: 'forged-environment',
+    };
+    await overwriteConfigEvidence(mismatch, 'config', mismatchEvidence);
+    await expect(verifyFirmwareArtifact(mismatch.input)).rejects.toMatchObject({
+      code: 'TARGET_CONFIG_MISMATCH',
+    });
+
+    const missingFile = await createRootfsFixture('rpi-2');
+    await unlink(configEvidencePath(missingFile, 'config'));
+    await expect(verifyFirmwareArtifact(missingFile.input)).rejects.toMatchObject({
+      name: 'VerificationError',
+    });
+  }, 30_000);
+
   it.each(['rpi-5', 'rpi-2'] as const)(
     'rejects source or resolved %s symbol tampering even when the supplied hash is well formed',
     async (targetId) => {
@@ -858,16 +1061,13 @@ describe('real rootfs verification contract', () => {
           sourceSha256: sha256(sourceBytes),
         },
       };
-      await writeFile(
-        join(sourceTamper.statePath, 'jobs/job-verify/evidence/04-target-setup.json'),
-        JSON.stringify({
-          schemaVersion: 1,
-          jobId: 'job-verify',
-          stage: 'target-setup',
-          outcome: 'passed',
-          observations: { config: { profiles: sourceProfiles } },
-        }),
-      );
+      const sourceEvidence = await readConfigEvidence(sourceTamper, 'target-setup');
+      const persistedSourceProfiles = configEvidenceProfiles(sourceEvidence, 'target-setup');
+      persistedSourceProfiles[targetId] = {
+        ...objectRecord(persistedSourceProfiles[targetId], `target-setup ${targetId} profile`),
+        sourceSha256: sha256(sourceBytes),
+      };
+      await overwriteConfigEvidence(sourceTamper, 'target-setup', sourceEvidence);
       await expect(verifyFirmwareArtifact({
         ...sourceTamper.input,
         config: {
@@ -896,16 +1096,13 @@ describe('real rootfs verification contract', () => {
           resolvedSha256: sha256(resolvedBytes),
         },
       };
-      await writeFile(
-        join(resolvedTamper.statePath, 'jobs/job-verify/evidence/04-target-setup.json'),
-        JSON.stringify({
-          schemaVersion: 1,
-          jobId: 'job-verify',
-          stage: 'target-setup',
-          outcome: 'passed',
-          observations: { config: { profiles: resolvedProfiles } },
-        }),
-      );
+      const resolvedEvidence = await readConfigEvidence(resolvedTamper, 'config');
+      const persistedResolvedProfiles = configEvidenceProfiles(resolvedEvidence, 'config');
+      persistedResolvedProfiles[targetId] = {
+        ...objectRecord(persistedResolvedProfiles[targetId], `config ${targetId} profile`),
+        resolvedSha256: sha256(resolvedBytes),
+      };
+      await overwriteConfigEvidence(resolvedTamper, 'config', resolvedEvidence);
       await expect(verifyFirmwareArtifact({
         ...resolvedTamper.input,
         config: {
