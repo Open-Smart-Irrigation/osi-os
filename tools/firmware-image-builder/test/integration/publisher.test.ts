@@ -593,6 +593,18 @@ describe('native publisher integration', () => {
         mutationCount: 0,
       });
     }
+
+    const racedBranch = 'feature%2Fsha-blocker-branch-race';
+    await mkdir(join(root, racedBranch), { recursive: true });
+    await symlink('/tmp', join(root, racedBranch, SHA));
+    const raced = await runBinary(branchParentAfterBinary, 'recheck', '--root', root, '--job-id', 'job-sha-blocker-branch-race', '--branch', racedBranch, '--sha', SHA, '--target', TARGET);
+    expect(raced.code).toBe(2);
+    expect(parsed(raced)).toMatchObject({
+      destination: 'unknown',
+      staging: 'unknown',
+      errorCode: 'PUBLISH_RECOVERY_FAILED',
+      mutationCount: 0,
+    });
   });
 
   it('keeps explicit source and kernel evidence when quarantine collides', async () => {

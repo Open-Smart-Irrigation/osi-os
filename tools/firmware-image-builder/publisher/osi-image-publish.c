@@ -992,6 +992,7 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
         if (!root_metadata_bindings_match(&root_chain, root, metadata) ||
             !directory_binding_matches(metadata, "staging", staging_parent) ||
             !named_state_matches(staging_parent, job_id, staging_state, staging_state == 1 ? &staging_identity : NULL) ||
+            (branch_parent >= 0 && !directory_binding_matches(root, branch, branch_parent)) ||
             !named_state_matches(blocker_parent, blocker_name, 1, &blocker_identity)) goto invalid;
         result->destination = "mismatched";
         goto classified;
