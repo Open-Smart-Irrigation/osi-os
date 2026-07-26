@@ -23,6 +23,7 @@ import type { TargetManifest } from '../../manifest/schema.js';
 import {
   APPROVED_ROOTFS_SCRIPT_SHA256,
   ROOTFS_PADDING_PATCH,
+  classifyTargetSetupOperationResult,
   createLockedTargetSetupOperations,
   decideRootfsPatchState,
   resolveTargetSetup,
@@ -44,6 +45,23 @@ const rustFixture = new URL('../fixtures/openwrt-packages-d8cd30f4/lang/rust/Mak
 const rootfsFixture = new URL('../../../../openwrt/target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh', import.meta.url).pathname;
 const temporaryDirectories: string[] = [];
 const requiredPackages = ['node-red', 'node-red-contrib-chirpstack', 'node-red-node-sqlite', 'chirpstack'] as const;
+const ROOTFS_REVERSE_OUTPUT = [
+  'Applying patch patches/image-with-padded-rootfs.patch',
+  'patching file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+  'Hunk #1 FAILED at 24.',
+  '1 out of 1 hunk FAILED -- rejects in file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+  'Patch patches/image-with-padded-rootfs.patch can be reverse-applied',
+  '',
+].join('\n');
+const NO_UART_REVERSE_OUTPUT = [
+  'Applying patch patches/no-uart-console.patch',
+  'patching file target/linux/bcm27xx/image/cmdline.txt',
+  'Hunk #1 FAILED at 1.',
+  '1 out of 1 hunk FAILED -- rejects in file target/linux/bcm27xx/image/cmdline.txt',
+  'Patch patches/no-uart-console.patch can be reverse-applied',
+  '',
+].join('\n');
+const EXPECTED_MAKE_REVERSE_ERROR = 'make: *** [Makefile:60: switch-env] Error 1\n';
 
 afterEach(async () => {
   for (const directory of temporaryDirectories.splice(0)) await rm(directory, { recursive: true, force: true });
@@ -244,8 +262,6 @@ function operations(fixture: Fixture, options: OperationsOptions = {}): {
       if (options.commandFailure?.operation === operationId) return options.commandFailure.result;
       if (operationId === 'activate-target') {
         activeTarget = targets.find((target) => target.environment === environment)!;
-        await removeIfPresent(join(workspace, 'openwrt/feeds'));
-        await removeIfPresent(join(workspace, 'openwrt/package/feeds'));
         await removeIfPresent(join(workspace, 'openwrt/.pc'));
         await mkdir(join(workspace, 'openwrt/.pc'), { recursive: true });
         await mkdir(join(workspace, 'openwrt/target/linux/bcm27xx/image'), { recursive: true });
@@ -339,6 +355,43 @@ describe('target setup', () => {
     expect(await readFile(join(fixture.workspace, 'openwrt/feeds/packages/lang/rust/Makefile'), 'utf8')).toContain('download-ci-llvm=false');
   });
 
+  it('removes only held builder feed entries left by a crash before resolving both profiles', async () => {
+    const fixture = await authorityFixture();
+    await mkdir(join(fixture.workspace, 'openwrt/feeds/packages/partial'), { recursive: true });
+    await writeFile(join(fixture.workspace, 'openwrt/feeds/packages/partial/object'), 'interrupted copy\n');
+    await mkdir(join(fixture.workspace, 'openwrt/package/feeds/chirpstack'), { recursive: true });
+    await writeFile(join(fixture.workspace, 'openwrt/package/feeds/chirpstack/partial'), 'interrupted install\n');
+    await writeFile(join(fixture.workspace, 'openwrt/not-builder-created'), 'preserve\n');
+    const { runner } = operations(fixture);
+
+    await expect(resolveTargetSetup(input(fixture, runner))).resolves.toMatchObject({
+      config: { bothProfilesChecked: true },
+    });
+
+    expect(await readFile(join(fixture.workspace, 'openwrt/not-builder-created'), 'utf8')).toBe('preserve\n');
+    expect(await lstat(join(fixture.workspace, 'openwrt/feeds/packages/partial')).catch(() => null)).toBeNull();
+    expect(await lstat(join(fixture.workspace, 'openwrt/package/feeds/chirpstack/partial')).catch(() => null)).toBeNull();
+  });
+
+  it.each([
+    ['openwrt feeds', ['feeds']],
+    ['OpenWrt package ancestor', ['package']],
+    ['installed package feeds', ['package', 'feeds']],
+  ] as const)('refuses a symlink substituted for %s during cleanup', async (_case, path) => {
+    const fixture = await authorityFixture();
+    const external = join(fixture.root, 'external-cleanup');
+    await mkdir(external);
+    const parent = join(fixture.workspace, 'openwrt', ...path.slice(0, -1));
+    await mkdir(parent, { recursive: true });
+    await symlink(external, join(parent, path.at(-1)!));
+    const { runner, calls } = operations(fixture);
+
+    await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({
+      code: 'FEED_INSTALL_FAILED',
+    });
+    expect(calls).toEqual([]);
+  });
+
   it('publishes exact source config bytes for both profiles before resolution', async () => {
     const fixture = await authorityFixture();
     const { runner } = operations(fixture, {
@@ -423,11 +476,107 @@ describe('target setup', () => {
     const inputValue = {
       series: ['no-uart-console.patch', ROOTFS_PADDING_PATCH],
       applied: ['no-uart-console.patch'],
-      output: `Applying ${ROOTFS_PADDING_PATCH}\nReversed (or previously applied) patch detected: ${ROOTFS_PADDING_PATCH}\n`,
+      output: ROOTFS_REVERSE_OUTPUT,
       rootfsScript: approved,
     };
     expect(sha256(approved)).toBe(APPROVED_ROOTFS_SCRIPT_SHA256);
     expect(decideRootfsPatchState(inputValue)).toBe('already-present');
+  });
+
+  it('classifies only the exact real rootfs quilt transcript and make exit as expected already-present', () => {
+    const definition = createOperationDefinition('activate-target', {
+      environment: targets[0]!.environment,
+    });
+    const command = result(definition.argv, {
+      exitCode: 2,
+      stdout: ROOTFS_REVERSE_OUTPUT,
+    });
+
+    expect(classifyTargetSetupOperationResult('activate-target', definition, command)).toEqual({
+      disposition: 'expected-rootfs-already-present',
+      command,
+    });
+  });
+
+  it('classifies the exact terminal quilt block in the real make switch-env result', () => {
+    const definition = createOperationDefinition('activate-target', {
+      environment: targets[0]!.environment,
+    });
+    const command = result(definition.argv, {
+      exitCode: 2,
+      stdout: [
+        'Cleaning patch state',
+        'Restoring clean source tree',
+        'Switching configuration',
+        'Recreating openwrt symlinks',
+        'Initializing quilt',
+        'Applying patches',
+        ROOTFS_REVERSE_OUTPUT,
+      ].join('\n'),
+      stderr: EXPECTED_MAKE_REVERSE_ERROR,
+    });
+
+    expect(classifyTargetSetupOperationResult('activate-target', definition, command)).toEqual({
+      disposition: 'expected-rootfs-already-present',
+      command,
+    });
+  });
+
+  it('resolves both profiles when activate-target returns the exact expected rootfs nonzero result', async () => {
+    const fixture = await authorityFixture();
+    const base = operations(fixture);
+    const runner = createLockedTargetSetupOperations(async (request) => {
+      const command = await base.execute(request);
+      if (request.operationId !== 'activate-target') return command;
+      const appliedPath = join(request.cwd, 'openwrt/.pc/applied-patches');
+      const applied = (await readFile(appliedPath, 'utf8'))
+        .split(/\r?\n/u)
+        .filter((patch) => patch !== ROOTFS_PADDING_PATCH)
+        .join('\n');
+      await writeFile(appliedPath, applied);
+      return result(request.definition.argv, {
+        exitCode: 2,
+        stdout: `Applying patches\n${ROOTFS_REVERSE_OUTPUT}`,
+        stderr: EXPECTED_MAKE_REVERSE_ERROR,
+      });
+    });
+
+    const setup = await resolveTargetSetup(input(fixture, runner));
+
+    expect(setup.patchDecision).toBe('already-present');
+    expect(setup.config.profiles['rpi-5'].patchDecision).toBe('already-present');
+    expect(setup.config.profiles['rpi-2'].patchDecision).toBe('already-present');
+  });
+
+  it.each([
+    ['another reverse-applicable patch', NO_UART_REVERSE_OUTPUT, 2],
+    ['wrong make exit', ROOTFS_REVERSE_OUTPUT, 1],
+    ['unexpected zero exit', ROOTFS_REVERSE_OUTPUT, 0],
+    ['extra output', `${ROOTFS_REVERSE_OUTPUT}unexpected output\n`, 2],
+    ['extra failure output', `${ROOTFS_REVERSE_OUTPUT}fatal: unrelated failure\n`, 2],
+    ['unrelated preceding failure', `fatal: unrelated failure\n${ROOTFS_REVERSE_OUTPUT}`, 2],
+    ['path mismatch', ROOTFS_REVERSE_OUTPUT.replace(
+      'Patch patches/image-with-padded-rootfs.patch can be reverse-applied',
+      'Patch patches/no-uart-console.patch can be reverse-applied',
+    ), 2],
+  ])('rejects an activate-target result with %s', (_case, stdout, exitCode) => {
+    const definition = createOperationDefinition('activate-target', {
+      environment: targets[0]!.environment,
+    });
+    expect(() => classifyTargetSetupOperationResult('activate-target', definition, result(
+      definition.argv,
+      { exitCode, stdout },
+    ))).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
+  });
+
+  it('rejects extra output around an otherwise exact reverse-applicable patch transcript', async () => {
+    const approved = await readFile(rootfsFixture, 'utf8');
+    expect(() => decideRootfsPatchState({
+      series: ['no-uart-console.patch', ROOTFS_PADDING_PATCH],
+      applied: ['no-uart-console.patch'],
+      output: `${ROOTFS_REVERSE_OUTPUT}unexpected output\n`,
+      rootfsScript: approved,
+    })).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
   });
 
   it.each([

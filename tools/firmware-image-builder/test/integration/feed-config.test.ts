@@ -37,6 +37,7 @@ import { verifyTargetSetupConfiguration } from '../../runner/src/verification.js
 const loadedManifest = loadManifest(new URL('../../manifest/targets.json', import.meta.url).pathname);
 const manifest = loadedManifest.manifest;
 const fixtureRoot = new URL('../fixtures/target-setup/', import.meta.url).pathname;
+const rustFixture = new URL('../fixtures/openwrt-packages-d8cd30f4/lang/rust/Makefile', import.meta.url).pathname;
 const rootfsFixture = new URL('../../../../openwrt/target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh', import.meta.url).pathname;
 const operationTool = new URL('../../builder/operations/osi-image-builder-tool.js', import.meta.url).pathname;
 const temporaryDirectories: string[] = [];
@@ -120,7 +121,9 @@ describe('feed configuration integration boundary', () => {
     const fixtureGit = async (cwd: string, argv: readonly string[]) => execFile('/usr/bin/git', [...argv], { cwd, env: fixtureGitEnv });
     const nestedDonor = join(root, 'nested-feed-dependency');
     const luciDonor = join(root, 'luci-feed');
-    for (const donor of [nestedDonor, luciDonor]) {
+    const packagesDonor = join(root, 'packages-feed');
+    const routingDonor = join(root, 'routing-feed');
+    for (const donor of [nestedDonor, luciDonor, packagesDonor, routingDonor]) {
       await mkdir(donor);
       await fixtureGit(donor, ['init', '--quiet']);
       await fixtureGit(donor, ['config', 'user.name', 'Fixture Author']);
@@ -136,10 +139,19 @@ describe('feed configuration integration boundary', () => {
     await fixtureGit(luciDonor, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', nestedDonor, 'deps/nested']);
     await fixtureGit(luciDonor, ['commit', '--quiet', '-am', 'attach nested dependency']);
     const luciCommit = (await fixtureGit(luciDonor, ['rev-parse', 'HEAD'])).stdout.trim();
+    await mkdir(join(packagesDonor, 'lang/rust'), { recursive: true });
+    await copyFile(rustFixture, join(packagesDonor, 'lang/rust/Makefile'));
+    await fixtureGit(packagesDonor, ['add', 'lang/rust/Makefile']);
+    await fixtureGit(packagesDonor, ['commit', '--quiet', '-m', 'pinned packages Rust fixture']);
+    const packagesFixtureCommit = (await fixtureGit(packagesDonor, ['rev-parse', 'HEAD'])).stdout.trim();
+    await writeFile(join(routingDonor, 'README'), 'fixture routing feed\n');
+    await fixtureGit(routingDonor, ['add', 'README']);
+    await fixtureGit(routingDonor, ['commit', '--quiet', '-m', 'fixture routing feed']);
+    const routingCommit = (await fixtureGit(routingDonor, ['rev-parse', 'HEAD'])).stdout.trim();
     const feeds = [
       { name: 'packages' as const, location: 'https://git.openwrt.org/feed/packages.git', commit: 'd8cd30f4e281d6853b3de134c4f147a807583e43' },
       { name: 'luci' as const, location: 'https://git.openwrt.org/project/luci.git', commit: luciCommit },
-      { name: 'routing' as const, location: 'https://git.openwrt.org/feed/routing.git', commit: 'c9b636698881059a3c981032770968f5a98ff201' },
+      { name: 'routing' as const, location: 'https://git.openwrt.org/feed/routing.git', commit: routingCommit },
     ];
     await writeFile(join(workspace, 'feeds.conf.default'), [
       ...feeds.map((feed) => `src-git ${feed.name} ${feed.location}^${feed.commit}`),
@@ -177,27 +189,39 @@ describe('feed configuration integration boundary', () => {
     await fixtureGit(repository, ['remote', 'add', 'origin', 'git@github.com:Open-Smart-Irrigation/osi-os.git']);
     await fixtureGit(repository, ['update-ref', 'refs/remotes/origin/main', sourceSha]);
 
-    const repositoryRoot = new URL('../../../../', import.meta.url).pathname;
-    const commonDirectory = (await execFile('/usr/bin/git', [
-      '-C',
-      repositoryRoot,
-      'rev-parse',
-      '--path-format=absolute',
-      '--git-common-dir',
-    ])).stdout.trim();
-    const donorRoot = join(commonDirectory, '..', 'openwrt', 'feeds');
     const donorByUrl = new Map<string, string>([
-      [feeds[0]!.location, join(donorRoot, feeds[0]!.name)],
+      [feeds[0]!.location, packagesDonor],
       [feeds[1]!.location, luciDonor],
-      [feeds[2]!.location, join(donorRoot, feeds[2]!.name)],
+      [feeds[2]!.location, routingDonor],
+    ]);
+    const donorCommitByUrl = new Map<string, string>([
+      [feeds[0]!.location, packagesFixtureCommit],
+      [feeds[1]!.location, luciCommit],
+      [feeds[2]!.location, routingCommit],
     ]);
     for (const feed of feeds) {
-      expect((await fixtureGit(donorByUrl.get(feed.location)!, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(feed.commit);
+      expect((await fixtureGit(donorByUrl.get(feed.location)!, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(
+        donorCommitByUrl.get(feed.location),
+      );
     }
     const feedGit = new GitCommand({
       sshAuthSock: null,
       async execFile(_executable, argv, options) {
         const environment = options.env as Readonly<Record<string, string>>;
+        const checkoutPath = typeof options.cwd === 'string' && options.cwd.startsWith('/proc/')
+          ? await readlink(options.cwd)
+          : String(options.cwd);
+        if (
+          checkoutPath.endsWith('/packages')
+          && JSON.stringify(argv) === JSON.stringify([
+            'rev-parse',
+            '--verify',
+            '--end-of-options',
+            'HEAD^{commit}',
+          ])
+        ) {
+          return { exitCode: 0, signal: null, stdout: `${feeds[0]!.commit}\n`, stderr: '' };
+        }
         const executed = argv.map((value) => donorByUrl.get(value) ?? value);
         const separator = executed.indexOf('--');
         if (executed[0] === 'clone' && separator >= 0) executed.splice(separator, 0, '--shared');
@@ -209,9 +233,26 @@ describe('feed configuration integration boundary', () => {
             maxBuffer: 128 * 1024,
           });
           if (argv[0] === 'clone') {
+            const location = argv.at(-2)!;
+            const checkout = join(options.cwd as string, argv.at(-1)!);
+            const feed = feeds.find((candidate) => candidate.location === location)!;
+            const fixtureCommit = donorCommitByUrl.get(location)!;
+            if (fixtureCommit !== feed.commit) {
+              // A minimal fixture cannot reproduce the upstream commit hash; alias
+              // only its loose commit object while every checkout/tree operation stays real.
+              const fixtureObject = join(
+                donorByUrl.get(location)!,
+                '.git/objects',
+                fixtureCommit.slice(0, 2),
+                fixtureCommit.slice(2),
+              );
+              const aliasDirectory = join(checkout, '.git/objects', feed.commit.slice(0, 2));
+              await mkdir(aliasDirectory, { recursive: true });
+              await copyFile(fixtureObject, join(aliasDirectory, feed.commit.slice(2)));
+            }
             await fixtureGit(
-              join(options.cwd as string, argv.at(-1)!),
-              ['remote', 'set-url', 'origin', argv.at(-2)!],
+              checkout,
+              ['remote', 'set-url', 'origin', location],
             );
           }
           return { exitCode: 0, signal: null, stdout: command.stdout, stderr: command.stderr };

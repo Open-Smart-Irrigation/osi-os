@@ -7,7 +7,9 @@ import {
   open,
   readlink,
   readdir,
+  rmdir,
   symlink,
+  unlink,
 } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { join, posix } from 'node:path';
@@ -56,8 +58,24 @@ const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const SHA40 = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const HTTPS_FEED = /^https:\/\/[^\s^]+$/u;
+const ROOTFS_REVERSE_OUTPUT = [
+  'Applying patch patches/image-with-padded-rootfs.patch',
+  'patching file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+  'Hunk #1 FAILED at 24.',
+  '1 out of 1 hunk FAILED -- rejects in file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+  'Patch patches/image-with-padded-rootfs.patch can be reverse-applied',
+  '',
+].join('\n');
+const EXPECTED_MAKE_REVERSE_ERROR = 'make: *** [Makefile:60: switch-env] Error 1\n';
+const UNRELATED_FAILURE_OUTPUT = /\b(?:can be reverse-applied|error|failed|failure|fatal|rejects?|cannot|does not apply)\b/iu;
 
 export type TargetSetupOperationId = (typeof TARGET_SETUP_OPERATIONS)[number];
+export type TargetSetupOperationDisposition = 'passed' | 'expected-rootfs-already-present';
+
+export interface ClassifiedTargetSetupOperationResult {
+  readonly disposition: TargetSetupOperationDisposition;
+  readonly command: CommandResult;
+}
 
 export interface HeldWorkspaceCapability {
   readonly descriptorPath: string;
@@ -587,24 +605,54 @@ function reversedPatchAttributions(
   for (const rawLine of output.split(/\r?\n/u)) {
     const line = rawLine.trim();
     if (line.length === 0) continue;
-    const applying = /^Applying(?: patch)? ([^\s]+)$/u.exec(line);
+    const applying = /^Applying patch (patches\/[^\s]+)$/u.exec(line);
     if (applying) {
-      const path = applying[1]!;
+      const quiltPath = applying[1]!;
+      const path = quiltPath.slice('patches/'.length);
       const index = series.indexOf(path);
-      if (!validPatchPath(path) || index < 0 || index <= applyingIndex) return null;
+      if (
+        !validPatchPath(path)
+        || quiltPath !== `patches/${path}`
+        || index < 0
+        || index <= applyingIndex
+      ) return null;
       applyingPatch = path;
       applyingIndex = index;
       continue;
     }
+    if (line === 'Applying patches') continue;
     if (/^Applying\b/u.test(line)) return null;
     if (!/revers(?:ed|e)|previously applied/iu.test(line)) continue;
-    const reversed = /^Reversed \(or previously applied\) patch detected: ([^\s]+)$/u.exec(line);
+    const reversed = /^Patch (patches\/[^\s]+) can be reverse-applied$/u.exec(line);
     if (!reversed || applyingPatch === null) return null;
-    const path = reversed[1]!;
-    if (!validPatchPath(path) || !series.includes(path) || path !== applyingPatch) return null;
+    const quiltPath = reversed[1]!;
+    const path = quiltPath.slice('patches/'.length);
+    if (
+      !validPatchPath(path)
+      || quiltPath !== `patches/${path}`
+      || !series.includes(path)
+      || path !== applyingPatch
+    ) return null;
     attributions.push(path);
   }
   return Object.freeze(attributions);
+}
+
+function hasExactRootfsReverseResult(stdout: string, stderr: string): boolean {
+  if (stderr !== '' && stderr !== EXPECTED_MAKE_REVERSE_ERROR) return false;
+  if (!stdout.endsWith(ROOTFS_REVERSE_OUTPUT)) return false;
+  const prefix = stdout.slice(0, -ROOTFS_REVERSE_OUTPUT.length);
+  return !UNRELATED_FAILURE_OUTPUT.test(prefix);
+}
+
+function hasExactCombinedRootfsReverseOutput(output: string): boolean {
+  if (output.endsWith(EXPECTED_MAKE_REVERSE_ERROR)) {
+    return hasExactRootfsReverseResult(
+      output.slice(0, -EXPECTED_MAKE_REVERSE_ERROR.length),
+      EXPECTED_MAKE_REVERSE_ERROR,
+    );
+  }
+  return hasExactRootfsReverseResult(output, '');
 }
 
 export function decideRootfsPatchState(input: RootfsPatchStateInput, requestId = 'target-setup'): RootfsPatchDecision {
@@ -622,6 +670,9 @@ export function decideRootfsPatchState(input: RootfsPatchStateInput, requestId =
   const reversed = reversedPatchAttributions(input.output, series);
   if (reversed === null) {
     fail('PATCH_STATE_AMBIGUOUS', 'OpenWrt patch output cannot be bound to the exact ordered patch series.', requestId);
+  }
+  if (reversed.length > 0 && !hasExactCombinedRootfsReverseOutput(input.output)) {
+    fail('PATCH_STATE_AMBIGUOUS', 'OpenWrt reverse-applicable output is not the exact approved quilt transcript.', requestId);
   }
   const expectedApplied = series.filter((patch) => patch !== ROOTFS_PADDING_PATCH);
   if (reversed.length === 1 && reversed[0] === ROOTFS_PADDING_PATCH && hasExactList(applied, expectedApplied)) return 'already-present';
@@ -812,6 +863,203 @@ async function createDirectoryAt(
       path: `${parent.relativePath}/${name}`,
       cause: error instanceof Error ? error.message : String(error),
     });
+  }
+}
+
+async function inspectOptionalEntry(
+  parent: HeldDirectory,
+  name: string,
+  dependencies: PathAuthorityDependencies,
+  requestId: string,
+): Promise<Stats | null> {
+  safeSegment(name, requestId, 'FEED_INSTALL_FAILED', 'A builder cleanup path component');
+  try {
+    await dependencies.beforeDirectoryAccess?.(parent.handle);
+    return await lstat(fdPath(parent.handle, name));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    fail('FEED_INSTALL_FAILED', 'A builder-created feed entry cannot be inspected safely for cleanup.', requestId, {
+      path: `${parent.relativePath}/${name}`,
+      cause: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function removeHeldFeedContents(
+  directory: HeldDirectory,
+  dependencies: PathAuthorityDependencies,
+  requestId: string,
+): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await readdir(fdPath(directory.handle));
+  } catch (error) {
+    fail('FEED_INSTALL_FAILED', 'A builder-created feed directory cannot be enumerated safely for cleanup.', requestId, {
+      path: directory.relativePath,
+      cause: error instanceof Error ? error.message : String(error),
+    });
+  }
+  entries.sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+  for (const name of entries) {
+    const stats = await inspectOptionalEntry(directory, name, dependencies, requestId);
+    if (stats === null) {
+      fail('FEED_INSTALL_FAILED', 'A builder-created feed entry disappeared during cleanup.', requestId, {
+        path: `${directory.relativePath}/${name}`,
+      });
+    }
+    if (stats.isDirectory()) {
+      const child = await openBoundDirectory(
+        directory,
+        name,
+        dependencies,
+        requestId,
+        'FEED_INSTALL_FAILED',
+        'A builder-created feed directory was replaced or symlinked during cleanup.',
+      );
+      try {
+        await removeHeldFeedContents(child, dependencies, requestId);
+        await assertDirectoryBinding(
+          child,
+          dependencies,
+          requestId,
+          'FEED_INSTALL_FAILED',
+          'A builder-created feed directory changed during cleanup.',
+        );
+        await rmdir(fdPath(directory.handle, name));
+      } catch (error) {
+        if (error instanceof BuilderError) throw error;
+        fail('FEED_INSTALL_FAILED', 'A builder-created feed directory cannot be removed safely.', requestId, {
+          path: child.relativePath,
+          cause: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        await child.handle.close().catch(() => undefined);
+      }
+      continue;
+    }
+    if (stats.isFile()) {
+      const opened = await openRegularFile(
+        directory,
+        name,
+        READ_FLAGS,
+        dependencies,
+        requestId,
+        'FEED_INSTALL_FAILED',
+        'A builder-created feed file was replaced or symlinked during cleanup.',
+      );
+      try {
+        await assertFileBinding(
+          directory,
+          name,
+          opened.handle,
+          opened.stats,
+          requestId,
+          'FEED_INSTALL_FAILED',
+          'A builder-created feed file changed during cleanup.',
+        );
+        await unlink(fdPath(directory.handle, name));
+      } catch (error) {
+        if (error instanceof BuilderError) throw error;
+        fail('FEED_INSTALL_FAILED', 'A builder-created feed file cannot be removed safely.', requestId, {
+          path: `${directory.relativePath}/${name}`,
+          cause: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        await opened.handle.close().catch(() => undefined);
+      }
+      continue;
+    }
+    if (stats.isSymbolicLink()) {
+      await readLink(
+        directory,
+        name,
+        requestId,
+        'FEED_INSTALL_FAILED',
+        'A builder-created feed link changed during cleanup.',
+      );
+      try {
+        await unlink(fdPath(directory.handle, name));
+      } catch (error) {
+        fail('FEED_INSTALL_FAILED', 'A builder-created feed link cannot be removed safely.', requestId, {
+          path: `${directory.relativePath}/${name}`,
+          cause: error instanceof Error ? error.message : String(error),
+        });
+      }
+      continue;
+    }
+    fail('FEED_INSTALL_FAILED', 'A builder-created feed entry has an unsupported type.', requestId, {
+      path: `${directory.relativePath}/${name}`,
+    });
+  }
+}
+
+async function removeHeldFeedDirectory(
+  parent: HeldDirectory,
+  name: string,
+  dependencies: PathAuthorityDependencies,
+  requestId: string,
+): Promise<void> {
+  const stats = await inspectOptionalEntry(parent, name, dependencies, requestId);
+  if (stats === null) return;
+  if (!stats.isDirectory()) {
+    fail('FEED_INSTALL_FAILED', 'A builder-created feed directory was replaced or symlinked before cleanup.', requestId, {
+      path: `${parent.relativePath}/${name}`,
+    });
+  }
+  const directory = await openBoundDirectory(
+    parent,
+    name,
+    dependencies,
+    requestId,
+    'FEED_INSTALL_FAILED',
+    'A builder-created feed directory was replaced or symlinked before cleanup.',
+  );
+  try {
+    await removeHeldFeedContents(directory, dependencies, requestId);
+    await assertDirectoryBinding(
+      directory,
+      dependencies,
+      requestId,
+      'FEED_INSTALL_FAILED',
+      'A builder-created feed directory changed before cleanup completed.',
+    );
+    await rmdir(fdPath(parent.handle, name));
+  } catch (error) {
+    if (error instanceof BuilderError) throw error;
+    fail('FEED_INSTALL_FAILED', 'A builder-created feed directory cannot be removed safely.', requestId, {
+      path: directory.relativePath,
+      cause: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    await directory.handle.close().catch(() => undefined);
+  }
+}
+
+async function cleanupMaterializedFeeds(
+  openwrt: HeldDirectory,
+  dependencies: PathAuthorityDependencies,
+  requestId: string,
+): Promise<void> {
+  await removeHeldFeedDirectory(openwrt, 'feeds', dependencies, requestId);
+  const packageStats = await inspectOptionalEntry(openwrt, 'package', dependencies, requestId);
+  if (packageStats === null) return;
+  if (!packageStats.isDirectory()) {
+    fail('FEED_INSTALL_FAILED', 'The OpenWrt package ancestor was replaced or symlinked before feed cleanup.', requestId, {
+      path: `${openwrt.relativePath}/package`,
+    });
+  }
+  const packageDirectory = await openBoundDirectory(
+    openwrt,
+    'package',
+    dependencies,
+    requestId,
+    'FEED_INSTALL_FAILED',
+    'The OpenWrt package ancestor was replaced or symlinked before feed cleanup.',
+  );
+  try {
+    await removeHeldFeedDirectory(packageDirectory, 'feeds', dependencies, requestId);
+  } finally {
+    await packageDirectory.handle.close().catch(() => undefined);
   }
 }
 
@@ -1180,6 +1428,49 @@ async function verifySelectedConfigLinks(
   }
 }
 
+async function selectConfigProfile(
+  workspace: HeldDirectory,
+  target: TargetManifest,
+  dependencies: PathAuthorityDependencies,
+  requestId: string,
+): Promise<void> {
+  const conf = await openDirectoryPath(
+    workspace,
+    ['conf'],
+    dependencies,
+    requestId,
+    'TARGET_CONFIG_MISMATCH',
+    'The selected profile config directory is unavailable.',
+  );
+  try {
+    const expected = `${target.environment}/.config`;
+    const current = await readLink(
+      conf.directory,
+      '.config',
+      requestId,
+      'TARGET_CONFIG_MISMATCH',
+      'The active profile config link is unavailable or unsafe.',
+    );
+    if (current !== expected) {
+      await unlink(fdPath(conf.directory.handle, '.config'));
+      await symlink(expected, fdPath(conf.directory.handle, '.config'));
+      await conf.directory.handle.sync();
+    }
+  } catch (error) {
+    if (error instanceof BuilderError) throw error;
+    fail(
+      'TARGET_CONFIG_MISMATCH',
+      'The active profile config could not be selected through held authority.',
+      requestId,
+      { target: target.id, cause: error instanceof Error ? error.message : String(error) },
+      'resolve-config',
+    );
+  } finally {
+    await closeHandles(conf.handles);
+  }
+  await verifySelectedConfigLinks(workspace, target, dependencies, requestId);
+}
+
 async function verifyLinks(
   workspace: HeldDirectory,
   localFeed: HeldDirectory,
@@ -1240,6 +1531,44 @@ function operationFailureMessage(operationId: TargetSetupOperationId): string {
   return 'OpenWrt defconfig did not complete exactly.';
 }
 
+export function classifyTargetSetupOperationResult(
+  operationId: TargetSetupOperationId,
+  definition: OperationDefinition,
+  command: CommandResult,
+  requestId = 'target-setup',
+): ClassifiedTargetSetupOperationResult {
+  const exactArgv = hasExactList(command.argv, definition.argv);
+  const reverseReported = `${command.stdout}\n${command.stderr}`.includes('can be reverse-applied');
+  if (
+    command.exitCode === 0
+    && command.signal === null
+    && command.timedOut === false
+    && exactArgv
+    && !(operationId === 'activate-target' && reverseReported)
+  ) {
+    return Object.freeze({ disposition: 'passed' as const, command });
+  }
+  if (
+    operationId === 'activate-target'
+    && command.exitCode === 2
+    && command.signal === null
+    && command.timedOut === false
+    && exactArgv
+    && hasExactRootfsReverseResult(command.stdout, command.stderr)
+  ) {
+    return Object.freeze({
+      disposition: 'expected-rootfs-already-present' as const,
+      command,
+    });
+  }
+  fail(operationFailureCode(operationId), operationFailureMessage(operationId), requestId, {
+    exitCode: command.exitCode,
+    signal: command.signal,
+    timedOut: command.timedOut,
+    argvMatches: exactArgv,
+  }, operationId);
+}
+
 async function runOperation(
   operations: LockedTargetSetupOperations,
   operationId: TargetSetupOperationId,
@@ -1261,19 +1590,7 @@ async function runOperation(
     fail(operationFailureCode(operationId), operationFailureMessage(operationId), requestId, { cause: operationError instanceof Error ? operationError.message : String(operationError) }, operationId);
   }
   if (result === undefined) fail(operationFailureCode(operationId), operationFailureMessage(operationId), requestId, {}, operationId);
-  if (
-    result.exitCode !== 0
-    || result.signal !== null
-    || result.timedOut !== false
-    || !hasExactList(result.argv, definition.argv)
-  ) {
-    fail(operationFailureCode(operationId), operationFailureMessage(operationId), requestId, {
-      exitCode: result.exitCode,
-      signal: result.signal,
-      timedOut: result.timedOut,
-      argvMatches: hasExactList(result.argv, definition.argv),
-    }, operationId);
-  }
+  classifyTargetSetupOperationResult(operationId, definition, result, requestId);
   return result;
 }
 
@@ -1321,6 +1638,33 @@ export interface TargetSetupInput {
   readonly requestId: string;
 }
 
+export interface TargetSetupPhaseInput extends TargetSetupInput {
+  readonly phase: 'target-setup' | 'feeds' | 'config';
+  readonly profiles?: Readonly<Record<TargetManifest['id'], ProfileResolution>>;
+}
+
+export type TargetSetupPhaseResult =
+  | Readonly<{
+      phase: 'target-setup';
+      workspacePath: string;
+      target: TargetManifest['id'];
+      patchDecision: RootfsPatchDecision;
+      profiles: Readonly<Record<TargetManifest['id'], ProfileResolution>>;
+    }>
+  | Readonly<{
+      phase: 'feeds';
+      workspacePath: string;
+      target: TargetManifest['id'];
+      feed: FeedResolution;
+      rust: RustResolution;
+    }>
+  | Readonly<{
+      phase: 'config';
+      workspacePath: string;
+      target: TargetManifest['id'];
+      config: TargetSetupResult['config'];
+    }>;
+
 export interface TargetSetupResult {
   readonly workspacePath: string;
   readonly target: TargetManifest['id'];
@@ -1338,7 +1682,11 @@ export interface TargetSetupResult {
   };
 }
 
-export async function resolveTargetSetup(input: TargetSetupInput): Promise<TargetSetupResult> {
+export function resolveTargetSetup(input: TargetSetupPhaseInput): Promise<TargetSetupPhaseResult>;
+export function resolveTargetSetup(input: TargetSetupInput): Promise<TargetSetupResult>;
+export async function resolveTargetSetup(
+  input: TargetSetupInput | TargetSetupPhaseInput,
+): Promise<TargetSetupResult | TargetSetupPhaseResult> {
   const jobId = assertJobId(input.jobId, input.requestId);
   if (!input.operations || !LOCKED_OPERATION_ADAPTERS.has(input.operations as object)) {
     fail('WORKTREE_CREATE_FAILED', 'Target setup requires the module-owned descriptor-bound operation adapter.', input.requestId);
@@ -1460,6 +1808,8 @@ export async function resolveTargetSetup(input: TargetSetupInput): Promise<Targe
         const definitions = targetState.definitions.get(target.id)!;
         const verifyWorkspaceBinding = () => assertBindings(bindings, dependencies, input.requestId);
         await assertBindings(bindings, dependencies, input.requestId);
+        await cleanupMaterializedFeeds(openwrt, dependencies, input.requestId);
+        await assertBindings(bindings, dependencies, input.requestId);
         const activation = await runOperation(input.operations, 'activate-target', definitions.get('activate-target')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
         await assertBindings(bindings, dependencies, input.requestId);
         await verifySelectedConfigLinks(workspace, target, dependencies, input.requestId);
@@ -1503,7 +1853,12 @@ export async function resolveTargetSetup(input: TargetSetupInput): Promise<Targe
         if (immediateSourceFeed !== sourceFeed || sourceSha256 !== destinationSha256) {
           fail('FEED_INSTALL_FAILED', 'The copied feed configuration hash differs from the pinned repository source.', input.requestId, { sourceSha256, destinationSha256 }, 'copy-feed-config');
         }
-        const patchDecision = await patchState(workspace, `${activation.stdout}\n${activation.stderr}`, input.requestId, dependencies);
+        const activationOutput = activation.stderr.length === 0
+          ? activation.stdout
+          : activation.stdout.length === 0
+            ? activation.stderr
+            : `${activation.stdout}${activation.stdout.endsWith('\n') ? '' : '\n'}${activation.stderr}`;
+        const patchDecision = await patchState(workspace, activationOutput, input.requestId, dependencies);
         const preparedEvidence = await materializeFeeds(openwrt, prepared, dependencies, input.requestId);
         const rust = await rustFeed(openwrt, input.requestId, dependencies);
         const materializedFeedHashes = await captureMaterializedFeedHashes(openwrt, prepared, dependencies, input.requestId);
