@@ -17,6 +17,9 @@ const ancestorBeforeBinary = join(publisherDirectory, 'osi-image-publish-test-an
 const ancestorAfterBinary = join(publisherDirectory, 'osi-image-publish-test-ancestor-after');
 const rootAncestorBeforeBinary = join(publisherDirectory, 'osi-image-publish-test-root-ancestor-before');
 const rootAncestorAfterBinary = join(publisherDirectory, 'osi-image-publish-test-root-ancestor-after');
+const metadataAfterBinary = join(publisherDirectory, 'osi-image-publish-test-metadata-after');
+const recheckLateSwapBinary = join(publisherDirectory, 'osi-image-publish-test-recheck-late-swap');
+const preRenameFsyncFailureBinary = join(publisherDirectory, 'osi-image-publish-test-pre-rename-fsync-failure');
 const unsupportedBinary = join(publisherDirectory, 'osi-image-publish-test-unsupported');
 const crossDeviceBinary = join(publisherDirectory, 'osi-image-publish-test-cross-device');
 const fsyncFailureBinary = join(publisherDirectory, 'osi-image-publish-test-fsync-failure');
@@ -74,6 +77,9 @@ describe('native publisher integration', () => {
     await rm(ancestorAfterBinary, { force: true });
     await rm(rootAncestorBeforeBinary, { force: true });
     await rm(rootAncestorAfterBinary, { force: true });
+    await rm(metadataAfterBinary, { force: true });
+    await rm(recheckLateSwapBinary, { force: true });
+    await rm(preRenameFsyncFailureBinary, { force: true });
     await rm(unsupportedBinary, { force: true });
     await rm(crossDeviceBinary, { force: true });
     await rm(fsyncFailureBinary, { force: true });
@@ -296,25 +302,98 @@ describe('native publisher integration', () => {
 
   it('retains and revalidates the complete approved-root descriptor chain', async () => {
     for (const [phase, executable] of [['before', rootAncestorBeforeBinary], ['after', rootAncestorAfterBinary]] as const) {
-      const chainBase = await mkdtemp('/tmp/osi-image-publisher-chain-');
-      const selectedRoot = join(chainBase, 'level-one', 'level-two', 'images');
-      const jobId = `job-root-ancestor-${phase}`;
+      for (const offset of [1, 2, 3, 4]) {
+        const chainBase = await mkdtemp('/tmp/osi-image-publisher-chain-');
+        const selectedRoot = join(chainBase, 'stable', 'level-one', 'level-two', 'level-three', 'images');
+        const jobId = `job-root-${phase}-${offset}`;
+        try {
+          await createStaging(jobId, selectedRoot);
+          const response = await runBinary(executable, 'publish', '--root', selectedRoot, '--job-id', jobId, '--branch', `feature%2Froot-${phase}-${offset}`, '--sha', SHA, '--target', TARGET);
+          expect(response.code).toBe(2);
+          expect(parsed(response)).toMatchObject({
+            published: false,
+            errorCode: 'PUBLISH_FAILED',
+            mutationCount: phase === 'before' ? 0 : 3,
+            ...(phase === 'after' ? { renameResult: 'RENAMED' } : {}),
+          });
+          await expect(access(join(selectedRoot, `feature%2Froot-${phase}-${offset}`, SHA, TARGET))).rejects.toMatchObject({ code: 'ENOENT' });
+          expect((await readdir(chainBase, { recursive: true })).some((entry) => entry.includes('.publisher-test-root-ancestor-hidden-'))).toBe(true);
+        } finally {
+          await rm(chainBase, { recursive: true, force: true });
+        }
+      }
+    }
+
+    const chainBase = await mkdtemp('/tmp/osi-image-publisher-chain-operations-');
+    const selectedRoot = join(chainBase, 'stable', 'level-one', 'level-two', 'images');
+    try {
+      const quarantineJob = 'job-chain-quarantine-1';
+      await createStaging(quarantineJob, selectedRoot);
+      const quarantine = await runBinary(rootAncestorBeforeBinary, 'quarantine', '--root', selectedRoot, '--job-id', quarantineJob);
+      expect(parsed(quarantine)).toMatchObject({ quarantined: false, mutationCount: 0, errorCode: 'QUARANTINE_PENDING' });
+    } finally {
+      await rm(chainBase, { recursive: true, force: true });
+    }
+
+    const recheckBase = await mkdtemp('/tmp/osi-image-publisher-chain-recheck-');
+    const recheckRoot = join(recheckBase, 'stable', 'level-one', 'level-two', 'images');
+    try {
+      await createStaging('job-chain-recheck-1', recheckRoot);
+      const recheck = await runBinary(rootAncestorBeforeBinary, 'recheck', '--root', recheckRoot, '--job-id', 'job-chain-recheck-1', '--branch', 'feature%2Fchain-recheck', '--sha', SHA, '--target', TARGET);
+      expect(parsed(recheck)).toMatchObject({ destination: 'unknown', staging: 'unknown', errorCode: 'PUBLISH_RECOVERY_FAILED' });
+    } finally {
+      await rm(recheckBase, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects metadata replacement around capability, quarantine creation, and recheck', async () => {
+    for (const operation of ['publish', 'quarantine', 'recheck'] as const) {
+      const operationBase = await mkdtemp(`/tmp/osi-image-publisher-metadata-${operation}-`);
+      const selectedRoot = join(operationBase, 'images');
+      const jobId = `job-metadata-${operation}`;
       try {
         await createStaging(jobId, selectedRoot);
-        const response = await runBinary(executable, 'publish', '--root', selectedRoot, '--job-id', jobId, '--branch', `feature%2Froot-${phase}`, '--sha', SHA, '--target', TARGET);
+        const response = operation === 'quarantine'
+          ? await runBinary(metadataAfterBinary, operation, '--root', selectedRoot, '--job-id', jobId)
+          : await runBinary(metadataAfterBinary, operation, '--root', selectedRoot, '--job-id', jobId, '--branch', `feature%2Fmetadata-${operation}`, '--sha', SHA, '--target', TARGET);
         expect(response.code).toBe(2);
-        expect(parsed(response)).toMatchObject({
-          published: false,
-          errorCode: 'PUBLISH_FAILED',
-          mutationCount: phase === 'before' ? 0 : 3,
-          ...(phase === 'after' ? { renameResult: 'RENAMED' } : {}),
-        });
-        await expect(access(join(selectedRoot, `feature%2Froot-${phase}`, SHA, TARGET))).rejects.toMatchObject({ code: 'ENOENT' });
-        const levelOneEntries = await readdir(join(chainBase, 'level-one'));
-        expect(levelOneEntries.some((entry) => entry.startsWith('.publisher-test-root-ancestor-hidden-'))).toBe(true);
+        expect(parsed(response)).toMatchObject(operation === 'publish'
+          ? { published: false, mutationCount: 0, errorCode: 'PUBLISH_FAILED' }
+          : operation === 'quarantine'
+            ? { quarantined: false, mutationCount: 0, errorCode: 'QUARANTINE_PENDING' }
+            : { destination: 'unknown', staging: 'unknown', mutationCount: 0, errorCode: 'PUBLISH_RECOVERY_FAILED' });
+        expect((await readdir(selectedRoot)).some((entry) => entry.startsWith('.publisher-test-metadata-hidden-'))).toBe(true);
       } finally {
-        await rm(chainBase, { recursive: true, force: true });
+        await rm(operationBase, { recursive: true, force: true });
       }
+    }
+  });
+
+  it('propagates pre-rename fsync failure and rejects late recheck name replacement', async () => {
+    const syncBase = await mkdtemp('/tmp/osi-image-publisher-pre-sync-');
+    const syncRoot = join(syncBase, 'images');
+    try {
+      await createStaging('job-pre-sync-publish', syncRoot);
+      const publish = await runBinary(preRenameFsyncFailureBinary, 'publish', '--root', syncRoot, '--job-id', 'job-pre-sync-publish', '--branch', 'feature%2Fpre-sync', '--sha', SHA, '--target', TARGET);
+      expect(parsed(publish)).toMatchObject({ published: false, mutationCount: 2, errorCode: 'PUBLISH_FAILED' });
+
+      await createStaging('job-pre-sync-quarantine', syncRoot);
+      const quarantine = await runBinary(preRenameFsyncFailureBinary, 'quarantine', '--root', syncRoot, '--job-id', 'job-pre-sync-quarantine');
+      expect(parsed(quarantine)).toMatchObject({ quarantined: false, mutationCount: 1, errorCode: 'QUARANTINE_PENDING' });
+    } finally {
+      await rm(syncBase, { recursive: true, force: true });
+    }
+
+    const recheckBase = await mkdtemp('/tmp/osi-image-publisher-recheck-late-');
+    const recheckRoot = join(recheckBase, 'images');
+    try {
+      await createStaging('job-recheck-late', recheckRoot);
+      const publish = await runBinary(binary, 'publish', '--root', recheckRoot, '--job-id', 'job-recheck-late', '--branch', 'feature%2Frecheck-late', '--sha', SHA, '--target', TARGET);
+      expect(publish.code).toBe(0);
+      const recheck = await runBinary(recheckLateSwapBinary, 'recheck', '--root', recheckRoot, '--job-id', 'job-recheck-late', '--branch', 'feature%2Frecheck-late', '--sha', SHA, '--target', TARGET);
+      expect(parsed(recheck)).toMatchObject({ destination: 'unknown', staging: 'unknown', errorCode: 'PUBLISH_RECOVERY_FAILED' });
+    } finally {
+      await rm(recheckBase, { recursive: true, force: true });
     }
   });
 
@@ -413,8 +492,8 @@ describe('native publisher integration', () => {
     await writeFile(join(swappedDestination, 'build-manifest.json'), '{}\n');
     await writeFile(join(swappedDestination, 'verification.json'), '{}\n');
     const swapped = await runBinary(destinationRaceBinary, 'recheck', '--root', root, '--job-id', 'job-recheck-swap', '--branch', swappedBranch, '--sha', SHA, '--target', TARGET);
-    expect(swapped.code).toBe(0);
-    expect(parsed(swapped)).toMatchObject({ destination: 'mismatched', staging: 'absent', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' });
+    expect(swapped.code).toBe(2);
+    expect(parsed(swapped)).toMatchObject({ destination: 'unknown', staging: 'unknown', errorCode: 'PUBLISH_RECOVERY_FAILED' });
   });
 
   it('keeps explicit source and kernel evidence when quarantine collides', async () => {

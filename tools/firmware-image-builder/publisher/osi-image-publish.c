@@ -385,16 +385,30 @@ static int directory_binding_matches(int parent, const char *name, int directory
 }
 
 #if defined(PUBLISHER_TEST_ROOT_ANCESTOR_BEFORE) || defined(PUBLISHER_TEST_ROOT_ANCESTOR_AFTER)
-static int test_swap_root_ancestor(struct directory_chain *chain) {
+static int test_swap_root_ancestor(struct directory_chain *chain, const char *job_id) {
     char hidden[96];
     size_t component;
+    size_t offset = 1;
+    size_t job_length = strlen(job_id);
     int length;
-    if (chain->component_count < 2) return -1;
-    component = chain->component_count - 2;
+    if (job_length >= 2 && job_id[job_length - 2] == '-' && job_id[job_length - 1] >= '1' && job_id[job_length - 1] <= '9') offset = (size_t)(job_id[job_length - 1] - '0');
+    if (chain->component_count <= offset) return -1;
+    component = chain->component_count - 1 - offset;
     length = snprintf(hidden, sizeof(hidden), ".publisher-test-root-ancestor-hidden-%ld", (long)getpid());
     if (length < 0 || (size_t)length >= sizeof(hidden)) return -1;
     if (renameat(chain->descriptors[component], chain->names[component], chain->descriptors[component], hidden) < 0) return -1;
     if (mkdirat(chain->descriptors[component], chain->names[component], 0750) < 0) return -1;
+    return 0;
+}
+#endif
+
+#if defined(PUBLISHER_TEST_METADATA_BEFORE) || defined(PUBLISHER_TEST_METADATA_AFTER)
+static int test_swap_metadata(int root) {
+    char hidden[96];
+    int length = snprintf(hidden, sizeof(hidden), ".publisher-test-metadata-hidden-%ld", (long)getpid());
+    if (length < 0 || (size_t)length >= sizeof(hidden)) return -1;
+    if (renameat(root, ".osi-image-builder", root, hidden) < 0) return -1;
+    if (mkdirat(root, ".osi-image-builder", 0750) < 0) return -1;
     return 0;
 }
 #endif
@@ -418,7 +432,7 @@ static int test_swap_destination(int parent, const char *name) {
 }
 #endif
 
-#if defined(PUBLISHER_TEST_ANCESTOR_BEFORE) || defined(PUBLISHER_TEST_ANCESTOR_AFTER)
+#if defined(PUBLISHER_TEST_ANCESTOR_BEFORE) || defined(PUBLISHER_TEST_ANCESTOR_AFTER) || defined(PUBLISHER_TEST_RECHECK_LATE_SWAP)
 static int test_swap_ancestor(int parent, const char *name) {
     if (renameat(parent, name, parent, ".publisher-test-ancestor-hidden") < 0) return -1;
     if (mkdirat(parent, name, 0750) < 0) return -1;
@@ -480,6 +494,44 @@ static int path_exists_at(int directory, const char *name, struct stat *item) {
     return -1;
 }
 
+static int root_metadata_bindings_match(const struct directory_chain *chain, int root, int metadata);
+
+static int named_state_matches(int directory, const char *name, int expected_state, const struct stat *expected) {
+    struct stat observed;
+    int state = path_exists_at(directory, name, &observed);
+    if (state != expected_state) return 0;
+    if (state == 0) return 1;
+    return expected != NULL && observed.st_dev == expected->st_dev && observed.st_ino == expected->st_ino &&
+        observed.st_mode == expected->st_mode;
+}
+
+static int recheck_bindings_match(
+    const struct directory_chain *chain,
+    int root,
+    int metadata,
+    int staging_parent,
+    const char *job_id,
+    int staging_state,
+    const struct stat *staging_identity,
+    int branch_parent,
+    const char *branch,
+    int destination_parent,
+    const char *sha,
+    const char *target,
+    int destination_state,
+    const struct stat *destination_identity
+) {
+    struct stat ignored;
+    if (!root_metadata_bindings_match(chain, root, metadata) ||
+        !directory_binding_matches(metadata, "staging", staging_parent) ||
+        !named_state_matches(staging_parent, job_id, staging_state, staging_state == 1 ? staging_identity : NULL)) return 0;
+    if (branch_parent < 0) return path_exists_at(root, branch, &ignored) == 0 && destination_state == 0;
+    if (!directory_binding_matches(root, branch, branch_parent)) return 0;
+    if (destination_parent < 0) return path_exists_at(branch_parent, sha, &ignored) == 0 && destination_state == 0;
+    if (!directory_binding_matches(branch_parent, sha, destination_parent)) return 0;
+    return named_state_matches(destination_parent, target, destination_state, destination_state == 1 ? destination_identity : NULL);
+}
+
 static int required_release_files(int directory) {
     const char *required[] = { "sha256sums", "build-manifest.json", "verification.json" };
     size_t index;
@@ -538,6 +590,10 @@ static const char *rename_error_name(int error_number) {
     return "OTHER_ERROR";
 }
 
+static int root_metadata_bindings_match(const struct directory_chain *chain, int root, int metadata) {
+    return directory_chain_matches(chain) && directory_binding_matches(root, ".osi-image-builder", metadata);
+}
+
 static int publish_bindings_match(int root, int metadata, int staging_parent, int branch_parent, const char *branch, int destination_parent, const char *sha) {
     return directory_binding_matches(root, ".osi-image-builder", metadata) &&
         directory_binding_matches(metadata, "staging", staging_parent) &&
@@ -551,19 +607,29 @@ static int quarantine_bindings_match(int root, int metadata, int staging_parent,
         directory_binding_matches(metadata, "quarantine", quarantine_parent);
 }
 
-static void sync_existing_publish_parents(int staging_parent, int destination_parent, int branch_parent, int metadata, int root) {
-    if (staging_parent >= 0) (void)fsync(staging_parent);
-    if (destination_parent >= 0) (void)fsync(destination_parent);
-    if (branch_parent >= 0) (void)fsync(branch_parent);
-    if (metadata >= 0) (void)fsync(metadata);
-    if (root >= 0) (void)fsync(root);
+static int sync_existing_publish_parents(int staging_parent, int destination_parent, int branch_parent, int metadata, int root) {
+    int failed = 0;
+    if (staging_parent >= 0 && fsync(staging_parent) < 0) failed = 1;
+    if (destination_parent >= 0 && fsync(destination_parent) < 0) failed = 1;
+    if (branch_parent >= 0 && fsync(branch_parent) < 0) failed = 1;
+    if (metadata >= 0 && fsync(metadata) < 0) failed = 1;
+    if (root >= 0 && fsync(root) < 0) failed = 1;
+#ifdef PUBLISHER_TEST_PRE_RENAME_FSYNC_FAILURE
+    failed = 1;
+#endif
+    return failed ? -1 : 0;
 }
 
-static void sync_existing_quarantine_parents(int staging_parent, int quarantine_parent, int metadata, int root) {
-    if (staging_parent >= 0) (void)fsync(staging_parent);
-    if (quarantine_parent >= 0) (void)fsync(quarantine_parent);
-    if (metadata >= 0) (void)fsync(metadata);
-    if (root >= 0) (void)fsync(root);
+static int sync_existing_quarantine_parents(int staging_parent, int quarantine_parent, int metadata, int root) {
+    int failed = 0;
+    if (staging_parent >= 0 && fsync(staging_parent) < 0) failed = 1;
+    if (quarantine_parent >= 0 && fsync(quarantine_parent) < 0) failed = 1;
+    if (metadata >= 0 && fsync(metadata) < 0) failed = 1;
+    if (root >= 0 && fsync(root) < 0) failed = 1;
+#ifdef PUBLISHER_TEST_PRE_RENAME_FSYNC_FAILURE
+    failed = 1;
+#endif
+    return failed ? -1 : 0;
 }
 
 static int publish_operation(const char *root_path, const char *job_id, const char *branch, const char *sha, const char *target, struct operation_result *result) {
@@ -586,9 +652,16 @@ static int publish_operation(const char *root_path, const char *job_id, const ch
         result->error_code = "PUBLISH_FAILED";
         return 2;
     }
-    if (!directory_chain_matches(&root_chain)) goto invalid;
+    if (!root_metadata_bindings_match(&root_chain, root, metadata)) goto invalid;
+#ifdef PUBLISHER_TEST_METADATA_BEFORE
+    if (test_swap_metadata(root) < 0) goto invalid;
+#endif
+    if (!root_metadata_bindings_match(&root_chain, root, metadata)) goto invalid;
     capability = publisher_capability_available(metadata);
-    if (!directory_chain_matches(&root_chain)) goto invalid;
+#ifdef PUBLISHER_TEST_METADATA_AFTER
+    if (test_swap_metadata(root) < 0) goto invalid;
+#endif
+    if (!root_metadata_bindings_match(&root_chain, root, metadata)) goto invalid;
     if (capability == 0) {
         result->available = 0;
         result->error_code = "PUBLISHER_UNSUPPORTED";
@@ -613,9 +686,10 @@ static int publish_operation(const char *root_path, const char *job_id, const ch
         goto done;
     }
 #ifdef PUBLISHER_TEST_ROOT_ANCESTOR_BEFORE
-    if (test_swap_root_ancestor(&root_chain) < 0) goto invalid;
+    if (test_swap_root_ancestor(&root_chain, job_id) < 0) goto invalid;
 #endif
-    if (!directory_chain_matches(&root_chain)) goto invalid;
+    if (!root_metadata_bindings_match(&root_chain, root, metadata) ||
+        !directory_binding_matches(metadata, "staging", staging_parent)) goto invalid;
     branch_parent = open_directory_at(root, branch, 1, &branch_created);
     result->mutation_count += branch_created;
     if (branch_parent < 0) goto invalid;
@@ -652,7 +726,7 @@ static int publish_operation(const char *root_path, const char *job_id, const ch
     result->published = 1;
     result->mutation_count += 1;
 #ifdef PUBLISHER_TEST_ROOT_ANCESTOR_AFTER
-    if (test_swap_root_ancestor(&root_chain) < 0) goto invalid;
+    if (test_swap_root_ancestor(&root_chain, job_id) < 0) goto invalid;
 #endif
 #ifdef PUBLISHER_TEST_ANCESTOR_AFTER
     if (test_swap_ancestor(branch_parent, sha) < 0) goto invalid;
@@ -682,7 +756,8 @@ static int publish_operation(const char *root_path, const char *job_id, const ch
 invalid:
     result->error_code = "PUBLISH_FAILED";
 done:
-    if (!result->published && result->mutation_count > 0) sync_existing_publish_parents(staging_parent, destination_parent, branch_parent, metadata, root);
+    if (!result->published && result->mutation_count > 0 &&
+        sync_existing_publish_parents(staging_parent, destination_parent, branch_parent, metadata, root) < 0) result->error_code = "PUBLISH_FAILED";
     if (destination_parent >= 0) close(destination_parent);
     if (branch_parent >= 0) close(branch_parent);
     if (source >= 0) close(source);
@@ -710,9 +785,16 @@ static int quarantine_operation(const char *root_path, const char *job_id, struc
         result->error_code = "QUARANTINE_PENDING";
         return 2;
     }
-    if (!directory_chain_matches(&root_chain)) goto invalid;
+    if (!root_metadata_bindings_match(&root_chain, root, metadata)) goto invalid;
+#ifdef PUBLISHER_TEST_METADATA_BEFORE
+    if (test_swap_metadata(root) < 0) goto invalid;
+#endif
+    if (!root_metadata_bindings_match(&root_chain, root, metadata)) goto invalid;
     capability = publisher_capability_available(metadata);
-    if (!directory_chain_matches(&root_chain)) goto invalid;
+#ifdef PUBLISHER_TEST_METADATA_AFTER
+    if (test_swap_metadata(root) < 0) goto invalid;
+#endif
+    if (!root_metadata_bindings_match(&root_chain, root, metadata)) goto invalid;
     if (capability == 0) {
         result->available = 0;
         result->error_code = "PUBLISHER_UNSUPPORTED";
@@ -724,11 +806,13 @@ static int quarantine_operation(const char *root_path, const char *job_id, struc
     }
     if (capability < 0) goto invalid;
     staging_parent = open_directory_at(metadata, "staging", 0, NULL);
-    if (!directory_chain_matches(&root_chain)) goto invalid;
+    if (!root_metadata_bindings_match(&root_chain, root, metadata) ||
+        !directory_binding_matches(metadata, "staging", staging_parent)) goto invalid;
 #ifdef PUBLISHER_TEST_ROOT_ANCESTOR_BEFORE
-    if (test_swap_root_ancestor(&root_chain) < 0) goto invalid;
+    if (test_swap_root_ancestor(&root_chain, job_id) < 0) goto invalid;
 #endif
-    if (!directory_chain_matches(&root_chain)) goto invalid;
+    if (!root_metadata_bindings_match(&root_chain, root, metadata) ||
+        !directory_binding_matches(metadata, "staging", staging_parent)) goto invalid;
     quarantine_parent = open_directory_at(metadata, "quarantine", 1, &quarantine_created);
     result->mutation_count += quarantine_created;
     if (staging_parent < 0 || quarantine_parent < 0) goto invalid;
@@ -763,7 +847,7 @@ static int quarantine_operation(const char *root_path, const char *job_id, struc
     result->quarantined = 1;
     result->mutation_count += 1;
 #ifdef PUBLISHER_TEST_ROOT_ANCESTOR_AFTER
-    if (test_swap_root_ancestor(&root_chain) < 0) goto invalid;
+    if (test_swap_root_ancestor(&root_chain, job_id) < 0) goto invalid;
 #endif
 #ifdef PUBLISHER_TEST_ANCESTOR_AFTER
     if (test_swap_ancestor(metadata, "quarantine") < 0) goto invalid;
@@ -792,7 +876,8 @@ static int quarantine_operation(const char *root_path, const char *job_id, struc
 invalid:
     result->error_code = "QUARANTINE_PENDING";
 done:
-    if (!result->quarantined && result->mutation_count > 0) sync_existing_quarantine_parents(staging_parent, quarantine_parent, metadata, root);
+    if (!result->quarantined && result->mutation_count > 0 &&
+        sync_existing_quarantine_parents(staging_parent, quarantine_parent, metadata, root) < 0) result->error_code = "QUARANTINE_PENDING";
     if (source >= 0) close(source);
     if (quarantine_parent >= 0) close(quarantine_parent);
     if (staging_parent >= 0) close(staging_parent);
@@ -809,7 +894,8 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
     int branch_parent = -1;
     int destination_parent = -1;
     int destination = -1;
-    struct stat item;
+    struct stat staging_identity;
+    struct stat destination_identity;
     int parent_bindings_match;
     int destination_matches = 0;
     int structurally_complete = 0;
@@ -822,14 +908,17 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
     if (prepare_root(root_path, &root_chain, &root, &metadata) < 0) {
         return 2;
     }
-#ifdef PUBLISHER_TEST_ROOT_ANCESTOR_BEFORE
-    if (test_swap_root_ancestor(&root_chain) < 0) goto invalid;
+#ifdef PUBLISHER_TEST_METADATA_AFTER
+    if (test_swap_metadata(root) < 0) goto invalid;
 #endif
-    if (!directory_chain_matches(&root_chain)) goto invalid;
+#ifdef PUBLISHER_TEST_ROOT_ANCESTOR_BEFORE
+    if (test_swap_root_ancestor(&root_chain, job_id) < 0) goto invalid;
+#endif
+    if (!root_metadata_bindings_match(&root_chain, root, metadata)) goto invalid;
     staging_parent = open_directory_at(metadata, "staging", 0, NULL);
     if (staging_parent < 0) goto invalid;
-    staging_state = path_exists_at(staging_parent, job_id, &item);
-    if (staging_state < 0 || (staging_state == 1 && (!S_ISDIR(item.st_mode) || S_ISLNK(item.st_mode)))) goto invalid;
+    staging_state = path_exists_at(staging_parent, job_id, &staging_identity);
+    if (staging_state < 0 || (staging_state == 1 && (!S_ISDIR(staging_identity.st_mode) || S_ISLNK(staging_identity.st_mode)))) goto invalid;
     result->staging = staging_state == 1 ? "present" : "absent";
     branch_parent = open_directory_at(root, branch, 0, NULL);
     if (branch_parent < 0 && errno != ENOENT) goto invalid;
@@ -838,13 +927,13 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
         if (destination_parent < 0 && errno != ENOENT) goto invalid;
     }
     if (destination_parent >= 0) {
-        destination_state = path_exists_at(destination_parent, target, &item);
-        if (destination_state < 0 || (destination_state == 1 && S_ISLNK(item.st_mode))) goto invalid;
-        if (destination_state == 1 && S_ISDIR(item.st_mode)) {
+        destination_state = path_exists_at(destination_parent, target, &destination_identity);
+        if (destination_state < 0 || (destination_state == 1 && S_ISLNK(destination_identity.st_mode))) goto invalid;
+        if (destination_state == 1 && S_ISDIR(destination_identity.st_mode)) {
             destination = openat(destination_parent, target, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
             if (destination < 0) goto invalid;
             structurally_complete = required_release_files(destination);
-            destination_matches = destination_identity_matches(destination_parent, target, &item);
+            destination_matches = destination_identity_matches(destination_parent, target, &destination_identity);
         }
     } else destination_state = 0;
     parent_bindings_match = directory_chain_matches(&root_chain) &&
@@ -856,7 +945,17 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
     else if (destination_state == 0) result->destination = "absent";
     else if (destination != -1 && structurally_complete && destination_matches && staging_state == 0) result->destination = "candidate";
     else result->destination = "mismatched";
-    if (!directory_chain_matches(&root_chain)) goto invalid;
+    if (!recheck_bindings_match(
+        &root_chain, root, metadata, staging_parent, job_id, staging_state, &staging_identity,
+        branch_parent, branch, destination_parent, sha, target, destination_state, &destination_identity
+    )) goto invalid;
+#ifdef PUBLISHER_TEST_RECHECK_LATE_SWAP
+    if (destination_parent >= 0 && test_swap_ancestor(branch_parent, sha) < 0) goto invalid;
+    if (!recheck_bindings_match(
+        &root_chain, root, metadata, staging_parent, job_id, staging_state, &staging_identity,
+        branch_parent, branch, destination_parent, sha, target, destination_state, &destination_identity
+    )) goto invalid;
+#endif
     if (strcmp(result->destination, "candidate") == 0) result->error_code = NULL;
     else if (strcmp(result->destination, "mismatched") == 0) result->error_code = "UNVERIFIED_FINAL_PATH_BLOCKER";
     else if (strcmp(result->destination, "absent") == 0) result->error_code = "PUBLISH_RECOVERY_FAILED";
