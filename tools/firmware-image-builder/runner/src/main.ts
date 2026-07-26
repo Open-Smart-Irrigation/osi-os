@@ -15,6 +15,7 @@ import {
 import {
   OwnershipStore,
   type LogCleanupProof,
+  type RunnerWriteCommand,
 } from '../../api/src/ownership.js';
 import {
   createReadOnlyPreflightDefaults,
@@ -30,11 +31,13 @@ import {
 } from '../../api/src/store.js';
 import {
   encodeJson,
+  normalizeJson,
   stableRelativePath,
 } from '../../api/src/validation.js';
 import { canonicalBuilderImageReference } from '../../builder/validate-builder.js';
 import {
   loadConfig,
+  loadStateRootAuthority,
   withApprovedRootSnapshot,
   withStateRootSnapshot,
   type ApprovedRootRegistry,
@@ -44,11 +47,16 @@ import {
 import { validateBuilderLock, type BuilderLock } from '../../domain/builder-lock.js';
 import { encodeBranchSlug } from '../../domain/paths.js';
 import type {
+  BuilderErrorContract,
   JobState,
   PipelineStageName,
   TrustedOperationId,
 } from '../../domain/types.js';
-import { loadManifest } from '../../manifest/validate.js';
+import { ACTIVE_RECOVERY_STATES } from '../../domain/types.js';
+import {
+  loadManifest,
+  type ManifestFileSystem,
+} from '../../manifest/validate.js';
 import type { TargetManifest } from '../../manifest/schema.js';
 import { createRunnerPublisherClient } from './publisher-client.js';
 import { createDockerExecutor } from './docker-executor.js';
@@ -61,7 +69,10 @@ import {
 import {
   createPipeline,
   type FinalPublicationProof,
+  type PipelineClock,
+  type PipelineEvidenceWriter,
   type PipelineInput,
+  type PipelineLease,
   type PipelineOperationExecution,
   type PipelineResult,
   type PreparedPublication,
@@ -220,6 +231,15 @@ export interface RunnerArguments {
 interface ProductionComposition {
   readonly input: PipelineInput;
   close(): Promise<void>;
+}
+
+export interface GuardedCompositionInput {
+  readonly args: RunnerArguments;
+  readonly clock: PipelineClock;
+  readonly store: BuilderStore;
+  readonly ownership: OwnershipStore;
+  readonly evidenceWriter: PipelineEvidenceWriter;
+  readonly compose: (lease: PipelineLease) => Promise<ProductionComposition>;
 }
 
 interface PublicationFileSet {
@@ -474,6 +494,41 @@ async function readStableFile(path: string): Promise<Buffer> {
   } finally {
     await handle.close();
   }
+}
+
+function loadManifestFromBytes(path: string, bytes: Buffer) {
+  const descriptor = 29;
+  let cursor = 0;
+  let opened = false;
+  const fileSystem: ManifestFileSystem = {
+    open(candidate) {
+      if (opened || candidate !== path) throw new Error('unexpected manifest open');
+      opened = true;
+      return descriptor;
+    },
+    stat(fd) {
+      if (!opened || fd !== descriptor) throw new Error('unexpected manifest stat');
+      return { size: bytes.length };
+    },
+    read(fd, target, offset, length, position) {
+      if (!opened || fd !== descriptor || position !== null) {
+        throw new Error('unexpected manifest read');
+      }
+      const copied = bytes.copy(
+        target,
+        offset,
+        cursor,
+        Math.min(bytes.length, cursor + length),
+      );
+      cursor += copied;
+      return copied;
+    },
+    close(fd) {
+      if (!opened || fd !== descriptor) throw new Error('unexpected manifest close');
+      opened = false;
+    },
+  };
+  return loadManifest(path, fileSystem);
 }
 
 function parseInstalledLock(path: string, bytes: Buffer): BuilderLock {
@@ -890,28 +945,275 @@ function createPublicationFiles(
   });
 }
 
+function compositionFailureContract(
+  job: JobRecord,
+  error: unknown,
+): BuilderErrorContract {
+  const cause = (error instanceof Error ? error.message : String(error)).slice(0, 2_048);
+  return Object.freeze({
+    code: 'BUILD_FAILED',
+    stage: 'preflight',
+    details: { cause },
+    retryable: false,
+    requestId: job.requestId,
+    diagnosis: `runner composition failed: ${cause}`,
+    recovery: 'Inspect the durable preflight evidence and repair the installed runner composition before retrying.',
+  });
+}
+
+function persistCompositionRecoveryBlocker(
+  input: GuardedCompositionInput,
+  reason: string,
+): PipelineResult {
+  const job = input.store.getJob(input.args.jobId);
+  if (!(ACTIVE_RECOVERY_STATES as readonly JobState[]).includes(job.state)) {
+    return {
+      state: 'recovery-required',
+      buildManifest: null,
+      verificationManifest: null,
+      blockerCode: 'RUNNER_DISAPPEARED',
+      reason,
+    };
+  }
+  const at = input.clock.now();
+  const blocker = {
+    phase: 'composition',
+    reason: reason.slice(0, 2_048),
+    runnerUnit: input.args.runnerUnit,
+    requestedOwner: input.args.owner,
+    observedOwner: job.runnerLeaseOwner,
+    observedLeaseExpiresAt: job.runnerLeaseExpiresAt,
+  } as const;
+  const result = input.ownership.apiWrite({
+    kind: 'runner-recovery-blocker',
+    jobId: job.jobId,
+    expectedState: job.state as (typeof ACTIVE_RECOVERY_STATES)[number],
+    runnerUnit: input.args.runnerUnit,
+    observedOwner: job.runnerLeaseOwner,
+    observedLeaseExpiresAt: job.runnerLeaseExpiresAt,
+    blocker,
+    at,
+  });
+  const persistedReason = result.ok
+    ? reason
+    : `${reason}; recovery blocker CAS failed: ${result.conflict.kind}`;
+  return {
+    state: 'recovery-required',
+    buildManifest: null,
+    verificationManifest: null,
+    blockerCode: 'RUNNER_DISAPPEARED',
+    reason: persistedReason,
+  };
+}
+
+async function terminalizeCompositionFailure(
+  input: GuardedCompositionInput,
+  lease: PipelineLease,
+  error: unknown,
+): Promise<PipelineResult> {
+  type CompositionRunnerCommand =
+    | Omit<Extract<RunnerWriteCommand, { kind: 'stage' }>, 'jobId' | 'owner' | 'runnerUnit' | 'leaseExpiresAt' | 'at'>
+    | Omit<Extract<RunnerWriteCommand, { kind: 'normal-terminal' }>, 'jobId' | 'owner' | 'runnerUnit' | 'leaseExpiresAt' | 'at'>;
+  const runner = (command: CompositionRunnerCommand): void => {
+    const result = input.ownership.runnerWrite({
+      ...command,
+      jobId: input.args.jobId,
+      owner: lease.owner,
+      runnerUnit: lease.runnerUnit,
+      leaseExpiresAt: lease.expiresAt,
+      at: input.clock.now(),
+    } as RunnerWriteCommand);
+    if (!result.ok) throw new Error(`composition ownership lost: ${result.conflict.kind}`);
+  };
+  const job = input.store.getJob(input.args.jobId);
+  const contract = compositionFailureContract(job, error);
+  const contractJson = normalizeJson(
+    contract,
+    'composition failure contract',
+  ) as JsonObject;
+  let stage = input.store.getStage(job.jobId, 'preflight');
+  let startedAt: string;
+  try {
+    if (job.state === 'starting') {
+      startedAt = input.clock.now();
+      runner({
+        kind: 'stage',
+        expectedState: 'starting',
+        state: 'preflight',
+        stage: 'preflight',
+        outcome: 'running',
+        startedAt,
+      });
+      stage = input.store.getStage(job.jobId, 'preflight');
+    } else if (job.state === 'preflight' && stage?.outcome === 'running') {
+      startedAt = stage.startedAt!;
+    } else if (job.state === 'preflight' && stage?.outcome === 'failed') {
+      runner({
+        kind: 'normal-terminal',
+        expectedState: 'preflight',
+        state: 'failed',
+        terminalAt: input.clock.now(),
+        errorCode: stage.errorCode ?? 'BUILD_FAILED',
+        error: stage.error ?? contractJson,
+      });
+      return {
+        state: 'failed',
+        buildManifest: null,
+        verificationManifest: null,
+        blockerCode: null,
+      };
+    } else {
+      return persistCompositionRecoveryBlocker(
+        input,
+        `composition failure cannot resume from ${job.state}`,
+      );
+    }
+    const finishedAt = input.clock.now();
+    const evidence = await input.evidenceWriter.write({
+      jobId: job.jobId,
+      stage: 'preflight',
+      startedAt,
+      finishedAt,
+      outcome: 'failed',
+      operationId: null,
+      commands: [],
+      inputs: {
+        targetId: job.targetId,
+        rootId: job.rootId,
+        branch: job.branch,
+        pinnedSha: job.pinnedSha,
+      },
+      observations: {
+        phase: 'composition',
+        runnerUnit: input.args.runnerUnit,
+      },
+      error: contract,
+    });
+    runner({
+      kind: 'stage',
+      expectedState: 'preflight',
+      state: 'preflight',
+      stage: 'preflight',
+      outcome: 'failed',
+      startedAt,
+      finishedAt,
+      evidencePath: evidence.path,
+      evidenceSha256: evidence.sha256,
+      errorCode: contract.code,
+      error: contractJson,
+    });
+    runner({
+      kind: 'normal-terminal',
+      expectedState: 'preflight',
+      state: 'failed',
+      terminalAt: input.clock.now(),
+      errorCode: contract.code,
+      error: contractJson,
+    });
+    return {
+      state: 'failed',
+      buildManifest: null,
+      verificationManifest: null,
+      blockerCode: null,
+    };
+  } catch (terminalError) {
+    return persistCompositionRecoveryBlocker(
+      input,
+      `composition terminalization failed: ${
+        terminalError instanceof Error ? terminalError.message : String(terminalError)
+      }`,
+    );
+  }
+}
+
+export async function runGuardedComposition(
+  input: GuardedCompositionInput,
+): Promise<PipelineResult> {
+  const initial = input.store.getJob(input.args.jobId);
+  let lease: PipelineLease | null = null;
+  if (
+    initial.state === 'starting'
+    && initial.runnerUnit === input.args.runnerUnit
+    && initial.runnerLeaseOwner === null
+    && initial.runnerLeaseExpiresAt === null
+  ) {
+    const acquired = input.ownership.runnerWrite({
+      kind: 'acquire-lease',
+      jobId: input.args.jobId,
+      runnerUnit: input.args.runnerUnit,
+      owner: input.args.owner,
+      expiresAt: input.args.leaseExpiresAt,
+      at: input.clock.now(),
+    });
+    if (acquired.ok) {
+      lease = Object.freeze({
+        owner: input.args.owner,
+        runnerUnit: input.args.runnerUnit,
+        expiresAt: input.args.leaseExpiresAt,
+      });
+    }
+  } else if (
+    initial.runnerUnit === input.args.runnerUnit
+    && initial.runnerLeaseOwner === input.args.owner
+    && initial.runnerLeaseExpiresAt === input.args.leaseExpiresAt
+    && initial.runnerLeaseExpiresAt > input.clock.now()
+  ) {
+    lease = Object.freeze({
+      owner: input.args.owner,
+      runnerUnit: input.args.runnerUnit,
+      expiresAt: input.args.leaseExpiresAt,
+    });
+  }
+  if (lease === null) {
+    return persistCompositionRecoveryBlocker(
+      input,
+      'runner could not prove composition ownership',
+    );
+  }
+
+  let composition: ProductionComposition;
+  try {
+    composition = await input.compose(lease);
+  } catch (error) {
+    return terminalizeCompositionFailure(input, lease, error);
+  }
+  try {
+    let pipeline;
+    try {
+      pipeline = createPipeline({
+        ...composition.input,
+        initialLease: lease,
+      });
+    } catch (error) {
+      return await terminalizeCompositionFailure(input, lease, error);
+    }
+    return await pipeline.run();
+  } finally {
+    await composition.close();
+  }
+}
+
 async function createProductionComposition(
   args: RunnerArguments,
+  loaded: LoadedConfig,
+  store: BuilderStore,
+  ownership: OwnershipStore,
 ): Promise<ProductionComposition> {
-  const loaded = await loadConfig();
   const packageDirectory = dirname(loaded.config.builderLockPath);
   const manifestPath = join(packageDirectory, 'manifest', 'targets.json');
   const publisherPath = join(packageDirectory, 'bin', 'osi-image-publish');
-  const [lockBytes] = await Promise.all([
-    readStableFile(loaded.config.builderLockPath),
-    readStableFile(manifestPath),
-    readStableFile(publisherPath),
-  ]);
-  const lock = parseInstalledLock(loaded.config.builderLockPath, lockBytes);
-  const manifest = loadManifest(manifestPath);
-  const database = openBuilderDatabase(join(loaded.stateRoot, 'jobs.sqlite'));
-  const store = new BuilderStore(database);
   let workspaceHandle: FileHandle | null = null;
   let stateRootHandle: FileHandle | null = null;
   let stateRootIdentity: Readonly<{ path: string; device: number; inode: number }> | null = null;
   let approvedRootHandle: FileHandle | null = null;
   try {
-    const ownership = new OwnershipStore(database);
+    const [lockBytes, manifestBytes] = await Promise.all([
+      readStableFile(loaded.config.builderLockPath),
+      readStableFile(manifestPath),
+      readStableFile(publisherPath),
+    ]);
+    const lock = parseInstalledLock(loaded.config.builderLockPath, lockBytes);
+    const manifest = loadManifestFromBytes(manifestPath, manifestBytes);
     const job = store.getJob(args.jobId);
     const target = manifest.manifest.targets.find(
       (candidate) => candidate.id === job.targetId,
@@ -1487,13 +1789,11 @@ async function createProductionComposition(
         await workspaceHandle?.close().catch(() => undefined);
         await approvedRootHandle?.close().catch(() => undefined);
         await stateRootHandle?.close().catch(() => undefined);
-        store.close();
       },
     });
   } catch (error) {
     await approvedRootHandle?.close().catch(() => undefined);
     await stateRootHandle?.close().catch(() => undefined);
-    store.close();
     throw error;
   }
 }
@@ -1546,12 +1846,35 @@ export function parseRunnerArguments(argv: readonly string[]): RunnerArguments {
 }
 
 export async function runRunner(argv: readonly string[]): Promise<PipelineResult> {
-  const composition = await createProductionComposition(
-    parseRunnerArguments(argv),
-  );
+  const args = parseRunnerArguments(argv);
+  const state = await loadStateRootAuthority();
+  const database = openBuilderDatabase(join(state.stateRoot, 'jobs.sqlite'));
+  const store = new BuilderStore(database);
+  const ownership = new OwnershipStore(database);
+  const clock: PipelineClock = { now: () => new Date().toISOString() };
   try {
-    return await createPipeline(composition.input).run();
+    return await runGuardedComposition({
+      args,
+      clock,
+      store,
+      ownership,
+      evidenceWriter: createEvidenceWriter({
+        stateRoot: state.authority,
+      }),
+      compose: async () => {
+        const loaded = await loadConfig();
+        if (loaded.stateRoot !== state.stateRoot) {
+          throw new Error('configured state root differs from guarded runner state');
+        }
+        return createProductionComposition(
+          args,
+          loaded,
+          store,
+          ownership,
+        );
+      },
+    });
   } finally {
-    await composition.close();
+    store.close();
   }
 }

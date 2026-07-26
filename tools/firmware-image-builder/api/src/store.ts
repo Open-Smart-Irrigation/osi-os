@@ -694,7 +694,23 @@ export class BuilderStore {
       const artifactAbsent = publishFields.slice(4, 13).every((key) => row[key] === null || row[key] === undefined);
       if (row.artifact_staging_path !== null || row.artifact_quarantine_path === null || row.artifact_final_directory !== null || row.artifact_final_path !== null || row.publish_started_at !== null || row.published_at !== null || !noPublishBlocker || (!artifactAbsent && !artifactComplete)) throw new StoreDataError('quarantined publish state evidence is incoherent');
     } else if (publishState === 'blocked') {
-      if (!artifactComplete || row.artifact_staging_path === null || row.artifact_quarantine_path !== null || row.artifact_final_directory !== null || row.artifact_final_path !== null || row.publish_started_at !== null || row.published_at !== null || publishBlockerCode === null || publishBlocker === null) throw new StoreDataError('blocked publish state evidence is incoherent');
+      const stagingDisposition = publishBlocker?.['staging'];
+      const stagingRetained = row.artifact_staging_path !== null && row.artifact_quarantine_path === null
+        && (stagingDisposition === undefined || stagingDisposition === 'present' || stagingDisposition === 'unknown');
+      const stagingAbsent = row.artifact_staging_path === null && row.artifact_quarantine_path === null
+        && stagingDisposition === 'absent';
+      const quarantine = publishBlocker?.['quarantine'];
+      const quarantineRecord = quarantine !== null
+        && typeof quarantine === 'object'
+        && !Array.isArray(quarantine)
+        ? quarantine as JsonObject
+        : null;
+      const stagingQuarantined = row.artifact_staging_path === null && row.artifact_quarantine_path !== null
+        && stagingDisposition === 'quarantined'
+        && quarantineRecord?.['quarantined'] === true
+        && quarantineRecord['renameResult'] === 'RENAMED'
+        && quarantineRecord['destinationRelativePath'] === row.artifact_quarantine_path;
+      if (!artifactComplete || (!stagingRetained && !stagingAbsent && !stagingQuarantined) || row.artifact_final_directory !== null || row.artifact_final_path !== null || row.publish_started_at !== null || row.published_at !== null || publishBlockerCode === null || publishBlocker === null) throw new StoreDataError('blocked publish state evidence is incoherent');
     }
     if ((cleanupBlockerCode === null) !== (cleanupBlocker === null)) throw new StoreDataError('cleanup blocker evidence is incomplete');
     if (cleanupBlockerCode !== null && !['starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup', 'feeds', 'config', 'building', 'verifying', 'cancel_requested', 'interrupted'].includes(state)) throw new StoreDataError('cleanup blocker is invalid for terminal state');

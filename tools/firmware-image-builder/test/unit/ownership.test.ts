@@ -833,6 +833,110 @@ describe('actor-owned compare-and-set writes', () => {
       .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
   });
 
+  it('atomically commits blocked publish evidence, quarantine identity, and the failed terminal', async () => {
+    const makeCommand = (jobId: string): RunnerWriteCommand => ({
+      ...runnerBase(jobId),
+      at: LATER,
+      kind: 'publish-failure-terminal',
+      expectedState: 'publishing',
+      startedAt: NOW,
+      finishedAt: LATER,
+      evidencePath: 'evidence/09-publish.json',
+      evidenceSha256: SHA64,
+      blockerCode: 'PUBLISH_RECOVERY_FAILED',
+      blocker: {
+        code: 'PUBLISH_RECOVERY_FAILED',
+        staging: 'quarantined',
+        quarantine: {
+          quarantined: true,
+          renameResult: 'RENAMED',
+          destinationRelativePath: `.osi-image-builder/quarantine/${jobId}`,
+        },
+      },
+      staging: 'quarantined',
+      quarantinePath: `.osi-image-builder/quarantine/${jobId}`,
+      terminalAt: LATER,
+      error: { code: 'PUBLISH_RECOVERY_FAILED', diagnosis: 'publication blocked' },
+    } as RunnerWriteCommand);
+
+    for (const failurePoint of [1, 2, 3, 4] as const) {
+      const jobId = `blocked-rollback-${failurePoint}`;
+      const value = await fixture(jobId);
+      toVerifying(value.ownership, jobId);
+      expect(value.ownership.runnerWrite({
+        ...runnerBase(jobId),
+        kind: 'publish-stage-start',
+        expectedState: 'verifying',
+        startedAt: NOW,
+        finalDirectory: `release/${jobId}`,
+        finalPath: `release/${jobId}/image`,
+        publishStartedAt: NOW,
+      }).ok).toBe(true);
+      const beforeEvents = value.store.listEvents(jobId).events.length;
+      const rollbackDb = openBuilderDatabase(value.path);
+      let event = 0;
+      const injected = new OwnershipStore(rollbackDb, {
+        now: () => LATER,
+        beforeEvent: () => {
+          event += 1;
+          if (event === failurePoint) throw new Error('blocked terminal crash');
+        },
+        failBeforeCommit: () => {
+          if (failurePoint === 4) throw new Error('blocked terminal pre-commit crash');
+        },
+      });
+      closers.push(() => rollbackDb.close());
+
+      expect(() => injected.runnerWrite(makeCommand(jobId)))
+        .toThrow(OwnershipTransactionError);
+      expect(value.store.getJob(jobId)).toMatchObject({
+        state: 'publishing',
+        publishState: 'publishing',
+        artifactStagingPath: 'staging/image',
+        artifactQuarantinePath: null,
+        terminalAt: null,
+      });
+      expect(value.store.getStage(jobId, 'publish')).toMatchObject({
+        outcome: 'running',
+      });
+      expect(value.store.listEvents(jobId).events).toHaveLength(beforeEvents);
+    }
+
+    const committed = await fixture('blocked-quarantined');
+    toVerifying(committed.ownership, 'blocked-quarantined');
+    expect(committed.ownership.runnerWrite({
+      ...runnerBase('blocked-quarantined'),
+      kind: 'publish-stage-start',
+      expectedState: 'verifying',
+      startedAt: NOW,
+      finalDirectory: 'release/blocked-quarantined',
+      finalPath: 'release/blocked-quarantined/image',
+      publishStartedAt: NOW,
+    }).ok).toBe(true);
+    expect(committed.ownership.runnerWrite(makeCommand('blocked-quarantined')).ok)
+      .toBe(true);
+    const reopenedDb = openBuilderDatabase(committed.path);
+    const reopened = new BuilderStore(reopenedDb);
+    closers.push(() => reopened.close());
+    expect(reopened.getJob('blocked-quarantined')).toMatchObject({
+      state: 'failed',
+      publishState: 'blocked',
+      artifactStagingPath: null,
+      artifactQuarantinePath: '.osi-image-builder/quarantine/blocked-quarantined',
+      terminalErrorCode: 'PUBLISH_RECOVERY_FAILED',
+      terminalAt: LATER,
+    });
+    expect(reopened.getStage('blocked-quarantined', 'publish')).toMatchObject({
+      outcome: 'failed',
+      evidencePath: 'evidence/09-publish.json',
+      evidenceSha256: SHA64,
+      errorCode: 'PUBLISH_RECOVERY_FAILED',
+    });
+    expect(reopened.listEvents('blocked-quarantined').events.slice(-3).map(
+      ({ eventType }) => eventType,
+    )).toEqual(['stage', 'publish', 'terminal']);
+  });
+
   it('accepts only typed publishing recovery evidence for success and failure', async () => {
     const success = await fixture('job-2'); toPublishing(success.ownership, 'job-2'); seedLogs(success.path, 'job-2');
     expect(success.ownership.apiWrite({ kind: 'publish-recovery', jobId: 'job-2', expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence: recoveryEvidence('job-2') })).toMatchObject({ ok: true });

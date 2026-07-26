@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
+import { execFile as execFileCallback } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -16,6 +18,7 @@ import {
   type JobRecord,
   type JsonObject,
   type OperationInput,
+  type StoredStage,
 } from '../../api/src/store.js';
 import { loadConfig } from '../../config/load.js';
 import {
@@ -30,11 +33,13 @@ import { loadManifest } from '../../manifest/validate.js';
 import type { TargetManifest } from '../../manifest/schema.js';
 import {
   createPipeline,
+  type PipelineLease,
   type PipelineInput,
   type PipelineOperationExecution,
   type PreparedPublication,
   type StageActionContext,
 } from '../../runner/src/pipeline.js';
+import { runGuardedComposition, runRunner } from '../../runner/src/main.js';
 import { createEvidenceWriter } from '../../runner/src/evidence.js';
 import { createOperationDefinition, hashOperationDefinition } from '../../runner/src/operation-registry.js';
 import {
@@ -58,6 +63,7 @@ const ROOTFS_ALREADY_PRESENT = [
   'Patch patches/image-with-padded-rootfs.patch can be reverse-applied',
   '',
 ].join('\n');
+const execFile = promisify(execFileCallback);
 const SOURCE_PREPARATION = Object.freeze({
   schemaVersion: 1 as const,
   sourceSha: SHA40,
@@ -181,6 +187,7 @@ interface Fixture {
   readonly operationOrder: TrustedOperationId[];
   readonly workspaceChecks: Array<readonly [PipelineStageName, 'before' | 'after']>;
   readonly publishedMetadata: Array<Readonly<{ build: JsonObject; verification: JsonObject }>>;
+  readonly publicationPreparationStages: Array<StoredStage | null>;
   readonly verifiedTargetEvidence: readonly unknown[];
   readonly sourceObservations: ReturnType<typeof createTargetSetupSourceObservations>;
   readonly configObservations: ReturnType<typeof createTargetSetupConfigObservations>;
@@ -205,6 +212,7 @@ async function fixture(options: {
     phase: 'before' | 'after';
   }>;
   readonly verifyProducedTargetEvidence?: boolean;
+  readonly predictPublishPassed?: boolean;
 } = {}): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), 'osi-pipeline-order-'));
   temporaryDirectories.push(directory);
@@ -343,6 +351,7 @@ async function fixture(options: {
   ]> = [];
   const operationAttempts = new Map<TrustedOperationId, number>();
   const publishedMetadata: Array<Readonly<{ build: JsonObject; verification: JsonObject }>> = [];
+  const publicationPreparationStages: Array<StoredStage | null> = [];
   const verifiedTargetEvidence: unknown[] = [];
   let prepared: PreparedPublication | null = null;
 
@@ -619,6 +628,7 @@ async function fixture(options: {
   const configObservations = createTargetSetupConfigObservations(configPhase);
   const publicationFiles = {
     prepare: async (value: Parameters<PipelineInput['services']['publicationFiles']['prepare']>[0]) => {
+      publicationPreparationStages.push(store.getStage(jobId, 'verify'));
       publishedMetadata.push({
         build: value.buildManifest,
         verification: value.verificationManifest,
@@ -916,6 +926,7 @@ async function fixture(options: {
   let pipelineGetJobCalls = 0;
   const input: PipelineInput = options.mutateJob === undefined
     && options.publicationBindingMismatch !== true
+    && options.predictPublishPassed !== true
     ? baseInput
     : {
       ...baseInput,
@@ -931,7 +942,22 @@ async function fixture(options: {
           }
           return options.mutateJob?.(persisted) ?? persisted;
         },
-        getStage: (id, stage) => store.getStage(id, stage),
+        getStage: (id, stage) => {
+          if (stage === 'publish' && options.predictPublishPassed === true) {
+            return {
+              jobId: id,
+              stage,
+              outcome: 'passed',
+              startedAt: ACCEPTED,
+              finishedAt: ACCEPTED,
+              evidencePath: `jobs/${id}/evidence/09-publish.json`,
+              evidenceSha256: HASH_A,
+              errorCode: null,
+              error: null,
+            };
+          }
+          return store.getStage(id, stage);
+        },
         getOperation: (id, operationId, attempt) => (
           store.getOperation(id, operationId, attempt)
         ),
@@ -948,6 +974,7 @@ async function fixture(options: {
     operationOrder,
     workspaceChecks,
     publishedMetadata,
+    publicationPreparationStages,
     verifiedTargetEvidence,
     sourceObservations,
     configObservations,
@@ -956,6 +983,234 @@ async function fixture(options: {
 }
 
 describe('trusted pipeline integration', () => {
+  it('continues from the exact lease acquired by guarded production composition', async () => {
+    const value = await fixture();
+    try {
+      const at = value.clock.now();
+      const expiresAt = new Date(Date.parse(at) + 60_000).toISOString();
+      expect(value.ownership.runnerWrite({
+        kind: 'acquire-lease',
+        jobId: value.input.jobId,
+        runnerUnit: value.input.runnerUnit,
+        owner: value.input.owner,
+        expiresAt,
+        at,
+      }).ok).toBe(true);
+      const initialLease: PipelineLease = {
+        owner: value.input.owner,
+        runnerUnit: value.input.runnerUnit,
+        expiresAt,
+      };
+      const input = {
+        ...value.input,
+        initialLease,
+      } as PipelineInput;
+
+      await expect(createPipeline(input).run()).resolves.toMatchObject({
+        state: 'succeeded',
+      });
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType, payload }) => (
+          eventType === 'state' && payload.runnerOwner === value.input.owner
+        ))).toHaveLength(1);
+    } finally {
+      value.close();
+    }
+  });
+
+  it.each([
+    'builder lock',
+    'target manifest',
+    'native publisher',
+    'persisted target',
+    'approved root',
+  ])('guards %s composition failure with one durable terminal', async (component) => {
+    const value = await fixture();
+    try {
+      const result = await runGuardedComposition({
+        args: {
+          jobId: value.input.jobId,
+          runnerUnit: value.input.runnerUnit,
+          owner: value.input.owner,
+          leaseExpiresAt: '2026-07-26T09:00:00.000Z',
+        },
+        clock: value.input.clock,
+        store: value.store,
+        ownership: value.ownership,
+        evidenceWriter: value.input.evidenceWriter,
+        compose: async () => {
+          throw new Error(`${component} composition failed`);
+        },
+      });
+      expect(result, JSON.stringify(result)).toMatchObject({
+        state: 'failed',
+      });
+      expect(value.store.getStage(value.input.jobId, 'preflight')).toMatchObject({
+        outcome: 'failed',
+        errorCode: 'BUILD_FAILED',
+        evidencePath: expect.stringContaining('00-preflight.json'),
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'failed',
+        terminalErrorCode: 'BUILD_FAILED',
+      });
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
+
+      const reopenedDatabase = openBuilderDatabase(join(value.statePath, 'jobs.sqlite'));
+      const reopenedStore = new BuilderStore(reopenedDatabase);
+      try {
+        expect(reopenedStore.getJob(value.input.jobId)).toMatchObject({
+          state: 'failed',
+          terminalErrorCode: 'BUILD_FAILED',
+        });
+        expect(reopenedStore.listEvents(value.input.jobId, { limit: 500 }).events
+          .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
+      } finally {
+        reopenedStore.close();
+      }
+    } finally {
+      value.close();
+    }
+  });
+
+  it('persists an explicit recovery blocker when composition ownership is foreign', async () => {
+    const value = await fixture();
+    try {
+      const at = value.clock.now();
+      const expiresAt = new Date(Date.parse(at) + 60_000).toISOString();
+      expect(value.ownership.runnerWrite({
+        kind: 'acquire-lease',
+        jobId: value.input.jobId,
+        runnerUnit: value.input.runnerUnit,
+        owner: 'foreign-runner',
+        expiresAt,
+        at,
+      }).ok).toBe(true);
+
+      await expect(runGuardedComposition({
+        args: {
+          jobId: value.input.jobId,
+          runnerUnit: value.input.runnerUnit,
+          owner: value.input.owner,
+          leaseExpiresAt: new Date(Date.parse(expiresAt) + 60_000).toISOString(),
+        },
+        clock: value.input.clock,
+        store: value.store,
+        ownership: value.ownership,
+        evidenceWriter: value.input.evidenceWriter,
+        compose: async () => {
+          throw new Error('composition must not run without ownership');
+        },
+      })).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'RUNNER_DISAPPEARED',
+      });
+      const database = openBuilderDatabase(join(value.statePath, 'jobs.sqlite'));
+      try {
+        const row = database.prepare(
+          'SELECT cleanup_blocker_code, cleanup_blocker_json FROM jobs WHERE job_id=?',
+        ).get(value.input.jobId) as {
+          cleanup_blocker_code: string;
+          cleanup_blocker_json: string;
+        };
+        expect(row.cleanup_blocker_code).toBe('RUNNER_DISAPPEARED');
+        expect(JSON.parse(row.cleanup_blocker_json)).toMatchObject({
+          phase: 'composition',
+          observedOwner: 'foreign-runner',
+        });
+      } finally {
+        database.close();
+      }
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(0);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('guards the concrete production publisher composition after opening ownership state', async () => {
+    const value = await fixture();
+    const configHome = join(value.directory, 'config');
+    const packageDirectory = join(value.directory, 'installed', LOCK.packageVersion);
+    const stateHome = join(value.directory, 'state-home');
+    const priorConfigHome = process.env.XDG_CONFIG_HOME;
+    const priorStateHome = process.env.XDG_STATE_HOME;
+    try {
+      await Promise.all([
+        mkdir(join(configHome, 'osi-image-builder'), { recursive: true }),
+        mkdir(join(packageDirectory, 'manifest'), { recursive: true }),
+        mkdir(join(packageDirectory, 'bin'), { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(
+          join(configHome, 'osi-image-builder', 'config.json'),
+          await readFile(join(configHome, 'config.json')),
+        ),
+        writeFile(
+          join(packageDirectory, 'manifest', 'targets.json'),
+          await readFile(new URL('../../manifest/targets.json', import.meta.url)),
+        ),
+      ]);
+      await execFile('/usr/bin/git', ['init', '-q', value.directory + '/repository']);
+      await execFile('/usr/bin/git', [
+        '-C',
+        value.directory + '/repository',
+        'remote',
+        'add',
+        'origin',
+        'git@github.com:Open-Smart-Irrigation/osi-os.git',
+      ]);
+      process.env.XDG_CONFIG_HOME = configHome;
+      process.env.XDG_STATE_HOME = stateHome;
+
+      await expect(runRunner([
+        '--job-id', value.input.jobId,
+        '--runner-unit', value.input.runnerUnit,
+        '--owner', value.input.owner,
+        '--lease-expires-at', '2026-07-28T09:00:00.000Z',
+      ])).resolves.toMatchObject({
+        state: 'failed',
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'failed',
+        terminalErrorCode: 'BUILD_FAILED',
+      });
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
+      expect(value.store.getStage(value.input.jobId, 'preflight')).toMatchObject({
+        outcome: 'failed',
+        evidencePath: expect.stringContaining('00-preflight.json'),
+      });
+    } finally {
+      if (priorConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = priorConfigHome;
+      if (priorStateHome === undefined) delete process.env.XDG_STATE_HOME;
+      else process.env.XDG_STATE_HOME = priorStateHome;
+      value.close();
+    }
+  });
+
+  it('rejects verification aggregation that predicts a passed publication', async () => {
+    const value = await fixture({ predictPublishPassed: true });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'failed',
+      });
+      expect(value.input.services.publisher.publish).not.toHaveBeenCalled();
+      expect(value.store.getStage(value.input.jobId, 'verify')).toMatchObject({
+        outcome: 'passed',
+      });
+      expect(value.store.getStage(value.input.jobId, 'publish')).toMatchObject({
+        outcome: 'failed',
+        errorCode: 'BUILD_FAILED',
+      });
+      expect(value.publishedMetadata).toHaveLength(0);
+    } finally {
+      value.close();
+    }
+  });
+
   it('runs all ten stages with durable real evidence, exact operations, and one terminal transaction', async () => {
     const value = await fixture();
     try {
@@ -1150,7 +1405,7 @@ describe('trusted pipeline integration', () => {
           stageEvidence: PIPELINE_STAGE_NAMES.map((stage, index) => ({
             stage,
             path: `${String(index).padStart(2, '0')}-${stage}.json`,
-            outcome: 'passed',
+            outcome: stage === 'publish' ? 'running' : 'passed',
           })),
         },
         verification: {
@@ -1168,6 +1423,12 @@ describe('trusted pipeline integration', () => {
         },
       });
       const verify = value.store.getStage(value.input.jobId, 'verify')!;
+      expect(value.publicationPreparationStages).toEqual([
+        expect.objectContaining({
+          outcome: 'passed',
+          evidencePath: expect.stringContaining('08-verify.json'),
+        }),
+      ]);
       const verifyEvidence = JSON.parse(await readFile(
         join(value.statePath, verify.evidencePath!),
         'utf8',
@@ -1348,6 +1609,10 @@ describe('trusted pipeline integration', () => {
           state: 'failed',
         });
         expect(value.store.getStage(value.input.jobId, 'verify')).toMatchObject({
+          outcome: 'passed',
+          errorCode: null,
+        });
+        expect(value.store.getStage(value.input.jobId, 'publish')).toMatchObject({
           outcome: 'failed',
           errorCode: 'CHECKSUM_FAILED',
         });
@@ -1526,10 +1791,134 @@ describe('trusted pipeline integration', () => {
         publishState: 'blocked',
         terminalErrorCode: 'OUTPUT_COLLISION',
       });
+      expect((value.publishedMetadata[0]!.verification.observations as {
+        stageEvidence: Array<{ stage: string; outcome: string }>;
+      }).stageEvidence.at(-1)).toEqual({
+        stage: 'publish',
+        path: '09-publish.json',
+        outcome: 'running',
+      });
       expect(value.store.getStage(value.input.jobId, 'publish')?.error)
         .not.toHaveProperty('operationId');
       expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
         .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('persists exact quarantine identity and clears removed staging in the blocked terminal', async () => {
+    const value = await fixture({
+      publisher: {
+        publish: vi.fn(async (): Promise<PublisherResponse> => ({
+          available: true,
+          published: false,
+          quarantined: false,
+          selfTest: false,
+          mutationCount: 3,
+          errorCode: 'PUBLISH_FAILED',
+          renameResult: 'RENAMED',
+          publisherVersion: '0.1.0',
+          publisherSourceSha256: HASH_C,
+          sourceRelativePath: `.osi-image-builder/staging/${value.input.jobId}`,
+          destinationRelativePath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5`,
+        })),
+        recheck: vi.fn(async (): Promise<PublisherResponse> => ({
+          available: true,
+          published: false,
+          quarantined: false,
+          selfTest: false,
+          mutationCount: 0,
+          errorCode: 'PUBLISH_RECOVERY_FAILED',
+          destination: 'absent',
+          staging: 'present',
+        })),
+      },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'failed',
+        blockerCode: 'PUBLISH_RECOVERY_FAILED',
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'failed',
+        publishState: 'blocked',
+        artifactStagingPath: null,
+        artifactQuarantinePath: `.osi-image-builder/quarantine/${value.input.jobId}`,
+      });
+      const reopenedDatabase = openBuilderDatabase(join(value.statePath, 'jobs.sqlite'));
+      const reopenedStore = new BuilderStore(reopenedDatabase);
+      try {
+        expect(reopenedStore.getJob(value.input.jobId)).toMatchObject({
+          artifactStagingPath: null,
+          artifactQuarantinePath: `.osi-image-builder/quarantine/${value.input.jobId}`,
+        });
+      } finally {
+        reopenedStore.close();
+      }
+      expect((value.publishedMetadata[0]!.verification.observations as {
+        stageEvidence: Array<{ stage: string; outcome: string }>;
+      }).stageEvidence.at(-1)).toMatchObject({
+        stage: 'publish',
+        outcome: 'running',
+      });
+    } finally {
+      value.close();
+    }
+  });
+
+  it('retains staging when quarantine proof is failed or unknown', async () => {
+    const value = await fixture({
+      publisher: {
+        publish: vi.fn(async (): Promise<PublisherResponse> => ({
+          available: true,
+          published: false,
+          quarantined: false,
+          selfTest: false,
+          mutationCount: 3,
+          errorCode: 'PUBLISH_FAILED',
+          renameResult: 'RENAMED',
+          publisherVersion: '0.1.0',
+          publisherSourceSha256: HASH_C,
+          sourceRelativePath: `.osi-image-builder/staging/${value.input.jobId}`,
+          destinationRelativePath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5`,
+        })),
+        recheck: vi.fn(async (): Promise<PublisherResponse> => ({
+          available: true,
+          published: false,
+          quarantined: false,
+          selfTest: false,
+          mutationCount: 0,
+          errorCode: 'PUBLISH_RECOVERY_FAILED',
+          destination: 'absent',
+          staging: 'present',
+        })),
+        quarantine: vi.fn(async (): Promise<PublisherResponse> => ({
+          available: true,
+          published: false,
+          quarantined: false,
+          selfTest: false,
+          mutationCount: 1,
+          errorCode: 'QUARANTINE_PENDING',
+          renameResult: 'RENAMED',
+          publisherVersion: '0.1.0',
+          publisherSourceSha256: HASH_C,
+          sourceRelativePath: `.osi-image-builder/staging/${value.input.jobId}`,
+          destinationRelativePath: `.osi-image-builder/quarantine/${value.input.jobId}`,
+        })),
+      },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'failed',
+        blockerCode: 'QUARANTINE_PENDING',
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'failed',
+        publishState: 'blocked',
+        artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
+        artifactQuarantinePath: null,
+      });
     } finally {
       value.close();
     }

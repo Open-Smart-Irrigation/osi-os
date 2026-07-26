@@ -455,11 +455,17 @@ describe('Task 7 persisted publish and path coherence', () => {
     expect(() => blocker.getJob('job-1')).toThrow(StoreDataError);
     const pair = await corrupt("publish_state='blocked', artifact_staging_path='staging/image', artifact_sha256=?, artifact_size=?, artifact_mtime=?, checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=?, publish_blocker_code='PUBLISH_FAILED', publish_blocker_json=NULL", complete);
     expect(() => pair.getJob('job-1')).toThrow(StoreDataError);
-    const quarantineOnly = await corrupt("publish_state='blocked', artifact_staging_path=NULL, artifact_quarantine_path='quarantine/image', artifact_sha256=?, artifact_size=?, artifact_mtime=?, checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=?, publish_blocker_code='PUBLISH_FAILED', publish_blocker_json='{}'", complete);
-    expect(() => quarantineOnly.getJob('job-1')).toThrow(StoreDataError);
+    const quarantineOnly = await corrupt("publish_state='blocked', artifact_staging_path=NULL, artifact_quarantine_path='quarantine/image', artifact_sha256=?, artifact_size=?, artifact_mtime=?, checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=?, publish_blocker_code='PUBLISH_FAILED', publish_blocker_json='{\"staging\":\"quarantined\",\"quarantine\":{\"quarantined\":true,\"renameResult\":\"RENAMED\",\"destinationRelativePath\":\"quarantine/image\"}}'", complete);
+    expect(quarantineOnly.getJob('job-1')).toMatchObject({
+      artifactStagingPath: null,
+      artifactQuarantinePath: 'quarantine/image',
+    });
     const bothRetained = await corrupt("publish_state='blocked', artifact_staging_path='staging/image', artifact_quarantine_path='quarantine/image', artifact_sha256=?, artifact_size=?, artifact_mtime=?, checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=?, publish_blocker_code='PUBLISH_FAILED', publish_blocker_json='{}'", complete);
     expect(() => bothRetained.getJob('job-1')).toThrow(StoreDataError);
-    const noRetainedArtifact = await corrupt("publish_state='blocked', artifact_staging_path=NULL, artifact_quarantine_path=NULL, artifact_sha256=?, artifact_size=?, artifact_mtime=?, checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=?, publish_blocker_code='PUBLISH_FAILED', publish_blocker_json='{}'", complete);
-    expect(() => noRetainedArtifact.getJob('job-1')).toThrow(StoreDataError);
+    const noRetainedArtifact = await corrupt("publish_state='blocked', artifact_staging_path=NULL, artifact_quarantine_path=NULL, artifact_sha256=?, artifact_size=?, artifact_mtime=?, checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=?, publish_blocker_code='PUBLISH_FAILED', publish_blocker_json='{\"staging\":\"absent\"}'", complete);
+    expect(noRetainedArtifact.getJob('job-1')).toMatchObject({
+      artifactStagingPath: null,
+      artifactQuarantinePath: null,
+    });
   });
 });

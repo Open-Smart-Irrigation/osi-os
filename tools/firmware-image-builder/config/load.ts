@@ -201,6 +201,11 @@ export interface LoadedConfig {
   readonly pathAuthorities: PathAuthorities;
 }
 
+export interface LoadedStateRoot {
+  readonly stateRoot: string;
+  readonly authority: StateRootAuthority;
+}
+
 export interface StatFsResult {
   readonly bavail: number;
   readonly bsize: number;
@@ -553,6 +558,36 @@ async function createStateRoot(statePath: string): Promise<string[]> {
       try { await rmdir(directory); } catch (cleanupError) { void cleanupError; }
     }
     throw new ConfigValidationError('STATE_ROOT_CREATE_FAILED', `State root could not be created: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+export async function loadStateRootAuthority(
+  options: Pick<ConfigLoadOptions, 'env' | 'pathAuthorityDependencies'> = {},
+): Promise<LoadedStateRoot> {
+  const stateRoot = resolveConfigDirectories(options.env).stateRoot;
+  await validateStateRootPreflight(stateRoot);
+  const created = await createStateRoot(stateRoot);
+  try {
+    const state = await inspectAuthorityDirectory(stateRoot, 'state root', 'state');
+    const authority = Object.freeze({}) as StateRootAuthority;
+    stateAuthorityBrand.add(authority);
+    authorityData.set(authority, {
+      roots: new Map(),
+      state: Object.freeze(state),
+      dependencies: Object.freeze({
+        ...defaultPathAuthorityDependencies,
+        ...options.pathAuthorityDependencies,
+      }),
+    });
+    return Object.freeze({ stateRoot, authority });
+  } catch (error) {
+    for (const directory of created) {
+      try { await rmdir(directory); } catch (cleanupError) { void cleanupError; }
+    }
+    if (error instanceof ConfigAuthorityError && error.code) {
+      throw new ConfigValidationError(error.code, error.message);
+    }
+    throw error;
   }
 }
 

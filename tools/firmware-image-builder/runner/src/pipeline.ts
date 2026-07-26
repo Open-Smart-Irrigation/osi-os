@@ -303,6 +303,7 @@ export interface PipelineInput {
   readonly jobId: string;
   readonly runnerUnit: string;
   readonly owner: string;
+  readonly initialLease?: PipelineLease;
   readonly leaseDurationMs: number;
   readonly clock: PipelineClock;
   readonly store: PipelineStore;
@@ -549,6 +550,17 @@ function validateServiceComposition(input: PipelineInput): void {
     throw new TypeError('lease duration must be at least ten seconds');
   }
   if (
+    input.initialLease !== undefined
+    && (
+      input.initialLease.owner !== input.owner
+      || input.initialLease.runnerUnit !== input.runnerUnit
+      || new Date(input.initialLease.expiresAt).toISOString()
+        !== input.initialLease.expiresAt
+    )
+  ) {
+    throw new TypeError('initial runner lease does not match the runner identity');
+  }
+  if (
     JSON.stringify(input.manifest.manifest.stages)
     !== JSON.stringify(PIPELINE_STAGE_NAMES)
   ) {
@@ -598,12 +610,15 @@ function validateInitialBinding(input: PipelineInput, job: JobRecord): void {
     (candidate) => candidate.id === input.target.id,
   );
   const rootIdentity = persistedRootIdentity(job);
+  const leaseMatches = input.initialLease === undefined
+    ? job.runnerLeaseOwner === null && job.runnerLeaseExpiresAt === null
+    : job.runnerLeaseOwner === input.initialLease.owner
+      && job.runnerLeaseExpiresAt === input.initialLease.expiresAt;
   if (
     job.jobId !== input.jobId
     || job.state !== 'starting'
     || job.runnerUnit !== input.runnerUnit
-    || job.runnerLeaseOwner !== null
-    || job.runnerLeaseExpiresAt !== null
+    || !leaseMatches
     || !job.sourceRunnable
     || job.sourcePreparation === null
     || job.offlineFeedPreparation === null
@@ -1031,6 +1046,12 @@ export function createPipeline(input: PipelineInput): {
   let preparedPublication: PreparedPublication | null = null;
   let publicationBinding: PublicationBinding | null = null;
   let publishStartedAt: string | null = null;
+  let publicationFailure: Readonly<{
+    blockerCode: BuilderErrorCode;
+    blocker: JsonObject;
+    staging: 'present' | 'absent' | 'quarantined' | 'unknown';
+    quarantinePath?: string;
+  }> | null = null;
   let provenance: Provenance | null = null;
   let preflightObservations: Readonly<Record<string, unknown>> | null = null;
   const operationExecutions: PipelineOperationExecution[] = [];
@@ -1360,15 +1381,39 @@ export function createPipeline(input: PipelineInput): {
       artifactMtime: artifact.artifact.mtime,
       artifactBasename: artifact.artifact.basename,
     }, 'build manifest');
+    const stageEvidence = PIPELINE_STAGE_NAMES.map((stage, index) => {
+      const expectedPath = `${String(index).padStart(2, '0')}-${stage}.json`;
+      if (stage === 'publish') {
+        if (input.store.getStage(job.jobId, stage) !== null) {
+          throw new Error('verification aggregation cannot predict persisted publication evidence');
+        }
+        return {
+          stage,
+          path: expectedPath,
+          outcome: 'running',
+        };
+      }
+      const persisted = input.store.getStage(job.jobId, stage);
+      if (
+        persisted === null
+        || persisted.outcome !== 'passed'
+        || persisted.evidencePath === null
+        || persisted.evidenceSha256 === null
+        || basename(persisted.evidencePath) !== expectedPath
+      ) {
+        throw new Error(`verification aggregation is missing durable ${stage} evidence`);
+      }
+      return {
+        stage,
+        path: basename(persisted.evidencePath),
+        outcome: persisted.outcome,
+      };
+    });
     const verification = canonicalObject({
       ...shared,
       verification: artifact.verification,
       observations: {
-        stageEvidence: PIPELINE_STAGE_NAMES.map((stage, index) => ({
-          stage,
-          path: `${String(index).padStart(2, '0')}-${stage}.json`,
-          outcome: 'passed',
-        })),
+        stageEvidence,
       },
     }, 'verification manifest');
     const buildBytes = encodeJson(shared, 'build manifest', true);
@@ -1389,7 +1434,7 @@ export function createPipeline(input: PipelineInput): {
   const preparePublication = async (
     job: JobRecord,
     artifact: VerifiedPipelineArtifact,
-  ): Promise<StageResult> => {
+  ): Promise<void> => {
     const metadata = buildMetadata(job, artifact);
     const prepared = await input.services.publicationFiles.prepare({
       job,
@@ -1424,29 +1469,6 @@ export function createPipeline(input: PipelineInput): {
       state: 'verifying',
       ...artifactInput,
     });
-    return {
-      operationId: 'verify-image',
-      commands: operationExecutions
-        .filter(({ operationId }) => operationId === 'verify-image')
-        .slice(-1)
-        .map(({ command }) => command),
-      observations: {
-        artifact: {
-          path: artifactInput.stagingPath,
-          sha256: artifactInput.artifactSha256,
-          size: artifactInput.artifactSize,
-          mtime: artifactInput.artifactMtime,
-        },
-        metadata: {
-          checksumPath: artifactInput.checksumPath,
-          checksumSha256: artifactInput.checksumSha256,
-          manifestPath: artifactInput.manifestPath,
-          manifestSha256: artifactInput.manifestSha256,
-          verificationPath: artifactInput.verificationPath,
-          verificationSha256: artifactInput.verificationSha256,
-        },
-      },
-    };
   };
 
   const createBinding = (job: JobRecord): PublicationBinding => {
@@ -1545,12 +1567,17 @@ export function createPipeline(input: PipelineInput): {
         nativeFailures: outcome.nativeFailures ?? [],
         staging: outcome.staging,
       }, 'publish blocker');
-      write({
-        kind: 'publish',
-        expectedState: 'publishing',
-        state: 'blocked',
+      const quarantinePath = outcome.staging === 'quarantined'
+        ? outcome.quarantine?.destinationRelativePath
+        : undefined;
+      if (outcome.staging === 'quarantined' && quarantinePath === undefined) {
+        throw new Error('quarantined publication recovery omitted its authoritative path');
+      }
+      publicationFailure = Object.freeze({
         blockerCode: outcome.code,
         blocker,
+        staging: outcome.staging,
+        ...(quarantinePath === undefined ? {} : { quarantinePath }),
       });
       throw new PipelineExpectedError(errorContract(
         {
@@ -1660,7 +1687,6 @@ export function createPipeline(input: PipelineInput): {
       ) {
         throw new Error('verification returned missing artifact metadata');
       }
-      const result = await preparePublication(job, verifiedArtifact);
       const verificationEvidence = verifiedArtifact.verification.evidence;
       const evidenceJson = verificationEvidence !== null
         && typeof verificationEvidence === 'object'
@@ -1679,10 +1705,10 @@ export function createPipeline(input: PipelineInput): {
           ? freshness as Readonly<Record<string, unknown>>
           : {};
       return {
-        ...result,
+        operationId: 'verify-image',
         commands: [operation.command],
         observations: {
-          ...result.observations,
+          artifact: verifiedArtifact.artifact,
           config: verifiedArtifact.config,
           verification: verifiedArtifact.verification,
           rootfs: verifiedArtifact.verification.rootfs,
@@ -1736,6 +1762,35 @@ export function createPipeline(input: PipelineInput): {
       error: evidenceError,
     }));
     renewLease();
+    if (
+      stage === 'publish'
+      && currentState === 'publishing'
+      && publicationFailure !== null
+    ) {
+      const terminalAt = now();
+      write({
+        kind: 'publish-failure-terminal',
+        expectedState: 'publishing',
+        startedAt,
+        finishedAt,
+        evidencePath: evidence.path,
+        evidenceSha256: evidence.sha256,
+        blockerCode: publicationFailure.blockerCode,
+        blocker: publicationFailure.blocker,
+        staging: publicationFailure.staging,
+        ...(publicationFailure.quarantinePath === undefined
+          ? {}
+          : { quarantinePath: publicationFailure.quarantinePath }),
+        terminalAt,
+        error: canonicalObject(contract, 'publish terminal failure'),
+      });
+      throw new PipelineTerminalFailure({
+        state: 'failed',
+        buildManifest,
+        verificationManifest,
+        blockerCode,
+      });
+    }
     write({
       kind: 'stage',
       expectedState: currentState,
@@ -1774,8 +1829,19 @@ export function createPipeline(input: PipelineInput): {
     const stageState = STAGE_STATE[stage];
     const startedAt = now();
     let result: StageResult | null = null;
+    let workspaceValidatedBefore = false;
     try {
       if (stage === 'publish') {
+        if (verifiedArtifact === null) {
+          throw new Error('verified publication artifact is unavailable');
+        }
+        await withLeaseHeartbeat(() => input.services.workspace.revalidate({
+          job,
+          stage,
+          phase: 'before',
+        }));
+        workspaceValidatedBefore = true;
+        await withLeaseHeartbeat(() => preparePublication(job, verifiedArtifact!));
         const binding = createBinding(job);
         publicationBinding = binding;
         publishStartedAt = now();
@@ -1798,11 +1864,13 @@ export function createPipeline(input: PipelineInput): {
         });
       }
       currentState = stageState;
-      await withLeaseHeartbeat(() => input.services.workspace.revalidate({
-        job,
-        stage,
-        phase: 'before',
-      }));
+      if (!workspaceValidatedBefore) {
+        await withLeaseHeartbeat(() => input.services.workspace.revalidate({
+          job,
+          stage,
+          phase: 'before',
+        }));
+      }
       const stageResult = await withLeaseHeartbeat(() => stageAction(stage, job));
       result = stageResult;
       await withLeaseHeartbeat(() => input.services.workspace.revalidate({
@@ -1898,7 +1966,14 @@ export function createPipeline(input: PipelineInput): {
       };
     }
     try {
-      acquireLease();
+      if (input.initialLease === undefined) {
+        acquireLease();
+      } else {
+        if (input.initialLease.expiresAt <= now()) {
+          throw new PipelineOwnershipLostError('stale-initial-lease');
+        }
+        lease = input.initialLease;
+      }
       try {
         validateInitialBinding(input, job);
         provenance = await withLeaseHeartbeat(() => loadProvenance(input, job));

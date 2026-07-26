@@ -206,6 +206,7 @@ describe('versioned builder database migrations', () => {
       { version: 3, filename: '003_freshness_and_logs.sql' },
       { version: 4, filename: '004_source_preparation.sql' },
       { version: 5, filename: '005_offline_feed_preparation.sql' },
+      { version: 6, filename: '006_blocked_publish_artifact_location.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
       .toEqual(['cleanup_leases', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'queue_entries', 'schema_migrations']);
@@ -312,7 +313,7 @@ describe('versioned builder database migrations', () => {
     const second = openBuilderDatabase(path);
     expect(second.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name").all())
       .toEqual(schema);
-    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 5 });
+    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 6 });
     second.close();
   });
 
@@ -415,7 +416,7 @@ describe('versioned builder database migrations', () => {
     physicalOrderDb.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(1, '001_initial.sql', MIGRATION_REGISTRY[0].sha256, 'x');
     physicalOrderDb.close();
     const accepted = openBuilderDatabase(physicalOrderPath);
-    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 5 });
+    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 6 });
     accepted.close();
   });
 
@@ -688,9 +689,10 @@ describe('versioned builder database migrations', () => {
     db.prepare(`UPDATE jobs SET publish_state='quarantined', artifact_quarantine_path='quarantine/image.gz', artifact_final_directory=NULL, artifact_final_path=NULL, artifact_staging_path=NULL, artifact_sha256=NULL, artifact_size=NULL, artifact_mtime=NULL, checksum_path=NULL, checksum_sha256=NULL, manifest_path=NULL, manifest_sha256=NULL, verification_path=NULL, verification_sha256=NULL, publish_started_at=NULL, published_at=NULL WHERE job_id='evidence-job'`).run();
     check(db, "UPDATE jobs SET publish_started_at='x' WHERE job_id='evidence-job'", /publish result is incoherent/);
     check(db, "UPDATE jobs SET publish_state='blocked', publish_blocker_code='PUBLISH_FAILED' WHERE job_id='evidence-job'", /publish result is incoherent/);
-    db.prepare(`UPDATE jobs SET publish_state='blocked', publish_blocker_code='PUBLISH_FAILED', publish_blocker_json='{}', artifact_quarantine_path=NULL WHERE job_id='evidence-job'`).run();
+    db.prepare(`UPDATE jobs SET ${Object.keys(staged).map((key) => `${key}=?`).join(', ')}, publish_state='blocked', publish_blocker_code='PUBLISH_FAILED', publish_blocker_json='{}', artifact_quarantine_path=NULL, artifact_final_directory=NULL, artifact_final_path=NULL, publish_started_at=NULL, published_at=NULL WHERE job_id='evidence-job'`).run(...Object.values(staged));
     check(db, "UPDATE jobs SET publish_started_at='x' WHERE job_id='evidence-job'", /publish result is incoherent/);
-    check(db, "UPDATE jobs SET artifact_quarantine_path='quarantine/image.gz' WHERE job_id='evidence-job'", /publish result is incoherent/);
+    db.prepare("UPDATE jobs SET artifact_staging_path=NULL, artifact_quarantine_path='quarantine/image.gz' WHERE job_id='evidence-job'").run();
+    check(db, "UPDATE jobs SET artifact_staging_path='staging/image.gz' WHERE job_id='evidence-job'", /publish result is incoherent/);
     insertValidJob(db, 'blocked-job', 'building');
     const blockedEvidence = stagingEvidence();
     db.prepare(`UPDATE jobs SET ${Object.keys(blockedEvidence).map((key) => `${key}=?`).join(', ')}, publish_state='blocked', publish_blocker_code='PUBLISH_FAILED', publish_blocker_json='{}' WHERE job_id='blocked-job'`).run(...Object.values(blockedEvidence));

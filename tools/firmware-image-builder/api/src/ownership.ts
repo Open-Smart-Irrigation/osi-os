@@ -205,6 +205,7 @@ export type ApiWriteCommand =
   | Readonly<{ kind: 'request-cancellation'; jobId: string; reason: string; at: string; error?: JsonInput }>
   | Readonly<{ kind: 'freshness-request'; jobId: string; at: string }>
   | Readonly<{ kind: 'freshness-result'; jobId: string; input: FreshnessInput; at: string }>
+  | Readonly<{ kind: 'runner-recovery-blocker'; jobId: string; expectedState: ActiveRecoveryState; runnerUnit: string; observedOwner: string | null; observedLeaseExpiresAt: string | null; blocker: JsonObject; at: string }>
   | Readonly<{ kind: 'direct-interrupt'; jobId: string; expectedState: ActiveRecoveryState; at: string; proof: DirectInterruptionProof; errorCode: BuilderErrorCode; error: JsonObject }>
   | Readonly<{ kind: 'publish-recovery'; jobId: string; expectedState: 'publishing'; at: string; state: 'succeeded' | 'failed'; evidence: PublishRecoveryEvidence; errorCode?: BuilderErrorCode; error?: JsonObject }>
   | Readonly<{ kind: 'cleanup-admission'; jobId: string; admissionId: string; owner: string; unitName: string; expiresAt: string; credentialRelativePath: string; credentialSha256: string; fenceTokenHash: string; snapshot: CleanupSnapshot; at: string }>
@@ -221,6 +222,7 @@ export type RunnerWriteCommand =
   | (CommonRunner & Readonly<{ kind: 'artifact'; expectedState: JobState; state: JobState; stagingPath: string; artifactSha256: string; artifactSize: number; artifactMtime: string; checksumPath: string; checksumSha256: string; manifestPath: string; manifestSha256: string; verificationPath: string; verificationSha256: string }>)
   | (CommonRunner & Readonly<{ kind: 'publish-stage-start'; expectedState: 'verifying'; startedAt: string; finalDirectory: string; finalPath: string; publishStartedAt: string }>)
   | (CommonRunner & Readonly<{ kind: 'publish-terminal'; expectedState: 'publishing'; startedAt: string; finishedAt: string; evidencePath: string; evidenceSha256: string; finalDirectory: string; finalPath: string; publishStartedAt: string; publishedAt: string; terminalAt: string }>)
+  | (CommonRunner & Readonly<{ kind: 'publish-failure-terminal'; expectedState: 'publishing'; startedAt: string; finishedAt: string; evidencePath: string; evidenceSha256: string; blockerCode: BuilderErrorCode; blocker: JsonObject; staging: 'present' | 'absent' | 'quarantined' | 'unknown'; quarantinePath?: string; terminalAt: string; error: JsonObject }>)
   | (CommonRunner & Readonly<{ kind: 'publish'; expectedState: JobState; state: 'staged' | 'publishing' | 'published' | 'blocked'; finalDirectory?: string; finalPath?: string; startedAt?: string; publishedAt?: string; blockerCode?: BuilderErrorCode; blocker?: JsonObject }>)
   | (CommonRunner & Readonly<{ kind: 'normal-terminal'; expectedState: JobState; state: 'succeeded' | 'failed'; terminalAt: string; errorCode?: BuilderErrorCode | null; error?: JsonInput }>)
   | (CommonRunner & Readonly<{ kind: 'operation-begin'; expectedState: JobState; operationId: TrustedOperationId; attempt: number; argvHash: string; argv: readonly string[]; startedAt: string }>)
@@ -366,6 +368,15 @@ function validateApiCommand(command: ApiWriteCommand): void {
     case 'freshness-request': preparedCommon(value, 'API'); return;
     case 'freshness-result':
       preparedCommon(value, 'API'); validateFreshnessInputShape(preparedObject(value.input, 'freshness input')); return;
+    case 'runner-recovery-blocker':
+      preparedCommon(value, 'API');
+      preparedEnum(value.expectedState, [...ACTIVE_STATES], 'runner recovery blocker state');
+      runnerUnit(preparedString(value.jobId, 'runner recovery blocker jobId'), preparedString(value.runnerUnit, 'runner recovery blocker unit'));
+      shapeNullableString(value.observedOwner, 'runner recovery blocker owner', true);
+      preparedOptionalInstant(value.observedLeaseExpiresAt, 'runner recovery blocker lease expiry');
+      if ((value.observedOwner === null) !== (value.observedLeaseExpiresAt === null)) throw new OwnershipValidationError('runner recovery blocker lease identity is incomplete');
+      preparedJsonObject(value.blocker, 'runner recovery blocker');
+      return;
     case 'direct-interrupt': preparedCommon(value, 'API'); preparedEnum(value.expectedState, JOB_STATES, 'direct interruption expectedState'); shapeDirectProof(value.proof, value.at as string); preparedEnum(value.errorCode, BUILDER_ERROR_CODES, 'direct interruption errorCode'); preparedJsonObject(value.error, 'direct interruption error'); return;
     case 'publish-recovery': preparedCommon(value, 'API'); preparedEnum(value.expectedState, ['publishing'], 'publish recovery expectedState'); preparedEnum(value.state, ['succeeded', 'failed'], 'publish recovery state'); shapePublishEvidence(value.evidence, value.at as string); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'publish recovery errorCode'); preparedJsonObject(value.error, 'publish recovery error', true); return;
     case 'cleanup-admission': preparedCommon(value, 'API'); preparedString(value.admissionId, 'cleanup admission id', TEXT_LIMITS.maxIdentifierBytes); preparedString(value.owner, 'cleanup admission owner', TEXT_LIMITS.maxIdentifierBytes); preparedString(value.unitName, 'cleanup admission unit', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.expiresAt, 'cleanup admission expiry'); preparedPath(value.credentialRelativePath, 'cleanup credential path'); preparedHash(value.credentialSha256, 'cleanup credential SHA'); preparedHash(value.fenceTokenHash, 'cleanup fence token hash'); shapeCleanupSnapshot(value.snapshot, 'cleanup admission snapshot', value.at as string); return;
@@ -561,6 +572,37 @@ function validateRunnerCommand(command: RunnerWriteCommand): void {
     case 'artifact': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'artifact expectedState'); preparedEnum(value.state, JOB_STATES, 'artifact state'); for (const field of ['stagingPath', 'checksumPath', 'manifestPath', 'verificationPath']) preparedPath(value[field], `artifact ${field}`); for (const field of ['artifactSha256', 'checksumSha256', 'manifestSha256', 'verificationSha256']) preparedHash(value[field], `artifact ${field}`); if (!Number.isSafeInteger(value.artifactSize) || Number(value.artifactSize) < 0) throw new OwnershipValidationError('artifact size is invalid'); preparedInstant(value.artifactMtime, 'artifact mtime'); shapeChronology([['artifact mtime', value.artifactMtime], ['artifact command.at', value.at]], 'artifact'); return;
     case 'publish-stage-start': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'verifying', 'publish stage predecessor'); preparedInstant(value.startedAt, 'publish stage startedAt'); preparedPath(value.finalDirectory, 'publish final directory'); preparedPath(value.finalPath, 'publish final path'); preparedInstant(value.publishStartedAt, 'publish startedAt'); shapeChronology([['publish stage startedAt', value.startedAt], ['publish startedAt', value.publishStartedAt], ['publish command.at', value.at]], 'publish stage start'); return;
     case 'publish-terminal': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'publishing', 'publish terminal predecessor'); preparedInstant(value.startedAt, 'publish stage startedAt'); preparedInstant(value.finishedAt, 'publish stage finishedAt'); preparedPath(value.evidencePath, 'publish stage evidence path'); preparedHash(value.evidenceSha256, 'publish stage evidence SHA'); preparedPath(value.finalDirectory, 'publish final directory'); preparedPath(value.finalPath, 'publish final path'); preparedInstant(value.publishStartedAt, 'publish startedAt'); preparedInstant(value.publishedAt, 'publishedAt'); preparedInstant(value.terminalAt, 'publish terminalAt'); shapeChronology([['publish stage startedAt', value.startedAt], ['publish startedAt', value.publishStartedAt], ['publish stage finishedAt', value.finishedAt], ['publishedAt', value.publishedAt], ['publish terminalAt', value.terminalAt], ['publish terminal command.at', value.at]], 'publish terminal'); return;
+    case 'publish-failure-terminal': {
+      preparedRunnerCommon(value);
+      shapeLiteral(value.expectedState, 'publishing', 'publish failure predecessor');
+      preparedInstant(value.startedAt, 'publish failure stage startedAt');
+      preparedInstant(value.finishedAt, 'publish failure stage finishedAt');
+      preparedPath(value.evidencePath, 'publish failure evidence path');
+      preparedHash(value.evidenceSha256, 'publish failure evidence SHA');
+      preparedEnum(value.blockerCode, BUILDER_ERROR_CODES, 'publish failure blocker code');
+      preparedEnum(value.staging, ['present', 'absent', 'quarantined', 'unknown'], 'publish failure staging disposition');
+      preparedInstant(value.terminalAt, 'publish failure terminalAt');
+      preparedJsonObject(value.error, 'publish failure terminal error');
+      const blocker = shapeRecord(value.blocker, 'publish failure blocker');
+      shapeLiteral(blocker.staging, String(value.staging), 'publish failure blocker staging');
+      if (value.staging === 'quarantined') {
+        preparedPath(value.quarantinePath, 'publish failure quarantine path');
+        const quarantine = shapeRecord(blocker.quarantine, 'publish failure quarantine proof');
+        shapeLiteral(quarantine.quarantined, true, 'publish failure quarantine result');
+        shapeLiteral(quarantine.renameResult, 'RENAMED', 'publish failure quarantine rename result');
+        preparedPath(quarantine.destinationRelativePath, 'publish failure quarantine destination');
+        shapeLiteral(quarantine.destinationRelativePath, String(value.quarantinePath), 'publish failure quarantine destination binding');
+      } else if (value.quarantinePath !== undefined && value.quarantinePath !== null) {
+        throw new OwnershipValidationError('non-quarantined publish failure contains a quarantine path');
+      }
+      shapeChronology([
+        ['publish failure stage startedAt', value.startedAt],
+        ['publish failure stage finishedAt', value.finishedAt],
+        ['publish failure terminalAt', value.terminalAt],
+        ['publish failure command.at', value.at],
+      ], 'publish failure terminal');
+      return;
+    }
     case 'publish': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'publish expectedState'); preparedEnum(value.state, ['staged', 'publishing', 'published', 'blocked'], 'publish state'); if (value.finalDirectory !== undefined && value.finalDirectory !== null) preparedPath(value.finalDirectory, 'publish final directory'); if (value.finalPath !== undefined && value.finalPath !== null) preparedPath(value.finalPath, 'publish final path'); preparedOptionalInstant(value.startedAt, 'publish startedAt'); preparedOptionalInstant(value.publishedAt, 'publish publishedAt'); preparedOptionalEnum(value.blockerCode, BUILDER_ERROR_CODES, 'publish blockerCode'); preparedJsonObject(value.blocker, 'publish blocker', true); shapePublishCommand(value, value.at as string); return;
     case 'normal-terminal': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'terminal expectedState'); preparedEnum(value.state, ['succeeded', 'failed'], 'terminal state'); preparedInstant(value.terminalAt, 'terminal time'); shapeChronology([['terminal time', value.terminalAt], ['terminal command.at', value.at]], 'terminal'); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'terminal errorCode'); preparedJsonObject(value.error, 'terminal error', true); return;
     case 'operation-begin': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'operation expectedState'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation id'); if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) <= 0) throw new OwnershipValidationError('operation attempt is invalid'); preparedHash(value.argvHash, 'operation argv hash'); preparedJsonArray(value.argv, 'operation argv'); preparedInstant(value.startedAt, 'operation startedAt'); shapeChronology([['operation startedAt', value.startedAt], ['operation command.at', value.at]], 'operation begin'); return;
@@ -1147,7 +1189,7 @@ export class OwnershipStore {
   apiWrite(command: ApiWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as ApiWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['enqueue', 'dispatch', 'request-cancellation', 'freshness-request', 'freshness-result', 'direct-interrupt', 'publish-recovery', 'cleanup-admission', 'hand-back'].includes(prepared.kind)) {
+    if (!['enqueue', 'dispatch', 'request-cancellation', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'cleanup-admission', 'hand-back'].includes(prepared.kind)) {
       throw new OwnershipViolationError('api', prepared.kind);
     }
     validateApiCommand(prepared);
@@ -1157,6 +1199,7 @@ export class OwnershipStore {
       case 'request-cancellation': return this.#transaction(() => this.#requestCancellation(prepared));
       case 'freshness-request': return this.#transaction(() => this.#freshnessRequest(prepared));
       case 'freshness-result': return this.#transaction(() => this.#freshnessResult(prepared));
+      case 'runner-recovery-blocker': return this.#transaction(() => this.#runnerRecoveryBlocker(prepared));
       case 'direct-interrupt': return this.#transaction(() => this.#directInterrupt(prepared));
       case 'publish-recovery': return this.#transaction(() => this.#publishRecovery(prepared));
       case 'cleanup-admission': return this.#transaction(() => this.#cleanupAdmission(prepared));
@@ -1167,7 +1210,7 @@ export class OwnershipStore {
   runnerWrite(command: RunnerWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as RunnerWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['acquire-lease', 'renew-lease', 'cancellation-transition', 'cancellation-cleanup', 'cancellation-terminal', 'stage', 'container', 'artifact', 'publish-stage-start', 'publish-terminal', 'publish', 'normal-terminal', 'operation-begin', 'operation-complete', 'operation-cleanup'].includes(prepared.kind)) {
+    if (!['acquire-lease', 'renew-lease', 'cancellation-transition', 'cancellation-cleanup', 'cancellation-terminal', 'stage', 'container', 'artifact', 'publish-stage-start', 'publish-terminal', 'publish-failure-terminal', 'publish', 'normal-terminal', 'operation-begin', 'operation-complete', 'operation-cleanup'].includes(prepared.kind)) {
       throw new OwnershipViolationError('runner', prepared.kind);
     }
     validateRunnerCommand(prepared);
@@ -1183,6 +1226,7 @@ export class OwnershipStore {
       case 'artifact': return this.#transaction(() => this.#artifact(prepared));
       case 'publish-stage-start': return this.#transaction(() => this.#publishStageStart(prepared));
       case 'publish-terminal': return this.#transaction(() => this.#publishTerminal(prepared));
+      case 'publish-failure-terminal': return this.#transaction(() => this.#publishFailureTerminal(prepared));
       case 'publish': return this.#transaction(() => this.#publish(prepared));
       case 'normal-terminal': return this.#transaction(() => this.#normalTerminal(prepared));
       case 'operation-begin': return this.#transaction(() => this.#operationBegin(prepared));
@@ -1389,6 +1433,56 @@ export class OwnershipStore {
     this.#event(command.jobId, 'freshness', { status: input.status, checkedAt: input.checkedAt, observedSha: input.observedSha }, command.at);
   }
 
+  #runnerRecoveryBlocker(command: Extract<ApiWriteCommand, { kind: 'runner-recovery-blocker' }>): void {
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [
+      ['runner recovery blocker time', command.at],
+    ]);
+    const blockerJson = json(command.blocker, 'runner recovery blocker', true);
+    if (
+      row.state !== command.expectedState
+      || row.runner_unit !== command.runnerUnit
+      || row.runner_lease_owner !== command.observedOwner
+      || row.runner_lease_expires_at !== command.observedLeaseExpiresAt
+      || row.terminal_at !== null
+      || row.cleanup_fence_generation !== null
+      || row.cleanup_admission_id !== null
+    ) {
+      conflict('identity-mismatch', 'runner recovery blocker observation is stale');
+    }
+    if (
+      row.cleanup_blocker_code === 'RUNNER_DISAPPEARED'
+      && row.cleanup_blocker_json === blockerJson
+    ) {
+      return;
+    }
+    if (row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null) {
+      conflict('fenced', 'runner recovery blocker is already persisted');
+    }
+    const result = this.#db.prepare(`UPDATE jobs SET
+      cleanup_blocker_code='RUNNER_DISAPPEARED', cleanup_blocker_json=?, updated_at=?
+      WHERE job_id=? AND state=? AND runner_unit=?
+        AND runner_lease_owner IS ? AND runner_lease_expires_at IS ?
+        AND terminal_at IS NULL AND cleanup_blocker_code IS NULL
+        AND cleanup_blocker_json IS NULL AND cleanup_fence_generation IS NULL
+        AND cleanup_admission_id IS NULL`).run(
+      blockerJson,
+      command.at,
+      command.jobId,
+      command.expectedState,
+      command.runnerUnit,
+      command.observedOwner,
+      command.observedLeaseExpiresAt,
+    );
+    if (Number(result.changes) !== 1) {
+      conflict('cas-lost', 'runner recovery blocker CAS lost');
+    }
+    this.#event(command.jobId, 'recovery', {
+      kind: 'runner-composition-blocker',
+      errorCode: 'RUNNER_DISAPPEARED',
+    }, command.at);
+  }
+
   #directInterrupt(command: Extract<ApiWriteCommand, { kind: 'direct-interrupt' }>): void {
     instant(command.at, 'interruption time'); const errorJson = json(command.error, 'interruption error', true);
     if (!isActiveState(command.expectedState)) conflict('illegal-predecessor', 'state is not recoverable by direct interruption');
@@ -1513,6 +1607,7 @@ export class OwnershipStore {
     if (row.state !== 'starting') conflict('stale-predecessor', 'runner lease predecessor changed');
     if (row.runner_unit !== command.runnerUnit) conflict('stale-runner-owner', 'runner identity changed');
     if (row.cleanup_fence_generation !== null || row.cleanup_admission_id !== null) conflict('fenced', 'runner is fenced for recovery');
+    if (row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null) conflict('fenced', 'runner has a persisted recovery blocker');
     if (row.runner_lease_owner !== null || row.runner_lease_expires_at !== null) conflict('stale-predecessor', 'runner lease was already claimed');
     requirePersistedTimeline(this.#db, command.jobId, [['runner start time', command.at]]);
     requireChronology([['accepted time', String(row.accepted_at)], ['dispatch time', row.dispatched_at === null ? null : String(row.dispatched_at)], ['runner start time', command.at]]);
@@ -1530,6 +1625,7 @@ export class OwnershipStore {
     if (!isRunnerLeaseRenewableState(String(row.state) as JobState)) conflict('stale-predecessor', 'runner lease predecessor changed');
     if (row.runner_unit !== command.runnerUnit || row.runner_lease_owner !== command.owner) conflict('stale-runner-owner', 'runner identity changed');
     if (row.cleanup_fence_generation !== null || row.cleanup_admission_id !== null) conflict('fenced', 'runner is fenced for recovery');
+    if (row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null) conflict('fenced', 'runner has a persisted recovery blocker');
     if (row.runner_lease_expires_at !== command.expectedExpiresAt) conflict('stale-lease', 'runner lease identity changed');
     requirePersistedTimeline(this.#db, command.jobId, [['runner renewal time', command.at], ['runner new expiry', command.expiresAt]]);
     requireChronology([['accepted time', String(row.accepted_at)], ['runner start time', row.runner_started_at === null ? null : String(row.runner_started_at)], ['runner renewal time', command.at]]);
@@ -1805,6 +1901,106 @@ export class OwnershipStore {
     this.#event(command.jobId, 'terminal', { state: 'succeeded', errorCode: null }, command.terminalAt);
   }
 
+  #publishFailureTerminal(command: Extract<RunnerWriteCommand, { kind: 'publish-failure-terminal' }>): void {
+    this.#runnerGuard(command, 'publishing');
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [
+      ['publish failure command time', command.at],
+      ['publish failure stage start time', command.startedAt],
+      ['publish failure stage finish time', command.finishedAt],
+      ['publish failure terminal time', command.terminalAt],
+    ], true);
+    requireChronology([
+      ['accepted time', String(row.accepted_at)],
+      ['artifact mtime', row.artifact_mtime === null ? null : String(row.artifact_mtime)],
+      ['publish stage start time', command.startedAt],
+      ['publish start time', row.publish_started_at === null ? null : String(row.publish_started_at)],
+      ['publish stage finish time', command.finishedAt],
+      ['terminal time', command.terminalAt],
+      ['publish failure command time', command.at],
+    ]);
+    confinedPath(command.evidencePath, 'publish failure evidence path');
+    hash(command.evidenceSha256, 'publish failure evidence SHA-256');
+    const blockerJson = json(command.blocker, 'publish failure blocker', true);
+    const errorJson = json(command.error, 'publish failure error', true);
+    if (
+      row.publish_state !== 'publishing'
+      || row.artifact_staging_path === null
+      || row.artifact_quarantine_path !== null
+      || row.artifact_final_directory === null
+      || row.artifact_final_path === null
+      || row.publish_started_at === null
+      || row.container_id !== null
+    ) {
+      conflict('identity-mismatch', 'publish failure binding differs from publishing recovery state');
+    }
+    const quarantinePath = command.staging === 'quarantined'
+      ? command.quarantinePath ?? null
+      : null;
+    if (quarantinePath !== null) confinedPath(quarantinePath, 'publish failure quarantine path');
+    const retainedStaging = command.staging === 'present' || command.staging === 'unknown'
+      ? String(row.artifact_staging_path)
+      : null;
+    const stage = this.#db.prepare(`UPDATE job_stages SET
+      outcome='failed', finished_at=?, evidence_path=?, evidence_sha256=?,
+      error_code=?, error_json=?
+      WHERE job_id=? AND stage='publish' AND outcome='running' AND started_at=?`).run(
+      command.finishedAt,
+      command.evidencePath,
+      command.evidenceSha256,
+      command.blockerCode,
+      errorJson,
+      command.jobId,
+      command.startedAt,
+    );
+    if (Number(stage.changes) !== 1) conflict('cas-lost', 'publish failure stage completion CAS lost');
+    const update = this.#db.prepare(`UPDATE jobs SET
+      state='failed', queue_state='complete', queue_position=NULL,
+      publish_state='blocked', artifact_staging_path=?, artifact_quarantine_path=?,
+      artifact_final_directory=NULL, artifact_final_path=NULL,
+      publish_started_at=NULL, published_at=NULL,
+      publish_blocker_code=?, publish_blocker_json=?,
+      terminal_at=?, terminal_error_code=?, terminal_error_json=?,
+      runner_finished_at=?, updated_at=?
+      WHERE job_id=? AND state='publishing' AND publish_state='publishing'
+        AND artifact_staging_path=? AND artifact_quarantine_path IS NULL
+        AND artifact_final_directory IS NOT NULL AND artifact_final_path IS NOT NULL
+        AND publish_started_at IS NOT NULL AND artifact_sha256 IS NOT NULL
+        AND artifact_size IS NOT NULL AND artifact_mtime IS NOT NULL
+        AND checksum_path IS NOT NULL AND checksum_sha256 IS NOT NULL
+        AND manifest_path IS NOT NULL AND manifest_sha256 IS NOT NULL
+        AND verification_path IS NOT NULL AND verification_sha256 IS NOT NULL
+        AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=?
+        AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(
+      retainedStaging,
+      quarantinePath,
+      command.blockerCode,
+      blockerJson,
+      command.terminalAt,
+      command.blockerCode,
+      errorJson,
+      command.terminalAt,
+      command.at,
+      command.jobId,
+      row.artifact_staging_path,
+      command.owner,
+      command.runnerUnit,
+      command.leaseExpiresAt,
+      command.at,
+    );
+    if (Number(update.changes) !== 1) conflict('cas-lost', 'publish failure terminal CAS lost');
+    this.#event(command.jobId, 'stage', { stage: 'publish', outcome: 'failed' }, command.finishedAt);
+    this.#event(command.jobId, 'publish', {
+      state: 'blocked',
+      staging: command.staging,
+      quarantinePath,
+    }, command.finishedAt);
+    this.#event(command.jobId, 'terminal', {
+      state: 'failed',
+      errorCode: command.blockerCode,
+    }, command.terminalAt);
+  }
+
   #publish(command: Extract<RunnerWriteCommand, { kind: 'publish' }>): void {
     this.#runnerGuard(command, command.expectedState); const row = this.#job(command.jobId); if (!['staged', 'publishing', 'published', 'blocked'].includes(command.state)) throw new OwnershipValidationError('publish state is invalid'); if (command.startedAt !== undefined) instant(command.startedAt, 'publish start time'); if (command.publishedAt !== undefined) instant(command.publishedAt, 'publish finish time'); validatePublishEffectiveSemantics(command, row); requirePersistedTimeline(this.#db, command.jobId, [['publish command time', command.at], ['publish start time', command.startedAt], ['publish finish time', command.publishedAt]]); const now = command.at; let result;
     if (command.state === 'publishing') {
@@ -2061,6 +2257,7 @@ export class OwnershipStore {
     if (expectedState !== undefined && !matchesExpectedState(String(row.state), expectedState)) conflict('stale-predecessor', 'runner predecessor changed');
     if (row.runner_unit !== command.runnerUnit || row.runner_lease_owner !== command.owner) conflict('stale-runner-owner', 'runner identity changed');
     if (row.cleanup_fence_generation !== null || row.cleanup_admission_id !== null) conflict('fenced', 'runner is fenced for recovery');
+    if (row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null) conflict('fenced', 'runner has a persisted recovery blocker');
     if (!skipLatest) requirePersistedTimeline(this.#db, command.jobId, [['runner command time', command.at]]);
     if (row.runner_lease_expires_at !== command.leaseExpiresAt || row.runner_lease_expires_at <= command.at) conflict('stale-lease', 'runner lease is stale');
   }
