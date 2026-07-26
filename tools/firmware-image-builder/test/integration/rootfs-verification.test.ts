@@ -167,9 +167,45 @@ function firstBootSeed(): string {
   const modules = SEED_HELPERS.join(' ');
   return `#!/bin/sh
 set -eu
+
 SRC=/usr/share/node-red
 DST=/srv/node-red
+
+mkdir -p "$DST" "$DST/node_modules"
+chown node-red:node-red "$DST" "$DST/node_modules" 2>/dev/null || true
+
+if [ -f /usr/share/flows.json ] && [ ! -f "$DST/flows.json" ]; then
+    cp /usr/share/flows.json "$DST/flows.json"
+fi
+
+if [ -f "$SRC/settings.js" ] && [ ! -f "$DST/settings.js" ]; then
+    cp "$SRC/settings.js" "$DST/settings.js"
+fi
+
+if [ -f "$SRC/package.json" ] && [ ! -f "$DST/package.json" ]; then
+    cp "$SRC/package.json" "$DST/package.json"
+fi
+
+if [ -f "$SRC/package-lock.json" ] && [ ! -f "$DST/package-lock.json" ]; then
+    cp "$SRC/package-lock.json" "$DST/package-lock.json"
+fi
+
+if [ -f "$SRC/edge-channels.json" ]; then
+    cp "$SRC/edge-channels.json" "$DST/edge-channels.json"
+fi
+
+if [ -d "$SRC/codecs" ]; then
+    mkdir -p "$DST/codecs"
+    cp -a "$SRC/codecs/." "$DST/codecs/"
+fi
+
+if [ -d "$SRC/node_modules" ]; then
+    cp -a "$SRC/node_modules/." "$DST/node_modules/"
+fi
+
+# Native sqlite must come from the OpenWrt package built for the target CPU.
 rm -rf "$DST/node_modules/sqlite3" "$DST/node_modules/node-red-node-sqlite"
+
 for module in ${modules}; do
   if [ -d "$SRC/$module" ]; then
     rm -rf "$DST/$module" "$DST/node_modules/$module"
@@ -177,10 +213,14 @@ for module in ${modules}; do
     cp -a "$SRC/$module" "$DST/node_modules/$module"
   fi
 done
+
 SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3
 if [ -d "$SQLITE_SRC" ]; then
-  ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"
+    ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"
 fi
+
+chown -R node-red:node-red "$DST" 2>/dev/null || true
+
 exit 0
 `;
 }
@@ -1147,6 +1187,62 @@ describe('real rootfs verification contract', () => {
       ),
     );
     await expect(verifyFirmwareArtifact(multilineQuotedAction.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+  }, 30_000);
+
+  it('rejects terminating, unknown, substituted, and reordered first-boot commands', async () => {
+    const topLevelFalse = await createRootfsFixture('rpi-5');
+    await writeFile(
+      join(topLevelFalse.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed().replace('set -eu', 'set -eu\nfalse'),
+    );
+    await expect(verifyFirmwareArtifact(topLevelFalse.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const earlyReturn = await createRootfsFixture('rpi-2');
+    await writeFile(
+      join(earlyReturn.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed().replace('set -eu', 'set -eu\nreturn 0'),
+    );
+    await expect(verifyFirmwareArtifact(earlyReturn.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const unknownCommand = await createRootfsFixture('rpi-5');
+    await writeFile(
+      join(unknownCommand.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed().replace('set -eu', 'set -eu\nmystery-command'),
+    );
+    await expect(verifyFirmwareArtifact(unknownCommand.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const commandSubstitution = await createRootfsFixture('rpi-2');
+    await writeFile(
+      join(commandSubstitution.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed().replace('set -eu', 'set -eu\n$(false)'),
+    );
+    await expect(verifyFirmwareArtifact(commandSubstitution.input)).rejects.toMatchObject({
+      code: 'ROOTFS_CONTENT_FAILED',
+    });
+
+    const reorderedCopies = await createRootfsFixture('rpi-5');
+    await writeFile(
+      join(reorderedCopies.rootfsPath, 'etc/uci-defaults/98_osi_node_red_seed'),
+      firstBootSeed().replace(
+        [
+          '    cp -a "$SRC/$module" "$DST/$module"',
+          '    cp -a "$SRC/$module" "$DST/node_modules/$module"',
+        ].join('\n'),
+        [
+          '    cp -a "$SRC/$module" "$DST/node_modules/$module"',
+          '    cp -a "$SRC/$module" "$DST/$module"',
+        ].join('\n'),
+      ),
+    );
+    await expect(verifyFirmwareArtifact(reorderedCopies.input)).rejects.toMatchObject({
       code: 'ROOTFS_CONTENT_FAILED',
     });
   }, 30_000);

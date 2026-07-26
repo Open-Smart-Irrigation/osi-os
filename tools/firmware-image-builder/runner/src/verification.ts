@@ -62,6 +62,49 @@ const DIRECT_HELPERS = Object.freeze([
   'osi-lsn50-normalize',
 ] as const);
 const ALL_HELPERS = Object.freeze([...RELATIVE_HELPERS, ...DIRECT_HELPERS] as const);
+const FIRST_BOOT_SEED_COMMANDS = Object.freeze([
+  'set -eu',
+  'SRC=/usr/share/node-red',
+  'DST=/srv/node-red',
+  'mkdir -p "$DST" "$DST/node_modules"',
+  'chown node-red:node-red "$DST" "$DST/node_modules" 2>/dev/null || true',
+  'if [ -f /usr/share/flows.json ] && [ ! -f "$DST/flows.json" ]; then',
+  'cp /usr/share/flows.json "$DST/flows.json"',
+  'fi',
+  'if [ -f "$SRC/settings.js" ] && [ ! -f "$DST/settings.js" ]; then',
+  'cp "$SRC/settings.js" "$DST/settings.js"',
+  'fi',
+  'if [ -f "$SRC/package.json" ] && [ ! -f "$DST/package.json" ]; then',
+  'cp "$SRC/package.json" "$DST/package.json"',
+  'fi',
+  'if [ -f "$SRC/package-lock.json" ] && [ ! -f "$DST/package-lock.json" ]; then',
+  'cp "$SRC/package-lock.json" "$DST/package-lock.json"',
+  'fi',
+  'if [ -f "$SRC/edge-channels.json" ]; then',
+  'cp "$SRC/edge-channels.json" "$DST/edge-channels.json"',
+  'fi',
+  'if [ -d "$SRC/codecs" ]; then',
+  'mkdir -p "$DST/codecs"',
+  'cp -a "$SRC/codecs/." "$DST/codecs/"',
+  'fi',
+  'if [ -d "$SRC/node_modules" ]; then',
+  'cp -a "$SRC/node_modules/." "$DST/node_modules/"',
+  'fi',
+  'rm -rf "$DST/node_modules/sqlite3" "$DST/node_modules/node-red-node-sqlite"',
+  'for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-command-ledger osi-db-helper osi-dendro-helper osi-dendro-analytics osi-zone-env osi-history-helper osi-history-sync-helper osi-history-router osi-health-helper osi-lib osi-journal osi-device-writer osi-uc512-normalize osi-lsn50-normalize; do',
+  'if [ -d "$SRC/$module" ]; then',
+  'rm -rf "$DST/$module" "$DST/node_modules/$module"',
+  'cp -a "$SRC/$module" "$DST/$module"',
+  'cp -a "$SRC/$module" "$DST/node_modules/$module"',
+  'fi',
+  'done',
+  'SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3',
+  'if [ -d "$SQLITE_SRC" ]; then',
+  'ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"',
+  'fi',
+  'chown -R node-red:node-red "$DST" 2>/dev/null || true',
+  'exit 0',
+] as const);
 const REQUIRED_ROOTFS_FILES = Object.freeze(
   REQUIRED_RUNTIME_FILES.filter((path) => !path.includes('/node_modules/osi-')),
 );
@@ -1279,135 +1322,23 @@ async function verifyHelperLayout(
 }
 
 function verifyFirstBootSeed(contents: string): void {
+  const firstLine = contents.split(/\r?\n/u, 1)[0];
+  if (firstLine !== '#!/bin/sh') {
+    fail('ROOTFS_CONTENT_FAILED', 'first-boot seed interpreter is not exact');
+  }
   const activeSeed = activeShellLines(contents);
-  type ShellFrame = {
-    readonly kind: 'if' | 'for';
-    readonly header: string;
-    branch: 'then' | 'else';
-  };
-  type ShellStatement = {
-    readonly line: string;
-    readonly index: number;
-    readonly context: readonly string[];
-  };
-  const frames: ShellFrame[] = [];
-  const statements: ShellStatement[] = [];
-  const context = (): readonly string[] => frames.map(
-    (frame) => `${frame.kind}:${frame.header}:${frame.branch}`,
+  const mismatchIndex = FIRST_BOOT_SEED_COMMANDS.findIndex(
+    (command, index) => activeSeed[index] !== command,
   );
-  for (const [index, line] of activeSeed.entries()) {
-    if (line.includes('<<')
-      || /^(?:function\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{/u.test(line)
-      || /^(?:case|select|while|until)\b/u.test(line)
-      || line === '{'
-      || line === '}'
-      || /^elif\b/u.test(line)) {
-      fail('ROOTFS_CONTENT_FAILED', 'first-boot seed contains an unsupported control structure');
-    }
-    if (line === 'else') {
-      const frame = frames.at(-1);
-      if (!frame || frame.kind !== 'if' || frame.branch !== 'then') {
-        fail('ROOTFS_CONTENT_FAILED', 'first-boot seed has an invalid else branch');
-      }
-      frame.branch = 'else';
-      continue;
-    }
-    if (line === 'fi') {
-      if (frames.at(-1)?.kind !== 'if') {
-        fail('ROOTFS_CONTENT_FAILED', 'first-boot seed has an unbalanced if block');
-      }
-      frames.pop();
-      continue;
-    }
-    if (line === 'done') {
-      if (frames.at(-1)?.kind !== 'for') {
-        fail('ROOTFS_CONTENT_FAILED', 'first-boot seed has an unbalanced loop');
-      }
-      frames.pop();
-      continue;
-    }
-    const statement = Object.freeze({ line, index, context: Object.freeze(context()) });
-    statements.push(statement);
-    if (/^if .+;\s*then$/u.test(line)) {
-      frames.push({ kind: 'if', header: line, branch: 'then' });
-    } else if (/^for .+;\s*do$/u.test(line)) {
-      frames.push({ kind: 'for', header: line, branch: 'then' });
-    }
-  }
-  if (frames.length !== 0) {
-    fail('ROOTFS_CONTENT_FAILED', 'first-boot seed has an unbalanced control structure');
-  }
-  const exits = statements.filter(({ line }) => /^exit(?:\s|$)/u.test(line));
-  const lastStatement = statements.at(-1);
-  if (exits.length !== 1
-    || exits[0]?.line !== 'exit 0'
-    || exits[0]?.context.length !== 0
-    || exits[0]?.index !== lastStatement?.index) {
-    fail('ROOTFS_CONTENT_FAILED', 'first-boot seed does not have one final reachable successful exit');
-  }
-  const atTopLevel = (statement: ShellStatement): boolean => statement.context.length === 0;
-  const sourceAssignments = statements.filter(({ line }) => line.startsWith('SRC='));
-  const destinationAssignments = statements.filter(({ line }) => line.startsWith('DST='));
-  const sqliteAssignments = statements.filter(({ line }) => line.startsWith('SQLITE_SRC='));
-  if (sourceAssignments.length !== 1
-    || sourceAssignments[0]?.line !== 'SRC=/usr/share/node-red'
-    || sourceAssignments[0]?.context.length !== 0
-    || destinationAssignments.length !== 1
-    || destinationAssignments[0]?.line !== 'DST=/srv/node-red'
-    || destinationAssignments[0]?.context.length !== 0
-    || sqliteAssignments.length !== 1
-    || sqliteAssignments[0]?.line !== 'SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3'
-    || sqliteAssignments[0]?.context.length !== 0) {
-    fail('ROOTFS_CONTENT_FAILED', 'first-boot seed source or destination assignments are not exact');
-  }
-  const moduleLoops = statements.filter(({ line }) => line.startsWith('for module in '));
-  const moduleLoopStatement = moduleLoops[0];
-  const moduleLoop = /^for module in\s+([^;]+);\s*do$/u.exec(moduleLoopStatement?.line ?? '');
-  const seededHelpers = moduleLoop?.[1]?.trim().split(/\s+/u) ?? [];
-  if (moduleLoops.length !== 1
-    || !moduleLoopStatement
-    || !atTopLevel(moduleLoopStatement)
-    || seededHelpers.length !== ALL_HELPERS.length
-    || [...seededHelpers].sort().join('\0') !== [...ALL_HELPERS].sort().join('\0')
-  ) {
-    fail('ROOTFS_CONTENT_FAILED', 'first-boot seed does not copy every shipped helper into runtime node_modules');
-  }
-  const helperIf = 'if [ -d "$SRC/$module" ]; then';
-  const sqliteCleanup = 'rm -rf "$DST/node_modules/sqlite3" "$DST/node_modules/node-red-node-sqlite"';
-  const helperContext = Object.freeze([
-    `for:${moduleLoopStatement.line}:then`,
-    `if:${helperIf}:then`,
-  ]);
-  const sqliteIf = 'if [ -d "$SQLITE_SRC" ]; then';
-  const sqliteContext = Object.freeze([`if:${sqliteIf}:then`]);
-  const expectedActions = new Map<string, readonly string[]>([
-    [sqliteCleanup, Object.freeze([])],
-    [helperIf, Object.freeze([`for:${moduleLoopStatement.line}:then`])],
-    ['rm -rf "$DST/$module" "$DST/node_modules/$module"', helperContext],
-    ['cp -a "$SRC/$module" "$DST/$module"', helperContext],
-    ['cp -a "$SRC/$module" "$DST/node_modules/$module"', helperContext],
-    [sqliteIf, Object.freeze([])],
-    ['ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"', sqliteContext],
-  ]);
-  for (const [line, expectedContext] of expectedActions) {
-    const matches = statements.filter((statement) => statement.line === line);
-    if (matches.length !== 1
-      || matches[0]!.context.length !== expectedContext.length
-      || matches[0]!.context.some((frame, index) => frame !== expectedContext[index])) {
-      fail('ROOTFS_CONTENT_FAILED', 'first-boot seed action is absent or unreachable', {
-        action: line,
-      });
-    }
-  }
-  if (sourceAssignments[0]!.index >= moduleLoopStatement.index
-    || destinationAssignments[0]!.index >= moduleLoopStatement.index
-    || destinationAssignments[0]!.index >= statements.find(({ line }) => line === sqliteCleanup)!.index
-    || statements.find(({ line }) => line === sqliteCleanup)!.index >= moduleLoopStatement.index
-    || moduleLoopStatement.index >= sqliteAssignments[0]!.index
-    || sqliteAssignments[0]!.index >= statements.find(
-      ({ line }) => line === 'ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"',
-    )!.index) {
-    fail('ROOTFS_CONTENT_FAILED', 'first-boot seed actions are not in executable order');
+  if (mismatchIndex !== -1 || activeSeed.length !== FIRST_BOOT_SEED_COMMANDS.length) {
+    const commandIndex = mismatchIndex === -1
+      ? Math.min(activeSeed.length, FIRST_BOOT_SEED_COMMANDS.length)
+      : mismatchIndex;
+    fail('ROOTFS_CONTENT_FAILED', 'first-boot seed command contract does not match', {
+      commandIndex,
+      expected: FIRST_BOOT_SEED_COMMANDS[commandIndex] ?? null,
+      observed: activeSeed[commandIndex] ?? null,
+    });
   }
 }
 
