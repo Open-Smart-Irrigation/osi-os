@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { createCommandExecutor } from '../../runner/src/command-executor.js';
 import { setupSourceWorktree } from '../../runner/src/source.js';
+import { loadConfig } from '../../config/load.js';
 
 const execFile = promisify(execFileCallback);
 const temporaryDirectories: string[] = [];
@@ -49,6 +50,8 @@ async function createFixture(withCollision = false) {
   await gitRaw(active, 'add', 'README.md');
   await gitRaw(active, 'commit', '-m', 'pinned source');
   await gitRaw(active, '-c', 'protocol.file.allow=always', 'submodule', 'add', submoduleOrigin, 'openwrt');
+  await gitRaw(active, 'config', '-f', '.gitmodules', 'submodule.openwrt.url', 'https://git.example/Open-Smart-Irrigation/openwrt.git');
+  await gitRaw(active, 'add', '.gitmodules');
   if (withCollision) {
     await mkdir(join(active, 'openwrt', 'bin', 'targets', 'bcm27xx', 'bcm2712'), { recursive: true });
     await writeFile(join(active, 'openwrt', 'bin', 'targets', 'bcm27xx', 'bcm2712', 'old.img.gz'), 'old output\n');
@@ -60,15 +63,31 @@ async function createFixture(withCollision = false) {
   await gitRaw(active, 'commit', '-am', 'add fixture submodule');
   const sha = await git(active, 'rev-parse', 'HEAD');
   await gitRaw(active, 'update-ref', 'refs/remotes/origin/main', sha);
-  const commitTime = await git(active, 'show', '-s', '--format=%cI', sha);
+  const commitTime = new Date(Date.parse(await git(active, 'show', '-s', '--format=%cI', sha))).toISOString();
   const authorName = await git(active, 'show', '-s', '--format=%an', sha);
   const authorEmail = await git(active, 'show', '-s', '--format=%ae', sha);
   const subject = await git(active, 'show', '-s', '--format=%s', sha);
   await writeFile(join(active, 'README.md'), 'dirty active checkout\n');
   await writeFile(join(active, 'untracked.txt'), 'must remain\n');
   const dirtyStatusBefore = await git(active, 'status', '--porcelain=v1', '--untracked-files=all');
+  const configHome = join(root, 'config');
+  await mkdir(join(root, 'images'), { recursive: true });
+  await mkdir(configHome, { recursive: true });
+  await writeFile(join(configHome, 'config.json'), JSON.stringify({
+    repositoryPath: active,
+    approvedOutputRoots: [{ id: 'images', label: 'images', path: join(root, 'images') }],
+    builderLockPath: '/opt/osi-image-builder/2026.07.22.1/builder.lock.json',
+    maxQueueLength: 50,
+    diskFreeMinimumBytes: 20 * 1024 ** 3,
+  }));
+  const loaded = await loadConfig({
+    configPath: join(configHome, 'config.json'),
+    env: { HOME: root, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: join(root, 'state-home') },
+    git: { getOriginPolicy: async () => ({ url: 'git@github.com:Open-Smart-Irrigation/osi-os.git', fetchRefspec: '+refs/heads/*:refs/remotes/origin/*' }) },
+    rootFs: { statfs: async () => ({ bavail: 30, bsize: 1024 ** 3 }) },
+  });
   return {
-    root, active, sha, dirtyStatusBefore,
+    root, active, sha, dirtyStatusBefore, stateRoot: loaded.pathAuthorities.stateRoot, statePath: loaded.stateRoot,
     source: {
       sourceRemote: 'ssh://git.example/Open-Smart-Irrigation/osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main',
       pinnedSha: sha, sourceCommitTime: commitTime, sourceAuthor: `${authorName} <${authorEmail}>`, sourceSubject: subject,
@@ -83,18 +102,17 @@ afterEach(async () => {
 describe('source worktree integration', () => {
   it('creates a detached recursive-submodule worktree and leaves a dirty active checkout unchanged', async () => {
     const fixture = await createFixture();
-    const workspacePath = join(fixture.root, 'state', 'jobs', 'job-1', 'workspace', 'source');
+    const workspacePath = join(fixture.statePath, 'jobs', 'job-1', 'workspace', 'source');
     const executor = createCommandExecutor();
     const result = await setupSourceWorktree({
       repositoryPath: fixture.active,
-      workspacePath,
+      stateRoot: fixture.stateRoot,
+      jobId: 'job-1',
       source: fixture.source,
       target: { openwrtTarget: 'bcm27xx/bcm2712' },
       executor: {
         async run(argv, options) {
-          // The production policy permits SSH only. The fixture submodule is local,
-          // so this adapter changes only the test transport allowance.
-          return executor.run(argv, { ...options, env: { ...options.env, GIT_ALLOW_PROTOCOL: 'file:ssh' } });
+          return executor.run(argv, options);
         },
       },
     });
@@ -111,12 +129,11 @@ describe('source worktree integration', () => {
 
   it('fails before later mutation when the exact target output directory exists', async () => {
     const fixture = await createFixture(true);
-    const workspacePath = join(fixture.root, 'state', 'jobs', 'job-2', 'workspace', 'source');
     await expect(setupSourceWorktree({
-      repositoryPath: fixture.active, workspacePath, source: fixture.source, target: { openwrtTarget: 'bcm27xx/bcm2712' },
+      repositoryPath: fixture.active, stateRoot: fixture.stateRoot, jobId: 'job-2', source: fixture.source, target: { openwrtTarget: 'bcm27xx/bcm2712' },
       executor: {
         async run(argv, options) {
-          return createCommandExecutor().run(argv, { ...options, env: { ...options.env, GIT_ALLOW_PROTOCOL: 'file:ssh' } });
+          return createCommandExecutor().run(argv, options);
         },
       },
     })).rejects.toMatchObject({ code: 'BUILD_OUTPUT_COLLISION' });

@@ -1,9 +1,11 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { link, lstat, mkdir, open, unlink } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { link, mkdir, open, readdir, unlink } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
+import { join } from 'node:path';
 
+import { withStateRootSnapshot, type StateRootAuthority } from '../../config/load.js';
+import { boundedText, encodeJson, normalizeJson, canonicalInstant, stableRelativePath, SharedValidationError } from '../../api/src/validation.js';
 import {
   BUILDER_ERROR_CODES,
   PIPELINE_STAGE_NAMES,
@@ -14,8 +16,12 @@ import {
   type TrustedOperationId,
 } from '../../domain/types.js';
 
-const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
+const MAX_CAPTURED_COMMANDS = 256;
+const PROC_FD = '/proc/self/fd';
+const DIR_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW;
+const FILE_FLAGS = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW;
+const READ_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
 
 export interface EvidenceCommand {
   readonly argv: readonly string[];
@@ -28,7 +34,8 @@ export interface StageEvidenceInput {
   readonly startedAt: string;
   readonly finishedAt: string;
   readonly outcome: 'passed' | 'failed';
-  readonly operationId: TrustedOperationId;
+  /** Source is a stage-only operation; other stages carry a trusted operation ID. */
+  readonly operationId: TrustedOperationId | null;
   readonly commands: readonly EvidenceCommand[];
   readonly inputs: Readonly<Record<string, unknown>>;
   readonly observations: Readonly<Record<string, unknown>>;
@@ -40,12 +47,13 @@ export interface StageEvidence extends StageEvidenceInput {
 }
 
 export interface EvidencePublication {
+  /** A confined state-root-relative path, suitable for persistence in the store. */
   readonly path: string;
   readonly sha256: string;
 }
 
 export interface EvidenceFileSystem {
-  readonly publishExclusive: (rootPath: string, path: string, contents: Buffer) => Promise<void>;
+  readonly publishExclusive: (root: StateRootAuthority, relativePath: string, contents: Buffer) => Promise<void>;
 }
 
 export class EvidenceError extends Error {
@@ -58,130 +66,219 @@ export class EvidenceError extends Error {
   }
 }
 
-function validTimestamp(value: string, field: string): void {
-  if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) throw new EvidenceError('EVIDENCE_INVALID', `${field} must be an ISO timestamp`);
-}
-
-function canonicalEvidencePath(stateRoot: string, jobId: string, stage: PipelineStageName): string {
-  if (typeof stateRoot !== 'string' || !isAbsolute(stateRoot) || stateRoot.includes('\0')) throw new EvidenceError('EVIDENCE_PATH_INVALID', 'state root must be an absolute path');
-  if (typeof jobId !== 'string' || !JOB_ID.test(jobId) || jobId === '.' || jobId === '..') throw new EvidenceError('EVIDENCE_PATH_INVALID', 'job ID is not a safe path segment');
-  if (!isPipelineStageName(stage)) throw new EvidenceError('EVIDENCE_PATH_INVALID', 'stage is not approved');
-  const index = PIPELINE_STAGE_NAMES.indexOf(stage);
-  const root = resolve(stateRoot);
-  const path = join(root, 'jobs', jobId, 'evidence', `${String(index).padStart(2, '0')}-${stage}.json`);
-  const escaped = relative(root, path);
-  if (escaped === '..' || escaped.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(escaped)) throw new EvidenceError('EVIDENCE_PATH_INVALID', 'evidence path escapes state root');
-  return path;
+function invalid(message: string, cause?: unknown): never {
+  throw new EvidenceError('EVIDENCE_INVALID', message, cause === undefined ? undefined : { cause });
 }
 
 function validateInput(input: StageEvidenceInput): StageEvidence {
-  if (!input || typeof input !== 'object') throw new EvidenceError('EVIDENCE_INVALID', 'stage evidence input is invalid');
-  if (!isPipelineStageName(input.stage) || !isTrustedOperationId(input.operationId)) throw new EvidenceError('EVIDENCE_INVALID', 'stage or operation is not trusted');
-  validTimestamp(input.startedAt, 'startedAt');
-  validTimestamp(input.finishedAt, 'finishedAt');
-  if (Date.parse(input.finishedAt) < Date.parse(input.startedAt)) throw new EvidenceError('EVIDENCE_INVALID', 'evidence timestamps are out of order');
-  if (input.outcome !== 'passed' && input.outcome !== 'failed') throw new EvidenceError('EVIDENCE_INVALID', 'evidence outcome is invalid');
-  if (!Array.isArray(input.commands)) throw new EvidenceError('EVIDENCE_INVALID', 'captured commands are invalid');
-  for (const command of input.commands) {
-    if (!command || !Array.isArray(command.argv) || command.argv.length === 0 || command.argv.some((value: unknown) => typeof value !== 'string' || value.length === 0) || (command.exitCode !== null && !Number.isSafeInteger(command.exitCode))) {
-      throw new EvidenceError('EVIDENCE_INVALID', 'captured commands are invalid');
-    }
+  if (!input || typeof input !== 'object') return invalid('stage evidence input is invalid');
+  let jobId: string;
+  try { jobId = stableRelativePath(input.jobId, 'jobId'); }
+  catch (error) { throw new EvidenceError('EVIDENCE_PATH_INVALID', 'jobId is not a stable path segment', { cause: error }); }
+  if (jobId.includes('/')) return invalid('jobId must be one stable path segment');
+  if (!isPipelineStageName(input.stage) || (input.operationId !== null && !isTrustedOperationId(input.operationId)) || (input.stage === 'source' && input.operationId !== null) || (input.stage !== 'source' && input.operationId === null)) return invalid('stage or operation is not trusted');
+  let startedAt: string;
+  let finishedAt: string;
+  try {
+    startedAt = canonicalInstant(input.startedAt, 'startedAt');
+    finishedAt = canonicalInstant(input.finishedAt, 'finishedAt');
+  } catch (error) { return invalid('evidence timestamps are not canonical', error); }
+  if (finishedAt < startedAt) return invalid('evidence timestamps are out of order');
+  if (input.outcome !== 'passed' && input.outcome !== 'failed') return invalid('evidence outcome is invalid');
+  if (!Array.isArray(input.commands) || input.commands.length > MAX_CAPTURED_COMMANDS) return invalid('captured commands are invalid');
+  const commands = input.commands.map((command, index) => {
+    if (!command || typeof command !== 'object' || !Array.isArray(command.argv) || command.argv.length === 0 || command.argv.some((value: unknown) => typeof value !== 'string' || value.length === 0) || (command.exitCode !== null && !Number.isSafeInteger(command.exitCode))) return invalid(`commands[${index}] is invalid`);
+    try { return normalizeJson({ argv: command.argv, exitCode: command.exitCode }, `commands[${index}]`) as unknown as EvidenceCommand; }
+    catch (error) { return invalid(`commands[${index}] is not bounded JSON`, error); }
+  });
+  if (input.outcome === 'passed' && input.error !== null) return invalid('passed evidence cannot contain an error');
+  if (input.outcome === 'failed' && input.error === null) return invalid('failed evidence requires an error');
+  if (input.error !== null) {
+    const error = input.error;
+    const operationCoherent = input.operationId === null ? error.operationId === undefined : error.operationId === input.operationId;
+    if (typeof error !== 'object' || !(BUILDER_ERROR_CODES as readonly string[]).includes(error.code) || error.stage !== input.stage || !operationCoherent || typeof error.retryable !== 'boolean' || typeof error.requestId !== 'string' || typeof error.diagnosis !== 'string' || typeof error.recovery !== 'string') return invalid('stage error is not coherent with the stage operation');
+    try {
+      stableRelativePath(error.requestId, 'error.requestId');
+      boundedText(error.diagnosis, 'error.diagnosis');
+      boundedText(error.recovery, 'error.recovery');
+      const details = normalizeJson(error.details, 'error.details');
+      if (details === null || typeof details !== 'object' || Array.isArray(details)) return invalid('error.details must be a JSON object');
+    } catch (cause) { return invalid('stage error details are not bounded JSON', cause); }
   }
-  if (input.outcome === 'passed' && input.error !== null) throw new EvidenceError('EVIDENCE_INVALID', 'passed evidence cannot contain an error');
-  if (input.outcome === 'failed' && input.error === null) throw new EvidenceError('EVIDENCE_INVALID', 'failed evidence requires an error');
-  if (input.error !== null && (
-    typeof input.error !== 'object'
-    || !(BUILDER_ERROR_CODES as readonly string[]).includes(input.error.code)
-    || typeof input.error.diagnosis !== 'string'
-    || typeof input.error.recovery !== 'string'
-    || typeof input.error.requestId !== 'string'
-    || (input.error.operationId !== undefined && !isTrustedOperationId(input.error.operationId))
-  )) throw new EvidenceError('EVIDENCE_INVALID', 'stage error is not a stable builder error');
+  let inputs: Record<string, unknown>;
+  let observations: Record<string, unknown>;
+  try {
+    inputs = normalizeJson(input.inputs, 'evidence.inputs') as Record<string, unknown>;
+    observations = normalizeJson(input.observations, 'evidence.observations') as Record<string, unknown>;
+    encodeJson(inputs, 'evidence.inputs', true);
+    encodeJson(observations, 'evidence.observations', true);
+  } catch (error) { return invalid('evidence JSON is not bounded', error); }
   return {
     schemaVersion: 1,
-    jobId: input.jobId,
+    jobId,
     stage: input.stage,
-    startedAt: input.startedAt,
-    finishedAt: input.finishedAt,
+    startedAt,
+    finishedAt,
     outcome: input.outcome,
     operationId: input.operationId,
-    commands: input.commands.map((command) => ({ argv: [...command.argv], exitCode: command.exitCode })),
-    inputs: input.inputs,
-    observations: input.observations,
+    commands: commands as readonly EvidenceCommand[],
+    inputs,
+    observations,
     error: input.error,
   };
 }
 
-function encodeEvidence(evidence: StageEvidence): Buffer {
-  let encoded: string | undefined;
-  try { encoded = JSON.stringify(evidence, null, 2); } catch (error) { throw new EvidenceError('EVIDENCE_INVALID', 'stage evidence is not JSON serializable', { cause: error }); }
-  if (encoded === undefined) throw new EvidenceError('EVIDENCE_INVALID', 'stage evidence is not JSON serializable');
-  return Buffer.from(`${encoded}\n`, 'utf8');
+function evidenceRelativePath(jobId: string, stage: PipelineStageName): string {
+  if (!isPipelineStageName(stage)) throw new EvidenceError('EVIDENCE_PATH_INVALID', 'stage is not approved');
+  const index = PIPELINE_STAGE_NAMES.indexOf(stage);
+  return `jobs/${jobId}/evidence/${String(index).padStart(2, '0')}-${stage}.json`;
 }
 
-async function ensureDirectory(path: string): Promise<void> {
-  try { await mkdir(path); } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'EEXIST') throw error;
-  }
-  const stats = await lstat(path);
-  if (!stats.isDirectory() || stats.isSymbolicLink()) throw new EvidenceError('EVIDENCE_PATH_INVALID', 'evidence directory is not a real directory');
+function procChild(parent: FileHandle, basename: string): string {
+  return join(PROC_FD, String(parent.fd), basename);
 }
 
-async function publishExclusive(rootPath: string, path: string, contents: Buffer): Promise<void> {
-  const root = resolve(rootPath);
-  if (resolve(path) !== path || relative(root, path).startsWith('..')) throw new EvidenceError('EVIDENCE_PATH_INVALID', 'evidence path is outside the state root');
-  await ensureDirectory(root);
-  const jobs = join(root, 'jobs');
-  const job = join(jobs, path.split('/').at(-3)!);
-  const evidenceDirectory = join(job, 'evidence');
-  await ensureDirectory(jobs);
-  await ensureDirectory(job);
-  await ensureDirectory(evidenceDirectory);
-  try { await lstat(path); throw new EvidenceError('EVIDENCE_EXISTS', 'canonical evidence already exists'); } catch (error) {
-    if (error instanceof EvidenceError) throw error;
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-  const temporaryPath = join(evidenceDirectory, `.${path.split('/').at(-1)}.${randomUUID()}.tmp`);
-  let handle;
-  try {
-    handle = await open(temporaryPath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW, 0o600);
-    await handle.writeFile(contents);
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    try { await link(temporaryPath, path); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new EvidenceError('EVIDENCE_EXISTS', 'canonical evidence already exists', { cause: error });
-      throw error;
+async function openDirectory(parent: FileHandle, basename: string, create: boolean): Promise<FileHandle> {
+  try { return await open(procChild(parent, basename), DIR_FLAGS); }
+  catch (error) {
+    if (!create || (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    try { await mkdir(procChild(parent, basename), { mode: 0o700 }); } catch (mkdirError) {
+      if ((mkdirError as NodeJS.ErrnoException).code !== 'EEXIST') throw mkdirError;
     }
-  } catch (error) {
-    if (handle !== undefined) await handle.close().catch(() => undefined);
-    throw error;
-  } finally {
-    await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+    await parent.sync();
+    return open(procChild(parent, basename), DIR_FLAGS);
   }
-  const directoryHandle = await open(evidenceDirectory, 'r');
-  try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+}
+
+async function readExact(parent: FileHandle, basename: string, expected: Buffer): Promise<boolean> {
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(procChild(parent, basename), READ_FLAGS);
+    const stats = await handle.stat();
+    if (!stats.isFile() || stats.size !== expected.length || stats.nlink < 1) return false;
+    const actual = await handle.readFile();
+    return Buffer.compare(actual, expected) === 0;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') return false;
+    throw error;
+  } finally { await handle?.close().catch(() => undefined); }
+}
+
+async function removeTemporaryLinks(parent: FileHandle, basename: string): Promise<void> {
+  for (const entry of await readdir(join(PROC_FD, String(parent.fd)))) {
+    if (entry.startsWith(`.${basename}.`) && entry.endsWith('.tmp')) {
+      try { await unlink(procChild(parent, entry)); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+  }
+}
+
+async function reconcileExisting(parent: FileHandle, basename: string, contents: Buffer, syncDirectory: () => Promise<void>): Promise<boolean> {
+  if (!(await readExact(parent, basename, contents))) return false;
+  await removeTemporaryLinks(parent, basename);
+  await syncDirectory();
+  return true;
+}
+
+async function syncReconciled(parent: FileHandle, basename: string, contents: Buffer, syncDirectory: () => Promise<void>): Promise<void> {
+  let firstError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await syncDirectory();
+      return;
+    } catch (error) {
+      firstError ??= error;
+      if (!(await readExact(parent, basename, contents))) throw error;
+    }
+  }
+  throw firstError;
+}
+
+async function publishExclusive(root: StateRootAuthority, relativePath: string, contents: Buffer): Promise<void> {
+  if (process.platform !== 'linux' || typeof fsConstants.O_NOFOLLOW !== 'number' || typeof fsConstants.O_DIRECTORY !== 'number') throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'descriptor publication requires Linux no-follow support');
+  const parts = relativePath.split('/');
+  const basename = parts.pop();
+  if (!basename || parts.length < 1 || parts.some((part) => part.length === 0 || part === '.' || part === '..')) throw new EvidenceError('EVIDENCE_PATH_INVALID', 'evidence path is not stable');
+  await withStateRootSnapshot(root, async ({ snapshot, dependencies }) => {
+    let current: FileHandle | undefined;
+    const handles: FileHandle[] = [];
+    try {
+      current = await open(snapshot.path, DIR_FLAGS);
+      handles.push(current);
+      const identity = await current.stat();
+      if (!identity.isDirectory() || identity.dev !== snapshot.device || identity.ino !== snapshot.inode) throw new EvidenceError('EVIDENCE_PATH_INVALID', 'state root identity changed');
+      for (const part of parts) {
+        let next: FileHandle;
+        await dependencies.beforeDirectoryAccess?.(current);
+        try { next = await openDirectory(current, part, true); }
+        catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === 'ELOOP' || code === 'ENOTDIR') throw new EvidenceError('EVIDENCE_PATH_INVALID', 'evidence path contains an unsafe ancestor', { cause: error });
+          throw error;
+        }
+        handles.push(next);
+        current = next;
+      }
+      const parent = current;
+      const temporary = `.${basename}.${randomUUID()}.tmp`;
+      let temporaryHandle: FileHandle | undefined;
+      const syncDirectory = async (): Promise<void> => { await dependencies.beforeDirectorySync?.(parent); await parent.sync(); };
+      try {
+        let existing: FileHandle | undefined;
+        try { existing = await open(procChild(parent, basename), READ_FLAGS); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && (error as NodeJS.ErrnoException).code !== 'ELOOP') throw error; }
+        if (existing !== undefined) {
+          await existing.close();
+          if (await reconcileExisting(parent, basename, contents, syncDirectory)) return;
+          throw new EvidenceError('EVIDENCE_EXISTS', 'canonical evidence already exists');
+        }
+        temporaryHandle = await open(procChild(parent, temporary), FILE_FLAGS, 0o600);
+        await temporaryHandle.writeFile(contents);
+        await temporaryHandle.sync();
+        await temporaryHandle.close();
+        temporaryHandle = undefined;
+        try { await link(procChild(parent, temporary), procChild(parent, basename)); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new EvidenceError('EVIDENCE_EXISTS', 'canonical evidence already exists', { cause: error });
+          throw error;
+        }
+        await syncReconciled(parent, basename, contents, syncDirectory);
+      } finally {
+        await temporaryHandle?.close().catch(() => undefined);
+        try { await unlink(procChild(parent, temporary)); } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+        await syncDirectory();
+      }
+    } finally {
+      for (const handle of handles.reverse()) await handle.close().catch(() => undefined);
+    }
+  });
 }
 
 const DEFAULT_FILE_SYSTEM: EvidenceFileSystem = Object.freeze({ publishExclusive });
 
 export class EvidenceWriter {
-  readonly #stateRoot: string;
+  readonly #stateRoot: StateRootAuthority;
   readonly #fileSystem: EvidenceFileSystem;
 
-  constructor(options: { readonly stateRoot: string; readonly fileSystem?: EvidenceFileSystem }) {
+  constructor(options: { readonly stateRoot: StateRootAuthority; readonly fileSystem?: EvidenceFileSystem }) {
     this.#stateRoot = options.stateRoot;
     this.#fileSystem = options.fileSystem ?? DEFAULT_FILE_SYSTEM;
   }
 
   async write(input: StageEvidenceInput): Promise<EvidencePublication> {
-    const evidence = validateInput(input);
-    const path = canonicalEvidencePath(this.#stateRoot, evidence.jobId, evidence.stage);
-    const contents = encodeEvidence(evidence);
+    let evidence: StageEvidence;
+    try { evidence = validateInput(input); }
+    catch (error) { if (error instanceof EvidenceError) throw error; if (error instanceof SharedValidationError) throw new EvidenceError('EVIDENCE_INVALID', error.message, { cause: error }); throw error; }
+    const path = evidenceRelativePath(evidence.jobId, evidence.stage);
+    let encoded: string;
+    try { encoded = encodeJson(evidence, 'stage evidence', true); }
+    catch (error) { throw new EvidenceError('EVIDENCE_INVALID', 'stage evidence is not canonical JSON', { cause: error }); }
+    const contents = Buffer.from(`${encoded}\n`, 'utf8');
     const sha256 = createHash('sha256').update(contents).digest('hex');
     if (!SHA256.test(sha256)) throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'evidence hash could not be calculated');
-    try { await this.#fileSystem.publishExclusive(resolve(this.#stateRoot), path, contents); }
+    try { await this.#fileSystem.publishExclusive(this.#stateRoot, path, contents); }
     catch (error) {
       if (error instanceof EvidenceError) throw error;
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new EvidenceError('EVIDENCE_EXISTS', 'canonical evidence already exists', { cause: error });
@@ -191,10 +288,10 @@ export class EvidenceWriter {
   }
 }
 
-export function createEvidenceWriter(options: { readonly stateRoot: string; readonly fileSystem?: EvidenceFileSystem }): EvidenceWriter {
+export function createEvidenceWriter(options: { readonly stateRoot: StateRootAuthority; readonly fileSystem?: EvidenceFileSystem }): EvidenceWriter {
   return new EvidenceWriter(options);
 }
 
-export async function writeStageEvidence(options: { readonly stateRoot: string; readonly fileSystem?: EvidenceFileSystem }, input: StageEvidenceInput): Promise<EvidencePublication> {
+export async function writeStageEvidence(options: { readonly stateRoot: StateRootAuthority; readonly fileSystem?: EvidenceFileSystem }, input: StageEvidenceInput): Promise<EvidencePublication> {
   return createEvidenceWriter(options).write(input);
 }

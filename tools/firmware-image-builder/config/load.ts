@@ -130,6 +130,7 @@ export interface PathAuthorityDependencies {
   readonly mountId: (handle: FileHandle) => Promise<number>;
   readonly beforeRead: (handle: FileHandle) => Promise<void>;
   readonly beforeDirectoryAccess?: (handle: FileHandle) => Promise<void>;
+  readonly beforeDirectorySync?: (handle: FileHandle) => Promise<void>;
 }
 
 interface AuthorityRootRecord {
@@ -170,6 +171,7 @@ const defaultPathAuthorityDependencies: PathAuthorityDependencies = Object.freez
     return mountId;
   },
   beforeRead: async () => undefined,
+  beforeDirectorySync: async () => undefined,
 });
 
 export interface BuilderConfig {
