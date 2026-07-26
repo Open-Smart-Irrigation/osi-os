@@ -1,0 +1,7 @@
+.PHONY: defconfig
+
+defconfig:
+	@test "$$(readlink .config)" = "../conf/.config"
+	@profile="$$(sed -n 's/^CONFIG_TARGET_PROFILE="\([^"]*\)"$$/\1/p' .config)"; \
+	  test -n "$$profile"; \
+	  printf 'defconfig:%s\n' "$$profile" >> "$$OSI_FIXTURE_LOG"
