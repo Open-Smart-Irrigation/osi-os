@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { access, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -11,6 +11,12 @@ const binary = join(publisherDirectory, 'osi-image-publish');
 const beforeRaceBinary = join(publisherDirectory, 'osi-image-publish-test-before');
 const afterRaceBinary = join(publisherDirectory, 'osi-image-publish-test-after');
 const destinationRaceBinary = join(publisherDirectory, 'osi-image-publish-test-destination');
+const ancestorBeforeBinary = join(publisherDirectory, 'osi-image-publish-test-ancestor-before');
+const ancestorAfterBinary = join(publisherDirectory, 'osi-image-publish-test-ancestor-after');
+const unsupportedBinary = join(publisherDirectory, 'osi-image-publish-test-unsupported');
+const crossDeviceBinary = join(publisherDirectory, 'osi-image-publish-test-cross-device');
+const fsyncFailureBinary = join(publisherDirectory, 'osi-image-publish-test-fsync-failure');
+const blockRootBinary = join(publisherDirectory, 'osi-image-publish-test-block-root');
 const SHA = '0123456789abcdef0123456789abcdef01234567';
 const TARGET = 'rpi-5';
 let base = '';
@@ -60,6 +66,12 @@ describe('native publisher integration', () => {
     await rm(beforeRaceBinary, { force: true });
     await rm(afterRaceBinary, { force: true });
     await rm(destinationRaceBinary, { force: true });
+    await rm(ancestorBeforeBinary, { force: true });
+    await rm(ancestorAfterBinary, { force: true });
+    await rm(unsupportedBinary, { force: true });
+    await rm(crossDeviceBinary, { force: true });
+    await rm(fsyncFailureBinary, { force: true });
+    await rm(blockRootBinary, { force: true });
   });
 
   it('reports version and completes a private self-test', async () => {
@@ -76,12 +88,13 @@ describe('native publisher integration', () => {
     await createStaging(jobId);
     const published = await runPublisher('publish', '--root', root, '--job-id', jobId, '--branch', 'feature%2Fpublisher', '--sha', SHA, '--target', TARGET);
     expect(published.code).toBe(0);
-    expect(parsed(published)).toMatchObject({ available: true, published: true, mutationCount: 1, renameResult: 'RENAME_NOREPLACE' });
+    expect(parsed(published)).toMatchObject({ available: true, published: true, mutationCount: 3, renameResult: 'RENAMED' });
     expect(parsed(published)).toMatchObject({ publisherVersion: '0.1.0', publisherSourceSha256: expect.stringMatching(/^[0-9a-f]{64}$/), sourceRelativePath: `.osi-image-builder/staging/${jobId}`, destinationRelativePath: `feature%2Fpublisher/${SHA}/${TARGET}` });
+    expect((await readdir(join(root, '.osi-image-builder'))).some((entry) => entry.startsWith('.osi-image-publisher-capability-'))).toBe(false);
     await expect(access(join(root, 'feature%2Fpublisher', SHA, TARGET))).resolves.toBeUndefined();
     const complete = await runPublisher('recheck', '--root', root, '--job-id', jobId, '--branch', 'feature%2Fpublisher', '--sha', SHA, '--target', TARGET);
     expect(complete.code).toBe(0);
-    expect(parsed(complete)).toMatchObject({ available: true, destination: 'complete', staging: 'absent', mutationCount: 0 });
+    expect(parsed(complete)).toMatchObject({ available: true, destination: 'candidate', staging: 'absent', mutationCount: 0 });
 
     const collisionJob = 'job-collision';
     await createStaging(collisionJob);
@@ -90,7 +103,15 @@ describe('native publisher integration', () => {
     await writeFile(join(finalPath, 'keep.txt'), 'keep');
     const collision = await runPublisher('publish', '--root', root, '--job-id', collisionJob, '--branch', 'feature%2Fcollision', '--sha', SHA, '--target', TARGET);
     expect(collision.code).not.toBe(0);
-    expect(parsed(collision)).toMatchObject({ available: true, published: false, errorCode: 'OUTPUT_COLLISION', mutationCount: 0 });
+    expect(parsed(collision)).toMatchObject({
+      available: true,
+      published: false,
+      errorCode: 'OUTPUT_COLLISION',
+      mutationCount: 0,
+      renameResult: 'EEXIST',
+      sourceRelativePath: `.osi-image-builder/staging/${collisionJob}`,
+      destinationRelativePath: `feature%2Fcollision/${SHA}/${TARGET}`,
+    });
     await expect(readFile(join(finalPath, 'keep.txt'), 'utf8')).resolves.toBe('keep');
     await expect(access(join(root, '.osi-image-builder', 'staging', collisionJob))).resolves.toBeUndefined();
 
@@ -98,7 +119,7 @@ describe('native publisher integration', () => {
     await createStaging(quarantineJob);
     const quarantined = await runPublisher('quarantine', '--root', root, '--job-id', quarantineJob);
     expect(quarantined.code).toBe(0);
-    expect(parsed(quarantined)).toMatchObject({ available: true, quarantined: true, mutationCount: 1, renameResult: 'RENAME_NOREPLACE', publisherVersion: '0.1.0', publisherSourceSha256: expect.stringMatching(/^[0-9a-f]{64}$/), sourceRelativePath: `.osi-image-builder/staging/${quarantineJob}`, destinationRelativePath: `.osi-image-builder/quarantine/${quarantineJob}` });
+    expect(parsed(quarantined)).toMatchObject({ available: true, quarantined: true, mutationCount: 2, renameResult: 'RENAMED', publisherVersion: '0.1.0', publisherSourceSha256: expect.stringMatching(/^[0-9a-f]{64}$/), sourceRelativePath: `.osi-image-builder/staging/${quarantineJob}`, destinationRelativePath: `.osi-image-builder/quarantine/${quarantineJob}` });
     await expect(access(join(root, '.osi-image-builder', 'staging', quarantineJob))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(join(root, '.osi-image-builder', 'quarantine', quarantineJob))).resolves.toBeUndefined();
   });
@@ -116,10 +137,10 @@ describe('native publisher integration', () => {
     expect(traversal.code).not.toBe(0);
     expect(parsed(traversal)).toMatchObject({ published: false, errorCode: 'INVALID_ARGUMENT', mutationCount: 0 });
 
-    const blockPublish = await runPublisher('publish', '--root', '/dev/null', '--job-id', 'job-block', '--branch', 'feature%2Fblock', '--sha', SHA, '--target', TARGET);
+    const blockPublish = await runBinary(blockRootBinary, 'publish', '--root', root, '--job-id', 'job-block', '--branch', 'feature%2Fblock', '--sha', SHA, '--target', TARGET);
     expect(blockPublish.code).not.toBe(0);
     expect(parsed(blockPublish)).toMatchObject({ available: true, published: false, quarantined: false, mutationCount: 0, errorCode: 'PUBLISH_FAILED' });
-    const blockQuarantine = await runPublisher('quarantine', '--root', '/dev/null', '--job-id', 'job-block');
+    const blockQuarantine = await runBinary(blockRootBinary, 'quarantine', '--root', root, '--job-id', 'job-block');
     expect(blockQuarantine.code).not.toBe(0);
     expect(parsed(blockQuarantine)).toMatchObject({ available: true, published: false, quarantined: false, mutationCount: 0, errorCode: 'QUARANTINE_PENDING' });
     for (const branch of ['.', '..']) {
@@ -132,6 +153,41 @@ describe('native publisher integration', () => {
       await expect(access(join(base, SHA, TARGET))).rejects.toMatchObject({ code: 'ENOENT' });
     }
     expect(fsConstants.O_NOFOLLOW).toBeTypeOf('number');
+  });
+
+  it('aligns encoded branch and job-ID boundaries across the client and native helper', async () => {
+    const encodedJob = 'job-encoded-leading';
+    await createStaging(encodedJob);
+    const encoded = await runPublisher('publish', '--root', root, '--job-id', encodedJob, '--branch', '%C3%A9-main', '--sha', SHA, '--target', TARGET);
+    expect(encoded.code).toBe(0);
+    expect(parsed(encoded)).toMatchObject({ published: true, destinationRelativePath: `%C3%A9-main/${SHA}/${TARGET}` });
+
+    const maximumJob = `j${'a'.repeat(127)}`;
+    await createStaging(maximumJob);
+    const maximum = await runPublisher('quarantine', '--root', root, '--job-id', maximumJob);
+    expect(maximum.code).toBe(0);
+    expect(parsed(maximum)).toMatchObject({ quarantined: true, sourceRelativePath: `.osi-image-builder/staging/${maximumJob}` });
+  });
+
+  it('reports selected-filesystem capability, cross-device, and fsync failures honestly', async () => {
+    const unsupportedJob = 'job-unsupported';
+    await createStaging(unsupportedJob);
+    const unsupported = await runBinary(unsupportedBinary, 'publish', '--root', root, '--job-id', unsupportedJob, '--branch', 'feature%2Funsupported', '--sha', SHA, '--target', TARGET);
+    expect(unsupported.code).not.toBe(0);
+    expect(parsed(unsupported)).toEqual({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' });
+    await expect(access(join(root, 'feature%2Funsupported'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const crossDeviceJob = 'job-cross-device';
+    await createStaging(crossDeviceJob);
+    const crossDevice = await runBinary(crossDeviceBinary, 'publish', '--root', root, '--job-id', crossDeviceJob, '--branch', 'feature%2Fcross-device', '--sha', SHA, '--target', TARGET);
+    expect(crossDevice.code).not.toBe(0);
+    expect(parsed(crossDevice)).toMatchObject({ available: true, published: false, mutationCount: 2, errorCode: 'STAGING_FILESYSTEM_MISMATCH' });
+
+    const fsyncJob = 'job-fsync-failure';
+    await createStaging(fsyncJob);
+    const fsyncFailure = await runBinary(fsyncFailureBinary, 'publish', '--root', root, '--job-id', fsyncJob, '--branch', 'feature%2Ffsync-failure', '--sha', SHA, '--target', TARGET);
+    expect(fsyncFailure.code).not.toBe(0);
+    expect(parsed(fsyncFailure)).toMatchObject({ published: false, mutationCount: 3, errorCode: 'PUBLISH_FAILED', renameResult: 'RENAMED' });
   });
 
   it('distinguishes a surviving staging tree from an existing mismatched destination without mutation', async () => {
@@ -159,15 +215,15 @@ describe('native publisher integration', () => {
     const before = await runBinary(beforeRaceBinary, 'publish', '--root', root, '--job-id', beforeJob, '--branch', 'feature%2Frace-before', '--sha', SHA, '--target', TARGET);
     expect(before.code).not.toBe(0);
     expect(parsed(before)).toMatchObject({ published: false, mutationCount: 0, errorCode: 'PUBLISH_FAILED' });
-    await rm(join(root, '.osi-image-builder', 'staging', beforeJob), { force: true });
+    await unlink(join(root, '.osi-image-builder', 'staging', beforeJob));
     await rename(join(root, '.osi-image-builder', 'staging', '.publisher-test-hidden'), join(root, '.osi-image-builder', 'staging', beforeJob));
 
     const afterJob = 'job-race-after';
     await createStaging(afterJob);
     const after = await runBinary(afterRaceBinary, 'publish', '--root', root, '--job-id', afterJob, '--branch', 'feature%2Frace-after', '--sha', SHA, '--target', TARGET);
     expect(after.code).not.toBe(0);
-    expect(parsed(after)).toMatchObject({ published: false, mutationCount: 1, errorCode: 'PUBLISH_FAILED', renameResult: 'RENAME_NOREPLACE', sourceRelativePath: `.osi-image-builder/staging/${afterJob}`, destinationRelativePath: `feature%2Frace-after/${SHA}/${TARGET}` });
-    await rm(join(root, 'feature%2Frace-after', SHA, TARGET), { force: true });
+    expect(parsed(after)).toMatchObject({ published: false, mutationCount: 2, errorCode: 'PUBLISH_FAILED', sourceRelativePath: `.osi-image-builder/staging/${afterJob}`, destinationRelativePath: `feature%2Frace-after/${SHA}/${TARGET}` });
+    await unlink(join(root, '.osi-image-builder', 'staging', afterJob));
     await rename(join(root, '.osi-image-builder', 'staging', '.publisher-test-hidden'), join(root, '.osi-image-builder', 'staging', afterJob));
   });
 
@@ -177,15 +233,15 @@ describe('native publisher integration', () => {
     const before = await runBinary(beforeRaceBinary, 'quarantine', '--root', root, '--job-id', beforeJob);
     expect(before.code).not.toBe(0);
     expect(parsed(before)).toMatchObject({ quarantined: false, mutationCount: 0, errorCode: 'QUARANTINE_PENDING' });
-    await rm(join(root, '.osi-image-builder', 'staging', beforeJob), { force: true });
+    await unlink(join(root, '.osi-image-builder', 'staging', beforeJob));
     await rename(join(root, '.osi-image-builder', 'staging', '.publisher-test-hidden'), join(root, '.osi-image-builder', 'staging', beforeJob));
 
     const afterJob = 'job-quarantine-race-after';
     await createStaging(afterJob);
     const after = await runBinary(afterRaceBinary, 'quarantine', '--root', root, '--job-id', afterJob);
     expect(after.code).not.toBe(0);
-    expect(parsed(after)).toMatchObject({ quarantined: false, mutationCount: 1, errorCode: 'QUARANTINE_PENDING', renameResult: 'RENAME_NOREPLACE', sourceRelativePath: `.osi-image-builder/staging/${afterJob}`, destinationRelativePath: `.osi-image-builder/quarantine/${afterJob}` });
-    await rm(join(root, '.osi-image-builder', 'quarantine', afterJob), { force: true });
+    expect(parsed(after)).toMatchObject({ quarantined: false, mutationCount: 0, errorCode: 'QUARANTINE_PENDING', sourceRelativePath: `.osi-image-builder/staging/${afterJob}`, destinationRelativePath: `.osi-image-builder/quarantine/${afterJob}` });
+    await unlink(join(root, '.osi-image-builder', 'staging', afterJob));
     await rename(join(root, '.osi-image-builder', 'staging', '.publisher-test-hidden'), join(root, '.osi-image-builder', 'staging', afterJob));
   });
 
@@ -196,7 +252,7 @@ describe('native publisher integration', () => {
     expect(published.code).not.toBe(0);
     expect(parsed(published)).toMatchObject({
       published: false,
-      mutationCount: 1,
+      mutationCount: 3,
       errorCode: 'PUBLISH_FAILED',
       destinationRelativePath: `feature%2Fdestination-race/${SHA}/${TARGET}`,
     });
@@ -215,5 +271,78 @@ describe('native publisher integration', () => {
     });
     await expect(access(join(root, '.osi-image-builder', 'quarantine', quarantineJob))).resolves.toBeUndefined();
     await expect(access(join(root, '.osi-image-builder', 'quarantine', `.publisher-test-destination-hidden-${quarantineJob}`))).resolves.toBeUndefined();
+  });
+
+  it('rejects detached ancestor names before rename and after a completed rename', async () => {
+    const beforeJob = 'job-ancestor-before';
+    await createStaging(beforeJob);
+    const before = await runBinary(ancestorBeforeBinary, 'publish', '--root', root, '--job-id', beforeJob, '--branch', 'feature%2Fancestor-before', '--sha', SHA, '--target', TARGET);
+    expect(before.code).not.toBe(0);
+    expect(parsed(before)).toMatchObject({ published: false, mutationCount: 2, errorCode: 'PUBLISH_FAILED' });
+    await expect(access(join(root, 'feature%2Fancestor-before', SHA, TARGET))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const afterJob = 'job-ancestor-after';
+    await createStaging(afterJob);
+    const after = await runBinary(ancestorAfterBinary, 'publish', '--root', root, '--job-id', afterJob, '--branch', 'feature%2Fancestor-after', '--sha', SHA, '--target', TARGET);
+    expect(after.code).not.toBe(0);
+    expect(parsed(after)).toMatchObject({ published: false, mutationCount: 3, errorCode: 'PUBLISH_FAILED', renameResult: 'RENAMED' });
+    await expect(access(join(root, 'feature%2Fancestor-after', SHA, TARGET))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const quarantineJob = 'job-quarantine-ancestor-after';
+    await createStaging(quarantineJob);
+    const quarantine = await runBinary(ancestorAfterBinary, 'quarantine', '--root', root, '--job-id', quarantineJob);
+    expect(quarantine.code).not.toBe(0);
+    expect(parsed(quarantine)).toMatchObject({ quarantined: false, mutationCount: 1, errorCode: 'QUARANTINE_PENDING', renameResult: 'RENAMED' });
+    await expect(access(join(root, '.osi-image-builder', 'quarantine', quarantineJob))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('reports only a structural candidate and blocks candidate-plus-staging recovery', async () => {
+    const candidateBranch = 'feature%2Fcandidate';
+    const candidate = join(root, candidateBranch, SHA, TARGET);
+    await mkdir(candidate, { recursive: true });
+    await writeFile(join(candidate, 'factory.img.gz'), 'corrupt');
+    await writeFile(join(candidate, 'sha256sums'), 'wrong  factory.img.gz\n');
+    await writeFile(join(candidate, 'build-manifest.json'), '{}\n');
+    await writeFile(join(candidate, 'verification.json'), '{}\n');
+    const candidateResult = await runPublisher('recheck', '--root', root, '--job-id', 'job-no-staging', '--branch', candidateBranch, '--sha', SHA, '--target', TARGET);
+    expect(candidateResult.code).toBe(0);
+    expect(parsed(candidateResult)).toMatchObject({ destination: 'candidate', staging: 'absent', mutationCount: 0 });
+
+    const blockedJob = 'job-candidate-with-staging';
+    await createStaging(blockedJob);
+    const blocked = await runPublisher('recheck', '--root', root, '--job-id', blockedJob, '--branch', candidateBranch, '--sha', SHA, '--target', TARGET);
+    expect(blocked.code).toBe(0);
+    expect(parsed(blocked)).toMatchObject({ destination: 'mismatched', staging: 'present', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' });
+
+    const swappedBranch = 'feature%2Frecheck-swap';
+    const swappedDestination = join(root, swappedBranch, SHA, TARGET);
+    await mkdir(swappedDestination, { recursive: true });
+    await writeFile(join(swappedDestination, 'factory.img.gz'), 'candidate');
+    await writeFile(join(swappedDestination, 'sha256sums'), 'candidate  factory.img.gz\n');
+    await writeFile(join(swappedDestination, 'build-manifest.json'), '{}\n');
+    await writeFile(join(swappedDestination, 'verification.json'), '{}\n');
+    const swapped = await runBinary(destinationRaceBinary, 'recheck', '--root', root, '--job-id', 'job-recheck-swap', '--branch', swappedBranch, '--sha', SHA, '--target', TARGET);
+    expect(swapped.code).toBe(0);
+    expect(parsed(swapped)).toMatchObject({ destination: 'mismatched', staging: 'absent', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' });
+  });
+
+  it('keeps explicit source and kernel evidence when quarantine collides', async () => {
+    const jobId = 'job-quarantine-collision';
+    await createStaging(jobId);
+    const destination = join(root, '.osi-image-builder', 'quarantine', jobId);
+    await mkdir(destination, { recursive: true });
+    await writeFile(join(destination, 'keep.txt'), 'keep');
+    const collision = await runPublisher('quarantine', '--root', root, '--job-id', jobId);
+    expect(collision.code).not.toBe(0);
+    expect(parsed(collision)).toMatchObject({
+      quarantined: false,
+      mutationCount: 0,
+      errorCode: 'QUARANTINE_PENDING',
+      renameResult: 'EEXIST',
+      sourceRelativePath: `.osi-image-builder/staging/${jobId}`,
+      destinationRelativePath: `.osi-image-builder/quarantine/${jobId}`,
+    });
+    await expect(readFile(join(destination, 'keep.txt'), 'utf8')).resolves.toBe('keep');
+    await expect(access(join(root, '.osi-image-builder', 'staging', jobId))).resolves.toBeUndefined();
   });
 });

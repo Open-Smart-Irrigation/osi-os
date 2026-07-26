@@ -31,11 +31,11 @@ export interface PublisherResponse {
   readonly selfTest: boolean;
   readonly mutationCount: number;
   readonly errorCode?: PublisherErrorCode;
-  readonly destination?: 'absent' | 'complete' | 'mismatched';
+  readonly destination?: 'absent' | 'candidate' | 'mismatched';
   readonly staging?: 'absent' | 'present';
   readonly sourceRelativePath?: string;
   readonly destinationRelativePath?: string;
-  readonly renameResult?: 'RENAME_NOREPLACE';
+  readonly renameResult?: 'RENAMED' | 'EEXIST' | 'ENOSYS' | 'EOPNOTSUPP' | 'EXDEV' | 'OTHER_ERROR';
   readonly publisherVersion?: string;
   readonly publisherSourceSha256?: string;
 }
@@ -79,6 +79,7 @@ const RESULT_FIELDS = new Set(['available', 'published', 'quarantined', 'selfTes
 const ERROR_CODES = new Set<PublisherErrorCode>([...PUBLISHER_OPERATION_ERROR_CODES, 'PUBLISHER_UNSUPPORTED']);
 const BLOCKER_CODES = new Set<PublisherErrorCode>(['PUBLISH_RECOVERY_FAILED', 'UNVERIFIED_FINAL_PATH_BLOCKER']);
 const EVIDENCE_FIELDS = ['publisherVersion', 'publisherSourceSha256', 'sourceRelativePath', 'destinationRelativePath', 'renameResult'];
+const RENAME_RESULTS = new Set(['RENAMED', 'EEXIST', 'ENOSYS', 'EOPNOTSUPP', 'EXDEV', 'OTHER_ERROR']);
 const PUBLISH_PRE_RENAME_ERROR_CODES = new Set<PublisherErrorCode>(['OUTPUT_COLLISION', 'PUBLISH_FAILED', 'STAGING_FILESYSTEM_MISMATCH']);
 
 function own(value: Record<string, unknown>, key: string): unknown {
@@ -98,12 +99,15 @@ function booleanField(value: Record<string, unknown>, key: string): boolean {
   return field;
 }
 
-function validateEvidence(value: Record<string, unknown>, sourceRelativePath: string, destinationRelativePath: string): void {
+function validatePathEvidence(value: Record<string, unknown>, sourceRelativePath: string, destinationRelativePath: string): void {
   if (stringField(value, 'publisherVersion') !== '0.1.0') throw new Error('publisher version evidence is invalid');
   if (!/^[0-9a-f]{64}$/u.test(stringField(value, 'publisherSourceSha256'))) throw new Error('publisher source hash evidence is invalid');
   if (stringField(value, 'sourceRelativePath') !== sourceRelativePath) throw new Error('publisher source path evidence is invalid');
   if (stringField(value, 'destinationRelativePath') !== destinationRelativePath) throw new Error('publisher destination path evidence is invalid');
-  if (stringField(value, 'renameResult') !== 'RENAME_NOREPLACE') throw new Error('publisher rename evidence is invalid');
+}
+
+function validateRenameEvidence(value: Record<string, unknown>, expected: string): void {
+  if (stringField(value, 'renameResult') !== expected) throw new Error('publisher rename evidence is invalid');
 }
 
 function parseResponse(result: CommandResult, argv: readonly string[], operation: 'publish' | 'quarantine' | 'recheck', request: PublisherRequest | Pick<PublisherRequest, 'rootId' | 'jobId'>): PublisherResponse {
@@ -120,44 +124,51 @@ function parseResponse(result: CommandResult, argv: readonly string[], operation
   const quarantined = booleanField(value, 'quarantined');
   const selfTest = booleanField(value, 'selfTest');
   const mutationCount = own(value, 'mutationCount');
-  if (typeof mutationCount !== 'number' || !Number.isSafeInteger(mutationCount) || mutationCount < 0 || mutationCount > 1) throw new Error('publisher mutation count is invalid');
+  if (typeof mutationCount !== 'number' || !Number.isSafeInteger(mutationCount) || mutationCount < 0 || mutationCount > 3) throw new Error('publisher mutation count is invalid');
   if (available === false) {
     if (result.exitCode === 0 || mutationCount !== 0 || published || quarantined || selfTest || Object.keys(value).some((key) => ['renameResult', 'sourceRelativePath', 'destinationRelativePath', 'publisherVersion', 'publisherSourceSha256', 'destination', 'staging'].includes(key)) || value.errorCode !== 'PUBLISHER_UNSUPPORTED') throw new Error('unsupported publisher result is contradictory');
     return value as unknown as PublisherResponse;
   }
   if (selfTest || (value.errorCode !== undefined && (typeof value.errorCode !== 'string' || !ERROR_CODES.has(value.errorCode as PublisherErrorCode)))) throw new Error('publisher result error contract is invalid');
-  if (value.renameResult !== undefined && value.renameResult !== 'RENAME_NOREPLACE') throw new Error('publisher rename result is invalid');
+  if (value.renameResult !== undefined && (typeof value.renameResult !== 'string' || !RENAME_RESULTS.has(value.renameResult))) throw new Error('publisher rename result is invalid');
   const jobId = request.jobId;
   const sourcePath = `.osi-image-builder/staging/${jobId}`;
   const destinationPath = operation === 'publish' ? `${(request as PublisherRequest).branchSlug}/${(request as PublisherRequest).sourceSha}/${(request as PublisherRequest).targetId}` : `.osi-image-builder/quarantine/${jobId}`;
   if (operation === 'recheck') {
-    if (result.exitCode !== 0 || published || quarantined || mutationCount !== 0 || EVIDENCE_FIELDS.some((key) => key in value) || typeof value.destination !== 'string' || !['absent', 'complete', 'mismatched'].includes(value.destination) || typeof value.staging !== 'string' || !['absent', 'present'].includes(value.staging) || (value.errorCode !== undefined && !BLOCKER_CODES.has(value.errorCode as PublisherErrorCode))) throw new Error('publisher recheck result is contradictory');
+    if (result.exitCode !== 0 || published || quarantined || mutationCount !== 0 || EVIDENCE_FIELDS.some((key) => key in value) || typeof value.destination !== 'string' || !['absent', 'candidate', 'mismatched'].includes(value.destination) || typeof value.staging !== 'string' || !['absent', 'present'].includes(value.staging) || (value.errorCode !== undefined && !BLOCKER_CODES.has(value.errorCode as PublisherErrorCode))) throw new Error('publisher recheck result is contradictory');
     if (
-      (value.destination === 'complete' && (value.staging !== 'absent' || value.errorCode !== undefined))
+      (value.destination === 'candidate' && (value.staging !== 'absent' || value.errorCode !== undefined))
       || (value.destination === 'absent' && value.errorCode !== 'PUBLISH_RECOVERY_FAILED')
       || (value.destination === 'mismatched' && value.errorCode !== 'UNVERIFIED_FINAL_PATH_BLOCKER')
     ) throw new Error('publisher recheck phase result is contradictory');
   } else if (operation === 'publish') {
     if (quarantined || 'destination' in value || 'staging' in value) throw new Error('publisher publication result is contradictory');
+    validatePathEvidence(value, sourcePath, destinationPath);
     if (published) {
-      if (result.exitCode !== 0 || mutationCount !== 1 || value.errorCode !== undefined) throw new Error('successful publisher result is contradictory');
-      validateEvidence(value, sourcePath, destinationPath);
-    } else if (mutationCount === 0) {
-      if (result.exitCode === 0 || typeof value.errorCode !== 'string' || !PUBLISH_PRE_RENAME_ERROR_CODES.has(value.errorCode as PublisherErrorCode) || EVIDENCE_FIELDS.some((key) => key in value)) throw new Error('pre-rename publisher failure is contradictory');
+      if (result.exitCode !== 0 || mutationCount < 1 || value.errorCode !== undefined) throw new Error('successful publisher result is contradictory');
+      validateRenameEvidence(value, 'RENAMED');
     } else {
-      if (result.exitCode === 0 || value.errorCode !== 'PUBLISH_FAILED') throw new Error('post-rename publisher failure is contradictory');
-      validateEvidence(value, sourcePath, destinationPath);
+      if (result.exitCode === 0 || typeof value.errorCode !== 'string' || !PUBLISH_PRE_RENAME_ERROR_CODES.has(value.errorCode as PublisherErrorCode)) throw new Error('publisher failure is contradictory');
+      if (value.renameResult === undefined) {
+        if (value.errorCode === 'OUTPUT_COLLISION' || mutationCount > 2) throw new Error('pre-rename publisher failure is contradictory');
+      } else if (value.renameResult === 'RENAMED') {
+        if (value.errorCode !== 'PUBLISH_FAILED' || mutationCount < 1) throw new Error('post-rename publisher failure is contradictory');
+      } else if (value.renameResult === 'EEXIST') {
+        if (value.errorCode !== 'OUTPUT_COLLISION' || mutationCount > 2) throw new Error('publisher collision result is contradictory');
+      } else if (value.renameResult === 'EXDEV') {
+        if (value.errorCode !== 'STAGING_FILESYSTEM_MISMATCH' || mutationCount > 2) throw new Error('publisher cross-device result is contradictory');
+      } else if (value.errorCode !== 'PUBLISH_FAILED' || mutationCount > 2) throw new Error('publisher rename failure is contradictory');
     }
   } else {
     if (published || 'destination' in value || 'staging' in value) throw new Error('publisher quarantine result is contradictory');
+    validatePathEvidence(value, sourcePath, destinationPath);
     if (quarantined) {
-      if (result.exitCode !== 0 || mutationCount !== 1 || value.errorCode !== undefined) throw new Error('successful quarantine result is contradictory');
-      validateEvidence(value, sourcePath, destinationPath);
-    } else if (mutationCount === 0) {
-      if (result.exitCode === 0 || value.errorCode !== 'QUARANTINE_PENDING' || EVIDENCE_FIELDS.some((key) => key in value)) throw new Error('pre-rename quarantine failure is contradictory');
+      if (result.exitCode !== 0 || mutationCount < 1 || value.errorCode !== undefined) throw new Error('successful quarantine result is contradictory');
+      validateRenameEvidence(value, 'RENAMED');
     } else {
-      if (result.exitCode === 0 || value.errorCode !== 'QUARANTINE_PENDING') throw new Error('post-rename quarantine failure is contradictory');
-      validateEvidence(value, sourcePath, destinationPath);
+      if (result.exitCode === 0 || value.errorCode !== 'QUARANTINE_PENDING') throw new Error('quarantine failure is contradictory');
+      if (value.renameResult === 'RENAMED' && mutationCount < 1) throw new Error('post-rename quarantine failure is contradictory');
+      if (value.renameResult !== undefined && value.renameResult !== 'RENAMED' && mutationCount > 1) throw new Error('quarantine rename failure is contradictory');
     }
   }
   return value as unknown as PublisherResponse;

@@ -52,7 +52,7 @@ function validPublishOutput(overrides: Record<string, unknown> = {}): string {
     publisherSourceSha256: SOURCE_HASH,
     sourceRelativePath: '.osi-image-builder/staging/job-123',
     destinationRelativePath: 'feature%2Fpublisher/0123456789abcdef0123456789abcdef01234567/rpi-5',
-    renameResult: 'RENAME_NOREPLACE',
+    renameResult: 'RENAMED',
     ...overrides,
   });
 }
@@ -86,6 +86,21 @@ describe('publisher client', () => {
     await expect(publisher.publish({ ...request, sourceSha: 'not-a-sha' })).rejects.toThrow(/sha/i);
     await expect(publisher.publish({ ...request, targetId: 'rpi-5/evil' as never })).rejects.toThrow(/target/i);
     expect(executor.calls).toHaveLength(0);
+    executor.run = async (argv, options) => {
+      executor.calls.push([...argv]);
+      executor.options.push(options);
+      const jobId = argv[argv.indexOf('--job-id') + 1]!;
+      const branchSlug = argv[argv.indexOf('--branch') + 1]!;
+      return {
+        ...result(validPublishOutput({
+          sourceRelativePath: `.osi-image-builder/staging/${jobId}`,
+          destinationRelativePath: `${branchSlug}/${SHA}/rpi-5`,
+        })),
+        argv: [...argv],
+      };
+    };
+    await expect(publisher.publish({ ...request, branchSlug: '%C3%A9-main' })).resolves.toMatchObject({ published: true });
+    await expect(publisher.publish({ ...request, jobId: `j${'a'.repeat(127)}` })).resolves.toMatchObject({ published: true });
   });
 
   it('passes only the fixed validated argv and parses structured publication output', async () => {
@@ -121,7 +136,7 @@ describe('publisher client', () => {
       publisherSourceSha256: SOURCE_HASH,
       sourceRelativePath: '.osi-image-builder/staging/job-123',
       destinationRelativePath: '.osi-image-builder/quarantine/job-123',
-      renameResult: 'RENAME_NOREPLACE',
+      renameResult: 'RENAMED',
     })));
     const publisher = client(executor);
     await expect(publisher.quarantine(request)).resolves.toMatchObject({ quarantined: true });
@@ -162,7 +177,7 @@ describe('publisher client', () => {
       result(validPublishOutput(), { timedOut: true }),
       result(JSON.stringify({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 1, errorCode: 'PUBLISHER_UNSUPPORTED' })),
       result(JSON.stringify({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' })),
-      result(JSON.stringify({ available: true, published: true, quarantined: false, selfTest: false, mutationCount: 1, renameResult: 'RENAME_NOREPLACE' })),
+      result(JSON.stringify({ available: true, published: true, quarantined: false, selfTest: false, mutationCount: 1, renameResult: 'RENAMED' })),
     ];
     for (const reply of cases) await expect(client(fakeExecutor(reply)).publish(request)).rejects.toThrow();
   });
@@ -175,6 +190,11 @@ describe('publisher client', () => {
       selfTest: false,
       mutationCount: 0,
       errorCode: 'OUTPUT_COLLISION',
+      publisherVersion: VERSION,
+      publisherSourceSha256: SOURCE_HASH,
+      sourceRelativePath: '.osi-image-builder/staging/job-123',
+      destinationRelativePath: 'feature%2Fpublisher/0123456789abcdef0123456789abcdef01234567/rpi-5',
+      renameResult: 'EEXIST',
     });
     await expect(client(fakeExecutor(result(failedBeforeRename, { exitCode: 2 }))).publish(request))
       .resolves.toMatchObject({ published: false, mutationCount: 0, errorCode: 'OUTPUT_COLLISION' });
@@ -188,7 +208,7 @@ describe('publisher client', () => {
 
     const contradictory = [
       result(failedBeforeRename),
-      result(JSON.stringify({ ...JSON.parse(failedBeforeRename), mutationCount: 1 }), { exitCode: 2 }),
+      result(JSON.stringify({ ...JSON.parse(failedBeforeRename), renameResult: 'RENAMED' }), { exitCode: 2 }),
       result(validPublishOutput({ published: false, errorCode: 'OUTPUT_COLLISION' }), { exitCode: 2 }),
       result(validPublishOutput({ published: false, errorCode: 'PUBLISH_FAILED' })),
     ];
@@ -203,6 +223,10 @@ describe('publisher client', () => {
       selfTest: false,
       mutationCount: 0,
       errorCode: 'QUARANTINE_PENDING',
+      publisherVersion: VERSION,
+      publisherSourceSha256: SOURCE_HASH,
+      sourceRelativePath: '.osi-image-builder/staging/job-123',
+      destinationRelativePath: '.osi-image-builder/quarantine/job-123',
     });
     await expect(client(fakeExecutor(result(quarantineFailure, { exitCode: 2 }))).quarantine(request))
       .resolves.toMatchObject({ quarantined: false, mutationCount: 0, errorCode: 'QUARANTINE_PENDING' });
@@ -218,7 +242,7 @@ describe('publisher client', () => {
       publisherSourceSha256: SOURCE_HASH,
       sourceRelativePath: '.osi-image-builder/staging/job-123',
       destinationRelativePath: '.osi-image-builder/quarantine/job-123',
-      renameResult: 'RENAME_NOREPLACE',
+      renameResult: 'RENAMED',
     });
     await expect(client(fakeExecutor(result(quarantineAfterRename, { exitCode: 2 }))).quarantine(request))
       .resolves.toMatchObject({ quarantined: false, mutationCount: 1, errorCode: 'QUARANTINE_PENDING' });
@@ -229,15 +253,15 @@ describe('publisher client', () => {
       quarantined: false,
       selfTest: false,
       mutationCount: 0,
-      destination: 'complete',
+      destination: 'candidate',
       staging: 'absent',
     });
     await expect(client(fakeExecutor(result(recheckComplete))).recheck(request))
-      .resolves.toMatchObject({ destination: 'complete', staging: 'absent' });
+      .resolves.toMatchObject({ destination: 'candidate', staging: 'absent' });
 
     const contradictoryQuarantine = [
       result(quarantineFailure),
-      result(JSON.stringify({ ...JSON.parse(quarantineFailure), mutationCount: 1 }), { exitCode: 2 }),
+      result(JSON.stringify({ ...JSON.parse(quarantineFailure), errorCode: 'PUBLISH_FAILED' }), { exitCode: 2 }),
       result(quarantineAfterRename),
       result(JSON.stringify({ ...JSON.parse(quarantineAfterRename), errorCode: 'PUBLISH_FAILED' }), { exitCode: 2 }),
     ];

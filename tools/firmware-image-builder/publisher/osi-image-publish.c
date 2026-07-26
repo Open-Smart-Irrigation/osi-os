@@ -38,7 +38,7 @@ struct operation_result {
     const char *error_code;
     const char *destination;
     const char *staging;
-    int rename_attempted;
+    const char *rename_result;
     char source_relative[PATH_MAX];
     char destination_relative[PATH_MAX];
 };
@@ -93,7 +93,10 @@ static void print_result(const struct operation_result *result) {
         fputs(",\"destinationRelativePath\":", stdout);
         json_string(result->destination_relative);
     }
-    if (result->rename_attempted) fputs(",\"renameResult\":\"RENAME_NOREPLACE\"", stdout);
+    if (result->rename_result != NULL) {
+        fputs(",\"renameResult\":", stdout);
+        json_string(result->rename_result);
+    }
     putchar('}');
     putchar('\n');
 }
@@ -126,7 +129,7 @@ static int is_hex_string(const char *value, size_t length) {
 static int safe_identifier(const char *value, size_t maximum) {
     size_t length = strlen(value);
     size_t index;
-    if (length == 0 || length >= maximum || value[0] == '.' || value[0] == '-') return 0;
+    if (length == 0 || length > maximum || value[0] == '.' || value[0] == '-') return 0;
     for (index = 0; index < length; index += 1) {
         char character = value[index];
         if (!((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
@@ -138,7 +141,7 @@ static int safe_identifier(const char *value, size_t maximum) {
 static int safe_branch(const char *value) {
     size_t length = strlen(value);
     size_t index;
-    if (length == 0 || length > MAX_BRANCH_BASENAME || length >= MAX_BRANCH || strcmp(value, ".") == 0 || strcmp(value, "..") == 0 || value[0] == '%' || value[length - 1] == '%') return 0;
+    if (length == 0 || length > MAX_BRANCH_BASENAME || length >= MAX_BRANCH || strcmp(value, ".") == 0 || strcmp(value, "..") == 0 || value[length - 1] == '%') return 0;
     for (index = 0; index < length; index += 1) {
         char character = value[index];
         if ((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
@@ -201,9 +204,14 @@ static int open_absolute_directory(const char *path) {
     return current;
 }
 
-static int open_directory_at(int parent, const char *name, int create) {
+static int open_directory_at(int parent, const char *name, int create, int *created) {
     int result;
-    if (create && mkdirat(parent, name, 0750) < 0 && errno != EEXIST) return -1;
+    if (created != NULL) *created = 0;
+    if (create) {
+        if (mkdirat(parent, name, 0750) == 0) {
+            if (created != NULL) *created = 1;
+        } else if (errno != EEXIST) return -1;
+    }
     result = openat(parent, name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     return result;
 }
@@ -211,6 +219,11 @@ static int open_directory_at(int parent, const char *name, int create) {
 static int same_device(int first, int second) {
     struct stat first_stat;
     struct stat second_stat;
+#ifdef PUBLISHER_TEST_CROSS_DEVICE
+    (void)first;
+    (void)second;
+    return 0;
+#endif
     if (fstat(first, &first_stat) < 0 || fstat(second, &second_stat) < 0) return 0;
     return first_stat.st_dev == second_stat.st_dev;
 }
@@ -277,16 +290,48 @@ static int publisher_renameat2(int old_parent, const char *old_name, int new_par
 #endif
 }
 
-static int publisher_capability_available(void) {
-    int status = publisher_renameat2(-1, "publisher-capability-probe", -1, "publisher-capability-probe-destination");
-    (void)status;
-    return errno != ENOSYS && errno != EOPNOTSUPP;
+static int publisher_capability_available(int directory) {
+    char probe_name[96];
+    int probe = -1;
+    int renamed = 0;
+    int supported = -1;
+    int cleanup_failed = 0;
+    int status;
+#ifdef PUBLISHER_TEST_UNSUPPORTED
+    (void)directory;
+    return 0;
+#endif
+    if (snprintf(probe_name, sizeof(probe_name), ".osi-image-publisher-capability-%ld", (long)getpid()) < 0) return -1;
+    if (mkdirat(directory, probe_name, 0700) < 0) return -1;
+    probe = openat(directory, probe_name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (probe < 0 || mkdirat(probe, "source", 0700) < 0) goto cleanup;
+    status = publisher_renameat2(probe, "source", probe, "destination");
+    if (status == 0) {
+        renamed = 1;
+        supported = 1;
+    } else if (errno == ENOSYS || errno == EOPNOTSUPP) supported = 0;
+cleanup:
+    if (probe >= 0) {
+        if (unlinkat(probe, renamed ? "destination" : "source", AT_REMOVEDIR) < 0 && errno != ENOENT) cleanup_failed = 1;
+        if (close(probe) < 0) cleanup_failed = 1;
+    }
+    if (unlinkat(directory, probe_name, AT_REMOVEDIR) < 0) cleanup_failed = 1;
+    if (fsync(directory) < 0) cleanup_failed = 1;
+    return cleanup_failed ? -1 : supported;
 }
 
 static int source_identity_matches(int parent, const char *name, const struct stat *expected) {
     struct stat observed;
     if (fstatat(parent, name, &observed, AT_SYMLINK_NOFOLLOW) < 0) return 0;
     return S_ISDIR(observed.st_mode) && observed.st_dev == expected->st_dev && observed.st_ino == expected->st_ino;
+}
+
+static int directory_binding_matches(int parent, const char *name, int directory) {
+    struct stat opened;
+    struct stat named;
+    if (fstat(directory, &opened) < 0 || fstatat(parent, name, &named, AT_SYMLINK_NOFOLLOW) < 0) return 0;
+    return S_ISDIR(opened.st_mode) && S_ISDIR(named.st_mode) &&
+        opened.st_dev == named.st_dev && opened.st_ino == named.st_ino;
 }
 
 #if defined(PUBLISHER_TEST_SWAP_BEFORE) || defined(PUBLISHER_TEST_SWAP_AFTER)
@@ -304,6 +349,14 @@ static int test_swap_destination(int parent, const char *name) {
     if (length < 0 || (size_t)length >= sizeof(hidden)) return -1;
     if (renameat(parent, name, parent, hidden) < 0) return -1;
     if (symlinkat("/tmp", parent, name) < 0) return -1;
+    return 0;
+}
+#endif
+
+#if defined(PUBLISHER_TEST_ANCESTOR_BEFORE) || defined(PUBLISHER_TEST_ANCESTOR_AFTER)
+static int test_swap_ancestor(int parent, const char *name) {
+    if (renameat(parent, name, parent, ".publisher-test-ancestor-hidden") < 0) return -1;
+    if (mkdirat(parent, name, 0750) < 0) return -1;
     return 0;
 }
 #endif
@@ -338,6 +391,9 @@ static int sync_publish_parents(int staging_parent, int destination_parent, int 
     if (fsync(branch_parent) < 0) failed = 1;
     if (fsync(metadata) < 0) failed = 1;
     if (fsync(root) < 0) failed = 1;
+#ifdef PUBLISHER_TEST_FSYNC_FAILURE
+    failed = 1;
+#endif
     return failed ? -1 : 0;
 }
 
@@ -347,6 +403,9 @@ static int sync_quarantine_parents(int staging_parent, int quarantine_parent, in
     if (fsync(quarantine_parent) < 0) failed = 1;
     if (fsync(metadata) < 0) failed = 1;
     if (fsync(root) < 0) failed = 1;
+#ifdef PUBLISHER_TEST_FSYNC_FAILURE
+    failed = 1;
+#endif
     return failed ? -1 : 0;
 }
 
@@ -388,15 +447,40 @@ static int required_release_files(int directory) {
 
 static int prepare_root(const char *root_path, int *root, int *metadata) {
     struct stat root_stat;
-    if (lstat(root_path, &root_stat) < 0 || S_ISBLK(root_stat.st_mode) || !S_ISDIR(root_stat.st_mode) || S_ISLNK(root_stat.st_mode)) return -1;
+    if (lstat(root_path, &root_stat) < 0) return -1;
+#ifdef PUBLISHER_TEST_BLOCK_ROOT
+    root_stat.st_mode = S_IFBLK;
+#endif
+    if (S_ISBLK(root_stat.st_mode) || !S_ISDIR(root_stat.st_mode) || S_ISLNK(root_stat.st_mode)) return -1;
     *root = open_absolute_directory(root_path);
     if (*root < 0) return -1;
-    *metadata = open_directory_at(*root, ".osi-image-builder", 0);
+    *metadata = open_directory_at(*root, ".osi-image-builder", 0, NULL);
     if (*metadata < 0) {
         close(*root);
         return -1;
     }
     return 0;
+}
+
+static const char *rename_error_name(int error_number) {
+    if (error_number == EEXIST) return "EEXIST";
+    if (error_number == ENOSYS) return "ENOSYS";
+    if (error_number == EOPNOTSUPP) return "EOPNOTSUPP";
+    if (error_number == EXDEV) return "EXDEV";
+    return "OTHER_ERROR";
+}
+
+static int publish_bindings_match(int root, int metadata, int staging_parent, int branch_parent, const char *branch, int destination_parent, const char *sha) {
+    return directory_binding_matches(root, ".osi-image-builder", metadata) &&
+        directory_binding_matches(metadata, "staging", staging_parent) &&
+        directory_binding_matches(root, branch, branch_parent) &&
+        directory_binding_matches(branch_parent, sha, destination_parent);
+}
+
+static int quarantine_bindings_match(int root, int metadata, int staging_parent, int quarantine_parent) {
+    return directory_binding_matches(root, ".osi-image-builder", metadata) &&
+        directory_binding_matches(metadata, "staging", staging_parent) &&
+        directory_binding_matches(metadata, "quarantine", quarantine_parent);
 }
 
 static int publish_operation(const char *root_path, const char *job_id, const char *branch, const char *sha, const char *target, struct operation_result *result) {
@@ -406,6 +490,9 @@ static int publish_operation(const char *root_path, const char *job_id, const ch
     int source = -1;
     int branch_parent = -1;
     int destination_parent = -1;
+    int branch_created = 0;
+    int destination_created = 0;
+    int capability;
     int status;
     struct stat source_identity;
     result->available = 1;
@@ -413,53 +500,68 @@ static int publish_operation(const char *root_path, const char *job_id, const ch
         result->error_code = "PUBLISH_FAILED";
         return 2;
     }
-    if (!publisher_capability_available()) {
+    capability = publisher_capability_available(metadata);
+    if (capability == 0) {
         result->available = 0;
         result->error_code = "PUBLISHER_UNSUPPORTED";
         close(metadata);
         close(root);
         return 2;
     }
-    staging_parent = open_directory_at(metadata, "staging", 0);
+    if (capability < 0) goto invalid;
+    (void)snprintf(result->source_relative, sizeof(result->source_relative), ".osi-image-builder/staging/%s", job_id);
+    (void)snprintf(result->destination_relative, sizeof(result->destination_relative), "%s/%s/%s", branch, sha, target);
+    staging_parent = open_directory_at(metadata, "staging", 0, NULL);
     if (staging_parent < 0) goto invalid;
     source = openat(staging_parent, job_id, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (source < 0) goto invalid;
-    branch_parent = open_directory_at(root, branch, 1);
-    if (branch_parent < 0) goto invalid;
-    destination_parent = open_directory_at(branch_parent, sha, 1);
-    if (destination_parent < 0) goto invalid;
     if (fstat(source, &source_identity) < 0 || !S_ISDIR(source_identity.st_mode)) goto invalid;
-    if (!same_device(source, destination_parent)) {
-        result->error_code = "STAGING_FILESYSTEM_MISMATCH";
-        goto done;
-    }
     if (fsync_tree(source) < 0 || fsync(staging_parent) < 0) goto invalid;
- #ifdef PUBLISHER_TESTING
- #ifdef PUBLISHER_TEST_SWAP_BEFORE
+#ifdef PUBLISHER_TEST_SWAP_BEFORE
     if (test_swap_source(staging_parent, job_id) < 0) goto invalid;
- #endif
- #endif
+#endif
     if (!source_identity_matches(staging_parent, job_id, &source_identity)) {
         result->error_code = "PUBLISH_FAILED";
         goto done;
     }
- #ifdef PUBLISHER_TESTING
- #ifdef PUBLISHER_TEST_SWAP_AFTER
+    branch_parent = open_directory_at(root, branch, 1, &branch_created);
+    result->mutation_count += branch_created;
+    if (branch_parent < 0) goto invalid;
+    destination_parent = open_directory_at(branch_parent, sha, 1, &destination_created);
+    result->mutation_count += destination_created;
+    if (destination_parent < 0) goto invalid;
+    if (!same_device(source, destination_parent)) {
+        result->error_code = "STAGING_FILESYSTEM_MISMATCH";
+        goto done;
+    }
+#ifdef PUBLISHER_TEST_SWAP_AFTER
     if (test_swap_source(staging_parent, job_id) < 0) goto invalid;
- #endif
- #endif
+#endif
+#ifdef PUBLISHER_TEST_ANCESTOR_BEFORE
+    if (test_swap_ancestor(branch_parent, sha) < 0) goto invalid;
+#endif
+    if (!publish_bindings_match(root, metadata, staging_parent, branch_parent, branch, destination_parent, sha) ||
+        !source_identity_matches(staging_parent, job_id, &source_identity)) {
+        result->error_code = "PUBLISH_FAILED";
+        goto done;
+    }
     status = publisher_renameat2(staging_parent, job_id, destination_parent, target);
     if (status < 0) {
-        if (errno == EEXIST) result->error_code = "OUTPUT_COLLISION";
+        int rename_error = errno;
+        result->rename_result = rename_error_name(rename_error);
+        if (rename_error == EEXIST) result->error_code = "OUTPUT_COLLISION";
+        else if (rename_error == EXDEV) result->error_code = "STAGING_FILESYSTEM_MISMATCH";
         else result->error_code = "PUBLISH_FAILED";
         goto done;
     }
-    result->rename_attempted = 1;
+    result->rename_result = "RENAMED";
     result->published = 1;
-    result->mutation_count = 1;
-    (void)snprintf(result->source_relative, sizeof(result->source_relative), ".osi-image-builder/staging/%s", job_id);
-    (void)snprintf(result->destination_relative, sizeof(result->destination_relative), "%s/%s/%s", branch, sha, target);
-    if (!destination_identity_matches(destination_parent, target, &source_identity)) {
+    result->mutation_count += 1;
+#ifdef PUBLISHER_TEST_ANCESTOR_AFTER
+    if (test_swap_ancestor(branch_parent, sha) < 0) goto invalid;
+#endif
+    if (!publish_bindings_match(root, metadata, staging_parent, branch_parent, branch, destination_parent, sha) ||
+        !destination_identity_matches(destination_parent, target, &source_identity)) {
         result->published = 0;
         result->error_code = "PUBLISH_FAILED";
         (void)sync_publish_parents(staging_parent, destination_parent, branch_parent, metadata, root);
@@ -468,6 +570,13 @@ static int publish_operation(const char *root_path, const char *job_id, const ch
     if (sync_publish_parents(staging_parent, destination_parent, branch_parent, metadata, root) < 0) {
         result->published = 0;
         result->error_code = "PUBLISH_FAILED";
+        goto done;
+    }
+    if (!publish_bindings_match(root, metadata, staging_parent, branch_parent, branch, destination_parent, sha) ||
+        !destination_identity_matches(destination_parent, target, &source_identity)) {
+        result->published = 0;
+        result->error_code = "PUBLISH_FAILED";
+        (void)sync_publish_parents(staging_parent, destination_parent, branch_parent, metadata, root);
         goto done;
     }
     goto done;
@@ -489,6 +598,8 @@ static int quarantine_operation(const char *root_path, const char *job_id, struc
     int staging_parent = -1;
     int quarantine_parent = -1;
     int source = -1;
+    int quarantine_created = 0;
+    int capability;
     int status;
     struct stat source_identity;
     result->available = 1;
@@ -496,43 +607,55 @@ static int quarantine_operation(const char *root_path, const char *job_id, struc
         result->error_code = "QUARANTINE_PENDING";
         return 2;
     }
-    if (!publisher_capability_available()) {
+    capability = publisher_capability_available(metadata);
+    if (capability == 0) {
         result->available = 0;
         result->error_code = "PUBLISHER_UNSUPPORTED";
         close(metadata);
         close(root);
         return 2;
     }
-    staging_parent = open_directory_at(metadata, "staging", 0);
-    quarantine_parent = open_directory_at(metadata, "quarantine", 1);
+    if (capability < 0) goto invalid;
+    (void)snprintf(result->source_relative, sizeof(result->source_relative), ".osi-image-builder/staging/%s", job_id);
+    (void)snprintf(result->destination_relative, sizeof(result->destination_relative), ".osi-image-builder/quarantine/%s", job_id);
+    staging_parent = open_directory_at(metadata, "staging", 0, NULL);
+    quarantine_parent = open_directory_at(metadata, "quarantine", 1, &quarantine_created);
+    result->mutation_count += quarantine_created;
     if (staging_parent < 0 || quarantine_parent < 0) goto invalid;
     source = openat(staging_parent, job_id, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (source < 0 || fstat(source, &source_identity) < 0 || !S_ISDIR(source_identity.st_mode) || fsync_tree(source) < 0 || !same_device(source, quarantine_parent)) goto invalid;
- #ifdef PUBLISHER_TESTING
- #ifdef PUBLISHER_TEST_SWAP_BEFORE
+#ifdef PUBLISHER_TEST_SWAP_BEFORE
     if (test_swap_source(staging_parent, job_id) < 0) goto invalid;
- #endif
- #endif
+#endif
     if (!source_identity_matches(staging_parent, job_id, &source_identity)) {
         result->error_code = "QUARANTINE_PENDING";
         goto done;
     }
- #ifdef PUBLISHER_TESTING
- #ifdef PUBLISHER_TEST_SWAP_AFTER
+#ifdef PUBLISHER_TEST_SWAP_AFTER
     if (test_swap_source(staging_parent, job_id) < 0) goto invalid;
- #endif
- #endif
-    status = publisher_renameat2(staging_parent, job_id, quarantine_parent, job_id);
-    if (status < 0) {
+#endif
+#ifdef PUBLISHER_TEST_ANCESTOR_BEFORE
+    if (test_swap_ancestor(metadata, "quarantine") < 0) goto invalid;
+#endif
+    if (!quarantine_bindings_match(root, metadata, staging_parent, quarantine_parent) ||
+        !source_identity_matches(staging_parent, job_id, &source_identity)) {
         result->error_code = "QUARANTINE_PENDING";
         goto done;
     }
-    result->rename_attempted = 1;
+    status = publisher_renameat2(staging_parent, job_id, quarantine_parent, job_id);
+    if (status < 0) {
+        result->rename_result = rename_error_name(errno);
+        result->error_code = "QUARANTINE_PENDING";
+        goto done;
+    }
+    result->rename_result = "RENAMED";
     result->quarantined = 1;
-    result->mutation_count = 1;
-    (void)snprintf(result->source_relative, sizeof(result->source_relative), ".osi-image-builder/staging/%s", job_id);
-    (void)snprintf(result->destination_relative, sizeof(result->destination_relative), ".osi-image-builder/quarantine/%s", job_id);
-    if (!destination_identity_matches(quarantine_parent, job_id, &source_identity)) {
+    result->mutation_count += 1;
+#ifdef PUBLISHER_TEST_ANCESTOR_AFTER
+    if (test_swap_ancestor(metadata, "quarantine") < 0) goto invalid;
+#endif
+    if (!quarantine_bindings_match(root, metadata, staging_parent, quarantine_parent) ||
+        !destination_identity_matches(quarantine_parent, job_id, &source_identity)) {
         result->quarantined = 0;
         result->error_code = "QUARANTINE_PENDING";
         (void)sync_quarantine_parents(staging_parent, quarantine_parent, metadata, root);
@@ -541,6 +664,13 @@ static int quarantine_operation(const char *root_path, const char *job_id, struc
     if (sync_quarantine_parents(staging_parent, quarantine_parent, metadata, root) < 0) {
         result->quarantined = 0;
         result->error_code = "QUARANTINE_PENDING";
+    }
+    if (result->quarantined &&
+        (!quarantine_bindings_match(root, metadata, staging_parent, quarantine_parent) ||
+         !destination_identity_matches(quarantine_parent, job_id, &source_identity))) {
+        result->quarantined = 0;
+        result->error_code = "QUARANTINE_PENDING";
+        (void)sync_quarantine_parents(staging_parent, quarantine_parent, metadata, root);
     }
     goto done;
 invalid:
@@ -562,6 +692,9 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
     int destination_parent = -1;
     int destination = -1;
     struct stat item;
+    int parent_bindings_match;
+    int destination_matches = 0;
+    int structurally_complete = 0;
     int staging_state;
     int destination_state;
     result->available = 1;
@@ -569,15 +702,15 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
         result->error_code = "INVALID_ARGUMENT";
         return 2;
     }
-    staging_parent = open_directory_at(metadata, "staging", 0);
+    staging_parent = open_directory_at(metadata, "staging", 0, NULL);
     if (staging_parent < 0) goto invalid;
     staging_state = path_exists_at(staging_parent, job_id, &item);
     if (staging_state < 0 || (staging_state == 1 && (!S_ISDIR(item.st_mode) || S_ISLNK(item.st_mode)))) goto invalid;
     result->staging = staging_state == 1 ? "present" : "absent";
-    branch_parent = open_directory_at(root, branch, 0);
+    branch_parent = open_directory_at(root, branch, 0, NULL);
     if (branch_parent < 0 && errno != ENOENT) goto invalid;
     if (branch_parent >= 0) {
-        destination_parent = open_directory_at(branch_parent, sha, 0);
+        destination_parent = open_directory_at(branch_parent, sha, 0, NULL);
         if (destination_parent < 0 && errno != ENOENT) goto invalid;
     }
     if (destination_parent >= 0) {
@@ -586,10 +719,17 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
         if (destination_state == 1 && S_ISDIR(item.st_mode)) {
             destination = openat(destination_parent, target, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
             if (destination < 0) goto invalid;
+            structurally_complete = required_release_files(destination);
+            destination_matches = destination_identity_matches(destination_parent, target, &item);
         }
     } else destination_state = 0;
-    if (destination_state == 0) result->destination = "absent";
-    else if (destination != -1 && required_release_files(destination)) result->destination = "complete";
+    parent_bindings_match = directory_binding_matches(root, ".osi-image-builder", metadata) &&
+        directory_binding_matches(metadata, "staging", staging_parent) &&
+        (branch_parent < 0 || directory_binding_matches(root, branch, branch_parent)) &&
+        (destination_parent < 0 || directory_binding_matches(branch_parent, sha, destination_parent));
+    if (!parent_bindings_match) result->destination = "mismatched";
+    else if (destination_state == 0) result->destination = "absent";
+    else if (destination != -1 && structurally_complete && destination_matches && staging_state == 0) result->destination = "candidate";
     else result->destination = "mismatched";
     if (strcmp(result->destination, "mismatched") == 0) result->error_code = "UNVERIFIED_FINAL_PATH_BLOCKER";
     else if (strcmp(result->destination, "absent") == 0) result->error_code = "PUBLISH_RECOVERY_FAILED";
@@ -647,7 +787,7 @@ static int remove_tree_at(int parent, const char *name) {
 }
 
 static int create_self_test_job(int staging, const char *name) {
-    int job = open_directory_at(staging, name, 1);
+    int job = open_directory_at(staging, name, 1, NULL);
     int file;
     if (job < 0) return -1;
     file = openat(job, "payload", O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
@@ -671,7 +811,11 @@ static int self_test(void) {
     int temporary_parent = -1;
     struct operation_result result = { 0 };
     int code = 2;
-    if (!publisher_capability_available()) return fail_result("PUBLISHER_UNSUPPORTED", 0, 0);
+    int capability_directory = open("/tmp", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    int capability = capability_directory < 0 ? -1 : publisher_capability_available(capability_directory);
+    if (capability_directory >= 0) close(capability_directory);
+    if (capability == 0) return fail_result("PUBLISHER_UNSUPPORTED", 0, 0);
+    if (capability < 0) return fail_result("PUBLISHER_SELF_TEST_FAILED", 1, 0);
     if (scratch == NULL) return fail_result("PUBLISHER_UNSUPPORTED", 0, 0);
     temporary_parent = open("/tmp", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (temporary_parent < 0) {
@@ -680,9 +824,9 @@ static int self_test(void) {
     }
     {
         int root = open_absolute_directory(scratch);
-        int metadata = root < 0 ? -1 : open_directory_at(root, ".osi-image-builder", 1);
-        int staging = metadata < 0 ? -1 : open_directory_at(metadata, "staging", 1);
-        int quarantine = metadata < 0 ? -1 : open_directory_at(metadata, "quarantine", 1);
+        int metadata = root < 0 ? -1 : open_directory_at(root, ".osi-image-builder", 1, NULL);
+        int staging = metadata < 0 ? -1 : open_directory_at(metadata, "staging", 1, NULL);
+        int quarantine = metadata < 0 ? -1 : open_directory_at(metadata, "quarantine", 1, NULL);
         int job = staging < 0 ? -1 : create_self_test_job(staging, "job-self-test");
         if (root >= 0 && metadata >= 0 && staging >= 0 && quarantine >= 0 && job >= 0) {
             struct operation_result link_result = { 0 };
@@ -695,8 +839,8 @@ static int self_test(void) {
             if (checks_ok) code = publish_operation(scratch, "job-self-test", "self-test", "0123456789abcdef0123456789abcdef01234567", "rpi-5", &result);
             if (code == 0 && result.published == 1) {
                 int second_root = open_absolute_directory(scratch);
-                int second_metadata = second_root < 0 ? -1 : open_directory_at(second_root, ".osi-image-builder", 0);
-                int second_staging = second_metadata < 0 ? -1 : open_directory_at(second_metadata, "staging", 0);
+                int second_metadata = second_root < 0 ? -1 : open_directory_at(second_root, ".osi-image-builder", 0, NULL);
+                int second_staging = second_metadata < 0 ? -1 : open_directory_at(second_metadata, "staging", 0, NULL);
                 struct operation_result collision = { 0 };
                 if (second_staging < 0 || create_self_test_job(second_staging, "job-collision") < 0) code = 2;
                 else code = publish_operation(scratch, "job-collision", "self-test", "0123456789abcdef0123456789abcdef01234567", "rpi-5", &collision);
@@ -706,8 +850,8 @@ static int self_test(void) {
                 if (code == 2 && collision.error_code != NULL && strcmp(collision.error_code, "OUTPUT_COLLISION") == 0) code = 0;
                 if (code == 0) {
                     int quarantine_root = open_absolute_directory(scratch);
-                    int quarantine_metadata = quarantine_root < 0 ? -1 : open_directory_at(quarantine_root, ".osi-image-builder", 0);
-                    int quarantine_staging = quarantine_metadata < 0 ? -1 : open_directory_at(quarantine_metadata, "staging", 0);
+                    int quarantine_metadata = quarantine_root < 0 ? -1 : open_directory_at(quarantine_root, ".osi-image-builder", 0, NULL);
+                    int quarantine_staging = quarantine_metadata < 0 ? -1 : open_directory_at(quarantine_metadata, "staging", 0, NULL);
                     struct operation_result quarantine_result = { 0 };
                     if (quarantine_staging < 0 || create_self_test_job(quarantine_staging, "job-quarantine") < 0) code = 2;
                     else if (quarantine_operation(scratch, "job-quarantine", &quarantine_result) != 0 || quarantine_result.quarantined != 1) code = 2;

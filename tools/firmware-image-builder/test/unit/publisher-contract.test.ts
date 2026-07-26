@@ -7,12 +7,7 @@ const publisherDirectory = join(process.cwd(), 'publisher');
 describe('native publisher build contract', () => {
   it('uses the exact C17 warning-as-error compiler contract', async () => {
     const makefile = await readFile(join(publisherDirectory, 'Makefile'), 'utf8');
-    expect(makefile).toContain('-std=c17');
-    expect(makefile).toContain('-D_GNU_SOURCE');
-    expect(makefile).toContain('-O2');
-    expect(makefile).toContain('-Wall');
-    expect(makefile).toContain('-Wextra');
-    expect(makefile).toContain('-Werror');
+    expect(makefile).toMatch(/^CFLAGS := -std=c17 -D_GNU_SOURCE -O2 -Wall -Wextra -Werror$/mu);
   });
 
   it('keeps publication descriptor-relative and no-follow', async () => {
