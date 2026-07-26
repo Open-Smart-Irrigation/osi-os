@@ -1639,7 +1639,7 @@ export class OwnershipStore {
     if (command.state === 'publishing') {
       if (!command.finalDirectory || !command.finalPath) throw new TypeError('publishing needs final paths');
       confinedPath(command.finalDirectory, 'publish final directory'); confinedPath(command.finalPath, 'publish final path');
-      if (!transition(command.expectedState, 'publishing')) conflict('illegal-predecessor', 'publish transition is not in the state matrix');
+      if (command.expectedState !== 'publishing' && !transition(command.expectedState, 'publishing')) conflict('illegal-predecessor', 'publish transition is not in the state matrix');
       result = this.#db.prepare(`UPDATE jobs SET state='publishing', publish_state='publishing', artifact_final_directory=?, artifact_final_path=?, publish_started_at=COALESCE(publish_started_at, ?), published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(command.finalDirectory, command.finalPath, command.startedAt ?? now, now, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, now);
     } else if (command.state === 'published') {
       if (!command.finalDirectory || !command.finalPath) throw new TypeError('published needs final paths');
@@ -1664,7 +1664,8 @@ export class OwnershipStore {
     instant(command.terminalAt, 'terminal time');
     requirePersistedTimeline(this.#db, command.jobId, [['terminal command time', command.at], ['terminal time', command.terminalAt]], true);
     const latestStage = this.#db.prepare("SELECT MAX(finished_at) AS finished_at FROM job_stages WHERE job_id=? AND finished_at IS NOT NULL").get(command.jobId) as Row;
-    requireChronology([['accepted time', String(row.accepted_at)], ['runner start time', row.runner_started_at === null ? null : String(row.runner_started_at)], ['latest stage finish time', latestStage.finished_at === null ? null : String(latestStage.finished_at)], ['artifact mtime', row.artifact_mtime === null ? null : String(row.artifact_mtime)], ['publish start time', row.publish_started_at === null ? null : String(row.publish_started_at)], ['published time', row.published_at === null ? null : String(row.published_at)], ['terminal time', command.terminalAt], ['terminal write time', command.at]]);
+    requireChronology([['accepted time', String(row.accepted_at)], ['runner start time', row.runner_started_at === null ? null : String(row.runner_started_at)], ['artifact mtime', row.artifact_mtime === null ? null : String(row.artifact_mtime)], ['publish start time', row.publish_started_at === null ? null : String(row.publish_started_at)], ['published time', row.published_at === null ? null : String(row.published_at)], ['terminal time', command.terminalAt], ['terminal write time', command.at]]);
+    requireChronology([['accepted time', String(row.accepted_at)], ['latest stage finish time', latestStage.finished_at === null ? null : String(latestStage.finished_at)], ['terminal time', command.terminalAt], ['terminal write time', command.at]]);
     if (!transition(command.expectedState, command.state)) conflict('illegal-predecessor', 'terminal transition is not in the state matrix');
     const result = command.state === 'succeeded'
       ? this.#db.prepare(`UPDATE jobs SET state='succeeded', queue_state='complete', queue_position=NULL, terminal_at=?, terminal_error_code=NULL, terminal_error_json=NULL, runner_finished_at=?, updated_at=?
