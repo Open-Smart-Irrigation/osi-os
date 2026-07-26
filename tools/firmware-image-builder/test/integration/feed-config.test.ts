@@ -29,6 +29,8 @@ import { createCommandExecutor } from '../../runner/src/command-executor.js';
 import { createEvidenceWriter } from '../../runner/src/evidence.js';
 import { INTERNAL_OPERATION_TOOL_PATH } from '../../runner/src/operation-registry.js';
 import {
+  createTargetSetupConfigObservations,
+  createTargetSetupSourceObservations,
   createLockedTargetSetupOperations,
   resolveTargetSetup,
   type TargetSetupOperationId,
@@ -494,7 +496,7 @@ describe('feed configuration integration boundary', () => {
     );
 
     const evidenceWriter = createEvidenceWriter({ stateRoot: loaded.pathAuthorities.stateRoot });
-    const setup = await resolveTargetSetup({
+    const targetSetup = await resolveTargetSetup({
       stateRoot: loaded.pathAuthorities.stateRoot,
       jobId,
       sourceSha,
@@ -504,7 +506,10 @@ describe('feed configuration integration boundary', () => {
       operations,
       evidenceWriter,
       requestId: 'req-feed-integration',
+      phase: 'target-setup',
     });
+    if (targetSetup.phase !== 'target-setup') throw new Error('target setup phase did not resolve');
+    const targetSetupObservations = createTargetSetupSourceObservations(targetSetup);
     await evidenceWriter.write({
       jobId,
       stage: 'target-setup',
@@ -514,37 +519,96 @@ describe('feed configuration integration boundary', () => {
       operationId: null,
       commands: [],
       inputs: {},
-      observations: { config: setup.config },
+      observations: targetSetupObservations,
+      error: null,
+    });
+    const feedsPhase = await resolveTargetSetup({
+      stateRoot: loaded.pathAuthorities.stateRoot,
+      jobId,
+      sourceSha,
+      target: manifest.targets[1]!,
+      targets: manifest.targets,
+      preparedFeeds: persistedSource.offlineFeedPreparation,
+      operations,
+      evidenceWriter,
+      requestId: 'req-feed-integration',
+      phase: 'feeds',
+    });
+    if (feedsPhase.phase !== 'feeds') throw new Error('feeds phase did not resolve');
+    const configPhase = await resolveTargetSetup({
+      stateRoot: loaded.pathAuthorities.stateRoot,
+      jobId,
+      sourceSha,
+      target: manifest.targets[1]!,
+      targets: manifest.targets,
+      preparedFeeds: persistedSource.offlineFeedPreparation,
+      operations,
+      evidenceWriter,
+      requestId: 'req-feed-integration',
+      phase: 'config',
+      profiles: targetSetup.profiles,
+    });
+    if (configPhase.phase !== 'config') throw new Error('config phase did not resolve');
+    const configObservations = createTargetSetupConfigObservations(configPhase);
+    await evidenceWriter.write({
+      jobId,
+      stage: 'config',
+      startedAt: '2026-07-26T10:02:00.000Z',
+      finishedAt: '2026-07-26T10:03:00.000Z',
+      outcome: 'passed',
+      operationId: null,
+      commands: [],
+      inputs: {},
+      observations: configObservations,
       error: null,
     });
     const verifiedConfig = await verifyTargetSetupConfiguration({
       workspace: { stateRoot: loaded.pathAuthorities.stateRoot, jobId },
       target: manifest.targets[1]!,
       targets: manifest.targets,
-      config: setup.config,
+      config: configPhase.config,
     });
 
     expect(calls).toEqual([
-      'activate-target', 'copy-feed-config', 'update-feeds', 'install-feeds', 'resolve-config',
-      'activate-target', 'copy-feed-config', 'update-feeds', 'install-feeds', 'resolve-config',
+      'activate-target', 'activate-target',
+      'copy-feed-config', 'update-feeds', 'install-feeds',
+      'resolve-config', 'resolve-config',
     ]);
     expect(await readFile(join(workspace, 'operation.log'), 'utf8')).toBe([
       `switch-env:${manifest.targets[0]!.environment}`,
-      'feeds:update',
-      'feeds:install',
-      'defconfig:DEVICE_rpi-5',
       `switch-env:${manifest.targets[1]!.environment}`,
       'feeds:update',
       'feeds:install',
+      'defconfig:DEVICE_rpi-5',
       'defconfig:DEVICE_rpi-2',
       '',
     ].join('\n'));
     expect(await readFile(join(root, 'network-command.log'), 'utf8').catch(() => '')).toBe('');
-    expect(setup.feed.prepared).toHaveLength(3);
-    expect(setup.rust.enforcedSha256).toBe('df5c72347a7f0d862c2cf03c9d2375f4d5de2aef4665e9aa53a37487cbaa3a33');
-    expect(setup.config.profile).toBe('DEVICE_rpi-2');
-    expect(setup.config.profiles['rpi-5'].resolvedSha256).toMatch(/^[0-9a-f]{64}$/u);
-    expect(setup.config.profiles['rpi-2'].resolvedSha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(feedsPhase.feed.prepared).toHaveLength(3);
+    expect(feedsPhase.rust.enforcedSha256).toBe('df5c72347a7f0d862c2cf03c9d2375f4d5de2aef4665e9aa53a37487cbaa3a33');
+    expect(configPhase.config.profile).toBe('DEVICE_rpi-2');
+    expect(configPhase.config.profiles['rpi-5'].resolvedSha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(configPhase.config.profiles['rpi-2'].resolvedSha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(targetSetupObservations.profiles['rpi-5']).not.toHaveProperty('resolvedSha256');
+    expect(targetSetupObservations.profiles['rpi-2']).not.toHaveProperty('resolvedSha256');
+    expect(JSON.parse(
+      await readFile(join(loaded.stateRoot, 'jobs', jobId, 'evidence/04-target-setup.json'), 'utf8'),
+    )).toMatchObject({ observations: targetSetupObservations });
+    expect(JSON.parse(
+      await readFile(join(loaded.stateRoot, 'jobs', jobId, 'evidence/06-config.json'), 'utf8'),
+    )).toMatchObject({ observations: configObservations });
+    for (const target of manifest.targets) {
+      const sourceProfile = targetSetup.profiles[target.id];
+      const sourceBytes = await readFile(join(
+        loaded.stateRoot,
+        'jobs',
+        jobId,
+        sourceProfile.sourceConfigEvidencePath,
+      ));
+      expect(sourceBytes.toString('utf8')).toBe(configFor(target));
+      expect(createHash('sha256').update(sourceBytes).digest('hex')).toBe(sourceProfile.sourceSha256);
+      expect(configPhase.config.profiles[target.id].sourceSha256).toBe(sourceProfile.sourceSha256);
+    }
     expect(verifiedConfig.profiles['rpi-5'].sourceConfigEvidencePath).toBe('evidence/target-setup/rpi-5.source.config');
     expect(verifiedConfig.profiles['rpi-2'].sourceConfigEvidencePath).toBe('evidence/target-setup/rpi-2.source.config');
     expect(await readlink(join(workspace, 'conf/.config'))).toBe(`${manifest.targets[1]!.environment}/.config`);
