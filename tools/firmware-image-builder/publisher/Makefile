@@ -100,7 +100,7 @@ test-recheck-late-swap: $(SOURCE) Makefile
 
 test-pre-rename-fsync-failure: $(SOURCE) Makefile
 	SOURCE_SHA256=$$(sha256sum $(SOURCE) | awk '{print $$1}'); \
-	$(CC) $(CFLAGS) -DPUBLISHER_TESTING -DPUBLISHER_TEST_SWAP_AFTER -DPUBLISHER_TEST_PRE_RENAME_FSYNC_FAILURE -DPUBLISHER_VERSION=\"$(VERSION)\" -DPUBLISHER_SOURCE_SHA256=\"$$SOURCE_SHA256\" -o osi-image-publish-test-pre-rename-fsync-failure $(SOURCE)
+	$(CC) $(CFLAGS) -DPUBLISHER_TESTING -DPUBLISHER_TEST_PRE_RENAME_FSYNC_FAILURE -DPUBLISHER_VERSION=\"$(VERSION)\" -DPUBLISHER_SOURCE_SHA256=\"$$SOURCE_SHA256\" -o osi-image-publish-test-pre-rename-fsync-failure $(SOURCE)
 	chmod 0555 osi-image-publish-test-pre-rename-fsync-failure
 
 test-unsupported: $(SOURCE) Makefile

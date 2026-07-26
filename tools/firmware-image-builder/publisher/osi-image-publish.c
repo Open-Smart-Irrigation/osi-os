@@ -720,6 +720,11 @@ static int publish_operation(const char *root_path, const char *job_id, const ch
         result->error_code = "PUBLISH_FAILED";
         goto done;
     }
+    if (result->mutation_count > 0 &&
+        sync_existing_publish_parents(staging_parent, destination_parent, branch_parent, metadata, root) < 0) {
+        result->error_code = "PUBLISH_FAILED";
+        goto done;
+    }
     status = publisher_renameat2(staging_parent, job_id, destination_parent, target);
     if (status < 0) {
         int rename_error = errno;
@@ -850,6 +855,11 @@ static int quarantine_operation(const char *root_path, const char *job_id, struc
         result->error_code = "QUARANTINE_PENDING";
         goto done;
     }
+    if (result->mutation_count > 0 &&
+        sync_existing_quarantine_parents(staging_parent, quarantine_parent, metadata, root) < 0) {
+        result->error_code = "QUARANTINE_PENDING";
+        goto done;
+    }
     status = publisher_renameat2(staging_parent, job_id, quarantine_parent, job_id);
     if (status < 0) {
         result->rename_result = rename_error_name(errno);
@@ -909,6 +919,11 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
     int destination = -1;
     struct stat staging_identity;
     struct stat destination_identity;
+    struct stat branch_identity;
+    struct stat sha_identity;
+    struct stat blocker_identity;
+    int blocker_parent = -1;
+    const char *blocker_name = NULL;
     int parent_bindings_match;
     int destination_matches = 0;
     int structurally_complete = 0;
@@ -933,15 +948,33 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
     staging_state = path_exists_at(staging_parent, job_id, &staging_identity);
     if (staging_state < 0 || (staging_state == 1 && (!S_ISDIR(staging_identity.st_mode) || S_ISLNK(staging_identity.st_mode)))) goto invalid;
     result->staging = staging_state == 1 ? "present" : "absent";
-    branch_parent = open_directory_at(root, branch, 0, NULL);
-    if (branch_parent < 0 && errno != ENOENT) goto invalid;
+    {
+        int branch_state = path_exists_at(root, branch, &branch_identity);
+        if (branch_state < 0) goto invalid;
+        if (branch_state == 1 && (!S_ISDIR(branch_identity.st_mode) || S_ISLNK(branch_identity.st_mode))) {
+            blocker_parent = root;
+            blocker_name = branch;
+            blocker_identity = branch_identity;
+        } else if (branch_state == 1) {
+            branch_parent = open_directory_at(root, branch, 0, NULL);
+            if (branch_parent < 0 || !directory_binding_matches(root, branch, branch_parent)) goto invalid;
+        }
+    }
     if (branch_parent >= 0) {
-        destination_parent = open_directory_at(branch_parent, sha, 0, NULL);
-        if (destination_parent < 0 && errno != ENOENT) goto invalid;
+        int sha_state = path_exists_at(branch_parent, sha, &sha_identity);
+        if (sha_state < 0) goto invalid;
+        if (sha_state == 1 && (!S_ISDIR(sha_identity.st_mode) || S_ISLNK(sha_identity.st_mode))) {
+            blocker_parent = branch_parent;
+            blocker_name = sha;
+            blocker_identity = sha_identity;
+        } else if (sha_state == 1) {
+            destination_parent = open_directory_at(branch_parent, sha, 0, NULL);
+            if (destination_parent < 0 || !directory_binding_matches(branch_parent, sha, destination_parent)) goto invalid;
+        }
     }
     if (destination_parent >= 0) {
         destination_state = path_exists_at(destination_parent, target, &destination_identity);
-        if (destination_state < 0 || (destination_state == 1 && S_ISLNK(destination_identity.st_mode))) goto invalid;
+        if (destination_state < 0) goto invalid;
         if (destination_state == 1 && S_ISDIR(destination_identity.st_mode)) {
             destination = openat(destination_parent, target, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
             if (destination < 0) goto invalid;
@@ -955,6 +988,14 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
 #ifdef PUBLISHER_TEST_BRANCH_PARENT_AFTER
     if (branch_parent >= 0 && test_swap_ancestor(root, branch) < 0) goto invalid;
 #endif
+    if (blocker_name != NULL) {
+        if (!root_metadata_bindings_match(&root_chain, root, metadata) ||
+            !directory_binding_matches(metadata, "staging", staging_parent) ||
+            !named_state_matches(staging_parent, job_id, staging_state, staging_state == 1 ? &staging_identity : NULL) ||
+            !named_state_matches(blocker_parent, blocker_name, 1, &blocker_identity)) goto invalid;
+        result->destination = "mismatched";
+        goto classified;
+    }
     parent_bindings_match = directory_chain_matches(&root_chain) &&
         directory_binding_matches(root, ".osi-image-builder", metadata) &&
         directory_binding_matches(metadata, "staging", staging_parent) &&
@@ -975,6 +1016,7 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
         branch_parent, branch, destination_parent, sha, target, destination_state, &destination_identity
     )) goto invalid;
 #endif
+classified:
     if (strcmp(result->destination, "candidate") == 0) result->error_code = NULL;
     else if (strcmp(result->destination, "mismatched") == 0) result->error_code = "UNVERIFIED_FINAL_PATH_BLOCKER";
     else if (strcmp(result->destination, "absent") == 0) result->error_code = "PUBLISH_RECOVERY_FAILED";

@@ -440,11 +440,17 @@ describe('native publisher integration', () => {
     try {
       await createStaging('job-pre-sync-publish', syncRoot);
       const publish = await runBinary(preRenameFsyncFailureBinary, 'publish', '--root', syncRoot, '--job-id', 'job-pre-sync-publish', '--branch', 'feature%2Fpre-sync', '--sha', SHA, '--target', TARGET);
+      expect(publish.code).toBe(2);
       expect(parsed(publish)).toMatchObject({ published: false, mutationCount: 2, errorCode: 'PUBLISH_FAILED' });
+      expect(parsed(publish)).not.toHaveProperty('renameResult');
+      await expect(access(join(syncRoot, '.osi-image-builder', 'staging', 'job-pre-sync-publish'))).resolves.toBeUndefined();
 
       await createStaging('job-pre-sync-quarantine', syncRoot);
       const quarantine = await runBinary(preRenameFsyncFailureBinary, 'quarantine', '--root', syncRoot, '--job-id', 'job-pre-sync-quarantine');
+      expect(quarantine.code).toBe(2);
       expect(parsed(quarantine)).toMatchObject({ quarantined: false, mutationCount: 1, errorCode: 'QUARANTINE_PENDING' });
+      expect(parsed(quarantine)).not.toHaveProperty('renameResult');
+      await expect(access(join(syncRoot, '.osi-image-builder', 'staging', 'job-pre-sync-quarantine'))).resolves.toBeUndefined();
     } finally {
       await rm(syncBase, { recursive: true, force: true });
     }
@@ -559,6 +565,34 @@ describe('native publisher integration', () => {
     const swapped = await runBinary(destinationRaceBinary, 'recheck', '--root', root, '--job-id', 'job-recheck-swap', '--branch', swappedBranch, '--sha', SHA, '--target', TARGET);
     expect(swapped.code).toBe(2);
     expect(parsed(swapped)).toMatchObject({ destination: 'unknown', staging: 'unknown', errorCode: 'PUBLISH_RECOVERY_FAILED' });
+  });
+
+  it('classifies existing branch, SHA, and final symlinks as explicit recovery blockers', async () => {
+    const cases = [
+      { branch: 'feature%2Fsymlink-branch', level: 'branch' },
+      { branch: 'feature%2Fsymlink-sha', level: 'sha' },
+      { branch: 'feature%2Fsymlink-target', level: 'target' },
+    ] as const;
+    for (const item of cases) {
+      if (item.level === 'branch') {
+        await symlink('/tmp', join(root, item.branch));
+      } else {
+        await mkdir(join(root, item.branch), { recursive: true });
+        if (item.level === 'sha') await symlink('/tmp', join(root, item.branch, SHA));
+        else {
+          await mkdir(join(root, item.branch, SHA), { recursive: true });
+          await symlink('/tmp', join(root, item.branch, SHA, TARGET));
+        }
+      }
+      const response = await runPublisher('recheck', '--root', root, '--job-id', `job-${item.level}-symlink`, '--branch', item.branch, '--sha', SHA, '--target', TARGET);
+      expect(response.code).toBe(0);
+      expect(parsed(response)).toMatchObject({
+        destination: 'mismatched',
+        staging: 'absent',
+        errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER',
+        mutationCount: 0,
+      });
+    }
   });
 
   it('keeps explicit source and kernel evidence when quarantine collides', async () => {
