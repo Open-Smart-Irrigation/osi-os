@@ -1,19 +1,18 @@
 import { createCommandExecutor, type CommandExecutor, type CommandResult, type CommandRunOptions } from '../runner/src/command-executor.js';
-import { TARGET_IDS, type TargetId } from '../domain/types.js';
+import { TARGET_IDS, type BuilderErrorCode, type TargetId } from '../domain/types.js';
 import type { ApprovedOutputRoot } from '../config/load.js';
 
-export type PublisherErrorCode =
-  | 'OUTPUT_COLLISION'
-  | 'PUBLISH_RECOVERY_FAILED'
-  | 'UNVERIFIED_FINAL_PATH_BLOCKER'
-  | 'QUARANTINE_PENDING'
-  | 'PUBLISH_FAILED'
-  | 'PUBLISHER_UNSUPPORTED'
-  | 'STAGING_FILESYSTEM_MISMATCH'
-  | 'PUBLISH_SOURCE_MISMATCH'
-  | 'PUBLISH_POST_RENAME_MISMATCH'
-  | 'PUBLISH_DURABILITY_FAILED'
-  | 'INVALID_ARGUMENT';
+export const PUBLISHER_OPERATION_ERROR_CODES = Object.freeze([
+  'OUTPUT_COLLISION',
+  'PUBLISH_RECOVERY_FAILED',
+  'UNVERIFIED_FINAL_PATH_BLOCKER',
+  'QUARANTINE_PENDING',
+  'PUBLISH_FAILED',
+  'STAGING_FILESYSTEM_MISMATCH',
+] as const satisfies readonly BuilderErrorCode[]);
+
+export type PublisherOperationErrorCode = (typeof PUBLISHER_OPERATION_ERROR_CODES)[number];
+export type PublisherErrorCode = PublisherOperationErrorCode | 'PUBLISHER_UNSUPPORTED';
 
 export interface PublisherCommandExecutor extends Pick<CommandExecutor, 'run'> {}
 
@@ -77,11 +76,10 @@ function validateRequest(request: PublisherRequest, root: ApprovedOutputRoot): v
 }
 
 const RESULT_FIELDS = new Set(['available', 'published', 'quarantined', 'selfTest', 'mutationCount', 'errorCode', 'destination', 'staging', 'sourceRelativePath', 'destinationRelativePath', 'renameResult', 'publisherVersion', 'publisherSourceSha256']);
-const ERROR_CODES = new Set<PublisherErrorCode>(['OUTPUT_COLLISION', 'PUBLISH_RECOVERY_FAILED', 'UNVERIFIED_FINAL_PATH_BLOCKER', 'QUARANTINE_PENDING', 'PUBLISH_FAILED', 'PUBLISHER_UNSUPPORTED', 'STAGING_FILESYSTEM_MISMATCH', 'PUBLISH_SOURCE_MISMATCH', 'PUBLISH_POST_RENAME_MISMATCH', 'PUBLISH_DURABILITY_FAILED', 'INVALID_ARGUMENT']);
+const ERROR_CODES = new Set<PublisherErrorCode>([...PUBLISHER_OPERATION_ERROR_CODES, 'PUBLISHER_UNSUPPORTED']);
 const BLOCKER_CODES = new Set<PublisherErrorCode>(['PUBLISH_RECOVERY_FAILED', 'UNVERIFIED_FINAL_PATH_BLOCKER']);
 const EVIDENCE_FIELDS = ['publisherVersion', 'publisherSourceSha256', 'sourceRelativePath', 'destinationRelativePath', 'renameResult'];
-const PUBLISH_ERROR_CODES = new Set<PublisherErrorCode>(['OUTPUT_COLLISION', 'PUBLISH_FAILED', 'PUBLISH_DURABILITY_FAILED', 'PUBLISH_POST_RENAME_MISMATCH', 'PUBLISH_SOURCE_MISMATCH', 'STAGING_FILESYSTEM_MISMATCH', 'INVALID_ARGUMENT']);
-const QUARANTINE_ERROR_CODES = new Set<PublisherErrorCode>(['QUARANTINE_PENDING', 'PUBLISH_FAILED', 'PUBLISH_DURABILITY_FAILED', 'PUBLISH_POST_RENAME_MISMATCH', 'PUBLISH_SOURCE_MISMATCH', 'STAGING_FILESYSTEM_MISMATCH', 'INVALID_ARGUMENT']);
+const PUBLISH_PRE_RENAME_ERROR_CODES = new Set<PublisherErrorCode>(['OUTPUT_COLLISION', 'PUBLISH_FAILED', 'STAGING_FILESYSTEM_MISMATCH']);
 
 function own(value: Record<string, unknown>, key: string): unknown {
   if (!Object.prototype.hasOwnProperty.call(value, key)) throw new Error(`publisher result is missing ${key}`);
@@ -108,7 +106,7 @@ function validateEvidence(value: Record<string, unknown>, sourceRelativePath: st
   if (stringField(value, 'renameResult') !== 'RENAME_NOREPLACE') throw new Error('publisher rename evidence is invalid');
 }
 
-function parseResponse(result: CommandResult, argv: readonly string[], operation: 'publish' | 'quarantine' | 'recheck', request: PublisherRequest | Pick<PublisherRequest, 'rootId' | 'jobId'>, root: ApprovedOutputRoot): PublisherResponse {
+function parseResponse(result: CommandResult, argv: readonly string[], operation: 'publish' | 'quarantine' | 'recheck', request: PublisherRequest | Pick<PublisherRequest, 'rootId' | 'jobId'>): PublisherResponse {
   if (JSON.stringify(result.argv) !== JSON.stringify(argv) || result.signal !== null || result.timedOut !== false || !Number.isSafeInteger(result.exitCode)) throw new Error('publisher command result execution evidence is invalid');
   if (typeof result.stdout !== 'string' || Buffer.byteLength(result.stdout, 'utf8') > 65_536) throw new Error('publisher output exceeds its bound');
   const text = result.stdout.endsWith('\n') ? result.stdout.slice(0, -1) : result.stdout;
@@ -124,7 +122,7 @@ function parseResponse(result: CommandResult, argv: readonly string[], operation
   const mutationCount = own(value, 'mutationCount');
   if (typeof mutationCount !== 'number' || !Number.isSafeInteger(mutationCount) || mutationCount < 0 || mutationCount > 1) throw new Error('publisher mutation count is invalid');
   if (available === false) {
-    if (mutationCount !== 0 || published || quarantined || selfTest || Object.keys(value).some((key) => ['renameResult', 'sourceRelativePath', 'destinationRelativePath', 'publisherVersion', 'publisherSourceSha256', 'destination', 'staging'].includes(key)) || value.errorCode !== 'PUBLISHER_UNSUPPORTED') throw new Error('unsupported publisher result is contradictory');
+    if (result.exitCode === 0 || mutationCount !== 0 || published || quarantined || selfTest || Object.keys(value).some((key) => ['renameResult', 'sourceRelativePath', 'destinationRelativePath', 'publisherVersion', 'publisherSourceSha256', 'destination', 'staging'].includes(key)) || value.errorCode !== 'PUBLISHER_UNSUPPORTED') throw new Error('unsupported publisher result is contradictory');
     return value as unknown as PublisherResponse;
   }
   if (selfTest || (value.errorCode !== undefined && (typeof value.errorCode !== 'string' || !ERROR_CODES.has(value.errorCode as PublisherErrorCode)))) throw new Error('publisher result error contract is invalid');
@@ -133,19 +131,35 @@ function parseResponse(result: CommandResult, argv: readonly string[], operation
   const sourcePath = `.osi-image-builder/staging/${jobId}`;
   const destinationPath = operation === 'publish' ? `${(request as PublisherRequest).branchSlug}/${(request as PublisherRequest).sourceSha}/${(request as PublisherRequest).targetId}` : `.osi-image-builder/quarantine/${jobId}`;
   if (operation === 'recheck') {
-    if (published || quarantined || mutationCount !== 0 || EVIDENCE_FIELDS.some((key) => key in value) || typeof value.destination !== 'string' || !['absent', 'complete', 'mismatched'].includes(value.destination) || typeof value.staging !== 'string' || !['absent', 'present'].includes(value.staging) || (value.errorCode !== undefined && !BLOCKER_CODES.has(value.errorCode as PublisherErrorCode))) throw new Error('publisher recheck result is contradictory');
+    if (result.exitCode !== 0 || published || quarantined || mutationCount !== 0 || EVIDENCE_FIELDS.some((key) => key in value) || typeof value.destination !== 'string' || !['absent', 'complete', 'mismatched'].includes(value.destination) || typeof value.staging !== 'string' || !['absent', 'present'].includes(value.staging) || (value.errorCode !== undefined && !BLOCKER_CODES.has(value.errorCode as PublisherErrorCode))) throw new Error('publisher recheck result is contradictory');
+    if (
+      (value.destination === 'complete' && (value.staging !== 'absent' || value.errorCode !== undefined))
+      || (value.destination === 'absent' && value.errorCode !== 'PUBLISH_RECOVERY_FAILED')
+      || (value.destination === 'mismatched' && value.errorCode !== 'UNVERIFIED_FINAL_PATH_BLOCKER')
+    ) throw new Error('publisher recheck phase result is contradictory');
   } else if (operation === 'publish') {
-    if (quarantined || 'destination' in value || 'staging' in value || (value.errorCode !== undefined && !PUBLISH_ERROR_CODES.has(value.errorCode as PublisherErrorCode)) || (published && (mutationCount !== 1 || value.errorCode !== undefined)) || (!published && mutationCount === 0 && value.errorCode === undefined) || (!published && mutationCount === 1 && value.errorCode === undefined) || (!published && mutationCount === 0 && EVIDENCE_FIELDS.some((key) => key in value))) throw new Error('publisher publication result is contradictory');
-    if (published || mutationCount === 1) validateEvidence(value, sourcePath, destinationPath);
-    if (published && result.exitCode !== 0) throw new Error('successful publisher exited unsuccessfully');
-    if (!published && result.exitCode === 0) throw new Error('failed publisher exited successfully');
+    if (quarantined || 'destination' in value || 'staging' in value) throw new Error('publisher publication result is contradictory');
+    if (published) {
+      if (result.exitCode !== 0 || mutationCount !== 1 || value.errorCode !== undefined) throw new Error('successful publisher result is contradictory');
+      validateEvidence(value, sourcePath, destinationPath);
+    } else if (mutationCount === 0) {
+      if (result.exitCode === 0 || typeof value.errorCode !== 'string' || !PUBLISH_PRE_RENAME_ERROR_CODES.has(value.errorCode as PublisherErrorCode) || EVIDENCE_FIELDS.some((key) => key in value)) throw new Error('pre-rename publisher failure is contradictory');
+    } else {
+      if (result.exitCode === 0 || value.errorCode !== 'PUBLISH_FAILED') throw new Error('post-rename publisher failure is contradictory');
+      validateEvidence(value, sourcePath, destinationPath);
+    }
   } else {
-    if (published || 'destination' in value || 'staging' in value || (value.errorCode !== undefined && !QUARANTINE_ERROR_CODES.has(value.errorCode as PublisherErrorCode)) || (quarantined && (mutationCount !== 1 || value.errorCode !== undefined)) || (!quarantined && mutationCount === 0 && value.errorCode === undefined) || (!quarantined && mutationCount === 1 && value.errorCode === undefined) || (!quarantined && mutationCount === 0 && EVIDENCE_FIELDS.some((key) => key in value))) throw new Error('publisher quarantine result is contradictory');
-    if (quarantined || mutationCount === 1) validateEvidence(value, sourcePath, destinationPath);
-    if (quarantined && result.exitCode !== 0) throw new Error('successful quarantine exited unsuccessfully');
-    if (!quarantined && result.exitCode === 0) throw new Error('failed quarantine exited successfully');
+    if (published || 'destination' in value || 'staging' in value) throw new Error('publisher quarantine result is contradictory');
+    if (quarantined) {
+      if (result.exitCode !== 0 || mutationCount !== 1 || value.errorCode !== undefined) throw new Error('successful quarantine result is contradictory');
+      validateEvidence(value, sourcePath, destinationPath);
+    } else if (mutationCount === 0) {
+      if (result.exitCode === 0 || value.errorCode !== 'QUARANTINE_PENDING' || EVIDENCE_FIELDS.some((key) => key in value)) throw new Error('pre-rename quarantine failure is contradictory');
+    } else {
+      if (result.exitCode === 0 || value.errorCode !== 'QUARANTINE_PENDING') throw new Error('post-rename quarantine failure is contradictory');
+      validateEvidence(value, sourcePath, destinationPath);
+    }
   }
-  void root;
   return value as unknown as PublisherResponse;
 }
 
@@ -159,10 +173,10 @@ export function createPublisherClient(options: PublisherClientOptions): Publishe
     roots.set(root.id, root);
   }
 
-  async function invoke(argv: readonly string[], operation: 'publish' | 'quarantine' | 'recheck', request: PublisherRequest | Pick<PublisherRequest, 'rootId' | 'jobId'>, root: ApprovedOutputRoot): Promise<PublisherResponse> {
+  async function invoke(argv: readonly string[], operation: 'publish' | 'quarantine' | 'recheck', request: PublisherRequest | Pick<PublisherRequest, 'rootId' | 'jobId'>): Promise<PublisherResponse> {
     const runOptions: CommandRunOptions = { env: FIXED_ENV, timeoutMs: options.timeoutMs ?? 30_000, maxCaptureBytes: 64 * 1024 };
     const result = await executor.run(argv, runOptions);
-    return parseResponse(result, argv, operation, request, root);
+    return parseResponse(result, argv, operation, request);
   }
 
   return {
@@ -170,20 +184,20 @@ export function createPublisherClient(options: PublisherClientOptions): Publishe
       const root = roots.get(request.rootId);
       if (root === undefined) throw new Error('approved root is unknown');
       validateRequest(request, root);
-      return invoke([options.executable, 'publish', '--root', root.path, '--job-id', request.jobId, '--branch', request.branchSlug, '--sha', request.sourceSha, '--target', request.targetId], 'publish', request, root);
+      return invoke([options.executable, 'publish', '--root', root.path, '--job-id', request.jobId, '--branch', request.branchSlug, '--sha', request.sourceSha, '--target', request.targetId], 'publish', request);
     },
     quarantine: async (request) => {
       const root = roots.get(request.rootId);
       if (root === undefined) throw new Error('approved root is unknown');
       if (!JOB_ID.test(request.jobId)) throw new Error('job ID is invalid');
       validateRoot(root);
-      return invoke([options.executable, 'quarantine', '--root', root.path, '--job-id', request.jobId], 'quarantine', request, root);
+      return invoke([options.executable, 'quarantine', '--root', root.path, '--job-id', request.jobId], 'quarantine', request);
     },
     recheck: async (request) => {
       const root = roots.get(request.rootId);
       if (root === undefined) throw new Error('approved root is unknown');
       validateRequest(request, root);
-      return invoke([options.executable, 'recheck', '--root', root.path, '--job-id', request.jobId, '--branch', request.branchSlug, '--sha', request.sourceSha, '--target', request.targetId], 'recheck', request, root);
+      return invoke([options.executable, 'recheck', '--root', root.path, '--job-id', request.jobId, '--branch', request.branchSlug, '--sha', request.sourceSha, '--target', request.targetId], 'recheck', request);
     },
   };
 }

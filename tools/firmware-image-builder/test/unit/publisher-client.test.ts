@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createPublisherClient, type PublisherCommandExecutor } from '../../publisher/client.js';
+import {
+  PUBLISHER_OPERATION_ERROR_CODES,
+  createPublisherClient,
+  type PublisherCommandExecutor,
+} from '../../publisher/client.js';
+import { BUILDER_ERROR_CODES } from '../../domain/types.js';
 import { createRunnerPublisherClient } from '../../runner/src/publisher-client.js';
 import type { CommandResult, CommandRunOptions } from '../../runner/src/command-executor.js';
 
@@ -100,7 +105,7 @@ describe('publisher client', () => {
   });
 
   it('returns typed unsupported capability without claiming publication', async () => {
-    const executor = fakeExecutor(result(JSON.stringify({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' })));
+    const executor = fakeExecutor(result(JSON.stringify({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' }), { exitCode: 2 }));
     const response = await client(executor).publish(request);
     expect(response).toMatchObject({ available: false, published: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' });
   });
@@ -156,8 +161,99 @@ describe('publisher client', () => {
       result(validPublishOutput(), { signal: 'SIGTERM' }),
       result(validPublishOutput(), { timedOut: true }),
       result(JSON.stringify({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 1, errorCode: 'PUBLISHER_UNSUPPORTED' })),
+      result(JSON.stringify({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' })),
       result(JSON.stringify({ available: true, published: true, quarantined: false, selfTest: false, mutationCount: 1, renameResult: 'RENAME_NOREPLACE' })),
     ];
     for (const reply of cases) await expect(client(fakeExecutor(reply)).publish(request)).rejects.toThrow();
+  });
+
+  it('accepts only exact publish phase, mutation, evidence, and exit combinations', async () => {
+    const failedBeforeRename = JSON.stringify({
+      available: true,
+      published: false,
+      quarantined: false,
+      selfTest: false,
+      mutationCount: 0,
+      errorCode: 'OUTPUT_COLLISION',
+    });
+    await expect(client(fakeExecutor(result(failedBeforeRename, { exitCode: 2 }))).publish(request))
+      .resolves.toMatchObject({ published: false, mutationCount: 0, errorCode: 'OUTPUT_COLLISION' });
+
+    const failedAfterRename = validPublishOutput({
+      published: false,
+      errorCode: 'PUBLISH_FAILED',
+    });
+    await expect(client(fakeExecutor(result(failedAfterRename, { exitCode: 2 }))).publish(request))
+      .resolves.toMatchObject({ published: false, mutationCount: 1, errorCode: 'PUBLISH_FAILED' });
+
+    const contradictory = [
+      result(failedBeforeRename),
+      result(JSON.stringify({ ...JSON.parse(failedBeforeRename), mutationCount: 1 }), { exitCode: 2 }),
+      result(validPublishOutput({ published: false, errorCode: 'OUTPUT_COLLISION' }), { exitCode: 2 }),
+      result(validPublishOutput({ published: false, errorCode: 'PUBLISH_FAILED' })),
+    ];
+    for (const reply of contradictory) await expect(client(fakeExecutor(reply)).publish(request)).rejects.toThrow();
+  });
+
+  it('accepts only exact quarantine and recheck phase results', async () => {
+    const quarantineFailure = JSON.stringify({
+      available: true,
+      published: false,
+      quarantined: false,
+      selfTest: false,
+      mutationCount: 0,
+      errorCode: 'QUARANTINE_PENDING',
+    });
+    await expect(client(fakeExecutor(result(quarantineFailure, { exitCode: 2 }))).quarantine(request))
+      .resolves.toMatchObject({ quarantined: false, mutationCount: 0, errorCode: 'QUARANTINE_PENDING' });
+
+    const quarantineAfterRename = JSON.stringify({
+      available: true,
+      published: false,
+      quarantined: false,
+      selfTest: false,
+      mutationCount: 1,
+      errorCode: 'QUARANTINE_PENDING',
+      publisherVersion: VERSION,
+      publisherSourceSha256: SOURCE_HASH,
+      sourceRelativePath: '.osi-image-builder/staging/job-123',
+      destinationRelativePath: '.osi-image-builder/quarantine/job-123',
+      renameResult: 'RENAME_NOREPLACE',
+    });
+    await expect(client(fakeExecutor(result(quarantineAfterRename, { exitCode: 2 }))).quarantine(request))
+      .resolves.toMatchObject({ quarantined: false, mutationCount: 1, errorCode: 'QUARANTINE_PENDING' });
+
+    const recheckComplete = JSON.stringify({
+      available: true,
+      published: false,
+      quarantined: false,
+      selfTest: false,
+      mutationCount: 0,
+      destination: 'complete',
+      staging: 'absent',
+    });
+    await expect(client(fakeExecutor(result(recheckComplete))).recheck(request))
+      .resolves.toMatchObject({ destination: 'complete', staging: 'absent' });
+
+    const contradictoryQuarantine = [
+      result(quarantineFailure),
+      result(JSON.stringify({ ...JSON.parse(quarantineFailure), mutationCount: 1 }), { exitCode: 2 }),
+      result(quarantineAfterRename),
+      result(JSON.stringify({ ...JSON.parse(quarantineAfterRename), errorCode: 'PUBLISH_FAILED' }), { exitCode: 2 }),
+    ];
+    for (const reply of contradictoryQuarantine) await expect(client(fakeExecutor(reply)).quarantine(request)).rejects.toThrow();
+
+    const contradictoryRecheck = [
+      result(recheckComplete, { exitCode: 2 }),
+      result(JSON.stringify({ ...JSON.parse(recheckComplete), staging: 'present' })),
+      result(JSON.stringify({ ...JSON.parse(recheckComplete), destination: 'absent' })),
+      result(JSON.stringify({ ...JSON.parse(recheckComplete), destination: 'mismatched' })),
+    ];
+    for (const reply of contradictoryRecheck) await expect(client(fakeExecutor(reply)).recheck(request)).rejects.toThrow();
+  });
+
+  it('limits operational publisher errors to the persisted builder taxonomy', () => {
+    const builderCodes = new Set<string>(BUILDER_ERROR_CODES);
+    expect(PUBLISHER_OPERATION_ERROR_CODES.every((code) => builderCodes.has(code))).toBe(true);
   });
 });
