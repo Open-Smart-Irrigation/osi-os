@@ -316,6 +316,30 @@ function validateTarget(value: unknown, expected: TargetManifest): TargetManifes
   return expected;
 }
 
+export function authenticateTargetManifests(
+  values: readonly TargetManifest[],
+): Readonly<Record<TargetId, TargetManifest>> {
+  if (!Array.isArray(values) || values.length !== TARGET_IDS.length) {
+    fail('TARGETS_INVALID', 'Manifest must contain exactly two targets.');
+  }
+  const seen = new Set<string>();
+  const targets = TARGET_IDS.map((targetId, index) => {
+    const value = values[index];
+    if (value && typeof value.id === 'string') {
+      if (seen.has(value.id)) fail('DUPLICATE_TARGET_ID', 'Target IDs must be unique.');
+      seen.add(value.id);
+    }
+    return validateTarget(value, TARGET_CONTRACTS[targetId]);
+  });
+  if (seen.size !== TARGET_IDS.length || !TARGET_IDS.every((id) => seen.has(id))) {
+    fail('TARGET_ORDER_MISMATCH', 'Targets are not the approved target set.');
+  }
+  return Object.freeze({
+    'rpi-5': targets[0]!,
+    'rpi-2': targets[1]!,
+  });
+}
+
 function deepFreeze<T>(value: T, seen = new Set<object>()): T {
   if (typeof value !== 'object' || value === null || seen.has(value)) return value;
   seen.add(value);
@@ -445,20 +469,9 @@ export function loadManifest(path: string, fileSystem: ManifestFileSystem = DEFA
   if (!Array.isArray(parsed.stages) || parsed.stages.some((stage) => !isPipelineStageName(stage))) fail('UNKNOWN_STAGE', 'Manifest contains an unknown stage.');
   exactArray(parsed.stages, PIPELINE_STAGE_NAMES, 'STAGE_ORDER_MISMATCH');
   validateStageDefinitions(parsed.stageDefinitions);
-  if (!Array.isArray(parsed.targets) || parsed.targets.length !== TARGET_IDS.length) fail('TARGETS_INVALID', 'Manifest must contain exactly two targets.');
-  const seen = new Set<string>();
-  for (const targetValue of parsed.targets) {
-    if (isJsonObject(targetValue) && typeof targetValue.id === 'string') {
-      if (seen.has(targetValue.id)) fail('DUPLICATE_TARGET_ID', 'Target IDs must be unique.');
-      seen.add(targetValue.id);
-    }
-  }
-  const targets: TargetManifest[] = [];
-  for (let index = 0; index < TARGET_IDS.length; index += 1) {
-    const targetValue = parsed.targets[index];
-    targets.push(validateTarget(targetValue, TARGET_CONTRACTS[TARGET_IDS[index]]));
-  }
-  if (seen.size !== TARGET_IDS.length || !TARGET_IDS.every((id) => seen.has(id))) fail('TARGET_ORDER_MISMATCH', 'Targets are not the approved target set.');
+  if (!Array.isArray(parsed.targets)) fail('TARGETS_INVALID', 'Manifest must contain exactly two targets.');
+  const authenticatedTargets = authenticateTargetManifests(parsed.targets as unknown as readonly TargetManifest[]);
+  const targets = TARGET_IDS.map((targetId) => authenticatedTargets[targetId]);
   const manifest: Manifest = {
     schemaVersion: 1,
     repository: { name: 'osi-os', remote: 'origin' },

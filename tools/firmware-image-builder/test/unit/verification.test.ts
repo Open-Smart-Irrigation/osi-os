@@ -47,9 +47,21 @@ function inputFor(targetId: 'rpi-5' | 'rpi-2'): VerificationInput {
     },
     pinnedSha: SHA40,
     branch: 'main',
-    freshness: {
-      requestFreshness: async () => {
+    nodeVerifier: {
+      resolve: async () => {
         throw new Error('must not be reached by pre-authority unit tests');
+      },
+    },
+    freshness: {
+      client: {
+        signal: async () => {
+          throw new Error('must not be reached by pre-authority unit tests');
+        },
+      },
+      store: {
+        getJob: () => {
+          throw new Error('must not be reached by pre-authority unit tests');
+        },
       },
     },
   };
@@ -65,6 +77,7 @@ describe('firmware verification public authority contract', () => {
         'buildStartedAt',
         'config',
         'freshness',
+        'nodeVerifier',
         'pinnedSha',
         'sourceEvidence',
         'target',
@@ -99,7 +112,7 @@ describe('firmware verification public authority contract', () => {
     },
   );
 
-  it('requires both canonical manifest targets and selected object identity', async () => {
+  it('requires exactly both canonical manifest target contracts', async () => {
     const input = inputFor('rpi-5');
     await expect(verifyFirmwareArtifact({
       ...input,
@@ -107,7 +120,35 @@ describe('firmware verification public authority contract', () => {
     })).rejects.toMatchObject({ code: 'TARGET_CONFIG_MISMATCH' });
     await expect(verifyFirmwareArtifact({
       ...input,
-      target: { ...input.target },
+      targets: [input.targets[0]!, input.targets[0]!],
+    })).rejects.toMatchObject({ code: 'TARGET_CONFIG_MISMATCH' });
+    await expect(verifyFirmwareArtifact({
+      ...input,
+      targets: [
+        input.targets[0]!,
+        { ...input.targets[1]!, label: 'forged Pi target' },
+      ],
+    })).rejects.toMatchObject({ code: 'TARGET_CONFIG_MISMATCH' });
+    await expect(verifyFirmwareArtifact({
+      ...input,
+      target: { ...input.target, profile: 'DEVICE_forged' },
+    })).rejects.toMatchObject({ code: 'TARGET_CONFIG_MISMATCH' });
+    await expect(verifyFirmwareArtifact({
+      ...input,
+      targets: [
+        input.targets[0]!,
+        {
+          ...input.targets[1]!,
+          configSymbols: [
+            {
+              name: 'CONFIG_TARGET_bcm27xx_bcm2709',
+              type: 'bool',
+              value: false,
+            },
+            ...input.targets[1]!.configSymbols.slice(1),
+          ],
+        },
+      ],
     })).rejects.toMatchObject({ code: 'TARGET_CONFIG_MISMATCH' });
   });
 
