@@ -21,6 +21,29 @@ const config = {
 };
 const loadedConfig = { config, redacted: config, configRoot: '/etc/osi-image-builder', stateRoot: '/state', pathAuthorities: { approvedRoots: {} as never, stateRoot: {} as never } };
 
+function validSource() {
+  return {
+    remote: 'origin' as const,
+    originUrl: 'ssh://git.example/osi-os',
+    ref: 'refs/remotes/origin/main',
+    branch: 'main',
+    sha,
+    commitTime: fixedNow,
+    author: 'OSI <osi@example.com>',
+    subject: 'current source',
+    sourcePreparation: {
+      schemaVersion: 1 as const,
+      sourceSha: sha,
+      gitmodulesBlobSha: '1'.repeat(40),
+      preparedAt: fixedNow,
+      components: [
+        { path: 'feeds/chirpstack-openwrt-feed' as const, mode: '040000' as const, type: 'tree' as const, objectId: '2'.repeat(40), provenanceUrl: 'https://github.com/chirpstack/chirpstack-openwrt-feed.git' },
+        { path: 'openwrt' as const, mode: '040000' as const, type: 'tree' as const, objectId: '3'.repeat(40), provenanceUrl: 'https://github.com/openwrt/openwrt.git' },
+      ],
+    },
+  };
+}
+
 function validLock(): Record<string, unknown> {
   return {
     schemaVersion: 1, packageVersion: '2026.07.23.1', imageRepository: 'registry.osi.invalid/builder', imageDigest: digest,
@@ -41,7 +64,7 @@ function capabilities(overrides: Partial<PreflightCapabilities> = {}) {
   };
   const result: PreflightCapabilities & { readonly calls: Record<string, number> } = {
     calls, clock: { now: () => new Date(fixedNow) },
-    sourceResolver: { resolveAtAcceptance: async () => { count('sourceResolver'); return { remote: 'origin', originUrl: 'ssh://git.example/osi-os', ref: 'refs/remotes/origin/main', branch: 'main', sha, commitTime: fixedNow, author: 'OSI <osi@example.com>', subject: 'current source' }; } },
+    sourceResolver: { resolveAtAcceptance: async () => { count('sourceResolver'); return validSource(); } },
     manifest: { inspect: (loaded, targetId) => { count('manifest'); return { sha256: loaded.sha256, target: loaded.manifest.targets.find((candidate) => candidate.id === targetId) }; } },
     repository: { inspect: async () => { count('repository'); return { isGitWorktree: true }; } },
     fileSystem: { statfs: async () => { count('statfs'); return { freeBytes: 25 * 1024 ** 3 }; } }, paths,
@@ -63,6 +86,7 @@ describe('typed preflight checks', () => {
     const caps = capabilities();
     const result = await service(caps).run(request);
     expect(result).toMatchObject({ preflightId: 'pf_test_01', observedSha: sha, createdAt: fixedNow, expiresAt: '2026-07-23T12:10:00.000Z' });
+    expect(result.source.sourcePreparation).toEqual(validSource().sourcePreparation);
     expect(result.checks.every((check) => check.status === 'passed')).toBe(true);
     expect(result.checks.find((check) => check.id === 'same-filesystem-staging')?.details).toMatchObject({ outputMountId: 20, stagingMountId: 20 });
     expect(caps.calls.worktree).toBe(1);
@@ -281,7 +305,7 @@ describe('typed preflight checks', () => {
     const sourceStarted = new Promise<void>((resolve) => { started = resolve; });
     const sourceRelease = new Promise<void>((resolve) => { release = resolve; });
     let id = 0;
-    const caps = capabilities({ sourceResolver: { resolveAtAcceptance: async () => { started(); await sourceRelease; return { remote: 'origin', originUrl: 'ssh://git.example/osi-os', ref: 'refs/remotes/origin/main', branch: 'main', sha, commitTime: fixedNow, author: 'OSI <osi@example.com>', subject: 'current source' }; } } });
+    const caps = capabilities({ sourceResolver: { resolveAtAcceptance: async () => { started(); await sourceRelease; return validSource(); } } });
     const concurrent = service(caps, { maxCacheEntries: 1, idFactory: () => `pf_concurrent_${++id}` });
     const first = concurrent.run(request);
     await sourceStarted;
@@ -291,7 +315,7 @@ describe('typed preflight checks', () => {
 
     let duplicateRelease!: () => void;
     const duplicateStarted = new Promise<void>((resolve) => { duplicateRelease = resolve; });
-    const duplicateCaps = capabilities({ sourceResolver: { resolveAtAcceptance: async () => { await duplicateStarted; return { remote: 'origin', originUrl: 'ssh://git.example/osi-os', ref: 'refs/remotes/origin/main', branch: 'main', sha, commitTime: fixedNow, author: 'OSI <osi@example.com>', subject: 'current source' }; } } });
+    const duplicateCaps = capabilities({ sourceResolver: { resolveAtAcceptance: async () => { await duplicateStarted; return validSource(); } } });
     let duplicateIdCalls = 0;
     const duplicate = service(duplicateCaps, { idFactory: () => { duplicateIdCalls += 1; return 'pf_duplicate'; } });
     const duplicateFirst = duplicate.run(request);
@@ -363,7 +387,7 @@ describe('typed preflight checks', () => {
     const caps = capabilities({ sourceResolver: { resolveAtAcceptance: async () => {
       sourceCalls += 1;
       if (sourceCalls === 1) throw new Error('temporary source failure');
-      return { remote: 'origin', originUrl: 'ssh://git.example/osi-os', ref: 'refs/remotes/origin/main', branch: 'main', sha, commitTime: fixedNow, author: 'OSI <osi@example.com>', subject: 'current source' };
+      return validSource();
     } } });
     const oneSlot = service(caps, { maxCacheEntries: 1, idFactory: () => `pf_failure_${++ids}` });
     await expect(oneSlot.run(request)).rejects.toMatchObject({ code: 'SOURCE_UNAVAILABLE' });

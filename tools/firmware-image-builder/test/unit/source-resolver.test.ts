@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { chmod, lstat, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +15,7 @@ import {
 import {
   SourceResolver,
   SourceResolverError,
+  validateRecursiveSourcePreparation,
   type GitExecutor,
   type GitResolutionMetadata,
 } from '../../api/src/git/source-resolver.js';
@@ -22,6 +23,8 @@ import { CANONICAL_FETCH_REFSPEC } from '../../config/origin-policy.js';
 
 const SHA_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const SHA_B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const SHA_C = 'cccccccccccccccccccccccccccccccccccccccc';
+const SHA_D = 'dddddddddddddddddddddddddddddddddddddddd';
 const ORIGIN = 'git@github.com:Open-Smart-Irrigation/osi-os.git';
 const NUL = '\0';
 const execFile = promisify(execFileCallback);
@@ -52,6 +55,12 @@ class FakeGit implements GitExecutor {
       if (argv[0] === 'for-each-ref' && argv.at(-1)?.startsWith('refs/remotes/origin/') && argv.at(-1) !== 'refs/remotes/origin/') return { stdout: `${argv.at(-1)}${NUL}${NUL}\n` };
       if (argv[0] === 'for-each-ref') return { stdout: `refs/remotes/origin/feature/a${NUL}${NUL}\nrefs/remotes/origin/HEAD${NUL}${NUL}\nrefs/remotes/origin/main${NUL}${NUL}\nrefs/heads/local${NUL}${NUL}\n` };
       if (argv[0] === 'rev-parse') return { stdout: `${argv.at(-1)?.includes('feature/a') ? SHA_B : SHA_A}\n` };
+      if (argv[0] === 'ls-tree') return {
+        stdout: `100644 blob ${SHA_B}\t.gitmodules${NUL}040000 tree ${SHA_C}\tfeeds/chirpstack-openwrt-feed${NUL}040000 tree ${SHA_D}\topenwrt${NUL}`,
+      };
+      if (argv[0] === 'show' && argv.at(-1)?.endsWith(':.gitmodules')) return {
+        stdout: '[submodule "openwrt"]\n path = openwrt\n url = https://github.com/openwrt/openwrt.git\n branch = openwrt-24.10\n[submodule "feeds/chirpstack-openwrt-feed"]\n path = feeds/chirpstack-openwrt-feed\n url = https://github.com/chirpstack/chirpstack-openwrt-feed.git\n',
+      };
       if (argv[0] === 'show') {
         const sha = argv.at(-1) === SHA_B ? SHA_B : SHA_A;
         return argv.some((part) => part.includes('%an'))
@@ -277,6 +286,47 @@ describe('Git command boundary', () => {
 });
 
 describe('API-owned source resolver', () => {
+  it('prepares the actual repository vendored-tree layout before runner handoff', async () => {
+    const repositoryPath = resolve(process.cwd(), '../..');
+    const localGit = new GitCommand({ sshAuthSock: null });
+    const head = (await localGit.run(['rev-parse', '--verify', 'HEAD'], { cwd: repositoryPath })).stdout.trim();
+    const preparation = await new SourceResolver({
+      repositoryPath,
+      git: localGit,
+      now: () => '2026-07-26T12:00:00.000Z',
+    }).prepareRecursiveSource(head);
+
+    expect(preparation).toEqual({
+      schemaVersion: 1,
+      sourceSha: head,
+      gitmodulesBlobSha: expect.stringMatching(/^[0-9a-f]{40}$/),
+      preparedAt: '2026-07-26T12:00:00.000Z',
+      components: [
+        {
+          path: 'feeds/chirpstack-openwrt-feed',
+          mode: '040000',
+          type: 'tree',
+          objectId: expect.stringMatching(/^[0-9a-f]{40}$/),
+          provenanceUrl: 'https://github.com/chirpstack/chirpstack-openwrt-feed.git',
+        },
+        {
+          path: 'openwrt',
+          mode: '040000',
+          type: 'tree',
+          objectId: expect.stringMatching(/^[0-9a-f]{40}$/),
+          provenanceUrl: 'https://github.com/openwrt/openwrt.git',
+        },
+      ],
+    });
+    expect(Object.isFrozen(preparation)).toBe(true);
+    expect(preparation.components.every(Object.isFrozen)).toBe(true);
+    expect(() => validateRecursiveSourcePreparation({ ...preparation, extra: true } as never, head)).toThrow(SourceResolverError);
+    expect(() => validateRecursiveSourcePreparation({
+      ...preparation,
+      components: preparation.components.map((component, index) => index === 0 ? { ...component, extra: true } as never : component),
+    }, head)).toThrow(SourceResolverError);
+  });
+
   it('fetches origin and lists only deterministic remote commit branches', async () => {
     const fake = new FakeGit();
     const result = await resolver(fake).listBranches();
@@ -471,6 +521,12 @@ describe('API-owned source resolver', () => {
       commitTime: '2026-07-22T10:00:00+00:00',
       author: 'Alice Example <alice@example.test>',
       subject: 'subject with\nnewline',
+      sourcePreparation: {
+        schemaVersion: 1,
+        sourceSha: SHA_A,
+        gitmodulesBlobSha: SHA_B,
+        preparedAt: '2026-07-23T12:00:00.000Z',
+      },
     });
     expect(Object.isFrozen(accepted)).toBe(true);
   });
@@ -503,16 +559,17 @@ describe('API-owned source resolver', () => {
     const source = await resolver(fake).resolveAtAcceptance('main', SHA_A);
     const runnerSource = SourceResolver.toRunnerPinnedSource(source);
 
-    expect(Object.keys(runnerSource).sort()).toEqual(['author', 'branch', 'commitTime', 'sha', 'subject']);
+    expect(Object.keys(runnerSource).sort()).toEqual(['author', 'branch', 'commitTime', 'sha', 'sourcePreparation', 'subject']);
     expect(runnerSource).not.toHaveProperty('fetch');
     expect(runnerSource).not.toHaveProperty('originUrl');
+    expect(runnerSource.sourcePreparation.components.every((component) => typeof component.objectId === 'string')).toBe(true);
     expect(Object.isFrozen(runnerSource)).toBe(true);
   });
 
   it('rejects incomplete or malformed metadata before creating a runner value', () => {
     expect(() => SourceResolver.toRunnerPinnedSource({
       remote: 'origin', originUrl: ORIGIN, ref: 'refs/remotes/origin/main', branch: 'main', sha: SHA_A,
-      commitTime: '', author: '', subject: '',
+      commitTime: '', author: '', subject: '', sourcePreparation: {} as never,
     })).toThrow(SourceResolverError);
   });
 
@@ -526,8 +583,13 @@ describe('API-owned source resolver', () => {
     await execFile('/usr/bin/git', ['-C', repository, 'config', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*']);
     await execFile('/usr/bin/git', ['-C', repository, 'config', 'user.name', 'Real Author']);
     await execFile('/usr/bin/git', ['-C', repository, 'config', 'user.email', 'real@example.test']);
+    await mkdir(join(repository, 'openwrt'));
+    await mkdir(join(repository, 'feeds', 'chirpstack-openwrt-feed'), { recursive: true });
     await writeFile(join(repository, 'README'), 'real framing\n');
-    await execFile('/usr/bin/git', ['-C', repository, 'add', 'README']);
+    await writeFile(join(repository, 'openwrt', 'README'), 'vendored openwrt\n');
+    await writeFile(join(repository, 'feeds', 'chirpstack-openwrt-feed', 'README'), 'vendored feed\n');
+    await writeFile(join(repository, '.gitmodules'), '[submodule "openwrt"]\n path = openwrt\n url = https://github.com/openwrt/openwrt.git\n branch = openwrt-24.10\n[submodule "feeds/chirpstack-openwrt-feed"]\n path = feeds/chirpstack-openwrt-feed\n url = https://github.com/chirpstack/chirpstack-openwrt-feed.git\n');
+    await execFile('/usr/bin/git', ['-C', repository, 'add', '.']);
     await execFile('/usr/bin/git', ['-C', repository, 'commit', '--quiet', '-m', 'real framing subject']);
     const sha = (await execFile('/usr/bin/git', ['-C', repository, 'rev-parse', 'HEAD'])).stdout.trim();
     await execFile('/usr/bin/git', ['-C', repository, 'update-ref', 'refs/remotes/origin/main', sha]);

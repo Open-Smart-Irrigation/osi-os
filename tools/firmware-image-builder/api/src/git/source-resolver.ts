@@ -9,6 +9,7 @@ import {
   validateOriginUrl,
   type ValidatedOriginPolicy,
 } from '../../../config/origin-policy.js';
+import { canonicalInstant, normalizeJson } from '../validation.js';
 
 const BRANCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u;
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
@@ -17,6 +18,16 @@ const MAX_BRANCH_BYTES = 255;
 const MAX_FIELD_BYTES = 64 * 1024;
 const MAX_REF_COUNT = 1000;
 const NUL = '\0';
+const SOURCE_COMPONENTS = Object.freeze([
+  Object.freeze({
+    path: 'feeds/chirpstack-openwrt-feed',
+    provenanceUrl: 'https://github.com/chirpstack/chirpstack-openwrt-feed.git',
+  }),
+  Object.freeze({
+    path: 'openwrt',
+    provenanceUrl: 'https://github.com/openwrt/openwrt.git',
+  }),
+] as const);
 
 export interface GitExecutor {
   run(argv: readonly string[], options?: GitRunOptions): Promise<GitProcessResult>;
@@ -50,6 +61,7 @@ export interface GitResolutionMetadata {
   readonly commitTime: string;
   readonly author: string;
   readonly subject: string;
+  readonly sourcePreparation: RecursiveSourcePreparation;
 }
 
 export interface RunnerPinnedSource {
@@ -58,6 +70,23 @@ export interface RunnerPinnedSource {
   readonly commitTime: string;
   readonly author: string;
   readonly subject: string;
+  readonly sourcePreparation: RecursiveSourcePreparation;
+}
+
+export interface PreparedSourceComponent {
+  readonly path: (typeof SOURCE_COMPONENTS)[number]['path'];
+  readonly mode: '040000';
+  readonly type: 'tree';
+  readonly objectId: string;
+  readonly provenanceUrl: string;
+}
+
+export interface RecursiveSourcePreparation {
+  readonly schemaVersion: 1;
+  readonly sourceSha: string;
+  readonly gitmodulesBlobSha: string;
+  readonly preparedAt: string;
+  readonly components: readonly PreparedSourceComponent[];
 }
 
 export type FreshnessResult =
@@ -72,6 +101,7 @@ export type SourceResolverCode =
   | 'ORIGIN_NOT_SSH'
   | 'GIT_FETCH_FAILED'
   | 'SOURCE_NOT_COMMIT'
+  | 'SOURCE_PREPARATION_FAILED'
   | 'BRANCH_MOVED'
   | 'FRESHNESS_UNKNOWN';
 
@@ -95,6 +125,7 @@ function sourceMessage(code: SourceResolverCode): string {
     case 'ORIGIN_NOT_SSH': return 'The configured origin is not one approved SSH URL.';
     case 'GIT_FETCH_FAILED': return 'The configured origin could not be fetched.';
     case 'SOURCE_NOT_COMMIT': return 'The selected remote ref does not resolve to a commit.';
+    case 'SOURCE_PREPARATION_FAILED': return 'The selected source tree could not be prepared for offline execution.';
     case 'BRANCH_MOVED': return 'The remote branch moved after it was displayed.';
     case 'FRESHNESS_UNKNOWN': return 'The remote freshness check was unavailable.';
   }
@@ -164,6 +195,80 @@ function immutable<T extends object>(value: T): Readonly<T> {
   return Object.freeze(value);
 }
 
+function parseSourceTree(output: string): {
+  readonly gitmodulesBlobSha: string;
+  readonly components: readonly Omit<PreparedSourceComponent, 'provenanceUrl'>[];
+} {
+  if (bytes(output) > MAX_FIELD_BYTES || !output.endsWith(NUL)) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+  const records = output.slice(0, -1).split(NUL);
+  const entries = records.map((record) => {
+    const match = /^([0-9]{6}) (blob|tree|commit) ([0-9a-f]{40})\t([^\0\r\n]+)$/u.exec(record);
+    if (!match) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    return { mode: match[1]!, type: match[2]!, objectId: match[3]!, path: match[4]! };
+  });
+  if (entries.length !== 3 || new Set(entries.map((entry) => entry.path)).size !== entries.length) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+  const modules = entries.find((entry) => entry.path === '.gitmodules');
+  if (!modules || modules.mode !== '100644' || modules.type !== 'blob') throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+  const components = SOURCE_COMPONENTS.map(({ path }) => {
+    const entry = entries.find((candidate) => candidate.path === path);
+    if (!entry || entry.mode !== '040000' || entry.type !== 'tree') throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    return immutable({ path, mode: '040000' as const, type: 'tree' as const, objectId: entry.objectId });
+  });
+  return immutable({ gitmodulesBlobSha: modules.objectId, components: Object.freeze(components) });
+}
+
+function validateGitmodules(contents: string): void {
+  if (bytes(contents) > MAX_FIELD_BYTES || contents.includes('\0') || contents.includes('\r')) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+  const sections = new Map<string, Map<string, string>>();
+  let current: Map<string, string> | undefined;
+  let currentName = '';
+  for (const rawLine of contents.split('\n')) {
+    const line = rawLine.trim();
+    if (line === '') continue;
+    const section = /^\[submodule "([^"]+)"\]$/u.exec(line);
+    if (section) {
+      currentName = section[1]!;
+      if (!SOURCE_COMPONENTS.some(({ path }) => path === currentName) || sections.has(currentName)) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+      current = new Map();
+      sections.set(currentName, current);
+      continue;
+    }
+    const setting = /^(path|url|branch)\s*=\s*(\S+)$/u.exec(line);
+    if (!current || !setting || current.has(setting[1]!)) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    if (setting[1] === 'branch' && currentName !== 'openwrt') throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    current.set(setting[1]!, setting[2]!);
+  }
+  if (sections.size !== SOURCE_COMPONENTS.length) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+  for (const expected of SOURCE_COMPONENTS) {
+    const values = sections.get(expected.path);
+    const expectedKeys = expected.path === 'openwrt' ? ['branch', 'path', 'url'] : ['path', 'url'];
+    if (!values || [...values.keys()].sort().join('\0') !== expectedKeys.join('\0') || values.get('path') !== expected.path || values.get('url') !== expected.provenanceUrl) {
+      throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    }
+    if (expected.path === 'openwrt' && values.get('branch') !== 'openwrt-24.10') throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+  }
+}
+
+export function validateRecursiveSourcePreparation(preparation: RecursiveSourcePreparation, sourceSha: string): RecursiveSourcePreparation {
+  try {
+    const value = normalizeJson(preparation, 'sourcePreparation');
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    const normalized = value as unknown as RecursiveSourcePreparation;
+    if (normalized.schemaVersion !== 1 || normalized.sourceSha !== sourceSha || !SHA_PATTERN.test(normalized.gitmodulesBlobSha)) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    const preparedAt = canonicalInstant(normalized.preparedAt, 'sourcePreparation.preparedAt');
+    if (!Array.isArray(normalized.components) || normalized.components.length !== SOURCE_COMPONENTS.length) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    const components = SOURCE_COMPONENTS.map((expected, index) => {
+      const component = normalized.components[index];
+      if (!component || component.path !== expected.path || component.mode !== '040000' || component.type !== 'tree' || !SHA_PATTERN.test(component.objectId) || component.provenanceUrl !== expected.provenanceUrl || Object.keys(component).sort().join('\0') !== 'mode\0objectId\0path\0provenanceUrl\0type') throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+      return immutable({ ...component });
+    });
+    if (Object.keys(normalized).sort().join('\0') !== 'components\0gitmodulesBlobSha\0preparedAt\0schemaVersion\0sourceSha') throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    return immutable({ schemaVersion: 1, sourceSha, gitmodulesBlobSha: normalized.gitmodulesBlobSha, preparedAt, components: Object.freeze(components) });
+  } catch {
+    throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+  }
+}
+
 export class SourceResolver {
   readonly #repositoryPath: string;
   readonly #git: GitExecutor;
@@ -191,7 +296,42 @@ export class SourceResolver {
       commitTime: metadata.commitTime,
       author: metadata.author,
       subject: metadata.subject,
+      sourcePreparation: validateRecursiveSourcePreparation(metadata.sourcePreparation, metadata.sha),
     });
+  }
+
+  async prepareRecursiveSource(shaInput: unknown): Promise<RecursiveSourcePreparation> {
+    const sha = validateSha(shaInput);
+    try {
+      const tree = parseSourceTree((await this.#run([
+        'ls-tree',
+        '-z',
+        '--full-tree',
+        sha,
+        '--',
+        '.gitmodules',
+        'feeds/chirpstack-openwrt-feed',
+        'openwrt',
+      ])).stdout);
+      const modules = await this.#run(['show', `${sha}:.gitmodules`]);
+      validateGitmodules(modules.stdout);
+      for (const component of tree.components) {
+        await this.#run(['cat-file', '-e', '--end-of-options', `${component.objectId}^{tree}`]);
+      }
+      return immutable({
+        schemaVersion: 1,
+        sourceSha: sha,
+        gitmodulesBlobSha: tree.gitmodulesBlobSha,
+        preparedAt: canonicalInstant(this.#now(), 'sourcePreparation.preparedAt'),
+        components: Object.freeze(tree.components.map((component, index) => immutable({
+          ...component,
+          provenanceUrl: SOURCE_COMPONENTS[index]!.provenanceUrl,
+        }))),
+      });
+    } catch (error) {
+      if (error instanceof SourceResolverError && error.code === 'INVALID_SHA') throw error;
+      throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    }
   }
 
   async listBranches(): Promise<BranchList> {
@@ -218,8 +358,9 @@ export class SourceResolver {
     const expectedSha = validateSha(expectedShaInput);
     const originUrl = await this.#fetchOrigin();
     const observedSha = await this.#resolveRef(branch);
-    const metadata = immutable(await this.#readMetadata(observedSha, true, originUrl, branch));
+    const commit = await this.#readMetadata(observedSha, true, originUrl, branch);
     if (observedSha !== expectedSha) throw new SourceResolverError('BRANCH_MOVED', { expectedSha, observedSha, branch });
+    const metadata = immutable({ ...commit, sourcePreparation: await this.prepareRecursiveSource(observedSha) });
     if (accept) await accept(metadata);
     return metadata;
   }
@@ -286,7 +427,7 @@ export class SourceResolver {
     }
   }
 
-  async #readMetadata(sha: string, complete: boolean, originUrl = '', branch = ''): Promise<GitResolutionMetadata> {
+  async #readMetadata(sha: string, complete: boolean, originUrl = '', branch = ''): Promise<Omit<GitResolutionMetadata, 'sourcePreparation'>> {
     const format = complete ? '%H%x00%cI%x00%an%x00%ae%x00%s%x00' : '%H%x00%cI%x00%s%x00';
     try {
       const result = await this.#run(['show', '--no-patch', `--format=format:${format}`, '--end-of-options', sha]);

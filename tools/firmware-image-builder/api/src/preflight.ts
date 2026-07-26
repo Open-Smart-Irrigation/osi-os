@@ -214,6 +214,8 @@ export interface PreflightResult {
   readonly branch: string;
   readonly expectedSha: string;
   readonly observedSha: string;
+  /** API-attested source identity and recursive vendored-tree preparation for runner persistence. */
+  readonly source: Readonly<GitResolutionMetadata>;
   readonly target: TargetManifest;
   readonly outputRoot: ApprovedOutputRoot;
   readonly createdAt: string;
@@ -405,7 +407,7 @@ export class PreflightService {
       if (collision.finalExists || collision.finalSymlink || !collision.parentWritable || collision.unsafeAncestor !== undefined) throw new Error('release path is unsafe or collides');
       checks.push(passed('output-collision', { releasePath, exists: false, parentWritable: true }));
     } catch { throw this.#error('OUTPUT_COLLISION', { releasePath }, [...checks, failed('output-collision', 'OUTPUT_COLLISION', {})]); }
-    return immutable({ preflightId, branch: request.branch, expectedSha: request.expectedSha, observedSha: source.sha, target, outputRoot, createdAt, expiresAt, checks: Object.freeze(checks) });
+    return immutable({ preflightId, branch: request.branch, expectedSha: request.expectedSha, observedSha: source.sha, source, target, outputRoot, createdAt, expiresAt, checks: Object.freeze(checks) });
   }
 
   async #readFreeSpace(path: string, id: 'disk-worktree' | 'disk-output', checks: PreflightCheckRecord[]): Promise<number> {
