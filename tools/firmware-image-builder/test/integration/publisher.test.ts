@@ -15,6 +15,8 @@ const afterRaceBinary = join(publisherDirectory, 'osi-image-publish-test-after')
 const destinationRaceBinary = join(publisherDirectory, 'osi-image-publish-test-destination');
 const ancestorBeforeBinary = join(publisherDirectory, 'osi-image-publish-test-ancestor-before');
 const ancestorAfterBinary = join(publisherDirectory, 'osi-image-publish-test-ancestor-after');
+const rootAncestorBeforeBinary = join(publisherDirectory, 'osi-image-publish-test-root-ancestor-before');
+const rootAncestorAfterBinary = join(publisherDirectory, 'osi-image-publish-test-root-ancestor-after');
 const unsupportedBinary = join(publisherDirectory, 'osi-image-publish-test-unsupported');
 const crossDeviceBinary = join(publisherDirectory, 'osi-image-publish-test-cross-device');
 const fsyncFailureBinary = join(publisherDirectory, 'osi-image-publish-test-fsync-failure');
@@ -43,8 +45,8 @@ function parsed(response: { stdout: string }): Record<string, unknown> {
   return JSON.parse(response.stdout) as Record<string, unknown>;
 }
 
-async function createStaging(jobId: string): Promise<string> {
-  const path = join(root, '.osi-image-builder', 'staging', jobId);
+async function createStaging(jobId: string, selectedRoot = root): Promise<string> {
+  const path = join(selectedRoot, '.osi-image-builder', 'staging', jobId);
   await mkdir(path, { recursive: true });
   await writeFile(join(path, 'factory.img.gz'), 'factory image');
   await writeFile(join(path, 'sha256sums'), 'checksum  factory.img.gz\n');
@@ -70,6 +72,8 @@ describe('native publisher integration', () => {
     await rm(destinationRaceBinary, { force: true });
     await rm(ancestorBeforeBinary, { force: true });
     await rm(ancestorAfterBinary, { force: true });
+    await rm(rootAncestorBeforeBinary, { force: true });
+    await rm(rootAncestorAfterBinary, { force: true });
     await rm(unsupportedBinary, { force: true });
     await rm(crossDeviceBinary, { force: true });
     await rm(fsyncFailureBinary, { force: true });
@@ -288,6 +292,30 @@ describe('native publisher integration', () => {
     expect(parsed(after)).toMatchObject({ published: false, mutationCount: 2, errorCode: 'PUBLISH_FAILED', sourceRelativePath: `.osi-image-builder/staging/${afterJob}`, destinationRelativePath: `feature%2Frace-after/${SHA}/${TARGET}` });
     await unlink(join(root, '.osi-image-builder', 'staging', afterJob));
     await rename(join(root, '.osi-image-builder', 'staging', '.publisher-test-hidden'), join(root, '.osi-image-builder', 'staging', afterJob));
+  });
+
+  it('retains and revalidates the complete approved-root descriptor chain', async () => {
+    for (const [phase, executable] of [['before', rootAncestorBeforeBinary], ['after', rootAncestorAfterBinary]] as const) {
+      const chainBase = await mkdtemp('/tmp/osi-image-publisher-chain-');
+      const selectedRoot = join(chainBase, 'level-one', 'level-two', 'images');
+      const jobId = `job-root-ancestor-${phase}`;
+      try {
+        await createStaging(jobId, selectedRoot);
+        const response = await runBinary(executable, 'publish', '--root', selectedRoot, '--job-id', jobId, '--branch', `feature%2Froot-${phase}`, '--sha', SHA, '--target', TARGET);
+        expect(response.code).toBe(2);
+        expect(parsed(response)).toMatchObject({
+          published: false,
+          errorCode: 'PUBLISH_FAILED',
+          mutationCount: phase === 'before' ? 0 : 3,
+          ...(phase === 'after' ? { renameResult: 'RENAMED' } : {}),
+        });
+        await expect(access(join(selectedRoot, `feature%2Froot-${phase}`, SHA, TARGET))).rejects.toMatchObject({ code: 'ENOENT' });
+        const levelOneEntries = await readdir(join(chainBase, 'level-one'));
+        expect(levelOneEntries.some((entry) => entry.startsWith('.publisher-test-root-ancestor-hidden-'))).toBe(true);
+      } finally {
+        await rm(chainBase, { recursive: true, force: true });
+      }
+    }
   });
 
   it('applies the same held-source identity proof and post-rename evidence to quarantine', async () => {

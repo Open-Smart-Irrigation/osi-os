@@ -18,6 +18,11 @@ describe('native publisher build contract', () => {
     expect(source).toContain('RENAME_NOREPLACE');
     expect(source).toMatch(/renameat2\s*\([^;]+RENAME_NOREPLACE/s);
     expect(source).toContain('errno == EINVAL');
+    expect(source).toContain('struct directory_chain');
+    expect(source).toMatch(/for \(index = 0; index < chain->component_count; index \+= 1\)/u);
+    expect(source).toContain('directory_chain_matches(&root_chain)');
+    expect(source).toContain('sync_existing_publish_parents');
+    expect(source).toContain('sync_existing_quarantine_parents');
   });
 
   it('uses a private self-test tree and does not expose recursive deletion', async () => {
