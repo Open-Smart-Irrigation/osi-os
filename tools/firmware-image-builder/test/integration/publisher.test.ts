@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { createPublisherClient } from '../../publisher/client.js';
+
 const execFile = promisify(execFileCallback);
 const publisherDirectory = join(process.cwd(), 'publisher');
 const binary = join(publisherDirectory, 'osi-image-publish');
@@ -170,12 +172,19 @@ describe('native publisher integration', () => {
   });
 
   it('reports selected-filesystem capability, cross-device, and fsync failures honestly', async () => {
+    const scratchBefore = new Set((await readdir('/tmp')).filter((entry) => entry.startsWith('osi-image-publish-self-test-')));
     const unsupportedJob = 'job-unsupported';
     await createStaging(unsupportedJob);
     const unsupported = await runBinary(unsupportedBinary, 'publish', '--root', root, '--job-id', unsupportedJob, '--branch', 'feature%2Funsupported', '--sha', SHA, '--target', TARGET);
     expect(unsupported.code).not.toBe(0);
     expect(parsed(unsupported)).toEqual({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' });
     await expect(access(join(root, 'feature%2Funsupported'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await readdir(join(root, '.osi-image-builder'))).some((entry) => entry.startsWith('.osi-image-publisher-capability-'))).toBe(false);
+    const unsupportedSelfTest = await runBinary(unsupportedBinary, '--self-test');
+    expect(unsupportedSelfTest.code).not.toBe(0);
+    expect(parsed(unsupportedSelfTest)).toEqual({ available: false, published: false, quarantined: false, selfTest: false, mutationCount: 0, errorCode: 'PUBLISHER_UNSUPPORTED' });
+    const scratchAfter = new Set((await readdir('/tmp')).filter((entry) => entry.startsWith('osi-image-publish-self-test-')));
+    expect(scratchAfter).toEqual(scratchBefore);
 
     const crossDeviceJob = 'job-cross-device';
     await createStaging(crossDeviceJob);
@@ -188,6 +197,47 @@ describe('native publisher integration', () => {
     const fsyncFailure = await runBinary(fsyncFailureBinary, 'publish', '--root', root, '--job-id', fsyncJob, '--branch', 'feature%2Ffsync-failure', '--sha', SHA, '--target', TARGET);
     expect(fsyncFailure.code).not.toBe(0);
     expect(parsed(fsyncFailure)).toMatchObject({ published: false, mutationCount: 3, errorCode: 'PUBLISH_FAILED', renameResult: 'RENAMED' });
+  });
+
+  it('keeps native early filesystem failures typed through the production client', async () => {
+    const missingRoot = join(base, 'missing-root');
+    const missingClient = createPublisherClient({
+      executable: binary,
+      approvedRoots: [{ id: 'missing', label: 'Missing', path: missingRoot, quarantinePath: `${missingRoot}/.osi-image-builder/quarantine` }],
+    });
+    const request = { rootId: 'missing', jobId: 'job-missing-root', branchSlug: 'feature%2Fmissing-root', sourceSha: SHA, targetId: 'rpi-5' as const };
+    await expect(missingClient.publish(request)).resolves.toMatchObject({
+      available: true,
+      published: false,
+      errorCode: 'PUBLISH_FAILED',
+      sourceRelativePath: '.osi-image-builder/staging/job-missing-root',
+    });
+    await expect(missingClient.quarantine(request)).resolves.toMatchObject({
+      available: true,
+      quarantined: false,
+      errorCode: 'QUARANTINE_PENDING',
+      sourceRelativePath: '.osi-image-builder/staging/job-missing-root',
+    });
+    await expect(missingClient.recheck(request)).resolves.toMatchObject({
+      destination: 'unknown',
+      staging: 'unknown',
+      errorCode: 'PUBLISH_RECOVERY_FAILED',
+    });
+
+    const invalidRoot = join(base, 'invalid-staging-root');
+    await mkdir(join(invalidRoot, '.osi-image-builder'), { recursive: true });
+    await writeFile(join(invalidRoot, '.osi-image-builder', 'staging'), 'not a directory');
+    const invalidClient = createPublisherClient({
+      executable: binary,
+      approvedRoots: [{ id: 'invalid', label: 'Invalid staging', path: invalidRoot, quarantinePath: `${invalidRoot}/.osi-image-builder/quarantine` }],
+    });
+    await expect(invalidClient.publish({ ...request, rootId: 'invalid', jobId: 'job-invalid-staging' })).resolves.toMatchObject({ errorCode: 'PUBLISH_FAILED' });
+    await expect(invalidClient.quarantine({ rootId: 'invalid', jobId: 'job-invalid-staging' })).resolves.toMatchObject({ errorCode: 'QUARANTINE_PENDING' });
+    await expect(invalidClient.recheck({ ...request, rootId: 'invalid', jobId: 'job-invalid-staging' })).resolves.toMatchObject({
+      destination: 'unknown',
+      staging: 'unknown',
+      errorCode: 'PUBLISH_RECOVERY_FAILED',
+    });
   });
 
   it('distinguishes a surviving staging tree from an existing mismatched destination without mutation', async () => {

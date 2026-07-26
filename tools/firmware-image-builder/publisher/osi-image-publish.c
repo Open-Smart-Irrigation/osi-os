@@ -297,19 +297,20 @@ static int publisher_capability_available(int directory) {
     int supported = -1;
     int cleanup_failed = 0;
     int status;
-#ifdef PUBLISHER_TEST_UNSUPPORTED
-    (void)directory;
-    return 0;
-#endif
     if (snprintf(probe_name, sizeof(probe_name), ".osi-image-publisher-capability-%ld", (long)getpid()) < 0) return -1;
     if (mkdirat(directory, probe_name, 0700) < 0) return -1;
     probe = openat(directory, probe_name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (probe < 0 || mkdirat(probe, "source", 0700) < 0) goto cleanup;
+#ifdef PUBLISHER_TEST_CAPABILITY_EINVAL
+    errno = EINVAL;
+    status = -1;
+#else
     status = publisher_renameat2(probe, "source", probe, "destination");
+#endif
     if (status == 0) {
         renamed = 1;
         supported = 1;
-    } else if (errno == ENOSYS || errno == EOPNOTSUPP) supported = 0;
+    } else if (errno == ENOSYS || errno == EOPNOTSUPP || errno == EINVAL) supported = 0;
 cleanup:
     if (probe >= 0) {
         if (unlinkat(probe, renamed ? "destination" : "source", AT_REMOVEDIR) < 0 && errno != ENOENT) cleanup_failed = 1;
@@ -496,6 +497,8 @@ static int publish_operation(const char *root_path, const char *job_id, const ch
     int status;
     struct stat source_identity;
     result->available = 1;
+    (void)snprintf(result->source_relative, sizeof(result->source_relative), ".osi-image-builder/staging/%s", job_id);
+    (void)snprintf(result->destination_relative, sizeof(result->destination_relative), "%s/%s/%s", branch, sha, target);
     if (prepare_root(root_path, &root, &metadata) < 0) {
         result->error_code = "PUBLISH_FAILED";
         return 2;
@@ -504,13 +507,13 @@ static int publish_operation(const char *root_path, const char *job_id, const ch
     if (capability == 0) {
         result->available = 0;
         result->error_code = "PUBLISHER_UNSUPPORTED";
+        result->source_relative[0] = '\0';
+        result->destination_relative[0] = '\0';
         close(metadata);
         close(root);
         return 2;
     }
     if (capability < 0) goto invalid;
-    (void)snprintf(result->source_relative, sizeof(result->source_relative), ".osi-image-builder/staging/%s", job_id);
-    (void)snprintf(result->destination_relative, sizeof(result->destination_relative), "%s/%s/%s", branch, sha, target);
     staging_parent = open_directory_at(metadata, "staging", 0, NULL);
     if (staging_parent < 0) goto invalid;
     source = openat(staging_parent, job_id, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
@@ -603,6 +606,8 @@ static int quarantine_operation(const char *root_path, const char *job_id, struc
     int status;
     struct stat source_identity;
     result->available = 1;
+    (void)snprintf(result->source_relative, sizeof(result->source_relative), ".osi-image-builder/staging/%s", job_id);
+    (void)snprintf(result->destination_relative, sizeof(result->destination_relative), ".osi-image-builder/quarantine/%s", job_id);
     if (prepare_root(root_path, &root, &metadata) < 0) {
         result->error_code = "QUARANTINE_PENDING";
         return 2;
@@ -611,13 +616,13 @@ static int quarantine_operation(const char *root_path, const char *job_id, struc
     if (capability == 0) {
         result->available = 0;
         result->error_code = "PUBLISHER_UNSUPPORTED";
+        result->source_relative[0] = '\0';
+        result->destination_relative[0] = '\0';
         close(metadata);
         close(root);
         return 2;
     }
     if (capability < 0) goto invalid;
-    (void)snprintf(result->source_relative, sizeof(result->source_relative), ".osi-image-builder/staging/%s", job_id);
-    (void)snprintf(result->destination_relative, sizeof(result->destination_relative), ".osi-image-builder/quarantine/%s", job_id);
     staging_parent = open_directory_at(metadata, "staging", 0, NULL);
     quarantine_parent = open_directory_at(metadata, "quarantine", 1, &quarantine_created);
     result->mutation_count += quarantine_created;
@@ -698,8 +703,10 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
     int staging_state;
     int destination_state;
     result->available = 1;
+    result->destination = "unknown";
+    result->staging = "unknown";
+    result->error_code = "PUBLISH_RECOVERY_FAILED";
     if (prepare_root(root_path, &root, &metadata) < 0) {
-        result->error_code = "INVALID_ARGUMENT";
         return 2;
     }
     staging_parent = open_directory_at(metadata, "staging", 0, NULL);
@@ -741,7 +748,9 @@ static int recheck_operation(const char *root_path, const char *job_id, const ch
     close(root);
     return 0;
 invalid:
-    result->error_code = "INVALID_ARGUMENT";
+    result->destination = "unknown";
+    result->staging = "unknown";
+    result->error_code = "PUBLISH_RECOVERY_FAILED";
     if (destination >= 0) close(destination);
     if (destination_parent >= 0) close(destination_parent);
     if (branch_parent >= 0) close(branch_parent);
@@ -807,7 +816,7 @@ static int create_self_test_job(int staging, const char *name) {
 
 static int self_test(void) {
     char scratch_template[] = "/tmp/osi-image-publish-self-test-XXXXXX";
-    char *scratch = mkdtemp(scratch_template);
+    char *scratch = NULL;
     int temporary_parent = -1;
     struct operation_result result = { 0 };
     int code = 2;
@@ -816,6 +825,7 @@ static int self_test(void) {
     if (capability_directory >= 0) close(capability_directory);
     if (capability == 0) return fail_result("PUBLISHER_UNSUPPORTED", 0, 0);
     if (capability < 0) return fail_result("PUBLISHER_SELF_TEST_FAILED", 1, 0);
+    scratch = mkdtemp(scratch_template);
     if (scratch == NULL) return fail_result("PUBLISHER_UNSUPPORTED", 0, 0);
     temporary_parent = open("/tmp", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (temporary_parent < 0) {

@@ -259,6 +259,19 @@ describe('publisher client', () => {
     await expect(client(fakeExecutor(result(recheckComplete))).recheck(request))
       .resolves.toMatchObject({ destination: 'candidate', staging: 'absent' });
 
+    const recheckFailed = JSON.stringify({
+      available: true,
+      published: false,
+      quarantined: false,
+      selfTest: false,
+      mutationCount: 0,
+      destination: 'unknown',
+      staging: 'unknown',
+      errorCode: 'PUBLISH_RECOVERY_FAILED',
+    });
+    await expect(client(fakeExecutor(result(recheckFailed, { exitCode: 2 }))).recheck(request))
+      .resolves.toMatchObject({ destination: 'unknown', staging: 'unknown', errorCode: 'PUBLISH_RECOVERY_FAILED' });
+
     const contradictoryQuarantine = [
       result(quarantineFailure),
       result(JSON.stringify({ ...JSON.parse(quarantineFailure), errorCode: 'PUBLISH_FAILED' }), { exitCode: 2 }),
@@ -272,6 +285,7 @@ describe('publisher client', () => {
       result(JSON.stringify({ ...JSON.parse(recheckComplete), staging: 'present' })),
       result(JSON.stringify({ ...JSON.parse(recheckComplete), destination: 'absent' })),
       result(JSON.stringify({ ...JSON.parse(recheckComplete), destination: 'mismatched' })),
+      result(recheckFailed),
     ];
     for (const reply of contradictoryRecheck) await expect(client(fakeExecutor(reply)).recheck(request)).rejects.toThrow();
   });

@@ -31,8 +31,8 @@ export interface PublisherResponse {
   readonly selfTest: boolean;
   readonly mutationCount: number;
   readonly errorCode?: PublisherErrorCode;
-  readonly destination?: 'absent' | 'candidate' | 'mismatched';
-  readonly staging?: 'absent' | 'present';
+  readonly destination?: 'absent' | 'candidate' | 'mismatched' | 'unknown';
+  readonly staging?: 'absent' | 'present' | 'unknown';
   readonly sourceRelativePath?: string;
   readonly destinationRelativePath?: string;
   readonly renameResult?: 'RENAMED' | 'EEXIST' | 'ENOSYS' | 'EOPNOTSUPP' | 'EXDEV' | 'OTHER_ERROR';
@@ -135,12 +135,17 @@ function parseResponse(result: CommandResult, argv: readonly string[], operation
   const sourcePath = `.osi-image-builder/staging/${jobId}`;
   const destinationPath = operation === 'publish' ? `${(request as PublisherRequest).branchSlug}/${(request as PublisherRequest).sourceSha}/${(request as PublisherRequest).targetId}` : `.osi-image-builder/quarantine/${jobId}`;
   if (operation === 'recheck') {
-    if (result.exitCode !== 0 || published || quarantined || mutationCount !== 0 || EVIDENCE_FIELDS.some((key) => key in value) || typeof value.destination !== 'string' || !['absent', 'candidate', 'mismatched'].includes(value.destination) || typeof value.staging !== 'string' || !['absent', 'present'].includes(value.staging) || (value.errorCode !== undefined && !BLOCKER_CODES.has(value.errorCode as PublisherErrorCode))) throw new Error('publisher recheck result is contradictory');
-    if (
-      (value.destination === 'candidate' && (value.staging !== 'absent' || value.errorCode !== undefined))
-      || (value.destination === 'absent' && value.errorCode !== 'PUBLISH_RECOVERY_FAILED')
-      || (value.destination === 'mismatched' && value.errorCode !== 'UNVERIFIED_FINAL_PATH_BLOCKER')
-    ) throw new Error('publisher recheck phase result is contradictory');
+    if (published || quarantined || mutationCount !== 0 || EVIDENCE_FIELDS.some((key) => key in value)) throw new Error('publisher recheck result is contradictory');
+    if (result.exitCode === 0) {
+      if (typeof value.destination !== 'string' || !['absent', 'candidate', 'mismatched'].includes(value.destination) || typeof value.staging !== 'string' || !['absent', 'present'].includes(value.staging) || (value.errorCode !== undefined && !BLOCKER_CODES.has(value.errorCode as PublisherErrorCode))) throw new Error('publisher recheck result is contradictory');
+      if (
+        (value.destination === 'candidate' && (value.staging !== 'absent' || value.errorCode !== undefined))
+        || (value.destination === 'absent' && value.errorCode !== 'PUBLISH_RECOVERY_FAILED')
+        || (value.destination === 'mismatched' && value.errorCode !== 'UNVERIFIED_FINAL_PATH_BLOCKER')
+      ) throw new Error('publisher recheck phase result is contradictory');
+    } else if (result.exitCode !== 2 || value.destination !== 'unknown' || value.staging !== 'unknown' || value.errorCode !== 'PUBLISH_RECOVERY_FAILED') {
+      throw new Error('publisher failed recheck result is contradictory');
+    }
   } else if (operation === 'publish') {
     if (quarantined || 'destination' in value || 'staging' in value) throw new Error('publisher publication result is contradictory');
     validatePathEvidence(value, sourcePath, destinationPath);

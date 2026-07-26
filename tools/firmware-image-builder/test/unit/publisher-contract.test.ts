@@ -17,6 +17,7 @@ describe('native publisher build contract', () => {
     }
     expect(source).toContain('RENAME_NOREPLACE');
     expect(source).toMatch(/renameat2\s*\([^;]+RENAME_NOREPLACE/s);
+    expect(source).toContain('errno == EINVAL');
   });
 
   it('uses a private self-test tree and does not expose recursive deletion', async () => {

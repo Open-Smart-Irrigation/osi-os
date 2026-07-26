@@ -57,7 +57,7 @@ test-ancestor-after: $(SOURCE) Makefile
 
 test-unsupported: $(SOURCE) Makefile
 	SOURCE_SHA256=$$(sha256sum $(SOURCE) | awk '{print $$1}'); \
-	$(CC) $(CFLAGS) -DPUBLISHER_TESTING -DPUBLISHER_TEST_UNSUPPORTED -DPUBLISHER_VERSION=\"$(VERSION)\" -DPUBLISHER_SOURCE_SHA256=\"$$SOURCE_SHA256\" -o osi-image-publish-test-unsupported $(SOURCE)
+	$(CC) $(CFLAGS) -DPUBLISHER_TESTING -DPUBLISHER_TEST_CAPABILITY_EINVAL -DPUBLISHER_VERSION=\"$(VERSION)\" -DPUBLISHER_SOURCE_SHA256=\"$$SOURCE_SHA256\" -o osi-image-publish-test-unsupported $(SOURCE)
 	chmod 0555 osi-image-publish-test-unsupported
 
 test-cross-device: $(SOURCE) Makefile
