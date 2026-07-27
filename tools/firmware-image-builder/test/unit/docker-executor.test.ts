@@ -230,7 +230,10 @@ describe('operation registry', () => {
 });
 
 describe('DockerExecutor', () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   it('stops cooperatively when cancellation arrives during attached Docker execution and waits for the child', async () => {
     const calls: string[][] = [];
@@ -283,6 +286,158 @@ describe('DockerExecutor', () => {
     expect(writes.map((command) => command.kind)).toContain('operation-complete');
     const complete = writes.find((command): command is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => command.kind === 'operation-complete');
     expect(complete?.input).toMatchObject({ outcome: 'failed', errorCode: 'CANCELLED' });
+  });
+
+  it('starts the full cooperative budget when cancellation arrives after an operation has run longer than 30 seconds', async () => {
+    let monotonic = 0;
+    let attachStarted = false;
+    let releaseAttach: (() => void) | undefined;
+    let inspectCount = 0;
+    const commandExecutor: DockerCommandExecutor = {
+      run: vi.fn(async (argv: readonly string[]) => {
+        switch (argv[1]) {
+          case 'version': return { argv: [...argv], exitCode: 0, signal: null, stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'image': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'ps': return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'create': return { argv: [...argv], exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'inspect': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify(inspectCount++ === 0 ? realisticCreatedRawInspection() : realisticRawInspection()), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'start':
+            attachStarted = true;
+            monotonic = 120_000;
+            await new Promise<void>((resolve) => { releaseAttach = resolve; });
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'stop':
+            releaseAttach?.();
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          default: throw new Error(`unexpected Docker command ${argv.join(' ')}`);
+        }
+      }),
+    };
+
+    const run = createDockerExecutor(options(commandExecutor, {
+      monotonicNow: () => monotonic,
+      cancellationRequested: () => attachStarted,
+    })).run();
+
+    await expect(run).rejects.toBeInstanceOf(DockerCancellationRequestedError);
+    const stopCallIndex = vi.mocked(commandExecutor.run).mock.calls.findIndex(([argv]) => argv[1] === 'stop');
+    expect(vi.mocked(commandExecutor.run).mock.calls[stopCallIndex]?.[1]).toMatchObject({ timeoutMs: 30_000 });
+  });
+
+  it('leaves a cancellation first observed after attach completion to the operation boundary', async () => {
+    const cancellationRequested = vi.fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValue(true);
+    const docker = fakeDocker(successfulResponses());
+
+    await expect(createDockerExecutor(options(docker, {
+      cancellationRequested,
+    })).run()).resolves.toMatchObject({
+      available: true,
+      outcome: 'passed',
+    });
+    expect(docker.calls.some((call) => call[1] === 'stop')).toBe(false);
+    expect(docker.calls.some((call) => call[1] === 'rm')).toBe(true);
+  });
+
+  it('returns cancellation recovery-required evidence when the attached Docker child exceeds the shared deadline', async () => {
+    vi.useFakeTimers();
+    let attachStarted = false;
+    let inspectCount = 0;
+    let startOptions: CommandRunOptions | undefined;
+    const writes: RunnerWriteCommand[] = [];
+    const onStdout = vi.fn();
+    const commandExecutor: DockerCommandExecutor = {
+      run: vi.fn(async (argv: readonly string[], runOptions: CommandRunOptions) => {
+        switch (argv[1]) {
+          case 'version': return { argv: [...argv], exitCode: 0, signal: null, stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'image': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'ps': return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'create': return { argv: [...argv], exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'inspect': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify(inspectCount++ === 0 ? realisticCreatedRawInspection() : realisticRawInspection()), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'start':
+            attachStarted = true;
+            startOptions = runOptions;
+            return new Promise<CommandResult>(() => undefined);
+          case 'stop':
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          default: throw new Error(`unexpected Docker command ${argv.join(' ')}`);
+        }
+      }),
+    };
+    const run = createDockerExecutor(options(commandExecutor, {
+      cancellationRequested: () => attachStarted,
+      onStdout,
+      ownership: { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true, kind: 'committed', eventSeq: writes.length }; }) },
+    })).run();
+    let settled = false;
+    void run.then(() => { settled = true; }, () => { settled = true; });
+
+    await vi.advanceTimersByTimeAsync(30_100);
+    await Promise.resolve();
+
+    expect(settled).toBe(true);
+    expect(writes).toContainEqual(expect.objectContaining({
+      kind: 'operation-complete',
+      input: expect.objectContaining({ outcome: 'failed', errorCode: 'DOCKER_CONTAINER_ORPHANED' }),
+    }));
+    expect(vi.mocked(commandExecutor.run).mock.calls.some(([argv]) => argv[1] === 'kill')).toBe(false);
+    startOptions?.onStdout?.('late child output');
+    expect(onStdout).not.toHaveBeenCalled();
+  });
+
+  it('commits operation evidence and returns Docker orphan recovery when cooperative stop fails', async () => {
+    const trace: string[] = [];
+    let attachStarted = false;
+    let releaseAttach: (() => void) | undefined;
+    let inspectCount = 0;
+    const writes: RunnerWriteCommand[] = [];
+    const commandExecutor: DockerCommandExecutor = {
+      run: vi.fn(async (argv: readonly string[]) => {
+        trace.push(`docker:${argv[1]}`);
+        switch (argv[1]) {
+          case 'version': return { argv: [...argv], exitCode: 0, signal: null, stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'image': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'ps': return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'create': return { argv: [...argv], exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'inspect': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify(inspectCount++ === 0 ? realisticCreatedRawInspection() : realisticRawInspection()), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'start':
+            attachStarted = true;
+            await new Promise<void>((resolve) => { releaseAttach = resolve; });
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'stop':
+            releaseAttach?.();
+            return { argv: [...argv], exitCode: 1, signal: null, stdout: '', stderr: 'daemon stop failed', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          default: throw new Error(`unexpected Docker command ${argv.join(' ')}`);
+        }
+      }),
+    };
+    const run = createDockerExecutor(options(commandExecutor, {
+      cancellationRequested: () => attachStarted,
+      ownership: {
+        runnerWrite: vi.fn((command: RunnerWriteCommand) => {
+          writes.push(command);
+          trace.push(`ownership:${command.kind}`);
+          return { ok: true, kind: 'committed', eventSeq: writes.length };
+        }),
+      },
+    })).run();
+
+    await expect(run).rejects.toMatchObject({
+      code: 'DOCKER_CONTAINER_ORPHANED',
+      recoveryRequired: true,
+    });
+    const completion = writes.find(
+      (command): command is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => command.kind === 'operation-complete',
+    );
+    expect(completion?.input).toMatchObject({
+      outcome: 'failed',
+      errorCode: 'DOCKER_CONTAINER_ORPHANED',
+      lifecyclePhase: 'stopped',
+    });
+    expect(trace.indexOf('docker:stop')).toBeLessThan(trace.lastIndexOf('docker:inspect'));
+    expect(trace.lastIndexOf('docker:inspect')).toBeLessThan(trace.indexOf('ownership:operation-complete'));
+    expect(trace.some((entry) => entry === 'docker:kill' || entry === 'docker:rm')).toBe(false);
   });
 
   it('rejects cancellation control inspection when the exact image digest differs', async () => {

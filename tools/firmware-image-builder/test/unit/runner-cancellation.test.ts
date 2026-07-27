@@ -32,7 +32,8 @@ type TestJob = Pick<JobRecord,
   'runnerLeaseOwner' | 'runnerLeaseExpiresAt' | 'targetManifestSha256' |
   'containerId' | 'containerName' | 'containerImageDigest' |
   'containerLabelJobId' | 'containerLabelManifestSha' | 'containerLabels' |
-  'containerStoppedAt' | 'artifactStagingPath'>;
+  'containerMount' | 'containerEnvironment' | 'containerSecurity' | 'containerInspection' |
+  'containerCreatedAt' | 'containerStartedAt' | 'containerStoppedAt' | 'artifactStagingPath'>;
 
 function job(overrides: Partial<TestJob> = {}): TestJob {
   return {
@@ -50,10 +51,34 @@ function job(overrides: Partial<TestJob> = {}): TestJob {
     containerLabelJobId: null,
     containerLabelManifestSha: null,
     containerLabels: null,
+    containerMount: null,
+    containerEnvironment: null,
+    containerSecurity: null,
+    containerInspection: null,
+    containerCreatedAt: null,
+    containerStartedAt: null,
     containerStoppedAt: null,
     artifactStagingPath: null,
     ...overrides,
   };
+}
+
+function containerJob(overrides: Partial<TestJob> = {}): TestJob {
+  return job({
+    containerId: CONTAINER_ID,
+    containerName: CONTAINER_NAME,
+    containerImageDigest: IMAGE_DIGEST,
+    containerLabelJobId: JOB_ID,
+    containerLabelManifestSha: MANIFEST_SHA,
+    containerLabels: LABELS,
+    containerMount: { source: '/tmp', destination: '/workdir' },
+    containerEnvironment: { CI: '1' },
+    containerSecurity: { user: '1000:1000' },
+    containerInspection: { running: true, status: 'running' },
+    containerCreatedAt: NOW,
+    containerStartedAt: NOW,
+    ...overrides,
+  });
 }
 
 function container(overrides: Partial<CancellationContainer> = {}): CancellationContainer {
@@ -64,6 +89,8 @@ function container(overrides: Partial<CancellationContainer> = {}): Cancellation
     labels: LABELS,
     running: true,
     status: 'running',
+    createdAt: NOW,
+    startedAt: NOW,
     stoppedAt: null,
     ...overrides,
   };
@@ -135,7 +162,10 @@ function dependencies(overrides: Partial<Parameters<typeof createRunnerCancellat
     runnerUnit: RUNNER_UNIT,
     owner: OWNER,
     leaseExpiresAt: () => LEASE,
-    store: { getJob: () => current },
+    store: {
+      getJob: () => current,
+      listEvents: () => ({ events: [], nextAfterSeq: null }),
+    },
     ownership,
     docker,
     evidence: async (record: JsonObject) => {
@@ -245,15 +275,8 @@ describe('runner cooperative cancellation', () => {
 
   it('retains the exact identity until removal proof and cleanup CAS', async () => {
     const fixture = dependencies();
-    fixture.setJob(job({
+    fixture.setJob(containerJob({
       cancelRequestedAt: NOW,
-      containerId: CONTAINER_ID,
-      containerName: CONTAINER_NAME,
-      containerImageDigest: IMAGE_DIGEST,
-      containerLabelJobId: JOB_ID,
-      containerLabelManifestSha: MANIFEST_SHA,
-      containerLabels: LABELS,
-      containerStoppedAt: STOPPED,
     }));
     fixture.docker.current = container();
     fixture.docker.listByLabels.mockImplementation(async () => []);
@@ -269,8 +292,14 @@ describe('runner cooperative cancellation', () => {
     await expect(controller.cancelIfRequested()).resolves.toMatchObject({ state: 'cancelled' });
     expect(identityAtEvidence).toEqual([CONTAINER_ID]);
     expect(fixture.docker.calls).toEqual(['stop', 'remove']);
-    expect(fixture.docker.waitForStopped).toHaveBeenCalledWith(CONTAINER_ID, 30_000);
+    expect(fixture.docker.stop).toHaveBeenCalledWith(CONTAINER_ID, 30_000);
+    expect(fixture.docker.waitForStopped).toHaveBeenCalledWith(CONTAINER_ID, expect.any(Number));
     expect(fixture.writes[1]).toMatchObject({
+      kind: 'container',
+      lifecycle: 'stopped',
+      stoppedAt: STOPPED,
+    });
+    expect(fixture.writes[2]).toMatchObject({
       kind: 'cancellation-evidence',
       evidence: {
         evidencePath: `jobs/${JOB_ID}/evidence/cancellation.json`,
@@ -278,11 +307,52 @@ describe('runner cooperative cancellation', () => {
         container: { id: CONTAINER_ID },
       },
     });
-    expect(fixture.writes[2]).toMatchObject({
+    expect(fixture.writes[3]).toMatchObject({
       kind: 'cancellation-cleanup',
       proof: { kind: 'container', unitInactiveAt: null, container: { id: CONTAINER_ID, name: CONTAINER_NAME, globalLabelResult: 'no-match' } },
     });
-    expect(fixture.writes[3]).toMatchObject({ kind: 'cancellation-terminal', cleanupEventSeq: 3 });
+    expect(fixture.writes[4]).toMatchObject({ kind: 'cancellation-terminal', cleanupEventSeq: 4 });
+  });
+
+  it('starts the full cooperative budget when cancellation first changes to requested after a long operation', async () => {
+    let monotonic = 0;
+    const fixture = dependencies({ monotonicNow: () => monotonic });
+    fixture.setJob(containerJob({
+      cancelRequestedAt: null,
+    }));
+    fixture.docker.current = container();
+    const controller = createRunnerCancellation(fixture.value);
+
+    expect(controller.isRequested()).toBe(false);
+    monotonic = 120_000;
+    fixture.value.signals.emit('SIGUSR1');
+    fixture.setJob(containerJob({
+      cancelRequestedAt: NOW,
+    }));
+
+    await expect(controller.cancelIfRequested()).resolves.toMatchObject({ state: 'cancelled' });
+    expect(fixture.docker.stop).toHaveBeenCalledWith(CONTAINER_ID, 30_000);
+    expect(fixture.docker.waitForStopped).toHaveBeenCalledWith(CONTAINER_ID, 30_000);
+  });
+
+  it('shares one exact 30-second budget across cooperative stop and stopped proof', async () => {
+    let monotonic = 10_000;
+    const fixture = dependencies({ monotonicNow: () => monotonic });
+    fixture.setJob(containerJob({
+      cancelRequestedAt: NOW,
+    }));
+    fixture.docker.current = container();
+    fixture.docker.stop.mockImplementation(async () => {
+      fixture.docker.calls.push('stop');
+      fixture.docker.current = container({ running: false, status: 'exited', stoppedAt: STOPPED });
+      monotonic += 12_000;
+    });
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.cancelIfRequested()).resolves.toMatchObject({ state: 'cancelled' });
+    expect(fixture.docker.stop).toHaveBeenCalledWith(CONTAINER_ID, 30_000);
+    expect(fixture.docker.waitForStopped).toHaveBeenCalledWith(CONTAINER_ID, 18_000);
   });
 
   it('does not call rm when the persisted stopped identity is already absent', async () => {
@@ -342,8 +412,32 @@ describe('runner cooperative cancellation', () => {
 
     await expect(controller.cancelIfRequested()).rejects.toBeInstanceOf(CancellationBlockedError);
     expect(fixture.writes).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'cancellation-blocker', blocker: expect.objectContaining({ reason: expect.stringMatching(/staging/i) }) }),
+      expect.objectContaining({
+        kind: 'cancellation-blocker',
+        blockerCode: 'QUARANTINE_PENDING',
+        blocker: expect.objectContaining({ reason: expect.stringMatching(/staging/i) }),
+      }),
     ]));
+  });
+
+  it('persists RECOVERY_LOG_GAP when cancellation log coverage cannot be proved', async () => {
+    const fixture = dependencies({
+      cleanup: {
+        staging: async () => ({ kind: 'absent', path: null } as const),
+        logs: async () => { throw new Error('runner generation has a coverage gap'); },
+      },
+    });
+    fixture.setJob(job({ cancelRequestedAt: NOW }));
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'RECOVERY_LOG_GAP',
+    });
+    expect(fixture.writes).toContainEqual(expect.objectContaining({
+      kind: 'cancellation-blocker',
+      blockerCode: 'RECOVERY_LOG_GAP',
+    }));
   });
 
   it('reports stale terminal state distinctly and clears the signal latch', async () => {
@@ -371,7 +465,9 @@ describe('runner cooperative cancellation', () => {
     const controller = createRunnerCancellation(fixture.value);
     fixture.value.signals.emit('SIGUSR1');
 
-    await expect(controller.cancelIfRequested()).rejects.toThrow(/ownership lost/i);
+    await expect(controller.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'RUNNER_DISAPPEARED',
+    });
     fixture.setJob(job({ cancelRequestedAt: null }));
     expect(controller.isRequested()).toBe(false);
   });
@@ -412,6 +508,51 @@ describe('runner cooperative cancellation', () => {
     await expect(controller.cancelIfRequested()).rejects.toBeInstanceOf(CancellationBlockedError);
     expect(fixture.docker.remove).not.toHaveBeenCalled();
     expect(fixture.writes).toHaveLength(2);
-    expect(fixture.writes[1]).toMatchObject({ kind: 'cancellation-blocker' });
+    expect(fixture.writes[1]).toMatchObject({
+      kind: 'cancellation-blocker',
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    });
+  });
+
+  it('persists DOCKER_CONTAINER_ORPHANED when exact removal fails after durable evidence', async () => {
+    const fixture = dependencies();
+    fixture.setJob(containerJob({ cancelRequestedAt: NOW }));
+    fixture.docker.current = container({ running: false, status: 'exited', stoppedAt: STOPPED });
+    fixture.docker.remove.mockRejectedValue(new Error('docker rm transport ambiguous'));
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    });
+    expect(fixture.writes).toContainEqual(expect.objectContaining({
+      kind: 'cancellation-blocker',
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    }));
+  });
+
+  it('persists an attached-operation Docker blocker without starting cleanup', async () => {
+    const fixture = dependencies();
+    fixture.setJob(containerJob({ cancelRequestedAt: NOW }));
+    fixture.docker.current = container({ running: false, status: 'exited', stoppedAt: STOPPED });
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.blockRecoveryRequired(
+      'DOCKER_CONTAINER_ORPHANED',
+      'attached Docker child remains after cooperative deadline',
+    )).rejects.toMatchObject({
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    });
+    expect(fixture.writes).toEqual([
+      expect.objectContaining({ kind: 'cancellation-transition' }),
+      expect.objectContaining({
+        kind: 'cancellation-blocker',
+        blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+      }),
+    ]);
+    expect(fixture.docker.stop).not.toHaveBeenCalled();
+    expect(fixture.docker.remove).not.toHaveBeenCalled();
+    expect(fixture.evidence).toHaveLength(0);
   });
 });

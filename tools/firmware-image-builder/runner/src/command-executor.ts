@@ -15,6 +15,7 @@ export interface CommandRunOptions {
   readonly cwd?: string;
   readonly env: Readonly<Record<string, string>>;
   readonly timeoutMs?: number;
+  readonly timeoutDisarmSignal?: AbortSignal;
   readonly maxCaptureBytes?: number;
   readonly onStdout?: (chunk: string) => void;
   readonly onStderr?: (chunk: string) => void;
@@ -77,10 +78,18 @@ export function createCommandExecutor(): CommandExecutor {
         let observerError: unknown;
         let spawnError: NodeJS.ErrnoException | undefined;
         let observerKillTimer: NodeJS.Timeout | undefined;
-        const timeout = options.timeoutMs === undefined ? undefined : setTimeout(() => {
+        let timeout = options.timeoutMs === undefined ? undefined : setTimeout(() => {
           timedOut = true;
           child.kill('SIGKILL');
         }, options.timeoutMs);
+        const disarmTimeout = (): void => {
+          if (timeout !== undefined) {
+            clearTimeout(timeout);
+            timeout = undefined;
+          }
+        };
+        if (options.timeoutDisarmSignal?.aborted === true) disarmTimeout();
+        else options.timeoutDisarmSignal?.addEventListener('abort', disarmTimeout, { once: true });
         const failObserver = (error: unknown): void => {
           if (observerFailed) return;
           observerFailed = true;
@@ -107,6 +116,7 @@ export function createCommandExecutor(): CommandExecutor {
         });
         child.once('close', (exitCode, signal) => {
           if (timeout) clearTimeout(timeout);
+          options.timeoutDisarmSignal?.removeEventListener('abort', disarmTimeout);
           if (observerKillTimer) clearTimeout(observerKillTimer);
           if (settled) return;
           settled = true;

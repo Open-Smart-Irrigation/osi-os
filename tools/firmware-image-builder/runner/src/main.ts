@@ -401,6 +401,30 @@ async function readHeldFile(
   }
 }
 
+async function hashHeldFile(
+  parent: FileHandle,
+  name: string,
+): Promise<Readonly<{ sha256: string; size: number }>> {
+  const handle = await open(fdPath(parent, safeSegment(name, 'file name')), READ_FLAGS);
+  try {
+    const before = await handle.stat();
+    if (!before.isFile()) throw new Error('held artifact path is not a regular file');
+    const digest = await hashHandle(handle);
+    const after = await handle.stat();
+    if (
+      before.dev !== after.dev
+      || before.ino !== after.ino
+      || before.size !== after.size
+      || before.mtimeMs !== after.mtimeMs
+    ) {
+      throw new Error('held artifact changed while being hashed');
+    }
+    return { sha256: digest, size: after.size };
+  } finally {
+    await handle.close();
+  }
+}
+
 async function writeHeldFile(
   parent: FileHandle,
   name: string,
@@ -831,7 +855,7 @@ async function writeRunnerCancellationEvidence(
   return Object.freeze({ path: relativePath, sha256: sha256(bytes) });
 }
 
-async function quarantineCancellationStaging(
+export async function quarantineCancellationStaging(
   loaded: LoadedConfig,
   job: JobRecord,
 ): Promise<StagingCleanupProof> {
@@ -845,22 +869,46 @@ async function quarantineCancellationStaging(
     async ({ snapshot }) => {
       const source = join(snapshot.path, '.osi-image-builder', 'staging', job.jobId);
       const destination = join(snapshot.path, '.osi-image-builder', 'quarantine', job.jobId);
+      const verifyQuarantinedArtifact = async (): Promise<Readonly<{
+        sha256: string;
+        size: number;
+      }>> => {
+        const destinationStats = await lstat(destination);
+        if (!destinationStats.isDirectory() || destinationStats.isSymbolicLink()) {
+          throw new Error('cancellation quarantine destination is not a directory');
+        }
+        const directory = await open(destination, DIRECTORY_FLAGS);
+        try {
+          const observed = await hashHeldFile(
+            directory,
+            basename(job.artifactStagingPath!),
+          );
+          if (
+            observed.sha256 !== job.artifactSha256
+            || observed.size !== job.artifactSize
+          ) {
+            throw new Error('cancellation quarantined artifact size or SHA does not match persisted identity');
+          }
+          return { sha256: observed.sha256, size: observed.size };
+        } finally {
+          await directory.close();
+        }
+      };
       let sourceStats;
       try {
         sourceStats = await lstat(source);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
         try {
-          const destinationStats = await lstat(destination);
-          if (!destinationStats.isDirectory() || destinationStats.isSymbolicLink()) throw new Error('cancellation quarantine destination is not a directory');
+          const observed = await verifyQuarantinedArtifact();
           return {
             kind: 'quarantined',
             sourcePath: job.artifactStagingPath!,
             destinationPath: `quarantine/${job.jobId}`,
             sourceAbsent: true,
             destinationPresent: true,
-            sha256: job.artifactSha256!,
-            size: job.artifactSize!,
+            sha256: observed.sha256,
+            size: observed.size,
             verifiedAt: new Date().toISOString(),
           };
         } catch (destinationError) {
@@ -875,16 +923,16 @@ async function quarantineCancellationStaging(
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
         throw error;
       });
-      const destinationAfter = await lstat(destination);
-      if (sourceAfter || !destinationAfter.isDirectory() || destinationAfter.isSymbolicLink()) throw new Error('cancellation staging quarantine was not proven');
+      if (sourceAfter) throw new Error('cancellation staging quarantine was not proven');
+      const observed = await verifyQuarantinedArtifact();
       return {
         kind: 'quarantined',
         sourcePath: job.artifactStagingPath!,
         destinationPath: `quarantine/${job.jobId}`,
         sourceAbsent: true,
         destinationPresent: true,
-        sha256: job.artifactSha256!,
-        size: job.artifactSize!,
+        sha256: observed.sha256,
+        size: observed.size,
         verifiedAt: new Date().toISOString(),
       };
     },
@@ -2185,7 +2233,7 @@ async function createProductionComposition(
       expectedImageDigest: lock.imageDigest,
       maxCaptureBytes: MAX_OPERATION_CAPTURE_BYTES,
     });
-    cancellation = createRunnerCancellation({
+    const runnerCancellation = createRunnerCancellation({
       jobId: args.jobId,
       runnerUnit: args.runnerUnit,
       owner: args.owner,
@@ -2200,13 +2248,13 @@ async function createProductionComposition(
       ),
       cleanup: {
         staging: async () => quarantineCancellationStaging(loaded, store.getJob(args.jobId)),
-        logs: async () => ({
-          runner: 'absent',
-          docker: 'absent',
-          verifiedAt: new Date().toISOString(),
-        }),
+        logs: async () => {
+          const verifiedAt = new Date().toISOString();
+          return ownership.cancellationLogProof(args.jobId, verifiedAt);
+        },
       },
     });
+    cancellation = runnerCancellation;
 
     return Object.freeze({
       input: Object.freeze({
@@ -2229,7 +2277,7 @@ async function createProductionComposition(
         evidenceWriter: createEvidenceWriter({
           stateRoot: loaded.pathAuthorities.stateRoot,
         }),
-        cancellation,
+        cancellation: runnerCancellation,
         services,
       }),
       close: async () => {

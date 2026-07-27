@@ -49,7 +49,7 @@ import type {
   TargetSetupConfigObservations,
   TargetSetupSourceObservations,
 } from './target-setup.js';
-import type { CancellationObservation } from './cancellation.js';
+import type { CancellationBlockerCode, CancellationObservation } from './cancellation.js';
 import { CancellationBlockedError } from './cancellation.js';
 import { DockerCancellationRequestedError } from './docker-executor.js';
 
@@ -346,6 +346,7 @@ export interface PipelineCancellation {
   readonly observeBetweenStages: (stage: PipelineStageName) => Promise<CancellationObservation>;
   readonly observeBetweenOperations: (operationId: TrustedOperationId) => Promise<CancellationObservation>;
   readonly cancelIfRequested: () => Promise<CancellationObservation>;
+  readonly blockRecoveryRequired?: (blockerCode: CancellationBlockerCode, reason: string) => Promise<never>;
   readonly dispose: () => void;
 }
 
@@ -366,7 +367,11 @@ export type PipelineResult =
       state: 'recovery-required';
       buildManifest: JsonObject | null;
       verificationManifest: JsonObject | null;
-      blockerCode: 'RUNNER_DISAPPEARED' | 'QUARANTINE_PENDING';
+      blockerCode:
+        | 'RUNNER_DISAPPEARED'
+        | 'QUARANTINE_PENDING'
+        | 'RECOVERY_LOG_GAP'
+        | 'DOCKER_CONTAINER_ORPHANED';
       reason: string;
     }>
   | Readonly<{
@@ -462,12 +467,15 @@ class PipelineOwnershipLostError extends Error {
 }
 
 class PipelineRecoveryRequiredError extends Error {
-  readonly blockerCode: 'QUARANTINE_PENDING';
+  readonly blockerCode: 'RUNNER_DISAPPEARED' | 'QUARANTINE_PENDING' | 'RECOVERY_LOG_GAP' | 'DOCKER_CONTAINER_ORPHANED';
 
-  constructor(reason: string) {
+  constructor(
+    reason: string,
+    blockerCode: PipelineRecoveryRequiredError['blockerCode'] = 'QUARANTINE_PENDING',
+  ) {
     super(reason);
     this.name = 'PipelineRecoveryRequiredError';
-    this.blockerCode = 'QUARANTINE_PENDING';
+    this.blockerCode = blockerCode;
   }
 }
 
@@ -1323,9 +1331,17 @@ export function createPipeline(input: PipelineInput): {
     value: PipelineStageName | TrustedOperationId,
   ): Promise<void> => {
     if (input.cancellation === undefined) return;
-    const observation = boundary === 'stage'
-      ? await input.cancellation.observeBetweenStages(value as PipelineStageName)
-      : await input.cancellation.observeBetweenOperations(value as TrustedOperationId);
+    let observation: CancellationObservation;
+    try {
+      observation = boundary === 'stage'
+        ? await input.cancellation.observeBetweenStages(value as PipelineStageName)
+        : await input.cancellation.observeBetweenOperations(value as TrustedOperationId);
+    } catch (error) {
+      if (error instanceof CancellationBlockedError) {
+        throw new PipelineRecoveryRequiredError(error.message, error.blockerCode);
+      }
+      throw error;
+    }
     if (observation.handled) throw new PipelineCancelled(observation);
   };
 
@@ -1346,12 +1362,25 @@ export function createPipeline(input: PipelineInput): {
     } catch (error) {
       if (error instanceof DockerCancellationRequestedError) {
         if (input.cancellation === undefined) throw error;
+        if (error.recoveryRequired) {
+          try {
+            if (input.cancellation.blockRecoveryRequired === undefined) {
+              throw new CancellationBlockedError(error.message, 'DOCKER_CONTAINER_ORPHANED');
+            }
+            await input.cancellation.blockRecoveryRequired('DOCKER_CONTAINER_ORPHANED', error.message);
+          } catch (cancellationError) {
+            if (cancellationError instanceof CancellationBlockedError) {
+              throw new PipelineRecoveryRequiredError(cancellationError.message, cancellationError.blockerCode);
+            }
+            throw cancellationError;
+          }
+        }
         let observation: CancellationObservation;
         try {
           observation = await input.cancellation.cancelIfRequested();
         } catch (cancellationError) {
           if (cancellationError instanceof CancellationBlockedError) {
-            throw new PipelineRecoveryRequiredError(cancellationError.message);
+            throw new PipelineRecoveryRequiredError(cancellationError.message, cancellationError.blockerCode);
           }
           throw cancellationError;
         }
@@ -2096,6 +2125,7 @@ export function createPipeline(input: PipelineInput): {
         }));
         workspaceValidatedBefore = true;
         await withLeaseHeartbeat(() => preparePublication(job, verifiedArtifact!));
+        await observeCancellation('stage', 'publish');
         const binding = createBinding(job);
         publicationBinding = binding;
         publishStartedAt = now();

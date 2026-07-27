@@ -40,7 +40,7 @@ import {
   type PreparedPublication,
   type StageActionContext,
 } from '../../runner/src/pipeline.js';
-import { runGuardedComposition, runRunner } from '../../runner/src/main.js';
+import { quarantineCancellationStaging, runGuardedComposition, runRunner } from '../../runner/src/main.js';
 import { CancellationBlockedError } from '../../runner/src/cancellation.js';
 import { createEvidenceWriter } from '../../runner/src/evidence.js';
 import { createOperationDefinition, hashOperationDefinition } from '../../runner/src/operation-registry.js';
@@ -260,6 +260,7 @@ interface Fixture {
   readonly store: BuilderStore;
   readonly ownership: OwnershipStore;
   readonly clock: AdvancingClock;
+  readonly loaded: Awaited<ReturnType<typeof loadConfig>>;
   readonly input: PipelineInput;
   readonly operationOrder: TrustedOperationId[];
   readonly workspaceChecks: Array<readonly [PipelineStageName, 'before' | 'after']>;
@@ -277,6 +278,7 @@ async function fixture(options: {
   readonly failStage?: 'preflight' | 'feeds' | 'config';
   readonly throwOperation?: TrustedOperationId;
   readonly cancelOperation?: TrustedOperationId;
+  readonly cancelOperationRecoveryRequired?: boolean;
   readonly failSource?: boolean;
   readonly publisher?: Partial<PublisherClient>;
   readonly tamperMetadata?: 'manifest' | 'verification' | 'checksum';
@@ -295,6 +297,7 @@ async function fixture(options: {
   readonly requirePreparationIntentBeforePrepare?: boolean;
   readonly throwPublicationPrepare?: boolean;
   readonly throwPublicationReopen?: boolean;
+  readonly publicationPrepareHook?: () => void;
   readonly throwArtifactOwnershipWrite?: boolean;
   readonly distinctPublisherIdentities?: boolean;
 } = {}): Promise<Fixture> {
@@ -464,7 +467,10 @@ async function fixture(options: {
         throw new Error('injected operation exception');
       }
       if (options.cancelOperation === operationId) {
-        throw new DockerCancellationRequestedError('attached Docker operation cancelled');
+        throw new DockerCancellationRequestedError(
+          'attached Docker operation cancelled',
+          { recoveryRequired: options.cancelOperationRecoveryRequired === true },
+        );
       }
       const attempt = (operationAttempts.get(operationId) ?? 0) + 1;
       operationAttempts.set(operationId, attempt);
@@ -803,6 +809,7 @@ async function fixture(options: {
           ? `${HASH_B}  factory.img.gz\n`
           : value.checksumBytes,
       });
+      options.publicationPrepareHook?.();
       return prepared;
     },
     reopenStaging: async () => {
@@ -1149,6 +1156,7 @@ async function fixture(options: {
     store,
     ownership,
     clock,
+    loaded,
     input,
     operationOrder,
     workspaceChecks,
@@ -1163,6 +1171,30 @@ async function fixture(options: {
 }
 
 describe('trusted pipeline integration', () => {
+  it('rejects a quarantined artifact whose actual size and SHA differ from persisted identity', async () => {
+    const value = await fixture();
+    try {
+      const stagingDirectory = join(
+        value.input.approvedRoot.path,
+        '.osi-image-builder',
+        'staging',
+        value.input.jobId,
+      );
+      await mkdir(stagingDirectory, { recursive: true });
+      await writeFile(join(stagingDirectory, 'factory.img.gz'), 'tampered artifact');
+      const persisted = value.store.getJob(value.input.jobId);
+
+      await expect(quarantineCancellationStaging(value.loaded, {
+        ...persisted,
+        artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
+        artifactSha256: HASH_A,
+        artifactSize: 100,
+      })).rejects.toThrow(/artifact.*(?:size|sha|identity)/i);
+    } finally {
+      value.close();
+    }
+  });
+
   it('drives a persisted cancellation through the production pipeline boundary', async () => {
     const value = await fixture();
     try {
@@ -1238,6 +1270,86 @@ describe('trusted pipeline integration', () => {
         blockerCode: 'QUARANTINE_PENDING',
       });
       expect(value.store.getJob(value.input.jobId).state).not.toBe('failed');
+    } finally {
+      value.close();
+    }
+  });
+
+  it('returns the same Docker orphan recovery result for an attached-operation cancellation blocker', async () => {
+    const value = await fixture({
+      cancelOperation: 'verify-profile-parity',
+      cancelOperationRecoveryRequired: true,
+    });
+    try {
+      const cancellation = {
+        isRequested: () => true,
+        observeBetweenStages: vi.fn(async () => ({ requested: false, handled: false } as const)),
+        observeBetweenOperations: vi.fn(async () => ({ requested: false, handled: false } as const)),
+        cancelIfRequested: vi.fn(async () => { throw new Error('recovery-required attach must not continue cancellation cleanup'); }),
+        blockRecoveryRequired: vi.fn(async () => {
+          throw new CancellationBlockedError('attached child remains after cooperative deadline', 'DOCKER_CONTAINER_ORPHANED');
+        }),
+        dispose: vi.fn(),
+      };
+      const input = { ...value.input, cancellation } as PipelineInput & { readonly cancellation: typeof cancellation };
+
+      await expect(createPipeline(input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+      });
+      expect(cancellation.blockRecoveryRequired).toHaveBeenCalledWith(
+        'DOCKER_CONTAINER_ORPHANED',
+        expect.stringMatching(/attached Docker operation cancelled/i),
+      );
+      expect(cancellation.cancelIfRequested).not.toHaveBeenCalled();
+      expect(value.store.getJob(value.input.jobId).state).not.toBe('failed');
+    } finally {
+      value.close();
+    }
+  });
+
+  it('accepts cancellation after publication preparation and immediately before publish ownership CAS', async () => {
+    let preparationCompleted = false;
+    const value = await fixture({
+      publicationPrepareHook: () => {
+        preparationCompleted = true;
+      },
+    });
+    try {
+      const cancellation = {
+        isRequested: () => preparationCompleted,
+        observeBetweenStages: vi.fn(async (stage: PipelineStageName) => (
+          stage === 'publish' && preparationCompleted
+            ? {
+                requested: true as const,
+                handled: true as const,
+                state: 'cancelled' as const,
+                evidencePath: `jobs/${value.input.jobId}/evidence/cancellation.json`,
+                evidenceSha256: HASH_D,
+              }
+            : { requested: false as const, handled: false as const }
+        )),
+        observeBetweenOperations: vi.fn(async () => ({ requested: false, handled: false } as const)),
+        cancelIfRequested: vi.fn(async () => ({ requested: false, handled: false } as const)),
+        dispose: vi.fn(),
+      };
+      const input = { ...value.input, cancellation } as PipelineInput & { readonly cancellation: typeof cancellation };
+
+      await expect(createPipeline(input).run()).resolves.toMatchObject({
+        state: 'cancelled',
+        blockerCode: 'CANCELLED',
+      });
+      expect(preparationCompleted).toBe(true);
+      expect(cancellation.observeBetweenStages.mock.calls.filter(([stage]) => stage === 'publish')).toHaveLength(2);
+      expect(value.input.services.publisher.publish).not.toHaveBeenCalled();
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'verifying',
+        publishState: 'staged',
+        artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
+      });
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events.some(
+        (event) => event.eventType === 'publish' && event.payload.state === 'publishing',
+      )).toBe(false);
     } finally {
       value.close();
     }

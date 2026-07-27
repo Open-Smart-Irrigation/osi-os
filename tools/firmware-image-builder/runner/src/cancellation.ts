@@ -6,7 +6,7 @@ import type {
   RunnerWriteCommand,
   StagingCleanupProof,
 } from '../../api/src/ownership.js';
-import type { JobRecord, JsonObject } from '../../api/src/store.js';
+import type { EventPage, JobRecord, JsonObject } from '../../api/src/store.js';
 import {
   ACTIVE_RECOVERY_STATES,
   type ActiveRecoveryState,
@@ -24,7 +24,8 @@ type CancellationJob = Pick<JobRecord,
   'runnerLeaseOwner' | 'runnerLeaseExpiresAt' | 'targetManifestSha256' |
   'containerId' | 'containerName' | 'containerImageDigest' |
   'containerLabelJobId' | 'containerLabelManifestSha' | 'containerLabels' |
-  'containerStoppedAt' | 'artifactStagingPath'>;
+  'containerMount' | 'containerEnvironment' | 'containerSecurity' | 'containerInspection' |
+  'containerCreatedAt' | 'containerStartedAt' | 'containerStoppedAt' | 'artifactStagingPath'>;
 
 export interface CancellationContainer {
   readonly id: string;
@@ -33,6 +34,8 @@ export interface CancellationContainer {
   readonly labels: JsonObject;
   readonly running: boolean;
   readonly status: string;
+  readonly createdAt: string;
+  readonly startedAt: string | null;
   readonly stoppedAt: string | null;
 }
 
@@ -42,7 +45,7 @@ export interface CancellationContainer {
  */
 export interface CancellationDockerExecutor {
   readonly inspect: (containerId: string) => Promise<CancellationContainer | null>;
-  readonly stop: (containerId: string) => Promise<void>;
+  readonly stop: (containerId: string, timeoutMs: number) => Promise<void>;
   readonly waitForStopped: (containerId: string, timeoutMs: number) => Promise<CancellationContainer>;
   readonly remove: (containerId: string) => Promise<void>;
   readonly listByLabels: (labels: JsonObject) => Promise<readonly CancellationContainer[]>;
@@ -63,7 +66,10 @@ export interface RunnerCancellationOptions {
   readonly runnerUnit: string;
   readonly owner: string;
   readonly leaseExpiresAt: () => string;
-  readonly store: Readonly<{ getJob: (jobId: string) => CancellationJob }>;
+  readonly store: Readonly<{
+    getJob: (jobId: string) => CancellationJob;
+    listEvents: (jobId: string, options?: { readonly afterSeq?: number; readonly limit?: number }) => EventPage;
+  }>;
   readonly ownership: Readonly<{
     runnerWrite: (command: RunnerWriteCommand) => OwnershipResult;
   }>;
@@ -74,6 +80,7 @@ export interface RunnerCancellationOptions {
     readonly logs: () => Promise<LogCleanupProof>;
   }>;
   readonly clock?: () => string;
+  readonly monotonicNow?: () => number;
   readonly signals?: RunnerCancellationSignals;
 }
 
@@ -82,12 +89,20 @@ export type CancellationObservation =
   | Readonly<{ requested: true; handled: true; state: 'cancelled'; evidencePath: string; evidenceSha256: string }>
   | Readonly<{ requested: true; handled: false; ignored: 'publishing' | 'stale' }>;
 
+export type CancellationBlockerCode =
+  | 'RUNNER_DISAPPEARED'
+  | 'QUARANTINE_PENDING'
+  | 'RECOVERY_LOG_GAP'
+  | 'DOCKER_CONTAINER_ORPHANED';
+
 export class CancellationBlockedError extends Error {
   readonly code = 'CANCELLATION_BLOCKED';
+  readonly blockerCode: CancellationBlockerCode;
 
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(message: string, blockerCode: CancellationBlockerCode = 'QUARANTINE_PENDING', options?: ErrorOptions) {
     super(message, options);
     this.name = 'CancellationBlockedError';
+    this.blockerCode = blockerCode;
   }
 }
 
@@ -103,6 +118,12 @@ function now(options: RunnerCancellationOptions): string {
   if (typeof value !== 'string' || new Date(value).toISOString() !== value) {
     throw new TypeError('runner cancellation clock must return a canonical instant');
   }
+  return value;
+}
+
+function monotonicNow(options: RunnerCancellationOptions): number {
+  const value = options.monotonicNow?.() ?? performance.now();
+  if (!Number.isFinite(value) || value < 0) throw new TypeError('runner cancellation monotonic clock must return a non-negative finite number');
   return value;
 }
 
@@ -179,18 +200,59 @@ function runnerWrite(
   build: (at: string) => RunnerWriteCommand,
 ): OwnershipResult {
   const result = options.ownership.runnerWrite(build(now(options)));
-  if (result.ok !== true) throw new CancellationBlockedError(`runner cancellation ownership lost: ${result.conflict.kind}`);
+  if (result.ok !== true) throw new CancellationBlockedError(`runner cancellation ownership lost: ${result.conflict.kind}`, 'RUNNER_DISAPPEARED');
   return result;
 }
 
 function eventSeq(result: OwnershipResult): number {
   if (result.ok !== true || result.kind !== 'committed') {
-    throw new CancellationBlockedError('runner cancellation cleanup did not return a committed event sequence');
+    throw new CancellationBlockedError('runner cancellation cleanup did not return a committed event sequence', 'RUNNER_DISAPPEARED');
   }
   if (!Number.isSafeInteger(result.eventSeq) || result.eventSeq < 0) {
-    throw new CancellationBlockedError('runner cancellation cleanup returned an invalid event sequence');
+    throw new CancellationBlockedError('runner cancellation cleanup returned an invalid event sequence', 'RUNNER_DISAPPEARED');
   }
   return result.eventSeq;
+}
+
+function persistedCancellationEvidence(
+  options: RunnerCancellationOptions,
+  job: CancellationJob,
+  identity: Readonly<{ id: string; name: string; imageDigest: string; labels: JsonObject }> | null,
+): { readonly eventSeq: number; readonly evidence: CancellationEvidence } | null {
+  let afterSeq = -1;
+  let found: { readonly eventSeq: number; readonly evidence: CancellationEvidence } | null = null;
+  for (let pageCount = 0; pageCount < 128; pageCount += 1) {
+    const page = options.store.listEvents(options.jobId, { afterSeq, limit: 128 });
+    for (const event of page.events) {
+      if (event.eventType !== 'cleanup' || event.payload.kind !== 'cancellation-evidence') continue;
+      const evidence = event.payload.evidence as CancellationEvidence | undefined;
+      if (evidence === undefined || evidence.runnerUnit !== options.runnerUnit) {
+        throw new CancellationIdentityError('persisted cancellation evidence has the wrong runner identity');
+      }
+      if (identity === null) {
+        if (evidence.kind !== 'pre-container' || evidence.container.kind !== 'absent') {
+          throw new CancellationIdentityError('persisted cancellation evidence does not match null container identity');
+        }
+      } else {
+        if (
+          evidence.kind !== 'container'
+          || evidence.container.kind !== 'stopped'
+          || evidence.container.id !== identity.id
+          || evidence.container.name !== identity.name
+          || evidence.container.imageDigest !== identity.imageDigest
+          || !exactJson(evidence.container.labels, identity.labels)
+          || evidence.container.stoppedAt !== job.containerStoppedAt
+        ) {
+          throw new CancellationIdentityError('persisted cancellation evidence does not match stopped container identity');
+        }
+      }
+      if (found !== null) throw new CancellationIdentityError('multiple durable cancellation evidence events exist');
+      found = { eventSeq: event.seq, evidence };
+    }
+    if (page.nextAfterSeq === null) return found;
+    afterSeq = page.nextAfterSeq;
+  }
+  throw new CancellationBlockedError('cancellation event history exceeds the bounded retry scan', 'RUNNER_DISAPPEARED');
 }
 
 function activeState(state: JobState): state is ActiveRecoveryState {
@@ -218,7 +280,7 @@ function cancellationProof(
       logs,
     };
   }
-  if (stopped === null) throw new CancellationBlockedError('container cleanup did not produce stopped inspection');
+  if (stopped === null) throw new CancellationBlockedError('container cleanup did not produce stopped inspection', 'DOCKER_CONTAINER_ORPHANED');
   return {
     kind: 'container',
     runnerUnit: options.runnerUnit,
@@ -248,7 +310,7 @@ function cancellationEvidence(
   staging: StagingCleanupProof,
   logs: LogCleanupProof,
 ): CancellationEvidence {
-  if (identity !== null && stopped === null) throw new CancellationBlockedError('cancellation evidence requires a stopped container');
+  if (identity !== null && stopped === null) throw new CancellationBlockedError('cancellation evidence requires a stopped container', 'DOCKER_CONTAINER_ORPHANED');
   return {
     kind: identity === null ? 'pre-container' : 'container',
     runnerUnit: options.runnerUnit,
@@ -275,27 +337,40 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
   readonly observeBetweenStages: (stage: PipelineStageName) => Promise<CancellationObservation>;
   readonly observeBetweenOperations: (operationId: TrustedOperationId) => Promise<CancellationObservation>;
   readonly cancelIfRequested: () => Promise<CancellationObservation>;
+  readonly blockRecoveryRequired: (blockerCode: CancellationBlockerCode, reason: string) => Promise<never>;
   readonly dispose: () => void;
 } {
-  if (options.store?.getJob === undefined || options.ownership?.runnerWrite === undefined) throw new TypeError('runner cancellation persistence is required');
+  if (options.store?.getJob === undefined || options.store.listEvents === undefined || options.ownership?.runnerWrite === undefined) throw new TypeError('runner cancellation persistence is required');
   if (options.docker?.inspect === undefined || options.docker.stop === undefined || options.docker.waitForStopped === undefined || options.docker.remove === undefined || options.docker.listByLabels === undefined) throw new TypeError('runner cancellation Docker controls are incomplete');
   if (options.evidence === undefined || options.cleanup?.staging === undefined || options.cleanup.logs === undefined) throw new TypeError('runner cancellation evidence and cleanup are required');
   let signalRequested = false;
+  let cancellationDeadline: number | null = null;
   let running: Promise<CancellationObservation> | null = null;
-  const onSignal = (): void => { signalRequested = true; };
+  const observeRequested = (requested: boolean): boolean => {
+    if (requested && cancellationDeadline === null) cancellationDeadline = monotonicNow(options) + COOPERATIVE_STOP_TIMEOUT_MS;
+    return requested;
+  };
+  const remainingBudget = (): number => {
+    if (cancellationDeadline === null) throw new CancellationBlockedError('cooperative cancellation budget was not started', 'DOCKER_CONTAINER_ORPHANED');
+    return Math.max(0, Math.ceil(cancellationDeadline - monotonicNow(options)));
+  };
+  const onSignal = (): void => {
+    signalRequested = true;
+    observeRequested(true);
+  };
   const signals = options.signals ?? process;
   signals.on('SIGUSR1', onSignal);
 
   const isRequested = (): boolean => {
-    if (signalRequested) return true;
-    return options.store.getJob(options.jobId).cancelRequestedAt !== null;
+    if (signalRequested) return observeRequested(true);
+    return observeRequested(options.store.getJob(options.jobId).cancelRequestedAt !== null);
   };
 
   const cancelIfRequested = async (): Promise<CancellationObservation> => {
     if (running !== null) return running;
     const work = (async (): Promise<CancellationObservation> => {
       const current = options.store.getJob(options.jobId);
-      const requested = current.cancelRequestedAt !== null;
+      const requested = observeRequested(current.cancelRequestedAt !== null || signalRequested);
       if (!requested) return { requested: false, handled: false };
       if (current.state === 'publishing') {
         signalRequested = false;
@@ -307,7 +382,7 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
       }
       if (current.runnerUnit !== options.runnerUnit || current.runnerLeaseOwner !== options.owner || current.runnerLeaseExpiresAt !== options.leaseExpiresAt()) {
         signalRequested = false;
-        throw new CancellationBlockedError('runner cancellation lease identity changed');
+        throw new CancellationBlockedError('runner cancellation lease identity changed', 'RUNNER_DISAPPEARED');
       }
       const expectedLabels = labels(current);
       const identity = assertExactPersistedIdentity(current, expectedLabels);
@@ -328,6 +403,8 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
             labels: identity.labels,
             running: false,
             status: 'exited',
+            createdAt: current.containerCreatedAt!,
+            startedAt: current.containerStartedAt,
             stoppedAt: current.containerStoppedAt,
           };
         }
@@ -349,7 +426,11 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
           throw error;
         }
       }
-      const persistBlocker = (error: unknown, phase: string): never => {
+      const persistBlocker = (error: unknown, phase: string, blockerCode: CancellationBlockerCode): never => {
+        if (error instanceof CancellationBlockedError && error.blockerCode === 'RUNNER_DISAPPEARED') {
+          signalRequested = false;
+          throw error;
+        }
         const reason = error instanceof Error ? error.message : String(error);
         try {
           runnerWrite(options, (at) => ({
@@ -360,27 +441,33 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
             leaseExpiresAt: options.leaseExpiresAt(),
             at,
             expectedState: 'cancel_requested',
-            blockerCode: 'CANCELLED',
+            blockerCode,
             blocker: { reason: `cancellation ${phase} blocked: ${reason}`, cause: reason },
           }));
         } catch (blockerError) {
           signalRequested = false;
-          throw new CancellationBlockedError(`cancellation ${phase} failed and blocker persistence failed`, { cause: new AggregateError([error, blockerError]) });
+          throw new CancellationBlockedError(`cancellation ${phase} failed and blocker persistence failed`, 'RUNNER_DISAPPEARED', { cause: new AggregateError([error, blockerError]) });
         }
         signalRequested = false;
-        throw new CancellationBlockedError(`cancellation ${phase} blocked`, { cause: error });
+        throw new CancellationBlockedError(`cancellation ${phase} blocked`, blockerCode, { cause: error });
       };
+      let blockedPhase = 'Docker container control';
+      let blockedCode: CancellationBlockerCode = 'DOCKER_CONTAINER_ORPHANED';
       try {
         if (identity !== null) {
           const present = await options.docker.inspect(identity.id);
           if (present !== null) {
             assertObservedIdentity(present, identity);
             if (present.running) {
-              await options.docker.stop(identity.id);
-              stopped = await options.docker.waitForStopped(identity.id, COOPERATIVE_STOP_TIMEOUT_MS);
+              const stopBudget = remainingBudget();
+              if (stopBudget < 1) throw new CancellationBlockedError('cooperative cancellation deadline expired before Docker stop', 'DOCKER_CONTAINER_ORPHANED');
+              await options.docker.stop(identity.id, stopBudget);
+              const waitBudget = remainingBudget();
+              if (waitBudget < 1) throw new CancellationBlockedError('cooperative cancellation deadline expired before stopped-state proof', 'DOCKER_CONTAINER_ORPHANED');
+              stopped = await options.docker.waitForStopped(identity.id, waitBudget);
               assertObservedIdentity(stopped, identity);
-              if (stopped.running) throw new CancellationBlockedError('Docker wait returned a running container');
-              if (stopped.stoppedAt === null && current.containerStoppedAt === null) throw new CancellationBlockedError('Docker wait did not provide a stopped timestamp');
+              if (stopped.running) throw new CancellationBlockedError('Docker wait returned a running container', 'DOCKER_CONTAINER_ORPHANED');
+              if (stopped.stoppedAt === null && current.containerStoppedAt === null) throw new CancellationBlockedError('Docker wait did not provide a stopped timestamp', 'DOCKER_CONTAINER_ORPHANED');
             } else {
               stopped = present;
             }
@@ -394,38 +481,111 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
               labels: identity.labels,
               running: false,
               status: 'exited',
+              createdAt: current.containerCreatedAt!,
+              startedAt: current.containerStartedAt,
               stoppedAt: current.containerStoppedAt,
             };
           }
+          if (stopped !== null && current.containerStoppedAt === null) {
+            const stoppedAt = stopped.stoppedAt;
+            if (stoppedAt === null) throw new CancellationBlockedError('Docker stopped proof lacks a stopped timestamp', 'DOCKER_CONTAINER_ORPHANED');
+            if (
+              current.containerMount === null
+              || current.containerEnvironment === null
+              || current.containerSecurity === null
+              || current.containerInspection === null
+              || current.containerCreatedAt === null
+            ) {
+              throw new CancellationIdentityError('persisted container lifecycle evidence is incomplete');
+            }
+            const startedAt = current.containerStartedAt ?? stopped.startedAt;
+            if (startedAt === null) throw new CancellationIdentityError('Docker stopped proof lacks a started timestamp');
+            const stoppedProof = stopped;
+            runnerWrite(options, (at) => ({
+              kind: 'container',
+              jobId: options.jobId,
+              owner: options.owner,
+              runnerUnit: options.runnerUnit,
+              leaseExpiresAt: options.leaseExpiresAt(),
+              at,
+              lifecycle: 'stopped',
+              containerId: identity.id,
+              containerName: identity.name,
+              imageDigest: identity.imageDigest,
+              labels: identity.labels,
+              mount: current.containerMount!,
+              environment: current.containerEnvironment!,
+              security: current.containerSecurity!,
+              inspection: {
+                ...current.containerInspection!,
+                cancellation: {
+                  running: false,
+                  status: stoppedProof.status,
+                  stoppedAt,
+                },
+              },
+              occurredAt: stoppedAt,
+              createdAt: current.containerCreatedAt,
+              startedAt,
+              stoppedAt,
+            }));
+          }
         }
-        const staging = await options.cleanup.staging();
-        const logs = await options.cleanup.logs();
-        const evidence = await options.evidence({
-          schemaVersion: 1,
-          kind: 'runner-cancellation',
-          jobId: options.jobId,
-          state: 'cancel_requested',
-          stage: current.currentStage,
-          outcome: 'controlled',
-          container: identity === null ? { kind: 'absent', globalLabelResult: 'no-match' } : {
-            kind: 'present', id: identity.id, name: identity.name, imageDigest: identity.imageDigest, labels: identity.labels,
-            stoppedAt: stopped?.stoppedAt ?? current.containerStoppedAt,
-          },
-          staging,
-          logs,
-        });
-        const durableEvidence = cancellationEvidence(options, current, identity, stopped, evidence, staging, logs);
-        const evidenceResult = runnerWrite(options, (at) => ({
-          kind: 'cancellation-evidence',
-          jobId: options.jobId,
-          owner: options.owner,
-          runnerUnit: options.runnerUnit,
-          leaseExpiresAt: options.leaseExpiresAt(),
-          at,
-          expectedState: 'cancel_requested',
-          evidence: durableEvidence,
-        }));
-        const evidenceEventSeq = eventSeq(evidenceResult);
+        blockedPhase = 'durable evidence recovery';
+        blockedCode = 'RUNNER_DISAPPEARED';
+        const priorEvidence = persistedCancellationEvidence(options, options.store.getJob(options.jobId), identity);
+        let staging: StagingCleanupProof;
+        let logs: LogCleanupProof;
+        let evidence: RunnerCancellationEvidencePublication;
+        let evidenceEventSeq: number;
+        if (priorEvidence === null) {
+          blockedPhase = 'staging quarantine';
+          blockedCode = 'QUARANTINE_PENDING';
+          staging = await options.cleanup.staging();
+          blockedPhase = 'log coverage';
+          blockedCode = 'RECOVERY_LOG_GAP';
+          logs = await options.cleanup.logs();
+          blockedPhase = 'immutable evidence publication';
+          blockedCode = 'QUARANTINE_PENDING';
+          evidence = await options.evidence({
+            schemaVersion: 1,
+            kind: 'runner-cancellation',
+            jobId: options.jobId,
+            state: 'cancel_requested',
+            stage: current.currentStage,
+            outcome: 'controlled',
+            container: identity === null ? { kind: 'absent', globalLabelResult: 'no-match' } : {
+              kind: 'present', id: identity.id, name: identity.name, imageDigest: identity.imageDigest, labels: identity.labels,
+              stoppedAt: stopped?.stoppedAt ?? current.containerStoppedAt,
+            },
+            staging,
+            logs,
+          });
+          const durableEvidence = cancellationEvidence(options, current, identity, stopped, evidence, staging, logs);
+          blockedPhase = 'durable evidence ownership';
+          blockedCode = 'RUNNER_DISAPPEARED';
+          const evidenceResult = runnerWrite(options, (at) => ({
+            kind: 'cancellation-evidence',
+            jobId: options.jobId,
+            owner: options.owner,
+            runnerUnit: options.runnerUnit,
+            leaseExpiresAt: options.leaseExpiresAt(),
+            at,
+            expectedState: 'cancel_requested',
+            evidence: durableEvidence,
+          }));
+          evidenceEventSeq = eventSeq(evidenceResult);
+        } else {
+          staging = priorEvidence.evidence.staging;
+          logs = priorEvidence.evidence.logs;
+          evidence = {
+            path: priorEvidence.evidence.evidencePath,
+            sha256: priorEvidence.evidence.evidenceSha256,
+          };
+          evidenceEventSeq = priorEvidence.eventSeq;
+        }
+        blockedPhase = 'Docker container removal';
+        blockedCode = 'DOCKER_CONTAINER_ORPHANED';
         let removedAt = now(options);
         if (identity !== null) {
           const present = await options.docker.inspect(identity.id);
@@ -433,12 +593,14 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
             assertObservedIdentity(present, identity);
             await options.docker.remove(identity.id);
             removedAt = now(options);
-            if (await options.docker.inspect(identity.id) !== null) throw new CancellationBlockedError('Docker rm did not prove exact container absence');
+            if (await options.docker.inspect(identity.id) !== null) throw new CancellationBlockedError('Docker rm did not prove exact container absence', 'DOCKER_CONTAINER_ORPHANED');
           }
         }
-        if ((await options.docker.listByLabels(expectedLabels)).length !== 0) throw new CancellationBlockedError('Docker label query did not prove cancellation container absence');
+        if ((await options.docker.listByLabels(expectedLabels)).length !== 0) throw new CancellationBlockedError('Docker label query did not prove cancellation container absence', 'DOCKER_CONTAINER_ORPHANED');
         const observedAt = now(options);
         const proof = cancellationProof(options, current, identity, stopped, removedAt, observedAt, staging, logs);
+        blockedPhase = 'cleanup ownership';
+        blockedCode = 'RUNNER_DISAPPEARED';
         const cleanupResult = runnerWrite(options, (at) => ({
           kind: 'cancellation-cleanup',
           jobId: options.jobId,
@@ -465,7 +627,7 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
         signalRequested = false;
         return { requested: true, handled: true, state: 'cancelled', evidencePath: evidence.path, evidenceSha256: evidence.sha256 };
       } catch (error) {
-        return persistBlocker(error, 'cleanup');
+        return persistBlocker(error, blockedPhase, blockedCode);
       }
     })();
     running = work;
@@ -476,11 +638,49 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
     }
   };
 
+  const blockRecoveryRequired = async (blockerCode: CancellationBlockerCode, reason: string): Promise<never> => {
+    const current = options.store.getJob(options.jobId);
+    if (!observeRequested(current.cancelRequestedAt !== null || signalRequested)) {
+      signalRequested = false;
+      throw new CancellationBlockedError('cancellation recovery blocker has no persisted request', 'RUNNER_DISAPPEARED');
+    }
+    if (current.state === 'publishing' || !activeState(current.state)) {
+      signalRequested = false;
+      throw new CancellationBlockedError('cancellation recovery blocker lost active ownership', 'RUNNER_DISAPPEARED');
+    }
+    if (current.state !== 'cancel_requested') {
+      const expectedState = current.state as ActiveRecoveryState;
+      runnerWrite(options, (at) => ({
+        kind: 'cancellation-transition',
+        jobId: options.jobId,
+        owner: options.owner,
+        runnerUnit: options.runnerUnit,
+        leaseExpiresAt: options.leaseExpiresAt(),
+        at,
+        expectedState,
+      }));
+    }
+    runnerWrite(options, (at) => ({
+      kind: 'cancellation-blocker',
+      jobId: options.jobId,
+      owner: options.owner,
+      runnerUnit: options.runnerUnit,
+      leaseExpiresAt: options.leaseExpiresAt(),
+      at,
+      expectedState: 'cancel_requested',
+      blockerCode,
+      blocker: { reason, cause: reason },
+    }));
+    signalRequested = false;
+    throw new CancellationBlockedError(reason, blockerCode);
+  };
+
   return Object.freeze({
     isRequested,
     observeBetweenStages: async (_stage) => cancelIfRequested(),
     observeBetweenOperations: async (_operationId) => cancelIfRequested(),
     cancelIfRequested,
+    blockRecoveryRequired,
     dispose: () => signals.off('SIGUSR1', onSignal),
   });
 }

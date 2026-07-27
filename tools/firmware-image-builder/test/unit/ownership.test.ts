@@ -354,8 +354,8 @@ describe('actor-owned compare-and-set writes', () => {
       expect(name in ownership, `OwnershipStore instance exposes ${name}`).toBe(false);
       expect(typeof (ownership as unknown as Record<string, unknown>)[name]).not.toBe('function');
     }
-    expect(Object.getOwnPropertyNames(OwnershipStore.prototype)).toEqual(expect.arrayContaining(['constructor', 'apiWrite', 'runnerWrite', 'cleanupWrite']));
-    expect(Object.getOwnPropertyNames(OwnershipStore.prototype).filter((name) => !['constructor', 'apiWrite', 'runnerWrite', 'cleanupWrite'].includes(name))).toEqual([]);
+    expect(Object.getOwnPropertyNames(OwnershipStore.prototype)).toEqual(expect.arrayContaining(['constructor', 'cancellationLogProof', 'apiWrite', 'runnerWrite', 'cleanupWrite']));
+    expect(Object.getOwnPropertyNames(OwnershipStore.prototype).filter((name) => !['constructor', 'cancellationLogProof', 'apiWrite', 'runnerWrite', 'cleanupWrite'].includes(name))).toEqual([]);
   });
 
   it('persists complete planned staging ownership before preparation mutates files', async () => {
@@ -704,6 +704,56 @@ describe('actor-owned compare-and-set writes', () => {
     const containerCleanup = withContainer.ownership.runnerWrite({ ...runnerBase('job-2'), at: RECOVERY, leaseExpiresAt: EXPIRY, kind: 'cancellation-cleanup', expectedState: 'cancel_requested', evidenceEventSeq: eventSeq(containerEvidence), proof: { ...proof, unitInactiveAt: null } });
     expect(containerCleanup.ok).toBe(true);
     expect(withContainer.ownership.runnerWrite({ ...runnerBase('job-2'), at: RECOVERY, leaseExpiresAt: EXPIRY, kind: 'cancellation-terminal', expectedState: 'cancel_requested', terminalAt: RECOVERY, cleanupEventSeq: eventSeq(containerCleanup) }).ok).toBe(true);
+  });
+
+  it('rejects cancellation evidence that claims sealed logs over persisted generation gaps', async () => {
+    const jobId = 'cancellation-log-gap';
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    seedLogGapEvent(target.path, jobId);
+
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-evidence',
+      expectedState: 'cancel_requested',
+      evidence: {
+        ...cancellationEvidence(jobId),
+        runnerObservedAt: RECOVERY,
+        logs: { runner: 'sealed', docker: 'sealed', verifiedAt: RECOVERY },
+      },
+    })).toMatchObject({
+      ok: false,
+      conflict: { kind: 'identity-mismatch' },
+    });
+    expect(target.store.listEvents(jobId).events.some(
+      (event) => event.eventType === 'cleanup' && event.payload.kind === 'cancellation-evidence',
+    )).toBe(false);
+  });
+
+  it('accepts strict sealed cancellation coverage alongside a truly absent log stream', async () => {
+    const jobId = 'cancellation-one-log-stream';
+    const target = await fixture(jobId);
+    const db = openBuilderDatabase(target.path);
+    db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, sealed_at, size_bytes, sha256) VALUES (?, ?, 0, ?, ?, ?, 0, ?)').run(
+      jobId,
+      'runner',
+      'logs/runner-0.log',
+      NOW,
+      LATER,
+      SHA64,
+    );
+    db.close();
+
+    expect(target.ownership.cancellationLogProof(jobId, RECOVERY)).toEqual({
+      runner: 'sealed',
+      docker: 'absent',
+      verifiedAt: RECOVERY,
+    });
   });
 
   it('persists a distinct staging-to-quarantine move before cancellation terminal', async () => {

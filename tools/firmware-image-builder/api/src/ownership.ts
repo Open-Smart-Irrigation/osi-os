@@ -1007,6 +1007,7 @@ function logCoverageSnapshot(db: DbFacade, jobId: string, at: string, strict = f
   const rows = loadLogRows(db, jobId);
   const runner = logGenerationCoverage(rows, 'runner', at, strict);
   const docker = logGenerationCoverage(rows, 'docker', at, strict);
+  if (strict) return { runner, docker, verifiedAt: at };
   const anyRows = runner !== 'absent' || docker !== 'absent';
   if (anyRows && (runner !== 'sealed' || docker !== 'sealed')) return { runner: runner === 'absent' ? 'unsealed' : runner, docker: docker === 'absent' ? 'unsealed' : docker, verifiedAt: at };
   return { runner, docker, verifiedAt: at };
@@ -1020,6 +1021,18 @@ function reconcileCleanupLogs(db: DbFacade, jobId: string, claimed: LogCleanupSn
   const actual = cleanupLogSnapshot(db, jobId, at);
   if (claimed.runner !== actual.runner || claimed.docker !== actual.docker) throw new OwnershipConflictError('identity-mismatch', 'cleanup log snapshot does not match persisted generations');
   return actual;
+}
+
+function reconcileCancellationLogs(db: DbFacade, jobId: string, claimed: LogCleanupProof, at: string): void {
+  const actual = logCoverageSnapshot(db, jobId, at, true);
+  if (
+    claimed.runner !== actual.runner
+    || claimed.docker !== actual.docker
+    || (actual.runner !== 'absent' && actual.runner !== 'sealed')
+    || (actual.docker !== 'absent' && actual.docker !== 'sealed')
+  ) {
+    throw new OwnershipConflictError('identity-mismatch', 'cancellation log proof does not match strict persisted generation coverage');
+  }
 }
 
 function validateCleanupPostcondition(db: DbFacade, post: CleanupPostcondition, admission: CleanupSnapshot, job: Row, at: string): string {
@@ -1450,6 +1463,24 @@ export class OwnershipStore {
     this.#failBeforeCommit = options.failBeforeCommit;
     this.#beforeBegin = options.beforeBegin;
     this.#beforeEvent = options.beforeEvent;
+  }
+
+  cancellationLogProof(jobId: string, at: string): LogCleanupProof {
+    preparedString(jobId, 'cancellation log jobId', TEXT_LIMITS.maxIdentifierBytes);
+    preparedInstant(at, 'cancellation log proof time');
+    this.#job(jobId);
+    const actual = logCoverageSnapshot(this.#db, jobId, at, true);
+    if (
+      (actual.runner !== 'absent' && actual.runner !== 'sealed')
+      || (actual.docker !== 'absent' && actual.docker !== 'sealed')
+    ) {
+      throw new OwnershipConflictError('identity-mismatch', 'cancellation logs do not have strict sealed coverage or true absence');
+    }
+    return {
+      runner: actual.runner,
+      docker: actual.docker,
+      verifiedAt: actual.verifiedAt,
+    };
   }
 
   apiWrite(command: ApiWriteCommand): OwnershipResult {
@@ -1993,6 +2024,7 @@ export class OwnershipStore {
     this.#runnerGuard(command, 'cancel_requested');
     const row = this.#job(command.jobId);
     validateCancellationEvidence(command.evidence, row, command.at);
+    reconcileCancellationLogs(this.#db, command.jobId, command.evidence.logs, command.at);
     const evidenceJson = json(command.evidence, 'cancellation evidence', true);
     const result = this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=NULL, cleanup_blocker_json=NULL,
       container_cleanup_outcome=CASE WHEN container_id IS NULL THEN NULL ELSE container_cleanup_outcome END,

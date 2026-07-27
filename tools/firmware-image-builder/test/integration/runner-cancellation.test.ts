@@ -135,7 +135,7 @@ describe('runner cancellation with the persisted ownership store', () => {
       },
       cleanup: {
         staging: async () => ({ kind: 'absent', path: null }),
-        logs: async () => ({ runner: 'sealed', docker: 'sealed', verifiedAt: '2026-07-27T09:00:03.000Z' }),
+        logs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt: '2026-07-27T09:00:03.000Z' }),
       },
       clock: () => '2026-07-27T09:00:03.000Z',
       signals: { on: () => undefined, off: () => undefined },
@@ -168,6 +168,8 @@ describe('runner cancellation with the persisted ownership store', () => {
       },
       running: true,
       status: 'running',
+      createdAt: LATER,
+      startedAt: LATER,
       stoppedAt: null as string | null,
     };
     let removed = false;
@@ -188,7 +190,7 @@ describe('runner cancellation with the persisted ownership store', () => {
       ownership: fixtureValue.ownership,
       docker,
       evidence: async (record) => { evidence.push(record); return { path: `jobs/${fixtureValue.input.jobId}/evidence/cancellation.json`, sha256: SHA64 }; },
-      cleanup: { staging: async () => ({ kind: 'absent', path: null }), logs: async () => ({ runner: 'sealed', docker: 'sealed', verifiedAt: '2026-07-27T09:00:05.000Z' }) },
+      cleanup: { staging: async () => ({ kind: 'absent', path: null }), logs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt: '2026-07-27T09:00:05.000Z' }) },
       clock: () => '2026-07-27T09:00:05.000Z',
       signals: { on: () => undefined, off: () => undefined },
     });
@@ -221,13 +223,143 @@ describe('runner cancellation with the persisted ownership store', () => {
         listByLabels: async () => [],
       },
       evidence: async () => ({ path: `jobs/${fixtureValue.input.jobId}/evidence/cancellation.json`, sha256: SHA64 }),
-      cleanup: { staging: async () => ({ kind: 'absent', path: null }), logs: async () => ({ runner: 'sealed', docker: 'sealed', verifiedAt: '2026-07-27T09:00:05.000Z' }) },
+      cleanup: { staging: async () => ({ kind: 'absent', path: null }), logs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt: '2026-07-27T09:00:05.000Z' }) },
       clock: () => '2026-07-27T09:00:05.000Z',
       signals: { on: () => undefined, off: () => undefined },
     });
 
     await expect(controller.cancelIfRequested()).resolves.toMatchObject({ state: 'cancelled' });
     expect(removed).toBe(false);
+    expect(fixtureValue.store.getJob(fixtureValue.input.jobId)).toMatchObject({ state: 'cancelled', containerId: null });
+    fixtureValue.db.close();
+  });
+
+  it('reuses durable cancellation evidence after rm succeeds and cleanup CAS crashes', async () => {
+    const fixtureValue = await fixture({ cancellation: false });
+    persistContainer(fixtureValue, 'created');
+    expect(fixtureValue.ownership.apiWrite({ kind: 'request-cancellation', jobId: fixtureValue.input.jobId, reason: 'operator', at: '2026-07-27T09:00:03.000Z' }).ok).toBe(true);
+    const current = {
+      id: CONTAINER_ID,
+      name: CONTAINER_NAME,
+      imageDigest: SHA64,
+      labels: {
+        'org.osi.image-builder.job-id': fixtureValue.input.jobId,
+        'org.osi.image-builder.manifest-sha': SHA64,
+      },
+      running: true,
+      status: 'running',
+      createdAt: LATER,
+      startedAt: LATER,
+      stoppedAt: null as string | null,
+    };
+    let removed = false;
+    let removeCalls = 0;
+    let rejectCleanup = true;
+    const evidenceRecords: unknown[] = [];
+    const chronology: string[] = [];
+    const ownership = {
+      runnerWrite: (command: Parameters<typeof fixtureValue.ownership.runnerWrite>[0]) => {
+        chronology.push(`ownership:${command.kind}`);
+        if (command.kind === 'cancellation-cleanup' && rejectCleanup) {
+          return { ok: false as const, conflict: { kind: 'cas-lost' as const, message: 'injected crash after rm' } };
+        }
+        return fixtureValue.ownership.runnerWrite(command);
+      },
+    };
+    const docker = {
+      inspect: async () => removed ? null : current,
+      stop: async () => {
+        chronology.push('docker:stop');
+        current.running = false;
+        current.status = 'exited';
+        current.stoppedAt = '2026-07-27T09:00:04.000Z';
+      },
+      waitForStopped: async () => {
+        chronology.push('docker:wait-stopped');
+        return current;
+      },
+      remove: async () => {
+        chronology.push('docker:rm');
+        removeCalls += 1;
+        removed = true;
+      },
+      listByLabels: async () => [],
+    };
+    const first = createRunnerCancellation({
+      jobId: fixtureValue.input.jobId,
+      runnerUnit: `osi-image-builder-runner@${fixtureValue.input.jobId}.service`,
+      owner: 'runner-integration',
+      leaseExpiresAt: () => '2026-07-27T09:10:00.000Z',
+      store: fixtureValue.store,
+      ownership,
+      docker,
+      evidence: async (record) => {
+        chronology.push('evidence:file');
+        evidenceRecords.push(record);
+        return { path: `jobs/${fixtureValue.input.jobId}/evidence/cancellation.json`, sha256: SHA64 };
+      },
+      cleanup: {
+        staging: async () => ({ kind: 'absent', path: null }),
+        logs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt: '2026-07-27T09:00:05.000Z' }),
+      },
+      clock: () => '2026-07-27T09:00:05.000Z',
+      signals: { on: () => undefined, off: () => undefined },
+    });
+
+    await expect(first.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'RUNNER_DISAPPEARED',
+    });
+    const stoppedAfterCrash = fixtureValue.store.getJob(fixtureValue.input.jobId);
+    expect(stoppedAfterCrash).toMatchObject({
+      state: 'cancel_requested',
+      containerId: CONTAINER_ID,
+      containerStoppedAt: '2026-07-27T09:00:04.000Z',
+    });
+    const evidenceEvent = fixtureValue.store.listEvents(fixtureValue.input.jobId).events.find(
+      (event) => event.eventType === 'cleanup' && event.payload.kind === 'cancellation-evidence',
+    );
+    expect(evidenceEvent).toBeDefined();
+    expect(removeCalls).toBe(1);
+    expect(evidenceRecords).toHaveLength(1);
+    expect(chronology.indexOf('docker:wait-stopped')).toBeLessThan(chronology.indexOf('ownership:container'));
+    expect(chronology.indexOf('ownership:container')).toBeLessThan(chronology.indexOf('evidence:file'));
+    expect(chronology.indexOf('evidence:file')).toBeLessThan(chronology.indexOf('ownership:cancellation-evidence'));
+    expect(chronology.indexOf('ownership:cancellation-evidence')).toBeLessThan(chronology.indexOf('docker:rm'));
+    expect(chronology.indexOf('docker:rm')).toBeLessThan(chronology.indexOf('ownership:cancellation-cleanup'));
+
+    rejectCleanup = false;
+    const second = createRunnerCancellation({
+      jobId: fixtureValue.input.jobId,
+      runnerUnit: `osi-image-builder-runner@${fixtureValue.input.jobId}.service`,
+      owner: 'runner-integration',
+      leaseExpiresAt: () => '2026-07-27T09:10:00.000Z',
+      store: fixtureValue.store,
+      ownership,
+      docker: {
+        ...docker,
+        stop: async () => { throw new Error('retry must not stop an absent container'); },
+        waitForStopped: async () => { throw new Error('retry must not wait for an absent container'); },
+        remove: async () => { throw new Error('retry must not remove an already-absent container'); },
+      },
+      evidence: async () => { throw new Error('retry must reuse the immutable evidence file'); },
+      cleanup: {
+        staging: async () => { throw new Error('retry must reuse persisted staging proof'); },
+        logs: async () => { throw new Error('retry must reuse persisted log proof'); },
+      },
+      clock: () => '2026-07-27T09:00:06.000Z',
+      signals: { on: () => undefined, off: () => undefined },
+    });
+
+    await expect(second.cancelIfRequested()).resolves.toMatchObject({
+      state: 'cancelled',
+      evidencePath: `jobs/${fixtureValue.input.jobId}/evidence/cancellation.json`,
+      evidenceSha256: SHA64,
+    });
+    expect(removeCalls).toBe(1);
+    expect(evidenceRecords).toHaveLength(1);
+    expect(fixtureValue.store.listEvents(fixtureValue.input.jobId).events.filter(
+      (event) => event.eventType === 'cleanup' && event.payload.kind === 'cancellation-evidence',
+    )).toEqual([evidenceEvent]);
     expect(fixtureValue.store.getJob(fixtureValue.input.jobId)).toMatchObject({ state: 'cancelled', containerId: null });
     fixtureValue.db.close();
   });
