@@ -91,6 +91,7 @@ export type ApiCancellationResult =
   | Readonly<{ readonly kind: 'runner-terminal'; readonly jobId: string; readonly state: Extract<JobState, 'succeeded' | 'failed' | 'cancelled' | 'interrupted'>; readonly runnerOwned: true }>
   | Readonly<{ readonly kind: 'already-terminal'; readonly jobId: string; readonly state: Extract<JobState, 'succeeded' | 'failed' | 'cancelled' | 'interrupted'>; readonly requestPersisted: false }>
   | Readonly<{ readonly kind: 'recovery-blocked'; readonly jobId: string; readonly state: ActiveRecoveryState; readonly blockerCode: 'RUNNER_DISAPPEARED'; readonly evidence: JsonObject; readonly requestPersisted: boolean }>
+  | Readonly<{ readonly kind: 'coordination-pending'; readonly jobId: string; readonly state: ActiveRecoveryState; readonly requestPersisted: true; readonly cancellationClockHighWaterAt: string; readonly cooperativeDeadlineAt: string }>
   | Readonly<{ readonly kind: 'request-not-accepted'; readonly jobId: string; readonly state: JobState; readonly evidence: JsonObject }>;
 
 export interface SystemdCancellationAdapterOptions {
@@ -351,6 +352,39 @@ function runnerIdentityIssue(
   return null;
 }
 
+function clockContentionIdentityIssue(
+  jobId: string,
+  job: CancellationJobRecord,
+  expectedUnit: string | null,
+  expectedOwner: string | null,
+  minimumLeaseExpiresAt: string | null,
+): string | null {
+  if (
+    expectedUnit === null
+    || !validateRunnerUnit(jobId, expectedUnit)
+    || job.runnerUnit !== expectedUnit
+  ) return 'runner unit changed during cancellation clock contention';
+  if (
+    expectedOwner === null
+    || expectedOwner.length === 0
+    || job.runnerLeaseOwner !== expectedOwner
+  ) return 'runner lease owner changed during cancellation clock contention';
+  if (
+    minimumLeaseExpiresAt === null
+    || !isCanonicalInstant(minimumLeaseExpiresAt)
+    || job.runnerLeaseExpiresAt === null
+    || !isCanonicalInstant(job.runnerLeaseExpiresAt)
+  ) return 'runner lease expiry is malformed during cancellation clock contention';
+  if (job.runnerLeaseExpiresAt < minimumLeaseExpiresAt) {
+    return 'runner lease expiry regressed during cancellation clock contention';
+  }
+  if (
+    job.cancellationClockHighWaterAt === null
+    || job.runnerLeaseExpiresAt <= job.cancellationClockHighWaterAt
+  ) return 'runner lease expired during cancellation clock contention';
+  return null;
+}
+
 function requestCommand(
   request: ApiCancellationRequest,
   late: boolean,
@@ -379,14 +413,18 @@ function durableBlocker(
   evidence: JsonObject,
 ): ApiCancellationResult {
   let observed = job;
-  let attemptedEvidence = evidence;
+  const expectedState = job.state;
+  const expectedCancelRequestedAt = job.cancelRequestedAt;
+  const expectedRunnerUnit = job.runnerUnit;
+  const expectedRunnerOwner = job.runnerLeaseOwner;
+  let minimumLeaseExpiresAt = job.runnerLeaseExpiresAt;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (observed.cleanupBlockerCode === 'RUNNER_DISAPPEARED' && observed.cleanupBlocker !== null) {
       return { kind: 'recovery-blocked', jobId: observed.jobId, state: observed.state as ActiveRecoveryState, blockerCode: 'RUNNER_DISAPPEARED', requestPersisted, evidence: observed.cleanupBlocker };
     }
     if (!ACTIVE_STATES.has(observed.state) || observed.cancelRequestedAt === null) {
       if (isTerminal(observed)) return outcomeForTerminal(job.jobId, observed, requestPersisted);
-      return { kind: 'request-not-accepted', jobId: observed.jobId, state: observed.state, evidence: attemptedEvidence };
+      return { kind: 'request-not-accepted', jobId: observed.jobId, state: observed.state, evidence };
     }
     const minimum = observed.cancellationClockHighWaterAt !== null
       && observed.cancellationClockHighWaterAt > observed.cancelRequestedAt
@@ -402,7 +440,7 @@ function durableBlocker(
         observedRunnerUnit: observed.runnerUnit,
         observedOwner: observed.runnerLeaseOwner,
         observedLeaseExpiresAt: observed.runnerLeaseExpiresAt,
-        blocker: attemptedEvidence,
+        blocker: evidence,
         at,
       });
     } catch {
@@ -413,16 +451,29 @@ function durableBlocker(
       return { kind: 'recovery-blocked', jobId: latest.jobId, state: latest.state as ActiveRecoveryState, blockerCode: 'RUNNER_DISAPPEARED', requestPersisted, evidence: latest.cleanupBlocker };
     }
     if (isTerminal(latest)) return outcomeForTerminal(job.jobId, latest, requestPersisted);
-    attemptedEvidence = {
-      kind: 'api-cancellation-fail-closed',
-      reason: 'runner identity changed while recovery blocker CAS was in progress',
-      requestedAt,
-      priorEvidence: attemptedEvidence,
-      persistedRunnerUnit: latest.runnerUnit,
-      observedOwner: latest.runnerLeaseOwner,
-      observedLeaseExpiresAt: latest.runnerLeaseExpiresAt,
-      state: latest.state,
-    };
+    const retryMinimum = latest.cancellationClockHighWaterAt !== null
+      && expectedCancelRequestedAt !== null
+      && latest.cancellationClockHighWaterAt > expectedCancelRequestedAt
+      ? latest.cancellationClockHighWaterAt
+      : expectedCancelRequestedAt;
+    if (
+      latest.state !== expectedState
+      || latest.cancelRequestedAt !== expectedCancelRequestedAt
+      || latest.runnerUnit !== expectedRunnerUnit
+      || latest.runnerLeaseOwner !== expectedRunnerOwner
+      || latest.cleanupFenceGeneration !== null
+      || latest.cleanupAdmissionId !== null
+      || minimumLeaseExpiresAt === null
+      || !isCanonicalInstant(minimumLeaseExpiresAt)
+      || latest.runnerLeaseExpiresAt === null
+      || !isCanonicalInstant(latest.runnerLeaseExpiresAt)
+      || latest.runnerLeaseExpiresAt < minimumLeaseExpiresAt
+      || retryMinimum === null
+      || latest.runnerLeaseExpiresAt <= retryMinimum
+    ) {
+      return { kind: 'request-not-accepted', jobId: latest.jobId, state: latest.state, evidence };
+    }
+    minimumLeaseExpiresAt = latest.runnerLeaseExpiresAt;
     observed = latest;
   }
   return {
@@ -432,7 +483,7 @@ function durableBlocker(
     evidence: {
       kind: 'cancellation-recovery-blocker-not-committed',
       requestedAt,
-      attempted: attemptedEvidence,
+      attempted: evidence,
       observedState: observed.state,
       observedRunnerUnit: observed.runnerUnit,
       observedOwner: observed.runnerLeaseOwner,
@@ -498,6 +549,9 @@ function observeCancellationClock(
   phase: string,
 ): ClockBoundary {
   let current = job;
+  const contentionRunnerUnit = job.runnerUnit;
+  const contentionRunnerOwner = job.runnerLeaseOwner;
+  let contentionMinimumLeaseExpiresAt = job.runnerLeaseExpiresAt;
   for (let attempt = 0; attempt < MAX_CLOCK_OBSERVATION_ATTEMPTS; attempt += 1) {
     if (isTerminal(current)) {
       return { kind: 'outcome', outcome: outcomeForTerminal(current.jobId, current, requestPersisted) };
@@ -621,6 +675,20 @@ function observeCancellationClock(
       return { kind: 'observed', job: latest, observedAt };
     }
     if (latest.cancellationClockHighWaterAt > observedAt) {
+      const identityIssue = clockContentionIdentityIssue(
+        latest.jobId,
+        latest,
+        contentionRunnerUnit,
+        contentionRunnerOwner,
+        contentionMinimumLeaseExpiresAt,
+      );
+      if (identityIssue !== null) {
+        return {
+          kind: 'outcome',
+          outcome: failedClosed(options, latest, requestPersisted, requestedAt, identityIssue),
+        };
+      }
+      contentionMinimumLeaseExpiresAt = latest.runnerLeaseExpiresAt;
       current = latest;
       continue;
     }
@@ -631,7 +699,14 @@ function observeCancellationClock(
   }
   return {
     kind: 'outcome',
-    outcome: failedClosed(options, current, requestPersisted, requestedAt, 'cancellation clock high-water retry budget was exhausted'),
+    outcome: {
+      kind: 'coordination-pending',
+      jobId: current.jobId,
+      state: current.state as ActiveRecoveryState,
+      requestPersisted: true,
+      cancellationClockHighWaterAt: current.cancellationClockHighWaterAt!,
+      cooperativeDeadlineAt: current.cancellationCooperativeDeadlineAt!,
+    },
   };
 }
 

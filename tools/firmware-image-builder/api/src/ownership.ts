@@ -2129,6 +2129,20 @@ export class OwnershipStore {
     if (command.stopIntentAt !== command.at) throw new OwnershipValidationError('cancellation stop intent must equal command time');
     if (command.escalationLeaseExpiresAt !== command.graceDeadlineAt) throw new OwnershipValidationError('cancellation escalation lease must equal grace deadline');
     if (command.observedLeaseExpiresAt <= command.at) conflict('stale-lease', 'runner lease expired before systemd stop intent');
+    const persistedLeaseExpiresAt = row.runner_lease_expires_at === null
+      ? null
+      : String(row.runner_lease_expires_at);
+    if (persistedLeaseExpiresAt === null) conflict('stale-lease', 'runner lease is missing before systemd stop intent');
+    let canonicalPersistedLeaseExpiresAt: string;
+    try {
+      canonicalPersistedLeaseExpiresAt = instant(persistedLeaseExpiresAt, 'persisted runner lease expiry');
+    } catch {
+      conflict('identity-mismatch', 'runner lease expiry is malformed before systemd stop intent');
+    }
+    if (canonicalPersistedLeaseExpiresAt <= command.at) conflict('stale-lease', 'runner lease is stale before systemd stop intent');
+    if (canonicalPersistedLeaseExpiresAt < command.observedLeaseExpiresAt) {
+      conflict('identity-mismatch', 'runner lease expiry regressed before systemd stop intent');
+    }
     if (row.cancellation_stop_intent_at !== null) conflict('cas-lost', 'cancellation stop intent is already owned');
     const result = this.#db.prepare(`UPDATE jobs SET
       cancellation_escalation_owner=?, cancellation_escalation_lease_expires_at=?,
@@ -2136,7 +2150,7 @@ export class OwnershipStore {
       WHERE job_id=? AND state=? AND cancel_requested_at=?
         AND cancellation_cooperative_deadline_at=?
         AND cancellation_clock_high_water_at=?
-        AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=?
+        AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at>=?
         AND runner_lease_expires_at>?
         AND cancellation_stop_intent_at IS NULL
         AND terminal_at IS NULL AND cleanup_blocker_code IS NULL
@@ -2318,12 +2332,31 @@ export class OwnershipStore {
       || row.cancel_requested_at !== command.cancelRequestedAt
       || row.runner_unit !== command.observedRunnerUnit
       || row.runner_lease_owner !== command.observedOwner
-      || row.runner_lease_expires_at !== command.observedLeaseExpiresAt
       || row.terminal_at !== null
       || row.cleanup_fence_generation !== null
       || row.cleanup_admission_id !== null
     ) {
       conflict('identity-mismatch', 'cancellation recovery blocker observation is stale');
+    }
+    const persistedLeaseExpiresAt = row.runner_lease_expires_at === null
+      ? null
+      : String(row.runner_lease_expires_at);
+    if (persistedLeaseExpiresAt !== command.observedLeaseExpiresAt) {
+      if (persistedLeaseExpiresAt === null || command.observedLeaseExpiresAt === null) {
+        conflict('identity-mismatch', 'cancellation recovery blocker lease observation changed');
+      }
+      try {
+        instant(persistedLeaseExpiresAt, 'persisted cancellation recovery blocker lease expiry');
+        instant(command.observedLeaseExpiresAt, 'observed cancellation recovery blocker lease expiry');
+      } catch {
+        conflict('identity-mismatch', 'cancellation recovery blocker lease extension is malformed');
+      }
+      if (persistedLeaseExpiresAt < command.observedLeaseExpiresAt) {
+        conflict('identity-mismatch', 'cancellation recovery blocker lease expiry regressed');
+      }
+      if (persistedLeaseExpiresAt <= command.at) {
+        conflict('stale-lease', 'cancellation recovery blocker lease extension is stale');
+      }
     }
     if (row.cleanup_blocker_code === 'RUNNER_DISAPPEARED' && row.cleanup_blocker_json === blockerJson) return;
     if (row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null) {
@@ -2343,7 +2376,7 @@ export class OwnershipStore {
       command.cancelRequestedAt,
       command.observedRunnerUnit,
       command.observedOwner,
-      command.observedLeaseExpiresAt,
+      persistedLeaseExpiresAt,
     );
     if (Number(result.changes) !== 1) conflict('cas-lost', 'cancellation recovery blocker CAS lost');
     this.#event(command.jobId, 'recovery', {
