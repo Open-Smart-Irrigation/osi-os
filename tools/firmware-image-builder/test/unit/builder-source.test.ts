@@ -201,6 +201,18 @@ describe('locked builder source', () => {
         'shell: false',
         'shell: true',
       ),
+      toolContents.replace(
+        'const MODULE_PROBE_TIMEOUT_MS = 15_000;',
+        'const MODULE_PROBE_TIMEOUT_MS = 150_000;',
+      ),
+      toolContents.replace(
+        'const [packageName, specifier] = NODE_MODULES[packageIndex];',
+        "const [packageName, specifier] = NODE_MODULES[0];",
+      ),
+      toolContents.replace(
+        'Object.keys(parsed).join(\'\\0\')\n        !== \'packageIndex\\0packageName\\0specifier\\0resolvedRelativePath\\0exportType\'',
+        'Object.keys(parsed).join(\'\\0\') !== \'packageIndex\\0packageName\\0specifier\\0resolvedRelativePath\'',
+      ),
       `${toolContents}\nprocess.env.NODE_PATH = '/host/node_modules';\n`,
     ]) {
       expect(() => validateTrustedOperationToolSource(drift)).toThrow();
@@ -222,6 +234,22 @@ describe('locked builder source', () => {
         "'@chirpstack/chirpstack-api',",
       ),
       probeContents.replace('const ORIGINAL_PROCESS_EXIT = process.exit.bind(process);', ''),
+      probeContents.replace(
+        'const ORIGINAL_JSON_STRINGIFY = JSON.stringify.bind(JSON);',
+        'const ORIGINAL_JSON_STRINGIFY = JSON.stringify;',
+      ),
+      probeContents.replace(
+        'const ORIGINAL_PROMISE_REJECT = ORIGINAL_PROMISE.reject.bind(ORIGINAL_PROMISE);',
+        'const ORIGINAL_PROMISE_REJECT = Promise.reject;',
+      ),
+      probeContents.replace(
+        'const record = ORIGINAL_OBJECT_CREATE(null);',
+        'const record = {};',
+      ),
+      probeContents.replace(
+        'const MAX_OUTPUT_BYTES = 1024 * 1024;',
+        'const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;',
+      ),
       probeContents.replace('args.length !== 4', 'args.length !== 3'),
       probeContents.replace('function installRootfsLoader(', 'function installRootfsLoaderRemoved('),
       probeContents.replace(
@@ -706,6 +734,10 @@ describe('locked builder source', () => {
     expect(helperScript).toContain('resolvedRelativePath');
     expect(helperScript).toContain('exportType');
     expect(helperScript).toContain('JSON.stringify(actual) !== JSON.stringify(expected)');
+    expect(helperScript).toContain('JSON.stringify replacement forged an incompatible export');
+    expect(helperScript).toContain('Object.prototype.toJSON forged an incompatible export');
+    expect(helperScript).toContain('globalThis.Promise = class PoisonedPromise');
+    expect(helperScript).toContain("setImmediate(() => import(['node', 'sqlite'].join(':'))");
     await expect(execFileAsync('/bin/sh', ['-n', '-c', helperScript])).resolves.toMatchObject({
       stdout: '',
       stderr: '',

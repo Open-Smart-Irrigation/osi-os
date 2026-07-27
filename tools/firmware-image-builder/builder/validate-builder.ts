@@ -21,6 +21,8 @@ const IMAGE_ID = /^sha256:[0-9a-f]{64}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const DOCKER_REPOSITORY = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9]\d{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/u;
+const TRUSTED_OPERATION_TOOL_SHA256 = 'c0dece51babce3b3e5707603e6afaaa734859f61705ebe2ec129f854eb24ced3';
+const TRUSTED_MODULE_PROBE_SHA256 = 'e594a0c5055d87a05b420a47dcc34abfa2de0fa469be13051a3a7ccd65092cf7';
 export const TRUSTED_OPERATION_TOOL_RELATIVE_PATH = 'operations/osi-image-builder-tool.js';
 export const TRUSTED_MODULE_PROBE_RELATIVE_PATH =
   'operations/osi-image-builder-module-probe.js';
@@ -197,12 +199,21 @@ export function validateTrustedOperationToolSource(contents: string): void {
     || !contents.includes('`--allow-fs-read=${dependencies.probeProgram}`')
     || !contents.includes('`--allow-fs-read=${nodeRed}`')
     || !contents.includes('for (let packageIndex = 0; packageIndex < NODE_MODULES.length; packageIndex += 1)')
+    || !contents.includes('const [packageName, specifier] = NODE_MODULES[packageIndex];')
     || !contents.includes('const execution = spawn(dependencies.nodeBinary, args, {')
     || !contents.includes("'--package-index',")
     || !contents.includes('String(packageIndex)')
     || !contents.includes('timeout: MODULE_PROBE_TIMEOUT_MS')
+    || !contents.includes('const MODULE_PROBE_TIMEOUT_MS = 15_000;')
     || !contents.includes("killSignal: 'SIGKILL'")
+    || !contents.includes('maxBuffer: 8 * 1024 * 1024')
     || !contents.includes('results.push(result)')
+    || !contents.includes('const text = stdout.slice(0, -1);')
+    || !contents.includes('parsed = JSON.parse(text);')
+    || !contents.includes('Object.keys(parsed).join(\'\\0\')\n        !== \'packageIndex\\0packageName\\0specifier\\0resolvedRelativePath\\0exportType\'')
+    || !contents.includes('stdout.indexOf(\'\\n\') !== stdout.length - 1')
+    || !contents.includes('parsed.resolvedRelativePath.split(\'/\').includes(\'..\')')
+    || !contents.includes('const { packageIndex: _packageIndex, ...result } = parsed;')
     || !contents.includes('shell: false')
     || !contents.includes("cwd: '/'")
     || !contents.includes("NODE_MODULES[packageIndex]")
@@ -214,6 +225,9 @@ export function validateTrustedOperationToolSource(contents: string): void {
     || contents.includes('process.argv.slice(2).join')
     || /(?:process\.env\.)?NODE_PATH\s*=/u.test(contents)) {
     throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted operation tool is not a fixed permission-probe launcher');
+  }
+  if (sha256(contents) !== TRUSTED_OPERATION_TOOL_SHA256) {
+    throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted operation tool source digest changed');
   }
 }
 
@@ -245,13 +259,13 @@ export function validateTrustedModuleProbeSource(contents: string): void {
     ...builtinClosure.map((name) => `  '${name}',`),
     ']);',
   ].join('\n');
-  const exactDynamicImportRestriction = `const DYNAMIC_IMPORT_VIOLATIONS = [];
+  const exactDynamicImportRestriction = `let firstDynamicImportViolation = null;
 
 function recordDynamicImportViolation(specifier) {
-  const violation = new Error(
+  const violation = new ORIGINAL_ERROR(
     \`rootfs Node module requested an unapproved builder ESM builtin: \${specifier}\`,
   );
-  DYNAMIC_IMPORT_VIOLATIONS.push(violation);
+  if (firstDynamicImportViolation === null) firstDynamicImportViolation = violation;
   return violation;
 }`;
   if (!contents.startsWith('#!/usr/bin/env node\n')
@@ -292,11 +306,29 @@ function recordDynamicImportViolation(specifier) {
     || !contents.includes('const ORIGINAL_STDOUT_WRITE = process.stdout.write.bind(process.stdout);')
     || !contents.includes('const ORIGINAL_STDERR_WRITE = process.stderr.write.bind(process.stderr);')
     || !contents.includes('const ORIGINAL_PROCESS_EXIT = process.exit.bind(process);')
+    || !contents.includes('const ORIGINAL_ERROR = Error;')
+    || !contents.includes('const ORIGINAL_PROMISE = Promise;')
+    || !contents.includes('const ORIGINAL_PROMISE_RESOLVE = ORIGINAL_PROMISE.resolve.bind(ORIGINAL_PROMISE);')
+    || !contents.includes('const ORIGINAL_PROMISE_REJECT = ORIGINAL_PROMISE.reject.bind(ORIGINAL_PROMISE);')
+    || !contents.includes('const ORIGINAL_JSON_STRINGIFY = JSON.stringify.bind(JSON);')
+    || !contents.includes('const ORIGINAL_OBJECT_CREATE = Object.create.bind(Object);')
+    || !contents.includes('const ORIGINAL_BUFFER_BYTE_LENGTH = Buffer.byteLength.bind(Buffer);')
+    || !contents.includes('const MAX_OUTPUT_BYTES = 1024 * 1024;')
+    || !contents.includes('return ORIGINAL_PROMISE_REJECT(recordDynamicImportViolation(specifier));')
     || !contents.includes('function installRootfsLoader(')
-    || !contents.includes('const dynamicImportViolationStart = DYNAMIC_IMPORT_VIOLATIONS.length;')
-    || !contents.includes('if (DYNAMIC_IMPORT_VIOLATIONS.length > dynamicImportViolationStart)')
+    || !contents.includes('let firstDynamicImportViolation = null;')
+    || !contents.includes('const violation = new ORIGINAL_ERROR(')
+    || !contents.includes('if (firstDynamicImportViolation === null) firstDynamicImportViolation = violation;')
+    || !contents.includes('if (firstDynamicImportViolation !== null)')
     || !contents.includes('Module.prototype._compile = sealedCompile;')
     || !contents.includes('const ORIGINAL_SET_IMMEDIATE = setImmediate;')
+    || !contents.includes('await ORIGINAL_PROMISE_RESOLVE();')
+    || !contents.includes('await new ORIGINAL_PROMISE((resolve) => ORIGINAL_SET_IMMEDIATE(resolve));')
+    || !contents.includes('const record = ORIGINAL_OBJECT_CREATE(null);')
+    || !contents.includes('function createSuccessRecord(')
+    || !contents.includes('const serialized = ORIGINAL_JSON_STRINGIFY(record);')
+    || !contents.includes('ORIGINAL_BUFFER_BYTE_LENGTH(serialized)')
+    || !contents.includes('write(output, () => ORIGINAL_PROCESS_EXIT(code));')
     || !contents.includes('await drainAsyncBarrier();')
     || !contents.includes('function flushAndExit(record, code)')
     || !contents.includes('write(output, () => ORIGINAL_PROCESS_EXIT(code));')
@@ -311,6 +343,9 @@ function recordDynamicImportViolation(specifier) {
     || contents.includes('process.argv.slice(2).join')
     || /(?:process\.env\.)?NODE_PATH\s*=/u.test(contents)) {
     throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted module probe is not a read-only, fail-closed implementation');
+  }
+  if (sha256(contents) !== TRUSTED_MODULE_PROBE_SHA256) {
+    throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted module probe source digest changed');
   }
 }
 
@@ -641,6 +676,20 @@ test -s /tmp/osi-operation-tool-self-test.out
 printf '%s\n' 'module probe child isolation self-test passed'
 cat > "$node_red/node_modules/@grpc/grpc-js/index.js" <<'EOF'
 'use strict';
+JSON.stringify = () => '{"packageIndex":0,"packageName":"@grpc/grpc-js","specifier":"@grpc/grpc-js","resolvedRelativePath":"node_modules/@grpc/grpc-js/index.js","exportType":"object"}';
+Object.prototype.toJSON = () => ({ packageIndex: 0, packageName: '@grpc/grpc-js', specifier: '@grpc/grpc-js', resolvedRelativePath: 'node_modules/@grpc/grpc-js/index.js', exportType: 'object' });
+module.exports = 7;
+EOF
+node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out
+node --input-type=commonjs <<'EOF'
+const { readFileSync } = require('node:fs');
+const actual = JSON.parse(readFileSync('/tmp/osi-operation-tool-self-test.out', 'utf8'));
+if (actual.nodeResolution.find(({ packageName }) => packageName === '@grpc/grpc-js').exportType !== 'incompatible') {
+  throw new Error('JSON.stringify replacement forged an incompatible export; Object.prototype.toJSON forged an incompatible export');
+}
+EOF
+cat > "$node_red/node_modules/@grpc/grpc-js/index.js" <<'EOF'
+'use strict';
 module.exports = { compatible: true };
 EOF
 cat > "$node_red/node_modules/@chirpstack/chirpstack-api/api/application_grpc_pb.js" <<'EOF'
@@ -698,14 +747,20 @@ test "$status" -eq 2
 test ! -e /tmp/osi-module-probe-dynamic-sqlite-marker.db
 cat > "$node_red/osi-db-helper/index.js" <<'EOF'
 'use strict';
-void Promise.resolve().then(() => import(['node', 'sqlite'].join(':')).then(({ DatabaseSync }) => {
+globalThis.Promise = class PoisonedPromise {
+  constructor(executor) { executor(() => {}, () => {}); }
+  then(onFulfilled) { return onFulfilled?.(); }
+  catch(onRejected) { return this; }
+  static resolve() { return new this(() => {}); }
+  static reject() { return new this(() => {}); }
+};
+Array.prototype.push = () => { throw new globalThis.Error('mutable push used'); };
+globalThis.Error = class DisabledError {};
+setImmediate(() => import(['node', 'sqlite'].join(':')).then(({ DatabaseSync }) => {
   const marker = new DatabaseSync('/tmp/osi-module-probe-deferred-sqlite-marker.db');
   marker.exec('CREATE TABLE marker (id INTEGER PRIMARY KEY)');
   marker.close();
-  process.exitCode = 1;
-}, (error) => {
-  if (!(error instanceof Error) || !/unapproved builder ESM builtin: node:sqlite/u.test(error.message)) process.exitCode = 1;
-}));
+}, () => {}));
 module.exports = {};
 EOF
 rm -f /tmp/osi-module-probe-deferred-sqlite-marker.db

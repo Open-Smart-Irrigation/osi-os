@@ -7,6 +7,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PROBE_PROGRAM = fileURLToPath(import.meta.url);
 const ORIGINAL_SET_IMMEDIATE = setImmediate;
+const ORIGINAL_PROMISE = Promise;
+const ORIGINAL_PROMISE_RESOLVE = ORIGINAL_PROMISE.resolve.bind(ORIGINAL_PROMISE);
+const ORIGINAL_PROMISE_REJECT = ORIGINAL_PROMISE.reject.bind(ORIGINAL_PROMISE);
+const ORIGINAL_JSON_STRINGIFY = JSON.stringify.bind(JSON);
+const ORIGINAL_OBJECT_CREATE = Object.create.bind(Object);
+const ORIGINAL_BUFFER_BYTE_LENGTH = Buffer.byteLength.bind(Buffer);
+const ORIGINAL_ERROR = Error;
 const ORIGINAL_STDOUT_WRITE = process.stdout.write.bind(process.stdout);
 const ORIGINAL_STDERR_WRITE = process.stderr.write.bind(process.stderr);
 const ORIGINAL_PROCESS_EXIT = process.exit.bind(process);
@@ -116,13 +123,13 @@ const NATIVE_DEPENDENCY_STUBS = Object.freeze({
     value: SQLITE3_INITIALIZER_STUB,
   }),
 });
-const DYNAMIC_IMPORT_VIOLATIONS = [];
+let firstDynamicImportViolation = null;
 
 function recordDynamicImportViolation(specifier) {
-  const violation = new Error(
+  const violation = new ORIGINAL_ERROR(
     `rootfs Node module requested an unapproved builder ESM builtin: ${specifier}`,
   );
-  DYNAMIC_IMPORT_VIOLATIONS.push(violation);
+  if (firstDynamicImportViolation === null) firstDynamicImportViolation = violation;
   return violation;
 }
 
@@ -271,7 +278,7 @@ function installRootfsLoader({ nodeRed, packageName, resolvedEntrypoint }) {
       filename,
       displayErrors: true,
       importModuleDynamically(specifier) {
-        return Promise.reject(recordDynamicImportViolation(specifier));
+        return ORIGINAL_PROMISE_REJECT(recordDynamicImportViolation(specifier));
       },
     });
     compiledWrapper.call(
@@ -289,11 +296,11 @@ function installRootfsLoader({ nodeRed, packageName, resolvedEntrypoint }) {
 }
 
 async function drainAsyncBarrier() {
-  await Promise.resolve();
-  await new Promise((resolve) => ORIGINAL_SET_IMMEDIATE(resolve));
-  await Promise.resolve();
-  await new Promise((resolve) => ORIGINAL_SET_IMMEDIATE(resolve));
-  await Promise.resolve();
+  await ORIGINAL_PROMISE_RESOLVE();
+  await new ORIGINAL_PROMISE((resolve) => ORIGINAL_SET_IMMEDIATE(resolve));
+  await ORIGINAL_PROMISE_RESOLVE();
+  await new ORIGINAL_PROMISE((resolve) => ORIGINAL_SET_IMMEDIATE(resolve));
+  await ORIGINAL_PROMISE_RESOLVE();
 }
 
 function exportType(value) {
@@ -304,17 +311,20 @@ function exportType(value) {
       : 'incompatible';
 }
 
+function createSuccessRecord(packageIndex, packageName, specifier, resolvedRelativePath, exported) {
+  const record = ORIGINAL_OBJECT_CREATE(null);
+  record.packageIndex = packageIndex;
+  record.packageName = packageName;
+  record.specifier = specifier;
+  record.resolvedRelativePath = resolvedRelativePath;
+  record.exportType = exportType(exported);
+  return record;
+}
+
 async function probePackage(nodeRed, packageIndex) {
   const [packageName, specifier, loadSpecifier = specifier] = NODE_MODULES[packageIndex];
   const rootfsRequire = createRequire(`${nodeRed}/__osi_verification__.cjs`);
   const resolved = rootfsRequire.resolve(loadSpecifier);
-  installRootfsLoader({ nodeRed, packageName, resolvedEntrypoint: resolved });
-  const dynamicImportViolationStart = DYNAMIC_IMPORT_VIOLATIONS.length;
-  const exported = rootfsRequire(loadSpecifier);
-  await drainAsyncBarrier();
-  if (DYNAMIC_IMPORT_VIOLATIONS.length > dynamicImportViolationStart) {
-    throw DYNAMIC_IMPORT_VIOLATIONS[dynamicImportViolationStart];
-  }
   const actualRelativePath = relative(nodeRed, resolved).replaceAll('\\', '/');
   if (actualRelativePath.startsWith('../') || actualRelativePath.startsWith('/')) {
     throw new Error(`resolved Node module escaped the trusted rootfs base: ${packageName}`);
@@ -330,13 +340,19 @@ async function probePackage(nodeRed, packageIndex) {
   if (!resolvedRelativePath.startsWith(expectedRoot)) {
     throw new Error(`resolved Node module changed package identity: ${packageName}`);
   }
-  return {
+  installRootfsLoader({ nodeRed, packageName, resolvedEntrypoint: resolved });
+  const exported = rootfsRequire(loadSpecifier);
+  await drainAsyncBarrier();
+  if (firstDynamicImportViolation !== null) {
+    throw firstDynamicImportViolation;
+  }
+  return createSuccessRecord(
     packageIndex,
     packageName,
     specifier,
     resolvedRelativePath,
-    exportType: exportType(exported),
-  };
+    exported,
+  );
 }
 
 function boundedDetails(error) {
@@ -352,8 +368,8 @@ function boundedDetails(error) {
 }
 
 function flushAndExit(record, code) {
-  const serialized = JSON.stringify(record);
-  if (Buffer.byteLength(serialized) > MAX_OUTPUT_BYTES) {
+  const serialized = ORIGINAL_JSON_STRINGIFY(record);
+  if (typeof serialized !== 'string' || ORIGINAL_BUFFER_BYTE_LENGTH(serialized) > MAX_OUTPUT_BYTES) {
     ORIGINAL_STDERR_WRITE(
       'osi-image-builder-module-probe: output exceeds bounded limit\n',
       () => ORIGINAL_PROCESS_EXIT(2),
@@ -389,5 +405,9 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => flushAndExit({ error: boundedDetails(error) }, 2));
+  main().catch((error) => {
+    const record = ORIGINAL_OBJECT_CREATE(null);
+    record.error = boundedDetails(error);
+    flushAndExit(record, 2);
+  });
 }

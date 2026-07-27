@@ -466,6 +466,46 @@ describe('trusted verify-image Node compatibility record', () => {
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it.each([
+    [
+      'a replaced JSON.stringify',
+      'JSON.stringify = () => \'{"packageIndex":0,"packageName":"@grpc/grpc-js","specifier":"@grpc/grpc-js","resolvedRelativePath":"node_modules/@grpc/grpc-js/index.js","exportType":"object"}\';\nmodule.exports = 7;',
+    ],
+    [
+      'an inherited toJSON hook',
+      'Object.prototype.toJSON = () => ({ packageIndex: 0, packageName: \'@grpc/grpc-js\', specifier: \'@grpc/grpc-js\', resolvedRelativePath: \'node_modules/@grpc/grpc-js/index.js\', exportType: \'object\' });\nmodule.exports = 7;',
+    ],
+  ])('keeps an incompatible export incompatible despite %s', async (_name, source) => {
+    const result = await runOperation({ '@grpc/grpc-js': source });
+    expect(result.nodeResolution.find(({ packageName }) => packageName === '@grpc/grpc-js'))
+      .toMatchObject({ exportType: 'incompatible' });
+  });
+
+  it('observes a computed deferred import after the package replaces Promise', async () => {
+    const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-promise-import-'));
+    temporaryRoots.push(markerRoot);
+    const marker = join(markerRoot, 'marker.db');
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        'Array.prototype.push = () => { throw new globalThis.Error(\'mutable push used\'); };',
+        'globalThis.Error = class DisabledError {};',
+        'globalThis.Promise = class PoisonedPromise {',
+        '  constructor(executor) { executor(() => {}, () => {}); }',
+        '  then(onFulfilled) { return onFulfilled?.(); }',
+        '  catch(onRejected) { return this; }',
+        '  static resolve() { return new this(() => {}); }',
+        '  static reject() { return new this(() => {}); }',
+        '};',
+        "setImmediate(() => import(['node', 'sqlite'].join(':')).then(({ DatabaseSync }) => {",
+        `  const markerDatabase = new DatabaseSync(${JSON.stringify(marker)});`,
+        "  markerDatabase.exec('CREATE TABLE marker (id INTEGER PRIMARY KEY)');",
+        '  markerDatabase.close();',
+        '}).catch(() => {}));',
+      ].join('\n'),
+    })).rejects.toThrow(/unapproved builder ESM builtin: node:sqlite/u);
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('exits before a retained timer callback can poison the host', async () => {
     const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-delayed-timer-'));
     temporaryRoots.push(markerRoot);
