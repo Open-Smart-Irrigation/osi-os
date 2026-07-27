@@ -1321,6 +1321,105 @@ describe('actor-owned compare-and-set writes', () => {
     expect(target.store.getJob(jobId).state).toBe('cancelled');
   });
 
+  it('permits only an exact stopped lifecycle write while a cancellation blocker is persisted', async () => {
+    const jobId = 'cancellation-blocked-container-stop';
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    const created = {
+      ...container(jobId),
+      leaseExpiresAt: EXPIRY,
+    } satisfies Extract<RunnerWriteCommand, { kind: 'container' }>;
+    expect(target.ownership.runnerWrite(created).ok).toBe(true);
+    const started = {
+      ...created,
+      at: LATER,
+      lifecycle: 'started' as const,
+      inspection: { running: true, status: 'running' },
+      occurredAt: LATER,
+      createdAt: NOW,
+      startedAt: LATER,
+    };
+    expect(target.ownership.runnerWrite(started).ok).toBe(true);
+    expect(target.ownership.apiWrite({
+      kind: 'request-cancellation',
+      jobId,
+      reason: 'stop',
+      at: ACTIVE,
+    }).ok).toBe(true);
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: ACTIVE,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-transition',
+      expectedState: 'starting',
+    }).ok).toBe(true);
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-blocker',
+      expectedState: 'cancel_requested',
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+      blocker: { reason: 'temporary stopped-state inspection failure' },
+    }).ok).toBe(true);
+
+    const stopped = {
+      ...started,
+      at: AFTER,
+      lifecycle: 'stopped' as const,
+      inspection: {
+        running: true,
+        status: 'running',
+        cancellation: {
+          running: false,
+          status: 'exited',
+          stoppedAt: SEALED,
+        },
+      },
+      occurredAt: SEALED,
+      stoppedAt: SEALED,
+    };
+    for (const command of [
+      { ...stopped, containerId: `other-${jobId}` },
+      { ...stopped, containerName: `other-${jobId}` },
+      { ...stopped, imageDigest: SHA64 },
+      {
+        ...stopped,
+        labels: {
+          ...stopped.labels,
+          'org.osi.image-builder.extra': 'unexpected',
+        },
+      },
+      { ...stopped, lifecycle: 'created' as const, stoppedAt: undefined },
+      { ...stopped, lifecycle: 'started' as const, stoppedAt: undefined },
+      {
+        ...stopped,
+        lifecycle: 'removed' as const,
+        occurredAt: AFTER,
+        removedAt: AFTER,
+        cleanupOutcome: 'passed' as const,
+      },
+    ]) {
+      expect(target.ownership.runnerWrite(command)).toMatchObject({
+        ok: false,
+        conflict: { kind: 'fenced' },
+      });
+    }
+
+    expect(target.ownership.runnerWrite(stopped).ok).toBe(true);
+    expect(target.store.getJob(jobId)).toMatchObject({
+      containerId: created.containerId,
+      containerName: created.containerName,
+      containerImageDigest: created.imageDigest,
+      containerStoppedAt: SEALED,
+    });
+    expect((target.db.prepare(
+      'SELECT cleanup_blocker_code FROM jobs WHERE job_id=?',
+    ).get(jobId) as { cleanup_blocker_code: string | null }).cleanup_blocker_code)
+      .toBe('DOCKER_CONTAINER_ORPHANED');
+  });
+
   it('accepts strict sealed cancellation coverage alongside a truly absent log stream', async () => {
     const jobId = 'cancellation-one-log-stream';
     const target = await fixture(jobId);

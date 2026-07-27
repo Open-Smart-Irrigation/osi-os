@@ -51,7 +51,11 @@ import {
   createTargetSetupSourceObservations,
 } from '../../runner/src/target-setup.js';
 import { verifyTargetSetupConfiguration } from '../../runner/src/verification.js';
-import { DockerCancellationRequestedError } from '../../runner/src/docker-executor.js';
+import {
+  createDockerExecutor,
+  DockerCancellationRequestedError,
+  type DockerCommandExecutor,
+} from '../../runner/src/docker-executor.js';
 import type { PublisherClient, PublisherResponse } from '../../publisher/client.js';
 
 const SHA40 = 'a'.repeat(40);
@@ -1822,6 +1826,232 @@ describe('trusted pipeline integration', () => {
             expect([publishStageCount, publishEventCount, publishStageEventCount]).toEqual([1, 1, 1]);
           }
         } finally {
+          value.close();
+        }
+      }
+    }
+  }, 30_000);
+
+  it('serializes real two-writer cancellation and operation-create authorization races', async () => {
+    type RaceResult = Readonly<{
+      ok: boolean;
+      kind?: string;
+      conflict?: Readonly<{ kind: string }>;
+    }>;
+    const at = '2026-07-26T08:01:00.000Z';
+    const afterRace = '2026-07-26T08:01:01.000Z';
+    const leaseExpiresAt = '2026-07-26T08:10:00.000Z';
+    for (const expectedWinner of ['cancellation', 'operation'] as const) {
+      for (let repetition = 0; repetition < 3; repetition += 1) {
+        const value = await fixture();
+        let cancellation: ReturnType<typeof createRunnerCancellation> | null = null;
+        try {
+          const path = join(value.statePath, 'jobs.sqlite');
+          const setup = openBuilderDatabase(path);
+          setup.prepare(`UPDATE jobs SET
+            state='starting', current_stage=NULL,
+            runner_lease_owner=?, runner_lease_expires_at=?, runner_started_at=?,
+            updated_at=?
+            WHERE job_id=?`).run(
+            value.input.owner,
+            leaseExpiresAt,
+            '2026-07-26T08:00:11.000Z',
+            '2026-07-26T08:00:11.000Z',
+            value.input.jobId,
+          );
+          setup.close();
+          const operation = createOperationDefinition('verify-image', {
+            environment: value.input.target.environment,
+          });
+          const [cancellationResult, operationResult] = await synchronizedOwnershipRace(path, [
+            {
+              actor: 'api',
+              command: {
+                kind: 'request-cancellation',
+                jobId: value.input.jobId,
+                reason: `operation-race-${expectedWinner}-${repetition}`,
+                at,
+              },
+              delayMs: expectedWinner === 'cancellation' ? 0 : 20,
+            },
+            {
+              actor: 'runner',
+              command: {
+                kind: 'operation-begin',
+                jobId: value.input.jobId,
+                owner: value.input.owner,
+                runnerUnit: value.input.runnerUnit,
+                leaseExpiresAt,
+                at,
+                expectedState: 'starting',
+                operationId: 'verify-image',
+                attempt: 1,
+                argvHash: hashOperationDefinition(operation),
+                argv: operation.argv,
+                startedAt: at,
+              },
+              delayMs: expectedWinner === 'operation' ? 0 : 20,
+            },
+          ]) as [RaceResult, RaceResult];
+
+          const database = openBuilderDatabase(path);
+          const operationRows = database.prepare(
+            'SELECT operation_id, attempt, argv_hash, argv_json, started_at, lifecycle_phase FROM job_operations WHERE job_id=?',
+          ).all(value.input.jobId);
+          const operationEvents = database.prepare(
+            "SELECT payload_json FROM job_events WHERE job_id=? AND event_type='operation'",
+          ).all(value.input.jobId);
+          const cancellationEvents = database.prepare(
+            "SELECT payload_json FROM job_events WHERE job_id=? AND event_type='cancellation_requested'",
+          ).all(value.input.jobId);
+          database.close();
+
+          expect(cancellationEvents).toHaveLength(1);
+          if (expectedWinner === 'cancellation') {
+            expect(cancellationResult.ok).toBe(true);
+            expect(operationResult).toMatchObject({
+              ok: false,
+              conflict: { kind: 'stale-predecessor' },
+            });
+            expect(operationRows).toEqual([]);
+            expect(operationEvents).toEqual([]);
+
+            const dockerActions: string[] = [];
+            const dockerMutations = {
+              stop: vi.fn(async () => undefined),
+              remove: vi.fn(async () => undefined),
+            };
+            cancellation = createRunnerCancellation({
+              jobId: value.input.jobId,
+              runnerUnit: value.input.runnerUnit,
+              owner: value.input.owner,
+              leaseExpiresAt: () => leaseExpiresAt,
+              store: value.store,
+              ownership: value.ownership,
+              docker: {
+                inspect: async () => null,
+                stop: dockerMutations.stop,
+                waitForStopped: async () => {
+                  throw new Error('pre-container cancellation must not wait');
+                },
+                remove: dockerMutations.remove,
+                listByLabels: async () => [],
+              },
+              evidence: async () => ({
+                path: `jobs/${value.input.jobId}/evidence/cancellation.json`,
+                sha256: HASH_D,
+              }),
+              cleanup: {
+                staging: async () => ({ kind: 'absent', path: null }),
+                logs: async () => value.ownership.cancellationLogProof(
+                  value.input.jobId,
+                  afterRace,
+                ),
+              },
+              clock: () => afterRace,
+              signals: { on: () => undefined, off: () => undefined },
+            });
+            const imageReference = `registry.example.test/osi/builder@sha256:${HASH_C}`;
+            const commandExecutor: DockerCommandExecutor = {
+              run: vi.fn(async (argv) => {
+                dockerActions.push(argv[1] ?? '');
+                const stdout = argv[1] === 'version'
+                  ? '{"Server":{"Os":"linux","Arch":"amd64"}}'
+                  : argv[1] === 'image'
+                    ? JSON.stringify({
+                        Id: `sha256:${HASH_A}`,
+                        RepoDigests: [imageReference],
+                        Architecture: 'amd64',
+                        Os: 'linux',
+                      })
+                    : '';
+                return {
+                  argv: [...argv],
+                  exitCode: 0,
+                  signal: null,
+                  stdout,
+                  stderr: '',
+                  timedOut: false,
+                  startedAt: afterRace,
+                  finishedAt: afterRace,
+                };
+              }),
+            };
+            await expect(createDockerExecutor({
+              commandExecutor,
+              dockerPath: '/usr/bin/docker',
+              imageReference,
+              imageDigest: HASH_C,
+              jobId: value.input.jobId,
+              manifestSha256: value.input.manifest.sha256,
+              attempt: 1,
+              worktreePath: '/tmp/osi-operation-race-worktree',
+              uid: 1000,
+              gid: 1000,
+              operationId: 'verify-image',
+              operationContext: { environment: value.input.target.environment },
+              operationTimeoutMs: 60_000,
+              maxCaptureBytes: 16 * 1024,
+              containerName: `osi-image-builder-race-${repetition}-attempt-1`,
+              store: value.store,
+              ownership: value.ownership,
+              leaseSnapshot: () => ({
+                owner: value.input.owner,
+                unit: value.input.runnerUnit,
+                leaseExpiresAt,
+                expectedState: 'starting',
+              }),
+              clock: () => afterRace,
+              evidence: async () => ({
+                path: `jobs/${value.input.jobId}/evidence/operation.json`,
+                sha256: HASH_D,
+              }),
+              finalizeLogs: async () => ({
+                runner: 'absent',
+                docker: 'absent',
+                verifiedAt: afterRace,
+              }),
+              cancellationBudget: cancellation.cancellationBudget,
+              authorizeContainerCreate: cancellation.authorizeContainerCreate,
+              authorizeCancellation: cancellation.authorizeActiveOperationStop,
+            }).run()).rejects.toMatchObject({
+              code: 'CANCELLED',
+              observation: { state: 'cancelled' },
+            });
+            expect(dockerActions).toEqual(['version', 'image', 'ps']);
+            expect(dockerActions.some((action) => (
+              ['create', 'start', 'stop', 'rm'].includes(action)
+            ))).toBe(false);
+            expect(dockerMutations.stop).not.toHaveBeenCalled();
+            expect(dockerMutations.remove).not.toHaveBeenCalled();
+            expect(value.store.getJob(value.input.jobId).state).toBe('cancelled');
+            expect(value.store.getOperation(
+              value.input.jobId,
+              'verify-image',
+              1,
+            )).toBeNull();
+          } else {
+            expect(operationResult.ok).toBe(true);
+            expect(cancellationResult.ok).toBe(true);
+            expect(operationRows).toEqual([
+              {
+                operation_id: 'verify-image',
+                attempt: 1,
+                argv_hash: hashOperationDefinition(operation),
+                argv_json: JSON.stringify(operation.argv),
+                started_at: at,
+                lifecycle_phase: 'not_created',
+              },
+            ]);
+            expect(operationEvents).toHaveLength(1);
+            expect(value.store.getJob(value.input.jobId)).toMatchObject({
+              state: 'starting',
+              cancelRequestedAt: at,
+              containerId: null,
+            });
+          }
+        } finally {
+          cancellation?.dispose();
           value.close();
         }
       }

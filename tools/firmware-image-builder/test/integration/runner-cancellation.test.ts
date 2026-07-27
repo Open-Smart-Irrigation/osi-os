@@ -86,7 +86,8 @@ afterEach(async () => {
   await Promise.all(tempDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-function persistContainer(fixtureValue: Awaited<ReturnType<typeof fixture>>, lifecycle: 'created' | 'stopped'): void {
+function persistContainer(fixtureValue: Awaited<ReturnType<typeof fixture>>, lifecycle: 'created' | 'started' | 'stopped'): void {
+  const started = lifecycle !== 'created';
   const stopped = lifecycle === 'stopped';
   expect(fixtureValue.ownership.runnerWrite({
     kind: 'container',
@@ -106,10 +107,11 @@ function persistContainer(fixtureValue: Awaited<ReturnType<typeof fixture>>, lif
     mount: { source: '/tmp', destination: '/work' },
     environment: { CI: '1' },
     security: { user: '1000:1000' },
-    inspection: { running: !stopped, status: stopped ? 'exited' : 'created' },
+    inspection: { running: !stopped, status: stopped ? 'exited' : started ? 'running' : 'created' },
     occurredAt: stopped ? '2026-07-27T09:00:02.000Z' : LATER,
     createdAt: LATER,
-    ...(stopped ? { startedAt: LATER, stoppedAt: '2026-07-27T09:00:02.000Z' } : {}),
+    ...(started ? { startedAt: LATER } : {}),
+    ...(stopped ? { stoppedAt: '2026-07-27T09:00:02.000Z' } : {}),
   }).ok).toBe(true);
 }
 
@@ -450,6 +452,140 @@ describe('runner cancellation with the persisted ownership store', () => {
     });
     expect(fixtureValue.store.getJob(fixtureValue.input.jobId).state).toBe('cancelled');
     expect((fixtureValue.db.prepare('SELECT cleanup_blocker_code FROM jobs WHERE job_id=?').get(fixtureValue.input.jobId) as { cleanup_blocker_code: string | null }).cleanup_blocker_code).toBeNull();
+    fixtureValue.db.close();
+  });
+
+  it('retries a repaired stopped-container blocker and completes the durable cancellation protocol', async () => {
+    const fixtureValue = await fixture({ cancellation: false });
+    persistContainer(fixtureValue, 'created');
+    persistContainer(fixtureValue, 'started');
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'request-cancellation',
+      jobId: fixtureValue.input.jobId,
+      reason: 'operator',
+      at: '2026-07-27T09:00:02.000Z',
+    }).ok).toBe(true);
+    const listeners = new Set<() => void>();
+    const signals = {
+      on: (_signal: 'SIGUSR1', listener: () => void) => { listeners.add(listener); },
+      off: (_signal: 'SIGUSR1', listener: () => void) => { listeners.delete(listener); },
+      emit: () => { for (const listener of listeners) listener(); },
+    };
+    const current = {
+      id: CONTAINER_ID,
+      name: CONTAINER_NAME,
+      imageDigest: SHA64,
+      labels: {
+        'org.osi.image-builder.job-id': fixtureValue.input.jobId,
+        'org.osi.image-builder.manifest-sha': SHA64,
+      },
+      running: true,
+      status: 'running',
+      createdAt: LATER,
+      startedAt: LATER,
+      stoppedAt: null as string | null,
+    };
+    let repaired = false;
+    let removed = false;
+    let clock = '2026-07-27T09:00:05.000Z';
+    const chronology: string[] = [];
+    const ownership = {
+      runnerWrite: (command: Parameters<typeof fixtureValue.ownership.runnerWrite>[0]) => {
+        const result = fixtureValue.ownership.runnerWrite(command);
+        if (result.ok) {
+          chronology.push(`ownership:${command.kind}${command.kind === 'container' ? `:${command.lifecycle}` : ''}`);
+          if (command.kind === 'container' && command.lifecycle === 'stopped') {
+            expect((fixtureValue.db.prepare(
+              'SELECT cleanup_blocker_code FROM jobs WHERE job_id=?',
+            ).get(fixtureValue.input.jobId) as { cleanup_blocker_code: string | null }).cleanup_blocker_code)
+              .toBe('DOCKER_CONTAINER_ORPHANED');
+          }
+        }
+        return result;
+      },
+    };
+    const stop = vi.fn(async () => {
+      chronology.push('docker:stop');
+      current.running = false;
+      current.status = 'exited';
+      current.stoppedAt = '2026-07-27T09:00:04.000Z';
+    });
+    const remove = vi.fn(async () => {
+      chronology.push('docker:remove');
+      removed = true;
+    });
+    const controller = createRunnerCancellation({
+      jobId: fixtureValue.input.jobId,
+      runnerUnit: `osi-image-builder-runner@${fixtureValue.input.jobId}.service`,
+      owner: 'runner-integration',
+      leaseExpiresAt: () => '2026-07-27T09:10:00.000Z',
+      store: fixtureValue.store,
+      ownership,
+      docker: {
+        inspect: async () => removed ? null : current,
+        stop,
+        waitForStopped: async () => {
+          if (!repaired) throw new Error('temporary stopped-state inspection failure');
+          return current;
+        },
+        remove,
+        listByLabels: async () => [],
+      },
+      evidence: async () => {
+        chronology.push('evidence:file');
+        return {
+          path: `jobs/${fixtureValue.input.jobId}/evidence/cancellation.json`,
+          sha256: SHA64,
+        };
+      },
+      cleanup: {
+        staging: async () => ({ kind: 'absent', path: null }),
+        logs: async () => fixtureValue.ownership.cancellationLogProof(
+          fixtureValue.input.jobId,
+          clock,
+        ),
+      },
+      clock: () => clock,
+      signals,
+    });
+
+    signals.emit();
+    await expect(controller.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(remove).not.toHaveBeenCalled();
+    expect(fixtureValue.store.getJob(fixtureValue.input.jobId)).toMatchObject({
+      state: 'cancel_requested',
+      containerStoppedAt: null,
+    });
+    expect((fixtureValue.db.prepare(
+      'SELECT cleanup_blocker_code FROM jobs WHERE job_id=?',
+    ).get(fixtureValue.input.jobId) as { cleanup_blocker_code: string | null }).cleanup_blocker_code)
+      .toBe('DOCKER_CONTAINER_ORPHANED');
+
+    repaired = true;
+    clock = '2026-07-27T09:00:06.000Z';
+    signals.emit();
+    await expect(controller.cancelIfRequested()).resolves.toMatchObject({
+      state: 'cancelled',
+    });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledOnce();
+    expect(fixtureValue.store.getJob(fixtureValue.input.jobId)).toMatchObject({
+      state: 'cancelled',
+      containerId: null,
+    });
+    expect((fixtureValue.db.prepare(
+      'SELECT cleanup_blocker_code FROM jobs WHERE job_id=?',
+    ).get(fixtureValue.input.jobId) as { cleanup_blocker_code: string | null }).cleanup_blocker_code)
+      .toBeNull();
+    expect(chronology.indexOf('ownership:container:stopped'))
+      .toBeLessThan(chronology.indexOf('ownership:cancellation-evidence'));
+    expect(chronology.indexOf('ownership:cancellation-evidence'))
+      .toBeLessThan(chronology.indexOf('docker:remove'));
+    expect(chronology.indexOf('docker:remove'))
+      .toBeLessThan(chronology.indexOf('ownership:cancellation-cleanup'));
     fixtureValue.db.close();
   });
 

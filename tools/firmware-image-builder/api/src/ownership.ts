@@ -290,6 +290,67 @@ export type RunnerWriteCommand =
   | (CommonRunner & Readonly<{ kind: 'operation-complete'; expectedState: JobState; operationId: TrustedOperationId; attempt: number; input: OperationInput }>)
   | (CommonRunner & Readonly<{ kind: 'operation-cleanup'; expectedState: JobState; operationId: TrustedOperationId; attempt: number; proof: OperationCleanupProof }>);
 
+function isBlockedCancellationStoppedWrite(
+  row: Row,
+  command: Extract<RunnerWriteCommand, { kind: 'container' }>,
+): boolean {
+  if (
+    row.state !== 'cancel_requested'
+    || command.lifecycle !== 'stopped'
+    || row.container_id === null
+    || row.container_name === null
+    || row.container_image_digest === null
+    || row.container_labels_json === null
+    || row.container_mount_json === null
+    || row.container_env_json === null
+    || row.container_security_json === null
+    || row.container_inspection_json === null
+    || row.container_created_at === null
+    || row.container_started_at === null
+    || row.container_stopped_at !== null
+    || row.container_removed_at !== null
+    || command.removedAt !== undefined && command.removedAt !== null
+    || command.cleanupOutcome !== undefined && command.cleanupOutcome !== null
+  ) {
+    return false;
+  }
+  const cancellation = command.inspection.cancellation;
+  if (
+    cancellation === null
+    || Array.isArray(cancellation)
+    || typeof cancellation !== 'object'
+  ) {
+    return false;
+  }
+  const cancellationProof = cancellation as JsonObject;
+  if (
+    cancellationProof.running !== false
+    || typeof cancellationProof.status !== 'string'
+    || cancellationProof.status.length === 0
+    || cancellationProof.stoppedAt !== command.stoppedAt
+  ) {
+    return false;
+  }
+  const { cancellation: _cancellation, ...priorInspection } = command.inspection;
+  return (
+    command.containerId === row.container_id
+    && command.containerName === row.container_name
+    && command.imageDigest === row.container_image_digest
+    && command.labels['org.osi.image-builder.job-id'] === row.container_label_job_id
+    && command.labels['org.osi.image-builder.manifest-sha'] === row.container_label_manifest_sha
+    && encodeJson(command.labels, 'blocked cancellation container labels', true) === row.container_labels_json
+    && encodeJson(command.mount, 'blocked cancellation container mount', true) === row.container_mount_json
+    && encodeJson(command.environment, 'blocked cancellation container environment', true) === row.container_env_json
+    && encodeJson(command.security, 'blocked cancellation container security', true) === row.container_security_json
+    && encodeJson(priorInspection, 'blocked cancellation prior inspection', true) === row.container_inspection_json
+    && command.createdAt === row.container_created_at
+    && command.startedAt === row.container_started_at
+    && command.stoppedAt !== undefined
+    && command.stoppedAt !== null
+    && command.occurredAt === command.stoppedAt
+  );
+}
+
 export type CleanupWriteCommand =
   | Readonly<{ kind: 'claim-lease'; jobId: string; admissionId: string; owner: string; unitName: string; fenceGeneration: number; fenceTokenHash: string; snapshot: CleanupSnapshot; at: string }>
   | Readonly<{ kind: 'renew-lease'; jobId: string; admissionId: string; owner: string; unitName: string; fenceGeneration: number; fenceTokenHash: string; expectedExpiresAt: string; expiresAt: string; snapshot: CleanupSnapshot; at: string }>
@@ -3109,7 +3170,18 @@ export class OwnershipStore {
     const cancellationRetry = row.state === 'cancel_requested'
       && commandKind !== undefined
       && ['cancellation-evidence', 'cancellation-blocker', 'cancellation-cleanup', 'cancellation-terminal'].includes(commandKind);
-    if ((row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null) && !cancellationRetry) conflict('fenced', 'runner has a persisted recovery blocker');
+    const stoppedRetry = commandKind === 'container'
+      && isBlockedCancellationStoppedWrite(
+        row,
+        command as Extract<RunnerWriteCommand, { kind: 'container' }>,
+      );
+    if (
+      (row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null)
+      && !cancellationRetry
+      && !stoppedRetry
+    ) {
+      conflict('fenced', 'runner has a persisted recovery blocker');
+    }
     if (!skipLatest) requirePersistedTimeline(this.#db, command.jobId, [['runner command time', command.at]]);
     if (row.runner_lease_expires_at !== command.leaseExpiresAt || row.runner_lease_expires_at <= command.at) conflict('stale-lease', 'runner lease is stale');
   }
