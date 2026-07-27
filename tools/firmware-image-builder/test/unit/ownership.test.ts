@@ -1672,6 +1672,58 @@ describe('actor-owned compare-and-set writes', () => {
     db.close();
   });
 
+  it('replaces an exact failed cleanup blocker when corrected retry cannot stop the stale unit', async () => {
+    const target = await claimedCleanup('cleanup-failed-stop-failure');
+    const previousBlocker = { reason: 'container cleanup failed' } satisfies JsonObject;
+    expect(target.ownership.cleanupWrite({
+      kind: 'evidence',
+      jobId: 'cleanup-failed-stop-failure',
+      admissionId: target.admission.admissionId,
+      owner: target.admission.owner,
+      unitName: target.admission.unitName,
+      fenceGeneration: 1,
+      fenceTokenHash: SHA64_B,
+      snapshot: target.snapshot,
+      status: 'failed',
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+      blocker: previousBlocker,
+      at: AFTER,
+    })).toMatchObject({ ok: true, kind: 'committed' });
+    const blocker = {
+      kind: 'cleanup-unit-stop-failed',
+      code: 'CLEANUP_UNIT_STOP_FAILED',
+      unitName: target.admission.unitName,
+      failure: 'stop-error',
+      observedAt: RETRY_AT,
+      error: { message: 'systemd stop failed', code: null },
+    } satisfies JsonObject;
+    expect(target.ownership.apiWrite({
+      kind: 'cleanup-admission-stop-failed',
+      jobId: 'cleanup-failed-stop-failure',
+      owner: 'api',
+      previousOwner: target.admission.owner,
+      previousAdmissionId: target.admission.admissionId,
+      previousStatus: 'failed',
+      previousUnitName: target.admission.unitName,
+      previousFenceGeneration: 1,
+      previousFenceTokenHash: SHA64_B,
+      previousExpiresAt: EXPIRY,
+      previousClaimAt: RECOVERY,
+      previousRenewAt: null,
+      previousBlockerCode: 'DOCKER_CONTAINER_ORPHANED',
+      previousBlocker,
+      failure: 'stop-error',
+      blockerCode: 'CLEANUP_UNIT_STOP_FAILED',
+      blocker,
+      snapshot: target.snapshot,
+      at: RETRY_AT,
+    })).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.store.getJob('cleanup-failed-stop-failure')).toMatchObject({
+      cleanupBlockerCode: 'CLEANUP_UNIT_STOP_FAILED',
+      cleanupBlocker: blocker,
+    });
+  });
+
   it('retains the staging source and fence across a cleanup crash window', async () => {
     const { ownership, store, path } = await fixture(); ownership.apiWrite(dispatch()); ownership.runnerWrite(lease(ACTIVE));
     ownership.runnerWrite({ ...runnerBase(), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256: manifestHash('job-1'), verificationPath: 'staging/verify', verificationSha256: verificationHash('job-1') });

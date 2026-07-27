@@ -573,9 +573,8 @@ function validateCleanupAdmissionReplacement(value: PreparedRecord, kind: 'rotat
 function validateCleanupAdmissionStopFailure(value: PreparedRecord): void {
   preparedCommon(value, 'API');
   validateCleanupAdmissionPredecessor(value, 'cleanup admission stop failure');
-  if (value.previousStatus !== 'admitted' && value.previousStatus !== 'claimed' && value.previousStatus !== 'blocking') throw new OwnershipValidationError('cleanup admission stop failure requires an admitted, claimed, or exact stop-failure-blocked predecessor');
-  if (value.previousStatus === 'blocking' && value.previousBlockerCode !== 'CLEANUP_UNIT_STOP_FAILED') throw new OwnershipValidationError('cleanup admission stop failure may only repeat the exact stop-failure blocker');
-  if (value.previousStatus !== 'blocking' && (value.previousBlockerCode !== undefined && value.previousBlockerCode !== null || value.previousBlocker !== undefined && value.previousBlocker !== null)) throw new OwnershipValidationError('cleanup admission stop failure predecessor must not already be blocked');
+  if (!['admitted', 'claimed', 'failed', 'blocking'].includes(String(value.previousStatus))) throw new OwnershipValidationError('cleanup admission stop failure predecessor is invalid');
+  if ((value.previousStatus === 'admitted' || value.previousStatus === 'claimed') && (value.previousBlockerCode !== undefined && value.previousBlockerCode !== null || value.previousBlocker !== undefined && value.previousBlocker !== null)) throw new OwnershipValidationError('active cleanup admission stop failure predecessor must not already be blocked');
   preparedString(value.owner, 'cleanup admission stop failure owner', TEXT_LIMITS.maxIdentifierBytes);
   preparedString(value.previousOwner, 'cleanup admission stop failure predecessor owner', TEXT_LIMITS.maxIdentifierBytes);
   preparedInstant(value.previousExpiresAt, 'cleanup admission stop failure predecessor expiry');
@@ -2773,7 +2772,7 @@ export class OwnershipStore {
     const admission = this.#db.prepare(`SELECT status, owner, unit_name, expires_at, fence_generation, fence_token_hash, claim_at, renew_at, blocker_code, blocker_json
       FROM cleanup_leases WHERE admission_id=? AND job_id=?`).get(command.previousAdmissionId, command.jobId) as Row | undefined;
     if (!admission) conflict('admission-mismatch', 'cleanup stop failure predecessor does not exist');
-    assertCleanupPredecessor(admission, command, ['admitted', 'claimed', 'blocking']);
+    assertCleanupPredecessor(admission, command, ['admitted', 'claimed', 'failed', 'blocking']);
     if (admission.owner !== command.previousOwner) conflict('admission-mismatch', 'cleanup stop failure predecessor owner changed');
     if (admission.expires_at !== command.previousExpiresAt) conflict('admission-mismatch', 'cleanup stop failure predecessor expiry changed');
     if (row.cleanup_admission_id !== command.previousAdmissionId || row.cleanup_fence_generation !== command.previousFenceGeneration || row.cleanup_fence_token_hash !== command.previousFenceTokenHash) conflict('admission-mismatch', 'cleanup stop failure lost the active cleanup fence');
