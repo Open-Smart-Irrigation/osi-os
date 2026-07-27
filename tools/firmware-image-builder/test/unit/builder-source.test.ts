@@ -218,7 +218,7 @@ describe('locked builder source', () => {
       expect(() => validateTrustedOperationToolSource(drift)).toThrow();
     }
     for (const drift of [
-      probeContents.replace('sqlite3: Object.freeze({', 'betterSqlite3: Object.freeze({'),
+      probeContents.replace('NATIVE_DEPENDENCY_STUBS.sqlite3 = Object.freeze({', 'NATIVE_DEPENDENCY_STUBS.betterSqlite3 = Object.freeze({'),
       probeContents.replace("packageName: 'osi-db-helper'", "packageName: 'osi-history-helper'"),
       probeContents.replace("  'process',\n", ''),
       probeContents.replace(
@@ -249,6 +249,34 @@ describe('locked builder source', () => {
       probeContents.replace(
         'const ORIGINAL_REFLECT_APPLY = Reflect.apply.bind(Reflect);',
         'const ORIGINAL_REFLECT_APPLY = Reflect.apply;',
+      ),
+      probeContents.replace(
+        'const BUILTIN_CAPABILITY_STUBS = ORIGINAL_OBJECT_CREATE(null);',
+        'const BUILTIN_CAPABILITY_STUBS = Object.freeze({});',
+      ),
+      probeContents.replace(
+        'const NATIVE_DEPENDENCY_STUBS = ORIGINAL_OBJECT_CREATE(null);',
+        'const NATIVE_DEPENDENCY_STUBS = Object.freeze({});',
+      ),
+      probeContents.replace(
+        "const moduleCache = createRestrictedLoaderCache(realModuleCache, 'Module._cache');",
+        'const moduleCache = realModuleCache;',
+      ),
+      probeContents.replace(
+        "seal(Module, '_pathCache', modulePathCache, 'Module._pathCache');",
+        '',
+      ),
+      probeContents.replace(
+        'const moduleFacade = ORIGINAL_OBJECT_CREATE(null);',
+        'const moduleFacade = module;',
+      ),
+      probeContents.replace(
+        "if (typeof request !== 'string') {",
+        "if (request == null) {",
+      ),
+      probeContents.replace(
+        'rootfs require.resolve options are not supported',
+        'rootfs require.resolve options are supported',
       ),
       probeContents.replace(
         "seal(Module, '_load', sealedLoad, 'Module._load');",

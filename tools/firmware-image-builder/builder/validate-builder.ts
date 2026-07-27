@@ -22,7 +22,7 @@ const DIGEST = /^[0-9a-f]{64}$/u;
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const DOCKER_REPOSITORY = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9]\d{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/u;
 const TRUSTED_OPERATION_TOOL_SHA256 = 'c0dece51babce3b3e5707603e6afaaa734859f61705ebe2ec129f854eb24ced3';
-const TRUSTED_MODULE_PROBE_SHA256 = '2c12d5ccad9306304b6fbf68818f2ca0bf5c897c1ee2f0ac58ce2b0023b24e52';
+const TRUSTED_MODULE_PROBE_SHA256 = 'da68440c7c0662c9278ed656efe9861cda78cc190643320562066bca2d4ba5e7';
 export const TRUSTED_OPERATION_TOOL_RELATIVE_PATH = 'operations/osi-image-builder-tool.js';
 export const TRUSTED_MODULE_PROBE_RELATIVE_PATH =
   'operations/osi-image-builder-module-probe.js';
@@ -273,11 +273,11 @@ function recordDynamicImportViolation(specifier) {
     || !contents.includes("args[0] !== '--rootfs-node-red'")
     || !contents.includes("args[2] !== '--package-index'")
     || !contents.includes('NODE_MODULES[packageIndex]')
-    || !contents.includes("sqlite3: Object.freeze({\n    packageName: 'osi-db-helper'")
+    || !contents.includes("NATIVE_DEPENDENCY_STUBS.sqlite3 = Object.freeze({\n  packageName: 'osi-db-helper'")
     || !contents.includes(exactBuiltinClosure)
     || !contents.includes('const ROOTFS_FILESYSTEM_CAPABILITY = Object.freeze(new Proxy(')
     || !contents.includes("  if (request === 'fs' || request === 'node:fs') {\n    return ROOTFS_FILESYSTEM_CAPABILITY;\n  }")
-    || !contents.includes("packageName: 'osi-health-helper',\n    parentRelativePath: 'osi-health-helper/index.js'")
+    || !contents.includes("BUILTIN_CAPABILITY_STUBS['node:child_process'] = Object.freeze({\n  packageName: 'osi-health-helper',\n  parentRelativePath: 'osi-health-helper/index.js'")
     || !contents.includes('return builtinStub.value;')
     || !contents.includes("'@chirpstack/chirpstack-api/api/application_grpc_pb',")
     || !contents.includes("seal(Module, '_resolveFilename', sealedResolveFilename, 'Module._resolveFilename');")
@@ -312,11 +312,21 @@ function recordDynamicImportViolation(specifier) {
     || !contents.includes('const ORIGINAL_PROMISE = Promise;')
     || !contents.includes('const ORIGINAL_PROMISE_REJECT = ORIGINAL_PROMISE.reject.bind(ORIGINAL_PROMISE);')
     || !contents.includes('const ORIGINAL_ARRAY_INCLUDES = Function.call.bind(Array.prototype.includes);')
+    || !contents.includes('const ORIGINAL_ARRAY_IS_ARRAY = Array.isArray.bind(Array);')
     || !contents.includes('const ORIGINAL_STRING_REPLACE_ALL = Function.call.bind(String.prototype.replaceAll);')
     || !contents.includes('const ORIGINAL_STRING_STARTS_WITH = Function.call.bind(String.prototype.startsWith);')
     || !contents.includes('const ORIGINAL_REFLECT_APPLY = Reflect.apply.bind(Reflect);')
+    || !contents.includes('const ORIGINAL_REFLECT_DEFINE_PROPERTY = Reflect.defineProperty.bind(Reflect);')
+    || !contents.includes('const ORIGINAL_REFLECT_DELETE_PROPERTY = Reflect.deleteProperty.bind(Reflect);')
+    || !contents.includes('const ORIGINAL_REFLECT_GET_OWN_PROPERTY_DESCRIPTOR = Reflect.getOwnPropertyDescriptor.bind(Reflect);')
+    || !contents.includes('const ORIGINAL_REFLECT_GET_PROTOTYPE_OF = Reflect.getPrototypeOf.bind(Reflect);')
     || !contents.includes('const ORIGINAL_REFLECT_GET = Reflect.get.bind(Reflect);')
     || !contents.includes('const ORIGINAL_REFLECT_HAS = Reflect.has.bind(Reflect);')
+    || !contents.includes('const ORIGINAL_REFLECT_IS_EXTENSIBLE = Reflect.isExtensible.bind(Reflect);')
+    || !contents.includes('const ORIGINAL_REFLECT_OWN_KEYS = Reflect.ownKeys.bind(Reflect);')
+    || !contents.includes('const ORIGINAL_REFLECT_PREVENT_EXTENSIONS = Reflect.preventExtensions.bind(Reflect);')
+    || !contents.includes('const ORIGINAL_REFLECT_SET = Reflect.set.bind(Reflect);')
+    || !contents.includes('const ORIGINAL_REFLECT_SET_PROTOTYPE_OF = Reflect.setPrototypeOf.bind(Reflect);')
     || !contents.includes('const ORIGINAL_MAP_DELETE = Function.call.bind(Map.prototype.delete);')
     || !contents.includes('const ORIGINAL_MAP_ENTRIES = Function.call.bind(Map.prototype.entries);')
     || !contents.includes('const ORIGINAL_MAP_SET = Function.call.bind(Map.prototype.set);')
@@ -325,10 +335,35 @@ function recordDynamicImportViolation(specifier) {
     || !contents.includes('const ORIGINAL_CREATE_ASYNC_HOOK = createHook.bind(null);')
     || !contents.includes('const ORIGINAL_JSON_STRINGIFY = JSON.stringify.bind(JSON);')
     || !contents.includes('const ORIGINAL_OBJECT_CREATE = Object.create.bind(Object);')
+    || !contents.includes('const ORIGINAL_OBJECT_DEFINE_PROPERTY = Object.defineProperty.bind(Object);')
+    || !contents.includes('const ORIGINAL_OBJECT_HAS_OWN = Object.hasOwn.bind(Object);')
+    || !contents.includes('const ORIGINAL_OBJECT_FREEZE = Object.freeze.bind(Object);')
     || !contents.includes('const ORIGINAL_BUFFER_BYTE_LENGTH = Buffer.byteLength.bind(Buffer);')
     || !contents.includes('const MAX_OUTPUT_BYTES = 1024 * 1024;')
     || !contents.includes('return ORIGINAL_PROMISE_REJECT(recordDynamicImportViolation(specifier));')
     || !contents.includes('function installRootfsLoader(')
+    || !contents.includes('const BUILTIN_CAPABILITY_STUBS = ORIGINAL_OBJECT_CREATE(null);')
+    || !contents.includes('const NATIVE_DEPENDENCY_STUBS = ORIGINAL_OBJECT_CREATE(null);')
+    || !contents.includes('Object.freeze(BUILTIN_CAPABILITY_STUBS);')
+    || !contents.includes('Object.freeze(NATIVE_DEPENDENCY_STUBS);')
+    || !contents.includes('const nativeStub = ORIGINAL_OBJECT_HAS_OWN(NATIVE_DEPENDENCY_STUBS, request)')
+    || !contents.includes('const builtinStub = ORIGINAL_OBJECT_HAS_OWN(BUILTIN_CAPABILITY_STUBS, request)')
+    || !contents.includes('let loaderAccessDepth = 0;')
+    || !contents.includes('function withTrustedLoaderAccess(operation)')
+    || !contents.includes('function createRestrictedLoaderCache(realCache, label)')
+    || !contents.includes("const moduleCache = createRestrictedLoaderCache(realModuleCache, 'Module._cache');")
+    || !contents.includes("const modulePathCache = createRestrictedLoaderCache(realModulePathCache, 'Module._pathCache');")
+    || !contents.includes("seal(Module, '_cache', moduleCache, 'Module._cache');")
+    || !contents.includes("seal(Module, '_pathCache', modulePathCache, 'Module._pathCache');")
+    || !contents.includes('const moduleFacade = ORIGINAL_OBJECT_CREATE(null);')
+    || !contents.includes("['constructor', null]")
+    || !contents.includes("['prototype', null]")
+    || !contents.includes('const requireEntry = createRequire(filename);')
+    || !contents.includes('rootfs require requests must be primitive strings')
+    || !contents.includes('rootfs require.resolve requests must be primitive strings')
+    || !contents.includes('rootfs require.resolve options are not supported')
+    || !contents.includes('ORIGINAL_OBJECT_FREEZE(localRequire);')
+    || !contents.includes('loaderAccessDepth = 0;')
     || !contents.includes('const TRUSTED_REAL_BUILTINS_TO_WARM = Object.freeze([')
     || !contents.includes('for (const builtin of TRUSTED_REAL_BUILTINS_TO_WARM) ORIGINAL_GET_BUILTIN_MODULE(builtin);')
     || !contents.includes('let firstDynamicImportViolation = null;')
@@ -687,21 +722,39 @@ if (JSON.stringify(actual) !== JSON.stringify(expected)) {
   throw new Error('verify-image canonical self-test output changed');
 }
 EOF
+mkdir -p "$node_red/node_modules/round-nine-native" "$node_red/node_modules/round-nine-builtin"
+printf '%s\n' '{"name":"round-nine-native","main":"index.js"}' > "$node_red/node_modules/round-nine-native/package.json"
+printf '%s\n' '{"name":"round-nine-builtin","main":"index.js"}' > "$node_red/node_modules/round-nine-builtin/package.json"
+printf '%s\n' 'module.exports = { compatible: true };' > "$node_red/node_modules/round-nine-native/index.js"
+printf '%s\n' 'module.exports = { compatible: true };' > "$node_red/node_modules/round-nine-builtin/index.js"
 cat > "$node_red/node_modules/@grpc/grpc-js/index.js" <<'EOF'
 'use strict';
-module.constructor._pathCache.poisoned = true;
-module.exports = { compatible: true };
-EOF
-cat > "$node_red/node_modules/@chirpstack/chirpstack-api/api/application_grpc_pb.js" <<'EOF'
-'use strict';
-if (Object.hasOwn(module.constructor._pathCache, 'poisoned')) {
-  throw new Error('cross-child Module state leaked');
+Object.prototype['round-nine-native'] = { packageName: '@grpc/grpc-js', value: { forged: true } };
+Object.prototype['round-nine-builtin'] = { packageName: '@grpc/grpc-js', parentRelativePath: 'node_modules/@grpc/grpc-js/index.js', value: { forged: true } };
+if (require('round-nine-native').forged || require('round-nine-builtin').forged) {
+  throw new Error('inherited stub entry was used');
 }
 module.exports = { compatible: true };
 EOF
 node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out
 test -s /tmp/osi-operation-tool-self-test.out
-printf '%s\n' 'module probe child isolation self-test passed'
+printf '%s\n' 'module probe inherited stub entries ignored'
+cat > "$node_red/node_modules/@grpc/grpc-js/index.js" <<'EOF'
+'use strict';
+require.cache.poisoned = true;
+module.exports = { compatible: true };
+EOF
+status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
+test "$status" -eq 2
+printf '%s\n' 'module probe same-child cache mutation rejected'
+cat > "$node_red/node_modules/@grpc/grpc-js/index.js" <<'EOF'
+'use strict';
+module.constructor._pathCache.poisoned = true;
+module.exports = { compatible: true };
+EOF
+status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
+test "$status" -eq 2
+printf '%s\n' 'module probe facade hides Module path cache'
 cat > "$node_red/node_modules/@grpc/grpc-js/index.js" <<'EOF'
 'use strict';
 JSON.stringify = () => '{"packageIndex":0,"packageName":"@grpc/grpc-js","specifier":"@grpc/grpc-js","resolvedRelativePath":"node_modules/@grpc/grpc-js/index.js","exportType":"object"}';

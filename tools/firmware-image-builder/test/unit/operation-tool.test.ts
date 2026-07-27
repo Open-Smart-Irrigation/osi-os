@@ -72,6 +72,7 @@ type OperationResult = Readonly<{
 
 async function runOperation(
   overrides: Readonly<Record<string, string>> = {},
+  extraPackages: Readonly<Record<string, string>> = {},
 ): Promise<OperationResult> {
   const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-modules-'));
   temporaryRoots.push(root);
@@ -104,6 +105,15 @@ async function runOperation(
           ? 'module.exports = { compatible: true };\n'
           : 'module.exports = function compatible() {};\n'),
     );
+  }
+  for (const [packageName, source] of Object.entries(extraPackages)) {
+    const packageRoot = join(nodeRed, 'node_modules', packageName);
+    await mkdir(packageRoot, { recursive: true });
+    await writeFile(
+      join(packageRoot, 'package.json'),
+      JSON.stringify({ name: packageName, main: 'index.js' }),
+    );
+    await writeFile(join(packageRoot, 'index.js'), source);
   }
   const chirpstackEntrypoint = join(
     nodeRed,
@@ -334,6 +344,24 @@ describe('trusted verify-image Node compatibility record', () => {
     await expect(runShippedOperation({
       dbHelperPrefix: "require('unknown-target-native-dependency');",
     })).rejects.toThrow(/unknown-target-native-dependency/u);
+  });
+
+  it('rejects non-string require requests before the trusted resolver window', async () => {
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        "const request = new Proxy({}, { get() { throw new Error('request coercion ran'); } });",
+        'require(request);',
+      ].join('\n'),
+    })).rejects.toThrow(/primitive strings/u);
+  });
+
+  it('rejects require.resolve options before a Proxy can expose paths', async () => {
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        "const options = new Proxy({}, { get() { throw new Error('resolve options getter ran'); } });",
+        "require.resolve('osi-db-helper', options);",
+      ].join('\n'),
+    })).rejects.toThrow(/require.resolve options are not supported/u);
   });
 
   it('rejects child_process execution before an injected helper can mutate the host', async () => {
@@ -592,7 +620,7 @@ describe('trusted verify-image Node compatibility record', () => {
       "require('node:sqlite');",
     ].join('\n')],
   ])('rejects same-child replacement of %s before a disallowed require can succeed', async (_name, source) => {
-    await expect(runOperation({ '@grpc/grpc-js': source })).rejects.toThrow(/round-eight-missing-dependency|node:sqlite|read only|writable|Cannot assign/u);
+    await expect(runOperation({ '@grpc/grpc-js': source })).rejects.toThrow(/round-eight-missing-dependency|node:sqlite|read only|writable|Cannot assign|Cannot set|Cannot read/u);
   });
 
   it.each([
@@ -616,27 +644,45 @@ describe('trusted verify-image Node compatibility record', () => {
     expect(result.nodeResolution).toHaveLength(21);
   });
 
-  it('restores per-package cache state so a later shipped entrypoint cannot be poisoned', async () => {
-    const result = await runOperation({
+  it('rejects require.cache poisoning before a missing dependency can be forged', async () => {
+    await expect(runOperation({
       '@grpc/grpc-js': [
         "const future = require.resolve('@chirpstack/chirpstack-api');",
         "require.cache[future] = { exports: { poisoned: true }, loaded: true };",
-        'module.exports = { compatible: true };',
+        "require('round-nine-missing-dependency');",
       ].join('\n'),
-    });
-    expect(result.nodeResolution.find(({ packageName }) => packageName === '@chirpstack/chirpstack-api'))
-      .toMatchObject({ exportType: 'function' });
+    })).rejects.toThrow(/Module._cache|round-nine-missing-dependency/u);
   });
 
-  it('isolates Module.prototype.require mutation from every other package child', async () => {
-    await runOperation({
+  it.each([
+    ['Module._cache', "module.constructor._cache.poisoned = true;"],
+    ['Module._pathCache', "module.constructor._pathCache.poisoned = true;"],
+    ['require.cache set', "require.cache.poisoned = true;"],
+    ['require.cache define', "Object.defineProperty(require.cache, 'poisoned', { value: true });"],
+    ['require.cache delete', "delete require.cache.poisoned;"],
+  ])('rejects same-child %s mutation before resolution can be poisoned', async (_name, source) => {
+    await expect(runOperation({
       '@grpc/grpc-js': [
-        "module.constructor.prototype.require = function poisonedRequire() { return { poisoned: true }; };",
+        source,
+        "require('round-nine-missing-dependency');",
+      ].join('\n'),
+    })).rejects.toThrow(/Module\._cache|Module\._pathCache|round-nine-missing-dependency|mutate|Cannot read/u);
+  });
+
+  it('ignores inherited native and builtin stub entries', async () => {
+    const result = await runOperation({
+      '@grpc/grpc-js': [
+        "Object.prototype['round-nine-native'] = { packageName: '@grpc/grpc-js', value: { forged: true } };",
+        "Object.prototype['round-nine-builtin'] = { packageName: '@grpc/grpc-js', parentRelativePath: 'node_modules/@grpc/grpc-js/index.js', value: { forged: true } };",
+        "if (require('round-nine-native').forged || require('round-nine-builtin').forged) throw new Error('inherited stub entry was used');",
         'module.exports = { compatible: true };',
       ].join('\n'),
+    }, {
+      'round-nine-native': 'module.exports = { compatible: true };\n',
+      'round-nine-builtin': 'module.exports = { compatible: true };\n',
     });
-    const result = await runOperation();
-    expect(result.nodeResolution).toHaveLength(21);
+    expect(result.nodeResolution.find(({ packageName }) => packageName === '@grpc/grpc-js'))
+      .toMatchObject({ exportType: 'object' });
   });
 
   it('seals process.getBuiltinModule while preserving approved harmless builtins', async () => {
@@ -764,18 +810,13 @@ describe('trusted verify-image Node compatibility record', () => {
     await expect(runProbeWithFakeChildren(child)).rejects.toThrow(expected);
   });
 
-  it('does not carry nested Module static mutations from package N into package N+1', async () => {
-    const result = await runOperation({
+  it('hides the real Module instance from same-child cache access', async () => {
+    await expect(runOperation({
       '@grpc/grpc-js': [
         "module.constructor._pathCache.poisoned = true;",
         'module.exports = { compatible: true };',
       ].join('\n'),
-      '@chirpstack/chirpstack-api': [
-        "if (Object.hasOwn(module.constructor._pathCache, 'poisoned')) throw new Error('cross-child Module state leaked');",
-        'module.exports = { compatible: true };',
-      ].join('\n'),
-    });
-    expect(result.nodeResolution).toHaveLength(21);
+    })).rejects.toThrow(/Cannot read properties of null|Module\._pathCache/u);
   });
 
   it.each([
