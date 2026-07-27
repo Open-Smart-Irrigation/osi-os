@@ -177,6 +177,12 @@ export type CleanupPostcondition = Readonly<{
 }>;
 
 export type PublishRecoveryEvidence = Readonly<{
+  readonly stage: Readonly<{
+    readonly startedAt: string;
+    readonly finishedAt: string;
+    readonly evidencePath: string;
+    readonly evidenceSha256: string;
+  }>;
   readonly runner: Readonly<{ readonly unit: string; readonly owner: string; readonly leaseExpiresAt: string; readonly inactiveAt: string; readonly observedAt: string }>;
   readonly container: NullContainerProof;
   readonly artifact: Readonly<Pick<ArtifactInput, 'stagingPath' | 'artifactSha256' | 'artifactSize' | 'artifactMtime' | 'checksumPath' | 'checksumSha256' | 'manifestPath' | 'manifestSha256' | 'verificationPath' | 'verificationSha256'>>;
@@ -221,6 +227,7 @@ export type RunnerWriteCommand =
   | (CommonRunner & Readonly<{ kind: 'container'; lifecycle: 'created' | 'started' | 'stopped' | 'removed'; containerId: string; containerName: string; imageDigest: string; labels: JsonObject; mount: JsonObject; environment: JsonObject; security: JsonObject; inspection: JsonObject; occurredAt: string; createdAt?: string | null; startedAt?: string | null; stoppedAt?: string | null; removedAt?: string | null; cleanupOutcome?: 'passed' | 'failed' | 'blocking' | null }>)
   | (CommonRunner & Readonly<{ kind: 'artifact'; expectedState: JobState; state: JobState; stagingPath: string; artifactSha256: string; artifactSize: number; artifactMtime: string; checksumPath: string; checksumSha256: string; manifestPath: string; manifestSha256: string; verificationPath: string; verificationSha256: string }>)
   | (CommonRunner & Readonly<{ kind: 'publish-stage-start'; expectedState: 'verifying'; startedAt: string; finalDirectory: string; finalPath: string; publishStartedAt: string }>)
+  | (CommonRunner & Readonly<{ kind: 'publish-quarantine-intent'; expectedState: 'publishing'; quarantinePath: string }>)
   | (CommonRunner & Readonly<{ kind: 'publish-terminal'; expectedState: 'publishing'; startedAt: string; finishedAt: string; evidencePath: string; evidenceSha256: string; finalDirectory: string; finalPath: string; publishStartedAt: string; publishedAt: string; terminalAt: string }>)
   | (CommonRunner & Readonly<{ kind: 'publish-failure-terminal'; expectedState: 'publishing'; startedAt: string; finishedAt: string; evidencePath: string; evidenceSha256: string; blockerCode: BuilderErrorCode; blocker: JsonObject; staging: 'present' | 'absent' | 'quarantined' | 'unknown'; quarantinePath?: string; terminalAt: string; error: JsonObject }>)
   | (CommonRunner & Readonly<{ kind: 'publish'; expectedState: JobState; state: 'staged' | 'publishing' | 'published' | 'blocked'; finalDirectory?: string; finalPath?: string; startedAt?: string; publishedAt?: string; blockerCode?: BuilderErrorCode; blocker?: JsonObject }>)
@@ -391,7 +398,8 @@ function validateOperationInput(input: unknown): void {
   const value = preparedObject(input, 'operation input'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation input operationId');
   if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) <= 0) throw new OwnershipValidationError('operation input attempt is invalid');
   preparedHash(value.argvHash, 'operation input argv hash'); preparedPath(value.evidencePath, 'operation input evidence path'); preparedHash(value.evidenceSha256, 'operation input evidence SHA'); preparedInstant(value.startedAt, 'operation input startedAt'); preparedOptionalInstant(value.finishedAt, 'operation input finishedAt');
-  preparedEnum(value.lifecyclePhase, [...COMMAND_LIFECYCLES], 'operation input lifecycle'); preparedEnum(value.outcome, ['passed', 'failed'], 'operation input outcome');
+  preparedEnum(value.lifecyclePhase, [...COMMAND_LIFECYCLES], 'operation input lifecycle'); preparedEnum(value.outcome, ['passed', 'failed', 'accepted'], 'operation input outcome');
+  preparedOptionalEnum(value.acceptedDisposition, ['expected-rootfs-already-present'], 'operation input accepted disposition');
   preparedJsonArray(value.argv, 'operation input argv');
   if (typeof value.timedOut !== 'boolean') throw new OwnershipValidationError('operation input timedOut is invalid');
   preparedOptionalHash(value.containerImageDigest, 'operation input container image digest'); if (value.containerId !== undefined && value.containerId !== null) preparedString(value.containerId, 'operation input container id', TEXT_LIMITS.maxIdentifierBytes); if (value.containerName !== undefined && value.containerName !== null) preparedString(value.containerName, 'operation input container name', TEXT_LIMITS.maxIdentifierBytes); if (value.containerLabelJobId !== undefined && value.containerLabelJobId !== null) preparedString(value.containerLabelJobId, 'operation input container job label', TEXT_LIMITS.maxIdentifierBytes); preparedOptionalHash(value.containerLabelManifestSha, 'operation input container manifest label');
@@ -401,6 +409,21 @@ function validateOperationInput(input: unknown): void {
   if (value.lifecyclePhase === 'not_created' && hasContainer) throw new OwnershipValidationError('pre-container operation result contains container evidence');
   if (value.lifecyclePhase !== 'not_created' && containerFields.some((field) => value[field] === undefined || value[field] === null)) throw new OwnershipValidationError('container operation result is incomplete');
   if (value.outcome === 'passed' && (value.errorCode !== undefined && value.errorCode !== null || value.error !== undefined && value.error !== null)) throw new OwnershipValidationError('passed operation contains error evidence');
+  if (
+    value.outcome === 'accepted'
+    && (
+      value.operationId !== 'activate-target'
+      || value.acceptedDisposition !== 'expected-rootfs-already-present'
+      || value.exitCode !== 2
+      || value.signal !== undefined && value.signal !== null
+      || value.timedOut !== false
+      || value.errorCode !== undefined && value.errorCode !== null
+      || value.error !== undefined && value.error !== null
+    )
+  ) {
+    throw new OwnershipValidationError('accepted operation evidence is incoherent');
+  }
+  if (value.outcome !== 'accepted' && value.acceptedDisposition !== undefined && value.acceptedDisposition !== null) throw new OwnershipValidationError('operation accepted disposition has no accepted outcome');
   if (value.outcome === 'failed' && (value.errorCode === undefined || value.errorCode === null || value.error === undefined || value.error === null)) throw new OwnershipValidationError('failed operation is missing error evidence');
   if (value.exitCode !== undefined && value.exitCode !== null && (!Number.isSafeInteger(value.exitCode) || Number(value.exitCode) < 0)) throw new OwnershipValidationError('operation exit code is invalid');
   if (value.exitCode !== undefined && value.exitCode !== null && value.signal !== undefined && value.signal !== null) throw new OwnershipValidationError('operation exit and signal evidence are mutually exclusive');
@@ -549,14 +572,14 @@ function shapePublishCommand(value: PreparedRecord, at: string): void {
 }
 
 function shapePublishEvidence(value: unknown, at: string): void {
-  const evidence = shapeRecord(value, 'publish recovery evidence'); const runner = shapeRecord(evidence.runner, 'publish recovery runner'); preparedString(runner.unit, 'publish recovery runner unit', TEXT_LIMITS.maxIdentifierBytes); preparedString(runner.owner, 'publish recovery runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(runner.leaseExpiresAt, 'publish recovery lease expiry'); preparedInstant(runner.inactiveAt, 'publish recovery inactiveAt'); preparedInstant(runner.observedAt, 'publish recovery observedAt'); shapeNullContainer(evidence.container, 'publish recovery container', at as string);
+  const evidence = shapeRecord(value, 'publish recovery evidence'); const stage = shapeRecord(evidence.stage, 'publish recovery stage'); preparedInstant(stage.startedAt, 'publish recovery stage startedAt'); preparedInstant(stage.finishedAt, 'publish recovery stage finishedAt'); preparedPath(stage.evidencePath, 'publish recovery stage evidence path'); preparedHash(stage.evidenceSha256, 'publish recovery stage evidence SHA'); const runner = shapeRecord(evidence.runner, 'publish recovery runner'); preparedString(runner.unit, 'publish recovery runner unit', TEXT_LIMITS.maxIdentifierBytes); preparedString(runner.owner, 'publish recovery runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(runner.leaseExpiresAt, 'publish recovery lease expiry'); preparedInstant(runner.inactiveAt, 'publish recovery inactiveAt'); preparedInstant(runner.observedAt, 'publish recovery observedAt'); shapeNullContainer(evidence.container, 'publish recovery container', at as string);
   const artifact = shapeRecord(evidence.artifact, 'publish recovery artifact'); for (const field of ['stagingPath', 'checksumPath', 'manifestPath', 'verificationPath']) preparedPath(artifact[field], `publish recovery ${field}`); for (const field of ['artifactSha256', 'checksumSha256', 'manifestSha256', 'verificationSha256']) preparedHash(artifact[field], `publish recovery ${field}`); if (!Number.isSafeInteger(artifact.artifactSize) || Number(artifact.artifactSize) < 0) throw new OwnershipValidationError('publish recovery artifact size is invalid'); preparedInstant(artifact.artifactMtime, 'publish recovery artifact mtime');
   const final = shapeRecord(evidence.final, 'publish recovery final'); preparedPath(final.directory, 'publish recovery final directory'); preparedPath(final.path, 'publish recovery final path'); preparedInstant(final.publishStartedAt, 'publish recovery publishStartedAt'); preparedOptionalInstant(final.publishedAt, 'publish recovery publishedAt');
   const observed = shapeRecord(evidence.observed, 'publish recovery observations');
   const finalObserved = shapeRecord(observed.final, 'publish recovery observed final'); if (typeof finalObserved.present !== 'boolean' || typeof finalObserved.held !== 'boolean') throw new OwnershipValidationError('publish recovery observed final flags are invalid'); preparedPath(finalObserved.path, 'publish recovery observed final path'); shapeNullableHash(finalObserved.sha256, 'publish recovery observed final SHA'); if (finalObserved.size !== null && finalObserved.size !== undefined && (!Number.isSafeInteger(finalObserved.size) || Number(finalObserved.size) < 0)) throw new OwnershipValidationError('publish recovery observed final size is invalid');
   const checksum = shapeRecord(observed.checksum, 'publish recovery checksum'); if (typeof checksum.present !== 'boolean') throw new OwnershipValidationError('publish recovery checksum present is invalid'); preparedPath(checksum.path, 'publish recovery checksum path'); if (checksum.contents !== null && checksum.contents !== undefined) preparedString(checksum.contents, 'publish recovery checksum contents', TEXT_LIMITS.maxChecksumBytes); shapeNullableHash(checksum.sha256, 'publish recovery checksum SHA');
   for (const [name, sidecar] of [['manifest', observed.manifest], ['verification', observed.verification]] as const) { const item = shapeRecord(sidecar, `publish recovery ${name}`); if (typeof item.present !== 'boolean') throw new OwnershipValidationError(`publish recovery ${name} present is invalid`); preparedPath(item.path, `publish recovery ${name} path`); if (item.bytes !== null && item.bytes !== undefined) preparedString(item.bytes, `publish recovery ${name} bytes`, TEXT_LIMITS.maxManifestBytes); preparedJsonObject(item.content, `publish recovery ${name} content`, true); shapeNullableHash(item.sha256, `publish recovery ${name} SHA`); }
-  const staging = shapeRecord(observed.staging, 'publish recovery observed staging'); preparedEnum(staging.state, ['present', 'absent'], 'publish recovery staging state'); shapeNullableString(staging.path, 'publish recovery staging path', true); shapeNullableHash(staging.sha256, 'publish recovery staging SHA'); if (staging.state === 'absent' && (staging.path !== undefined && staging.path !== null || staging.sha256 !== undefined && staging.sha256 !== null)) throw new OwnershipValidationError('absent staging observation contains identity'); if (staging.state === 'present') { if (staging.path === undefined || staging.path === null || staging.sha256 === undefined || staging.sha256 === null) throw new OwnershipValidationError('present staging observation is incomplete'); const path = staging.path as string; if (!path.startsWith('staging/')) throw new OwnershipValidationError('present staging observation path is invalid'); } shapeLogs(observed.logs, 'publish recovery logs', false, at as string); shapeLiteral(shapeRecord(observed.logs, 'publish recovery logs').noGap, true, 'publish recovery logs noGap'); shapeChronology([['publish runner inactiveAt', runner.inactiveAt], ['publish runner observedAt', runner.observedAt], ['publish at', at]], 'publish recovery'); shapeChronology([['publish start', final.publishStartedAt], ['publish finish', final.publishedAt], ['publish at', at]], 'publish recovery');
+  const staging = shapeRecord(observed.staging, 'publish recovery observed staging'); preparedEnum(staging.state, ['present', 'absent'], 'publish recovery staging state'); shapeNullableString(staging.path, 'publish recovery staging path', true); shapeNullableHash(staging.sha256, 'publish recovery staging SHA'); if (staging.state === 'absent' && (staging.path !== undefined && staging.path !== null || staging.sha256 !== undefined && staging.sha256 !== null)) throw new OwnershipValidationError('absent staging observation contains identity'); if (staging.state === 'present') { if (staging.path === undefined || staging.path === null || staging.sha256 === undefined || staging.sha256 === null) throw new OwnershipValidationError('present staging observation is incomplete'); const path = staging.path as string; if (!path.startsWith('staging/')) throw new OwnershipValidationError('present staging observation path is invalid'); } shapeLogs(observed.logs, 'publish recovery logs', false, at as string); shapeLiteral(shapeRecord(observed.logs, 'publish recovery logs').noGap, true, 'publish recovery logs noGap'); shapeChronology([['publish stage startedAt', stage.startedAt], ['publish stage finishedAt', stage.finishedAt], ['publish at', at]], 'publish recovery stage'); shapeChronology([['publish runner inactiveAt', runner.inactiveAt], ['publish runner observedAt', runner.observedAt], ['publish at', at]], 'publish recovery'); shapeChronology([['publish start', final.publishStartedAt], ['publish finish', final.publishedAt], ['publish at', at]], 'publish recovery');
 }
 
 function validateRunnerCommand(command: RunnerWriteCommand): void {
@@ -571,6 +594,7 @@ function validateRunnerCommand(command: RunnerWriteCommand): void {
     case 'container': preparedRunnerCommon(value); preparedEnum(value.lifecycle, CONTAINER_LIFECYCLES, 'container lifecycle'); for (const field of ['containerId', 'containerName']) preparedString(value[field], `container ${field}`, TEXT_LIMITS.maxIdentifierBytes); preparedHash(value.imageDigest, 'container image digest'); preparedJsonObject(value.labels, 'container labels'); preparedJsonObject(value.mount, 'container mount'); preparedJsonObject(value.environment, 'container environment'); preparedJsonObject(value.security, 'container security'); preparedJsonObject(value.inspection, 'container inspection'); preparedInstant(value.occurredAt, 'container occurredAt'); preparedOptionalInstant(value.createdAt, 'container createdAt'); preparedOptionalInstant(value.startedAt, 'container startedAt'); preparedOptionalInstant(value.stoppedAt, 'container stoppedAt'); preparedOptionalInstant(value.removedAt, 'container removedAt'); preparedOptionalEnum(value.cleanupOutcome, ['passed', 'failed', 'blocking'], 'container cleanup outcome'); shapeContainerCommand(value, value.at as string); return;
     case 'artifact': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'artifact expectedState'); preparedEnum(value.state, JOB_STATES, 'artifact state'); for (const field of ['stagingPath', 'checksumPath', 'manifestPath', 'verificationPath']) preparedPath(value[field], `artifact ${field}`); for (const field of ['artifactSha256', 'checksumSha256', 'manifestSha256', 'verificationSha256']) preparedHash(value[field], `artifact ${field}`); if (!Number.isSafeInteger(value.artifactSize) || Number(value.artifactSize) < 0) throw new OwnershipValidationError('artifact size is invalid'); preparedInstant(value.artifactMtime, 'artifact mtime'); shapeChronology([['artifact mtime', value.artifactMtime], ['artifact command.at', value.at]], 'artifact'); return;
     case 'publish-stage-start': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'verifying', 'publish stage predecessor'); preparedInstant(value.startedAt, 'publish stage startedAt'); preparedPath(value.finalDirectory, 'publish final directory'); preparedPath(value.finalPath, 'publish final path'); preparedInstant(value.publishStartedAt, 'publish startedAt'); shapeChronology([['publish stage startedAt', value.startedAt], ['publish startedAt', value.publishStartedAt], ['publish command.at', value.at]], 'publish stage start'); return;
+    case 'publish-quarantine-intent': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'publishing', 'publish quarantine intent predecessor'); preparedPath(value.quarantinePath, 'publish quarantine intent path'); return;
     case 'publish-terminal': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'publishing', 'publish terminal predecessor'); preparedInstant(value.startedAt, 'publish stage startedAt'); preparedInstant(value.finishedAt, 'publish stage finishedAt'); preparedPath(value.evidencePath, 'publish stage evidence path'); preparedHash(value.evidenceSha256, 'publish stage evidence SHA'); preparedPath(value.finalDirectory, 'publish final directory'); preparedPath(value.finalPath, 'publish final path'); preparedInstant(value.publishStartedAt, 'publish startedAt'); preparedInstant(value.publishedAt, 'publishedAt'); preparedInstant(value.terminalAt, 'publish terminalAt'); shapeChronology([['publish stage startedAt', value.startedAt], ['publish startedAt', value.publishStartedAt], ['publish stage finishedAt', value.finishedAt], ['publishedAt', value.publishedAt], ['publish terminalAt', value.terminalAt], ['publish terminal command.at', value.at]], 'publish terminal'); return;
     case 'publish-failure-terminal': {
       preparedRunnerCommon(value);
@@ -1035,6 +1059,16 @@ function validatePublishEvidence(db: DbFacade, evidence: PublishRecoveryEvidence
   instant(evidence.runner.leaseExpiresAt, 'publish recovery lease expiry'); instant(evidence.runner.inactiveAt, 'publish recovery inactive time'); instant(evidence.runner.observedAt, 'publish recovery observation time');
   if (evidence.runner.inactiveAt > at || evidence.runner.observedAt > at) throw new OwnershipValidationError('publish recovery observation is from the future');
   if (evidence.runner.unit !== job.runner_unit || evidence.runner.owner !== job.runner_lease_owner || evidence.runner.leaseExpiresAt !== job.runner_lease_expires_at || evidence.runner.leaseExpiresAt >= at) throw new OwnershipConflictError('stale-lease', 'publish recovery runner snapshot does not match the job');
+  const stage = db.prepare("SELECT outcome, started_at FROM job_stages WHERE job_id=? AND stage='publish'").get(String(job.job_id)) as Row | undefined;
+  if (
+    stage?.outcome !== 'running'
+    || stage.started_at !== evidence.stage.startedAt
+    || evidence.stage.finishedAt < evidence.stage.startedAt
+  ) {
+    throw new OwnershipConflictError('identity-mismatch', 'publish recovery stage evidence does not match the running publication stage');
+  }
+  confinedPath(evidence.stage.evidencePath, 'publish recovery stage evidence path');
+  hash(evidence.stage.evidenceSha256, 'publish recovery stage evidence SHA-256');
   validateNullContainerProof(evidence.container, at);
   if (job.container_id !== null || job.container_name !== null || job.container_image_digest !== null || job.container_label_job_id !== null || job.container_label_manifest_sha !== null || job.container_labels_json !== null) throw new OwnershipConflictError('identity-mismatch', 'publish recovery requires null container identity');
   const artifact = evidence.artifact;
@@ -1210,7 +1244,7 @@ export class OwnershipStore {
   runnerWrite(command: RunnerWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as RunnerWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['acquire-lease', 'renew-lease', 'cancellation-transition', 'cancellation-cleanup', 'cancellation-terminal', 'stage', 'container', 'artifact', 'publish-stage-start', 'publish-terminal', 'publish-failure-terminal', 'publish', 'normal-terminal', 'operation-begin', 'operation-complete', 'operation-cleanup'].includes(prepared.kind)) {
+    if (!['acquire-lease', 'renew-lease', 'cancellation-transition', 'cancellation-cleanup', 'cancellation-terminal', 'stage', 'container', 'artifact', 'publish-stage-start', 'publish-quarantine-intent', 'publish-terminal', 'publish-failure-terminal', 'publish', 'normal-terminal', 'operation-begin', 'operation-complete', 'operation-cleanup'].includes(prepared.kind)) {
       throw new OwnershipViolationError('runner', prepared.kind);
     }
     validateRunnerCommand(prepared);
@@ -1225,6 +1259,7 @@ export class OwnershipStore {
       case 'container': return this.#transaction(() => this.#container(prepared));
       case 'artifact': return this.#transaction(() => this.#artifact(prepared));
       case 'publish-stage-start': return this.#transaction(() => this.#publishStageStart(prepared));
+      case 'publish-quarantine-intent': return this.#transaction(() => this.#publishQuarantineIntent(prepared));
       case 'publish-terminal': return this.#transaction(() => this.#publishTerminal(prepared));
       case 'publish-failure-terminal': return this.#transaction(() => this.#publishFailureTerminal(prepared));
       case 'publish': return this.#transaction(() => this.#publish(prepared));
@@ -1521,18 +1556,37 @@ export class OwnershipStore {
     const errorJson = command.state === 'failed' ? json(command.error, 'publish recovery error', true) : null;
     const a = command.evidence.artifact; const f = command.evidence.final;
     this.#event(command.jobId, 'recovery', { kind: 'publish-recovery', state: command.state, evidence: command.evidence }, command.at);
+    const stageOutcome = command.state === 'succeeded' ? 'passed' : 'failed';
+    const stage = this.#db.prepare(`UPDATE job_stages SET outcome=?, finished_at=?,
+      evidence_path=?, evidence_sha256=?, error_code=?, error_json=?
+      WHERE job_id=? AND stage='publish' AND outcome='running' AND started_at=?`).run(
+      stageOutcome,
+      command.evidence.stage.finishedAt,
+      command.evidence.stage.evidencePath,
+      command.evidence.stage.evidenceSha256,
+      command.state === 'failed' ? command.errorCode ?? 'PUBLISH_RECOVERY_FAILED' : null,
+      command.state === 'failed' ? errorJson : null,
+      command.jobId,
+      command.evidence.stage.startedAt,
+    );
+    if (Number(stage.changes) !== 1) conflict('stale-predecessor', 'publishing recovery stage predecessor changed');
     const result = command.state === 'succeeded'
       ? this.#db.prepare(`UPDATE jobs SET state='succeeded', queue_state='complete', queue_position=NULL, publish_state='published', artifact_staging_path=NULL,
-          artifact_final_directory=?, artifact_final_path=?, publish_started_at=?, published_at=?, terminal_at=?, terminal_error_code=NULL, terminal_error_json=NULL, runner_finished_at=?, updated_at=?
+          artifact_quarantine_intent_path=NULL, artifact_final_directory=?, artifact_final_path=?, publish_started_at=?, published_at=?, terminal_at=?, terminal_error_code=NULL, terminal_error_json=NULL, runner_finished_at=?, updated_at=?
         WHERE job_id=? AND state='publishing' AND publish_state='publishing' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND runner_lease_expires_at < ?
           AND artifact_staging_path=? AND artifact_final_directory=? AND artifact_final_path=? AND artifact_sha256=? AND artifact_size=? AND artifact_mtime=? AND checksum_path=? AND checksum_sha256=? AND manifest_path=? AND manifest_sha256=? AND verification_path=? AND verification_sha256=?
           AND container_id IS NULL AND container_label_job_id IS NULL AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL`).run(f.directory, f.path, f.publishStartedAt, f.publishedAt ?? command.at, f.publishedAt ?? command.at, f.publishedAt ?? command.at, command.at, command.jobId, command.evidence.runner.unit, command.evidence.runner.owner, command.evidence.runner.leaseExpiresAt, command.at, a.stagingPath, f.directory, f.path, a.artifactSha256, a.artifactSize, a.artifactMtime, a.checksumPath, a.checksumSha256, a.manifestPath, a.manifestSha256, a.verificationPath, a.verificationSha256)
       : this.#db.prepare(`UPDATE jobs SET state='failed', queue_state='complete', queue_position=NULL, publish_state='blocked', artifact_final_directory=NULL, artifact_final_path=NULL,
-          publish_started_at=NULL, published_at=NULL, publish_blocker_code=?, publish_blocker_json=?, terminal_at=?, terminal_error_code=?, terminal_error_json=?, updated_at=?
+          artifact_quarantine_intent_path=NULL, publish_started_at=NULL, published_at=NULL, publish_blocker_code=?, publish_blocker_json=?, terminal_at=?, terminal_error_code=?, terminal_error_json=?, updated_at=?
         WHERE job_id=? AND state='publishing' AND publish_state='publishing' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND runner_lease_expires_at < ?
           AND artifact_staging_path=? AND artifact_final_directory=? AND artifact_final_path=? AND artifact_sha256=? AND artifact_size=? AND artifact_mtime=? AND checksum_path=? AND checksum_sha256=? AND manifest_path=? AND manifest_sha256=? AND verification_path=? AND verification_sha256=?
           AND container_id IS NULL AND container_label_job_id IS NULL AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL`).run('PUBLISH_RECOVERY_FAILED', errorJson, command.at, command.errorCode ?? null, errorJson, command.at, command.jobId, command.evidence.runner.unit, command.evidence.runner.owner, command.evidence.runner.leaseExpiresAt, command.at, a.stagingPath, f.directory, f.path, a.artifactSha256, a.artifactSize, a.artifactMtime, a.checksumPath, a.checksumSha256, a.manifestPath, a.manifestSha256, a.verificationPath, a.verificationSha256);
     if (Number(result.changes) !== 1) conflict('stale-predecessor', 'publishing recovery lost its recovery preconditions');
+    this.#event(command.jobId, 'stage', {
+      stage: 'publish',
+      outcome: stageOutcome,
+      recovery: true,
+    }, command.evidence.stage.finishedAt);
     this.#event(command.jobId, 'terminal', { state: command.state, recovery: true, finalDirectory: f.directory, finalPath: f.path }, command.at);
   }
 
@@ -1750,7 +1804,7 @@ export class OwnershipStore {
     confinedPath(command.stagingPath, 'artifact staging path'); confinedPath(command.checksumPath, 'artifact checksum path'); confinedPath(command.manifestPath, 'artifact manifest path'); confinedPath(command.verificationPath, 'artifact verification path');
     for (const [value, field] of [[command.artifactSha256, 'artifact SHA-256'], [command.checksumSha256, 'checksum SHA-256'], [command.manifestSha256, 'manifest SHA-256'], [command.verificationSha256, 'verification SHA-256']] as const) hash(value, field);
     instant(command.artifactMtime, 'artifact mtime'); requireChronology([['accepted time', String(row.accepted_at)], ['artifact mtime', command.artifactMtime], ['artifact write time', command.at]]); if (!Number.isSafeInteger(command.artifactSize) || command.artifactSize < 0) throw new TypeError('artifact size is invalid');
-    const result = this.#db.prepare(`UPDATE jobs SET publish_state='staged', artifact_staging_path=?, artifact_quarantine_path=NULL, artifact_final_directory=NULL, artifact_final_path=NULL,
+    const result = this.#db.prepare(`UPDATE jobs SET publish_state='staged', artifact_staging_path=?, artifact_quarantine_path=NULL, artifact_quarantine_intent_path=NULL, artifact_final_directory=NULL, artifact_final_path=NULL,
       artifact_sha256=?, artifact_size=?, artifact_mtime=?, checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=?,
       publish_started_at=NULL, published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=?
       AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(command.stagingPath, command.artifactSha256, command.artifactSize, command.artifactMtime, command.checksumPath, command.checksumSha256, command.manifestPath, command.manifestSha256, command.verificationPath, command.verificationSha256, command.at, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, command.at);
@@ -1800,7 +1854,8 @@ export class OwnershipStore {
     const update = this.#db.prepare(`UPDATE jobs SET
       state='publishing', current_stage='publish', publish_state='publishing',
       artifact_final_directory=?, artifact_final_path=?, publish_started_at=?,
-      published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL,
+      published_at=NULL, artifact_quarantine_intent_path=NULL,
+      publish_blocker_code=NULL, publish_blocker_json=NULL,
       updated_at=?
       WHERE job_id=? AND state='verifying' AND publish_state='staged'
         AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=?
@@ -1818,6 +1873,37 @@ export class OwnershipStore {
     if (Number(update.changes) !== 1) conflict('cas-lost', 'publish stage start CAS lost');
     this.#event(command.jobId, 'publish', { state: 'publishing' }, command.at);
     this.#event(command.jobId, 'stage', { stage: 'publish', outcome: 'running' }, command.at);
+  }
+
+  #publishQuarantineIntent(command: Extract<RunnerWriteCommand, { kind: 'publish-quarantine-intent' }>): void {
+    this.#runnerGuard(command, 'publishing');
+    const expectedPath = `.osi-image-builder/quarantine/${command.jobId}`;
+    confinedPath(command.quarantinePath, 'publish quarantine intent path');
+    if (command.quarantinePath !== expectedPath) {
+      throw new OwnershipValidationError('publish quarantine intent path is not authoritative');
+    }
+    const result = this.#db.prepare(`UPDATE jobs SET artifact_quarantine_intent_path=?, updated_at=?
+      WHERE job_id=? AND state='publishing' AND publish_state='publishing'
+        AND artifact_staging_path IS NOT NULL AND artifact_quarantine_path IS NULL
+        AND artifact_quarantine_intent_path IS NULL
+        AND artifact_final_directory IS NOT NULL AND artifact_final_path IS NOT NULL
+        AND publish_started_at IS NOT NULL AND published_at IS NULL
+        AND publish_blocker_code IS NULL AND publish_blocker_json IS NULL
+        AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=?
+        AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(
+      command.quarantinePath,
+      command.at,
+      command.jobId,
+      command.owner,
+      command.runnerUnit,
+      command.leaseExpiresAt,
+      command.at,
+    );
+    if (Number(result.changes) !== 1) conflict('cas-lost', 'publish quarantine intent CAS lost');
+    this.#event(command.jobId, 'publish', {
+      state: 'publishing',
+      quarantineIntentPath: command.quarantinePath,
+    }, command.at);
   }
 
   #publishTerminal(command: Extract<RunnerWriteCommand, { kind: 'publish-terminal' }>): void {
@@ -1850,6 +1936,7 @@ export class OwnershipStore {
       || row.artifact_final_directory !== command.finalDirectory
       || row.artifact_final_path !== command.finalPath
       || row.publish_started_at !== command.publishStartedAt
+      || row.artifact_quarantine_intent_path !== null
       || row.container_id !== null
     ) {
       conflict('identity-mismatch', 'publish terminal binding differs from publishing recovery state');
@@ -1868,6 +1955,7 @@ export class OwnershipStore {
     const update = this.#db.prepare(`UPDATE jobs SET
       state='succeeded', queue_state='complete', queue_position=NULL,
       publish_state='published', artifact_staging_path=NULL,
+      artifact_quarantine_intent_path=NULL,
       artifact_final_directory=?, artifact_final_path=?, published_at=?,
       terminal_at=?, terminal_error_code=NULL, terminal_error_json=NULL,
       runner_finished_at=?, updated_at=?
@@ -1938,6 +2026,22 @@ export class OwnershipStore {
       ? command.quarantinePath ?? null
       : null;
     if (quarantinePath !== null) confinedPath(quarantinePath, 'publish failure quarantine path');
+    const expectedQuarantinePath = `.osi-image-builder/quarantine/${command.jobId}`;
+    if (
+      row.artifact_quarantine_intent_path !== null
+      && row.artifact_quarantine_intent_path !== expectedQuarantinePath
+    ) {
+      conflict('identity-mismatch', 'publish quarantine intent differs from the authoritative path');
+    }
+    if (
+      command.staging === 'quarantined'
+      && (
+        quarantinePath !== expectedQuarantinePath
+        || row.artifact_quarantine_intent_path !== quarantinePath
+      )
+    ) {
+      conflict('identity-mismatch', 'quarantined publication lacks its durable rename intent');
+    }
     const retainedStaging = command.staging === 'present' || command.staging === 'unknown'
       ? String(row.artifact_staging_path)
       : null;
@@ -1957,6 +2061,7 @@ export class OwnershipStore {
     const update = this.#db.prepare(`UPDATE jobs SET
       state='failed', queue_state='complete', queue_position=NULL,
       publish_state='blocked', artifact_staging_path=?, artifact_quarantine_path=?,
+      artifact_quarantine_intent_path=NULL,
       artifact_final_directory=NULL, artifact_final_path=NULL,
       publish_started_at=NULL, published_at=NULL,
       publish_blocker_code=?, publish_blocker_json=?,
@@ -1964,6 +2069,7 @@ export class OwnershipStore {
       runner_finished_at=?, updated_at=?
       WHERE job_id=? AND state='publishing' AND publish_state='publishing'
         AND artifact_staging_path=? AND artifact_quarantine_path IS NULL
+        AND (artifact_quarantine_intent_path IS NULL OR artifact_quarantine_intent_path=?)
         AND artifact_final_directory IS NOT NULL AND artifact_final_path IS NOT NULL
         AND publish_started_at IS NOT NULL AND artifact_sha256 IS NOT NULL
         AND artifact_size IS NOT NULL AND artifact_mtime IS NOT NULL
@@ -1983,6 +2089,7 @@ export class OwnershipStore {
       command.at,
       command.jobId,
       row.artifact_staging_path,
+      `.osi-image-builder/quarantine/${command.jobId}`,
       command.owner,
       command.runnerUnit,
       command.leaseExpiresAt,
@@ -2011,7 +2118,7 @@ export class OwnershipStore {
     } else if (command.state === 'published') {
       if (!command.finalDirectory || !command.finalPath) throw new TypeError('published needs final paths');
       confinedPath(command.finalDirectory, 'published final directory'); confinedPath(command.finalPath, 'published final path');
-      result = this.#db.prepare(`UPDATE jobs SET publish_state='published', artifact_staging_path=NULL, artifact_final_directory=?, artifact_final_path=?, publish_started_at=COALESCE(publish_started_at, ?), published_at=?, artifact_quarantine_path=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(command.finalDirectory, command.finalPath, command.startedAt ?? now, command.publishedAt ?? now, now, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, now);
+      result = this.#db.prepare(`UPDATE jobs SET publish_state='published', artifact_staging_path=NULL, artifact_final_directory=?, artifact_final_path=?, publish_started_at=COALESCE(publish_started_at, ?), published_at=?, artifact_quarantine_path=NULL, artifact_quarantine_intent_path=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(command.finalDirectory, command.finalPath, command.startedAt ?? now, command.publishedAt ?? now, now, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, now);
     } else if (command.state === 'staged') {
       result = this.#db.prepare("UPDATE jobs SET publish_state='staged', updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL").run(now, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, now);
     } else {
@@ -2148,7 +2255,7 @@ export class OwnershipStore {
     this.#runnerGuard(command, command.expectedState, priorOperation?.outcome !== null && priorOperation?.outcome !== undefined);
     const input = command.input;
     if (priorOperation?.outcome === null || priorOperation === undefined) requirePersistedTimeline(this.#db, command.jobId, [['operation completion command time', command.at], ['operation start time', input.startedAt], ['operation finish time', input.finishedAt]], true);
-    if (!['not_created', 'created', 'started', 'stopped', 'removed'].includes(input.lifecyclePhase) || !['passed', 'failed'].includes(input.outcome)) throw new OwnershipValidationError('operation result enum is invalid');
+    if (!['not_created', 'created', 'started', 'stopped', 'removed'].includes(input.lifecyclePhase) || !['passed', 'failed', 'accepted'].includes(input.outcome)) throw new OwnershipValidationError('operation result enum is invalid');
     const job = this.#job(command.jobId);
     if (input.operationId !== command.operationId || input.attempt !== command.attempt) conflict('identity-mismatch', 'operation completion identity does not match its command');
     if (!TRUSTED_OPERATION_IDS.includes(input.operationId) || !Number.isSafeInteger(input.attempt) || input.attempt <= 0) throw new OwnershipValidationError('operation identity is invalid');
@@ -2161,7 +2268,22 @@ export class OwnershipStore {
     const security = input.containerSecurity === undefined || input.containerSecurity === null ? null : jsonValue(input.containerSecurity, 'operation security', 'object');
     const inspection = input.inspection === undefined || input.inspection === null ? null : jsonValue(input.inspection, 'operation inspection', 'object');
     instant(input.startedAt, 'operation start time'); if (input.finishedAt !== undefined && input.finishedAt !== null) instant(input.finishedAt, 'operation finish time'); requireChronology([['operation start time', input.startedAt], ['operation finish time', input.finishedAt]]);
-    if (input.finishedAt === undefined || input.finishedAt === null || (input.outcome === 'passed' && (input.exitCode !== 0 || input.timedOut)) || (input.outcome === 'failed' && !input.errorCode)) throw new OwnershipValidationError('operation completion evidence is incomplete');
+    if (
+      input.finishedAt === undefined
+      || input.finishedAt === null
+      || (input.outcome === 'passed' && (input.exitCode !== 0 || input.timedOut))
+      || (
+        input.outcome === 'accepted'
+        && (
+          input.operationId !== 'activate-target'
+          || input.exitCode !== 2
+          || input.signal !== undefined && input.signal !== null
+          || input.timedOut
+          || input.acceptedDisposition !== 'expected-rootfs-already-present'
+        )
+      )
+      || (input.outcome === 'failed' && !input.errorCode)
+    ) throw new OwnershipValidationError('operation completion evidence is incomplete');
     if (input.lifecyclePhase === 'not_created') {
       if (input.containerId !== undefined || input.containerName !== undefined || input.containerImageDigest !== undefined || input.containerLabelJobId !== undefined || input.containerLabelManifestSha !== undefined || mount !== null || environment !== null || security !== null || inspection !== null) throw new OwnershipValidationError('pre-container operation result contains container evidence');
     } else {
@@ -2191,6 +2313,7 @@ export class OwnershipStore {
         && (existing.exit_code === null ? null : Number(existing.exit_code)) === (input.exitCode ?? null)
         && existing.signal === (input.signal ?? null)
         && existing.outcome === input.outcome
+        && existing.accepted_disposition === (input.acceptedDisposition ?? null)
         && existing.evidence_path === input.evidencePath
         && existing.evidence_sha256 === input.evidenceSha256
         && existing.error_code === (input.errorCode ?? null)
@@ -2202,14 +2325,22 @@ export class OwnershipStore {
       return;
     }
     const result = this.#db.prepare(`UPDATE job_operations SET finished_at=?, container_id=?, container_name=?, container_image_digest=?, container_label_job_id=?, container_label_manifest_sha=?,
-      container_mount_json=?, container_env_json=?, container_security_json=?, inspection_json=?, timed_out=?, lifecycle_phase=?, exit_code=?, signal=?, outcome=?, evidence_path=?, evidence_sha256=?, error_code=?, error_json=?
+      container_mount_json=?, container_env_json=?, container_security_json=?, inspection_json=?, timed_out=?, lifecycle_phase=?, exit_code=?, signal=?, outcome=?, accepted_disposition=?, evidence_path=?, evidence_sha256=?, error_code=?, error_json=?
       WHERE job_id=? AND operation_id=? AND attempt=? AND outcome IS NULL AND argv_hash=? AND argv_json=? AND started_at=?`).run(
       input.finishedAt, input.containerId ?? null, input.containerName ?? null, input.containerImageDigest ?? null, input.containerLabelJobId ?? null, input.containerLabelManifestSha ?? null,
-      mount, environment, security, inspection, input.timedOut ? 1 : 0, input.lifecyclePhase, input.exitCode ?? null, input.signal ?? null, input.outcome, input.evidencePath, input.evidenceSha256, input.errorCode ?? null, errorJson,
+      mount, environment, security, inspection, input.timedOut ? 1 : 0, input.lifecyclePhase, input.exitCode ?? null, input.signal ?? null, input.outcome, input.acceptedDisposition ?? null, input.evidencePath, input.evidenceSha256, input.errorCode ?? null, errorJson,
       command.jobId, input.operationId, input.attempt, input.argvHash, argv, input.startedAt,
     );
     if (Number(result.changes) !== 1) conflict('cas-lost', 'operation completion CAS lost');
-    this.#event(command.jobId, 'operation', { operationId: input.operationId, attempt: input.attempt, phase: 'complete', outcome: input.outcome }, command.at);
+    this.#event(command.jobId, 'operation', {
+      operationId: input.operationId,
+      attempt: input.attempt,
+      phase: 'complete',
+      outcome: input.outcome,
+      ...(input.acceptedDisposition === undefined || input.acceptedDisposition === null
+        ? {}
+        : { acceptedDisposition: input.acceptedDisposition }),
+    }, command.at);
   }
 
   #operationCleanup(command: Extract<RunnerWriteCommand, { kind: 'operation-cleanup' }>): void {

@@ -281,6 +281,7 @@ export interface JobRecord extends SourceIdentityBase {
   readonly terminalAt: string | null;
   readonly artifactStagingPath: string | null;
   readonly artifactQuarantinePath: string | null;
+  readonly artifactQuarantineIntentPath: string | null;
   readonly artifactFinalDirectory: string | null;
   readonly artifactFinalPath: string | null;
   readonly artifactSha256: string | null;
@@ -295,6 +296,8 @@ export interface JobRecord extends SourceIdentityBase {
   readonly publishState: PublishState | null;
   readonly publishStartedAt: string | null;
   readonly publishedAt: string | null;
+  readonly publishBlockerCode: BuilderErrorCode | null;
+  readonly publishBlocker: JsonObject | null;
   readonly freshnessStatus: FreshnessState | null;
   readonly freshnessObservedSha: string | null;
   readonly newerSourceAvailable: boolean | null;
@@ -355,7 +358,8 @@ export interface OperationInput {
   readonly lifecyclePhase: LifecyclePhase;
   readonly exitCode?: number | null;
   readonly signal?: string | null;
-  readonly outcome: 'passed' | 'failed';
+  readonly outcome: 'passed' | 'failed' | 'accepted';
+  readonly acceptedDisposition?: 'expected-rootfs-already-present' | null;
   readonly evidencePath: string;
   readonly evidenceSha256: string;
   readonly errorCode?: BuilderErrorCode | null;
@@ -457,7 +461,8 @@ export interface StoredOperation {
   readonly lifecyclePhase: LifecyclePhase;
   readonly exitCode: number | null;
   readonly signal: string | null;
-  readonly outcome: 'passed' | 'failed' | null;
+  readonly outcome: 'passed' | 'failed' | 'accepted' | null;
+  readonly acceptedDisposition: 'expected-rootfs-already-present' | null;
   readonly evidencePath: string | null;
   readonly evidenceSha256: string | null;
   readonly errorCode: BuilderErrorCode | null;
@@ -678,21 +683,22 @@ export class BuilderStore {
     if (freshnessStatus === 'fresh' && (row.newer_source_available !== 0 || row.freshness_observed_sha !== row.pinned_sha || row.freshness_error_code !== null || row.freshness_error_json !== null || row.freshness_error_evidence_path !== null || row.freshness_error_evidence_sha256 !== null)) throw new StoreDataError('fresh freshness evidence is incoherent');
     if (freshnessStatus === 'advanced' && (row.newer_source_available !== 1 || row.freshness_observed_sha === null || row.freshness_error_code !== null || row.freshness_error_json !== null)) throw new StoreDataError('advanced freshness evidence is incoherent');
     if (freshnessStatus === 'unknown' && (row.newer_source_available !== 0 || row.freshness_observed_sha !== null || row.freshness_error_code !== 'FRESHNESS_UNKNOWN' || row.freshness_error_json === null)) throw new StoreDataError('unknown freshness evidence is incoherent');
-    const publishFields = ['artifact_staging_path', 'artifact_quarantine_path', 'artifact_final_directory', 'artifact_final_path', 'artifact_sha256', 'artifact_size', 'artifact_mtime', 'checksum_path', 'checksum_sha256', 'manifest_path', 'manifest_sha256', 'verification_path', 'verification_sha256', 'publish_started_at', 'published_at', 'publish_blocker_code', 'publish_blocker_json'];
+    const publishFields = ['artifact_staging_path', 'artifact_quarantine_path', 'artifact_quarantine_intent_path', 'artifact_final_directory', 'artifact_final_path', 'artifact_sha256', 'artifact_size', 'artifact_mtime', 'checksum_path', 'checksum_sha256', 'manifest_path', 'manifest_sha256', 'verification_path', 'verification_sha256', 'publish_started_at', 'published_at', 'publish_blocker_code', 'publish_blocker_json'];
     const hasAnyPublish = publishFields.some((key) => row[key] !== null && row[key] !== undefined);
     const artifactComplete = ['artifact_sha256', 'artifact_size', 'artifact_mtime', 'checksum_path', 'checksum_sha256', 'manifest_path', 'manifest_sha256', 'verification_path', 'verification_sha256'].every((key) => row[key] !== null && row[key] !== undefined);
     const noPublishBlocker = publishBlockerCode === null && publishBlocker === null;
     if (publishState === null || publishState === 'not_started') {
       if (hasAnyPublish) throw new StoreDataError(`${publishState ?? 'null'} publish state contains publish evidence`);
     } else if (publishState === 'staged') {
-      if (!artifactComplete || row.artifact_staging_path === null || row.artifact_quarantine_path !== null || row.artifact_final_directory !== null || row.artifact_final_path !== null || row.publish_started_at !== null || row.published_at !== null || !noPublishBlocker) throw new StoreDataError('staged publish state evidence is incoherent');
+      if (!artifactComplete || row.artifact_staging_path === null || row.artifact_quarantine_path !== null || row.artifact_quarantine_intent_path !== null || row.artifact_final_directory !== null || row.artifact_final_path !== null || row.publish_started_at !== null || row.published_at !== null || !noPublishBlocker) throw new StoreDataError('staged publish state evidence is incoherent');
     } else if (publishState === 'publishing') {
-      if (!artifactComplete || row.artifact_staging_path === null || row.artifact_quarantine_path !== null || row.artifact_final_directory === null || row.artifact_final_path === null || row.publish_started_at === null || row.published_at !== null || !noPublishBlocker) throw new StoreDataError('publishing state evidence is incoherent');
+      const quarantineIntent = persistedRelativePath(row, 'artifact_quarantine_intent_path');
+      if (!artifactComplete || row.artifact_staging_path === null || row.artifact_quarantine_path !== null || (quarantineIntent !== null && quarantineIntent !== `.osi-image-builder/quarantine/${jobId}`) || row.artifact_final_directory === null || row.artifact_final_path === null || row.publish_started_at === null || row.published_at !== null || !noPublishBlocker) throw new StoreDataError('publishing state evidence is incoherent');
     } else if (publishState === 'published') {
-      if (!artifactComplete || row.artifact_staging_path !== null || row.artifact_quarantine_path !== null || row.artifact_final_directory === null || row.artifact_final_path === null || row.publish_started_at === null || row.published_at === null || !noPublishBlocker) throw new StoreDataError('published state evidence is incoherent');
+      if (!artifactComplete || row.artifact_staging_path !== null || row.artifact_quarantine_path !== null || row.artifact_quarantine_intent_path !== null || row.artifact_final_directory === null || row.artifact_final_path === null || row.publish_started_at === null || row.published_at === null || !noPublishBlocker) throw new StoreDataError('published state evidence is incoherent');
     } else if (publishState === 'quarantined') {
-      const artifactAbsent = publishFields.slice(4, 13).every((key) => row[key] === null || row[key] === undefined);
-      if (row.artifact_staging_path !== null || row.artifact_quarantine_path === null || row.artifact_final_directory !== null || row.artifact_final_path !== null || row.publish_started_at !== null || row.published_at !== null || !noPublishBlocker || (!artifactAbsent && !artifactComplete)) throw new StoreDataError('quarantined publish state evidence is incoherent');
+      const artifactAbsent = ['artifact_sha256', 'artifact_size', 'artifact_mtime', 'checksum_path', 'checksum_sha256', 'manifest_path', 'manifest_sha256', 'verification_path', 'verification_sha256'].every((key) => row[key] === null || row[key] === undefined);
+      if (row.artifact_staging_path !== null || row.artifact_quarantine_path === null || row.artifact_quarantine_intent_path !== null || row.artifact_final_directory !== null || row.artifact_final_path !== null || row.publish_started_at !== null || row.published_at !== null || !noPublishBlocker || (!artifactAbsent && !artifactComplete)) throw new StoreDataError('quarantined publish state evidence is incoherent');
     } else if (publishState === 'blocked') {
       const stagingDisposition = publishBlocker?.['staging'];
       const stagingRetained = row.artifact_staging_path !== null && row.artifact_quarantine_path === null
@@ -710,7 +716,7 @@ export class BuilderStore {
         && quarantineRecord?.['quarantined'] === true
         && quarantineRecord['renameResult'] === 'RENAMED'
         && quarantineRecord['destinationRelativePath'] === row.artifact_quarantine_path;
-      if (!artifactComplete || (!stagingRetained && !stagingAbsent && !stagingQuarantined) || row.artifact_final_directory !== null || row.artifact_final_path !== null || row.publish_started_at !== null || row.published_at !== null || publishBlockerCode === null || publishBlocker === null) throw new StoreDataError('blocked publish state evidence is incoherent');
+      if (!artifactComplete || row.artifact_quarantine_intent_path !== null || (!stagingRetained && !stagingAbsent && !stagingQuarantined) || row.artifact_final_directory !== null || row.artifact_final_path !== null || row.publish_started_at !== null || row.published_at !== null || publishBlockerCode === null || publishBlocker === null) throw new StoreDataError('blocked publish state evidence is incoherent');
     }
     if ((cleanupBlockerCode === null) !== (cleanupBlocker === null)) throw new StoreDataError('cleanup blocker evidence is incomplete');
     if (cleanupBlockerCode !== null && !['starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup', 'feeds', 'config', 'building', 'verifying', 'cancel_requested', 'interrupted'].includes(state)) throw new StoreDataError('cleanup blocker is invalid for terminal state');
@@ -728,7 +734,7 @@ export class BuilderStore {
       containerLabels: parseJsonObject(nullableString(row, 'container_labels_json'), 'container_labels_json'), containerMount: parseJsonObject(nullableString(row, 'container_mount_json'), 'container_mount_json'), containerEnvironment: parseJsonObject(nullableString(row, 'container_env_json'), 'container_env_json'), containerSecurity: parseJsonObject(nullableString(row, 'container_security_json'), 'container_security_json'), containerInspection: parseJsonObject(nullableString(row, 'container_inspection_json'), 'container_inspection_json'),
       containerCreatedAt: nullableInstant(row, 'container_created_at'), containerStartedAt: nullableInstant(row, 'container_started_at'), containerStoppedAt: nullableInstant(row, 'container_stopped_at'), containerRemovedAt: nullableInstant(row, 'container_removed_at'), containerCleanupOutcome: persistedEnum(row, 'container_cleanup_outcome', ['passed', 'failed', 'blocking']) as 'passed' | 'failed' | 'blocking' | null,
       terminalErrorCode: persistedEnum(row, 'terminal_error_code', BUILDER_ERROR_CODES) as BuilderErrorCode | null, terminalError: parseJsonObject(nullableString(row, 'terminal_error_json'), 'terminal_error_json'), terminalAt: nullableInstant(row, 'terminal_at'),
-      artifactStagingPath: persistedRelativePath(row, 'artifact_staging_path'), artifactQuarantinePath: persistedRelativePath(row, 'artifact_quarantine_path'), artifactFinalDirectory: persistedRelativePath(row, 'artifact_final_directory'), artifactFinalPath: persistedRelativePath(row, 'artifact_final_path'), artifactSha256: readHash(row, 'artifact_sha256', HASH64), artifactSize: nullableNumber(row, 'artifact_size'), artifactMtime: nullableInstant(row, 'artifact_mtime'), checksumPath: persistedRelativePath(row, 'checksum_path'), checksumSha256: readHash(row, 'checksum_sha256', HASH64), manifestPath: persistedRelativePath(row, 'manifest_path'), manifestSha256: readHash(row, 'manifest_sha256', HASH64), verificationPath: persistedRelativePath(row, 'verification_path'), verificationSha256: readHash(row, 'verification_sha256', HASH64), publishState, publishStartedAt: nullableInstant(row, 'publish_started_at'), publishedAt: nullableInstant(row, 'published_at'),
+      artifactStagingPath: persistedRelativePath(row, 'artifact_staging_path'), artifactQuarantinePath: persistedRelativePath(row, 'artifact_quarantine_path'), artifactQuarantineIntentPath: persistedRelativePath(row, 'artifact_quarantine_intent_path'), artifactFinalDirectory: persistedRelativePath(row, 'artifact_final_directory'), artifactFinalPath: persistedRelativePath(row, 'artifact_final_path'), artifactSha256: readHash(row, 'artifact_sha256', HASH64), artifactSize: nullableNumber(row, 'artifact_size'), artifactMtime: nullableInstant(row, 'artifact_mtime'), checksumPath: persistedRelativePath(row, 'checksum_path'), checksumSha256: readHash(row, 'checksum_sha256', HASH64), manifestPath: persistedRelativePath(row, 'manifest_path'), manifestSha256: readHash(row, 'manifest_sha256', HASH64), verificationPath: persistedRelativePath(row, 'verification_path'), verificationSha256: readHash(row, 'verification_sha256', HASH64), publishState, publishStartedAt: nullableInstant(row, 'publish_started_at'), publishedAt: nullableInstant(row, 'published_at'), publishBlockerCode, publishBlocker,
       freshnessStatus, freshnessObservedSha: readHash(row, 'freshness_observed_sha', HASH40), newerSourceAvailable: row.newer_source_available === null || row.newer_source_available === undefined ? null : (() => { const value = Number(row.newer_source_available); if (value !== 0 && value !== 1) throw new StoreDataError('SQLite newer_source_available is invalid'); return value === 1; })(), freshnessRequestedAt: nullableInstant(row, 'freshness_requested_at'), freshnessCheckedAt: nullableInstant(row, 'freshness_checked_at'), freshnessErrorCode: persistedEnum(row, 'freshness_error_code', BUILDER_ERROR_CODES) as BuilderErrorCode | null, freshnessError: parseJsonObject(nullableString(row, 'freshness_error_json'), 'freshness_error_json'), freshnessErrorEvidencePath: persistedRelativePath(row, 'freshness_error_evidence_path'), freshnessErrorEvidenceSha256: readHash(row, 'freshness_error_evidence_sha256', HASH64),
     };
   }
@@ -756,15 +762,35 @@ export class BuilderStore {
     const attempt = requiredInteger(row, 'attempt', 'operation attempt');
     if (attempt < 1) throw new StoreDataError('operation attempt is invalid');
     const lifecyclePhase = persistedEnum(row, 'lifecycle_phase', LIFECYCLE_PHASES, false)! as LifecyclePhase;
-    const outcome = persistedEnum(row, 'outcome', ['passed', 'failed']) as 'passed' | 'failed' | null;
+    const outcome = persistedEnum(row, 'outcome', ['passed', 'failed', 'accepted']) as 'passed' | 'failed' | 'accepted' | null;
+    const acceptedDisposition = persistedEnum(
+      row,
+      'accepted_disposition',
+      ['expected-rootfs-already-present'],
+    ) as 'expected-rootfs-already-present' | null;
     nullableGroup(row, ['container_id', 'container_name', 'container_image_digest', 'container_label_job_id', 'container_label_manifest_sha', 'container_mount_json', 'container_env_json', 'container_security_json', 'inspection_json'], 'operation container evidence');
     nullableGroup(row, ['evidence_path', 'evidence_sha256'], 'operation evidence');
     nullableGroup(row, ['error_code', 'error_json'], 'operation error');
     if (lifecyclePhase === 'not_created' && ['container_id', 'container_name', 'container_image_digest', 'container_label_job_id', 'container_label_manifest_sha', 'container_mount_json', 'container_env_json', 'container_security_json', 'inspection_json'].some((key) => row[key] !== null && row[key] !== undefined)) throw new StoreDataError('pre-container operation contains container evidence');
     if (lifecyclePhase !== 'not_created' && ['container_id', 'container_name', 'container_image_digest', 'container_label_job_id', 'container_label_manifest_sha', 'container_mount_json', 'container_env_json', 'container_security_json', 'inspection_json'].some((key) => row[key] === null || row[key] === undefined)) throw new StoreDataError('container operation is missing identity evidence');
-    if (outcome === null && ['finished_at', 'evidence_path', 'evidence_sha256', 'error_code', 'error_json'].some((key) => row[key] !== null && row[key] !== undefined)) throw new StoreDataError('incomplete operation contains result evidence');
+    if (outcome === null && ['finished_at', 'accepted_disposition', 'evidence_path', 'evidence_sha256', 'error_code', 'error_json'].some((key) => row[key] !== null && row[key] !== undefined)) throw new StoreDataError('incomplete operation contains result evidence');
     if (outcome !== null && (row.finished_at === null || row.evidence_path === null || row.evidence_sha256 === null)) throw new StoreDataError('completed operation is missing result evidence');
     if (outcome === 'passed' && (row.error_code !== null || row.error_json !== null)) throw new StoreDataError('passed operation contains error evidence');
+    if (
+      outcome === 'accepted'
+      && (
+        acceptedDisposition !== 'expected-rootfs-already-present'
+        || row.operation_id !== 'activate-target'
+        || Number(row.exit_code) !== 2
+        || row.signal !== null
+        || Number(row.timed_out) !== 0
+        || row.error_code !== null
+        || row.error_json !== null
+      )
+    ) {
+      throw new StoreDataError('accepted operation evidence is incoherent');
+    }
+    if (outcome !== 'accepted' && acceptedDisposition !== null) throw new StoreDataError('operation disposition has no accepted outcome');
     if (outcome === 'failed' && (row.error_code === null || row.error_json === null)) throw new StoreDataError('failed operation is missing error evidence');
     return {
       jobId: asString(row, 'job_id'), operationId: persistedEnum(row, 'operation_id', TRUSTED_OPERATION_IDS, false)! as TrustedOperationId, attempt, argvHash: readHash(row, 'argv_hash', HASH64)!,
@@ -774,7 +800,7 @@ export class BuilderStore {
       containerMount: parseJsonObject(nullableString(row, 'container_mount_json'), 'operation mount'), containerEnvironment: parseJsonObject(nullableString(row, 'container_env_json'), 'operation environment'),
       containerSecurity: parseJsonObject(nullableString(row, 'container_security_json'), 'operation security'), inspection: parseJsonObject(nullableString(row, 'inspection_json'), 'operation inspection'),
       timedOut: (() => { const value = Number(row.timed_out); if (value !== 0 && value !== 1) throw new StoreDataError('SQLite operation timed_out is invalid'); return value === 1; })(), lifecyclePhase, exitCode: nullableNumber(row, 'exit_code'), signal: nullableString(row, 'signal'),
-      outcome, evidencePath: persistedRelativePath(row, 'evidence_path'), evidenceSha256: readHash(row, 'evidence_sha256', HASH64),
+      outcome, acceptedDisposition, evidencePath: persistedRelativePath(row, 'evidence_path'), evidenceSha256: readHash(row, 'evidence_sha256', HASH64),
       errorCode: persistedEnum(row, 'error_code', BUILDER_ERROR_CODES) as BuilderErrorCode | null, error: parseJsonObject(nullableString(row, 'error_json'), 'operation error'),
     };
   }

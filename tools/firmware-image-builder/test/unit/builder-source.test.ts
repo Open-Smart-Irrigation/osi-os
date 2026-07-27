@@ -36,7 +36,7 @@ const definitionPath = new URL('../../builder/execution-definition.json', import
 const targetNames = ['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const;
 const execFileAsync = promisify(execFile);
 const operationToolPath = new URL('../../builder/operations/osi-image-builder-tool.js', import.meta.url).pathname;
-const operationToolModule = async () => await import(operationToolPath) as unknown as { readonly createOperationHandlersForTesting: (root: string, hooks?: { readonly onStep?: (point: string, path: string) => void | Promise<void> }) => { readonly copyFeedConfig: () => Promise<{ readonly sha256: string }>; readonly mirrorGui: () => Promise<{ readonly fileCount: number }>; readonly verifyImage: () => Promise<{ readonly sha256: string; readonly targetId: string; readonly nodeResolution: readonly { readonly packageName: string; readonly specifier: string; readonly resolvedRelativePath: string }[] }> } };
+const operationToolModule = async () => await import(operationToolPath) as unknown as { readonly createOperationHandlersForTesting: (root: string, hooks?: { readonly onStep?: (point: string, path: string) => void | Promise<void> }) => { readonly copyFeedConfig: () => Promise<{ readonly sha256: string }>; readonly mirrorGui: () => Promise<{ readonly fileCount: number }>; readonly verifyImage: () => Promise<{ readonly sha256: string; readonly targetId: string; readonly nodeResolution: readonly { readonly packageName: string; readonly specifier: string; readonly resolvedRelativePath: string; readonly exportType: 'function' | 'object' | 'incompatible' }[] }> } };
 const evidence: BuilderValidationEvidence = {
   imageId: `sha256:${digest('f')}`, imageDigest: digest('a'), architecture: 'linux/amd64',
   rustc: 'rustc 1.85.0', llvm: '19.1.7', polly: '19.1.7', zstd: '1.5.7', node: 'v22.14.0',
@@ -257,7 +257,7 @@ describe('locked builder source', () => {
     }
   });
 
-  it('resolves the fixed rootfs Node package set without loading target modules', async () => {
+  it('loads the fixed rootfs Node package set and records actual compatible export types', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-node-resolve-'));
     const rootfs = join(
       root,
@@ -299,7 +299,7 @@ describe('locked builder source', () => {
       );
       await writeFile(image, '');
       await truncate(image, 64 * 1024 * 1024);
-      for (const packageName of packaged) {
+      for (const [index, packageName] of packaged.entries()) {
         const packageRoot = join(nodeRed, 'node_modules', packageName);
         await mkdir(packageRoot, { recursive: true });
         await writeFile(
@@ -308,10 +308,12 @@ describe('locked builder source', () => {
         );
         await writeFile(
           join(packageRoot, 'index.js'),
-          'throw new Error("target module must not execute");\n',
+          index % 2 === 0
+            ? 'module.exports = { compatible: true };\n'
+            : 'module.exports = function compatible() {};\n',
         );
       }
-      for (const packageName of direct) {
+      for (const [index, packageName] of direct.entries()) {
         const packageRoot = join(nodeRed, packageName);
         await mkdir(packageRoot, { recursive: true });
         await writeFile(
@@ -320,7 +322,9 @@ describe('locked builder source', () => {
         );
         await writeFile(
           join(packageRoot, 'index.js'),
-          'throw new Error("target module must not execute");\n',
+          index % 2 === 0
+            ? 'module.exports = function compatible() {};\n'
+            : 'module.exports = { compatible: true };\n',
         );
       }
       const result = await (await operationToolModule())
@@ -333,6 +337,8 @@ describe('locked builder source', () => {
       expect(result.nodeResolution.every(({ resolvedRelativePath }) => (
         !resolvedRelativePath.startsWith('../')
       ))).toBe(true);
+      expect(new Set(result.nodeResolution.map(({ exportType }) => exportType)))
+        .toEqual(new Set(['function', 'object']));
     } finally {
       await rm(root, { recursive: true, force: true });
     }

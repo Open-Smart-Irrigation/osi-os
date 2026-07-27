@@ -1861,14 +1861,12 @@ export type TargetSetupSourceProfileObservation = Readonly<{
   sourceConfigEvidencePath: string;
 }>;
 
-export type TargetSetupFinalProfileObservation = Readonly<{
+export type TargetSetupResolvedProfileObservation = Readonly<{
   target: TargetManifest['id'];
   environment: string;
   selectedTarget: string;
   profile: string;
   rootfsPartSize: number;
-  sourceSha256: string;
-  sourceConfigEvidencePath: string;
   resolvedSha256: string;
 }>;
 
@@ -1884,7 +1882,7 @@ export type TargetSetupConfigObservations = Readonly<{
     profile: string;
     rootfsPartSize: number;
     bothProfilesChecked: true;
-    profiles: Readonly<Record<TargetManifest['id'], TargetSetupFinalProfileObservation>>;
+    profiles: Readonly<Record<TargetManifest['id'], TargetSetupResolvedProfileObservation>>;
   }>;
 }>;
 
@@ -1904,15 +1902,13 @@ function sourceProfileObservation(
 
 function resolvedProfileObservation(
   profile: ProfileResolution,
-): TargetSetupFinalProfileObservation {
+): TargetSetupResolvedProfileObservation {
   return Object.freeze({
     target: profile.target,
     environment: profile.environment,
     selectedTarget: profile.selectedTarget,
     profile: profile.profile,
     rootfsPartSize: profile.rootfsPartSize,
-    sourceSha256: profile.sourceSha256,
-    sourceConfigEvidencePath: profile.sourceConfigEvidencePath,
     resolvedSha256: profile.resolvedSha256,
   });
 }

@@ -318,6 +318,18 @@ export class PreflightService {
       };
       throw this.#error('SOURCE_UNAVAILABLE', details, rechecked.checks);
     }
+    const preparedAt = this.#validNow();
+    if (preparedAt.getTime() >= Date.parse(previous.expiresAt)) {
+      throw this.#error(
+        'PREFLIGHT_EXPIRED',
+        {
+          preflightId,
+          expiresAt: previous.expiresAt,
+          checkedAt: preparedAt.toISOString(),
+        },
+        rechecked.checks,
+      );
+    }
     return immutable({
       ...rechecked,
       preflightId,

@@ -129,7 +129,7 @@ export interface PipelineEvidenceWriter {
 export interface PipelineOperationExecution {
   readonly operationId: TrustedOperationId;
   readonly attempt: number;
-  readonly outcome: 'passed' | 'failed';
+  readonly outcome: 'passed' | 'failed' | 'accepted';
   readonly command: EvidenceCommand;
   readonly observations: Readonly<Record<string, unknown>>;
   readonly error?: BuilderErrorContract;
@@ -349,11 +349,16 @@ export interface PublicationBindingInput {
 }
 
 export interface PublishRecoveryInput {
+  readonly publisherAuthority: Readonly<{
+    readonly packageVersion: string;
+    readonly publisherSha256: string;
+  }>;
   readonly publisher: Pick<PublisherClient, 'recheck' | 'quarantine'>;
   readonly request: PublisherRequest;
   readonly binding: PublicationBinding;
   readonly response: PublisherResponse | null;
   readonly invocationFailure?: NativeFailureEvidence;
+  readonly persistQuarantineIntent: (quarantinePath: string) => Promise<void>;
   readonly verifyFinal: () => Promise<FinalPublicationProof>;
 }
 
@@ -792,6 +797,7 @@ function validatePublisherPathEvidence(
   response: PublisherResponse,
   binding: PublicationBinding,
   operation: 'publish' | 'quarantine',
+  authority: PublishRecoveryInput['publisherAuthority'],
 ): void {
   const expected = expectedPublisherPaths(binding);
   const destination = operation === 'publish'
@@ -800,7 +806,7 @@ function validatePublisherPathEvidence(
   if (
     response.sourceRelativePath !== expected.source
     || response.destinationRelativePath !== destination
-    || response.publisherVersion !== '0.1.0'
+    || response.publisherVersion !== authority.packageVersion
     || typeof response.publisherSourceSha256 !== 'string'
     || !SHA256.test(response.publisherSourceSha256)
   ) {
@@ -905,6 +911,8 @@ async function recoverAmbiguousPublishing(
     };
   }
   if (recheck.destination === 'absent' && recheck.staging === 'present') {
+    const quarantinePath = `.osi-image-builder/quarantine/${input.binding.jobId}`;
+    await input.persistQuarantineIntent(quarantinePath);
     let quarantine: PublisherResponse;
     try {
       quarantine = await input.publisher.quarantine({
@@ -922,7 +930,12 @@ async function recoverAmbiguousPublishing(
       };
     }
     if (quarantine.renameResult !== undefined || quarantine.quarantined) {
-      validatePublisherPathEvidence(quarantine, input.binding, 'quarantine');
+      validatePublisherPathEvidence(
+        quarantine,
+        input.binding,
+        'quarantine',
+        input.publisherAuthority,
+      );
     }
     if (quarantine.quarantined && quarantine.renameResult === 'RENAMED') {
       return {
@@ -987,6 +1000,15 @@ export function validatePublicationBinding(
 export async function recoverPublishing(
   input: PublishRecoveryInput,
 ): Promise<PublishRecoveryResult> {
+  if (
+    typeof input.publisherAuthority.packageVersion !== 'string'
+    || input.publisherAuthority.packageVersion.length === 0
+    || !SHA256.test(input.publisherAuthority.publisherSha256)
+    || /^0+$/u.test(input.publisherAuthority.publisherSha256)
+    || typeof input.persistQuarantineIntent !== 'function'
+  ) {
+    throw new Error('publisher authority or quarantine persistence is incomplete');
+  }
   validatePublicationBinding({
     persisted: input.binding,
     candidate: input.binding,
@@ -1003,7 +1025,12 @@ export async function recoverPublishing(
     throw new Error('publish response and invocation failure evidence are contradictory');
   }
   if (initial.renameResult !== undefined || initial.published) {
-    validatePublisherPathEvidence(initial, input.binding, 'publish');
+    validatePublisherPathEvidence(
+      initial,
+      input.binding,
+      'publish',
+      input.publisherAuthority,
+    );
   }
   if (initial.renameResult === 'EEXIST' || initial.errorCode === 'OUTPUT_COLLISION') {
     return {
@@ -1282,17 +1309,9 @@ export function createPipeline(input: PipelineInput): {
       throw new Error(`${stage} has no trusted operation evidence`);
     }
     return {
-      operationId: operationIdFor(phase.executions),
+      operationId: null,
       commands: phase.executions.map(({ command }) => command),
-      observations: {
-        ...phase.observations,
-        operations: phase.executions.map((execution) => ({
-          operationId: execution.operationId,
-          attempt: execution.attempt,
-          outcome: execution.outcome,
-          ...execution.observations,
-        })),
-      },
+      observations: phase.observations,
     };
   };
 
@@ -1436,6 +1455,25 @@ export function createPipeline(input: PipelineInput): {
     artifact: VerifiedPipelineArtifact,
   ): Promise<void> => {
     const metadata = buildMetadata(job, artifact);
+    const stagingDirectory = `staging/${job.jobId}`;
+    const plannedArtifact: ArtifactInput = Object.freeze({
+      stagingPath: `${stagingDirectory}/${artifact.artifact.basename}`,
+      artifactSha256: artifact.artifact.sha256,
+      artifactSize: artifact.artifact.size,
+      artifactMtime: artifact.artifact.mtime,
+      checksumPath: `${stagingDirectory}/sha256sums`,
+      checksumSha256: sha256(metadata.checksumBytes),
+      manifestPath: `${stagingDirectory}/build-manifest.json`,
+      manifestSha256: sha256(metadata.buildBytes),
+      verificationPath: `${stagingDirectory}/verification.json`,
+      verificationSha256: sha256(metadata.verificationBytes),
+    });
+    write({
+      kind: 'artifact',
+      expectedState: 'verifying',
+      state: 'verifying',
+      ...plannedArtifact,
+    });
     const prepared = await input.services.publicationFiles.prepare({
       job,
       target: input.target,
@@ -1459,16 +1497,13 @@ export function createPipeline(input: PipelineInput): {
       checksumBytes: metadata.checksumBytes,
       jobId: job.jobId,
     });
+    if (!sameArtifact(plannedArtifact, artifactInput)) {
+      throw new Error('publication preparation differs from persisted staging ownership');
+    }
     preparedPublication = reopened;
     preparedArtifact = artifactInput;
     buildManifest = metadata.build;
     verificationManifest = metadata.verification;
-    write({
-      kind: 'artifact',
-      expectedState: 'verifying',
-      state: 'verifying',
-      ...artifactInput,
-    });
   };
 
   const createBinding = (job: JobRecord): PublicationBinding => {
@@ -1545,11 +1580,22 @@ export function createPipeline(input: PipelineInput): {
     }
     renewLease();
     const outcome = await recoverPublishing({
+      publisherAuthority: {
+        packageVersion: provenance?.lock.packageVersion ?? '',
+        publisherSha256: provenance?.lock.publisherSha256 ?? '',
+      },
       publisher: input.services.publisher,
       request,
       binding,
       response,
       ...(invocationFailure === undefined ? {} : { invocationFailure }),
+      persistQuarantineIntent: async (quarantinePath) => {
+        write({
+          kind: 'publish-quarantine-intent',
+          expectedState: 'publishing',
+          quarantinePath,
+        });
+      },
       verifyFinal: () => input.services.publicationFiles.verifyFinal({
         binding,
         artifact: preparedArtifact!,

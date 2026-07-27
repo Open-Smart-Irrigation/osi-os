@@ -18,6 +18,7 @@ import {
   resolveTrustedOperationRequest,
   runRunner,
   stageVerifiedArtifact,
+  validateInstalledPublisherAuthority,
 } from '../../runner/src/main.js';
 import { createOperationDefinition } from '../../runner/src/operation-registry.js';
 import {
@@ -35,11 +36,55 @@ import type {
 const SHA40 = 'a'.repeat(40);
 const SHA256 = 'b'.repeat(64);
 const PUBLISHER_SHA = 'c'.repeat(64);
+const PUBLISHER_VERSION = '2026.07.27.1';
 const JOB_ID = 'job-pipeline-unit';
 
 describe('production runner composition', () => {
   it('constructs its own production pipeline instead of accepting a bootstrap', () => {
     expect(runRunner).toHaveLength(1);
+  });
+
+  it('binds installed publisher bytes to package version and lock hash', () => {
+    const publisherBytes = Buffer.from('installed native publisher');
+    const publisherSha256 = createHash('sha256').update(publisherBytes).digest('hex');
+    expect(validateInstalledPublisherAuthority(
+      {
+        schemaVersion: 1,
+        packageVersion: '2026.07.27.1',
+        publisherSha256,
+      },
+      '2026.07.27.1',
+      publisherBytes,
+    )).toEqual({
+      packageVersion: '2026.07.27.1',
+      publisherSha256,
+    });
+    expect(() => validateInstalledPublisherAuthority(
+      {
+        schemaVersion: 1,
+        packageVersion: '2026.07.27.1',
+        publisherSha256: 'd'.repeat(64),
+      },
+      '2026.07.27.1',
+      publisherBytes,
+    )).toThrow(/publisher.*hash/i);
+    expect(() => validateInstalledPublisherAuthority(
+      {
+        schemaVersion: 1,
+        packageVersion: '2026.07.27.1',
+      },
+      '2026.07.27.1',
+      publisherBytes,
+    )).toThrow(/publisher.*hash/i);
+    expect(() => validateInstalledPublisherAuthority(
+      {
+        schemaVersion: 1,
+        packageVersion: '2026.07.27.1',
+        publisherSha256,
+      },
+      '2026.07.27.2',
+      publisherBytes,
+    )).toThrow(/package version/i);
   });
 
   it('stages and hashes a real artifact through a readable held descriptor', async () => {
@@ -169,10 +214,14 @@ const binding: PublicationBinding = Object.freeze({
 });
 
 const publishEvidence = Object.freeze({
-  publisherVersion: '0.1.0',
+  publisherVersion: PUBLISHER_VERSION,
   publisherSourceSha256: PUBLISHER_SHA,
   sourceRelativePath: `.osi-image-builder/staging/${JOB_ID}`,
   destinationRelativePath: binding.finalDirectory,
+});
+const publisherAuthority = Object.freeze({
+  packageVersion: PUBLISHER_VERSION,
+  publisherSha256: PUBLISHER_SHA,
 });
 
 function response(
@@ -257,6 +306,8 @@ describe('native publication recovery', () => {
     const native = publisher();
     const verifyFinal = vi.fn(async () => proof());
     await expect(recoverPublishing({
+      publisherAuthority,
+      persistQuarantineIntent: async () => {},
       publisher: native,
       request,
       binding,
@@ -280,14 +331,26 @@ describe('native publication recovery', () => {
   });
 
   it('quarantines only after recheck proves final absence and surviving staging', async () => {
+    const order: string[] = [];
     const native = publisher({
       recheck: vi.fn(async () => response({
         destination: 'absent',
         staging: 'present',
         errorCode: 'PUBLISH_RECOVERY_FAILED',
       })),
+      quarantine: vi.fn(async () => {
+        order.push('native-quarantine');
+        return response({
+          quarantined: true,
+          mutationCount: 2,
+          renameResult: 'RENAMED',
+          ...publishEvidence,
+          destinationRelativePath: `.osi-image-builder/quarantine/${JOB_ID}`,
+        });
+      }),
     });
     await expect(recoverPublishing({
+      publisherAuthority,
       publisher: native,
       request,
       binding,
@@ -298,6 +361,9 @@ describe('native publication recovery', () => {
         renameResult: 'RENAMED',
         ...publishEvidence,
       }),
+      persistQuarantineIntent: async (path) => {
+        order.push(`persist:${path}`);
+      },
       verifyFinal: async () => proof(),
     })).resolves.toMatchObject({
       kind: 'blocked',
@@ -312,6 +378,10 @@ describe('native publication recovery', () => {
       rootId: request.rootId,
       jobId: request.jobId,
     });
+    expect(order).toEqual([
+      `persist:.osi-image-builder/quarantine/${JOB_ID}`,
+      'native-quarantine',
+    ]);
   });
 
   it('retains a quarantine blocker when the helper cannot prove the move', async () => {
@@ -326,6 +396,8 @@ describe('native publication recovery', () => {
       })),
     });
     await expect(recoverPublishing({
+      publisherAuthority,
+      persistQuarantineIntent: async () => {},
       publisher: native,
       request,
       binding,
@@ -360,6 +432,8 @@ describe('native publication recovery', () => {
       })),
     });
     await expect(recoverPublishing({
+      publisherAuthority,
+      persistQuarantineIntent: async () => {},
       publisher: native,
       request,
       binding,
@@ -420,6 +494,8 @@ describe('native publication recovery', () => {
   ) => {
     const native = publisher({ recheck: vi.fn(async () => recheck) });
     await expect(recoverPublishing({
+      publisherAuthority,
+      persistQuarantineIntent: async () => {},
       publisher: native,
       request,
       binding,
@@ -457,6 +533,8 @@ describe('native publication recovery', () => {
     code,
   ) => {
     await expect(recoverPublishing({
+      publisherAuthority,
+      persistQuarantineIntent: async () => {},
       publisher: native,
       request,
       binding,
@@ -479,6 +557,8 @@ describe('native publication recovery', () => {
   it('classifies EEXIST as an immutable output collision without recheck', async () => {
     const native = publisher();
     await expect(recoverPublishing({
+      publisherAuthority,
+      persistQuarantineIntent: async () => {},
       publisher: native,
       request,
       binding,
@@ -501,6 +581,8 @@ describe('native publication recovery', () => {
   it('rejects a forged native source or destination path before recheck', async () => {
     const native = publisher();
     await expect(recoverPublishing({
+      publisherAuthority,
+      persistQuarantineIntent: async () => {},
       publisher: native,
       request,
       binding,
@@ -520,6 +602,8 @@ describe('native publication recovery', () => {
   it('returns an explicit blocker when final proof differs after rename', async () => {
     const native = publisher();
     await expect(recoverPublishing({
+      publisherAuthority,
+      persistQuarantineIntent: async () => {},
       publisher: native,
       request,
       binding,

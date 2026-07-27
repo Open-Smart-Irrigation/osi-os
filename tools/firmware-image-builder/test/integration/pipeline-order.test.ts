@@ -55,14 +55,48 @@ const HASH_A = 'b'.repeat(64);
 const HASH_B = 'c'.repeat(64);
 const HASH_C = 'd'.repeat(64);
 const ACCEPTED = '2026-07-26T08:00:00.000Z';
-const ROOTFS_ALREADY_PRESENT = [
-  'Applying patch patches/image-with-padded-rootfs.patch',
-  'patching file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
-  'Hunk #1 FAILED at 24.',
-  '1 out of 1 hunk FAILED -- rejects in file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
-  'Patch patches/image-with-padded-rootfs.patch can be reverse-applied',
+const ROOTFS_ALREADY_PRESENT_STDERR = [
+  'No series file found',
+  'make: *** [Makefile:60: switch-env] Error 1',
   '',
 ].join('\n');
+
+function rootfsAlreadyPresentStdout(environment: string): string {
+  return [
+    'Cleaning patch state',
+    'cd openwrt && quilt pop -af || true',
+    'Restoring clean source tree',
+    'cd openwrt && git checkout -- . || true',
+    'cd openwrt && git clean -fd || true',
+    'rm -rf openwrt/.pc',
+    'Switching configuration',
+    'rm -f conf/files conf/patches conf/.config',
+    `ln -s ${environment}/files conf/files`,
+    `ln -s ${environment}/patches conf/patches`,
+    `ln -s ${environment}/.config conf/.config`,
+    'Recreating openwrt symlinks',
+    'rm -f openwrt/.config openwrt/files openwrt/patches',
+    'ln -s ../conf/.config openwrt/.config',
+    'ln -s ../conf/files openwrt/files',
+    'ln -s ../conf/patches openwrt/patches',
+    'Initializing quilt',
+    'mkdir -p openwrt/.pc',
+    'echo "patches" > openwrt/.pc/.quilt_patches',
+    'cd openwrt && quilt upgrade || true',
+    'Converting meta-data to version 2',
+    'Applying patches',
+    'cd openwrt && quilt push -a || [ $? -eq 2 ]',
+    'Applying patch patches/boot-config.patch',
+    'patching file target/linux/bcm27xx/image/config.txt',
+    '',
+    'Applying patch patches/image-with-padded-rootfs.patch',
+    'patching file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+    'Hunk #1 FAILED at 24.',
+    '1 out of 1 hunk FAILED -- rejects in file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+    'Patch patches/image-with-padded-rootfs.patch can be reverse-applied',
+    '',
+  ].join('\n');
+}
 const execFile = promisify(execFileCallback);
 const SOURCE_PREPARATION = Object.freeze({
   schemaVersion: 1 as const,
@@ -112,6 +146,7 @@ const LOCK = Object.freeze({
   nodeVersion: '22.14.0',
   executionDefinitionSha256: '5'.repeat(64),
   validationEvidenceSha256: '6'.repeat(64),
+  publisherSha256: HASH_C,
   installable: true,
 });
 const temporaryDirectories: string[] = [];
@@ -213,6 +248,7 @@ async function fixture(options: {
   }>;
   readonly verifyProducedTargetEvidence?: boolean;
   readonly predictPublishPassed?: boolean;
+  readonly requireTrackedStagingBeforePrepare?: boolean;
 } = {}): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), 'osi-pipeline-order-'));
   temporaryDirectories.push(directory);
@@ -440,7 +476,29 @@ async function fixture(options: {
       const stoppedAt = clock.now();
       const expectedPatch = options.expectedPatchAlreadyPresent === true
         && operationId === 'activate-target';
-      const failed = options.failOperation === operationId || expectedPatch;
+      const failed = options.failOperation === operationId;
+      const acceptedDisposition = expectedPatch
+        ? classifyTargetSetupOperationResult(
+            'activate-target',
+            definition,
+            {
+              argv: definition.argv,
+              startedAt,
+              finishedAt: startedAt,
+              exitCode: 2,
+              signal: null,
+              timedOut: false,
+              stdout: rootfsAlreadyPresentStdout(context.target.environment),
+              stderr: ROOTFS_ALREADY_PRESENT_STDERR,
+            },
+            context.job.requestId,
+          ).disposition
+        : null;
+      const operationOutcome = acceptedDisposition === 'expected-rootfs-already-present'
+        ? 'accepted' as const
+        : failed
+          ? 'failed' as const
+          : 'passed' as const;
       const inspection = {
         running: false,
         status: 'exited',
@@ -474,7 +532,10 @@ async function fixture(options: {
       const evidenceBytes = canonical({
         operationId,
         attempt,
-        outcome: failed ? 'failed' : 'passed',
+        outcome: operationOutcome,
+        ...(expectedPatch
+          ? { acceptedDisposition: 'expected-rootfs-already-present' }
+          : {}),
       });
       await writeFile(evidenceAbsolutePath, evidenceBytes);
       const operationInput: OperationInput = {
@@ -497,7 +558,10 @@ async function fixture(options: {
         lifecyclePhase: 'stopped',
         exitCode: expectedPatch ? 2 : failed ? 1 : 0,
         signal: null,
-        outcome: failed ? 'failed' : 'passed',
+        outcome: operationOutcome,
+        ...(expectedPatch
+          ? { acceptedDisposition: 'expected-rootfs-already-present' as const }
+          : {}),
         evidencePath: evidenceRelativePath,
         evidenceSha256: hash(evidenceBytes),
         ...(failed
@@ -551,7 +615,7 @@ async function fixture(options: {
       return Object.freeze({
         operationId,
         attempt,
-        outcome: failed ? 'failed' : 'passed',
+        outcome: operationOutcome,
         command: Object.freeze({
           argv: definition.argv,
           startedAt,
@@ -564,8 +628,11 @@ async function fixture(options: {
         observations: Object.freeze({
           evidencePath: evidenceRelativePath,
           evidenceSha256: hash(evidenceBytes),
-          stdout: expectedPatch ? ROOTFS_ALREADY_PRESENT : '',
-          stderr: '',
+          acceptedDisposition,
+          stdout: expectedPatch
+            ? rootfsAlreadyPresentStdout(context.target.environment)
+            : '',
+          stderr: expectedPatch ? ROOTFS_ALREADY_PRESENT_STDERR : '',
         }),
         ...(failed
           ? {
@@ -628,6 +695,15 @@ async function fixture(options: {
   const configObservations = createTargetSetupConfigObservations(configPhase);
   const publicationFiles = {
     prepare: async (value: Parameters<PipelineInput['services']['publicationFiles']['prepare']>[0]) => {
+      if (options.requireTrackedStagingBeforePrepare === true) {
+        expect(store.getJob(jobId)).toMatchObject({
+          state: 'verifying',
+          publishState: 'staged',
+          artifactStagingPath: `staging/${jobId}/factory.img.gz`,
+          artifactSha256: HASH_A,
+          artifactSize: 100,
+        });
+      }
       publicationPreparationStages.push(store.getStage(jobId, 'verify'));
       publishedMetadata.push({
         build: value.buildManifest,
@@ -684,7 +760,7 @@ async function fixture(options: {
     selfTest: false,
     mutationCount: 3,
     renameResult: 'RENAMED',
-    publisherVersion: '0.1.0',
+    publisherVersion: LOCK.packageVersion,
     publisherSourceSha256: HASH_C,
     sourceRelativePath: `.osi-image-builder/staging/${jobId}`,
     destinationRelativePath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5`,
@@ -707,7 +783,7 @@ async function fixture(options: {
       selfTest: false,
       mutationCount: 2,
       renameResult: 'RENAMED',
-      publisherVersion: '0.1.0',
+      publisherVersion: LOCK.packageVersion,
       publisherSourceSha256: HASH_C,
       sourceRelativePath: `.osi-image-builder/staging/${jobId}`,
       destinationRelativePath: `.osi-image-builder/quarantine/${jobId}`,
@@ -1329,14 +1405,14 @@ describe('trusted pipeline integration', () => {
           value.store.getStage(value.input.jobId, 'target-setup')!.evidencePath!,
         ),
         'utf8',
-      )) as { observations: Record<string, unknown> };
+      )) as { operationId: null; observations: Record<string, unknown> };
       const configEvidence = JSON.parse(await readFile(
         join(
           value.statePath,
           value.store.getStage(value.input.jobId, 'config')!.evidencePath!,
         ),
         'utf8',
-      )) as { observations: Record<string, unknown> };
+      )) as { operationId: null; observations: Record<string, unknown> };
       expect(sourceEvidence.observations).toMatchObject(value.sourceObservations);
       expect(configEvidence.observations).toMatchObject(value.configObservations);
       expect(Object.keys(
@@ -1361,10 +1437,10 @@ describe('trusted pipeline integration', () => {
         'resolvedSha256',
         'rootfsPartSize',
         'selectedTarget',
-        'sourceConfigEvidencePath',
-        'sourceSha256',
         'target',
       ]);
+      expect(sourceEvidence.operationId).toBeNull();
+      expect(configEvidence.operationId).toBeNull();
     } finally {
       value.close();
     }
@@ -1443,6 +1519,17 @@ describe('trusted pipeline integration', () => {
     }
   });
 
+  it('persists artifact ownership before the first staging mutation', async () => {
+    const value = await fixture({ requireTrackedStagingBeforePrepare: true });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'succeeded',
+      });
+    } finally {
+      value.close();
+    }
+  });
+
   it('lets Task15 classify only the exact expected nonzero quilt result', async () => {
     const value = await fixture({ expectedPatchAlreadyPresent: true });
     try {
@@ -1454,7 +1541,8 @@ describe('trusted pipeline integration', () => {
         'activate-target',
         1,
       )).toMatchObject({
-        outcome: 'failed',
+        outcome: 'accepted',
+        acceptedDisposition: 'expected-rootfs-already-present',
         exitCode: 2,
       });
       const stage = value.store.getStage(value.input.jobId, 'target-setup')!;
@@ -1768,7 +1856,7 @@ describe('trusted pipeline integration', () => {
             mutationCount: 1,
             errorCode: 'OUTPUT_COLLISION',
             renameResult: 'EEXIST',
-            publisherVersion: '0.1.0',
+            publisherVersion: LOCK.packageVersion,
             publisherSourceSha256: HASH_C,
             sourceRelativePath: `.osi-image-builder/staging/${value.input.jobId}`,
             destinationRelativePath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5`,
@@ -1818,7 +1906,7 @@ describe('trusted pipeline integration', () => {
           mutationCount: 3,
           errorCode: 'PUBLISH_FAILED',
           renameResult: 'RENAMED',
-          publisherVersion: '0.1.0',
+          publisherVersion: LOCK.packageVersion,
           publisherSourceSha256: HASH_C,
           sourceRelativePath: `.osi-image-builder/staging/${value.input.jobId}`,
           destinationRelativePath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5`,
@@ -1878,7 +1966,7 @@ describe('trusted pipeline integration', () => {
           mutationCount: 3,
           errorCode: 'PUBLISH_FAILED',
           renameResult: 'RENAMED',
-          publisherVersion: '0.1.0',
+          publisherVersion: LOCK.packageVersion,
           publisherSourceSha256: HASH_C,
           sourceRelativePath: `.osi-image-builder/staging/${value.input.jobId}`,
           destinationRelativePath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5`,
@@ -1901,7 +1989,7 @@ describe('trusted pipeline integration', () => {
           mutationCount: 1,
           errorCode: 'QUARANTINE_PENDING',
           renameResult: 'RENAMED',
-          publisherVersion: '0.1.0',
+          publisherVersion: LOCK.packageVersion,
           publisherSourceSha256: HASH_C,
           sourceRelativePath: `.osi-image-builder/staging/${value.input.jobId}`,
           destinationRelativePath: `.osi-image-builder/quarantine/${value.input.jobId}`,

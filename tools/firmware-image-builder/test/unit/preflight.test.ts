@@ -266,6 +266,41 @@ describe('typed preflight checks', () => {
     expect(caps.calls.sourceResolver).toBe(2);
   });
 
+  it('rejects a token that expires while offline feeds are being prepared', async () => {
+    let now = new Date(fixedNow);
+    const caps = capabilities({
+      clock: { now: () => new Date(now) },
+      sourceResolver: {
+        resolveAtAcceptance: async () => validSource(),
+        prepareOfflineFeeds: async (sourceSha, _stateRoot, jobId) => {
+          now = new Date('2026-07-23T12:10:00.000Z');
+          return {
+            schemaVersion: 1,
+            boundary: 'api-prepared-pinned-feeds-v1',
+            networkPolicy: 'runner-offline',
+            jobId,
+            sourceSha,
+            preparedAt: fixedNow,
+            feeds: [],
+          };
+        },
+      },
+    });
+    const preflight = service(caps);
+    const first = await preflight.run(request);
+
+    await expect(preflight.accept(
+      first.preflightId,
+      request,
+      'job-offline-preparation-expired',
+    )).rejects.toMatchObject({
+      code: 'PREFLIGHT_EXPIRED',
+      details: {
+        checkedAt: '2026-07-23T12:10:00.000Z',
+      },
+    });
+  });
+
   it('bounds IDs and cache, preserves the original on duplicate, and prunes at expiry', async () => {
     let now = new Date(fixedNow);
     const caps = capabilities({ clock: { now: () => new Date(now) } });

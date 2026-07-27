@@ -392,6 +392,7 @@ async function verifyImage(root, hooks) {
         const require = createRequire(`${nodeRed}/__osi_verification__.cjs`);
         const nodeResolution = NODE_MODULES.map(([packageName, specifier], index) => {
           const resolved = require.resolve(specifier);
+          const exported = require(specifier);
           const actualRelativePath = relative(nodeRed, resolved).replaceAll('\\', '/');
           if (actualRelativePath.startsWith('../') || actualRelativePath.startsWith('/')) {
             throw new Error(`resolved Node module escaped the trusted rootfs base: ${packageName}`);
@@ -407,7 +408,12 @@ async function verifyImage(root, hooks) {
           if (!resolvedRelativePath.startsWith(expectedRoot)) {
             throw new Error(`resolved Node module changed package identity: ${packageName}`);
           }
-          return { packageName, specifier, resolvedRelativePath };
+          const exportType = typeof exported === 'function'
+            ? 'function'
+            : exported !== null && typeof exported === 'object'
+              ? 'object'
+              : 'incompatible';
+          return { packageName, specifier, resolvedRelativePath, exportType };
         });
         return {
           operation: 'verify-image',

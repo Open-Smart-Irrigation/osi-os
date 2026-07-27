@@ -116,6 +116,7 @@ describe('native publisher integration', () => {
     const productionClient = createPublisherClient({
       executable: binary,
       approvedRoots: [{ id: 'images', label: 'Images', path: root, quarantinePath: `${root}/.osi-image-builder/quarantine` }],
+      expectedVersion: '0.1.0',
     });
     const clientRecheck = await productionClient.recheck({
       rootId: 'images',
@@ -233,6 +234,7 @@ describe('native publisher integration', () => {
     const missingClient = createPublisherClient({
       executable: binary,
       approvedRoots: [{ id: 'missing', label: 'Missing', path: missingRoot, quarantinePath: `${missingRoot}/.osi-image-builder/quarantine` }],
+      expectedVersion: '0.1.0',
     });
     const request = { rootId: 'missing', jobId: 'job-missing-root', branchSlug: 'feature%2Fmissing-root', sourceSha: SHA, targetId: 'rpi-5' as const };
     await expect(missingClient.publish(request)).resolves.toMatchObject({
@@ -259,6 +261,7 @@ describe('native publisher integration', () => {
     const invalidClient = createPublisherClient({
       executable: binary,
       approvedRoots: [{ id: 'invalid', label: 'Invalid staging', path: invalidRoot, quarantinePath: `${invalidRoot}/.osi-image-builder/quarantine` }],
+      expectedVersion: '0.1.0',
     });
     await expect(invalidClient.publish({ ...request, rootId: 'invalid', jobId: 'job-invalid-staging' })).resolves.toMatchObject({ errorCode: 'PUBLISH_FAILED' });
     await expect(invalidClient.quarantine({ rootId: 'invalid', jobId: 'job-invalid-staging' })).resolves.toMatchObject({ errorCode: 'QUARANTINE_PENDING' });

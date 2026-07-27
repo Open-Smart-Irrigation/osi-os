@@ -540,6 +540,36 @@ function parseInstalledLock(path: string, bytes: Buffer): BuilderLock {
   return result.lock;
 }
 
+export interface InstalledPublisherAuthority {
+  readonly packageVersion: string;
+  readonly publisherSha256: string;
+}
+
+export function validateInstalledPublisherAuthority(
+  lock: Readonly<Pick<BuilderLock, 'schemaVersion' | 'packageVersion' | 'publisherSha256'>>,
+  installedVersion: string,
+  publisherBytes: Buffer,
+): InstalledPublisherAuthority {
+  if (lock.schemaVersion !== 1 || lock.packageVersion !== installedVersion) {
+    throw new Error('installed publisher package version does not match the builder lock');
+  }
+  if (
+    typeof lock.publisherSha256 !== 'string'
+    || !/^[0-9a-f]{64}$/u.test(lock.publisherSha256)
+    || /^0+$/u.test(lock.publisherSha256)
+  ) {
+    throw new Error('installed publisher hash is missing or invalid');
+  }
+  const observedSha256 = sha256(publisherBytes);
+  if (observedSha256 !== lock.publisherSha256) {
+    throw new Error('installed publisher hash does not match the builder lock');
+  }
+  return Object.freeze({
+    packageVersion: lock.packageVersion,
+    publisherSha256: lock.publisherSha256,
+  });
+}
+
 function offlineFeedPreparation(job: JobRecord): OfflineFeedPreparation {
   if (!job.sourceRunnable || job.offlineFeedPreparation === null) {
     throw new Error('persisted offline feed preparation is missing');
@@ -605,6 +635,7 @@ function mapOperation(
       evidenceSha256: operation.evidenceSha256,
       lifecyclePhase: operation.lifecyclePhase,
       containerId: operation.containerId,
+      acceptedDisposition: operation.acceptedDisposition,
       stdout,
       stderr,
     }),
@@ -685,12 +716,18 @@ export function createNodeVerifier(
         throw new Error('trusted verify-image operation result is unavailable');
       }
       const stdout = trusted.observations.stdout;
-      if (typeof stdout !== 'string' || stdout.trim().split(/\r?\n/u).length !== 1) {
+      if (
+        typeof stdout !== 'string'
+        || stdout.includes('\r')
+        || !stdout.endsWith('\n')
+        || stdout.indexOf('\n') !== stdout.length - 1
+      ) {
         throw new Error('trusted verify-image operation output is not one structured result');
       }
+      const text = stdout.slice(0, -1);
       let parsed: unknown;
       try {
-        parsed = JSON.parse(stdout.trim()) as unknown;
+        parsed = JSON.parse(text) as unknown;
       } catch (error) {
         throw new Error('trusted verify-image operation output is not JSON', { cause: error });
       }
@@ -698,19 +735,32 @@ export function createNodeVerifier(
         parsed === null
         || typeof parsed !== 'object'
         || Array.isArray(parsed)
-        || (parsed as { operation?: unknown }).operation !== 'verify-image'
-        || (parsed as { targetId?: unknown }).targetId !== target.id
-        || !Array.isArray((parsed as { nodeResolution?: unknown }).nodeResolution)
+        || JSON.stringify(parsed) !== text
       ) {
-        throw new Error('trusted verify-image operation omitted Node resolution evidence');
+        throw new Error('trusted verify-image operation output is not canonical');
       }
-      const observed = (parsed as {
-        nodeResolution: Array<{
-          packageName?: unknown;
-          specifier?: unknown;
-          resolvedRelativePath?: unknown;
-        }>;
-      }).nodeResolution;
+      const result = parsed as Record<string, unknown>;
+      if (
+        Object.keys(result).join('\0')
+          !== 'operation\0targetId\0relativePath\0size\0sha256\0nodeResolution'
+        || result.operation !== 'verify-image'
+        || result.targetId !== target.id
+        || typeof result.relativePath !== 'string'
+        || !Number.isSafeInteger(result.size)
+        || (result.size as number) < 64 * 1024 * 1024
+        || typeof result.sha256 !== 'string'
+        || !/^[0-9a-f]{64}$/u.test(result.sha256)
+        || !Array.isArray(result.nodeResolution)
+      ) {
+        throw new Error('trusted verify-image operation omitted exact Node resolution evidence');
+      }
+      stableRelativePath(result.relativePath, 'verified image path');
+      const observed = result.nodeResolution as Array<{
+        packageName?: unknown;
+        specifier?: unknown;
+        resolvedRelativePath?: unknown;
+        exportType?: unknown;
+      }>;
       if (observed.length !== request.modules.length) {
         throw new Error('trusted verify-image Node resolution count changed');
       }
@@ -719,9 +769,16 @@ export function createNodeVerifier(
         modules: Object.freeze(request.modules.map(({ packageName, specifier }, index) => {
           const candidate = observed[index];
           if (
-            candidate?.packageName !== packageName
+            candidate === null
+            || typeof candidate !== 'object'
+            || Object.keys(candidate).join('\0')
+              !== 'packageName\0specifier\0resolvedRelativePath\0exportType'
+            || candidate.packageName !== packageName
             || candidate.specifier !== specifier
             || typeof candidate.resolvedRelativePath !== 'string'
+            || !['function', 'object', 'incompatible'].includes(
+              candidate.exportType as string,
+            )
           ) {
             throw new Error('trusted verify-image Node resolution binding changed');
           }
@@ -729,10 +786,16 @@ export function createNodeVerifier(
             candidate.resolvedRelativePath,
             'resolved rootfs Node module',
           );
+          const expectedRoot = specifier.startsWith('./')
+            ? `${packageName}/`
+            : `node_modules/${packageName}/`;
+          if (!relativePath.startsWith(expectedRoot)) {
+            throw new Error('trusted verify-image resolved rootfs Node module package changed');
+          }
           return Object.freeze({
             packageName,
             resolvedRelativePath: relativePath,
-            exportType: 'object' as const,
+            exportType: candidate.exportType as 'function' | 'object' | 'incompatible',
           });
         })),
       });
@@ -1207,12 +1270,21 @@ async function createProductionComposition(
   let stateRootIdentity: Readonly<{ path: string; device: number; inode: number }> | null = null;
   let approvedRootHandle: FileHandle | null = null;
   try {
-    const [lockBytes, manifestBytes] = await Promise.all([
+    const [lockBytes, manifestBytes, publisherBytes] = await Promise.all([
       readStableFile(loaded.config.builderLockPath),
       readStableFile(manifestPath),
       readStableFile(publisherPath),
     ]);
     const lock = parseInstalledLock(loaded.config.builderLockPath, lockBytes);
+    const installedVersion = dirname(loaded.config.builderLockPath).split('/').at(-1);
+    if (installedVersion === undefined) {
+      throw new Error('installed publisher package version is unavailable');
+    }
+    const publisherAuthority = validateInstalledPublisherAuthority(
+      lock,
+      installedVersion,
+      publisherBytes,
+    );
     const manifest = loadManifestFromBytes(manifestPath, manifestBytes);
     const job = store.getJob(args.jobId);
     const target = manifest.manifest.targets.find(
@@ -1394,6 +1466,24 @@ async function createProductionComposition(
             docker: 'absent',
             verifiedAt: operationFinishedAt,
           }),
+          ...(requestedDefinition !== undefined && operationId === 'activate-target'
+            ? {
+                classifyAcceptedResult(result: CommandResult) {
+                  const classified = classifyTargetSetupOperationResult(
+                    operationId,
+                    requestedDefinition,
+                    {
+                      ...result,
+                      argv: definition.argv,
+                    },
+                    context.job.requestId,
+                  );
+                  return classified.disposition === 'expected-rootfs-already-present'
+                    ? classified.disposition
+                    : null;
+                },
+              }
+            : {}),
           onStdout: (chunk) => stdout.push(chunk),
           onStderr: (chunk) => stderr.push(chunk),
         });
@@ -1426,12 +1516,21 @@ async function createProductionComposition(
           requestedDefinition !== undefined
           && operationId === 'activate-target'
         ) {
-          classifyTargetSetupOperationResult(
+          const classified = classifyTargetSetupOperationResult(
             operationId,
             requestedDefinition,
             targetSetupCommand(execution),
             context.job.requestId,
           );
+          if (
+            classified.disposition === 'expected-rootfs-already-present'
+              ? execution.outcome !== 'accepted'
+                || execution.observations.acceptedDisposition
+                  !== 'expected-rootfs-already-present'
+              : execution.outcome !== 'passed'
+          ) {
+            throw new Error('persisted activate-target outcome differs from the trusted classifier');
+          }
           activeTargetSetupEnvironment = operation.environment;
         }
         completedExecutions.set(operationId, execution);
@@ -1759,6 +1858,7 @@ async function createProductionComposition(
       publisher: createRunnerPublisherClient({
         executable: publisherPath,
         approvedRoots: loaded.config.approvedOutputRoots,
+        expectedVersion: publisherAuthority.packageVersion,
       }),
     };
 

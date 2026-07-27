@@ -61,6 +61,7 @@ function client(executor: PublisherCommandExecutor) {
   return createPublisherClient({
     executable: '/opt/osi-image-builder/bin/osi-image-publish',
     approvedRoots: [{ id: 'images', label: 'Images', path: ROOT, quarantinePath: `${ROOT}/.osi-image-builder/quarantine` }],
+    expectedVersion: VERSION,
     commandExecutor: executor,
   });
 }
@@ -74,6 +75,28 @@ const request = {
 };
 
 describe('publisher client', () => {
+  it('binds publisher version evidence to installed package authority', async () => {
+    const installedVersion = '2026.07.27.1';
+    const executor = fakeExecutor(result(validPublishOutput({
+      publisherVersion: installedVersion,
+    })));
+    const publisher = createPublisherClient({
+      executable: '/opt/osi-image-builder/bin/osi-image-publish',
+      approvedRoots: [{
+        id: 'images',
+        label: 'Images',
+        path: ROOT,
+        quarantinePath: `${ROOT}/.osi-image-builder/quarantine`,
+      }],
+      expectedVersion: installedVersion,
+      commandExecutor: executor,
+    });
+
+    await expect(publisher.publish(request)).resolves.toMatchObject({
+      publisherVersion: installedVersion,
+    });
+  });
+
   it('rejects arbitrary paths and unsafe publication components before invoking the helper', async () => {
     const executor = fakeExecutor(result(validPublishOutput()));
     const publisher = client(executor);
@@ -161,6 +184,7 @@ describe('publisher client', () => {
     const published = await createRunnerPublisherClient({
       executable: '/opt/osi-image-builder/bin/osi-image-publish',
       approvedRoots: [{ id: 'images', label: 'Images', path: ROOT, quarantinePath: `${ROOT}/.osi-image-builder/quarantine` }],
+      expectedVersion: VERSION,
       commandExecutor: executor,
     }).publish(request);
     expect(published).toMatchObject({ available: true, published: true });
@@ -168,7 +192,7 @@ describe('publisher client', () => {
 
   it('rejects duplicate roots and contradictory or incomplete helper results', async () => {
     const root = { id: 'images', label: 'Images', path: ROOT, quarantinePath: `${ROOT}/.osi-image-builder/quarantine` };
-    expect(() => createPublisherClient({ executable: '/opt/osi-image-builder/bin/osi-image-publish', approvedRoots: [root, root], commandExecutor: fakeExecutor(result(validPublishOutput())) })).toThrow(/duplicate/i);
+    expect(() => createPublisherClient({ executable: '/opt/osi-image-builder/bin/osi-image-publish', approvedRoots: [root, root], expectedVersion: VERSION, commandExecutor: fakeExecutor(result(validPublishOutput())) })).toThrow(/duplicate/i);
 
     const cases = [
       result(validPublishOutput({ extra: true })),

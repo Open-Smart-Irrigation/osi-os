@@ -207,6 +207,7 @@ describe('versioned builder database migrations', () => {
       { version: 4, filename: '004_source_preparation.sql' },
       { version: 5, filename: '005_offline_feed_preparation.sql' },
       { version: 6, filename: '006_blocked_publish_artifact_location.sql' },
+      { version: 7, filename: '007_publish_intent_and_accepted_operations.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
       .toEqual(['cleanup_leases', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'queue_entries', 'schema_migrations']);
@@ -226,7 +227,7 @@ describe('versioned builder database migrations', () => {
       'verification_sha256', 'publish_state', 'publish_started_at', 'published_at', 'publish_blocker_code', 'publish_blocker_json',
       'freshness_status', 'freshness_observed_sha', 'newer_source_available', 'freshness_requested_at', 'freshness_checked_at',
       'freshness_error_code', 'freshness_error_json', 'freshness_error_evidence_path', 'freshness_error_evidence_sha256',
-      'source_preparation_json', 'offline_feed_preparation_json',
+      'source_preparation_json', 'offline_feed_preparation_json', 'artifact_quarantine_intent_path',
     ]);
     expectColumns(db, 'job_stages', [
       'job_id', 'stage', 'outcome', 'started_at', 'finished_at', 'evidence_path', 'evidence_sha256', 'error_code',
@@ -235,7 +236,7 @@ describe('versioned builder database migrations', () => {
     expectColumns(db, 'job_operations', [
       'job_id', 'operation_id', 'attempt', 'argv_hash', 'argv_json', 'started_at', 'finished_at', 'container_id',
       'container_name', 'container_image_digest', 'container_label_job_id', 'container_label_manifest_sha', 'container_mount_json',
-      'container_env_json', 'container_security_json', 'inspection_json', 'timed_out', 'lifecycle_phase', 'exit_code', 'signal', 'outcome', 'evidence_path',
+      'container_env_json', 'container_security_json', 'inspection_json', 'timed_out', 'lifecycle_phase', 'exit_code', 'signal', 'outcome', 'accepted_disposition', 'evidence_path',
       'evidence_sha256', 'error_code', 'error_json',
     ]);
     expectColumns(db, 'job_events', [
@@ -313,7 +314,7 @@ describe('versioned builder database migrations', () => {
     const second = openBuilderDatabase(path);
     expect(second.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name").all())
       .toEqual(schema);
-    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 6 });
+    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 7 });
     second.close();
   });
 
@@ -416,7 +417,7 @@ describe('versioned builder database migrations', () => {
     physicalOrderDb.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(1, '001_initial.sql', MIGRATION_REGISTRY[0].sha256, 'x');
     physicalOrderDb.close();
     const accepted = openBuilderDatabase(physicalOrderPath);
-    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 6 });
+    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 7 });
     accepted.close();
   });
 
@@ -600,6 +601,50 @@ describe('versioned builder database migrations', () => {
     });
     store.close();
     fresh.close();
+  });
+
+  it('normalizes legacy blocked publish rows that have no tracked artifact', async () => {
+    const path = await temporaryDatabase();
+    const migrationDir = await copyMigrations();
+    const legacy = new DatabaseSync(path);
+    for (const migration of MIGRATION_REGISTRY.slice(0, 5)) {
+      legacy.exec(await readFile(join(migrationDir, migration.filename), 'utf8'));
+      legacy.prepare(
+        'INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)',
+      ).run(
+        migration.version,
+        migration.filename,
+        migration.sha256,
+        '2026-07-23T00:00:00.000Z',
+      );
+    }
+    insertValidJob(legacy, 'legacy-blocked');
+    legacy.prepare(`
+      UPDATE jobs
+      SET state='failed',
+          queue_state='complete',
+          publish_state='blocked',
+          publish_blocker_code='PUBLISH_FAILED',
+          publish_blocker_json='{"legacy":true}',
+          terminal_at='2026-07-23T00:01:00.000Z',
+          terminal_error_code='PUBLISH_FAILED',
+          terminal_error_json='{"legacy":true}'
+      WHERE job_id='legacy-blocked'
+    `).run();
+    legacy.close();
+
+    const upgraded = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
+    const store = new BuilderStore(upgraded);
+    expect(store.getJob('legacy-blocked')).toMatchObject({
+      state: 'failed',
+      publishState: 'not_started',
+      artifactStagingPath: null,
+      artifactQuarantinePath: null,
+      publishBlockerCode: null,
+      publishBlocker: null,
+      terminalErrorCode: 'PUBLISH_FAILED',
+    });
+    store.close();
   });
 
   it('enforces cleanup generations, exact admissions, lease status evidence, and cross-table fences', async () => {

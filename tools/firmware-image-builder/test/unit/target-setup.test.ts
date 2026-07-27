@@ -484,8 +484,6 @@ describe('target setup', () => {
       selectedTarget: targets[0]!.openwrtTarget,
       profile: targets[0]!.profile,
       rootfsPartSize: targets[0]!.rootfsPartSize,
-      sourceSha256: targetSetup.profiles['rpi-5'].sourceSha256,
-      sourceConfigEvidencePath: 'evidence/target-setup/rpi-5.source.config',
       resolvedSha256: config.config.profiles['rpi-5'].resolvedSha256,
     });
     expect(Object.keys(configObservations.config.profiles['rpi-5']).sort()).toEqual([
@@ -494,8 +492,6 @@ describe('target setup', () => {
       'resolvedSha256',
       'rootfsPartSize',
       'selectedTarget',
-      'sourceConfigEvidencePath',
-      'sourceSha256',
       'target',
     ]);
     expect(await readlink(join(fixture.workspace, 'conf/.config')))
