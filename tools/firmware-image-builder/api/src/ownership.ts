@@ -19,6 +19,7 @@ import { TEXT_LIMITS, boundedText, canonicalInstant as sharedCanonicalInstant, e
 
 const HASH64 = /^[0-9a-f]{64}$/;
 const ADMISSION_ID = /^cln_[0-7][0-9a-hj-km-np-tv-z]{25}$/;
+const STOP_AUTHORIZATION_ATTEMPT_ID = /^sta_[a-f0-9]{32}$/;
 const EVENT_TYPES = new Set(['enqueue', 'dispatch', 'cancellation_requested', 'state', 'stage', 'operation', 'container', 'artifact', 'publish', 'terminal', 'cleanup_admission', 'cleanup_claim', 'cleanup_renew', 'cleanup_complete', 'cleanup', 'recovery', 'freshness']);
 const ACTIVE_STATES = new Set<JobState>(ACTIVE_RECOVERY_STATES);
 const ACTIVE_RECOVERY_STATE_SQL = ACTIVE_RECOVERY_STATES.map((state) => `'${state}'`).join(',');
@@ -215,6 +216,8 @@ export type CleanupAdmissionPredecessorStatus = 'admitted' | 'claimed' | 'failed
 export type CleanupAdmissionPredecessor = Readonly<{
   readonly previousAdmissionId: string;
   readonly previousStatus: CleanupAdmissionPredecessorStatus;
+  readonly previousOwner?: string;
+  readonly previousExpiresAt?: string;
   readonly previousUnitName: string;
   readonly previousFenceGeneration: number;
   readonly previousFenceTokenHash: string;
@@ -222,6 +225,12 @@ export type CleanupAdmissionPredecessor = Readonly<{
   readonly previousRenewAt: string | null;
   readonly previousBlockerCode: BuilderErrorCode | null;
   readonly previousBlocker: JsonObject | null;
+  readonly previousStopAuthorizationAttemptId?: string | null;
+  readonly previousStopAuthorizationOwner?: string | null;
+  readonly previousStopAuthorizationAt?: string | null;
+  readonly previousStopAuthorizationExpiresAt?: string | null;
+  readonly previousStopAuthorizationState?: 'consumed' | 'failed' | 'orphaned' | null;
+  readonly previousUnexpectedExit?: JsonObject | null;
 }>;
 
 export type CleanupPostContainer =
@@ -288,7 +297,10 @@ export type ApiWriteCommand =
   | Readonly<{ kind: 'publish-recovery'; jobId: string; expectedState: 'publishing'; at: string; state: 'succeeded' | 'failed'; evidence: PublishRecoveryEvidence; errorCode?: BuilderErrorCode; error?: JsonObject }>
   | Readonly<{ kind: 'cleanup-credential-reserve'; jobId: string; admissionId: string; owner: string; credentialRelativePath: string; createdAt: string; expiresAt: string; at: string }>
   | Readonly<{ kind: 'cleanup-credential-abort'; jobId: string; admissionId: string; owner: string; credentialRelativePath: string; createdAt: string; expiresAt: string; at: string }>
-  | (CleanupAdmissionPredecessor & Readonly<{ kind: 'cleanup-admission-stop-failed'; jobId: string; owner: string; previousOwner: string; previousExpiresAt: string; failure: 'capability-unavailable' | 'stop-error' | 'still-active'; blockerCode: 'CLEANUP_UNIT_STOP_FAILED'; blocker: JsonObject; snapshot: CleanupSnapshot; at: string }>)
+  | (CleanupAdmissionPredecessor & Readonly<{ kind: 'cleanup-admission-stop-authorize'; jobId: string; owner: string; previousOwner: string; previousExpiresAt: string; authorizationOwner: string; attemptId: string; authorizationAt: string; authorizationExpiresAt: string; explicitRetry?: boolean; expectedAuthorizationAttemptId?: string | null; at: string }>)
+  | Readonly<{ kind: 'cleanup-admission-stop-complete'; jobId: string; admissionId: string; attemptId: string; authorizationOwner: string; observation: JsonObject; at: string }>
+  | (CleanupAdmissionPredecessor & Readonly<{ kind: 'cleanup-admission-stop-failed'; jobId: string; owner: string; previousOwner: string; previousExpiresAt: string; stopAuthorizationAttemptId: string; stopAuthorizationOwner: string; stopAuthorizationAt: string; stopAuthorizationExpiresAt: string; failure: 'capability-unavailable' | 'stop-error' | 'still-active' | 'authorization-orphaned'; blockerCode: 'CLEANUP_UNIT_STOP_FAILED'; blocker: JsonObject; snapshot: CleanupSnapshot; at: string }>)
+  | (CleanupAdmissionPredecessor & Readonly<{ kind: 'cleanup-admission-unexpected-exit'; jobId: string; previousOwner: string; previousExpiresAt: string; observation: JsonObject; at: string }>)
   | Readonly<{ kind: 'cleanup-admission'; jobId: string; admissionId: string; owner: string; unitName: string; expiresAt: string; credentialRelativePath: string; credentialSha256: string; fenceTokenHash: string; reservationCreatedAt: string; reservationExpiresAt: string; snapshot: CleanupSnapshot; at: string }>
   | (CleanupAdmissionPredecessor & Readonly<{ kind: 'cleanup-admission-rotate'; jobId: string; admissionId: string; owner: string; unitName: string; expiresAt: string; credentialRelativePath: string; credentialSha256: string; fenceTokenHash: string; reservationCreatedAt: string; reservationExpiresAt: string; snapshot: CleanupSnapshot; at: string }>)
   | (CleanupAdmissionPredecessor & Readonly<{ kind: 'cleanup-admission-retry'; jobId: string; admissionId: string; owner: string; unitName: string; expiresAt: string; credentialRelativePath: string; credentialSha256: string; fenceTokenHash: string; reservationCreatedAt: string; reservationExpiresAt: string; expectedBlockerCode: BuilderErrorCode; expectedBlocker: JsonObject; snapshot: CleanupSnapshot; at: string }>)
@@ -523,6 +535,21 @@ function validateCleanupAdmissionPredecessor(value: PreparedRecord, field: strin
   if (hasBlocker !== (value.previousBlocker !== undefined && value.previousBlocker !== null)) throw new OwnershipValidationError(`${field} previous blocker evidence is incomplete`);
   if (['admitted', 'claimed'].includes(String(value.previousStatus)) && hasBlocker) throw new OwnershipValidationError(`${field} active predecessor cannot have blocker evidence`);
   if (['failed', 'blocking'].includes(String(value.previousStatus)) && !hasBlocker) throw new OwnershipValidationError(`${field} blocked predecessor requires blocker evidence`);
+  const stopAttempt = value.previousStopAuthorizationAttemptId === undefined ? null : value.previousStopAuthorizationAttemptId;
+  const stopOwner = value.previousStopAuthorizationOwner === undefined ? null : value.previousStopAuthorizationOwner;
+  const stopAt = value.previousStopAuthorizationAt === undefined ? null : value.previousStopAuthorizationAt;
+  const stopExpires = value.previousStopAuthorizationExpiresAt === undefined ? null : value.previousStopAuthorizationExpiresAt;
+  const stopState = value.previousStopAuthorizationState === undefined ? null : value.previousStopAuthorizationState;
+  const hasStopAuthorization = stopAttempt !== null || stopOwner !== null || stopAt !== null || stopExpires !== null || stopState !== null;
+  if (hasStopAuthorization) {
+    preparedString(stopAttempt, `${field} stop authorization attempt id`, TEXT_LIMITS.maxIdentifierBytes);
+    if (!STOP_AUTHORIZATION_ATTEMPT_ID.test(String(stopAttempt))) throw new OwnershipValidationError(`${field} stop authorization attempt id is invalid`);
+    preparedString(stopOwner, `${field} stop authorization owner`, TEXT_LIMITS.maxIdentifierBytes);
+    preparedInstant(stopAt, `${field} stop authorization time`);
+    preparedInstant(stopExpires, `${field} stop authorization expiry`);
+    preparedEnum(stopState, ['consumed', 'failed', 'orphaned'], `${field} stop authorization state`);
+  }
+  preparedJsonObject(value.previousUnexpectedExit, `${field} unexpected exit evidence`, true);
 }
 
 function validateCleanupCredentialReservation(value: PreparedRecord, field: string): void {
@@ -578,10 +605,55 @@ function validateCleanupAdmissionStopFailure(value: PreparedRecord): void {
   preparedString(value.owner, 'cleanup admission stop failure owner', TEXT_LIMITS.maxIdentifierBytes);
   preparedString(value.previousOwner, 'cleanup admission stop failure predecessor owner', TEXT_LIMITS.maxIdentifierBytes);
   preparedInstant(value.previousExpiresAt, 'cleanup admission stop failure predecessor expiry');
-  preparedEnum(value.failure, ['capability-unavailable', 'stop-error', 'still-active'], 'cleanup admission stop failure kind');
+  preparedEnum(value.failure, ['capability-unavailable', 'stop-error', 'still-active', 'authorization-orphaned'], 'cleanup admission stop failure kind');
+  preparedString(value.stopAuthorizationAttemptId, 'cleanup stop authorization attempt id', TEXT_LIMITS.maxIdentifierBytes);
+  if (!STOP_AUTHORIZATION_ATTEMPT_ID.test(String(value.stopAuthorizationAttemptId))) throw new OwnershipValidationError('cleanup stop authorization attempt id is invalid');
+  preparedString(value.stopAuthorizationOwner, 'cleanup stop authorization owner', TEXT_LIMITS.maxIdentifierBytes);
+  preparedInstant(value.stopAuthorizationAt, 'cleanup stop authorization time');
+  preparedInstant(value.stopAuthorizationExpiresAt, 'cleanup stop authorization expiry');
+  if (String(value.previousExpiresAt) > String(value.at)) throw new OwnershipValidationError('cleanup stop failure requires a stale predecessor lease');
   if (value.blockerCode !== 'CLEANUP_UNIT_STOP_FAILED') throw new OwnershipValidationError('cleanup admission stop failure blocker code is fixed');
   preparedJsonObject(value.blocker, 'cleanup admission stop failure blocker');
   shapeCleanupSnapshot(value.snapshot, 'cleanup admission stop failure snapshot', value.at as string);
+}
+
+function validateCleanupAdmissionStopAuthorization(value: PreparedRecord): void {
+  preparedCommon(value, 'API');
+  validateCleanupAdmissionPredecessor(value, 'cleanup stop authorization');
+  preparedString(value.owner, 'cleanup stop authorization request owner', TEXT_LIMITS.maxIdentifierBytes);
+  preparedString(value.authorizationOwner, 'cleanup stop authorization owner', TEXT_LIMITS.maxIdentifierBytes);
+  preparedString(value.attemptId, 'cleanup stop authorization attempt id', TEXT_LIMITS.maxIdentifierBytes);
+  if (!STOP_AUTHORIZATION_ATTEMPT_ID.test(String(value.attemptId))) throw new OwnershipValidationError('cleanup stop authorization attempt id is invalid');
+  preparedInstant(value.authorizationAt, 'cleanup stop authorization time');
+  preparedInstant(value.authorizationExpiresAt, 'cleanup stop authorization expiry');
+  if (String(value.authorizationAt) !== String(value.at)) throw new OwnershipValidationError('cleanup stop authorization time must equal command time');
+  if (String(value.previousExpiresAt) > String(value.at)) throw new OwnershipValidationError('cleanup stop authorization requires a stale predecessor lease');
+  if (String(value.authorizationExpiresAt) <= String(value.at)) throw new OwnershipValidationError('cleanup stop authorization expiry must be in the future');
+  if (value.explicitRetry === true) {
+    preparedString(value.expectedAuthorizationAttemptId, 'cleanup stop authorization retry predecessor', TEXT_LIMITS.maxIdentifierBytes);
+    if (!STOP_AUTHORIZATION_ATTEMPT_ID.test(String(value.expectedAuthorizationAttemptId))) throw new OwnershipValidationError('cleanup stop authorization retry predecessor is invalid');
+  }
+}
+
+function validateCleanupAdmissionStopComplete(value: PreparedRecord): void {
+  preparedCommon(value, 'API');
+  preparedString(value.admissionId, 'cleanup stop completion admission id', TEXT_LIMITS.maxIdentifierBytes);
+  preparedString(value.attemptId, 'cleanup stop completion attempt id', TEXT_LIMITS.maxIdentifierBytes);
+  if (!STOP_AUTHORIZATION_ATTEMPT_ID.test(String(value.attemptId))) throw new OwnershipValidationError('cleanup stop completion attempt id is invalid');
+  preparedString(value.authorizationOwner, 'cleanup stop completion owner', TEXT_LIMITS.maxIdentifierBytes);
+  preparedJsonObject(value.observation, 'cleanup stop completion observation');
+  const observation = value.observation as PreparedRecord;
+  if (observation.kind !== 'cleanup-stop-observation' || observation.code !== 'CLEANUP_UNIT_STOP_CONFIRMED_INACTIVE' || observation.active !== false || typeof observation.unitName !== 'string' || observation.observedAt !== value.at) throw new OwnershipValidationError('cleanup stop completion observation is not exact');
+}
+
+function validateCleanupAdmissionUnexpectedExit(value: PreparedRecord): void {
+  preparedCommon(value, 'API');
+  validateCleanupAdmissionPredecessor(value, 'cleanup unexpected exit');
+  preparedJsonObject(value.observation, 'cleanup unexpected exit observation');
+  const observation = value.observation as PreparedRecord;
+  if (observation.kind !== 'cleanup-unit-unexpected-exit' || observation.code !== 'CLEANUP_UNIT_UNEXPECTED_EXIT' || observation.active !== false || observation.unitName !== value.previousUnitName || observation.inactiveAt !== value.at || observation.observedAt !== value.at) throw new OwnershipValidationError('cleanup unexpected exit observation is not exact');
+  if (String(value.previousExpiresAt ?? '') <= String(value.at)) throw new OwnershipValidationError('cleanup unexpected exit requires an unexpired predecessor lease');
+  if (value.previousStatus !== 'claimed') throw new OwnershipValidationError('cleanup unexpected exit requires a claimed predecessor');
 }
 
 function validateApiCommand(command: ApiWriteCommand): void {
@@ -622,7 +694,10 @@ function validateApiCommand(command: ApiWriteCommand): void {
     case 'publish-recovery': preparedCommon(value, 'API'); preparedEnum(value.expectedState, ['publishing'], 'publish recovery expectedState'); preparedEnum(value.state, ['succeeded', 'failed'], 'publish recovery state'); shapePublishEvidence(value.evidence, value.at as string); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'publish recovery errorCode'); preparedJsonObject(value.error, 'publish recovery error', true); return;
     case 'cleanup-credential-reserve': validateCleanupCredentialReservation(value, 'cleanup credential reservation'); return;
     case 'cleanup-credential-abort': validateCleanupCredentialReservation(value, 'cleanup credential abort'); return;
+    case 'cleanup-admission-stop-authorize': validateCleanupAdmissionStopAuthorization(value); return;
+    case 'cleanup-admission-stop-complete': validateCleanupAdmissionStopComplete(value); return;
     case 'cleanup-admission-stop-failed': validateCleanupAdmissionStopFailure(value); return;
+    case 'cleanup-admission-unexpected-exit': validateCleanupAdmissionUnexpectedExit(value); return;
     case 'cleanup-admission': preparedCommon(value, 'API'); preparedString(value.admissionId, 'cleanup admission id', TEXT_LIMITS.maxIdentifierBytes); preparedString(value.owner, 'cleanup admission owner', TEXT_LIMITS.maxIdentifierBytes); preparedString(value.unitName, 'cleanup admission unit', TEXT_LIMITS.maxIdentifierBytes); cleanupUnit(String(value.admissionId), String(value.unitName)); preparedInstant(value.expiresAt, 'cleanup admission expiry'); preparedPath(value.credentialRelativePath, 'cleanup credential path'); preparedHash(value.credentialSha256, 'cleanup credential SHA'); preparedHash(value.fenceTokenHash, 'cleanup fence token hash'); validateCleanupAdmissionReservation(value, 'cleanup admission'); shapeCleanupSnapshot(value.snapshot, 'cleanup admission snapshot', value.at as string); return;
     case 'cleanup-admission-rotate': validateCleanupAdmissionReplacement(value, 'rotate'); return;
     case 'cleanup-admission-retry': validateCleanupAdmissionReplacement(value, 'retry'); return;
@@ -1855,6 +1930,21 @@ function assertCleanupPredecessor(
   const oldBlocker = nullableRowText(old.blocker_json);
   const expectedBlocker = command.previousBlocker === null ? null : json(command.previousBlocker, 'cleanup predecessor blocker', true);
   if (oldBlocker !== expectedBlocker) conflict('admission-mismatch', 'cleanup predecessor blocker evidence changed');
+  const oldStopAttempt = nullableRowText(old.stop_authorization_attempt_id);
+  const oldStopOwner = nullableRowText(old.stop_authorization_owner);
+  const oldStopAt = nullableRowText(old.stop_authorization_at);
+  const oldStopExpires = nullableRowText(old.stop_authorization_expires_at);
+  const oldStopState = nullableRowText(old.stop_authorization_state);
+  if ((command.previousStopAuthorizationAttemptId ?? null) !== oldStopAttempt
+    || (command.previousStopAuthorizationOwner ?? null) !== oldStopOwner
+    || (command.previousStopAuthorizationAt ?? null) !== oldStopAt
+    || (command.previousStopAuthorizationExpiresAt ?? null) !== oldStopExpires
+    || (command.previousStopAuthorizationState ?? null) !== oldStopState) conflict('admission-mismatch', 'cleanup stop authorization evidence changed');
+  const oldUnexpectedExit = nullableRowText(old.unexpected_exit_json);
+  const expectedUnexpectedExit = command.previousUnexpectedExit === undefined || command.previousUnexpectedExit === null
+    ? null
+    : json(command.previousUnexpectedExit, 'cleanup predecessor unexpected exit evidence', true);
+  if (oldUnexpectedExit !== expectedUnexpectedExit) conflict('admission-mismatch', 'cleanup unexpected exit evidence changed');
 }
 
 type TrustedSqliteError = Readonly<{ code: string; message: string; errcode: number | null }>;
@@ -1900,7 +1990,7 @@ export class OwnershipStore {
   apiWrite(command: ApiWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as ApiWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['enqueue', 'dispatch', 'request-cancellation', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'cleanup-credential-reserve', 'cleanup-credential-abort', 'cleanup-admission-stop-failed', 'cleanup-admission', 'cleanup-admission-rotate', 'cleanup-admission-retry', 'hand-back'].includes(prepared.kind)) {
+    if (!['enqueue', 'dispatch', 'request-cancellation', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'cleanup-credential-reserve', 'cleanup-credential-abort', 'cleanup-admission-stop-authorize', 'cleanup-admission-stop-complete', 'cleanup-admission-stop-failed', 'cleanup-admission-unexpected-exit', 'cleanup-admission', 'cleanup-admission-rotate', 'cleanup-admission-retry', 'hand-back'].includes(prepared.kind)) {
       throw new OwnershipViolationError('api', prepared.kind);
     }
     validateApiCommand(prepared);
@@ -1923,7 +2013,10 @@ export class OwnershipStore {
       case 'publish-recovery': return this.#transaction(() => this.#publishRecovery(prepared));
       case 'cleanup-credential-reserve': return this.#transaction(() => this.#cleanupCredentialReserve(prepared));
       case 'cleanup-credential-abort': return this.#transaction(() => this.#cleanupCredentialAbort(prepared));
+      case 'cleanup-admission-stop-authorize': return this.#transaction(() => this.#cleanupAdmissionStopAuthorize(prepared));
+      case 'cleanup-admission-stop-complete': return this.#transaction(() => this.#cleanupAdmissionStopComplete(prepared));
       case 'cleanup-admission-stop-failed': return this.#transaction(() => this.#cleanupAdmissionStopFailed(prepared));
+      case 'cleanup-admission-unexpected-exit': return this.#transaction(() => this.#cleanupAdmissionUnexpectedExit(prepared));
       case 'cleanup-admission': return this.#transaction(() => this.#cleanupAdmission(prepared));
       case 'cleanup-admission-rotate': return this.#transaction(() => this.#cleanupAdmissionRotate(prepared));
       case 'cleanup-admission-retry': return this.#transaction(() => this.#cleanupAdmissionRetry(prepared));
@@ -2029,10 +2122,12 @@ export class OwnershipStore {
         || message.includes('unique constraint failed: queue_entries.fifo_seq')
         || message.includes('unique constraint failed: jobs.cleanup_admission_id')
         || message.includes('unique constraint failed: cleanup_credential_reservations.')
+        || message.includes('unique constraint failed: cleanup_stop_authorizations.')
+        || message.includes('unique constraint failed: cleanup_stop_authorization_heads.')
         || message.includes('unique constraint failed: cleanup_leases.'));
       const knownOwnershipTrigger = [
         'invalid cleanup fence', 'cleanup lease is linked by an active job fence', 'cleanup lease fence identity is immutable',
-        'cleanup status timestamps are incomplete', 'handback requires clearing the active fence',
+        'cleanup status timestamps are incomplete', 'handback requires clearing the active fence', 'cleanup stop authorization attempts are immutable', 'cleanup stop authorization head transition is incoherent',
       ].some((known) => message.includes(known)) && sqlite.code !== 'ERR_SQLITE_BUSY';
       if (knownUniqueRace) return { ok: false, conflict: { kind: 'admission-mismatch', message: 'known SQLite uniqueness race' } };
       if (knownOwnershipTrigger) return { ok: false, conflict: { kind: 'cas-lost', message: 'known ownership trigger rejected the CAS' } };
@@ -2759,6 +2854,118 @@ export class OwnershipStore {
     );
   }
 
+  #cleanupAdmissionStopAuthorize(command: Extract<ApiWriteCommand, { kind: 'cleanup-admission-stop-authorize' }>): void {
+    instant(command.at, 'cleanup stop authorization time');
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [['cleanup stop authorization time', command.at]]);
+    const admission = this.#db.prepare(`SELECT status, owner, unit_name, expires_at, fence_generation, fence_token_hash, claim_at, renew_at,
+        blocker_code, blocker_json, stop_authorization_attempt_id, stop_authorization_owner, stop_authorization_at,
+        stop_authorization_expires_at, stop_authorization_state, unexpected_exit_json
+      FROM cleanup_leases WHERE admission_id=? AND job_id=?`).get(command.previousAdmissionId, command.jobId) as Row | undefined;
+    if (!admission) conflict('admission-mismatch', 'cleanup stop authorization predecessor does not exist');
+    assertCleanupPredecessor(admission, command, ['admitted', 'claimed', 'failed', 'blocking']);
+    if (admission.owner !== command.previousOwner) conflict('admission-mismatch', 'cleanup stop authorization predecessor owner changed');
+    if (admission.expires_at !== command.previousExpiresAt) conflict('admission-mismatch', 'cleanup stop authorization predecessor expiry changed');
+    if (String(command.previousExpiresAt) > command.at) conflict('stale-lease', 'cleanup stop authorization predecessor is unexpired');
+    if (row.cleanup_admission_id !== command.previousAdmissionId
+      || row.cleanup_fence_generation !== command.previousFenceGeneration
+      || row.cleanup_fence_token_hash !== command.previousFenceTokenHash) conflict('fenced', 'cleanup stop authorization lost the active cleanup fence');
+    const currentHead = this.#db.prepare(`SELECT h.admission_id, h.job_id, h.attempt_id, h.state, h.authorization_owner,
+        a.authorization_at, a.authorization_expires_at
+      FROM cleanup_stop_authorization_heads AS h
+      JOIN cleanup_stop_authorizations AS a ON a.attempt_id = h.attempt_id
+      WHERE h.admission_id=? AND h.job_id=?`).get(command.previousAdmissionId, command.jobId) as Row | undefined;
+    if (currentHead) {
+      if (!command.explicitRetry && currentHead.state === 'authorized' && currentHead.attempt_id === command.attemptId && currentHead.authorization_owner === command.authorizationOwner) {
+        if (currentHead.authorization_at !== command.authorizationAt || currentHead.authorization_expires_at !== command.authorizationExpiresAt) conflict('admission-mismatch', 'cleanup stop authorization replay changed its expiry');
+        return;
+      }
+      if (!command.explicitRetry) conflict('fenced', 'cleanup stop authorization is already owned by another attempt');
+      if (!['failed', 'orphaned'].includes(String(currentHead.state)) || currentHead.attempt_id !== command.expectedAuthorizationAttemptId) conflict('fenced', 'cleanup stop authorization retry is not an explicit correction of the current attempt');
+      if (row.cleanup_blocker_code !== command.previousBlockerCode || row.cleanup_blocker_json !== (command.previousBlocker === null ? null : json(command.previousBlocker, 'cleanup stop authorization blocker', true))) conflict('admission-mismatch', 'cleanup stop authorization retry blocker changed');
+    } else if (command.explicitRetry) {
+      conflict('admission-mismatch', 'cleanup stop authorization retry has no orphaned predecessor attempt');
+    }
+    const attemptNo = Number((this.#db.prepare('SELECT COALESCE(MAX(attempt_no), 0) + 1 AS next FROM cleanup_stop_authorizations WHERE admission_id=?').get(command.previousAdmissionId) as Row).next);
+    this.#db.prepare(`INSERT INTO cleanup_stop_authorizations (
+      attempt_id, attempt_no, job_id, admission_id, request_owner, authorization_owner, authorization_at, authorization_expires_at,
+      unit_name, fence_generation, fence_token_hash, predecessor_status, predecessor_owner, predecessor_expires_at,
+      predecessor_claim_at, predecessor_renew_at, predecessor_blocker_code, predecessor_blocker_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      command.attemptId, attemptNo, command.jobId, command.previousAdmissionId, command.owner, command.authorizationOwner,
+      command.authorizationAt, command.authorizationExpiresAt, command.previousUnitName, command.previousFenceGeneration,
+      command.previousFenceTokenHash, command.previousStatus, command.previousOwner, command.previousExpiresAt,
+      command.previousClaimAt, command.previousRenewAt, command.previousBlockerCode,
+      command.previousBlocker === null ? null : json(command.previousBlocker, 'cleanup stop authorization predecessor blocker', true),
+    );
+    if (!currentHead) {
+      this.#db.prepare(`INSERT INTO cleanup_stop_authorization_heads
+        (admission_id, job_id, attempt_id, state, authorization_owner, updated_at, outcome_json)
+        VALUES (?, ?, ?, 'authorized', ?, ?, NULL)`).run(command.previousAdmissionId, command.jobId, command.attemptId, command.authorizationOwner, command.at);
+    } else {
+      const result = this.#db.prepare(`UPDATE cleanup_stop_authorization_heads SET attempt_id=?, state='authorized', authorization_owner=?, updated_at=?, outcome_json=NULL
+        WHERE admission_id=? AND job_id=? AND attempt_id=? AND state IN ('failed', 'orphaned')`).run(
+        command.attemptId, command.authorizationOwner, command.at, command.previousAdmissionId, command.jobId, command.expectedAuthorizationAttemptId,
+      );
+      if (Number(result.changes) !== 1) conflict('cas-lost', 'cleanup stop authorization retry head CAS lost');
+    }
+    this.#event(command.jobId, 'cleanup', {
+      admissionId: command.previousAdmissionId,
+      attemptId: command.attemptId,
+      authorizationOwner: command.authorizationOwner,
+      authorizationAt: command.authorizationAt,
+      authorizationExpiresAt: command.authorizationExpiresAt,
+      retry: command.explicitRetry === true,
+    }, command.at);
+  }
+
+  #cleanupAdmissionStopComplete(command: Extract<ApiWriteCommand, { kind: 'cleanup-admission-stop-complete' }>): void {
+    instant(command.at, 'cleanup stop completion time');
+    const observation = json(command.observation, 'cleanup stop completion observation', true);
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [['cleanup stop completion time', command.at]]);
+    const authorization = this.#db.prepare(`SELECT h.state, h.authorization_owner, a.*
+      FROM cleanup_stop_authorization_heads AS h
+      JOIN cleanup_stop_authorizations AS a ON a.attempt_id=h.attempt_id
+      WHERE h.admission_id=? AND h.job_id=?`).get(command.admissionId, command.jobId) as Row | undefined;
+    if (!authorization) conflict('admission-mismatch', 'cleanup stop authorization does not exist');
+    if (authorization.attempt_id !== command.attemptId || authorization.authorization_owner !== command.authorizationOwner || authorization.state !== 'authorized') conflict('fenced', 'cleanup stop completion is not owned by the authorization attempt');
+    if (authorization.unit_name !== (command.observation as Record<string, unknown>).unitName) throw new OwnershipValidationError('cleanup stop completion unit does not match authorization');
+    if (String(authorization.authorization_expires_at) <= command.at) conflict('stale-lease', 'cleanup stop authorization expired before completion');
+    const leaseResult = this.#db.prepare(`UPDATE cleanup_leases SET stop_authorization_attempt_id=?, stop_authorization_owner=?, stop_authorization_at=?, stop_authorization_expires_at=?, stop_authorization_state='consumed'
+      WHERE admission_id=? AND job_id=? AND status=? AND owner=? AND expires_at=? AND fence_generation=? AND fence_token_hash=?`).run(
+      command.attemptId, command.authorizationOwner, authorization.authorization_at, authorization.authorization_expires_at,
+      command.admissionId, command.jobId, authorization.predecessor_status, authorization.predecessor_owner, authorization.predecessor_expires_at,
+      authorization.fence_generation, authorization.fence_token_hash,
+    );
+    if (Number(leaseResult.changes) !== 1) conflict('cas-lost', 'cleanup stop completion lease CAS lost');
+    const headResult = this.#db.prepare(`UPDATE cleanup_stop_authorization_heads SET state='consumed', updated_at=?, outcome_json=?
+      WHERE admission_id=? AND job_id=? AND attempt_id=? AND state='authorized'`).run(command.at, observation, command.admissionId, command.jobId, command.attemptId);
+    if (Number(headResult.changes) !== 1) conflict('cas-lost', 'cleanup stop completion authorization CAS lost');
+    this.#event(command.jobId, 'cleanup', { admissionId: command.admissionId, kind: 'cleanup-stop-authorization-complete', attemptId: command.attemptId, outcome: 'inactive', observation: JSON.parse(String(observation)) as JsonObject }, command.at);
+  }
+
+  #cleanupAdmissionUnexpectedExit(command: Extract<ApiWriteCommand, { kind: 'cleanup-admission-unexpected-exit' }>): void {
+    instant(command.at, 'cleanup unexpected exit time');
+    const observation = json(command.observation, 'cleanup unexpected exit observation', true);
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [['cleanup unexpected exit time', command.at]]);
+    const admission = this.#db.prepare(`SELECT status, owner, unit_name, expires_at, fence_generation, fence_token_hash, claim_at, renew_at,
+        blocker_code, blocker_json, stop_authorization_attempt_id, stop_authorization_owner, stop_authorization_at,
+        stop_authorization_expires_at, stop_authorization_state, unexpected_exit_json
+      FROM cleanup_leases WHERE admission_id=? AND job_id=?`).get(command.previousAdmissionId, command.jobId) as Row | undefined;
+    if (!admission) conflict('admission-mismatch', 'cleanup unexpected exit predecessor does not exist');
+    assertCleanupPredecessor(admission, command, ['claimed']);
+    if (admission.owner !== command.previousOwner || admission.expires_at !== command.previousExpiresAt) conflict('admission-mismatch', 'cleanup unexpected exit predecessor changed');
+    if (row.cleanup_admission_id !== command.previousAdmissionId || row.cleanup_fence_generation !== command.previousFenceGeneration || row.cleanup_fence_token_hash !== command.previousFenceTokenHash) conflict('fenced', 'cleanup unexpected exit lost the active cleanup fence');
+    const result = this.#db.prepare(`UPDATE cleanup_leases SET unexpected_exit_json=?
+      WHERE admission_id=? AND job_id=? AND status='claimed' AND owner=? AND expires_at=? AND fence_generation=? AND fence_token_hash=? AND claim_at IS ? AND renew_at IS ? AND unexpected_exit_json IS NULL AND expires_at > ?`).run(
+      observation, command.previousAdmissionId, command.jobId, command.previousOwner, command.previousExpiresAt, command.previousFenceGeneration, command.previousFenceTokenHash, command.previousClaimAt, command.previousRenewAt, command.at,
+    );
+    if (Number(result.changes) !== 1) conflict('cas-lost', 'cleanup unexpected exit marker CAS lost');
+    this.#event(command.jobId, 'cleanup', { admissionId: command.previousAdmissionId, status: 'recovery', errorCode: 'CLEANUP_UNIT_UNEXPECTED_EXIT', observation: JSON.parse(String(observation)) as JsonObject }, command.at);
+  }
+
   #cleanupAdmissionStopFailed(command: Extract<ApiWriteCommand, { kind: 'cleanup-admission-stop-failed' }>): void {
     instant(command.at, 'cleanup stop failure time');
     const blocker = json(command.blocker, 'cleanup stop failure blocker', true);
@@ -2769,12 +2976,14 @@ export class OwnershipStore {
       ['cleanup predecessor renew time', command.previousRenewAt],
       ['cleanup stop failure time', command.at],
     ]);
-    const admission = this.#db.prepare(`SELECT status, owner, unit_name, expires_at, fence_generation, fence_token_hash, claim_at, renew_at, blocker_code, blocker_json
+    const admission = this.#db.prepare(`SELECT status, owner, unit_name, expires_at, fence_generation, fence_token_hash, claim_at, renew_at, blocker_code, blocker_json,
+        stop_authorization_attempt_id, stop_authorization_owner, stop_authorization_at, stop_authorization_expires_at, stop_authorization_state, unexpected_exit_json
       FROM cleanup_leases WHERE admission_id=? AND job_id=?`).get(command.previousAdmissionId, command.jobId) as Row | undefined;
     if (!admission) conflict('admission-mismatch', 'cleanup stop failure predecessor does not exist');
     assertCleanupPredecessor(admission, command, ['admitted', 'claimed', 'failed', 'blocking']);
     if (admission.owner !== command.previousOwner) conflict('admission-mismatch', 'cleanup stop failure predecessor owner changed');
     if (admission.expires_at !== command.previousExpiresAt) conflict('admission-mismatch', 'cleanup stop failure predecessor expiry changed');
+    if (String(command.previousExpiresAt) > command.at) conflict('stale-lease', 'cleanup stop failure requires a stale predecessor lease');
     if (row.cleanup_admission_id !== command.previousAdmissionId || row.cleanup_fence_generation !== command.previousFenceGeneration || row.cleanup_fence_token_hash !== command.previousFenceTokenHash) conflict('admission-mismatch', 'cleanup stop failure lost the active cleanup fence');
     const previousBlocker = command.previousBlockerCode === null ? null : json(command.previousBlocker, 'cleanup stop failure predecessor blocker', true);
     const jobBlockerMatchesPredecessor = (row.cleanup_blocker_code === null && row.cleanup_blocker_json === null)
@@ -2782,7 +2991,26 @@ export class OwnershipStore {
     if (!jobBlockerMatchesPredecessor) conflict('admission-mismatch', 'cleanup stop failure job blocker changed');
     if (blocker === null) throw new OwnershipValidationError('cleanup stop failure blocker is missing');
     const blockerValue = JSON.parse(blocker) as JsonObject;
-    if (blockerValue.kind !== 'cleanup-unit-stop-failed' || blockerValue.code !== command.blockerCode || blockerValue.unitName !== command.previousUnitName || blockerValue.failure !== command.failure || blockerValue.observedAt !== command.at) throw new OwnershipValidationError('cleanup stop failure blocker evidence is not exact');
+    const expectedBlockerKind = command.failure === 'authorization-orphaned' ? 'cleanup-stop-authorization-orphaned' : 'cleanup-unit-stop-failed';
+    if (blockerValue.kind !== expectedBlockerKind || blockerValue.code !== command.blockerCode || blockerValue.unitName !== command.previousUnitName || blockerValue.failure !== command.failure || blockerValue.observedAt !== command.at) throw new OwnershipValidationError('cleanup stop failure blocker evidence is not exact');
+    const authorization = this.#db.prepare(`SELECT h.state, h.authorization_owner, a.attempt_id, a.authorization_at, a.authorization_expires_at, a.unit_name,
+        a.fence_generation, a.fence_token_hash, a.predecessor_status, a.predecessor_owner, a.predecessor_expires_at,
+        a.predecessor_claim_at, a.predecessor_renew_at, a.predecessor_blocker_code, a.predecessor_blocker_json
+      FROM cleanup_stop_authorization_heads AS h
+      JOIN cleanup_stop_authorizations AS a ON a.attempt_id=h.attempt_id
+      WHERE h.admission_id=? AND h.job_id=?`).get(command.previousAdmissionId, command.jobId) as Row | undefined;
+    if (!authorization) conflict('admission-mismatch', 'cleanup stop failure authorization does not exist');
+    if (authorization.attempt_id !== command.stopAuthorizationAttemptId || authorization.authorization_owner !== command.stopAuthorizationOwner
+      || authorization.authorization_at !== command.stopAuthorizationAt || authorization.authorization_expires_at !== command.stopAuthorizationExpiresAt
+      || authorization.unit_name !== command.previousUnitName || Number(authorization.fence_generation) !== command.previousFenceGeneration
+      || authorization.fence_token_hash !== command.previousFenceTokenHash || authorization.predecessor_status !== command.previousStatus
+      || authorization.predecessor_owner !== command.previousOwner || authorization.predecessor_expires_at !== command.previousExpiresAt
+      || authorization.predecessor_claim_at !== command.previousClaimAt || authorization.predecessor_renew_at !== command.previousRenewAt
+      || authorization.predecessor_blocker_code !== command.previousBlockerCode
+      || authorization.predecessor_blocker_json !== (command.previousBlocker === null ? null : json(command.previousBlocker, 'cleanup stop failure authorization predecessor blocker', true))) conflict('admission-mismatch', 'cleanup stop failure authorization evidence changed');
+    if (!['authorized', 'failed', 'orphaned', 'consumed'].includes(String(authorization.state))) conflict('fenced', 'cleanup stop failure authorization state is invalid');
+    if (command.failure === 'authorization-orphaned' && String(authorization.state) !== 'authorized') conflict('fenced', 'cleanup stop authorization is not orphanable');
+    if (command.failure !== 'authorization-orphaned' && !['authorized', 'failed', 'consumed'].includes(String(authorization.state))) conflict('fenced', 'cleanup stop failure authorization is not owned');
     const snapshot = cleanupAdmissionSnapshot(this.#db, command.jobId, command.previousAdmissionId);
     validateCleanupSnapshot(this.#db, command.snapshot, row, command.at, 'worker', snapshot.snapshot);
     const jobResult = this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=?, cleanup_blocker_json=?, updated_at=?
@@ -2791,13 +3019,20 @@ export class OwnershipStore {
       command.blockerCode, blocker, command.at, command.jobId, command.previousAdmissionId, command.previousFenceGeneration, command.previousFenceTokenHash, command.previousBlockerCode, previousBlocker,
     );
     if (Number(jobResult.changes) !== 1) conflict('cas-lost', 'cleanup stop failure job blocker CAS lost');
-    const leaseResult = this.#db.prepare(`UPDATE cleanup_leases SET status='blocking', blocker_code=?, blocker_json=?
+    const leaseResult = this.#db.prepare(`UPDATE cleanup_leases SET status='blocking', blocker_code=?, blocker_json=?, stop_authorization_attempt_id=?, stop_authorization_owner=?, stop_authorization_at=?, stop_authorization_expires_at=?, stop_authorization_state=?
       WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=?
-        AND status=? AND claim_at IS ? AND renew_at IS ? AND blocker_code IS ? AND blocker_json IS ?`).run(
-      command.blockerCode, blocker, command.previousAdmissionId, command.jobId, command.previousOwner, command.previousUnitName,
-      command.previousFenceGeneration, command.previousFenceTokenHash, command.previousStatus, command.previousClaimAt, command.previousRenewAt, command.previousBlockerCode, previousBlocker,
+        AND status=? AND expires_at=? AND expires_at <= ? AND claim_at IS ? AND renew_at IS ? AND blocker_code IS ? AND blocker_json IS ?`).run(
+      command.blockerCode, blocker, command.stopAuthorizationAttemptId, command.stopAuthorizationOwner, command.stopAuthorizationAt, command.stopAuthorizationExpiresAt,
+      command.failure === 'authorization-orphaned' ? 'orphaned' : 'failed', command.previousAdmissionId, command.jobId, command.previousOwner, command.previousUnitName,
+      command.previousFenceGeneration, command.previousFenceTokenHash, command.previousStatus, command.previousExpiresAt, command.at, command.previousClaimAt, command.previousRenewAt, command.previousBlockerCode, previousBlocker,
     );
     if (Number(leaseResult.changes) !== 1) conflict('cas-lost', 'cleanup stop failure lease CAS lost');
+    const authorizationState = command.failure === 'authorization-orphaned' ? 'orphaned' : 'failed';
+    const authorizationResult = this.#db.prepare(`UPDATE cleanup_stop_authorization_heads SET state=?, updated_at=?, outcome_json=?
+      WHERE admission_id=? AND job_id=? AND attempt_id=? AND state=?`).run(
+      authorizationState, command.at, blocker, command.previousAdmissionId, command.jobId, command.stopAuthorizationAttemptId, command.failure === 'authorization-orphaned' ? 'authorized' : String(authorization.state),
+    );
+    if (Number(authorizationResult.changes) !== 1) conflict('cas-lost', 'cleanup stop failure authorization CAS lost');
     this.#event(command.jobId, 'cleanup', {
       admissionId: command.previousAdmissionId,
       status: 'blocking',
@@ -2864,11 +3099,31 @@ export class OwnershipStore {
     requirePersistedTimeline(this.#db, command.jobId, [['cleanup admission rotation time', command.at]]);
     requireChronology([['accepted time', String(row.accepted_at)], ['cleanup admission rotation time', command.at]]);
     const snapshot = validateCleanupSnapshot(this.#db, command.snapshot, row, command.at);
-    const old = this.#db.prepare(`SELECT status, unit_name, fence_generation, fence_token_hash, claim_at, renew_at, blocker_code, blocker_json
+    const old = this.#db.prepare(`SELECT status, owner, unit_name, expires_at, fence_generation, fence_token_hash, claim_at, renew_at, blocker_code, blocker_json,
+        stop_authorization_attempt_id, stop_authorization_owner, stop_authorization_at, stop_authorization_expires_at, stop_authorization_state, unexpected_exit_json
       FROM cleanup_leases WHERE admission_id=? AND job_id=?`).get(command.previousAdmissionId, command.jobId) as Row | undefined;
     if (!old) conflict('admission-mismatch', 'previous cleanup admission does not exist');
     if (row.cleanup_admission_id !== command.previousAdmissionId || row.cleanup_fence_generation !== Number(old.fence_generation) || row.cleanup_fence_token_hash !== old.fence_token_hash) conflict('admission-mismatch', 'previous cleanup admission is not the active fence');
     assertCleanupPredecessor(old, command, ['admitted', 'claimed']);
+    if (command.previousOwner !== undefined && old.owner !== command.previousOwner || command.previousExpiresAt !== undefined && old.expires_at !== command.previousExpiresAt) conflict('admission-mismatch', 'previous cleanup lease owner or expiry changed');
+    if (command.previousStatus === 'claimed' && String(old.expires_at) > command.at) {
+      if (old.unexpected_exit_json === null) conflict('admission-mismatch', 'claimed unexpired cleanup rotation lacks unexpected-exit evidence');
+      let unexpectedExit: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(String(old.unexpected_exit_json)) as unknown;
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('unexpected-exit evidence is not an object');
+        unexpectedExit = parsed as Record<string, unknown>;
+      } catch (error) {
+        throw new OwnershipTransactionError('cleanup unexpected-exit evidence is corrupt', { cause: error });
+      }
+      if (unexpectedExit.kind !== 'cleanup-unit-unexpected-exit' || unexpectedExit.code !== 'CLEANUP_UNIT_UNEXPECTED_EXIT' || unexpectedExit.active !== false || unexpectedExit.unitName !== old.unit_name || unexpectedExit.inactiveAt !== unexpectedExit.observedAt || String(unexpectedExit.observedAt) > command.at) conflict('admission-mismatch', 'claimed unexpired cleanup rotation has invalid unexpected-exit evidence');
+    }
+    if (String(old.stop_authorization_state) === 'consumed') {
+      const authorization = this.#db.prepare(`SELECT h.state, h.authorization_owner, a.attempt_id, a.authorization_at, a.authorization_expires_at
+        FROM cleanup_stop_authorization_heads AS h JOIN cleanup_stop_authorizations AS a ON a.attempt_id=h.attempt_id
+        WHERE h.admission_id=? AND h.job_id=?`).get(command.previousAdmissionId, command.jobId) as Row | undefined;
+      if (!authorization || authorization.state !== 'consumed' || authorization.attempt_id !== old.stop_authorization_attempt_id || authorization.authorization_owner !== old.stop_authorization_owner || authorization.authorization_at !== old.stop_authorization_at || authorization.authorization_expires_at !== old.stop_authorization_expires_at) conflict('admission-mismatch', 'cleanup stop authorization completion evidence changed');
+    }
     if (this.#db.prepare('SELECT 1 FROM cleanup_leases WHERE admission_id=?').get(command.admissionId)) conflict('admission-mismatch', 'replacement cleanup admission already exists');
     this.#consumeCleanupCredentialReservation(command);
     const generation = Number(row.cleanup_generation) + 1;
@@ -2887,9 +3142,11 @@ export class OwnershipStore {
     );
     if (Number(installed.changes) !== 1) conflict('cas-lost', 'replacement cleanup fence CAS lost');
     const expired = this.#db.prepare(`UPDATE cleanup_leases SET status='expired', blocker_code=NULL, blocker_json=NULL,
-        expired_at=?, superseded_at=?, superseded_by_admission_id=?, predecessor_status=?, predecessor_claim_at=?, predecessor_renew_at=?, predecessor_blocker_code=?, predecessor_blocker_json=?
+        expired_at=?, superseded_at=?, superseded_by_admission_id=?, predecessor_status=?, predecessor_claim_at=?, predecessor_renew_at=?, predecessor_blocker_code=?, predecessor_blocker_json=?,
+        predecessor_stop_authorization_attempt_id=?, predecessor_stop_authorization_owner=?, predecessor_stop_authorization_at=?, predecessor_stop_authorization_expires_at=?, predecessor_stop_authorization_state=?, predecessor_unexpected_exit_json=?
       WHERE admission_id=? AND job_id=? AND status=? AND unit_name=? AND fence_generation=? AND fence_token_hash=?`).run(
       command.at, command.at, command.admissionId, command.previousStatus, old.claim_at, old.renew_at, old.blocker_code, old.blocker_json,
+      old.stop_authorization_attempt_id, old.stop_authorization_owner, old.stop_authorization_at, old.stop_authorization_expires_at, old.stop_authorization_state, old.unexpected_exit_json,
       command.previousAdmissionId, command.jobId, command.previousStatus, command.previousUnitName, command.previousFenceGeneration, command.previousFenceTokenHash,
     );
     if (Number(expired.changes) !== 1) conflict('cas-lost', 'previous cleanup admission expiry CAS lost');
@@ -2906,7 +3163,8 @@ export class OwnershipStore {
     requirePersistedTimeline(this.#db, command.jobId, [['corrected cleanup retry time', command.at]]);
     requireChronology([['accepted time', String(row.accepted_at)], ['corrected cleanup retry time', command.at]]);
     const snapshot = validateCleanupSnapshot(this.#db, command.snapshot, row, command.at);
-    const old = this.#db.prepare(`SELECT status, unit_name, fence_generation, fence_token_hash, claim_at, renew_at, blocker_code, blocker_json
+    const old = this.#db.prepare(`SELECT status, owner, expires_at, unit_name, fence_generation, fence_token_hash, claim_at, renew_at, blocker_code, blocker_json,
+        stop_authorization_attempt_id, stop_authorization_owner, stop_authorization_at, stop_authorization_expires_at, stop_authorization_state, unexpected_exit_json
       FROM cleanup_leases WHERE admission_id=? AND job_id=?`).get(command.previousAdmissionId, command.jobId) as Row | undefined;
     if (!old) conflict('admission-mismatch', 'previous blocked cleanup admission does not exist');
     if (row.cleanup_admission_id !== command.previousAdmissionId || row.cleanup_fence_generation !== Number(old.fence_generation) || row.cleanup_fence_token_hash !== old.fence_token_hash) conflict('admission-mismatch', 'previous blocked cleanup admission is not the active fence');
@@ -2929,9 +3187,11 @@ export class OwnershipStore {
     );
     if (Number(installed.changes) !== 1) conflict('cas-lost', 'corrected cleanup blocker resolution CAS lost');
     const expired = this.#db.prepare(`UPDATE cleanup_leases SET status='expired', blocker_code=NULL, blocker_json=NULL,
-        expired_at=?, superseded_at=?, superseded_by_admission_id=?, predecessor_status=?, predecessor_claim_at=?, predecessor_renew_at=?, predecessor_blocker_code=?, predecessor_blocker_json=?
+        expired_at=?, superseded_at=?, superseded_by_admission_id=?, predecessor_status=?, predecessor_claim_at=?, predecessor_renew_at=?, predecessor_blocker_code=?, predecessor_blocker_json=?,
+        predecessor_stop_authorization_attempt_id=?, predecessor_stop_authorization_owner=?, predecessor_stop_authorization_at=?, predecessor_stop_authorization_expires_at=?, predecessor_stop_authorization_state=?, predecessor_unexpected_exit_json=?
       WHERE admission_id=? AND job_id=? AND status=? AND unit_name=? AND fence_generation=? AND fence_token_hash=?`).run(
       command.at, command.at, command.admissionId, command.previousStatus, old.claim_at, old.renew_at, old.blocker_code, old.blocker_json,
+      old.stop_authorization_attempt_id, old.stop_authorization_owner, old.stop_authorization_at, old.stop_authorization_expires_at, old.stop_authorization_state, old.unexpected_exit_json,
       command.previousAdmissionId, command.jobId, command.previousStatus, command.previousUnitName, command.previousFenceGeneration, command.previousFenceTokenHash,
     );
     if (Number(expired.changes) !== 1) conflict('cas-lost', 'previous blocked cleanup admission expiry CAS lost');
@@ -3668,7 +3928,14 @@ export class OwnershipStore {
     const leaseTimeline = this.#db.prepare('SELECT admitted_at, claim_at, expires_at FROM cleanup_leases WHERE admission_id=? AND job_id=?').get(command.admissionId, command.jobId) as Row | undefined;
     if (!leaseTimeline) conflict('admission-mismatch', 'cleanup lease does not exist');
     requireChronology([['cleanup admitted time', String(leaseTimeline.admitted_at)], ['cleanup claim time', leaseTimeline.claim_at === null ? null : String(leaseTimeline.claim_at)], ['cleanup renewal time', command.at]]);
-    const result = this.#db.prepare('UPDATE cleanup_leases SET expires_at=?, renew_at=? WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=? AND proof_json=? AND status=\'claimed\' AND expires_at=? AND expires_at > ? AND EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND cleanup_admission_id=? AND cleanup_fence_generation=? AND cleanup_fence_token_hash=?)').run(command.expiresAt, command.at, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash, admission.raw, command.expectedExpiresAt, command.at, command.jobId, command.admissionId, command.fenceGeneration, command.fenceTokenHash);
+    const result = this.#db.prepare(`UPDATE cleanup_leases SET expires_at=?, renew_at=?
+      WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=? AND proof_json=?
+        AND status='claimed' AND expires_at=? AND expires_at > ?
+        AND NOT EXISTS (SELECT 1 FROM cleanup_stop_authorization_heads WHERE admission_id=? AND job_id=? AND state='authorized')
+        AND EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND cleanup_admission_id=? AND cleanup_fence_generation=? AND cleanup_fence_token_hash=?)`).run(
+      command.expiresAt, command.at, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash,
+      admission.raw, command.expectedExpiresAt, command.at, command.admissionId, command.jobId, command.jobId, command.admissionId, command.fenceGeneration, command.fenceTokenHash,
+    );
     if (Number(result.changes) !== 1) conflict('stale-lease', 'cleanup renewal lost ownership');
     this.#event(command.jobId, 'cleanup_renew', { admissionId: command.admissionId }, command.at);
   }

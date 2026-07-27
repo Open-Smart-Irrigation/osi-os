@@ -219,7 +219,7 @@ describe('versioned builder database migrations', () => {
       { version: 12, filename: '012_cleanup_admission_supersession_evidence.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
-      .toEqual(['cleanup_credential_reservations', 'cleanup_leases', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_entries', 'schema_migrations']);
+      .toEqual(['cleanup_credential_reservations', 'cleanup_leases', 'cleanup_stop_authorization_heads', 'cleanup_stop_authorizations', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_entries', 'schema_migrations']);
     expectColumns(db, 'jobs', [
       'job_id', 'request_id', 'request_json', 'source_remote', 'source_ref', 'source_branch', 'branch', 'expected_sha', 'pinned_sha',
       'target_id', 'root_id', 'target_manifest_sha256', 'source_commit_time', 'source_author', 'source_subject',
@@ -265,10 +265,21 @@ describe('versioned builder database migrations', () => {
       'proof_json', 'blocker_code', 'blocker_json', 'completion_evidence_path', 'completion_evidence_sha256',
       'admitted_at', 'claim_at', 'renew_at', 'complete_at', 'handback_at', 'expired_at', 'superseded_at',
       'superseded_by_admission_id', 'predecessor_status', 'predecessor_claim_at', 'predecessor_renew_at',
-      'predecessor_blocker_code', 'predecessor_blocker_json',
+      'predecessor_blocker_code', 'predecessor_blocker_json', 'stop_authorization_attempt_id', 'stop_authorization_owner',
+      'stop_authorization_at', 'stop_authorization_expires_at', 'stop_authorization_state', 'unexpected_exit_json',
+      'predecessor_stop_authorization_attempt_id', 'predecessor_stop_authorization_owner', 'predecessor_stop_authorization_at',
+      'predecessor_stop_authorization_expires_at', 'predecessor_stop_authorization_state', 'predecessor_unexpected_exit_json',
     ]);
     expectColumns(db, 'cleanup_credential_reservations', [
       'job_id', 'admission_id', 'owner', 'credential_relative_path', 'created_at', 'expires_at',
+    ]);
+    expectColumns(db, 'cleanup_stop_authorizations', [
+      'attempt_id', 'attempt_no', 'job_id', 'admission_id', 'request_owner', 'authorization_owner', 'authorization_at',
+      'authorization_expires_at', 'unit_name', 'fence_generation', 'fence_token_hash', 'predecessor_status', 'predecessor_owner',
+      'predecessor_expires_at', 'predecessor_claim_at', 'predecessor_renew_at', 'predecessor_blocker_code', 'predecessor_blocker_json',
+    ]);
+    expectColumns(db, 'cleanup_stop_authorization_heads', [
+      'admission_id', 'job_id', 'attempt_id', 'state', 'authorization_owner', 'updated_at', 'outcome_json',
     ]);
     expectColumns(db, 'job_log_generations', [
       'job_id', 'stream', 'generation', 'path', 'started_at', 'sealed_at', 'size_bytes', 'sha256',
@@ -289,7 +300,7 @@ describe('versioned builder database migrations', () => {
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'").all()
       .map((row) => (row as { name: string }).name);
     expect(indexes.sort()).toEqual([
-      'cleanup_credential_reservations_expiry', 'cleanup_credential_reservations_job_path', 'cleanup_leases_expiry', 'cleanup_leases_fence_identity', 'cleanup_leases_fence_token_identity', 'cleanup_leases_job', 'job_events_cancellation_protocol', 'job_events_log_range', 'job_events_sequence', 'job_log_generations_active', 'job_operations_identity',
+      'cleanup_credential_reservations_expiry', 'cleanup_credential_reservations_job_path', 'cleanup_leases_expiry', 'cleanup_leases_fence_identity', 'cleanup_leases_fence_token_identity', 'cleanup_leases_job', 'cleanup_stop_authorizations_admission', 'cleanup_stop_authorizations_expiry', 'job_events_cancellation_protocol', 'job_events_log_range', 'job_events_sequence', 'job_log_generations_active', 'job_operations_identity',
       'job_stages_job', 'jobs_cleanup_admission', 'jobs_recovery', 'queue_entries_fifo',
     ]);
     const normalizeForeignKeys = (child: string) => db.prepare(`PRAGMA foreign_key_list(${child})`).all()
@@ -302,6 +313,15 @@ describe('versioned builder database migrations', () => {
     expect(normalizeForeignKeys('job_operations')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('cleanup_leases')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('cleanup_credential_reservations')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
+    expect(normalizeForeignKeys('cleanup_stop_authorizations').sort((a, b) => `${a.table}${a.from}`.localeCompare(`${b.table}${b.from}`))).toEqual([
+      { table: 'cleanup_leases', from: 'admission_id', to: 'admission_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
+      { table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
+    ]);
+    expect(normalizeForeignKeys('cleanup_stop_authorization_heads').sort((a, b) => `${a.table}${a.from}`.localeCompare(`${b.table}${b.from}`))).toEqual([
+      { table: 'cleanup_leases', from: 'admission_id', to: 'admission_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
+      { table: 'cleanup_stop_authorizations', from: 'attempt_id', to: 'attempt_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
+      { table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
+    ]);
     expect(normalizeForeignKeys('job_log_generations')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('legacy_blocked_publish_evidence')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('job_events').sort((a, b) => `${a.table}${a.from}`.localeCompare(`${b.table}${b.from}`))).toEqual([
@@ -317,6 +337,8 @@ describe('versioned builder database migrations', () => {
       'cleanup_leases_status_guard_update', 'cleanup_leases_identity_guard', 'job_events_append_guard', 'job_events_immutable_update_guard', 'job_log_generations_append_guard',
       'cleanup_leases_admission_id_guard', 'cleanup_leases_admission_id_guard_update',
       'cleanup_credential_reservations_immutable_update_guard', 'cleanup_leases_supersession_insert_guard', 'cleanup_leases_supersession_transition_guard', 'cleanup_leases_expired_immutable_guard',
+      'cleanup_stop_authorizations_immutable_update_guard', 'cleanup_stop_authorizations_identity_guard', 'cleanup_stop_authorization_heads_transition_guard', 'cleanup_stop_authorization_head_identity_guard', 'cleanup_stop_authorization_head_identity_update_guard',
+      'cleanup_leases_stop_authorization_columns_guard', 'cleanup_leases_stop_authorization_columns_update_guard', 'cleanup_leases_stop_authorization_identity_guard',
       'job_log_generations_immutable_guard', 'job_log_generations_seal_guard', 'job_log_generations_size_guard',
       'job_operations_committed_delete_guard', 'job_operations_committed_update_guard', 'job_operations_manifest_label_guard',
       'job_operations_manifest_label_guard_update', 'jobs_cleanup_generation_guard', 'jobs_container_guard',
@@ -1129,6 +1151,18 @@ describe('versioned builder database migrations', () => {
     ['renew_at', '2026-07-23T00:02:45.000Z'],
     ['complete_at', '2026-07-23T00:03:00.000Z'],
     ['handback_at', '2026-07-23T00:04:00.000Z'],
+    ['stop_authorization_attempt_id', 'sta_' + 'a'.repeat(32)],
+    ['stop_authorization_owner', 'stop-owner'],
+    ['stop_authorization_at', '2026-07-23T00:02:50.000Z'],
+    ['stop_authorization_expires_at', '2026-07-23T00:03:50.000Z'],
+    ['stop_authorization_state', 'failed'],
+    ['unexpected_exit_json', '{"kind":"cleanup-unit-unexpected-exit"}'],
+    ['predecessor_stop_authorization_attempt_id', 'sta_' + 'b'.repeat(32)],
+    ['predecessor_stop_authorization_owner', 'previous-stop-owner'],
+    ['predecessor_stop_authorization_at', '2026-07-23T00:02:50.000Z'],
+    ['predecessor_stop_authorization_expires_at', '2026-07-23T00:03:50.000Z'],
+    ['predecessor_stop_authorization_state', 'failed'],
+    ['predecessor_unexpected_exit_json', '{"kind":"cleanup-unit-unexpected-exit"}'],
   ])('rejects supersession transition mutation of historical %s', async (column, value) => {
     const path = await temporaryDatabase();
     const db = openBuilderDatabase(path);
@@ -1173,6 +1207,44 @@ describe('versioned builder database migrations', () => {
     );
     expect(() => db.prepare('UPDATE cleanup_credential_reservations SET owner=? WHERE admission_id=?').run('forged', reservation))
       .toThrow(/immutable/);
+    db.close();
+  });
+
+  it('enforces stop-authorization identity, complete columns, and durable head transitions in SQL', async () => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    insertValidJob(db);
+    insertValidJob(db, 'job-other');
+    insertAdmittedLease(db);
+    db.prepare('UPDATE jobs SET cleanup_generation=1, cleanup_fence_generation=1, cleanup_fence_token_hash=?, cleanup_admission_id=? WHERE job_id=?').run('c'.repeat(64), ADMISSION_ID, 'job-valid');
+    const attemptId = 'sta_' + 'a'.repeat(32);
+    const unitName = `osi-image-builder-cleanup@${ADMISSION_ID}.service`;
+    db.prepare(`INSERT INTO cleanup_stop_authorizations (
+      attempt_id, attempt_no, job_id, admission_id, request_owner, authorization_owner, authorization_at, authorization_expires_at,
+      unit_name, fence_generation, fence_token_hash, predecessor_status, predecessor_owner, predecessor_expires_at,
+      predecessor_claim_at, predecessor_renew_at, predecessor_blocker_code, predecessor_blocker_json
+    ) VALUES (?, 1, 'job-valid', ?, 'api', 'stop-owner', '2026-07-23T02:00:00.000Z', '2026-07-23T03:00:00.000Z', ?, 1, ?, 'admitted', 'builder', '2026-07-23T01:00:00.000Z', NULL, NULL, NULL, NULL)`).run(attemptId, ADMISSION_ID, unitName, 'c'.repeat(64));
+    db.prepare(`INSERT INTO cleanup_stop_authorization_heads (admission_id, job_id, attempt_id, state, authorization_owner, updated_at, outcome_json)
+      VALUES (?, 'job-valid', ?, 'authorized', 'stop-owner', '2026-07-23T02:00:00.000Z', NULL)`).run(ADMISSION_ID, attemptId);
+
+    check(db, `UPDATE cleanup_leases SET stop_authorization_attempt_id='${attemptId}' WHERE admission_id='${ADMISSION_ID}'`, /columns must be complete|evidence is incoherent/);
+    check(db, `UPDATE cleanup_leases SET stop_authorization_attempt_id='${attemptId}', stop_authorization_owner='forged-owner', stop_authorization_at='2026-07-23T02:00:00.000Z', stop_authorization_expires_at='2026-07-23T03:00:00.000Z', stop_authorization_state='failed' WHERE admission_id='${ADMISSION_ID}'`, /evidence is incoherent/);
+    check(db, `INSERT INTO cleanup_stop_authorizations (
+      attempt_id, attempt_no, job_id, admission_id, request_owner, authorization_owner, authorization_at, authorization_expires_at,
+      unit_name, fence_generation, fence_token_hash, predecessor_status, predecessor_owner, predecessor_expires_at,
+      predecessor_claim_at, predecessor_renew_at, predecessor_blocker_code, predecessor_blocker_json
+    ) VALUES ('sta_${'b'.repeat(32)}', 2, 'job-other', '${ADMISSION_ID}', 'api', 'stop-owner', '2026-07-23T02:00:00.000Z', '2026-07-23T03:00:00.000Z', '${unitName}', 1, '${'c'.repeat(64)}', 'admitted', 'builder', '2026-07-23T01:00:00.000Z', NULL, NULL, NULL, NULL)`, /identity is incoherent/);
+    check(db, `UPDATE cleanup_stop_authorization_heads SET authorization_owner='forged-owner' WHERE admission_id='${ADMISSION_ID}'`, /identity is incoherent|transition is incoherent/);
+    check(db, `UPDATE cleanup_stop_authorization_heads SET outcome_json='{}' WHERE admission_id='${ADMISSION_ID}'`, /transition is incoherent/);
+    check(db, `UPDATE cleanup_stop_authorization_heads SET attempt_id='sta_${'c'.repeat(32)}' WHERE admission_id='${ADMISSION_ID}'`, /identity is incoherent|transition is incoherent/);
+    check(db, `UPDATE cleanup_stop_authorization_heads SET job_id='job-other' WHERE admission_id='${ADMISSION_ID}'`, /identity is incoherent|FOREIGN KEY/);
+    check(db, `UPDATE cleanup_stop_authorization_heads SET admission_id='cln_0${'b'.repeat(25)}' WHERE admission_id='${ADMISSION_ID}'`, /identity is incoherent|FOREIGN KEY/);
+
+    db.prepare(`UPDATE cleanup_leases SET stop_authorization_attempt_id=?, stop_authorization_owner='stop-owner', stop_authorization_at='2026-07-23T02:00:00.000Z', stop_authorization_expires_at='2026-07-23T03:00:00.000Z', stop_authorization_state='consumed' WHERE admission_id=?`).run(attemptId, ADMISSION_ID);
+    db.prepare(`UPDATE cleanup_stop_authorization_heads SET state='consumed', outcome_json='{"active":false}' WHERE admission_id=?`).run(ADMISSION_ID);
+    check(db, `UPDATE cleanup_stop_authorization_heads SET authorization_owner='forged-owner' WHERE admission_id='${ADMISSION_ID}'`, /identity is incoherent|transition is incoherent/);
+    check(db, `UPDATE cleanup_stop_authorization_heads SET outcome_json='{"active":true}' WHERE admission_id='${ADMISSION_ID}'`, /transition is incoherent/);
+    check(db, `UPDATE cleanup_stop_authorization_heads SET attempt_id='sta_${'d'.repeat(32)}' WHERE admission_id='${ADMISSION_ID}'`, /identity is incoherent|transition is incoherent/);
     db.close();
   });
 

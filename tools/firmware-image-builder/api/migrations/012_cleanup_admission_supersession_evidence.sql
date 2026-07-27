@@ -6,6 +6,18 @@ ALTER TABLE cleanup_leases ADD COLUMN predecessor_claim_at TEXT;
 ALTER TABLE cleanup_leases ADD COLUMN predecessor_renew_at TEXT;
 ALTER TABLE cleanup_leases ADD COLUMN predecessor_blocker_code TEXT;
 ALTER TABLE cleanup_leases ADD COLUMN predecessor_blocker_json TEXT;
+ALTER TABLE cleanup_leases ADD COLUMN stop_authorization_attempt_id TEXT;
+ALTER TABLE cleanup_leases ADD COLUMN stop_authorization_owner TEXT;
+ALTER TABLE cleanup_leases ADD COLUMN stop_authorization_at TEXT;
+ALTER TABLE cleanup_leases ADD COLUMN stop_authorization_expires_at TEXT;
+ALTER TABLE cleanup_leases ADD COLUMN stop_authorization_state TEXT CHECK (stop_authorization_state IS NULL OR stop_authorization_state IN ('consumed', 'failed', 'orphaned'));
+ALTER TABLE cleanup_leases ADD COLUMN unexpected_exit_json TEXT;
+ALTER TABLE cleanup_leases ADD COLUMN predecessor_stop_authorization_attempt_id TEXT;
+ALTER TABLE cleanup_leases ADD COLUMN predecessor_stop_authorization_owner TEXT;
+ALTER TABLE cleanup_leases ADD COLUMN predecessor_stop_authorization_at TEXT;
+ALTER TABLE cleanup_leases ADD COLUMN predecessor_stop_authorization_expires_at TEXT;
+ALTER TABLE cleanup_leases ADD COLUMN predecessor_stop_authorization_state TEXT CHECK (predecessor_stop_authorization_state IS NULL OR predecessor_stop_authorization_state IN ('consumed', 'failed', 'orphaned'));
+ALTER TABLE cleanup_leases ADD COLUMN predecessor_unexpected_exit_json TEXT;
 
 CREATE TABLE cleanup_credential_reservations (
   job_id TEXT NOT NULL,
@@ -31,6 +43,213 @@ CREATE TRIGGER cleanup_credential_reservations_immutable_update_guard
 BEFORE UPDATE ON cleanup_credential_reservations
 BEGIN
   SELECT RAISE(ABORT, 'cleanup credential reservation is immutable');
+END;
+
+CREATE TABLE cleanup_stop_authorizations (
+  attempt_id TEXT PRIMARY KEY CHECK (
+    length(attempt_id) = 36
+    AND substr(attempt_id, 1, 4) = 'sta_'
+    AND substr(attempt_id, 5) NOT GLOB '*[^0-9a-f]*'
+  ),
+  attempt_no INTEGER NOT NULL CHECK (attempt_no > 0),
+  job_id TEXT NOT NULL,
+  admission_id TEXT NOT NULL,
+  request_owner TEXT NOT NULL,
+  authorization_owner TEXT NOT NULL,
+  authorization_at TEXT NOT NULL CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', authorization_at) = authorization_at),
+  authorization_expires_at TEXT NOT NULL CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', authorization_expires_at) = authorization_expires_at AND authorization_expires_at > authorization_at),
+  unit_name TEXT NOT NULL,
+  fence_generation INTEGER NOT NULL CHECK (fence_generation > 0),
+  fence_token_hash TEXT NOT NULL CHECK (length(fence_token_hash) = 64 AND fence_token_hash NOT GLOB '*[^0-9a-f]*'),
+  predecessor_status TEXT NOT NULL CHECK (predecessor_status IN ('admitted', 'claimed', 'failed', 'blocking')),
+  predecessor_owner TEXT NOT NULL,
+  predecessor_expires_at TEXT NOT NULL CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', predecessor_expires_at) = predecessor_expires_at AND predecessor_expires_at <= authorization_at),
+  predecessor_claim_at TEXT,
+  predecessor_renew_at TEXT,
+  predecessor_blocker_code TEXT,
+  predecessor_blocker_json TEXT,
+  CHECK ((predecessor_blocker_code IS NULL) = (predecessor_blocker_json IS NULL)),
+  FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  FOREIGN KEY (admission_id) REFERENCES cleanup_leases(admission_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  UNIQUE (admission_id, attempt_no)
+);
+
+CREATE TABLE cleanup_stop_authorization_heads (
+  admission_id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  attempt_id TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK (state IN ('authorized', 'consumed', 'failed', 'orphaned')),
+  authorization_owner TEXT NOT NULL,
+  updated_at TEXT NOT NULL CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) = updated_at),
+  outcome_json TEXT,
+  FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  FOREIGN KEY (admission_id) REFERENCES cleanup_leases(admission_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  FOREIGN KEY (attempt_id) REFERENCES cleanup_stop_authorizations(attempt_id) ON DELETE RESTRICT ON UPDATE RESTRICT
+);
+
+CREATE INDEX cleanup_stop_authorizations_admission ON cleanup_stop_authorizations (admission_id, attempt_no);
+CREATE INDEX cleanup_stop_authorizations_expiry ON cleanup_stop_authorizations (authorization_expires_at);
+
+CREATE TRIGGER cleanup_stop_authorizations_immutable_update_guard
+BEFORE UPDATE ON cleanup_stop_authorizations
+BEGIN
+  SELECT RAISE(ABORT, 'cleanup stop authorization attempts are immutable');
+END;
+
+CREATE TRIGGER cleanup_stop_authorization_heads_transition_guard
+BEFORE UPDATE ON cleanup_stop_authorization_heads
+WHEN NEW.admission_id IS NOT OLD.admission_id
+  OR NEW.job_id IS NOT OLD.job_id
+  OR NOT (OLD.state IN ('failed', 'orphaned') AND NEW.state = 'authorized')
+     AND (NEW.attempt_id IS NOT OLD.attempt_id OR NEW.authorization_owner IS NOT OLD.authorization_owner)
+  OR OLD.state = 'authorized' AND NEW.state = 'authorized' AND NEW.outcome_json IS NOT OLD.outcome_json
+  OR OLD.state IN ('failed', 'orphaned') AND NEW.state IN ('failed', 'orphaned') AND NEW.outcome_json IS NOT OLD.outcome_json
+  OR OLD.state IN ('failed', 'orphaned') AND NEW.state = 'authorized' AND NEW.outcome_json IS NOT NULL
+  OR NEW.state IN ('consumed', 'failed', 'orphaned') AND NOT EXISTS (
+    SELECT 1
+    FROM cleanup_leases AS lease
+    WHERE lease.admission_id = NEW.admission_id
+      AND lease.job_id = NEW.job_id
+      AND lease.stop_authorization_attempt_id = NEW.attempt_id
+      AND lease.stop_authorization_owner = NEW.authorization_owner
+      AND lease.stop_authorization_state = NEW.state
+  )
+  OR (OLD.state = 'authorized' AND NEW.state NOT IN ('authorized', 'consumed', 'failed', 'orphaned'))
+  OR OLD.state IN ('consumed', 'orphaned', 'failed') AND NEW.state NOT IN ('consumed', 'orphaned', 'failed', 'authorized')
+  OR OLD.state = 'consumed' AND NEW.state <> 'consumed'
+  OR OLD.state IN ('authorized', 'consumed') AND NEW.attempt_id IS NOT OLD.attempt_id AND NOT (OLD.state IN ('failed', 'orphaned') AND NEW.state = 'authorized')
+  OR OLD.state = 'consumed' AND NEW.outcome_json IS NOT OLD.outcome_json
+BEGIN
+  SELECT RAISE(ABORT, 'cleanup stop authorization head transition is incoherent');
+END;
+
+CREATE TRIGGER cleanup_stop_authorizations_identity_guard
+BEFORE INSERT ON cleanup_stop_authorizations
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM cleanup_leases AS lease
+  JOIN jobs AS job ON job.job_id = lease.job_id
+  WHERE lease.admission_id = NEW.admission_id
+    AND lease.job_id = NEW.job_id
+    AND lease.unit_name = NEW.unit_name
+    AND lease.fence_generation = NEW.fence_generation
+    AND lease.fence_token_hash = NEW.fence_token_hash
+    AND lease.status = NEW.predecessor_status
+    AND lease.owner = NEW.predecessor_owner
+    AND lease.expires_at = NEW.predecessor_expires_at
+    AND lease.claim_at IS NEW.predecessor_claim_at
+    AND lease.renew_at IS NEW.predecessor_renew_at
+    AND lease.blocker_code IS NEW.predecessor_blocker_code
+    AND lease.blocker_json IS NEW.predecessor_blocker_json
+    AND job.cleanup_admission_id = NEW.admission_id
+    AND job.cleanup_fence_generation = NEW.fence_generation
+    AND job.cleanup_fence_token_hash = NEW.fence_token_hash
+)
+BEGIN
+  SELECT RAISE(ABORT, 'cleanup stop authorization identity is incoherent');
+END;
+
+CREATE TRIGGER cleanup_stop_authorization_head_identity_guard
+BEFORE INSERT ON cleanup_stop_authorization_heads
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM cleanup_stop_authorizations AS attempt
+  WHERE attempt.attempt_id = NEW.attempt_id
+    AND attempt.admission_id = NEW.admission_id
+    AND attempt.job_id = NEW.job_id
+    AND attempt.authorization_owner = NEW.authorization_owner
+)
+BEGIN
+  SELECT RAISE(ABORT, 'cleanup stop authorization head identity is incoherent');
+END;
+
+CREATE TRIGGER cleanup_stop_authorization_head_identity_update_guard
+BEFORE UPDATE ON cleanup_stop_authorization_heads
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM cleanup_stop_authorizations AS attempt
+  WHERE attempt.attempt_id = NEW.attempt_id
+    AND attempt.admission_id = NEW.admission_id
+    AND attempt.job_id = NEW.job_id
+    AND attempt.authorization_owner = NEW.authorization_owner
+)
+BEGIN
+  SELECT RAISE(ABORT, 'cleanup stop authorization head identity is incoherent');
+END;
+
+CREATE TRIGGER cleanup_leases_stop_authorization_columns_guard
+BEFORE INSERT ON cleanup_leases
+WHEN (NEW.stop_authorization_attempt_id IS NULL AND (
+    NEW.stop_authorization_owner IS NOT NULL
+    OR NEW.stop_authorization_at IS NOT NULL
+    OR NEW.stop_authorization_expires_at IS NOT NULL
+    OR NEW.stop_authorization_state IS NOT NULL
+  ))
+  OR (NEW.stop_authorization_attempt_id IS NOT NULL AND (
+    NEW.stop_authorization_owner IS NULL
+    OR NEW.stop_authorization_at IS NULL
+    OR NEW.stop_authorization_expires_at IS NULL
+    OR NEW.stop_authorization_state IS NULL
+  ))
+BEGIN
+  SELECT RAISE(ABORT, 'cleanup stop authorization columns must be complete');
+END;
+
+CREATE TRIGGER cleanup_leases_stop_authorization_columns_update_guard
+BEFORE UPDATE ON cleanup_leases
+WHEN (NEW.stop_authorization_attempt_id IS NULL AND (
+    NEW.stop_authorization_owner IS NOT NULL
+    OR NEW.stop_authorization_at IS NOT NULL
+    OR NEW.stop_authorization_expires_at IS NOT NULL
+    OR NEW.stop_authorization_state IS NOT NULL
+  ))
+  OR (NEW.stop_authorization_attempt_id IS NOT NULL AND (
+    NEW.stop_authorization_owner IS NULL
+    OR NEW.stop_authorization_at IS NULL
+    OR NEW.stop_authorization_expires_at IS NULL
+    OR NEW.stop_authorization_state IS NULL
+  ))
+BEGIN
+  SELECT RAISE(ABORT, 'cleanup stop authorization columns must be complete');
+END;
+
+CREATE TRIGGER cleanup_leases_stop_authorization_identity_guard
+BEFORE UPDATE ON cleanup_leases
+WHEN NEW.stop_authorization_attempt_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM cleanup_stop_authorizations AS attempt
+    WHERE attempt.attempt_id = NEW.stop_authorization_attempt_id
+      AND attempt.job_id = NEW.job_id
+      AND attempt.admission_id = NEW.admission_id
+      AND attempt.unit_name = NEW.unit_name
+      AND attempt.fence_generation = NEW.fence_generation
+      AND attempt.fence_token_hash = NEW.fence_token_hash
+      AND attempt.authorization_owner = NEW.stop_authorization_owner
+      AND attempt.authorization_at = NEW.stop_authorization_at
+      AND attempt.authorization_expires_at = NEW.stop_authorization_expires_at
+      AND attempt.predecessor_status = OLD.status
+      AND attempt.predecessor_owner = OLD.owner
+      AND attempt.predecessor_expires_at = OLD.expires_at
+      AND attempt.predecessor_claim_at IS OLD.claim_at
+      AND attempt.predecessor_renew_at IS OLD.renew_at
+      AND attempt.predecessor_blocker_code IS OLD.blocker_code
+      AND attempt.predecessor_blocker_json IS OLD.blocker_json
+      AND EXISTS (
+        SELECT 1
+        FROM cleanup_stop_authorization_heads AS head
+        WHERE head.attempt_id = attempt.attempt_id
+          AND head.admission_id = NEW.admission_id
+          AND head.job_id = NEW.job_id
+          AND (
+            (NEW.stop_authorization_state = 'consumed' AND head.state IN ('authorized', 'consumed'))
+            OR (NEW.stop_authorization_state = 'failed' AND head.state IN ('authorized', 'failed'))
+            OR (NEW.stop_authorization_state = 'orphaned' AND head.state IN ('authorized', 'orphaned'))
+          )
+      )
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'cleanup stop authorization evidence is incoherent');
 END;
 
 CREATE TRIGGER cleanup_leases_admission_id_guard
@@ -68,6 +287,12 @@ WHEN NEW.status = 'expired'
   OR NEW.predecessor_renew_at IS NOT NULL
   OR NEW.predecessor_blocker_code IS NOT NULL
   OR NEW.predecessor_blocker_json IS NOT NULL
+  OR NEW.predecessor_stop_authorization_attempt_id IS NOT NULL
+  OR NEW.predecessor_stop_authorization_owner IS NOT NULL
+  OR NEW.predecessor_stop_authorization_at IS NOT NULL
+  OR NEW.predecessor_stop_authorization_expires_at IS NOT NULL
+  OR NEW.predecessor_stop_authorization_state IS NOT NULL
+  OR NEW.predecessor_unexpected_exit_json IS NOT NULL
 BEGIN
   SELECT RAISE(ABORT, 'cleanup supersession evidence must start null');
 END;
@@ -103,6 +328,12 @@ WHEN OLD.status <> 'expired'
     AND NEW.predecessor_renew_at IS OLD.renew_at
     AND NEW.predecessor_blocker_code IS OLD.blocker_code
     AND NEW.predecessor_blocker_json IS OLD.blocker_json
+    AND NEW.predecessor_stop_authorization_attempt_id IS OLD.stop_authorization_attempt_id
+    AND NEW.predecessor_stop_authorization_owner IS OLD.stop_authorization_owner
+    AND NEW.predecessor_stop_authorization_at IS OLD.stop_authorization_at
+    AND NEW.predecessor_stop_authorization_expires_at IS OLD.stop_authorization_expires_at
+    AND NEW.predecessor_stop_authorization_state IS OLD.stop_authorization_state
+    AND NEW.predecessor_unexpected_exit_json IS OLD.unexpected_exit_json
     AND NEW.admission_id IS OLD.admission_id
     AND NEW.job_id IS OLD.job_id
     AND NEW.unit_name IS OLD.unit_name
@@ -127,6 +358,12 @@ WHEN OLD.status <> 'expired'
     AND NEW.renew_at IS OLD.renew_at
     AND NEW.complete_at IS OLD.complete_at
     AND NEW.handback_at IS OLD.handback_at
+    AND NEW.stop_authorization_attempt_id IS OLD.stop_authorization_attempt_id
+    AND NEW.stop_authorization_owner IS OLD.stop_authorization_owner
+    AND NEW.stop_authorization_at IS OLD.stop_authorization_at
+    AND NEW.stop_authorization_expires_at IS OLD.stop_authorization_expires_at
+    AND NEW.stop_authorization_state IS OLD.stop_authorization_state
+    AND NEW.unexpected_exit_json IS OLD.unexpected_exit_json
     AND EXISTS (
       SELECT 1
       FROM cleanup_leases AS replacement
@@ -182,6 +419,18 @@ WHEN OLD.status = 'expired'
     OR NEW.predecessor_renew_at IS NOT OLD.predecessor_renew_at
     OR NEW.predecessor_blocker_code IS NOT OLD.predecessor_blocker_code
     OR NEW.predecessor_blocker_json IS NOT OLD.predecessor_blocker_json
+    OR NEW.stop_authorization_attempt_id IS NOT OLD.stop_authorization_attempt_id
+    OR NEW.stop_authorization_owner IS NOT OLD.stop_authorization_owner
+    OR NEW.stop_authorization_at IS NOT OLD.stop_authorization_at
+    OR NEW.stop_authorization_expires_at IS NOT OLD.stop_authorization_expires_at
+    OR NEW.stop_authorization_state IS NOT OLD.stop_authorization_state
+    OR NEW.unexpected_exit_json IS NOT OLD.unexpected_exit_json
+    OR NEW.predecessor_stop_authorization_attempt_id IS NOT OLD.predecessor_stop_authorization_attempt_id
+    OR NEW.predecessor_stop_authorization_owner IS NOT OLD.predecessor_stop_authorization_owner
+    OR NEW.predecessor_stop_authorization_at IS NOT OLD.predecessor_stop_authorization_at
+    OR NEW.predecessor_stop_authorization_expires_at IS NOT OLD.predecessor_stop_authorization_expires_at
+    OR NEW.predecessor_stop_authorization_state IS NOT OLD.predecessor_stop_authorization_state
+    OR NEW.predecessor_unexpected_exit_json IS NOT OLD.predecessor_unexpected_exit_json
   )
 BEGIN
   SELECT RAISE(ABORT, 'expired cleanup supersession evidence is immutable');

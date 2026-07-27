@@ -88,12 +88,23 @@ function fakeRecovery(options: {
           admission_id: command.admissionId,
           job_id: command.jobId,
           status: 'admitted',
+          owner: command.owner,
           expires_at: command.expiresAt,
+          claim_at: null,
+          renew_at: null,
+          blocker_code: null,
+          blocker_json: null,
           credential_relative_path: command.credentialRelativePath,
           credential_sha256: command.credentialSha256,
           fence_generation: generation,
           fence_token_hash: command.fenceTokenHash,
           unit_name: command.unitName,
+          stop_authorization_attempt_id: null,
+          stop_authorization_owner: null,
+          stop_authorization_at: null,
+          stop_authorization_expires_at: null,
+          stop_authorization_state: null,
+          unexpected_exit_json: null,
         };
       } else if (command.kind === 'cleanup-admission-rotate' || command.kind === 'cleanup-admission-retry') {
         const previous = lease;
@@ -106,17 +117,44 @@ function fakeRecovery(options: {
           admission_id: command.admissionId,
           job_id: command.jobId,
           status: 'admitted',
+          owner: command.owner,
           expires_at: command.expiresAt,
           credential_relative_path: command.credentialRelativePath,
           credential_sha256: command.credentialSha256,
           fence_generation: generation,
           fence_token_hash: command.fenceTokenHash,
           unit_name: command.unitName,
+          claim_at: null,
+          renew_at: null,
+          blocker_code: null,
+          blocker_json: null,
+          stop_authorization_attempt_id: command.previousStopAuthorizationAttemptId ?? null,
+          stop_authorization_owner: command.previousStopAuthorizationOwner ?? null,
+          stop_authorization_at: command.previousStopAuthorizationAt ?? null,
+          stop_authorization_expires_at: command.previousStopAuthorizationExpiresAt ?? null,
+          stop_authorization_state: command.previousStopAuthorizationState ?? null,
+          unexpected_exit_json: command.previousUnexpectedExit ? JSON.stringify(command.previousUnexpectedExit) : null,
         };
+      } else if (command.kind === 'cleanup-admission-stop-authorize') {
+        // The durable store owns the authorization state. This adapter only
+        // needs to preserve the command's evidence for later fake reads.
+      } else if (command.kind === 'cleanup-admission-unexpected-exit' && lease !== null) {
+        lease.unexpected_exit_json = JSON.stringify(command.observation);
+      } else if (command.kind === 'cleanup-admission-stop-complete' && lease !== null) {
+        lease.stop_authorization_attempt_id = command.attemptId;
+        lease.stop_authorization_owner = command.authorizationOwner;
+        lease.stop_authorization_at = command.at;
+        lease.stop_authorization_expires_at = command.at;
+        lease.stop_authorization_state = 'consumed';
       } else if (command.kind === 'cleanup-admission-stop-failed' && lease !== null) {
         lease.status = 'blocking';
         lease.blocker_code = command.blockerCode;
         lease.blocker_json = JSON.stringify(command.blocker);
+        lease.stop_authorization_attempt_id = command.stopAuthorizationAttemptId;
+        lease.stop_authorization_owner = command.stopAuthorizationOwner;
+        lease.stop_authorization_at = command.stopAuthorizationAt;
+        lease.stop_authorization_expires_at = command.stopAuthorizationExpiresAt;
+        lease.stop_authorization_state = command.failure === 'authorization-orphaned' ? 'orphaned' : 'failed';
       }
       return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined } as const;
     },

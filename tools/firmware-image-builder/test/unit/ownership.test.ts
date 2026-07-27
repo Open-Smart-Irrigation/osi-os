@@ -9,6 +9,7 @@ import { BuilderStore, type JsonObject } from '../../api/src/store.js';
 import { encodeJson, normalizeJson } from '../../api/src/validation.js';
 import {
   PIPELINE_STAGE_NAMES,
+  type BuilderErrorCode,
   type JobState,
   type PipelineStageName,
 } from '../../domain/types.js';
@@ -25,6 +26,7 @@ const BEFORE = '2026-07-23T09:59:00.000Z';
 const ACTIVE = '2026-07-23T10:02:00.000Z'; const RECOVERY = '2026-07-23T10:03:00.000Z'; const EXPIRY = '2026-07-23T10:04:00.000Z';
 const SEALED = '2026-07-23T10:03:30.000Z'; const AFTER = '2026-07-23T10:03:45.000Z';
 const RETRY_AT = '2026-07-23T10:03:50.000Z'; const RETRY_CLAIM_AT = '2026-07-23T10:03:51.000Z'; const RETRY_COMPLETE_AT = '2026-07-23T10:03:52.000Z'; const RETRY_HAND_BACK_AT = '2026-07-23T10:03:53.000Z';
+const STOP_AT = '2026-07-23T10:04:30.000Z'; const STOP_RETRY_AT = '2026-07-23T10:04:45.000Z';
 const SOURCE_PREPARATION = Object.freeze({
   schemaVersion: 1 as const,
   sourceSha: SHA40,
@@ -248,6 +250,54 @@ async function claimedCleanup(jobId = 'job-1'): Promise<{ store: BuilderStore; o
   const snapshotValue = snapshot('present', jobId); const admission = cleanupAdmission(snapshotValue, jobId); result.ownership.apiWrite(admission);
   const claim: Extract<CleanupWriteCommand, { kind: 'claim-lease' }> = { kind: 'claim-lease', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, at: RECOVERY };
   result.ownership.cleanupWrite(claim); return { ...result, admission, snapshot: snapshotValue, claim };
+}
+function authorizeCleanupStop(target: Awaited<ReturnType<typeof claimedCleanup>>, options: {
+  readonly at: string;
+  readonly previousStatus?: 'admitted' | 'claimed' | 'failed' | 'blocking';
+  readonly previousBlockerCode?: BuilderErrorCode | null;
+  readonly previousBlocker?: JsonObject | null;
+  readonly explicitRetry?: boolean;
+  readonly expectedAuthorizationAttemptId?: string | null;
+  readonly previousStopAuthorizationAttemptId?: string | null;
+  readonly previousStopAuthorizationOwner?: string | null;
+  readonly previousStopAuthorizationAt?: string | null;
+  readonly previousStopAuthorizationExpiresAt?: string | null;
+  readonly previousStopAuthorizationState?: 'consumed' | 'failed' | 'orphaned' | null;
+  readonly attemptId: string;
+}) {
+  const previousStatus = options.previousStatus ?? 'claimed';
+  const authorizationOwner = `cleanup-stop:${options.attemptId}`;
+  const authorizationExpiresAt = '2026-07-23T10:05:30.000Z';
+  const command: Extract<ApiWriteCommand, { kind: 'cleanup-admission-stop-authorize' }> = {
+    kind: 'cleanup-admission-stop-authorize',
+    jobId: target.admission.jobId,
+    owner: 'api',
+    previousOwner: target.admission.owner,
+    previousAdmissionId: target.admission.admissionId,
+    previousStatus,
+    previousUnitName: target.admission.unitName,
+    previousFenceGeneration: 1,
+    previousFenceTokenHash: SHA64_B,
+    previousExpiresAt: target.admission.expiresAt,
+    previousClaimAt: target.claim.at,
+    previousRenewAt: null,
+    previousBlockerCode: options.previousBlockerCode ?? null,
+    previousBlocker: options.previousBlocker ?? null,
+    previousStopAuthorizationAttemptId: options.previousStopAuthorizationAttemptId,
+    previousStopAuthorizationOwner: options.previousStopAuthorizationOwner,
+    previousStopAuthorizationAt: options.previousStopAuthorizationAt,
+    previousStopAuthorizationExpiresAt: options.previousStopAuthorizationExpiresAt,
+    previousStopAuthorizationState: options.previousStopAuthorizationState,
+    authorizationOwner,
+    attemptId: options.attemptId,
+    authorizationAt: options.at,
+    authorizationExpiresAt,
+    explicitRetry: options.explicitRetry,
+    expectedAuthorizationAttemptId: options.expectedAuthorizationAttemptId,
+    at: options.at,
+  };
+  expect(target.ownership.apiWrite(command)).toMatchObject({ ok: true, kind: 'committed' });
+  return { attemptId: options.attemptId, authorizationOwner, authorizationAt: options.at, authorizationExpiresAt };
 }
 function failingOwnership(path: string): OwnershipStore {
   const db = openBuilderDatabase(path); const ownership = new OwnershipStore(db, { now: () => NOW, failBeforeCommit: () => { throw new Error('injected rollback'); } }); closers.push(() => db.close()); return ownership;
@@ -1617,12 +1667,16 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('persists cleanup stop failure evidence with exact predecessor and fence CAS', async () => {
     const target = await claimedCleanup('cleanup-stop-failure');
+    const firstAuthorization = authorizeCleanupStop(target, {
+      at: STOP_AT,
+      attemptId: `sta_${'1'.repeat(32)}`,
+    });
     const blocker = {
       kind: 'cleanup-unit-stop-failed',
       code: 'CLEANUP_UNIT_STOP_FAILED',
       unitName: target.admission.unitName,
       failure: 'stop-error',
-      observedAt: AFTER,
+      observedAt: STOP_AT,
       error: { message: 'systemd stop failed', code: null },
     } satisfies JsonObject;
     const command: Extract<ApiWriteCommand, { kind: 'cleanup-admission-stop-failed' }> = {
@@ -1640,11 +1694,15 @@ describe('actor-owned compare-and-set writes', () => {
       previousRenewAt: null,
       previousBlockerCode: null,
       previousBlocker: null,
+      stopAuthorizationAttemptId: firstAuthorization.attemptId,
+      stopAuthorizationOwner: firstAuthorization.authorizationOwner,
+      stopAuthorizationAt: firstAuthorization.authorizationAt,
+      stopAuthorizationExpiresAt: firstAuthorization.authorizationExpiresAt,
       failure: 'stop-error',
       blockerCode: 'CLEANUP_UNIT_STOP_FAILED',
       blocker,
       snapshot: target.snapshot,
-      at: AFTER,
+      at: STOP_AT,
     };
     expect(target.ownership.apiWrite(command)).toMatchObject({ ok: true, kind: 'committed' });
     expect(target.store.getJob('cleanup-stop-failure')).toMatchObject({ cleanupBlockerCode: 'CLEANUP_UNIT_STOP_FAILED', cleanupBlocker: blocker });
@@ -1655,20 +1713,43 @@ describe('actor-owned compare-and-set writes', () => {
     });
     const event = target.store.listEvents('cleanup-stop-failure').events.at(-1);
     expect(event).toMatchObject({ eventType: 'cleanup', payload: { admissionId: target.admission.admissionId, status: 'blocking', blockerCode: 'CLEANUP_UNIT_STOP_FAILED', blocker } });
-    const repeatedBlocker = { ...blocker, failure: 'still-active', observedAt: RETRY_AT, error: { message: 'cleanup predecessor remains active', code: null } } satisfies JsonObject;
+    const repeatedBlocker = { ...blocker, failure: 'still-active', observedAt: STOP_RETRY_AT, error: { message: 'cleanup predecessor remains active', code: null } } satisfies JsonObject;
+    const secondAuthorization = authorizeCleanupStop(target, {
+      at: STOP_RETRY_AT,
+      previousStatus: 'blocking',
+      previousBlockerCode: 'CLEANUP_UNIT_STOP_FAILED',
+      previousBlocker: blocker,
+      previousStopAuthorizationAttemptId: firstAuthorization.attemptId,
+      previousStopAuthorizationOwner: firstAuthorization.authorizationOwner,
+      previousStopAuthorizationAt: firstAuthorization.authorizationAt,
+      previousStopAuthorizationExpiresAt: firstAuthorization.authorizationExpiresAt,
+      previousStopAuthorizationState: 'failed',
+      explicitRetry: true,
+      expectedAuthorizationAttemptId: firstAuthorization.attemptId,
+      attemptId: `sta_${'2'.repeat(32)}`,
+    });
     expect(target.ownership.apiWrite({
       ...command,
       previousStatus: 'blocking',
       previousBlockerCode: 'CLEANUP_UNIT_STOP_FAILED',
       previousBlocker: blocker,
+      previousStopAuthorizationAttemptId: firstAuthorization.attemptId,
+      previousStopAuthorizationOwner: firstAuthorization.authorizationOwner,
+      previousStopAuthorizationAt: firstAuthorization.authorizationAt,
+      previousStopAuthorizationExpiresAt: firstAuthorization.authorizationExpiresAt,
+      previousStopAuthorizationState: 'failed',
+      stopAuthorizationAttemptId: secondAuthorization.attemptId,
+      stopAuthorizationOwner: secondAuthorization.authorizationOwner,
+      stopAuthorizationAt: secondAuthorization.authorizationAt,
+      stopAuthorizationExpiresAt: secondAuthorization.authorizationExpiresAt,
       failure: 'still-active',
       blocker: repeatedBlocker,
-      at: RETRY_AT,
+      at: STOP_RETRY_AT,
     })).toMatchObject({ ok: true, kind: 'committed' });
     expect(target.store.getJob('cleanup-stop-failure')).toMatchObject({ cleanupBlockerCode: 'CLEANUP_UNIT_STOP_FAILED', cleanupBlocker: repeatedBlocker });
     expect(target.store.listEvents('cleanup-stop-failure').events.at(-1)).toMatchObject({ eventType: 'cleanup', payload: { status: 'blocking', blockerCode: 'CLEANUP_UNIT_STOP_FAILED', blocker: repeatedBlocker, failure: 'still-active' } });
-    expect(target.ownership.apiWrite({ ...command, blocker: { ...blocker, error: { message: 'forged', code: null } }, at: '2026-07-23T10:03:55.000Z' })).toMatchObject({ ok: false, conflict: { kind: 'admission-mismatch' } });
-    expect(target.ownership.apiWrite({ ...command, previousOwner: 'forged-owner', at: '2026-07-23T10:03:56.000Z' })).toMatchObject({ ok: false, conflict: { kind: 'admission-mismatch' } });
+    expect(target.ownership.apiWrite({ ...command, blocker: { ...blocker, error: { message: 'forged', code: null } }, at: '2026-07-23T10:04:55.000Z' })).toMatchObject({ ok: false, conflict: { kind: 'admission-mismatch' } });
+    expect(target.ownership.apiWrite({ ...command, previousOwner: 'forged-owner', at: '2026-07-23T10:04:56.000Z' })).toMatchObject({ ok: false, conflict: { kind: 'admission-mismatch' } });
     db.close();
   });
 
@@ -1694,9 +1775,16 @@ describe('actor-owned compare-and-set writes', () => {
       code: 'CLEANUP_UNIT_STOP_FAILED',
       unitName: target.admission.unitName,
       failure: 'stop-error',
-      observedAt: RETRY_AT,
+      observedAt: STOP_AT,
       error: { message: 'systemd stop failed', code: null },
     } satisfies JsonObject;
+    const authorization = authorizeCleanupStop(target, {
+      at: STOP_AT,
+      previousStatus: 'failed',
+      previousBlockerCode: 'DOCKER_CONTAINER_ORPHANED',
+      previousBlocker,
+      attemptId: `sta_${'3'.repeat(32)}`,
+    });
     expect(target.ownership.apiWrite({
       kind: 'cleanup-admission-stop-failed',
       jobId: 'cleanup-failed-stop-failure',
@@ -1715,8 +1803,12 @@ describe('actor-owned compare-and-set writes', () => {
       failure: 'stop-error',
       blockerCode: 'CLEANUP_UNIT_STOP_FAILED',
       blocker,
+      stopAuthorizationAttemptId: authorization.attemptId,
+      stopAuthorizationOwner: authorization.authorizationOwner,
+      stopAuthorizationAt: authorization.authorizationAt,
+      stopAuthorizationExpiresAt: authorization.authorizationExpiresAt,
       snapshot: target.snapshot,
-      at: RETRY_AT,
+      at: STOP_AT,
     })).toMatchObject({ ok: true, kind: 'committed' });
     expect(target.store.getJob('cleanup-failed-stop-failure')).toMatchObject({
       cleanupBlockerCode: 'CLEANUP_UNIT_STOP_FAILED',
@@ -1770,6 +1862,18 @@ describe('actor-owned compare-and-set writes', () => {
     const setup = await claimedCleanup('cleanup-renew'); const before = setup.store.listEvents('cleanup-renew').events.length;
     expect(setup.ownership.cleanupWrite({ kind: 'renew-lease', jobId: 'cleanup-renew', admissionId: setup.admission.admissionId, owner: 'cleanup-a', unitName: setup.admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, expectedExpiresAt: EXPIRY, expiresAt: '2026-07-23T10:05:00.000Z', snapshot: setup.snapshot, at: RECOVERY }).ok).toBe(true);
     expect(setup.store.listEvents('cleanup-renew').events).toHaveLength(before + 1); expect(setup.store.listEvents('cleanup-renew').events.at(-1)?.eventType).toBe('cleanup_renew'); const db = openBuilderDatabase(setup.path); expect((db.prepare('SELECT expires_at FROM cleanup_leases WHERE job_id=?').get('cleanup-renew') as { expires_at: string }).expires_at).toBe('2026-07-23T10:05:00.000Z'); db.close();
+  });
+
+  it('rejects cleanup-worker renewal after a durable stop authorization commits', async () => {
+    const setup = await claimedCleanup('cleanup-renew-stop-authorized');
+    authorizeCleanupStop(setup, { at: STOP_AT, attemptId: `sta_${'4'.repeat(32)}` });
+    const beforeEvents = setup.store.listEvents('cleanup-renew-stop-authorized').events.length;
+    expect(setup.ownership.cleanupWrite({
+      kind: 'renew-lease', jobId: 'cleanup-renew-stop-authorized', admissionId: setup.admission.admissionId,
+      owner: 'cleanup-a', unitName: setup.admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B,
+      expectedExpiresAt: EXPIRY, expiresAt: '2026-07-23T10:05:00.000Z', snapshot: setup.snapshot, at: RECOVERY,
+    })).toMatchObject({ ok: false, conflict: { kind: 'stale-lease' } });
+    expect(setup.store.listEvents('cleanup-renew-stop-authorized').events).toHaveLength(beforeEvents);
   });
 
   it('isolates cleanup owner, unit, token, admission, generation, expiry, and hand-back conflicts', async () => {
