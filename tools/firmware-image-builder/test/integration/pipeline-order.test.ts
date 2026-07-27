@@ -222,6 +222,7 @@ interface Fixture {
   readonly operationOrder: TrustedOperationId[];
   readonly workspaceChecks: Array<readonly [PipelineStageName, 'before' | 'after']>;
   readonly publishedMetadata: Array<Readonly<{ build: JsonObject; verification: JsonObject }>>;
+  readonly finalizedVerification: JsonObject[];
   readonly publicationPreparationStages: Array<StoredStage | null>;
   readonly verifiedTargetEvidence: readonly unknown[];
   readonly sourceObservations: ReturnType<typeof createTargetSetupSourceObservations>;
@@ -248,7 +249,7 @@ async function fixture(options: {
   }>;
   readonly verifyProducedTargetEvidence?: boolean;
   readonly predictPublishPassed?: boolean;
-  readonly requireTrackedStagingBeforePrepare?: boolean;
+  readonly requirePreparationIntentBeforePrepare?: boolean;
 } = {}): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), 'osi-pipeline-order-'));
   temporaryDirectories.push(directory);
@@ -387,6 +388,7 @@ async function fixture(options: {
   ]> = [];
   const operationAttempts = new Map<TrustedOperationId, number>();
   const publishedMetadata: Array<Readonly<{ build: JsonObject; verification: JsonObject }>> = [];
+  const finalizedVerification: JsonObject[] = [];
   const publicationPreparationStages: Array<StoredStage | null> = [];
   const verifiedTargetEvidence: unknown[] = [];
   let prepared: PreparedPublication | null = null;
@@ -695,13 +697,23 @@ async function fixture(options: {
   const configObservations = createTargetSetupConfigObservations(configPhase);
   const publicationFiles = {
     prepare: async (value: Parameters<PipelineInput['services']['publicationFiles']['prepare']>[0]) => {
-      if (options.requireTrackedStagingBeforePrepare === true) {
+      if (options.requirePreparationIntentBeforePrepare === true) {
         expect(store.getJob(jobId)).toMatchObject({
           state: 'verifying',
-          publishState: 'staged',
-          artifactStagingPath: `staging/${jobId}/factory.img.gz`,
-          artifactSha256: HASH_A,
-          artifactSize: 100,
+          publishState: 'not_started',
+          artifactStagingPath: null,
+        });
+        expect(store.listEvents(jobId, { limit: 500 }).events.at(-1)).toMatchObject({
+          eventType: 'artifact',
+          payload: {
+            phase: 'preparing',
+            stagingDirectory: `staging/${jobId}`,
+            artifact: {
+              stagingPath: `staging/${jobId}/factory.img.gz`,
+              artifactSha256: HASH_A,
+              artifactSize: 100,
+            },
+          },
         });
       }
       publicationPreparationStages.push(store.getStage(jobId, 'verify'));
@@ -752,6 +764,22 @@ async function fixture(options: {
       verificationSha256: value.artifact.verificationSha256,
       staging: 'absent' as const,
     }),
+    finalizeVerification: async (value: Parameters<PipelineInput['services']['publicationFiles']['finalizeVerification']>[0]) => {
+      finalizedVerification.push(value.verificationManifest);
+      return {
+        verified: true as const,
+        finalPath: value.binding.finalPath,
+        artifactSha256: value.binding.artifactSha256,
+        artifactSize: value.binding.artifactSize,
+        checksumPath: `${value.binding.finalDirectory}/sha256sums`,
+        checksumSha256: value.artifact.checksumSha256,
+        manifestPath: `${value.binding.finalDirectory}/build-manifest.json`,
+        manifestSha256: value.artifact.manifestSha256,
+        verificationPath: `${value.binding.finalDirectory}/verification.json`,
+        verificationSha256: hash(value.verificationManifestBytes),
+        staging: 'absent' as const,
+      };
+    },
   };
   const publisherResponse: PublisherResponse = {
     available: true,
@@ -1050,6 +1078,7 @@ async function fixture(options: {
     operationOrder,
     workspaceChecks,
     publishedMetadata,
+    finalizedVerification,
     publicationPreparationStages,
     verifiedTargetEvidence,
     sourceObservations,
@@ -1337,7 +1366,18 @@ describe('trusted pipeline integration', () => {
           stage,
           outcome: 'passed',
         });
-        expect(evidence.operationId).toBeNull();
+        expect(evidence.operationId).toBe(({
+          preflight: null,
+          source: null,
+          'release-gates': 'check-mqtt-topics',
+          frontend: 'mirror-gui',
+          'target-setup': null,
+          feeds: 'install-feeds',
+          config: null,
+          build: 'build-image',
+          verify: 'verify-image',
+          publish: null,
+        } as const)[stage]);
       }
       const events = value.store.listEvents(value.input.jobId, { limit: 500 }).events;
       expect(events.filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
@@ -1387,6 +1427,14 @@ describe('trusted pipeline integration', () => {
         artifactStagingPath: null,
         artifactFinalPath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5/factory.img.gz`,
       });
+      expect(value.finalizedVerification).toHaveLength(1);
+      expect((value.finalizedVerification[0]!.observations as {
+        stageEvidence: Array<{ stage: string; outcome: string }>;
+      }).stageEvidence.at(-1)).toEqual({
+        stage: 'publish',
+        path: '09-publish.json',
+        outcome: 'passed',
+      });
     } finally {
       value.close();
     }
@@ -1413,6 +1461,8 @@ describe('trusted pipeline integration', () => {
         ),
         'utf8',
       )) as { operationId: null; observations: Record<string, unknown> };
+      expect(sourceEvidence.operationId).toBeNull();
+      expect(configEvidence.operationId).toBeNull();
       expect(sourceEvidence.observations).toMatchObject(value.sourceObservations);
       expect(configEvidence.observations).toMatchObject(value.configObservations);
       expect(Object.keys(
@@ -1519,8 +1569,8 @@ describe('trusted pipeline integration', () => {
     }
   });
 
-  it('persists artifact ownership before the first staging mutation', async () => {
-    const value = await fixture({ requireTrackedStagingBeforePrepare: true });
+  it('persists a preparation intent before the first staging mutation without claiming staged files', async () => {
+    const value = await fixture({ requirePreparationIntentBeforePrepare: true });
     try {
       await expect(createPipeline(value.input).run()).resolves.toMatchObject({
         state: 'succeeded',
@@ -1599,9 +1649,9 @@ describe('trusted pipeline integration', () => {
       )) as Record<string, unknown>;
       expect(evidence).toMatchObject({
         outcome: 'failed',
-        operationId: null,
+        operationId,
       });
-      expect((evidence.error as Record<string, unknown>).operationId).toBeUndefined();
+      expect((evidence.error as Record<string, unknown>).operationId).toBe(operationId);
       expect(value.store.getOperation(value.input.jobId, operationId, 1)).toMatchObject({
         operationId,
         outcome: 'failed',
@@ -1658,9 +1708,10 @@ describe('trusted pipeline integration', () => {
       )) as Record<string, unknown>;
       expect(evidence).toMatchObject({
         outcome: 'failed',
-        operationId: null,
+        operationId: 'verify-profile-parity',
       });
-      expect((evidence.error as Record<string, unknown>).operationId).toBeUndefined();
+      expect((evidence.error as Record<string, unknown>).operationId)
+        .toBe('verify-profile-parity');
       expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
         .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
     } finally {

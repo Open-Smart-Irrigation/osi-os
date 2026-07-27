@@ -1,9 +1,10 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import {
   lstat,
   mkdir,
   open,
+  rename,
 } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import {
@@ -256,6 +257,40 @@ interface DirectoryChain {
 
 function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+export async function holdInstalledPublisher(path: string): Promise<Readonly<{
+  executable: string;
+  sha256: string;
+  bytes: Buffer;
+  close: () => Promise<void>;
+}>> {
+  const handle = await open(path, READ_FLAGS);
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || (before.mode & 0o111) === 0) {
+      throw new Error('installed publisher is not an executable regular file');
+    }
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    if (
+      before.dev !== after.dev
+      || before.ino !== after.ino
+      || before.size !== after.size
+      || before.mtimeMs !== after.mtimeMs
+    ) {
+      throw new Error('installed publisher changed while establishing authority');
+    }
+    return Object.freeze({
+      executable: `/proc/${String(process.pid)}/fd/${String(handle.fd)}`,
+      sha256: sha256(bytes),
+      bytes,
+      close: () => handle.close(),
+    });
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 function fdPath(parent: FileHandle, name?: string): string {
@@ -1005,6 +1040,117 @@ function createPublicationFiles(
         },
       );
     },
+    async finalizeVerification(input): Promise<FinalPublicationProof> {
+      const canonicalBytes = encodeJson(
+        input.verificationManifest,
+        'terminal verification manifest',
+        true,
+      );
+      const observations = input.verificationManifest.observations;
+      const publishEvidence = observations !== null
+        && typeof observations === 'object'
+        && !Array.isArray(observations)
+        ? (observations as JsonObject).publishEvidence
+        : null;
+      const stages = observations !== null
+        && typeof observations === 'object'
+        && !Array.isArray(observations)
+        ? (observations as JsonObject).stageEvidence
+        : null;
+      const publishEvidenceRecord = publishEvidence !== null
+        && typeof publishEvidence === 'object'
+        && !Array.isArray(publishEvidence)
+        ? publishEvidence as JsonObject
+        : null;
+      const lastStage = Array.isArray(stages)
+        ? stages.at(-1) as JsonObject | undefined
+        : undefined;
+      if (
+        canonicalBytes !== input.verificationManifestBytes
+        || publishEvidenceRecord === null
+        || publishEvidenceRecord.path !== input.publishEvidencePath
+        || publishEvidenceRecord.sha256 !== input.publishEvidenceSha256
+        || !Array.isArray(stages)
+        || stages.length !== 10
+        || lastStage?.stage !== 'publish'
+        || lastStage.outcome !== 'passed'
+      ) {
+        throw new Error('terminal verification manifest does not bind publish evidence');
+      }
+      return withApprovedRootSnapshot(
+        loaded.pathAuthorities.approvedRoots,
+        input.binding.rootId,
+        async ({ snapshot }) => {
+          if (
+            snapshot.path !== input.binding.rootPath
+            || snapshot.device !== input.binding.rootDevice
+            || snapshot.inode !== input.binding.rootInode
+          ) {
+            throw new Error('terminal verification root identity changed');
+          }
+          const root = await open(snapshot.path, DIRECTORY_FLAGS);
+          let final: DirectoryChain | null = null;
+          const temporaryName = `.verification-${safeSegment(input.binding.jobId, 'job ID')}-${randomUUID()}.tmp`;
+          try {
+            final = await openDirectoryChain(
+              root,
+              [
+                input.binding.branchSlug,
+                input.binding.pinnedSha,
+                input.binding.targetId,
+              ],
+              false,
+            );
+            const running = await readHeldFile(final.directory, 'verification.json');
+            if (running.sha256 !== input.artifact.verificationSha256) {
+              throw new Error('published verification input differs from staged authority');
+            }
+            await writeHeldFile(
+              final.directory,
+              temporaryName,
+              input.verificationManifestBytes,
+            );
+            await rename(
+              fdPath(final.directory, temporaryName),
+              fdPath(final.directory, 'verification.json'),
+            );
+            await final.directory.sync();
+            const [image, checksum, manifest, verification] = await Promise.all([
+              readHeldFile(final.directory, basename(input.binding.finalPath)),
+              readHeldFile(final.directory, 'sha256sums'),
+              readHeldFile(final.directory, 'build-manifest.json'),
+              readHeldFile(final.directory, 'verification.json'),
+            ]);
+            if (
+              image.sha256 !== input.binding.artifactSha256
+              || image.size !== input.binding.artifactSize
+              || checksum.sha256 !== input.artifact.checksumSha256
+              || manifest.sha256 !== input.artifact.manifestSha256
+              || verification.sha256 !== sha256(input.verificationManifestBytes)
+              || verification.bytes.toString('utf8') !== input.verificationManifestBytes
+            ) {
+              throw new Error('terminal publication files failed held revalidation');
+            }
+            return Object.freeze({
+              verified: true,
+              finalPath: input.binding.finalPath,
+              artifactSha256: image.sha256,
+              artifactSize: image.size,
+              checksumPath: `${input.binding.finalDirectory}/sha256sums`,
+              checksumSha256: checksum.sha256,
+              manifestPath: `${input.binding.finalDirectory}/build-manifest.json`,
+              manifestSha256: manifest.sha256,
+              verificationPath: `${input.binding.finalDirectory}/verification.json`,
+              verificationSha256: verification.sha256,
+              staging: 'absent',
+            });
+          } finally {
+            if (final !== null) await closeHandles(final.handles);
+            await root.close();
+          }
+        },
+      );
+    },
   });
 }
 
@@ -1269,11 +1415,12 @@ async function createProductionComposition(
   let stateRootHandle: FileHandle | null = null;
   let stateRootIdentity: Readonly<{ path: string; device: number; inode: number }> | null = null;
   let approvedRootHandle: FileHandle | null = null;
+  let heldPublisher: Awaited<ReturnType<typeof holdInstalledPublisher>> | null = null;
   try {
-    const [lockBytes, manifestBytes, publisherBytes] = await Promise.all([
+    heldPublisher = await holdInstalledPublisher(publisherPath);
+    const [lockBytes, manifestBytes] = await Promise.all([
       readStableFile(loaded.config.builderLockPath),
       readStableFile(manifestPath),
-      readStableFile(publisherPath),
     ]);
     const lock = parseInstalledLock(loaded.config.builderLockPath, lockBytes);
     const installedVersion = dirname(loaded.config.builderLockPath).split('/').at(-1);
@@ -1283,7 +1430,7 @@ async function createProductionComposition(
     const publisherAuthority = validateInstalledPublisherAuthority(
       lock,
       installedVersion,
-      publisherBytes,
+      heldPublisher.bytes,
     );
     const manifest = loadManifestFromBytes(manifestPath, manifestBytes);
     const job = store.getJob(args.jobId);
@@ -1856,9 +2003,10 @@ async function createProductionComposition(
       },
       publicationFiles,
       publisher: createRunnerPublisherClient({
-        executable: publisherPath,
+        executable: heldPublisher.executable,
         approvedRoots: loaded.config.approvedOutputRoots,
         expectedVersion: publisherAuthority.packageVersion,
+        expectedSourceSha256: publisherAuthority.publisherSha256,
       }),
     };
 
@@ -1889,11 +2037,13 @@ async function createProductionComposition(
         await workspaceHandle?.close().catch(() => undefined);
         await approvedRootHandle?.close().catch(() => undefined);
         await stateRootHandle?.close().catch(() => undefined);
+        await heldPublisher?.close().catch(() => undefined);
       },
     });
   } catch (error) {
     await approvedRootHandle?.close().catch(() => undefined);
     await stateRootHandle?.close().catch(() => undefined);
+    await heldPublisher?.close().catch(() => undefined);
     throw error;
   }
 }

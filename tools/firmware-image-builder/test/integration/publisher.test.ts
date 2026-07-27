@@ -1,4 +1,5 @@
 import { execFile as execFileCallback } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { join } from 'node:path';
@@ -32,6 +33,7 @@ const TARGET = 'rpi-5';
 let base = '';
 let root = '';
 let staging = '';
+let publisherSourceSha256 = '';
 
 async function runPublisher(...argv: string[]) {
   return runBinary(binary, ...argv);
@@ -63,6 +65,9 @@ async function createStaging(jobId: string, selectedRoot = root): Promise<string
 
 describe('native publisher integration', () => {
   beforeAll(async () => {
+    publisherSourceSha256 = createHash('sha256')
+      .update(await readFile(join(publisherDirectory, 'osi-image-publish.c')))
+      .digest('hex');
     await execFile('make', ['-C', publisherDirectory, 'clean', 'all', 'test-hooks'], { env: { PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' } });
     base = await mkdtemp('/tmp/osi-image-publisher-');
     root = join(base, 'images');
@@ -117,6 +122,7 @@ describe('native publisher integration', () => {
       executable: binary,
       approvedRoots: [{ id: 'images', label: 'Images', path: root, quarantinePath: `${root}/.osi-image-builder/quarantine` }],
       expectedVersion: '0.1.0',
+      expectedSourceSha256: publisherSourceSha256,
     });
     const clientRecheck = await productionClient.recheck({
       rootId: 'images',
@@ -235,6 +241,7 @@ describe('native publisher integration', () => {
       executable: binary,
       approvedRoots: [{ id: 'missing', label: 'Missing', path: missingRoot, quarantinePath: `${missingRoot}/.osi-image-builder/quarantine` }],
       expectedVersion: '0.1.0',
+      expectedSourceSha256: publisherSourceSha256,
     });
     const request = { rootId: 'missing', jobId: 'job-missing-root', branchSlug: 'feature%2Fmissing-root', sourceSha: SHA, targetId: 'rpi-5' as const };
     await expect(missingClient.publish(request)).resolves.toMatchObject({
@@ -262,6 +269,7 @@ describe('native publisher integration', () => {
       executable: binary,
       approvedRoots: [{ id: 'invalid', label: 'Invalid staging', path: invalidRoot, quarantinePath: `${invalidRoot}/.osi-image-builder/quarantine` }],
       expectedVersion: '0.1.0',
+      expectedSourceSha256: publisherSourceSha256,
     });
     await expect(invalidClient.publish({ ...request, rootId: 'invalid', jobId: 'job-invalid-staging' })).resolves.toMatchObject({ errorCode: 'PUBLISH_FAILED' });
     await expect(invalidClient.quarantine({ rootId: 'invalid', jobId: 'job-invalid-staging' })).resolves.toMatchObject({ errorCode: 'QUARANTINE_PENDING' });

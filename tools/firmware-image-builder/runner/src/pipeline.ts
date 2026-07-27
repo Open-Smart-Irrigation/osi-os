@@ -295,6 +295,16 @@ export interface PipelineServices {
         artifact: ArtifactInput;
       }>,
     ) => Promise<FinalPublicationProof>;
+    readonly finalizeVerification: (
+      input: Readonly<{
+        binding: PublicationBinding;
+        artifact: ArtifactInput;
+        verificationManifest: JsonObject;
+        verificationManifestBytes: string;
+        publishEvidencePath: string;
+        publishEvidenceSha256: string;
+      }>,
+    ) => Promise<FinalPublicationProof>;
   };
   readonly publisher: PublisherClient;
 }
@@ -538,6 +548,7 @@ function validateServiceComposition(input: PipelineInput): void {
     [input.services?.publicationFiles?.prepare, 'publicationFiles.prepare'],
     [input.services?.publicationFiles?.reopenStaging, 'publicationFiles.reopenStaging'],
     [input.services?.publicationFiles?.verifyFinal, 'publicationFiles.verifyFinal'],
+    [input.services?.publicationFiles?.finalizeVerification, 'publicationFiles.finalizeVerification'],
     [input.services?.publisher?.publish, 'publisher.publish'],
     [input.services?.publisher?.recheck, 'publisher.recheck'],
     [input.services?.publisher?.quarantine, 'publisher.quarantine'],
@@ -807,8 +818,7 @@ function validatePublisherPathEvidence(
     response.sourceRelativePath !== expected.source
     || response.destinationRelativePath !== destination
     || response.publisherVersion !== authority.packageVersion
-    || typeof response.publisherSourceSha256 !== 'string'
-    || !SHA256.test(response.publisherSourceSha256)
+    || response.publisherSourceSha256 !== authority.publisherSha256
   ) {
     throw new Error('publisher path or executable evidence does not match the publication binding');
   }
@@ -1309,7 +1319,7 @@ export function createPipeline(input: PipelineInput): {
       throw new Error(`${stage} has no trusted operation evidence`);
     }
     return {
-      operationId: null,
+      operationId: stage === 'feeds' ? operationIdFor(phase.executions) : null,
       commands: phase.executions.map(({ command }) => command),
       observations: phase.observations,
     };
@@ -1469,10 +1479,10 @@ export function createPipeline(input: PipelineInput): {
       verificationSha256: sha256(metadata.verificationBytes),
     });
     write({
-      kind: 'artifact',
+      kind: 'artifact-preparation-intent',
       expectedState: 'verifying',
-      state: 'verifying',
-      ...plannedArtifact,
+      stagingDirectory,
+      artifact: plannedArtifact,
     });
     const prepared = await input.services.publicationFiles.prepare({
       job,
@@ -1500,10 +1510,73 @@ export function createPipeline(input: PipelineInput): {
     if (!sameArtifact(plannedArtifact, artifactInput)) {
       throw new Error('publication preparation differs from persisted staging ownership');
     }
+    write({
+      kind: 'artifact',
+      expectedState: 'verifying',
+      state: 'verifying',
+      ...artifactInput,
+    });
     preparedPublication = reopened;
     preparedArtifact = artifactInput;
     buildManifest = metadata.build;
     verificationManifest = metadata.verification;
+  };
+
+  const terminalVerification = (
+    evidence: EvidencePublication,
+  ): Readonly<{ manifest: JsonObject; bytes: string }> => {
+    if (verificationManifest === null) {
+      throw new Error('staged verification manifest is unavailable');
+    }
+    const observations = verificationManifest.observations;
+    if (observations === null || typeof observations !== 'object' || Array.isArray(observations)) {
+      throw new Error('staged verification observations are invalid');
+    }
+    const stageEvidence = (observations as JsonObject).stageEvidence;
+    if (!Array.isArray(stageEvidence) || stageEvidence.length !== PIPELINE_STAGE_NAMES.length) {
+      throw new Error('staged verification stage aggregation is invalid');
+    }
+    const terminalStages = stageEvidence.map((entry, index) => {
+      if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new Error('staged verification stage record is invalid');
+      }
+      const record = entry as JsonObject;
+      if (
+        record.stage !== PIPELINE_STAGE_NAMES[index]
+        || record.path !== `${String(index).padStart(2, '0')}-${PIPELINE_STAGE_NAMES[index]}.json`
+      ) {
+        throw new Error('staged verification stage record is out of order');
+      }
+      if (index === PIPELINE_STAGE_NAMES.length - 1) {
+        if (record.outcome !== 'running') {
+          throw new Error('staged verification predicts a terminal publication outcome');
+        }
+        return {
+          stage: 'publish',
+          path: '09-publish.json',
+          outcome: 'passed',
+        };
+      }
+      if (record.outcome !== 'passed') {
+        throw new Error('staged verification contains a non-passed prerequisite');
+      }
+      return record;
+    });
+    const manifest = canonicalObject({
+      ...verificationManifest,
+      observations: {
+        ...(observations as JsonObject),
+        stageEvidence: terminalStages,
+        publishEvidence: {
+          path: evidence.path,
+          sha256: evidence.sha256,
+        },
+      },
+    }, 'terminal verification manifest');
+    return {
+      manifest,
+      bytes: encodeJson(manifest, 'terminal verification manifest', true),
+    };
   };
 
   const createBinding = (job: JobRecord): PublicationBinding => {
@@ -1786,14 +1859,14 @@ export function createPipeline(input: PipelineInput): {
     renewLease();
     const finishedAt = now();
     const contract = errorContract(error, stage, job.requestId, operationId);
-    const evidenceError = summaryError(contract);
+    const evidenceError = operationId === null ? summaryError(contract) : contract;
     const evidence = await withLeaseHeartbeat(() => input.evidenceWriter.write({
       jobId: job.jobId,
       stage,
       startedAt,
       finishedAt,
       outcome: 'failed',
-      operationId: null,
+      operationId,
       commands,
       inputs: {
         targetId: job.targetId,
@@ -1932,7 +2005,7 @@ export function createPipeline(input: PipelineInput): {
         startedAt,
         finishedAt,
         outcome: 'passed',
-        operationId: null,
+        operationId: stageResult.operationId,
         commands: stageResult.commands,
         inputs: {
           targetId: job.targetId,
@@ -1948,6 +2021,25 @@ export function createPipeline(input: PipelineInput): {
         if (publicationBinding === null || publishStartedAt === null) {
           throw new Error('publication terminal binding is incomplete');
         }
+        if (preparedArtifact === null) {
+          throw new Error('publication terminal artifact is incomplete');
+        }
+        const priorVerificationSha256 = preparedArtifact.verificationSha256;
+        const terminal = terminalVerification(evidence);
+        const finalProof = validateFinalProof(await withLeaseHeartbeat(
+          () => input.services.publicationFiles.finalizeVerification({
+            binding: publicationBinding!,
+            artifact: preparedArtifact!,
+            verificationManifest: terminal.manifest,
+            verificationManifestBytes: terminal.bytes,
+            publishEvidencePath: evidence.path,
+            publishEvidenceSha256: evidence.sha256,
+          }),
+        ), publicationBinding);
+        if (finalProof.verificationSha256 !== sha256(terminal.bytes)) {
+          throw new Error('terminal verification replacement hash is invalid');
+        }
+        verificationManifest = terminal.manifest;
         const publishedAt = now();
         const terminalAt = now();
         write({
@@ -1962,6 +2054,8 @@ export function createPipeline(input: PipelineInput): {
           publishStartedAt,
           publishedAt,
           terminalAt,
+          priorVerificationSha256,
+          verificationSha256: finalProof.verificationSha256,
         });
         return;
       }

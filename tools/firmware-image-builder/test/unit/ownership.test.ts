@@ -980,6 +980,54 @@ describe('actor-owned compare-and-set writes', () => {
     expect(failed.store.getJob('job-3')).toMatchObject({ state: 'failed', artifactStagingPath: 'staging/image', publishState: 'blocked' });
   });
 
+  it('recovers an exact quarantine rename after a crash before the terminal write', async () => {
+    const jobId = 'quarantine-crash-recovery';
+    const target = await fixture(jobId);
+    toPublishing(target.ownership, jobId);
+    seedLogs(target.path, jobId);
+    const quarantinePath = `.osi-image-builder/quarantine/${jobId}`;
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      kind: 'publish-quarantine-intent',
+      expectedState: 'publishing',
+      quarantinePath,
+    }).ok).toBe(true);
+    const base = recoveryEvidence(jobId, 'failed');
+    const evidence: PublishRecoveryEvidence = {
+      ...base,
+      observed: {
+        ...base.observed,
+        staging: { state: 'absent', path: null, sha256: null },
+        quarantine: {
+          state: 'present',
+          path: quarantinePath,
+          held: true,
+          artifactPath: `${quarantinePath}/image`,
+          artifactSize: 10,
+          artifactSha256: SHA64,
+        },
+      },
+    };
+
+    expect(target.ownership.apiWrite({
+      kind: 'publish-recovery',
+      jobId,
+      expectedState: 'publishing',
+      at: RECOVERY,
+      state: 'failed',
+      evidence,
+      errorCode: 'PUBLISH_RECOVERY_FAILED',
+      error: { reason: 'quarantine completed before runner crash' },
+    }).ok).toBe(true);
+    expect(target.store.getJob(jobId)).toMatchObject({
+      state: 'failed',
+      publishState: 'blocked',
+      artifactStagingPath: null,
+      artifactQuarantinePath: quarantinePath,
+      artifactQuarantineIntentPath: null,
+    });
+  });
+
   it('commits failed publish recovery for missing, corrupt, and partial final evidence', async () => {
     const cases: Array<[string, (evidence: PublishRecoveryEvidence) => PublishRecoveryEvidence]> = [
       ['missing-sidecars', (evidence) => ({ ...evidence, observed: { ...evidence.observed, checksum: { present: false, path: 'staging/sums', contents: null, sha256: null }, manifest: { present: false, path: 'staging/manifest', bytes: null, content: null, sha256: null }, verification: { present: false, path: 'staging/verify', bytes: null, content: null, sha256: null } } })],

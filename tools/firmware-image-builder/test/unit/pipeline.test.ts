@@ -1,20 +1,25 @@
 import { createHash } from 'node:crypto';
+import { execFile as execFileCallback } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
 import {
+  chmod,
   mkdtemp,
   open,
   readFile,
+  rename,
   rm,
   utimes,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import { describe, expect, it, vi } from 'vitest';
 
 import {
   parseRunnerArguments,
+  holdInstalledPublisher,
   resolveTrustedOperationRequest,
   runRunner,
   stageVerifiedArtifact,
@@ -38,6 +43,7 @@ const SHA256 = 'b'.repeat(64);
 const PUBLISHER_SHA = 'c'.repeat(64);
 const PUBLISHER_VERSION = '2026.07.27.1';
 const JOB_ID = 'job-pipeline-unit';
+const execFile = promisify(execFileCallback);
 
 describe('production runner composition', () => {
   it('constructs its own production pipeline instead of accepting a bootstrap', () => {
@@ -85,6 +91,34 @@ describe('production runner composition', () => {
       '2026.07.27.2',
       publisherBytes,
     )).toThrow(/package version/i);
+  });
+
+  it('executes the held publisher inode after its installed pathname is replaced', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'osi-held-publisher-'));
+    const installed = join(directory, 'osi-image-publish');
+    const replacement = join(directory, 'replacement');
+    const originalBytes = Buffer.from('#!/bin/sh\nprintf held-publisher\n');
+    try {
+      await writeFile(installed, originalBytes);
+      await chmod(installed, 0o555);
+      const held = await holdInstalledPublisher(installed);
+      try {
+        await writeFile(replacement, '#!/bin/sh\nprintf replaced-publisher\n');
+        await chmod(replacement, 0o555);
+        await rename(replacement, installed);
+
+        await expect(execFile(held.executable, [], {
+          env: { PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' },
+        })).resolves.toMatchObject({ stdout: 'held-publisher' });
+        expect(held.sha256).toBe(
+          createHash('sha256').update(originalBytes).digest('hex'),
+        );
+      } finally {
+        await held.close();
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('stages and hashes a real artifact through a readable held descriptor', async () => {

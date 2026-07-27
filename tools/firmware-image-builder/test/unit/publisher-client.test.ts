@@ -62,6 +62,7 @@ function client(executor: PublisherCommandExecutor) {
     executable: '/opt/osi-image-builder/bin/osi-image-publish',
     approvedRoots: [{ id: 'images', label: 'Images', path: ROOT, quarantinePath: `${ROOT}/.osi-image-builder/quarantine` }],
     expectedVersion: VERSION,
+    expectedSourceSha256: SOURCE_HASH,
     commandExecutor: executor,
   });
 }
@@ -89,12 +90,23 @@ describe('publisher client', () => {
         quarantinePath: `${ROOT}/.osi-image-builder/quarantine`,
       }],
       expectedVersion: installedVersion,
+      expectedSourceSha256: SOURCE_HASH,
       commandExecutor: executor,
     });
 
     await expect(publisher.publish(request)).resolves.toMatchObject({
       publisherVersion: installedVersion,
     });
+  });
+
+  it('rejects a publisher result from bytes other than the held lock authority', async () => {
+    const executor = fakeExecutor(result(validPublishOutput({
+      publisherSourceSha256: 'b'.repeat(64),
+    })));
+
+    await expect(client(executor).publish(request)).rejects.toThrow(
+      /publisher source hash evidence/i,
+    );
   });
 
   it('rejects arbitrary paths and unsafe publication components before invoking the helper', async () => {
@@ -185,6 +197,7 @@ describe('publisher client', () => {
       executable: '/opt/osi-image-builder/bin/osi-image-publish',
       approvedRoots: [{ id: 'images', label: 'Images', path: ROOT, quarantinePath: `${ROOT}/.osi-image-builder/quarantine` }],
       expectedVersion: VERSION,
+      expectedSourceSha256: SOURCE_HASH,
       commandExecutor: executor,
     }).publish(request);
     expect(published).toMatchObject({ available: true, published: true });
@@ -192,7 +205,7 @@ describe('publisher client', () => {
 
   it('rejects duplicate roots and contradictory or incomplete helper results', async () => {
     const root = { id: 'images', label: 'Images', path: ROOT, quarantinePath: `${ROOT}/.osi-image-builder/quarantine` };
-    expect(() => createPublisherClient({ executable: '/opt/osi-image-builder/bin/osi-image-publish', approvedRoots: [root, root], expectedVersion: VERSION, commandExecutor: fakeExecutor(result(validPublishOutput())) })).toThrow(/duplicate/i);
+    expect(() => createPublisherClient({ executable: '/opt/osi-image-builder/bin/osi-image-publish', approvedRoots: [root, root], expectedVersion: VERSION, expectedSourceSha256: SOURCE_HASH, commandExecutor: fakeExecutor(result(validPublishOutput())) })).toThrow(/duplicate/i);
 
     const cases = [
       result(validPublishOutput({ extra: true })),

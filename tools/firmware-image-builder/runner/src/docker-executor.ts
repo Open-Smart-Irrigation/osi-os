@@ -3,7 +3,7 @@ import { createOperationDefinition, hashOperationDefinition, type OperationArgvC
 import { parseCanonicalBuilderImageReference, selectExactRepositoryDigest } from '../../builder/validate-builder.js';
 import type { BuilderErrorCode, JobState, TrustedOperationId } from '../../domain/types.js';
 import type { LogCleanupProof, OperationCleanupProof, RunnerWriteCommand } from '../../api/src/ownership.js';
-import type { JobRecord, JsonObject, OperationInput } from '../../api/src/store.js';
+import type { JobRecord, JsonObject, OperationInput, StoredOperation } from '../../api/src/store.js';
 
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const JOB_LABEL = 'org.osi.image-builder.job-id';
@@ -70,6 +70,7 @@ export interface DockerJobRead extends Pick<JobRecord,
 
 export interface BuilderStoreLike {
   getJob(jobId: string): DockerJobRead;
+  getOperation?(jobId: string, operationId: TrustedOperationId, attempt: number): StoredOperation | OperationInput | null;
 }
 
 export interface OwnershipStoreLike {
@@ -472,6 +473,100 @@ async function proveAbsent(options: DockerExecutorOptions, id: string): Promise<
   return proveLabelAbsent(options);
 }
 
+function exactPersistedIdentity(options: DockerExecutorOptions, job: DockerJobRead): {
+  readonly id: string;
+  readonly labels: JsonObject;
+  readonly stoppedAt: string;
+} {
+  const labels = {
+    [JOB_LABEL]: options.jobId,
+    [MANIFEST_LABEL]: options.manifestSha256,
+  };
+  if (
+    job.containerId === null
+    || job.containerName !== options.containerName
+    || job.containerImageDigest !== options.imageDigest
+    || job.containerLabelJobId !== options.jobId
+    || job.containerLabelManifestSha !== options.manifestSha256
+    || JSON.stringify(job.containerLabels) !== JSON.stringify(labels)
+    || job.containerStoppedAt === null
+  ) {
+    fail('persisted Docker identity does not match the trusted operation');
+  }
+  return {
+    id: job.containerId,
+    labels,
+    stoppedAt: canonicalInstant(job.containerStoppedAt, 'persisted container stoppedAt'),
+  };
+}
+
+async function recoverRemovedContainer(
+  options: DockerExecutorOptions,
+  job: DockerJobRead,
+): Promise<DockerExecutionResult> {
+  const identity = exactPersistedIdentity(options, job);
+  const operation = options.store.getOperation?.(
+    options.jobId,
+    options.operationId,
+    options.attempt,
+  );
+  const operationFinishedAt = operation?.finishedAt;
+  const operationOutcome = operation?.outcome;
+  if (
+    operation === undefined
+    || operation === null
+    || operation.operationId !== options.operationId
+    || operation.attempt !== options.attempt
+    || operationOutcome === undefined
+    || operationOutcome === null
+    || operationFinishedAt === undefined
+    || operationFinishedAt === null
+    || operation.containerId !== identity.id
+    || operation.containerName !== options.containerName
+    || operation.containerImageDigest !== options.imageDigest
+    || operation.containerLabelJobId !== options.jobId
+    || operation.containerLabelManifestSha !== options.manifestSha256
+  ) {
+    fail('persisted Docker operation does not bind retained cleanup identity');
+  }
+  const observedAt = await proveAbsent(options, identity.id);
+  const logs = validateLogProof(
+    await options.finalizeLogs({ operationFinishedAt }),
+    operationFinishedAt,
+  );
+  if (logs.verifiedAt > observedAt) fail('log proof is from the future relative to recovered cleanup');
+  const proof: OperationCleanupProof = {
+    kind: 'container-absent',
+    id: identity.id,
+    name: options.containerName,
+    imageDigest: options.imageDigest,
+    labels: identity.labels,
+    stoppedAt: identity.stoppedAt,
+    observedAt,
+    globalLabelResult: 'no-match',
+    logs,
+  };
+  runner(options, (snapshot) => ({
+    kind: 'operation-cleanup',
+    jobId: options.jobId,
+    owner: snapshot.owner,
+    runnerUnit: snapshot.unit,
+    leaseExpiresAt: snapshot.leaseExpiresAt,
+    at: observedAt,
+    expectedState: snapshot.expectedState,
+    operationId: options.operationId,
+    attempt: options.attempt,
+    proof,
+  }));
+  return {
+    available: true,
+    outcome: operationOutcome,
+    containerId: identity.id,
+    exitCode: operation.exitCode ?? null,
+    mutationCount: 1,
+  };
+}
+
 async function cleanupOrphan(options: DockerExecutorOptions, id: string): Promise<{ readonly removedAt: string; readonly observedAt: string }> {
   const removed = await runDocker(options, ['rm', id]);
   requireSuccess(removed, 'Docker orphan cleanup');
@@ -574,7 +669,7 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
       const image = inspectImage(requireSuccess(await runDocker(options, ['image', 'inspect', '--format={{json .}}', options.imageReference]), 'Docker image inspect'), options);
       const job = options.store.getJob(options.jobId);
       const sourceEpoch = sourceDateEpoch(job.sourceCommitTime);
-      if (!identityIsNull(job)) fail('persisted Docker identity is not clear before create');
+      if (!identityIsNull(job)) return recoverRemovedContainer(options, job);
       await proveLabelAbsent(options);
       const startedAt = now(options);
       const argvHash = hashOperationDefinition(definition);

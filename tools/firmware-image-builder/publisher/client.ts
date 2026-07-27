@@ -44,6 +44,7 @@ export interface PublisherClientOptions {
   readonly executable: string;
   readonly approvedRoots: readonly ApprovedOutputRoot[];
   readonly expectedVersion: string;
+  readonly expectedSourceSha256: string;
   readonly commandExecutor?: PublisherCommandExecutor;
   readonly timeoutMs?: number;
 }
@@ -100,9 +101,9 @@ function booleanField(value: Record<string, unknown>, key: string): boolean {
   return field;
 }
 
-function validatePathEvidence(value: Record<string, unknown>, sourceRelativePath: string, destinationRelativePath: string, expectedVersion: string): void {
+function validatePathEvidence(value: Record<string, unknown>, sourceRelativePath: string, destinationRelativePath: string, expectedVersion: string, expectedSourceSha256: string): void {
   if (stringField(value, 'publisherVersion') !== expectedVersion) throw new Error('publisher version evidence is invalid');
-  if (!/^[0-9a-f]{64}$/u.test(stringField(value, 'publisherSourceSha256'))) throw new Error('publisher source hash evidence is invalid');
+  if (stringField(value, 'publisherSourceSha256') !== expectedSourceSha256) throw new Error('publisher source hash evidence is invalid');
   if (stringField(value, 'sourceRelativePath') !== sourceRelativePath) throw new Error('publisher source path evidence is invalid');
   if (stringField(value, 'destinationRelativePath') !== destinationRelativePath) throw new Error('publisher destination path evidence is invalid');
 }
@@ -111,7 +112,7 @@ function validateRenameEvidence(value: Record<string, unknown>, expected: string
   if (stringField(value, 'renameResult') !== expected) throw new Error('publisher rename evidence is invalid');
 }
 
-function parseResponse(result: CommandResult, argv: readonly string[], operation: 'publish' | 'quarantine' | 'recheck', request: PublisherRequest | Pick<PublisherRequest, 'rootId' | 'jobId'>, expectedVersion: string): PublisherResponse {
+function parseResponse(result: CommandResult, argv: readonly string[], operation: 'publish' | 'quarantine' | 'recheck', request: PublisherRequest | Pick<PublisherRequest, 'rootId' | 'jobId'>, expectedVersion: string, expectedSourceSha256: string): PublisherResponse {
   if (JSON.stringify(result.argv) !== JSON.stringify(argv) || result.signal !== null || result.timedOut !== false || !Number.isSafeInteger(result.exitCode)) throw new Error('publisher command result execution evidence is invalid');
   if (typeof result.stdout !== 'string' || Buffer.byteLength(result.stdout, 'utf8') > 65_536) throw new Error('publisher output exceeds its bound');
   const text = result.stdout.endsWith('\n') ? result.stdout.slice(0, -1) : result.stdout;
@@ -149,7 +150,7 @@ function parseResponse(result: CommandResult, argv: readonly string[], operation
     }
   } else if (operation === 'publish') {
     if (quarantined || 'destination' in value || 'staging' in value) throw new Error('publisher publication result is contradictory');
-    validatePathEvidence(value, sourcePath, destinationPath, expectedVersion);
+    validatePathEvidence(value, sourcePath, destinationPath, expectedVersion, expectedSourceSha256);
     if (published) {
       if (result.exitCode !== 0 || mutationCount < 1 || value.errorCode !== undefined) throw new Error('successful publisher result is contradictory');
       validateRenameEvidence(value, 'RENAMED');
@@ -167,7 +168,7 @@ function parseResponse(result: CommandResult, argv: readonly string[], operation
     }
   } else {
     if (published || 'destination' in value || 'staging' in value) throw new Error('publisher quarantine result is contradictory');
-    validatePathEvidence(value, sourcePath, destinationPath, expectedVersion);
+    validatePathEvidence(value, sourcePath, destinationPath, expectedVersion, expectedSourceSha256);
     if (quarantined) {
       if (result.exitCode !== 0 || mutationCount < 1 || mutationCount > 2 || value.errorCode !== undefined) throw new Error('successful quarantine result is contradictory');
       validateRenameEvidence(value, 'RENAMED');
@@ -184,6 +185,7 @@ function parseResponse(result: CommandResult, argv: readonly string[], operation
 export function createPublisherClient(options: PublisherClientOptions): PublisherClient {
   if (typeof options.executable !== 'string' || !SAFE_ABSOLUTE.test(options.executable) || options.executable.split('/').some((part, index) => index > 0 && (part === '' || part === '.' || part === '..'))) throw new Error('publisher executable must be an absolute path');
   if (typeof options.expectedVersion !== 'string' || !/^(?:v?\d+\.\d+\.\d+|\d{4}\.\d{2}\.\d{2}(?:\.\d+)?)$/u.test(options.expectedVersion)) throw new Error('expected publisher version is invalid');
+  if (!/^[0-9a-f]{64}$/u.test(options.expectedSourceSha256)) throw new Error('expected publisher source hash is invalid');
   const executor = options.commandExecutor ?? createCommandExecutor();
   const roots = new Map<string, ApprovedOutputRoot>();
   for (const root of options.approvedRoots) {
@@ -195,7 +197,7 @@ export function createPublisherClient(options: PublisherClientOptions): Publishe
   async function invoke(argv: readonly string[], operation: 'publish' | 'quarantine' | 'recheck', request: PublisherRequest | Pick<PublisherRequest, 'rootId' | 'jobId'>): Promise<PublisherResponse> {
     const runOptions: CommandRunOptions = { env: FIXED_ENV, timeoutMs: options.timeoutMs ?? 30_000, maxCaptureBytes: 64 * 1024 };
     const result = await executor.run(argv, runOptions);
-    return parseResponse(result, argv, operation, request, options.expectedVersion);
+    return parseResponse(result, argv, operation, request, options.expectedVersion, options.expectedSourceSha256);
   }
 
   return {

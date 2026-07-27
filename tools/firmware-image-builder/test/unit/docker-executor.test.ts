@@ -10,7 +10,7 @@ import {
 } from '../../runner/src/docker-executor.js';
 import { createOperationArgv, createOperationDefinition, assertOperationRegistryCoverage, INTERNAL_OPERATION_TOOL_PATH } from '../../runner/src/operation-registry.js';
 import { CommandExecutionError, createCommandExecutor, type CommandResult, type CommandRunOptions } from '../../runner/src/command-executor.js';
-import type { OperationInput } from '../../api/src/store.js';
+import type { JsonObject, OperationInput } from '../../api/src/store.js';
 import type { OperationCleanupProof, RunnerWriteCommand } from '../../api/src/ownership.js';
 
 const DIGEST = 'a'.repeat(64);
@@ -294,6 +294,78 @@ describe('DockerExecutor', () => {
     expect(Date.parse(lifecycleCommands[1]!.occurredAt)).toBeGreaterThanOrEqual(Date.parse(lifecycleCommands[1]!.startedAt!));
     expect(Date.parse(lifecycleCommands[2]!.occurredAt)).toBeGreaterThanOrEqual(Date.parse(lifecycleCommands[2]!.stoppedAt!));
     expect(evidenceValue?.inspection).toEqual(expect.objectContaining({ imagePreflight: expect.objectContaining({ architecture: 'amd64', os: 'linux' }), container: expect.objectContaining({ rootImageId: `sha256:${'e'.repeat(64)}` }) }));
+  });
+
+  it('recovers retained exact identity when rm completed before cleanup CAS', async () => {
+    const docker = fakeDocker([
+      ...successfulResponses(),
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { exitCode: 1, stderr: 'No such container: retained\n' },
+      { stdout: '' },
+    ]);
+    const identity = {
+      ...emptyIdentityForTest(),
+      containerId: null as string | null,
+      containerName: null as string | null,
+      containerImageDigest: null as string | null,
+      containerLabelJobId: null as string | null,
+      containerLabelManifestSha: null as string | null,
+      containerLabels: null as JsonObject | null,
+      containerStoppedAt: null as string | null,
+    };
+    let operation: OperationInput | null = null;
+    let rejectCleanup = true;
+    const ownership = {
+      runnerWrite: vi.fn((command: RunnerWriteCommand) => {
+        if (command.kind === 'container') {
+          Object.assign(identity, {
+            containerId: command.containerId,
+            containerName: command.containerName,
+            containerImageDigest: command.imageDigest,
+            containerLabelJobId: command.labels['org.osi.image-builder.job-id'],
+            containerLabelManifestSha: command.labels['org.osi.image-builder.manifest-sha'],
+            containerLabels: command.labels,
+            containerStoppedAt: command.stoppedAt ?? identity.containerStoppedAt,
+          });
+        }
+        if (command.kind === 'operation-complete') operation = command.input;
+        if (command.kind === 'operation-cleanup') {
+          if (rejectCleanup) return { ok: false, kind: 'cas-lost' };
+          Object.assign(identity, emptyIdentityForTest());
+        }
+        return { ok: true, kind: 'committed', eventSeq: 1 };
+      }),
+    };
+    const store = {
+      getJob: () => identity,
+      getOperation: () => operation,
+    };
+    const first = createDockerExecutor(options(docker, { ownership, store }));
+    await expect(first.run()).rejects.toThrow(/ownership write was not committed/i);
+    expect(identity.containerId).toBe('1'.repeat(64));
+
+    rejectCleanup = false;
+    const second = createDockerExecutor(options(docker, { ownership, store }));
+    await expect(second.run()).resolves.toMatchObject({
+      available: true,
+      outcome: 'passed',
+      containerId: '1'.repeat(64),
+    });
+    expect(docker.calls.filter((call) => call[1] === 'create')).toHaveLength(1);
+    const recovered = ownership.runnerWrite.mock.calls
+      .map(([command]) => command)
+      .find((command): command is Extract<RunnerWriteCommand, { kind: 'operation-cleanup' }> => (
+        command.kind === 'operation-cleanup' && command.proof.kind === 'container-absent'
+      ));
+    expect(recovered?.proof).toMatchObject({
+      kind: 'container-absent',
+      id: '1'.repeat(64),
+      name: 'osi-image-builder-job-1-attempt-1',
+      imageDigest: DIGEST,
+      globalLabelResult: 'no-match',
+    });
+    expect(identity.containerId).toBeNull();
   });
 
   it('runs target-setup feed operations with Docker network disabled', async () => {
