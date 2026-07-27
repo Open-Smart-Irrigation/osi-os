@@ -741,18 +741,32 @@ describe('real rootfs verification contract', () => {
   it('joins resolved-only stage06 evidence to the strict verifier and actual locked loader', async () => {
     const fixture = await createRootfsFixture('rpi-5');
     await writeFile(join(fixture.sourcePath, 'openwrt/.config'), configFor(fixture.target));
-    const dbHelper = join(fixture.rootfsPath, 'usr/share/node-red/osi-db-helper');
-    await rm(dbHelper, { recursive: true, force: true });
+    const rootfsNodeRed = join(fixture.rootfsPath, 'usr/share/node-red');
+    const shippedNodeRed = join(
+      process.cwd(),
+      '../../conf',
+      fixture.target.environment,
+      'files/usr/share/node-red',
+    );
+    await rm(join(rootfsNodeRed, 'node_modules'), { recursive: true, force: true });
     await cp(
-      join(
-        process.cwd(),
-        '../../conf',
-        fixture.target.environment,
-        'files/usr/share/node-red/osi-db-helper',
-      ),
-      dbHelper,
+      join(shippedNodeRed, 'node_modules'),
+      join(rootfsNodeRed, 'node_modules'),
       { recursive: true },
     );
+    for (const helper of [...RELATIVE_HELPERS, ...DIRECT_HELPERS]) {
+      await rm(join(rootfsNodeRed, helper), { recursive: true, force: true });
+      await cp(
+        join(shippedNodeRed, helper),
+        join(rootfsNodeRed, helper),
+        { recursive: true },
+      );
+    }
+    for (const helper of RELATIVE_HELPERS) {
+      const link = join(rootfsNodeRed, 'node_modules', helper);
+      await rm(link, { recursive: true, force: true });
+      await symlink(`../${helper}`, link);
+    }
     const operationTool = await import(operationToolPath) as {
       createOperationHandlersForTesting(rootPath: string): {
         verifyImage(): Promise<unknown>;

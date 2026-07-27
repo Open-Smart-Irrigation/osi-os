@@ -167,6 +167,19 @@ describe('locked builder source', () => {
     for (const drift of [
       toolContents.replace('sqlite3: Object.freeze({', 'betterSqlite3: Object.freeze({'),
       toolContents.replace("packageName: 'osi-db-helper'", "packageName: 'osi-history-helper'"),
+      toolContents.replace("  'process',\n", ''),
+      toolContents.replace(
+        'return ROOTFS_FILESYSTEM_CAPABILITY;',
+        'return Reflect.apply(originalLoad, this, [request, parent, isMain]);',
+      ),
+      toolContents.replace(
+        "parentRelativePath: 'osi-health-helper/index.js'",
+        "parentRelativePath: 'osi-db-helper/index.js'",
+      ),
+      toolContents.replace(
+        "'@chirpstack/chirpstack-api/api/application_grpc_pb',",
+        "'@chirpstack/chirpstack-api',",
+      ),
       toolContents.replace('Module._load = originalLoad;', ''),
       `${toolContents}\nprocess.env.NODE_PATH = '/host/node_modules';\n`,
     ]) {
@@ -321,6 +334,15 @@ describe('locked builder source', () => {
             : 'module.exports = function compatible() {};\n',
         );
       }
+      const chirpstackEntrypoint = join(
+        nodeRed,
+        'node_modules/@chirpstack/chirpstack-api/api/application_grpc_pb.js',
+      );
+      await mkdir(join(chirpstackEntrypoint, '..'), { recursive: true });
+      await writeFile(
+        chirpstackEntrypoint,
+        'module.exports = function compatible() {};\n',
+      );
       for (const [index, packageName] of direct.entries()) {
         const packageRoot = join(nodeRed, packageName);
         await mkdir(packageRoot, { recursive: true });
@@ -614,9 +636,16 @@ describe('locked builder source', () => {
     );
     expect(helperScript).toContain('node_red="$rootfs/usr/share/node-red"');
     expect(helperScript).toContain("require('sqlite3')");
+    expect(helperScript).toContain("require('process')");
+    expect(helperScript).toContain("require('node:child_process')");
+    expect(helperScript).toContain(
+      '@chirpstack/chirpstack-api/api/application_grpc_pb.js',
+    );
     expect(helperScript).toContain('relativeHelpers');
     expect(helperScript).toContain("'osi-db-helper'");
-    expect(helperScript).toContain("'node_modules/' + packageName + '/index.js'");
+    expect(helperScript).toContain(
+      "'node_modules/@chirpstack/chirpstack-api/api/application_grpc_pb.js'",
+    );
     expect(helperScript).toContain('resolvedRelativePath');
     expect(helperScript).toContain('exportType');
     expect(helperScript).toContain('JSON.stringify(actual) !== JSON.stringify(expected)');

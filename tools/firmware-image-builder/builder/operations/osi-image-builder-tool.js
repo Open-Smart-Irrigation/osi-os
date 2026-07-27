@@ -24,17 +24,56 @@ const FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW;
 const RELATIVE_HELPER_START = 4;
 const RELATIVE_HELPER_END = 13;
 const ALLOWED_ROOTFS_BUILTINS = Object.freeze([
-  'child_process',
+  'buffer',
   'crypto',
+  'dns',
+  'events',
   'fs',
   'http',
+  'http2',
   'https',
+  'net',
   'node:child_process',
   'node:crypto',
   'node:fs',
-  'node:path',
+  'os',
   'path',
+  'process',
+  'stream',
+  'tls',
+  'url',
+  'util',
+  'zlib',
 ]);
+function deniedFilesystemCapability() {
+  throw new Error('rootfs Node module attempted to use a denied builder filesystem capability');
+}
+const ROOTFS_FILESYSTEM_CAPABILITY = Object.freeze(new Proxy(
+  Object.freeze({ readFile: deniedFilesystemCapability }),
+  {
+    get(target, property, receiver) {
+      if (!Reflect.has(target, property)) {
+        throw new Error(
+          `rootfs Node module requested a denied builder filesystem capability: ${String(property)}`,
+        );
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  },
+));
+function deniedChildProcessCapability() {
+  throw new Error('rootfs Node module attempted to use a denied builder process capability');
+}
+const ROOTFS_CHILD_PROCESS_CAPABILITY = Object.freeze({
+  execFile: deniedChildProcessCapability,
+});
+const BUILTIN_CAPABILITY_STUBS = Object.freeze({
+  'node:child_process': Object.freeze({
+    packageName: 'osi-health-helper',
+    parentRelativePath: 'osi-health-helper/index.js',
+    value: ROOTFS_CHILD_PROCESS_CAPABILITY,
+  }),
+});
 class NativeDatabaseInitializerStub {
   constructor() {
     throw new Error('the sqlite3 initializer stub cannot open a database');
@@ -56,7 +95,11 @@ const NATIVE_DEPENDENCY_STUBS = Object.freeze({
 });
 const NODE_MODULES = Object.freeze([
   ['@grpc/grpc-js', '@grpc/grpc-js'],
-  ['@chirpstack/chirpstack-api', '@chirpstack/chirpstack-api'],
+  [
+    '@chirpstack/chirpstack-api',
+    '@chirpstack/chirpstack-api',
+    '@chirpstack/chirpstack-api/api/application_grpc_pb',
+  ],
   ['google-protobuf', 'google-protobuf'],
   ['protobufjs', 'protobufjs'],
   ['osi-chameleon-helper', 'osi-chameleon-helper'],
@@ -153,6 +196,24 @@ function loadFixedRootfsEntrypoint({
       return stub.value;
     }
     sealedResolveFilename(request, parent, isMain);
+    if (request === 'fs' || request === 'node:fs') {
+      return ROOTFS_FILESYSTEM_CAPABILITY;
+    }
+    const builtinStub = Object.hasOwn(BUILTIN_CAPABILITY_STUBS, request)
+      ? BUILTIN_CAPABILITY_STUBS[request]
+      : undefined;
+    if (builtinStub !== undefined) {
+      const parentRelativePath = typeof parent?.filename === 'string'
+        ? relative(nodeRed, parent.filename).replaceAll('\\', '/')
+        : '';
+      if (
+        packageName !== builtinStub.packageName
+        || parentRelativePath !== builtinStub.parentRelativePath
+      ) {
+        throw new Error(`rootfs Node module requested an unapproved builder builtin: ${request}`);
+      }
+      return builtinStub.value;
+    }
     return Reflect.apply(originalLoad, this, [request, parent, isMain]);
   };
 
@@ -502,12 +563,15 @@ async function verifyImage(root, hooks) {
         }
         const nodeRed = `${root}/${rootfs.path}/usr/share/node-red`;
         const require = createRequire(`${nodeRed}/__osi_verification__.cjs`);
-        const nodeResolution = NODE_MODULES.map(([packageName, specifier], index) => {
-          const resolved = require.resolve(specifier);
+        const nodeResolution = NODE_MODULES.map((
+          [packageName, specifier, loadSpecifier = specifier],
+          index,
+        ) => {
+          const resolved = require.resolve(loadSpecifier);
           const exported = loadFixedRootfsEntrypoint({
             nodeRed,
             packageName,
-            specifier,
+            specifier: loadSpecifier,
             resolvedEntrypoint: resolved,
             rootfsRequire: require,
           });

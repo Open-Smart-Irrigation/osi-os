@@ -105,6 +105,16 @@ async function runOperation(
           : 'module.exports = function compatible() {};\n'),
     );
   }
+  const chirpstackEntrypoint = join(
+    nodeRed,
+    'node_modules/@chirpstack/chirpstack-api/api/application_grpc_pb.js',
+  );
+  await mkdir(join(chirpstackEntrypoint, '..'), { recursive: true });
+  await writeFile(
+    chirpstackEntrypoint,
+    overrides['@chirpstack/chirpstack-api']
+      ?? 'module.exports = function compatible() {};\n',
+  );
   const module = await import(operationToolPath) as {
     createOperationHandlersForTesting(rootPath: string): {
       verifyImage(): Promise<OperationResult>;
@@ -116,6 +126,7 @@ async function runOperation(
 async function runShippedOperation(options: Readonly<{
   dbHelperPrefix?: string;
   hostDependency?: string;
+  productionThirdParty?: boolean;
 }> = {}): Promise<Readonly<{
   nodeRed: string;
   result: OperationResult;
@@ -137,36 +148,47 @@ async function runShippedOperation(options: Readonly<{
   await writeFile(image, '');
   await truncate(image, 64 * 1024 * 1024);
 
-  for (const [index, packageName] of thirdPartyPackages.entries()) {
-    const packageRoot = join(nodeRed, 'node_modules', packageName);
-    await mkdir(packageRoot, { recursive: true });
-    await writeFile(
-      join(packageRoot, 'package.json'),
-      JSON.stringify({ name: packageName, main: 'index.js' }),
+  if (options.productionThirdParty) {
+    await cp(
+      join(shippedNodeRedPath, 'node_modules'),
+      join(nodeRed, 'node_modules'),
+      { recursive: true },
     );
-    await writeFile(
-      join(packageRoot, 'index.js'),
-      index % 2 === 0
-        ? 'module.exports = { compatible: true };\n'
-        : 'module.exports = function compatible() {};\n',
-    );
-  }
-  for (const path of [
-    'api/application_grpc_pb',
-    'api/application_pb',
-    'api/device_grpc_pb',
-    'api/device_pb',
-    'api/device_profile_grpc_pb',
-    'api/device_profile_pb',
-    'api/gateway_grpc_pb',
-    'api/gateway_pb',
-    'api/tenant_grpc_pb',
-    'api/tenant_pb',
-    'common/common_pb',
-  ]) {
-    const file = join(nodeRed, 'node_modules/@chirpstack/chirpstack-api', `${path}.js`);
-    await mkdir(join(file, '..'), { recursive: true });
-    await writeFile(file, 'module.exports = {};\n');
+    for (const helper of relativeHelpers) {
+      await rm(join(nodeRed, 'node_modules', helper), { force: true, recursive: true });
+    }
+  } else {
+    for (const [index, packageName] of thirdPartyPackages.entries()) {
+      const packageRoot = join(nodeRed, 'node_modules', packageName);
+      await mkdir(packageRoot, { recursive: true });
+      await writeFile(
+        join(packageRoot, 'package.json'),
+        JSON.stringify({ name: packageName, main: 'index.js' }),
+      );
+      await writeFile(
+        join(packageRoot, 'index.js'),
+        index % 2 === 0
+          ? 'module.exports = { compatible: true };\n'
+          : 'module.exports = function compatible() {};\n',
+      );
+    }
+    for (const path of [
+      'api/application_grpc_pb',
+      'api/application_pb',
+      'api/device_grpc_pb',
+      'api/device_pb',
+      'api/device_profile_grpc_pb',
+      'api/device_profile_pb',
+      'api/gateway_grpc_pb',
+      'api/gateway_pb',
+      'api/tenant_grpc_pb',
+      'api/tenant_pb',
+      'common/common_pb',
+    ]) {
+      const file = join(nodeRed, 'node_modules/@chirpstack/chirpstack-api', `${path}.js`);
+      await mkdir(join(file, '..'), { recursive: true });
+      await writeFile(file, 'module.exports = {};\n');
+    }
   }
   for (const helper of [...relativeHelpers, ...direct]) {
     await cp(join(shippedNodeRedPath, helper), join(nodeRed, helper), { recursive: true });
@@ -239,6 +261,36 @@ afterEach(async () => {
 });
 
 describe('trusted verify-image Node compatibility record', () => {
+  it('loads the exact shipped third-party versions and actual helper entrypoints', async () => {
+    const { nodeRed, result } = await runShippedOperation({
+      productionThirdParty: true,
+    });
+    const expectedVersions = new Map([
+      ['@grpc/grpc-js', '1.14.3'],
+      ['@chirpstack/chirpstack-api', '4.12.1'],
+      ['google-protobuf', '3.21.4'],
+      ['protobufjs', '7.5.4'],
+    ]);
+    for (const [packageName, version] of expectedVersions) {
+      const manifest = JSON.parse(await readFile(
+        join(nodeRed, 'node_modules', packageName, 'package.json'),
+        'utf8',
+      )) as { version?: unknown };
+      expect(manifest.version).toBe(version);
+      expect(result.nodeResolution.find((record) => record.packageName === packageName))
+        .toMatchObject({ packageName, exportType: 'object' });
+    }
+    expect(result.nodeResolution.find(
+      ({ packageName }) => packageName === '@chirpstack/chirpstack-api',
+    )).toMatchObject({
+      resolvedRelativePath:
+        'node_modules/@chirpstack/chirpstack-api/api/application_grpc_pb.js',
+    });
+    expect(result.nodeResolution.filter(
+      ({ packageName }) => packageName.startsWith('osi-'),
+    )).toHaveLength(17);
+  });
+
   it('loads the actual shipped helper entrypoints through only the sealed sqlite3 initializer stub', async () => {
     const nodePath = process.env.NODE_PATH;
     const { nodeRed, result } = await runShippedOperation({
@@ -265,6 +317,32 @@ describe('trusted verify-image Node compatibility record', () => {
     await expect(runShippedOperation({
       dbHelperPrefix: "require('unknown-target-native-dependency');",
     })).rejects.toThrow(/unknown-target-native-dependency/u);
+  });
+
+  it('rejects child_process execution before an injected helper can mutate the host', async () => {
+    const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-exec-marker-'));
+    temporaryRoots.push(markerRoot);
+    const marker = join(markerRoot, 'executed');
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        "const childProcess = require('child_process');",
+        `childProcess.execFileSync(process.execPath, ['-e', ${JSON.stringify(
+          `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'executed')`,
+        )}]);`,
+      ].join('\n'),
+    })).rejects.toThrow(/unapproved builder builtin: child_process/u);
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects fs mutation before an injected helper can write a file', async () => {
+    const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-fs-marker-'));
+    temporaryRoots.push(markerRoot);
+    const marker = join(markerRoot, 'written');
+    await expect(runShippedOperation({
+      dbHelperPrefix:
+        `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'written');`,
+    })).rejects.toThrow(/filesystem capability|writeFileSync/u);
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('does not allow a target helper to select a dependency from the builder host tree', async () => {

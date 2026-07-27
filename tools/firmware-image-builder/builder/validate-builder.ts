@@ -166,6 +166,33 @@ function dockerfileMetadata(contents: string): BuilderSourceMetadata {
 }
 
 export function validateTrustedOperationToolSource(contents: string): void {
+  const builtinClosure = [
+    'buffer',
+    'crypto',
+    'dns',
+    'events',
+    'fs',
+    'http',
+    'http2',
+    'https',
+    'net',
+    'node:child_process',
+    'node:crypto',
+    'node:fs',
+    'os',
+    'path',
+    'process',
+    'stream',
+    'tls',
+    'url',
+    'util',
+    'zlib',
+  ];
+  const exactBuiltinClosure = [
+    'const ALLOWED_ROOTFS_BUILTINS = Object.freeze([',
+    ...builtinClosure.map((name) => `  '${name}',`),
+    ']);',
+  ].join('\n');
   if (!contents.startsWith('#!/usr/bin/env node\n')
     || !contents.includes("new Set(['copy-feed-config', 'verify-image', 'mirror-gui'])")
     || !contents.includes('args.length !== 1')
@@ -173,6 +200,12 @@ export function validateTrustedOperationToolSource(contents: string): void {
     || !contents.includes('guiSource')
     || !contents.includes('imageDirectory')
     || !contents.includes("sqlite3: Object.freeze({\n    packageName: 'osi-db-helper'")
+    || !contents.includes(exactBuiltinClosure)
+    || !contents.includes('const ROOTFS_FILESYSTEM_CAPABILITY = Object.freeze(new Proxy(')
+    || !contents.includes('return ROOTFS_FILESYSTEM_CAPABILITY;')
+    || !contents.includes("packageName: 'osi-health-helper',\n    parentRelativePath: 'osi-health-helper/index.js'")
+    || !contents.includes('return builtinStub.value;')
+    || !contents.includes("'@chirpstack/chirpstack-api/api/application_grpc_pb',")
     || !contents.includes('Module._resolveFilename = sealedResolveFilename;')
     || !contents.includes('Module._load = sealedLoad;')
     || !contents.includes('Module._load = originalLoad;')
@@ -394,6 +427,27 @@ for module in $third_party; do
   printf '{"name":"%s","main":"index.js"}\\n' "$module" > "$package/package.json"
   printf '%s\\n' 'module.exports = { compatible: true };' > "$package/index.js"
 done
+cat > "$node_red/node_modules/@grpc/grpc-js/index.js" <<'EOF'
+'use strict';
+require('buffer');
+require('crypto');
+require('dns');
+require('events');
+require('fs');
+require('http2');
+require('net');
+require('os');
+require('path');
+require('process');
+require('stream');
+require('tls');
+require('url');
+require('util');
+require('zlib');
+module.exports = { compatible: true };
+EOF
+mkdir -p "$node_red/node_modules/@chirpstack/chirpstack-api/api"
+printf '%s\\n' 'module.exports = { compatible: true };' > "$node_red/node_modules/@chirpstack/chirpstack-api/api/application_grpc_pb.js"
 for module in $relative_helpers; do
   package="$node_red/$module"
   mkdir -p "$package"
@@ -404,6 +458,24 @@ for module in $relative_helpers; do
 const sqlite3 = require('sqlite3');
 if (Object.keys(sqlite3).sort().join(',') !== 'Database,OPEN_CREATE,OPEN_READONLY,OPEN_READWRITE' || typeof sqlite3.Database !== 'function' || sqlite3.OPEN_READONLY !== 1 || sqlite3.OPEN_READWRITE !== 2 || sqlite3.OPEN_CREATE !== 4) {
   throw new Error('sqlite3 initializer stub shape changed');
+}
+module.exports = { compatible: true };
+EOF
+  elif [ "$module" = osi-cloud-http ]; then
+    cat > "$package/index.js" <<'EOF'
+'use strict';
+require('http');
+require('https');
+module.exports = { compatible: true };
+EOF
+  elif [ "$module" = osi-health-helper ]; then
+    cat > "$package/index.js" <<'EOF'
+'use strict';
+const childProcess = require('node:child_process');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+if (Object.keys(childProcess).join(',') !== 'execFile' || Object.keys(fs).join(',') !== 'readFile' || typeof crypto.createHash !== 'function') {
+  throw new Error('sealed builtin capability shape changed');
 }
 module.exports = { compatible: true };
 EOF
@@ -436,7 +508,7 @@ const expected = {
   size: 67108864,
   sha256: createHash('sha256').update(readFileSync(imagePath)).digest('hex'),
   nodeResolution: [
-    ...thirdParty.map((packageName) => ({ packageName, specifier: packageName, resolvedRelativePath: 'node_modules/' + packageName + '/index.js', exportType: 'object' })),
+    ...thirdParty.map((packageName) => ({ packageName, specifier: packageName, resolvedRelativePath: packageName === '@chirpstack/chirpstack-api' ? 'node_modules/@chirpstack/chirpstack-api/api/application_grpc_pb.js' : 'node_modules/' + packageName + '/index.js', exportType: 'object' })),
     ...relativeHelpers.map((packageName) => ({ packageName, specifier: packageName, resolvedRelativePath: 'node_modules/' + packageName + '/index.js', exportType: 'object' })),
     ...directHelpers.map((packageName) => ({ packageName, specifier: './' + packageName, resolvedRelativePath: packageName + '/index.js', exportType: 'function' })),
   ],
