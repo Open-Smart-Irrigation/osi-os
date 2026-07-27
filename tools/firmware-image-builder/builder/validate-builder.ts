@@ -166,7 +166,19 @@ function dockerfileMetadata(contents: string): BuilderSourceMetadata {
 }
 
 export function validateTrustedOperationToolSource(contents: string): void {
-  if (!contents.startsWith('#!/usr/bin/env node\n') || !contents.includes("new Set(['copy-feed-config', 'verify-image', 'mirror-gui'])") || !contents.includes('args.length !== 1') || !contents.includes('feedSource') || !contents.includes('guiSource') || !contents.includes('imageDirectory') || contents.includes('process.argv.slice(2).join')) {
+  if (!contents.startsWith('#!/usr/bin/env node\n')
+    || !contents.includes("new Set(['copy-feed-config', 'verify-image', 'mirror-gui'])")
+    || !contents.includes('args.length !== 1')
+    || !contents.includes('feedSource')
+    || !contents.includes('guiSource')
+    || !contents.includes('imageDirectory')
+    || !contents.includes("sqlite3: Object.freeze({\n    packageName: 'osi-db-helper'")
+    || !contents.includes('Module._resolveFilename = sealedResolveFilename;')
+    || !contents.includes('Module._load = sealedLoad;')
+    || !contents.includes('Module._load = originalLoad;')
+    || !contents.includes('Module._resolveFilename = originalResolveFilename;')
+    || contents.includes('process.argv.slice(2).join')
+    || /(?:process\.env\.)?NODE_PATH\s*=/u.test(contents)) {
     throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted operation tool is not a closed, fail-closed implementation');
   }
 }
@@ -368,9 +380,71 @@ node "$tool" copy-feed-config >/tmp/osi-operation-tool-self-test.out
 test -s /workdir/openwrt/feeds.conf.default
 node "$tool" mirror-gui >/tmp/osi-operation-tool-self-test.out
 test -s /workdir/feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/index.html
-mkdir -p /workdir/openwrt/bin/targets/self/profile
-truncate -s 67108864 /workdir/openwrt/bin/targets/self/profile/validation.img
+rootfs=/workdir/openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx
+node_red="$rootfs/usr/share/node-red"
+mkdir -p /workdir/openwrt/bin/targets/bcm27xx/bcm2712 "$node_red/node_modules"
+printf '%s\\n' 'CONFIG_TARGET_PROFILE="DEVICE_rpi-5"' > /workdir/openwrt/.config
+truncate -s 67108864 /workdir/openwrt/bin/targets/bcm27xx/bcm2712/validation.img
+third_party='@grpc/grpc-js @chirpstack/chirpstack-api google-protobuf protobufjs'
+relative_helpers='osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-db-helper osi-dendro-helper osi-health-helper osi-history-helper osi-history-sync-helper osi-lib'
+direct_helpers='osi-command-ledger osi-dendro-analytics osi-zone-env osi-history-router osi-journal osi-device-writer osi-uc512-normalize osi-lsn50-normalize'
+for module in $third_party; do
+  package="$node_red/node_modules/$module"
+  mkdir -p "$package"
+  printf '{"name":"%s","main":"index.js"}\\n' "$module" > "$package/package.json"
+  printf '%s\\n' 'module.exports = { compatible: true };' > "$package/index.js"
+done
+for module in $relative_helpers; do
+  package="$node_red/$module"
+  mkdir -p "$package"
+  printf '{"name":"%s","main":"index.js"}\\n' "$module" > "$package/package.json"
+  if [ "$module" = osi-db-helper ]; then
+    cat > "$package/index.js" <<'EOF'
+'use strict';
+const sqlite3 = require('sqlite3');
+if (Object.keys(sqlite3).sort().join(',') !== 'Database,OPEN_CREATE,OPEN_READONLY,OPEN_READWRITE' || typeof sqlite3.Database !== 'function' || sqlite3.OPEN_READONLY !== 1 || sqlite3.OPEN_READWRITE !== 2 || sqlite3.OPEN_CREATE !== 4) {
+  throw new Error('sqlite3 initializer stub shape changed');
+}
+module.exports = { compatible: true };
+EOF
+  else
+    printf '%s\\n' 'module.exports = { compatible: true };' > "$package/index.js"
+  fi
+  ln -s "../$module" "$node_red/node_modules/$module"
+done
+for module in $direct_helpers; do
+  package="$node_red/$module"
+  mkdir -p "$package"
+  printf '{"name":"%s","main":"index.js"}\\n' "$module" > "$package/package.json"
+  printf '%s\\n' 'module.exports = function compatible() {};' > "$package/index.js"
+done
 node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out
+test ! -e "$node_red/node_modules/sqlite3"
+node --input-type=commonjs <<'EOF'
+const { createHash } = require('node:crypto');
+const { readFileSync } = require('node:fs');
+const outputPath = '/tmp/osi-operation-tool-self-test.out';
+const imagePath = '/workdir/openwrt/bin/targets/bcm27xx/bcm2712/validation.img';
+const actual = JSON.parse(readFileSync(outputPath, 'utf8'));
+const thirdParty = ['@grpc/grpc-js', '@chirpstack/chirpstack-api', 'google-protobuf', 'protobufjs'];
+const relativeHelpers = ['osi-chameleon-helper', 'osi-chirpstack-helper', 'osi-cloud-http', 'osi-db-helper', 'osi-dendro-helper', 'osi-health-helper', 'osi-history-helper', 'osi-history-sync-helper', 'osi-lib'];
+const directHelpers = ['osi-command-ledger', 'osi-dendro-analytics', 'osi-zone-env', 'osi-history-router', 'osi-journal', 'osi-device-writer', 'osi-uc512-normalize', 'osi-lsn50-normalize'];
+const expected = {
+  operation: 'verify-image',
+  targetId: 'rpi-5',
+  relativePath: 'openwrt/bin/targets/bcm27xx/bcm2712/validation.img',
+  size: 67108864,
+  sha256: createHash('sha256').update(readFileSync(imagePath)).digest('hex'),
+  nodeResolution: [
+    ...thirdParty.map((packageName) => ({ packageName, specifier: packageName, resolvedRelativePath: 'node_modules/' + packageName + '/index.js', exportType: 'object' })),
+    ...relativeHelpers.map((packageName) => ({ packageName, specifier: packageName, resolvedRelativePath: 'node_modules/' + packageName + '/index.js', exportType: 'object' })),
+    ...directHelpers.map((packageName) => ({ packageName, specifier: './' + packageName, resolvedRelativePath: packageName + '/index.js', exportType: 'function' })),
+  ],
+};
+if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+  throw new Error('verify-image canonical self-test output changed');
+}
+EOF
 rm -rf /workdir/openwrt /workdir/web /workdir/feeds /workdir/feeds.conf.default
 status=0; node "$tool" unknown-operation >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?; test "$status" -eq 2
 for operation in copy-feed-config verify-image mirror-gui; do

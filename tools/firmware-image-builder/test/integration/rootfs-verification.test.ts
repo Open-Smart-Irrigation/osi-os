@@ -54,6 +54,10 @@ import {
 
 const SHA40 = '0123456789abcdef0123456789abcdef01234567';
 const ADVANCED_SHA40 = 'fedcba9876543210fedcba9876543210fedcba98';
+const operationToolPath = new URL(
+  '../../builder/operations/osi-image-builder-tool.js',
+  import.meta.url,
+).pathname;
 const temporaryDirectories: string[] = [];
 const cleanupFunctions: Array<() => Promise<void> | void> = [];
 const manifest = loadManifest(new URL('../../manifest/targets.json', import.meta.url).pathname).manifest;
@@ -272,6 +276,21 @@ function trustedNodeVerificationExecution(
           : 'incompatible' as const,
     };
   });
+  return trustedNodeOperationExecution({
+    operation: 'verify-image',
+    targetId: target.id,
+    relativePath: `openwrt/bin/targets/${target.openwrtTarget}/${
+      target.id === 'rpi-5'
+        ? 'chirpstack-gateway-os-test-full-bcm27xx-bcm2712-rpi-5-squashfs-factory.img.gz'
+        : 'chirpstack-gateway-os-test-full-bcm27xx-bcm2709-rpi-2-squashfs-factory.img.gz'
+    }`,
+    size: target.minimumArtifactBytes,
+    sha256: 'a'.repeat(64),
+    nodeResolution,
+  });
+}
+
+function trustedNodeOperationExecution(result: unknown): PipelineOperationExecution {
   return Object.freeze({
     operationId: 'verify-image',
     attempt: 1,
@@ -286,18 +305,7 @@ function trustedNodeVerificationExecution(
       outputLimit: false,
     }),
     observations: Object.freeze({
-      stdout: `${JSON.stringify({
-        operation: 'verify-image',
-        targetId: target.id,
-        relativePath: `openwrt/bin/targets/${target.openwrtTarget}/${
-          target.id === 'rpi-5'
-            ? 'chirpstack-gateway-os-test-full-bcm27xx-bcm2712-rpi-5-squashfs-factory.img.gz'
-            : 'chirpstack-gateway-os-test-full-bcm27xx-bcm2709-rpi-2-squashfs-factory.img.gz'
-        }`,
-        size: target.minimumArtifactBytes,
-        sha256: 'a'.repeat(64),
-        nodeResolution,
-      })}\n`,
+      stdout: `${JSON.stringify(result)}\n`,
     }),
   });
 }
@@ -730,6 +738,72 @@ function withFreshness(
 }
 
 describe('real rootfs verification contract', () => {
+  it('joins resolved-only stage06 evidence to the strict verifier and actual locked loader', async () => {
+    const fixture = await createRootfsFixture('rpi-5');
+    await writeFile(join(fixture.sourcePath, 'openwrt/.config'), configFor(fixture.target));
+    const dbHelper = join(fixture.rootfsPath, 'usr/share/node-red/osi-db-helper');
+    await rm(dbHelper, { recursive: true, force: true });
+    await cp(
+      join(
+        process.cwd(),
+        '../../conf',
+        fixture.target.environment,
+        'files/usr/share/node-red/osi-db-helper',
+      ),
+      dbHelper,
+      { recursive: true },
+    );
+    const operationTool = await import(operationToolPath) as {
+      createOperationHandlersForTesting(rootPath: string): {
+        verifyImage(): Promise<unknown>;
+      };
+    };
+    const trustedResult = await operationTool
+      .createOperationHandlersForTesting(fixture.sourcePath)
+      .verifyImage();
+    const input: VerificationInput = {
+      ...fixture.input,
+      nodeVerifier: createNodeVerifier(
+        fixture.target,
+        () => trustedNodeOperationExecution(trustedResult),
+      ),
+    };
+
+    const configEvidence = JSON.parse(await readFile(
+      join(fixture.statePath, 'jobs/job-verify/evidence/06-config.json'),
+      'utf8',
+    )) as {
+      observations: {
+        config: {
+          profiles: Record<string, Record<string, unknown>>;
+        };
+      };
+    };
+    expect(Object.keys(configEvidence.observations.config.profiles['rpi-5']!).sort())
+      .toEqual([
+        'environment',
+        'profile',
+        'resolvedSha256',
+        'rootfsPartSize',
+        'selectedTarget',
+        'target',
+      ]);
+    await expect(verifyFirmwareArtifact(input)).resolves.toMatchObject({
+      config: {
+        profiles: {
+          'rpi-5': {
+            resolvedSha256: fixture.input.config.profiles['rpi-5'].resolvedSha256,
+          },
+        },
+      },
+      rootfs: {
+        nodeResolution: {
+          'osi-db-helper': true,
+        },
+      },
+    });
+  }, 30_000);
+
   it('joins production stage 04 source identity with stage 06 resolved hashes', async () => {
     const fixture = await createRootfsFixture('rpi-5');
     const targetSetupEvidence = JSON.parse(await readFile(

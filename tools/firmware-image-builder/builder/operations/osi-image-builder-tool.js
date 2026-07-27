@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, rename, rmdir, unlink } from 'node:fs/promises';
-import { createRequire } from 'node:module';
+import Module, { createRequire, isBuiltin } from 'node:module';
 import { relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -23,6 +23,37 @@ const DIRECTORY_FLAGS = constants.O_DIRECTORY | constants.O_NOFOLLOW;
 const FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW;
 const RELATIVE_HELPER_START = 4;
 const RELATIVE_HELPER_END = 13;
+const ALLOWED_ROOTFS_BUILTINS = Object.freeze([
+  'child_process',
+  'crypto',
+  'fs',
+  'http',
+  'https',
+  'node:child_process',
+  'node:crypto',
+  'node:fs',
+  'node:path',
+  'path',
+]);
+class NativeDatabaseInitializerStub {
+  constructor() {
+    throw new Error('the sqlite3 initializer stub cannot open a database');
+  }
+}
+Object.freeze(NativeDatabaseInitializerStub.prototype);
+Object.freeze(NativeDatabaseInitializerStub);
+const SQLITE3_INITIALIZER_STUB = Object.freeze({
+  Database: NativeDatabaseInitializerStub,
+  OPEN_READONLY: 1,
+  OPEN_READWRITE: 2,
+  OPEN_CREATE: 4,
+});
+const NATIVE_DEPENDENCY_STUBS = Object.freeze({
+  sqlite3: Object.freeze({
+    packageName: 'osi-db-helper',
+    value: SQLITE3_INITIALIZER_STUB,
+  }),
+});
 const NODE_MODULES = Object.freeze([
   ['@grpc/grpc-js', '@grpc/grpc-js'],
   ['@chirpstack/chirpstack-api', '@chirpstack/chirpstack-api'],
@@ -64,6 +95,87 @@ function fail(message) {
 
 function requireAbsoluteRoot(root) {
   if (typeof root !== 'string' || !root.startsWith('/') || root.includes('\0')) throw new Error('operation root is not a canonical absolute path');
+}
+
+function confinedRootfsModulePath(nodeRed, path) {
+  if (typeof path !== 'string') return false;
+  const relativePath = relative(nodeRed, path).replaceAll('\\', '/');
+  return relativePath.length > 0
+    && relativePath !== '..'
+    && !relativePath.startsWith('../')
+    && !relativePath.startsWith('/');
+}
+
+// CommonJS has no per-require hook; verify-image is synchronous and restores both hooks.
+function loadFixedRootfsEntrypoint({
+  nodeRed,
+  packageName,
+  specifier,
+  resolvedEntrypoint,
+  rootfsRequire,
+}) {
+  const originalLoad = Module._load;
+  const originalResolveFilename = Module._resolveFilename;
+  const sealedResolveFilename = function sealedResolveFilename(
+    request,
+    parent,
+    isMain,
+    options,
+  ) {
+    if (isBuiltin(request)) {
+      if (!ALLOWED_ROOTFS_BUILTINS.includes(request)) {
+        throw new Error(`rootfs Node module requested an unapproved builder builtin: ${request}`);
+      }
+      return Reflect.apply(
+        originalResolveFilename,
+        Module,
+        [request, parent, isMain, options],
+      );
+    }
+    const resolved = Reflect.apply(
+      originalResolveFilename,
+      Module,
+      [request, parent, isMain, options],
+    );
+    if (!confinedRootfsModulePath(nodeRed, resolved)) {
+      throw new Error(`rootfs Node module dependency resolved outside the trusted rootfs: ${request}`);
+    }
+    return resolved;
+  };
+  const sealedLoad = function sealedLoad(request, parent, isMain) {
+    const stub = Object.hasOwn(NATIVE_DEPENDENCY_STUBS, request)
+      ? NATIVE_DEPENDENCY_STUBS[request]
+      : undefined;
+    if (stub !== undefined) {
+      if (packageName !== stub.packageName || parent?.filename !== resolvedEntrypoint) {
+        throw new Error(`rootfs Node module requested an unapproved native dependency stub: ${request}`);
+      }
+      return stub.value;
+    }
+    sealedResolveFilename(request, parent, isMain);
+    return Reflect.apply(originalLoad, this, [request, parent, isMain]);
+  };
+
+  Module._resolveFilename = sealedResolveFilename;
+  Module._load = sealedLoad;
+  let exported;
+  let failure;
+  let failed = false;
+  try {
+    exported = rootfsRequire(specifier);
+  } catch (error) {
+    failed = true;
+    failure = error;
+  }
+  const loaderChanged = Module._load !== sealedLoad
+    || Module._resolveFilename !== sealedResolveFilename;
+  Module._load = originalLoad;
+  Module._resolveFilename = originalResolveFilename;
+  if (failed) throw failure;
+  if (loaderChanged) {
+    throw new Error(`rootfs Node module changed the sealed builder loader: ${packageName}`);
+  }
+  return exported;
 }
 
 function entryPath(directory, name = '') {
@@ -392,7 +504,13 @@ async function verifyImage(root, hooks) {
         const require = createRequire(`${nodeRed}/__osi_verification__.cjs`);
         const nodeResolution = NODE_MODULES.map(([packageName, specifier], index) => {
           const resolved = require.resolve(specifier);
-          const exported = require(specifier);
+          const exported = loadFixedRootfsEntrypoint({
+            nodeRed,
+            packageName,
+            specifier,
+            resolvedEntrypoint: resolved,
+            rootfsRequire: require,
+          });
           const actualRelativePath = relative(nodeRed, resolved).replaceAll('\\', '/');
           if (actualRelativePath.startsWith('../') || actualRelativePath.startsWith('/')) {
             throw new Error(`resolved Node module escaped the trusted rootfs base: ${packageName}`);

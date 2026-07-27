@@ -164,6 +164,14 @@ describe('locked builder source', () => {
     expect(dockerfileContents).toContain("stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-tool.js");
     expect(() => validateTrustedOperationToolSource(toolContents)).not.toThrow();
     expect(toolContents).not.toMatch(/process\.argv\.slice\(2\).*join/u);
+    for (const drift of [
+      toolContents.replace('sqlite3: Object.freeze({', 'betterSqlite3: Object.freeze({'),
+      toolContents.replace("packageName: 'osi-db-helper'", "packageName: 'osi-history-helper'"),
+      toolContents.replace('Module._load = originalLoad;', ''),
+      `${toolContents}\nprocess.env.NODE_PATH = '/host/node_modules';\n`,
+    ]) {
+      expect(() => validateTrustedOperationToolSource(drift)).toThrow();
+    }
     for (const operation of ['copy-feed-config', 'verify-image', 'mirror-gui']) {
       await expect(execFileAsync(process.execPath, [operationToolPath, operation], { cwd: new URL('../../../../', import.meta.url).pathname, maxBuffer: 32 * 1024 })).rejects.toMatchObject({ code: 2 });
     }
@@ -599,6 +607,47 @@ describe('locked builder source', () => {
     expect(helperCall.join(' ')).toContain('node "$tool" copy-feed-config');
     expect(helperCall.join(' ')).toContain('node "$tool" mirror-gui');
     expect(helperCall.join(' ')).toContain('node "$tool" verify-image');
+    const helperScript = helperCall.at(-1)!;
+    expect(helperScript).toContain('CONFIG_TARGET_PROFILE="DEVICE_rpi-5"');
+    expect(helperScript).toContain(
+      'openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx',
+    );
+    expect(helperScript).toContain('node_red="$rootfs/usr/share/node-red"');
+    expect(helperScript).toContain("require('sqlite3')");
+    expect(helperScript).toContain('relativeHelpers');
+    expect(helperScript).toContain("'osi-db-helper'");
+    expect(helperScript).toContain("'node_modules/' + packageName + '/index.js'");
+    expect(helperScript).toContain('resolvedRelativePath');
+    expect(helperScript).toContain('exportType');
+    expect(helperScript).toContain('JSON.stringify(actual) !== JSON.stringify(expected)');
+    await expect(execFileAsync('/bin/sh', ['-n', '-c', helperScript])).resolves.toMatchObject({
+      stdout: '',
+      stderr: '',
+    });
+    const localSelfTest = await mkdtemp(join(tmpdir(), 'osi-builder-self-test-'));
+    try {
+      const localTool = join(localSelfTest, 'osi-image-builder-tool.js');
+      const localToolSource = (await readFile(operationToolPath, 'utf8')).replace(
+        "const WORKTREE = '/workdir';",
+        `const WORKTREE = '${localSelfTest}';`,
+      );
+      await writeFile(localTool, localToolSource);
+      const functionalStart = helperScript.indexOf('node --check "$tool"');
+      expect(functionalStart).toBeGreaterThan(0);
+      const functionalScript = [
+        'set -eu',
+        `tool='${localTool}'`,
+        helperScript.slice(functionalStart).replaceAll('/workdir', localSelfTest),
+      ].join('\n');
+      await expect(execFileAsync('/bin/sh', ['-c', functionalScript], {
+        maxBuffer: 1024 * 1024,
+      })).resolves.toMatchObject({
+        stdout: expect.stringContaining('trusted operation tool:'),
+        stderr: '',
+      });
+    } finally {
+      await rm(localSelfTest, { recursive: true, force: true });
+    }
   });
 
   it.each(['absent', 'wrong-owner', 'wrong-mode', 'unrunnable'] as const)('rejects an installed helper self-test failure: %s', async (failure) => {
