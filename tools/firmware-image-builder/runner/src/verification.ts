@@ -932,6 +932,23 @@ async function verifyConfig(
   input: TargetSetupVerificationInput,
   targets: Readonly<Record<TargetId, TargetManifest>>,
 ): Promise<VerificationResult['config']> {
+  const hasExactKeys = (
+    value: Record<string, unknown>,
+    expected: readonly string[],
+  ): boolean => Object.keys(value).sort().join('\0') === [...expected].sort().join('\0');
+  const envelopeKeys = Object.freeze([
+    'commands',
+    'error',
+    'finishedAt',
+    'inputs',
+    'jobId',
+    'observations',
+    'operationId',
+    'outcome',
+    'schemaVersion',
+    'stage',
+    'startedAt',
+  ]);
   if (input.config.bothProfilesChecked !== true
     || input.config.selectedTarget !== input.target.openwrtTarget
     || input.config.profile !== input.target.profile
@@ -956,11 +973,29 @@ async function verifyConfig(
         fail('TARGET_CONFIG_MISMATCH', `Task 15 ${stage} evidence is not an object`);
       }
       const evidence = parsed as Record<string, unknown>;
-      if (evidence.schemaVersion !== 1
+      let startedAt: string;
+      let finishedAt: string;
+      try {
+        startedAt = canonicalInstant(evidence.startedAt, `${stage} evidence startedAt`);
+        finishedAt = canonicalInstant(evidence.finishedAt, `${stage} evidence finishedAt`);
+      } catch (error) {
+        return fail('TARGET_CONFIG_MISMATCH', `Task 15 ${stage} evidence timestamps are invalid`, {}, error);
+      }
+      if (!hasExactKeys(evidence, envelopeKeys)
+        || evidence.schemaVersion !== 1
         || evidence.jobId !== input.workspace.jobId
         || evidence.stage !== stage
         || evidence.outcome !== 'passed'
-        || evidence.error !== null) {
+        || evidence.operationId !== null
+        || evidence.error !== null
+        || !Array.isArray(evidence.commands)
+        || !evidence.inputs
+        || typeof evidence.inputs !== 'object'
+        || Array.isArray(evidence.inputs)
+        || !evidence.observations
+        || typeof evidence.observations !== 'object'
+        || Array.isArray(evidence.observations)
+        || finishedAt < startedAt) {
         fail('TARGET_CONFIG_MISMATCH', `Task 15 ${stage} evidence envelope is not authentic`);
       }
       return evidence;
@@ -991,12 +1026,34 @@ async function verifyConfig(
     && !Array.isArray(persistedConfig)
     ? (persistedConfig as Record<string, unknown>).profiles
     : undefined;
-  if (!sourceProfiles
+  if (!targetSetupObservations
+    || typeof targetSetupObservations !== 'object'
+    || Array.isArray(targetSetupObservations)
+    || !hasExactKeys(targetSetupObservations as Record<string, unknown>, [
+      'patchDecision',
+      'profiles',
+      'target',
+    ])
+    || (targetSetupObservations as Record<string, unknown>).target !== input.target.id
+    || ((targetSetupObservations as Record<string, unknown>).patchDecision !== 'applied'
+      && (targetSetupObservations as Record<string, unknown>).patchDecision !== 'already-present')
+    || !configObservations
+    || typeof configObservations !== 'object'
+    || Array.isArray(configObservations)
+    || !hasExactKeys(configObservations as Record<string, unknown>, ['config'])
+    || !sourceProfiles
     || typeof sourceProfiles !== 'object'
     || Array.isArray(sourceProfiles)
     || !persistedConfig
     || typeof persistedConfig !== 'object'
     || Array.isArray(persistedConfig)
+    || !hasExactKeys(persistedConfig as Record<string, unknown>, [
+      'bothProfilesChecked',
+      'profile',
+      'profiles',
+      'rootfsPartSize',
+      'selectedTarget',
+    ])
     || !resolvedProfiles
     || typeof resolvedProfiles !== 'object'
     || Array.isArray(resolvedProfiles)) {
@@ -1023,7 +1080,31 @@ async function verifyConfig(
           target: targetId,
         });
       }
-      const recordedTarget = (profile as Record<string, unknown>).target;
+      const profileRecord = profile as Record<string, unknown>;
+      const expectedKeys = stage === 'target-setup'
+        ? [
+            'environment',
+            'profile',
+            'rootfsPartSize',
+            'selectedTarget',
+            'sourceConfigEvidencePath',
+            'sourceSha256',
+            'target',
+          ]
+        : [
+            'environment',
+            'profile',
+            'resolvedSha256',
+            'rootfsPartSize',
+            'selectedTarget',
+            'target',
+          ];
+      if (!hasExactKeys(profileRecord, expectedKeys)) {
+        fail('TARGET_CONFIG_MISMATCH', `Task 15 ${stage} profile keys are not exact`, {
+          target: targetId,
+        });
+      }
+      const recordedTarget = profileRecord.target;
       if ((recordedTarget !== 'rpi-5' && recordedTarget !== 'rpi-2')
         || recordedTarget !== targetId
         || seen.has(recordedTarget)) {

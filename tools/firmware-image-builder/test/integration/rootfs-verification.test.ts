@@ -37,15 +37,20 @@ import { loadManifest } from '../../manifest/validate.js';
 import type { TargetManifest } from '../../manifest/schema.js';
 import {
   verifyFirmwareArtifact,
-  type RootfsNodeResolutionRequest,
   type VerificationInput,
   type WorkspaceAuthority,
 } from '../../runner/src/verification.js';
+import { createNodeVerifier } from '../../runner/src/main.js';
+import type { PipelineOperationExecution } from '../../runner/src/pipeline.js';
 import {
   createApiFreshnessSocketClient,
   requestPersistedFreshness,
 } from '../../runner/src/freshness.js';
 import { createEvidenceWriter } from '../../runner/src/evidence.js';
+import {
+  createTargetSetupConfigObservations,
+  createTargetSetupSourceObservations,
+} from '../../runner/src/target-setup.js';
 
 const SHA40 = '0123456789abcdef0123456789abcdef01234567';
 const ADVANCED_SHA40 = 'fedcba9876543210fedcba9876543210fedcba98';
@@ -223,6 +228,78 @@ chown -R node-red:node-red "$DST" 2>/dev/null || true
 
 exit 0
 `;
+}
+
+function trustedNodeVerificationExecution(
+  target: TargetManifest,
+  rootfsPath: string,
+): PipelineOperationExecution {
+  const nodeRed = join(rootfsPath, 'usr/share/node-red');
+  const require = createRequire(join(nodeRed, '__osi_verification__.cjs'));
+  const modules = [
+    ...THIRD_PARTY_PACKAGES.map((packageName) => ({
+      packageName,
+      specifier: packageName,
+    })),
+    ...RELATIVE_HELPERS.map((packageName) => ({
+      packageName,
+      specifier: packageName,
+    })),
+    ...DIRECT_HELPERS.map((packageName) => ({
+      packageName,
+      specifier: `./${packageName}`,
+    })),
+  ];
+  const nodeResolution = modules.map(({ packageName, specifier }, index) => {
+    const resolved = require.resolve(specifier);
+    const loaded = require(resolved) as unknown;
+    const actualRelativePath = relative(nodeRed, resolved).replaceAll('\\', '/');
+    const directRoot = `${packageName}/`;
+    const nodeModulesRoot = `node_modules/${packageName}/`;
+    const resolvedRelativePath = index >= THIRD_PARTY_PACKAGES.length
+      && index < THIRD_PARTY_PACKAGES.length + RELATIVE_HELPERS.length
+      && actualRelativePath.startsWith(directRoot)
+      ? `${nodeModulesRoot}${actualRelativePath.slice(directRoot.length)}`
+      : actualRelativePath;
+    return {
+      packageName,
+      specifier,
+      resolvedRelativePath,
+      exportType: typeof loaded === 'function'
+        ? 'function' as const
+        : loaded !== null && typeof loaded === 'object'
+          ? 'object' as const
+          : 'incompatible' as const,
+    };
+  });
+  return Object.freeze({
+    operationId: 'verify-image',
+    attempt: 1,
+    outcome: 'passed',
+    command: Object.freeze({
+      argv: Object.freeze(['node', '/usr/libexec/osi-image-builder-tool', 'verify-image']),
+      startedAt: '2026-07-26T10:04:00.000Z',
+      finishedAt: '2026-07-26T10:05:00.000Z',
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      outputLimit: false,
+    }),
+    observations: Object.freeze({
+      stdout: `${JSON.stringify({
+        operation: 'verify-image',
+        targetId: target.id,
+        relativePath: `openwrt/bin/targets/${target.openwrtTarget}/${
+          target.id === 'rpi-5'
+            ? 'chirpstack-gateway-os-test-full-bcm27xx-bcm2712-rpi-5-squashfs-factory.img.gz'
+            : 'chirpstack-gateway-os-test-full-bcm27xx-bcm2709-rpi-2-squashfs-factory.img.gz'
+        }`,
+        size: target.minimumArtifactBytes,
+        sha256: 'a'.repeat(64),
+        nodeResolution,
+      })}\n`,
+    }),
+  });
 }
 
 async function authorityFixture(pathAuthorityDependencies?: Partial<PathAuthorityDependencies>) {
@@ -467,29 +544,16 @@ export async function createRootfsFixture(
       resolvedSha256: sha256(resolvedConfigs[profile.id]),
     }];
   })) as VerificationInput['config']['profiles'];
-  const sourceProfiles = Object.fromEntries(targets.map((profile) => {
-    const record = profiles[profile.id];
-    return [profile.id, {
-      target: record.target,
-      environment: record.environment,
-      selectedTarget: record.selectedTarget,
-      profile: record.profile,
-      rootfsPartSize: record.rootfsPartSize,
-      sourceSha256: record.sourceSha256,
-      sourceConfigEvidencePath: record.sourceConfigEvidencePath,
-    }];
-  }));
-  const resolvedEvidenceProfiles = Object.fromEntries(targets.map((profile) => {
-    const record = profiles[profile.id];
-    return [profile.id, {
-      target: record.target,
-      environment: record.environment,
-      selectedTarget: record.selectedTarget,
-      profile: record.profile,
-      rootfsPartSize: record.rootfsPartSize,
-      resolvedSha256: record.resolvedSha256,
-    }];
-  }));
+  const producerProfiles = Object.freeze({
+    'rpi-5': Object.freeze({
+      ...profiles['rpi-5'],
+      patchDecision: 'applied' as const,
+    }),
+    'rpi-2': Object.freeze({
+      ...profiles['rpi-2'],
+      patchDecision: 'applied' as const,
+    }),
+  });
   const config = {
     selectedTarget: target.openwrtTarget,
     profile: target.profile,
@@ -497,13 +561,34 @@ export async function createRootfsFixture(
     bothProfilesChecked: true as const,
     profiles,
   };
+  const sourceObservations = createTargetSetupSourceObservations(Object.freeze({
+    phase: 'target-setup' as const,
+    workspacePath: sourcePath,
+    target: target.id,
+    patchDecision: 'applied' as const,
+    profiles: producerProfiles,
+  }));
+  const configObservations = createTargetSetupConfigObservations(Object.freeze({
+    phase: 'config' as const,
+    workspacePath: sourcePath,
+    target: target.id,
+    config: Object.freeze({
+      selectedTarget: config.selectedTarget,
+      profile: config.profile,
+      rootfsPartSize: config.rootfsPartSize,
+      sourceSha256: profiles[target.id].sourceSha256,
+      resolvedSha256: profiles[target.id].resolvedSha256,
+      bothProfilesChecked: true as const,
+      profiles: producerProfiles,
+    }),
+  }));
   await task15EvidenceWriter.write({
     jobId: authority.workspace.jobId,
     stage: 'target-setup',
     startedAt: '2026-07-26T10:00:00.000Z',
     finishedAt: '2026-07-26T10:01:00.000Z',
     outcome: 'passed',
-    operationId: 'activate-target',
+    operationId: null,
     commands: [],
     inputs: {
       targetId: target.id,
@@ -511,11 +596,7 @@ export async function createRootfsFixture(
       branch: 'main',
       pinnedSha: SHA40,
     },
-    observations: {
-      target: target.id,
-      patchDecision: 'applied',
-      profiles: sourceProfiles,
-    },
+    observations: sourceObservations,
     error: null,
   });
   await task15EvidenceWriter.write({
@@ -524,7 +605,7 @@ export async function createRootfsFixture(
     startedAt: '2026-07-26T10:02:00.000Z',
     finishedAt: '2026-07-26T10:03:00.000Z',
     outcome: 'passed',
-    operationId: 'resolve-config',
+    operationId: null,
     commands: [],
     inputs: {
       targetId: target.id,
@@ -532,15 +613,7 @@ export async function createRootfsFixture(
       branch: 'main',
       pinnedSha: SHA40,
     },
-    observations: {
-      config: {
-        selectedTarget: config.selectedTarget,
-        profile: config.profile,
-        rootfsPartSize: config.rootfsPartSize,
-        bothProfilesChecked: true,
-        profiles: resolvedEvidenceProfiles,
-      },
-    },
+    observations: configObservations,
     error: null,
   });
   const input: VerificationInput = {
@@ -557,28 +630,10 @@ export async function createRootfsFixture(
     config,
     pinnedSha: SHA40,
     branch: 'main',
-    nodeVerifier: {
-      resolve: async (request: RootfsNodeResolutionRequest) => {
-        const nodeRed = join(rootfsPath, 'usr/share/node-red');
-        const require = createRequire(join(nodeRed, '__osi_verification__.cjs'));
-        return {
-          targetId: request.targetId,
-          modules: request.modules.map(({ packageName, specifier }) => {
-            const resolved = require.resolve(specifier);
-            const loaded = require(resolved) as unknown;
-            return {
-              packageName,
-              resolvedRelativePath: relative(nodeRed, resolved).replaceAll('\\', '/'),
-              exportType: typeof loaded === 'function'
-                ? 'function' as const
-                : loaded !== null && typeof loaded === 'object'
-                  ? 'object' as const
-                  : 'incompatible' as const,
-            };
-          }),
-        };
-      },
-    },
+    nodeVerifier: createNodeVerifier(
+      target,
+      () => trustedNodeVerificationExecution(target, rootfsPath),
+    ),
     freshness: {
       client: {
         signal: async () => undefined,
@@ -1040,6 +1095,126 @@ describe('real rootfs verification contract', () => {
     });
   }, 30_000);
 
+  it('rejects non-production target-setup and config evidence shapes', async () => {
+    const unknownEnvelope = await createRootfsFixture('rpi-5');
+    const unknownEnvelopeEvidence = await readConfigEvidence(unknownEnvelope, 'target-setup');
+    unknownEnvelopeEvidence.fabricated = true;
+    await overwriteConfigEvidence(unknownEnvelope, 'target-setup', unknownEnvelopeEvidence);
+    await expect(verifyFirmwareArtifact(unknownEnvelope.input)).rejects.toMatchObject({
+      code: 'TARGET_CONFIG_MISMATCH',
+    });
+
+    const missingEnvelope = await createRootfsFixture('rpi-2');
+    const missingEnvelopeEvidence = await readConfigEvidence(missingEnvelope, 'config');
+    delete missingEnvelopeEvidence.startedAt;
+    await overwriteConfigEvidence(missingEnvelope, 'config', missingEnvelopeEvidence);
+    await expect(verifyFirmwareArtifact(missingEnvelope.input)).rejects.toMatchObject({
+      code: 'TARGET_CONFIG_MISMATCH',
+    });
+
+    for (const stage of ['target-setup', 'config'] as const) {
+      const operation = await createRootfsFixture('rpi-5');
+      const operationEvidence = await readConfigEvidence(operation, stage);
+      operationEvidence.operationId = stage === 'target-setup'
+        ? 'activate-target'
+        : 'resolve-config';
+      await overwriteConfigEvidence(operation, stage, operationEvidence);
+      await expect(verifyFirmwareArtifact(operation.input)).rejects.toMatchObject({
+        code: 'TARGET_CONFIG_MISMATCH',
+      });
+
+      const unknownObservation = await createRootfsFixture('rpi-2');
+      const unknownObservationEvidence = await readConfigEvidence(unknownObservation, stage);
+      objectRecord(
+        unknownObservationEvidence.observations,
+        `${stage} observations`,
+      ).fabricated = true;
+      await overwriteConfigEvidence(unknownObservation, stage, unknownObservationEvidence);
+      await expect(verifyFirmwareArtifact(unknownObservation.input)).rejects.toMatchObject({
+        code: 'TARGET_CONFIG_MISMATCH',
+      });
+    }
+
+    const missingObservation = await createRootfsFixture('rpi-5');
+    const missingObservationEvidence = await readConfigEvidence(
+      missingObservation,
+      'target-setup',
+    );
+    delete objectRecord(
+      missingObservationEvidence.observations,
+      'target-setup observations',
+    ).patchDecision;
+    await overwriteConfigEvidence(
+      missingObservation,
+      'target-setup',
+      missingObservationEvidence,
+    );
+    await expect(verifyFirmwareArtifact(missingObservation.input)).rejects.toMatchObject({
+      code: 'TARGET_CONFIG_MISMATCH',
+    });
+
+    const missingProfileField = await createRootfsFixture('rpi-2');
+    const missingProfileFieldEvidence = await readConfigEvidence(
+      missingProfileField,
+      'config',
+    );
+    const missingFieldProfiles = configEvidenceProfiles(
+      missingProfileFieldEvidence,
+      'config',
+    );
+    delete objectRecord(
+      missingFieldProfiles['rpi-2'],
+      'config rpi-2 profile',
+    ).resolvedSha256;
+    await overwriteConfigEvidence(
+      missingProfileField,
+      'config',
+      missingProfileFieldEvidence,
+    );
+    await expect(verifyFirmwareArtifact(missingProfileField.input)).rejects.toMatchObject({
+      code: 'TARGET_CONFIG_MISMATCH',
+    });
+
+    const stage04Resolved = await createRootfsFixture('rpi-5');
+    const stage04ResolvedEvidence = await readConfigEvidence(stage04Resolved, 'target-setup');
+    const stage04ResolvedProfiles = configEvidenceProfiles(
+      stage04ResolvedEvidence,
+      'target-setup',
+    );
+    stage04ResolvedProfiles['rpi-5'] = {
+      ...objectRecord(stage04ResolvedProfiles['rpi-5'], 'target-setup rpi-5 profile'),
+      resolvedSha256: 'a'.repeat(64),
+    };
+    await overwriteConfigEvidence(stage04Resolved, 'target-setup', stage04ResolvedEvidence);
+    await expect(verifyFirmwareArtifact(stage04Resolved.input)).rejects.toMatchObject({
+      code: 'TARGET_CONFIG_MISMATCH',
+    });
+
+    const stage06Source = await createRootfsFixture('rpi-2');
+    const stage06SourceEvidence = await readConfigEvidence(stage06Source, 'config');
+    const stage06SourceProfiles = configEvidenceProfiles(stage06SourceEvidence, 'config');
+    stage06SourceProfiles['rpi-2'] = {
+      ...objectRecord(stage06SourceProfiles['rpi-2'], 'config rpi-2 profile'),
+      sourceSha256: stage06Source.input.config.profiles['rpi-2'].sourceSha256,
+      sourceConfigEvidencePath:
+        stage06Source.input.config.profiles['rpi-2'].sourceConfigEvidencePath,
+    };
+    await overwriteConfigEvidence(stage06Source, 'config', stage06SourceEvidence);
+    await expect(verifyFirmwareArtifact(stage06Source.input)).rejects.toMatchObject({
+      code: 'TARGET_CONFIG_MISMATCH',
+    });
+
+    const wrongProfileKey = await createRootfsFixture('rpi-5');
+    const wrongProfileKeyEvidence = await readConfigEvidence(wrongProfileKey, 'config');
+    const wrongProfileKeyProfiles = configEvidenceProfiles(wrongProfileKeyEvidence, 'config');
+    wrongProfileKeyProfiles['rpi-five'] = wrongProfileKeyProfiles['rpi-5'];
+    delete wrongProfileKeyProfiles['rpi-5'];
+    await overwriteConfigEvidence(wrongProfileKey, 'config', wrongProfileKeyEvidence);
+    await expect(verifyFirmwareArtifact(wrongProfileKey.input)).rejects.toMatchObject({
+      code: 'TARGET_CONFIG_MISMATCH',
+    });
+  }, 30_000);
+
   it.each(['rpi-5', 'rpi-2'] as const)(
     'rejects source or resolved %s symbol tampering even when the supplied hash is well formed',
     async (targetId) => {
@@ -1208,6 +1383,15 @@ describe('real rootfs verification contract', () => {
     await writeFile(join(protobufRoot, 'dist/runtime.cjs'), 'module.exports = { verified: true };\n');
     await expect(verifyFirmwareArtifact(exportsPackage.input)).resolves.toMatchObject({
       rootfs: { nodeResolution: { protobufjs: true } },
+    });
+
+    const callable = await createRootfsFixture('rpi-5');
+    await writeFile(
+      join(callable.rootfsPath, 'usr/share/node-red/osi-command-ledger/index.js'),
+      'module.exports = function verifiedHelper() {};\n',
+    );
+    await expect(verifyFirmwareArtifact(callable.input)).resolves.toMatchObject({
+      rootfs: { nodeResolution: { 'osi-command-ledger': true } },
     });
 
     const incompatible = await createRootfsFixture('rpi-2');

@@ -21,6 +21,8 @@ const FIXED_PATHS = Object.freeze({
 const PROC_FD = '/proc/self/fd';
 const DIRECTORY_FLAGS = constants.O_DIRECTORY | constants.O_NOFOLLOW;
 const FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW;
+const RELATIVE_HELPER_START = 4;
+const RELATIVE_HELPER_END = 13;
 const NODE_MODULES = Object.freeze([
   ['@grpc/grpc-js', '@grpc/grpc-js'],
   ['@chirpstack/chirpstack-api', '@chirpstack/chirpstack-api'],
@@ -388,11 +390,22 @@ async function verifyImage(root, hooks) {
         }
         const nodeRed = `${root}/${rootfs.path}/usr/share/node-red`;
         const require = createRequire(`${nodeRed}/__osi_verification__.cjs`);
-        const nodeResolution = NODE_MODULES.map(([packageName, specifier]) => {
+        const nodeResolution = NODE_MODULES.map(([packageName, specifier], index) => {
           const resolved = require.resolve(specifier);
-          const resolvedRelativePath = relative(nodeRed, resolved).replaceAll('\\', '/');
-          if (resolvedRelativePath.startsWith('../') || resolvedRelativePath.startsWith('/')) {
+          const actualRelativePath = relative(nodeRed, resolved).replaceAll('\\', '/');
+          if (actualRelativePath.startsWith('../') || actualRelativePath.startsWith('/')) {
             throw new Error(`resolved Node module escaped the trusted rootfs base: ${packageName}`);
+          }
+          const directRoot = `${packageName}/`;
+          const nodeModulesRoot = `node_modules/${packageName}/`;
+          const resolvedRelativePath = index >= RELATIVE_HELPER_START
+            && index < RELATIVE_HELPER_END
+            && actualRelativePath.startsWith(directRoot)
+            ? `${nodeModulesRoot}${actualRelativePath.slice(directRoot.length)}`
+            : actualRelativePath;
+          const expectedRoot = specifier.startsWith('./') ? directRoot : nodeModulesRoot;
+          if (!resolvedRelativePath.startsWith(expectedRoot)) {
+            throw new Error(`resolved Node module changed package identity: ${packageName}`);
           }
           return { packageName, specifier, resolvedRelativePath };
         });
