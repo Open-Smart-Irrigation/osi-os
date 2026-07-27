@@ -196,10 +196,16 @@ export function validateTrustedOperationToolSource(contents: string): void {
     || !contents.includes("    '--experimental-vm-modules',")
     || !contents.includes('`--allow-fs-read=${dependencies.probeProgram}`')
     || !contents.includes('`--allow-fs-read=${nodeRed}`')
-    || !contents.includes('const execution = spawnSync(dependencies.nodeBinary, args, {')
+    || !contents.includes('for (let packageIndex = 0; packageIndex < NODE_MODULES.length; packageIndex += 1)')
+    || !contents.includes('const execution = spawn(dependencies.nodeBinary, args, {')
+    || !contents.includes("'--package-index',")
+    || !contents.includes('String(packageIndex)')
+    || !contents.includes('timeout: MODULE_PROBE_TIMEOUT_MS')
+    || !contents.includes("killSignal: 'SIGKILL'")
+    || !contents.includes('results.push(result)')
     || !contents.includes('shell: false')
     || !contents.includes("cwd: '/'")
-    || !contents.includes("NODE_MODULES[index]")
+    || !contents.includes("NODE_MODULES[packageIndex]")
     || contents.includes('--allow-fs-write')
     || contents.includes('--allow-child-process')
     || contents.includes('--allow-worker')
@@ -239,38 +245,6 @@ export function validateTrustedModuleProbeSource(contents: string): void {
     ...builtinClosure.map((name) => `  '${name}',`),
     ']);',
   ].join('\n');
-  const exactGetBuiltinModuleWrapper = `const ORIGINAL_GET_BUILTIN_MODULE = process.getBuiltinModule.bind(process);
-
-function sealedGetBuiltinModule(request) {
-  if (typeof request !== 'string' || !ALLOWED_ROOTFS_BUILTINS.includes(request)) {
-    throw new Error(\`rootfs Node module requested an unapproved builder builtin: \${request}\`);
-  }
-  if (request === 'fs' || request === 'node:fs') {
-    return ROOTFS_FILESYSTEM_CAPABILITY;
-  }
-  if (request === 'node:child_process') {
-    return ROOTFS_CHILD_PROCESS_CAPABILITY;
-  }
-  return ORIGINAL_GET_BUILTIN_MODULE(request);
-}
-Object.freeze(sealedGetBuiltinModule);`;
-  const exactGetBuiltinModuleSeal = `function sealProcessBuiltinAccess() {
-  Object.defineProperty(process, 'getBuiltinModule', {
-    value: sealedGetBuiltinModule,
-    writable: false,
-    enumerable: true,
-    configurable: false,
-  });
-  const descriptor = Object.getOwnPropertyDescriptor(process, 'getBuiltinModule');
-  if (
-    descriptor?.value !== sealedGetBuiltinModule
-    || descriptor.writable !== false
-    || descriptor.enumerable !== true
-    || descriptor.configurable !== false
-  ) {
-    throw new Error('probe process builtin access is not sealed');
-  }
-}`;
   const exactDynamicImportRestriction = `const DYNAMIC_IMPORT_VIOLATIONS = [];
 
 function recordDynamicImportViolation(specifier) {
@@ -280,21 +254,15 @@ function recordDynamicImportViolation(specifier) {
   DYNAMIC_IMPORT_VIOLATIONS.push(violation);
   return violation;
 }`;
-  const exactModuleStateIsolation = `const loaderSnapshot = snapshotModuleLoaderState();
-  const originalLoad = Module._load;
-  const originalResolveFilename = Module._resolveFilename;
-  const originalCompile = Module.prototype._compile;`;
-  const exactModuleStateRestore = `try {
-      restoreModuleLoaderState(loaderSnapshot);
-    } catch (error) {
-      failure ??= error;
-    }`;
   if (!contents.startsWith('#!/usr/bin/env node\n')
-    || !contents.includes("args.length !== 2 || args[0] !== '--rootfs-node-red'")
+    || !contents.includes("args.length !== 4")
+    || !contents.includes("args[0] !== '--rootfs-node-red'")
+    || !contents.includes("args[2] !== '--package-index'")
+    || !contents.includes('NODE_MODULES[packageIndex]')
     || !contents.includes("sqlite3: Object.freeze({\n    packageName: 'osi-db-helper'")
     || !contents.includes(exactBuiltinClosure)
     || !contents.includes('const ROOTFS_FILESYSTEM_CAPABILITY = Object.freeze(new Proxy(')
-    || !contents.includes('return ROOTFS_FILESYSTEM_CAPABILITY;')
+    || !contents.includes("  if (request === 'fs' || request === 'node:fs') {\n    return ROOTFS_FILESYSTEM_CAPABILITY;\n  }")
     || !contents.includes("packageName: 'osi-health-helper',\n    parentRelativePath: 'osi-health-helper/index.js'")
     || !contents.includes('return builtinStub.value;')
     || !contents.includes("'@chirpstack/chirpstack-api/api/application_grpc_pb',")
@@ -309,28 +277,32 @@ function recordDynamicImportViolation(specifier) {
     || !contents.includes("process.permission.has('worker')")
     || !contents.includes("process.permission.has('wasi')")
     || !contents.includes("process.permission.has('addons')")
-    || !contents.includes(exactGetBuiltinModuleWrapper)
-    || !contents.includes(exactGetBuiltinModuleSeal)
+    || !contents.includes('const ORIGINAL_GET_BUILTIN_MODULE = process.getBuiltinModule.bind(process);')
+    || !contents.includes('function sealedGetBuiltinModule(request)')
+    || !contents.includes('Object.freeze(sealedGetBuiltinModule);')
+    || !contents.includes("function sealProcessBuiltinAccess()")
+    || !contents.includes("Object.defineProperty(process, 'getBuiltinModule', {")
+    || !contents.includes("  Object.defineProperty(process, 'getBuiltinModule', {\n    value: sealedGetBuiltinModule,\n    writable: false,\n    enumerable: true,\n    configurable: false,\n  });")
+    || !contents.includes("Object.defineProperty(process, 'exit', {")
+    || !contents.includes('writable: false')
+    || !contents.includes('configurable: false')
     || !contents.includes("import Module, { createRequire, isBuiltin } from 'node:module';")
     || !contents.includes("import { runInThisContext } from 'node:vm';")
     || !contents.includes(exactDynamicImportRestriction)
-    || !contents.includes(exactModuleStateIsolation)
-    || !contents.includes('moduleState: snapshotObjectState(Module)')
-    || !contents.includes('modulePrototypeState: snapshotObjectState(Module.prototype)')
-    || !contents.includes('function snapshotObjectState(target)')
-    || !contents.includes('descriptors: Object.getOwnPropertyDescriptors(target)')
-    || !contents.includes(exactModuleStateRestore)
-    || !contents.includes("restoreObjectState(Module, snapshot.moduleState, 'Module');")
-    || !contents.includes("restoreObjectState(Module.prototype, snapshot.modulePrototypeState, 'Module.prototype');")
-    || !contents.includes("restoreObjectState(snapshot.extensions, snapshot.extensionsState, 'Module._extensions');")
-    || !contents.includes("restoreObjectState(snapshot.cache, snapshot.cacheState, 'Module._cache');")
-    || !contents.includes('Module._extensions !== snapshot.extensions')
-    || !contents.includes('Module._cache')
+    || !contents.includes('const ORIGINAL_STDOUT_WRITE = process.stdout.write.bind(process.stdout);')
+    || !contents.includes('const ORIGINAL_STDERR_WRITE = process.stderr.write.bind(process.stderr);')
+    || !contents.includes('const ORIGINAL_PROCESS_EXIT = process.exit.bind(process);')
+    || !contents.includes('function installRootfsLoader(')
+    || !contents.includes('const dynamicImportViolationStart = DYNAMIC_IMPORT_VIOLATIONS.length;')
+    || !contents.includes('if (DYNAMIC_IMPORT_VIOLATIONS.length > dynamicImportViolationStart)')
     || !contents.includes('Module.prototype._compile = sealedCompile;')
-    || !contents.includes('installAsyncSchedulingGuards()')
-    || !contents.includes('rootfs Node module attempted asynchronous scheduling')
     || !contents.includes('const ORIGINAL_SET_IMMEDIATE = setImmediate;')
     || !contents.includes('await drainAsyncBarrier();')
+    || !contents.includes('function flushAndExit(record, code)')
+    || !contents.includes('write(output, () => ORIGINAL_PROCESS_EXIT(code));')
+    || contents.includes('snapshotModuleLoaderState')
+    || contents.includes('restoreModuleLoaderState')
+    || contents.includes('installAsyncSchedulingGuards')
     || contents.includes('--allow-fs-write')
     || contents.includes('--allow-child-process')
     || contents.includes('--allow-worker')
@@ -651,6 +623,30 @@ if (JSON.stringify(actual) !== JSON.stringify(expected)) {
   throw new Error('verify-image canonical self-test output changed');
 }
 EOF
+cat > "$node_red/node_modules/@grpc/grpc-js/index.js" <<'EOF'
+'use strict';
+module.constructor._pathCache = { poisoned: true };
+module.constructor.globalPaths = ['/poisoned'];
+module.exports = { compatible: true };
+EOF
+cat > "$node_red/node_modules/@chirpstack/chirpstack-api/api/application_grpc_pb.js" <<'EOF'
+'use strict';
+if (Object.hasOwn(module.constructor._pathCache, 'poisoned') || module.constructor.globalPaths.includes('/poisoned')) {
+  throw new Error('cross-child Module state leaked');
+}
+module.exports = { compatible: true };
+EOF
+node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out
+test -s /tmp/osi-operation-tool-self-test.out
+printf '%s\n' 'module probe child isolation self-test passed'
+cat > "$node_red/node_modules/@grpc/grpc-js/index.js" <<'EOF'
+'use strict';
+module.exports = { compatible: true };
+EOF
+cat > "$node_red/node_modules/@chirpstack/chirpstack-api/api/application_grpc_pb.js" <<'EOF'
+'use strict';
+module.exports = { compatible: true };
+EOF
 cat > "$node_red/osi-db-helper/index.js" <<'EOF'
 'use strict';
 process.getBuiltinModule('fs').writeFileSync('/tmp/osi-module-probe-write-marker', 'written');
@@ -700,6 +696,22 @@ rm -f /tmp/osi-module-probe-dynamic-sqlite-marker.db
 status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
 test "$status" -eq 2
 test ! -e /tmp/osi-module-probe-dynamic-sqlite-marker.db
+cat > "$node_red/osi-db-helper/index.js" <<'EOF'
+'use strict';
+void Promise.resolve().then(() => import(['node', 'sqlite'].join(':')).then(({ DatabaseSync }) => {
+  const marker = new DatabaseSync('/tmp/osi-module-probe-deferred-sqlite-marker.db');
+  marker.exec('CREATE TABLE marker (id INTEGER PRIMARY KEY)');
+  marker.close();
+  process.exitCode = 1;
+}, (error) => {
+  if (!(error instanceof Error) || !/unapproved builder ESM builtin: node:sqlite/u.test(error.message)) process.exitCode = 1;
+}));
+module.exports = {};
+EOF
+rm -f /tmp/osi-module-probe-deferred-sqlite-marker.db
+status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
+test "$status" -eq 2
+test ! -e /tmp/osi-module-probe-deferred-sqlite-marker.db
 rm -rf /workdir/openwrt /workdir/web /workdir/feeds /workdir/feeds.conf.default
 status=0; node "$tool" unknown-operation >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?; test "$status" -eq 2
 for operation in copy-feed-config verify-image mirror-gui; do

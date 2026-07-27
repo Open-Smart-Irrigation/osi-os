@@ -34,6 +34,7 @@ const TEST_PROBE_DEPENDENCIES = Object.freeze({
   nodeBinary: process.execPath,
   probeProgram: ADJACENT_MODULE_PROBE,
 });
+const MODULE_PROBE_TIMEOUT_MS = 15_000;
 const NODE_MODULES = Object.freeze([
   ['@grpc/grpc-js', '@grpc/grpc-js'],
   [
@@ -81,100 +82,104 @@ function requireAbsoluteRoot(root) {
   if (typeof root !== 'string' || !root.startsWith('/') || root.includes('\0')) throw new Error('operation root is not a canonical absolute path');
 }
 
-function runModuleProbe(nodeRed, dependencies) {
+function runModuleProbe(nodeRed, dependencies, spawn = spawnSync) {
   requireAbsoluteRoot(nodeRed);
   requireAbsoluteRoot(dependencies.nodeBinary);
   requireAbsoluteRoot(dependencies.probeProgram);
-  const args = [
-    '--experimental-vm-modules',
-    '--permission',
-    `--allow-fs-read=${dependencies.probeProgram}`,
-    `--allow-fs-read=${nodeRed}`,
-    dependencies.probeProgram,
-    '--rootfs-node-red',
-    nodeRed,
-  ];
-  const execution = spawnSync(dependencies.nodeBinary, args, {
-    cwd: '/',
-    encoding: 'utf8',
-    env: {
-      HOME: '/nonexistent',
-      LANG: 'C',
-      LC_ALL: 'C',
-      PATH: '/usr/local/bin:/usr/bin:/bin',
-      TZ: 'UTC',
-    },
-    maxBuffer: 8 * 1024 * 1024,
-    shell: false,
-    windowsHide: true,
-  });
-  if (execution.error) {
-    throw new Error('rootfs Node module permission probe could not start', {
-      cause: execution.error,
+  const results = [];
+  for (let packageIndex = 0; packageIndex < NODE_MODULES.length; packageIndex += 1) {
+    const [packageName, specifier] = NODE_MODULES[packageIndex];
+    const args = [
+      '--experimental-vm-modules',
+      '--permission',
+      `--allow-fs-read=${dependencies.probeProgram}`,
+      `--allow-fs-read=${nodeRed}`,
+      dependencies.probeProgram,
+      '--rootfs-node-red',
+      nodeRed,
+      '--package-index',
+      String(packageIndex),
+    ];
+    const execution = spawn(dependencies.nodeBinary, args, {
+      cwd: '/',
+      encoding: 'utf8',
+      env: {
+        HOME: '/nonexistent',
+        LANG: 'C',
+        LC_ALL: 'C',
+        PATH: '/usr/local/bin:/usr/bin:/bin',
+        TZ: 'UTC',
+      },
+      timeout: MODULE_PROBE_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+      maxBuffer: 8 * 1024 * 1024,
+      shell: false,
+      windowsHide: true,
     });
-  }
-  if (execution.status !== 0 || execution.signal !== null) {
-    const stderr = execution.stderr.trim();
-    throw new Error(
-      `rootfs Node module permission probe failed${
-        stderr.length > 0 ? `: ${stderr.slice(0, 4096)}` : ''
-      }`,
-    );
-  }
-  const stdout = execution.stdout;
-  if (
-    stdout.includes('\r')
-    || !stdout.endsWith('\n')
-    || stdout.indexOf('\n') !== stdout.length - 1
-  ) {
-    throw new Error('rootfs Node module permission probe output is not one record');
-  }
-  const text = stdout.slice(0, -1);
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    throw new Error('rootfs Node module permission probe output is not JSON', {
-      cause: error,
-    });
-  }
-  if (
-    parsed === null
-    || typeof parsed !== 'object'
-    || Array.isArray(parsed)
-    || JSON.stringify(parsed) !== text
-    || Object.keys(parsed).join('\0') !== 'nodeResolution'
-    || !Array.isArray(parsed.nodeResolution)
-    || parsed.nodeResolution.length !== NODE_MODULES.length
-  ) {
-    throw new Error('rootfs Node module permission probe output changed');
-  }
-  return parsed.nodeResolution.map((candidate, index) => {
-    const [packageName, specifier] = NODE_MODULES[index];
+    if (execution.error) {
+      const suffix = execution.error.code === 'ETIMEDOUT' ? ' timed out' : '';
+      throw new Error(`rootfs Node module permission probe${suffix} could not start`, {
+        cause: execution.error,
+      });
+    }
+    if (execution.status !== 0 || execution.signal !== null) {
+      const stderr = execution.stderr.trim();
+      throw new Error(
+        `rootfs Node module permission probe failed for ${packageName}${
+          stderr.length > 0 ? `: ${stderr.slice(0, 4096)}` : ''
+        }`,
+      );
+    }
+    const stdout = execution.stdout;
     if (
-      candidate === null
-      || typeof candidate !== 'object'
-      || Array.isArray(candidate)
-      || Object.keys(candidate).join('\0')
-        !== 'packageName\0specifier\0resolvedRelativePath\0exportType'
-      || candidate.packageName !== packageName
-      || candidate.specifier !== specifier
-      || typeof candidate.resolvedRelativePath !== 'string'
-      || candidate.resolvedRelativePath.length === 0
-      || candidate.resolvedRelativePath.startsWith('/')
-      || candidate.resolvedRelativePath.split('/').includes('..')
-      || !['function', 'object', 'incompatible'].includes(candidate.exportType)
+      stdout.length > 1024 * 1024
+      || stdout.includes('\r')
+      || !stdout.endsWith('\n')
+      || stdout.indexOf('\n') !== stdout.length - 1
+    ) {
+      throw new Error('rootfs Node module permission probe output is not one record');
+    }
+    const text = stdout.slice(0, -1);
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      throw new Error('rootfs Node module permission probe output is not JSON', {
+        cause: error,
+      });
+    }
+    if (
+      parsed === null
+      || typeof parsed !== 'object'
+      || Array.isArray(parsed)
+      || JSON.stringify(parsed) !== text
+      || Object.keys(parsed).join('\0')
+        !== 'packageIndex\0packageName\0specifier\0resolvedRelativePath\0exportType'
+      || parsed.packageIndex !== packageIndex
+      || parsed.packageName !== packageName
+      || parsed.specifier !== specifier
+      || typeof parsed.resolvedRelativePath !== 'string'
+      || parsed.resolvedRelativePath.length === 0
+      || parsed.resolvedRelativePath.startsWith('/')
+      || parsed.resolvedRelativePath.split('/').includes('..')
+      || !['function', 'object', 'incompatible'].includes(parsed.exportType)
     ) {
       throw new Error('rootfs Node module permission probe binding changed');
     }
     const expectedRoot = specifier.startsWith('./')
       ? `${packageName}/`
       : `node_modules/${packageName}/`;
-    if (!candidate.resolvedRelativePath.startsWith(expectedRoot)) {
+    if (!parsed.resolvedRelativePath.startsWith(expectedRoot)) {
       throw new Error(`resolved Node module changed package identity: ${packageName}`);
     }
-    return candidate;
-  });
+    const { packageIndex: _packageIndex, ...result } = parsed;
+    results.push(result);
+  }
+  return results;
+}
+
+export function runModuleProbeForTesting(nodeRed, dependencies, spawn = spawnSync) {
+  return runModuleProbe(nodeRed, dependencies, spawn);
 }
 
 function entryPath(directory, name = '') {

@@ -123,6 +123,23 @@ async function runOperation(
   return module.createOperationHandlersForTesting(root).verifyImage();
 }
 
+async function runProbeWithFakeChildren(
+  fakeChild: (binary: string, args: string[], options: Record<string, unknown>) => unknown,
+) {
+  const module = await import(operationToolPath) as {
+    runModuleProbeForTesting(
+      rootfs: string,
+      dependencies: { nodeBinary: string; probeProgram: string },
+      spawn: typeof fakeChild,
+    ): readonly Readonly<Record<string, unknown>>[];
+  };
+  return module.runModuleProbeForTesting(
+    '/rootfs/usr/share/node-red',
+    { nodeBinary: '/usr/local/bin/node', probeProgram: '/probe.js' },
+    fakeChild,
+  );
+}
+
 async function runShippedOperation(options: Readonly<{
   dbHelperPrefix?: string;
   hostDependency?: string;
@@ -449,26 +466,29 @@ describe('trusted verify-image Node compatibility record', () => {
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('rejects delayed timer scheduling before a callback can poison the host', async () => {
+  it('exits before a retained timer callback can poison the host', async () => {
     const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-delayed-timer-'));
     temporaryRoots.push(markerRoot);
     const marker = join(markerRoot, 'marker');
-    await expect(runShippedOperation({
+    const started = Date.now();
+    await runShippedOperation({
       dbHelperPrefix: [
-        `setTimeout(() => { const sqlite = module.constructor._load('node:sqlite'); const database = new sqlite.DatabaseSync(${JSON.stringify(marker)}); database.close(); }, 0);`,
+        `setTimeout(() => { require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'late'); throw new Error('late timer ran'); }, 250);`,
+        "process.once('beforeExit', () => { throw new Error('beforeExit emitted'); });",
       ].join('\n'),
-    })).rejects.toThrow(/asynchronous scheduling/u);
+    });
+    expect(Date.now() - started).toBeLessThan(5000);
     await new Promise((resolve) => setTimeout(resolve, 25));
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('fails closed and restores a mutated extension loader before the next probe', async () => {
-    await expect(runOperation({
+  it('isolates a mutated extension loader from every other package child', async () => {
+    await runOperation({
       '@grpc/grpc-js': [
         "require.extensions['.js'] = function poisonedLoader(module) { module.exports = { poisoned: true }; };",
         'module.exports = { compatible: true };',
       ].join('\n'),
-    })).rejects.toThrow(/sealed builder loader/u);
+    });
     const result = await runOperation();
     expect(result.nodeResolution).toHaveLength(21);
   });
@@ -485,13 +505,13 @@ describe('trusted verify-image Node compatibility record', () => {
       .toMatchObject({ exportType: 'function' });
   });
 
-  it('fails closed and restores Module.prototype.require before the next probe', async () => {
-    await expect(runOperation({
+  it('isolates Module.prototype.require mutation from every other package child', async () => {
+    await runOperation({
       '@grpc/grpc-js': [
         "module.constructor.prototype.require = function poisonedRequire() { return { poisoned: true }; };",
         'module.exports = { compatible: true };',
       ].join('\n'),
-    })).rejects.toThrow(/sealed builder loader/u);
+    });
     const result = await runOperation();
     expect(result.nodeResolution).toHaveLength(21);
   });
@@ -529,6 +549,111 @@ describe('trusted verify-image Node compatibility record', () => {
       .resolve(request);
     expect(resolved.modules.find(({ packageName }) => packageName === 'protobufjs'))
       .toMatchObject({ exportType: 'incompatible' });
+  });
+
+  it('launches exactly one child per fixed package in fixed order', async () => {
+    const calls: Array<{ binary: string; args: string[]; options: Record<string, unknown> }> = [];
+    const thirdParty = [
+      '@grpc/grpc-js',
+      '@chirpstack/chirpstack-api',
+      'google-protobuf',
+      'protobufjs',
+    ];
+    const relative = [
+      'osi-chameleon-helper',
+      'osi-chirpstack-helper',
+      'osi-cloud-http',
+      'osi-db-helper',
+      'osi-dendro-helper',
+      'osi-health-helper',
+      'osi-history-helper',
+      'osi-history-sync-helper',
+      'osi-lib',
+    ];
+    const direct = [
+      'osi-command-ledger',
+      'osi-dendro-analytics',
+      'osi-zone-env',
+      'osi-history-router',
+      'osi-journal',
+      'osi-device-writer',
+      'osi-uc512-normalize',
+      'osi-lsn50-normalize',
+    ];
+    const all = [...thirdParty, ...relative, ...direct];
+    const result = await runProbeWithFakeChildren((binary, args, options) => {
+      calls.push({ binary, args, options });
+      const index = Number(args.at(-1));
+      const packageName = all[index]!;
+      const specifier = index < 13 ? packageName : `./${packageName}`;
+      const resolvedRelativePath = index === 1
+        ? 'node_modules/@chirpstack/chirpstack-api/api/application_grpc_pb.js'
+        : index < 13
+          ? `node_modules/${packageName}/index.js`
+          : `${packageName}/index.js`;
+      return {
+        error: null,
+        status: 0,
+        signal: null,
+        stderr: '',
+        stdout: `${JSON.stringify({
+          packageIndex: index,
+          packageName,
+          specifier,
+          resolvedRelativePath,
+          exportType: index % 2 === 0 ? 'object' : 'function',
+        })}\n`,
+      };
+    });
+    expect(calls).toHaveLength(21);
+    expect(calls.map(({ args }) => Number(args.at(-1)))).toEqual(all.map((_, index) => index));
+    for (const [index, call] of calls.entries()) {
+      expect(call.binary).toBe('/usr/local/bin/node');
+      expect(call.args).toEqual([
+        '--experimental-vm-modules',
+        '--permission',
+        '--allow-fs-read=/probe.js',
+        '--allow-fs-read=/rootfs/usr/share/node-red',
+        '/probe.js',
+        '--rootfs-node-red',
+        '/rootfs/usr/share/node-red',
+        '--package-index',
+        String(index),
+      ]);
+      expect(call.options).toMatchObject({
+        cwd: '/',
+        encoding: 'utf8',
+        timeout: 15_000,
+        killSignal: 'SIGKILL',
+        maxBuffer: 8 * 1024 * 1024,
+        shell: false,
+        windowsHide: true,
+      });
+    }
+    expect(result.map(({ packageName }) => packageName)).toEqual(all);
+  });
+
+  it.each([
+    ['timeout', () => ({ error: { code: 'ETIMEDOUT' }, status: null, signal: 'SIGKILL', stdout: '', stderr: '' }), /timed out/u],
+    ['malformed result', () => ({ error: null, status: 0, signal: null, stdout: 'not-json\n', stderr: '' }), /not JSON/u],
+    ['mismatched result', () => ({ error: null, status: 0, signal: null, stdout: `${JSON.stringify({ packageIndex: 1, packageName: 'wrong', specifier: 'wrong', resolvedRelativePath: 'node_modules/@grpc/grpc-js/index.js', exportType: 'object' })}\n`, stderr: '' }), /binding changed/u],
+  ])('rejects a child %s', async (_name, child, expected) => {
+    await expect(runProbeWithFakeChildren(child)).rejects.toThrow(expected);
+  });
+
+  it('does not carry nested Module static mutations from package N into package N+1', async () => {
+    const result = await runOperation({
+      '@grpc/grpc-js': [
+        "module.constructor._pathCache = { poisoned: true };",
+        "module.constructor.globalPaths = ['/poisoned'];",
+        'module.exports = { compatible: true };',
+      ].join('\n'),
+      '@chirpstack/chirpstack-api': [
+        "if (Object.hasOwn(module.constructor._pathCache, 'poisoned') || module.constructor.globalPaths.includes('/poisoned')) throw new Error('cross-child Module state leaked');",
+        'module.exports = { compatible: true };',
+      ].join('\n'),
+    });
+    expect(result.nodeResolution).toHaveLength(21);
   });
 
   it.each([

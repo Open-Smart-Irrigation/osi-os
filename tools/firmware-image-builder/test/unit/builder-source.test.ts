@@ -221,7 +221,9 @@ describe('locked builder source', () => {
         "'@chirpstack/chirpstack-api/api/application_grpc_pb',",
         "'@chirpstack/chirpstack-api',",
       ),
-      probeContents.replace("restoreObjectState(Module, snapshot.moduleState, 'Module');", ''),
+      probeContents.replace('const ORIGINAL_PROCESS_EXIT = process.exit.bind(process);', ''),
+      probeContents.replace('args.length !== 4', 'args.length !== 3'),
+      probeContents.replace('function installRootfsLoader(', 'function installRootfsLoaderRemoved('),
       probeContents.replace(
         "    '--permission',",
         "    '--allow-fs-write=/tmp',",
