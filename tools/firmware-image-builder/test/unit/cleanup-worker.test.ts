@@ -415,6 +415,48 @@ describe('cleanup worker argument and admission fence', () => {
     await expect(readFile(value.credential.path)).resolves.toBeDefined();
   });
 
+  it('rechecks runner inactivity after evidence and immediately before cleanup completion CAS', async () => {
+    const value = await fixture('present');
+    let evidenceWritten = false;
+    vi.spyOn(value.options.evidenceWriter, 'write').mockImplementationOnce(async () => {
+      evidenceWritten = true;
+      return { path: `jobs/${value.jobId}/evidence/cleanup.json`, sha256: SHA256 };
+    });
+    vi.spyOn(value.options.systemd, 'inspect').mockImplementation(async (unit) => ({
+      unit,
+      active: evidenceWritten,
+      observedAt: NOW,
+    }));
+    await expect(value.worker.run([value.admissionId])).rejects.toThrow(/runner unit is not proven inactive before cleanup completion CAS/u);
+    expect(value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(value.admissionId)).toEqual({ status: 'claimed' });
+    expect(value.db.prepare('SELECT container_id, cleanup_fence_generation FROM jobs WHERE job_id=?').get(value.jobId)).toEqual({
+      container_id: `container-${value.jobId}`,
+      cleanup_fence_generation: 1,
+    });
+    expect(value.db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id=? AND event_type='cleanup_complete'").get(value.jobId)).toEqual({ count: 0 });
+  });
+
+  it('rechecks runner inactivity after blocked evidence and immediately before blocker CAS', async () => {
+    const value = await fixture('staging-log');
+    let evidenceWritten = false;
+    vi.spyOn(value.options.logSealer, 'seal').mockRejectedValueOnce(new Error('seal failed'));
+    vi.spyOn(value.options.evidenceWriter, 'write').mockImplementationOnce(async () => {
+      evidenceWritten = true;
+      return { path: `jobs/${value.jobId}/evidence/cleanup.json`, sha256: SHA256 };
+    });
+    vi.spyOn(value.options.systemd, 'inspect').mockImplementation(async (unit) => ({
+      unit,
+      active: evidenceWritten,
+      observedAt: NOW,
+    }));
+    await expect(value.worker.run([value.admissionId])).rejects.toThrow(/runner unit is not proven inactive before cleanup blocker CAS/u);
+    expect(value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(value.admissionId)).toEqual({ status: 'claimed' });
+    expect(value.db.prepare('SELECT cleanup_blocker_code, cleanup_fence_generation FROM jobs WHERE job_id=?').get(value.jobId)).toEqual({
+      cleanup_blocker_code: 'RECOVERY_LOG_GAP',
+      cleanup_fence_generation: 1,
+    });
+  });
+
   it('rejects a wrong credential token even when the credential file hash is exact', async () => {
     const value = await fixture('present');
     const bytes = Buffer.from(`${JSON.stringify({
@@ -500,6 +542,59 @@ describe('cleanup worker exact container protocol', () => {
     });
     expect(evidence.postcondition.container).not.toHaveProperty('stoppedAt');
     expect(evidence.postcondition.container).not.toHaveProperty('removedAt');
+  });
+
+  it('timestamps Docker absence and removal only after the corresponding observations complete', async () => {
+    const nullIdentity = await fixture('staging-log');
+    let nullNow = NOW;
+    (nullIdentity.options.clock as { now: () => string }).now = () => nullNow;
+    vi.spyOn(nullIdentity.docker, 'listByLabels').mockImplementationOnce(async (_labels, timeoutMs) => {
+      nullIdentity.docker.calls.push(`list:${timeoutMs}`);
+      nullNow = '2026-07-27T12:00:01.000Z';
+      return [];
+    });
+    await nullIdentity.worker.run([nullIdentity.admissionId]);
+    const nullEvidence = (nullIdentity.options.evidenceWriter.write as ReturnType<typeof vi.fn>).mock.calls[0]?.[0].evidence as {
+      postcondition: { container: { observedAt: string } };
+    };
+    expect(nullEvidence.postcondition.container.observedAt).toBe('2026-07-27T12:00:01.000Z');
+
+    const alreadyAbsent = await fixture('absent');
+    let absentNow = NOW;
+    (alreadyAbsent.options.clock as { now: () => string }).now = () => absentNow;
+    alreadyAbsent.docker.setPresent(false);
+    vi.spyOn(alreadyAbsent.docker, 'listByLabels').mockImplementationOnce(async (_labels, timeoutMs) => {
+      alreadyAbsent.docker.calls.push(`list:${timeoutMs}`);
+      absentNow = '2026-07-27T12:00:02.000Z';
+      return [];
+    });
+    await alreadyAbsent.worker.run([alreadyAbsent.admissionId]);
+    const absentEvidence = (alreadyAbsent.options.evidenceWriter.write as ReturnType<typeof vi.fn>).mock.calls[0]?.[0].evidence as {
+      postcondition: { container: { observedAt: string } };
+    };
+    expect(absentEvidence.postcondition.container.observedAt).toBe('2026-07-27T12:00:02.000Z');
+
+    const removed = await fixture('present');
+    let removedNow = NOW;
+    (removed.options.clock as { now: () => string }).now = () => removedNow;
+    vi.spyOn(removed.docker, 'remove').mockImplementationOnce(async (id, timeoutMs) => {
+      removed.docker.calls.push(`remove:${id}:${timeoutMs}`);
+      removed.docker.setPresent(false);
+      removedNow = '2026-07-27T12:00:03.000Z';
+    });
+    vi.spyOn(removed.docker, 'listByLabels').mockImplementationOnce(async (_labels, timeoutMs) => {
+      removed.docker.calls.push(`list:${timeoutMs}`);
+      removedNow = '2026-07-27T12:00:04.000Z';
+      return [];
+    });
+    await removed.worker.run([removed.admissionId]);
+    const removedEvidence = (removed.options.evidenceWriter.write as ReturnType<typeof vi.fn>).mock.calls[0]?.[0].evidence as {
+      postcondition: { container: { removedAt: string; observedAt: string } };
+    };
+    expect(removedEvidence.postcondition.container).toMatchObject({
+      removedAt: '2026-07-27T12:00:03.000Z',
+      observedAt: '2026-07-27T12:00:04.000Z',
+    });
   });
 
   it('accepts the exact Docker labels independent of object key order', async () => {

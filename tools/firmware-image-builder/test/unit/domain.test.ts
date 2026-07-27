@@ -311,6 +311,7 @@ describe('builder domain vocabulary', () => {
       'CLN_0123456789abcdefghjkmnpqrs', 'cln_0123456789abcdefghjkmnpqrs/',
       'cln_0123456789abcdefghjkmnpqrs@', 'cln_0123456789abcdefghjkmnpqrs.',
       'cln_0123456789abcdefghijklmno', 'cln_0123456789abcdefghjkmnpqrs%20',
+      'cln_8123456789abcdefghjkmnpqrs',
     ];
     for (const value of unsafe) expect(() => assertAdmissionId(value)).toThrow(BuilderError);
     const branded: AdmissionId = accepted;

@@ -83,7 +83,7 @@ These terms are used in the API, database, UI, logs, and evidence files.
 | Newer source | A later SHA currently at the same remote branch after the job pinned its source. It is informational and never changes the active job. |
 | Cleanup fence | A per-job compare-and-set barrier installed atomically by API recovery admission. While present, runner lease, stage, operation, container, and terminal writes are rejected; only the matching cleanup worker and API hand-back may advance recovery. |
 | Direct interruption proof | A transaction proving `jobs.container_*` are all null, the global Docker label query has no matching job container, staging is absent, logs are sealed at their last durable event with no orphan tail or gap, and no blocker, cleanup admission, or cleanup fence exists. Only this proof permits API interruption without a cleanup worker. |
-| Admission ID | A tool-generated systemd-safe identifier matching `^cln_[0-9a-hj-km-np-tv-z]{26}$`: lowercase fixed prefix `cln_` plus one lowercase Crockford-Base32 ULID. It is immutable, never user supplied, contains no slash, backslash, percent, whitespace, `@`, dot, or shell metacharacter, and is used directly as the only dynamic systemd instance argument. |
+| Admission ID | A tool-generated systemd-safe identifier matching `^cln_[0-7][0-9a-hj-km-np-tv-z]{25}$`: lowercase fixed prefix `cln_` plus one canonical lowercase Crockford-Base32 ULID. The first ULID character is limited to `0` through `7` by the 128-bit ULID range. The ID is immutable, never user supplied, contains no slash, backslash, percent, whitespace, `@`, dot, or shell metacharacter, and is used directly as the only dynamic systemd instance argument. |
 
 The API uses `rpi-5` and `rpi-2` as stable target IDs. It displays “Pi 5” and
 “Pi 4 / 400 / 3 / 2” as the corresponding human labels.
@@ -2094,7 +2094,7 @@ The implementation is accepted only when all of these pass:
    replacement starts while the old unit is active. The exact persisted unit
 is `osi-image-builder-cleanup@<admission-id>.service`, and delayed old
 units cannot claim rotated generations. Admission IDs match
-`^cln_[0-9a-hj-km-np-tv-z]{26}$`; unsafe or mismatched IDs are rejected before
+`^cln_[0-7][0-9a-hj-km-np-tv-z]{25}$`; unsafe or mismatched IDs are rejected before
 systemd invocation. `%i` is the only dynamic `ExecStart` argument, and no job
 ID or token appears in cleanup argv or environment.
 7. The queue survives API restart and starts exactly one runner at a time in

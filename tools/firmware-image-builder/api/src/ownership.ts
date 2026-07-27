@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import {
   ACTIVE_RECOVERY_STATES,
+  ADMISSION_ID_PATTERN,
   STATE_TRANSITIONS,
   TARGET_IDS,
   BUILDER_ERROR_CODES,
@@ -18,7 +19,6 @@ import { encodeOfflineFeedPreparation, encodeSourcePreparation, type ArtifactInp
 import { TEXT_LIMITS, boundedText, canonicalInstant as sharedCanonicalInstant, encodeJson, normalizeCommand, normalizeJson, requireChronology as sharedRequireChronology, SharedValidationError } from './validation.js';
 
 const HASH64 = /^[0-9a-f]{64}$/;
-const ADMISSION_ID = /^cln_[0-7][0-9a-hj-km-np-tv-z]{25}$/;
 const STOP_AUTHORIZATION_ATTEMPT_ID = /^sta_[a-f0-9]{32}$/;
 const EVENT_TYPES = new Set(['enqueue', 'dispatch', 'cancellation_requested', 'state', 'stage', 'operation', 'container', 'artifact', 'publish', 'terminal', 'cleanup_admission', 'cleanup_claim', 'cleanup_renew', 'cleanup_complete', 'cleanup', 'recovery', 'freshness']);
 const ACTIVE_STATES = new Set<JobState>(ACTIVE_RECOVERY_STATES);
@@ -561,7 +561,7 @@ function validateCleanupAdmissionPredecessor(value: PreparedRecord, field: strin
 function validateCleanupCredentialReservation(value: PreparedRecord, field: string): void {
   preparedCommon(value, 'API');
   preparedString(value.admissionId, `${field} admission id`, TEXT_LIMITS.maxIdentifierBytes);
-  if (!ADMISSION_ID.test(String(value.admissionId))) throw new OwnershipValidationError(`${field} admission id is invalid`);
+  if (!ADMISSION_ID_PATTERN.test(String(value.admissionId))) throw new OwnershipValidationError(`${field} admission id is invalid`);
   preparedString(value.owner, `${field} owner`, TEXT_LIMITS.maxIdentifierBytes);
   preparedPath(value.credentialRelativePath, `${field} credential path`);
   if (value.credentialRelativePath !== `recovery/cleanup-credentials/${value.admissionId}.token`) throw new OwnershipValidationError(`${field} credential path is not exact`);
@@ -1929,7 +1929,7 @@ function runnerUnit(jobId: string, unit: string): void {
 }
 
 function cleanupUnit(admissionId: string, unit: string): void {
-  if (!ADMISSION_ID.test(admissionId) || unit !== `osi-image-builder-cleanup@${admissionId}.service`) throw new OwnershipValidationError('cleanup unit does not match admission');
+  if (!ADMISSION_ID_PATTERN.test(admissionId) || unit !== `osi-image-builder-cleanup@${admissionId}.service`) throw new OwnershipValidationError('cleanup unit does not match admission');
 }
 
 const JOB_TIMELINE_COLUMNS = [
@@ -3169,7 +3169,7 @@ export class OwnershipStore {
   #cleanupAdmission(command: Extract<ApiWriteCommand, { kind: 'cleanup-admission' }>): void {
     instant(command.at, 'admission time'); instant(command.expiresAt, 'admission expiry');
     if (command.expiresAt <= command.at) conflict('stale-lease', 'cleanup admission expiry must be in the future');
-    if (!ADMISSION_ID.test(command.admissionId)) throw new TypeError('admission ID is invalid');
+    if (!ADMISSION_ID_PATTERN.test(command.admissionId)) throw new TypeError('admission ID is invalid');
     cleanupUnit(command.admissionId, command.unitName); hash(command.credentialSha256, 'credential SHA-256'); hash(command.fenceTokenHash, 'fence token hash');
     const row = this.#job(command.jobId);
     requirePersistedTimeline(this.#db, command.jobId, [['cleanup admission time', command.at]]);
@@ -3196,7 +3196,7 @@ export class OwnershipStore {
   #cleanupAdmissionRotate(command: Extract<ApiWriteCommand, { kind: 'cleanup-admission-rotate' }>): void {
     instant(command.at, 'admission rotation time'); instant(command.expiresAt, 'admission rotation expiry');
     if (command.expiresAt <= command.at) conflict('stale-lease', 'cleanup admission expiry must be in the future');
-    if (!ADMISSION_ID.test(command.previousAdmissionId) || !ADMISSION_ID.test(command.admissionId) || command.previousAdmissionId === command.admissionId) throw new TypeError('cleanup admission rotation IDs are invalid');
+    if (!ADMISSION_ID_PATTERN.test(command.previousAdmissionId) || !ADMISSION_ID_PATTERN.test(command.admissionId) || command.previousAdmissionId === command.admissionId) throw new TypeError('cleanup admission rotation IDs are invalid');
     cleanupUnit(command.admissionId, command.unitName); hash(command.credentialSha256, 'rotated credential SHA-256'); hash(command.fenceTokenHash, 'rotated fence token hash');
     const row = this.#job(command.jobId);
     requirePersistedTimeline(this.#db, command.jobId, [['cleanup admission rotation time', command.at]]);
@@ -3266,7 +3266,7 @@ export class OwnershipStore {
   #cleanupAdmissionRetry(command: Extract<ApiWriteCommand, { kind: 'cleanup-admission-retry' }>): void {
     instant(command.at, 'corrected cleanup retry time'); instant(command.expiresAt, 'corrected cleanup retry expiry');
     if (command.expiresAt <= command.at) conflict('stale-lease', 'cleanup retry expiry must be in the future');
-    if (!ADMISSION_ID.test(command.previousAdmissionId) || !ADMISSION_ID.test(command.admissionId) || command.previousAdmissionId === command.admissionId) throw new TypeError('cleanup admission retry IDs are invalid');
+    if (!ADMISSION_ID_PATTERN.test(command.previousAdmissionId) || !ADMISSION_ID_PATTERN.test(command.admissionId) || command.previousAdmissionId === command.admissionId) throw new TypeError('cleanup admission retry IDs are invalid');
     cleanupUnit(command.admissionId, command.unitName); hash(command.credentialSha256, 'retry credential SHA-256'); hash(command.fenceTokenHash, 'retry fence token hash');
     const expectedBlocker = json(command.expectedBlocker, 'cleanup retry expected blocker', true);
     const row = this.#job(command.jobId);

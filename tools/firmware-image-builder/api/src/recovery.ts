@@ -4,7 +4,12 @@ import { mkdir as nodeMkdir, open as nodeOpen, readdir as nodeReaddir, unlink as
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import type { BuilderErrorCode } from '../../domain/types.js';
+import {
+  ADMISSION_ID_PATTERN,
+  CLEANUP_CREDENTIAL_TOKEN_MAX_CHARS,
+  CLEANUP_CREDENTIAL_TOKEN_MIN_CHARS,
+  type BuilderErrorCode,
+} from '../../domain/types.js';
 import type {
   CleanupAdmissionPredecessor,
   CleanupAdmissionPredecessorStatus,
@@ -15,7 +20,7 @@ import type {
 } from './ownership.js';
 import type { JsonObject } from './store.js';
 
-export const ADMISSION_ID_PATTERN = /^cln_[0-7][0-9a-hj-km-np-tv-z]{25}$/;
+export { ADMISSION_ID_PATTERN } from '../../domain/types.js';
 const ADMISSION_BODY_PATTERN = /^[0-7][0-9a-hj-km-np-tv-z]{25}$/;
 const CREDENTIAL_NAME_PATTERN = /^cln_([0-7][0-9a-hj-km-np-tv-z]{25})\.token$/;
 const CREDENTIAL_DIRECTORY = 'recovery/cleanup-credentials';
@@ -255,7 +260,7 @@ function parseCredential(bytes: Uint8Array): { readonly admissionId: string; rea
   try { value = JSON.parse(Buffer.from(bytes).toString('utf8')) as unknown; } catch (error) { throw new RecoveryBoundaryError('cleanup credential is corrupt', { cause: error }); }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RecoveryBoundaryError('cleanup credential record is invalid');
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).sort().join(',') !== 'admissionId,generation,token' || typeof record.admissionId !== 'string' || !ADMISSION_ID_PATTERN.test(record.admissionId) || !Number.isSafeInteger(record.generation) || Number(record.generation) <= 0 || typeof record.token !== 'string' || record.token.length < 16) throw new RecoveryBoundaryError('cleanup credential record fields are invalid');
+  if (Object.keys(record).sort().join(',') !== 'admissionId,generation,token' || typeof record.admissionId !== 'string' || !ADMISSION_ID_PATTERN.test(record.admissionId) || !Number.isSafeInteger(record.generation) || Number(record.generation) <= 0 || typeof record.token !== 'string' || record.token.length < CLEANUP_CREDENTIAL_TOKEN_MIN_CHARS || record.token.length > CLEANUP_CREDENTIAL_TOKEN_MAX_CHARS) throw new RecoveryBoundaryError('cleanup credential record fields are invalid');
   return { admissionId: record.admissionId, generation: Number(record.generation), token: record.token };
 }
 

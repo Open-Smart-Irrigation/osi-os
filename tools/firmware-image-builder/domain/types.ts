@@ -272,7 +272,9 @@ export type FreshnessResult =
 declare const admissionIdBrand: unique symbol;
 export type AdmissionId = string & { readonly [admissionIdBrand]: 'AdmissionId' };
 
-const ADMISSION_ID_PATTERN = /^cln_[0-9a-hj-km-np-tv-z]{26}$/;
+export const ADMISSION_ID_PATTERN = /^cln_[0-7][0-9a-hj-km-np-tv-z]{25}$/;
+export const CLEANUP_CREDENTIAL_TOKEN_MIN_CHARS = 16;
+export const CLEANUP_CREDENTIAL_TOKEN_MAX_CHARS = 4096;
 
 export function isAdmissionId(value: unknown): value is AdmissionId {
   return typeof value === 'string' && ADMISSION_ID_PATTERN.test(value);

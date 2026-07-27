@@ -19,7 +19,12 @@ import {
 } from '../../api/src/ownership.js';
 import { BuilderStore, type JobRecord, type JsonObject } from '../../api/src/store.js';
 import { canonicalInstant, encodeJson, parseJson, stableRelativePath, type JsonValue } from '../../api/src/validation.js';
-import { ACTIVE_RECOVERY_STATES, type BuilderErrorCode } from '../../domain/types.js';
+import {
+  ACTIVE_RECOVERY_STATES,
+  CLEANUP_CREDENTIAL_TOKEN_MAX_CHARS,
+  CLEANUP_CREDENTIAL_TOKEN_MIN_CHARS,
+  type BuilderErrorCode,
+} from '../../domain/types.js';
 
 const HASH64 = /^[0-9a-f]{64}$/u;
 const CREDENTIAL_DIRECTORY = 'recovery/cleanup-credentials';
@@ -234,7 +239,7 @@ function parseCredential(bytes: Uint8Array): { readonly admissionId: string; rea
   if (Object.keys(record).sort().join(',') !== 'admissionId,generation,token') throw new CleanupWorkerError('CLEANUP_CREDENTIAL_INVALID', 'cleanup credential fields are not exact');
   if (typeof record.admissionId !== 'string' || !ADMISSION_ID_PATTERN.test(record.admissionId)) throw new CleanupWorkerError('CLEANUP_CREDENTIAL_INVALID', 'cleanup credential admission ID is invalid');
   if (!Number.isSafeInteger(record.generation) || Number(record.generation) <= 0) throw new CleanupWorkerError('CLEANUP_CREDENTIAL_INVALID', 'cleanup credential generation is invalid');
-  if (typeof record.token !== 'string' || record.token.length < 16 || record.token.length > 4096) throw new CleanupWorkerError('CLEANUP_CREDENTIAL_INVALID', 'cleanup credential token is invalid');
+  if (typeof record.token !== 'string' || record.token.length < CLEANUP_CREDENTIAL_TOKEN_MIN_CHARS || record.token.length > CLEANUP_CREDENTIAL_TOKEN_MAX_CHARS) throw new CleanupWorkerError('CLEANUP_CREDENTIAL_INVALID', 'cleanup credential token is invalid');
   return { admissionId: record.admissionId, generation: Number(record.generation), token: record.token };
 }
 
@@ -498,7 +503,6 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
   async function proveContainer(
     admission: PersistedAdmission,
     job: JobRecord,
-    at: string,
   ): Promise<{ readonly post: CleanupPostcondition['container']; readonly exactContainerId: string | null }> {
     try {
       const expectedLabels = exactLabels(job.jobId, job.targetManifestSha256);
@@ -510,7 +514,8 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
           options.docker.listByLabels(expectedLabels, options.timeouts.dockerMs)
         ));
         if (matches.length !== 0) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'global Docker label query found a container for a null identity');
-        return { exactContainerId: null, post: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt: at } };
+        const observedAt = canonicalInstant(options.clock.now(), 'null-container Docker observation time');
+        return { exactContainerId: null, post: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt } };
       }
 
       const identity = admission.snapshot.container;
@@ -522,6 +527,7 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
           options.docker.listByLabels(expectedLabels, options.timeouts.dockerMs)
         ));
         if (matches.length !== 0) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'exact container is absent but a matching Docker label remains');
+        const observedAt = canonicalInstant(options.clock.now(), 'already-absent Docker observation time');
         return {
           exactContainerId: identity.id,
           post: {
@@ -533,7 +539,7 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
             exactIdAbsent: true,
             dockerAction: 'none',
             globalLabelResult: 'no-match',
-            observedAt: at,
+            observedAt,
           },
         };
       }
@@ -550,11 +556,13 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
       }
       if (stopped.running || stopped.stoppedAt === null) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'Docker stop did not prove the exact container stopped');
       const stoppedAt = canonicalInstant(stopped.stoppedAt, 'Docker stoppedAt');
-      const removedAt = canonicalInstant(options.clock.now(), 'Docker removal time');
-      if (stoppedAt > removedAt) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'Docker stop time is later than the proposed removal time');
+      const removalUpperBound = canonicalInstant(options.clock.now(), 'Docker pre-removal time');
+      if (stoppedAt > removalUpperBound) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'Docker stop time is later than the removal request');
       await claimedAction(admission, 'Docker remove', () => (
         options.docker.remove(identity.id, options.timeouts.dockerMs)
       ));
+      const removedAt = canonicalInstant(options.clock.now(), 'Docker removal completion time');
+      if (stoppedAt > removedAt) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'Docker stop time is later than the removal completion time');
       const exactAfterRemove = await claimedAction(admission, 'post-remove Docker inspect', () => (
         options.docker.inspect(identity.id, options.timeouts.dockerMs)
       ));
@@ -637,19 +645,22 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
       error = new CleanupWorkerError('CLEANUP_ADMISSION_BLOCKED', `${errorMessage(error)}; cleanup evidence writer failed: ${errorMessage(evidenceError)}`, { cause: error });
     }
     const blocker = cleanupBlocker(error, admission.admissionId, job.jobId, at, evidenceLocation);
-    const result = options.ownership.cleanupWrite({
-      kind: 'evidence',
-      jobId: job.jobId,
-      admissionId: admission.admissionId,
-      owner: options.workerOwner,
-      unitName: admission.unitName,
-      fenceGeneration: admission.fenceGeneration,
-      fenceTokenHash: admission.fenceTokenHash,
-      snapshot: admission.snapshot,
-      status: 'blocking',
-      blockerCode: blockerCode(error),
-      blocker,
-      at,
+    const result = await claimedAction(admission, 'cleanup blocker CAS', async () => {
+      const writeAt = canonicalInstant(options.clock.now(), 'cleanup blocker write time');
+      return options.ownership.cleanupWrite({
+        kind: 'evidence',
+        jobId: job.jobId,
+        admissionId: admission.admissionId,
+        owner: options.workerOwner,
+        unitName: admission.unitName,
+        fenceGeneration: admission.fenceGeneration,
+        fenceTokenHash: admission.fenceTokenHash,
+        snapshot: admission.snapshot,
+        status: 'blocking',
+        blockerCode: blockerCode(error),
+        blocker,
+        at: writeAt,
+      });
     });
     requireOwnership(result, 'cleanup blocker evidence');
     return { status: 'blocked', jobId: job.jobId, admissionId: admission.admissionId, blockerCode: blockerCode(error), message: errorMessage(error) };
@@ -681,7 +692,7 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
         requireOwnership(claim, 'cleanup claim');
         claimed = true;
         await claimedAction(resolved.admission, 'credential unlink', credential.unlinkAfterClaim);
-        const containerProof = await proveContainer(resolved.admission, resolved.job, options.clock.now());
+        const containerProof = await proveContainer(resolved.admission, resolved.job);
         const logs = await sealLogs(resolved.admission);
         const staging = await quarantineStaging(resolved.admission, resolved.job);
         const postcondition: CleanupPostcondition = {
@@ -701,21 +712,24 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
           postcondition,
           observedAt: completionAt,
         });
-        const complete = options.ownership.cleanupWrite({
-          kind: 'complete',
-          jobId: resolved.job.jobId,
-          admissionId: resolved.admission.admissionId,
-          owner: options.workerOwner,
-          unitName: resolved.admission.unitName,
-          fenceGeneration: resolved.admission.fenceGeneration,
-          fenceTokenHash: resolved.admission.fenceTokenHash,
-          snapshot: resolved.admission.snapshot,
-          postcondition,
-          exactContainerId: containerProof.exactContainerId,
-          containerAbsent: true,
-          evidencePath: evidence.path,
-          evidenceSha256: evidence.sha256,
-          at: completionAt,
+        const complete = await claimedAction(resolved.admission, 'cleanup completion CAS', async () => {
+          const writeAt = canonicalInstant(options.clock.now(), 'cleanup completion write time');
+          return options.ownership.cleanupWrite({
+            kind: 'complete',
+            jobId: resolved.job.jobId,
+            admissionId: resolved.admission.admissionId,
+            owner: options.workerOwner,
+            unitName: resolved.admission.unitName,
+            fenceGeneration: resolved.admission.fenceGeneration,
+            fenceTokenHash: resolved.admission.fenceTokenHash,
+            snapshot: resolved.admission.snapshot,
+            postcondition,
+            exactContainerId: containerProof.exactContainerId,
+            containerAbsent: true,
+            evidencePath: evidence.path,
+            evidenceSha256: evidence.sha256,
+            at: writeAt,
+          });
         });
         requireOwnership(complete, 'cleanup completion');
         return { status: 'completed', jobId: resolved.job.jobId, admissionId: resolved.admission.admissionId, exactContainerId: containerProof.exactContainerId };

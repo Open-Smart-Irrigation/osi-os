@@ -82,11 +82,11 @@ describe('cleanup admission credentials', () => {
     const recovery = createCleanupAdmissionRecovery({ stateRoot: root, db: { prepare: () => ({ get: () => ({ cleanup_generation: 0 }) }) } as never, ownership, systemd: fakeSystemd(order), clock: { now: () => NOW }, crypto: { randomBytes: () => Buffer.from('0123456789abcdef0123456789abcdef') }, fileSystem: realFileSystem(), ownerUid: process.getuid?.() ?? 0, onAdmissionCommitted: () => { order.push('db:admission-committed'); } });
     await recovery.openAdmissions();
     const result = await recovery.admitAndStart({ jobId: 'job-unit', owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot('job-unit') });
-    expect(result.admissionId).toMatch(/^cln_[0-9a-hj-km-np-tv-z]{26}$/); expect(ADMISSION_ID_PATTERN.test(result.admissionId)).toBe(true); expect(result.unitName).toBe(`osi-image-builder-cleanup@${result.admissionId}.service`); expect(order).toEqual(['db:admission-committed', `systemd:start:${result.unitName}`]); expect(ownership.writes[0]).toMatchObject({ kind: 'cleanup-admission', unitName: result.unitName, credentialRelativePath: `recovery/cleanup-credentials/${result.admissionId}.token` });
+    expect(result.admissionId).toMatch(/^cln_[0-7][0-9a-hj-km-np-tv-z]{25}$/); expect(ADMISSION_ID_PATTERN.test(result.admissionId)).toBe(true); expect(result.unitName).toBe(`osi-image-builder-cleanup@${result.admissionId}.service`); expect(order).toEqual(['db:admission-committed', `systemd:start:${result.unitName}`]); expect(ownership.writes[0]).toMatchObject({ kind: 'cleanup-admission', unitName: result.unitName, credentialRelativePath: `recovery/cleanup-credentials/${result.admissionId}.token` });
   });
 
   it('writes a fixed 0600 credential record and never sends the token to systemd or SQLite', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-credential-')); tempDirectories.push(root); const ownership = fakeOwnership(); const start = vi.fn(async (unit: string) => { expect(unit).toMatch(/^osi-image-builder-cleanup@cln_[0-9a-hj-km-np-tv-z]{26}\.service$/); });
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-credential-')); tempDirectories.push(root); const ownership = fakeOwnership(); const start = vi.fn(async (unit: string) => { expect(unit).toMatch(/^osi-image-builder-cleanup@cln_[0-7][0-9a-hj-km-np-tv-z]{25}\.service$/); });
     const recovery = createCleanupAdmissionRecovery({ stateRoot: root, db: { prepare: () => ({ get: () => ({ cleanup_generation: 4 }) }) } as never, ownership, systemd: { start, isActive: async () => false }, clock: { now: () => NOW }, crypto: { randomBytes: () => Buffer.alloc(32, 7) }, fileSystem: realFileSystem(), ownerUid: process.getuid?.() ?? 0 });
     await recovery.openAdmissions();
     const result = await recovery.admitAndStart({ jobId: 'job-credential', owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot('job-credential') }); const path = join(root, 'jobs', 'job-credential', result.credentialRelativePath); const contents = await readFile(path, 'utf8'); const record = JSON.parse(contents) as { admissionId: string; generation: number; token: string };
@@ -164,6 +164,7 @@ describe('cleanup admission credentials', () => {
     ['corrupt credential', async (path: string) => { const { writeFile, chmod } = await import('node:fs/promises'); await writeFile(path, '{broken\n'); await chmod(path, 0o600); }],
     ['wrong mode credential', async (path: string) => { const { chmod } = await import('node:fs/promises'); await chmod(path, 0o644); }],
     ['mismatched credential', async (path: string) => { const { writeFile } = await import('node:fs/promises'); const record = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>; await writeFile(path, JSON.stringify({ ...record, token: 'different-token-value' })); }],
+    ['oversized token credential', async (path: string) => { const { writeFile } = await import('node:fs/promises'); const record = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>; await writeFile(path, JSON.stringify({ ...record, token: 'x'.repeat(4097) })); }],
     ['expired credential', async () => {}],
     ['wrong owner credential', async () => {}],
   ])('rotates a %s without starting the invalid predecessor', async (_name, mutate) => {
