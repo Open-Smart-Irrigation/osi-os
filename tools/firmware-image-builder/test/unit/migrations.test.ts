@@ -1104,6 +1104,56 @@ describe('versioned builder database migrations', () => {
     db.close();
   });
 
+  it.each([
+    ['admission_id', 'cln_0' + 'e'.repeat(25)],
+    ['job_id', 'job-valid-2'],
+    ['unit_name', `osi-image-builder-cleanup@cln_0${'e'.repeat(25)}.service`],
+    ['owner', 'forged-owner'],
+    ['expires_at', '2026-07-23T02:00:00.000Z'],
+    ['credential_relative_path', `recovery/cleanup-credentials/cln_0${'e'.repeat(25)}.token`],
+    ['credential_sha256', 'e'.repeat(64)],
+    ['fence_generation', 3],
+    ['fence_token_hash', 'e'.repeat(64)],
+    ['stale_runner_unit', 'osi-image-builder-runner@job-valid.service'],
+    ['stale_runner_owner', 'stale-runner'],
+    ['stale_runner_lease_expires_at', '2026-07-23T00:01:00.000Z'],
+    ['stale_state', 'building'],
+    ['stale_container_id', 'container-forged'],
+    ['stale_container_name', 'forged-container'],
+    ['stale_container_labels_json', '{"forged":true}'],
+    ['proof_json', '{"forged":true}'],
+    ['completion_evidence_path', 'evidence/forged.json'],
+    ['completion_evidence_sha256', 'e'.repeat(64)],
+    ['admitted_at', '2026-07-23T00:02:00.000Z'],
+    ['complete_at', '2026-07-23T00:03:00.000Z'],
+    ['handback_at', '2026-07-23T00:04:00.000Z'],
+  ])('rejects supersession transition mutation of historical %s', async (column, value) => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    insertValidJob(db);
+    insertAdmittedLease(db);
+    db.prepare("UPDATE cleanup_leases SET status='claimed', claim_at='2026-07-23T00:10:00.000Z' WHERE admission_id=?").run(ADMISSION_ID);
+    db.prepare("UPDATE cleanup_leases SET status='failed', blocker_code='CLEANUP_ADMISSION_BLOCKED', blocker_json='{}' WHERE admission_id=?").run(ADMISSION_ID);
+    const replacement = 'cln_0' + 'b'.repeat(25);
+    db.prepare(`INSERT INTO cleanup_leases (
+      admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256,
+      fence_generation, fence_token_hash, proof_json, admitted_at
+    ) VALUES (?, 'job-valid', ?, 'replacement', ?, 'admitted', ?, ?, 2, ?, '{}', ?)`).run(
+      replacement,
+      `osi-image-builder-cleanup@${replacement}.service`,
+      '2026-07-23T01:01:00.000Z',
+      `recovery/cleanup-credentials/${replacement}.token`,
+      HASH64,
+      'd'.repeat(64),
+      '2026-07-23T00:11:00.000Z',
+    );
+    db.prepare('UPDATE jobs SET cleanup_generation=2, cleanup_fence_generation=2, cleanup_fence_token_hash=?, cleanup_admission_id=? WHERE job_id=?').run('d'.repeat(64), replacement, 'job-valid');
+    expect(() => db.prepare(`UPDATE cleanup_leases SET status='expired', blocker_code=NULL, blocker_json=NULL, expired_at=?, superseded_at=?, superseded_by_admission_id=?, predecessor_status='failed', predecessor_claim_at='2026-07-23T00:10:00.000Z', predecessor_renew_at=NULL, predecessor_blocker_code='CLEANUP_ADMISSION_BLOCKED', predecessor_blocker_json='{}', ${column}=? WHERE admission_id=?`).run(
+      '2026-07-23T00:12:00.000Z', '2026-07-23T00:12:00.000Z', replacement, value, ADMISSION_ID,
+    )).toThrow(/supersession transition evidence|immutable|active job fence|FOREIGN KEY|CHECK/);
+    db.close();
+  });
+
   it('keeps cleanup credential reservation identity immutable', async () => {
     const path = await temporaryDatabase();
     const db = openBuilderDatabase(path);

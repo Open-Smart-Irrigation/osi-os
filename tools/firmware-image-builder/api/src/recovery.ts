@@ -338,8 +338,13 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       }
       await parent.sync();
       const child = await parent.openDirectoryChild(name);
-      verifyDirectory(await child.stat(), path, ownerUid);
-      return child;
+      try {
+        verifyDirectory(await child.stat(), path, ownerUid);
+        return child;
+      } catch (error) {
+        try { await child.close(); } catch (closeError) { throw new RecoveryBoundaryError('recovery child close failed', { cause: closeError }); }
+        throw error;
+      }
     }
   }
 
@@ -594,42 +599,46 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       throw new RecoveryBoundaryError('corrected cleanup retry requires a failed or blocking predecessor');
     }
     const oldUnit = expected.previousUnitName;
-    if (expected.previousStatus === 'claimed') {
-      await stopAndConfirmInactive(oldUnit);
-    } else if (await options.systemd.isActive(oldUnit)) {
+    const oldActive = await options.systemd.isActive(oldUnit);
+    const oldUnexpired = typeof old.expires_at === 'string' && old.expires_at > at;
+    if (oldActive && oldUnexpired) {
       throw new RecoveryBoundaryError('cleanup worker is active; recovery deferred');
     }
-    let credentialValid = true;
+    let stopped = false;
+    if (oldActive) {
+      await stopAndConfirmInactive(oldUnit);
+      stopped = true;
+    }
     if (retry === null) {
       try { await readCredential(input.jobId, old); }
       catch (error) {
         if (!(error instanceof CleanupCredentialInvalidError)) throw error;
-        credentialValid = false;
       }
     } else if (expected.previousBlockerCode !== retry.expectedBlockerCode || JSON.stringify(expected.previousBlocker) !== JSON.stringify(retry.expectedBlocker)) {
       throw new RecoveryBoundaryError('corrected cleanup retry blocker does not match persisted evidence');
     }
-    if (retry === null && credentialValid && expected.previousStatus === 'admitted' && typeof old.expires_at === 'string' && old.expires_at > at) {
-      await ensurePredecessorStillMatches(input.jobId, expected);
-      const currentActive = await options.systemd.isActive(oldUnit);
-      if (currentActive) throw new RecoveryBoundaryError('cleanup worker became active during recovery');
-      await start(oldUnit);
-      return { admissionId: expected.previousAdmissionId, generation: expected.previousFenceGeneration, unitName: oldUnit, credentialRelativePath: String(old.credential_relative_path), credentialSha256: String(old.credential_sha256), rotated: false, started: true };
-    }
     await ensurePredecessorStillMatches(input.jobId, expected);
+    if (await options.systemd.isActive(oldUnit)) {
+      if (stopped) throw new RecoveryBoundaryError('cleanup worker became active during recovery');
+      await stopAndConfirmInactive(oldUnit);
+      stopped = true;
+    }
     const generation = jobGeneration(input.jobId);
     const material = newAdmission(at);
     const reservation = { createdAt: at, expiresAt: reservationExpiry(at, input.expiresAt), owner: input.owner };
     reserveCredential(input.jobId, material.admissionId, input.owner, reservation.createdAt, reservation.expiresAt);
     const credential = await writeCredential(input.jobId, material.admissionId, generation, material.token, reservation);
-    await stopAndConfirmInactive(oldUnit);
+    if (await options.systemd.isActive(oldUnit)) {
+      if (stopped) throw new RecoveryBoundaryError('cleanup worker became active during recovery');
+      await stopAndConfirmInactive(oldUnit);
+      stopped = true;
+    }
     await ensurePredecessorStillMatches(input.jobId, expected);
     const unitName = `osi-image-builder-cleanup@${material.admissionId}.service`;
     const command: ApiWriteCommand = retry === null
       ? { kind: 'cleanup-admission-rotate', ...expected, jobId: input.jobId, admissionId: material.admissionId, owner: input.owner, unitName, expiresAt: input.expiresAt, credentialRelativePath: credential.relativePath, credentialSha256: credential.sha256, fenceTokenHash: crypto.sha256(material.token), reservationCreatedAt: reservation.createdAt, reservationExpiresAt: reservation.expiresAt, snapshot: input.snapshot, at }
       : { kind: 'cleanup-admission-retry', ...expected, jobId: input.jobId, admissionId: material.admissionId, owner: input.owner, unitName, expiresAt: input.expiresAt, credentialRelativePath: credential.relativePath, credentialSha256: credential.sha256, fenceTokenHash: crypto.sha256(material.token), reservationCreatedAt: reservation.createdAt, reservationExpiresAt: reservation.expiresAt, expectedBlockerCode: retry.expectedBlockerCode, expectedBlocker: retry.expectedBlocker, snapshot: retry.correctedSnapshot, at };
     ownershipCommandResult(options.ownership.apiWrite(command));
-    if (await options.systemd.isActive(oldUnit)) await stopAndConfirmInactive(oldUnit);
     options.onAdmissionCommitted?.();
     await start(unitName);
     return replacementResult(material.admissionId, generation, unitName, credential, true);
@@ -666,47 +675,50 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       const now = clock.now();
       databaseRun(options.db, 'DELETE FROM cleanup_credential_reservations WHERE expires_at <= ?', now);
       const root = await fileSystem.openDirectory(options.stateRoot);
-      verifyDirectory(await root.stat(), options.stateRoot, ownerUid);
-      let jobs: RecoveryDirectoryHandle | null = null;
       try {
-        jobs = await openChildDirectory(root, 'jobs', join(options.stateRoot, 'jobs'), false);
-        if (jobs === null) return 0;
-        let removed = 0;
-        for (const jobId of await jobs.readdir()) {
-          try { safeSegment(jobId, 'job ID'); } catch { continue; }
-          let directory: DirectoryLease | null = null;
-          try { directory = await directoryLease(jobId, false); } catch { continue; }
-          if (directory === null) continue;
-          try {
-            for (const name of await directory.directory.readdir()) {
-              const match = name.match(CREDENTIAL_NAME_PATTERN);
-              if (!match) continue;
-              const admissionId = `cln_${match[1]}`;
-              let handle: RecoveryFileHandle | null = null;
-              try {
-                handle = await directory.directory.openFileChild(name, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-                verifyCredentialFile(await handle.stat(), `${CREDENTIAL_DIRECTORY}/${name}`, ownerUid);
-              } catch (error) {
-                if (handle !== null) await handle.close();
-                void error;
-                continue;
+        verifyDirectory(await root.stat(), options.stateRoot, ownerUid);
+        let jobs: RecoveryDirectoryHandle | null = null;
+        try {
+          jobs = await openChildDirectory(root, 'jobs', join(options.stateRoot, 'jobs'), false);
+          if (jobs === null) return 0;
+          let removed = 0;
+          for (const jobId of await jobs.readdir()) {
+            try { safeSegment(jobId, 'job ID'); } catch { continue; }
+            let directory: DirectoryLease | null = null;
+            try { directory = await directoryLease(jobId, false); } catch { continue; }
+            if (directory === null) continue;
+            try {
+              for (const name of await directory.directory.readdir()) {
+                const match = name.match(CREDENTIAL_NAME_PATTERN);
+                if (!match) continue;
+                const admissionId = `cln_${match[1]}`;
+                let handle: RecoveryFileHandle | null = null;
+                try {
+                  handle = await directory.directory.openFileChild(name, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+                  verifyCredentialFile(await handle.stat(), `${CREDENTIAL_DIRECTORY}/${name}`, ownerUid);
+                } catch (error) {
+                  if (handle !== null) await handle.close();
+                  void error;
+                  continue;
+                }
+                await handle.close(); handle = null;
+                const matchingLease = options.db.prepare('SELECT 1 FROM cleanup_leases WHERE job_id=? AND admission_id=?').get(jobId, admissionId);
+                const matchingReservation = options.db.prepare(
+                  `SELECT 1 FROM cleanup_credential_reservations
+                   WHERE job_id=? AND admission_id=? AND credential_relative_path=? AND expires_at > ?`,
+                ).get(jobId, admissionId, `${CREDENTIAL_DIRECTORY}/${name}`, now);
+                if ((matchingLease !== undefined && matchingLease !== null) || (matchingReservation !== undefined && matchingReservation !== null)) continue;
+                await directory.directory.unlinkChild(name);
+                await directory.directory.sync();
+                removed += 1;
               }
-              await handle.close(); handle = null;
-              const matchingLease = options.db.prepare('SELECT 1 FROM cleanup_leases WHERE job_id=? AND admission_id=?').get(jobId, admissionId);
-              const matchingReservation = options.db.prepare(
-                `SELECT 1 FROM cleanup_credential_reservations
-                 WHERE job_id=? AND admission_id=? AND credential_relative_path=? AND expires_at > ?`,
-              ).get(jobId, admissionId, `${CREDENTIAL_DIRECTORY}/${name}`, now);
-              if ((matchingLease !== undefined && matchingLease !== null) || (matchingReservation !== undefined && matchingReservation !== null)) continue;
-              await directory.directory.unlinkChild(name);
-              await directory.directory.sync();
-              removed += 1;
-            }
-          } finally { await directory.close(); }
+            } finally { await directory.close(); }
+          }
+          return removed;
+        } finally {
+          if (jobs !== null) await jobs.close();
         }
-        return removed;
       } finally {
-        if (jobs !== null) await jobs.close();
         await root.close();
       }
     });

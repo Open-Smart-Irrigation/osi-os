@@ -53,6 +53,7 @@ function fakeRecovery(options: {
   readonly events?: string[];
   readonly active?: { value: boolean };
   readonly fileSystem?: RecoveryFileSystem;
+  readonly crypto?: CleanupAdmissionRecoveryOptions['crypto'];
 }) {
   let lease = options.lease ?? null;
   let generation = options.generation ?? 0;
@@ -120,10 +121,14 @@ function fakeRecovery(options: {
     systemd: systemd(options.events, options.active),
     fileSystem: options.fileSystem,
     clock: { now: () => NOW },
-    crypto: { randomBytes: () => Buffer.alloc(32, 7) },
+    crypto: options.crypto ?? { randomBytes: () => Buffer.alloc(32, 7) },
     ownerUid: process.getuid?.() ?? 0,
   } as CleanupAdmissionRecoveryOptions);
   return { recovery, writes, getLease: () => lease };
+}
+
+function unsafeDirectoryStats(stats: { readonly uid: number; readonly mode: number; readonly nlink: number; readonly isFile: () => boolean; readonly isDirectory: () => boolean; readonly isSymbolicLink: () => boolean }) {
+  return { ...stats, mode: 0o755, isDirectory: () => true, isFile: () => false, isSymbolicLink: () => false };
 }
 
 afterEach(async () => {
@@ -194,6 +199,70 @@ describe('Task 20 cleanup admission corrections', () => {
     expect(events.some((event) => event.endsWith(':overlap'))).toBe(false);
     expect(writes.filter((command) => (command as { kind?: string }).kind?.includes('rotate')).length).toBe(1);
     expect(ADMISSION_ID_PATTERN.test(result.admissionId)).toBe(true);
+  });
+
+  it('defers an active unexpired claimed lease without stopping, rotating, or starting', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-active-fresh-')); roots.push(root);
+    const events: string[] = [];
+    const active = { value: false };
+    const { recovery, writes, getLease } = fakeRecovery({ root, events, active });
+    await recovery.openAdmissions();
+    const first = await recovery.admitAndStart({ jobId: 'job-active-fresh', owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-active-fresh'), at: NOW });
+    getLease()!.status = 'claimed';
+
+    await expect(recovery.reconcileAndStart({ jobId: 'job-active-fresh', admissionId: first.admissionId, owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-active-fresh'), at: NOW }))
+      .rejects.toThrow(/active; recovery deferred/);
+    expect(events.filter((event) => event.startsWith('stop:'))).toHaveLength(0);
+    expect(events.filter((event) => event.startsWith('start:'))).toHaveLength(1);
+    expect(writes.filter((command) => (command as { kind?: string }).kind === 'cleanup-admission-rotate')).toHaveLength(0);
+  });
+
+  it('rotates an inactive unexpired lease as an unexpected exit instead of restarting its old fence', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-inactive-fresh-')); roots.push(root);
+    const events: string[] = [];
+    const active = { value: false };
+    const { recovery, writes, getLease } = fakeRecovery({ root, events, active });
+    await recovery.openAdmissions();
+    const first = await recovery.admitAndStart({ jobId: 'job-inactive-fresh', owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-inactive-fresh'), at: NOW });
+    getLease()!.status = 'claimed';
+    active.value = false;
+
+    const result = await recovery.reconcileAndStart({ jobId: 'job-inactive-fresh', admissionId: first.admissionId, owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-inactive-fresh'), at: NOW });
+    expect(result.rotated).toBe(true);
+    expect(events.filter((event) => event.startsWith('stop:'))).toHaveLength(0);
+    expect(writes.filter((command) => (command as { kind?: string }).kind === 'cleanup-admission-rotate')).toHaveLength(1);
+  });
+
+  it('rotates an inactive stale lease without issuing a stop for an already inactive unit', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-inactive-stale-')); roots.push(root);
+    const events: string[] = [];
+    const active = { value: false };
+    const { recovery, writes, getLease } = fakeRecovery({ root, events, active });
+    await recovery.openAdmissions();
+    const first = await recovery.admitAndStart({ jobId: 'job-inactive-stale', owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-inactive-stale'), at: NOW });
+    getLease()!.status = 'claimed';
+    active.value = false;
+
+    const result = await recovery.reconcileAndStart({ jobId: 'job-inactive-stale', admissionId: first.admissionId, owner: 'api', expiresAt: '2026-07-27T12:10:00.000Z', snapshot: snapshot('job-inactive-stale'), at: '2026-07-27T12:06:00.000Z' });
+    expect(result.rotated).toBe(true);
+    expect(events.filter((event) => event.startsWith('stop:'))).toHaveLength(0);
+    expect(writes.filter((command) => (command as { kind?: string }).kind === 'cleanup-admission-rotate')).toHaveLength(1);
+  });
+
+  it('stops an active stale lease once, confirms inactivity, and starts one replacement', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-active-stale-')); roots.push(root);
+    const events: string[] = [];
+    const active = { value: false };
+    const { recovery, writes, getLease } = fakeRecovery({ root, events, active });
+    await recovery.openAdmissions();
+    const first = await recovery.admitAndStart({ jobId: 'job-active-stale', owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-active-stale'), at: NOW });
+    getLease()!.status = 'claimed';
+
+    const result = await recovery.reconcileAndStart({ jobId: 'job-active-stale', admissionId: first.admissionId, owner: 'api', expiresAt: '2026-07-27T12:10:00.000Z', snapshot: snapshot('job-active-stale'), at: '2026-07-27T12:06:00.000Z' });
+    expect(result.rotated).toBe(true);
+    expect(events.filter((event) => event.startsWith('stop:'))).toHaveLength(1);
+    expect(events.filter((event) => event.startsWith('start:'))).toHaveLength(2);
+    expect(writes.filter((command) => (command as { kind?: string }).kind === 'cleanup-admission-rotate')).toHaveLength(1);
   });
 
   it('lets concurrent rotators commit and start exactly one replacement', async () => {
@@ -279,9 +348,15 @@ describe('Task 20 cleanup admission corrections', () => {
     const outside = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-outside-')); roots.push(outside);
     const base = createRecoveryFileSystem();
     let phase: 'create' | 'read' | 'prune' | null = 'create';
+    let readSwapped = false;
     const wrap = (directory: RecoveryDirectoryHandle, path: string): RecoveryDirectoryHandle => ({
       ...directory,
       async openDirectoryChild(name) {
+        if (readSwapped && path.endsWith('/recovery') && name === 'cleanup-credentials') {
+          await unlink(join(path, name));
+          await rename(join(path, `${name}-held`), join(path, name));
+          readSwapped = false;
+        }
         const child = await directory.openDirectoryChild(name);
         if (phase === 'create' && path === join(root, 'jobs') && name === 'job-descriptor') {
           await rename(join(path, name), join(path, `${name}-held`));
@@ -290,6 +365,8 @@ describe('Task 20 cleanup admission corrections', () => {
         if (phase === 'read' && path.endsWith('/recovery') && name === 'cleanup-credentials') {
           await rename(join(path, name), join(path, `${name}-held`));
           await symlink(outside, join(path, name));
+          readSwapped = true;
+          phase = null;
         }
         if (phase === 'prune' && path.endsWith('/recovery') && name === 'cleanup-credentials') {
           await rename(join(path, name), join(path, `${name}-held`));
@@ -316,20 +393,65 @@ describe('Task 20 cleanup admission corrections', () => {
       fileSystem,
       lease: first.getLease(),
       generation: 1,
+      crypto: { randomBytes: () => Buffer.alloc(32, 8) },
     });
     await readRecovery.recovery.openAdmissions();
     phase = 'read';
-    await expect(readRecovery.recovery.reconcileAndStart({ jobId: 'job-descriptor', admissionId: admission.admissionId, owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-descriptor'), at: NOW })).resolves.toMatchObject({ rotated: false });
+    await expect(readRecovery.recovery.reconcileAndStart({ jobId: 'job-descriptor', admissionId: admission.admissionId, owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-descriptor'), at: NOW })).resolves.toMatchObject({ rotated: true });
     expect(await (await import('node:fs/promises')).readdir(outside)).toEqual([]);
-    await unlink(join(root, 'jobs', 'job-descriptor', 'recovery', 'cleanup-credentials'));
-    await rename(join(root, 'jobs', 'job-descriptor', 'recovery', 'cleanup-credentials-held'), join(root, 'jobs', 'job-descriptor', 'recovery', 'cleanup-credentials'));
-
     phase = 'prune';
     const orphanPath = join(root, 'jobs', 'job-descriptor', 'recovery', 'cleanup-credentials', 'cln_00000000000000000000000000.token');
     await writeFile(orphanPath, 'orphan\n', { mode: 0o600 });
     const pruneRecovery = fakeRecovery({ root, fileSystem, lease: first.getLease(), generation: 1 });
-    await expect(pruneRecovery.recovery.pruneOrphanCredentials()).resolves.toBe(1);
+    await expect(pruneRecovery.recovery.pruneOrphanCredentials()).resolves.toBe(2);
     await expect(stat(join(outside, 'cln_00000000000000000000000000.token'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('closes a child handle when post-create directory verification fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-child-close-')); roots.push(root);
+    const base = createRecoveryFileSystem();
+    let childCloseCount = 0;
+    const wrap = (directory: RecoveryDirectoryHandle, path: string): RecoveryDirectoryHandle => ({
+      ...directory,
+      async openDirectoryChild(name) {
+        const child = await directory.openDirectoryChild(name);
+        if (path === root && name === 'jobs') {
+          return {
+            ...child,
+            async stat() { return unsafeDirectoryStats(await child.stat()); },
+            async close() { childCloseCount += 1; await child.close(); },
+          };
+        }
+        return wrap(child, join(path, name));
+      },
+    });
+    const fileSystem: RecoveryFileSystem = { openDirectory: async (path) => wrap(await base.openDirectory(path), path) };
+    const { recovery } = fakeRecovery({ root, fileSystem });
+    await recovery.openAdmissions();
+
+    await expect(recovery.admitAndStart({ jobId: 'job-child-close', owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-child-close'), at: NOW }))
+      .rejects.toThrow(/unsafe recovery directory/);
+    expect(childCloseCount).toBe(1);
+  });
+
+  it('closes the pruning root when root verification fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-root-close-')); roots.push(root);
+    const base = createRecoveryFileSystem();
+    let rootCloseCount = 0;
+    const fileSystem: RecoveryFileSystem = {
+      openDirectory: async (path) => {
+        const directory = await base.openDirectory(path);
+        return {
+          ...directory,
+          async stat() { return unsafeDirectoryStats(await directory.stat()); },
+          async close() { rootCloseCount += 1; await directory.close(); },
+        };
+      },
+    };
+    const { recovery } = fakeRecovery({ root, fileSystem });
+
+    await expect(recovery.openAdmissions()).rejects.toThrow(/unsafe recovery directory/);
+    expect(rootCloseCount).toBe(1);
   });
 
   it('fsyncs each newly created ancestor before opening and verifying its child', async () => {

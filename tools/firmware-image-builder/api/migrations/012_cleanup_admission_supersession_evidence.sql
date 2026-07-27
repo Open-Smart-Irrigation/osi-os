@@ -103,6 +103,28 @@ WHEN OLD.status <> 'expired'
     AND NEW.predecessor_renew_at IS OLD.renew_at
     AND NEW.predecessor_blocker_code IS OLD.blocker_code
     AND NEW.predecessor_blocker_json IS OLD.blocker_json
+    AND NEW.admission_id IS OLD.admission_id
+    AND NEW.job_id IS OLD.job_id
+    AND NEW.unit_name IS OLD.unit_name
+    AND NEW.owner IS OLD.owner
+    AND NEW.expires_at IS OLD.expires_at
+    AND NEW.credential_relative_path IS OLD.credential_relative_path
+    AND NEW.credential_sha256 IS OLD.credential_sha256
+    AND NEW.fence_generation IS OLD.fence_generation
+    AND NEW.fence_token_hash IS OLD.fence_token_hash
+    AND NEW.stale_runner_unit IS OLD.stale_runner_unit
+    AND NEW.stale_runner_owner IS OLD.stale_runner_owner
+    AND NEW.stale_runner_lease_expires_at IS OLD.stale_runner_lease_expires_at
+    AND NEW.stale_state IS OLD.stale_state
+    AND NEW.stale_container_id IS OLD.stale_container_id
+    AND NEW.stale_container_name IS OLD.stale_container_name
+    AND NEW.stale_container_labels_json IS OLD.stale_container_labels_json
+    AND NEW.proof_json IS OLD.proof_json
+    AND NEW.completion_evidence_path IS OLD.completion_evidence_path
+    AND NEW.completion_evidence_sha256 IS OLD.completion_evidence_sha256
+    AND NEW.admitted_at IS OLD.admitted_at
+    AND NEW.complete_at IS OLD.complete_at
+    AND NEW.handback_at IS OLD.handback_at
     AND EXISTS (
       SELECT 1
       FROM cleanup_leases AS replacement
