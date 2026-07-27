@@ -571,6 +571,58 @@ async function readTextFile(
   return (await readRegularFile(parent, name, dependencies, requestId, code, diagnosis)).toString('utf8');
 }
 
+async function readOptionalTextFile(
+  parent: HeldDirectory,
+  name: string,
+  dependencies: PathAuthorityDependencies,
+  requestId: string,
+  code: BuilderErrorCode,
+  diagnosis: string,
+): Promise<string | null> {
+  safeSegment(name, requestId, code, 'An optional target-setup filename');
+  let handle: FileHandle;
+  try {
+    handle = await open(fdPath(parent.handle, name), READ_FLAGS);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      fail(code, diagnosis, requestId, {
+        path: `${parent.relativePath}/${name}`,
+        cause: error instanceof Error ? error.message : String(error),
+      });
+    }
+    try {
+      await dependencies.beforeRead(parent.handle);
+      await lstat(fdPath(parent.handle, name));
+    } catch (recheckError) {
+      if ((recheckError as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      fail(code, diagnosis, requestId, {
+        path: `${parent.relativePath}/${name}`,
+        cause: recheckError instanceof Error ? recheckError.message : String(recheckError),
+      });
+    }
+    fail(code, diagnosis, requestId, {
+      path: `${parent.relativePath}/${name}`,
+      cause: 'the optional file appeared while its absence was inspected',
+    });
+  }
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) fail(code, diagnosis, requestId, { path: `${parent.relativePath}/${name}` });
+    await dependencies.beforeRead(handle);
+    const contents = await readHandle(handle);
+    await assertFileBinding(parent, name, handle, stats, requestId, code, diagnosis);
+    return contents.toString('utf8');
+  } catch (error) {
+    if (error instanceof BuilderError) throw error;
+    fail(code, diagnosis, requestId, {
+      path: `${parent.relativePath}/${name}`,
+      cause: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
 async function readTextPath(
   root: HeldDirectory,
   segments: readonly string[],
@@ -1565,12 +1617,44 @@ async function verifyPreparedAndMaterializedFeeds(
 
 async function patchState(
   workspace: HeldDirectory,
+  target: TargetManifest,
   activationOutput: string,
   requestId: string,
   dependencies: PathAuthorityDependencies,
 ): Promise<RootfsPatchDecision> {
-  const series = await readTextPath(workspace, ['openwrt', '.pc', 'series'], dependencies, requestId, 'PATCH_STATE_AMBIGUOUS', 'The OpenWrt quilt series is unavailable or unsafe.');
-  const applied = await readTextPath(workspace, ['openwrt', '.pc', 'applied-patches'], dependencies, requestId, 'PATCH_STATE_AMBIGUOUS', 'The OpenWrt applied patch list is unavailable or unsafe.');
+  const series = await readTextPath(
+    workspace,
+    ['conf', target.environment, 'patches', 'series'],
+    dependencies,
+    requestId,
+    'PATCH_STATE_AMBIGUOUS',
+    'The canonical profile patch series is unavailable or unsafe.',
+  );
+  const quilt = await openDirectoryPath(workspace, ['openwrt', '.pc'], dependencies, requestId, 'PATCH_STATE_AMBIGUOUS', 'The OpenWrt Quilt metadata directory is unavailable or unsafe.');
+  let applied: string | null;
+  try {
+    const quiltSeries = await readTextFile(
+      quilt.directory,
+      '.quilt_series',
+      dependencies,
+      requestId,
+      'PATCH_STATE_AMBIGUOUS',
+      'The OpenWrt Quilt series metadata is unavailable or unsafe.',
+    );
+    if (quiltSeries !== 'series\n') {
+      fail('PATCH_STATE_AMBIGUOUS', 'The OpenWrt Quilt series metadata does not name the canonical series file exactly.', requestId);
+    }
+    applied = await readOptionalTextFile(
+      quilt.directory,
+      'applied-patches',
+      dependencies,
+      requestId,
+      'PATCH_STATE_AMBIGUOUS',
+      'The OpenWrt applied patch list is unavailable or unsafe.',
+    );
+  } finally {
+    await closeHandles(quilt.handles);
+  }
   const rootfsScript = await readTextPath(
     workspace,
     ['openwrt', 'target', 'linux', 'bcm27xx', 'image', 'gen_rpi_sdcard_img.sh'],
@@ -1581,7 +1665,7 @@ async function patchState(
   );
   return decideRootfsPatchState({
     series: series.split(/\r?\n/u),
-    applied: applied.split(/\r?\n/u),
+    applied: applied === null ? [] : applied.split(/\r?\n/u),
     output: activationOutput,
     rootfsScript,
   }, requestId);
@@ -2206,6 +2290,7 @@ export async function resolveTargetSetup(
             }
             const decision = await patchState(
               workspace,
+              target,
               `${activation.stdout}${activation.stderr}`,
               input.requestId,
               dependencies,
@@ -2531,7 +2616,7 @@ export async function resolveTargetSetup(
           : activation.stdout.length === 0
             ? activation.stderr
             : `${activation.stdout}${activation.stdout.endsWith('\n') ? '' : '\n'}${activation.stderr}`;
-        const patchDecision = await patchState(workspace, activationOutput, input.requestId, dependencies);
+        const patchDecision = await patchState(workspace, target, activationOutput, input.requestId, dependencies);
         const preparedEvidence = await materializeFeeds(openwrt, prepared, dependencies, input.requestId);
         const rust = await rustFeed(openwrt, input.requestId, dependencies);
         const materializedFeedHashes = await captureMaterializedFeedHashes(openwrt, prepared, dependencies, input.requestId);

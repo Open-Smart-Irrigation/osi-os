@@ -62,7 +62,7 @@ printf '%s\n' \
 
 rm -rf openwrt/.pc
 mkdir -p openwrt/.pc openwrt/target/linux/bcm27xx/image
-cp "conf/$environment/patches/series" openwrt/.pc/series
+printf 'series\n' > openwrt/.pc/.quilt_series
 cp "conf/$environment/patches/series" openwrt/.pc/applied-patches
 cp "conf/$environment/approved-rootfs.sh" openwrt/target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh
 rm -f conf/.config openwrt/.config

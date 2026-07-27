@@ -74,8 +74,10 @@ const EXPECTED_MAKE_REVERSE_ERROR = 'make: *** [Makefile:60: switch-env] Error 1
 const EXPECTED_FRESH_MAKE_REVERSE_ERROR = `No series file found\n${EXPECTED_MAKE_REVERSE_ERROR}`;
 const EXPECTED_FRESH_MAKE_SUCCESS_ERROR = 'No series file found\n';
 type FixturePatch = 'boot-config.patch' | typeof ROOTFS_PADDING_PATCH;
+type FixtureCleanup = boolean | readonly FixturePatch[] | 'empty-stack';
 
-function cleanupTranscript(cleanup: boolean | readonly FixturePatch[]): readonly string[] {
+function cleanupTranscript(cleanup: FixtureCleanup): readonly string[] {
+  if (cleanup === 'empty-stack') return ['No patches applied'];
   const patches: readonly FixturePatch[] = typeof cleanup === 'boolean'
     ? (cleanup ? ['boot-config.patch'] : [])
     : cleanup;
@@ -98,7 +100,7 @@ function cleanupTranscript(cleanup: boolean | readonly FixturePatch[]): readonly
 function fullMakeOutput(
   environment: string,
   patchOutput: string,
-  cleanup: boolean | readonly FixturePatch[] = false,
+  cleanup: FixtureCleanup = false,
 ): string {
   return [
     'Cleaning patch state',
@@ -136,13 +138,13 @@ function fullMakeOutput(
   ].join('\n');
 }
 
-function fullMakeReverseOutput(environment: string, cleanup = false): string {
+function fullMakeReverseOutput(environment: string, cleanup: FixtureCleanup = false): string {
   return fullMakeOutput(environment, ROOTFS_REVERSE_OUTPUT, cleanup);
 }
 
 function fullMakeSuccessOutput(
   environment: string,
-  cleanup: boolean | readonly FixturePatch[] = false,
+  cleanup: FixtureCleanup = false,
 ): string {
   return fullMakeOutput(environment, ROOTFS_APPLY_OUTPUT, cleanup);
 }
@@ -356,7 +358,7 @@ function operations(fixture: Fixture, options: OperationsOptions = {}): {
         await mkdir(join(workspace, 'openwrt/.pc'), { recursive: true });
         await mkdir(join(workspace, 'openwrt/target/linux/bcm27xx/image'), { recursive: true });
         const series = await readFile(join(workspace, 'conf', environment, 'patches/series'));
-        await writeFile(join(workspace, 'openwrt/.pc/series'), series);
+        await writeFile(join(workspace, 'openwrt/.pc/.quilt_series'), 'series\n');
         await writeFile(join(workspace, 'openwrt/.pc/applied-patches'), series);
         await copyFile(rootfsFixture, join(workspace, 'openwrt/target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh'));
         await removeIfPresent(join(workspace, 'conf/.config'));
@@ -788,10 +790,15 @@ describe('target setup', () => {
     ))).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
   });
 
-  it('resolves both profiles when activate-target returns the exact expected rootfs nonzero result', async () => {
+  it('resolves exact Pi 5 and Pi 2 reverse states with real Quilt metadata', async () => {
     const fixture = await authorityFixture();
     const base = operations(fixture);
     let activation = 0;
+    const metadata: Array<{
+      readonly environment: string;
+      readonly quiltSeries: string;
+      readonly applied: string | null;
+    }> = [];
     const runner = createLockedTargetSetupOperations(async (request) => {
       const command = await base.execute(request);
       if (request.operationId !== 'activate-target') return command;
@@ -799,10 +806,19 @@ describe('target setup', () => {
       const applied = (await readFile(appliedPath, 'utf8'))
         .split(/\r?\n/u)
         .filter((patch) => patch !== ROOTFS_PADDING_PATCH)
-        .join('\n');
-      await writeFile(appliedPath, applied);
+        .filter((patch) => patch.length > 0);
+      if (applied.length === 0) await rm(appliedPath);
+      else await writeFile(appliedPath, `${applied.join('\n')}\n`);
       const environment = request.definition.argv[2]!.slice('ENV='.length);
-      const cleanup = activation > 0;
+      metadata.push({
+        environment,
+        quiltSeries: await readFile(join(request.cwd, 'openwrt/.pc/.quilt_series'), 'utf8'),
+        applied: await readFile(appliedPath, 'utf8').catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return null;
+          throw error;
+        }),
+      });
+      const cleanup: FixtureCleanup = activation > 0 ? 'empty-stack' : false;
       activation += 1;
       return result(request.definition.argv, {
         exitCode: 2,
@@ -816,6 +832,110 @@ describe('target setup', () => {
     expect(setup.patchDecision).toBe('already-present');
     expect(setup.config.profiles['rpi-5'].patchDecision).toBe('already-present');
     expect(setup.config.profiles['rpi-2'].patchDecision).toBe('already-present');
+    expect(metadata).toEqual([
+      {
+        environment: targets[1]!.environment,
+        quiltSeries: 'series\n',
+        applied: null,
+      },
+      {
+        environment: targets[0]!.environment,
+        quiltSeries: 'series\n',
+        applied: 'boot-config.patch\n',
+      },
+    ]);
+  });
+
+  it.each([
+    ['malformed Quilt series metadata', async (fixture: Fixture) => {
+      await writeFile(join(fixture.workspace, 'openwrt/.pc/.quilt_series'), '../series\n');
+    }],
+    ['symlinked applied patch metadata', async (fixture: Fixture) => {
+      const applied = join(fixture.workspace, 'openwrt/.pc/applied-patches');
+      const held = join(fixture.workspace, 'openwrt/.pc/applied-patches.held');
+      await rename(applied, held);
+      await symlink(held, applied);
+    }],
+    ['directory applied patch metadata', async (fixture: Fixture) => {
+      const applied = join(fixture.workspace, 'openwrt/.pc/applied-patches');
+      await rm(applied);
+      await mkdir(applied);
+    }],
+  ] as const)('rejects %s', async (_case, mutate) => {
+    const fixture = await authorityFixture();
+    let mutated = false;
+    const { runner } = operations(fixture, {
+      async afterOperation(operationId) {
+        if (mutated || operationId !== 'activate-target') return;
+        mutated = true;
+        await mutate(fixture);
+      },
+    });
+
+    await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({
+      code: 'PATCH_STATE_AMBIGUOUS',
+    });
+    expect(mutated).toBe(true);
+  });
+
+  it('rejects replacement of the canonical profile series after opening its descriptor', async () => {
+    let fixture: Fixture;
+    let swapped = false;
+    fixture = await authorityFixture({
+      async beforeRead(handle) {
+        const path = await readlink(`/proc/self/fd/${handle.fd}`);
+        if (!swapped && path.endsWith(`/conf/${targets[0]!.environment}/patches/series`)) {
+          swapped = true;
+          await rename(path, `${path}.held`);
+          await writeFile(path, `${ROOTFS_PADDING_PATCH}\n`);
+        }
+      },
+    });
+    const { runner } = operations(fixture);
+
+    await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({
+      code: 'PATCH_STATE_AMBIGUOUS',
+    });
+    expect(swapped).toBe(true);
+  });
+
+  it('rejects an applied-patches file created while its absence is inspected', async () => {
+    let fixture: Fixture;
+    let raced = false;
+    fixture = await authorityFixture({
+      async beforeRead(handle) {
+        const path = await readlink(`/proc/self/fd/${handle.fd}`);
+        if (!raced && path.endsWith('/openwrt/.pc')) {
+          raced = true;
+          await writeFile(join(path, 'applied-patches'), `${ROOTFS_PADDING_PATCH}\n`);
+        }
+      },
+    });
+    const base = operations(fixture);
+    let activation = 0;
+    const runner = createLockedTargetSetupOperations(async (request) => {
+      const command = await base.execute(request);
+      if (request.operationId !== 'activate-target') return command;
+      const appliedPath = join(request.cwd, 'openwrt/.pc/applied-patches');
+      const applied = (await readFile(appliedPath, 'utf8'))
+        .split(/\r?\n/u)
+        .filter((patch) => patch.length > 0 && patch !== ROOTFS_PADDING_PATCH);
+      if (applied.length === 0) await rm(appliedPath);
+      else await writeFile(appliedPath, `${applied.join('\n')}\n`);
+      const environment = request.definition.argv[2]!.slice('ENV='.length);
+      const cleanup: FixtureCleanup = activation > 0 ? 'empty-stack' : false;
+      activation += 1;
+      return result(request.definition.argv, {
+        exitCode: 2,
+        stdout: fullMakeReverseOutput(environment, cleanup),
+        stderr: cleanup ? EXPECTED_MAKE_REVERSE_ERROR : EXPECTED_FRESH_MAKE_REVERSE_ERROR,
+      });
+    });
+
+    await expect(resolveTargetSetup(input(fixture, runner))).rejects.toMatchObject({
+      code: 'PATCH_STATE_AMBIGUOUS',
+    });
+    expect(raced).toBe(true);
   });
 
   it.each([

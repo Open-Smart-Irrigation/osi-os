@@ -150,6 +150,13 @@ describe('feed configuration integration boundary', () => {
       expect(command.stdout.trimEnd()).toMatch(
         /Patch patches\/image-with-padded-rootfs\.patch can be reverse-applied$/u,
       );
+      expect(await readFile(join(root, 'openwrt/.pc/.quilt_series'), 'utf8')).toBe('series\n');
+      const appliedPatches = join(root, 'openwrt/.pc/applied-patches');
+      if (target.id === 'rpi-5') {
+        expect(await readFile(appliedPatches, 'utf8')).toBe('boot-config.patch\n');
+      } else {
+        await expect(lstat(appliedPatches)).rejects.toMatchObject({ code: 'ENOENT' });
+      }
       expect(await readFile(
         join(root, 'openwrt/target/linux/bcm27xx/image/cmdline.txt'),
         'utf8',
