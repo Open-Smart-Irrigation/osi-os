@@ -164,6 +164,30 @@ function errorCode(error: unknown): string | null {
     : null;
 }
 
+function incrementBigEndian(bytes: Uint8Array): boolean {
+  for (let index = bytes.length - 1; index >= 0; index -= 1) {
+    if (bytes[index]! !== 0xff) {
+      bytes[index] = bytes[index]! + 1;
+      return true;
+    }
+    bytes[index] = 0;
+  }
+  return false;
+}
+
+async function withTimeout<T>(operation: () => Promise<T>, timeoutMs: number, timeoutError: () => Error): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const work = Promise.resolve().then(operation);
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(timeoutError()), timeoutMs);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 function safeSegment(value: string, field: string): void {
   if (value.length === 0 || value === '.' || value === '..' || value.includes('/') || value.includes('\\') || value.includes('\0')) throw new RecoveryBoundaryError(`${field} is not a safe path segment`);
 }
@@ -477,7 +501,7 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     const tokenBytes = suppliedTokenBytes.slice(0, 32);
     let token = Buffer.from(tokenBytes).toString('base64url');
     while (issuedCredentialTokenHashes.has(crypto.sha256(token))) {
-      tokenBytes[tokenBytes.length - 1] = (tokenBytes[tokenBytes.length - 1]! + 1) & 0xff;
+      if (!incrementBigEndian(tokenBytes)) throw new RecoveryBoundaryError('cleanup credential token entropy is exhausted');
       token = Buffer.from(tokenBytes).toString('base64url');
     }
     issuedCredentialTokenHashes.add(crypto.sha256(token));
@@ -553,15 +577,17 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     exactUnit(admissionId, unitName);
     if (!options.systemd.stop) throw new CleanupStopFailureError('capability-unavailable', 'cleanup predecessor stop capability is unavailable');
     try {
-      await options.systemd.stop(unitName);
-    } catch (error) {
-      throw new CleanupStopFailureError('stop-error', `cleanup predecessor stop failed: ${unitName}`, { cause: error });
-    }
-    try {
-      if (await options.systemd.isActive(unitName)) throw new CleanupStopFailureError('still-active', `cleanup predecessor remains active: ${unitName}`);
+      await withTimeout(
+        async () => {
+          await options.systemd.stop!(unitName);
+          if (await options.systemd.isActive(unitName)) throw new CleanupStopFailureError('still-active', `cleanup predecessor remains active: ${unitName}`);
+        },
+        STOP_AUTHORIZATION_HOLD_MS,
+        () => new CleanupStopFailureError('stop-error', `cleanup predecessor stop confirmation timed out: ${unitName}`),
+      );
     } catch (error) {
       if (error instanceof CleanupStopFailureError) throw error;
-      throw new CleanupStopFailureError('stop-error', `cleanup predecessor activity confirmation failed: ${unitName}`, { cause: error });
+      throw new CleanupStopFailureError('stop-error', `cleanup predecessor stop failed: ${unitName}`, { cause: error });
     }
   }
 
@@ -733,13 +759,19 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     const previousOwner = expected.previousOwner;
     const previousExpiresAt = expected.previousExpiresAt;
     if (typeof previousOwner !== 'string' || typeof previousExpiresAt !== 'string') throw new RecoveryBoundaryError('cleanup unexpected-exit predecessor owner or expiry is unavailable');
+    if (expected.previousUnexpectedExit !== null && expected.previousUnexpectedExit !== undefined) {
+      const persisted = expected.previousUnexpectedExit;
+      if (persisted.kind !== 'cleanup-unit-unexpected-exit' || persisted.code !== 'CLEANUP_UNIT_UNEXPECTED_EXIT' || persisted.active !== false || persisted.unitName !== expected.previousUnitName || persisted.inactiveAt !== persisted.observedAt) throw new RecoveryBoundaryError('persisted cleanup unexpected-exit evidence is invalid');
+      return expected;
+    }
+    const observation = { kind: 'cleanup-unit-unexpected-exit', code: 'CLEANUP_UNIT_UNEXPECTED_EXIT', unitName: expected.previousUnitName, active: false, inactiveAt: at, observedAt: at } satisfies JsonObject;
     ownershipCommandResult(options.ownership.apiWrite({
       kind: 'cleanup-admission-unexpected-exit',
       ...expected,
       jobId: input.jobId,
       previousOwner,
       previousExpiresAt,
-      observation: { kind: 'cleanup-unit-unexpected-exit', code: 'CLEANUP_UNIT_UNEXPECTED_EXIT', unitName: expected.previousUnitName, active: false, inactiveAt: at, observedAt: at },
+      observation,
       at,
     }));
     const current = dbLease(input.admissionId, input.jobId);
@@ -764,7 +796,7 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     if (previousExpiresAt === null) throw new RecoveryBoundaryError('cleanup predecessor expiry is invalid');
     let stopped = false;
 
-    const persistStopFailure = async (failure: CleanupStopFailure | 'authorization-orphaned', cause: unknown, authorization: StopAuthorizationRecord): Promise<void> => {
+    const persistStopFailure = async (failure: CleanupStopFailure | 'authorization-orphaned', cause: unknown, authorization: StopAuthorizationRecord, observedAt: string): Promise<void> => {
       const previousOwner = expected.previousOwner;
       const previousExpiresAt = expected.previousExpiresAt;
       if (typeof previousOwner !== 'string' || typeof previousExpiresAt !== 'string') throw new RecoveryBoundaryError('cleanup predecessor owner or expiry is invalid');
@@ -774,7 +806,7 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
         code: 'CLEANUP_UNIT_STOP_FAILED',
         unitName: oldUnit,
         failure,
-        observedAt: at,
+        observedAt,
         error: {
           message: cause instanceof Error ? cause.message : String(cause),
           code: errorCode(cause),
@@ -795,11 +827,27 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
         blockerCode: 'CLEANUP_UNIT_STOP_FAILED',
         blocker,
         snapshot: input.snapshot,
-        at,
+        at: observedAt,
       }));
     };
 
+    const reconcileAuthorizationHead = async (): Promise<void> => {
+      const authorization = dbStopAuthorization(input.admissionId, input.jobId);
+      if (!authorization) return;
+      if (authorization.state === 'authorized') {
+        if (ownedStopAuthorizationAttempts.has(authorization.attemptId)) return;
+        if (authorization.authorizationExpiresAt > at) throw new RecoveryBoundaryError('cleanup stop authorization is held by another owner; recovery deferred');
+        const orphaned = new CleanupStopFailureError('still-active', 'cleanup stop authorization is orphaned after expiring before completion');
+        await persistStopFailure('authorization-orphaned', orphaned, authorization, clock.now());
+        throw orphaned;
+      }
+      if ((authorization.state === 'failed' || authorization.state === 'orphaned') && retry === null) {
+        throw new RecoveryBoundaryError('cleanup stop authorization requires explicit corrected retry');
+      }
+    };
+
     const observeActive = async (): Promise<boolean> => options.systemd.isActive(oldUnit);
+    await reconcileAuthorizationHead();
     const initialActive = await observeActive();
     if (initialActive && oldUnexpired) throw new RecoveryBoundaryError('cleanup worker is active; recovery deferred');
     if (!initialActive && oldUnexpired && expected.previousStatus === 'claimed') {
@@ -815,14 +863,14 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
         const error = new CleanupStopFailureError('still-active', `cleanup predecessor remains active after stop: ${oldUnit}`);
         const existing = dbStopAuthorization(input.admissionId, input.jobId);
         if (!existing) throw new RecoveryBoundaryError('cleanup stop authorization disappeared after stop');
-        await persistStopFailure(error.failure, error, existing);
+        await persistStopFailure(error.failure, error, existing, clock.now());
         throw error;
       }
       let authorization = dbStopAuthorization(input.admissionId, input.jobId);
       if (authorization?.state === 'authorized' && !ownedStopAuthorizationAttempts.has(authorization.attemptId)) {
         if (authorization.authorizationExpiresAt <= at) {
           const orphaned = new CleanupStopFailureError('still-active', 'cleanup stop authorization is orphaned after expiring while the unit remained active');
-          await persistStopFailure('authorization-orphaned', orphaned, authorization);
+          await persistStopFailure('authorization-orphaned', orphaned, authorization, clock.now());
           throw orphaned;
         }
         throw new RecoveryBoundaryError('cleanup stop authorization is held by another owner');
@@ -836,14 +884,15 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       if (authorization.state !== 'authorized' || !ownedStopAuthorizationAttempts.has(authorization.attemptId)) throw new RecoveryBoundaryError('cleanup stop authorization owner is not current');
       try {
         await stopAndConfirmInactive(oldUnit);
-        await completeStopAuthorization(input, authorization, oldUnit, at);
+        const observedAt = clock.now();
+        await completeStopAuthorization(input, authorization, oldUnit, observedAt);
         const current = dbLease(input.admissionId, input.jobId);
         if (current === null) throw new RecoveryBoundaryError('cleanup predecessor disappeared after stop authorization completion');
         expected = predecessor(current);
         stopped = true;
       } catch (error) {
         const failure = error instanceof CleanupStopFailureError ? error.failure : 'stop-error';
-        await persistStopFailure(failure, error, authorization);
+        await persistStopFailure(failure, error, authorization, clock.now());
         throw error;
       }
     }
@@ -872,6 +921,7 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
         started: true,
       };
     }
+    await reconcileAuthorizationHead();
     await ensurePredecessorStillMatches(input.jobId, expected);
     await stopStaleOnce(await observeActive());
     const generation = jobGeneration(input.jobId);

@@ -93,6 +93,29 @@ describe('cleanup admission credentials', () => {
     expect(record).toMatchObject({ admissionId: result.admissionId, generation: 5 }); expect((await stat(path)).mode & 0o777).toBe(0o600); expect((await stat(path)).uid).toBe(process.getuid?.() ?? 0); expect((await stat(join(root, 'jobs', 'job-credential', 'recovery', 'cleanup-credentials'))).mode & 0o777).toBe(0o700); expect(ownership.writes[0]).not.toHaveProperty('token'); expect(JSON.stringify(ownership.writes[0])).not.toContain(record.token); expect(start).toHaveBeenCalledOnce(); expect(createHash('sha256').update(record.token).digest('hex')).toBe((ownership.writes[0] as { fenceTokenHash: string }).fenceTokenHash);
   });
 
+  it('terminates after 257 constant-random credential generations with unique 32-byte tokens', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-token-collision-')); tempDirectories.push(root);
+    const ownership = fakeOwnership();
+    const recovery = createCleanupAdmissionRecovery({
+      stateRoot: root,
+      db: { prepare: () => ({ get: () => ({ cleanup_generation: 0 }) }) } as never,
+      ownership,
+      systemd: fakeSystemd(),
+      clock: { now: () => NOW },
+      crypto: { randomBytes: (size) => Buffer.alloc(size, 7) },
+      fileSystem: realFileSystem(),
+      ownerUid: process.getuid?.() ?? 0,
+    });
+    await recovery.openAdmissions();
+    const tokens = new Set<string>();
+    for (let index = 0; index < 257; index += 1) {
+      const result = await recovery.admitAndStart({ jobId: `job-token-${index}`, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(`job-token-${index}`) });
+      const record = JSON.parse(await readFile(join(root, 'jobs', `job-token-${index}`, result.credentialRelativePath), 'utf8')) as { token: string };
+      tokens.add(record.token);
+    }
+    expect(tokens).toHaveLength(257);
+  });
+
   it('fsyncs the credential file before its parent directory', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-fsync-')); tempDirectories.push(root); const events: string[] = []; const ownership = fakeOwnership();
     const recovery = createCleanupAdmissionRecovery({ stateRoot: root, db: { prepare: () => ({ get: () => ({ cleanup_generation: 0 }) }) } as never, ownership, systemd: fakeSystemd(), clock: { now: () => NOW }, crypto: { randomBytes: () => Buffer.alloc(32, 8) }, fileSystem: recordingFileSystem(events), ownerUid: process.getuid?.() ?? 0 });

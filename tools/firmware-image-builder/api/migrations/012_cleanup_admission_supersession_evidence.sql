@@ -87,8 +87,90 @@ CREATE TABLE cleanup_stop_authorization_heads (
   FOREIGN KEY (attempt_id) REFERENCES cleanup_stop_authorizations(attempt_id) ON DELETE RESTRICT ON UPDATE RESTRICT
 );
 
+CREATE TABLE cleanup_stop_authorization_outcomes (
+  attempt_id TEXT PRIMARY KEY CHECK (
+    length(attempt_id) = 36
+    AND substr(attempt_id, 1, 4) = 'sta_'
+    AND substr(attempt_id, 5) NOT GLOB '*[^0-9a-f]*'
+  ),
+  job_id TEXT NOT NULL,
+  admission_id TEXT NOT NULL,
+  authorization_owner TEXT NOT NULL,
+  outcome_state TEXT NOT NULL CHECK (outcome_state IN ('consumed', 'failed', 'orphaned')),
+  unit_name TEXT NOT NULL,
+  observed_at TEXT NOT NULL CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', observed_at) = observed_at),
+  outcome_json TEXT NOT NULL CHECK (json_valid(outcome_json) = 1 AND json_type(outcome_json) = 'object'),
+  event_seq INTEGER NOT NULL CHECK (event_seq >= 0),
+  FOREIGN KEY (attempt_id) REFERENCES cleanup_stop_authorizations(attempt_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  FOREIGN KEY (admission_id) REFERENCES cleanup_leases(admission_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  FOREIGN KEY (job_id, event_seq) REFERENCES job_events(job_id, seq) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  UNIQUE (job_id, event_seq)
+);
+
 CREATE INDEX cleanup_stop_authorizations_admission ON cleanup_stop_authorizations (admission_id, attempt_no);
 CREATE INDEX cleanup_stop_authorizations_expiry ON cleanup_stop_authorizations (authorization_expires_at);
+CREATE INDEX cleanup_stop_authorization_outcomes_admission ON cleanup_stop_authorization_outcomes (admission_id, observed_at);
+
+CREATE TRIGGER cleanup_stop_authorization_outcomes_immutable_guard
+BEFORE UPDATE ON cleanup_stop_authorization_outcomes
+BEGIN
+  SELECT RAISE(ABORT, 'cleanup stop authorization outcomes are immutable');
+END;
+
+CREATE TRIGGER cleanup_stop_authorization_outcomes_delete_guard
+BEFORE DELETE ON cleanup_stop_authorization_outcomes
+BEGIN
+  SELECT RAISE(ABORT, 'cleanup stop authorization outcomes are immutable');
+END;
+
+CREATE TRIGGER cleanup_stop_authorization_outcomes_identity_guard
+BEFORE INSERT ON cleanup_stop_authorization_outcomes
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM cleanup_stop_authorization_heads AS head
+  JOIN cleanup_stop_authorizations AS attempt ON attempt.attempt_id = head.attempt_id
+  JOIN cleanup_leases AS lease ON lease.admission_id = head.admission_id
+  JOIN job_events AS event ON event.job_id = NEW.job_id AND event.seq = NEW.event_seq
+  WHERE head.admission_id = NEW.admission_id
+    AND head.job_id = NEW.job_id
+    AND head.attempt_id = NEW.attempt_id
+    AND head.state = 'authorized'
+    AND attempt.job_id = NEW.job_id
+    AND attempt.admission_id = NEW.admission_id
+    AND attempt.authorization_owner = NEW.authorization_owner
+    AND attempt.unit_name = NEW.unit_name
+    AND lease.job_id = NEW.job_id
+    AND lease.unit_name = NEW.unit_name
+    AND lease.status = attempt.predecessor_status
+    AND lease.owner = attempt.predecessor_owner
+    AND lease.expires_at = attempt.predecessor_expires_at
+    AND lease.fence_generation = attempt.fence_generation
+    AND lease.fence_token_hash = attempt.fence_token_hash
+    AND event.event_type = 'cleanup'
+    AND json_valid(event.payload_json) = 1
+    AND json_extract(event.payload_json, '$.kind') IN ('cleanup-stop-authorization-complete', 'cleanup-stop-authorization-failed')
+    AND json_extract(event.payload_json, '$.admissionId') = NEW.admission_id
+    AND json_extract(event.payload_json, '$.attemptId') = NEW.attempt_id
+    AND json_extract(event.payload_json, '$.authorizationOwner') = NEW.authorization_owner
+    AND json_extract(event.payload_json, '$.outcomeState') = NEW.outcome_state
+    AND json_extract(event.payload_json, '$.outcome') = json(NEW.outcome_json)
+    AND json_extract(NEW.outcome_json, '$.unitName') = NEW.unit_name
+    AND json_extract(NEW.outcome_json, '$.observedAt') = NEW.observed_at
+    AND (
+      (NEW.outcome_state = 'consumed'
+        AND json_extract(NEW.outcome_json, '$.kind') = 'cleanup-stop-observation'
+        AND json_extract(NEW.outcome_json, '$.code') = 'CLEANUP_UNIT_STOP_CONFIRMED_INACTIVE'
+        AND json_extract(NEW.outcome_json, '$.active') = 0)
+      OR (NEW.outcome_state IN ('failed', 'orphaned')
+        AND json_extract(NEW.outcome_json, '$.kind') IN ('cleanup-unit-stop-failed', 'cleanup-stop-authorization-orphaned')
+        AND json_extract(NEW.outcome_json, '$.code') = 'CLEANUP_UNIT_STOP_FAILED'
+        AND json_extract(NEW.outcome_json, '$.failure') IS NOT NULL)
+    )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'cleanup stop authorization outcome evidence is incoherent');
+END;
 
 CREATE TRIGGER cleanup_stop_authorizations_immutable_update_guard
 BEFORE UPDATE ON cleanup_stop_authorizations
@@ -103,6 +185,7 @@ WHEN NEW.admission_id IS NOT OLD.admission_id
   OR NOT (OLD.state IN ('failed', 'orphaned') AND NEW.state = 'authorized')
      AND (NEW.attempt_id IS NOT OLD.attempt_id OR NEW.authorization_owner IS NOT OLD.authorization_owner)
   OR OLD.state = 'authorized' AND NEW.state = 'authorized' AND NEW.outcome_json IS NOT OLD.outcome_json
+  OR OLD.state = NEW.state AND NEW.updated_at IS NOT OLD.updated_at
   OR OLD.state IN ('failed', 'orphaned') AND NEW.state IN ('failed', 'orphaned') AND NEW.outcome_json IS NOT OLD.outcome_json
   OR OLD.state IN ('failed', 'orphaned') AND NEW.state = 'authorized' AND NEW.outcome_json IS NOT NULL
   OR NEW.state IN ('consumed', 'failed', 'orphaned') AND NOT EXISTS (
@@ -114,8 +197,19 @@ WHEN NEW.admission_id IS NOT OLD.admission_id
       AND lease.stop_authorization_owner = NEW.authorization_owner
       AND lease.stop_authorization_state = NEW.state
   )
+  OR NEW.state IN ('consumed', 'failed', 'orphaned') AND NOT EXISTS (
+    SELECT 1
+    FROM cleanup_stop_authorization_outcomes AS outcome
+    WHERE outcome.attempt_id = NEW.attempt_id
+      AND outcome.job_id = NEW.job_id
+      AND outcome.admission_id = NEW.admission_id
+      AND outcome.authorization_owner = NEW.authorization_owner
+      AND outcome.outcome_state = NEW.state
+      AND outcome.outcome_json IS NEW.outcome_json
+  )
   OR (OLD.state = 'authorized' AND NEW.state NOT IN ('authorized', 'consumed', 'failed', 'orphaned'))
   OR OLD.state IN ('consumed', 'orphaned', 'failed') AND NEW.state NOT IN ('consumed', 'orphaned', 'failed', 'authorized')
+  OR OLD.state IN ('failed', 'orphaned') AND NEW.state IN ('failed', 'orphaned') AND NEW.state IS NOT OLD.state
   OR OLD.state = 'consumed' AND NEW.state <> 'consumed'
   OR OLD.state IN ('authorized', 'consumed') AND NEW.attempt_id IS NOT OLD.attempt_id AND NOT (OLD.state IN ('failed', 'orphaned') AND NEW.state = 'authorized')
   OR OLD.state = 'consumed' AND NEW.outcome_json IS NOT OLD.outcome_json
@@ -247,6 +341,19 @@ WHEN NEW.stop_authorization_attempt_id IS NOT NULL
             OR (NEW.stop_authorization_state = 'orphaned' AND head.state IN ('authorized', 'orphaned'))
           )
       )
+      AND (
+        NEW.stop_authorization_state NOT IN ('consumed', 'failed', 'orphaned')
+        OR EXISTS (
+          SELECT 1
+          FROM cleanup_stop_authorization_outcomes AS outcome
+          WHERE outcome.attempt_id = NEW.stop_authorization_attempt_id
+            AND outcome.job_id = NEW.job_id
+            AND outcome.admission_id = NEW.admission_id
+            AND outcome.authorization_owner = NEW.stop_authorization_owner
+            AND outcome.outcome_state = NEW.stop_authorization_state
+            AND outcome.unit_name = NEW.unit_name
+        )
+      )
   )
 BEGIN
   SELECT RAISE(ABORT, 'cleanup stop authorization evidence is incoherent');
@@ -334,6 +441,28 @@ WHEN OLD.status <> 'expired'
     AND NEW.predecessor_stop_authorization_expires_at IS OLD.stop_authorization_expires_at
     AND NEW.predecessor_stop_authorization_state IS OLD.stop_authorization_state
     AND NEW.predecessor_unexpected_exit_json IS OLD.unexpected_exit_json
+    AND (
+      OLD.status <> 'claimed'
+      OR OLD.expires_at <= NEW.expired_at
+      OR (
+        OLD.unexpected_exit_json IS NOT NULL
+        AND json_valid(OLD.unexpected_exit_json) = 1
+        AND json_type(OLD.unexpected_exit_json) = 'object'
+        AND json_extract(OLD.unexpected_exit_json, '$.kind') = 'cleanup-unit-unexpected-exit'
+        AND json_extract(OLD.unexpected_exit_json, '$.code') = 'CLEANUP_UNIT_UNEXPECTED_EXIT'
+        AND json_extract(OLD.unexpected_exit_json, '$.active') = 0
+        AND json_extract(OLD.unexpected_exit_json, '$.unitName') = OLD.unit_name
+        AND json_extract(OLD.unexpected_exit_json, '$.inactiveAt') = json_extract(OLD.unexpected_exit_json, '$.observedAt')
+        AND json_extract(OLD.unexpected_exit_json, '$.observedAt') <= NEW.expired_at
+      )
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM cleanup_stop_authorization_heads AS head
+      WHERE head.admission_id = OLD.admission_id
+        AND head.job_id = OLD.job_id
+        AND head.state = 'authorized'
+    )
     AND NEW.admission_id IS OLD.admission_id
     AND NEW.job_id IS OLD.job_id
     AND NEW.unit_name IS OLD.unit_name
