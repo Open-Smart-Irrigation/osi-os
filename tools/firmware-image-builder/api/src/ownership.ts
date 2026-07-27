@@ -1946,7 +1946,17 @@ export class OwnershipStore {
     const row = this.#job(command.jobId);
     requirePersistedTimeline(this.#db, command.jobId, [['cancellation time', command.at]]);
     requireChronology([['accepted time', String(row.accepted_at)], ['cancellation time', command.at]]);
-    if (row.state === 'publishing' || !ACTIVE_STATES.has(row.state as JobState) && row.state !== 'queued') conflict('illegal-predecessor', 'job cannot be cancelled by the API');
+    if (row.state === 'publishing') {
+      if (row.cancel_requested_at !== null) return;
+      const publishStartedAt = row.publish_started_at === null ? null : String(row.publish_started_at);
+      if (publishStartedAt === null || command.at <= publishStartedAt) conflict('illegal-predecessor', 'publishing cancellation request is not late to the publish start');
+      requireChronology([['publish start time', publishStartedAt], ['cancellation time', command.at]]);
+      const result = this.#db.prepare("UPDATE jobs SET cancel_requested_at=?, cancel_reason=?, updated_at=? WHERE job_id=? AND state='publishing' AND cancel_requested_at IS NULL").run(command.at, command.reason, command.at, command.jobId);
+      if (Number(result.changes) !== 1) conflict('cas-lost', 'late publishing cancellation request lost ownership');
+      this.#event(command.jobId, 'cancellation_requested', { reason: command.reason, late: true }, command.at);
+      return;
+    }
+    if (!ACTIVE_STATES.has(row.state as JobState) && row.state !== 'queued') conflict('illegal-predecessor', 'job cannot be cancelled by the API');
     if (row.state === 'queued') {
       const result = this.#db.prepare("UPDATE jobs SET state='cancelled', queue_state='cancelled', queue_position=NULL, cancel_requested_at=?, cancel_reason=?, terminal_at=?, terminal_error_code='CANCELLED', terminal_error_json=?, updated_at=? WHERE job_id=? AND state='queued' AND queue_state='queued'").run(command.at, command.reason, command.at, error, command.at, command.jobId);
       if (Number(result.changes) !== 1) conflict('stale-predecessor');
@@ -1956,6 +1966,7 @@ export class OwnershipStore {
       this.#event(command.jobId, 'terminal', { state: 'cancelled', errorCode: 'CANCELLED', error: JSON.parse(error!) as JsonObject }, command.at);
       return;
     }
+    if (row.cancel_requested_at !== null) return;
     const result = this.#db.prepare('UPDATE jobs SET cancel_requested_at=?, cancel_reason=?, updated_at=? WHERE job_id=? AND state=? AND cancel_requested_at IS NULL AND cleanup_fence_generation IS NULL').run(command.at, command.reason, command.at, command.jobId, row.state as string);
     if (Number(result.changes) !== 1) conflict('cas-lost', 'cancellation request lost ownership');
     this.#event(command.jobId, 'cancellation_requested', { reason: command.reason }, command.at);
