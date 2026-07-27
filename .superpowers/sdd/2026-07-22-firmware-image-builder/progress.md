@@ -15,5 +15,5 @@ Task 12: complete
 Task 13: complete
 Task 14: complete (review approved)
 Task 15: complete (commits d8b64ad6, 8532a8ee, d97aec9b; final review approved)
-Task 16: fix round 2 in progress after 59c1405d; Sol found node:sqlite bypass, requiring sealed getBuiltinModule plus read-only verify-image container/mount
-Task 17: fix round 3 complete; the post-intent preparation/reopen/validation/artifact-CAS boundary now preserves active ownership and returns QUARANTINE_PENDING for non-ownership exceptions, while true CAS lease loss remains RUNNER_DISAPPEARED; regressions cover reopen and artifact-completion failures, tampered metadata, zero terminal events, and cleanup admission
+Task 16: fix round 6 in progress; replace shared-process package probing with one hard-timeout disposable child per fixed package, retaining the locked offline/read-only verify-image container contract
+Task 17: complete (commits 8eb7f2b8, 05d26a48, 2ced831e; final review approved)
