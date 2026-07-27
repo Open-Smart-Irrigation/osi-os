@@ -30,7 +30,7 @@ function inspection(overrides: Partial<DockerInspection> = {}): DockerInspection
     mounts: [{ type: 'bind', source: '/tmp/worktree', destination: '/workdir', readOnly: false }],
     user: '1000:1000',
     workingDir: '/workdir',
-    networkMode: 'bridge',
+    networkMode: 'none',
     capDrop: ['ALL'],
     capAdd: [],
     privileged: false,
@@ -78,7 +78,7 @@ function realisticRawInspection(): Record<string, unknown> {
       },
     },
     HostConfig: {
-      NetworkMode: 'bridge',
+      NetworkMode: 'none',
       CapDrop: ['ALL'],
       CapAdd: null,
       Privileged: false,
@@ -257,7 +257,7 @@ describe('DockerExecutor', () => {
     expect(create).not.toContain('--rm');
     expect(create).toContain('--pull=never');
     expect(create).toContain('--platform=linux/amd64');
-    expect(create).toContain('--network=bridge');
+    expect(create).toContain('--network=none');
     expect(create).toContain('--cap-drop=ALL');
     expect(create).toContain('--security-opt=no-new-privileges:true');
     expect(create).toContain('--pids-limit=4096');
@@ -368,7 +368,9 @@ describe('DockerExecutor', () => {
     expect(identity.containerId).toBeNull();
   });
 
-  it('runs target-setup feed operations with Docker network disabled', async () => {
+  it.each(['update-feeds', 'verify-image'] as const)(
+    'runs the %s operation with Docker network disabled',
+    async (operationId) => {
     const docker = fakeDocker([
       { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}\n' },
       { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
@@ -382,12 +384,13 @@ describe('DockerExecutor', () => {
       { stdout: '' },
     ]);
 
-    await createDockerExecutor(options(docker, { operationId: 'update-feeds' })).run();
+    await createDockerExecutor(options(docker, { operationId })).run();
 
     const create = docker.calls.find((call) => call[1] === 'create');
     expect(create).toContain('--network=none');
     expect(create).not.toContain('--network=bridge');
-  });
+    },
+  );
 
   it('rejects every inspected security or identity mismatch before starting the container', async () => {
     const mismatches: Array<[string, Partial<DockerInspection>]> = [
@@ -501,6 +504,7 @@ describe('DockerExecutor', () => {
     const frontendRaw = (): Record<string, unknown> => {
       const value = realisticRawInspection();
       (value.Config as Record<string, unknown>).WorkingDir = '/workdir/web/react-gui';
+      (value.HostConfig as Record<string, unknown>).NetworkMode = 'bridge';
       return value;
     };
     const frontendCreatedRaw = (): Record<string, unknown> => ({ ...frontendRaw(), State: { Status: 'created', Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 0 } });

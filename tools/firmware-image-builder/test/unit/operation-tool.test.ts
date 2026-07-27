@@ -345,11 +345,55 @@ describe('trusted verify-image Node compatibility record', () => {
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('denies process.getBuiltinModule filesystem writes inside the rootfs', async () => {
+    const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-builtin-fs-'));
+    temporaryRoots.push(markerRoot);
+    const marker = join(markerRoot, 'written');
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        "const builtinFs = process.getBuiltinModule('fs');",
+        `builtinFs.writeFileSync(${JSON.stringify(marker)}, 'written');`,
+      ].join('\n'),
+    })).rejects.toThrow(/ERR_ACCESS_DENIED|FileSystemWrite|permission/u);
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('denies process.getBuiltinModule writes to the extracted rootfs', async () => {
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        "const builtinFs = process.getBuiltinModule('fs');",
+        "builtinFs.writeFileSync(`${__dirname}/written`, 'written');",
+      ].join('\n'),
+    })).rejects.toThrow(/ERR_ACCESS_DENIED|FileSystemWrite|permission/u);
+    const fixtureRoot = temporaryRoots.at(-1);
+    expect(fixtureRoot).toBeDefined();
+    await expect(access(join(
+      fixtureRoot!,
+      'workspace/openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx',
+      'usr/share/node-red/osi-db-helper/written',
+    ))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('denies process.getBuiltinModule child processes before they can mutate the host', async () => {
+    const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-builtin-child-'));
+    temporaryRoots.push(markerRoot);
+    const marker = join(markerRoot, 'spawned');
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        "const builtinChildProcess = process.getBuiltinModule('child_process');",
+        `builtinChildProcess.spawnSync(process.execPath, ['-e', ${JSON.stringify(
+          `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'spawned')`,
+        )}]);`,
+      ].join('\n'),
+    })).rejects.toThrow(/ERR_ACCESS_DENIED|ChildProcess|permission/u);
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('does not allow a target helper to select a dependency from the builder host tree', async () => {
     await expect(runShippedOperation({
       dbHelperPrefix: "require('host-only-target-dependency');",
       hostDependency: 'host-only-target-dependency',
-    })).rejects.toThrow(/outside the trusted rootfs/u);
+    })).rejects.toThrow(/FileSystemRead|outside the trusted rootfs|permission/u);
   });
 
   it('records object, function, and incompatible exports from target execution', async () => {

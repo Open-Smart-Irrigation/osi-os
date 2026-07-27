@@ -122,9 +122,13 @@ RUN curl --fail --silent --show-error --location --retry 3 \
 # The runner invokes only this fixed, image-owned operation entry. It is not
 # reachable through the worktree bind mount and is executable by buildbot.
 COPY --chown=root:root --chmod=0555 builder/operations/osi-image-builder-tool.js /opt/osi-image-builder/operations/osi-image-builder-tool.js
+COPY --chown=root:root --chmod=0555 builder/operations/osi-image-builder-module-probe.js /opt/osi-image-builder/operations/osi-image-builder-module-probe.js
 RUN test -f /opt/osi-image-builder/operations/osi-image-builder-tool.js \
+  && test -f /opt/osi-image-builder/operations/osi-image-builder-module-probe.js \
   && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-image-builder-tool.js)" = '0:0' \
-  && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-tool.js)" = '555'
+  && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-image-builder-module-probe.js)" = '0:0' \
+  && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-tool.js)" = '555' \
+  && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-module-probe.js)" = '555'
 
 # OpenWrt invokes the same non-interactive host toolchain for all operations.
 RUN useradd --create-home --shell /bin/bash --user-group buildbot \

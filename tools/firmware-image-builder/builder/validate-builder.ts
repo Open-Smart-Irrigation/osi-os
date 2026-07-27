@@ -22,6 +22,8 @@ const DIGEST = /^[0-9a-f]{64}$/u;
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const DOCKER_REPOSITORY = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9]\d{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/u;
 export const TRUSTED_OPERATION_TOOL_RELATIVE_PATH = 'operations/osi-image-builder-tool.js';
+export const TRUSTED_MODULE_PROBE_RELATIVE_PATH =
+  'operations/osi-image-builder-module-probe.js';
 export const RUST_TARGETS = Object.freeze(['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const);
 const TARGET_PACKAGE_NAMES = Object.freeze(['musl:arm64', 'musl-dev:arm64', 'musl:armhf', 'musl-dev:armhf'] as const);
 
@@ -161,11 +163,45 @@ function dockerfileMetadata(contents: string): BuilderSourceMetadata {
   const packages = supportedPackageTokens(contents);
   const packageSet = ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', `libpolly-${llvmMajor}-dev`, 'libzstd-dev'] as const;
   if (!packages.includes('gcc-14') || !packages.includes('g++-14') || !packages.includes('clang') || !packages.includes('git') || !/apt-get download "musl:arm64=\$\{MUSL_VERSION\}" "musl-dev:arm64=\$\{MUSL_VERSION\}" "musl:armhf=\$\{MUSL_VERSION\}" "musl-dev:armhf=\$\{MUSL_VERSION\}"/u.test(contents) || !/ARG MUSL_ARM64_SHA256=[0-9a-f]{64}/u.test(contents) || !/ARG MUSL_DEV_ARM64_SHA256=[0-9a-f]{64}/u.test(contents) || !/ARG MUSL_ARMHF_SHA256=[0-9a-f]{64}/u.test(contents) || !/ARG MUSL_DEV_ARMHF_SHA256=[0-9a-f]{64}/u.test(contents) || !/musl-libdir\s*=\s*"\/opt\/target-sysroots\/aarch64\/usr\/lib\/aarch64-linux-musl"/u.test(contents) || !/musl-libdir\s*=\s*"\/opt\/target-sysroots\/armv7\/usr\/lib\/arm-linux-musleabihf"/u.test(contents) || !/--sysroot=\/opt\/target-sysroots\/aarch64/u.test(contents) || !/--sysroot=\/opt\/target-sysroots\/armv7/u.test(contents) || !/\/opt\/target-sysroots\/aarch64\/usr\/include\/aarch64-linux-musl/u.test(contents) || !/\/opt\/target-sysroots\/armv7\/usr\/include\/arm-linux-musleabihf/u.test(contents) || /__clang_major__=0/u.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile lacks complete target musl toolchains');
-  if (!/^COPY --chown=root:root --chmod=0555 builder\/operations\/osi-image-builder-tool\.js \/opt\/osi-image-builder\/operations\/osi-image-builder-tool\.js$/mu.test(contents) || !/stat -c '%u:%g'.*0:0/u.test(contents) || !/stat -c '%a'.*555/u.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile does not bake the immutable trusted operation tool');
+  if (
+    !/^COPY --chown=root:root --chmod=0555 builder\/operations\/osi-image-builder-tool\.js \/opt\/osi-image-builder\/operations\/osi-image-builder-tool\.js$/mu.test(contents)
+    || !/^COPY --chown=root:root --chmod=0555 builder\/operations\/osi-image-builder-module-probe\.js \/opt\/osi-image-builder\/operations\/osi-image-builder-module-probe\.js$/mu.test(contents)
+    || !/stat -c '%u:%g'.*osi-image-builder-tool\.js.*0:0/u.test(contents)
+    || !/stat -c '%u:%g'.*osi-image-builder-module-probe\.js.*0:0/u.test(contents)
+    || !/stat -c '%a'.*osi-image-builder-tool\.js.*555/u.test(contents)
+    || !/stat -c '%a'.*osi-image-builder-module-probe\.js.*555/u.test(contents)
+  ) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile does not bake the immutable trusted operation tool and module probe');
   return { baseImage: base[1]!, baseImageDigest: base[2]!, dockerfileSha256: sha256(contents), executionDefinitionSha256: '', packageSet, rustConfig: rust.config, nodeVersion: node, architecture: 'linux/amd64', packageSource: 'snapshot.debian.org/archive/debian/20260715T000000Z' };
 }
 
 export function validateTrustedOperationToolSource(contents: string): void {
+  if (!contents.startsWith('#!/usr/bin/env node\n')
+    || !contents.includes("new Set(['copy-feed-config', 'verify-image', 'mirror-gui'])")
+    || !contents.includes('args.length !== 1')
+    || !contents.includes('feedSource')
+    || !contents.includes('guiSource')
+    || !contents.includes('imageDirectory')
+    || !contents.includes("const INSTALLED_NODE_BINARY = '/usr/local/bin/node';")
+    || !contents.includes("'/opt/osi-image-builder/operations/osi-image-builder-module-probe.js';")
+    || !contents.includes("    '--permission',")
+    || !contents.includes('`--allow-fs-read=${dependencies.probeProgram}`')
+    || !contents.includes('`--allow-fs-read=${nodeRed}`')
+    || !contents.includes('const execution = spawnSync(dependencies.nodeBinary, args, {')
+    || !contents.includes('shell: false')
+    || !contents.includes("cwd: '/'")
+    || !contents.includes("NODE_MODULES[index]")
+    || contents.includes('--allow-fs-write')
+    || contents.includes('--allow-child-process')
+    || contents.includes('--allow-worker')
+    || contents.includes('--allow-wasi')
+    || contents.includes('--allow-addons')
+    || contents.includes('process.argv.slice(2).join')
+    || /(?:process\.env\.)?NODE_PATH\s*=/u.test(contents)) {
+    throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted operation tool is not a fixed permission-probe launcher');
+  }
+}
+
+export function validateTrustedModuleProbeSource(contents: string): void {
   const builtinClosure = [
     'buffer',
     'crypto',
@@ -194,11 +230,7 @@ export function validateTrustedOperationToolSource(contents: string): void {
     ']);',
   ].join('\n');
   if (!contents.startsWith('#!/usr/bin/env node\n')
-    || !contents.includes("new Set(['copy-feed-config', 'verify-image', 'mirror-gui'])")
-    || !contents.includes('args.length !== 1')
-    || !contents.includes('feedSource')
-    || !contents.includes('guiSource')
-    || !contents.includes('imageDirectory')
+    || !contents.includes("args.length !== 2 || args[0] !== '--rootfs-node-red'")
     || !contents.includes("sqlite3: Object.freeze({\n    packageName: 'osi-db-helper'")
     || !contents.includes(exactBuiltinClosure)
     || !contents.includes('const ROOTFS_FILESYSTEM_CAPABILITY = Object.freeze(new Proxy(')
@@ -210,9 +242,22 @@ export function validateTrustedOperationToolSource(contents: string): void {
     || !contents.includes('Module._load = sealedLoad;')
     || !contents.includes('Module._load = originalLoad;')
     || !contents.includes('Module._resolveFilename = originalResolveFilename;')
+    || !contents.includes("    '--permission',")
+    || !contents.includes('`--allow-fs-read=${PROBE_PROGRAM}`')
+    || !contents.includes('`--allow-fs-read=${nodeRed}`')
+    || !contents.includes("process.permission.has('fs.write')")
+    || !contents.includes("process.permission.has('child')")
+    || !contents.includes("process.permission.has('worker')")
+    || !contents.includes("process.permission.has('wasi')")
+    || !contents.includes("process.permission.has('addons')")
+    || contents.includes('--allow-fs-write')
+    || contents.includes('--allow-child-process')
+    || contents.includes('--allow-worker')
+    || contents.includes('--allow-wasi')
+    || contents.includes('--allow-addons')
     || contents.includes('process.argv.slice(2).join')
     || /(?:process\.env\.)?NODE_PATH\s*=/u.test(contents)) {
-    throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted operation tool is not a closed, fail-closed implementation');
+    throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted module probe is not a read-only, fail-closed implementation');
   }
 }
 
@@ -310,6 +355,7 @@ export async function validateBuilderSource(options: { readonly dockerfile: stri
     await assertSupportedPackageParity(options.rootDockerfile, options.dockerfile);
     const dockerfileContents = await readFile(options.dockerfile, 'utf8');
     validateTrustedOperationToolSource(await readFile(join(dirname(options.dockerfile), TRUSTED_OPERATION_TOOL_RELATIVE_PATH), 'utf8'));
+    validateTrustedModuleProbeSource(await readFile(join(dirname(options.dockerfile), TRUSTED_MODULE_PROBE_RELATIVE_PATH), 'utf8'));
     const definitionContents = await readFile(options.executionDefinitionPath, 'utf8');
     const metadata = dockerfileMetadata(dockerfileContents);
     validateExecutionDefinition(JSON.parse(definitionContents), '{{imageRepository}}@sha256:{{imageDigest}}');
@@ -399,12 +445,17 @@ done`;
 
 const OPERATION_TOOL_SELF_TEST = `set -eu
 tool=/opt/osi-image-builder/operations/osi-image-builder-tool.js
+probe=/opt/osi-image-builder/operations/osi-image-builder-module-probe.js
 test "$(id -u)" != 0
 test "$(id -un)" = buildbot
 test -f "$tool"
+test -f "$probe"
 test "$(stat -c '%u:%g' "$tool")" = '0:0'
+test "$(stat -c '%u:%g' "$probe")" = '0:0'
 test "$(stat -c '%a' "$tool")" = '555'
+test "$(stat -c '%a' "$probe")" = '555'
 node --check "$tool"
+node --check "$probe"
 rm -rf /workdir/openwrt /workdir/web /workdir/feeds /workdir/feeds.conf.default
 mkdir -p /workdir/openwrt /workdir/web/react-gui/build /workdir/feeds/chirpstack-openwrt-feed/apps/node-red/files
 printf '%s\n' 'src-git local ./feeds/chirpstack-openwrt-feed' > /workdir/feeds.conf.default
@@ -517,6 +568,27 @@ if (JSON.stringify(actual) !== JSON.stringify(expected)) {
   throw new Error('verify-image canonical self-test output changed');
 }
 EOF
+cat > "$node_red/osi-db-helper/index.js" <<'EOF'
+'use strict';
+process.getBuiltinModule('fs').writeFileSync('/tmp/osi-module-probe-write-marker', 'written');
+module.exports = {};
+EOF
+rm -f /tmp/osi-module-probe-write-marker
+status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
+test "$status" -eq 2
+test ! -e /tmp/osi-module-probe-write-marker
+cat > "$node_red/osi-db-helper/index.js" <<'EOF'
+'use strict';
+process.getBuiltinModule('child_process').spawnSync(
+  process.execPath,
+  ['-e', "require('node:fs').writeFileSync('/tmp/osi-module-probe-child-marker', 'spawned')"]
+);
+module.exports = {};
+EOF
+rm -f /tmp/osi-module-probe-child-marker
+status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
+test "$status" -eq 2
+test ! -e /tmp/osi-module-probe-child-marker
 rm -rf /workdir/openwrt /workdir/web /workdir/feeds /workdir/feeds.conf.default
 status=0; node "$tool" unknown-operation >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?; test "$status" -eq 2
 for operation in copy-feed-config verify-image mirror-gui; do

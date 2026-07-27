@@ -20,6 +20,7 @@ import {
   validateProductionBuilderLock,
   validationEvidenceSha256,
   validateExecutionDefinition,
+  validateTrustedModuleProbeSource,
   validateTrustedOperationToolSource,
   type BuilderValidationEvidence,
 } from '../../builder/validate-builder.js';
@@ -36,6 +37,7 @@ const definitionPath = new URL('../../builder/execution-definition.json', import
 const targetNames = ['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const;
 const execFileAsync = promisify(execFile);
 const operationToolPath = new URL('../../builder/operations/osi-image-builder-tool.js', import.meta.url).pathname;
+const moduleProbePath = new URL('../../builder/operations/osi-image-builder-module-probe.js', import.meta.url).pathname;
 const operationToolModule = async () => await import(operationToolPath) as unknown as { readonly createOperationHandlersForTesting: (root: string, hooks?: { readonly onStep?: (point: string, path: string) => void | Promise<void> }) => { readonly copyFeedConfig: () => Promise<{ readonly sha256: string }>; readonly mirrorGui: () => Promise<{ readonly fileCount: number }>; readonly verifyImage: () => Promise<{ readonly sha256: string; readonly targetId: string; readonly nodeResolution: readonly { readonly packageName: string; readonly specifier: string; readonly resolvedRelativePath: string; readonly exportType: 'function' | 'object' | 'incompatible' }[] }> } };
 const evidence: BuilderValidationEvidence = {
   imageId: `sha256:${digest('f')}`, imageDigest: digest('a'), architecture: 'linux/amd64',
@@ -159,31 +161,57 @@ describe('locked builder source', () => {
   it('bakes and validates the immutable operation tool with a closed runtime surface', async () => {
     const dockerfileContents = await readFile(dockerfile, 'utf8');
     const toolContents = await readFile(operationToolPath, 'utf8');
+    const probeContents = await readFile(moduleProbePath, 'utf8');
     expect(dockerfileContents).toContain('COPY --chown=root:root --chmod=0555 builder/operations/osi-image-builder-tool.js /opt/osi-image-builder/operations/osi-image-builder-tool.js');
+    expect(dockerfileContents).toContain('COPY --chown=root:root --chmod=0555 builder/operations/osi-image-builder-module-probe.js /opt/osi-image-builder/operations/osi-image-builder-module-probe.js');
     expect(dockerfileContents).toContain("stat -c '%u:%g' /opt/osi-image-builder/operations/osi-image-builder-tool.js");
+    expect(dockerfileContents).toContain("stat -c '%u:%g' /opt/osi-image-builder/operations/osi-image-builder-module-probe.js");
     expect(dockerfileContents).toContain("stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-tool.js");
+    expect(dockerfileContents).toContain("stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-module-probe.js");
     expect(() => validateTrustedOperationToolSource(toolContents)).not.toThrow();
+    expect(() => validateTrustedModuleProbeSource(probeContents)).not.toThrow();
     expect(toolContents).not.toMatch(/process\.argv\.slice\(2\).*join/u);
     for (const drift of [
-      toolContents.replace('sqlite3: Object.freeze({', 'betterSqlite3: Object.freeze({'),
-      toolContents.replace("packageName: 'osi-db-helper'", "packageName: 'osi-history-helper'"),
-      toolContents.replace("  'process',\n", ''),
       toolContents.replace(
-        'return ROOTFS_FILESYSTEM_CAPABILITY;',
-        'return Reflect.apply(originalLoad, this, [request, parent, isMain]);',
+        "    '--permission',",
+        "    '--allow-child-process',",
       ),
       toolContents.replace(
-        "parentRelativePath: 'osi-health-helper/index.js'",
-        "parentRelativePath: 'osi-db-helper/index.js'",
+        "const INSTALLED_NODE_BINARY = '/usr/local/bin/node';",
+        "const INSTALLED_NODE_BINARY = process.execPath;",
       ),
       toolContents.replace(
-        "'@chirpstack/chirpstack-api/api/application_grpc_pb',",
-        "'@chirpstack/chirpstack-api',",
+        'shell: false',
+        'shell: true',
       ),
-      toolContents.replace('Module._load = originalLoad;', ''),
       `${toolContents}\nprocess.env.NODE_PATH = '/host/node_modules';\n`,
     ]) {
       expect(() => validateTrustedOperationToolSource(drift)).toThrow();
+    }
+    for (const drift of [
+      probeContents.replace('sqlite3: Object.freeze({', 'betterSqlite3: Object.freeze({'),
+      probeContents.replace("packageName: 'osi-db-helper'", "packageName: 'osi-history-helper'"),
+      probeContents.replace("  'process',\n", ''),
+      probeContents.replace(
+        'return ROOTFS_FILESYSTEM_CAPABILITY;',
+        'return Reflect.apply(originalLoad, this, [request, parent, isMain]);',
+      ),
+      probeContents.replace(
+        "parentRelativePath: 'osi-health-helper/index.js'",
+        "parentRelativePath: 'osi-db-helper/index.js'",
+      ),
+      probeContents.replace(
+        "'@chirpstack/chirpstack-api/api/application_grpc_pb',",
+        "'@chirpstack/chirpstack-api',",
+      ),
+      probeContents.replace('Module._load = originalLoad;', ''),
+      probeContents.replace(
+        "    '--permission',",
+        "    '--allow-fs-write=/tmp',",
+      ),
+      `${probeContents}\nprocess.env.NODE_PATH = '/host/node_modules';\n`,
+    ]) {
+      expect(() => validateTrustedModuleProbeSource(drift)).toThrow();
     }
     for (const operation of ['copy-feed-config', 'verify-image', 'mirror-gui']) {
       await expect(execFileAsync(process.execPath, [operationToolPath, operation], { cwd: new URL('../../../../', import.meta.url).pathname, maxBuffer: 32 * 1024 })).rejects.toMatchObject({ code: 2 });
@@ -635,6 +663,9 @@ describe('locked builder source', () => {
       'openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx',
     );
     expect(helperScript).toContain('node_red="$rootfs/usr/share/node-red"');
+    expect(helperScript).toContain(
+      'probe=/opt/osi-image-builder/operations/osi-image-builder-module-probe.js',
+    );
     expect(helperScript).toContain("require('sqlite3')");
     expect(helperScript).toContain("require('process')");
     expect(helperScript).toContain("require('node:child_process')");
@@ -656,9 +687,17 @@ describe('locked builder source', () => {
     const localSelfTest = await mkdtemp(join(tmpdir(), 'osi-builder-self-test-'));
     try {
       const localTool = join(localSelfTest, 'osi-image-builder-tool.js');
+      const localProbe = join(localSelfTest, 'osi-image-builder-module-probe.js');
+      await writeFile(localProbe, await readFile(moduleProbePath, 'utf8'));
       const localToolSource = (await readFile(operationToolPath, 'utf8')).replace(
         "const WORKTREE = '/workdir';",
         `const WORKTREE = '${localSelfTest}';`,
+      ).replace(
+        "const INSTALLED_NODE_BINARY = '/usr/local/bin/node';",
+        `const INSTALLED_NODE_BINARY = '${process.execPath}';`,
+      ).replace(
+        "  '/opt/osi-image-builder/operations/osi-image-builder-module-probe.js';",
+        `  '${localProbe}';`,
       );
       await writeFile(localTool, localToolSource);
       const functionalStart = helperScript.indexOf('node --check "$tool"');
@@ -666,7 +705,14 @@ describe('locked builder source', () => {
       const functionalScript = [
         'set -eu',
         `tool='${localTool}'`,
-        helperScript.slice(functionalStart).replaceAll('/workdir', localSelfTest),
+        `probe='${localProbe}'`,
+        helperScript
+          .slice(functionalStart)
+          .replaceAll('/workdir', localSelfTest)
+          .replaceAll(
+            '/opt/osi-image-builder/operations/osi-image-builder-module-probe.js',
+            localProbe,
+          ),
       ].join('\n');
       await expect(execFileAsync('/bin/sh', ['-c', functionalScript], {
         maxBuffer: 1024 * 1024,

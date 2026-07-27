@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, rename, rmdir, unlink } from 'node:fs/promises';
-import Module, { createRequire, isBuiltin } from 'node:module';
-import { relative } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const WORKTREE = '/workdir';
 const OPERATIONS = new Set(['copy-feed-config', 'verify-image', 'mirror-gui']);
@@ -21,77 +20,19 @@ const FIXED_PATHS = Object.freeze({
 const PROC_FD = '/proc/self/fd';
 const DIRECTORY_FLAGS = constants.O_DIRECTORY | constants.O_NOFOLLOW;
 const FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW;
-const RELATIVE_HELPER_START = 4;
-const RELATIVE_HELPER_END = 13;
-const ALLOWED_ROOTFS_BUILTINS = Object.freeze([
-  'buffer',
-  'crypto',
-  'dns',
-  'events',
-  'fs',
-  'http',
-  'http2',
-  'https',
-  'net',
-  'node:child_process',
-  'node:crypto',
-  'node:fs',
-  'os',
-  'path',
-  'process',
-  'stream',
-  'tls',
-  'url',
-  'util',
-  'zlib',
-]);
-function deniedFilesystemCapability() {
-  throw new Error('rootfs Node module attempted to use a denied builder filesystem capability');
-}
-const ROOTFS_FILESYSTEM_CAPABILITY = Object.freeze(new Proxy(
-  Object.freeze({ readFile: deniedFilesystemCapability }),
-  {
-    get(target, property, receiver) {
-      if (!Reflect.has(target, property)) {
-        throw new Error(
-          `rootfs Node module requested a denied builder filesystem capability: ${String(property)}`,
-        );
-      }
-      return Reflect.get(target, property, receiver);
-    },
-  },
-));
-function deniedChildProcessCapability() {
-  throw new Error('rootfs Node module attempted to use a denied builder process capability');
-}
-const ROOTFS_CHILD_PROCESS_CAPABILITY = Object.freeze({
-  execFile: deniedChildProcessCapability,
+const INSTALLED_NODE_BINARY = '/usr/local/bin/node';
+const INSTALLED_MODULE_PROBE =
+  '/opt/osi-image-builder/operations/osi-image-builder-module-probe.js';
+const ADJACENT_MODULE_PROBE = fileURLToPath(
+  new URL('./osi-image-builder-module-probe.js', import.meta.url),
+);
+const INSTALLED_PROBE_DEPENDENCIES = Object.freeze({
+  nodeBinary: INSTALLED_NODE_BINARY,
+  probeProgram: INSTALLED_MODULE_PROBE,
 });
-const BUILTIN_CAPABILITY_STUBS = Object.freeze({
-  'node:child_process': Object.freeze({
-    packageName: 'osi-health-helper',
-    parentRelativePath: 'osi-health-helper/index.js',
-    value: ROOTFS_CHILD_PROCESS_CAPABILITY,
-  }),
-});
-class NativeDatabaseInitializerStub {
-  constructor() {
-    throw new Error('the sqlite3 initializer stub cannot open a database');
-  }
-}
-Object.freeze(NativeDatabaseInitializerStub.prototype);
-Object.freeze(NativeDatabaseInitializerStub);
-const SQLITE3_INITIALIZER_STUB = Object.freeze({
-  Database: NativeDatabaseInitializerStub,
-  OPEN_READONLY: 1,
-  OPEN_READWRITE: 2,
-  OPEN_CREATE: 4,
-});
-const NATIVE_DEPENDENCY_STUBS = Object.freeze({
-  sqlite3: Object.freeze({
-    packageName: 'osi-db-helper',
-    value: SQLITE3_INITIALIZER_STUB,
-  }),
+const TEST_PROBE_DEPENDENCIES = Object.freeze({
+  nodeBinary: process.execPath,
+  probeProgram: ADJACENT_MODULE_PROBE,
 });
 const NODE_MODULES = Object.freeze([
   ['@grpc/grpc-js', '@grpc/grpc-js'],
@@ -140,103 +81,99 @@ function requireAbsoluteRoot(root) {
   if (typeof root !== 'string' || !root.startsWith('/') || root.includes('\0')) throw new Error('operation root is not a canonical absolute path');
 }
 
-function confinedRootfsModulePath(nodeRed, path) {
-  if (typeof path !== 'string') return false;
-  const relativePath = relative(nodeRed, path).replaceAll('\\', '/');
-  return relativePath.length > 0
-    && relativePath !== '..'
-    && !relativePath.startsWith('../')
-    && !relativePath.startsWith('/');
-}
-
-// CommonJS has no per-require hook; verify-image is synchronous and restores both hooks.
-function loadFixedRootfsEntrypoint({
-  nodeRed,
-  packageName,
-  specifier,
-  resolvedEntrypoint,
-  rootfsRequire,
-}) {
-  const originalLoad = Module._load;
-  const originalResolveFilename = Module._resolveFilename;
-  const sealedResolveFilename = function sealedResolveFilename(
-    request,
-    parent,
-    isMain,
-    options,
-  ) {
-    if (isBuiltin(request)) {
-      if (!ALLOWED_ROOTFS_BUILTINS.includes(request)) {
-        throw new Error(`rootfs Node module requested an unapproved builder builtin: ${request}`);
-      }
-      return Reflect.apply(
-        originalResolveFilename,
-        Module,
-        [request, parent, isMain, options],
-      );
-    }
-    const resolved = Reflect.apply(
-      originalResolveFilename,
-      Module,
-      [request, parent, isMain, options],
+function runModuleProbe(nodeRed, dependencies) {
+  requireAbsoluteRoot(nodeRed);
+  requireAbsoluteRoot(dependencies.nodeBinary);
+  requireAbsoluteRoot(dependencies.probeProgram);
+  const args = [
+    '--permission',
+    `--allow-fs-read=${dependencies.probeProgram}`,
+    `--allow-fs-read=${nodeRed}`,
+    dependencies.probeProgram,
+    '--rootfs-node-red',
+    nodeRed,
+  ];
+  const execution = spawnSync(dependencies.nodeBinary, args, {
+    cwd: '/',
+    encoding: 'utf8',
+    env: {
+      HOME: '/nonexistent',
+      LANG: 'C',
+      LC_ALL: 'C',
+      PATH: '/usr/local/bin:/usr/bin:/bin',
+      TZ: 'UTC',
+    },
+    maxBuffer: 8 * 1024 * 1024,
+    shell: false,
+    windowsHide: true,
+  });
+  if (execution.error) {
+    throw new Error('rootfs Node module permission probe could not start', {
+      cause: execution.error,
+    });
+  }
+  if (execution.status !== 0 || execution.signal !== null) {
+    const stderr = execution.stderr.trim();
+    throw new Error(
+      `rootfs Node module permission probe failed${
+        stderr.length > 0 ? `: ${stderr.slice(0, 4096)}` : ''
+      }`,
     );
-    if (!confinedRootfsModulePath(nodeRed, resolved)) {
-      throw new Error(`rootfs Node module dependency resolved outside the trusted rootfs: ${request}`);
-    }
-    return resolved;
-  };
-  const sealedLoad = function sealedLoad(request, parent, isMain) {
-    const stub = Object.hasOwn(NATIVE_DEPENDENCY_STUBS, request)
-      ? NATIVE_DEPENDENCY_STUBS[request]
-      : undefined;
-    if (stub !== undefined) {
-      if (packageName !== stub.packageName || parent?.filename !== resolvedEntrypoint) {
-        throw new Error(`rootfs Node module requested an unapproved native dependency stub: ${request}`);
-      }
-      return stub.value;
-    }
-    sealedResolveFilename(request, parent, isMain);
-    if (request === 'fs' || request === 'node:fs') {
-      return ROOTFS_FILESYSTEM_CAPABILITY;
-    }
-    const builtinStub = Object.hasOwn(BUILTIN_CAPABILITY_STUBS, request)
-      ? BUILTIN_CAPABILITY_STUBS[request]
-      : undefined;
-    if (builtinStub !== undefined) {
-      const parentRelativePath = typeof parent?.filename === 'string'
-        ? relative(nodeRed, parent.filename).replaceAll('\\', '/')
-        : '';
-      if (
-        packageName !== builtinStub.packageName
-        || parentRelativePath !== builtinStub.parentRelativePath
-      ) {
-        throw new Error(`rootfs Node module requested an unapproved builder builtin: ${request}`);
-      }
-      return builtinStub.value;
-    }
-    return Reflect.apply(originalLoad, this, [request, parent, isMain]);
-  };
-
-  Module._resolveFilename = sealedResolveFilename;
-  Module._load = sealedLoad;
-  let exported;
-  let failure;
-  let failed = false;
+  }
+  const stdout = execution.stdout;
+  if (
+    stdout.includes('\r')
+    || !stdout.endsWith('\n')
+    || stdout.indexOf('\n') !== stdout.length - 1
+  ) {
+    throw new Error('rootfs Node module permission probe output is not one record');
+  }
+  const text = stdout.slice(0, -1);
+  let parsed;
   try {
-    exported = rootfsRequire(specifier);
+    parsed = JSON.parse(text);
   } catch (error) {
-    failed = true;
-    failure = error;
+    throw new Error('rootfs Node module permission probe output is not JSON', {
+      cause: error,
+    });
   }
-  const loaderChanged = Module._load !== sealedLoad
-    || Module._resolveFilename !== sealedResolveFilename;
-  Module._load = originalLoad;
-  Module._resolveFilename = originalResolveFilename;
-  if (failed) throw failure;
-  if (loaderChanged) {
-    throw new Error(`rootfs Node module changed the sealed builder loader: ${packageName}`);
+  if (
+    parsed === null
+    || typeof parsed !== 'object'
+    || Array.isArray(parsed)
+    || JSON.stringify(parsed) !== text
+    || Object.keys(parsed).join('\0') !== 'nodeResolution'
+    || !Array.isArray(parsed.nodeResolution)
+    || parsed.nodeResolution.length !== NODE_MODULES.length
+  ) {
+    throw new Error('rootfs Node module permission probe output changed');
   }
-  return exported;
+  return parsed.nodeResolution.map((candidate, index) => {
+    const [packageName, specifier] = NODE_MODULES[index];
+    if (
+      candidate === null
+      || typeof candidate !== 'object'
+      || Array.isArray(candidate)
+      || Object.keys(candidate).join('\0')
+        !== 'packageName\0specifier\0resolvedRelativePath\0exportType'
+      || candidate.packageName !== packageName
+      || candidate.specifier !== specifier
+      || typeof candidate.resolvedRelativePath !== 'string'
+      || candidate.resolvedRelativePath.length === 0
+      || candidate.resolvedRelativePath.startsWith('/')
+      || candidate.resolvedRelativePath.split('/').includes('..')
+      || !['function', 'object', 'incompatible'].includes(candidate.exportType)
+    ) {
+      throw new Error('rootfs Node module permission probe binding changed');
+    }
+    const expectedRoot = specifier.startsWith('./')
+      ? `${packageName}/`
+      : `node_modules/${packageName}/`;
+    if (!candidate.resolvedRelativePath.startsWith(expectedRoot)) {
+      throw new Error(`resolved Node module changed package identity: ${packageName}`);
+    }
+    return candidate;
+  });
 }
 
 function entryPath(directory, name = '') {
@@ -515,7 +452,7 @@ async function mirrorGui(root, hooks) {
   } finally { if (destinationParent) await closeChain(destinationParent); if (source) await closeChain(source); await rootHandle.close(); }
 }
 
-async function verifyImage(root, hooks) {
+async function verifyImage(root, hooks, probeDependencies) {
   const rootHandle = await openRoot(root);
   let targetDirectory;
   try {
@@ -562,41 +499,7 @@ async function verifyImage(root, hooks) {
           await openwrt.close();
         }
         const nodeRed = `${root}/${rootfs.path}/usr/share/node-red`;
-        const require = createRequire(`${nodeRed}/__osi_verification__.cjs`);
-        const nodeResolution = NODE_MODULES.map((
-          [packageName, specifier, loadSpecifier = specifier],
-          index,
-        ) => {
-          const resolved = require.resolve(loadSpecifier);
-          const exported = loadFixedRootfsEntrypoint({
-            nodeRed,
-            packageName,
-            specifier: loadSpecifier,
-            resolvedEntrypoint: resolved,
-            rootfsRequire: require,
-          });
-          const actualRelativePath = relative(nodeRed, resolved).replaceAll('\\', '/');
-          if (actualRelativePath.startsWith('../') || actualRelativePath.startsWith('/')) {
-            throw new Error(`resolved Node module escaped the trusted rootfs base: ${packageName}`);
-          }
-          const directRoot = `${packageName}/`;
-          const nodeModulesRoot = `node_modules/${packageName}/`;
-          const resolvedRelativePath = index >= RELATIVE_HELPER_START
-            && index < RELATIVE_HELPER_END
-            && actualRelativePath.startsWith(directRoot)
-            ? `${nodeModulesRoot}${actualRelativePath.slice(directRoot.length)}`
-            : actualRelativePath;
-          const expectedRoot = specifier.startsWith('./') ? directRoot : nodeModulesRoot;
-          if (!resolvedRelativePath.startsWith(expectedRoot)) {
-            throw new Error(`resolved Node module changed package identity: ${packageName}`);
-          }
-          const exportType = typeof exported === 'function'
-            ? 'function'
-            : exported !== null && typeof exported === 'object'
-              ? 'object'
-              : 'incompatible';
-          return { packageName, specifier, resolvedRelativePath, exportType };
-        });
+        const nodeResolution = runModuleProbe(nodeRed, probeDependencies);
         return {
           operation: 'verify-image',
           targetId: rootfs.targetId,
@@ -610,16 +513,24 @@ async function verifyImage(root, hooks) {
   } finally { if (targetDirectory) await closeChain(targetDirectory); await rootHandle.close(); }
 }
 
-export function createOperationHandlersForTesting(root, hooks = {}) {
+export function createOperationHandlersForTesting(
+  root,
+  hooks = {},
+  probeDependencies = TEST_PROBE_DEPENDENCIES,
+) {
   requireAbsoluteRoot(root);
-  return Object.freeze({ copyFeedConfig: () => copyFeedConfig(root, hooks), mirrorGui: () => mirrorGui(root, hooks), verifyImage: () => verifyImage(root, hooks) });
+  return Object.freeze({ copyFeedConfig: () => copyFeedConfig(root, hooks), mirrorGui: () => mirrorGui(root, hooks), verifyImage: () => verifyImage(root, hooks, probeDependencies) });
 }
 
 async function main() {
   const args = process.argv.slice(2);
   if (args.length !== 1 || !OPERATIONS.has(args[0])) { fail('exactly one trusted operation name is required'); return; }
   try {
-    const handlers = createOperationHandlersForTesting(WORKTREE);
+    const handlers = createOperationHandlersForTesting(
+      WORKTREE,
+      {},
+      INSTALLED_PROBE_DEPENDENCIES,
+    );
     const result = args[0] === 'copy-feed-config' ? await handlers.copyFeedConfig() : args[0] === 'mirror-gui' ? await handlers.mirrorGui() : await handlers.verifyImage();
     process.stdout.write(JSON.stringify(result) + '\n');
   } catch (error) {

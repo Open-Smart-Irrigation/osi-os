@@ -382,6 +382,7 @@ const OFFLINE_OPERATION_IDS = new Set([
   'update-feeds',
   'install-feeds',
   'resolve-config',
+  'verify-image',
 ]);
 
 function operationNetworkMode(options: DockerExecutorOptions): 'bridge' | 'none' {
