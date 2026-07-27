@@ -28,6 +28,8 @@ const DEFAULT_COOPERATIVE_TIMEOUT_MS = 30_000;
 const DEFAULT_SYSTEMD_GRACE_MS = 15_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const MAX_OBSERVATION_TEXT_BYTES = 8_192;
+const MAX_CLOCK_OBSERVATION_ATTEMPTS = 3;
+const MAX_STOP_AUTHORIZATION_ATTEMPTS = 3;
 const ACTIVE_STATES = new Set<JobState>(ACTIVE_RECOVERY_STATES);
 const TERMINAL_STATE_SET = new Set<JobState>(TERMINAL_STATES);
 const SYSTEMD_ENVIRONMENT_KEYS = new Set([
@@ -286,7 +288,8 @@ export function createApiCancellationService(options: ApiCancellationServiceOpti
 }
 
 function readCancellationJob(store: ApiCancellationOptions['store'], jobId: string): CancellationJobRecord {
-  return store.getCancellationJob?.(jobId) ?? store.getJob(jobId);
+  if (store.getCancellationJob !== undefined) return store.getCancellationJob(jobId);
+  return (store as ApiCancellationStore).getJob(jobId);
 }
 
 function isTerminal(job: CancellationJobRecord): job is CancellationJobRecord & { readonly state: Extract<JobState, 'succeeded' | 'failed' | 'cancelled' | 'interrupted'> } {
@@ -494,116 +497,142 @@ function observeCancellationClock(
   requestedAt: string,
   phase: string,
 ): ClockBoundary {
-  if (isTerminal(job)) {
-    return { kind: 'outcome', outcome: outcomeForTerminal(job.jobId, job, requestPersisted) };
-  }
-  if (job.state === 'publishing') {
-    return {
-      kind: 'outcome',
-      outcome: { kind: 'late-publishing', jobId: job.jobId, state: 'publishing', late: true, requestPersisted: true },
-    };
-  }
-  if (
-    !ACTIVE_STATES.has(job.state)
-    || job.cancelRequestedAt === null
-    || job.cancellationClockHighWaterAt === null
-    || !isCanonicalInstant(job.cancellationClockHighWaterAt)
-  ) {
-    return {
-      kind: 'outcome',
-      outcome: failedClosed(options, job, requestPersisted, requestedAt, 'durable cancellation clock high-water is missing or invalid'),
-    };
-  }
-  const observedAt = (options.clock ?? defaultClock).now();
-  if (!isCanonicalInstant(observedAt)) {
-    return {
-      kind: 'outcome',
-      outcome: durableBlocker(options, job, requestPersisted, requestedAt, {
-        kind: 'api-cancellation-clock-regression',
-        reason: 'wall clock observation is not a canonical UTC instant',
-        phase,
+  let current = job;
+  for (let attempt = 0; attempt < MAX_CLOCK_OBSERVATION_ATTEMPTS; attempt += 1) {
+    if (isTerminal(current)) {
+      return { kind: 'outcome', outcome: outcomeForTerminal(current.jobId, current, requestPersisted) };
+    }
+    if (current.state === 'publishing') {
+      return {
+        kind: 'outcome',
+        outcome: { kind: 'late-publishing', jobId: current.jobId, state: 'publishing', late: true, requestPersisted: true },
+      };
+    }
+    if (current.cleanupBlockerCode === 'RUNNER_DISAPPEARED' && current.cleanupBlocker !== null) {
+      return {
+        kind: 'outcome',
+        outcome: {
+          kind: 'recovery-blocked',
+          jobId: current.jobId,
+          state: current.state as ActiveRecoveryState,
+          blockerCode: 'RUNNER_DISAPPEARED',
+          requestPersisted,
+          evidence: current.cleanupBlocker,
+        },
+      };
+    }
+    if (
+      !ACTIVE_STATES.has(current.state)
+      || current.cancelRequestedAt === null
+      || current.cancellationClockHighWaterAt === null
+      || !isCanonicalInstant(current.cancellationClockHighWaterAt)
+    ) {
+      return {
+        kind: 'outcome',
+        outcome: failedClosed(options, current, requestPersisted, requestedAt, 'durable cancellation clock high-water is missing or invalid'),
+      };
+    }
+    if (current.cleanupFenceGeneration !== null || current.cleanupAdmissionId !== null) {
+      return {
+        kind: 'outcome',
+        outcome: failedClosed(options, current, requestPersisted, requestedAt, 'cancellation clock observation is fenced for cleanup recovery'),
+      };
+    }
+
+    const observedAt = (options.clock ?? defaultClock).now();
+    if (!isCanonicalInstant(observedAt)) {
+      return {
+        kind: 'outcome',
+        outcome: durableBlocker(options, current, requestPersisted, requestedAt, {
+          kind: 'api-cancellation-clock-regression',
+          reason: 'wall clock observation is not a canonical UTC instant',
+          phase,
+          requestedAt,
+          observedAt,
+          highWaterAt: current.cancellationClockHighWaterAt,
+        }),
+      };
+    }
+    if (observedAt < current.cancellationClockHighWaterAt) {
+      return clockRegression(
+        options,
+        current,
+        requestPersisted,
         requestedAt,
         observedAt,
-        highWaterAt: job.cancellationClockHighWaterAt,
-      }),
-    };
-  }
-  if (observedAt < job.cancellationClockHighWaterAt) {
-    return clockRegression(
-      options,
-      job,
-      requestPersisted,
-      requestedAt,
-      observedAt,
-      job.cancellationClockHighWaterAt,
-      phase,
-    );
-  }
-  try {
-    options.ownership.apiWrite({
-      kind: 'observe-cancellation-clock',
-      jobId: job.jobId,
-      expectedState: job.state as ActiveRecoveryState,
-      cancelRequestedAt: job.cancelRequestedAt,
-      expectedHighWaterAt: job.cancellationClockHighWaterAt,
-      observedAt,
-      at: observedAt,
-    });
-  } catch {
-    // The durable re-read below distinguishes a concurrent advance from a state race.
-  }
-  const latest = readCancellationJob(options.store, job.jobId);
-  if (isTerminal(latest)) {
-    return { kind: 'outcome', outcome: outcomeForTerminal(job.jobId, latest, requestPersisted) };
-  }
-  if (latest.state === 'publishing') {
-    return {
-      kind: 'outcome',
-      outcome: { kind: 'late-publishing', jobId: latest.jobId, state: 'publishing', late: true, requestPersisted: true },
-    };
-  }
-  if (latest.cleanupBlockerCode === 'RUNNER_DISAPPEARED' && latest.cleanupBlocker !== null) {
-    return {
-      kind: 'outcome',
-      outcome: {
-        kind: 'recovery-blocked',
-        jobId: latest.jobId,
-        state: latest.state as ActiveRecoveryState,
-        blockerCode: 'RUNNER_DISAPPEARED',
-        requestPersisted,
-        evidence: latest.cleanupBlocker,
-      },
-    };
-  }
-  if (
-    !ACTIVE_STATES.has(latest.state)
-    || latest.cancelRequestedAt !== job.cancelRequestedAt
-    || latest.cancellationClockHighWaterAt === null
-    || !isCanonicalInstant(latest.cancellationClockHighWaterAt)
-  ) {
-    return {
-      kind: 'outcome',
-      outcome: failedClosed(options, latest, requestPersisted, requestedAt, 'cancellation clock observation lost durable state ownership'),
-    };
-  }
-  if (latest.cancellationClockHighWaterAt > observedAt) {
-    return clockRegression(
-      options,
-      latest,
-      requestPersisted,
-      requestedAt,
-      observedAt,
-      latest.cancellationClockHighWaterAt,
-      phase,
-    );
-  }
-  if (latest.cancellationClockHighWaterAt !== observedAt) {
+        current.cancellationClockHighWaterAt,
+        phase,
+      );
+    }
+
+    const expectedState = current.state;
+    const cancelRequestedAt = current.cancelRequestedAt;
+    try {
+      options.ownership.apiWrite({
+        kind: 'observe-cancellation-clock',
+        jobId: current.jobId,
+        expectedState: expectedState as ActiveRecoveryState,
+        cancelRequestedAt,
+        expectedHighWaterAt: current.cancellationClockHighWaterAt,
+        observedAt,
+        at: observedAt,
+      });
+    } catch {
+      // The durable re-read below distinguishes a concurrent advance from a state race.
+    }
+    const latest = readCancellationJob(options.store, current.jobId);
+    if (isTerminal(latest)) {
+      return { kind: 'outcome', outcome: outcomeForTerminal(current.jobId, latest, requestPersisted) };
+    }
+    if (latest.state === 'publishing') {
+      return {
+        kind: 'outcome',
+        outcome: { kind: 'late-publishing', jobId: latest.jobId, state: 'publishing', late: true, requestPersisted: true },
+      };
+    }
+    if (latest.cleanupBlockerCode === 'RUNNER_DISAPPEARED' && latest.cleanupBlocker !== null) {
+      return {
+        kind: 'outcome',
+        outcome: {
+          kind: 'recovery-blocked',
+          jobId: latest.jobId,
+          state: latest.state as ActiveRecoveryState,
+          blockerCode: 'RUNNER_DISAPPEARED',
+          requestPersisted,
+          evidence: latest.cleanupBlocker,
+        },
+      };
+    }
+    if (
+      !ACTIVE_STATES.has(latest.state)
+      || latest.state !== expectedState
+      || latest.cancelRequestedAt !== cancelRequestedAt
+      || latest.cancellationClockHighWaterAt === null
+      || !isCanonicalInstant(latest.cancellationClockHighWaterAt)
+      || latest.cleanupFenceGeneration !== null
+      || latest.cleanupAdmissionId !== null
+    ) {
+      return {
+        kind: 'outcome',
+        outcome: failedClosed(options, latest, requestPersisted, requestedAt, 'cancellation clock observation lost durable state ownership'),
+      };
+    }
+    if (latest.cancellationClockHighWaterAt === observedAt) {
+      return { kind: 'observed', job: latest, observedAt };
+    }
+    if (latest.cancellationClockHighWaterAt > observedAt) {
+      current = latest;
+      continue;
+    }
     return {
       kind: 'outcome',
       outcome: failedClosed(options, latest, requestPersisted, requestedAt, 'cancellation clock high-water did not advance durably'),
     };
   }
-  return { kind: 'observed', job: latest, observedAt };
+  return {
+    kind: 'outcome',
+    outcome: failedClosed(options, current, requestPersisted, requestedAt, 'cancellation clock high-water retry budget was exhausted'),
+  };
 }
 
 function writeRequest(
@@ -860,87 +889,147 @@ export async function requestCancellation(
   const stopIntentAt = terminal.cancellationStopIntentAt;
   const graceDeadlineAt = terminal.cancellationGraceDeadlineAt;
   if (ownsStop) {
-    terminal = readCancellationJob(options.store, request.jobId);
-    if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
-    if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
-    const preAuthorizationClock = observeCancellationClock(options, terminal, true, request.at, 'pre-stop-authorization');
-    if (preAuthorizationClock.kind === 'outcome') return preAuthorizationClock.outcome;
-    terminal = preAuthorizationClock.job;
-    const authorizationIdentityIssue = runnerIdentityIssue(
-      request.jobId,
-      terminal,
-      escalationUnit,
-      cancellationLeaseOwner,
-      claimLeaseExpiresAt,
-      preAuthorizationClock.observedAt,
-    );
-    if (
-      authorizationIdentityIssue !== null
-      || terminal.cancellationEscalationOwner !== coordinatorId
-      || terminal.cancellationStopIntentAt !== stopIntentAt
-    ) {
-      return failedClosed(
-        options,
-        terminal,
-        true,
-        request.at,
-        authorizationIdentityIssue ?? 'systemd stop authorization ownership changed before the stop boundary',
-      );
-    }
-    const authorizedLeaseExpiresAt = terminal.runnerLeaseExpiresAt!;
+    const escalationState = terminal.state;
     let ownsAuthorization = false;
-    try {
-      const authorization = options.ownership.apiWrite({
-        kind: 'authorize-cancellation-stop',
-        jobId: terminal.jobId,
-        expectedState: terminal.state as ActiveRecoveryState,
-        cancelRequestedAt: terminal.cancelRequestedAt!,
-        runnerUnit: escalationUnit,
-        observedOwner: terminal.runnerLeaseOwner!,
-        observedLeaseExpiresAt: authorizedLeaseExpiresAt,
-        escalationOwner: coordinatorId,
-        stopIntentAt,
-        expectedHighWaterAt: preAuthorizationClock.observedAt,
-        authorizedAt: preAuthorizationClock.observedAt,
-        at: preAuthorizationClock.observedAt,
-      });
-      ownsAuthorization = authorization.ok && authorization.kind === 'committed';
-    } catch {
-      ownsAuthorization = false;
-    }
-    terminal = readCancellationJob(options.store, request.jobId);
-    if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
-    if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
-    if (!ownsAuthorization) {
+    let authorizationObservedAt: string | null = null;
+    let authorizedLeaseExpiresAt = claimLeaseExpiresAt;
+    let minimumLeaseExpiresAt = claimLeaseExpiresAt;
+    for (let attempt = 0; attempt < MAX_STOP_AUTHORIZATION_ATTEMPTS; attempt += 1) {
+      terminal = readCancellationJob(options.store, request.jobId);
+      if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
+      if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
+      const preAuthorizationClock = observeCancellationClock(options, terminal, true, request.at, 'pre-stop-authorization');
+      if (preAuthorizationClock.kind === 'outcome') return preAuthorizationClock.outcome;
+      terminal = preAuthorizationClock.job;
+      const authorizationIdentityIssue = runnerIdentityIssue(
+        request.jobId,
+        terminal,
+        escalationUnit,
+        cancellationLeaseOwner,
+        minimumLeaseExpiresAt,
+        preAuthorizationClock.observedAt,
+      );
       if (
-        terminal.cancellationStopAuthorizedAt === null
-        && terminal.cancellationStopAuthorizedLeaseExpiresAt === null
+        authorizationIdentityIssue !== null
+        || terminal.state !== escalationState
+        || terminal.cancelRequestedAt !== cancellationRequestedAt
+        || terminal.cancellationEscalationOwner !== coordinatorId
+        || terminal.cancellationStopIntentAt !== stopIntentAt
+        || terminal.cleanupBlockerCode !== null
+        || terminal.cleanupBlocker !== null
+        || terminal.cleanupFenceGeneration !== null
+        || terminal.cleanupAdmissionId !== null
       ) {
-        return failedClosed(options, terminal, true, request.at, 'systemd stop authorization CAS was not committed');
+        return failedClosed(
+          options,
+          terminal,
+          true,
+          request.at,
+          authorizationIdentityIssue ?? 'systemd stop authorization ownership changed before the stop boundary',
+        );
+      }
+      const attemptedLeaseExpiresAt = terminal.runnerLeaseExpiresAt!;
+      let authorizationReturned = false;
+      try {
+        const authorization = options.ownership.apiWrite({
+          kind: 'authorize-cancellation-stop',
+          jobId: terminal.jobId,
+          expectedState: terminal.state as ActiveRecoveryState,
+          cancelRequestedAt: terminal.cancelRequestedAt,
+          runnerUnit: escalationUnit,
+          observedOwner: terminal.runnerLeaseOwner!,
+          observedLeaseExpiresAt: attemptedLeaseExpiresAt,
+          escalationOwner: coordinatorId,
+          stopIntentAt,
+          expectedHighWaterAt: preAuthorizationClock.observedAt,
+          authorizedAt: preAuthorizationClock.observedAt,
+          at: preAuthorizationClock.observedAt,
+        });
+        authorizationReturned = true;
+        ownsAuthorization = authorization.ok && authorization.kind === 'committed';
+      } catch {
+        authorizationReturned = false;
+        ownsAuthorization = false;
+      }
+      terminal = readCancellationJob(options.store, request.jobId);
+      if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
+      if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
+      if (ownsAuthorization) {
+        authorizationObservedAt = preAuthorizationClock.observedAt;
+        authorizedLeaseExpiresAt = attemptedLeaseExpiresAt;
+        break;
       }
       if (
-        terminal.cancellationStopAuthorizedAt === null
-        || terminal.cancellationStopAuthorizedLeaseExpiresAt === null
-      ) return failedClosed(options, terminal, true, request.at, 'durable systemd stop authorization is incomplete');
+        terminal.cancellationStopAuthorizedAt !== null
+        || terminal.cancellationStopAuthorizedLeaseExpiresAt !== null
+      ) {
+        if (
+          terminal.cancellationStopAuthorizedAt === null
+          || terminal.cancellationStopAuthorizedLeaseExpiresAt === null
+        ) return failedClosed(options, terminal, true, request.at, 'durable systemd stop authorization is incomplete');
+        break;
+      }
+      if (!authorizationReturned) {
+        return failedClosed(options, terminal, true, request.at, 'systemd stop authorization outcome is ambiguous');
+      }
+      const retryIdentityIssue = runnerIdentityIssue(
+        request.jobId,
+        terminal,
+        escalationUnit,
+        cancellationLeaseOwner,
+        attemptedLeaseExpiresAt,
+        preAuthorizationClock.observedAt,
+      );
+      if (
+        retryIdentityIssue !== null
+        || terminal.state !== escalationState
+        || terminal.cancelRequestedAt !== cancellationRequestedAt
+        || terminal.cancellationEscalationOwner !== coordinatorId
+        || terminal.cancellationStopIntentAt !== stopIntentAt
+        || terminal.cleanupBlockerCode !== null
+        || terminal.cleanupBlocker !== null
+        || terminal.cleanupFenceGeneration !== null
+        || terminal.cleanupAdmissionId !== null
+      ) {
+        return failedClosed(
+          options,
+          terminal,
+          true,
+          request.at,
+          retryIdentityIssue ?? 'systemd stop authorization ownership changed during CAS retry',
+        );
+      }
+      minimumLeaseExpiresAt = attemptedLeaseExpiresAt;
+      if (attempt === MAX_STOP_AUTHORIZATION_ATTEMPTS - 1) {
+        return failedClosed(options, terminal, true, request.at, 'systemd stop authorization retry budget was exhausted by same-owner lease churn');
+      }
     }
     if (
       ownsAuthorization
       && (
-        terminal.cancellationStopAuthorizedAt !== preAuthorizationClock.observedAt
+        authorizationObservedAt === null
+        || terminal.cancellationStopAuthorizedAt !== authorizationObservedAt
         || terminal.cancellationStopAuthorizedLeaseExpiresAt !== authorizedLeaseExpiresAt
+        || terminal.state !== escalationState
+        || terminal.cancelRequestedAt !== cancellationRequestedAt
         || terminal.cancellationEscalationOwner !== coordinatorId
+        || terminal.cancellationStopIntentAt !== stopIntentAt
         || terminal.runnerUnit !== escalationUnit
         || terminal.runnerLeaseOwner !== cancellationLeaseOwner
         || terminal.runnerLeaseExpiresAt === null
         || !isCanonicalInstant(terminal.runnerLeaseExpiresAt)
         || terminal.runnerLeaseExpiresAt < authorizedLeaseExpiresAt
-        || terminal.runnerLeaseExpiresAt <= preAuthorizationClock.observedAt
+        || terminal.runnerLeaseExpiresAt <= authorizationObservedAt
+        || terminal.cleanupBlockerCode !== null
+        || terminal.cleanupBlocker !== null
+        || terminal.cleanupFenceGeneration !== null
+        || terminal.cleanupAdmissionId !== null
       )
     ) {
       return failedClosed(options, terminal, true, request.at, 'durable systemd stop authorization does not match the immediate runner observation');
     }
-    const stopDeadlineMonotonic = monotonicDeadline(clock, graceDeadlineAt, preAuthorizationClock.observedAt);
     if (ownsAuthorization) {
+      const stopDeadlineMonotonic = monotonicDeadline(clock, graceDeadlineAt, authorizationObservedAt!);
       let stopObservation: ApiCancellationSystemdObservation;
       try {
         stopObservation = await options.systemd.stopRunner(escalationUnit, stopDeadlineMonotonic);

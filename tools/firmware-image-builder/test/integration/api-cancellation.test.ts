@@ -1,8 +1,10 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { openBuilderDatabase } from '../../api/src/store-schema.js';
+import { MIGRATION_REGISTRY, openBuilderDatabase } from '../../api/src/store-schema.js';
 import { BuilderStore, type CreateJobInput } from '../../api/src/store.js';
 import { OwnershipStore } from '../../api/src/ownership.js';
 import { requestCancellation, type ApiCancellationClock, type ApiCancellationSystemd } from '../../api/src/cancellation.js';
@@ -342,6 +344,109 @@ describe('API cancellation against the durable ownership store', () => {
     secondDb.close();
   });
 
+  it('upgrades a migration-010 cancellation to the latest durable observation without restoring elapsed budget', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'osi-api-cancellation-v10-'));
+    directories.push(directory);
+    const databasePath = join(directory, 'jobs.sqlite');
+    const historical = new DatabaseSync(databasePath);
+    for (const migration of MIGRATION_REGISTRY.slice(0, 10)) {
+      historical.exec(readFileSync(new URL(`../../api/migrations/${migration.filename}`, import.meta.url), 'utf8'));
+      historical.prepare('INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)')
+        .run(migration.version, migration.filename, migration.sha256, NOW);
+    }
+    const jobId = 'migration-v10-a';
+    historical.prepare(`INSERT INTO jobs (
+      job_id, request_id, request_json,
+      source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha,
+      source_preparation_json, offline_feed_preparation_json,
+      target_id, root_id, target_manifest_sha256,
+      source_commit_time, source_author, source_subject,
+      accepted_at, state, queue_state,
+      cancel_requested_at, cancel_reason,
+      created_at, updated_at, dispatched_at, runner_unit,
+      runner_lease_owner, runner_lease_expires_at,
+      cancellation_cooperative_deadline_at,
+      cancellation_escalation_owner, cancellation_escalation_lease_expires_at,
+      cancellation_stop_intent_at, cancellation_grace_deadline_at,
+      cancellation_signal_observation_json, cancellation_stop_observation_json,
+      cancellation_inspection_observations_json
+    ) VALUES (
+      ?, ?, '{}',
+      ?, ?, ?, ?, ?, ?,
+      ?, ?,
+      ?, ?, ?,
+      ?, ?, ?,
+      ?, 'starting', 'dispatched',
+      ?, 'operator',
+      ?, ?, ?, ?,
+      'runner-v10', ?,
+      ?,
+      'coordinator-v10', ?,
+      ?, ?,
+      '{}', '{}', '{"observations":[{"activity":"active"}]}'
+    )`).run(
+      jobId,
+      `request-${jobId}`,
+      'git@example.com:osi-os.git',
+      'refs/remotes/origin/main',
+      'main',
+      'main',
+      SHA40,
+      SHA40,
+      JSON.stringify(sourcePreparation()),
+      JSON.stringify(offlineFeeds(jobId)),
+      'rpi-5',
+      'release',
+      SHA64,
+      NOW,
+      'Migration test',
+      'Cancellation high-water',
+      NOW,
+      '2026-07-27T12:00:02.000Z',
+      NOW,
+      '2026-07-27T12:00:25.000Z',
+      LATER,
+      `osi-image-builder-runner@${jobId}.service`,
+      '2026-07-27T12:10:00.000Z',
+      '2026-07-27T12:00:32.000Z',
+      '2026-07-27T12:00:35.000Z',
+      '2026-07-27T12:00:20.000Z',
+      '2026-07-27T12:00:35.000Z',
+    );
+    const insertEvent = historical.prepare(`INSERT INTO job_events (
+      job_id, seq, event_type, state, payload_json, at
+    ) VALUES (?, ?, ?, 'starting', ?, ?)`);
+    insertEvent.run(jobId, 0, 'cancellation_requested', '{"reason":"operator"}', '2026-07-27T12:00:02.000Z');
+    insertEvent.run(jobId, 1, 'recovery', '{"kind":"cancellation-signal-observed"}', '2026-07-27T12:00:10.000Z');
+    insertEvent.run(jobId, 2, 'recovery', '{"kind":"cancellation-stop-intent"}', '2026-07-27T12:00:20.000Z');
+    insertEvent.run(jobId, 3, 'recovery', '{"kind":"cancellation-inspection-observed"}', '2026-07-27T12:00:24.000Z');
+    historical.close();
+
+    const upgraded = openBuilderDatabase(databasePath);
+    const store = new BuilderStore(upgraded);
+    const systemdValue = systemd();
+    expect(store.getCancellationJob(jobId).cancellationClockHighWaterAt)
+      .toBe('2026-07-27T12:00:25.000Z');
+
+    const outcome = await requestCancellation({
+      store,
+      ownership: new OwnershipStore(upgraded, { now: () => NOW }),
+      systemd: systemdValue,
+      clock: clock('2026-07-27T12:00:20.000Z'),
+    }, { jobId, reason: 'retry', at: '2026-07-27T12:00:20.000Z' });
+
+    expect(outcome).toMatchObject({
+      kind: 'recovery-blocked',
+      evidence: expect.objectContaining({
+        kind: 'api-cancellation-clock-regression',
+        observedAt: '2026-07-27T12:00:20.000Z',
+        highWaterAt: '2026-07-27T12:00:25.000Z',
+      }),
+    });
+    expect(systemdValue.calls).toEqual([]);
+    upgraded.close();
+  });
+
   it('accepts a production-style same-owner lease renewal at twenty seconds and stops once at thirty seconds', async () => {
     const fixtureValue = await fixture(['lease-renewal-a']);
     activate(fixtureValue, 'lease-renewal-a');
@@ -473,6 +578,73 @@ describe('API cancellation against the durable ownership store', () => {
       cancellationStopAuthorizedLeaseExpiresAt: null,
     });
     expect(fixtureValue.store.listEvents('authorization-rollback-a').events).toHaveLength(eventsBefore);
+    secondDb.close();
+  });
+
+  it('retries a healthy concurrent high-water advance when the local wall clock catches up', async () => {
+    const fixtureValue = await fixture(['clock-race-a']);
+    activate(fixtureValue, 'clock-race-a');
+    const requestAt = '2026-07-27T12:00:02.000Z';
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'request-cancellation',
+      jobId: 'clock-race-a',
+      reason: 'operator',
+      at: requestAt,
+      cooperativeDeadlineAt: requestAt,
+    }).ok).toBe(true);
+    const secondDb = openBuilderDatabase(fixtureValue.databasePath);
+    const secondOwnership = new OwnershipStore(secondDb, { now: () => NOW });
+    let raced = false;
+    const ownership = {
+      apiWrite: (command: Parameters<OwnershipStore['apiWrite']>[0]) => {
+        if (command.kind === 'observe-cancellation-clock' && !raced) {
+          raced = true;
+          expect(secondOwnership.apiWrite({
+            kind: 'observe-cancellation-clock',
+            jobId: 'clock-race-a',
+            expectedState: 'starting',
+            cancelRequestedAt: requestAt,
+            expectedHighWaterAt: requestAt,
+            observedAt: '2026-07-27T12:00:02.002Z',
+            at: '2026-07-27T12:00:02.002Z',
+          }).ok).toBe(true);
+        }
+        return fixtureValue.ownership.apiWrite(command);
+      },
+    };
+    const wallSamples = [
+      '2026-07-27T12:00:02.001Z',
+      '2026-07-27T12:00:02.003Z',
+    ];
+    let sampleIndex = 0;
+    const staggeredClock: ApiCancellationClock = {
+      now: () => wallSamples[Math.min(sampleIndex++, wallSamples.length - 1)]!,
+      monotonicNow: () => 0,
+      sleep: async () => {},
+    };
+    const systemdValue = systemd();
+
+    const outcome = await requestCancellation({
+      store: fixtureValue.store,
+      ownership,
+      systemd: systemdValue,
+      clock: staggeredClock,
+      coordinatorId: 'clock-race-coordinator-a',
+      cooperativeTimeoutMs: 0,
+      systemdGraceMs: 0,
+      pollIntervalMs: 1,
+    }, { jobId: 'clock-race-a', reason: 'retry', at: '2026-07-27T12:00:02.003Z' });
+
+    expect(outcome).toMatchObject({
+      kind: 'recovery-blocked',
+      evidence: expect.objectContaining({ kind: 'api-cancellation-escalation' }),
+    });
+    expect(systemdValue.calls.filter(([kind]) => kind === 'signal')).toHaveLength(1);
+    expect(systemdValue.calls.filter(([kind]) => kind === 'stop')).toHaveLength(1);
+    expect(fixtureValue.store.getCancellationJob('clock-race-a')).toMatchObject({
+      cancellationClockHighWaterAt: '2026-07-27T12:00:02.003Z',
+      cleanupBlocker: expect.objectContaining({ kind: 'api-cancellation-escalation' }),
+    });
     secondDb.close();
   });
 

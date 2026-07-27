@@ -352,6 +352,8 @@ export interface CancellationJobRecord {
   readonly cancellationClockHighWaterAt: string | null;
   readonly cancellationStopAuthorizedAt: string | null;
   readonly cancellationStopAuthorizedLeaseExpiresAt: string | null;
+  readonly cleanupFenceGeneration: number | null;
+  readonly cleanupAdmissionId: string | null;
   readonly cleanupBlockerCode: BuilderErrorCode | null;
   readonly cleanupBlocker: JsonObject | null;
 }
@@ -618,6 +620,7 @@ export class BuilderStore {
       cancellation_inspection_observations_json,
       cancellation_clock_high_water_at, cancellation_stop_authorized_at,
       cancellation_stop_authorized_lease_expires_at,
+      cleanup_fence_generation, cleanup_admission_id,
       cleanup_blocker_code, cleanup_blocker_json
       FROM jobs WHERE job_id = ?`).get(jobId) as DbRow | undefined;
     if (!row) throw new StoreNotFoundError(`job not found: ${jobId}`);
@@ -643,6 +646,8 @@ export class BuilderStore {
       cancellationClockHighWaterAt: nullableInstant(row, 'cancellation_clock_high_water_at'),
       cancellationStopAuthorizedAt: nullableInstant(row, 'cancellation_stop_authorized_at'),
       cancellationStopAuthorizedLeaseExpiresAt: nullableInstant(row, 'cancellation_stop_authorized_lease_expires_at'),
+      cleanupFenceGeneration: nullableNumber(row, 'cleanup_fence_generation'),
+      cleanupAdmissionId: nullableString(row, 'cleanup_admission_id'),
       cleanupBlockerCode,
       cleanupBlocker,
     };

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { JobRecord, JsonObject } from '../../api/src/store.js';
+import type { CancellationJobRecord, JobRecord, JsonObject } from '../../api/src/store.js';
 import type { ApiWriteCommand, OwnershipResult } from '../../api/src/ownership.js';
 import type { CommandResult } from '../../runner/src/command-executor.js';
 import {
@@ -25,7 +25,10 @@ type MutableJob = Pick<JobRecord,
   'cancellationSignalObservation' | 'cancellationStopObservation' |
   'cancellationInspectionObservations' | 'cancellationClockHighWaterAt' |
   'cancellationStopAuthorizedAt' | 'cancellationStopAuthorizedLeaseExpiresAt' |
-  'cleanupBlockerCode' | 'cleanupBlocker'>;
+  'cleanupBlockerCode' | 'cleanupBlocker'> & {
+    cleanupFenceGeneration: number | null;
+    cleanupAdmissionId: string | null;
+  };
 
 function job(overrides: Partial<MutableJob> = {}): MutableJob {
   const value: MutableJob = {
@@ -44,6 +47,8 @@ function job(overrides: Partial<MutableJob> = {}): MutableJob {
     cancellationClockHighWaterAt: null,
     cancellationStopAuthorizedAt: null,
     cancellationStopAuthorizedLeaseExpiresAt: null,
+    cleanupFenceGeneration: null,
+    cleanupAdmissionId: null,
     cleanupBlockerCode: null,
     cleanupBlocker: null,
     runnerUnit: UNIT,
@@ -146,7 +151,7 @@ function coordinatorFixture(initial: MutableJob, systemd: TestSystemd, clock: Ap
   let current = initial;
   const writes: ApiWriteCommand[] = [];
   const store = {
-    getJob: vi.fn(() => current as unknown as JobRecord),
+    getJob: vi.fn(() => current as unknown as CancellationJobRecord),
   };
   const ownership = {
     apiWrite: vi.fn((command: ApiWriteCommand) => {
@@ -723,6 +728,77 @@ describe('API cancellation coordination', () => {
       runnerLeaseExpiresAt: '2026-07-27T12:11:00.000Z',
       cancellationStopAuthorizedLeaseExpiresAt: LEASE_EXPIRY,
     });
+  });
+
+  it('retries bounded stop authorization when the same owner renews before the first two CAS attempts', async () => {
+    const fixture = coordinatorFixture(job(), fakeSystemd(), fakeClock());
+    const originalWrite = fixture.ownership.apiWrite;
+    let renewals = 0;
+    fixture.ownership.apiWrite = vi.fn((command: ApiWriteCommand) => {
+      if (command.kind === 'authorize-cancellation-stop' && renewals < 2) {
+        renewals += 1;
+        fixture.setJob({
+          ...fixture.getJob(),
+          runnerLeaseExpiresAt: `2026-07-27T12:${String(10 + renewals).padStart(2, '0')}:00.000Z`,
+        });
+      }
+      return originalWrite(command);
+    });
+
+    await requestCancellation({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      systemd: fixture.systemd,
+      clock: fixture.clock,
+      pollIntervalMs: 30_000,
+      systemdGraceMs: 0,
+    }, { jobId: JOB_ID, reason: 'operator', at: AT });
+
+    const attempts = fixture.writes.filter((write) => write.kind === 'authorize-cancellation-stop');
+    expect(attempts).toHaveLength(3);
+    expect(attempts.map((attempt) => attempt.observedLeaseExpiresAt)).toEqual([
+      '2026-07-27T12:10:00.000Z',
+      '2026-07-27T12:11:00.000Z',
+      '2026-07-27T12:12:00.000Z',
+    ]);
+    expect(fixture.systemd.stops).toHaveLength(1);
+    expect(fixture.getJob()).toMatchObject({
+      cancellationStopAuthorizedLeaseExpiresAt: '2026-07-27T12:12:00.000Z',
+      cancellationStopObservation: expect.any(Object),
+    });
+  });
+
+  it('blocks without stop when same-owner authorization lease churn exhausts the retry budget', async () => {
+    const fixture = coordinatorFixture(job(), fakeSystemd(), fakeClock());
+    const originalWrite = fixture.ownership.apiWrite;
+    let renewals = 0;
+    fixture.ownership.apiWrite = vi.fn((command: ApiWriteCommand) => {
+      if (command.kind === 'authorize-cancellation-stop') {
+        renewals += 1;
+        fixture.setJob({
+          ...fixture.getJob(),
+          runnerLeaseExpiresAt: `2026-07-27T12:${String(10 + renewals).padStart(2, '0')}:00.000Z`,
+        });
+      }
+      return originalWrite(command);
+    });
+
+    const outcome = await requestCancellation({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      systemd: fixture.systemd,
+      clock: fixture.clock,
+      pollIntervalMs: 30_000,
+      systemdGraceMs: 0,
+    }, { jobId: JOB_ID, reason: 'operator', at: AT });
+
+    expect(fixture.writes.filter((write) => write.kind === 'authorize-cancellation-stop')).toHaveLength(3);
+    expect(outcome).toMatchObject({
+      kind: 'recovery-blocked',
+      evidence: expect.objectContaining({ reason: expect.stringMatching(/authorization.*retry|churn/i) }),
+    });
+    expect(fixture.systemd.stops).toHaveLength(0);
+    expect(fixture.getJob().cancellationStopAuthorizedAt).toBeNull();
   });
 
   it('does not stop when the fresh lease expires between escalation claim and stop authorization', async () => {
