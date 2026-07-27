@@ -260,8 +260,10 @@ export type ApiWriteCommand =
   | Readonly<{ kind: 'dispatch'; jobId: string; runnerUnit: string; at: string }>
   | Readonly<{ kind: 'request-cancellation'; jobId: string; reason: string; at: string; cooperativeDeadlineAt?: string; error?: JsonInput }>
   | Readonly<{ kind: 'initialize-cancellation-coordination'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; cooperativeDeadlineAt: string; at: string }>
+  | Readonly<{ kind: 'observe-cancellation-clock'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; expectedHighWaterAt: string; observedAt: string; at: string }>
   | Readonly<{ kind: 'record-cancellation-signal'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; runnerUnit: string; observedOwner: string; observedLeaseExpiresAt: string; observation: JsonObject; at: string }>
   | Readonly<{ kind: 'claim-cancellation-escalation'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; cooperativeDeadlineAt: string; runnerUnit: string; observedOwner: string; observedLeaseExpiresAt: string; escalationOwner: string; escalationLeaseExpiresAt: string; stopIntentAt: string; graceDeadlineAt: string; at: string }>
+  | Readonly<{ kind: 'authorize-cancellation-stop'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; runnerUnit: string; observedOwner: string; observedLeaseExpiresAt: string; escalationOwner: string; stopIntentAt: string; expectedHighWaterAt: string; authorizedAt: string; at: string }>
   | Readonly<{ kind: 'record-cancellation-stop'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; runnerUnit: string; observedOwner: string; observedLeaseExpiresAt: string; escalationOwner: string; stopIntentAt: string; observation: JsonObject; at: string }>
   | Readonly<{ kind: 'record-cancellation-inspection'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; runnerUnit: string; observedOwner: string; observedLeaseExpiresAt: string; stopIntentAt: string; observation: JsonObject; at: string }>
   | Readonly<{ kind: 'cancellation-recovery-blocker'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; observedRunnerUnit: string | null; observedOwner: string | null; observedLeaseExpiresAt: string | null; blocker: JsonObject; at: string }>
@@ -495,10 +497,14 @@ function validateApiCommand(command: ApiWriteCommand): void {
     case 'request-cancellation': preparedCommon(value, 'API'); preparedString(value.reason, 'cancellation reason'); preparedOptionalInstant(value.cooperativeDeadlineAt, 'cooperative cancellation deadline'); preparedJsonObject(value.error, 'cancellation error', true); return;
     case 'initialize-cancellation-coordination':
       preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation coordination state'); preparedInstant(value.cancelRequestedAt, 'cancellation coordination request time'); preparedInstant(value.cooperativeDeadlineAt, 'cooperative cancellation deadline'); return;
+    case 'observe-cancellation-clock':
+      preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation clock state'); preparedInstant(value.cancelRequestedAt, 'cancellation clock request time'); preparedInstant(value.expectedHighWaterAt, 'cancellation clock expected high-water'); preparedInstant(value.observedAt, 'cancellation clock observation'); return;
     case 'record-cancellation-signal':
       preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation signal state'); preparedInstant(value.cancelRequestedAt, 'cancellation signal request time'); runnerUnit(preparedString(value.jobId, 'cancellation signal jobId'), preparedString(value.runnerUnit, 'cancellation signal unit')); preparedString(value.observedOwner, 'cancellation signal runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.observedLeaseExpiresAt, 'cancellation signal runner lease expiry'); preparedJsonObject(value.observation, 'cancellation signal observation'); return;
     case 'claim-cancellation-escalation':
       preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation escalation state'); preparedInstant(value.cancelRequestedAt, 'cancellation escalation request time'); preparedInstant(value.cooperativeDeadlineAt, 'cancellation cooperative deadline'); runnerUnit(preparedString(value.jobId, 'cancellation escalation jobId'), preparedString(value.runnerUnit, 'cancellation escalation unit')); preparedString(value.observedOwner, 'cancellation escalation runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.observedLeaseExpiresAt, 'cancellation escalation runner lease expiry'); preparedString(value.escalationOwner, 'cancellation escalation owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.escalationLeaseExpiresAt, 'cancellation escalation lease expiry'); preparedInstant(value.stopIntentAt, 'cancellation stop intent time'); preparedInstant(value.graceDeadlineAt, 'cancellation grace deadline'); return;
+    case 'authorize-cancellation-stop':
+      preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation stop authorization state'); preparedInstant(value.cancelRequestedAt, 'cancellation stop authorization request time'); runnerUnit(preparedString(value.jobId, 'cancellation stop authorization jobId'), preparedString(value.runnerUnit, 'cancellation stop authorization unit')); preparedString(value.observedOwner, 'cancellation stop authorization runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.observedLeaseExpiresAt, 'cancellation stop authorization runner lease expiry'); preparedString(value.escalationOwner, 'cancellation stop authorization escalation owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.stopIntentAt, 'cancellation stop authorization intent time'); preparedInstant(value.expectedHighWaterAt, 'cancellation stop authorization high-water'); preparedInstant(value.authorizedAt, 'cancellation stop authorization time'); return;
     case 'record-cancellation-stop':
       preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation stop state'); preparedInstant(value.cancelRequestedAt, 'cancellation stop request time'); runnerUnit(preparedString(value.jobId, 'cancellation stop jobId'), preparedString(value.runnerUnit, 'cancellation stop unit')); preparedString(value.observedOwner, 'cancellation stop runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.observedLeaseExpiresAt, 'cancellation stop runner lease expiry'); preparedString(value.escalationOwner, 'cancellation stop escalation owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.stopIntentAt, 'cancellation stop intent time'); preparedJsonObject(value.observation, 'cancellation stop observation'); return;
     case 'record-cancellation-inspection':
@@ -1772,7 +1778,7 @@ export class OwnershipStore {
   apiWrite(command: ApiWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as ApiWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['enqueue', 'dispatch', 'request-cancellation', 'initialize-cancellation-coordination', 'record-cancellation-signal', 'claim-cancellation-escalation', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'cleanup-admission', 'hand-back'].includes(prepared.kind)) {
+    if (!['enqueue', 'dispatch', 'request-cancellation', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'cleanup-admission', 'hand-back'].includes(prepared.kind)) {
       throw new OwnershipViolationError('api', prepared.kind);
     }
     validateApiCommand(prepared);
@@ -1781,8 +1787,10 @@ export class OwnershipStore {
       case 'dispatch': return this.#transaction(() => this.#dispatch(prepared));
       case 'request-cancellation': return this.#transaction(() => this.#requestCancellation(prepared));
       case 'initialize-cancellation-coordination': return this.#transaction(() => this.#initializeCancellationCoordination(prepared));
+      case 'observe-cancellation-clock': return this.#transaction(() => this.#observeCancellationClock(prepared));
       case 'record-cancellation-signal': return this.#transaction(() => this.#recordCancellationSignal(prepared));
       case 'claim-cancellation-escalation': return this.#transaction(() => this.#claimCancellationEscalation(prepared));
+      case 'authorize-cancellation-stop': return this.#transaction(() => this.#authorizeCancellationStop(prepared));
       case 'record-cancellation-stop': return this.#transaction(() => this.#recordCancellationStop(prepared));
       case 'record-cancellation-inspection': return this.#transaction(() => this.#recordCancellationInspection(prepared));
       case 'cancellation-recovery-blocker': return this.#transaction(() => this.#cancellationRecoveryBlocker(prepared));
@@ -1997,7 +2005,7 @@ export class OwnershipStore {
       ['cancellation time', command.at],
       ['cooperative cancellation deadline', cooperativeDeadlineAt],
     ]);
-    const result = this.#db.prepare('UPDATE jobs SET cancel_requested_at=?, cancel_reason=?, cancellation_cooperative_deadline_at=?, updated_at=? WHERE job_id=? AND state=? AND cancel_requested_at IS NULL AND cancellation_cooperative_deadline_at IS NULL AND cleanup_fence_generation IS NULL').run(command.at, command.reason, cooperativeDeadlineAt, command.at, command.jobId, row.state as string);
+    const result = this.#db.prepare('UPDATE jobs SET cancel_requested_at=?, cancel_reason=?, cancellation_cooperative_deadline_at=?, cancellation_clock_high_water_at=?, updated_at=? WHERE job_id=? AND state=? AND cancel_requested_at IS NULL AND cancellation_cooperative_deadline_at IS NULL AND cancellation_clock_high_water_at IS NULL AND cleanup_fence_generation IS NULL').run(command.at, command.reason, cooperativeDeadlineAt, command.at, command.at, command.jobId, row.state as string);
     if (Number(result.changes) !== 1) conflict('cas-lost', 'cancellation request lost ownership');
     this.#event(command.jobId, 'cancellation_requested', { reason: command.reason }, command.at);
   }
@@ -2036,6 +2044,51 @@ export class OwnershipStore {
     this.#event(command.jobId, 'recovery', {
       kind: 'cancellation-coordination-initialized',
       cooperativeDeadlineAt: command.cooperativeDeadlineAt,
+    }, command.at);
+  }
+
+  #observeCancellationClock(command: Extract<ApiWriteCommand, { kind: 'observe-cancellation-clock' }>): void {
+    const row = this.#job(command.jobId);
+    if (command.observedAt !== command.at) {
+      throw new OwnershipValidationError('cancellation clock observation must equal command time');
+    }
+    requirePersistedTimeline(this.#db, command.jobId, [['cancellation clock observation', command.observedAt]]);
+    requireChronology([
+      ['cancellation request time', command.cancelRequestedAt],
+      ['cancellation expected clock high-water', command.expectedHighWaterAt],
+      ['cancellation clock observation', command.observedAt],
+    ]);
+    if (
+      row.state !== command.expectedState
+      || row.cancel_requested_at !== command.cancelRequestedAt
+      || row.cancellation_clock_high_water_at !== command.expectedHighWaterAt
+      || row.terminal_at !== null
+      || row.cleanup_blocker_code !== null
+      || row.cleanup_blocker_json !== null
+      || row.cleanup_fence_generation !== null
+      || row.cleanup_admission_id !== null
+    ) {
+      conflict('cas-lost', 'cancellation clock high-water CAS lost');
+    }
+    if (command.observedAt === command.expectedHighWaterAt) return;
+    const result = this.#db.prepare(`UPDATE jobs SET
+      cancellation_clock_high_water_at=?, updated_at=?
+      WHERE job_id=? AND state=? AND cancel_requested_at=?
+        AND cancellation_clock_high_water_at=?
+        AND terminal_at IS NULL AND cleanup_blocker_code IS NULL
+        AND cleanup_blocker_json IS NULL AND cleanup_fence_generation IS NULL
+        AND cleanup_admission_id IS NULL`).run(
+      command.observedAt,
+      command.at,
+      command.jobId,
+      command.expectedState,
+      command.cancelRequestedAt,
+      command.expectedHighWaterAt,
+    );
+    if (Number(result.changes) !== 1) conflict('cas-lost', 'cancellation clock high-water CAS lost');
+    this.#event(command.jobId, 'recovery', {
+      kind: 'cancellation-clock-observed',
+      observedAt: command.observedAt,
     }, command.at);
   }
 
@@ -2082,6 +2135,7 @@ export class OwnershipStore {
       cancellation_stop_intent_at=?, cancellation_grace_deadline_at=?, updated_at=?
       WHERE job_id=? AND state=? AND cancel_requested_at=?
         AND cancellation_cooperative_deadline_at=?
+        AND cancellation_clock_high_water_at=?
         AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=?
         AND runner_lease_expires_at>?
         AND cancellation_stop_intent_at IS NULL
@@ -2097,6 +2151,7 @@ export class OwnershipStore {
       command.expectedState,
       command.cancelRequestedAt,
       command.cooperativeDeadlineAt,
+      command.at,
       command.runnerUnit,
       command.observedOwner,
       command.observedLeaseExpiresAt,
@@ -2110,6 +2165,78 @@ export class OwnershipStore {
     }, command.at);
   }
 
+  #authorizeCancellationStop(command: Extract<ApiWriteCommand, { kind: 'authorize-cancellation-stop' }>): void {
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [['cancellation stop authorization time', command.authorizedAt]]);
+    requireChronology([
+      ['cancellation request time', command.cancelRequestedAt],
+      ['cancellation stop intent time', command.stopIntentAt],
+      ['cancellation clock high-water', command.expectedHighWaterAt],
+      ['cancellation stop authorization time', command.authorizedAt],
+      ['runner lease expiry', command.observedLeaseExpiresAt],
+    ]);
+    if (command.authorizedAt !== command.at || command.expectedHighWaterAt !== command.authorizedAt) {
+      throw new OwnershipValidationError('cancellation stop authorization must use the observed clock high-water');
+    }
+    if (command.observedLeaseExpiresAt <= command.authorizedAt) {
+      conflict('stale-lease', 'runner lease expired before systemd stop authorization');
+    }
+    if (row.cancellation_stop_authorized_at !== null || row.cancellation_stop_authorized_lease_expires_at !== null) {
+      if (
+        row.state === command.expectedState
+        && row.cancel_requested_at === command.cancelRequestedAt
+        && row.cancellation_clock_high_water_at === command.expectedHighWaterAt
+        && row.runner_unit === command.runnerUnit
+        && row.runner_lease_owner === command.observedOwner
+        && row.runner_lease_expires_at === command.observedLeaseExpiresAt
+        && row.cancellation_stop_intent_at === command.stopIntentAt
+        && row.cancellation_stop_authorized_at === command.authorizedAt
+        && row.cancellation_stop_authorized_lease_expires_at === command.observedLeaseExpiresAt
+        && row.cancellation_escalation_owner === command.escalationOwner
+        && row.terminal_at === null
+        && row.cleanup_blocker_code === null
+        && row.cleanup_blocker_json === null
+        && row.cleanup_fence_generation === null
+        && row.cleanup_admission_id === null
+      ) return;
+      conflict('fenced', 'cancellation stop authorization is already committed');
+    }
+    const result = this.#db.prepare(`UPDATE jobs SET
+      cancellation_stop_authorized_at=?,
+      cancellation_stop_authorized_lease_expires_at=?,
+      updated_at=?
+      WHERE job_id=? AND state=? AND cancel_requested_at=?
+        AND cancellation_clock_high_water_at=?
+        AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=?
+        AND runner_lease_expires_at>?
+        AND cancellation_escalation_owner=? AND cancellation_stop_intent_at=?
+        AND cancellation_stop_authorized_at IS NULL
+        AND cancellation_stop_authorized_lease_expires_at IS NULL
+        AND terminal_at IS NULL AND cleanup_blocker_code IS NULL
+        AND cleanup_blocker_json IS NULL AND cleanup_fence_generation IS NULL
+        AND cleanup_admission_id IS NULL`).run(
+      command.authorizedAt,
+      command.observedLeaseExpiresAt,
+      command.at,
+      command.jobId,
+      command.expectedState,
+      command.cancelRequestedAt,
+      command.expectedHighWaterAt,
+      command.runnerUnit,
+      command.observedOwner,
+      command.observedLeaseExpiresAt,
+      command.authorizedAt,
+      command.escalationOwner,
+      command.stopIntentAt,
+    );
+    if (Number(result.changes) !== 1) conflict('cas-lost', 'cancellation stop authorization CAS lost');
+    this.#event(command.jobId, 'recovery', {
+      kind: 'cancellation-stop-authorized',
+      escalationOwner: command.escalationOwner,
+      runnerLeaseExpiresAt: command.observedLeaseExpiresAt,
+    }, command.at);
+  }
+
   #recordCancellationStop(command: Extract<ApiWriteCommand, { kind: 'record-cancellation-stop' }>): void {
     const observation = json(command.observation, 'cancellation stop observation', true)!;
     const row = this.#job(command.jobId);
@@ -2118,11 +2245,20 @@ export class OwnershipStore {
       if (row.cancellation_stop_observation_json === observation) return;
       conflict('fenced', 'cancellation stop observation is immutable');
     }
+    if (
+      row.cancellation_stop_authorized_at === null
+      || row.cancellation_stop_authorized_lease_expires_at === null
+      || String(row.cancellation_stop_authorized_lease_expires_at) > command.observedLeaseExpiresAt
+    ) {
+      conflict('fenced', 'cancellation stop has no valid durable authorization');
+    }
     const result = this.#db.prepare(`UPDATE jobs SET
       cancellation_stop_observation_json=?, updated_at=?
       WHERE job_id=? AND state=? AND cancel_requested_at=?
         AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=?
         AND cancellation_escalation_owner=? AND cancellation_stop_intent_at=?
+        AND cancellation_stop_authorized_at IS NOT NULL
+        AND cancellation_stop_authorized_lease_expires_at<=?
         AND cancellation_stop_observation_json IS NULL
         AND terminal_at IS NULL AND cleanup_fence_generation IS NULL
         AND cleanup_admission_id IS NULL`).run(
@@ -2136,6 +2272,7 @@ export class OwnershipStore {
       command.observedLeaseExpiresAt,
       command.escalationOwner,
       command.stopIntentAt,
+      command.observedLeaseExpiresAt,
     );
     if (Number(result.changes) !== 1) conflict('cas-lost', 'cancellation stop observation CAS lost');
     this.#event(command.jobId, 'recovery', { kind: 'cancellation-stop-observed' }, command.at);

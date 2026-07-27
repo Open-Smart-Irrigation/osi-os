@@ -23,7 +23,9 @@ type MutableJob = Pick<JobRecord,
   'cancellationEscalationOwner' | 'cancellationEscalationLeaseExpiresAt' |
   'cancellationStopIntentAt' | 'cancellationGraceDeadlineAt' |
   'cancellationSignalObservation' | 'cancellationStopObservation' |
-  'cancellationInspectionObservations' | 'cleanupBlockerCode' | 'cleanupBlocker'>;
+  'cancellationInspectionObservations' | 'cancellationClockHighWaterAt' |
+  'cancellationStopAuthorizedAt' | 'cancellationStopAuthorizedLeaseExpiresAt' |
+  'cleanupBlockerCode' | 'cleanupBlocker'>;
 
 function job(overrides: Partial<MutableJob> = {}): MutableJob {
   const value: MutableJob = {
@@ -39,6 +41,9 @@ function job(overrides: Partial<MutableJob> = {}): MutableJob {
     cancellationSignalObservation: null,
     cancellationStopObservation: null,
     cancellationInspectionObservations: null,
+    cancellationClockHighWaterAt: null,
+    cancellationStopAuthorizedAt: null,
+    cancellationStopAuthorizedLeaseExpiresAt: null,
     cleanupBlockerCode: null,
     cleanupBlocker: null,
     runnerUnit: UNIT,
@@ -51,10 +56,12 @@ function job(overrides: Partial<MutableJob> = {}): MutableJob {
     queuePosition: null,
     ...overrides,
   };
-  if (value.cancelRequestedAt !== null && overrides.cancellationCooperativeDeadlineAt === undefined) {
+  if (value.cancelRequestedAt !== null) {
     return {
       ...value,
-      cancellationCooperativeDeadlineAt: new Date(Date.parse(value.cancelRequestedAt) + 30_000).toISOString(),
+      cancellationCooperativeDeadlineAt: overrides.cancellationCooperativeDeadlineAt
+        ?? new Date(Date.parse(value.cancelRequestedAt) + 30_000).toISOString(),
+      cancellationClockHighWaterAt: overrides.cancellationClockHighWaterAt ?? value.cancelRequestedAt,
     };
   }
   return value;
@@ -150,9 +157,19 @@ function coordinatorFixture(initial: MutableJob, systemd: TestSystemd, clock: Ap
           cancelRequestedAt: command.at,
           cancelReason: command.reason,
           cancellationCooperativeDeadlineAt: command.cooperativeDeadlineAt ?? null,
+          cancellationClockHighWaterAt: command.at,
         };
       } else if (command.kind === 'initialize-cancellation-coordination') {
-        current = { ...current, cancellationCooperativeDeadlineAt: command.cooperativeDeadlineAt };
+        current = {
+          ...current,
+          cancellationCooperativeDeadlineAt: command.cooperativeDeadlineAt,
+          cancellationClockHighWaterAt: current.cancellationClockHighWaterAt ?? command.at,
+        };
+      } else if (command.kind === 'observe-cancellation-clock') {
+        if (current.cancellationClockHighWaterAt !== command.expectedHighWaterAt) {
+          return { ok: false as const, conflict: { kind: 'cas-lost' as const, message: 'clock high-water changed' } };
+        }
+        current = { ...current, cancellationClockHighWaterAt: command.observedAt };
       } else if (command.kind === 'record-cancellation-signal') {
         if (current.state === 'cancelled' || current.state === 'failed' || current.state === 'succeeded' || current.state === 'interrupted' || current.state === 'publishing') {
           return { ok: false as const, conflict: { kind: 'cas-lost' as const, message: 'state changed' } };
@@ -168,6 +185,16 @@ function coordinatorFixture(initial: MutableJob, systemd: TestSystemd, clock: Ap
           cancellationEscalationLeaseExpiresAt: command.escalationLeaseExpiresAt,
           cancellationStopIntentAt: command.stopIntentAt,
           cancellationGraceDeadlineAt: command.graceDeadlineAt,
+        };
+      } else if (command.kind === 'authorize-cancellation-stop') {
+        if (
+          current.cancellationClockHighWaterAt !== command.expectedHighWaterAt
+          || current.runnerLeaseExpiresAt !== command.observedLeaseExpiresAt
+        ) return { ok: false as const, conflict: { kind: 'cas-lost' as const, message: 'stop authorization changed' } };
+        current = {
+          ...current,
+          cancellationStopAuthorizedAt: command.authorizedAt,
+          cancellationStopAuthorizedLeaseExpiresAt: command.observedLeaseExpiresAt,
         };
       } else if (command.kind === 'record-cancellation-stop') {
         current = { ...current, cancellationStopObservation: command.observation };
@@ -248,6 +275,34 @@ describe('API cancellation coordination', () => {
     expect(fixture.systemd.signals).toHaveLength(1);
   });
 
+  it('records the signal observation when the same runner renews its lease in flight', async () => {
+    const fixture = coordinatorFixture(job(), fakeSystemd(), fakeClock());
+    fixture.systemd.signalCancellation = async (unit, deadline) => {
+      fixture.systemd.signals.push(`${unit}:${deadline}`);
+      fixture.setJob({
+        ...fixture.getJob(),
+        runnerLeaseExpiresAt: '2026-07-27T12:11:00.000Z',
+      });
+      return observation(true, { activity: 'unknown' });
+    };
+
+    await requestCancellation({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      systemd: fixture.systemd,
+      clock: fixture.clock,
+      cooperativeTimeoutMs: 0,
+      systemdGraceMs: 0,
+    }, { jobId: JOB_ID, reason: 'operator', at: AT });
+
+    expect(fixture.writes.find((write) => write.kind === 'record-cancellation-signal')).toMatchObject({
+      runnerUnit: UNIT,
+      observedOwner: 'runner-api-test',
+      observedLeaseExpiresAt: '2026-07-27T12:11:00.000Z',
+    });
+    expect(fixture.getJob().cancellationSignalObservation).not.toBeNull();
+  });
+
   it('uses one monotonic 30-second cooperative deadline and avoids stop when the runner commits at the boundary', async () => {
     const clock = fakeClock((monotonic) => {
       if (monotonic >= 30_000) {
@@ -272,6 +327,66 @@ describe('API cancellation coordination', () => {
     expect(outcome).toMatchObject({ kind: 'runner-terminal', state: 'cancelled' });
     expect(clock.monotonic()).toBe(30_000);
     expect(systemd.stops).toHaveLength(0);
+  });
+
+  it('blocks without signalling when wall time is behind the durable cancellation high-water', async () => {
+    const fixture = coordinatorFixture(
+      job({ state: 'building' }),
+      fakeSystemd(),
+      fakeClock(undefined, '2026-07-27T11:59:59.000Z'),
+    );
+
+    const outcome = await requestCancellation({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      systemd: fixture.systemd,
+      clock: fixture.clock,
+    }, { jobId: JOB_ID, reason: 'operator', at: AT });
+
+    expect(outcome).toMatchObject({
+      kind: 'recovery-blocked',
+      evidence: expect.objectContaining({
+        kind: 'api-cancellation-clock-regression',
+        observedAt: '2026-07-27T11:59:59.000Z',
+        highWaterAt: AT,
+      }),
+    });
+    expect(fixture.systemd.signals).toHaveLength(0);
+    expect(fixture.systemd.stops).toHaveLength(0);
+  });
+
+  it('detects partial wall-clock rollback after progress without recreating cooperative budget', async () => {
+    let monotonic = 0;
+    let wall = Date.parse(AT);
+    const rollbackClock: ApiCancellationClock = {
+      now: () => new Date(wall).toISOString(),
+      monotonicNow: () => monotonic,
+      sleep: async (milliseconds) => {
+        monotonic += milliseconds;
+        wall += milliseconds;
+        if (monotonic >= 20_000) wall = Date.parse('2026-07-27T12:00:05.000Z');
+      },
+    };
+    const fixture = coordinatorFixture(job(), fakeSystemd(), rollbackClock);
+
+    const outcome = await requestCancellation({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      systemd: fixture.systemd,
+      clock: rollbackClock,
+      pollIntervalMs: 10_000,
+    }, { jobId: JOB_ID, reason: 'operator', at: AT });
+
+    expect(outcome).toMatchObject({
+      kind: 'recovery-blocked',
+      evidence: expect.objectContaining({
+        kind: 'api-cancellation-clock-regression',
+        observedAt: '2026-07-27T12:00:05.000Z',
+        highWaterAt: '2026-07-27T12:00:10.000Z',
+      }),
+    });
+    expect(fixture.systemd.signals).toHaveLength(1);
+    expect(fixture.systemd.stops).toHaveLength(0);
   });
 
   it('derives retry budget from the durable cancellation instant instead of resetting thirty seconds', async () => {
@@ -541,6 +656,131 @@ describe('API cancellation coordination', () => {
     });
     expect(systemd.stops).toHaveLength(0);
     expect(fixture.getJob().cleanupBlockerCode).toBe('RUNNER_DISAPPEARED');
+  });
+
+  it('accepts same-owner lease renewal and authorizes stop against the fresh extended expiry', async () => {
+    let renewed = false;
+    let fixture: ReturnType<typeof coordinatorFixture>;
+    const clock = fakeClock((monotonic) => {
+      if (!renewed && monotonic >= 20_000) {
+        renewed = true;
+        fixture.setJob(job({
+          cancelRequestedAt: AT,
+          cancelReason: 'operator',
+          cancellationClockHighWaterAt: '2026-07-27T12:00:10.000Z',
+          runnerLeaseExpiresAt: '2026-07-27T12:11:00.000Z',
+        }));
+      }
+    });
+    fixture = coordinatorFixture(job(), fakeSystemd(), clock);
+
+    await requestCancellation({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      systemd: fixture.systemd,
+      clock,
+      pollIntervalMs: 10_000,
+      systemdGraceMs: 0,
+    }, { jobId: JOB_ID, reason: 'operator', at: AT });
+
+    expect(fixture.systemd.stops).toHaveLength(1);
+    expect(fixture.writes.find((write) => write.kind === 'authorize-cancellation-stop')).toMatchObject({
+      runnerUnit: UNIT,
+      observedOwner: 'runner-api-test',
+      observedLeaseExpiresAt: '2026-07-27T12:11:00.000Z',
+    });
+    expect(fixture.getJob()).toMatchObject({
+      cancellationStopAuthorizedAt: '2026-07-27T12:00:30.000Z',
+      cancellationStopAuthorizedLeaseExpiresAt: '2026-07-27T12:11:00.000Z',
+    });
+  });
+
+  it('accepts same-owner lease renewal immediately after stop authorization', async () => {
+    const fixture = coordinatorFixture(job(), fakeSystemd(), fakeClock());
+    const originalWrite = fixture.ownership.apiWrite;
+    fixture.ownership.apiWrite = vi.fn((command: ApiWriteCommand) => {
+      const write = originalWrite(command);
+      if (command.kind === 'authorize-cancellation-stop' && write.ok) {
+        fixture.setJob({
+          ...fixture.getJob(),
+          runnerLeaseExpiresAt: '2026-07-27T12:11:00.000Z',
+        });
+      }
+      return write;
+    });
+
+    await requestCancellation({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      systemd: fixture.systemd,
+      clock: fixture.clock,
+      pollIntervalMs: 30_000,
+      systemdGraceMs: 0,
+    }, { jobId: JOB_ID, reason: 'operator', at: AT });
+
+    expect(fixture.systemd.stops).toHaveLength(1);
+    expect(fixture.getJob()).toMatchObject({
+      runnerLeaseExpiresAt: '2026-07-27T12:11:00.000Z',
+      cancellationStopAuthorizedLeaseExpiresAt: LEASE_EXPIRY,
+    });
+  });
+
+  it('does not stop when the fresh lease expires between escalation claim and stop authorization', async () => {
+    const fixture = coordinatorFixture(job(), fakeSystemd(), fakeClock());
+    const originalWrite = fixture.ownership.apiWrite;
+    fixture.ownership.apiWrite = vi.fn((command: ApiWriteCommand) => {
+      const write = originalWrite(command);
+      if (command.kind === 'claim-cancellation-escalation' && write.ok) {
+        fixture.setJob({
+          ...fixture.getJob(),
+          runnerLeaseExpiresAt: command.stopIntentAt,
+        });
+      }
+      return write;
+    });
+
+    const outcome = await requestCancellation({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      systemd: fixture.systemd,
+      clock: fixture.clock,
+      pollIntervalMs: 30_000,
+    }, { jobId: JOB_ID, reason: 'operator', at: AT });
+
+    expect(outcome).toMatchObject({
+      kind: 'recovery-blocked',
+      evidence: expect.objectContaining({ reason: expect.stringMatching(/stop authorization|expired/i) }),
+    });
+    expect(fixture.systemd.stops).toHaveLength(0);
+  });
+
+  it('fails closed on lease expiry regression immediately before stop authorization', async () => {
+    const fixture = coordinatorFixture(job(), fakeSystemd(), fakeClock());
+    const originalWrite = fixture.ownership.apiWrite;
+    fixture.ownership.apiWrite = vi.fn((command: ApiWriteCommand) => {
+      const write = originalWrite(command);
+      if (command.kind === 'claim-cancellation-escalation' && write.ok) {
+        fixture.setJob({
+          ...fixture.getJob(),
+          runnerLeaseExpiresAt: '2026-07-27T12:09:00.000Z',
+        });
+      }
+      return write;
+    });
+
+    const outcome = await requestCancellation({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      systemd: fixture.systemd,
+      clock: fixture.clock,
+      pollIntervalMs: 30_000,
+    }, { jobId: JOB_ID, reason: 'operator', at: AT });
+
+    expect(outcome).toMatchObject({
+      kind: 'recovery-blocked',
+      evidence: expect.objectContaining({ reason: expect.stringMatching(/regressed/i) }),
+    });
+    expect(fixture.systemd.stops).toHaveLength(0);
   });
 
   it('retains exact stop argv when the systemd adapter reports a stop timeout and does not infer cancellation from inactivity', async () => {

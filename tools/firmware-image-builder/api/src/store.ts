@@ -276,6 +276,9 @@ export interface JobRecord extends SourceIdentityBase {
   readonly cancellationSignalObservation: JsonObject | null;
   readonly cancellationStopObservation: JsonObject | null;
   readonly cancellationInspectionObservations: JsonObject | null;
+  readonly cancellationClockHighWaterAt: string | null;
+  readonly cancellationStopAuthorizedAt: string | null;
+  readonly cancellationStopAuthorizedLeaseExpiresAt: string | null;
   readonly dispatchedAt: string | null;
   readonly runnerUnit: string | null;
   readonly runnerLeaseOwner: string | null;
@@ -346,6 +349,9 @@ export interface CancellationJobRecord {
   readonly cancellationSignalObservation: JsonObject | null;
   readonly cancellationStopObservation: JsonObject | null;
   readonly cancellationInspectionObservations: JsonObject | null;
+  readonly cancellationClockHighWaterAt: string | null;
+  readonly cancellationStopAuthorizedAt: string | null;
+  readonly cancellationStopAuthorizedLeaseExpiresAt: string | null;
   readonly cleanupBlockerCode: BuilderErrorCode | null;
   readonly cleanupBlocker: JsonObject | null;
 }
@@ -610,6 +616,8 @@ export class BuilderStore {
       cancellation_stop_intent_at, cancellation_grace_deadline_at,
       cancellation_signal_observation_json, cancellation_stop_observation_json,
       cancellation_inspection_observations_json,
+      cancellation_clock_high_water_at, cancellation_stop_authorized_at,
+      cancellation_stop_authorized_lease_expires_at,
       cleanup_blocker_code, cleanup_blocker_json
       FROM jobs WHERE job_id = ?`).get(jobId) as DbRow | undefined;
     if (!row) throw new StoreNotFoundError(`job not found: ${jobId}`);
@@ -632,6 +640,9 @@ export class BuilderStore {
       cancellationSignalObservation: parseJsonObject(nullableString(row, 'cancellation_signal_observation_json'), 'cancellation_signal_observation_json'),
       cancellationStopObservation: parseJsonObject(nullableString(row, 'cancellation_stop_observation_json'), 'cancellation_stop_observation_json'),
       cancellationInspectionObservations: parseJsonObject(nullableString(row, 'cancellation_inspection_observations_json'), 'cancellation_inspection_observations_json'),
+      cancellationClockHighWaterAt: nullableInstant(row, 'cancellation_clock_high_water_at'),
+      cancellationStopAuthorizedAt: nullableInstant(row, 'cancellation_stop_authorized_at'),
+      cancellationStopAuthorizedLeaseExpiresAt: nullableInstant(row, 'cancellation_stop_authorized_lease_expires_at'),
       cleanupBlockerCode,
       cleanupBlocker,
     };
@@ -749,6 +760,10 @@ export class BuilderStore {
       'cancellation_stop_intent_at',
       'cancellation_grace_deadline_at',
     ], 'cancellation escalation');
+    nullableGroup(row, [
+      'cancellation_stop_authorized_at',
+      'cancellation_stop_authorized_lease_expires_at',
+    ], 'cancellation stop authorization');
     nullableGroup(row, ['dispatched_at', 'runner_unit'], 'dispatch evidence');
     nullableGroup(row, ['runner_lease_owner', 'runner_lease_expires_at'], 'runner lease');
     nullableGroup(row, ['container_id', 'container_name', 'container_image_digest', 'container_label_job_id', 'container_label_manifest_sha', 'container_labels_json', 'container_mount_json', 'container_env_json', 'container_security_json', 'container_inspection_json', 'container_created_at'], 'container identity');
@@ -848,6 +863,9 @@ export class BuilderStore {
       cancellationSignalObservation: parseJsonObject(nullableString(row, 'cancellation_signal_observation_json'), 'cancellation_signal_observation_json'),
       cancellationStopObservation: parseJsonObject(nullableString(row, 'cancellation_stop_observation_json'), 'cancellation_stop_observation_json'),
       cancellationInspectionObservations: parseJsonObject(nullableString(row, 'cancellation_inspection_observations_json'), 'cancellation_inspection_observations_json'),
+      cancellationClockHighWaterAt: nullableInstant(row, 'cancellation_clock_high_water_at'),
+      cancellationStopAuthorizedAt: nullableInstant(row, 'cancellation_stop_authorized_at'),
+      cancellationStopAuthorizedLeaseExpiresAt: nullableInstant(row, 'cancellation_stop_authorized_lease_expires_at'),
       dispatchedAt: nullableInstant(row, 'dispatched_at'), runnerUnit: nullableString(row, 'runner_unit'), runnerLeaseOwner: nullableString(row, 'runner_lease_owner'), runnerLeaseExpiresAt: nullableInstant(row, 'runner_lease_expires_at'),
       containerId: nullableString(row, 'container_id'), containerName: nullableString(row, 'container_name'), containerImageDigest: nullableString(row, 'container_image_digest'), containerLabelJobId: nullableString(row, 'container_label_job_id'), containerLabelManifestSha: nullableString(row, 'container_label_manifest_sha'),
       containerLabels: parseJsonObject(nullableString(row, 'container_labels_json'), 'container_labels_json'), containerMount: parseJsonObject(nullableString(row, 'container_mount_json'), 'container_mount_json'), containerEnvironment: parseJsonObject(nullableString(row, 'container_env_json'), 'container_env_json'), containerSecurity: parseJsonObject(nullableString(row, 'container_security_json'), 'container_security_json'), containerInspection: parseJsonObject(nullableString(row, 'container_inspection_json'), 'container_inspection_json'),
