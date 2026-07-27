@@ -4,11 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { OwnershipStore } from '../../api/src/ownership.js';
+import { OwnershipStore, type ApiWriteCommand, type CleanupWriteCommand } from '../../api/src/ownership.js';
 import { createCleanupAdmissionRecovery } from '../../api/src/recovery.js';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 
 const NOW = '2026-07-27T12:00:00.000Z'; const EXPIRES = '2026-07-27T12:05:00.000Z'; const SHA40 = 'a'.repeat(40); const SHA64 = 'b'.repeat(64); const roots: string[] = [];
+const ROTATE_AT = '2026-07-27T12:01:00.000Z';
 function snapshot(jobId: string) { return { runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: null, leaseExpiresAt: null, inactiveAt: NOW, observedAt: NOW }, state: 'starting' as const, container: { kind: 'absent' as const, globalLabelResult: 'no-match' as const, observedAt: NOW }, staging: { kind: 'absent' as const, path: null }, logs: { runner: 'absent' as const, docker: 'absent' as const, verifiedAt: NOW }, blocker: 'none' as const }; }
 
 async function fixture() {
@@ -20,13 +21,13 @@ afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root,
 describe('cleanup credential crash boundaries', () => {
   it('leaves a durable orphan after admission commit failure and prunes it only after restart proves no row', async () => {
     const value = await fixture(); const recovery = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: { apiWrite: () => { throw new Error('simulated admission commit crash'); } }, systemd: { start: async () => { throw new Error('worker must not start'); }, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 });
-    await expect(recovery.admitAndStart({ jobId: value.jobId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) })).rejects.toThrow('simulated admission commit crash'); const credentialRoot = join(value.root, 'jobs', value.jobId, 'recovery', 'cleanup-credentials'); const files = await readdir(credentialRoot); expect(files).toHaveLength(1); expect(files[0]).toMatch(/^cln_[0-9a-hj-km-np-tv-z]{26}\.token$/); expect((await stat(join(credentialRoot, files[0]!))).mode & 0o777).toBe(0o600);
-    const restarted = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: value.ownership, systemd: { start: async () => undefined, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 }); expect(await restarted.pruneOrphanCredentials()).toEqual(1); expect(await readdir(credentialRoot)).toEqual([]); value.db.close();
+    await recovery.openAdmissions(); await expect(recovery.admitAndStart({ jobId: value.jobId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) })).rejects.toThrow('simulated admission commit crash'); const credentialRoot = join(value.root, 'jobs', value.jobId, 'recovery', 'cleanup-credentials'); const files = await readdir(credentialRoot); expect(files).toHaveLength(1); expect(files[0]).toMatch(/^cln_[0-9-a-hj-km-np-tv-z]{26}\.token$/); expect((await stat(join(credentialRoot, files[0]!))).mode & 0o777).toBe(0o600);
+    const restarted = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: value.ownership, systemd: { start: async () => undefined, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 }); await restarted.openAdmissions(); expect(await readdir(credentialRoot)).toEqual([]); value.db.close();
   });
 
   it('commits the fence and lease before starting the exact worker, with no plaintext token in SQLite', async () => {
     const value = await fixture(); const chronology: string[] = []; const recovery = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: { apiWrite: (command) => { const result = value.ownership.apiWrite(command); if (result.ok) chronology.push('db:commit'); return result; } }, systemd: { start: async (unit) => { chronology.push(`systemd:${unit}`); expect(value.db.prepare('SELECT cleanup_admission_id, cleanup_fence_generation FROM jobs WHERE job_id=?').get(value.jobId)).toMatchObject({ cleanup_fence_generation: 1 }); }, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 });
-    const result = await recovery.admitAndStart({ jobId: value.jobId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) }); const lease = value.db.prepare('SELECT * FROM cleanup_leases WHERE admission_id=?').get(result.admissionId) as Record<string, unknown>; expect(chronology).toEqual(['db:commit', `systemd:${result.unitName}`]); expect(lease).toMatchObject({ job_id: value.jobId, status: 'admitted', fence_generation: 1, unit_name: result.unitName }); expect(lease.credential_sha256).toBe(createHash('sha256').update(await readFile(join(value.root, 'jobs', value.jobId, result.credentialRelativePath))).digest('hex')); expect(await recovery.pruneOrphanCredentials()).toBe(0); value.db.close();
+    await recovery.openAdmissions(); const result = await recovery.admitAndStart({ jobId: value.jobId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) }); const lease = value.db.prepare('SELECT * FROM cleanup_leases WHERE admission_id=?').get(result.admissionId) as Record<string, unknown>; expect(chronology).toEqual(['db:commit', `systemd:${result.unitName}`]); expect(lease).toMatchObject({ job_id: value.jobId, status: 'admitted', fence_generation: 1, unit_name: result.unitName }); expect(lease.credential_sha256).toBe(createHash('sha256').update(await readFile(join(value.root, 'jobs', value.jobId, result.credentialRelativePath))).digest('hex')); await expect(recovery.pruneOrphanCredentials()).rejects.toThrow(/prune is unavailable/); value.db.close();
   });
 
   it('does not prune symlink credential entries', async () => {
@@ -38,10 +39,10 @@ describe('cleanup credential crash boundaries', () => {
   });
 
   it('rotates the committed fence atomically to a new generation and rejects the stale predecessor', async () => {
-    const value = await fixture(); const starts: string[] = []; const recovery = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: value.ownership, systemd: { start: async (unit) => { starts.push(unit); }, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 });
-    const first = await recovery.admitAndStart({ jobId: value.jobId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) }); const oldPath = join(value.root, 'jobs', value.jobId, first.credentialRelativePath); const oldRecord = JSON.parse(await readFile(oldPath, 'utf8')) as { token: string };
+    const value = await fixture(); const starts: string[] = []; const recovery = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: value.ownership, systemd: { start: async (unit) => { starts.push(unit); }, stop: async () => undefined, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 });
+    await recovery.openAdmissions(); const first = await recovery.admitAndStart({ jobId: value.jobId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) }); const oldPath = join(value.root, 'jobs', value.jobId, first.credentialRelativePath);
     await unlink(oldPath); const rotated = await recovery.reconcileAndStart({ jobId: value.jobId, admissionId: first.admissionId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) });
-    expect(rotated.generation).toBe(2); expect(rotated.admissionId).not.toBe(first.admissionId); expect(starts).toEqual([first.unitName, rotated.unitName]); expect(recovery.verifyToken(oldRecord.token, first.admissionId)).toBe(false);
+    expect(rotated.generation).toBe(2); expect(rotated.admissionId).not.toBe(first.admissionId); expect(starts).toEqual([first.unitName, rotated.unitName]);
     expect(value.db.prepare('SELECT admission_id, status, fence_generation FROM cleanup_leases WHERE job_id=? ORDER BY fence_generation').all(value.jobId)).toEqual([
       expect.objectContaining({ admission_id: first.admissionId, status: 'expired', fence_generation: 1 }),
       expect.objectContaining({ admission_id: rotated.admissionId, status: 'admitted', fence_generation: 2 }),
@@ -49,13 +50,38 @@ describe('cleanup credential crash boundaries', () => {
     await expect(recovery.reconcileAndStart({ jobId: value.jobId, admissionId: first.admissionId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) })).rejects.toThrow('not rotatable'); value.db.close();
   });
 
+  it('rejects an old credential through persisted cleanup CAS after external rotation and restart', async () => {
+    const value = await fixture();
+    const recovery = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: value.ownership, systemd: { start: async () => undefined, stop: async () => undefined, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 });
+    await recovery.openAdmissions();
+    const first = await recovery.admitAndStart({ jobId: value.jobId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) });
+    const oldCredential = JSON.parse(await readFile(join(value.root, 'jobs', value.jobId, first.credentialRelativePath), 'utf8')) as { token: string };
+    const oldLease = value.db.prepare('SELECT * FROM cleanup_leases WHERE admission_id=?').get(first.admissionId) as Record<string, unknown>;
+    const replacementAdmissionId = 'cln_0123456789abcdefghjkmnpqrv';
+    const replacement: ApiWriteCommand = {
+      kind: 'cleanup-admission-rotate', jobId: value.jobId, admissionId: replacementAdmissionId, owner: 'external-recovery',
+      unitName: `osi-image-builder-cleanup@${replacementAdmissionId}.service`, expiresAt: EXPIRES,
+      credentialRelativePath: `recovery/cleanup-credentials/${replacementAdmissionId}.token`, credentialSha256: createHash('sha256').update('replacement-credential').digest('hex'),
+      fenceTokenHash: createHash('sha256').update('replacement-fence').digest('hex'), snapshot: snapshot(value.jobId), at: ROTATE_AT,
+      previousAdmissionId: first.admissionId, previousStatus: 'admitted', previousUnitName: first.unitName, previousFenceGeneration: 1,
+      previousFenceTokenHash: String(oldLease.fence_token_hash), previousClaimAt: null, previousRenewAt: null, previousBlockerCode: null, previousBlocker: null,
+    };
+    expect(value.ownership.apiWrite(replacement).ok).toBe(true);
+    expect(createHash('sha256').update(oldCredential.token).digest('hex')).toBe(oldLease.fence_token_hash);
+    const stale: CleanupWriteCommand = { kind: 'claim-lease', jobId: value.jobId, admissionId: first.admissionId, owner: 'api', unitName: first.unitName, fenceGeneration: 1, fenceTokenHash: String(oldLease.fence_token_hash), snapshot: snapshot(value.jobId), at: ROTATE_AT };
+    expect(value.ownership.cleanupWrite(stale)).toMatchObject({ ok: false });
+    const restartedOwnership = new OwnershipStore(value.db, { now: () => NOW });
+    expect(restartedOwnership.cleanupWrite(stale)).toMatchObject({ ok: false });
+    value.db.close();
+  });
+
   it('rolls back rotation at the database boundary and keeps the old fence', async () => {
-    const value = await fixture(); const initial = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: value.ownership, systemd: { start: async () => undefined, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 }); const first = await initial.admitAndStart({ jobId: value.jobId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) }); await unlink(join(value.root, 'jobs', value.jobId, first.credentialRelativePath));
-    const failing = new OwnershipStore(value.db, { now: () => NOW, failBeforeCommit: () => { throw new Error('database commit failure'); } }); const recovery = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: failing, systemd: { start: async () => { throw new Error('worker must not start'); }, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 }); await expect(recovery.reconcileAndStart({ jobId: value.jobId, admissionId: first.admissionId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) })).rejects.toThrow('SQLite ownership transaction rolled back'); expect(value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(first.admissionId)).toMatchObject({ status: 'admitted' }); expect(value.db.prepare('SELECT cleanup_admission_id, cleanup_fence_generation FROM jobs WHERE job_id=?').get(value.jobId)).toMatchObject({ cleanup_admission_id: first.admissionId, cleanup_fence_generation: 1 }); value.db.close();
+    const value = await fixture(); const initial = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: value.ownership, systemd: { start: async () => undefined, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 }); await initial.openAdmissions(); const first = await initial.admitAndStart({ jobId: value.jobId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) }); await unlink(join(value.root, 'jobs', value.jobId, first.credentialRelativePath));
+    const failing = new OwnershipStore(value.db, { now: () => NOW, failBeforeCommit: () => { throw new Error('database commit failure'); } }); const recovery = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: failing, systemd: { start: async () => { throw new Error('worker must not start'); }, stop: async () => undefined, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 }); await recovery.openAdmissions(); await expect(recovery.reconcileAndStart({ jobId: value.jobId, admissionId: first.admissionId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) })).rejects.toThrow('SQLite ownership transaction rolled back'); expect(value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(first.admissionId)).toMatchObject({ status: 'admitted' }); expect(value.db.prepare('SELECT cleanup_admission_id, cleanup_fence_generation FROM jobs WHERE job_id=?').get(value.jobId)).toMatchObject({ cleanup_admission_id: first.admissionId, cleanup_fence_generation: 1 }); value.db.close();
   });
 
   it('keeps the replacement admission fenced when the exact systemd start fails', async () => {
-    const value = await fixture(); let starts = 0; const recovery = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: value.ownership, systemd: { start: async () => { starts += 1; if (starts === 2) throw new Error('systemd start failure'); }, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 }); const first = await recovery.admitAndStart({ jobId: value.jobId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) }); await unlink(join(value.root, 'jobs', value.jobId, first.credentialRelativePath));
+    const value = await fixture(); let starts = 0; const recovery = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: value.ownership, systemd: { start: async () => { starts += 1; if (starts === 2) throw new Error('systemd start failure'); }, stop: async () => undefined, isActive: async () => false }, clock: { now: () => NOW }, ownerUid: process.getuid?.() ?? 0 }); await recovery.openAdmissions(); const first = await recovery.admitAndStart({ jobId: value.jobId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) }); await unlink(join(value.root, 'jobs', value.jobId, first.credentialRelativePath));
     await expect(recovery.reconcileAndStart({ jobId: value.jobId, admissionId: first.admissionId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot(value.jobId) })).rejects.toThrow('systemd start failure'); const job = value.db.prepare('SELECT cleanup_admission_id, cleanup_fence_generation FROM jobs WHERE job_id=?').get(value.jobId) as { cleanup_admission_id: string; cleanup_fence_generation: number }; expect(job.cleanup_admission_id).not.toBe(first.admissionId); expect(job.cleanup_fence_generation).toBe(2); expect(value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(first.admissionId)).toMatchObject({ status: 'expired' }); value.db.close();
   });
 });

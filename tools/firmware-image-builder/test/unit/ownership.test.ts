@@ -24,6 +24,7 @@ const NOW = '2026-07-23T10:00:00.000Z'; const LATER = '2026-07-23T10:01:00.000Z'
 const BEFORE = '2026-07-23T09:59:00.000Z';
 const ACTIVE = '2026-07-23T10:02:00.000Z'; const RECOVERY = '2026-07-23T10:03:00.000Z'; const EXPIRY = '2026-07-23T10:04:00.000Z';
 const SEALED = '2026-07-23T10:03:30.000Z'; const AFTER = '2026-07-23T10:03:45.000Z';
+const RETRY_AT = '2026-07-23T10:03:50.000Z'; const RETRY_CLAIM_AT = '2026-07-23T10:03:51.000Z'; const RETRY_COMPLETE_AT = '2026-07-23T10:03:52.000Z'; const RETRY_HAND_BACK_AT = '2026-07-23T10:03:53.000Z';
 const SOURCE_PREPARATION = Object.freeze({
   schemaVersion: 1 as const,
   sourceSha: SHA40,
@@ -198,6 +199,25 @@ function stagedSnapshot(jobId = 'job-1'): CleanupSnapshot { return {
 function stagedPostcondition(destinationPath = 'quarantine/image', jobId = 'job-1'): CleanupPostcondition { const admission = stagedSnapshot(jobId); return {
   ...admission, container: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt: RECOVERY }, logs, staging: { kind: 'quarantined', sourcePath: 'staging/image', destinationPath, sourceAbsent: true, destinationPresent: true, sha256: SHA64, size: 10, verifiedAt: RECOVERY }, blocker: 'none',
 }; }
+function blockedCleanupSnapshot(containerState: 'present' | 'absent', jobId: string): CleanupSnapshot {
+  const base = containerState === 'present' ? snapshot('present', jobId) : nullLeaseSnapshot(jobId);
+  return { ...base, logs: { ...base.logs, runner: 'unsealed', docker: 'unsealed', verifiedAt: RECOVERY }, blocker: 'staging-or-log' };
+}
+function correctedCleanupSnapshot(containerState: 'present' | 'absent', jobId: string): CleanupSnapshot {
+  const base = containerState === 'present' ? snapshot('present', jobId) : nullLeaseSnapshot(jobId);
+  return { ...base, logs: { ...base.logs, runner: 'sealed', docker: 'sealed', verifiedAt: RECOVERY }, blocker: 'none' };
+}
+function correctedRetryCommand(jobId: string, previousAdmissionId: string, replacementAdmissionId: string, correctedSnapshot: CleanupSnapshot): Extract<ApiWriteCommand, { kind: 'cleanup-admission-retry' }> {
+  const blocker = { reason: 'logs-unsealed' };
+  return {
+    kind: 'cleanup-admission-retry', jobId, previousAdmissionId, previousStatus: 'blocking',
+    previousUnitName: `osi-image-builder-cleanup@${previousAdmissionId}.service`, previousFenceGeneration: 1, previousFenceTokenHash: SHA64_B,
+    previousClaimAt: RECOVERY, previousRenewAt: null, previousBlockerCode: 'CLEANUP_ADMISSION_BLOCKED', previousBlocker: blocker,
+    admissionId: replacementAdmissionId, owner: 'cleanup-retry', unitName: `osi-image-builder-cleanup@${replacementAdmissionId}.service`, expiresAt: EXPIRY,
+    credentialRelativePath: `recovery/cleanup-credentials/${replacementAdmissionId}.token`, credentialSha256: 'e'.repeat(64), fenceTokenHash: 'f'.repeat(64),
+    expectedBlockerCode: 'CLEANUP_ADMISSION_BLOCKED', expectedBlocker: blocker, snapshot: correctedSnapshot, at: RETRY_AT,
+  };
+}
 function cleanupAdmission(s: CleanupSnapshot, jobId = 'job-1'): Extract<ApiWriteCommand, { kind: 'cleanup-admission' }> { return {
   kind: 'cleanup-admission', jobId, admissionId: 'cln_0123456789abcdefghjkmnpqrs', owner: 'cleanup-a', unitName: 'osi-image-builder-cleanup@cln_0123456789abcdefghjkmnpqrs.service', expiresAt: EXPIRY,
   credentialRelativePath: 'recovery/cleanup-credentials/cln_0123456789abcdefghjkmnpqrs.token', credentialSha256: SHA64, fenceTokenHash: SHA64_B, snapshot: s, at: RECOVERY,
@@ -1529,6 +1549,49 @@ describe('actor-owned compare-and-set writes', () => {
     expect(ownership.cleanupWrite({ ...complete, postcondition: { ...stagedPostcondition(), staging: { kind: 'quarantined', sourcePath: 'staging/wrong', destinationPath: 'quarantine/image', sourceAbsent: true, destinationPresent: true, sha256: SHA64, size: 10, verifiedAt: RECOVERY } } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
     expect(ownership.cleanupWrite(complete).ok).toBe(true); expect(store.getJob('job-1')).toMatchObject({ artifactStagingPath: null, artifactQuarantinePath: 'quarantine/image', publishState: 'quarantined' });
     expect(ownership.apiWrite({ kind: 'hand-back', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, at: RECOVERY, proof: { runner: stagedSnapshot().runner, container: absent(RECOVERY), blocker: 'none' } }).ok).toBe(true);
+  });
+
+  it.each([
+    ['container-present', 'present', 'cleanup-retry-present', 'cln_0123456789abcdefghjkmnpqrv'],
+    ['null-container', 'absent', 'cleanup-retry-null', 'cln_0123456789abcdefghjkmnpqrx'],
+  ] as const)('retries a corrected %s blocker through completion and hand-back', async (_label, containerState, jobId, replacementAdmissionId) => {
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    if (containerState === 'present') {
+      target.ownership.runnerWrite(lease(ACTIVE, jobId));
+      target.ownership.runnerWrite(container(jobId));
+    }
+    seedUnsealedLogs(target.path, jobId);
+    const blocked = blockedCleanupSnapshot(containerState, jobId);
+    const admission = cleanupAdmission(blocked, jobId);
+    expect(target.ownership.apiWrite(admission).ok).toBe(true);
+    expect(target.ownership.cleanupWrite({ kind: 'claim-lease', jobId, admissionId: admission.admissionId, owner: admission.owner, unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: blocked, at: RECOVERY }).ok).toBe(true);
+    const blocker = { reason: 'logs-unsealed' };
+    expect(target.ownership.cleanupWrite({ kind: 'evidence', jobId, admissionId: admission.admissionId, owner: admission.owner, unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: blocked, status: 'blocking', blockerCode: 'CLEANUP_ADMISSION_BLOCKED', blocker, at: AFTER }).ok).toBe(true);
+
+    const sealDb = openBuilderDatabase(target.path);
+    sealDb.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=?').run(SEALED, SHA64, jobId);
+    sealDb.close();
+    const corrected = correctedCleanupSnapshot(containerState, jobId);
+    const retry = correctedRetryCommand(jobId, admission.admissionId, replacementAdmissionId, corrected);
+    expect(target.ownership.apiWrite(retry).ok).toBe(true);
+    const evidenceDb = openBuilderDatabase(target.path);
+    expect(evidenceDb.prepare('SELECT status, claim_at, renew_at, blocker_code, blocker_json, expired_at, superseded_at, superseded_by_admission_id, predecessor_status, predecessor_claim_at, predecessor_renew_at, predecessor_blocker_code, predecessor_blocker_json FROM cleanup_leases WHERE admission_id=?').get(admission.admissionId)).toEqual({
+      status: 'expired', claim_at: null, renew_at: null, blocker_code: null, blocker_json: null, expired_at: RETRY_AT, superseded_at: RETRY_AT, superseded_by_admission_id: replacementAdmissionId,
+      predecessor_status: 'blocking', predecessor_claim_at: RECOVERY, predecessor_renew_at: null, predecessor_blocker_code: 'CLEANUP_ADMISSION_BLOCKED', predecessor_blocker_json: JSON.stringify(blocker),
+    });
+    expect(evidenceDb.prepare('SELECT cleanup_admission_id, cleanup_fence_generation, cleanup_blocker_code, cleanup_blocker_json FROM jobs WHERE job_id=?').get(jobId)).toEqual({ cleanup_admission_id: replacementAdmissionId, cleanup_fence_generation: 2, cleanup_blocker_code: null, cleanup_blocker_json: null });
+    evidenceDb.close();
+
+    const completeAdmission = retry;
+    expect(target.ownership.cleanupWrite({ kind: 'claim-lease', jobId, admissionId: replacementAdmissionId, owner: completeAdmission.owner, unitName: completeAdmission.unitName, fenceGeneration: 2, fenceTokenHash: completeAdmission.fenceTokenHash, snapshot: corrected, at: RETRY_CLAIM_AT }).ok).toBe(true);
+    const completed = { kind: 'complete' as const, jobId, admissionId: replacementAdmissionId, owner: completeAdmission.owner, unitName: completeAdmission.unitName, fenceGeneration: 2, fenceTokenHash: completeAdmission.fenceTokenHash, snapshot: corrected, postcondition: postcondition(corrected), exactContainerId: containerState === 'present' ? `container-${jobId}` : null, containerAbsent: true as const, evidencePath: 'recovery/cleanup-retry.json', evidenceSha256: 'e'.repeat(64), at: RETRY_COMPLETE_AT } satisfies CleanupWriteCommand;
+    expect(target.ownership.cleanupWrite(completed).ok).toBe(true);
+    expect(target.ownership.apiWrite({ kind: 'hand-back', jobId, admissionId: replacementAdmissionId, owner: completeAdmission.owner, unitName: completeAdmission.unitName, fenceGeneration: 2, fenceTokenHash: completeAdmission.fenceTokenHash, at: RETRY_HAND_BACK_AT, proof: { runner: corrected.runner, container: absent(RETRY_HAND_BACK_AT), blocker: 'none' } }).ok).toBe(true);
+    expect(target.store.getJob(jobId)).toMatchObject({ cleanupBlockerCode: null });
+    const finalDb = openBuilderDatabase(target.path);
+    expect(finalDb.prepare('SELECT status, handback_at FROM cleanup_leases WHERE admission_id=?').get(replacementAdmissionId)).toEqual({ status: 'handed_back', handback_at: RETRY_HAND_BACK_AT });
+    finalDb.close();
   });
 
   it('retains the staging source and fence across a cleanup crash window', async () => {
