@@ -29,6 +29,7 @@ const DEFAULT_SYSTEMD_GRACE_MS = 15_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const MAX_OBSERVATION_TEXT_BYTES = 8_192;
 const MAX_CLOCK_OBSERVATION_ATTEMPTS = 3;
+const MAX_POST_CLAIM_ATTEMPTS = 3;
 const MAX_STOP_AUTHORIZATION_ATTEMPTS = 3;
 const ACTIVE_STATES = new Set<JobState>(ACTIVE_RECOVERY_STATES);
 const TERMINAL_STATE_SET = new Set<JobState>(TERMINAL_STATES);
@@ -383,6 +384,90 @@ function clockContentionIdentityIssue(
     || job.runnerLeaseExpiresAt <= job.cancellationClockHighWaterAt
   ) return 'runner lease expired during cancellation clock contention';
   return null;
+}
+
+function postClaimRereadIssue(
+  jobId: string,
+  observed: CancellationJobRecord,
+  latest: CancellationJobRecord,
+  requireLiveLease: boolean,
+): string | null {
+  if (!ACTIVE_STATES.has(latest.state) || latest.state !== observed.state) {
+    return 'runner state changed after the cancellation escalation claim CAS';
+  }
+  if (latest.cancelRequestedAt !== observed.cancelRequestedAt) {
+    return 'cancellation request identity changed after the cancellation escalation claim CAS';
+  }
+  if (latest.cancellationCooperativeDeadlineAt !== observed.cancellationCooperativeDeadlineAt) {
+    return 'cooperative cancellation deadline changed after the cancellation escalation claim CAS';
+  }
+  if (
+    !validateRunnerUnit(jobId, observed.runnerUnit)
+    || !validateRunnerUnit(jobId, latest.runnerUnit)
+    || latest.runnerUnit !== observed.runnerUnit
+  ) return 'runner unit changed after the cancellation escalation claim CAS';
+  if (
+    observed.runnerLeaseOwner === null
+    || observed.runnerLeaseOwner.length === 0
+    || latest.runnerLeaseOwner !== observed.runnerLeaseOwner
+  ) return 'runner lease owner changed after the cancellation escalation claim CAS';
+  if (
+    observed.runnerLeaseExpiresAt === null
+    || !isCanonicalInstant(observed.runnerLeaseExpiresAt)
+    || latest.runnerLeaseExpiresAt === null
+    || !isCanonicalInstant(latest.runnerLeaseExpiresAt)
+  ) return 'runner lease expiry is malformed after the cancellation escalation claim CAS';
+  if (latest.runnerLeaseExpiresAt < observed.runnerLeaseExpiresAt) {
+    return 'runner lease expiry regressed after the cancellation escalation claim CAS';
+  }
+  if (
+    observed.cancellationClockHighWaterAt === null
+    || !isCanonicalInstant(observed.cancellationClockHighWaterAt)
+    || latest.cancellationClockHighWaterAt === null
+    || !isCanonicalInstant(latest.cancellationClockHighWaterAt)
+  ) return 'cancellation clock high-water is malformed after the cancellation escalation claim CAS';
+  if (latest.cancellationClockHighWaterAt < observed.cancellationClockHighWaterAt) {
+    return 'cancellation clock high-water regressed after the cancellation escalation claim CAS';
+  }
+  if (requireLiveLease && latest.runnerLeaseExpiresAt <= latest.cancellationClockHighWaterAt) {
+    return 'runner lease is stale after the cancellation escalation claim CAS';
+  }
+  if (
+    latest.cleanupBlockerCode !== null
+    || latest.cleanupBlocker !== null
+    || latest.cleanupFenceGeneration !== null
+    || latest.cleanupAdmissionId !== null
+  ) return 'cancellation escalation claim CAS reread is fenced for cleanup recovery';
+  return null;
+}
+
+function postClaimNoIntentIssue(job: CancellationJobRecord): string | null {
+  if (job.cancellationStopIntentAt !== null) return 'durable cancellation stop intent appeared during claim classification';
+  if (
+    job.cancellationEscalationOwner !== null
+    || job.cancellationEscalationLeaseExpiresAt !== null
+    || job.cancellationGraceDeadlineAt !== null
+    || job.cancellationStopAuthorizedAt !== null
+    || job.cancellationStopAuthorizedLeaseExpiresAt !== null
+    || job.cancellationStopObservation !== null
+    || job.cancellationInspectionObservations !== null
+  ) return 'cancellation escalation identity changed without a durable stop intent';
+  return null;
+}
+
+function coordinationPending(job: CancellationJobRecord): ApiCancellationResult {
+  if (
+    job.cancellationClockHighWaterAt === null
+    || job.cancellationCooperativeDeadlineAt === null
+  ) throw new TypeError('healthy cancellation contention is missing durable coordination fields');
+  return {
+    kind: 'coordination-pending',
+    jobId: job.jobId,
+    state: job.state as ActiveRecoveryState,
+    requestPersisted: true,
+    cancellationClockHighWaterAt: job.cancellationClockHighWaterAt,
+    cooperativeDeadlineAt: job.cancellationCooperativeDeadlineAt,
+  };
 }
 
 function requestCommand(
@@ -895,57 +980,87 @@ export async function requestCancellation(
     terminal = cooperativeClock.job;
   }
 
-  terminal = readCancellationJob(options.store, request.jobId);
-  if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
-  if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
-  const preClaimClock = observeCancellationClock(options, terminal, true, request.at, 'pre-escalation-claim');
-  if (preClaimClock.kind === 'outcome') return preClaimClock.outcome;
-  terminal = preClaimClock.job;
-  if (!ACTIVE_STATES.has(terminal.state)) return failedClosed(options, terminal, true, request.at, 'runner state changed before systemd escalation');
-  const preClaimIdentityIssue = runnerIdentityIssue(
-    request.jobId,
-    terminal,
-    cancellationRunnerUnit,
-    cancellationLeaseOwner,
-    cancellationLeaseExpiresAt,
-    preClaimClock.observedAt,
-  );
-  if (preClaimIdentityIssue !== null) {
-    return failedClosed(
-      options,
-      terminal,
-      true,
-      request.at,
-      preClaimIdentityIssue.replace('systemd stop authorization', 'systemd escalation'),
-    );
-  }
-
-  const freshEscalationAt = preClaimClock.observedAt;
-  const claimLeaseExpiresAt = terminal.runnerLeaseExpiresAt!;
   let ownsStop = false;
-  if (terminal.cancellationStopIntentAt === null) {
-    const graceDeadlineAt = addMilliseconds(freshEscalationAt, systemdGraceMs);
-    try {
-      const claim = options.ownership.apiWrite({
-        kind: 'claim-cancellation-escalation',
-        jobId: terminal.jobId,
-        expectedState: terminal.state as ActiveRecoveryState,
-        cancelRequestedAt: terminal.cancelRequestedAt!,
-        cooperativeDeadlineAt,
-        runnerUnit: terminal.runnerUnit!,
-        observedOwner: terminal.runnerLeaseOwner!,
-        observedLeaseExpiresAt: terminal.runnerLeaseExpiresAt!,
-        escalationOwner: coordinatorId,
-        escalationLeaseExpiresAt: graceDeadlineAt,
-        stopIntentAt: freshEscalationAt,
-        graceDeadlineAt,
-        at: freshEscalationAt,
-      });
-      ownsStop = claim.ok && claim.kind === 'committed';
-    } catch {
-      ownsStop = false;
-    }
+  let claimLeaseExpiresAt!: string;
+  let freshEscalationAt: string;
+  for (let postClaimAttempt = 0; postClaimAttempt < MAX_POST_CLAIM_ATTEMPTS; postClaimAttempt += 1) {
     terminal = readCancellationJob(options.store, request.jobId);
+    if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
+    if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
+    const preClaimClock = observeCancellationClock(options, terminal, true, request.at, 'pre-escalation-claim');
+    if (preClaimClock.kind === 'outcome') return preClaimClock.outcome;
+    terminal = preClaimClock.job;
+    if (!ACTIVE_STATES.has(terminal.state)) return failedClosed(options, terminal, true, request.at, 'runner state changed before systemd escalation');
+    const preClaimObserved = terminal;
+    const preClaimIdentityIssue = runnerIdentityIssue(
+      request.jobId,
+      terminal,
+      cancellationRunnerUnit,
+      cancellationLeaseOwner,
+      cancellationLeaseExpiresAt,
+      preClaimClock.observedAt,
+    );
+    if (preClaimIdentityIssue !== null) {
+      return failedClosed(
+        options,
+        terminal,
+        true,
+        request.at,
+        preClaimIdentityIssue.replace('systemd stop authorization', 'systemd escalation'),
+      );
+    }
+
+    freshEscalationAt = preClaimClock.observedAt;
+    claimLeaseExpiresAt = terminal.runnerLeaseExpiresAt!;
+    ownsStop = false;
+    if (terminal.cancellationStopIntentAt === null) {
+      const graceDeadlineAt = addMilliseconds(freshEscalationAt, systemdGraceMs);
+      try {
+        const claim = options.ownership.apiWrite({
+          kind: 'claim-cancellation-escalation',
+          jobId: terminal.jobId,
+          expectedState: terminal.state as ActiveRecoveryState,
+          cancelRequestedAt: terminal.cancelRequestedAt!,
+          cooperativeDeadlineAt,
+          runnerUnit: terminal.runnerUnit!,
+          observedOwner: terminal.runnerLeaseOwner!,
+          observedLeaseExpiresAt: terminal.runnerLeaseExpiresAt!,
+          escalationOwner: coordinatorId,
+          escalationLeaseExpiresAt: graceDeadlineAt,
+          stopIntentAt: freshEscalationAt,
+          graceDeadlineAt,
+          at: freshEscalationAt,
+        });
+        ownsStop = claim.ok && claim.kind === 'committed';
+      } catch {
+        ownsStop = false;
+      }
+      terminal = readCancellationJob(options.store, request.jobId);
+      if (!ownsStop && terminal.cancellationStopIntentAt === null) {
+        const rereadIssue = postClaimRereadIssue(request.jobId, preClaimObserved, terminal, true);
+        const noIntentIssue = postClaimNoIntentIssue(terminal);
+        const higherHighWater = preClaimObserved.cancellationClockHighWaterAt !== null
+          && terminal.cancellationClockHighWaterAt !== null
+          && terminal.cancellationClockHighWaterAt > preClaimObserved.cancellationClockHighWaterAt;
+        if (rereadIssue !== null || noIntentIssue !== null || !higherHighWater) {
+          return failedClosed(
+            options,
+            terminal,
+            true,
+            request.at,
+            rereadIssue ?? noIntentIssue ?? 'cancellation escalation claim was lost without a canonical higher clock high-water',
+          );
+        }
+        const retryAt = (options.clock ?? defaultClock).now();
+        if (!isCanonicalInstant(retryAt)) {
+          return failedClosed(options, terminal, true, request.at, 'wall clock observation is not canonical during cancellation escalation contention');
+        }
+        if (retryAt < terminal.cancellationClockHighWaterAt!) return coordinationPending(terminal);
+        if (postClaimAttempt === MAX_POST_CLAIM_ATTEMPTS - 1) return coordinationPending(terminal);
+        continue;
+      }
+    }
+    break;
   }
   if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
   if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };

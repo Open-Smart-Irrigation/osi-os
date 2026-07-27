@@ -669,6 +669,290 @@ describe('API cancellation against the durable ownership store', () => {
     });
   });
 
+  it('returns bounded coordination-pending after a separate-connection high-water advance before the claim', async () => {
+    const fixtureValue = await fixture(['post-claim-clock-pending-a']);
+    activate(fixtureValue, 'post-claim-clock-pending-a');
+    const secondDb = openBuilderDatabase(fixtureValue.databasePath);
+    const secondStore = new BuilderStore(secondDb);
+    const secondOwnership = new OwnershipStore(secondDb, { now: () => NOW });
+    const requestAt = '2026-07-27T12:00:02.000Z';
+    const highWaterTimes = [
+      '2026-07-27T12:00:03.000Z',
+      '2026-07-27T12:00:04.000Z',
+      '2026-07-27T12:00:05.000Z',
+      '2026-07-27T12:00:06.000Z',
+    ];
+    let postObservation = false;
+    let claimAttempts = 0;
+    let bPausedBeforeClaim = false;
+    let blockerWrites = 0;
+    const ownership = {
+      apiWrite: (command: Parameters<OwnershipStore['apiWrite']>[0]) => {
+        if (command.kind === 'claim-cancellation-escalation') {
+          postObservation = true;
+          claimAttempts += 1;
+          const current = secondStore.getCancellationJob('post-claim-clock-pending-a');
+          const observedAt = highWaterTimes[Math.min(claimAttempts - 1, highWaterTimes.length - 1)]!;
+          expect(secondOwnership.apiWrite({
+            kind: 'observe-cancellation-clock',
+            jobId: current.jobId,
+            expectedState: current.state as 'starting',
+            cancelRequestedAt: current.cancelRequestedAt!,
+            expectedHighWaterAt: current.cancellationClockHighWaterAt!,
+            observedAt,
+            at: observedAt,
+          }).ok).toBe(true);
+          bPausedBeforeClaim = true;
+        }
+        if (command.kind === 'cancellation-recovery-blocker') blockerWrites += 1;
+        return fixtureValue.ownership.apiWrite(command);
+      },
+    };
+    const contentionClock: ApiCancellationClock = {
+      now: () => postObservation
+        ? secondStore.getCancellationJob('post-claim-clock-pending-a').cancellationClockHighWaterAt!
+        : requestAt,
+      monotonicNow: () => 0,
+      sleep: async () => {},
+    };
+    const systemdValue = systemd();
+
+    const outcome = await requestCancellation({
+      store: fixtureValue.store,
+      ownership,
+      systemd: systemdValue,
+      clock: contentionClock,
+      coordinatorId: 'post-claim-clock-coordinator-a',
+      cooperativeTimeoutMs: 0,
+      systemdGraceMs: 0,
+      pollIntervalMs: 1,
+    }, { jobId: 'post-claim-clock-pending-a', reason: 'operator', at: requestAt });
+
+    expect(bPausedBeforeClaim).toBe(true);
+    expect(claimAttempts).toBeGreaterThan(0);
+    expect(claimAttempts).toBeLessThanOrEqual(4);
+    expect(outcome).toMatchObject({
+      kind: 'coordination-pending',
+      jobId: 'post-claim-clock-pending-a',
+      requestPersisted: true,
+      cooperativeDeadlineAt: requestAt,
+    });
+    expect(blockerWrites).toBe(0);
+    expect(systemdValue.calls.filter(([kind]) => kind === 'stop')).toHaveLength(0);
+    expect(fixtureValue.store.getCancellationJob('post-claim-clock-pending-a')).toMatchObject({
+      cancellationStopIntentAt: null,
+      cancellationStopAuthorizedAt: null,
+      cleanupBlockerCode: null,
+      cleanupFenceGeneration: null,
+      cleanupAdmissionId: null,
+    });
+    secondDb.close();
+  });
+
+  it('lets the eventual second coordinator claim and stop once after the first loses the post-observation claim', async () => {
+    const fixtureValue = await fixture(['post-claim-two-coordinators-a']);
+    activate(fixtureValue, 'post-claim-two-coordinators-a');
+    const secondDb = openBuilderDatabase(fixtureValue.databasePath);
+    const secondStore = new BuilderStore(secondDb);
+    const secondOwnershipStore = new OwnershipStore(secondDb, { now: () => NOW });
+    const requestAt = '2026-07-27T12:00:02.000Z';
+    const highWaterAt = '2026-07-27T12:00:03.000Z';
+    const events: string[] = [];
+    let bSignalStarted!: () => void;
+    const bSignalReady = new Promise<void>((resolve) => { bSignalStarted = resolve; });
+    let releaseBSignal!: () => void;
+    const bSignalGate = new Promise<void>((resolve) => { releaseBSignal = resolve; });
+    let bReleased = false;
+    const sharedSystemd = systemd();
+    const originalStop = sharedSystemd.stopRunner;
+    sharedSystemd.stopRunner = async (unit, deadline) => {
+      events.push('stop');
+      return originalStop(unit, deadline);
+    };
+    const aSystemd: ApiCancellationSystemd = {
+      signalCancellation: sharedSystemd.signalCancellation,
+      stopRunner: async (unit, deadline) => {
+        events.push('stop-a');
+        return sharedSystemd.stopRunner(unit, deadline);
+      },
+      inspectRunner: sharedSystemd.inspectRunner,
+    };
+    const bSystemd: ApiCancellationSystemd = {
+      signalCancellation: async (unit, deadline) => {
+        bSignalStarted();
+        await bSignalGate;
+        return sharedSystemd.signalCancellation(unit, deadline);
+      },
+      stopRunner: async (unit, deadline) => {
+        events.push('stop-b');
+        return sharedSystemd.stopRunner(unit, deadline);
+      },
+      inspectRunner: sharedSystemd.inspectRunner,
+    };
+    const aOwnership = {
+      apiWrite: (command: Parameters<OwnershipStore['apiWrite']>[0]) => {
+        if (command.kind === 'claim-cancellation-escalation') {
+          const current = secondStore.getCancellationJob('post-claim-two-coordinators-a');
+          expect(secondOwnershipStore.apiWrite({
+            kind: 'observe-cancellation-clock',
+            jobId: current.jobId,
+            expectedState: current.state as 'starting',
+            cancelRequestedAt: current.cancelRequestedAt!,
+            expectedHighWaterAt: current.cancellationClockHighWaterAt!,
+            observedAt: highWaterAt,
+            at: highWaterAt,
+          }).ok).toBe(true);
+          bReleased = true;
+          releaseBSignal();
+        }
+        if (command.kind === 'cancellation-recovery-blocker') events.push('blocker-a');
+        return fixtureValue.ownership.apiWrite(command);
+      },
+    };
+    const bOwnership = {
+      apiWrite: (command: Parameters<OwnershipStore['apiWrite']>[0]) => {
+        if (command.kind === 'cancellation-recovery-blocker') events.push('blocker-b');
+        return secondOwnershipStore.apiWrite(command);
+      },
+    };
+    const aClock = clock(requestAt);
+    const bClock: ApiCancellationClock = {
+      now: () => bReleased ? highWaterAt : requestAt,
+      monotonicNow: () => 0,
+      sleep: async () => {},
+    };
+
+    const bPromise = requestCancellation({
+      store: secondStore,
+      ownership: bOwnership,
+      systemd: bSystemd,
+      clock: bClock,
+      coordinatorId: 'post-claim-coordinator-b',
+      cooperativeTimeoutMs: 0,
+      systemdGraceMs: 0,
+      pollIntervalMs: 1,
+    }, { jobId: 'post-claim-two-coordinators-a', reason: 'operator-b', at: requestAt });
+    await bSignalReady;
+    const aPromise = requestCancellation({
+      store: fixtureValue.store,
+      ownership: aOwnership,
+      systemd: aSystemd,
+      clock: aClock,
+      coordinatorId: 'post-claim-coordinator-a',
+      cooperativeTimeoutMs: 0,
+      systemdGraceMs: 0,
+      pollIntervalMs: 1,
+    }, { jobId: 'post-claim-two-coordinators-a', reason: 'operator-a', at: requestAt });
+    const [bOutcome, aOutcome] = await Promise.all([bPromise, aPromise]);
+
+    expect(aOutcome).toMatchObject({ kind: 'coordination-pending', requestPersisted: true });
+    expect(bOutcome).toMatchObject({ kind: 'recovery-blocked', blockerCode: 'RUNNER_DISAPPEARED' });
+    expect(events).not.toContain('stop-a');
+    expect(events).not.toContain('blocker-a');
+    expect(events.indexOf('stop-b')).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf('blocker-b')).toBeGreaterThan(events.indexOf('stop-b'));
+    expect(sharedSystemd.calls.filter(([kind]) => kind === 'stop')).toHaveLength(1);
+    expect(fixtureValue.store.getCancellationJob('post-claim-two-coordinators-a')).toMatchObject({
+      cancellationStopIntentAt: highWaterAt,
+      cancellationEscalationOwner: 'post-claim-coordinator-b',
+      cleanupBlockerCode: 'RUNNER_DISAPPEARED',
+    });
+    secondDb.close();
+  });
+
+  it.each([
+    ['state changed', (db: DatabaseSync, jobId: string) => {
+      db.exec('DROP TRIGGER jobs_terminal_guard_update');
+      db.prepare("UPDATE jobs SET state='cancel_requested' WHERE job_id=?").run(jobId);
+    }, true],
+    ['runner unit changed', (db: DatabaseSync, jobId: string) => {
+      db.exec('DROP TRIGGER jobs_runner_lease_guard_update');
+      db.prepare('UPDATE jobs SET runner_unit=? WHERE job_id=?').run('osi-image-builder-runner@other.service', jobId);
+    }, true],
+    ['runner owner changed', (db: DatabaseSync, jobId: string) => {
+      db.exec('DROP TRIGGER jobs_runner_lease_guard_update');
+      db.prepare('UPDATE jobs SET runner_lease_owner=? WHERE job_id=?').run('runner-takeover', jobId);
+    }, true],
+    ['cancel request changed', (db: DatabaseSync, jobId: string) => {
+      db.prepare('UPDATE jobs SET cancel_requested_at=? WHERE job_id=?').run('2026-07-27T12:00:03.000Z', jobId);
+    }, true],
+    ['cooperative deadline changed', (db: DatabaseSync, jobId: string) => {
+      db.prepare('UPDATE jobs SET cancellation_cooperative_deadline_at=? WHERE job_id=?').run('2026-07-27T12:00:33.000Z', jobId);
+    }, true],
+    ['cleanup fence present', (db: DatabaseSync, jobId: string) => {
+      db.exec('DROP TRIGGER jobs_fence_guard_update');
+      db.prepare('UPDATE jobs SET cleanup_generation=1, cleanup_fence_generation=1, cleanup_fence_token_hash=?, cleanup_admission_id=? WHERE job_id=?')
+        .run(SHA64, 'cln_post_claim_fence', jobId);
+    }, false],
+    ['cleanup admission present', (db: DatabaseSync, jobId: string) => {
+      db.exec('DROP TRIGGER jobs_fence_guard_update');
+      db.prepare('UPDATE jobs SET cleanup_admission_id=? WHERE job_id=?').run('cln_post_claim_admission', jobId);
+    }, false],
+    ['blocker already present', (db: DatabaseSync, jobId: string) => {
+      db.exec('DROP TRIGGER jobs_cleanup_blocker_guard_update');
+      db.prepare("UPDATE jobs SET cleanup_blocker_code='RUNNER_DISAPPEARED', cleanup_blocker_json=? WHERE job_id=?")
+        .run(JSON.stringify({ kind: 'preexisting-post-claim-blocker' }), jobId);
+    }, true],
+    ['lease regressed', (db: DatabaseSync, jobId: string) => {
+      db.exec('DROP TRIGGER jobs_runner_lease_guard_update');
+      db.prepare('UPDATE jobs SET runner_lease_expires_at=? WHERE job_id=?').run('2026-07-27T12:09:00.000Z', jobId);
+    }, true],
+    ['lease malformed', (db: DatabaseSync, jobId: string) => {
+      db.exec('DROP TRIGGER jobs_runner_lease_guard_update');
+      db.prepare('UPDATE jobs SET runner_lease_expires_at=? WHERE job_id=?').run('not-an-instant', jobId);
+    }, true],
+    ['lease stale', (db: DatabaseSync, jobId: string) => {
+      db.exec('DROP TRIGGER jobs_runner_lease_guard_update');
+      db.prepare('UPDATE jobs SET runner_lease_expires_at=? WHERE job_id=?').run('2026-07-27T12:00:02.000Z', jobId);
+    }, true],
+    ['high-water regressed', (db: DatabaseSync, jobId: string) => {
+      db.prepare('UPDATE jobs SET cancellation_clock_high_water_at=? WHERE job_id=?').run('2026-07-27T12:00:01.000Z', jobId);
+    }, true],
+  ] as const)('fails closed without stop after a post-observation/pre-claim %s', async (_label, mutate, blockerExpected) => {
+    const fixtureValue = await fixture([`post-claim-invalid-${_label.replaceAll(' ', '-')}`]);
+    const jobId = `post-claim-invalid-${_label.replaceAll(' ', '-')}`;
+    activate(fixtureValue, jobId);
+    const requestAt = '2026-07-27T12:00:02.000Z';
+    let mutated = false;
+    const ownership = {
+      apiWrite: (command: Parameters<OwnershipStore['apiWrite']>[0]) => {
+        if (command.kind === 'claim-cancellation-escalation' && !mutated) {
+          mutated = true;
+          fixtureValue.db.exec('PRAGMA ignore_check_constraints=ON');
+          mutate(fixtureValue.db, jobId);
+        }
+        return fixtureValue.ownership.apiWrite(command);
+      },
+    };
+    const systemdValue = systemd();
+
+    const outcome = await requestCancellation({
+      store: fixtureValue.store,
+      ownership,
+      systemd: systemdValue,
+      clock: clock(requestAt),
+      coordinatorId: `post-claim-invalid-${_label.replaceAll(' ', '-')}`,
+      cooperativeTimeoutMs: 0,
+      systemdGraceMs: 0,
+      pollIntervalMs: 1,
+    }, { jobId, reason: 'operator', at: requestAt });
+
+    expect(mutated).toBe(true);
+    expect(outcome.kind).not.toBe('coordination-pending');
+    expect(outcome.kind).not.toBe('runner-terminal');
+    expect(systemdValue.calls.filter(([kind]) => kind === 'stop')).toHaveLength(0);
+    const finalJob = fixtureValue.store.getCancellationJob(jobId);
+    expect(finalJob.cancellationStopIntentAt).toBeNull();
+    expect(finalJob.cancellationStopAuthorizedAt).toBeNull();
+    if (blockerExpected) {
+      expect(outcome).toMatchObject({ kind: 'recovery-blocked', blockerCode: 'RUNNER_DISAPPEARED' });
+      expect(finalJob.cleanupBlockerCode).toBe('RUNNER_DISAPPEARED');
+    } else {
+      expect(outcome.kind).toBe('request-not-accepted');
+      expect(finalJob.cleanupBlockerCode).toBeNull();
+    }
+  });
+
   it('CAS-advances the durable clock and rolls stop authorization back atomically', async () => {
     const fixtureValue = await fixture(['clock-cas-a', 'authorization-rollback-a']);
     activate(fixtureValue, 'clock-cas-a');
