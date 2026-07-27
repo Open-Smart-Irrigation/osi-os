@@ -596,7 +596,7 @@ export async function createRootfsFixture(
     startedAt: '2026-07-26T10:00:00.000Z',
     finishedAt: '2026-07-26T10:01:00.000Z',
     outcome: 'passed',
-    operationId: null,
+    operationId: 'activate-target',
     commands: [],
     inputs: {
       targetId: target.id,
@@ -613,7 +613,7 @@ export async function createRootfsFixture(
     startedAt: '2026-07-26T10:02:00.000Z',
     finishedAt: '2026-07-26T10:03:00.000Z',
     outcome: 'passed',
-    operationId: null,
+    operationId: 'resolve-config',
     commands: [],
     inputs: {
       targetId: target.id,
@@ -1204,8 +1204,8 @@ describe('real rootfs verification contract', () => {
       const operation = await createRootfsFixture('rpi-5');
       const operationEvidence = await readConfigEvidence(operation, stage);
       operationEvidence.operationId = stage === 'target-setup'
-        ? 'activate-target'
-        : 'resolve-config';
+        ? 'resolve-config'
+        : 'activate-target';
       await overwriteConfigEvidence(operation, stage, operationEvidence);
       await expect(verifyFirmwareArtifact(operation.input)).rejects.toMatchObject({
         code: 'TARGET_CONFIG_MISMATCH',

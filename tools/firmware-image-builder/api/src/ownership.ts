@@ -231,6 +231,7 @@ export type RunnerWriteCommand =
   | (CommonRunner & Readonly<{ kind: 'artifact'; expectedState: JobState; state: JobState; stagingPath: string; artifactSha256: string; artifactSize: number; artifactMtime: string; checksumPath: string; checksumSha256: string; manifestPath: string; manifestSha256: string; verificationPath: string; verificationSha256: string }>)
   | (CommonRunner & Readonly<{ kind: 'publish-stage-start'; expectedState: 'verifying'; startedAt: string; finalDirectory: string; finalPath: string; publishStartedAt: string }>)
   | (CommonRunner & Readonly<{ kind: 'publish-quarantine-intent'; expectedState: 'publishing'; quarantinePath: string }>)
+  | (CommonRunner & Readonly<{ kind: 'publish-quarantine-ambiguous'; expectedState: 'publishing'; quarantinePath: string; renameResult: 'RENAMED'; staging: 'possibly-absent' }>)
   | (CommonRunner & Readonly<{ kind: 'publish-terminal'; expectedState: 'publishing'; startedAt: string; finishedAt: string; evidencePath: string; evidenceSha256: string; finalDirectory: string; finalPath: string; publishStartedAt: string; publishedAt: string; terminalAt: string; priorVerificationSha256?: string; verificationSha256?: string }>)
   | (CommonRunner & Readonly<{ kind: 'publish-failure-terminal'; expectedState: 'publishing'; startedAt: string; finishedAt: string; evidencePath: string; evidenceSha256: string; blockerCode: BuilderErrorCode; blocker: JsonObject; staging: 'present' | 'absent' | 'quarantined' | 'unknown'; quarantinePath?: string; terminalAt: string; error: JsonObject }>)
   | (CommonRunner & Readonly<{ kind: 'publish'; expectedState: JobState; state: 'staged' | 'publishing' | 'published' | 'blocked'; finalDirectory?: string; finalPath?: string; startedAt?: string; publishedAt?: string; blockerCode?: BuilderErrorCode; blocker?: JsonObject }>)
@@ -622,6 +623,7 @@ function validateRunnerCommand(command: RunnerWriteCommand): void {
     case 'artifact': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'artifact expectedState'); preparedEnum(value.state, JOB_STATES, 'artifact state'); for (const field of ['stagingPath', 'checksumPath', 'manifestPath', 'verificationPath']) preparedPath(value[field], `artifact ${field}`); for (const field of ['artifactSha256', 'checksumSha256', 'manifestSha256', 'verificationSha256']) preparedHash(value[field], `artifact ${field}`); if (!Number.isSafeInteger(value.artifactSize) || Number(value.artifactSize) < 0) throw new OwnershipValidationError('artifact size is invalid'); preparedInstant(value.artifactMtime, 'artifact mtime'); shapeChronology([['artifact mtime', value.artifactMtime], ['artifact command.at', value.at]], 'artifact'); return;
     case 'publish-stage-start': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'verifying', 'publish stage predecessor'); preparedInstant(value.startedAt, 'publish stage startedAt'); preparedPath(value.finalDirectory, 'publish final directory'); preparedPath(value.finalPath, 'publish final path'); preparedInstant(value.publishStartedAt, 'publish startedAt'); shapeChronology([['publish stage startedAt', value.startedAt], ['publish startedAt', value.publishStartedAt], ['publish command.at', value.at]], 'publish stage start'); return;
     case 'publish-quarantine-intent': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'publishing', 'publish quarantine intent predecessor'); preparedPath(value.quarantinePath, 'publish quarantine intent path'); return;
+    case 'publish-quarantine-ambiguous': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'publishing', 'publish quarantine ambiguity predecessor'); preparedPath(value.quarantinePath, 'publish quarantine ambiguity path'); shapeLiteral(value.renameResult, 'RENAMED', 'publish quarantine rename result'); shapeLiteral(value.staging, 'possibly-absent', 'publish quarantine staging state'); return;
     case 'publish-terminal': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'publishing', 'publish terminal predecessor'); preparedInstant(value.startedAt, 'publish stage startedAt'); preparedInstant(value.finishedAt, 'publish stage finishedAt'); preparedPath(value.evidencePath, 'publish stage evidence path'); preparedHash(value.evidenceSha256, 'publish stage evidence SHA'); preparedPath(value.finalDirectory, 'publish final directory'); preparedPath(value.finalPath, 'publish final path'); preparedInstant(value.publishStartedAt, 'publish startedAt'); preparedInstant(value.publishedAt, 'publishedAt'); preparedInstant(value.terminalAt, 'publish terminalAt'); preparedOptionalHash(value.priorVerificationSha256, 'prior verification SHA'); preparedOptionalHash(value.verificationSha256, 'terminal verification SHA'); if ((value.priorVerificationSha256 === undefined) !== (value.verificationSha256 === undefined)) throw new OwnershipValidationError('publish terminal verification replacement evidence is incomplete'); shapeChronology([['publish stage startedAt', value.startedAt], ['publish startedAt', value.publishStartedAt], ['publish stage finishedAt', value.finishedAt], ['publishedAt', value.publishedAt], ['publish terminalAt', value.terminalAt], ['publish terminal command.at', value.at]], 'publish terminal'); return;
     case 'publish-failure-terminal': {
       preparedRunnerCommon(value);
@@ -1068,6 +1070,49 @@ function validateCanonicalSidecar(observed: { present: boolean; path: string; by
   if (content.jobId !== job.job_id || content.branch !== job.branch || content.pinnedSha !== job.pinned_sha || content.targetId !== job.target_id || content.artifactSha256 !== artifactSha256) throw new OwnershipConflictError('identity-mismatch', `${field} canonical fields do not bind the job`);
 }
 
+function validateTerminalVerification(
+  content: JsonObject,
+  evidencePath: string,
+): void {
+  const observations = content.observations;
+  if (observations === null || typeof observations !== 'object' || Array.isArray(observations)) {
+    throw new OwnershipConflictError('identity-mismatch', 'published verification observations are missing');
+  }
+  const observationRecord = observations as JsonObject;
+  const publishEvidence = observationRecord.publishEvidence;
+  const stageEvidence = observationRecord.stageEvidence;
+  if (
+    publishEvidence === null
+    || typeof publishEvidence !== 'object'
+    || Array.isArray(publishEvidence)
+  ) {
+    throw new OwnershipConflictError('identity-mismatch', 'published verification does not bind terminal publish evidence');
+  }
+  const publishRecord = publishEvidence as JsonObject;
+  if (
+    Object.keys(publishRecord).join('\0') !== 'path'
+    || publishRecord.path !== evidencePath
+    || !Array.isArray(stageEvidence)
+    || stageEvidence.length !== PIPELINE_STAGE_NAMES.length
+  ) {
+    throw new OwnershipConflictError('identity-mismatch', 'published verification does not bind terminal publish evidence');
+  }
+  stageEvidence.forEach((entry, index) => {
+    const stage = PIPELINE_STAGE_NAMES[index];
+    if (
+      entry === null
+      || typeof entry !== 'object'
+      || Array.isArray(entry)
+      || Object.keys(entry).sort().join('\0') !== 'outcome\0path\0stage'
+      || entry.stage !== stage
+      || entry.path !== `${String(index).padStart(2, '0')}-${stage}.json`
+      || entry.outcome !== 'passed'
+    ) {
+      throw new OwnershipConflictError('identity-mismatch', 'published verification contains non-terminal stage evidence');
+    }
+  });
+}
+
 function validateFailedSidecar(observed: { present: boolean; path: string; bytes: string | null; content: JsonObject | null; sha256: string | null }, expectedPath: string, field: string): void {
   if (typeof observed.present !== 'boolean' || observed.path !== expectedPath) throw new OwnershipConflictError('identity-mismatch', `${field} failure observation path does not match staging`);
   confinedPath(observed.path, `${field} failure path`);
@@ -1132,7 +1177,14 @@ function validatePublishEvidence(db: DbFacade, evidence: PublishRecoveryEvidence
     validateFailedSidecar(verificationEvidence, expectedVerificationPath, 'verification manifest');
   } else {
     validateCanonicalSidecar(manifestEvidence, expectedManifestPath, artifact.manifestSha256, job, artifact.artifactSha256, 'build manifest');
-    validateCanonicalSidecar(verificationEvidence, expectedVerificationPath, artifact.verificationSha256, job, artifact.artifactSha256, 'verification manifest');
+    if (verificationEvidence.sha256 === null || verificationEvidence.content === null) {
+      throw new OwnershipConflictError('identity-mismatch', 'terminal verification evidence is incomplete');
+    }
+    validateCanonicalSidecar(verificationEvidence, expectedVerificationPath, verificationEvidence.sha256, job, artifact.artifactSha256, 'verification manifest');
+    validateTerminalVerification(
+      verificationEvidence.content,
+      evidence.stage.evidencePath,
+    );
   }
   const staging = evidence.observed.staging;
   if (terminalState === 'succeeded' && (staging.state !== 'absent' || staging.path !== null || staging.sha256 !== null || !final.present || !checksum.present || !manifestEvidence.path.startsWith(`${evidence.final.directory}/`) || !verificationEvidence.path.startsWith(`${evidence.final.directory}/`))) throw new OwnershipConflictError('identity-mismatch', 'successful recovery requires final held sidecars and absent staging');
@@ -1288,7 +1340,7 @@ export class OwnershipStore {
   runnerWrite(command: RunnerWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as RunnerWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['acquire-lease', 'renew-lease', 'cancellation-transition', 'cancellation-cleanup', 'cancellation-terminal', 'stage', 'container', 'artifact-preparation-intent', 'artifact', 'publish-stage-start', 'publish-quarantine-intent', 'publish-terminal', 'publish-failure-terminal', 'publish', 'normal-terminal', 'operation-begin', 'operation-complete', 'operation-cleanup'].includes(prepared.kind)) {
+    if (!['acquire-lease', 'renew-lease', 'cancellation-transition', 'cancellation-cleanup', 'cancellation-terminal', 'stage', 'container', 'artifact-preparation-intent', 'artifact', 'publish-stage-start', 'publish-quarantine-intent', 'publish-quarantine-ambiguous', 'publish-terminal', 'publish-failure-terminal', 'publish', 'normal-terminal', 'operation-begin', 'operation-complete', 'operation-cleanup'].includes(prepared.kind)) {
       throw new OwnershipViolationError('runner', prepared.kind);
     }
     validateRunnerCommand(prepared);
@@ -1305,6 +1357,7 @@ export class OwnershipStore {
       case 'artifact': return this.#transaction(() => this.#artifact(prepared));
       case 'publish-stage-start': return this.#transaction(() => this.#publishStageStart(prepared));
       case 'publish-quarantine-intent': return this.#transaction(() => this.#publishQuarantineIntent(prepared));
+      case 'publish-quarantine-ambiguous': return this.#transaction(() => this.#publishQuarantineAmbiguous(prepared));
       case 'publish-terminal': return this.#transaction(() => this.#publishTerminal(prepared));
       case 'publish-failure-terminal': return this.#transaction(() => this.#publishFailureTerminal(prepared));
       case 'publish': return this.#transaction(() => this.#publish(prepared));
@@ -1636,12 +1689,18 @@ export class OwnershipStore {
             : {}),
         }, 'publish recovery blocker', true)
       : null;
+    const recoveredVerificationSha256 = command.state === 'succeeded'
+      ? command.evidence.observed.verification.sha256
+      : a.verificationSha256;
+    if (recoveredVerificationSha256 === null) {
+      conflict('identity-mismatch', 'publish recovery omitted terminal verification identity');
+    }
     const result = command.state === 'succeeded'
       ? this.#db.prepare(`UPDATE jobs SET state='succeeded', queue_state='complete', queue_position=NULL, publish_state='published', artifact_staging_path=NULL,
-          artifact_quarantine_intent_path=NULL, artifact_final_directory=?, artifact_final_path=?, publish_started_at=?, published_at=?, terminal_at=?, terminal_error_code=NULL, terminal_error_json=NULL, runner_finished_at=?, updated_at=?
+          artifact_quarantine_intent_path=NULL, artifact_final_directory=?, artifact_final_path=?, publish_started_at=?, published_at=?, verification_sha256=?, terminal_at=?, terminal_error_code=NULL, terminal_error_json=NULL, runner_finished_at=?, updated_at=?
         WHERE job_id=? AND state='publishing' AND publish_state='publishing' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND runner_lease_expires_at < ?
           AND artifact_staging_path=? AND artifact_final_directory=? AND artifact_final_path=? AND artifact_sha256=? AND artifact_size=? AND artifact_mtime=? AND checksum_path=? AND checksum_sha256=? AND manifest_path=? AND manifest_sha256=? AND verification_path=? AND verification_sha256=?
-          AND container_id IS NULL AND container_label_job_id IS NULL AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL`).run(f.directory, f.path, f.publishStartedAt, f.publishedAt ?? command.at, f.publishedAt ?? command.at, f.publishedAt ?? command.at, command.at, command.jobId, command.evidence.runner.unit, command.evidence.runner.owner, command.evidence.runner.leaseExpiresAt, command.at, a.stagingPath, f.directory, f.path, a.artifactSha256, a.artifactSize, a.artifactMtime, a.checksumPath, a.checksumSha256, a.manifestPath, a.manifestSha256, a.verificationPath, a.verificationSha256)
+          AND container_id IS NULL AND container_label_job_id IS NULL AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL`).run(f.directory, f.path, f.publishStartedAt, f.publishedAt ?? command.at, recoveredVerificationSha256, f.publishedAt ?? command.at, f.publishedAt ?? command.at, command.at, command.jobId, command.evidence.runner.unit, command.evidence.runner.owner, command.evidence.runner.leaseExpiresAt, command.at, a.stagingPath, f.directory, f.path, a.artifactSha256, a.artifactSize, a.artifactMtime, a.checksumPath, a.checksumSha256, a.manifestPath, a.manifestSha256, a.verificationPath, a.verificationSha256)
       : this.#db.prepare(`UPDATE jobs SET state='failed', queue_state='complete', queue_position=NULL, publish_state='blocked', artifact_staging_path=?, artifact_quarantine_path=?, artifact_final_directory=NULL, artifact_final_path=NULL,
           artifact_quarantine_intent_path=NULL, publish_started_at=NULL, published_at=NULL, publish_blocker_code=?, publish_blocker_json=?, terminal_at=?, terminal_error_code=?, terminal_error_json=?, updated_at=?
         WHERE job_id=? AND state='publishing' AND publish_state='publishing' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND runner_lease_expires_at < ?
@@ -1899,10 +1958,30 @@ export class OwnershipStore {
     confinedPath(command.stagingPath, 'artifact staging path'); confinedPath(command.checksumPath, 'artifact checksum path'); confinedPath(command.manifestPath, 'artifact manifest path'); confinedPath(command.verificationPath, 'artifact verification path');
     for (const [value, field] of [[command.artifactSha256, 'artifact SHA-256'], [command.checksumSha256, 'checksum SHA-256'], [command.manifestSha256, 'manifest SHA-256'], [command.verificationSha256, 'verification SHA-256']] as const) hash(value, field);
     instant(command.artifactMtime, 'artifact mtime'); requireChronology([['accepted time', String(row.accepted_at)], ['artifact mtime', command.artifactMtime], ['artifact write time', command.at]]); if (!Number.isSafeInteger(command.artifactSize) || command.artifactSize < 0) throw new TypeError('artifact size is invalid');
+    const hasPreparationIntent = row.publish_state === 'not_started'
+      && row.artifact_staging_path !== null;
+    if (
+      hasPreparationIntent
+      && (
+        row.artifact_staging_path !== command.stagingPath
+        || row.artifact_sha256 !== command.artifactSha256
+        || Number(row.artifact_size) !== command.artifactSize
+        || row.artifact_mtime !== command.artifactMtime
+        || row.checksum_path !== command.checksumPath
+        || row.checksum_sha256 !== command.checksumSha256
+        || row.manifest_path !== command.manifestPath
+        || row.manifest_sha256 !== command.manifestSha256
+        || row.verification_path !== command.verificationPath
+        || row.verification_sha256 !== command.verificationSha256
+      )
+    ) {
+      conflict('identity-mismatch', 'completed artifact differs from its preparation intent');
+    }
     const result = this.#db.prepare(`UPDATE jobs SET publish_state='staged', artifact_staging_path=?, artifact_quarantine_path=NULL, artifact_quarantine_intent_path=NULL, artifact_final_directory=NULL, artifact_final_path=NULL,
       artifact_sha256=?, artifact_size=?, artifact_mtime=?, checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=?,
       publish_started_at=NULL, published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=?
-      AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(command.stagingPath, command.artifactSha256, command.artifactSize, command.artifactMtime, command.checksumPath, command.checksumSha256, command.manifestPath, command.manifestSha256, command.verificationPath, command.verificationSha256, command.at, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, command.at);
+      AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL
+      AND (publish_state IS NULL OR publish_state='not_started')`).run(command.stagingPath, command.artifactSha256, command.artifactSize, command.artifactMtime, command.checksumPath, command.checksumSha256, command.manifestPath, command.manifestSha256, command.verificationPath, command.verificationSha256, command.at, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, command.at);
     if (Number(result.changes) !== 1) conflict('cas-lost', 'artifact CAS lost');
     this.#event(command.jobId, 'artifact', { stagingPath: command.stagingPath, artifactSha256: command.artifactSha256 }, command.at);
   }
@@ -1931,10 +2010,24 @@ export class OwnershipStore {
     ) {
       conflict('stale-predecessor', 'artifact preparation ownership already exists');
     }
-    const result = this.#db.prepare(`UPDATE jobs SET publish_state='not_started', updated_at=?
+    const artifact = command.artifact;
+    const result = this.#db.prepare(`UPDATE jobs SET publish_state='not_started',
+      artifact_staging_path=?, artifact_sha256=?, artifact_size=?, artifact_mtime=?,
+      checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?,
+      verification_path=?, verification_sha256=?, updated_at=?
       WHERE job_id=? AND state='verifying' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ?
         AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL
         AND publish_state IS NULL AND artifact_staging_path IS NULL AND artifact_quarantine_path IS NULL AND artifact_quarantine_intent_path IS NULL`).run(
+      artifact.stagingPath,
+      artifact.artifactSha256,
+      artifact.artifactSize,
+      artifact.artifactMtime,
+      artifact.checksumPath,
+      artifact.checksumSha256,
+      artifact.manifestPath,
+      artifact.manifestSha256,
+      artifact.verificationPath,
+      artifact.verificationSha256,
       command.at,
       command.jobId,
       command.runnerUnit,
@@ -2041,6 +2134,27 @@ export class OwnershipStore {
     this.#event(command.jobId, 'publish', {
       state: 'publishing',
       quarantineIntentPath: command.quarantinePath,
+    }, command.at);
+  }
+
+  #publishQuarantineAmbiguous(command: Extract<RunnerWriteCommand, { kind: 'publish-quarantine-ambiguous' }>): void {
+    this.#runnerGuard(command, 'publishing');
+    const row = this.#job(command.jobId);
+    const expectedPath = `.osi-image-builder/quarantine/${command.jobId}`;
+    if (
+      command.quarantinePath !== expectedPath
+      || row.publish_state !== 'publishing'
+      || row.artifact_staging_path === null
+      || row.artifact_quarantine_path !== null
+      || row.artifact_quarantine_intent_path !== expectedPath
+    ) {
+      conflict('identity-mismatch', 'ambiguous quarantine rename differs from durable intent');
+    }
+    this.#event(command.jobId, 'publish', {
+      state: 'publishing',
+      quarantineIntentPath: expectedPath,
+      renameResult: command.renameResult,
+      staging: command.staging,
     }, command.at);
   }
 

@@ -54,6 +54,7 @@ const SHA40 = 'a'.repeat(40);
 const HASH_A = 'b'.repeat(64);
 const HASH_B = 'c'.repeat(64);
 const HASH_C = 'd'.repeat(64);
+const HASH_D = 'e'.repeat(64);
 const ACCEPTED = '2026-07-26T08:00:00.000Z';
 const ROOTFS_ALREADY_PRESENT_STDERR = [
   'No series file found',
@@ -250,6 +251,7 @@ async function fixture(options: {
   readonly verifyProducedTargetEvidence?: boolean;
   readonly predictPublishPassed?: boolean;
   readonly requirePreparationIntentBeforePrepare?: boolean;
+  readonly distinctPublisherIdentities?: boolean;
 } = {}): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), 'osi-pipeline-order-'));
   temporaryDirectories.push(directory);
@@ -701,7 +703,12 @@ async function fixture(options: {
         expect(store.getJob(jobId)).toMatchObject({
           state: 'verifying',
           publishState: 'not_started',
-          artifactStagingPath: null,
+          artifactStagingPath: `staging/${jobId}/factory.img.gz`,
+          artifactSha256: HASH_A,
+          artifactSize: 100,
+          checksumPath: `staging/${jobId}/sha256sums`,
+          manifestPath: `staging/${jobId}/build-manifest.json`,
+          verificationPath: `staging/${jobId}/verification.json`,
         });
         expect(store.listEvents(jobId, { limit: 500 }).events.at(-1)).toMatchObject({
           eventType: 'artifact',
@@ -789,7 +796,9 @@ async function fixture(options: {
     mutationCount: 3,
     renameResult: 'RENAMED',
     publisherVersion: LOCK.packageVersion,
-    publisherSourceSha256: HASH_C,
+    publisherSourceSha256: options.distinctPublisherIdentities === true
+      ? HASH_D
+      : HASH_C,
     sourceRelativePath: `.osi-image-builder/staging/${jobId}`,
     destinationRelativePath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5`,
   };
@@ -812,7 +821,9 @@ async function fixture(options: {
       mutationCount: 2,
       renameResult: 'RENAMED',
       publisherVersion: LOCK.packageVersion,
-      publisherSourceSha256: HASH_C,
+      publisherSourceSha256: options.distinctPublisherIdentities === true
+        ? HASH_D
+        : HASH_C,
       sourceRelativePath: `.osi-image-builder/staging/${jobId}`,
       destinationRelativePath: `.osi-image-builder/quarantine/${jobId}`,
     })),
@@ -1024,6 +1035,13 @@ async function fixture(options: {
         },
       },
       publicationFiles,
+      publisherAuthority: {
+        packageVersion: LOCK.packageVersion,
+        publisherExecutableSha256: LOCK.publisherSha256,
+        publisherSourceSha256: options.distinctPublisherIdentities === true
+          ? HASH_D
+          : HASH_C,
+      },
       publisher,
     },
   };
@@ -1371,9 +1389,9 @@ describe('trusted pipeline integration', () => {
           source: null,
           'release-gates': 'check-mqtt-topics',
           frontend: 'mirror-gui',
-          'target-setup': null,
+          'target-setup': 'activate-target',
           feeds: 'install-feeds',
-          config: null,
+          config: 'resolve-config',
           build: 'build-image',
           verify: 'verify-image',
           publish: null,
@@ -1435,6 +1453,20 @@ describe('trusted pipeline integration', () => {
         path: '09-publish.json',
         outcome: 'passed',
       });
+      const publishedJob = value.store.getJob(value.input.jobId);
+      const publishStage = value.store.getStage(value.input.jobId, 'publish')!;
+      const publishEvidence = JSON.parse(await readFile(
+        join(value.statePath, publishStage.evidencePath!),
+        'utf8',
+      )) as {
+        observations: {
+          final: {
+            verificationSha256: string;
+          };
+        };
+      };
+      expect(publishEvidence.observations.final.verificationSha256)
+        .toBe(publishedJob.verificationSha256);
     } finally {
       value.close();
     }
@@ -1453,16 +1485,16 @@ describe('trusted pipeline integration', () => {
           value.store.getStage(value.input.jobId, 'target-setup')!.evidencePath!,
         ),
         'utf8',
-      )) as { operationId: null; observations: Record<string, unknown> };
+      )) as { operationId: 'activate-target'; observations: Record<string, unknown> };
       const configEvidence = JSON.parse(await readFile(
         join(
           value.statePath,
           value.store.getStage(value.input.jobId, 'config')!.evidencePath!,
         ),
         'utf8',
-      )) as { operationId: null; observations: Record<string, unknown> };
-      expect(sourceEvidence.operationId).toBeNull();
-      expect(configEvidence.operationId).toBeNull();
+      )) as { operationId: 'resolve-config'; observations: Record<string, unknown> };
+      expect(sourceEvidence.operationId).toBe('activate-target');
+      expect(configEvidence.operationId).toBe('resolve-config');
       expect(sourceEvidence.observations).toMatchObject(value.sourceObservations);
       expect(configEvidence.observations).toMatchObject(value.configObservations);
       expect(Object.keys(
@@ -1489,8 +1521,8 @@ describe('trusted pipeline integration', () => {
         'selectedTarget',
         'target',
       ]);
-      expect(sourceEvidence.operationId).toBeNull();
-      expect(configEvidence.operationId).toBeNull();
+      expect(sourceEvidence.operationId).toBe('activate-target');
+      expect(configEvidence.operationId).toBe('resolve-config');
     } finally {
       value.close();
     }
@@ -1575,6 +1607,18 @@ describe('trusted pipeline integration', () => {
       await expect(createPipeline(value.input).run()).resolves.toMatchObject({
         state: 'succeeded',
       });
+    } finally {
+      value.close();
+    }
+  });
+
+  it('keeps executable and embedded source publisher identities distinct in composition', async () => {
+    const value = await fixture({ distinctPublisherIdentities: true });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'succeeded',
+      });
+      expect(value.input.services.publisher.publish).toHaveBeenCalledOnce();
     } finally {
       value.close();
     }
@@ -2006,7 +2050,7 @@ describe('trusted pipeline integration', () => {
     }
   });
 
-  it('retains staging when quarantine proof is failed or unknown', async () => {
+  it('retains quarantine intent and active recovery after a post-rename verification failure', async () => {
     const value = await fixture({
       publisher: {
         publish: vi.fn(async (): Promise<PublisherResponse> => ({
@@ -2049,15 +2093,31 @@ describe('trusted pipeline integration', () => {
     });
     try {
       await expect(createPipeline(value.input).run()).resolves.toMatchObject({
-        state: 'failed',
+        state: 'recovery-required',
         blockerCode: 'QUARANTINE_PENDING',
       });
       expect(value.store.getJob(value.input.jobId)).toMatchObject({
-        state: 'failed',
-        publishState: 'blocked',
+        state: 'publishing',
+        publishState: 'publishing',
         artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
         artifactQuarantinePath: null,
+        artifactQuarantineIntentPath: `.osi-image-builder/quarantine/${value.input.jobId}`,
+        terminalAt: null,
       });
+      expect(value.store.getStage(value.input.jobId, 'publish')).toMatchObject({
+        outcome: 'running',
+      });
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events)
+        .toContainEqual(expect.objectContaining({
+          eventType: 'publish',
+          payload: expect.objectContaining({
+            renameResult: 'RENAMED',
+            staging: 'possibly-absent',
+            quarantineIntentPath: `.osi-image-builder/quarantine/${value.input.jobId}`,
+          }),
+        }));
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(0);
     } finally {
       value.close();
     }

@@ -687,8 +687,21 @@ export class BuilderStore {
     const hasAnyPublish = publishFields.some((key) => row[key] !== null && row[key] !== undefined);
     const artifactComplete = ['artifact_sha256', 'artifact_size', 'artifact_mtime', 'checksum_path', 'checksum_sha256', 'manifest_path', 'manifest_sha256', 'verification_path', 'verification_sha256'].every((key) => row[key] !== null && row[key] !== undefined);
     const noPublishBlocker = publishBlockerCode === null && publishBlocker === null;
-    if (publishState === null || publishState === 'not_started') {
-      if (hasAnyPublish) throw new StoreDataError(`${publishState ?? 'null'} publish state contains publish evidence`);
+    if (publishState === null) {
+      if (hasAnyPublish) throw new StoreDataError('null publish state contains publish evidence');
+    } else if (publishState === 'not_started') {
+      const plannedPreparation = artifactComplete
+        && row.artifact_staging_path !== null
+        && row.artifact_quarantine_path === null
+        && row.artifact_quarantine_intent_path === null
+        && row.artifact_final_directory === null
+        && row.artifact_final_path === null
+        && row.publish_started_at === null
+        && row.published_at === null
+        && noPublishBlocker;
+      if (hasAnyPublish && !plannedPreparation) {
+        throw new StoreDataError('not_started publish state contains incomplete preparation ownership');
+      }
     } else if (publishState === 'staged') {
       if (!artifactComplete || row.artifact_staging_path === null || row.artifact_quarantine_path !== null || row.artifact_quarantine_intent_path !== null || row.artifact_final_directory !== null || row.artifact_final_path !== null || row.publish_started_at !== null || row.published_at !== null || !noPublishBlocker) throw new StoreDataError('staged publish state evidence is incoherent');
     } else if (publishState === 'publishing') {

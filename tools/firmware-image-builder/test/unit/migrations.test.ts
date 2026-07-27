@@ -209,6 +209,7 @@ describe('versioned builder database migrations', () => {
       { version: 5, filename: '005_offline_feed_preparation.sql' },
       { version: 6, filename: '006_blocked_publish_artifact_location.sql' },
       { version: 7, filename: '007_publish_intent_and_accepted_operations.sql' },
+      { version: 8, filename: '008_preparation_artifact_ownership.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
       .toEqual(['cleanup_leases', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_entries', 'schema_migrations']);
@@ -323,7 +324,7 @@ describe('versioned builder database migrations', () => {
     const second = openBuilderDatabase(path);
     expect(second.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name").all())
       .toEqual(schema);
-    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 7 });
+    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 8 });
     second.close();
   });
 
@@ -426,7 +427,7 @@ describe('versioned builder database migrations', () => {
     physicalOrderDb.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(1, '001_initial.sql', MIGRATION_REGISTRY[0].sha256, 'x');
     physicalOrderDb.close();
     const accepted = openBuilderDatabase(physicalOrderPath);
-    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 7 });
+    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 8 });
     accepted.close();
   });
 
@@ -767,7 +768,7 @@ describe('versioned builder database migrations', () => {
     fresh.close();
 
     const reopened = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
-    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 7 });
+    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 8 });
     expect(reopened.prepare('SELECT COUNT(*) AS count FROM legacy_blocked_publish_evidence').get()).toEqual({ count: 2 });
     expect(reopened.prepare("SELECT terminal_error_json FROM jobs WHERE job_id='legacy-terminal'").get())
       .toEqual({ terminal_error_json: terminalSentinel });
@@ -826,6 +827,45 @@ describe('versioned builder database migrations', () => {
     });
     expect(upgraded.prepare("SELECT terminal_error_json FROM jobs WHERE job_id='legacy-blocked'").get())
       .toEqual({ terminal_error_json: '{"legacy":true}' });
+    store.close();
+  });
+
+  it('preserves a v7 legacy null preparation state for compatible artifact completion', async () => {
+    const path = await temporaryDatabase();
+    const migrationDir = await copyMigrations();
+    const legacy = new DatabaseSync(path);
+    for (const migration of MIGRATION_REGISTRY.slice(0, 7)) {
+      legacy.exec(await readFile(join(migrationDir, migration.filename), 'utf8'));
+      legacy.prepare(
+        'INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)',
+      ).run(
+        migration.version,
+        migration.filename,
+        migration.sha256,
+        '2026-07-23T00:00:00.000Z',
+      );
+    }
+    insertValidJob(legacy, 'legacy-null-preparation', 'verifying');
+    legacy.prepare(
+      "UPDATE jobs SET publish_state='not_started' WHERE job_id='legacy-null-preparation'",
+    ).run();
+    legacy.close();
+
+    const upgraded = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
+    const store = new BuilderStore(upgraded);
+    expect(store.getJob('legacy-null-preparation')).toMatchObject({
+      state: 'verifying',
+      publishState: 'not_started',
+      artifactStagingPath: null,
+      artifactSha256: null,
+      artifactSize: null,
+      checksumPath: null,
+      manifestPath: null,
+      verificationPath: null,
+    });
+    expect(upgraded.prepare(
+      "SELECT COUNT(*) AS count FROM schema_migrations WHERE version=8",
+    ).get()).toEqual({ count: 1 });
     store.close();
   });
 

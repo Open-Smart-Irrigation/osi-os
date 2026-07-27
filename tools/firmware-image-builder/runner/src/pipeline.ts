@@ -306,6 +306,11 @@ export interface PipelineServices {
       }>,
     ) => Promise<FinalPublicationProof>;
   };
+  readonly publisherAuthority: Readonly<{
+    readonly packageVersion: string;
+    readonly publisherExecutableSha256: string;
+    readonly publisherSourceSha256: string;
+  }>;
   readonly publisher: PublisherClient;
 }
 
@@ -348,7 +353,7 @@ export type PipelineResult =
       state: 'recovery-required';
       buildManifest: JsonObject | null;
       verificationManifest: JsonObject | null;
-      blockerCode: 'RUNNER_DISAPPEARED';
+      blockerCode: 'RUNNER_DISAPPEARED' | 'QUARANTINE_PENDING';
       reason: string;
     }>;
 
@@ -361,7 +366,8 @@ export interface PublicationBindingInput {
 export interface PublishRecoveryInput {
   readonly publisherAuthority: Readonly<{
     readonly packageVersion: string;
-    readonly publisherSha256: string;
+    readonly publisherExecutableSha256: string;
+    readonly publisherSourceSha256: string;
   }>;
   readonly publisher: Pick<PublisherClient, 'recheck' | 'quarantine'>;
   readonly request: PublisherRequest;
@@ -369,6 +375,7 @@ export interface PublishRecoveryInput {
   readonly response: PublisherResponse | null;
   readonly invocationFailure?: NativeFailureEvidence;
   readonly persistQuarantineIntent: (quarantinePath: string) => Promise<void>;
+  readonly persistQuarantineAmbiguity: (quarantinePath: string) => Promise<void>;
   readonly verifyFinal: () => Promise<FinalPublicationProof>;
 }
 
@@ -383,6 +390,15 @@ export type PublishRecoveryResult =
       response: PublisherResponse;
       proof: FinalPublicationProof;
       recovered: boolean;
+      nativeFailures?: readonly NativeFailureEvidence[];
+    }>
+  | Readonly<{
+      kind: 'recovery-required';
+      code: 'QUARANTINE_PENDING';
+      staging: 'possibly-absent';
+      response: PublisherResponse | null;
+      recheck: PublisherResponse;
+      quarantine: PublisherResponse;
       nativeFailures?: readonly NativeFailureEvidence[];
     }>
   | Readonly<{
@@ -421,6 +437,16 @@ class PipelineOwnershipLostError extends Error {
     super(`runner ownership CAS failed: ${conflict}`);
     this.name = 'PipelineOwnershipLostError';
     this.conflict = conflict;
+  }
+}
+
+class PipelineRecoveryRequiredError extends Error {
+  readonly blockerCode: 'QUARANTINE_PENDING';
+
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'PipelineRecoveryRequiredError';
+    this.blockerCode = 'QUARANTINE_PENDING';
   }
 }
 
@@ -558,6 +584,13 @@ function validateServiceComposition(input: PipelineInput): void {
     .map(([, name]) => name);
   if (missing.length > 0) {
     throw new TypeError(`production pipeline composition is incomplete: ${missing.join(', ')}`);
+  }
+  if (
+    typeof input.services.publisherAuthority?.packageVersion !== 'string'
+    || !SHA256.test(input.services.publisherAuthority.publisherExecutableSha256)
+    || !SHA256.test(input.services.publisherAuthority.publisherSourceSha256)
+  ) {
+    throw new TypeError('production pipeline publisher authority is incomplete');
   }
   if (
     !Number.isSafeInteger(input.leaseDurationMs)
@@ -818,7 +851,7 @@ function validatePublisherPathEvidence(
     response.sourceRelativePath !== expected.source
     || response.destinationRelativePath !== destination
     || response.publisherVersion !== authority.packageVersion
-    || response.publisherSourceSha256 !== authority.publisherSha256
+    || response.publisherSourceSha256 !== authority.publisherSourceSha256
   ) {
     throw new Error('publisher path or executable evidence does not match the publication binding');
   }
@@ -958,10 +991,22 @@ async function recoverAmbiguousPublishing(
         ...(nativeFailures.length === 0 ? {} : { nativeFailures }),
       };
     }
+    if (quarantine.renameResult === 'RENAMED') {
+      await input.persistQuarantineAmbiguity(quarantinePath);
+      return {
+        kind: 'recovery-required',
+        code: 'QUARANTINE_PENDING',
+        staging: 'possibly-absent',
+        response: initial,
+        recheck,
+        quarantine,
+        ...(nativeFailures.length === 0 ? {} : { nativeFailures }),
+      };
+    }
     return {
       kind: 'blocked',
       code: 'QUARANTINE_PENDING',
-      staging: quarantine.renameResult === 'RENAMED' ? 'unknown' : 'present',
+      staging: 'present',
       response: initial,
       recheck,
       quarantine,
@@ -1013,9 +1058,12 @@ export async function recoverPublishing(
   if (
     typeof input.publisherAuthority.packageVersion !== 'string'
     || input.publisherAuthority.packageVersion.length === 0
-    || !SHA256.test(input.publisherAuthority.publisherSha256)
-    || /^0+$/u.test(input.publisherAuthority.publisherSha256)
+    || !SHA256.test(input.publisherAuthority.publisherExecutableSha256)
+    || /^0+$/u.test(input.publisherAuthority.publisherExecutableSha256)
+    || !SHA256.test(input.publisherAuthority.publisherSourceSha256)
+    || /^0+$/u.test(input.publisherAuthority.publisherSourceSha256)
     || typeof input.persistQuarantineIntent !== 'function'
+    || typeof input.persistQuarantineAmbiguity !== 'function'
   ) {
     throw new Error('publisher authority or quarantine persistence is incomplete');
   }
@@ -1319,7 +1367,7 @@ export function createPipeline(input: PipelineInput): {
       throw new Error(`${stage} has no trusted operation evidence`);
     }
     return {
-      operationId: stage === 'feeds' ? operationIdFor(phase.executions) : null,
+      operationId: operationIdFor(phase.executions),
       commands: phase.executions.map(({ command }) => command),
       observations: phase.observations,
     };
@@ -1522,9 +1570,7 @@ export function createPipeline(input: PipelineInput): {
     verificationManifest = metadata.verification;
   };
 
-  const terminalVerification = (
-    evidence: EvidencePublication,
-  ): Readonly<{ manifest: JsonObject; bytes: string }> => {
+  const terminalVerification = (): Readonly<{ manifest: JsonObject; bytes: string }> => {
     if (verificationManifest === null) {
       throw new Error('staged verification manifest is unavailable');
     }
@@ -1568,8 +1614,7 @@ export function createPipeline(input: PipelineInput): {
         ...(observations as JsonObject),
         stageEvidence: terminalStages,
         publishEvidence: {
-          path: evidence.path,
-          sha256: evidence.sha256,
+          path: `jobs/${input.jobId}/evidence/09-publish.json`,
         },
       },
     }, 'terminal verification manifest');
@@ -1643,6 +1688,13 @@ export function createPipeline(input: PipelineInput): {
       sourceSha: binding.pinnedSha,
       targetId: binding.targetId,
     });
+    if (
+      provenance?.lock.packageVersion !== input.services.publisherAuthority.packageVersion
+      || provenance.lock.publisherSha256
+        !== input.services.publisherAuthority.publisherExecutableSha256
+    ) {
+      throw new Error('publisher executable authority does not match the builder lock');
+    }
     renewLease();
     let response: PublisherResponse | null = null;
     let invocationFailure: NativeFailureEvidence | undefined;
@@ -1653,10 +1705,7 @@ export function createPipeline(input: PipelineInput): {
     }
     renewLease();
     const outcome = await recoverPublishing({
-      publisherAuthority: {
-        packageVersion: provenance?.lock.packageVersion ?? '',
-        publisherSha256: provenance?.lock.publisherSha256 ?? '',
-      },
+      publisherAuthority: input.services.publisherAuthority,
       publisher: input.services.publisher,
       request,
       binding,
@@ -1669,11 +1718,25 @@ export function createPipeline(input: PipelineInput): {
           quarantinePath,
         });
       },
+      persistQuarantineAmbiguity: async (quarantinePath) => {
+        write({
+          kind: 'publish-quarantine-ambiguous',
+          expectedState: 'publishing',
+          quarantinePath,
+          renameResult: 'RENAMED',
+          staging: 'possibly-absent',
+        });
+      },
       verifyFinal: () => input.services.publicationFiles.verifyFinal({
         binding,
         artifact: preparedArtifact!,
       }),
     });
+    if (outcome.kind === 'recovery-required') {
+      throw new PipelineRecoveryRequiredError(
+        'native quarantine rename requires authoritative recovery recheck',
+      );
+    }
     if (outcome.kind === 'blocked') {
       blockerCode = outcome.code;
       const blocker = canonicalObject({
@@ -1999,21 +2062,41 @@ export function createPipeline(input: PipelineInput): {
       }));
       renewLease();
       const finishedAt = now();
+      let evidenceResult = stageResult;
+      let terminal: Readonly<{ manifest: JsonObject; bytes: string }> | null = null;
+      if (stage === 'publish') {
+        terminal = terminalVerification();
+        const final = stageResult.observations.final;
+        if (final === null || typeof final !== 'object' || Array.isArray(final)) {
+          throw new Error('publication stage result omitted final verification evidence');
+        }
+        evidenceResult = {
+          ...stageResult,
+          observations: canonicalObject({
+            ...stageResult.observations,
+            final: {
+              ...(final as JsonObject),
+              verificationSha256: sha256(terminal.bytes),
+            },
+          }, 'terminal publication observations'),
+        };
+        result = evidenceResult;
+      }
       const evidence = await withLeaseHeartbeat(() => input.evidenceWriter.write({
         jobId: job.jobId,
         stage,
         startedAt,
         finishedAt,
         outcome: 'passed',
-        operationId: stageResult.operationId,
-        commands: stageResult.commands,
+        operationId: evidenceResult.operationId,
+        commands: evidenceResult.commands,
         inputs: {
           targetId: job.targetId,
           rootId: job.rootId,
           branch: job.branch,
           pinnedSha: job.pinnedSha,
         },
-        observations: stageResult.observations,
+        observations: evidenceResult.observations,
         error: null,
       }));
       renewLease();
@@ -2025,7 +2108,12 @@ export function createPipeline(input: PipelineInput): {
           throw new Error('publication terminal artifact is incomplete');
         }
         const priorVerificationSha256 = preparedArtifact.verificationSha256;
-        const terminal = terminalVerification(evidence);
+        if (
+          terminal === null
+          || evidence.path !== `jobs/${job.jobId}/evidence/09-publish.json`
+        ) {
+          throw new Error('publication evidence path is not the fixed terminal path');
+        }
         const finalProof = validateFinalProof(await withLeaseHeartbeat(
           () => input.services.publicationFiles.finalizeVerification({
             binding: publicationBinding!,
@@ -2072,7 +2160,10 @@ export function createPipeline(input: PipelineInput): {
       });
       renewLease();
     } catch (error) {
-      if (error instanceof PipelineOwnershipLostError) throw error;
+      if (
+        error instanceof PipelineOwnershipLostError
+        || error instanceof PipelineRecoveryRequiredError
+      ) throw error;
       const operationId = error instanceof PipelineExpectedError
         ? error.contract.operationId ?? null
         : result?.operationId
@@ -2159,6 +2250,15 @@ export function createPipeline(input: PipelineInput): {
           buildManifest,
           verificationManifest,
           blockerCode: 'RUNNER_DISAPPEARED',
+          reason: error.message,
+        };
+      }
+      if (error instanceof PipelineRecoveryRequiredError) {
+        return {
+          state: 'recovery-required',
+          buildManifest,
+          verificationManifest,
+          blockerCode: error.blockerCode,
           reason: error.message,
         };
       }

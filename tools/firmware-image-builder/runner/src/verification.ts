@@ -973,6 +973,9 @@ async function verifyConfig(
         fail('TARGET_CONFIG_MISMATCH', `Task 15 ${stage} evidence is not an object`);
       }
       const evidence = parsed as Record<string, unknown>;
+      const expectedOperationId = stage === 'target-setup'
+        ? 'activate-target'
+        : 'resolve-config';
       let startedAt: string;
       let finishedAt: string;
       try {
@@ -986,7 +989,7 @@ async function verifyConfig(
         || evidence.jobId !== input.workspace.jobId
         || evidence.stage !== stage
         || evidence.outcome !== 'passed'
-        || evidence.operationId !== null
+        || evidence.operationId !== expectedOperationId
         || evidence.error !== null
         || !Array.isArray(evidence.commands)
         || !evidence.inputs

@@ -98,7 +98,10 @@ import {
   type TargetSetupResult,
   type TargetSetupSourceObservations,
 } from './target-setup.js';
-import type { CommandResult } from './command-executor.js';
+import {
+  createCommandExecutor,
+  type CommandResult,
+} from './command-executor.js';
 import {
   verifyFirmwareArtifacts,
   type RootfsNodeResolutionRequest,
@@ -577,13 +580,18 @@ function parseInstalledLock(path: string, bytes: Buffer): BuilderLock {
 
 export interface InstalledPublisherAuthority {
   readonly packageVersion: string;
-  readonly publisherSha256: string;
+  readonly publisherExecutableSha256: string;
+  readonly publisherSourceSha256: string;
 }
 
 export function validateInstalledPublisherAuthority(
   lock: Readonly<Pick<BuilderLock, 'schemaVersion' | 'packageVersion' | 'publisherSha256'>>,
   installedVersion: string,
   publisherBytes: Buffer,
+  versionEvidence: Readonly<{
+    readonly publisherVersion: string;
+    readonly publisherSourceSha256: string;
+  }>,
 ): InstalledPublisherAuthority {
   if (lock.schemaVersion !== 1 || lock.packageVersion !== installedVersion) {
     throw new Error('installed publisher package version does not match the builder lock');
@@ -599,9 +607,73 @@ export function validateInstalledPublisherAuthority(
   if (observedSha256 !== lock.publisherSha256) {
     throw new Error('installed publisher hash does not match the builder lock');
   }
+  if (versionEvidence.publisherVersion !== lock.packageVersion) {
+    throw new Error('installed publisher version evidence does not match the builder lock');
+  }
+  if (
+    !/^[0-9a-f]{64}$/u.test(versionEvidence.publisherSourceSha256)
+    || /^0+$/u.test(versionEvidence.publisherSourceSha256)
+  ) {
+    throw new Error('installed publisher source hash evidence is invalid');
+  }
   return Object.freeze({
     packageVersion: lock.packageVersion,
-    publisherSha256: lock.publisherSha256,
+    publisherExecutableSha256: lock.publisherSha256,
+    publisherSourceSha256: versionEvidence.publisherSourceSha256,
+  });
+}
+
+export async function readHeldPublisherVersion(
+  executable: string,
+): Promise<Readonly<{
+  readonly publisherVersion: string;
+  readonly publisherSourceSha256: string;
+}>> {
+  const argv = [executable, '--version'] as const;
+  const result = await createCommandExecutor().run(argv, {
+    env: { PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' },
+    timeoutMs: 30_000,
+    maxCaptureBytes: 4_096,
+  });
+  if (
+    JSON.stringify(result.argv) !== JSON.stringify(argv)
+    || result.exitCode !== 0
+    || result.signal !== null
+    || result.timedOut
+  ) {
+    throw new Error('installed publisher version execution evidence is invalid');
+  }
+  const text = result.stdout.endsWith('\n')
+    ? result.stdout.slice(0, -1)
+    : result.stdout;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error('installed publisher returned invalid version evidence', {
+      cause: error,
+    });
+  }
+  if (
+    parsed === null
+    || typeof parsed !== 'object'
+    || Array.isArray(parsed)
+    || JSON.stringify(parsed) !== text
+    || Object.keys(parsed).join(',') !== 'available,version,sourceSha256'
+  ) {
+    throw new Error('installed publisher version evidence is not canonical');
+  }
+  const value = parsed as Record<string, unknown>;
+  if (
+    value.available !== true
+    || typeof value.version !== 'string'
+    || typeof value.sourceSha256 !== 'string'
+  ) {
+    throw new Error('installed publisher version evidence is incomplete');
+  }
+  return Object.freeze({
+    publisherVersion: value.version,
+    publisherSourceSha256: value.sourceSha256,
   });
 }
 
@@ -1069,7 +1141,8 @@ function createPublicationFiles(
         canonicalBytes !== input.verificationManifestBytes
         || publishEvidenceRecord === null
         || publishEvidenceRecord.path !== input.publishEvidencePath
-        || publishEvidenceRecord.sha256 !== input.publishEvidenceSha256
+        || Object.keys(publishEvidenceRecord).join('\0') !== 'path'
+        || !/^[0-9a-f]{64}$/u.test(input.publishEvidenceSha256)
         || !Array.isArray(stages)
         || stages.length !== 10
         || lastStage?.stage !== 'publish'
@@ -1431,6 +1504,7 @@ async function createProductionComposition(
       lock,
       installedVersion,
       heldPublisher.bytes,
+      await readHeldPublisherVersion(heldPublisher.executable),
     );
     const manifest = loadManifestFromBytes(manifestPath, manifestBytes);
     const job = store.getJob(args.jobId);
@@ -2002,11 +2076,12 @@ async function createProductionComposition(
         },
       },
       publicationFiles,
+      publisherAuthority,
       publisher: createRunnerPublisherClient({
         executable: heldPublisher.executable,
         approvedRoots: loaded.config.approvedOutputRoots,
         expectedVersion: publisherAuthority.packageVersion,
-        expectedSourceSha256: publisherAuthority.publisherSha256,
+        expectedSourceSha256: publisherAuthority.publisherSourceSha256,
       }),
     };
 

@@ -20,6 +20,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   parseRunnerArguments,
   holdInstalledPublisher,
+  readHeldPublisherVersion,
   resolveTrustedOperationRequest,
   runRunner,
   stageVerifiedArtifact,
@@ -50,10 +51,28 @@ describe('production runner composition', () => {
     expect(runRunner).toHaveLength(1);
   });
 
-  it('binds installed publisher bytes to package version and lock hash', () => {
+  it('binds distinct installed publisher executable and embedded source identities', () => {
     const publisherBytes = Buffer.from('installed native publisher');
     const publisherSha256 = createHash('sha256').update(publisherBytes).digest('hex');
-    expect(validateInstalledPublisherAuthority(
+    const publisherSourceSha256 = 'e'.repeat(64);
+    const validate = validateInstalledPublisherAuthority as unknown as (
+      lock: {
+        schemaVersion: 1;
+        packageVersion: string;
+        publisherSha256?: string;
+      },
+      installedVersion: string,
+      bytes: Buffer,
+      versionEvidence: {
+        publisherVersion: string;
+        publisherSourceSha256: string;
+      },
+    ) => {
+      packageVersion: string;
+      publisherExecutableSha256: string;
+      publisherSourceSha256: string;
+    };
+    expect(validate(
       {
         schemaVersion: 1,
         packageVersion: '2026.07.27.1',
@@ -61,11 +80,16 @@ describe('production runner composition', () => {
       },
       '2026.07.27.1',
       publisherBytes,
+      {
+        publisherVersion: '2026.07.27.1',
+        publisherSourceSha256,
+      },
     )).toEqual({
       packageVersion: '2026.07.27.1',
-      publisherSha256,
+      publisherExecutableSha256: publisherSha256,
+      publisherSourceSha256,
     });
-    expect(() => validateInstalledPublisherAuthority(
+    expect(() => validate(
       {
         schemaVersion: 1,
         packageVersion: '2026.07.27.1',
@@ -73,16 +97,24 @@ describe('production runner composition', () => {
       },
       '2026.07.27.1',
       publisherBytes,
+      {
+        publisherVersion: '2026.07.27.1',
+        publisherSourceSha256,
+      },
     )).toThrow(/publisher.*hash/i);
-    expect(() => validateInstalledPublisherAuthority(
+    expect(() => validate(
       {
         schemaVersion: 1,
         packageVersion: '2026.07.27.1',
       },
       '2026.07.27.1',
       publisherBytes,
+      {
+        publisherVersion: '2026.07.27.1',
+        publisherSourceSha256,
+      },
     )).toThrow(/publisher.*hash/i);
-    expect(() => validateInstalledPublisherAuthority(
+    expect(() => validate(
       {
         schemaVersion: 1,
         packageVersion: '2026.07.27.1',
@@ -90,7 +122,61 @@ describe('production runner composition', () => {
       },
       '2026.07.27.2',
       publisherBytes,
+      {
+        publisherVersion: '2026.07.27.1',
+        publisherSourceSha256,
+      },
     )).toThrow(/package version/i);
+    expect(() => validate(
+      {
+        schemaVersion: 1,
+        packageVersion: '2026.07.27.1',
+        publisherSha256,
+      },
+      '2026.07.27.1',
+      publisherBytes,
+      {
+        publisherVersion: '2026.07.27.2',
+        publisherSourceSha256,
+      },
+    )).toThrow(/publisher.*version/i);
+  });
+
+  it('composes publisher authority from held executable and embedded source evidence', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'osi-publisher-authority-'));
+    const installed = join(directory, 'osi-image-publish');
+    const sourceSha256 = 'e'.repeat(64);
+    const publisherBytes = Buffer.from(
+      `#!/bin/sh\nprintf '%s\\n' '{"available":true,"version":"${PUBLISHER_VERSION}","sourceSha256":"${sourceSha256}"}'\n`,
+    );
+    try {
+      await writeFile(installed, publisherBytes);
+      await chmod(installed, 0o555);
+      const held = await holdInstalledPublisher(installed);
+      try {
+        const authority = validateInstalledPublisherAuthority(
+          {
+            schemaVersion: 1,
+            packageVersion: PUBLISHER_VERSION,
+            publisherSha256: held.sha256,
+          },
+          PUBLISHER_VERSION,
+          held.bytes,
+          await readHeldPublisherVersion(held.executable),
+        );
+        expect(authority).toEqual({
+          packageVersion: PUBLISHER_VERSION,
+          publisherExecutableSha256: held.sha256,
+          publisherSourceSha256: sourceSha256,
+        });
+        expect(authority.publisherSourceSha256)
+          .not.toBe(authority.publisherExecutableSha256);
+      } finally {
+        await held.close();
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('executes the held publisher inode after its installed pathname is replaced', async () => {
@@ -255,7 +341,8 @@ const publishEvidence = Object.freeze({
 });
 const publisherAuthority = Object.freeze({
   packageVersion: PUBLISHER_VERSION,
-  publisherSha256: PUBLISHER_SHA,
+  publisherExecutableSha256: PUBLISHER_SHA,
+  publisherSourceSha256: PUBLISHER_SHA,
 });
 
 function response(
@@ -336,12 +423,35 @@ describe('publication binding', () => {
 });
 
 describe('native publication recovery', () => {
+  it('rejects missing quarantine persistence before native recovery', async () => {
+    const native = publisher();
+    await expect(recoverPublishing({
+      publisherAuthority,
+      persistQuarantineIntent: async () => {},
+      persistQuarantineAmbiguity: undefined as never,
+      publisher: native,
+      request,
+      binding,
+      response: response({
+        published: false,
+        mutationCount: 3,
+        errorCode: 'PUBLISH_FAILED',
+        renameResult: 'RENAMED',
+        ...publishEvidence,
+      }),
+      verifyFinal: async () => proof(),
+    })).rejects.toThrow(/quarantine persistence/i);
+    expect(native.recheck).not.toHaveBeenCalled();
+    expect(native.quarantine).not.toHaveBeenCalled();
+  });
+
   it('rechecks post-rename ambiguity and accepts only a complete held final proof', async () => {
     const native = publisher();
     const verifyFinal = vi.fn(async () => proof());
     await expect(recoverPublishing({
       publisherAuthority,
       persistQuarantineIntent: async () => {},
+      persistQuarantineAmbiguity: async () => {},
       publisher: native,
       request,
       binding,
@@ -398,6 +508,7 @@ describe('native publication recovery', () => {
       persistQuarantineIntent: async (path) => {
         order.push(`persist:${path}`);
       },
+      persistQuarantineAmbiguity: async () => {},
       verifyFinal: async () => proof(),
     })).resolves.toMatchObject({
       kind: 'blocked',
@@ -432,6 +543,7 @@ describe('native publication recovery', () => {
     await expect(recoverPublishing({
       publisherAuthority,
       persistQuarantineIntent: async () => {},
+      persistQuarantineAmbiguity: async () => {},
       publisher: native,
       request,
       binding,
@@ -451,6 +563,7 @@ describe('native publication recovery', () => {
   });
 
   it('does not claim staging survives an ambiguous quarantine rename', async () => {
+    const ambiguities: string[] = [];
     const native = publisher({
       recheck: vi.fn(async () => response({
         destination: 'absent',
@@ -468,6 +581,9 @@ describe('native publication recovery', () => {
     await expect(recoverPublishing({
       publisherAuthority,
       persistQuarantineIntent: async () => {},
+      persistQuarantineAmbiguity: async (path) => {
+        ambiguities.push(path);
+      },
       publisher: native,
       request,
       binding,
@@ -480,13 +596,16 @@ describe('native publication recovery', () => {
       }),
       verifyFinal: async () => proof(),
     })).resolves.toMatchObject({
-      kind: 'blocked',
+      kind: 'recovery-required',
       code: 'QUARANTINE_PENDING',
-      staging: 'unknown',
+      staging: 'possibly-absent',
       quarantine: {
         renameResult: 'RENAMED',
       },
     });
+    expect(ambiguities).toEqual([
+      `.osi-image-builder/quarantine/${JOB_ID}`,
+    ]);
   });
 
   it.each([
@@ -530,6 +649,7 @@ describe('native publication recovery', () => {
     await expect(recoverPublishing({
       publisherAuthority,
       persistQuarantineIntent: async () => {},
+      persistQuarantineAmbiguity: async () => {},
       publisher: native,
       request,
       binding,
@@ -569,6 +689,7 @@ describe('native publication recovery', () => {
     await expect(recoverPublishing({
       publisherAuthority,
       persistQuarantineIntent: async () => {},
+      persistQuarantineAmbiguity: async () => {},
       publisher: native,
       request,
       binding,
@@ -593,6 +714,7 @@ describe('native publication recovery', () => {
     await expect(recoverPublishing({
       publisherAuthority,
       persistQuarantineIntent: async () => {},
+      persistQuarantineAmbiguity: async () => {},
       publisher: native,
       request,
       binding,
@@ -617,6 +739,7 @@ describe('native publication recovery', () => {
     await expect(recoverPublishing({
       publisherAuthority,
       persistQuarantineIntent: async () => {},
+      persistQuarantineAmbiguity: async () => {},
       publisher: native,
       request,
       binding,
@@ -638,6 +761,7 @@ describe('native publication recovery', () => {
     await expect(recoverPublishing({
       publisherAuthority,
       persistQuarantineIntent: async () => {},
+      persistQuarantineAmbiguity: async () => {},
       publisher: native,
       request,
       binding,

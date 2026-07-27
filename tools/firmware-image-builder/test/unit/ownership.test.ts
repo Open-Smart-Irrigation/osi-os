@@ -5,9 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
-import { BuilderStore } from '../../api/src/store.js';
+import { BuilderStore, type JsonObject } from '../../api/src/store.js';
 import { encodeJson, normalizeJson } from '../../api/src/validation.js';
-import type { JobState, PipelineStageName } from '../../domain/types.js';
+import {
+  PIPELINE_STAGE_NAMES,
+  type JobState,
+  type PipelineStageName,
+} from '../../domain/types.js';
 import {
   OwnershipStore, OwnershipTransactionError, OwnershipValidationError, OwnershipViolationError,
   type ApiWriteCommand, type CleanupPostcondition, type CleanupSnapshot, type CleanupWriteCommand, type DirectInterruptionProof, type DirectLogProof, type StagingCleanupProof,
@@ -76,6 +80,31 @@ async function synchronizedWorkers(path: string, writes: ReadonlyArray<readonly 
 function canonicalJson(value: Record<string, unknown>): string { return JSON.stringify(Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))); }
 function manifestHash(jobId: string): string { return createHash('sha256').update(canonicalJson({ artifactSha256: SHA64, branch: 'main', jobId, pinnedSha: SHA40, targetId: 'rpi-5' })).digest('hex'); }
 function verificationHash(jobId: string): string { return createHash('sha256').update(canonicalJson({ artifactSha256: SHA64, branch: 'main', jobId, pinnedSha: SHA40, targetId: 'rpi-5' })).digest('hex'); }
+function terminalVerification(jobId: string): { content: JsonObject; bytes: string; sha256: string } {
+  const content: JsonObject = {
+    artifactSha256: SHA64,
+    branch: 'main',
+    jobId,
+    observations: {
+      publishEvidence: {
+        path: `jobs/${jobId}/evidence/09-publish.json`,
+      },
+      stageEvidence: PIPELINE_STAGE_NAMES.map((stage, index) => ({
+        stage,
+        path: `${String(index).padStart(2, '0')}-${stage}.json`,
+        outcome: 'passed',
+      })),
+    },
+    pinnedSha: SHA40,
+    targetId: 'rpi-5',
+  };
+  const bytes = encodeJson(content, 'terminal verification fixture', true);
+  return {
+    content,
+    bytes,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+  };
+}
 const CHECKSUM_CONTENT = `${SHA64}  image\n`;
 function checksumHash(): string { return createHash('sha256').update(CHECKSUM_CONTENT).digest('hex'); }
 
@@ -203,10 +232,13 @@ function seedUnsealedLogs(path: string, jobId: string): void {
   for (const stream of ['runner', 'docker']) db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, size_bytes) VALUES (?, ?, 0, ?, ?, 0)').run(jobId, stream, `logs/${stream}-0.log`, NOW);
   db.close();
 }
-function toVerifying(ownership: OwnershipStore, jobId: string): void {
+function advanceToVerifying(ownership: OwnershipStore, jobId: string): void {
   ownership.apiWrite(dispatch(jobId)); ownership.runnerWrite(lease(ACTIVE, jobId));
   const stages: Array<[PipelineStageName, JobState, JobState]> = [['preflight', 'starting', 'preflight'], ['source', 'preflight', 'source'], ['release-gates', 'source', 'release_gates'], ['frontend', 'release_gates', 'frontend'], ['target-setup', 'frontend', 'target_setup'], ['feeds', 'target_setup', 'feeds'], ['config', 'feeds', 'config'], ['build', 'config', 'building'], ['verify', 'building', 'verifying']];
   for (const [name, from, to] of stages) ownership.runnerWrite({ ...runnerBase(jobId), kind: 'stage', expectedState: from, state: to, stage: name, outcome: 'passed', startedAt: NOW, finishedAt: NOW, evidencePath: `evidence/${name}`, evidenceSha256: SHA64 });
+}
+function toVerifying(ownership: OwnershipStore, jobId: string): void {
+  advanceToVerifying(ownership, jobId);
   ownership.runnerWrite({ ...runnerBase(jobId), kind: 'artifact', expectedState: 'verifying', state: 'verifying', stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256: manifestHash(jobId), verificationPath: 'staging/verify', verificationSha256: verificationHash(jobId) });
 }
 function toPublishing(ownership: OwnershipStore, jobId: string): void {
@@ -224,15 +256,16 @@ function toPublishing(ownership: OwnershipStore, jobId: string): void {
 function recoveryEvidence(jobId: string, terminalState: 'succeeded' | 'failed' = 'succeeded'): PublishRecoveryEvidence {
   const manifestContent = { artifactSha256: SHA64, branch: 'main', jobId, pinnedSha: SHA40, targetId: 'rpi-5' };
   const manifestSha256 = manifestHash(jobId);
-  const verificationContent = { artifactSha256: SHA64, branch: 'main', jobId, pinnedSha: SHA40, targetId: 'rpi-5' };
-  const verificationSha256 = verificationHash(jobId);
+  const stagedVerificationContent = { artifactSha256: SHA64, branch: 'main', jobId, pinnedSha: SHA40, targetId: 'rpi-5' };
+  const stagedVerificationSha256 = verificationHash(jobId);
+  const terminal = terminalVerification(jobId);
   const success = terminalState === 'succeeded';
   return {
   runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', leaseExpiresAt: ACTIVE, inactiveAt: LATER, observedAt: RECOVERY }, container: absent(RECOVERY),
   stage: { startedAt: NOW, finishedAt: RECOVERY, evidencePath: `jobs/${jobId}/evidence/09-publish.json`, evidenceSha256: SHA64 },
-  artifact: { stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256, verificationPath: 'staging/verify', verificationSha256 },
+  artifact: { stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256, verificationPath: 'staging/verify', verificationSha256: stagedVerificationSha256 },
   final: { directory: `release/${jobId}`, path: `release/${jobId}/image`, publishStartedAt: NOW, publishedAt: null },
-  observed: { final: success ? { present: true, path: `release/${jobId}/image`, held: true, size: 10, sha256: SHA64 } : { present: false, path: `release/${jobId}/image`, held: false, size: null, sha256: null }, checksum: { present: true, path: success ? `release/${jobId}/sha256sums` : 'staging/sums', contents: CHECKSUM_CONTENT, sha256: checksumHash() }, manifest: { present: true, path: success ? `release/${jobId}/build-manifest.json` : 'staging/manifest', bytes: canonicalJson(manifestContent), content: manifestContent, sha256: manifestSha256 }, verification: { present: true, path: success ? `release/${jobId}/verification.json` : 'staging/verify', bytes: canonicalJson(verificationContent), content: verificationContent, sha256: verificationSha256 }, staging: success ? { state: 'absent', path: null, sha256: null } : { state: 'present', path: 'staging/image', sha256: SHA64 }, logs: { runner: 'sealed', docker: 'sealed', verifiedAt: RECOVERY, noGap: true } },
+  observed: { final: success ? { present: true, path: `release/${jobId}/image`, held: true, size: 10, sha256: SHA64 } : { present: false, path: `release/${jobId}/image`, held: false, size: null, sha256: null }, checksum: { present: true, path: success ? `release/${jobId}/sha256sums` : 'staging/sums', contents: CHECKSUM_CONTENT, sha256: checksumHash() }, manifest: { present: true, path: success ? `release/${jobId}/build-manifest.json` : 'staging/manifest', bytes: canonicalJson(manifestContent), content: manifestContent, sha256: manifestSha256 }, verification: { present: true, path: success ? `release/${jobId}/verification.json` : 'staging/verify', bytes: success ? terminal.bytes : canonicalJson(stagedVerificationContent), content: success ? terminal.content : stagedVerificationContent, sha256: success ? terminal.sha256 : stagedVerificationSha256 }, staging: success ? { state: 'absent', path: null, sha256: null } : { state: 'present', path: 'staging/image', sha256: SHA64 }, logs: { runner: 'sealed', docker: 'sealed', verifiedAt: RECOVERY, noGap: true } },
   }; }
 
 afterEach(async () => { for (const close of closers.splice(0)) close(); await Promise.all(tempPaths.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -252,6 +285,74 @@ describe('actor-owned compare-and-set writes', () => {
     }
     expect(Object.getOwnPropertyNames(OwnershipStore.prototype)).toEqual(expect.arrayContaining(['constructor', 'apiWrite', 'runnerWrite', 'cleanupWrite']));
     expect(Object.getOwnPropertyNames(OwnershipStore.prototype).filter((name) => !['constructor', 'apiWrite', 'runnerWrite', 'cleanupWrite'].includes(name))).toEqual([]);
+  });
+
+  it('persists complete planned staging ownership before preparation mutates files', async () => {
+    const jobId = 'preparing-artifact';
+    const target = await fixture(jobId);
+    advanceToVerifying(target.ownership, jobId);
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      kind: 'artifact-preparation-intent',
+      expectedState: 'verifying',
+      stagingDirectory: `staging/${jobId}`,
+      artifact: {
+        stagingPath: `staging/${jobId}/image`,
+        artifactSha256: SHA64,
+        artifactSize: 10,
+        artifactMtime: NOW,
+        checksumPath: `staging/${jobId}/sha256sums`,
+        checksumSha256: checksumHash(),
+        manifestPath: `staging/${jobId}/build-manifest.json`,
+        manifestSha256: manifestHash(jobId),
+        verificationPath: `staging/${jobId}/verification.json`,
+        verificationSha256: verificationHash(jobId),
+      },
+    }).ok).toBe(true);
+    expect(target.store.getJob(jobId)).toMatchObject({
+      state: 'verifying',
+      publishState: 'not_started',
+      artifactStagingPath: `staging/${jobId}/image`,
+      artifactSha256: SHA64,
+      artifactSize: 10,
+      checksumPath: `staging/${jobId}/sha256sums`,
+      checksumSha256: checksumHash(),
+      manifestPath: `staging/${jobId}/build-manifest.json`,
+      manifestSha256: manifestHash(jobId),
+      verificationPath: `staging/${jobId}/verification.json`,
+      verificationSha256: verificationHash(jobId),
+    });
+  });
+
+  it('allows a legacy null not_started row to complete without a fabricated plan', async () => {
+    const jobId = 'legacy-null-preparation';
+    const target = await fixture(jobId);
+    advanceToVerifying(target.ownership, jobId);
+    const database = openBuilderDatabase(target.path);
+    database.prepare(
+      "UPDATE jobs SET publish_state='not_started' WHERE job_id=?",
+    ).run(jobId);
+    database.close();
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      kind: 'artifact',
+      expectedState: 'verifying',
+      state: 'verifying',
+      stagingPath: 'staging/image',
+      artifactSha256: SHA64,
+      artifactSize: 10,
+      artifactMtime: NOW,
+      checksumPath: 'staging/sums',
+      checksumSha256: checksumHash(),
+      manifestPath: 'staging/manifest',
+      manifestSha256: manifestHash(jobId),
+      verificationPath: 'staging/verify',
+      verificationSha256: verificationHash(jobId),
+    }).ok).toBe(true);
+    expect(target.store.getJob(jobId)).toMatchObject({
+      publishState: 'staged',
+      artifactStagingPath: 'staging/image',
+    });
   });
 
   it('prevalidates hostile and oversized commands before attempting BEGIN', async () => {
@@ -966,6 +1067,8 @@ describe('actor-owned compare-and-set writes', () => {
       evidencePath: 'jobs/job-2/evidence/09-publish.json',
       evidenceSha256: SHA64,
     });
+    expect(success.store.getJob('job-2').verificationSha256)
+      .toBe(terminalVerification('job-2').sha256);
     const failed = await fixture('job-3'); toPublishing(failed.ownership, 'job-3'); seedLogs(failed.path, 'job-3');
     const failedResult = failed.ownership.apiWrite({ kind: 'publish-recovery', jobId: 'job-3', expectedState: 'publishing', at: RECOVERY, state: 'failed', evidence: recoveryEvidence('job-3', 'failed'), errorCode: 'PUBLISH_FAILED', error: { reason: 'final verification failed' } });
     expect(failedResult).toMatchObject({ ok: true });
@@ -978,6 +1081,55 @@ describe('actor-owned compare-and-set writes', () => {
     const incomplete = await fixture('job-4'); toPublishing(incomplete.ownership, 'job-4'); seedLogs(incomplete.path, 'job-4');
     expect(incomplete.ownership.apiWrite({ kind: 'publish-recovery', jobId: 'job-4', expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence: { ...recoveryEvidence('job-4'), artifact: { ...recoveryEvidence('job-4').artifact, manifestSha256: SHA64_B } } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
     expect(failed.store.getJob('job-3')).toMatchObject({ state: 'failed', artifactStagingPath: 'staging/image', publishState: 'blocked' });
+  });
+
+  it('rejects successful recovery while published verification still says publish running', async () => {
+    const jobId = 'recovery-running-verification';
+    const target = await fixture(jobId);
+    toPublishing(target.ownership, jobId);
+    seedLogs(target.path, jobId);
+    const evidence = recoveryEvidence(jobId);
+    const content = {
+      artifactSha256: SHA64,
+      branch: 'main',
+      jobId,
+      observations: {
+        publishEvidence: {
+          path: `jobs/${jobId}/evidence/09-publish.json`,
+        },
+        stageEvidence: PIPELINE_STAGE_NAMES.map((stage, index) => ({
+          stage,
+          path: `${String(index).padStart(2, '0')}-${stage}.json`,
+          outcome: stage === 'publish' ? 'running' : 'passed',
+        })),
+      },
+      pinnedSha: SHA40,
+      targetId: 'rpi-5',
+    };
+    const bytes = encodeJson(content, 'running verification fixture', true);
+    const verification = {
+      ...evidence.observed.verification,
+      bytes,
+      content,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    };
+    expect(target.ownership.apiWrite({
+      kind: 'publish-recovery',
+      jobId,
+      expectedState: 'publishing',
+      at: RECOVERY,
+      state: 'succeeded',
+      evidence: {
+        ...evidence,
+        observed: {
+          ...evidence.observed,
+          verification,
+        },
+      },
+    })).toMatchObject({
+      ok: false,
+      conflict: { kind: 'identity-mismatch' },
+    });
   });
 
   it('recovers an exact quarantine rename after a crash before the terminal write', async () => {
