@@ -211,7 +211,7 @@ describe('versioned builder database migrations', () => {
       { version: 7, filename: '007_publish_intent_and_accepted_operations.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
-      .toEqual(['cleanup_leases', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'queue_entries', 'schema_migrations']);
+      .toEqual(['cleanup_leases', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_entries', 'schema_migrations']);
     expectColumns(db, 'jobs', [
       'job_id', 'request_id', 'request_json', 'source_remote', 'source_ref', 'source_branch', 'branch', 'expected_sha', 'pinned_sha',
       'target_id', 'root_id', 'target_manifest_sha256', 'source_commit_time', 'source_author', 'source_subject',
@@ -254,6 +254,12 @@ describe('versioned builder database migrations', () => {
     expectColumns(db, 'job_log_generations', [
       'job_id', 'stream', 'generation', 'path', 'started_at', 'sealed_at', 'size_bytes', 'sha256',
     ]);
+    expectColumns(db, 'legacy_blocked_publish_evidence', [
+      'job_id', 'artifact_staging_path', 'artifact_quarantine_path', 'artifact_final_directory',
+      'artifact_final_path', 'artifact_sha256', 'artifact_size', 'artifact_mtime', 'checksum_path',
+      'checksum_sha256', 'manifest_path', 'manifest_sha256', 'verification_path', 'verification_sha256',
+      'publish_state', 'publish_started_at', 'published_at', 'publish_blocker_code', 'publish_blocker_json',
+    ]);
     expectColumns(db, 'schema_migrations', ['version', 'filename', 'sha256', 'applied_at']);
     expectColumns(db, 'queue_entries', ['job_id', 'fifo_seq', 'enqueued_at', 'claimed_at']);
     expectColumns(db, 'job_events', [
@@ -277,6 +283,7 @@ describe('versioned builder database migrations', () => {
     expect(normalizeForeignKeys('job_operations')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('cleanup_leases')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('job_log_generations')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
+    expect(normalizeForeignKeys('legacy_blocked_publish_evidence')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('job_events').sort((a, b) => `${a.table}${a.from}`.localeCompare(`${b.table}${b.from}`))).toEqual([
       { table: 'job_log_generations', from: 'file_generation', to: 'generation', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
       { table: 'job_log_generations', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
@@ -291,6 +298,7 @@ describe('versioned builder database migrations', () => {
       'job_log_generations_immutable_guard', 'job_log_generations_seal_guard', 'job_log_generations_size_guard',
       'job_operations_committed_delete_guard', 'job_operations_committed_update_guard', 'job_operations_manifest_label_guard',
       'job_operations_manifest_label_guard_update', 'jobs_cleanup_generation_guard', 'jobs_container_guard',
+      'legacy_blocked_publish_evidence_delete_guard', 'legacy_blocked_publish_evidence_update_guard',
       'jobs_container_guard_update', 'jobs_fence_guard', 'jobs_fence_guard_update', 'jobs_cleanup_blocker_guard',
       'jobs_cleanup_blocker_guard_update', 'jobs_freshness_evidence_pair_guard',
       'jobs_freshness_evidence_pair_guard_update', 'jobs_freshness_guard', 'jobs_freshness_guard_update',
@@ -626,32 +634,30 @@ describe('versioned builder database migrations', () => {
         '2026-07-23T00:00:00.000Z',
       );
     }
-    insertValidJob(legacy, 'legacy-empty');
+    const terminalSentinel = '{"legacy_publish":{"sentinel":"keep"},"terminal":"preserved"}';
+    insertValidJob(legacy, 'legacy-terminal');
     legacy.prepare(`
       UPDATE jobs
       SET state='failed',
           queue_state='complete',
           publish_state='blocked',
           publish_blocker_code='PUBLISH_FAILED',
-          publish_blocker_json='{"legacy":"empty"}',
+          publish_blocker_json='{"legacy":"terminal"}',
           terminal_at='2026-07-23T00:01:00.000Z',
           terminal_error_code='PUBLISH_FAILED',
-          terminal_error_json='{"terminal":"preserved"}'
-      WHERE job_id='legacy-empty'
-    `).run();
-    insertValidJob(legacy, 'legacy-staging');
+          terminal_error_json=?
+      WHERE job_id='legacy-terminal'
+    `).run(terminalSentinel);
+    insertValidJob(legacy, 'legacy-nonterminal');
     legacy.prepare(`
       UPDATE jobs
-      SET state='failed',
-          queue_state='complete',
+      SET state='building',
+          queue_state='dispatched',
           artifact_staging_path='legacy/staging/image.gz',
           publish_state='blocked',
           publish_blocker_code='PUBLISH_FAILED',
-          publish_blocker_json='{"legacy":"staging"}',
-          terminal_at='2026-07-23T00:02:00.000Z',
-          terminal_error_code='PUBLISH_FAILED',
-          terminal_error_json='{"terminal":"preserved"}'
-      WHERE job_id='legacy-staging'
+          publish_blocker_json='{"legacy":"nonterminal"}'
+      WHERE job_id='legacy-nonterminal'
     `).run();
     const historicalV6 = MIGRATION_REGISTRY[5]!;
     legacy.exec(await readFile(join(migrationDir, historicalV6.filename), 'utf8'));
@@ -665,49 +671,106 @@ describe('versioned builder database migrations', () => {
     expect(schemaSnapshot(upgraded)).toEqual(schemaSnapshot(fresh));
 
     const rows = upgraded.prepare(`
-      SELECT job_id, publish_state, artifact_staging_path, publish_blocker_code,
-             publish_blocker_json, terminal_error_json
+      SELECT job_id, state, publish_state, artifact_staging_path, publish_blocker_code,
+             publish_blocker_json, terminal_at, terminal_error_code, terminal_error_json
       FROM jobs
-      WHERE job_id IN ('legacy-empty', 'legacy-staging')
+      WHERE job_id IN ('legacy-nonterminal', 'legacy-terminal')
       ORDER BY job_id
     `).all() as Array<Record<string, string | null>>;
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
-      job_id: 'legacy-empty',
+      job_id: 'legacy-nonterminal',
+      state: 'building',
       publish_state: 'not_started',
       artifact_staging_path: null,
       publish_blocker_code: null,
       publish_blocker_json: null,
-    });
-    expect(JSON.parse(rows[0]!.terminal_error_json!)).toMatchObject({
-      terminal: 'preserved',
-      legacy_publish: {
-        publish_state: 'blocked',
-        publish_blocker_code: 'PUBLISH_FAILED',
-        publish_blocker_json: '{"legacy":"empty"}',
-      },
+      terminal_at: null,
+      terminal_error_code: null,
+      terminal_error_json: null,
     });
     expect(rows[1]).toMatchObject({
-      job_id: 'legacy-staging',
+      job_id: 'legacy-terminal',
+      state: 'failed',
       publish_state: 'not_started',
       artifact_staging_path: null,
       publish_blocker_code: null,
       publish_blocker_json: null,
+      terminal_at: '2026-07-23T00:01:00.000Z',
+      terminal_error_code: 'PUBLISH_FAILED',
+      terminal_error_json: terminalSentinel,
     });
-    expect(JSON.parse(rows[1]!.terminal_error_json!)).toMatchObject({
-      terminal: 'preserved',
-      legacy_publish: {
-        publish_state: 'blocked',
+
+    const archiveRows = upgraded.prepare(
+      'SELECT * FROM legacy_blocked_publish_evidence ORDER BY job_id',
+    ).all() as Array<Record<string, string | number | null>>;
+    expect(archiveRows).toEqual([
+      {
+        job_id: 'legacy-nonterminal',
         artifact_staging_path: 'legacy/staging/image.gz',
+        artifact_quarantine_path: null,
+        artifact_final_directory: null,
+        artifact_final_path: null,
+        artifact_sha256: null,
+        artifact_size: null,
+        artifact_mtime: null,
+        checksum_path: null,
+        checksum_sha256: null,
+        manifest_path: null,
+        manifest_sha256: null,
+        verification_path: null,
+        verification_sha256: null,
+        publish_state: 'blocked',
+        publish_started_at: null,
+        published_at: null,
         publish_blocker_code: 'PUBLISH_FAILED',
-        publish_blocker_json: '{"legacy":"staging"}',
+        publish_blocker_json: '{"legacy":"nonterminal"}',
       },
-    });
+      {
+        job_id: 'legacy-terminal',
+        artifact_staging_path: null,
+        artifact_quarantine_path: null,
+        artifact_final_directory: null,
+        artifact_final_path: null,
+        artifact_sha256: null,
+        artifact_size: null,
+        artifact_mtime: null,
+        checksum_path: null,
+        checksum_sha256: null,
+        manifest_path: null,
+        manifest_sha256: null,
+        verification_path: null,
+        verification_sha256: null,
+        publish_state: 'blocked',
+        publish_started_at: null,
+        published_at: null,
+        publish_blocker_code: 'PUBLISH_FAILED',
+        publish_blocker_json: '{"legacy":"terminal"}',
+      },
+    ]);
+    check(
+      upgraded,
+      "INSERT INTO legacy_blocked_publish_evidence SELECT * FROM legacy_blocked_publish_evidence WHERE job_id='legacy-terminal'",
+      /UNIQUE constraint failed: legacy_blocked_publish_evidence\.job_id/,
+    );
+    check(
+      upgraded,
+      "UPDATE legacy_blocked_publish_evidence SET publish_blocker_code='changed' WHERE job_id='legacy-terminal'",
+      /legacy blocked publish evidence is immutable/,
+    );
+    check(
+      upgraded,
+      "DELETE FROM legacy_blocked_publish_evidence WHERE job_id='legacy-terminal'",
+      /legacy blocked publish evidence is immutable/,
+    );
     upgraded.close();
     fresh.close();
 
     const reopened = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
     expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 7 });
+    expect(reopened.prepare('SELECT COUNT(*) AS count FROM legacy_blocked_publish_evidence').get()).toEqual({ count: 2 });
+    expect(reopened.prepare("SELECT terminal_error_json FROM jobs WHERE job_id='legacy-terminal'").get())
+      .toEqual({ terminal_error_json: terminalSentinel });
     reopened.close();
   });
 
@@ -752,6 +815,17 @@ describe('versioned builder database migrations', () => {
       publishBlocker: null,
       terminalErrorCode: 'PUBLISH_FAILED',
     });
+    expect(upgraded.prepare(`
+      SELECT job_id, publish_state, publish_blocker_code, publish_blocker_json
+      FROM legacy_blocked_publish_evidence
+    `).get()).toEqual({
+      job_id: 'legacy-blocked',
+      publish_state: 'blocked',
+      publish_blocker_code: 'PUBLISH_FAILED',
+      publish_blocker_json: '{"legacy":true}',
+    });
+    expect(upgraded.prepare("SELECT terminal_error_json FROM jobs WHERE job_id='legacy-blocked'").get())
+      .toEqual({ terminal_error_json: '{"legacy":true}' });
     store.close();
   });
 

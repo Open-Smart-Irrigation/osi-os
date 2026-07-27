@@ -1,51 +1,40 @@
 ALTER TABLE jobs ADD COLUMN artifact_quarantine_intent_path TEXT;
 
--- Archive invalid v6 blocked rows before normalizing them to an empty publish state.
-UPDATE jobs
-SET terminal_error_json = json_set(
-      COALESCE(terminal_error_json, '{}'),
-      '$.legacy_publish',
-      json_object(
-        'publish_state', publish_state,
-        'artifact_staging_path', artifact_staging_path,
-        'artifact_quarantine_path', artifact_quarantine_path,
-        'artifact_quarantine_intent_path', artifact_quarantine_intent_path,
-        'artifact_final_directory', artifact_final_directory,
-        'artifact_final_path', artifact_final_path,
-        'artifact_sha256', artifact_sha256,
-        'artifact_size', artifact_size,
-        'artifact_mtime', artifact_mtime,
-        'checksum_path', checksum_path,
-        'checksum_sha256', checksum_sha256,
-        'manifest_path', manifest_path,
-        'manifest_sha256', manifest_sha256,
-        'verification_path', verification_path,
-        'verification_sha256', verification_sha256,
-        'publish_started_at', publish_started_at,
-        'published_at', published_at,
-        'publish_blocker_code', publish_blocker_code,
-        'publish_blocker_json', publish_blocker_json
-      )
-    ),
-    artifact_staging_path = NULL,
-    artifact_quarantine_path = NULL,
-    artifact_quarantine_intent_path = NULL,
-    artifact_final_directory = NULL,
-    artifact_final_path = NULL,
-    artifact_sha256 = NULL,
-    artifact_size = NULL,
-    artifact_mtime = NULL,
-    checksum_path = NULL,
-    checksum_sha256 = NULL,
-    manifest_path = NULL,
-    manifest_sha256 = NULL,
-    verification_path = NULL,
-    verification_sha256 = NULL,
-    publish_state = 'not_started',
-    publish_started_at = NULL,
-    published_at = NULL,
-    publish_blocker_code = NULL,
-    publish_blocker_json = NULL
+CREATE TABLE legacy_blocked_publish_evidence (
+  job_id TEXT PRIMARY KEY,
+  artifact_staging_path TEXT,
+  artifact_quarantine_path TEXT,
+  artifact_final_directory TEXT,
+  artifact_final_path TEXT,
+  artifact_sha256 TEXT,
+  artifact_size INTEGER,
+  artifact_mtime TEXT,
+  checksum_path TEXT,
+  checksum_sha256 TEXT,
+  manifest_path TEXT,
+  manifest_sha256 TEXT,
+  verification_path TEXT,
+  verification_sha256 TEXT,
+  publish_state TEXT NOT NULL CHECK (publish_state = 'blocked'),
+  publish_started_at TEXT,
+  published_at TEXT,
+  publish_blocker_code TEXT,
+  publish_blocker_json TEXT,
+  FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE RESTRICT ON UPDATE RESTRICT
+);
+
+INSERT INTO legacy_blocked_publish_evidence (
+  job_id, artifact_staging_path, artifact_quarantine_path, artifact_final_directory,
+  artifact_final_path, artifact_sha256, artifact_size, artifact_mtime, checksum_path,
+  checksum_sha256, manifest_path, manifest_sha256, verification_path, verification_sha256,
+  publish_state, publish_started_at, published_at, publish_blocker_code, publish_blocker_json
+)
+SELECT
+  job_id, artifact_staging_path, artifact_quarantine_path, artifact_final_directory,
+  artifact_final_path, artifact_sha256, artifact_size, artifact_mtime, checksum_path,
+  checksum_sha256, manifest_path, manifest_sha256, verification_path, verification_sha256,
+  publish_state, publish_started_at, published_at, publish_blocker_code, publish_blocker_json
+FROM jobs
 WHERE publish_state = 'blocked'
   AND NOT (
     artifact_staging_path IS NULL
@@ -67,6 +56,40 @@ WHERE publish_state = 'blocked'
     AND publish_blocker_code IS NOT NULL
     AND publish_blocker_json IS NOT NULL
   );
+
+UPDATE jobs
+SET artifact_staging_path = NULL,
+    artifact_quarantine_path = NULL,
+    artifact_quarantine_intent_path = NULL,
+    artifact_final_directory = NULL,
+    artifact_final_path = NULL,
+    artifact_sha256 = NULL,
+    artifact_size = NULL,
+    artifact_mtime = NULL,
+    checksum_path = NULL,
+    checksum_sha256 = NULL,
+    manifest_path = NULL,
+    manifest_sha256 = NULL,
+    verification_path = NULL,
+    verification_sha256 = NULL,
+    publish_state = 'not_started',
+    publish_started_at = NULL,
+    published_at = NULL,
+    publish_blocker_code = NULL,
+    publish_blocker_json = NULL
+WHERE job_id IN (SELECT job_id FROM legacy_blocked_publish_evidence);
+
+CREATE TRIGGER legacy_blocked_publish_evidence_update_guard
+BEFORE UPDATE ON legacy_blocked_publish_evidence
+BEGIN
+  SELECT RAISE(ABORT, 'legacy blocked publish evidence is immutable');
+END;
+
+CREATE TRIGGER legacy_blocked_publish_evidence_delete_guard
+BEFORE DELETE ON legacy_blocked_publish_evidence
+BEGIN
+  SELECT RAISE(ABORT, 'legacy blocked publish evidence is immutable');
+END;
 
 DROP TRIGGER jobs_publish_null_guard;
 DROP TRIGGER jobs_publish_null_guard_update;
