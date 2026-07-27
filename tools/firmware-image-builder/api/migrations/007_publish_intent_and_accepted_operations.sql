@@ -1,5 +1,73 @@
 ALTER TABLE jobs ADD COLUMN artifact_quarantine_intent_path TEXT;
 
+-- Archive invalid v6 blocked rows before normalizing them to an empty publish state.
+UPDATE jobs
+SET terminal_error_json = json_set(
+      COALESCE(terminal_error_json, '{}'),
+      '$.legacy_publish',
+      json_object(
+        'publish_state', publish_state,
+        'artifact_staging_path', artifact_staging_path,
+        'artifact_quarantine_path', artifact_quarantine_path,
+        'artifact_quarantine_intent_path', artifact_quarantine_intent_path,
+        'artifact_final_directory', artifact_final_directory,
+        'artifact_final_path', artifact_final_path,
+        'artifact_sha256', artifact_sha256,
+        'artifact_size', artifact_size,
+        'artifact_mtime', artifact_mtime,
+        'checksum_path', checksum_path,
+        'checksum_sha256', checksum_sha256,
+        'manifest_path', manifest_path,
+        'manifest_sha256', manifest_sha256,
+        'verification_path', verification_path,
+        'verification_sha256', verification_sha256,
+        'publish_started_at', publish_started_at,
+        'published_at', published_at,
+        'publish_blocker_code', publish_blocker_code,
+        'publish_blocker_json', publish_blocker_json
+      )
+    ),
+    artifact_staging_path = NULL,
+    artifact_quarantine_path = NULL,
+    artifact_quarantine_intent_path = NULL,
+    artifact_final_directory = NULL,
+    artifact_final_path = NULL,
+    artifact_sha256 = NULL,
+    artifact_size = NULL,
+    artifact_mtime = NULL,
+    checksum_path = NULL,
+    checksum_sha256 = NULL,
+    manifest_path = NULL,
+    manifest_sha256 = NULL,
+    verification_path = NULL,
+    verification_sha256 = NULL,
+    publish_state = 'not_started',
+    publish_started_at = NULL,
+    published_at = NULL,
+    publish_blocker_code = NULL,
+    publish_blocker_json = NULL
+WHERE publish_state = 'blocked'
+  AND NOT (
+    artifact_staging_path IS NULL
+    AND artifact_quarantine_path IS NULL
+    AND artifact_quarantine_intent_path IS NULL
+    AND artifact_final_directory IS NULL
+    AND artifact_final_path IS NULL
+    AND artifact_sha256 IS NOT NULL
+    AND artifact_size IS NOT NULL
+    AND artifact_mtime IS NOT NULL
+    AND checksum_path IS NOT NULL
+    AND checksum_sha256 IS NOT NULL
+    AND manifest_path IS NOT NULL
+    AND manifest_sha256 IS NOT NULL
+    AND verification_path IS NOT NULL
+    AND verification_sha256 IS NOT NULL
+    AND publish_started_at IS NULL
+    AND published_at IS NULL
+    AND publish_blocker_code IS NOT NULL
+    AND publish_blocker_json IS NOT NULL
+  );
+
 DROP TRIGGER jobs_publish_null_guard;
 DROP TRIGGER jobs_publish_null_guard_update;
 DROP TRIGGER jobs_publish_guard;

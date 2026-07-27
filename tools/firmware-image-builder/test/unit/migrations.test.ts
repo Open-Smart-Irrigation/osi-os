@@ -13,6 +13,7 @@ const repoMigrationDir = fileURLToPath(new URL('../../api/migrations/', import.m
 const tempPaths: string[] = [];
 const SHA40 = 'a'.repeat(40);
 const HASH64 = 'b'.repeat(64);
+const HISTORICAL_V6_SHA256 = 'c6334dd0fd03b34b8261e5b34bc0b09501e35a02ee4b57f81c98fd62af6e54a0';
 const ADMISSION_ID = `cln_${'a'.repeat(26)}`;
 
 function sourcePreparationJson(sourceSha = SHA40): string {
@@ -601,6 +602,113 @@ describe('versioned builder database migrations', () => {
     });
     store.close();
     fresh.close();
+  });
+
+  it('upgrades an exact historical v6 database without losing legacy blocked publish evidence', async () => {
+    expect(MIGRATION_REGISTRY[5]).toMatchObject({
+      version: 6,
+      filename: '006_blocked_publish_artifact_location.sql',
+      sha256: HISTORICAL_V6_SHA256,
+    });
+
+    const path = await temporaryDatabase();
+    const freshPath = await temporaryDatabase();
+    const migrationDir = await copyMigrations();
+    const legacy = new DatabaseSync(path);
+    for (const migration of MIGRATION_REGISTRY.slice(0, 5)) {
+      legacy.exec(await readFile(join(migrationDir, migration.filename), 'utf8'));
+      legacy.prepare(
+        'INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)',
+      ).run(
+        migration.version,
+        migration.filename,
+        migration.sha256,
+        '2026-07-23T00:00:00.000Z',
+      );
+    }
+    insertValidJob(legacy, 'legacy-empty');
+    legacy.prepare(`
+      UPDATE jobs
+      SET state='failed',
+          queue_state='complete',
+          publish_state='blocked',
+          publish_blocker_code='PUBLISH_FAILED',
+          publish_blocker_json='{"legacy":"empty"}',
+          terminal_at='2026-07-23T00:01:00.000Z',
+          terminal_error_code='PUBLISH_FAILED',
+          terminal_error_json='{"terminal":"preserved"}'
+      WHERE job_id='legacy-empty'
+    `).run();
+    insertValidJob(legacy, 'legacy-staging');
+    legacy.prepare(`
+      UPDATE jobs
+      SET state='failed',
+          queue_state='complete',
+          artifact_staging_path='legacy/staging/image.gz',
+          publish_state='blocked',
+          publish_blocker_code='PUBLISH_FAILED',
+          publish_blocker_json='{"legacy":"staging"}',
+          terminal_at='2026-07-23T00:02:00.000Z',
+          terminal_error_code='PUBLISH_FAILED',
+          terminal_error_json='{"terminal":"preserved"}'
+      WHERE job_id='legacy-staging'
+    `).run();
+    const historicalV6 = MIGRATION_REGISTRY[5]!;
+    legacy.exec(await readFile(join(migrationDir, historicalV6.filename), 'utf8'));
+    legacy.prepare(
+      'INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)',
+    ).run(6, historicalV6.filename, HISTORICAL_V6_SHA256, '2026-07-23T00:00:00.000Z');
+    legacy.close();
+
+    const upgraded = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
+    const fresh = openBuilderDatabase(freshPath, { migrationsDirectory: migrationDir });
+    expect(schemaSnapshot(upgraded)).toEqual(schemaSnapshot(fresh));
+
+    const rows = upgraded.prepare(`
+      SELECT job_id, publish_state, artifact_staging_path, publish_blocker_code,
+             publish_blocker_json, terminal_error_json
+      FROM jobs
+      WHERE job_id IN ('legacy-empty', 'legacy-staging')
+      ORDER BY job_id
+    `).all() as Array<Record<string, string | null>>;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      job_id: 'legacy-empty',
+      publish_state: 'not_started',
+      artifact_staging_path: null,
+      publish_blocker_code: null,
+      publish_blocker_json: null,
+    });
+    expect(JSON.parse(rows[0]!.terminal_error_json!)).toMatchObject({
+      terminal: 'preserved',
+      legacy_publish: {
+        publish_state: 'blocked',
+        publish_blocker_code: 'PUBLISH_FAILED',
+        publish_blocker_json: '{"legacy":"empty"}',
+      },
+    });
+    expect(rows[1]).toMatchObject({
+      job_id: 'legacy-staging',
+      publish_state: 'not_started',
+      artifact_staging_path: null,
+      publish_blocker_code: null,
+      publish_blocker_json: null,
+    });
+    expect(JSON.parse(rows[1]!.terminal_error_json!)).toMatchObject({
+      terminal: 'preserved',
+      legacy_publish: {
+        publish_state: 'blocked',
+        artifact_staging_path: 'legacy/staging/image.gz',
+        publish_blocker_code: 'PUBLISH_FAILED',
+        publish_blocker_json: '{"legacy":"staging"}',
+      },
+    });
+    upgraded.close();
+    fresh.close();
+
+    const reopened = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
+    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 7 });
+    reopened.close();
   });
 
   it('normalizes legacy blocked publish rows that have no tracked artifact', async () => {
