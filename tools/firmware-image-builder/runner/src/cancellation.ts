@@ -6,7 +6,7 @@ import type {
   RunnerWriteCommand,
   StagingCleanupProof,
 } from '../../api/src/ownership.js';
-import type { EventPage, JobRecord, JsonObject } from '../../api/src/store.js';
+import type { EventRecord, JobRecord, JsonObject } from '../../api/src/store.js';
 import {
   ACTIVE_RECOVERY_STATES,
   type ActiveRecoveryState,
@@ -51,6 +51,12 @@ export interface CancellationDockerExecutor {
   readonly listByLabels: (labels: JsonObject, deadline: number) => Promise<readonly CancellationContainer[]>;
 }
 
+export interface ActiveOperationCancellationAuthorization {
+  readonly containerId: string;
+  readonly deadline: number;
+  readonly running: boolean;
+}
+
 export interface RunnerCancellationSignals {
   readonly on: (signal: 'SIGUSR1', listener: () => void) => void;
   readonly off: (signal: 'SIGUSR1', listener: () => void) => void;
@@ -72,7 +78,7 @@ export interface RunnerCancellationOptions {
   readonly leaseExpiresAt: () => string;
   readonly store: Readonly<{
     getJob: (jobId: string) => CancellationJob;
-    listEvents: (jobId: string, options?: { readonly afterSeq?: number; readonly limit?: number }) => EventPage;
+    getCancellationProtocolEvents: (jobId: string) => readonly EventRecord[];
   }>;
   readonly ownership: Readonly<{
     runnerWrite: (command: RunnerWriteCommand) => OwnershipResult;
@@ -234,63 +240,58 @@ function persistedCancellationProtocol(
   readonly cleanupEventSeq: number | null;
   readonly cleanupProof: CancellationProof | null;
 } | null {
-  let afterSeq = -1;
   let found: { readonly eventSeq: number; readonly evidence: CancellationEvidence } | null = null;
   let cleanup: { readonly eventSeq: number; readonly evidenceEventSeq: number; readonly proof: CancellationProof } | null = null;
-  for (let pageCount = 0; pageCount < 128; pageCount += 1) {
-    const page = options.store.listEvents(options.jobId, { afterSeq, limit: 128 });
-    for (const event of page.events) {
-      if (event.eventType !== 'cleanup') continue;
-      if (event.payload.kind === 'cancellation-evidence') {
-        const evidence = event.payload.evidence as CancellationEvidence | undefined;
-        if (evidence === undefined || evidence.runnerUnit !== options.runnerUnit) {
-          throw new CancellationIdentityError('persisted cancellation evidence has the wrong runner identity');
-        }
-        if (found !== null) throw new CancellationIdentityError('multiple durable cancellation evidence events exist');
-        found = { eventSeq: event.seq, evidence };
-      } else if (event.payload.kind === 'cancellation-cleanup') {
-        const evidenceEventSeq = event.payload.evidenceEventSeq;
-        const proof = event.payload.proof as CancellationProof | undefined;
-        if (!Number.isSafeInteger(evidenceEventSeq) || proof === undefined || cleanup !== null) {
-          throw new CancellationIdentityError('persisted cancellation cleanup event is invalid');
-        }
-        cleanup = { eventSeq: event.seq, evidenceEventSeq: Number(evidenceEventSeq), proof };
+  const events = options.store.getCancellationProtocolEvents(options.jobId);
+  for (const event of events) {
+    if (event.eventType !== 'cleanup') throw new CancellationIdentityError('persisted cancellation protocol query returned an unrelated event');
+    if (event.payload.kind === 'cancellation-evidence') {
+      const evidence = event.payload.evidence as CancellationEvidence | undefined;
+      if (evidence === undefined || evidence.runnerUnit !== options.runnerUnit) {
+        throw new CancellationIdentityError('persisted cancellation evidence has the wrong runner identity');
       }
+      if (found !== null) throw new CancellationIdentityError('multiple durable cancellation evidence events exist');
+      found = { eventSeq: event.seq, evidence };
+    } else if (event.payload.kind === 'cancellation-cleanup') {
+      const evidenceEventSeq = event.payload.evidenceEventSeq;
+      const proof = event.payload.proof as CancellationProof | undefined;
+      if (!Number.isSafeInteger(evidenceEventSeq) || proof === undefined || cleanup !== null) {
+        throw new CancellationIdentityError('persisted cancellation cleanup event is invalid');
+      }
+      cleanup = { eventSeq: event.seq, evidenceEventSeq: Number(evidenceEventSeq), proof };
+    } else {
+      throw new CancellationIdentityError('persisted cancellation protocol query returned an invalid event');
     }
-    if (page.nextAfterSeq === null) {
-      if (found === null) {
-        if (cleanup !== null) throw new CancellationIdentityError('persisted cancellation cleanup has no evidence event');
-        return null;
-      }
-      if (cleanup !== null) {
-        if (cleanup.evidenceEventSeq !== found.eventSeq) throw new CancellationIdentityError('persisted cancellation cleanup references the wrong evidence event');
-        if (
-          job.containerId !== null
-          || job.containerName !== null
-          || job.containerImageDigest !== null
-          || job.containerLabelJobId !== null
-          || job.containerLabelManifestSha !== null
-          || job.containerLabels !== null
-        ) {
-          throw new CancellationIdentityError('persisted cancellation cleanup did not clear container identity');
-        }
-        return {
-          evidenceEventSeq: found.eventSeq,
-          evidence: found.evidence,
-          cleanupEventSeq: cleanup.eventSeq,
-          cleanupProof: cleanup.proof,
-        };
-      }
-      return {
-        evidenceEventSeq: found.eventSeq,
-        evidence: found.evidence,
-        cleanupEventSeq: null,
-        cleanupProof: null,
-      };
-    }
-    afterSeq = page.nextAfterSeq;
   }
-  throw new CancellationBlockedError('cancellation event history exceeds the bounded retry scan', 'RUNNER_DISAPPEARED');
+  if (found === null) {
+    if (cleanup !== null) throw new CancellationIdentityError('persisted cancellation cleanup has no evidence event');
+    return null;
+  }
+  if (cleanup !== null) {
+    if (cleanup.evidenceEventSeq !== found.eventSeq) throw new CancellationIdentityError('persisted cancellation cleanup references the wrong evidence event');
+    if (
+      job.containerId !== null
+      || job.containerName !== null
+      || job.containerImageDigest !== null
+      || job.containerLabelJobId !== null
+      || job.containerLabelManifestSha !== null
+      || job.containerLabels !== null
+    ) {
+      throw new CancellationIdentityError('persisted cancellation cleanup did not clear container identity');
+    }
+    return {
+      evidenceEventSeq: found.eventSeq,
+      evidence: found.evidence,
+      cleanupEventSeq: cleanup.eventSeq,
+      cleanupProof: cleanup.proof,
+    };
+  }
+  return {
+    evidenceEventSeq: found.eventSeq,
+    evidence: found.evidence,
+    cleanupEventSeq: null,
+    cleanupProof: null,
+  };
 }
 
 function assertPersistedCancellationEvidence(
@@ -450,18 +451,20 @@ function recoveredCancellationRecord(
 export function createRunnerCancellation(options: RunnerCancellationOptions): {
   readonly isRequested: () => boolean;
   readonly cancellationBudget: () => CancellationBudget;
+  readonly authorizeActiveOperationStop: () => Promise<ActiveOperationCancellationAuthorization>;
   readonly observeBetweenStages: (stage: PipelineStageName) => Promise<CancellationObservation>;
   readonly observeBetweenOperations: (operationId: TrustedOperationId) => Promise<CancellationObservation>;
   readonly cancelIfRequested: () => Promise<CancellationObservation>;
   readonly blockRecoveryRequired: (blockerCode: CancellationBlockerCode, reason: string) => Promise<never>;
   readonly dispose: () => void;
 } {
-  if (options.store?.getJob === undefined || options.store.listEvents === undefined || options.ownership?.runnerWrite === undefined) throw new TypeError('runner cancellation persistence is required');
+  if (options.store?.getJob === undefined || options.store.getCancellationProtocolEvents === undefined || options.ownership?.runnerWrite === undefined) throw new TypeError('runner cancellation persistence is required');
   if (options.docker?.inspect === undefined || options.docker.stop === undefined || options.docker.waitForStopped === undefined || options.docker.remove === undefined || options.docker.listByLabels === undefined) throw new TypeError('runner cancellation Docker controls are incomplete');
   if (options.evidence === undefined || options.cleanup?.staging === undefined || options.cleanup.logs === undefined) throw new TypeError('runner cancellation evidence and cleanup are required');
   let signalRequested = false;
   let cancellationDeadline: number | null = null;
   let running: Promise<CancellationObservation> | null = null;
+  let authorizationRunning: Promise<ActiveOperationCancellationAuthorization> | null = null;
   const observeRequested = (requested: boolean): boolean => {
     if (requested && cancellationDeadline === null) cancellationDeadline = monotonicNow(options) + COOPERATIVE_STOP_TIMEOUT_MS;
     return requested;
@@ -495,6 +498,107 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
       deadline: cancellationDeadline,
       remainingMs: remainingBudget(),
     };
+  };
+
+  const persistBlocker = (
+    error: unknown,
+    phase: string,
+    blockerCode: CancellationBlockerCode,
+  ): never => {
+    if (error instanceof CancellationBlockedError && error.blockerCode === 'RUNNER_DISAPPEARED') {
+      signalRequested = false;
+      throw error;
+    }
+    const reason = error instanceof Error ? error.message : String(error);
+    try {
+      runnerWrite(options, (at) => ({
+        kind: 'cancellation-blocker',
+        jobId: options.jobId,
+        owner: options.owner,
+        runnerUnit: options.runnerUnit,
+        leaseExpiresAt: options.leaseExpiresAt(),
+        at,
+        expectedState: 'cancel_requested',
+        blockerCode,
+        blocker: { reason: `cancellation ${phase} blocked: ${reason}`, cause: reason },
+      }));
+    } catch (blockerError) {
+      signalRequested = false;
+      throw new CancellationBlockedError(`cancellation ${phase} failed and blocker persistence failed`, 'RUNNER_DISAPPEARED', { cause: new AggregateError([error, blockerError]) });
+    }
+    signalRequested = false;
+    throw new CancellationBlockedError(`cancellation ${phase} blocked`, blockerCode, { cause: error });
+  };
+
+  const authorizeActiveOperationStop = async (): Promise<ActiveOperationCancellationAuthorization> => {
+    if (authorizationRunning !== null) return authorizationRunning;
+    const work = (async (): Promise<ActiveOperationCancellationAuthorization> => {
+      let current = options.store.getJob(options.jobId);
+      if (!observeRequested(current.cancelRequestedAt !== null || signalRequested)) {
+        throw new CancellationBlockedError('active Docker cancellation has no persisted request', 'RUNNER_DISAPPEARED');
+      }
+      if (current.state === 'publishing' || !activeState(current.state)) {
+        signalRequested = false;
+        throw new CancellationBlockedError('active Docker cancellation lost an active runner state', 'RUNNER_DISAPPEARED');
+      }
+      if (
+        current.runnerUnit !== options.runnerUnit
+        || current.runnerLeaseOwner !== options.owner
+        || current.runnerLeaseExpiresAt !== options.leaseExpiresAt()
+      ) {
+        signalRequested = false;
+        throw new CancellationBlockedError('active Docker cancellation lease identity changed', 'RUNNER_DISAPPEARED');
+      }
+      if (current.state !== 'cancel_requested') {
+        try {
+          runnerWrite(options, (at) => ({
+            kind: 'cancellation-transition',
+            jobId: options.jobId,
+            owner: options.owner,
+            runnerUnit: options.runnerUnit,
+            leaseExpiresAt: options.leaseExpiresAt(),
+            at,
+            expectedState: current.state as ActiveRecoveryState,
+          }));
+        } catch (error) {
+          signalRequested = false;
+          throw error;
+        }
+      }
+      current = options.store.getJob(options.jobId);
+      if (
+        current.state !== 'cancel_requested'
+        || current.runnerUnit !== options.runnerUnit
+        || current.runnerLeaseOwner !== options.owner
+        || current.runnerLeaseExpiresAt !== options.leaseExpiresAt()
+      ) {
+        signalRequested = false;
+        throw new CancellationBlockedError('active Docker cancellation lost its committed ownership fence', 'RUNNER_DISAPPEARED');
+      }
+      try {
+        const expectedLabels = labels(current);
+        const identity = assertExactPersistedIdentity(current, expectedLabels);
+        if (identity === null) throw new CancellationIdentityError('active Docker cancellation has no persisted container identity');
+        const observed = await options.docker.inspect(identity.id, absoluteDeadline());
+        if (observed === null) throw new CancellationIdentityError('active Docker cancellation container is absent');
+        assertObservedIdentity(observed, identity);
+        return Object.freeze({
+          containerId: identity.id,
+          deadline: absoluteDeadline(),
+          running: observed.running,
+        });
+      } catch (error) {
+        if (error instanceof CancellationBlockedError) throw error;
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new CancellationBlockedError(`cancellation Docker stop authorization blocked: ${reason}`, 'DOCKER_CONTAINER_ORPHANED', { cause: error });
+      }
+    })();
+    authorizationRunning = work;
+    try {
+      return await work;
+    } finally {
+      if (authorizationRunning === work) authorizationRunning = null;
+    }
   };
 
   const cancelIfRequested = async (): Promise<CancellationObservation> => {
@@ -533,31 +637,6 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
         }
         current = { ...current, state: 'cancel_requested' };
       }
-      const persistBlocker = (error: unknown, phase: string, blockerCode: CancellationBlockerCode): never => {
-        if (error instanceof CancellationBlockedError && error.blockerCode === 'RUNNER_DISAPPEARED') {
-          signalRequested = false;
-          throw error;
-        }
-        const reason = error instanceof Error ? error.message : String(error);
-        try {
-          runnerWrite(options, (at) => ({
-            kind: 'cancellation-blocker',
-            jobId: options.jobId,
-            owner: options.owner,
-            runnerUnit: options.runnerUnit,
-            leaseExpiresAt: options.leaseExpiresAt(),
-            at,
-            expectedState: 'cancel_requested',
-            blockerCode,
-            blocker: { reason: `cancellation ${phase} blocked: ${reason}`, cause: reason },
-          }));
-        } catch (blockerError) {
-          signalRequested = false;
-          throw new CancellationBlockedError(`cancellation ${phase} failed and blocker persistence failed`, 'RUNNER_DISAPPEARED', { cause: new AggregateError([error, blockerError]) });
-        }
-        signalRequested = false;
-        throw new CancellationBlockedError(`cancellation ${phase} blocked`, blockerCode, { cause: error });
-      };
       let blockedPhase = 'durable evidence recovery';
       let blockedCode: CancellationBlockerCode = 'RUNNER_DISAPPEARED';
       try {
@@ -874,6 +953,7 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
   return Object.freeze({
     isRequested,
     cancellationBudget,
+    authorizeActiveOperationStop,
     observeBetweenStages: async (_stage) => cancelIfRequested(),
     observeBetweenOperations: async (_operationId) => cancelIfRequested(),
     cancelIfRequested,

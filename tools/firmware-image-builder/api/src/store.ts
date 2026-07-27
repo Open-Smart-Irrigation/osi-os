@@ -610,24 +610,47 @@ export class BuilderStore {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > EVENT_PAGE_MAX_LIMIT) throw new StoreValidationError(`event limit must be a safe integer between 1 and ${EVENT_PAGE_MAX_LIMIT}`);
     const rows = this.#db.prepare('SELECT job_id, seq, event_type, state, stage, payload_json, at, stream, file_generation, byte_offset, byte_length, partial FROM job_events WHERE job_id = ? AND seq > ? ORDER BY seq LIMIT ?').all(jobId, afterSeq, limit + 1) as unknown as DbRow[];
     const hasMore = rows.length > limit;
-    const events = rows.slice(0, limit).map((row) => {
-      const seq = Number(row.seq);
-      if (!Number.isSafeInteger(seq) || seq < 0) throw new StoreDataError('SQLite event sequence is invalid');
-      const eventType = persistedEnum(row, 'event_type', EVENT_TYPES, false)! as EventType;
-      const state = persistedEnum(row, 'state', JOB_STATES) as JobState | null;
-      const stage = persistedEnum(row, 'stage', PIPELINE_STAGE_NAMES) as PipelineStageName | null;
-      const stream = persistedEnum(row, 'stream', ['runner', 'docker']);
-      if (stream !== null) {
-        const generation = nullableNumber(row, 'file_generation'); const offset = nullableNumber(row, 'byte_offset'); const length = nullableNumber(row, 'byte_length'); const partial = nullableNumber(row, 'partial');
-        if (generation === null || offset === null || length === null || partial === null || !Number.isSafeInteger(generation) || generation < 0 || !Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length <= 0 || (partial !== 0 && partial !== 1)) throw new StoreDataError('SQLite log event range is invalid');
-        if (!['log', 'log_orphan_tail', 'log-gap', 'log-truncated'].includes(eventType)) throw new StoreDataError('SQLite log event type is invalid');
-      } else if (row.file_generation !== null || row.byte_offset !== null || row.byte_length !== null || row.partial !== null) throw new StoreDataError('SQLite event log range nullable group is invalid');
-      return {
-        jobId: asString(row, 'job_id'), seq, eventType,
-        state, stage, payload: parseJsonObject(asString(row, 'payload_json'), 'event payload') ?? {}, at: canonicalInstant(asString(row, 'at'), 'event at'),
-      };
-    });
+    const events = rows.slice(0, limit).map((row) => this.#mapEvent(row));
     return { events, nextAfterSeq: hasMore ? events.at(-1)?.seq ?? null : null };
+  }
+
+  getCancellationProtocolEvents(jobId: string): readonly EventRecord[] {
+    this.#requireJob(jobId);
+    const rows = this.#db.prepare(`
+      SELECT job_id, seq, event_type, state, stage, payload_json, at,
+             stream, file_generation, byte_offset, byte_length, partial
+      FROM job_events
+      WHERE job_id = ?
+        AND event_type = 'cleanup'
+        AND json_extract(payload_json, '$.kind')
+          IN ('cancellation-evidence', 'cancellation-cleanup')
+      ORDER BY seq
+      LIMIT 3
+    `).all(jobId) as unknown as DbRow[];
+    return rows.map((row) => this.#mapEvent(row));
+  }
+
+  #mapEvent(row: DbRow): EventRecord {
+    const seq = Number(row.seq);
+    if (!Number.isSafeInteger(seq) || seq < 0) throw new StoreDataError('SQLite event sequence is invalid');
+    const eventType = persistedEnum(row, 'event_type', EVENT_TYPES, false)! as EventType;
+    const state = persistedEnum(row, 'state', JOB_STATES) as JobState | null;
+    const stage = persistedEnum(row, 'stage', PIPELINE_STAGE_NAMES) as PipelineStageName | null;
+    const stream = persistedEnum(row, 'stream', ['runner', 'docker']);
+    if (stream !== null) {
+      const generation = nullableNumber(row, 'file_generation'); const offset = nullableNumber(row, 'byte_offset'); const length = nullableNumber(row, 'byte_length'); const partial = nullableNumber(row, 'partial');
+      if (generation === null || offset === null || length === null || partial === null || !Number.isSafeInteger(generation) || generation < 0 || !Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length <= 0 || (partial !== 0 && partial !== 1)) throw new StoreDataError('SQLite log event range is invalid');
+      if (!['log', 'log_orphan_tail', 'log-gap', 'log-truncated'].includes(eventType)) throw new StoreDataError('SQLite log event type is invalid');
+    } else if (row.file_generation !== null || row.byte_offset !== null || row.byte_length !== null || row.partial !== null) throw new StoreDataError('SQLite event log range nullable group is invalid');
+    return {
+      jobId: asString(row, 'job_id'),
+      seq,
+      eventType,
+      state,
+      stage,
+      payload: parseJsonObject(asString(row, 'payload_json'), 'event payload') ?? {},
+      at: canonicalInstant(asString(row, 'at'), 'event at'),
+    };
   }
 
   #requireJob(jobId: string): DbRow {

@@ -236,6 +236,81 @@ function seedLogRanges(path: string, jobId: string, ranges: ReadonlyArray<readon
   db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=?').run(LATER, SHA64, jobId);
   db.close();
 }
+function seedManyLogEvents(path: string, jobId: string, eventCount: number): void {
+  const db = openBuilderDatabase(path);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const stream of ['runner', 'docker']) {
+      db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, size_bytes) VALUES (?, ?, 0, ?, ?, ?)').run(
+        jobId,
+        stream,
+        `logs/${stream}-0.log`,
+        NOW,
+        eventCount,
+      );
+      const insert = db.prepare('INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at, stream, file_generation, byte_offset, byte_length, partial) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 0)');
+      for (let offset = 0; offset < eventCount; offset += 1) {
+        const row = db.prepare('SELECT state, stage, COALESCE(MAX(seq) + 1, 0) AS seq FROM job_events WHERE job_id=?').get(jobId) as { state: string; stage: string | null; seq: number };
+        insert.run(jobId, row.seq, 'log', row.state, row.stage, '{}', NOW, stream, offset);
+      }
+    }
+    db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=?').run(LATER, SHA64, jobId);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  } finally {
+    db.close();
+  }
+}
+function seedMaxLogGenerations(path: string, jobId: string): void {
+  const db = openBuilderDatabase(path);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const insert = db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, sealed_at, size_bytes, sha256) VALUES (?, ?, ?, ?, ?, ?, 0, ?)');
+    for (const stream of ['runner', 'docker']) {
+      for (let generation = 0; generation < 64; generation += 1) {
+        insert.run(jobId, stream, generation, `logs/${stream}-${generation}.log`, NOW, LATER, SHA64);
+      }
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  } finally {
+    db.close();
+  }
+}
+function compactLogGeneration(
+  stream: 'runner' | 'docker',
+  generation: number,
+  options: {
+    readonly sizeBytes?: number;
+    readonly eventCount?: number;
+    readonly firstEventSeq?: number | null;
+    readonly lastEventSeq?: number | null;
+    readonly sealedAt?: string;
+  } = {},
+): string {
+  const sizeBytes = options.sizeBytes ?? 0;
+  const eventCount = options.eventCount ?? 0;
+  return encodeJson({
+    generation,
+    path: `logs/${stream}-${generation}.log`,
+    startedAt: NOW,
+    sealedAt: options.sealedAt ?? LATER,
+    sizeBytes,
+    sha256: SHA64,
+    sealStatus: 'sealed',
+    byteCount: sizeBytes,
+    eventCount,
+    firstEventSeq: options.firstEventSeq ?? null,
+    lastEventSeq: options.lastEventSeq ?? null,
+    coverageSha256: eventCount === 0
+      ? createHash('sha256').digest('hex')
+      : SHA64,
+  }, `${stream} compact log fixture`, true);
+}
 function seedLogUncoveredTail(path: string, jobId: string): void {
   const db = openBuilderDatabase(path);
   for (const stream of ['runner', 'docker']) {
@@ -729,28 +804,20 @@ describe('actor-owned compare-and-set writes', () => {
           docker: 'sealed',
           verifiedAt: RECOVERY,
           generations: {
-            runner: [{
-              generation: 0,
-              path: 'logs/runner-0.log',
-              startedAt: NOW,
-              sealedAt: RECOVERY,
+            runner: [compactLogGeneration('runner', 0, {
               sizeBytes: 1,
-              sha256: SHA64,
-              sealStatus: 'sealed',
-              eventRange: { firstSeq: 1, lastSeq: 1, count: 1 },
-              events: [{ seq: 1, eventType: 'log', at: NOW, byteOffset: 0, byteLength: 1, partial: false }],
-            }],
-            docker: [{
-              generation: 0,
-              path: 'logs/docker-0.log',
-              startedAt: NOW,
+              eventCount: 1,
+              firstEventSeq: 1,
+              lastEventSeq: 1,
               sealedAt: RECOVERY,
+            })],
+            docker: [compactLogGeneration('docker', 0, {
               sizeBytes: 1,
-              sha256: SHA64,
-              sealStatus: 'sealed',
-              eventRange: { firstSeq: 2, lastSeq: 2, count: 1 },
-              events: [{ seq: 2, eventType: 'log', at: NOW, byteOffset: 0, byteLength: 1, partial: false }],
-            }],
+              eventCount: 1,
+              firstEventSeq: 2,
+              lastEventSeq: 2,
+              sealedAt: RECOVERY,
+            })],
           },
         },
       },
@@ -761,6 +828,122 @@ describe('actor-owned compare-and-set writes', () => {
     expect(target.store.listEvents(jobId).events.some(
       (event) => event.eventType === 'cleanup' && event.payload.kind === 'cancellation-evidence',
     )).toBe(false);
+  });
+
+  it('binds more than 256 log events with compact generation metadata', async () => {
+    const jobId = 'cancellation-compact-log-coverage';
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    seedManyLogEvents(target.path, jobId, 300);
+
+    const boundLogs = target.ownership.cancellationLogProof(jobId, RECOVERY);
+    expect(boundLogs).toMatchObject({ runner: 'sealed', docker: 'sealed' });
+    if (!('generations' in boundLogs)) throw new Error('expected compact cancellation generation binding');
+    const runnerMetadata = JSON.parse(boundLogs.generations.runner[0] as unknown as string) as Record<string, unknown>;
+    expect(runnerMetadata).toMatchObject({
+      generation: 0,
+      byteCount: 300,
+      eventCount: 300,
+      sealStatus: 'sealed',
+    });
+    expect(runnerMetadata).toHaveProperty('coverageSha256', expect.stringMatching(/^[0-9a-f]{64}$/u));
+    expect(runnerMetadata).not.toHaveProperty('events');
+
+    const command: RunnerWriteCommand = {
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-evidence',
+      expectedState: 'cancel_requested',
+      evidence: {
+        ...cancellationEvidence(jobId),
+        runnerObservedAt: RECOVERY,
+        logs: boundLogs,
+      },
+    };
+    expect(() => normalizeJson(command.evidence, 'compact cancellation evidence')).not.toThrow();
+    expect(target.ownership.runnerWrite(command).ok).toBe(true);
+  });
+
+  it('keeps the maximum bounded generation set inside command validation limits', async () => {
+    const jobId = 'cancellation-max-compact-generations';
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    seedMaxLogGenerations(target.path, jobId);
+    const boundLogs = target.ownership.cancellationLogProof(jobId, RECOVERY);
+    const command: RunnerWriteCommand = {
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-evidence',
+      expectedState: 'cancel_requested',
+      evidence: {
+        ...cancellationEvidence(jobId),
+        runnerObservedAt: RECOVERY,
+        logs: boundLogs,
+      },
+    };
+
+    expect(() => normalizeJson(command.evidence, 'maximum cancellation evidence')).not.toThrow();
+    expect(Buffer.byteLength(JSON.stringify(command), 'utf8')).toBeLessThanOrEqual(65_536);
+    expect(target.ownership.runnerWrite(command).ok).toBe(true);
+  });
+
+  it.each(['event-type', 'partial-flag'] as const)('rejects a compact coverage digest after an immutable log event %s is tampered', async (mutation) => {
+    const jobId = `cancellation-event-coverage-digest-${mutation}`;
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    seedLogRanges(target.path, jobId, [[0, 1, 'log'], [1, 1, 'log']]);
+    const boundLogs = target.ownership.cancellationLogProof(jobId, RECOVERY);
+    const evidence = target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-evidence',
+      expectedState: 'cancel_requested',
+      evidence: {
+        ...cancellationEvidence(jobId),
+        runnerObservedAt: RECOVERY,
+        logs: boundLogs,
+      },
+    });
+    const db = openBuilderDatabase(target.path);
+    db.exec('DROP TRIGGER job_events_immutable_update_guard');
+    if (mutation === 'event-type') {
+      db.prepare("UPDATE job_events SET event_type='log_orphan_tail' WHERE job_id=? AND stream='runner' AND byte_offset=1").run(jobId);
+    } else {
+      db.prepare("UPDATE job_events SET partial=1 WHERE job_id=? AND stream='runner' AND byte_offset=1").run(jobId);
+    }
+    db.close();
+
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: AFTER,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-cleanup',
+      expectedState: 'cancel_requested',
+      evidenceEventSeq: eventSeq(evidence),
+      proof: {
+        kind: 'pre-container',
+        runnerUnit: runnerBase(jobId).runnerUnit,
+        unitInactiveAt: null,
+        container: absent(AFTER),
+        staging,
+        logs: boundLogs,
+      },
+    })).toMatchObject({
+      ok: false,
+      conflict: { kind: 'identity-mismatch' },
+    });
   });
 
   it('requires cleanup proof to exactly bind the referenced cancellation evidence', async () => {
@@ -1157,17 +1340,7 @@ describe('actor-owned compare-and-set writes', () => {
       docker: 'absent',
       verifiedAt: RECOVERY,
       generations: {
-        runner: [{
-          generation: 0,
-          path: 'logs/runner-0.log',
-          startedAt: NOW,
-          sealedAt: LATER,
-          sizeBytes: 0,
-          sha256: SHA64,
-          sealStatus: 'sealed',
-          eventRange: null,
-          events: [],
-        }],
+        runner: [compactLogGeneration('runner', 0)],
         docker: [],
       },
     });

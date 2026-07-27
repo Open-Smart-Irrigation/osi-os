@@ -49,7 +49,12 @@ import type {
   TargetSetupConfigObservations,
   TargetSetupSourceObservations,
 } from './target-setup.js';
-import type { CancellationBlockerCode, CancellationBudget, CancellationObservation } from './cancellation.js';
+import type {
+  ActiveOperationCancellationAuthorization,
+  CancellationBlockerCode,
+  CancellationBudget,
+  CancellationObservation,
+} from './cancellation.js';
 import { CancellationBlockedError } from './cancellation.js';
 import { DockerCancellationRequestedError } from './docker-executor.js';
 
@@ -344,6 +349,7 @@ export interface PipelineInput {
 export interface PipelineCancellation {
   readonly isRequested: () => boolean;
   readonly cancellationBudget?: () => CancellationBudget;
+  readonly authorizeActiveOperationStop?: () => Promise<ActiveOperationCancellationAuthorization>;
   readonly observeBetweenStages: (stage: PipelineStageName) => Promise<CancellationObservation>;
   readonly observeBetweenOperations: (operationId: TrustedOperationId) => Promise<CancellationObservation>;
   readonly cancelIfRequested: () => Promise<CancellationObservation>;
@@ -1367,9 +1373,9 @@ export function createPipeline(input: PipelineInput): {
           if (!error.recoveryPersisted) {
             try {
               if (input.cancellation.blockRecoveryRequired === undefined) {
-                throw new CancellationBlockedError(error.message, 'DOCKER_CONTAINER_ORPHANED');
+                throw new CancellationBlockedError(error.message, error.blockerCode);
               }
-              await input.cancellation.blockRecoveryRequired('DOCKER_CONTAINER_ORPHANED', error.message);
+              await input.cancellation.blockRecoveryRequired(error.blockerCode, error.message);
             } catch (cancellationError) {
               if (cancellationError instanceof CancellationBlockedError) {
                 throw new PipelineRecoveryRequiredError(cancellationError.message, cancellationError.blockerCode);
@@ -1377,7 +1383,7 @@ export function createPipeline(input: PipelineInput): {
               throw cancellationError;
             }
           }
-          throw new PipelineRecoveryRequiredError(error.message, 'DOCKER_CONTAINER_ORPHANED');
+          throw new PipelineRecoveryRequiredError(error.message, error.blockerCode);
         }
         let observation: CancellationObservation;
         try {

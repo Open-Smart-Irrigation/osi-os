@@ -64,7 +64,11 @@ import {
   createRunnerPublisherClient,
   type RunnerPublisherClient,
 } from './publisher-client.js';
-import { createDockerCancellationControls, createDockerExecutor } from './docker-executor.js';
+import {
+  DockerCancellationRequestedError,
+  createDockerCancellationControls,
+  createDockerExecutor,
+} from './docker-executor.js';
 import {
   CancellationBlockedError,
   createRunnerCancellation,
@@ -1949,6 +1953,12 @@ async function createProductionComposition(
             deadline: null,
             remainingMs: null,
           },
+          authorizeCancellation: async () => {
+            if (cancellation?.authorizeActiveOperationStop === undefined) {
+              throw new Error('runner cancellation authorization is unavailable');
+            }
+            return cancellation.authorizeActiveOperationStop();
+          },
           persistCancellationBlocker: async (reason) => {
             if (cancellation?.blockRecoveryRequired === undefined) {
               throw new Error('runner cancellation blocker persistence is unavailable');
@@ -1973,18 +1983,7 @@ async function createProductionComposition(
             owner: context.lease.owner,
             unit: context.lease.runnerUnit,
             leaseExpiresAt: context.lease.expiresAt,
-            expectedState: ({
-              preflight: 'preflight',
-              source: 'source',
-              'release-gates': 'release_gates',
-              frontend: 'frontend',
-              'target-setup': 'target_setup',
-              feeds: 'feeds',
-              config: 'config',
-              build: 'building',
-              verify: 'verifying',
-              publish: 'publishing',
-            } satisfies Readonly<Record<PipelineStageName, JobState>>)[context.stage],
+            expectedState: store.getJob(context.job.jobId).state,
           }),
           evidence: (value) => writeOperationEvidence(
             loaded.pathAuthorities.stateRoot,
@@ -2033,6 +2032,9 @@ async function createProductionComposition(
         );
         if (persisted === null) {
           throw executorError ?? new Error('Docker executor did not persist an operation');
+        }
+        if (executorError instanceof DockerCancellationRequestedError) {
+          throw executorError;
         }
         const execution = mapOperation(
           persisted,

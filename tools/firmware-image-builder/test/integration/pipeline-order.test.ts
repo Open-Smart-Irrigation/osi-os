@@ -340,6 +340,7 @@ async function fixture(options: {
   readonly throwOperation?: TrustedOperationId;
   readonly cancelOperation?: TrustedOperationId;
   readonly cancelOperationRecoveryRequired?: boolean;
+  readonly cancelOperationBlockerCode?: 'RUNNER_DISAPPEARED' | 'DOCKER_CONTAINER_ORPHANED';
   readonly failSource?: boolean;
   readonly publisher?: Partial<PublisherClient>;
   readonly tamperMetadata?: 'manifest' | 'verification' | 'checksum';
@@ -530,7 +531,10 @@ async function fixture(options: {
       if (options.cancelOperation === operationId) {
         throw new DockerCancellationRequestedError(
           'attached Docker operation cancelled',
-          { recoveryRequired: options.cancelOperationRecoveryRequired === true },
+          {
+            recoveryRequired: options.cancelOperationRecoveryRequired === true,
+            blockerCode: options.cancelOperationBlockerCode,
+          },
         );
       }
       const attempt = (operationAttempts.get(operationId) ?? 0) + 1;
@@ -1552,6 +1556,40 @@ describe('trusted pipeline integration', () => {
       });
       expect(cancellation.blockRecoveryRequired).toHaveBeenCalledWith(
         'DOCKER_CONTAINER_ORPHANED',
+        expect.stringMatching(/attached Docker operation cancelled/i),
+      );
+      expect(cancellation.cancelIfRequested).not.toHaveBeenCalled();
+      expect(value.store.getJob(value.input.jobId).state).not.toBe('failed');
+    } finally {
+      value.close();
+    }
+  });
+
+  it('preserves a runner-ownership authorization blocker from the attached operation', async () => {
+    const value = await fixture({
+      cancelOperation: 'verify-profile-parity',
+      cancelOperationRecoveryRequired: true,
+      cancelOperationBlockerCode: 'RUNNER_DISAPPEARED',
+    });
+    try {
+      const cancellation = {
+        isRequested: () => true,
+        observeBetweenStages: vi.fn(async () => ({ requested: false, handled: false } as const)),
+        observeBetweenOperations: vi.fn(async () => ({ requested: false, handled: false } as const)),
+        cancelIfRequested: vi.fn(async () => { throw new Error('authorization blocker must not continue cancellation cleanup'); }),
+        blockRecoveryRequired: vi.fn(async () => {
+          throw new CancellationBlockedError('runner cancellation ownership changed', 'RUNNER_DISAPPEARED');
+        }),
+        dispose: vi.fn(),
+      };
+      const input = { ...value.input, cancellation } as PipelineInput & { readonly cancellation: typeof cancellation };
+
+      await expect(createPipeline(input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'RUNNER_DISAPPEARED',
+      });
+      expect(cancellation.blockRecoveryRequired).toHaveBeenCalledWith(
+        'RUNNER_DISAPPEARED',
         expect.stringMatching(/attached Docker operation cancelled/i),
       );
       expect(cancellation.cancelIfRequested).not.toHaveBeenCalled();

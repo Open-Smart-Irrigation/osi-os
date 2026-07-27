@@ -4,7 +4,7 @@ import { OFFLINE_OPERATION_IDS, parseCanonicalBuilderImageReference, READ_ONLY_O
 import type { BuilderErrorCode, JobState, TrustedOperationId } from '../../domain/types.js';
 import type { LogCleanupProof, OperationCleanupProof, RunnerWriteCommand } from '../../api/src/ownership.js';
 import type { JobRecord, JsonObject, OperationInput, StoredOperation } from '../../api/src/store.js';
-import type { CancellationBudget } from './cancellation.js';
+import type { ActiveOperationCancellationAuthorization, CancellationBudget } from './cancellation.js';
 
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const JOB_LABEL = 'org.osi.image-builder.job-id';
@@ -131,6 +131,7 @@ export interface DockerExecutorOptions {
   readonly evidence: (value: JsonObject) => Promise<{ readonly path: string; readonly sha256: string }>;
   readonly finalizeLogs: (input: LogFinalizeInput) => Promise<LogCleanupProof>;
   readonly cancellationBudget?: () => CancellationBudget;
+  readonly authorizeCancellation?: () => Promise<ActiveOperationCancellationAuthorization>;
   readonly persistCancellationBlocker?: (reason: string) => Promise<void>;
   readonly classifyAcceptedResult?: (
     result: CommandResult,
@@ -173,17 +174,31 @@ export class DockerCancellationRequestedError extends Error {
   readonly code: 'CANCELLED' | 'DOCKER_CONTAINER_ORPHANED';
   readonly recoveryRequired: boolean;
   readonly recoveryPersisted: boolean;
+  readonly blockerCode: 'RUNNER_DISAPPEARED' | 'DOCKER_CONTAINER_ORPHANED';
 
   constructor(
     message = 'Docker operation stopped cooperatively for cancellation',
-    options: Readonly<{ recoveryRequired?: boolean; recoveryPersisted?: boolean }> = {},
+    options: Readonly<{
+      recoveryRequired?: boolean;
+      recoveryPersisted?: boolean;
+      blockerCode?: 'RUNNER_DISAPPEARED' | 'DOCKER_CONTAINER_ORPHANED';
+    }> = {},
   ) {
     super(message);
     this.name = 'DockerCancellationRequestedError';
     this.recoveryRequired = options.recoveryRequired ?? false;
     this.recoveryPersisted = options.recoveryPersisted ?? false;
+    this.blockerCode = options.blockerCode ?? 'DOCKER_CONTAINER_ORPHANED';
     this.code = this.recoveryRequired ? 'DOCKER_CONTAINER_ORPHANED' : 'CANCELLED';
   }
+}
+
+function cancellationControlBlocker(error: unknown): 'RUNNER_DISAPPEARED' | 'DOCKER_CONTAINER_ORPHANED' {
+  return error !== null
+    && typeof error === 'object'
+    && (error as { readonly blockerCode?: unknown }).blockerCode === 'RUNNER_DISAPPEARED'
+    ? 'RUNNER_DISAPPEARED'
+    : 'DOCKER_CONTAINER_ORPHANED';
 }
 
 function fail(message: string): never { throw new DockerLifecycleError(message); }
@@ -261,13 +276,6 @@ function cancellationInspection(stdout: string, expectedImageDigest: string): Do
   };
 }
 
-function exactCancellationLabels(actual: JsonObject, expected: JsonObject): boolean {
-  const actualKeys = Object.keys(actual).sort();
-  const expectedKeys = Object.keys(expected).sort();
-  return JSON.stringify(actualKeys) === JSON.stringify(expectedKeys)
-    && expectedKeys.every((key) => actual[key] === expected[key]);
-}
-
 export function createDockerCancellationControls(options: DockerCancellationControlOptions) {
   const remainingBudget = (deadline: number, action: string): number => {
     if (!Number.isFinite(deadline) || deadline < 0) fail(`${action} deadline is invalid`);
@@ -283,16 +291,16 @@ export function createDockerCancellationControls(options: DockerCancellationCont
     return cancellationInspection(requireSuccess(response, 'Docker cancellation inspect'), options.expectedImageDigest);
   };
   const listByLabels = async (labels: JsonObject, deadline: number): Promise<readonly DockerCancellationContainer[]> => {
-    const filters = Object.entries(labels).flatMap(([key, value]) => [`--filter=label=${key}=${requiredString(value, `Docker cancellation filter ${key}`)}`]);
+    const jobId = requiredString(labels[JOB_LABEL], `Docker cancellation filter ${JOB_LABEL}`);
     const response = await cancellationCommand(
       options,
-      ['ps', '--all', ...filters, '--format={{.ID}}'],
+      ['ps', '--all', `--filter=label=${JOB_LABEL}=${jobId}`, '--format={{.ID}}'],
       remainingBudget(deadline, 'Docker cancellation label query'),
     );
     const ids = requireSuccess(response, 'Docker cancellation label query').split(/\r?\n/u).map((value) => value.trim()).filter((value) => value.length > 0);
     const containers: Array<DockerCancellationContainer | null> = [];
     for (const id of ids) containers.push(await inspect(id, deadline));
-    return containers.filter((value): value is DockerCancellationContainer => value !== null && exactCancellationLabels(value.labels, labels));
+    return containers.filter((value): value is DockerCancellationContainer => value !== null);
   };
   const stop = async (containerId: string, deadline: number): Promise<void> => {
     const timeoutMs = remainingBudget(deadline, 'Docker cooperative stop');
@@ -868,19 +876,34 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
           cancellationDeadlineTimer = setTimeout(() => resolveCancellationDeadline?.(), initialBudget);
           cancellationDeadlineTimer.unref?.();
           cancellationControl = (async () => {
-            let stopError: unknown = null;
+            let authorization: ActiveOperationCancellationAuthorization;
             try {
-              const stopBudget = remainingCancellationBudget();
-              if (stopBudget < 1) throw new DockerLifecycleError('cooperative cancellation deadline expired before Docker stop');
-              const graceSeconds = Math.max(1, Math.ceil(stopBudget / 1_000));
-              requireSuccess(await runDocker(
-                options,
-                ['stop', `--time=${graceSeconds}`, id!],
-                {},
-                { timeoutMs: stopBudget },
-              ), 'Docker cooperative stop');
+              if (options.authorizeCancellation === undefined) {
+                throw new DockerLifecycleError('coordinator cancellation authorization is unavailable');
+              }
+              authorization = await options.authorizeCancellation();
+              if (authorization.containerId !== id || authorization.deadline !== cancellationDeadline) {
+                throw new DockerLifecycleError('coordinator cancellation authorization does not bind the attached container and deadline');
+              }
             } catch (error) {
-              stopError = error;
+              cancellationControlError = error;
+              return;
+            }
+            let stopError: unknown = null;
+            if (authorization.running) {
+              try {
+                const stopBudget = remainingCancellationBudget();
+                if (stopBudget < 1) throw new DockerLifecycleError('cooperative cancellation deadline expired before Docker stop');
+                const graceSeconds = Math.max(1, Math.ceil(stopBudget / 1_000));
+                requireSuccess(await runDocker(
+                  options,
+                  ['stop', `--time=${graceSeconds}`, id!],
+                  {},
+                  { timeoutMs: stopBudget },
+                ), 'Docker cooperative stop');
+              } catch (error) {
+                stopError = error;
+              }
             }
             try {
               const inspectBudget = remainingCancellationBudget();
@@ -949,6 +972,19 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
         }
         const cancellationObserved = cancellationControl !== null;
         if (attachOutcome === null && !cancellationObserved) throw new DockerLifecycleError('Docker attach ended without a result');
+        const cancellationBlockerCode = cancellationControlBlocker(cancellationControlError);
+        if (cancellationObserved && cancellationControlError !== null && cancellationBlockerCode === 'RUNNER_DISAPPEARED') {
+          if (attachOutcome === null) await attach;
+          throw new DockerCancellationRequestedError(
+            cancellationControlError instanceof Error
+              ? cancellationControlError.message
+              : String(cancellationControlError),
+            {
+              recoveryRequired: true,
+              blockerCode: 'RUNNER_DISAPPEARED',
+            },
+          );
+        }
         let result: CommandResult;
         let attachError: unknown = null;
         if (attachOutcome === null) {
@@ -1061,6 +1097,7 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
           throw new DockerCancellationRequestedError(message, {
             recoveryRequired: cancellationRecoveryRequired,
             recoveryPersisted,
+            blockerCode: cancellationBlockerCode,
           });
         }
         const persistedIdentity = options.store.getJob(options.jobId);

@@ -153,6 +153,7 @@ function dependencies(overrides: Partial<Parameters<typeof createRunnerCancellat
   const ownership = {
     runnerWrite(command: RunnerWriteCommand): OwnershipResult {
       writes.push(command);
+      if (command.kind === 'cancellation-transition') current = { ...current, state: 'cancel_requested' };
       return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined };
     },
   };
@@ -164,7 +165,7 @@ function dependencies(overrides: Partial<Parameters<typeof createRunnerCancellat
     leaseExpiresAt: () => LEASE,
     store: {
       getJob: () => current,
-      listEvents: () => ({ events: [], nextAfterSeq: null }),
+      getCancellationProtocolEvents: () => [],
     },
     ownership,
     docker,
@@ -212,6 +213,71 @@ describe('runner cooperative cancellation', () => {
       deadline: 42_500,
       remainingMs: 22_500,
     });
+  });
+
+  it('authorizes active-operation stop only after the cancellation transition commits and exact inspection passes', async () => {
+    const trace: string[] = [];
+    const fixture = dependencies();
+    fixture.setJob(containerJob({ cancelRequestedAt: NOW }));
+    fixture.docker.current = container();
+    const persistedWrite = fixture.value.ownership.runnerWrite.bind(fixture.value.ownership);
+    vi.spyOn(fixture.value.ownership, 'runnerWrite').mockImplementation((command: RunnerWriteCommand) => {
+      trace.push(`ownership:${command.kind}`);
+      return persistedWrite(command);
+    });
+    fixture.docker.inspect.mockImplementation(async () => {
+      trace.push('docker:inspect');
+      return fixture.docker.current;
+    });
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.authorizeActiveOperationStop()).resolves.toMatchObject({
+      containerId: CONTAINER_ID,
+      deadline: expect.any(Number),
+    });
+    expect(trace).toEqual([
+      'ownership:cancellation-transition',
+      'docker:inspect',
+    ]);
+    expect(fixture.docker.stop).not.toHaveBeenCalled();
+    expect(fixture.docker.remove).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['stale lease', () => {
+      const fixture = dependencies();
+      fixture.setJob(containerJob({ cancelRequestedAt: NOW, runnerLeaseOwner: 'runner-other' }));
+      return fixture;
+    }],
+    ['lost transition CAS', () => {
+      const fixture = dependencies();
+      fixture.setJob(containerJob({ cancelRequestedAt: NOW }));
+      vi.spyOn(fixture.value.ownership, 'runnerWrite').mockReturnValue({
+        ok: false,
+        conflict: { kind: 'cas-lost', message: 'injected cancellation transition race' },
+      });
+      return fixture;
+    }],
+    ['missing persisted identity', () => {
+      const fixture = dependencies();
+      fixture.setJob(job({ cancelRequestedAt: NOW }));
+      return fixture;
+    }],
+    ['mismatched fresh inspection', () => {
+      const fixture = dependencies();
+      fixture.setJob(containerJob({ cancelRequestedAt: NOW }));
+      fixture.docker.current = container({ name: 'osi-image-builder-other' });
+      return fixture;
+    }],
+  ] as const)('does not authorize Docker mutation for %s', async (_case, setup) => {
+    const fixture = setup();
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.authorizeActiveOperationStop()).rejects.toBeInstanceOf(CancellationBlockedError);
+    expect(fixture.docker.stop).not.toHaveBeenCalled();
+    expect(fixture.docker.remove).not.toHaveBeenCalled();
   });
 
   it('handles SIGUSR1 and observes the request at a stage boundary', async () => {

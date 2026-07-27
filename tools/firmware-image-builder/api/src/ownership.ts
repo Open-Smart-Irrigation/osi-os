@@ -128,15 +128,7 @@ export type StagingCleanupProof =
 export type LogCleanupProof = Readonly<{ readonly runner: 'absent' | 'sealed'; readonly docker: 'absent' | 'sealed'; readonly verifiedAt: string }>;
 export type LogCleanupSnapshot = Readonly<{ readonly runner: 'absent' | 'sealed' | 'unsealed'; readonly docker: 'absent' | 'sealed' | 'unsealed'; readonly verifiedAt: string }>;
 
-export type CancellationLogEventRange = Readonly<{
-  readonly seq: number;
-  readonly eventType: 'log' | 'log_orphan_tail' | 'log-truncated';
-  readonly at: string;
-  readonly byteOffset: number;
-  readonly byteLength: number;
-  readonly partial: boolean;
-}>;
-export type CancellationLogGeneration = Readonly<{
+export type CancellationLogGenerationMetadata = Readonly<{
   readonly generation: number;
   readonly path: string;
   readonly startedAt: string;
@@ -144,12 +136,15 @@ export type CancellationLogGeneration = Readonly<{
   readonly sizeBytes: number;
   readonly sha256: string;
   readonly sealStatus: 'sealed';
-  readonly eventRange: Readonly<{ readonly firstSeq: number; readonly lastSeq: number; readonly count: number }> | null;
-  readonly events: readonly CancellationLogEventRange[];
+  readonly byteCount: number;
+  readonly eventCount: number;
+  readonly firstEventSeq: number | null;
+  readonly lastEventSeq: number | null;
+  readonly coverageSha256: string;
 }>;
 export type CancellationLogGenerations = Readonly<{
-  readonly runner: readonly CancellationLogGeneration[];
-  readonly docker: readonly CancellationLogGeneration[];
+  readonly runner: readonly string[];
+  readonly docker: readonly string[];
 }>;
 export type CancellationLogProof =
   | LogCleanupProof
@@ -532,45 +527,50 @@ function shapeCancellationLogs(value: unknown, field: string, at: string): void 
       throw new OwnershipValidationError(`${field}.generations.${stream} does not match its coverage state`);
     }
     for (const [index, candidate] of streamGenerations.entries()) {
-      const generation = shapeRecord(candidate, `${field}.generations.${stream}[${index}]`);
+      if (typeof candidate !== 'string') throw new OwnershipValidationError(`${field}.generations.${stream}[${index}] is not compact metadata`);
+      let generation: PreparedRecord;
+      try {
+        const parsed = JSON.parse(candidate) as unknown;
+        if (encodeJson(parsed, `${field}.generations.${stream}[${index}]`, true) !== candidate) {
+          throw new OwnershipValidationError(`${field}.generations.${stream}[${index}] is not canonical`);
+        }
+        generation = shapeRecord(parsed, `${field}.generations.${stream}[${index}]`);
+      } catch (error) {
+        if (error instanceof OwnershipValidationError) throw error;
+        throw new OwnershipValidationError(`${field}.generations.${stream}[${index}] is invalid`, { cause: error });
+      }
       if (generation.generation !== index) throw new OwnershipValidationError(`${field}.generations.${stream}[${index}].generation is not contiguous`);
       preparedPath(generation.path, `${field}.generations.${stream}[${index}].path`);
       if (!(generation.path as string).startsWith('logs/') || (generation.path as string).includes('..')) throw new OwnershipValidationError(`${field}.generations.${stream}[${index}].path is invalid`);
       preparedInstant(generation.startedAt, `${field}.generations.${stream}[${index}].startedAt`);
       preparedInstant(generation.sealedAt, `${field}.generations.${stream}[${index}].sealedAt`);
       preparedHash(generation.sha256, `${field}.generations.${stream}[${index}].sha256`);
+      preparedHash(generation.coverageSha256, `${field}.generations.${stream}[${index}].coverageSha256`);
       shapeLiteral(generation.sealStatus, 'sealed', `${field}.generations.${stream}[${index}].sealStatus`);
       if (!Number.isSafeInteger(generation.sizeBytes) || Number(generation.sizeBytes) < 0) throw new OwnershipValidationError(`${field}.generations.${stream}[${index}].sizeBytes is invalid`);
+      if (
+        !Number.isSafeInteger(generation.byteCount)
+        || generation.byteCount !== generation.sizeBytes
+        || !Number.isSafeInteger(generation.eventCount)
+        || Number(generation.eventCount) < 0
+      ) {
+        throw new OwnershipValidationError(`${field}.generations.${stream}[${index}] coverage counts are invalid`);
+      }
+      if (generation.eventCount === 0) {
+        if (generation.firstEventSeq !== null || generation.lastEventSeq !== null) throw new OwnershipValidationError(`${field}.generations.${stream}[${index}] empty event range is invalid`);
+      } else if (
+        !Number.isSafeInteger(generation.firstEventSeq)
+        || !Number.isSafeInteger(generation.lastEventSeq)
+        || Number(generation.firstEventSeq) < 0
+        || Number(generation.lastEventSeq) < Number(generation.firstEventSeq)
+      ) {
+        throw new OwnershipValidationError(`${field}.generations.${stream}[${index}] event range is invalid`);
+      }
       shapeChronology([
         [`${field}.generations.${stream}[${index}].startedAt`, generation.startedAt],
         [`${field}.generations.${stream}[${index}].sealedAt`, generation.sealedAt],
         [`${field}.verifiedAt`, proof.verifiedAt],
       ], `${field}.generations.${stream}[${index}]`);
-      if (!Array.isArray(generation.events)) throw new OwnershipValidationError(`${field}.generations.${stream}[${index}].events is required`);
-      let expectedOffset = 0;
-      let priorSeq = -1;
-      for (const [eventIndex, candidateEvent] of generation.events.entries()) {
-        const event = shapeRecord(candidateEvent, `${field}.generations.${stream}[${index}].events[${eventIndex}]`);
-        if (!Number.isSafeInteger(event.seq) || Number(event.seq) <= priorSeq) throw new OwnershipValidationError(`${field} event sequence is invalid`);
-        preparedEnum(event.eventType, ['log', 'log_orphan_tail', 'log-truncated'], `${field} event type`);
-        preparedInstant(event.at, `${field} event time`);
-        if (!Number.isSafeInteger(event.byteOffset) || Number(event.byteOffset) !== expectedOffset || !Number.isSafeInteger(event.byteLength) || Number(event.byteLength) < 1 || expectedOffset + Number(event.byteLength) > Number(generation.sizeBytes)) {
-          throw new OwnershipValidationError(`${field} event range is not contiguous`);
-        }
-        if (typeof event.partial !== 'boolean') throw new OwnershipValidationError(`${field} event partial flag is invalid`);
-        shapeChronology([[`${field} event time`, event.at], [`${field} generation sealedAt`, generation.sealedAt]], `${field} event`);
-        priorSeq = Number(event.seq);
-        expectedOffset += Number(event.byteLength);
-      }
-      if (expectedOffset !== Number(generation.sizeBytes)) throw new OwnershipValidationError(`${field} generation bytes are not fully covered`);
-      if (generation.events.length === 0) {
-        shapeLiteral(generation.eventRange, null, `${field} empty eventRange`);
-      } else {
-        const range = shapeRecord(generation.eventRange, `${field}.generations.${stream}[${index}].eventRange`);
-        if (range.firstSeq !== (generation.events[0] as Record<string, unknown>).seq || range.lastSeq !== (generation.events.at(-1) as Record<string, unknown>).seq || range.count !== generation.events.length) {
-          throw new OwnershipValidationError(`${field} eventRange does not bind its events`);
-        }
-      }
     }
   }
 }
@@ -1058,7 +1058,23 @@ function logGenerationCoverage(rows: { readonly generations: readonly Row[]; rea
       let previousSeq = -1;
       for (const event of events) {
         const seq = Number(event.seq); const offset = Number(event.byte_offset); const length = Number(event.byte_length);
-        if (!['log', 'log_orphan_tail', 'log-truncated', 'log-gap'].includes(String(event.event_type)) || String(event.event_type) === 'log-gap' || !Number.isSafeInteger(seq) || seq <= previousSeq || !Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || length <= 0 || offset < 0 || offset + length > Number(generation.size_bytes)) { valid = false; continue; }
+        const partial = Number(event.partial);
+        const eventAt = String(event.at);
+        instant(eventAt, `${stream} log event time`);
+        if (
+          eventAt < String(generation.started_at)
+          || eventAt > String(generation.sealed_at)
+          || !['log', 'log_orphan_tail', 'log-truncated', 'log-gap'].includes(String(event.event_type))
+          || String(event.event_type) === 'log-gap'
+          || !Number.isSafeInteger(seq)
+          || seq <= previousSeq
+          || !Number.isSafeInteger(offset)
+          || !Number.isSafeInteger(length)
+          || length <= 0
+          || offset < 0
+          || offset + length > Number(generation.size_bytes)
+          || (partial !== 0 && partial !== 1)
+        ) { valid = false; continue; }
         previousSeq = seq;
       }
       const ranges = events.map((event) => ({ offset: Number(event.byte_offset), length: Number(event.byte_length) })).sort((a, b) => a.offset - b.offset);
@@ -1108,22 +1124,31 @@ function reconcileCleanupLogs(db: DbFacade, jobId: string, claimed: LogCleanupSn
 function cancellationLogGenerations(
   rows: ReturnType<typeof loadLogRows>,
   stream: 'runner' | 'docker',
-): readonly CancellationLogGeneration[] {
+): readonly string[] {
   return rows.generations
     .filter((generation) => generation.stream === stream)
     .map((generation) => {
       const generationNumber = Number(generation.generation);
       const events = rows.events
-        .filter((event) => event.stream === stream && Number(event.file_generation) === generationNumber)
-        .map((event): CancellationLogEventRange => ({
-          seq: Number(event.seq),
-          eventType: String(event.event_type) as CancellationLogEventRange['eventType'],
-          at: String(event.at),
-          byteOffset: Number(event.byte_offset),
-          byteLength: Number(event.byte_length),
-          partial: Number(event.partial) === 1,
-        }));
-      return Object.freeze({
+        .filter((event) => event.stream === stream && Number(event.file_generation) === generationNumber);
+      const coverage = createHash('sha256');
+      let byteCount = 0;
+      for (const event of events) {
+        const byteLength = Number(event.byte_length);
+        byteCount += byteLength;
+        coverage.update(JSON.stringify([
+          stream,
+          generationNumber,
+          Number(event.seq),
+          String(event.event_type),
+          String(event.at),
+          Number(event.byte_offset),
+          byteLength,
+          Number(event.partial) === 1,
+        ]));
+        coverage.update('\n');
+      }
+      const metadata: CancellationLogGenerationMetadata = {
         generation: generationNumber,
         path: String(generation.path),
         startedAt: String(generation.started_at),
@@ -1131,15 +1156,13 @@ function cancellationLogGenerations(
         sizeBytes: Number(generation.size_bytes),
         sha256: String(generation.sha256),
         sealStatus: 'sealed' as const,
-        eventRange: events.length === 0
-          ? null
-          : Object.freeze({
-              firstSeq: events[0]!.seq,
-              lastSeq: events.at(-1)!.seq,
-              count: events.length,
-            }),
-        events: Object.freeze(events),
-      });
+        byteCount,
+        eventCount: events.length,
+        firstEventSeq: events.length === 0 ? null : Number(events[0]!.seq),
+        lastEventSeq: events.length === 0 ? null : Number(events.at(-1)!.seq),
+        coverageSha256: coverage.digest('hex'),
+      };
+      return encodeJson(metadata, `${stream} cancellation log generation`, true);
     });
 }
 

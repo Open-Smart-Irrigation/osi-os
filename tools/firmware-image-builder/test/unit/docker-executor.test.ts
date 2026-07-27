@@ -10,6 +10,7 @@ import {
   type DockerInspection,
   type PersistedContainerIdentity,
 } from '../../runner/src/docker-executor.js';
+import { CancellationBlockedError } from '../../runner/src/cancellation.js';
 import { createOperationArgv, createOperationDefinition, assertOperationRegistryCoverage, INTERNAL_OPERATION_TOOL_PATH } from '../../runner/src/operation-registry.js';
 import { CommandExecutionError, createCommandExecutor, type CommandResult, type CommandRunOptions } from '../../runner/src/command-executor.js';
 import type { JsonObject, OperationInput } from '../../api/src/store.js';
@@ -129,7 +130,7 @@ function options(executor: DockerCommandExecutor, overrides: Partial<DockerExecu
     if (result.ok && command.kind === 'operation-cleanup') Object.assign(activeIdentity, { containerId: null, containerName: null, containerImageDigest: null, containerLabelJobId: null, containerLabelManifestSha: null, containerLabels: null, containerMount: null, containerEnvironment: null, containerSecurity: null, containerInspection: null, containerCreatedAt: null, containerStartedAt: null, containerStoppedAt: null, containerRemovedAt: null, containerCleanupOutcome: null });
     return result;
   };
-  return {
+  const result: DockerExecutorOptions = {
     commandExecutor: executor,
     dockerPath: '/usr/bin/docker',
     imageReference: `registry.example/builder@sha256:${DIGEST}`,
@@ -153,6 +154,17 @@ function options(executor: DockerCommandExecutor, overrides: Partial<DockerExecu
     finalizeLogs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt: NOW }),
     ...rest,
   };
+  if (result.cancellationBudget !== undefined && result.authorizeCancellation === undefined) {
+    return {
+      ...result,
+      authorizeCancellation: async () => {
+        const budget = result.cancellationBudget!();
+        if (!budget.requested || budget.deadline === null) throw new Error('test cancellation authorization has no deadline');
+        return { containerId: '1'.repeat(64), deadline: budget.deadline, running: true };
+      },
+    };
+  }
+  return result;
 }
 
 function cancellationBudgetWhen(
@@ -286,22 +298,70 @@ describe('DockerExecutor', () => {
     };
     const writes: RunnerWriteCommand[] = [];
     const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true, kind: 'committed', eventSeq: writes.length }; }) };
+    const cancellationBudget = cancellationBudgetWhen(() => attachStarted);
+    const authorizeCancellation = vi.fn(async () => {
+      trace.push('cancellation-authorized');
+      const budget = cancellationBudget();
+      if (budget.deadline === null) throw new Error('test cancellation deadline is unavailable');
+      return { containerId: '1'.repeat(64), deadline: budget.deadline, running: true };
+    });
     const run = createDockerExecutor(options(commandExecutor, {
       ownership,
       clock: () => '2026-07-24T10:00:10.000Z',
-      cancellationBudget: cancellationBudgetWhen(() => attachStarted),
+      cancellationBudget,
+      authorizeCancellation,
       finalizeLogs: async ({ operationFinishedAt }) => ({ runner: 'absent', docker: 'absent', verifiedAt: operationFinishedAt }),
     })).run();
 
     await expect(run).rejects.toBeInstanceOf(DockerCancellationRequestedError);
     expect(stopIssued).toBe(true);
-    expect(trace).toEqual(['stop-resolved', 'attach-resolved']);
+    expect(trace).toEqual(['cancellation-authorized', 'stop-resolved', 'attach-resolved']);
+    expect(authorizeCancellation).toHaveBeenCalledOnce();
     expect(calls.map((call) => call[1])).toEqual(['version', 'image', 'ps', 'create', 'inspect', 'start', 'stop', 'inspect']);
     expect(calls.find((call) => call[1] === 'stop')).toEqual(['/usr/bin/docker', 'stop', '--time=30', '1'.repeat(64)]);
     expect(calls.some((call) => call[1] === 'kill' || call[1] === 'rm')).toBe(false);
     expect(writes.map((command) => command.kind)).toContain('operation-complete');
     const complete = writes.find((command): command is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => command.kind === 'operation-complete');
     expect(complete?.input).toMatchObject({ outcome: 'failed', errorCode: 'CANCELLED' });
+  });
+
+  it('issues no Docker stop or remove when active-operation authorization is denied', async () => {
+    let attachStarted = false;
+    let releaseAttach: (() => void) | undefined;
+    let inspectCount = 0;
+    const calls: string[][] = [];
+    const commandExecutor: DockerCommandExecutor = {
+      run: vi.fn(async (argv: readonly string[]) => {
+        calls.push([...argv]);
+        switch (argv[1]) {
+          case 'version': return { argv: [...argv], exitCode: 0, signal: null, stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'image': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'ps': return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'create': return { argv: [...argv], exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'inspect': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify(inspectCount++ === 0 ? realisticCreatedRawInspection() : realisticRawInspection()), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'start':
+            attachStarted = true;
+            await new Promise<void>((resolve) => { releaseAttach = resolve; });
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          default: throw new Error(`unexpected Docker command ${argv.join(' ')}`);
+        }
+      }),
+    };
+    const cancellationBudget = cancellationBudgetWhen(() => attachStarted);
+    const authorizeCancellation = vi.fn(async () => {
+      releaseAttach?.();
+      throw new CancellationBlockedError('runner cancellation transition lost its CAS', 'RUNNER_DISAPPEARED');
+    });
+
+    await expect(createDockerExecutor(options(commandExecutor, {
+      cancellationBudget,
+      authorizeCancellation,
+    })).run()).rejects.toMatchObject({
+      recoveryRequired: true,
+      blockerCode: 'RUNNER_DISAPPEARED',
+    });
+    expect(authorizeCancellation).toHaveBeenCalledOnce();
+    expect(calls.some((call) => call[1] === 'stop' || call[1] === 'rm')).toBe(false);
   });
 
   it('starts the full cooperative budget when cancellation arrives after an operation has run longer than 30 seconds', async () => {
@@ -330,14 +390,21 @@ describe('DockerExecutor', () => {
       }),
     };
 
+    const cancellationBudget = cancellationBudgetWhen(() => attachStarted, () => monotonic);
     const run = createDockerExecutor(options(commandExecutor, {
       monotonicNow: () => monotonic,
-      cancellationBudget: cancellationBudgetWhen(() => attachStarted, () => monotonic),
+      cancellationBudget,
+      authorizeCancellation: async () => {
+        const budget = cancellationBudget();
+        if (budget.deadline === null) throw new Error('test cancellation deadline is unavailable');
+        monotonic += 10_000;
+        return { containerId: '1'.repeat(64), deadline: budget.deadline, running: true };
+      },
     })).run();
 
     await expect(run).rejects.toBeInstanceOf(DockerCancellationRequestedError);
     const stopCallIndex = vi.mocked(commandExecutor.run).mock.calls.findIndex(([argv]) => argv[1] === 'stop');
-    expect(vi.mocked(commandExecutor.run).mock.calls[stopCallIndex]?.[1]).toMatchObject({ timeoutMs: 30_000 });
+    expect(vi.mocked(commandExecutor.run).mock.calls[stopCallIndex]?.[1]).toMatchObject({ timeoutMs: 20_000 });
   });
 
   it('leaves a cancellation first observed after attach completion to the operation boundary', async () => {
@@ -540,6 +607,98 @@ describe('DockerExecutor', () => {
     });
 
     await expect(controls.inspect('1'.repeat(64), performance.now() + 30_000)).rejects.toThrow(/image digest/i);
+  });
+
+  it.each([
+    ['an extra label', [
+      {
+        id: '1'.repeat(64),
+        labels: {
+          'org.osi.image-builder.job-id': 'job-1',
+          'org.osi.image-builder.manifest-sha': MANIFEST,
+          'org.example.unexpected': 'present',
+        },
+      },
+    ]],
+    ['a wrong manifest label', [
+      {
+        id: '1'.repeat(64),
+        labels: {
+          'org.osi.image-builder.job-id': 'job-1',
+          'org.osi.image-builder.manifest-sha': 'f'.repeat(64),
+        },
+      },
+    ]],
+    ['multiple job-labeled objects', [
+      {
+        id: '1'.repeat(64),
+        labels: {
+          'org.osi.image-builder.job-id': 'job-1',
+          'org.osi.image-builder.manifest-sha': MANIFEST,
+        },
+      },
+      {
+        id: '2'.repeat(64),
+        labels: {
+          'org.osi.image-builder.job-id': 'job-1',
+          'org.osi.image-builder.manifest-sha': 'f'.repeat(64),
+          'org.example.unexpected': 'present',
+        },
+      },
+    ]],
+  ] as const)('returns every container carrying the job label when it has %s', async (_case, values) => {
+    const calls: string[][] = [];
+    const commandExecutor: DockerCommandExecutor = {
+      run: vi.fn(async (argv: readonly string[]) => {
+        calls.push([...argv]);
+        if (argv[1] === 'ps') {
+          return {
+            argv: [...argv],
+            exitCode: 0,
+            signal: null,
+            stdout: `${values.map(({ id }) => id).join('\n')}\n`,
+            stderr: '',
+            timedOut: false,
+            startedAt: NOW,
+            finishedAt: NOW,
+          };
+        }
+        if (argv[1] === 'inspect') {
+          const id = argv.at(-1);
+          const item = values.find((candidate) => candidate.id === id);
+          if (item === undefined) throw new Error(`unexpected inspect ID ${String(id)}`);
+          const raw = realisticRawInspection();
+          raw.Id = item.id;
+          (raw.Config as Record<string, unknown>).Labels = item.labels;
+          return {
+            argv: [...argv],
+            exitCode: 0,
+            signal: null,
+            stdout: JSON.stringify(raw),
+            stderr: '',
+            timedOut: false,
+            startedAt: NOW,
+            finishedAt: NOW,
+          };
+        }
+        throw new Error(`unexpected Docker cancellation command: ${argv.join(' ')}`);
+      }),
+    };
+    const controls = createDockerCancellationControls({
+      commandExecutor,
+      dockerPath: '/usr/bin/docker',
+      expectedImageDigest: DIGEST,
+      maxCaptureBytes: 16 * 1024,
+    });
+    const expectedLabels = {
+      'org.osi.image-builder.job-id': 'job-1',
+      'org.osi.image-builder.manifest-sha': MANIFEST,
+    };
+
+    await expect(controls.listByLabels(expectedLabels, performance.now() + 30_000)).resolves.toHaveLength(values.length);
+    const list = calls.find((argv) => argv[1] === 'ps');
+    expect(list).toContain('--filter=label=org.osi.image-builder.job-id=job-1');
+    expect(list).not.toContain(`--filter=label=org.osi.image-builder.manifest-sha=${MANIFEST}`);
   });
 
   it('uses one supplied absolute deadline after time spent in label and inspect controls', async () => {
