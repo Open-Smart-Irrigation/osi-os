@@ -135,7 +135,14 @@ type PersistedCleanupSnapshot = Omit<CleanupSnapshot, 'logs'> & Readonly<{ reado
 
 export type CleanupStagingSnapshot =
   | Readonly<{ readonly kind: 'absent'; readonly path: null }>
-  | Readonly<{ readonly kind: 'present'; readonly path: string; readonly sha256: string; readonly size: number }>;
+  | Readonly<{ readonly kind: 'present'; readonly path: string; readonly sha256: string | null; readonly size: number | null }>;
+
+export type ObservedJsonEvidence = Readonly<{
+  readonly present: true;
+  readonly path: string;
+  readonly bytes: string;
+  readonly sha256: string;
+}>;
 
 type NullContainerProof = Readonly<{ readonly kind: 'absent'; readonly globalLabelResult: 'no-match'; readonly observedAt: string }>;
 
@@ -188,6 +195,7 @@ export type PublishRecoveryEvidence = Readonly<{
   readonly artifact: Readonly<Pick<ArtifactInput, 'stagingPath' | 'artifactSha256' | 'artifactSize' | 'artifactMtime' | 'checksumPath' | 'checksumSha256' | 'manifestPath' | 'manifestSha256' | 'verificationPath' | 'verificationSha256'>>;
   readonly final: Readonly<{ readonly directory: string; readonly path: string; readonly publishStartedAt: string; readonly publishedAt: string | null }>;
   readonly observed: Readonly<{
+    readonly stageEvidence: ObservedJsonEvidence;
     readonly final: Readonly<{ readonly present: boolean; readonly path: string; readonly held: boolean; readonly size: number | null; readonly sha256: string | null }>;
     readonly checksum: Readonly<{ readonly present: boolean; readonly path: string; readonly contents: string | null; readonly sha256: string | null }>;
     readonly manifest: Readonly<{ readonly present: boolean; readonly path: string; readonly bytes: string | null; readonly content: JsonObject | null; readonly sha256: string | null }>;
@@ -232,7 +240,7 @@ export type RunnerWriteCommand =
   | (CommonRunner & Readonly<{ kind: 'publish-stage-start'; expectedState: 'verifying'; startedAt: string; finalDirectory: string; finalPath: string; publishStartedAt: string }>)
   | (CommonRunner & Readonly<{ kind: 'publish-quarantine-intent'; expectedState: 'publishing'; quarantinePath: string }>)
   | (CommonRunner & Readonly<{ kind: 'publish-quarantine-ambiguous'; expectedState: 'publishing'; quarantinePath: string; renameResult: 'RENAMED'; staging: 'possibly-absent' }>)
-  | (CommonRunner & Readonly<{ kind: 'publish-terminal'; expectedState: 'publishing'; startedAt: string; finishedAt: string; evidencePath: string; evidenceSha256: string; finalDirectory: string; finalPath: string; publishStartedAt: string; publishedAt: string; terminalAt: string; priorVerificationSha256?: string; verificationSha256?: string }>)
+  | (CommonRunner & Readonly<{ kind: 'publish-terminal'; expectedState: 'publishing'; startedAt: string; finishedAt: string; evidencePath: string; evidenceSha256: string; finalDirectory: string; finalPath: string; publishStartedAt: string; publishedAt: string; terminalAt: string; priorVerificationSha256: string; verificationSha256: string; observedStageEvidence: ObservedJsonEvidence; observedVerification: ObservedJsonEvidence }>)
   | (CommonRunner & Readonly<{ kind: 'publish-failure-terminal'; expectedState: 'publishing'; startedAt: string; finishedAt: string; evidencePath: string; evidenceSha256: string; blockerCode: BuilderErrorCode; blocker: JsonObject; staging: 'present' | 'absent' | 'quarantined' | 'unknown'; quarantinePath?: string; terminalAt: string; error: JsonObject }>)
   | (CommonRunner & Readonly<{ kind: 'publish'; expectedState: JobState; state: 'staged' | 'publishing' | 'published' | 'blocked'; finalDirectory?: string; finalPath?: string; startedAt?: string; publishedAt?: string; blockerCode?: BuilderErrorCode; blocker?: JsonObject }>)
   | (CommonRunner & Readonly<{ kind: 'normal-terminal'; expectedState: JobState; state: 'succeeded' | 'failed'; terminalAt: string; errorCode?: BuilderErrorCode | null; error?: JsonInput }>)
@@ -469,7 +477,7 @@ function shapeStaging(value: unknown, field: string, allowPresent: boolean, allo
   const proof = shapeRecord(value, field);
   if (proof.kind === 'absent') { shapeLiteral(proof.path, null, `${field}.path`); if (proof.sha256 !== undefined && proof.sha256 !== null) throw new OwnershipValidationError(`${field}.sha256 must be absent`); if (proof.size !== undefined && proof.size !== null) throw new OwnershipValidationError(`${field}.size must be absent`); return; }
   if (proof.kind === 'present' && allowPresent) {
-    preparedPath(proof.path, `${field}.path`); const path = proof.path as string; if (!path.startsWith('staging/')) throw new OwnershipValidationError(`${field}.path is not a staging path`); preparedHash(proof.sha256, `${field}.sha256`); if (!Number.isSafeInteger(proof.size) || Number(proof.size) < 0) throw new OwnershipValidationError(`${field}.size is invalid`); return;
+    preparedPath(proof.path, `${field}.path`); const path = proof.path as string; if (!path.startsWith('staging/')) throw new OwnershipValidationError(`${field}.path is not a staging path`); if (proof.sha256 !== null && proof.sha256 !== undefined) preparedHash(proof.sha256, `${field}.sha256`); if (proof.size !== null && proof.size !== undefined && (!Number.isSafeInteger(proof.size) || Number(proof.size) < 0)) throw new OwnershipValidationError(`${field}.size is invalid`); return;
   }
   if (proof.kind === 'quarantined' && allowQuarantined) {
     preparedPath(proof.sourcePath, `${field}.sourcePath`); preparedPath(proof.destinationPath, `${field}.destinationPath`); const source = proof.sourcePath as string; const destination = proof.destinationPath as string; if (!source.startsWith('staging/') || !destination.startsWith('quarantine/') || source === destination) throw new OwnershipValidationError(`${field} quarantine paths are invalid`); shapeLiteral(proof.sourceAbsent, true, `${field}.sourceAbsent`); shapeLiteral(proof.destinationPresent, true, `${field}.destinationPresent`); preparedHash(proof.sha256, `${field}.sha256`); if (!Number.isSafeInteger(proof.size) || Number(proof.size) < 0) throw new OwnershipValidationError(`${field}.size is invalid`); preparedInstant(proof.verifiedAt, `${field}.verifiedAt`); return;
@@ -580,9 +588,10 @@ function shapePublishEvidence(value: unknown, at: string): void {
   const artifact = shapeRecord(evidence.artifact, 'publish recovery artifact'); for (const field of ['stagingPath', 'checksumPath', 'manifestPath', 'verificationPath']) preparedPath(artifact[field], `publish recovery ${field}`); for (const field of ['artifactSha256', 'checksumSha256', 'manifestSha256', 'verificationSha256']) preparedHash(artifact[field], `publish recovery ${field}`); if (!Number.isSafeInteger(artifact.artifactSize) || Number(artifact.artifactSize) < 0) throw new OwnershipValidationError('publish recovery artifact size is invalid'); preparedInstant(artifact.artifactMtime, 'publish recovery artifact mtime');
   const final = shapeRecord(evidence.final, 'publish recovery final'); preparedPath(final.directory, 'publish recovery final directory'); preparedPath(final.path, 'publish recovery final path'); preparedInstant(final.publishStartedAt, 'publish recovery publishStartedAt'); preparedOptionalInstant(final.publishedAt, 'publish recovery publishedAt');
   const observed = shapeRecord(evidence.observed, 'publish recovery observations');
+  shapeObservedJsonEvidence(observed.stageEvidence, 'publish recovery observed stage-09 evidence');
   const finalObserved = shapeRecord(observed.final, 'publish recovery observed final'); if (typeof finalObserved.present !== 'boolean' || typeof finalObserved.held !== 'boolean') throw new OwnershipValidationError('publish recovery observed final flags are invalid'); preparedPath(finalObserved.path, 'publish recovery observed final path'); shapeNullableHash(finalObserved.sha256, 'publish recovery observed final SHA'); if (finalObserved.size !== null && finalObserved.size !== undefined && (!Number.isSafeInteger(finalObserved.size) || Number(finalObserved.size) < 0)) throw new OwnershipValidationError('publish recovery observed final size is invalid');
   const checksum = shapeRecord(observed.checksum, 'publish recovery checksum'); if (typeof checksum.present !== 'boolean') throw new OwnershipValidationError('publish recovery checksum present is invalid'); preparedPath(checksum.path, 'publish recovery checksum path'); if (checksum.contents !== null && checksum.contents !== undefined) preparedString(checksum.contents, 'publish recovery checksum contents', TEXT_LIMITS.maxChecksumBytes); shapeNullableHash(checksum.sha256, 'publish recovery checksum SHA');
-  for (const [name, sidecar] of [['manifest', observed.manifest], ['verification', observed.verification]] as const) { const item = shapeRecord(sidecar, `publish recovery ${name}`); if (typeof item.present !== 'boolean') throw new OwnershipValidationError(`publish recovery ${name} present is invalid`); preparedPath(item.path, `publish recovery ${name} path`); if (item.bytes !== null && item.bytes !== undefined) preparedString(item.bytes, `publish recovery ${name} bytes`, TEXT_LIMITS.maxManifestBytes); preparedJsonObject(item.content, `publish recovery ${name} content`, true); shapeNullableHash(item.sha256, `publish recovery ${name} SHA`); }
+  for (const [name, sidecar] of [['manifest', observed.manifest], ['verification', observed.verification]] as const) { const item = shapeRecord(sidecar, `publish recovery ${name}`); if (typeof item.present !== 'boolean') throw new OwnershipValidationError(`publish recovery ${name} present is invalid`); preparedPath(item.path, `publish recovery ${name} path`); if (item.bytes !== null && item.bytes !== undefined) preparedString(item.bytes, `publish recovery ${name} bytes`, TEXT_LIMITS.maxManifestBytes); shapeNullableHash(item.sha256, `publish recovery ${name} SHA`); }
   const staging = shapeRecord(observed.staging, 'publish recovery observed staging'); preparedEnum(staging.state, ['present', 'absent'], 'publish recovery staging state'); shapeNullableString(staging.path, 'publish recovery staging path', true); shapeNullableHash(staging.sha256, 'publish recovery staging SHA'); if (staging.state === 'absent' && (staging.path !== undefined && staging.path !== null || staging.sha256 !== undefined && staging.sha256 !== null)) throw new OwnershipValidationError('absent staging observation contains identity'); if (staging.state === 'present') { if (staging.path === undefined || staging.path === null || staging.sha256 === undefined || staging.sha256 === null) throw new OwnershipValidationError('present staging observation is incomplete'); const path = staging.path as string; if (!path.startsWith('staging/')) throw new OwnershipValidationError('present staging observation path is invalid'); }
   if (observed.quarantine !== undefined) {
     const quarantine = shapeRecord(observed.quarantine, 'publish recovery observed quarantine');
@@ -596,6 +605,14 @@ function shapePublishEvidence(value: unknown, at: string): void {
     if (quarantine.state === 'present' && (quarantine.path === null || !quarantine.held || quarantine.artifactPath === null || quarantine.artifactSize === null || quarantine.artifactSha256 === null)) throw new OwnershipValidationError('present quarantine observation is incomplete');
   }
   shapeLogs(observed.logs, 'publish recovery logs', false, at as string); shapeLiteral(shapeRecord(observed.logs, 'publish recovery logs').noGap, true, 'publish recovery logs noGap'); shapeChronology([['publish stage startedAt', stage.startedAt], ['publish stage finishedAt', stage.finishedAt], ['publish at', at]], 'publish recovery stage'); shapeChronology([['publish runner inactiveAt', runner.inactiveAt], ['publish runner observedAt', runner.observedAt], ['publish at', at]], 'publish recovery'); shapeChronology([['publish start', final.publishStartedAt], ['publish finish', final.publishedAt], ['publish at', at]], 'publish recovery');
+}
+
+function shapeObservedJsonEvidence(value: unknown, field: string): void {
+  const observed = shapeRecord(value, field);
+  shapeLiteral(observed.present, true, `${field}.present`);
+  preparedPath(observed.path, `${field}.path`);
+  preparedString(observed.bytes, `${field}.bytes`, TEXT_LIMITS.maxManifestBytes);
+  preparedHash(observed.sha256, `${field}.sha256`);
 }
 
 function validateRunnerCommand(command: RunnerWriteCommand): void {
@@ -624,7 +641,7 @@ function validateRunnerCommand(command: RunnerWriteCommand): void {
     case 'publish-stage-start': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'verifying', 'publish stage predecessor'); preparedInstant(value.startedAt, 'publish stage startedAt'); preparedPath(value.finalDirectory, 'publish final directory'); preparedPath(value.finalPath, 'publish final path'); preparedInstant(value.publishStartedAt, 'publish startedAt'); shapeChronology([['publish stage startedAt', value.startedAt], ['publish startedAt', value.publishStartedAt], ['publish command.at', value.at]], 'publish stage start'); return;
     case 'publish-quarantine-intent': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'publishing', 'publish quarantine intent predecessor'); preparedPath(value.quarantinePath, 'publish quarantine intent path'); return;
     case 'publish-quarantine-ambiguous': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'publishing', 'publish quarantine ambiguity predecessor'); preparedPath(value.quarantinePath, 'publish quarantine ambiguity path'); shapeLiteral(value.renameResult, 'RENAMED', 'publish quarantine rename result'); shapeLiteral(value.staging, 'possibly-absent', 'publish quarantine staging state'); return;
-    case 'publish-terminal': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'publishing', 'publish terminal predecessor'); preparedInstant(value.startedAt, 'publish stage startedAt'); preparedInstant(value.finishedAt, 'publish stage finishedAt'); preparedPath(value.evidencePath, 'publish stage evidence path'); preparedHash(value.evidenceSha256, 'publish stage evidence SHA'); preparedPath(value.finalDirectory, 'publish final directory'); preparedPath(value.finalPath, 'publish final path'); preparedInstant(value.publishStartedAt, 'publish startedAt'); preparedInstant(value.publishedAt, 'publishedAt'); preparedInstant(value.terminalAt, 'publish terminalAt'); preparedOptionalHash(value.priorVerificationSha256, 'prior verification SHA'); preparedOptionalHash(value.verificationSha256, 'terminal verification SHA'); if ((value.priorVerificationSha256 === undefined) !== (value.verificationSha256 === undefined)) throw new OwnershipValidationError('publish terminal verification replacement evidence is incomplete'); shapeChronology([['publish stage startedAt', value.startedAt], ['publish startedAt', value.publishStartedAt], ['publish stage finishedAt', value.finishedAt], ['publishedAt', value.publishedAt], ['publish terminalAt', value.terminalAt], ['publish terminal command.at', value.at]], 'publish terminal'); return;
+    case 'publish-terminal': preparedRunnerCommon(value); shapeLiteral(value.expectedState, 'publishing', 'publish terminal predecessor'); preparedInstant(value.startedAt, 'publish stage startedAt'); preparedInstant(value.finishedAt, 'publish stage finishedAt'); preparedPath(value.evidencePath, 'publish stage evidence path'); preparedHash(value.evidenceSha256, 'publish stage evidence SHA'); preparedPath(value.finalDirectory, 'publish final directory'); preparedPath(value.finalPath, 'publish final path'); preparedInstant(value.publishStartedAt, 'publish startedAt'); preparedInstant(value.publishedAt, 'publishedAt'); preparedInstant(value.terminalAt, 'publish terminalAt'); preparedHash(value.priorVerificationSha256, 'prior verification SHA'); preparedHash(value.verificationSha256, 'terminal verification SHA'); shapeObservedJsonEvidence(value.observedStageEvidence, 'publish terminal observed stage-09 evidence'); shapeObservedJsonEvidence(value.observedVerification, 'publish terminal observed verification evidence'); shapeChronology([['publish stage startedAt', value.startedAt], ['publish startedAt', value.publishStartedAt], ['publish stage finishedAt', value.finishedAt], ['publishedAt', value.publishedAt], ['publish terminalAt', value.terminalAt], ['publish terminal command.at', value.at]], 'publish terminal'); return;
     case 'publish-failure-terminal': {
       preparedRunnerCommon(value);
       shapeLiteral(value.expectedState, 'publishing', 'publish failure predecessor');
@@ -751,8 +768,10 @@ function validateCleanupProof(proof: StagingCleanupProof | LogCleanupProof | Cle
     const value = proof as StagingCleanupProof | CleanupStagingSnapshot;
     if (value.kind === 'absent') return;
     if (value.kind === 'present') {
-      confinedPath(value.path, 'staging source path'); hash(value.sha256, 'staging source SHA-256');
-      if (!value.path.startsWith('staging/') || !Number.isSafeInteger(value.size) || value.size < 0) throw new OwnershipValidationError('staging source snapshot is invalid');
+      confinedPath(value.path, 'staging source path');
+      if (value.sha256 !== null) hash(value.sha256, 'staging source SHA-256');
+      if (value.size !== null && (!Number.isSafeInteger(value.size) || value.size < 0)) throw new OwnershipValidationError('staging source snapshot is invalid');
+      if (!value.path.startsWith('staging/')) throw new OwnershipValidationError('staging source snapshot is invalid');
       return;
     }
     if (value.kind !== 'quarantined') throw new OwnershipValidationError('staging cleanup proof kind is invalid');
@@ -802,10 +821,14 @@ function validateCleanupSnapshot(db: DbFacade, snapshot: CleanupSnapshot, job: R
   if (snapshot.staging.kind === 'present' && snapshot.staging.path && snapshot.staging.path.startsWith('staging/') === false) throw new OwnershipValidationError('cleanup staging snapshot path is invalid');
   if (snapshot.logs.verifiedAt > at) throw new OwnershipValidationError('cleanup log proof is from the future');
   if (snapshot.blocker !== 'none' && snapshot.blocker !== 'staging-or-log') throw new OwnershipValidationError('cleanup blocker kind is invalid');
-  if (snapshot.blocker === 'none' && (snapshot.staging.kind !== 'absent' || snapshot.logs.runner === 'unsealed' || snapshot.logs.docker === 'unsealed')) throw new OwnershipValidationError('no-blocker cleanup snapshot retains cleanup work');
-  if (snapshot.blocker === 'staging-or-log' && snapshot.staging.kind === 'absent' && snapshot.logs.runner !== 'unsealed' && snapshot.logs.docker !== 'unsealed') throw new OwnershipValidationError('cleanup blocker snapshot has no blocker');
-  if (snapshot.staging.kind === 'absent' && job.artifact_staging_path !== null) throw new OwnershipConflictError('identity-mismatch', 'cleanup staging absence conflicts with persisted staging');
-  if (snapshot.staging.kind === 'present' && (job.artifact_staging_path !== snapshot.staging.path || job.artifact_quarantine_path !== null || job.artifact_sha256 !== snapshot.staging.sha256 || Number(job.artifact_size) !== snapshot.staging.size)) throw new OwnershipConflictError('identity-mismatch', 'cleanup staging snapshot conflicts with persisted artifact');
+  const preparationIntent = job.publish_state === 'not_started' && job.artifact_staging_path !== null;
+  if (snapshot.blocker === 'none' && (snapshot.staging.kind !== 'absent' || snapshot.logs.runner === 'unsealed' || snapshot.logs.docker === 'unsealed' || preparationIntent)) throw new OwnershipValidationError('no-blocker cleanup snapshot retains cleanup work');
+  if (snapshot.blocker === 'staging-or-log' && snapshot.staging.kind === 'absent' && snapshot.logs.runner !== 'unsealed' && snapshot.logs.docker !== 'unsealed' && !preparationIntent) throw new OwnershipValidationError('cleanup blocker snapshot has no blocker');
+  if (snapshot.staging.kind === 'absent' && job.artifact_staging_path !== null && !preparationIntent) throw new OwnershipConflictError('identity-mismatch', 'cleanup staging absence conflicts with persisted staging');
+  if (snapshot.staging.kind === 'present') {
+    if (job.artifact_staging_path !== snapshot.staging.path || job.artifact_quarantine_path !== null) throw new OwnershipConflictError('identity-mismatch', 'cleanup staging snapshot path conflicts with persisted artifact');
+    if (!preparationIntent && (snapshot.staging.sha256 === null || snapshot.staging.size === null || job.artifact_sha256 !== snapshot.staging.sha256 || Number(job.artifact_size) !== snapshot.staging.size)) throw new OwnershipConflictError('identity-mismatch', 'cleanup staging snapshot conflicts with persisted artifact');
+  }
   if (snapshot.container.kind === 'present') {
     instant(snapshot.container.observedAt, 'container observation time');
     if (snapshot.container.observedAt > at) throw new OwnershipValidationError('cleanup container observation is from the future');
@@ -974,9 +997,11 @@ function validateCleanupPostcondition(db: DbFacade, post: CleanupPostcondition, 
     throw new OwnershipValidationError('cleanup postcondition container kind is invalid');
   }
   reconcileCleanupLogs(db, String(job.job_id), post.logs, at);
+  const preparationIntent = job.publish_state === 'not_started' && job.artifact_staging_path !== null;
   if (admission.staging.kind === 'present') {
-    if (post.staging.kind !== 'quarantined' || post.staging.sourcePath !== admission.staging.path || post.staging.sha256 !== admission.staging.sha256 || post.staging.size !== admission.staging.size || job.artifact_staging_path !== admission.staging.path || job.artifact_quarantine_path !== null) throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition does not prove the admitted staging quarantine');
-  } else if (post.staging.kind !== 'absent' || job.artifact_staging_path !== null) {
+    if (post.staging.kind !== 'quarantined' || post.staging.sourcePath !== admission.staging.path || job.artifact_staging_path !== admission.staging.path || job.artifact_quarantine_path !== null) throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition does not prove the admitted staging quarantine');
+    if (!preparationIntent && (post.staging.sha256 !== admission.staging.sha256 || post.staging.size !== admission.staging.size)) throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition does not prove the admitted staging identity');
+  } else if (post.staging.kind !== 'absent' || job.artifact_staging_path !== null && !preparationIntent) {
     throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition introduces unadmitted staging work');
   }
   return proofJson(post, 'cleanup postcondition');
@@ -1070,6 +1095,37 @@ function validateCanonicalSidecar(observed: { present: boolean; path: string; by
   if (content.jobId !== job.job_id || content.branch !== job.branch || content.pinnedSha !== job.pinned_sha || content.targetId !== job.target_id || content.artifactSha256 !== artifactSha256) throw new OwnershipConflictError('identity-mismatch', `${field} canonical fields do not bind the job`);
 }
 
+function validateObservedJsonEvidence(observed: ObservedJsonEvidence, expectedPath: string, field: string): JsonObject {
+  if (!observed.present || observed.path !== expectedPath) throw new OwnershipConflictError('identity-mismatch', `${field} path does not match the fixed path`);
+  if (createHash('sha256').update(observed.bytes, 'utf8').digest('hex') !== observed.sha256) throw new OwnershipConflictError('identity-mismatch', `${field} SHA does not match its bytes`);
+  let parsed: unknown;
+  try { parsed = JSON.parse(observed.bytes); } catch (error) { throw new OwnershipValidationError(`${field} bytes are not valid JSON`, { cause: error }); }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new OwnershipValidationError(`${field} bytes must contain a JSON object`);
+  const canonical = json(parsed, `${field} bytes`, true);
+  if (observed.bytes !== canonical && observed.bytes !== `${canonical}\n`) throw new OwnershipConflictError('identity-mismatch', `${field} bytes are not canonical`);
+  return parsed as JsonObject;
+}
+
+function validateObservedCanonicalSidecar(observed: ObservedJsonEvidence, expectedPath: string, expectedHash: string, job: Row, artifactSha256: string, field: string): JsonObject {
+  if (observed.sha256 !== expectedHash) throw new OwnershipConflictError('identity-mismatch', `${field} SHA does not match the persisted evidence`);
+  const content = validateObservedJsonEvidence(observed, expectedPath, field);
+  if (content.jobId !== job.job_id || content.branch !== job.branch || content.pinnedSha !== job.pinned_sha || content.targetId !== job.target_id || content.artifactSha256 !== artifactSha256) throw new OwnershipConflictError('identity-mismatch', `${field} canonical fields do not bind the job`);
+  return content;
+}
+
+function validatePublishStageEvidence(observed: ObservedJsonEvidence, expectedPath: string, expectedSha256: string, verificationSha256: string, job: Row, expectedOutcome: 'passed' | 'failed'): void {
+  if (observed.sha256 !== expectedSha256) throw new OwnershipConflictError('identity-mismatch', 'publish stage evidence hash does not match the persisted stage evidence');
+  const content = validateObservedJsonEvidence(observed, expectedPath, 'publish stage evidence');
+  const observations = content.observations;
+  const final = observations !== null && typeof observations === 'object' && !Array.isArray(observations)
+    ? (observations as JsonObject).final
+    : null;
+  const inputs = content.inputs;
+  if (content.schemaVersion !== 1 || content.jobId !== job.job_id || content.stage !== 'publish' || content.outcome !== expectedOutcome || (expectedOutcome === 'passed' && content.error !== null) || inputs === null || typeof inputs !== 'object' || Array.isArray(inputs) || (inputs as JsonObject).targetId !== job.target_id || (inputs as JsonObject).rootId !== job.root_id || (inputs as JsonObject).branch !== job.branch || (inputs as JsonObject).pinnedSha !== job.pinned_sha || (expectedOutcome === 'passed' && (final === null || typeof final !== 'object' || Array.isArray(final) || (final as JsonObject).verificationSha256 !== verificationSha256))) {
+    throw new OwnershipConflictError('identity-mismatch', 'publish stage evidence does not match the terminal publication outcome or job');
+  }
+}
+
 function validateTerminalVerification(
   content: JsonObject,
   evidencePath: string,
@@ -1141,6 +1197,16 @@ function validatePublishEvidence(db: DbFacade, evidence: PublishRecoveryEvidence
   }
   confinedPath(evidence.stage.evidencePath, 'publish recovery stage evidence path');
   hash(evidence.stage.evidenceSha256, 'publish recovery stage evidence SHA-256');
+  if (evidence.stage.evidencePath !== `jobs/${String(job.job_id)}/evidence/09-publish.json`) throw new OwnershipConflictError('identity-mismatch', 'publish recovery stage evidence path is not the fixed publish path');
+  const expectedStageOutcome = terminalState === 'succeeded' ? 'passed' : 'failed';
+  validatePublishStageEvidence(
+    evidence.observed.stageEvidence,
+    evidence.stage.evidencePath,
+    evidence.stage.evidenceSha256,
+    evidence.observed.verification.sha256 ?? '',
+    job,
+    expectedStageOutcome,
+  );
   validateNullContainerProof(evidence.container, at);
   if (job.container_id !== null || job.container_name !== null || job.container_image_digest !== null || job.container_label_job_id !== null || job.container_label_manifest_sha !== null || job.container_labels_json !== null) throw new OwnershipConflictError('identity-mismatch', 'publish recovery requires null container identity');
   const artifact = evidence.artifact;
@@ -2183,10 +2249,9 @@ export class OwnershipStore {
     confinedPath(command.finalPath, 'publish final path');
     confinedPath(command.evidencePath, 'publish stage evidence path');
     hash(command.evidenceSha256, 'publish stage evidence SHA-256');
-    const priorVerificationSha256 = command.priorVerificationSha256
-      ?? String(row.verification_sha256);
-    const verificationSha256 = command.verificationSha256
-      ?? priorVerificationSha256;
+    if (command.evidencePath !== `jobs/${command.jobId}/evidence/09-publish.json`) conflict('identity-mismatch', 'publish terminal evidence path is not the fixed publish path');
+    const priorVerificationSha256 = command.priorVerificationSha256;
+    const verificationSha256 = command.verificationSha256;
     hash(priorVerificationSha256, 'prior verification SHA-256');
     hash(verificationSha256, 'terminal verification SHA-256');
     if (
@@ -2200,6 +2265,23 @@ export class OwnershipStore {
     ) {
       conflict('identity-mismatch', 'publish terminal binding differs from publishing recovery state');
     }
+    validatePublishStageEvidence(
+      command.observedStageEvidence,
+      command.evidencePath,
+      command.evidenceSha256,
+      verificationSha256,
+      row,
+      'passed',
+    );
+    const verificationContent = validateObservedCanonicalSidecar(
+      command.observedVerification,
+      `${command.finalDirectory}/verification.json`,
+      verificationSha256,
+      row,
+      String(row.artifact_sha256),
+      'terminal verification',
+    );
+    validateTerminalVerification(verificationContent, command.evidencePath);
     const stage = this.#db.prepare(`UPDATE job_stages SET
       outcome='passed', finished_at=?, evidence_path=?, evidence_sha256=?,
       error_code=NULL, error_json=NULL
@@ -2460,9 +2542,15 @@ export class OwnershipStore {
       const unsealed = this.#db.prepare("SELECT 1 FROM job_log_generations WHERE job_id=? AND sealed_at IS NULL LIMIT 1").get(command.jobId);
       if (unsealed) conflict('identity-mismatch', 'cleanup log blocker is not sealed in the database');
     }
-    const quarantineUpdate = command.postcondition.staging.kind === 'quarantined'
-      ? 'artifact_staging_path=NULL, artifact_quarantine_path=?, publish_state=\'quarantined\', publish_started_at=NULL, published_at=NULL, '
+    const preparationIntent = row.publish_state === 'not_started' && row.artifact_staging_path !== null;
+    const preparationClear = preparationIntent
+      ? 'artifact_sha256=NULL, artifact_size=NULL, artifact_mtime=NULL, checksum_path=NULL, checksum_sha256=NULL, manifest_path=NULL, manifest_sha256=NULL, verification_path=NULL, verification_sha256=NULL, '
       : '';
+    const quarantineUpdate = command.postcondition.staging.kind === 'quarantined'
+      ? `artifact_staging_path=NULL, artifact_quarantine_path=?, publish_state='quarantined', ${preparationClear}publish_started_at=NULL, published_at=NULL, `
+      : preparationIntent
+        ? `artifact_staging_path=NULL, artifact_quarantine_path=NULL, publish_state=NULL, ${preparationClear}`
+        : '';
     const quarantineParams = command.postcondition.staging.kind === 'quarantined' ? [command.postcondition.staging.destinationPath] : [];
     const result = present
       ? this.#db.prepare(`UPDATE jobs SET container_id=NULL, container_name=NULL, container_image_digest=NULL, container_label_job_id=NULL, container_label_manifest_sha=NULL,

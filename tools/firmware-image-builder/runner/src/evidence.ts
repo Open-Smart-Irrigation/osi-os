@@ -57,6 +57,7 @@ export interface StageEvidence extends StageEvidenceInput {
 export interface EvidencePublication {
   readonly path: string;
   readonly sha256: string;
+  readonly bytes: string;
 }
 
 export interface TargetSetupSourceConfigInput {
@@ -652,7 +653,7 @@ export class EvidenceWriter {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new EvidenceError('EVIDENCE_EXISTS', 'canonical evidence already exists', { cause: error });
       throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'evidence publication failed', { cause: error });
     }
-    return Object.freeze({ path, sha256 });
+    return Object.freeze({ path, sha256, bytes: contents.toString('utf8') });
   }
 
   async writeTargetSetupSourceConfig(input: TargetSetupSourceConfigInput): Promise<EvidencePublication> {

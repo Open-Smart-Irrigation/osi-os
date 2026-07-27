@@ -3,6 +3,7 @@ import { basename, dirname } from 'node:path';
 
 import type {
   OwnershipResult,
+  ObservedJsonEvidence,
   RunnerWriteCommand,
 } from '../../api/src/ownership.js';
 import {
@@ -472,6 +473,11 @@ class PipelineTerminalFailure extends Error {
 
 function sha256(value: Uint8Array | string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function observedJsonEvidence(publication: EvidencePublication): ObservedJsonEvidence {
+  if (typeof publication.bytes !== 'string') throw new Error('stage evidence writer omitted immutable bytes');
+  return Object.freeze({ present: true, path: publication.path, bytes: publication.bytes, sha256: publication.sha256 });
 }
 
 function exactJson(left: unknown, right: unknown): boolean {
@@ -1129,6 +1135,7 @@ export function createPipeline(input: PipelineInput): {
   let verifiedArtifact: VerifiedPipelineArtifact | null = null;
   let preparedArtifact: ArtifactInput | null = null;
   let preparedPublication: PreparedPublication | null = null;
+  let preparationIntentWritten = false;
   let publicationBinding: PublicationBinding | null = null;
   let publishStartedAt: string | null = null;
   let publicationFailure: Readonly<{
@@ -1532,17 +1539,28 @@ export function createPipeline(input: PipelineInput): {
       stagingDirectory,
       artifact: plannedArtifact,
     });
-    const prepared = await input.services.publicationFiles.prepare({
-      job,
-      target: input.target,
-      root: input.approvedRoot,
-      artifact: artifact.artifact,
-      buildManifest: metadata.build,
-      buildManifestBytes: metadata.buildBytes,
-      verificationManifest: metadata.verification,
-      verificationManifestBytes: metadata.verificationBytes,
-      checksumBytes: metadata.checksumBytes,
-    });
+    preparationIntentWritten = true;
+    let prepared: PreparedPublication;
+    try {
+      prepared = await input.services.publicationFiles.prepare({
+        job,
+        target: input.target,
+        root: input.approvedRoot,
+        artifact: artifact.artifact,
+        buildManifest: metadata.build,
+        buildManifestBytes: metadata.buildBytes,
+        verificationManifest: metadata.verification,
+        verificationManifestBytes: metadata.verificationBytes,
+        checksumBytes: metadata.checksumBytes,
+      });
+    } catch (error) {
+      if (preparationIntentWritten) {
+        throw new PipelineRecoveryRequiredError(
+          `publication preparation failed after durable ownership intent: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      throw error;
+    }
     const reopened = await input.services.publicationFiles.reopenStaging({
       job,
       root: input.approvedRoot,
@@ -2144,6 +2162,13 @@ export function createPipeline(input: PipelineInput): {
           terminalAt,
           priorVerificationSha256,
           verificationSha256: finalProof.verificationSha256,
+          observedStageEvidence: observedJsonEvidence(evidence),
+          observedVerification: {
+            present: true,
+            path: `${publicationBinding.finalDirectory}/verification.json`,
+            bytes: terminal.bytes,
+            sha256: finalProof.verificationSha256,
+          },
         });
         return;
       }

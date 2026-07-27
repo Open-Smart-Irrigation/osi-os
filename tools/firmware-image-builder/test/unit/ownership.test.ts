@@ -105,6 +105,23 @@ function terminalVerification(jobId: string): { content: JsonObject; bytes: stri
     sha256: createHash('sha256').update(bytes).digest('hex'),
   };
 }
+function publishStageEvidence(jobId: string, verificationSha256: string, outcome: 'passed' | 'failed' = 'passed'): { content: JsonObject; bytes: string; sha256: string } {
+  const content: JsonObject = {
+    schemaVersion: 1,
+    jobId,
+    stage: 'publish',
+    startedAt: NOW,
+    finishedAt: RECOVERY,
+    outcome,
+    operationId: null,
+    commands: [],
+    inputs: { targetId: 'rpi-5', rootId: 'release', branch: 'main', pinnedSha: SHA40 },
+    observations: { final: { verificationSha256 } },
+    error: null,
+  };
+  const bytes = `${encodeJson(content, 'publish stage fixture', true)}\n`;
+  return { content, bytes, sha256: createHash('sha256').update(bytes).digest('hex') };
+}
 const CHECKSUM_CONTENT = `${SHA64}  image\n`;
 function checksumHash(): string { return createHash('sha256').update(CHECKSUM_CONTENT).digest('hex'); }
 
@@ -156,7 +173,7 @@ function snapshot(containerState: 'present' | 'absent' = 'present', jobId = 'job
 function postcondition(s: CleanupSnapshot): CleanupPostcondition {
   const sealedLog = (value: 'absent' | 'sealed' | 'unsealed'): 'absent' | 'sealed' => value === 'unsealed' ? 'sealed' : value;
   const postContainer = s.container.kind === 'present' ? { kind: 'removed' as const, id: s.container.id, name: s.container.name, imageDigest: s.container.imageDigest, labels: s.container.labels, exactIdAbsent: true as const, globalLabelResult: 'no-match' as const, stoppedAt: NOW, removedAt: LATER, observedAt: RECOVERY } : { kind: 'null-identity' as const, dockerAction: 'none' as const, globalLabelResult: 'no-match' as const, observedAt: RECOVERY };
-  return { ...s, container: postContainer, staging: s.staging.kind === 'absent' ? staging : { kind: 'quarantined', sourcePath: s.staging.path, destinationPath: 'quarantine/image', sourceAbsent: true, destinationPresent: true, sha256: s.staging.sha256, size: s.staging.size, verifiedAt: RECOVERY }, logs: { runner: sealedLog(s.logs.runner), docker: sealedLog(s.logs.docker), verifiedAt: s.logs.verifiedAt }, blocker: 'none' };
+  return { ...s, container: postContainer, staging: s.staging.kind === 'absent' ? staging : { kind: 'quarantined', sourcePath: s.staging.path, destinationPath: 'quarantine/image', sourceAbsent: true, destinationPresent: true, sha256: s.staging.sha256 ?? SHA64, size: s.staging.size ?? 0, verifiedAt: RECOVERY }, logs: { runner: sealedLog(s.logs.runner), docker: sealedLog(s.logs.docker), verifiedAt: s.logs.verifiedAt }, blocker: 'none' };
 }
 function nullLeaseSnapshot(jobId = 'job-1'): CleanupSnapshot { return {
   runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: null, leaseExpiresAt: null, inactiveAt: LATER, observedAt: RECOVERY },
@@ -260,13 +277,55 @@ function recoveryEvidence(jobId: string, terminalState: 'succeeded' | 'failed' =
   const stagedVerificationSha256 = verificationHash(jobId);
   const terminal = terminalVerification(jobId);
   const success = terminalState === 'succeeded';
+  const stageEvidence = publishStageEvidence(
+    jobId,
+    success ? terminal.sha256 : stagedVerificationSha256,
+    success ? 'passed' : 'failed',
+  );
   return {
   runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', leaseExpiresAt: ACTIVE, inactiveAt: LATER, observedAt: RECOVERY }, container: absent(RECOVERY),
-  stage: { startedAt: NOW, finishedAt: RECOVERY, evidencePath: `jobs/${jobId}/evidence/09-publish.json`, evidenceSha256: SHA64 },
+  stage: { startedAt: NOW, finishedAt: RECOVERY, evidencePath: `jobs/${jobId}/evidence/09-publish.json`, evidenceSha256: stageEvidence.sha256 },
   artifact: { stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256, verificationPath: 'staging/verify', verificationSha256: stagedVerificationSha256 },
   final: { directory: `release/${jobId}`, path: `release/${jobId}/image`, publishStartedAt: NOW, publishedAt: null },
-  observed: { final: success ? { present: true, path: `release/${jobId}/image`, held: true, size: 10, sha256: SHA64 } : { present: false, path: `release/${jobId}/image`, held: false, size: null, sha256: null }, checksum: { present: true, path: success ? `release/${jobId}/sha256sums` : 'staging/sums', contents: CHECKSUM_CONTENT, sha256: checksumHash() }, manifest: { present: true, path: success ? `release/${jobId}/build-manifest.json` : 'staging/manifest', bytes: canonicalJson(manifestContent), content: manifestContent, sha256: manifestSha256 }, verification: { present: true, path: success ? `release/${jobId}/verification.json` : 'staging/verify', bytes: success ? terminal.bytes : canonicalJson(stagedVerificationContent), content: success ? terminal.content : stagedVerificationContent, sha256: success ? terminal.sha256 : stagedVerificationSha256 }, staging: success ? { state: 'absent', path: null, sha256: null } : { state: 'present', path: 'staging/image', sha256: SHA64 }, logs: { runner: 'sealed', docker: 'sealed', verifiedAt: RECOVERY, noGap: true } },
+  observed: { stageEvidence: { present: true, path: `jobs/${jobId}/evidence/09-publish.json`, bytes: stageEvidence.bytes, sha256: stageEvidence.sha256 }, final: success ? { present: true, path: `release/${jobId}/image`, held: true, size: 10, sha256: SHA64 } : { present: false, path: `release/${jobId}/image`, held: false, size: null, sha256: null }, checksum: { present: true, path: success ? `release/${jobId}/sha256sums` : 'staging/sums', contents: CHECKSUM_CONTENT, sha256: checksumHash() }, manifest: { present: true, path: success ? `release/${jobId}/build-manifest.json` : 'staging/manifest', bytes: canonicalJson(manifestContent), content: manifestContent, sha256: manifestSha256 }, verification: { present: true, path: success ? `release/${jobId}/verification.json` : 'staging/verify', bytes: success ? terminal.bytes : canonicalJson(stagedVerificationContent), content: success ? terminal.content : stagedVerificationContent, sha256: success ? terminal.sha256 : stagedVerificationSha256 }, staging: success ? { state: 'absent', path: null, sha256: null } : { state: 'present', path: 'staging/image', sha256: SHA64 }, logs: { runner: 'sealed', docker: 'sealed', verifiedAt: RECOVERY, noGap: true } },
   }; }
+function validPublishTerminal(jobId: string): Extract<RunnerWriteCommand, { kind: 'publish-terminal' }> {
+  const terminal = terminalVerification(jobId);
+  const stageEvidence = publishStageEvidence(jobId, terminal.sha256);
+  return {
+    ...runnerBase(jobId),
+    kind: 'publish-terminal',
+    expectedState: 'publishing',
+    startedAt: NOW,
+    finishedAt: LATER,
+    evidencePath: `jobs/${jobId}/evidence/09-publish.json`,
+    evidenceSha256: stageEvidence.sha256,
+    finalDirectory: `release/${jobId}`,
+    finalPath: `release/${jobId}/image`,
+    publishStartedAt: NOW,
+    publishedAt: LATER,
+    terminalAt: LATER,
+    priorVerificationSha256: verificationHash(jobId),
+    verificationSha256: terminal.sha256,
+    observedStageEvidence: { present: true, path: stageEvidencePath(jobId), bytes: stageEvidence.bytes, sha256: stageEvidence.sha256 },
+    observedVerification: { present: true, path: `release/${jobId}/verification.json`, bytes: terminal.bytes, sha256: terminal.sha256 },
+  };
+}
+function stageEvidencePath(jobId: string): string { return `jobs/${jobId}/evidence/09-publish.json`; }
+function rewriteRecoveryStageEvidence(evidence: PublishRecoveryEvidence, mutate: (content: JsonObject) => JsonObject): PublishRecoveryEvidence {
+  const current = JSON.parse(evidence.observed.stageEvidence.bytes) as JsonObject;
+  const content = mutate(current);
+  const bytes = `${encodeJson(content, 'rewritten publish stage fixture', true)}\n`;
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  return {
+    ...evidence,
+    stage: { ...evidence.stage, evidenceSha256: sha256 },
+    observed: {
+      ...evidence.observed,
+      stageEvidence: { ...evidence.observed.stageEvidence, bytes, sha256 },
+    },
+  };
+}
 
 afterEach(async () => { for (const close of closers.splice(0)) close(); await Promise.all(tempPaths.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
 
@@ -322,6 +381,62 @@ describe('actor-owned compare-and-set writes', () => {
       verificationPath: `staging/${jobId}/verification.json`,
       verificationSha256: verificationHash(jobId),
     });
+  });
+
+  it('admits and completes cleanup for an intent with absent or partial staging', async () => {
+    for (const [jobId, stagingSnapshot] of [
+      ['intent-before-mkdir', { kind: 'absent' as const, path: null }],
+      ['intent-partial-staging', { kind: 'present' as const, path: 'staging/intent-partial-staging/image', sha256: null, size: null }],
+    ] as const) {
+      const target = await fixture(jobId);
+      advanceToVerifying(target.ownership, jobId);
+      target.ownership.runnerWrite({
+        ...runnerBase(jobId),
+        kind: 'artifact-preparation-intent',
+        expectedState: 'verifying',
+        stagingDirectory: `staging/${jobId}`,
+        artifact: {
+          stagingPath: `staging/${jobId}/image`, artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW,
+          checksumPath: `staging/${jobId}/sha256sums`, checksumSha256: checksumHash(),
+          manifestPath: `staging/${jobId}/build-manifest.json`, manifestSha256: manifestHash(jobId),
+          verificationPath: `staging/${jobId}/verification.json`, verificationSha256: verificationHash(jobId),
+        },
+      });
+      const snapshotValue: CleanupSnapshot = {
+        runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', leaseExpiresAt: ACTIVE, inactiveAt: LATER, observedAt: RECOVERY },
+        state: 'verifying',
+        container: absent(RECOVERY),
+        staging: stagingSnapshot,
+        logs,
+        blocker: 'staging-or-log',
+      };
+      const admission = cleanupAdmission(snapshotValue, jobId);
+      expect(target.ownership.apiWrite(admission).ok).toBe(true);
+      const reopenedDb = openBuilderDatabase(target.path);
+      const reopened = new OwnershipStore(reopenedDb, { now: () => NOW });
+      const reopenedStore = new BuilderStore(reopenedDb);
+      closers.push(() => reopenedDb.close());
+      const claim: CleanupWriteCommand = {
+        kind: 'claim-lease', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+        fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, at: RECOVERY,
+      };
+      expect(reopened.cleanupWrite(claim).ok).toBe(true);
+      const evidence: CleanupWriteCommand = {
+        kind: 'evidence', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+        fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, status: 'blocking', blockerCode: 'QUARANTINE_PENDING', blocker: { reason: 'preparation intent cleanup' }, at: RECOVERY,
+      };
+      expect(reopened.cleanupWrite(evidence).ok).toBe(true);
+      expect(reopened.cleanupWrite({
+        kind: 'complete', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+        fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, postcondition: postcondition(snapshotValue),
+        exactContainerId: null, containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY,
+      }).ok).toBe(true);
+      expect(reopenedStore.getJob(jobId)).toMatchObject({
+        publishState: stagingSnapshot.kind === 'absent' ? null : 'quarantined',
+        artifactStagingPath: null,
+        artifactSha256: null,
+      });
+    }
   });
 
   it('allows a legacy null not_started row to complete without a fabricated plan', async () => {
@@ -896,7 +1011,8 @@ describe('actor-owned compare-and-set writes', () => {
       outcome: 'running',
     });
 
-    fail = true;
+    const terminalVerificationValue = terminalVerification(jobId);
+    const terminalStageEvidence = publishStageEvidence(jobId, terminalVerificationValue.sha256);
     const terminal: RunnerWriteCommand = {
       ...runnerBase(jobId),
       at: LATER,
@@ -904,28 +1020,34 @@ describe('actor-owned compare-and-set writes', () => {
       expectedState: 'publishing',
       startedAt: NOW,
       finishedAt: LATER,
-      evidencePath: 'evidence/09-publish.json',
-      evidenceSha256: SHA64,
+      evidencePath: `jobs/${jobId}/evidence/09-publish.json`,
+      evidenceSha256: terminalStageEvidence.sha256,
       finalDirectory: `release/${jobId}`,
       finalPath: `release/${jobId}/image`,
       publishStartedAt: NOW,
       publishedAt: LATER,
       terminalAt: LATER,
+      priorVerificationSha256: verificationHash(jobId),
+      verificationSha256: terminalVerificationValue.sha256,
+      observedStageEvidence: { present: true, path: `jobs/${jobId}/evidence/09-publish.json`, bytes: terminalStageEvidence.bytes, sha256: terminalStageEvidence.sha256 },
+      observedVerification: { present: true, path: `release/${jobId}/verification.json`, bytes: terminalVerificationValue.bytes, sha256: terminalVerificationValue.sha256 },
     };
+    const terminalRollbackDb = openBuilderDatabase(value.path);
+    const terminalRollback = new OwnershipStore(terminalRollbackDb, {
+      now: () => NOW,
+      failBeforeCommit: () => { throw new Error('publish terminal transaction crash'); },
+    });
+    closers.push(() => terminalRollbackDb.close());
     const beforeTerminal = value.store.listEvents(jobId).events.length;
-    expect(() => injected.runnerWrite(terminal)).toThrow(OwnershipTransactionError);
+    expect(() => terminalRollback.runnerWrite(terminal)).toThrow(OwnershipTransactionError);
     expect(value.store.getJob(jobId)).toMatchObject({
       state: 'publishing',
       publishState: 'publishing',
       artifactStagingPath: 'staging/image',
       terminalAt: null,
     });
-    expect(value.store.getStage(jobId, 'publish')).toMatchObject({
-      outcome: 'running',
-    });
+    expect(value.store.getStage(jobId, 'publish')).toMatchObject({ outcome: 'running' });
     expect(value.store.listEvents(jobId).events).toHaveLength(beforeTerminal);
-
-    fail = false;
     expect(value.ownership.runnerWrite(terminal).ok).toBe(true);
     expect(value.store.getJob(jobId)).toMatchObject({
       state: 'succeeded',
@@ -936,11 +1058,104 @@ describe('actor-owned compare-and-set writes', () => {
     });
     expect(value.store.getStage(jobId, 'publish')).toMatchObject({
       outcome: 'passed',
-      evidencePath: 'evidence/09-publish.json',
-      evidenceSha256: SHA64,
+      evidencePath: `jobs/${jobId}/evidence/09-publish.json`,
+      evidenceSha256: terminalStageEvidence.sha256,
     });
     expect(value.store.listEvents(jobId).events
       .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
+  });
+
+  it('rejects omitted, forged, and mismatched normal publish verification proof', async () => {
+    const omitted = await fixture('terminal-proof-omitted');
+    toPublishing(omitted.ownership, 'terminal-proof-omitted');
+    const valid = validPublishTerminal('terminal-proof-omitted');
+    expect(() => omitted.ownership.runnerWrite({ ...valid, priorVerificationSha256: undefined } as never)).toThrow(OwnershipValidationError);
+
+    const forged = await fixture('terminal-proof-forged');
+    toPublishing(forged.ownership, 'terminal-proof-forged');
+    const forgedCommand = validPublishTerminal('terminal-proof-forged');
+    expect(forged.ownership.runnerWrite({
+      ...forgedCommand,
+      observedVerification: { ...forgedCommand.observedVerification, sha256: SHA64 },
+    })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+
+    const mismatch = await fixture('terminal-proof-mismatch');
+    toPublishing(mismatch.ownership, 'terminal-proof-mismatch');
+    const mismatchCommand = validPublishTerminal('terminal-proof-mismatch');
+    const mismatchStage = publishStageEvidence('terminal-proof-mismatch', terminalVerification('terminal-proof-mismatch').sha256);
+    const mismatchContent = { ...mismatchStage.content, observations: { final: { verificationSha256: SHA64 } } };
+    const mismatchBytes = `${encodeJson(mismatchContent, 'mismatched publish stage fixture', true)}\n`;
+    expect(mismatch.ownership.runnerWrite({
+      ...mismatchCommand,
+      observedStageEvidence: {
+        ...mismatchCommand.observedStageEvidence,
+        bytes: mismatchBytes,
+        sha256: createHash('sha256').update(mismatchBytes).digest('hex'),
+      },
+    })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+  });
+
+  it('rejects stale publish recovery without canonical stage-09 proof', async () => {
+    const cases: Array<[string, (evidence: PublishRecoveryEvidence) => PublishRecoveryEvidence]> = [
+      ['recovery-stage-absent', (evidence) => ({ ...evidence, observed: { ...evidence.observed, stageEvidence: undefined as never } })],
+      ['recovery-stage-hash', (evidence) => ({ ...evidence, observed: { ...evidence.observed, stageEvidence: { ...evidence.observed.stageEvidence, sha256: SHA64 } } })],
+      ['recovery-stage-noncanonical', (evidence) => ({ ...evidence, observed: { ...evidence.observed, stageEvidence: { ...evidence.observed.stageEvidence, bytes: `${evidence.observed.stageEvidence.bytes} ` } } })],
+      ['recovery-stage-failed', (evidence) => rewriteRecoveryStageEvidence(evidence, (content) => ({ ...content, outcome: 'failed' }))],
+      ['recovery-stage-final-mismatch', (evidence) => rewriteRecoveryStageEvidence(evidence, (content) => ({ ...content, observations: { final: { verificationSha256: SHA64 } } }))],
+    ];
+    for (const [jobId, alter] of cases) {
+      const target = await fixture(jobId);
+      toPublishing(target.ownership, jobId);
+      seedLogs(target.path, jobId);
+      const evidence = alter(recoveryEvidence(jobId));
+      if (jobId === 'recovery-stage-absent') {
+        expect(() => target.ownership.apiWrite({ kind: 'publish-recovery', jobId, expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence })).toThrow(OwnershipValidationError);
+      } else {
+        expect(target.ownership.apiWrite({ kind: 'publish-recovery', jobId, expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+      }
+    }
+  });
+
+  it('validates failed recovery stage hash, outcome, and persisted job binding', async () => {
+    const cases: Array<[string, (evidence: PublishRecoveryEvidence) => PublishRecoveryEvidence]> = [
+      ['failed-stage-hash', (evidence) => ({
+        ...evidence,
+        observed: {
+          ...evidence.observed,
+          stageEvidence: { ...evidence.observed.stageEvidence, sha256: SHA64 },
+        },
+      })],
+      ['failed-stage-outcome', (evidence) => {
+        return rewriteRecoveryStageEvidence(evidence, (content) => ({ ...content, outcome: 'passed' }));
+      }],
+      ['failed-stage-job-binding', (evidence) => {
+        return rewriteRecoveryStageEvidence(evidence, (content) => ({ ...content, jobId: 'another-job' }));
+      }],
+      ['failed-stage-source-binding', (evidence) => {
+        return rewriteRecoveryStageEvidence(evidence, (current) => ({
+          ...current,
+          inputs: {
+            ...(current.inputs as JsonObject),
+            branch: 'feature/other-source',
+          },
+        }));
+      }],
+    ];
+    for (const [jobId, alter] of cases) {
+      const target = await fixture(jobId);
+      toPublishing(target.ownership, jobId);
+      seedLogs(target.path, jobId);
+      expect(target.ownership.apiWrite({
+        kind: 'publish-recovery',
+        jobId,
+        expectedState: 'publishing',
+        at: RECOVERY,
+        state: 'failed',
+        evidence: alter(recoveryEvidence(jobId, 'failed')),
+        errorCode: 'PUBLISH_FAILED',
+        error: { reason: jobId },
+      })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    }
   });
 
   it('atomically commits blocked publish evidence, quarantine identity, and the failed terminal', async () => {
@@ -1065,7 +1280,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(success.store.getStage('job-2', 'publish')).toMatchObject({
       outcome: 'passed',
       evidencePath: 'jobs/job-2/evidence/09-publish.json',
-      evidenceSha256: SHA64,
+      evidenceSha256: recoveryEvidence('job-2').stage.evidenceSha256,
     });
     expect(success.store.getJob('job-2').verificationSha256)
       .toBe(terminalVerification('job-2').sha256);
@@ -1075,7 +1290,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(failed.store.getStage('job-3', 'publish')).toMatchObject({
       outcome: 'failed',
       evidencePath: 'jobs/job-3/evidence/09-publish.json',
-      evidenceSha256: SHA64,
+      evidenceSha256: recoveryEvidence('job-3', 'failed').stage.evidenceSha256,
       errorCode: 'PUBLISH_FAILED',
     });
     const incomplete = await fixture('job-4'); toPublishing(incomplete.ownership, 'job-4'); seedLogs(incomplete.path, 'job-4');

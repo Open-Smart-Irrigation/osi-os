@@ -251,6 +251,7 @@ async function fixture(options: {
   readonly verifyProducedTargetEvidence?: boolean;
   readonly predictPublishPassed?: boolean;
   readonly requirePreparationIntentBeforePrepare?: boolean;
+  readonly throwPublicationPrepare?: boolean;
   readonly distinctPublisherIdentities?: boolean;
 } = {}): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), 'osi-pipeline-order-'));
@@ -722,6 +723,9 @@ async function fixture(options: {
             },
           },
         });
+      }
+      if (options.throwPublicationPrepare === true) {
+        throw new Error('injected publication preparation failure');
       }
       publicationPreparationStages.push(store.getStage(jobId, 'verify'));
       publishedMetadata.push({
@@ -1607,6 +1611,30 @@ describe('trusted pipeline integration', () => {
       await expect(createPipeline(value.input).run()).resolves.toMatchObject({
         state: 'succeeded',
       });
+    } finally {
+      value.close();
+    }
+  });
+
+  it('returns recovery-required when preparation throws after durable intent', async () => {
+    const value = await fixture({
+      requirePreparationIntentBeforePrepare: true,
+      throwPublicationPrepare: true,
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'QUARANTINE_PENDING',
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'verifying',
+        publishState: 'not_started',
+        artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
+        terminalAt: null,
+      });
+      expect(value.store.getStage(value.input.jobId, 'publish')).toBeNull();
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(0);
     } finally {
       value.close();
     }
