@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -41,7 +41,7 @@ import {
   type StageActionContext,
 } from '../../runner/src/pipeline.js';
 import { quarantineCancellationStaging, runGuardedComposition, runRunner } from '../../runner/src/main.js';
-import { CancellationBlockedError } from '../../runner/src/cancellation.js';
+import { CancellationBlockedError, createRunnerCancellation } from '../../runner/src/cancellation.js';
 import { createEvidenceWriter } from '../../runner/src/evidence.js';
 import { createOperationDefinition, hashOperationDefinition } from '../../runner/src/operation-registry.js';
 import {
@@ -1174,14 +1174,14 @@ describe('trusted pipeline integration', () => {
   it('rejects a quarantined artifact whose actual size and SHA differ from persisted identity', async () => {
     const value = await fixture();
     try {
-      const stagingDirectory = join(
+      const quarantineDirectory = join(
         value.input.approvedRoot.path,
         '.osi-image-builder',
-        'staging',
+        'quarantine',
         value.input.jobId,
       );
-      await mkdir(stagingDirectory, { recursive: true });
-      await writeFile(join(stagingDirectory, 'factory.img.gz'), 'tampered artifact');
+      await mkdir(quarantineDirectory, { recursive: true });
+      await writeFile(join(quarantineDirectory, 'factory.img.gz'), 'tampered artifact');
       const persisted = value.store.getJob(value.input.jobId);
 
       await expect(quarantineCancellationStaging(value.loaded, {
@@ -1189,7 +1189,57 @@ describe('trusted pipeline integration', () => {
         artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
         artifactSha256: HASH_A,
         artifactSize: 100,
-      })).rejects.toThrow(/artifact.*(?:size|sha|identity)/i);
+      }, value.input.services.publisher)).rejects.toThrow(/artifact.*(?:size|sha|identity)/i);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('uses native no-overwrite quarantine and preserves an existing destination', async () => {
+    const value = await fixture();
+    try {
+      const source = join(
+        value.input.approvedRoot.path,
+        '.osi-image-builder',
+        'staging',
+        value.input.jobId,
+      );
+      const destination = join(
+        value.input.approvedRoot.path,
+        '.osi-image-builder',
+        'quarantine',
+        value.input.jobId,
+      );
+      const artifact = Buffer.from('expected cancellation artifact');
+      await mkdir(source, { recursive: true });
+      await mkdir(destination, { recursive: true });
+      await writeFile(join(source, 'factory.img.gz'), artifact);
+      const destinationBefore = await lstat(destination);
+      const quarantine = vi.fn(async (): Promise<PublisherResponse> => ({
+        available: true,
+        published: false,
+        quarantined: false,
+        selfTest: false,
+        mutationCount: 0,
+        errorCode: 'QUARANTINE_PENDING',
+        sourceRelativePath: `.osi-image-builder/staging/${value.input.jobId}`,
+        destinationRelativePath: `.osi-image-builder/quarantine/${value.input.jobId}`,
+        renameResult: 'EEXIST',
+        publisherVersion: LOCK.packageVersion,
+        publisherSourceSha256: HASH_C,
+      }));
+      const persisted = value.store.getJob(value.input.jobId);
+
+      await expect(quarantineCancellationStaging(value.loaded, {
+        ...persisted,
+        artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
+        artifactSha256: createHash('sha256').update(artifact).digest('hex'),
+        artifactSize: artifact.length,
+      }, { quarantine })).rejects.toThrow(/no-overwrite|quarantine|collision|eexist/i);
+
+      expect(quarantine).toHaveBeenCalledOnce();
+      expect(await readFile(join(source, 'factory.img.gz'))).toEqual(artifact);
+      expect((await lstat(destination)).ino).toBe(destinationBefore.ino);
     } finally {
       value.close();
     }
@@ -1351,6 +1401,89 @@ describe('trusted pipeline integration', () => {
         (event) => event.eventType === 'publish' && event.payload.state === 'publishing',
       )).toBe(false);
     } finally {
+      value.close();
+    }
+  });
+
+  it('recovers a committed API cancellation between the final check and publish CAS', async () => {
+    const value = await fixture();
+    const apiDatabase = openBuilderDatabase(join(value.statePath, 'jobs.sqlite'));
+    const apiOwnership = new OwnershipStore(apiDatabase, { now: () => value.clock.now() });
+    let cancellationCommitted = false;
+    const cancellation = createRunnerCancellation({
+      jobId: value.input.jobId,
+      runnerUnit: value.input.runnerUnit,
+      owner: value.input.owner,
+      leaseExpiresAt: () => value.store.getJob(value.input.jobId).runnerLeaseExpiresAt!,
+      store: value.store,
+      ownership: value.ownership,
+      docker: {
+        inspect: async () => null,
+        stop: async () => { throw new Error('publish race has no container to stop'); },
+        waitForStopped: async () => { throw new Error('publish race has no container to wait for'); },
+        remove: async () => { throw new Error('publish race has no container to remove'); },
+        listByLabels: async () => [],
+      },
+      evidence: async () => ({
+        path: `jobs/${value.input.jobId}/evidence/cancellation.json`,
+        sha256: HASH_D,
+      }),
+      cleanup: {
+        staging: async () => ({
+          kind: 'quarantined',
+          sourcePath: `staging/${value.input.jobId}/factory.img.gz`,
+          destinationPath: `quarantine/${value.input.jobId}`,
+          sourceAbsent: true,
+          destinationPresent: true,
+          sha256: HASH_A,
+          size: 100,
+          verifiedAt: value.clock.now(),
+        }),
+        logs: async () => value.ownership.cancellationLogProof(
+          value.input.jobId,
+          value.clock.now(),
+        ),
+      },
+      clock: () => value.clock.now(),
+      signals: { on: () => undefined, off: () => undefined },
+    });
+    const runnerOwnership = {
+      runnerWrite: (command: RunnerWriteCommand): OwnershipResult => {
+        if (command.kind === 'publish-stage-start') {
+          const result = apiOwnership.apiWrite({
+            kind: 'request-cancellation',
+            jobId: value.input.jobId,
+            reason: 'publish CAS race',
+            at: value.clock.now(),
+          });
+          expect(result.ok).toBe(true);
+          cancellationCommitted = true;
+        }
+        return value.ownership.runnerWrite(command);
+      },
+    };
+    try {
+      const raceResult = await createPipeline({
+        ...value.input,
+        ownership: runnerOwnership,
+        cancellation,
+      }).run();
+      expect(raceResult).toMatchObject({
+        state: 'cancelled',
+        blockerCode: 'CANCELLED',
+      });
+      expect(cancellationCommitted).toBe(true);
+      expect(value.input.services.publisher.publish).not.toHaveBeenCalled();
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'cancelled',
+        publishState: 'quarantined',
+      });
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events.some(
+        (event) => event.eventType === 'publish' && event.payload.state === 'publishing',
+      )).toBe(false);
+    } finally {
+      cancellation.dispose();
+      apiDatabase.close();
       value.close();
     }
   });

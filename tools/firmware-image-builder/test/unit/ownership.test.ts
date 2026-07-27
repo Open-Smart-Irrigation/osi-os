@@ -735,6 +735,133 @@ describe('actor-owned compare-and-set writes', () => {
     )).toBe(false);
   });
 
+  it('requires cleanup proof to exactly bind the referenced cancellation evidence', async () => {
+    const jobId = 'cancellation-proof-binding';
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    const evidence = target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: LATER,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-evidence',
+      expectedState: 'cancel_requested',
+      evidence: cancellationEvidence(jobId),
+    });
+
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-cleanup',
+      expectedState: 'cancel_requested',
+      evidenceEventSeq: eventSeq(evidence),
+      proof: {
+        kind: 'pre-container',
+        runnerUnit: runnerBase(jobId).runnerUnit,
+        unitInactiveAt: null,
+        container: absent(RECOVERY),
+        staging,
+        logs: { runner: 'absent', docker: 'absent', verifiedAt: RECOVERY },
+      },
+    })).toMatchObject({
+      ok: false,
+      conflict: { kind: 'identity-mismatch' },
+    });
+    expect(target.store.getJob(jobId).state).toBe('cancel_requested');
+  });
+
+  it('rejects log generations added after cancellation evidence and before cleanup', async () => {
+    const jobId = 'cancellation-log-after-evidence';
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    const evidence = target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: LATER,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-evidence',
+      expectedState: 'cancel_requested',
+      evidence: cancellationEvidence(jobId),
+    });
+    seedUnsealedLogs(target.path, jobId);
+
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-cleanup',
+      expectedState: 'cancel_requested',
+      evidenceEventSeq: eventSeq(evidence),
+      proof: {
+        kind: 'pre-container',
+        runnerUnit: runnerBase(jobId).runnerUnit,
+        unitInactiveAt: null,
+        container: absent(RECOVERY),
+        staging,
+        logs: { runner: 'absent', docker: 'absent', verifiedAt: RECOVERY },
+      },
+    })).toMatchObject({
+      ok: false,
+      conflict: { kind: 'identity-mismatch' },
+    });
+    expect(target.store.listEvents(jobId).events.some(
+      (event) => event.eventType === 'cleanup' && event.payload.kind === 'cancellation-cleanup',
+    )).toBe(false);
+  });
+
+  it('rejects log generations added after cancellation cleanup and before terminal', async () => {
+    const jobId = 'cancellation-log-after-cleanup';
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    const evidence = target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: LATER,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-evidence',
+      expectedState: 'cancel_requested',
+      evidence: cancellationEvidence(jobId),
+    });
+    const cleanup = target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: LATER,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-cleanup',
+      expectedState: 'cancel_requested',
+      evidenceEventSeq: eventSeq(evidence),
+      proof: {
+        kind: 'pre-container',
+        runnerUnit: runnerBase(jobId).runnerUnit,
+        unitInactiveAt: null,
+        container: absent(LATER),
+        staging,
+        logs: { runner: 'absent', docker: 'absent', verifiedAt: NOW },
+      },
+    });
+    seedUnsealedLogs(target.path, jobId);
+
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-terminal',
+      expectedState: 'cancel_requested',
+      terminalAt: RECOVERY,
+      cleanupEventSeq: eventSeq(cleanup),
+    })).toMatchObject({
+      ok: false,
+      conflict: { kind: 'identity-mismatch' },
+    });
+    expect(target.store.getJob(jobId).state).toBe('cancel_requested');
+  });
+
   it('accepts strict sealed cancellation coverage alongside a truly absent log stream', async () => {
     const jobId = 'cancellation-one-log-stream';
     const target = await fixture(jobId);
@@ -770,7 +897,17 @@ describe('actor-owned compare-and-set writes', () => {
         globalLabelResult: 'no-match' as const, observedAt: RECOVERY },
       staging: { kind: 'quarantined' as const, sourcePath: 'staging/image', destinationPath: 'quarantine/image', sourceAbsent: true, destinationPresent: true, sha256: SHA64, size: 10, verifiedAt: RECOVERY } as StagingCleanupProof, logs,
     };
-    const evidence = ownership.runnerWrite({ ...runnerBase(), at: LATER, leaseExpiresAt: EXPIRY, kind: 'cancellation-evidence', expectedState: 'cancel_requested', evidence: cancellationEvidence('job-1', true) });
+    const evidence = ownership.runnerWrite({
+      ...runnerBase(),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-evidence',
+      expectedState: 'cancel_requested',
+      evidence: {
+        ...cancellationEvidence('job-1', true),
+        staging: proof.staging,
+      },
+    });
     const result = ownership.runnerWrite({ ...runnerBase(), at: RECOVERY, leaseExpiresAt: EXPIRY, kind: 'cancellation-cleanup', expectedState: 'cancel_requested', evidenceEventSeq: eventSeq(evidence), proof: { ...proof, unitInactiveAt: null } });
     expect(result.ok).toBe(true);
     expect(store.getJob('job-1')).toMatchObject({ artifactStagingPath: null, artifactQuarantinePath: 'quarantine/image', publishState: 'quarantined', containerId: null });

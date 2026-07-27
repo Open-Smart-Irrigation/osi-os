@@ -1110,6 +1110,41 @@ function validateCancellationEvidence(evidence: CancellationEvidence, job: Row, 
   if (container.stoppedAt > at) throw new OwnershipValidationError('cancellation evidence stopped time is from the future');
 }
 
+function validateCancellationEvidenceBinding(evidence: CancellationEvidence, proof: CancellationProof): void {
+  if (
+    evidence.runnerUnit !== proof.runnerUnit
+    || proofJson(evidence.staging, 'cancellation evidence staging binding') !== proofJson(proof.staging, 'cancellation proof staging binding')
+    || evidence.logs.runner !== proof.logs.runner
+    || evidence.logs.docker !== proof.logs.docker
+    || evidence.logs.verifiedAt !== proof.logs.verifiedAt
+  ) {
+    throw new OwnershipConflictError('identity-mismatch', 'cancellation cleanup proof does not exactly bind the durable evidence');
+  }
+  if (evidence.kind === 'pre-container') {
+    if (
+      proof.kind !== 'pre-container'
+      || evidence.container.kind !== 'absent'
+      || proof.container.kind !== 'absent'
+      || evidence.container.globalLabelResult !== proof.container.globalLabelResult
+    ) {
+      throw new OwnershipConflictError('identity-mismatch', 'cancellation cleanup identity does not bind pre-container evidence');
+    }
+    return;
+  }
+  if (proof.kind !== 'container' || evidence.container.kind !== 'stopped') {
+    throw new OwnershipConflictError('identity-mismatch', 'cancellation cleanup identity does not bind stopped-container evidence');
+  }
+  if (
+    evidence.container.id !== proof.container.id
+    || evidence.container.name !== proof.container.name
+    || evidence.container.imageDigest !== proof.container.imageDigest
+    || evidence.container.stoppedAt !== proof.container.stoppedAt
+    || proofJson(evidence.container.labels, 'cancellation evidence label binding') !== proofJson(proof.container.labels, 'cancellation proof label binding')
+  ) {
+    throw new OwnershipConflictError('identity-mismatch', 'cancellation cleanup container does not exactly bind durable evidence');
+  }
+}
+
 function validateDirectLogProof(db: DbFacade, proof: DirectLogProof, jobId: string, at: string): void {
   instant(proof.verifiedAt, 'direct log proof time');
   if (proof.verifiedAt > at) throw new OwnershipValidationError('direct log proof is from the future');
@@ -2054,6 +2089,10 @@ export class OwnershipStore {
     if (!evidence) conflict('stale-predecessor', 'cancellation evidence event is missing');
     const evidencePayload = JSON.parse(String(evidence.payload_json)) as Record<string, unknown>;
     if (evidencePayload.kind !== 'cancellation-evidence') conflict('stale-predecessor', 'cancellation cleanup requires the durable evidence phase');
+    const durableEvidence = evidencePayload.evidence as CancellationEvidence | undefined;
+    if (durableEvidence === undefined) conflict('identity-mismatch', 'cancellation cleanup evidence payload is missing');
+    validateCancellationEvidenceBinding(durableEvidence, command.proof);
+    reconcileCancellationLogs(this.#db, command.jobId, command.proof.logs, command.at);
     const stagingProof = command.proof.staging;
     if (stagingProof.kind === 'absent') {
       if (row.artifact_staging_path !== null) conflict('identity-mismatch', 'cancellation staging absence does not match persisted staging');
@@ -2084,6 +2123,9 @@ export class OwnershipStore {
     if (!evidence) conflict('stale-predecessor', 'cancellation cleanup evidence is missing');
     const payload = JSON.parse(String(evidence.payload_json)) as Record<string, unknown>;
     if (payload.kind !== 'cancellation-cleanup') conflict('identity-mismatch', 'cancellation cleanup event is not the required protocol step');
+    const proof = payload.proof as CancellationProof | undefined;
+    if (proof === undefined) conflict('identity-mismatch', 'cancellation cleanup proof is missing');
+    reconcileCancellationLogs(this.#db, command.jobId, proof.logs, command.at);
     const row = this.#job(command.jobId);
     if (row.container_id !== null || row.container_name !== null || row.container_image_digest !== null || row.container_label_job_id !== null || row.container_label_manifest_sha !== null || row.container_labels_json !== null || row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null || row.artifact_staging_path !== null) {
       conflict('identity-mismatch', 'cancellation cleanup did not clear all active identity and blockers');
@@ -2289,6 +2331,7 @@ export class OwnershipStore {
       publish_blocker_code=NULL, publish_blocker_json=NULL,
       updated_at=?
       WHERE job_id=? AND state='verifying' AND publish_state='staged'
+        AND cancel_requested_at IS NULL
         AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=?
         AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(
       command.finalDirectory,

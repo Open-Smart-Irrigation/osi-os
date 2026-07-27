@@ -60,9 +60,16 @@ import {
   type ManifestFileSystem,
 } from '../../manifest/validate.js';
 import type { TargetManifest } from '../../manifest/schema.js';
-import { createRunnerPublisherClient } from './publisher-client.js';
+import {
+  createRunnerPublisherClient,
+  type RunnerPublisherClient,
+} from './publisher-client.js';
 import { createDockerCancellationControls, createDockerExecutor } from './docker-executor.js';
-import { createRunnerCancellation } from './cancellation.js';
+import {
+  CancellationBlockedError,
+  createRunnerCancellation,
+  type RecoveredRunnerCancellationEvidence,
+} from './cancellation.js';
 import { createEvidenceWriter } from './evidence.js';
 import { createApiFreshnessSocketClient } from './freshness.js';
 import {
@@ -855,9 +862,58 @@ async function writeRunnerCancellationEvidence(
   return Object.freeze({ path: relativePath, sha256: sha256(bytes) });
 }
 
+async function recoverRunnerCancellationEvidence(
+  stateRoot: StateRootAuthority,
+  jobId: string,
+): Promise<RecoveredRunnerCancellationEvidence | null> {
+  const relativePath = `jobs/${jobId}/evidence/cancellation.json`;
+  return withStateRootSnapshot(stateRoot, async ({ snapshot }) => {
+    const root = await open(snapshot.path, DIRECTORY_FLAGS);
+    let chain: DirectoryChain | null = null;
+    try {
+      try {
+        chain = await openDirectoryChain(root, ['jobs', jobId, 'evidence'], false);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      }
+      let existing;
+      try {
+        existing = await readHeldFile(chain.directory, 'cancellation.json');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(existing.bytes.toString('utf8'));
+      } catch (error) {
+        throw new Error('immutable cancellation evidence is not valid JSON', { cause: error });
+      }
+      const value = normalizeJson(parsed, 'immutable cancellation evidence');
+      if (value === null || Array.isArray(value) || typeof value !== 'object') {
+        throw new Error('immutable cancellation evidence is not an object');
+      }
+      const canonical = Buffer.from(`${encodeJson(value, 'immutable cancellation evidence', true)}\n`);
+      if (!existing.bytes.equals(canonical)) {
+        throw new Error('immutable cancellation evidence bytes are not canonical');
+      }
+      return Object.freeze({
+        value: value as JsonObject,
+        path: relativePath,
+        sha256: existing.sha256,
+      });
+    } finally {
+      if (chain !== null) await closeHandles(chain.handles);
+      await root.close();
+    }
+  });
+}
+
 export async function quarantineCancellationStaging(
   loaded: LoadedConfig,
   job: JobRecord,
+  publisher: Pick<RunnerPublisherClient, 'quarantine'>,
 ): Promise<StagingCleanupProof> {
   if (job.artifactStagingPath === null) return { kind: 'absent', path: null };
   if (job.artifactSha256 === null || job.artifactSize === null) {
@@ -917,8 +973,19 @@ export async function quarantineCancellationStaging(
         }
       }
       if (!sourceStats.isDirectory() || sourceStats.isSymbolicLink()) throw new Error('cancellation staging directory is not safe');
-      await mkdir(join(snapshot.path, '.osi-image-builder', 'quarantine'), { recursive: true, mode: 0o700 });
-      await rename(source, destination);
+      const result = await publisher.quarantine({
+        rootId: job.rootId,
+        jobId: job.jobId,
+      });
+      if (
+        result.available !== true
+        || result.quarantined !== true
+        || result.renameResult !== 'RENAMED'
+        || result.sourceRelativePath !== `.osi-image-builder/staging/${job.jobId}`
+        || result.destinationRelativePath !== `.osi-image-builder/quarantine/${job.jobId}`
+      ) {
+        throw new Error(`native no-overwrite cancellation quarantine failed: ${result.renameResult ?? result.errorCode ?? 'unknown'}`);
+      }
       const sourceAfter = await lstat(source).then(() => true).catch((error: unknown) => {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
         throw error;
@@ -1691,6 +1758,7 @@ async function createProductionComposition(
     let heldOperationWorkspacePath: string | null = null;
     let activeTargetSetupEnvironment: string | null = null;
     let cancellation: PipelineCancellation | null = null;
+    const monotonicClock = (): number => performance.now();
     const requireWorkspace = (): FileHandle => {
       if (workspaceHandle === null) throw new Error('held source workspace is unavailable');
       return workspaceHandle;
@@ -1800,7 +1868,31 @@ async function createProductionComposition(
           ).slice(0, 48)}`,
           store,
           ownership,
-          cancellationRequested: () => cancellation?.isRequested() === true,
+          cancellationBudget: () => cancellation?.cancellationBudget?.() ?? {
+            requested: false,
+            deadline: null,
+            remainingMs: null,
+          },
+          persistCancellationBlocker: async (reason) => {
+            if (cancellation?.blockRecoveryRequired === undefined) {
+              throw new Error('runner cancellation blocker persistence is unavailable');
+            }
+            try {
+              await cancellation.blockRecoveryRequired(
+                'DOCKER_CONTAINER_ORPHANED',
+                reason,
+              );
+            } catch (error) {
+              if (
+                error instanceof CancellationBlockedError
+                && error.blockerCode === 'DOCKER_CONTAINER_ORPHANED'
+              ) {
+                return;
+              }
+              throw error;
+            }
+          },
+          monotonicNow: monotonicClock,
           leaseSnapshot: () => ({
             owner: context.lease.owner,
             unit: context.lease.runnerUnit,
@@ -1980,6 +2072,12 @@ async function createProductionComposition(
     };
 
     const publicationFiles = createPublicationFiles(loaded, requireWorkspace);
+    const publisher = createRunnerPublisherClient({
+      executable: heldPublisher.executable,
+      approvedRoots: loaded.config.approvedOutputRoots,
+      expectedVersion: publisherAuthority.packageVersion,
+      expectedSourceSha256: publisherAuthority.publisherSourceSha256,
+    });
     const services: PipelineInput['services'] = {
       workspace: {
         async revalidate({ stage, phase }) {
@@ -2220,12 +2318,7 @@ async function createProductionComposition(
       },
       publicationFiles,
       publisherAuthority,
-      publisher: createRunnerPublisherClient({
-        executable: heldPublisher.executable,
-        approvedRoots: loaded.config.approvedOutputRoots,
-        expectedVersion: publisherAuthority.packageVersion,
-        expectedSourceSha256: publisherAuthority.publisherSourceSha256,
-      }),
+      publisher,
     };
 
     const cancellationControls = createDockerCancellationControls({
@@ -2246,13 +2339,22 @@ async function createProductionComposition(
         args.jobId,
         value,
       ),
+      recoverEvidence: () => recoverRunnerCancellationEvidence(
+        loaded.pathAuthorities.stateRoot,
+        args.jobId,
+      ),
       cleanup: {
-        staging: async () => quarantineCancellationStaging(loaded, store.getJob(args.jobId)),
+        staging: async () => quarantineCancellationStaging(
+          loaded,
+          store.getJob(args.jobId),
+          publisher,
+        ),
         logs: async () => {
           const verifiedAt = new Date().toISOString();
           return ownership.cancellationLogProof(args.jobId, verifiedAt);
         },
       },
+      monotonicNow: monotonicClock,
     });
     cancellation = runnerCancellation;
 

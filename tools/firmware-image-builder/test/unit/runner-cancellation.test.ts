@@ -190,6 +190,30 @@ function dependencies(overrides: Partial<Parameters<typeof createRunnerCancellat
 }
 
 describe('runner cooperative cancellation', () => {
+  it('owns one absolute monotonic deadline from the first observed request', () => {
+    let monotonic = 12_500;
+    const fixture = dependencies({ monotonicNow: () => monotonic });
+    const controller = createRunnerCancellation(fixture.value);
+
+    expect(controller.cancellationBudget()).toEqual({
+      requested: false,
+      deadline: null,
+      remainingMs: null,
+    });
+    fixture.value.signals.emit('SIGUSR1');
+    expect(controller.cancellationBudget()).toEqual({
+      requested: true,
+      deadline: 42_500,
+      remainingMs: 30_000,
+    });
+    monotonic = 20_000;
+    expect(controller.cancellationBudget()).toEqual({
+      requested: true,
+      deadline: 42_500,
+      remainingMs: 22_500,
+    });
+  });
+
   it('handles SIGUSR1 and observes the request at a stage boundary', async () => {
     const fixture = dependencies();
     const controller = createRunnerCancellation(fixture.value);
@@ -243,9 +267,18 @@ describe('runner cooperative cancellation', () => {
     const controller = createRunnerCancellation(fixture.value);
     fixture.value.signals.emit('SIGUSR1');
 
-    await expect(controller.cancelIfRequested()).rejects.toThrow(/persisted container labels/i);
+    await expect(controller.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    });
     expect(fixture.docker.stop).not.toHaveBeenCalled();
-    expect(fixture.writes).toHaveLength(0);
+    expect(fixture.writes).toEqual([
+      expect.objectContaining({ kind: 'cancellation-transition' }),
+      expect.objectContaining({
+        kind: 'cancellation-blocker',
+        blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+        blocker: expect.objectContaining({ cause: expect.stringMatching(/persisted container labels/i) }),
+      }),
+    ]);
   });
 
   it.each([
@@ -268,9 +301,47 @@ describe('runner cooperative cancellation', () => {
     const controller = createRunnerCancellation(fixture.value);
     fixture.value.signals.emit('SIGUSR1');
 
-    await expect(controller.cancelIfRequested()).rejects.toThrow(/identity or labels/i);
+    await expect(controller.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    });
     expect(fixture.docker.stop).not.toHaveBeenCalled();
-    expect(fixture.writes).toHaveLength(0);
+    expect(fixture.writes).toEqual([
+      expect.objectContaining({ kind: 'cancellation-transition' }),
+      expect.objectContaining({
+        kind: 'cancellation-blocker',
+        blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+        blocker: expect.objectContaining({ cause: expect.stringMatching(/identity or labels/i) }),
+      }),
+    ]);
+  });
+
+  it.each([
+    ['Docker label lookup', false, 'label query transport failed'],
+    ['Docker exact inspection', true, 'inspect transport failed'],
+  ])('persists a Docker orphan blocker when %s fails', async (_phase, withIdentity, message) => {
+    const fixture = dependencies();
+    fixture.setJob(withIdentity
+      ? containerJob({ cancelRequestedAt: NOW })
+      : job({ cancelRequestedAt: NOW }));
+    if (withIdentity) {
+      fixture.docker.inspect.mockRejectedValue(new Error(message));
+    } else {
+      fixture.docker.listByLabels.mockRejectedValue(new Error(message));
+    }
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    });
+    expect(fixture.writes).toEqual([
+      expect.objectContaining({ kind: 'cancellation-transition' }),
+      expect.objectContaining({
+        kind: 'cancellation-blocker',
+        blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+        blocker: expect.objectContaining({ cause: message }),
+      }),
+    ]);
   });
 
   it('retains the exact identity until removal proof and cleanup CAS', async () => {

@@ -155,6 +155,22 @@ function options(executor: DockerCommandExecutor, overrides: Partial<DockerExecu
   };
 }
 
+function cancellationBudgetWhen(
+  requested: () => boolean,
+  monotonic: () => number = () => performance.now(),
+): () => Readonly<{ requested: boolean; deadline: number | null; remainingMs: number | null }> {
+  let deadline: number | null = null;
+  return () => {
+    if (!requested()) return { requested: false, deadline: null, remainingMs: null };
+    deadline ??= monotonic() + 30_000;
+    return {
+      requested: true,
+      deadline,
+      remainingMs: Math.max(0, Math.ceil(deadline - monotonic())),
+    };
+  };
+}
+
 function fakeDocker(responses: ReadonlyArray<Error | Partial<CommandResult>>, trace?: string[]): DockerCommandExecutor & { calls: string[][]; runOptions: CommandRunOptions[] } {
   const calls: string[][] = [];
   const runOptions: CommandRunOptions[] = [];
@@ -273,7 +289,7 @@ describe('DockerExecutor', () => {
     const run = createDockerExecutor(options(commandExecutor, {
       ownership,
       clock: () => '2026-07-24T10:00:10.000Z',
-      cancellationRequested: () => attachStarted,
+      cancellationBudget: cancellationBudgetWhen(() => attachStarted),
       finalizeLogs: async ({ operationFinishedAt }) => ({ runner: 'absent', docker: 'absent', verifiedAt: operationFinishedAt }),
     })).run();
 
@@ -316,7 +332,7 @@ describe('DockerExecutor', () => {
 
     const run = createDockerExecutor(options(commandExecutor, {
       monotonicNow: () => monotonic,
-      cancellationRequested: () => attachStarted,
+      cancellationBudget: cancellationBudgetWhen(() => attachStarted, () => monotonic),
     })).run();
 
     await expect(run).rejects.toBeInstanceOf(DockerCancellationRequestedError);
@@ -331,7 +347,7 @@ describe('DockerExecutor', () => {
     const docker = fakeDocker(successfulResponses());
 
     await expect(createDockerExecutor(options(docker, {
-      cancellationRequested,
+      cancellationBudget: cancellationBudgetWhen(cancellationRequested),
     })).run()).resolves.toMatchObject({
       available: true,
       outcome: 'passed',
@@ -342,11 +358,14 @@ describe('DockerExecutor', () => {
 
   it('returns cancellation recovery-required evidence when the attached Docker child exceeds the shared deadline', async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(0);
     let attachStarted = false;
     let inspectCount = 0;
     let startOptions: CommandRunOptions | undefined;
+    let releaseAttach: (() => void) | undefined;
     const writes: RunnerWriteCommand[] = [];
     const onStdout = vi.fn();
+    const persistCancellationBlocker = vi.fn(async () => undefined);
     const commandExecutor: DockerCommandExecutor = {
       run: vi.fn(async (argv: readonly string[], runOptions: CommandRunOptions) => {
         switch (argv[1]) {
@@ -358,7 +377,8 @@ describe('DockerExecutor', () => {
           case 'start':
             attachStarted = true;
             startOptions = runOptions;
-            return new Promise<CommandResult>(() => undefined);
+            await new Promise<void>((resolve) => { releaseAttach = resolve; });
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
           case 'stop':
             return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
           default: throw new Error(`unexpected Docker command ${argv.join(' ')}`);
@@ -366,8 +386,14 @@ describe('DockerExecutor', () => {
       }),
     };
     const run = createDockerExecutor(options(commandExecutor, {
-      cancellationRequested: () => attachStarted,
+      cancellationBudget: () => ({
+        requested: attachStarted,
+        deadline: attachStarted ? 30_000 : null,
+        remainingMs: attachStarted ? 30_000 : null,
+      }),
+      monotonicNow: () => Date.now(),
       onStdout,
+      persistCancellationBlocker,
       ownership: { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true, kind: 'committed', eventSeq: writes.length }; }) },
     })).run();
     let settled = false;
@@ -376,14 +402,76 @@ describe('DockerExecutor', () => {
     await vi.advanceTimersByTimeAsync(30_100);
     await Promise.resolve();
 
-    expect(settled).toBe(true);
+    expect(settled).toBe(false);
     expect(writes).toContainEqual(expect.objectContaining({
       kind: 'operation-complete',
       input: expect.objectContaining({ outcome: 'failed', errorCode: 'DOCKER_CONTAINER_ORPHANED' }),
     }));
+    expect(writes.filter((write) => write.kind === 'operation-complete')).toHaveLength(1);
+    expect(persistCancellationBlocker).toHaveBeenCalledOnce();
     expect(vi.mocked(commandExecutor.run).mock.calls.some(([argv]) => argv[1] === 'kill')).toBe(false);
     startOptions?.onStdout?.('late child output');
     expect(onStdout).not.toHaveBeenCalled();
+    releaseAttach?.();
+    await expect(run).rejects.toMatchObject({
+      code: 'DOCKER_CONTAINER_ORPHANED',
+      recoveryRequired: true,
+      recoveryPersisted: true,
+    });
+    expect(writes.filter((write) => write.kind === 'operation-complete')).toHaveLength(1);
+    expect(persistCancellationBlocker).toHaveBeenCalledOnce();
+  });
+
+  it('still awaits the attached child when deadline blocker persistence fails', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    let attachStarted = false;
+    let inspectCount = 0;
+    let releaseAttach: (() => void) | undefined;
+    const commandExecutor: DockerCommandExecutor = {
+      run: vi.fn(async (argv: readonly string[]) => {
+        switch (argv[1]) {
+          case 'version': return { argv: [...argv], exitCode: 0, signal: null, stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'image': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'ps': return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'create': return { argv: [...argv], exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'inspect': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify(inspectCount++ === 0 ? realisticCreatedRawInspection() : realisticRawInspection()), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'start':
+            attachStarted = true;
+            await new Promise<void>((resolve) => { releaseAttach = resolve; });
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'stop':
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          default: throw new Error(`unexpected Docker command ${argv.join(' ')}`);
+        }
+      }),
+    };
+    const persistCancellationBlocker = vi.fn(async () => {
+      throw new Error('blocker persistence unavailable');
+    });
+    const run = createDockerExecutor(options(commandExecutor, {
+      cancellationBudget: () => ({
+        requested: attachStarted,
+        deadline: attachStarted ? 30_000 : null,
+        remainingMs: attachStarted ? Math.max(0, 30_000 - Date.now()) : null,
+      }),
+      monotonicNow: () => Date.now(),
+      persistCancellationBlocker,
+    })).run();
+    let settled = false;
+    void run.then(() => { settled = true; }, () => { settled = true; });
+
+    await vi.advanceTimersByTimeAsync(30_100);
+    await Promise.resolve();
+
+    expect(persistCancellationBlocker).toHaveBeenCalledOnce();
+    expect(settled).toBe(false);
+    releaseAttach?.();
+    await expect(run).rejects.toMatchObject({
+      code: 'DOCKER_CONTAINER_ORPHANED',
+      recoveryRequired: true,
+      recoveryPersisted: false,
+    });
   });
 
   it('commits operation evidence and returns Docker orphan recovery when cooperative stop fails', async () => {
@@ -413,7 +501,7 @@ describe('DockerExecutor', () => {
       }),
     };
     const run = createDockerExecutor(options(commandExecutor, {
-      cancellationRequested: () => attachStarted,
+      cancellationBudget: cancellationBudgetWhen(() => attachStarted),
       ownership: {
         runnerWrite: vi.fn((command: RunnerWriteCommand) => {
           writes.push(command);

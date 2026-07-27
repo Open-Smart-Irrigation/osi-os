@@ -4,6 +4,7 @@ import { OFFLINE_OPERATION_IDS, parseCanonicalBuilderImageReference, READ_ONLY_O
 import type { BuilderErrorCode, JobState, TrustedOperationId } from '../../domain/types.js';
 import type { LogCleanupProof, OperationCleanupProof, RunnerWriteCommand } from '../../api/src/ownership.js';
 import type { JobRecord, JsonObject, OperationInput, StoredOperation } from '../../api/src/store.js';
+import type { CancellationBudget } from './cancellation.js';
 
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const JOB_LABEL = 'org.osi.image-builder.job-id';
@@ -129,7 +130,8 @@ export interface DockerExecutorOptions {
   readonly monotonicNow?: () => number;
   readonly evidence: (value: JsonObject) => Promise<{ readonly path: string; readonly sha256: string }>;
   readonly finalizeLogs: (input: LogFinalizeInput) => Promise<LogCleanupProof>;
-  readonly cancellationRequested?: () => boolean;
+  readonly cancellationBudget?: () => CancellationBudget;
+  readonly persistCancellationBlocker?: (reason: string) => Promise<void>;
   readonly classifyAcceptedResult?: (
     result: CommandResult,
   ) => 'expected-rootfs-already-present' | null;
@@ -170,14 +172,16 @@ export class DockerLifecycleError extends Error {
 export class DockerCancellationRequestedError extends Error {
   readonly code: 'CANCELLED' | 'DOCKER_CONTAINER_ORPHANED';
   readonly recoveryRequired: boolean;
+  readonly recoveryPersisted: boolean;
 
   constructor(
     message = 'Docker operation stopped cooperatively for cancellation',
-    options: Readonly<{ recoveryRequired?: boolean }> = {},
+    options: Readonly<{ recoveryRequired?: boolean; recoveryPersisted?: boolean }> = {},
   ) {
     super(message);
     this.name = 'DockerCancellationRequestedError';
     this.recoveryRequired = options.recoveryRequired ?? false;
+    this.recoveryPersisted = options.recoveryPersisted ?? false;
     this.code = this.recoveryRequired ? 'DOCKER_CONTAINER_ORPHANED' : 'CANCELLED';
   }
 }
@@ -842,11 +846,15 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
           if (cancellationDeadline === null) return 0;
           return Math.max(0, Math.ceil(cancellationDeadline - monotonicNow(options)));
         };
-        const requestCooperativeStop = (): void => {
+        const requestCooperativeStop = (budget: CancellationBudget): void => {
           if (cancellationControl !== null) return;
-          cancellationDeadline = monotonicNow(options) + DOCKER_CONTROL_TIMEOUT_MS;
+          if (!budget.requested || budget.deadline === null || budget.remainingMs === null) {
+            throw new DockerLifecycleError('coordinator cancellation budget is incomplete');
+          }
+          cancellationDeadline = budget.deadline;
           attachTimeout.abort();
           const initialBudget = remainingCancellationBudget();
+          if (initialBudget < 1) resolveCancellationDeadline?.();
           cancellationDeadlineTimer = setTimeout(() => resolveCancellationDeadline?.(), initialBudget);
           cancellationDeadlineTimer.unref?.();
           cancellationControl = (async () => {
@@ -879,9 +887,11 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
             cancellationControlSettled = true;
           });
         };
-        if (options.cancellationRequested?.() === true) requestCooperativeStop();
+        const initialCancellation = options.cancellationBudget?.();
+        if (initialCancellation?.requested === true) requestCooperativeStop(initialCancellation);
         const cancellationPoll = setInterval(() => {
-          if (options.cancellationRequested?.() === true) requestCooperativeStop();
+          const budget = options.cancellationBudget?.();
+          if (budget?.requested === true) requestCooperativeStop(budget);
         }, 50);
         cancellationPoll.unref();
         let acceptAttachOutput = true;
@@ -1021,7 +1031,28 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
         const completionAt = now(options);
         if (logs.verifiedAt > completionAt) fail('log proof is from the future relative to operation completion');
         runner(options, (snapshot) => ({ kind: 'operation-complete', jobId: options.jobId, owner: snapshot.owner, runnerUnit: snapshot.unit, leaseExpiresAt: snapshot.leaseExpiresAt, at: completionAt, expectedState: snapshot.expectedState, operationId: options.operationId, attempt: options.attempt, input }));
-        if (cancellationObserved) throw new DockerCancellationRequestedError(operationError?.message, { recoveryRequired: cancellationRecoveryRequired });
+        if (cancellationObserved) {
+          let recoveryPersisted = false;
+          let blockerPersistenceError: unknown = null;
+          if (!childWaitWithinDeadline && options.persistCancellationBlocker !== undefined) {
+            try {
+              await options.persistCancellationBlocker(
+                operationError?.message ?? 'Docker attached child exceeded the cooperative cancellation deadline',
+              );
+              recoveryPersisted = true;
+            } catch (error) {
+              blockerPersistenceError = error;
+            }
+          }
+          if (!childWaitWithinDeadline) await attach;
+          const message = blockerPersistenceError === null
+            ? operationError?.message
+            : `${operationError?.message ?? 'Docker cancellation recovery required'}; blocker persistence failed: ${blockerPersistenceError instanceof Error ? blockerPersistenceError.message : String(blockerPersistenceError)}`;
+          throw new DockerCancellationRequestedError(message, {
+            recoveryRequired: cancellationRecoveryRequired,
+            recoveryPersisted,
+          });
+        }
         const persistedIdentity = options.store.getJob(options.jobId);
         if (persistedIdentity.containerId !== id || persistedIdentity.containerName !== options.containerName) fail('persisted Docker identity changed before cleanup');
         const removed = await runDocker(options, ['rm', id]);

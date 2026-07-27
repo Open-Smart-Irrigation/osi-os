@@ -1,11 +1,13 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { OwnershipStore } from '../../api/src/ownership.js';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
-import { BuilderStore, type CreateJobInput } from '../../api/src/store.js';
+import { BuilderStore, type CreateJobInput, type JsonObject } from '../../api/src/store.js';
+import { encodeJson } from '../../api/src/validation.js';
 import { createRunnerCancellation } from '../../runner/src/cancellation.js';
 
 const NOW = '2026-07-27T09:00:00.000Z';
@@ -77,7 +79,7 @@ async function fixture(options: { readonly cancellation?: boolean } = {}) {
   if (options.cancellation !== false) {
     expect(ownership.apiWrite({ kind: 'request-cancellation', jobId: input.jobId, reason: 'operator', at: '2026-07-27T09:00:02.000Z' }).ok).toBe(true);
   }
-  return { db, ownership, store, input };
+  return { db, directory, ownership, store, input };
 }
 
 afterEach(async () => {
@@ -361,6 +363,166 @@ describe('runner cancellation with the persisted ownership store', () => {
       (event) => event.eventType === 'cleanup' && event.payload.kind === 'cancellation-evidence',
     )).toEqual([evidenceEvent]);
     expect(fixtureValue.store.getJob(fixtureValue.input.jobId)).toMatchObject({ state: 'cancelled', containerId: null });
+    fixtureValue.db.close();
+  });
+
+  it('finishes terminal from a committed cleanup event without duplicating cleanup', async () => {
+    const fixtureValue = await fixture();
+    let rejectTerminal = true;
+    const ownership = {
+      runnerWrite: (command: Parameters<typeof fixtureValue.ownership.runnerWrite>[0]) => {
+        if (command.kind === 'cancellation-terminal' && rejectTerminal) {
+          return { ok: false as const, conflict: { kind: 'cas-lost' as const, message: 'injected crash after cleanup commit' } };
+        }
+        return fixtureValue.ownership.runnerWrite(command);
+      },
+    };
+    const base = {
+      jobId: fixtureValue.input.jobId,
+      runnerUnit: `osi-image-builder-runner@${fixtureValue.input.jobId}.service`,
+      owner: 'runner-integration',
+      leaseExpiresAt: () => '2026-07-27T09:10:00.000Z',
+      store: fixtureValue.store,
+      ownership,
+      docker: {
+        inspect: async () => null,
+        stop: async () => { throw new Error('terminal retry must not stop'); },
+        waitForStopped: async () => { throw new Error('terminal retry must not wait'); },
+        remove: async () => { throw new Error('terminal retry must not remove'); },
+        listByLabels: async () => [],
+      },
+      clock: () => '2026-07-27T09:00:05.000Z',
+      signals: { on: () => undefined, off: () => undefined },
+    } as const;
+    const first = createRunnerCancellation({
+      ...base,
+      evidence: async () => ({
+        path: `jobs/${fixtureValue.input.jobId}/evidence/cancellation.json`,
+        sha256: SHA64,
+      }),
+      cleanup: {
+        staging: async () => ({ kind: 'absent', path: null }),
+        logs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt: '2026-07-27T09:00:04.000Z' }),
+      },
+    });
+
+    await expect(first.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'RUNNER_DISAPPEARED',
+    });
+    const cleanupEventsBefore = fixtureValue.store.listEvents(fixtureValue.input.jobId).events.filter(
+      (event) => event.eventType === 'cleanup' && event.payload.kind === 'cancellation-cleanup',
+    );
+    expect(cleanupEventsBefore).toHaveLength(1);
+    expect(fixtureValue.store.getJob(fixtureValue.input.jobId)).toMatchObject({
+      state: 'cancel_requested',
+      containerId: null,
+    });
+
+    rejectTerminal = false;
+    const second = createRunnerCancellation({
+      ...base,
+      evidence: async () => { throw new Error('terminal retry must reuse committed evidence'); },
+      cleanup: {
+        staging: async () => { throw new Error('terminal retry must reuse committed staging proof'); },
+        logs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt: '2026-07-27T09:00:05.000Z' }),
+      },
+    });
+    await expect(second.cancelIfRequested()).resolves.toMatchObject({
+      state: 'cancelled',
+      evidencePath: `jobs/${fixtureValue.input.jobId}/evidence/cancellation.json`,
+      evidenceSha256: SHA64,
+    });
+    expect(fixtureValue.store.listEvents(fixtureValue.input.jobId).events.filter(
+      (event) => event.eventType === 'cleanup' && event.payload.kind === 'cancellation-cleanup',
+    )).toEqual(cleanupEventsBefore);
+    expect(fixtureValue.store.getJob(fixtureValue.input.jobId).state).toBe('cancelled');
+    fixtureValue.db.close();
+  });
+
+  it('recovers an immutable cancellation file when the evidence event did not commit', async () => {
+    const fixtureValue = await fixture();
+    const relativePath = `jobs/${fixtureValue.input.jobId}/evidence/cancellation.json`;
+    const absolutePath = join(fixtureValue.directory, relativePath);
+    let rejectEvidence = true;
+    let publishedRecord: JsonObject | null = null;
+    let publishedSha256: string | null = null;
+    const ownership = {
+      runnerWrite: (command: Parameters<typeof fixtureValue.ownership.runnerWrite>[0]) => {
+        if (command.kind === 'cancellation-evidence' && rejectEvidence) {
+          return { ok: false as const, conflict: { kind: 'cas-lost' as const, message: 'injected crash after immutable evidence write' } };
+        }
+        return fixtureValue.ownership.runnerWrite(command);
+      },
+    };
+    const base = {
+      jobId: fixtureValue.input.jobId,
+      runnerUnit: `osi-image-builder-runner@${fixtureValue.input.jobId}.service`,
+      owner: 'runner-integration',
+      leaseExpiresAt: () => '2026-07-27T09:10:00.000Z',
+      store: fixtureValue.store,
+      ownership,
+      docker: {
+        inspect: async () => null,
+        stop: async () => { throw new Error('immutable retry must not stop'); },
+        waitForStopped: async () => { throw new Error('immutable retry must not wait'); },
+        remove: async () => { throw new Error('immutable retry must not remove'); },
+        listByLabels: async () => [],
+      },
+      signals: { on: () => undefined, off: () => undefined },
+    } as const;
+    const first = createRunnerCancellation({
+      ...base,
+      evidence: async (record) => {
+        publishedRecord = record;
+        const bytes = Buffer.from(`${encodeJson(record, 'cancellation evidence fixture', true)}\n`);
+        publishedSha256 = createHash('sha256').update(bytes).digest('hex');
+        await mkdir(join(fixtureValue.directory, 'jobs', fixtureValue.input.jobId, 'evidence'), { recursive: true });
+        await writeFile(absolutePath, bytes, { flag: 'wx' });
+        return { path: relativePath, sha256: publishedSha256 };
+      },
+      cleanup: {
+        staging: async () => ({ kind: 'absent', path: null }),
+        logs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt: '2026-07-27T09:00:04.000Z' }),
+      },
+      clock: () => '2026-07-27T09:00:05.000Z',
+    });
+
+    await expect(first.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'RUNNER_DISAPPEARED',
+    });
+    expect(publishedRecord).not.toBeNull();
+    expect(fixtureValue.store.listEvents(fixtureValue.input.jobId).events.some(
+      (event) => event.eventType === 'cleanup' && event.payload.kind === 'cancellation-evidence',
+    )).toBe(false);
+
+    rejectEvidence = false;
+    const second = createRunnerCancellation({
+      ...base,
+      recoverEvidence: async () => {
+        const bytes = await readFile(absolutePath);
+        return {
+          value: JSON.parse(bytes.toString('utf8')) as JsonObject,
+          path: relativePath,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+        };
+      },
+      evidence: async () => { throw new Error('immutable retry must not rewrite cancellation.json'); },
+      cleanup: {
+        staging: async () => { throw new Error('immutable retry must reuse the file staging proof'); },
+        logs: async () => { throw new Error('immutable retry must reuse the file log proof'); },
+      },
+      clock: () => '2026-07-27T09:00:06.000Z',
+    });
+
+    await expect(second.cancelIfRequested()).resolves.toMatchObject({
+      state: 'cancelled',
+      evidencePath: relativePath,
+      evidenceSha256: publishedSha256,
+    });
+    expect(await readFile(absolutePath, 'utf8')).toBe(`${encodeJson(publishedRecord, 'cancellation evidence fixture', true)}\n`);
+    expect(fixtureValue.store.listEvents(fixtureValue.input.jobId).events.filter(
+      (event) => event.eventType === 'cleanup' && event.payload.kind === 'cancellation-evidence',
+    )).toHaveLength(1);
     fixtureValue.db.close();
   });
 });
