@@ -65,9 +65,9 @@ const ROOTFS_REVERSE_LINES = Object.freeze([
   '1 out of 1 hunk FAILED -- rejects in file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
   'Patch patches/image-with-padded-rootfs.patch can be reverse-applied',
 ]);
-const ROOTFS_REVERSE_OUTPUT = `${ROOTFS_REVERSE_LINES.join('\n')}\n`;
 const EXPECTED_MAKE_REVERSE_ERROR = 'make: *** [Makefile:60: switch-env] Error 1\n';
 const EXPECTED_FRESH_MAKE_REVERSE_ERROR = `No series file found\n${EXPECTED_MAKE_REVERSE_ERROR}`;
+const EXPECTED_FRESH_MAKE_SUCCESS_ERROR = 'No series file found\n';
 const PATCH_TRANSCRIPTS = Object.freeze({
   'boot-config.patch': Object.freeze({
     apply: Object.freeze([
@@ -81,8 +81,20 @@ const PATCH_TRANSCRIPTS = Object.freeze({
       '',
     ]),
   }),
+  [ROOTFS_PADDING_PATCH]: Object.freeze({
+    apply: Object.freeze([
+      `Applying patch patches/${ROOTFS_PADDING_PATCH}`,
+      'patching file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+      '',
+    ]),
+    remove: Object.freeze([
+      `Removing patch patches/${ROOTFS_PADDING_PATCH}`,
+      'Restoring target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+      '',
+    ]),
+  }),
 });
-type PreludePatch = keyof typeof PATCH_TRANSCRIPTS;
+type ApprovedPatch = keyof typeof PATCH_TRANSCRIPTS;
 const TARGET_PATCH_PRELUDES = Object.freeze({
   full_raspberrypi_bcm27xx_bcm2712: Object.freeze([
     'boot-config.patch',
@@ -90,6 +102,22 @@ const TARGET_PATCH_PRELUDES = Object.freeze({
   full_raspberrypi_bcm27xx_bcm2709: Object.freeze([] as const),
 });
 type ApprovedTargetEnvironment = keyof typeof TARGET_PATCH_PRELUDES;
+const TARGET_PATCH_SERIES = Object.freeze({
+  full_raspberrypi_bcm27xx_bcm2712: Object.freeze([
+    ...TARGET_PATCH_PRELUDES.full_raspberrypi_bcm27xx_bcm2712,
+    ROOTFS_PADDING_PATCH,
+  ]),
+  full_raspberrypi_bcm27xx_bcm2709: Object.freeze([
+    ...TARGET_PATCH_PRELUDES.full_raspberrypi_bcm27xx_bcm2709,
+    ROOTFS_PADDING_PATCH,
+  ]),
+});
+type ActivateTargetCleanupState = 'fresh' | 'existing-stack';
+type ActivateTargetPatchOutcome = 'applied' | 'rootfs-reverse';
+interface ParsedActivateTargetTranscript {
+  readonly cleanupState: ActivateTargetCleanupState;
+  readonly patchOutcome: ActivateTargetPatchOutcome;
+}
 
 export type TargetSetupOperationId = (typeof TARGET_SETUP_OPERATIONS)[number];
 export type TargetSetupOperationDisposition = 'passed' | 'expected-rootfs-already-present';
@@ -696,9 +724,9 @@ function approvedActivateTargetEnvironment(
   return isApprovedTargetEnvironment(environment) ? environment : null;
 }
 
-function validRemovedPatchStack(removed: readonly PreludePatch[]): boolean {
+function validRemovedPatchStack(removed: readonly ApprovedPatch[]): boolean {
   if (removed.length === 0) return true;
-  return Object.values(TARGET_PATCH_PRELUDES).some((series) => {
+  return Object.values(TARGET_PATCH_SERIES).some((series) => {
     if (removed.length > series.length) return false;
     return hasExactList(removed, series.slice(0, removed.length).reverse());
   });
@@ -707,12 +735,12 @@ function validRemovedPatchStack(removed: readonly PreludePatch[]): boolean {
 function consumeCleanupTranscript(
   lines: readonly string[],
   start: number,
-): number | null {
+): Readonly<{ nextIndex: number; state: ActivateTargetCleanupState }> | null {
   let index = start;
-  const removed: PreludePatch[] = [];
+  const removed: ApprovedPatch[] = [];
   while (true) {
     let matched = false;
-    for (const patch of Object.keys(PATCH_TRANSCRIPTS) as PreludePatch[]) {
+    for (const patch of Object.keys(PATCH_TRANSCRIPTS) as ApprovedPatch[]) {
       const next = consumeExactLines(lines, index, PATCH_TRANSCRIPTS[patch].remove);
       if (next === null) continue;
       removed.push(patch);
@@ -726,28 +754,30 @@ function consumeCleanupTranscript(
   if (removed.length > 0 || lines[index] === 'No patches applied') {
     if (lines[index] !== 'No patches applied') return null;
     index += 1;
+    return Object.freeze({ nextIndex: index, state: 'existing-stack' as const });
   }
-  return index;
+  return Object.freeze({ nextIndex: index, state: 'fresh' as const });
 }
 
-function hasExactFullMakeTranscript(
+function parseExactFullMakeTranscript(
   lines: readonly string[],
   environment: ApprovedTargetEnvironment,
-): boolean {
+): ParsedActivateTargetTranscript | null {
   let index = consumeExactLines(lines, 0, [
     'Cleaning patch state',
     'cd openwrt && quilt pop -af || true',
   ]);
-  if (index === null) return false;
-  index = consumeCleanupTranscript(lines, index);
-  if (index === null) return false;
+  if (index === null) return null;
+  const cleanup = consumeCleanupTranscript(lines, index);
+  if (cleanup === null) return null;
+  index = cleanup.nextIndex;
   index = consumeExactLines(lines, index, [
     'Restoring clean source tree',
     'cd openwrt && git checkout -- . || true',
     'cd openwrt && git clean -fd || true',
     'rm -rf openwrt/.pc',
   ]);
-  if (index === null) return false;
+  if (index === null) return null;
   index = consumeExactLines(lines, index, [
     'Switching configuration',
     'rm -f conf/files conf/patches conf/.config',
@@ -765,30 +795,74 @@ function hasExactFullMakeTranscript(
     'cd openwrt && quilt upgrade || true',
     'Converting meta-data to version 2',
   ]);
-  if (index === null) return false;
+  if (index === null) return null;
   index = consumeExactLines(lines, index, [
     'Applying patches',
     'cd openwrt && quilt push -a || [ $? -eq 2 ]',
   ]);
-  if (index === null) return false;
+  if (index === null) return null;
   for (const patch of TARGET_PATCH_PRELUDES[environment]) {
     index = consumeExactLines(lines, index, PATCH_TRANSCRIPTS[patch].apply);
-    if (index === null) return false;
+    if (index === null) return null;
   }
-  index = consumeExactLines(lines, index, ROOTFS_REVERSE_LINES);
-  return index === lines.length;
+  const reverseEnd = consumeExactLines(lines, index, ROOTFS_REVERSE_LINES);
+  if (reverseEnd === lines.length) {
+    return Object.freeze({
+      cleanupState: cleanup.state,
+      patchOutcome: 'rootfs-reverse' as const,
+    });
+  }
+  index = consumeExactLines(lines, index, PATCH_TRANSCRIPTS[ROOTFS_PADDING_PATCH].apply);
+  if (index === null) return null;
+  index = consumeExactLines(lines, index, [
+    `Now at patch patches/${ROOTFS_PADDING_PATCH}`,
+  ]);
+  if (index !== lines.length) return null;
+  return Object.freeze({
+    cleanupState: cleanup.state,
+    patchOutcome: 'applied' as const,
+  });
 }
 
-function hasExactFullMakeReverseTranscript(
+function parseExactActivateTargetTranscript(
   stdout: string,
   expectedEnvironment?: ApprovedTargetEnvironment,
-): boolean {
-  if (!stdout.endsWith('\n') || stdout.includes('\r')) return false;
+): ParsedActivateTargetTranscript | null {
+  if (!stdout.endsWith('\n') || stdout.includes('\r')) return null;
   const lines = stdout.slice(0, -1).split('\n');
   const environments = expectedEnvironment === undefined
     ? Object.keys(TARGET_PATCH_PRELUDES) as ApprovedTargetEnvironment[]
     : [expectedEnvironment];
-  return environments.some((environment) => hasExactFullMakeTranscript(lines, environment));
+  for (const environment of environments) {
+    const parsed = parseExactFullMakeTranscript(lines, environment);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function expectedActivateTargetStderr(
+  transcript: ParsedActivateTargetTranscript,
+): string {
+  if (transcript.patchOutcome === 'applied') {
+    return transcript.cleanupState === 'fresh'
+      ? EXPECTED_FRESH_MAKE_SUCCESS_ERROR
+      : '';
+  }
+  return transcript.cleanupState === 'fresh'
+    ? EXPECTED_FRESH_MAKE_REVERSE_ERROR
+    : EXPECTED_MAKE_REVERSE_ERROR;
+}
+
+function hasExactActivateTargetResult(
+  stdout: string,
+  stderr: string,
+  expectedEnvironment: ApprovedTargetEnvironment | undefined,
+  expectedOutcome: ActivateTargetPatchOutcome,
+): boolean {
+  const transcript = parseExactActivateTargetTranscript(stdout, expectedEnvironment);
+  return transcript !== null
+    && transcript.patchOutcome === expectedOutcome
+    && stderr === expectedActivateTargetStderr(transcript);
 }
 
 function hasExactRootfsReverseResult(
@@ -796,11 +870,12 @@ function hasExactRootfsReverseResult(
   stderr: string,
   expectedEnvironment?: ApprovedTargetEnvironment,
 ): boolean {
-  return hasExactFullMakeReverseTranscript(stdout, expectedEnvironment)
-    && (
-      stderr === EXPECTED_MAKE_REVERSE_ERROR
-      || stderr === EXPECTED_FRESH_MAKE_REVERSE_ERROR
-    );
+  return hasExactActivateTargetResult(
+    stdout,
+    stderr,
+    expectedEnvironment,
+    'rootfs-reverse',
+  );
 }
 
 function hasExactCombinedRootfsReverseOutput(output: string): boolean {
@@ -813,7 +888,7 @@ function hasExactCombinedRootfsReverseOutput(output: string): boolean {
       && hasExactRootfsReverseResult(output.slice(0, -stderr.length), stderr)
     ) return true;
   }
-  return hasExactRootfsReverseResult(output, '');
+  return false;
 }
 
 export function decideRootfsPatchState(input: RootfsPatchStateInput, requestId = 'target-setup'): RootfsPatchDecision {
@@ -1702,13 +1777,23 @@ export function classifyTargetSetupOperationResult(
   const targetEnvironment = operationId === 'activate-target'
     ? approvedActivateTargetEnvironment(definition)
     : null;
-  const reverseReported = `${command.stdout}\n${command.stderr}`.includes('can be reverse-applied');
   if (
     command.exitCode === 0
     && command.signal === null
     && command.timedOut === false
     && exactArgv
-    && !(operationId === 'activate-target' && reverseReported)
+    && (
+      operationId !== 'activate-target'
+      || (
+        targetEnvironment !== null
+        && hasExactActivateTargetResult(
+          command.stdout,
+          command.stderr,
+          targetEnvironment,
+          'applied',
+        )
+      )
+    )
   ) {
     return Object.freeze({ disposition: 'passed' as const, command });
   }

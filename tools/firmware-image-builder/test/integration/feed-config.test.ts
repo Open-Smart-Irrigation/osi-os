@@ -2,7 +2,6 @@ import { execFile as execFileCallback } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmod,
-  cp,
   copyFile,
   lstat,
   mkdir,
@@ -74,6 +73,8 @@ describe('feed configuration integration boundary', () => {
   it('runs the exact repository switch-env recipe to the approved rootfs state for both profiles', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-switch-env-reality-'));
     temporaryDirectories.push(root);
+    expect((await readFile(join(repositoryFixtureRoot, 'openwrt/.gitignore'), 'utf8'))
+      .split(/\r?\n/u)).toContain('/.pc');
     await copyFile(join(repositoryFixtureRoot, 'Makefile'), join(root, 'Makefile'));
     await copyFile(join(repositoryFixtureRoot, '.gitignore'), join(root, '.gitignore'));
     await mkdir(join(root, 'openwrt/target/linux/bcm27xx/image'), { recursive: true });
@@ -81,11 +82,9 @@ describe('feed configuration integration boundary', () => {
       join(repositoryFixtureRoot, 'openwrt/.gitignore'),
       join(root, 'openwrt/.gitignore'),
     );
-    await cp(
-      join(repositoryFixtureRoot, 'openwrt/.pc'),
-      join(root, 'openwrt/.pc'),
-      { recursive: true },
-    );
+    await expect(lstat(join(root, 'openwrt/.pc'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
     for (const relativePath of [
       'openwrt/target/linux/bcm27xx/image/cmdline.txt',
       'openwrt/target/linux/bcm27xx/image/config.txt',
@@ -159,7 +158,37 @@ describe('feed configuration integration boundary', () => {
         join(root, 'openwrt/target/linux/bcm27xx/image/config.txt'),
         'utf8',
       );
+      for (const setting of [
+        'dtparam=spi=on',
+        'enable_uart=1',
+        'dtparam=i2c1=on',
+        'dtparam=i2c_arm=on',
+        'dtoverlay=dwc2',
+      ]) {
+        expect(bootConfig.split(/\r?\n/u)).toContain(setting);
+      }
       expect(bootConfig.includes('dtparam=cooling_fan=okay')).toBe(target.id === 'rpi-5');
+    }
+    const pi5KernelConfig = await readFile(
+      join(root, 'openwrt/target/linux/bcm27xx/bcm2712/config-6.6'),
+      'utf8',
+    );
+    for (const symbol of [
+      'CONFIG_SPI=y',
+      'CONFIG_SPI_DESIGNWARE=y',
+      'CONFIG_SPI_DW_MMIO=y',
+      'CONFIG_SPI_DYNAMIC=y',
+      'CONFIG_SPI_MASTER=y',
+    ]) {
+      expect(pi5KernelConfig.split(/\r?\n/u)).toContain(symbol);
+    }
+    for (const obsoleteDisabledSymbol of [
+      '# CONFIG_FIRMWARE_RP1 is not set',
+      '# CONFIG_MBOX_RP1 is not set',
+      '# CONFIG_RP1_PIO is not set',
+      '# CONFIG_SENSORS_RP1_ADC is not set',
+    ]) {
+      expect(pi5KernelConfig).not.toContain(obsoleteDisabledSymbol);
     }
   }, 30_000);
 
@@ -200,6 +229,9 @@ describe('feed configuration integration boundary', () => {
     await copyFile(join(fixtureRoot, 'feeds.sh'), join(workspace, 'openwrt/scripts/feeds'));
     await chmod(join(workspace, 'test-support/switch-env.sh'), 0o755);
     await chmod(join(workspace, 'openwrt/scripts/feeds'), 0o755);
+    await expect(lstat(join(workspace, 'openwrt/.pc'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
     for (const target of manifest.targets) {
       const directory = join(workspace, 'conf', target.environment);
       await mkdir(join(directory, 'patches'), { recursive: true });

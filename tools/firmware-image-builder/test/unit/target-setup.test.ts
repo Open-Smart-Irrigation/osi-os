@@ -55,6 +55,13 @@ const ROOTFS_REVERSE_OUTPUT = [
   'Patch patches/image-with-padded-rootfs.patch can be reverse-applied',
   '',
 ].join('\n');
+const ROOTFS_APPLY_OUTPUT = [
+  'Applying patch patches/image-with-padded-rootfs.patch',
+  'patching file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+  '',
+  'Now at patch patches/image-with-padded-rootfs.patch',
+  '',
+].join('\n');
 const NO_UART_REVERSE_OUTPUT = [
   'Applying patch patches/no-uart-console.patch',
   'patching file target/linux/bcm27xx/image/cmdline.txt',
@@ -65,22 +72,38 @@ const NO_UART_REVERSE_OUTPUT = [
 ].join('\n');
 const EXPECTED_MAKE_REVERSE_ERROR = 'make: *** [Makefile:60: switch-env] Error 1\n';
 const EXPECTED_FRESH_MAKE_REVERSE_ERROR = `No series file found\n${EXPECTED_MAKE_REVERSE_ERROR}`;
+const EXPECTED_FRESH_MAKE_SUCCESS_ERROR = 'No series file found\n';
+type FixturePatch = 'boot-config.patch' | typeof ROOTFS_PADDING_PATCH;
 
-function fullMakeReverseOutput(
+function cleanupTranscript(cleanup: boolean | readonly FixturePatch[]): readonly string[] {
+  const patches: readonly FixturePatch[] = typeof cleanup === 'boolean'
+    ? (cleanup ? ['boot-config.patch'] : [])
+    : cleanup;
+  return [
+    ...patches.flatMap((patch) => patch === ROOTFS_PADDING_PATCH
+      ? [
+          `Removing patch patches/${ROOTFS_PADDING_PATCH}`,
+          'Restoring target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+          '',
+        ]
+      : [
+          'Removing patch patches/boot-config.patch',
+          'Restoring target/linux/bcm27xx/image/config.txt',
+          '',
+        ]),
+    ...(patches.length > 0 ? ['No patches applied'] : []),
+  ];
+}
+
+function fullMakeOutput(
   environment: string,
-  cleanup = false,
+  patchOutput: string,
+  cleanup: boolean | readonly FixturePatch[] = false,
 ): string {
   return [
     'Cleaning patch state',
     'cd openwrt && quilt pop -af || true',
-    ...(cleanup
-      ? [
-          'Removing patch patches/boot-config.patch',
-          'Restoring target/linux/bcm27xx/image/config.txt',
-          '',
-          'No patches applied',
-        ]
-      : []),
+    ...cleanupTranscript(cleanup),
     'Restoring clean source tree',
     'cd openwrt && git checkout -- . || true',
     'cd openwrt && git clean -fd || true',
@@ -109,8 +132,19 @@ function fullMakeReverseOutput(
           '',
         ]
       : []),
-    ROOTFS_REVERSE_OUTPUT,
+    patchOutput,
   ].join('\n');
+}
+
+function fullMakeReverseOutput(environment: string, cleanup = false): string {
+  return fullMakeOutput(environment, ROOTFS_REVERSE_OUTPUT, cleanup);
+}
+
+function fullMakeSuccessOutput(
+  environment: string,
+  cleanup: boolean | readonly FixturePatch[] = false,
+): string {
+  return fullMakeOutput(environment, ROOTFS_APPLY_OUTPUT, cleanup);
 }
 
 afterEach(async () => {
@@ -304,11 +338,19 @@ function operations(fixture: Fixture, options: OperationsOptions = {}): {
 } {
   const calls: Array<{ operationId: TargetSetupOperationId; argv: readonly string[]; environment: string }> = [];
   let activeTarget = targets[0]!;
+  let activatedTarget: TargetManifest | null = null;
   const execute: TargetSetupCommandExecutor = async ({ operationId, definition, cwd: workspace }) => {
       const environment = definition.argv.find((value) => value.startsWith('ENV='))?.slice(4) ?? activeTarget.environment;
       calls.push({ operationId, argv: definition.argv, environment });
       if (options.commandFailure?.operation === operationId) return options.commandFailure.result;
+      let command = result(definition.argv);
       if (operationId === 'activate-target') {
+        const removedPatches: readonly FixturePatch[] = activatedTarget === null
+          ? []
+          : [
+              ROOTFS_PADDING_PATCH,
+              ...(activatedTarget.id === 'rpi-5' ? ['boot-config.patch' as const] : []),
+            ];
         activeTarget = targets.find((target) => target.environment === environment)!;
         await removeIfPresent(join(workspace, 'openwrt/.pc'));
         await mkdir(join(workspace, 'openwrt/.pc'), { recursive: true });
@@ -323,6 +365,11 @@ function operations(fixture: Fixture, options: OperationsOptions = {}): {
         await symlink('../conf/.config', join(workspace, 'openwrt/.config'));
         const sourceOverride = options.sourceConfigOverride?.[activeTarget.id];
         if (sourceOverride !== undefined) await writeFile(join(workspace, 'conf', activeTarget.environment, '.config'), sourceOverride);
+        command = result(definition.argv, {
+          stdout: fullMakeSuccessOutput(environment, removedPatches),
+          stderr: activatedTarget === null ? EXPECTED_FRESH_MAKE_SUCCESS_ERROR : '',
+        });
+        activatedTarget = activeTarget;
       }
       if (operationId === 'copy-feed-config') {
         await copyFile(join(workspace, 'feeds.conf.default'), join(workspace, 'openwrt/feeds.conf.default'));
@@ -359,7 +406,7 @@ function operations(fixture: Fixture, options: OperationsOptions = {}): {
         await writeFile(join(workspace, 'openwrt/.config'), resolved);
       }
       await options.afterOperation?.(operationId);
-      return result(definition.argv);
+      return command;
   };
   const runner = createLockedTargetSetupOperations(execute);
   return { runner, execute, calls };
@@ -667,6 +714,78 @@ describe('target setup', () => {
       disposition: 'expected-rootfs-already-present',
       command,
     });
+  });
+
+  it.each([
+    ['fresh workspace', false, EXPECTED_FRESH_MAKE_SUCCESS_ERROR],
+    ['existing patch stack', true, ''],
+  ])('classifies the complete successful make transcript for a %s', (_case, cleanup, stderr) => {
+    const definition = createOperationDefinition('activate-target', {
+      environment: targets[0]!.environment,
+    });
+    const command = result(definition.argv, {
+      stdout: fullMakeSuccessOutput(targets[0]!.environment, cleanup),
+      stderr,
+    });
+
+    expect(classifyTargetSetupOperationResult('activate-target', definition, command)).toEqual({
+      disposition: 'passed',
+      command,
+    });
+  });
+
+  it('rejects arbitrary output from an exit-zero activate-target command', () => {
+    const definition = createOperationDefinition('activate-target', {
+      environment: targets[0]!.environment,
+    });
+
+    expect(() => classifyTargetSetupOperationResult('activate-target', definition, result(
+      definition.argv,
+      {
+        stdout: 'branch-controlled output\n',
+        stderr: '',
+      },
+    ))).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
+  });
+
+  it('rejects a masked cleanup failure in an otherwise exact exit-zero transcript', () => {
+    const definition = createOperationDefinition('activate-target', {
+      environment: targets[0]!.environment,
+    });
+
+    expect(() => classifyTargetSetupOperationResult('activate-target', definition, result(
+      definition.argv,
+      {
+        stdout: fullMakeSuccessOutput(targets[0]!.environment),
+        stderr: 'fatal: not a git repository\n',
+      },
+    ))).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
+  });
+
+  it.each([
+    [
+      'fresh stdout with existing-stack stderr',
+      fullMakeReverseOutput(targets[0]!.environment),
+      EXPECTED_MAKE_REVERSE_ERROR,
+    ],
+    [
+      'existing-stack stdout with fresh stderr',
+      fullMakeReverseOutput(targets[0]!.environment, true),
+      EXPECTED_FRESH_MAKE_REVERSE_ERROR,
+    ],
+  ])('rejects an impossible cleanup pairing: %s', (_case, stdout, stderr) => {
+    const definition = createOperationDefinition('activate-target', {
+      environment: targets[0]!.environment,
+    });
+
+    expect(() => classifyTargetSetupOperationResult('activate-target', definition, result(
+      definition.argv,
+      {
+        exitCode: 2,
+        stdout,
+        stderr,
+      },
+    ))).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
   });
 
   it('resolves both profiles when activate-target returns the exact expected rootfs nonzero result', async () => {
