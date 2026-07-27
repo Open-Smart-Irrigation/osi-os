@@ -15,5 +15,5 @@ Task 12: complete
 Task 13: complete
 Task 14: complete (review approved)
 Task 15: complete (commits d8b64ad6, 8532a8ee, d97aec9b; final review approved)
-Task 16: fix round 6 in progress; replace shared-process package probing with one hard-timeout disposable child per fixed package, retaining the locked offline/read-only verify-image container contract
+Task 16: complete (through commit a917db9c; final review approved)
 Task 17: complete (commits 8eb7f2b8, 05d26a48, 2ced831e; final review approved)
