@@ -6,6 +6,7 @@ import { runInThisContext } from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PROBE_PROGRAM = fileURLToPath(import.meta.url);
+const ORIGINAL_SET_IMMEDIATE = setImmediate;
 const ALLOWED_ROOTFS_BUILTINS = Object.freeze([
   'buffer',
   'crypto',
@@ -189,6 +190,16 @@ function confinedRootfsModulePath(nodeRed, path) {
     && !relativePath.startsWith('/');
 }
 
+const DYNAMIC_IMPORT_VIOLATIONS = [];
+
+function recordDynamicImportViolation(specifier) {
+  const violation = new Error(
+    `rootfs Node module requested an unapproved builder ESM builtin: ${specifier}`,
+  );
+  DYNAMIC_IMPORT_VIOLATIONS.push(violation);
+  return violation;
+}
+
 function samePropertyDescriptor(left, right) {
   if (left === undefined || right === undefined) return left === right;
   return left.value === right.value
@@ -210,66 +221,184 @@ function sameObjectState(target, snapshot) {
   ));
 }
 
+function snapshotObjectState(target) {
+  return {
+    prototype: Object.getPrototypeOf(target),
+    descriptors: Object.getOwnPropertyDescriptors(target),
+  };
+}
+
 function restoreObjectState(target, snapshot, field) {
-  if (!Object.setPrototypeOf(target, snapshot.prototype)) {
+  if (Object.getPrototypeOf(target) !== snapshot.prototype
+    && !Reflect.setPrototypeOf(target, snapshot.prototype)) {
     throw new Error(`could not restore ${field} prototype`);
   }
   for (const key of Reflect.ownKeys(target)) {
-    if (!Reflect.deleteProperty(target, key)) {
+    if (Object.hasOwn(snapshot.descriptors, key)) continue;
+    const descriptor = Object.getOwnPropertyDescriptor(target, key);
+    if (descriptor?.configurable !== true || !Reflect.deleteProperty(target, key)) {
       throw new Error(`could not restore ${field} entry: ${String(key)}`);
     }
   }
   for (const key of Reflect.ownKeys(snapshot.descriptors)) {
     const descriptor = snapshot.descriptors[key];
-    if (descriptor === undefined || !Reflect.defineProperty(target, key, descriptor)) {
+    if (descriptor === undefined) {
       throw new Error(`could not restore ${field} entry: ${String(key)}`);
     }
+    const current = Object.getOwnPropertyDescriptor(target, key);
+    if (!samePropertyDescriptor(current, descriptor)
+      && !Reflect.defineProperty(target, key, descriptor)) {
+      throw new Error(`could not restore ${field} entry: ${String(key)}`);
+    }
+  }
+  if (!sameObjectState(target, snapshot)) {
+    throw new Error(`could not verify restored ${field} state`);
   }
 }
 
 function snapshotModuleLoaderState() {
   return {
-    load: Module._load,
-    resolveFilename: Module._resolveFilename,
-    compile: Module.prototype._compile,
+    moduleState: snapshotObjectState(Module),
+    modulePrototypeState: snapshotObjectState(Module.prototype),
     extensions: Module._extensions,
-    extensionsDescriptor: Object.getOwnPropertyDescriptor(Module, '_extensions'),
-    extensionsState: {
-      prototype: Object.getPrototypeOf(Module._extensions),
-      descriptors: Object.getOwnPropertyDescriptors(Module._extensions),
-    },
+    extensionsState: snapshotObjectState(Module._extensions),
     cache: Module._cache,
-    cacheDescriptor: Object.getOwnPropertyDescriptor(Module, '_cache'),
-    cacheState: {
-      prototype: Object.getPrototypeOf(Module._cache),
-      descriptors: Object.getOwnPropertyDescriptors(Module._cache),
-    },
+    cacheState: snapshotObjectState(Module._cache),
   };
 }
 
-function moduleLoaderStateChanged(snapshot, sealedLoad, sealedResolveFilename, sealedCompile) {
-  return Module._load !== sealedLoad
-    || Module._resolveFilename !== sealedResolveFilename
-    || Module.prototype._compile !== sealedCompile
+function descriptorMatchesWithValue(target, snapshot, key, expectedValue) {
+  const current = Object.getOwnPropertyDescriptor(target, key);
+  const original = snapshot.descriptors[key];
+  return current !== undefined
+    && original !== undefined
+    && current.value === expectedValue
+    && current.writable === original.writable
+    && current.enumerable === original.enumerable
+    && current.configurable === original.configurable;
+}
+
+function cacheContentsChanged(snapshot) {
+  if (Module._cache !== snapshot.cache
+    || Object.getPrototypeOf(Module._cache) !== snapshot.cacheState.prototype) {
+    return true;
+  }
+  for (const key of Reflect.ownKeys(snapshot.cacheState.descriptors)) {
+    if (!samePropertyDescriptor(
+      Object.getOwnPropertyDescriptor(Module._cache, key),
+      snapshot.cacheState.descriptors[key],
+    )) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function moduleSurfaceChanged(
+  snapshot,
+  sealedLoad,
+  sealedResolveFilename,
+  sealedCompile,
+) {
+  if (Object.getPrototypeOf(Module) !== snapshot.moduleState.prototype
+    || Object.getPrototypeOf(Module.prototype) !== snapshot.modulePrototypeState.prototype) {
+    return true;
+  }
+  const moduleKeys = Reflect.ownKeys(Module);
+  const originalModuleKeys = Reflect.ownKeys(snapshot.moduleState.descriptors);
+  if (moduleKeys.length !== originalModuleKeys.length
+    || !originalModuleKeys.every((key) => moduleKeys.includes(key))) {
+    return true;
+  }
+  const modulePrototypeKeys = Reflect.ownKeys(Module.prototype);
+  const originalModulePrototypeKeys = Reflect.ownKeys(snapshot.modulePrototypeState.descriptors);
+  if (modulePrototypeKeys.length !== originalModulePrototypeKeys.length
+    || !originalModulePrototypeKeys.every((key) => modulePrototypeKeys.includes(key))) {
+    return true;
+  }
+  return originalModuleKeys.some((key) => key === '_load'
+    ? !descriptorMatchesWithValue(Module, snapshot.moduleState, key, sealedLoad)
+    : key === '_resolveFilename'
+      ? !descriptorMatchesWithValue(Module, snapshot.moduleState, key, sealedResolveFilename)
+      : !samePropertyDescriptor(
+        Object.getOwnPropertyDescriptor(Module, key),
+        snapshot.moduleState.descriptors[key],
+      ))
+    || originalModulePrototypeKeys.some((key) => key === '_compile'
+      ? !descriptorMatchesWithValue(Module.prototype, snapshot.modulePrototypeState, key, sealedCompile)
+      : !samePropertyDescriptor(
+        Object.getOwnPropertyDescriptor(Module.prototype, key),
+        snapshot.modulePrototypeState.descriptors[key],
+      ))
     || Module._extensions !== snapshot.extensions
-    || !sameObjectState(Module._extensions, snapshot.extensionsState);
+    || !sameObjectState(Module._extensions, snapshot.extensionsState)
+    || cacheContentsChanged(snapshot);
 }
 
 function restoreModuleLoaderState(snapshot) {
-  if (snapshot.extensionsDescriptor !== undefined) {
-    Object.defineProperty(Module, '_extensions', snapshot.extensionsDescriptor);
-  }
-  if (snapshot.cacheDescriptor !== undefined) {
-    Object.defineProperty(Module, '_cache', snapshot.cacheDescriptor);
-  }
+  restoreObjectState(Module, snapshot.moduleState, 'Module');
+  restoreObjectState(Module.prototype, snapshot.modulePrototypeState, 'Module.prototype');
   restoreObjectState(snapshot.extensions, snapshot.extensionsState, 'Module._extensions');
   restoreObjectState(snapshot.cache, snapshot.cacheState, 'Module._cache');
-  Module._load = snapshot.load;
-  Module._resolveFilename = snapshot.resolveFilename;
-  Module.prototype._compile = snapshot.compile;
 }
 
-function loadFixedRootfsEntrypoint({
+function installAsyncSchedulingGuards() {
+  const targets = [
+    [globalThis, 'setImmediate'],
+    [globalThis, 'setTimeout'],
+    [globalThis, 'setInterval'],
+    [globalThis, 'queueMicrotask'],
+    [process, 'nextTick'],
+  ];
+  const snapshots = targets.map(([target, key]) => ({
+    target,
+    key,
+    descriptor: Object.getOwnPropertyDescriptor(target, key),
+  }));
+  const scheduled = [];
+  const restore = () => {
+    for (const { target, key, descriptor } of snapshots) {
+      if (descriptor === undefined) {
+        if (Object.hasOwn(target, key) && !Reflect.deleteProperty(target, key)) {
+          throw new Error(`could not restore asynchronous scheduler: ${key}`);
+        }
+      } else if (!Reflect.defineProperty(target, key, descriptor)) {
+        throw new Error(`could not restore asynchronous scheduler: ${key}`);
+      }
+    }
+  };
+  try {
+    for (const { target, key, descriptor } of snapshots) {
+      if (descriptor?.value === undefined) continue;
+      const guarded = function guardedAsyncSchedule() {
+        scheduled.push(key);
+        throw new Error(`rootfs Node module attempted asynchronous scheduling: ${key}`);
+      };
+      if (!Reflect.defineProperty(target, key, { ...descriptor, value: guarded })) {
+        throw new Error(`could not guard asynchronous scheduler: ${key}`);
+      }
+    }
+  } catch (error) {
+    try {
+      restore();
+    } catch (restoreError) {
+      throw new AggregateError([error, restoreError], 'could not restore asynchronous scheduler guards');
+    }
+    throw error;
+  }
+  return {
+    scheduled,
+    restore,
+  };
+}
+
+async function drainAsyncBarrier() {
+  await Promise.resolve();
+  await new Promise((resolve) => ORIGINAL_SET_IMMEDIATE(resolve));
+  await Promise.resolve();
+}
+
+async function loadFixedRootfsEntrypoint({
   nodeRed,
   packageName,
   specifier,
@@ -342,15 +471,11 @@ function loadFixedRootfsEntrypoint({
       return Reflect.apply(originalCompile, this, [content, filename]);
     }
     const module = this;
-    const dynamicImportViolations = [];
     const compiledWrapper = runInThisContext(Module.wrap(content), {
       filename,
       displayErrors: true,
       importModuleDynamically(specifier) {
-        const violation = new Error(
-          `rootfs Node module requested an unapproved builder ESM builtin: ${specifier}`,
-        );
-        dynamicImportViolations.push(violation);
+        const violation = recordDynamicImportViolation(specifier);
         return Promise.reject(violation);
       },
     });
@@ -362,19 +487,32 @@ function loadFixedRootfsEntrypoint({
       filename,
       dirname(filename),
     );
-    if (dynamicImportViolations.length > 0) {
-      throw dynamicImportViolations[0];
-    }
   };
 
   Module._resolveFilename = sealedResolveFilename;
   Module._load = sealedLoad;
   Module.prototype._compile = sealedCompile;
+  const asyncGuards = installAsyncSchedulingGuards();
+  const dynamicImportViolationStart = DYNAMIC_IMPORT_VIOLATIONS.length;
   let exported;
   let failure;
   try {
     exported = rootfsRequire(specifier);
-    if (moduleLoaderStateChanged(loaderSnapshot, sealedLoad, sealedResolveFilename, sealedCompile)) {
+    await drainAsyncBarrier();
+    if (DYNAMIC_IMPORT_VIOLATIONS.length > dynamicImportViolationStart) {
+      throw DYNAMIC_IMPORT_VIOLATIONS[dynamicImportViolationStart];
+    }
+    if (asyncGuards.scheduled.length > 0) {
+      throw new Error(
+        `rootfs Node module scheduled asynchronous work beyond the probe barrier: ${asyncGuards.scheduled.join(', ')}`,
+      );
+    }
+    if (moduleSurfaceChanged(
+      loaderSnapshot,
+      sealedLoad,
+      sealedResolveFilename,
+      sealedCompile,
+    )) {
       throw new Error(`rootfs Node module changed the sealed builder loader: ${packageName}`);
     }
   } catch (error) {
@@ -385,19 +523,22 @@ function loadFixedRootfsEntrypoint({
     } catch (error) {
       failure ??= error;
     }
+    try {
+      asyncGuards.restore();
+    } catch (error) {
+      failure ??= error;
+    }
   }
   if (failure !== undefined) throw failure;
   return exported;
 }
 
-function probeModules(nodeRed) {
+async function probeModules(nodeRed) {
   const rootfsRequire = createRequire(`${nodeRed}/__osi_verification__.cjs`);
-  return NODE_MODULES.map((
-    [packageName, specifier, loadSpecifier = specifier],
-    index,
-  ) => {
+  const results = [];
+  for (const [index, [packageName, specifier, loadSpecifier = specifier]] of NODE_MODULES.entries()) {
     const resolved = rootfsRequire.resolve(loadSpecifier);
-    const exported = loadFixedRootfsEntrypoint({
+    const exported = await loadFixedRootfsEntrypoint({
       nodeRed,
       packageName,
       specifier: loadSpecifier,
@@ -427,8 +568,9 @@ function probeModules(nodeRed) {
       : exported !== null && typeof exported === 'object'
         ? 'object'
         : 'incompatible';
-    return { packageName, specifier, resolvedRelativePath, exportType };
-  });
+    results.push({ packageName, specifier, resolvedRelativePath, exportType });
+  }
+  return results;
 }
 
 async function main() {
@@ -442,7 +584,7 @@ async function main() {
     requireCanonicalAbsolutePath(nodeRed, 'rootfs Node-RED path');
     assertPermissionBoundary(nodeRed);
     sealProcessBuiltinAccess();
-    process.stdout.write(`${JSON.stringify({ nodeResolution: probeModules(nodeRed) })}\n`);
+    process.stdout.write(`${JSON.stringify({ nodeResolution: await probeModules(nodeRed) })}\n`);
   } catch (error) {
     const details = error && typeof error === 'object'
       ? [

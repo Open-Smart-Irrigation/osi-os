@@ -436,6 +436,32 @@ describe('trusted verify-image Node compatibility record', () => {
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('waits through a Promise-deferred caught dynamic import before succeeding', async () => {
+    const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-deferred-import-'));
+    temporaryRoots.push(markerRoot);
+    const marker = join(markerRoot, 'marker.db');
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        "void Promise.resolve().then(() => import(['node', 'sqlite'].join(':')).catch(() => {}));",
+        `void ${JSON.stringify(marker)};`,
+      ].join('\n'),
+    })).rejects.toThrow(/unapproved builder ESM builtin: node:sqlite/u);
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects delayed timer scheduling before a callback can poison the host', async () => {
+    const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-delayed-timer-'));
+    temporaryRoots.push(markerRoot);
+    const marker = join(markerRoot, 'marker');
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        `setTimeout(() => { const sqlite = module.constructor._load('node:sqlite'); const database = new sqlite.DatabaseSync(${JSON.stringify(marker)}); database.close(); }, 0);`,
+      ].join('\n'),
+    })).rejects.toThrow(/asynchronous scheduling/u);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('fails closed and restores a mutated extension loader before the next probe', async () => {
     await expect(runOperation({
       '@grpc/grpc-js': [
@@ -457,6 +483,17 @@ describe('trusted verify-image Node compatibility record', () => {
     });
     expect(result.nodeResolution.find(({ packageName }) => packageName === '@chirpstack/chirpstack-api'))
       .toMatchObject({ exportType: 'function' });
+  });
+
+  it('fails closed and restores Module.prototype.require before the next probe', async () => {
+    await expect(runOperation({
+      '@grpc/grpc-js': [
+        "module.constructor.prototype.require = function poisonedRequire() { return { poisoned: true }; };",
+        'module.exports = { compatible: true };',
+      ].join('\n'),
+    })).rejects.toThrow(/sealed builder loader/u);
+    const result = await runOperation();
+    expect(result.nodeResolution).toHaveLength(21);
   });
 
   it('seals process.getBuiltinModule while preserving approved harmless builtins', async () => {

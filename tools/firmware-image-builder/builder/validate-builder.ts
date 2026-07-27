@@ -271,18 +271,15 @@ Object.freeze(sealedGetBuiltinModule);`;
     throw new Error('probe process builtin access is not sealed');
   }
 }`;
-  const exactDynamicImportRestriction = `const dynamicImportViolations = [];
-    const compiledWrapper = runInThisContext(Module.wrap(content), {
-      filename,
-      displayErrors: true,
-      importModuleDynamically(specifier) {
-        const violation = new Error(
-          \`rootfs Node module requested an unapproved builder ESM builtin: \${specifier}\`,
-        );
-        dynamicImportViolations.push(violation);
-        return Promise.reject(violation);
-      },
-    });`;
+  const exactDynamicImportRestriction = `const DYNAMIC_IMPORT_VIOLATIONS = [];
+
+function recordDynamicImportViolation(specifier) {
+  const violation = new Error(
+    \`rootfs Node module requested an unapproved builder ESM builtin: \${specifier}\`,
+  );
+  DYNAMIC_IMPORT_VIOLATIONS.push(violation);
+  return violation;
+}`;
   const exactModuleStateIsolation = `const loaderSnapshot = snapshotModuleLoaderState();
   const originalLoad = Module._load;
   const originalResolveFilename = Module._resolveFilename;
@@ -291,8 +288,7 @@ Object.freeze(sealedGetBuiltinModule);`;
       restoreModuleLoaderState(loaderSnapshot);
     } catch (error) {
       failure ??= error;
-    }
-  }`;
+    }`;
   if (!contents.startsWith('#!/usr/bin/env node\n')
     || !contents.includes("args.length !== 2 || args[0] !== '--rootfs-node-red'")
     || !contents.includes("sqlite3: Object.freeze({\n    packageName: 'osi-db-helper'")
@@ -304,9 +300,6 @@ Object.freeze(sealedGetBuiltinModule);`;
     || !contents.includes("'@chirpstack/chirpstack-api/api/application_grpc_pb',")
     || !contents.includes('Module._resolveFilename = sealedResolveFilename;')
     || !contents.includes('Module._load = sealedLoad;')
-    || !contents.includes('Module._load = snapshot.load;')
-    || !contents.includes('Module._resolveFilename = snapshot.resolveFilename;')
-    || !contents.includes('Module.prototype._compile = snapshot.compile;')
     || !contents.includes("    '--permission',")
     || !contents.includes('`--allow-fs-read=${PROBE_PROGRAM}`')
     || !contents.includes('`--allow-fs-read=${nodeRed}`')
@@ -322,14 +315,22 @@ Object.freeze(sealedGetBuiltinModule);`;
     || !contents.includes("import { runInThisContext } from 'node:vm';")
     || !contents.includes(exactDynamicImportRestriction)
     || !contents.includes(exactModuleStateIsolation)
-    || !contents.includes('Object.getOwnPropertyDescriptors(Module._extensions)')
-    || !contents.includes('Object.getOwnPropertyDescriptors(Module._cache)')
+    || !contents.includes('moduleState: snapshotObjectState(Module)')
+    || !contents.includes('modulePrototypeState: snapshotObjectState(Module.prototype)')
+    || !contents.includes('function snapshotObjectState(target)')
+    || !contents.includes('descriptors: Object.getOwnPropertyDescriptors(target)')
     || !contents.includes(exactModuleStateRestore)
+    || !contents.includes("restoreObjectState(Module, snapshot.moduleState, 'Module');")
+    || !contents.includes("restoreObjectState(Module.prototype, snapshot.modulePrototypeState, 'Module.prototype');")
     || !contents.includes("restoreObjectState(snapshot.extensions, snapshot.extensionsState, 'Module._extensions');")
     || !contents.includes("restoreObjectState(snapshot.cache, snapshot.cacheState, 'Module._cache');")
     || !contents.includes('Module._extensions !== snapshot.extensions')
     || !contents.includes('Module._cache')
     || !contents.includes('Module.prototype._compile = sealedCompile;')
+    || !contents.includes('installAsyncSchedulingGuards()')
+    || !contents.includes('rootfs Node module attempted asynchronous scheduling')
+    || !contents.includes('const ORIGINAL_SET_IMMEDIATE = setImmediate;')
+    || !contents.includes('await drainAsyncBarrier();')
     || contents.includes('--allow-fs-write')
     || contents.includes('--allow-child-process')
     || contents.includes('--allow-worker')
