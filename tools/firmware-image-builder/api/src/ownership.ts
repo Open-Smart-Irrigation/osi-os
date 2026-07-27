@@ -288,6 +288,7 @@ export type ApiWriteCommand =
   | Readonly<{ kind: 'publish-recovery'; jobId: string; expectedState: 'publishing'; at: string; state: 'succeeded' | 'failed'; evidence: PublishRecoveryEvidence; errorCode?: BuilderErrorCode; error?: JsonObject }>
   | Readonly<{ kind: 'cleanup-credential-reserve'; jobId: string; admissionId: string; owner: string; credentialRelativePath: string; createdAt: string; expiresAt: string; at: string }>
   | Readonly<{ kind: 'cleanup-credential-abort'; jobId: string; admissionId: string; owner: string; credentialRelativePath: string; createdAt: string; expiresAt: string; at: string }>
+  | (CleanupAdmissionPredecessor & Readonly<{ kind: 'cleanup-admission-stop-failed'; jobId: string; owner: string; previousOwner: string; previousExpiresAt: string; failure: 'capability-unavailable' | 'stop-error' | 'still-active'; blockerCode: 'CLEANUP_UNIT_STOP_FAILED'; blocker: JsonObject; snapshot: CleanupSnapshot; at: string }>)
   | Readonly<{ kind: 'cleanup-admission'; jobId: string; admissionId: string; owner: string; unitName: string; expiresAt: string; credentialRelativePath: string; credentialSha256: string; fenceTokenHash: string; reservationCreatedAt: string; reservationExpiresAt: string; snapshot: CleanupSnapshot; at: string }>
   | (CleanupAdmissionPredecessor & Readonly<{ kind: 'cleanup-admission-rotate'; jobId: string; admissionId: string; owner: string; unitName: string; expiresAt: string; credentialRelativePath: string; credentialSha256: string; fenceTokenHash: string; reservationCreatedAt: string; reservationExpiresAt: string; snapshot: CleanupSnapshot; at: string }>)
   | (CleanupAdmissionPredecessor & Readonly<{ kind: 'cleanup-admission-retry'; jobId: string; admissionId: string; owner: string; unitName: string; expiresAt: string; credentialRelativePath: string; credentialSha256: string; fenceTokenHash: string; reservationCreatedAt: string; reservationExpiresAt: string; expectedBlockerCode: BuilderErrorCode; expectedBlocker: JsonObject; snapshot: CleanupSnapshot; at: string }>)
@@ -569,6 +570,21 @@ function validateCleanupAdmissionReplacement(value: PreparedRecord, kind: 'rotat
   shapeCleanupSnapshot(value.snapshot, `cleanup admission ${kind} snapshot`, value.at as string);
 }
 
+function validateCleanupAdmissionStopFailure(value: PreparedRecord): void {
+  preparedCommon(value, 'API');
+  validateCleanupAdmissionPredecessor(value, 'cleanup admission stop failure');
+  if (value.previousStatus !== 'admitted' && value.previousStatus !== 'claimed' && value.previousStatus !== 'blocking') throw new OwnershipValidationError('cleanup admission stop failure requires an admitted, claimed, or exact stop-failure-blocked predecessor');
+  if (value.previousStatus === 'blocking' && value.previousBlockerCode !== 'CLEANUP_UNIT_STOP_FAILED') throw new OwnershipValidationError('cleanup admission stop failure may only repeat the exact stop-failure blocker');
+  if (value.previousStatus !== 'blocking' && (value.previousBlockerCode !== undefined && value.previousBlockerCode !== null || value.previousBlocker !== undefined && value.previousBlocker !== null)) throw new OwnershipValidationError('cleanup admission stop failure predecessor must not already be blocked');
+  preparedString(value.owner, 'cleanup admission stop failure owner', TEXT_LIMITS.maxIdentifierBytes);
+  preparedString(value.previousOwner, 'cleanup admission stop failure predecessor owner', TEXT_LIMITS.maxIdentifierBytes);
+  preparedInstant(value.previousExpiresAt, 'cleanup admission stop failure predecessor expiry');
+  preparedEnum(value.failure, ['capability-unavailable', 'stop-error', 'still-active'], 'cleanup admission stop failure kind');
+  if (value.blockerCode !== 'CLEANUP_UNIT_STOP_FAILED') throw new OwnershipValidationError('cleanup admission stop failure blocker code is fixed');
+  preparedJsonObject(value.blocker, 'cleanup admission stop failure blocker');
+  shapeCleanupSnapshot(value.snapshot, 'cleanup admission stop failure snapshot', value.at as string);
+}
+
 function validateApiCommand(command: ApiWriteCommand): void {
   const value = command as unknown as PreparedRecord;
   switch (command.kind) {
@@ -607,6 +623,7 @@ function validateApiCommand(command: ApiWriteCommand): void {
     case 'publish-recovery': preparedCommon(value, 'API'); preparedEnum(value.expectedState, ['publishing'], 'publish recovery expectedState'); preparedEnum(value.state, ['succeeded', 'failed'], 'publish recovery state'); shapePublishEvidence(value.evidence, value.at as string); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'publish recovery errorCode'); preparedJsonObject(value.error, 'publish recovery error', true); return;
     case 'cleanup-credential-reserve': validateCleanupCredentialReservation(value, 'cleanup credential reservation'); return;
     case 'cleanup-credential-abort': validateCleanupCredentialReservation(value, 'cleanup credential abort'); return;
+    case 'cleanup-admission-stop-failed': validateCleanupAdmissionStopFailure(value); return;
     case 'cleanup-admission': preparedCommon(value, 'API'); preparedString(value.admissionId, 'cleanup admission id', TEXT_LIMITS.maxIdentifierBytes); preparedString(value.owner, 'cleanup admission owner', TEXT_LIMITS.maxIdentifierBytes); preparedString(value.unitName, 'cleanup admission unit', TEXT_LIMITS.maxIdentifierBytes); cleanupUnit(String(value.admissionId), String(value.unitName)); preparedInstant(value.expiresAt, 'cleanup admission expiry'); preparedPath(value.credentialRelativePath, 'cleanup credential path'); preparedHash(value.credentialSha256, 'cleanup credential SHA'); preparedHash(value.fenceTokenHash, 'cleanup fence token hash'); validateCleanupAdmissionReservation(value, 'cleanup admission'); shapeCleanupSnapshot(value.snapshot, 'cleanup admission snapshot', value.at as string); return;
     case 'cleanup-admission-rotate': validateCleanupAdmissionReplacement(value, 'rotate'); return;
     case 'cleanup-admission-retry': validateCleanupAdmissionReplacement(value, 'retry'); return;
@@ -1884,7 +1901,7 @@ export class OwnershipStore {
   apiWrite(command: ApiWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as ApiWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['enqueue', 'dispatch', 'request-cancellation', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'cleanup-credential-reserve', 'cleanup-credential-abort', 'cleanup-admission', 'cleanup-admission-rotate', 'cleanup-admission-retry', 'hand-back'].includes(prepared.kind)) {
+    if (!['enqueue', 'dispatch', 'request-cancellation', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'cleanup-credential-reserve', 'cleanup-credential-abort', 'cleanup-admission-stop-failed', 'cleanup-admission', 'cleanup-admission-rotate', 'cleanup-admission-retry', 'hand-back'].includes(prepared.kind)) {
       throw new OwnershipViolationError('api', prepared.kind);
     }
     validateApiCommand(prepared);
@@ -1907,6 +1924,7 @@ export class OwnershipStore {
       case 'publish-recovery': return this.#transaction(() => this.#publishRecovery(prepared));
       case 'cleanup-credential-reserve': return this.#transaction(() => this.#cleanupCredentialReserve(prepared));
       case 'cleanup-credential-abort': return this.#transaction(() => this.#cleanupCredentialAbort(prepared));
+      case 'cleanup-admission-stop-failed': return this.#transaction(() => this.#cleanupAdmissionStopFailed(prepared));
       case 'cleanup-admission': return this.#transaction(() => this.#cleanupAdmission(prepared));
       case 'cleanup-admission-rotate': return this.#transaction(() => this.#cleanupAdmissionRotate(prepared));
       case 'cleanup-admission-retry': return this.#transaction(() => this.#cleanupAdmissionRetry(prepared));
@@ -2742,6 +2760,54 @@ export class OwnershipStore {
     );
   }
 
+  #cleanupAdmissionStopFailed(command: Extract<ApiWriteCommand, { kind: 'cleanup-admission-stop-failed' }>): void {
+    instant(command.at, 'cleanup stop failure time');
+    const blocker = json(command.blocker, 'cleanup stop failure blocker', true);
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [['cleanup stop failure time', command.at]]);
+    requireChronology([
+      ['cleanup predecessor claim time', command.previousClaimAt],
+      ['cleanup predecessor renew time', command.previousRenewAt],
+      ['cleanup stop failure time', command.at],
+    ]);
+    const admission = this.#db.prepare(`SELECT status, owner, unit_name, expires_at, fence_generation, fence_token_hash, claim_at, renew_at, blocker_code, blocker_json
+      FROM cleanup_leases WHERE admission_id=? AND job_id=?`).get(command.previousAdmissionId, command.jobId) as Row | undefined;
+    if (!admission) conflict('admission-mismatch', 'cleanup stop failure predecessor does not exist');
+    assertCleanupPredecessor(admission, command, ['admitted', 'claimed', 'blocking']);
+    if (admission.owner !== command.previousOwner) conflict('admission-mismatch', 'cleanup stop failure predecessor owner changed');
+    if (admission.expires_at !== command.previousExpiresAt) conflict('admission-mismatch', 'cleanup stop failure predecessor expiry changed');
+    if (row.cleanup_admission_id !== command.previousAdmissionId || row.cleanup_fence_generation !== command.previousFenceGeneration || row.cleanup_fence_token_hash !== command.previousFenceTokenHash) conflict('admission-mismatch', 'cleanup stop failure lost the active cleanup fence');
+    const previousBlocker = command.previousBlockerCode === null ? null : json(command.previousBlocker, 'cleanup stop failure predecessor blocker', true);
+    const jobBlockerMatchesPredecessor = (row.cleanup_blocker_code === null && row.cleanup_blocker_json === null)
+      || (row.cleanup_blocker_code === command.previousBlockerCode && row.cleanup_blocker_json === previousBlocker);
+    if (!jobBlockerMatchesPredecessor) conflict('admission-mismatch', 'cleanup stop failure job blocker changed');
+    if (blocker === null) throw new OwnershipValidationError('cleanup stop failure blocker is missing');
+    const blockerValue = JSON.parse(blocker) as JsonObject;
+    if (blockerValue.kind !== 'cleanup-unit-stop-failed' || blockerValue.code !== command.blockerCode || blockerValue.unitName !== command.previousUnitName || blockerValue.failure !== command.failure || blockerValue.observedAt !== command.at) throw new OwnershipValidationError('cleanup stop failure blocker evidence is not exact');
+    const snapshot = cleanupAdmissionSnapshot(this.#db, command.jobId, command.previousAdmissionId);
+    validateCleanupSnapshot(this.#db, command.snapshot, row, command.at, 'worker', snapshot.snapshot);
+    const jobResult = this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=?, cleanup_blocker_json=?, updated_at=?
+      WHERE job_id=? AND cleanup_admission_id=? AND cleanup_fence_generation=? AND cleanup_fence_token_hash=?
+        AND ((cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL) OR (cleanup_blocker_code=? AND cleanup_blocker_json=?))`).run(
+      command.blockerCode, blocker, command.at, command.jobId, command.previousAdmissionId, command.previousFenceGeneration, command.previousFenceTokenHash, command.previousBlockerCode, previousBlocker,
+    );
+    if (Number(jobResult.changes) !== 1) conflict('cas-lost', 'cleanup stop failure job blocker CAS lost');
+    const leaseResult = this.#db.prepare(`UPDATE cleanup_leases SET status='blocking', blocker_code=?, blocker_json=?
+      WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=?
+        AND status=? AND claim_at IS ? AND renew_at IS ? AND blocker_code IS ? AND blocker_json IS ?`).run(
+      command.blockerCode, blocker, command.previousAdmissionId, command.jobId, command.previousOwner, command.previousUnitName,
+      command.previousFenceGeneration, command.previousFenceTokenHash, command.previousStatus, command.previousClaimAt, command.previousRenewAt, command.previousBlockerCode, previousBlocker,
+    );
+    if (Number(leaseResult.changes) !== 1) conflict('cas-lost', 'cleanup stop failure lease CAS lost');
+    this.#event(command.jobId, 'cleanup', {
+      admissionId: command.previousAdmissionId,
+      status: 'blocking',
+      blockerCode: command.blockerCode,
+      blocker: blockerValue,
+      failure: command.failure,
+    }, command.at);
+  }
+
   #consumeCleanupCredentialReservation(command: {
     readonly jobId: string;
     readonly admissionId: string;
@@ -2821,7 +2887,7 @@ export class OwnershipStore {
       command.previousAdmissionId, Number(old.fence_generation), old.fence_token_hash,
     );
     if (Number(installed.changes) !== 1) conflict('cas-lost', 'replacement cleanup fence CAS lost');
-    const expired = this.#db.prepare(`UPDATE cleanup_leases SET status='expired', claim_at=NULL, renew_at=NULL, blocker_code=NULL, blocker_json=NULL,
+    const expired = this.#db.prepare(`UPDATE cleanup_leases SET status='expired', blocker_code=NULL, blocker_json=NULL,
         expired_at=?, superseded_at=?, superseded_by_admission_id=?, predecessor_status=?, predecessor_claim_at=?, predecessor_renew_at=?, predecessor_blocker_code=?, predecessor_blocker_json=?
       WHERE admission_id=? AND job_id=? AND status=? AND unit_name=? AND fence_generation=? AND fence_token_hash=?`).run(
       command.at, command.at, command.admissionId, command.previousStatus, old.claim_at, old.renew_at, old.blocker_code, old.blocker_json,
@@ -2863,7 +2929,7 @@ export class OwnershipStore {
       command.previousAdmissionId, Number(old.fence_generation), old.fence_token_hash, command.expectedBlockerCode, expectedBlocker,
     );
     if (Number(installed.changes) !== 1) conflict('cas-lost', 'corrected cleanup blocker resolution CAS lost');
-    const expired = this.#db.prepare(`UPDATE cleanup_leases SET status='expired', claim_at=NULL, renew_at=NULL, blocker_code=NULL, blocker_json=NULL,
+    const expired = this.#db.prepare(`UPDATE cleanup_leases SET status='expired', blocker_code=NULL, blocker_json=NULL,
         expired_at=?, superseded_at=?, superseded_by_admission_id=?, predecessor_status=?, predecessor_claim_at=?, predecessor_renew_at=?, predecessor_blocker_code=?, predecessor_blocker_json=?
       WHERE admission_id=? AND job_id=? AND status=? AND unit_name=? AND fence_generation=? AND fence_token_hash=?`).run(
       command.at, command.at, command.admissionId, command.previousStatus, old.claim_at, old.renew_at, old.blocker_code, old.blocker_json,

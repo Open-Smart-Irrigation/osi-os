@@ -144,6 +144,18 @@ export class CleanupCredentialInvalidError extends RecoveryBoundaryError {
   }
 }
 
+type CleanupStopFailure = 'capability-unavailable' | 'stop-error' | 'still-active';
+
+class CleanupStopFailureError extends RecoveryBoundaryError {
+  readonly failure: CleanupStopFailure;
+
+  constructor(failure: CleanupStopFailure, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'CleanupStopFailureError';
+    this.failure = failure;
+  }
+}
+
 function errorCode(error: unknown): string | null {
   return typeof error === 'object' && error !== null && 'code' in error && typeof (error as { code?: unknown }).code === 'string'
     ? (error as { code: string }).code
@@ -494,9 +506,18 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
   async function stopAndConfirmInactive(unitName: string): Promise<void> {
     const admissionId = unitName.slice('osi-image-builder-cleanup@'.length, -'.service'.length);
     exactUnit(admissionId, unitName);
-    if (!options.systemd.stop) throw new RecoveryBoundaryError('cleanup predecessor stop capability is unavailable');
-    await options.systemd.stop(unitName);
-    if (await options.systemd.isActive(unitName)) throw new RecoveryBoundaryError(`cleanup predecessor remains active: ${unitName}`);
+    if (!options.systemd.stop) throw new CleanupStopFailureError('capability-unavailable', 'cleanup predecessor stop capability is unavailable');
+    try {
+      await options.systemd.stop(unitName);
+    } catch (error) {
+      throw new CleanupStopFailureError('stop-error', `cleanup predecessor stop failed: ${unitName}`, { cause: error });
+    }
+    try {
+      if (await options.systemd.isActive(unitName)) throw new CleanupStopFailureError('still-active', `cleanup predecessor remains active: ${unitName}`);
+    } catch (error) {
+      if (error instanceof CleanupStopFailureError) throw error;
+      throw new CleanupStopFailureError('stop-error', `cleanup predecessor activity confirmation failed: ${unitName}`, { cause: error });
+    }
   }
 
   async function readCredential(jobId: string, lease: Record<string, unknown>): Promise<void> {
@@ -507,6 +528,7 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     if (directory === null) throw new CleanupCredentialInvalidError('cleanup credential directory is missing');
     const filename = `${admissionId}.token`;
     let handle: RecoveryFileHandle | null = null;
+    let failure: unknown;
     try {
       try { handle = await directory.directory.openFileChild(filename, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW); }
       catch (error) {
@@ -524,10 +546,12 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       let record: { readonly admissionId: string; readonly generation: number; readonly token: string };
       try { record = parseCredential(bytes); } catch (error) { throw new CleanupCredentialInvalidError(error instanceof Error ? error.message : 'cleanup credential is corrupt', { cause: error }); }
       if (record.admissionId !== admissionId || record.generation !== Number(lease.fence_generation) || crypto.sha256(bytes) !== lease.credential_sha256 || crypto.sha256(record.token) !== lease.fence_token_hash) throw new CleanupCredentialInvalidError('cleanup credential does not match the committed admission');
-    } finally {
-      if (handle !== null) await handle.close();
-      await directory.close();
+    } catch (error) { failure = error; }
+    if (handle !== null) {
+      try { await handle.close(); } catch (error) { failure ??= error; }
     }
+    try { await directory.close(); } catch (error) { failure ??= error; }
+    if (failure !== undefined) throw failure;
   }
 
   function predecessor(lease: Record<string, unknown>): CleanupAdmissionPredecessor {
@@ -599,16 +623,64 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       throw new RecoveryBoundaryError('corrected cleanup retry requires a failed or blocking predecessor');
     }
     const oldUnit = expected.previousUnitName;
-    const oldActive = await options.systemd.isActive(oldUnit);
     const oldUnexpired = typeof old.expires_at === 'string' && old.expires_at > at;
-    if (oldActive && oldUnexpired) {
-      throw new RecoveryBoundaryError('cleanup worker is active; recovery deferred');
-    }
+    const previousExpiresAt = typeof old.expires_at === 'string' ? old.expires_at : null;
+    if (previousExpiresAt === null) throw new RecoveryBoundaryError('cleanup predecessor expiry is invalid');
     let stopped = false;
-    if (oldActive) {
-      await stopAndConfirmInactive(oldUnit);
-      stopped = true;
+
+    const persistStopFailure = async (failure: CleanupStopFailure, cause: unknown): Promise<void> => {
+      const previousOwner = typeof old.owner === 'string' ? old.owner : null;
+      if (previousOwner === null) throw new RecoveryBoundaryError('cleanup predecessor owner is invalid');
+      const blocker: JsonObject = {
+        kind: 'cleanup-unit-stop-failed',
+        code: 'CLEANUP_UNIT_STOP_FAILED',
+        unitName: oldUnit,
+        failure,
+        observedAt: at,
+        error: {
+          message: cause instanceof Error ? cause.message : String(cause),
+          code: errorCode(cause),
+        },
+      };
+      ownershipCommandResult(options.ownership.apiWrite({
+        kind: 'cleanup-admission-stop-failed',
+        ...expected,
+        jobId: input.jobId,
+        owner: input.owner,
+        previousOwner,
+        previousExpiresAt,
+        failure,
+        blockerCode: 'CLEANUP_UNIT_STOP_FAILED',
+        blocker,
+        snapshot: input.snapshot,
+        at,
+      }));
+    };
+
+    const activeForRecovery = async (): Promise<boolean> => {
+      const active = await options.systemd.isActive(oldUnit);
+      if (active && oldUnexpired) throw new RecoveryBoundaryError('cleanup worker is active; recovery deferred');
+      return active;
+    };
+
+    const stopStaleOnce = async (active: boolean): Promise<void> => {
+      if (!active) return;
+      if (oldUnexpired) throw new RecoveryBoundaryError('cleanup worker is active; recovery deferred');
+      if (stopped) {
+        const error = new CleanupStopFailureError('still-active', `cleanup predecessor remains active after stop: ${oldUnit}`);
+        await persistStopFailure(error.failure, error);
+        throw error;
+      }
+      try {
+        await stopAndConfirmInactive(oldUnit);
+        stopped = true;
+      } catch (error) {
+        const failure = error instanceof CleanupStopFailureError ? error.failure : 'stop-error';
+        await persistStopFailure(failure, error);
+        throw error;
+      }
     }
+    await stopStaleOnce(await activeForRecovery());
     let credentialValid = true;
     if (retry === null) {
       try { await readCredential(input.jobId, old); }
@@ -621,9 +693,7 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     }
     if (retry === null && credentialValid && expected.previousStatus === 'admitted' && oldUnexpired) {
       await ensurePredecessorStillMatches(input.jobId, expected);
-      if (await options.systemd.isActive(oldUnit)) {
-        throw new RecoveryBoundaryError('cleanup worker became active during recovery');
-      }
+      await stopStaleOnce(await activeForRecovery());
       await start(oldUnit);
       return {
         admissionId: expected.previousAdmissionId,
@@ -636,21 +706,13 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       };
     }
     await ensurePredecessorStillMatches(input.jobId, expected);
-    if (await options.systemd.isActive(oldUnit)) {
-      if (stopped) throw new RecoveryBoundaryError('cleanup worker became active during recovery');
-      await stopAndConfirmInactive(oldUnit);
-      stopped = true;
-    }
+    await stopStaleOnce(await activeForRecovery());
     const generation = jobGeneration(input.jobId);
     const material = newAdmission(at);
     const reservation = { createdAt: at, expiresAt: reservationExpiry(at, input.expiresAt), owner: input.owner };
     reserveCredential(input.jobId, material.admissionId, input.owner, reservation.createdAt, reservation.expiresAt);
     const credential = await writeCredential(input.jobId, material.admissionId, generation, material.token, reservation);
-    if (await options.systemd.isActive(oldUnit)) {
-      if (stopped) throw new RecoveryBoundaryError('cleanup worker became active during recovery');
-      await stopAndConfirmInactive(oldUnit);
-      stopped = true;
-    }
+    await stopStaleOnce(await activeForRecovery());
     await ensurePredecessorStillMatches(input.jobId, expected);
     const unitName = `osi-image-builder-cleanup@${material.admissionId}.service`;
     const command: ApiWriteCommand = retry === null

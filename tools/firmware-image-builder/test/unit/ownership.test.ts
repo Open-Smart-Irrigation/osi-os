@@ -462,8 +462,8 @@ describe('actor-owned compare-and-set writes', () => {
     const { ownership, store } = await fixture();
     const protectedStore: BuilderStore = store; expect(protectedStore.getJob('job-1').state).toBe('queued');
     for (const kind of ['container', 'stage', 'terminal', 'artifact', 'publish', 'runner-lease'] as const) expect(() => ownership.apiWrite({ kind, jobId: 'job-1' } as never)).toThrow(OwnershipViolationError);
-    for (const kind of ['dispatch', 'request-cancellation', 'cleanup-admission', 'recovery-terminal'] as const) expect(() => ownership.runnerWrite({ kind, jobId: 'job-1' } as never)).toThrow(OwnershipViolationError);
-    for (const kind of ['stage', 'terminal', 'publish', 'artifact'] as const) expect(() => ownership.cleanupWrite({ kind, jobId: 'job-1' } as never)).toThrow(OwnershipViolationError);
+    for (const kind of ['dispatch', 'request-cancellation', 'cleanup-admission', 'cleanup-admission-stop-failed', 'recovery-terminal'] as const) expect(() => ownership.runnerWrite({ kind, jobId: 'job-1' } as never)).toThrow(OwnershipViolationError);
+    for (const kind of ['stage', 'terminal', 'publish', 'artifact', 'cleanup-admission-stop-failed'] as const) expect(() => ownership.cleanupWrite({ kind, jobId: 'job-1' } as never)).toThrow(OwnershipViolationError);
     const hidden = ['dispatch', 'stage', 'container', 'publishRecovery', 'transaction', 'job', 'event', 'normalTerminal'];
     for (const name of hidden) {
       expect(Object.prototype.hasOwnProperty.call(OwnershipStore.prototype, name), `OwnershipStore prototype owns ${name}`).toBe(false);
@@ -1598,7 +1598,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(apiWriteAdmission(target.ownership, retry).ok).toBe(true);
     const evidenceDb = openBuilderDatabase(target.path);
     expect(evidenceDb.prepare('SELECT status, claim_at, renew_at, blocker_code, blocker_json, expired_at, superseded_at, superseded_by_admission_id, predecessor_status, predecessor_claim_at, predecessor_renew_at, predecessor_blocker_code, predecessor_blocker_json FROM cleanup_leases WHERE admission_id=?').get(admission.admissionId)).toEqual({
-      status: 'expired', claim_at: null, renew_at: null, blocker_code: null, blocker_json: null, expired_at: RETRY_AT, superseded_at: RETRY_AT, superseded_by_admission_id: replacementAdmissionId,
+      status: 'expired', claim_at: RECOVERY, renew_at: null, blocker_code: null, blocker_json: null, expired_at: RETRY_AT, superseded_at: RETRY_AT, superseded_by_admission_id: replacementAdmissionId,
       predecessor_status: 'blocking', predecessor_claim_at: RECOVERY, predecessor_renew_at: null, predecessor_blocker_code: 'CLEANUP_ADMISSION_BLOCKED', predecessor_blocker_json: JSON.stringify(blocker),
     });
     expect(evidenceDb.prepare('SELECT cleanup_admission_id, cleanup_fence_generation, cleanup_blocker_code, cleanup_blocker_json FROM jobs WHERE job_id=?').get(jobId)).toEqual({ cleanup_admission_id: replacementAdmissionId, cleanup_fence_generation: 2, cleanup_blocker_code: null, cleanup_blocker_json: null });
@@ -1613,6 +1613,63 @@ describe('actor-owned compare-and-set writes', () => {
     const finalDb = openBuilderDatabase(target.path);
     expect(finalDb.prepare('SELECT status, handback_at FROM cleanup_leases WHERE admission_id=?').get(replacementAdmissionId)).toEqual({ status: 'handed_back', handback_at: RETRY_HAND_BACK_AT });
     finalDb.close();
+  });
+
+  it('persists cleanup stop failure evidence with exact predecessor and fence CAS', async () => {
+    const target = await claimedCleanup('cleanup-stop-failure');
+    const blocker = {
+      kind: 'cleanup-unit-stop-failed',
+      code: 'CLEANUP_UNIT_STOP_FAILED',
+      unitName: target.admission.unitName,
+      failure: 'stop-error',
+      observedAt: AFTER,
+      error: { message: 'systemd stop failed', code: null },
+    } satisfies JsonObject;
+    const command: Extract<ApiWriteCommand, { kind: 'cleanup-admission-stop-failed' }> = {
+      kind: 'cleanup-admission-stop-failed',
+      jobId: 'cleanup-stop-failure',
+      owner: 'api',
+      previousOwner: 'cleanup-a',
+      previousAdmissionId: target.admission.admissionId,
+      previousStatus: 'claimed',
+      previousUnitName: target.admission.unitName,
+      previousFenceGeneration: 1,
+      previousFenceTokenHash: SHA64_B,
+      previousExpiresAt: EXPIRY,
+      previousClaimAt: RECOVERY,
+      previousRenewAt: null,
+      previousBlockerCode: null,
+      previousBlocker: null,
+      failure: 'stop-error',
+      blockerCode: 'CLEANUP_UNIT_STOP_FAILED',
+      blocker,
+      snapshot: target.snapshot,
+      at: AFTER,
+    };
+    expect(target.ownership.apiWrite(command)).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.store.getJob('cleanup-stop-failure')).toMatchObject({ cleanupBlockerCode: 'CLEANUP_UNIT_STOP_FAILED', cleanupBlocker: blocker });
+    const db = openBuilderDatabase(target.path);
+    expect(db.prepare('SELECT status, owner, unit_name, fence_generation, fence_token_hash, claim_at, renew_at, blocker_code, blocker_json FROM cleanup_leases WHERE admission_id=?').get(target.admission.admissionId)).toMatchObject({
+      status: 'blocking', owner: 'cleanup-a', unit_name: target.admission.unitName, fence_generation: 1, fence_token_hash: SHA64_B,
+      claim_at: RECOVERY, renew_at: null, blocker_code: 'CLEANUP_UNIT_STOP_FAILED', blocker_json: encodeJson(blocker, 'cleanup stop failure blocker', true),
+    });
+    const event = target.store.listEvents('cleanup-stop-failure').events.at(-1);
+    expect(event).toMatchObject({ eventType: 'cleanup', payload: { admissionId: target.admission.admissionId, status: 'blocking', blockerCode: 'CLEANUP_UNIT_STOP_FAILED', blocker } });
+    const repeatedBlocker = { ...blocker, failure: 'still-active', observedAt: RETRY_AT, error: { message: 'cleanup predecessor remains active', code: null } } satisfies JsonObject;
+    expect(target.ownership.apiWrite({
+      ...command,
+      previousStatus: 'blocking',
+      previousBlockerCode: 'CLEANUP_UNIT_STOP_FAILED',
+      previousBlocker: blocker,
+      failure: 'still-active',
+      blocker: repeatedBlocker,
+      at: RETRY_AT,
+    })).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.store.getJob('cleanup-stop-failure')).toMatchObject({ cleanupBlockerCode: 'CLEANUP_UNIT_STOP_FAILED', cleanupBlocker: repeatedBlocker });
+    expect(target.store.listEvents('cleanup-stop-failure').events.at(-1)).toMatchObject({ eventType: 'cleanup', payload: { status: 'blocking', blockerCode: 'CLEANUP_UNIT_STOP_FAILED', blocker: repeatedBlocker, failure: 'still-active' } });
+    expect(target.ownership.apiWrite({ ...command, blocker: { ...blocker, error: { message: 'forged', code: null } }, at: '2026-07-23T10:03:55.000Z' })).toMatchObject({ ok: false, conflict: { kind: 'admission-mismatch' } });
+    expect(target.ownership.apiWrite({ ...command, previousOwner: 'forged-owner', at: '2026-07-23T10:03:56.000Z' })).toMatchObject({ ok: false, conflict: { kind: 'admission-mismatch' } });
+    db.close();
   });
 
   it('retains the staging source and fence across a cleanup crash window', async () => {

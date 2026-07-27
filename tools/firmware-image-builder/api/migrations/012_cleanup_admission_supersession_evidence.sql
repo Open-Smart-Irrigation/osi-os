@@ -123,6 +123,8 @@ WHEN OLD.status <> 'expired'
     AND NEW.completion_evidence_path IS OLD.completion_evidence_path
     AND NEW.completion_evidence_sha256 IS OLD.completion_evidence_sha256
     AND NEW.admitted_at IS OLD.admitted_at
+    AND NEW.claim_at IS OLD.claim_at
+    AND NEW.renew_at IS OLD.renew_at
     AND NEW.complete_at IS OLD.complete_at
     AND NEW.handback_at IS OLD.handback_at
     AND EXISTS (

@@ -54,6 +54,8 @@ function fakeRecovery(options: {
   readonly active?: { value: boolean };
   readonly fileSystem?: RecoveryFileSystem;
   readonly crypto?: CleanupAdmissionRecoveryOptions['crypto'];
+  readonly systemd?: RecoverySystemd;
+  readonly apiWrite?: (command: Record<string, unknown>, writes: unknown[], lease: Record<string, unknown> | null) => ReturnType<NonNullable<CleanupAdmissionRecoveryOptions['ownership']['apiWrite']>>;
 }) {
   let lease = options.lease ?? null;
   let generation = options.generation ?? 0;
@@ -79,6 +81,7 @@ function fakeRecovery(options: {
     apiWrite(command: Record<string, unknown>) {
       if (command.kind === 'cleanup-credential-reserve' || command.kind === 'cleanup-credential-abort') return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined } as const;
       writes.push(command);
+      if (options.apiWrite) return options.apiWrite(command, writes, lease);
       if (command.kind === 'cleanup-admission') {
         generation += 1;
         lease = {
@@ -110,6 +113,10 @@ function fakeRecovery(options: {
           fence_token_hash: command.fenceTokenHash,
           unit_name: command.unitName,
         };
+      } else if (command.kind === 'cleanup-admission-stop-failed' && lease !== null) {
+        lease.status = 'blocking';
+        lease.blocker_code = command.blockerCode;
+        lease.blocker_json = JSON.stringify(command.blocker);
       }
       return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined } as const;
     },
@@ -118,7 +125,7 @@ function fakeRecovery(options: {
     stateRoot: options.root,
     db: db as never,
     ownership: ownership as never,
-    systemd: systemd(options.events, options.active),
+    systemd: options.systemd ?? systemd(options.events, options.active),
     fileSystem: options.fileSystem,
     clock: { now: () => NOW },
     crypto: options.crypto ?? { randomBytes: () => Buffer.alloc(32, 7) },
@@ -151,7 +158,7 @@ describe('Task 20 cleanup admission corrections', () => {
     await expect(recovery.pruneOrphanCredentials()).rejects.toThrow(/prune is unavailable after admissions open/);
   });
 
-  it('stops a claimed predecessor again at the rotation fence and authorizes one replacement', async () => {
+  it('defers when a claimed predecessor becomes active after an initial inactive observation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-interleave-')); roots.push(root);
     const events: string[] = [];
     const active = { value: false };
@@ -192,13 +199,91 @@ describe('Task 20 cleanup admission corrections', () => {
       ownerUid: process.getuid?.() ?? 0,
     });
     await replacementRecovery.openAdmissions();
-    const result = await replacementRecovery.reconcileAndStart({ jobId: 'job-interleave', admissionId: first.admissionId, owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-interleave'), at: NOW });
+    await expect(replacementRecovery.reconcileAndStart({ jobId: 'job-interleave', admissionId: first.admissionId, owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-interleave'), at: NOW }))
+      .rejects.toThrow(/active; recovery deferred/);
 
-    expect(result.rotated).toBe(true);
-    expect(events).toContain(`stop:${first.unitName}`);
+    expect(events).not.toContain(`stop:${first.unitName}`);
     expect(events.some((event) => event.endsWith(':overlap'))).toBe(false);
-    expect(writes.filter((command) => (command as { kind?: string }).kind?.includes('rotate')).length).toBe(1);
-    expect(ADMISSION_ID_PATTERN.test(result.admissionId)).toBe(true);
+    expect(writes.filter((command) => (command as { kind?: string }).kind?.includes('rotate')).length).toBe(0);
+    expect(writes.filter((command) => (command as { kind?: string }).kind === 'cleanup-admission-stop-failed')).toHaveLength(0);
+    expect(ADMISSION_ID_PATTERN.test(first.admissionId)).toBe(true);
+  });
+
+  it.each([
+    ['stop capability unavailable', undefined, 'capability-unavailable'],
+    ['systemd stop throws', async () => { throw new Error('systemd stop failed'); }, 'stop-error'],
+    ['systemd stop leaves the unit active', async () => {}, 'still-active'],
+  ] as const)('persists a cleanup blocker when stale-worker stop %s', async (_name, stop, failure) => {
+    const root = await mkdtemp(join(tmpdir(), `osi-cleanup-correction-stop-${failure}-`)); roots.push(root);
+    const events: string[] = [];
+    const active = { value: true };
+    const systemdFailure: RecoverySystemd = {
+      async start(unit) { events.push(`start:${unit}`); },
+      ...(stop === undefined ? {} : { stop: async (unit: string) => { events.push(`stop:${unit}`); await stop(); } }),
+      async isActive(unit) { events.push(`active:${unit}`); return active.value; },
+    };
+    const lease = {
+      admission_id: OLD_ID,
+      job_id: `job-stop-${failure}`,
+      status: 'claimed',
+      expires_at: EXPIRES,
+      credential_relative_path: `recovery/cleanup-credentials/${OLD_ID}.token`,
+      credential_sha256: SHA,
+      fence_generation: 1,
+      fence_token_hash: SHA_B,
+      unit_name: `osi-image-builder-cleanup@${OLD_ID}.service`,
+      owner: 'cleanup-worker',
+      claim_at: NOW,
+      renew_at: null,
+      blocker_code: null,
+      blocker_json: null,
+    };
+    const { recovery, writes, getLease } = fakeRecovery({ root, lease, generation: 1, systemd: systemdFailure, active });
+    await recovery.openAdmissions();
+    await expect(recovery.reconcileAndStart({ jobId: lease.job_id as string, admissionId: OLD_ID, owner: 'api', expiresAt: '2026-07-27T12:10:00.000Z', snapshot: snapshot(lease.job_id as string), at: '2026-07-27T12:06:00.000Z' }))
+      .rejects.toThrow(/stop|active|CAS|blocking/);
+    const failureWrite = writes.find((command) => (command as { kind?: string }).kind === 'cleanup-admission-stop-failed') as Record<string, unknown> | undefined;
+    expect(failureWrite).toMatchObject({
+      kind: 'cleanup-admission-stop-failed',
+      previousAdmissionId: OLD_ID,
+      previousStatus: 'claimed',
+      previousUnitName: lease.unit_name,
+      previousFenceGeneration: 1,
+      previousFenceTokenHash: SHA_B,
+      previousExpiresAt: EXPIRES,
+      previousClaimAt: NOW,
+      previousRenewAt: null,
+      previousOwner: 'cleanup-worker',
+      failure,
+      blockerCode: 'CLEANUP_UNIT_STOP_FAILED',
+    });
+    expect(getLease()).toMatchObject({ status: 'blocking', blocker_code: 'CLEANUP_UNIT_STOP_FAILED' });
+    expect(writes.filter((command) => (command as { kind?: string }).kind === 'cleanup-admission-rotate')).toHaveLength(0);
+    expect(events.filter((event) => event.startsWith('stop:'))).toHaveLength(stop === undefined ? 0 : 1);
+    await expect(recovery.reconcileAndStart({ jobId: lease.job_id as string, admissionId: OLD_ID, owner: 'api', expiresAt: '2026-07-27T12:10:00.000Z', snapshot: snapshot(lease.job_id as string), at: '2026-07-27T12:07:00.000Z' }))
+      .rejects.toThrow(/explicit corrected retry/);
+  });
+
+  it('does not silently lose a stop-failure CAS race and requires corrected retry after persistence', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-stop-cas-')); roots.push(root);
+    const active = { value: true };
+    const lease = {
+      admission_id: OLD_ID, job_id: 'job-stop-cas', status: 'claimed', expires_at: EXPIRES,
+      credential_relative_path: `recovery/cleanup-credentials/${OLD_ID}.token`, credential_sha256: SHA,
+      fence_generation: 1, fence_token_hash: SHA_B, unit_name: `osi-image-builder-cleanup@${OLD_ID}.service`,
+      owner: 'cleanup-worker', claim_at: NOW, renew_at: null, blocker_code: null, blocker_json: null,
+    };
+    const { recovery, writes } = fakeRecovery({
+      root, lease, generation: 1, active,
+      systemd: { start: async () => {}, stop: async () => { throw new Error('stop failed'); }, isActive: async () => active.value },
+      apiWrite: (command) => command.kind === 'cleanup-admission-stop-failed'
+        ? { ok: false, conflict: { kind: 'cas-lost', message: 'stop-failure predecessor changed' } }
+        : { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined },
+    });
+    await recovery.openAdmissions();
+    await expect(recovery.reconcileAndStart({ jobId: 'job-stop-cas', admissionId: OLD_ID, owner: 'api', expiresAt: '2026-07-27T12:10:00.000Z', snapshot: snapshot('job-stop-cas'), at: '2026-07-27T12:06:00.000Z' })).rejects.toThrow(/CAS rejected|stop-failure/);
+    expect(writes.filter((command) => (command as { kind?: string }).kind === 'cleanup-admission-stop-failed')).toHaveLength(1);
+    expect(writes.filter((command) => (command as { kind?: string }).kind === 'cleanup-admission-rotate')).toHaveLength(0);
   });
 
   it('defers an active unexpired claimed lease without stopping, rotating, or starting', async () => {
@@ -443,6 +528,39 @@ describe('Task 20 cleanup admission corrections', () => {
     await expect(recovery.admitAndStart({ jobId: 'job-child-close', owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-child-close'), at: NOW }))
       .rejects.toThrow(/unsafe recovery directory/);
     expect(childCloseCount).toBe(1);
+  });
+
+  it('closes every directory lease when credential handle close fails and preserves the first close error', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-read-close-')); roots.push(root);
+    const base = createRecoveryFileSystem();
+    let failCredentialClose = false;
+    let credentialCloseCount = 0;
+    let directoryCloseCount = 0;
+    const wrap = (directory: RecoveryDirectoryHandle, path: string): RecoveryDirectoryHandle => ({
+      ...directory,
+      async close() { directoryCloseCount += 1; await directory.close(); },
+      async openDirectoryChild(name) { return wrap(await directory.openDirectoryChild(name), join(path, name)); },
+      async openFileChild(name, flags, mode) {
+        const file = await directory.openFileChild(name, flags, mode);
+        if (!failCredentialClose || !name.endsWith('.token') || (flags & 3) !== 0) return file;
+        return {
+          ...file,
+          async close() { credentialCloseCount += 1; throw new Error('credential close failed'); },
+        };
+      },
+    });
+    const fileSystem: RecoveryFileSystem = { openDirectory: async (path) => wrap(await base.openDirectory(path), path) };
+    const first = fakeRecovery({ root, fileSystem });
+    await first.recovery.openAdmissions();
+    const admission = await first.recovery.admitAndStart({ jobId: 'job-read-close', owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-read-close'), at: NOW });
+    const second = fakeRecovery({ root, fileSystem, lease: first.getLease(), generation: 1 });
+    await second.recovery.openAdmissions();
+    failCredentialClose = true;
+    credentialCloseCount = 0;
+    directoryCloseCount = 0;
+    await expect(second.recovery.reconcileAndStart({ jobId: 'job-read-close', admissionId: admission.admissionId, owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-read-close'), at: NOW })).rejects.toThrow('credential close failed');
+    expect(credentialCloseCount).toBe(1);
+    expect(directoryCloseCount).toBe(5);
   });
 
   it('closes the pruning root when root verification fails', async () => {

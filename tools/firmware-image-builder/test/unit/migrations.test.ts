@@ -1125,6 +1125,8 @@ describe('versioned builder database migrations', () => {
     ['completion_evidence_path', 'evidence/forged.json'],
     ['completion_evidence_sha256', 'e'.repeat(64)],
     ['admitted_at', '2026-07-23T00:02:00.000Z'],
+    ['claim_at', '2026-07-23T00:02:30.000Z'],
+    ['renew_at', '2026-07-23T00:02:45.000Z'],
     ['complete_at', '2026-07-23T00:03:00.000Z'],
     ['handback_at', '2026-07-23T00:04:00.000Z'],
   ])('rejects supersession transition mutation of historical %s', async (column, value) => {
