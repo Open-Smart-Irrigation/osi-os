@@ -977,14 +977,17 @@ or safely quarantines existing staging, then commits `cancelled` without
 creating a container.
 
 The runner creates a stopped container with exactly one job-worktree bind
-mount, the host UID/GID supplied explicitly, and `CARGO_BUILD_JOBS=2`:
+mount, the host UID/GID supplied explicitly, and `CARGO_BUILD_JOBS=2`.
+The installed execution definition names the operations that are read-only.
+`verify-image` is read-only; operations that prepare or build the worktree are
+writable:
 
 ```text
 docker create --name <validated-container-name>
   --label org.osi.image-builder.job-id=<job-id>
   --label org.osi.image-builder.manifest-sha=<manifest-sha>
   --user <uid>:<gid> --workdir /workdir
-  --mount type=bind,src=<job-worktree>,dst=/workdir,rw
+  --mount type=bind,src=<job-worktree>,dst=/workdir,<rw-or-readonly-by-operation>
   --env HOME=/workdir/.builder-home --env PATH=<image-path>
   --env CARGO_BUILD_JOBS=2 --env TZ=UTC
   --env SOURCE_DATE_EPOCH=<persisted-commit-time>
@@ -993,12 +996,18 @@ docker create --name <validated-container-name>
   <imageRepository>@<imageDigest> <trusted-operation-argv>
 ```
 
+For `verify-image`, the runner uses `--network=none`, a read-only worktree
+bind, and `--read-only` for the container root filesystem. For a mutating
+operation, it omits `--read-only` and keeps the worktree bind writable. The
+runner derives both modes only from the hashed installed execution definition;
+branch content cannot request or relax them.
+
 For each operation, the runner immediately inspects the created object and validates the exact
 container ID and name, image ID and immutable digest, both labels, one and
 only one bind mount with the expected source/destination/access, the exact
 allowlisted environment, requested user IDs, `Privileged=false`, no added
-capabilities, `CapDrop=ALL`, no devices, and the expected network/security
-settings. It persists the ID, name, image digest, labels, mount, environment,
+capabilities, `CapDrop=ALL`, no devices, and the expected network, rootfs, and
+security settings. It persists the ID, name, image digest, labels, mount, environment,
 user IDs, operation ID, and security inspection evidence through a runner-
 identity CAS transaction before invoking `docker start --attach <container-id>`.
 
