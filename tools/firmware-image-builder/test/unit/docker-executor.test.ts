@@ -27,7 +27,7 @@ function inspection(overrides: Partial<DockerInspection> = {}): DockerInspection
       'org.osi.image-builder.job-id': 'job-1',
       'org.osi.image-builder.manifest-sha': MANIFEST,
     },
-    mounts: [{ type: 'bind', source: '/tmp/worktree', destination: '/workdir', readOnly: false }],
+    mounts: [{ type: 'bind', source: '/tmp/worktree', destination: '/workdir', readOnly: true }],
     user: '1000:1000',
     workingDir: '/workdir',
     networkMode: 'none',
@@ -45,7 +45,7 @@ function inspection(overrides: Partial<DockerInspection> = {}): DockerInspection
       TZ: 'UTC',
       SOURCE_DATE_EPOCH: '1784887200',
     },
-    readonlyRootfs: false,
+    readonlyRootfs: true,
     running: false,
     status: 'created',
     createdAt: '2026-07-24T09:59:59.000Z',
@@ -84,11 +84,11 @@ function realisticRawInspection(): Record<string, unknown> {
       Privileged: false,
       Devices: null,
       SecurityOpt: ['no-new-privileges:true'],
-      ReadonlyRootfs: false,
+      ReadonlyRootfs: true,
       PidsLimit: 4096,
       Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 4096 }],
     },
-    Mounts: [{ Type: 'bind', Source: '/tmp/worktree', Destination: '/workdir', RW: true }],
+    Mounts: [{ Type: 'bind', Source: '/tmp/worktree', Destination: '/workdir', RW: false }],
     Created: '2026-07-24T09:59:59.000000000Z',
     State: { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:01.500000000Z', FinishedAt: '2026-07-24T10:00:02.500000000Z', ExitCode: 0 },
   };
@@ -101,12 +101,17 @@ function realisticCreatedRawInspection(): Record<string, unknown> {
   return value;
 }
 
-function rawInspectionWithNetwork(
+function rawInspectionWithContract(
   state: 'created' | 'exited',
   networkMode: 'bridge' | 'none',
+  readOnly: boolean,
 ): Record<string, unknown> {
   const value = state === 'created' ? realisticCreatedRawInspection() : realisticRawInspection();
-  (value.HostConfig as Record<string, unknown>).NetworkMode = networkMode;
+  const host = value.HostConfig as Record<string, unknown>;
+  host.NetworkMode = networkMode;
+  host.ReadonlyRootfs = readOnly;
+  const mounts = value.Mounts as Array<Record<string, unknown>>;
+  mounts[0]!.RW = !readOnly;
   return value;
 }
 
@@ -263,11 +268,17 @@ describe('DockerExecutor', () => {
     expect(create).toContain('--pids-limit=4096');
     expect(create).toContain('--ulimit=nofile=1024:4096');
     const mountArg = create?.find((value) => value.startsWith('--mount='));
-    expect(mountArg).toBe('--mount=type=bind,source=/tmp/worktree,destination=/workdir');
+    expect(mountArg).toBe('--mount=type=bind,source=/tmp/worktree,destination=/workdir,readonly');
     expect(mountArg).toBeDefined();
     const mountSegments = mountArg!.slice('--mount='.length).split(',');
-    expect(mountSegments.every((segment) => /^(type|source|destination)=[^,]+$/u.test(segment))).toBe(true);
+    expect(mountSegments).toEqual([
+      'type=bind',
+      'source=/tmp/worktree',
+      'destination=/workdir',
+      'readonly',
+    ]);
     expect(mountSegments).not.toContain('rw');
+    expect(create).toContain('--read-only');
     expect(create).toContain('--user=1000:1000');
     expect(create).toContain(`registry.example/builder@sha256:${DIGEST}`);
     expect(create).not.toContain('/var/run/docker.sock');
@@ -368,29 +379,119 @@ describe('DockerExecutor', () => {
     expect(identity.containerId).toBeNull();
   });
 
-  it.each(['update-feeds', 'verify-image'] as const)(
-    'runs the %s operation with Docker network disabled',
-    async (operationId) => {
+  it('runs verify-image with an offline read-only worktree and container rootfs', async () => {
+    const writes: RunnerWriteCommand[] = [];
     const docker = fakeDocker([
       { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}\n' },
       { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
       { stdout: '' },
       { stdout: `${'1'.repeat(64)}\n` },
-      { stdout: JSON.stringify(rawInspectionWithNetwork('created', 'none')) },
+      { stdout: JSON.stringify(rawInspectionWithContract('created', 'none', true)) },
       { stdout: '', startedAt: '2026-07-24T10:00:01.500Z', finishedAt: '2026-07-24T10:00:02.500Z' },
-      { stdout: JSON.stringify(rawInspectionWithNetwork('exited', 'none')) },
+      { stdout: JSON.stringify(rawInspectionWithContract('exited', 'none', true)) },
       { stdout: '' },
       { exitCode: 1, stderr: 'No such container\n' },
       { stdout: '' },
     ]);
 
-    await createDockerExecutor(options(docker, { operationId })).run();
+    await createDockerExecutor(options(docker, {
+      operationId: 'verify-image',
+      ownership: {
+        runnerWrite: vi.fn((command: RunnerWriteCommand) => {
+          writes.push(command);
+          return { ok: true };
+        }),
+      },
+    })).run();
 
     const create = docker.calls.find((call) => call[1] === 'create');
     expect(create).toContain('--network=none');
     expect(create).not.toContain('--network=bridge');
-    },
-  );
+    expect(create).toContain('--read-only');
+    expect(create).toContain(
+      '--mount=type=bind,source=/tmp/worktree,destination=/workdir,readonly',
+    );
+    const created = writes.find((
+      command,
+    ): command is Extract<RunnerWriteCommand, { kind: 'container' }> => (
+      command.kind === 'container' && command.lifecycle === 'created'
+    ));
+    expect(created?.mount).toEqual({
+      type: 'bind',
+      source: '/tmp/worktree',
+      destination: '/workdir',
+      readOnly: true,
+    });
+    expect(created?.security).toMatchObject({
+      network: 'none',
+      readonlyRootfs: true,
+    });
+    expect(created?.inspection).toMatchObject({
+      container: {
+        mounts: [{
+          type: 'bind',
+          source: '/tmp/worktree',
+          destination: '/workdir',
+          readOnly: true,
+        }],
+        readonlyRootfs: true,
+      },
+    });
+    const completed = writes.find((
+      command,
+    ): command is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => (
+      command.kind === 'operation-complete'
+    ));
+    expect(completed?.input.containerMount).toMatchObject({ readOnly: true });
+    expect(completed?.input.containerSecurity).toMatchObject({ readonlyRootfs: true });
+    expect(completed?.input.inspection).toMatchObject({
+      container: { mounts: [{ readOnly: true }], readonlyRootfs: true },
+    });
+  });
+
+  it('keeps a mutating operation worktree and container rootfs writable', async () => {
+    const writes: RunnerWriteCommand[] = [];
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}\n' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { stdout: '' },
+      { stdout: `${'1'.repeat(64)}\n` },
+      { stdout: JSON.stringify(rawInspectionWithContract('created', 'none', false)) },
+      { stdout: '', startedAt: '2026-07-24T10:00:01.500Z', finishedAt: '2026-07-24T10:00:02.500Z' },
+      { stdout: JSON.stringify(rawInspectionWithContract('exited', 'none', false)) },
+      { stdout: '' },
+      { exitCode: 1, stderr: 'No such container\n' },
+      { stdout: '' },
+    ]);
+
+    await createDockerExecutor(options(docker, {
+      operationId: 'update-feeds',
+      ownership: {
+        runnerWrite: vi.fn((command: RunnerWriteCommand) => {
+          writes.push(command);
+          return { ok: true };
+        }),
+      },
+    })).run();
+
+    const create = docker.calls.find((call) => call[1] === 'create');
+    expect(create).toContain('--network=none');
+    expect(create).not.toContain('--read-only');
+    expect(create).toContain('--mount=type=bind,source=/tmp/worktree,destination=/workdir');
+    expect(create).not.toContain(
+      '--mount=type=bind,source=/tmp/worktree,destination=/workdir,readonly',
+    );
+    const created = writes.find((
+      command,
+    ): command is Extract<RunnerWriteCommand, { kind: 'container' }> => (
+      command.kind === 'container' && command.lifecycle === 'created'
+    ));
+    expect(created?.mount).toMatchObject({ readOnly: false });
+    expect(created?.security).toMatchObject({ readonlyRootfs: false });
+    expect(created?.inspection).toMatchObject({
+      container: { mounts: [{ readOnly: false }], readonlyRootfs: false },
+    });
+  });
 
   it('rejects every inspected security or identity mismatch before starting the container', async () => {
     const mismatches: Array<[string, Partial<DockerInspection>]> = [
@@ -400,12 +501,13 @@ describe('DockerExecutor', () => {
       ['image ref', { image: `registry.example/other@sha256:${DIGEST}` }],
       ['label', { labels: { 'org.osi.image-builder.job-id': 'other', 'org.osi.image-builder.manifest-sha': MANIFEST } }],
       ['mount', { mounts: [] }],
+      ['mount read-only', { mounts: [{ type: 'bind', source: '/tmp/worktree', destination: '/workdir', readOnly: false }] }],
       ['user', { user: '0:0' }],
       ['workdir', { workingDir: '/wrong' }],
       ['network', { networkMode: 'host' }],
       ['capability', { capDrop: [] }],
       ['security', { privileged: true }],
-      ['readonly rootfs', { readonlyRootfs: true }],
+      ['readonly rootfs', { readonlyRootfs: false }],
       ['pids', { pidsLimit: 1 }],
       ['ulimit', { ulimits: [{ name: 'nofile', soft: 1, hard: 1 }] }],
       ['running', { running: true }],
@@ -504,7 +606,11 @@ describe('DockerExecutor', () => {
     const frontendRaw = (): Record<string, unknown> => {
       const value = realisticRawInspection();
       (value.Config as Record<string, unknown>).WorkingDir = '/workdir/web/react-gui';
-      (value.HostConfig as Record<string, unknown>).NetworkMode = 'bridge';
+      const host = value.HostConfig as Record<string, unknown>;
+      host.NetworkMode = 'bridge';
+      host.ReadonlyRootfs = false;
+      const mounts = value.Mounts as Array<Record<string, unknown>>;
+      mounts[0]!.RW = true;
       return value;
     };
     const frontendCreatedRaw = (): Record<string, unknown> => ({ ...frontendRaw(), State: { Status: 'created', Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 0 } });

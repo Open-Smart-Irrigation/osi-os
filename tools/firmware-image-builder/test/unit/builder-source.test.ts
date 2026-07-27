@@ -11,6 +11,7 @@ import {
   builderImageReference,
   builderRuntimeArguments,
   parseCanonicalBuilderImageReference,
+  READ_ONLY_OPERATION_IDS,
   selectExactRepositoryDigest,
   sha256,
   validateBuiltBuilderImage,
@@ -67,6 +68,7 @@ describe('locked builder source', () => {
   it('accepts only the closed direct-runtime definition and rejects nested unknown or unsafe values', async () => {
     const definition = JSON.parse(await readFile(definitionPath, 'utf8')) as Record<string, unknown>;
     expect(() => validateExecutionDefinition(definition)).not.toThrow();
+    expect(definition.readOnlyOperationIds).toEqual(READ_ONLY_OPERATION_IDS);
     const mutations: Array<(candidate: Record<string, unknown>) => void> = [
       (candidate) => { (candidate.environment as Record<string, unknown>).HOME = '/home/buildbot'; },
       (candidate) => { (candidate.environment as Record<string, unknown>).PATH = '/host/bin'; },
@@ -77,6 +79,9 @@ describe('locked builder source', () => {
       (candidate) => { (candidate as Record<string, unknown>).argv = ['sh', '-c', 'echo unsafe']; },
       (candidate) => { (candidate as Record<string, unknown>).unknown = {}; },
       (candidate) => { (candidate.mount as Record<string, unknown>).destination = '/tmp'; },
+      (candidate) => { candidate.readOnlyOperationIds = []; },
+      (candidate) => { candidate.readOnlyOperationIds = ['verify-image', 'build-image']; },
+      (candidate) => { candidate.readOnlyOperationIds = ['build-image']; },
       (candidate) => { (candidate as Record<string, unknown>).operations = { 'build-image': ['make'] }; },
     ];
     for (const mutate of mutations) {
@@ -209,6 +214,12 @@ describe('locked builder source', () => {
         "    '--permission',",
         "    '--allow-fs-write=/tmp',",
       ),
+      probeContents.replace(
+        "Object.defineProperty(process, 'getBuiltinModule', {",
+        "Object.defineProperty(process, 'getBuiltinModuleRemoved', {",
+      ),
+      probeContents.replace('    writable: false,', '    writable: true,'),
+      probeContents.replace('    configurable: false,', '    configurable: true,'),
       `${probeContents}\nprocess.env.NODE_PATH = '/host/node_modules';\n`,
     ]) {
       expect(() => validateTrustedModuleProbeSource(drift)).toThrow();
@@ -669,6 +680,7 @@ describe('locked builder source', () => {
     expect(helperScript).toContain("require('sqlite3')");
     expect(helperScript).toContain("require('process')");
     expect(helperScript).toContain("require('node:child_process')");
+    expect(helperScript).toContain("process.getBuiltinModule('node:sqlite')");
     expect(helperScript).toContain(
       '@chirpstack/chirpstack-api/api/application_grpc_pb.js',
     );

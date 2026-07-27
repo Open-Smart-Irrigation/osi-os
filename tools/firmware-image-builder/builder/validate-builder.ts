@@ -24,6 +24,7 @@ const DOCKER_REPOSITORY = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9]\d{0,4})?(?:\/[
 export const TRUSTED_OPERATION_TOOL_RELATIVE_PATH = 'operations/osi-image-builder-tool.js';
 export const TRUSTED_MODULE_PROBE_RELATIVE_PATH =
   'operations/osi-image-builder-module-probe.js';
+export const READ_ONLY_OPERATION_IDS = Object.freeze(['verify-image'] as const);
 export const RUST_TARGETS = Object.freeze(['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const);
 const TARGET_PACKAGE_NAMES = Object.freeze(['musl:arm64', 'musl-dev:arm64', 'musl:armhf', 'musl-dev:armhf'] as const);
 
@@ -229,6 +230,38 @@ export function validateTrustedModuleProbeSource(contents: string): void {
     ...builtinClosure.map((name) => `  '${name}',`),
     ']);',
   ].join('\n');
+  const exactGetBuiltinModuleWrapper = `const ORIGINAL_GET_BUILTIN_MODULE = process.getBuiltinModule.bind(process);
+
+function sealedGetBuiltinModule(request) {
+  if (typeof request !== 'string' || !ALLOWED_ROOTFS_BUILTINS.includes(request)) {
+    throw new Error(\`rootfs Node module requested an unapproved builder builtin: \${request}\`);
+  }
+  if (request === 'fs' || request === 'node:fs') {
+    return ROOTFS_FILESYSTEM_CAPABILITY;
+  }
+  if (request === 'node:child_process') {
+    return ROOTFS_CHILD_PROCESS_CAPABILITY;
+  }
+  return ORIGINAL_GET_BUILTIN_MODULE(request);
+}
+Object.freeze(sealedGetBuiltinModule);`;
+  const exactGetBuiltinModuleSeal = `function sealProcessBuiltinAccess() {
+  Object.defineProperty(process, 'getBuiltinModule', {
+    value: sealedGetBuiltinModule,
+    writable: false,
+    enumerable: true,
+    configurable: false,
+  });
+  const descriptor = Object.getOwnPropertyDescriptor(process, 'getBuiltinModule');
+  if (
+    descriptor?.value !== sealedGetBuiltinModule
+    || descriptor.writable !== false
+    || descriptor.enumerable !== true
+    || descriptor.configurable !== false
+  ) {
+    throw new Error('probe process builtin access is not sealed');
+  }
+}`;
   if (!contents.startsWith('#!/usr/bin/env node\n')
     || !contents.includes("args.length !== 2 || args[0] !== '--rootfs-node-red'")
     || !contents.includes("sqlite3: Object.freeze({\n    packageName: 'osi-db-helper'")
@@ -250,6 +283,9 @@ export function validateTrustedModuleProbeSource(contents: string): void {
     || !contents.includes("process.permission.has('worker')")
     || !contents.includes("process.permission.has('wasi')")
     || !contents.includes("process.permission.has('addons')")
+    || !contents.includes(exactGetBuiltinModuleWrapper)
+    || !contents.includes(exactGetBuiltinModuleSeal)
+    || !contents.includes('    sealProcessBuiltinAccess();')
     || contents.includes('--allow-fs-write')
     || contents.includes('--allow-child-process')
     || contents.includes('--allow-worker')
@@ -265,7 +301,7 @@ export function validateExecutionDefinition(value: unknown, imageTemplate = '{{i
   const fail = (message: string): never => { throw new BuilderSourceError('BUILDER_DOCKERFILE_INVALID', message); };
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('Execution definition must be an object');
   const record = value as Record<string, unknown>;
-  const expectedTop = ['architecture', 'environment', 'image', 'mount', 'network', 'operationIds', 'runtime', 'schemaVersion', 'security', 'user', 'workdir'];
+  const expectedTop = ['architecture', 'environment', 'image', 'mount', 'network', 'operationIds', 'readOnlyOperationIds', 'runtime', 'schemaVersion', 'security', 'user', 'workdir'];
   if (!exactKeys(record, expectedTop)) fail('Execution definition contains unknown or missing top-level fields');
   if (record.schemaVersion !== 1 || record.runtime !== 'docker' || record.architecture !== 'linux/amd64' || record.user !== '<uid>:<gid>' || record.workdir !== '/workdir' || record.network !== 'bridge') fail('Execution definition runtime contract is invalid');
   if (!record.image || typeof record.image !== 'object' || Array.isArray(record.image) || !exactKeys(record.image as object, ['pullPolicy', 'reference']) || (record.image as Record<string, unknown>).pullPolicy !== 'never' || (record.image as Record<string, unknown>).reference !== imageTemplate) fail('Execution definition image contract is invalid');
@@ -276,6 +312,7 @@ export function validateExecutionDefinition(value: unknown, imageTemplate = '{{i
   const security = record.security;
   if (!security || typeof security !== 'object' || Array.isArray(security) || !exactKeys(security as object, ['capAdd', 'capDrop', 'devices', 'noNewPrivileges', 'pidsLimit', 'privileged', 'sockets', 'ulimit']) || JSON.stringify(security) !== JSON.stringify({ capDrop: ['ALL'], capAdd: [], devices: [], sockets: [], privileged: false, noNewPrivileges: true, pidsLimit: 4096, ulimit: 'nofile=1024:4096' })) fail('Execution definition security is invalid');
   if (!Array.isArray(record.operationIds) || JSON.stringify(record.operationIds) !== JSON.stringify(TRUSTED_OPERATION_IDS)) fail('Execution definition operation IDs are not synchronized with the trusted manifest');
+  if (!Array.isArray(record.readOnlyOperationIds) || JSON.stringify(record.readOnlyOperationIds) !== JSON.stringify(READ_ONLY_OPERATION_IDS)) fail('Execution definition read-only operation IDs are invalid');
 }
 
 export function builderImageReference(lock: Pick<BuilderLock, 'imageRepository' | 'imageDigest'>): string {
@@ -589,6 +626,18 @@ rm -f /tmp/osi-module-probe-child-marker
 status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
 test "$status" -eq 2
 test ! -e /tmp/osi-module-probe-child-marker
+cat > "$node_red/osi-db-helper/index.js" <<'EOF'
+'use strict';
+const sqlite = process.getBuiltinModule('node:sqlite');
+const marker = new sqlite.DatabaseSync('/tmp/osi-module-probe-sqlite-marker.db');
+marker.exec('CREATE TABLE marker (id INTEGER PRIMARY KEY)');
+marker.close();
+module.exports = {};
+EOF
+rm -f /tmp/osi-module-probe-sqlite-marker.db
+status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
+test "$status" -eq 2
+test ! -e /tmp/osi-module-probe-sqlite-marker.db
 rm -rf /workdir/openwrt /workdir/web /workdir/feeds /workdir/feeds.conf.default
 status=0; node "$tool" unknown-operation >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?; test "$status" -eq 2
 for operation in copy-feed-config verify-image mirror-gui; do

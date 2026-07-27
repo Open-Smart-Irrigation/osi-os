@@ -389,6 +389,34 @@ describe('trusted verify-image Node compatibility record', () => {
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('denies process.getBuiltinModule node:sqlite before it can create a host database', async () => {
+    const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-builtin-sqlite-'));
+    temporaryRoots.push(markerRoot);
+    const marker = join(markerRoot, 'marker.db');
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        "const builtinSqlite = process.getBuiltinModule('node:sqlite');",
+        `const markerDatabase = new builtinSqlite.DatabaseSync(${JSON.stringify(marker)});`,
+        "markerDatabase.exec('CREATE TABLE marker (id INTEGER PRIMARY KEY)');",
+        'markerDatabase.close();',
+      ].join('\n'),
+    })).rejects.toThrow(/unapproved builder builtin: node:sqlite/u);
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('seals process.getBuiltinModule while preserving approved harmless builtins', async () => {
+    const { result } = await runShippedOperation({
+      dbHelperPrefix: [
+        "const builtinDescriptor = Object.getOwnPropertyDescriptor(process, 'getBuiltinModule');",
+        "if (builtinDescriptor.writable !== false || builtinDescriptor.configurable !== false) throw new Error('getBuiltinModule is mutable');",
+        "const builtinCrypto = process.getBuiltinModule('node:crypto');",
+        "if (typeof builtinCrypto.createHash !== 'function') throw new Error('approved builtin unavailable');",
+      ].join('\n'),
+    });
+    expect(result.nodeResolution.find(({ packageName }) => packageName === 'osi-db-helper'))
+      .toMatchObject({ exportType: 'object' });
+  });
+
   it('does not allow a target helper to select a dependency from the builder host tree', async () => {
     await expect(runShippedOperation({
       dbHelperPrefix: "require('host-only-target-dependency');",

@@ -105,6 +105,21 @@ const NATIVE_DEPENDENCY_STUBS = Object.freeze({
     value: SQLITE3_INITIALIZER_STUB,
   }),
 });
+const ORIGINAL_GET_BUILTIN_MODULE = process.getBuiltinModule.bind(process);
+
+function sealedGetBuiltinModule(request) {
+  if (typeof request !== 'string' || !ALLOWED_ROOTFS_BUILTINS.includes(request)) {
+    throw new Error(`rootfs Node module requested an unapproved builder builtin: ${request}`);
+  }
+  if (request === 'fs' || request === 'node:fs') {
+    return ROOTFS_FILESYSTEM_CAPABILITY;
+  }
+  if (request === 'node:child_process') {
+    return ROOTFS_CHILD_PROCESS_CAPABILITY;
+  }
+  return ORIGINAL_GET_BUILTIN_MODULE(request);
+}
+Object.freeze(sealedGetBuiltinModule);
 
 function fail(message) {
   process.stderr.write(`osi-image-builder-module-probe: ${message}\n`);
@@ -142,6 +157,24 @@ function assertPermissionBoundary(nodeRed) {
     || !process.permission.has('fs.read', nodeRed)
   ) {
     throw new Error('probe process permissions are not read-only and fail-closed');
+  }
+}
+
+function sealProcessBuiltinAccess() {
+  Object.defineProperty(process, 'getBuiltinModule', {
+    value: sealedGetBuiltinModule,
+    writable: false,
+    enumerable: true,
+    configurable: false,
+  });
+  const descriptor = Object.getOwnPropertyDescriptor(process, 'getBuiltinModule');
+  if (
+    descriptor?.value !== sealedGetBuiltinModule
+    || descriptor.writable !== false
+    || descriptor.enumerable !== true
+    || descriptor.configurable !== false
+  ) {
+    throw new Error('probe process builtin access is not sealed');
   }
 }
 
@@ -294,6 +327,7 @@ async function main() {
     const nodeRed = args[1];
     requireCanonicalAbsolutePath(nodeRed, 'rootfs Node-RED path');
     assertPermissionBoundary(nodeRed);
+    sealProcessBuiltinAccess();
     process.stdout.write(`${JSON.stringify({ nodeResolution: probeModules(nodeRed) })}\n`);
   } catch (error) {
     const details = error && typeof error === 'object'

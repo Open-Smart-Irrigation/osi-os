@@ -1,6 +1,6 @@
 import { CommandExecutionError, createCommandExecutor, type CommandResult, type CommandRunOptions } from './command-executor.js';
 import { createOperationDefinition, hashOperationDefinition, type OperationArgvContext, type OperationDefinition } from './operation-registry.js';
-import { parseCanonicalBuilderImageReference, selectExactRepositoryDigest } from '../../builder/validate-builder.js';
+import { parseCanonicalBuilderImageReference, READ_ONLY_OPERATION_IDS, selectExactRepositoryDigest } from '../../builder/validate-builder.js';
 import type { BuilderErrorCode, JobState, TrustedOperationId } from '../../domain/types.js';
 import type { LogCleanupProof, OperationCleanupProof, RunnerWriteCommand } from '../../api/src/ownership.js';
 import type { JobRecord, JsonObject, OperationInput, StoredOperation } from '../../api/src/store.js';
@@ -389,6 +389,25 @@ function operationNetworkMode(options: DockerExecutorOptions): 'bridge' | 'none'
   return OFFLINE_OPERATION_IDS.has(options.operationId) ? 'none' : 'bridge';
 }
 
+function operationReadOnly(options: DockerExecutorOptions): boolean {
+  return (READ_ONLY_OPERATION_IDS as readonly string[]).includes(options.operationId);
+}
+
+function worktreeMount(options: DockerExecutorOptions): JsonObject {
+  return {
+    type: 'bind',
+    source: options.worktreePath,
+    destination: '/workdir',
+    readOnly: operationReadOnly(options),
+  };
+}
+
+function worktreeMountArgument(options: DockerExecutorOptions): string {
+  return `--mount=type=bind,source=${options.worktreePath},destination=/workdir${
+    operationReadOnly(options) ? ',readonly' : ''
+  }`;
+}
+
 function validateStartResult(result: CommandResult, expectedArgv: readonly string[]): { readonly startedAt: string; readonly finishedAt: string } {
   if (!Array.isArray(result.argv) || JSON.stringify(result.argv) !== JSON.stringify(expectedArgv) || typeof result.stdout !== 'string' || typeof result.stderr !== 'string' || typeof result.timedOut !== 'boolean' || (typeof result.exitCode !== 'number' && result.exitCode !== null) || (typeof result.signal !== 'string' && result.signal !== null)) fail('Docker start returned an incomplete command result');
   const startedAt = canonicalInstant(result.startedAt, 'Docker start startedAt');
@@ -414,9 +433,9 @@ function validateInspection(actual: DockerInspection, createdId: string, image: 
   const labels = { [JOB_LABEL]: options.jobId, [MANIFEST_LABEL]: options.manifestSha256 };
   if (actual.id !== createdId || actual.name !== options.containerName || actual.image !== options.imageReference || actual.imageId !== image.imageId) fail('Docker container identity or image proof does not match the locked definition');
   if (!exactRecord(actual.labels, labels)) fail('Docker container labels do not match');
-  if (actual.mounts.length !== 1 || actual.mounts[0]!.type !== 'bind' || actual.mounts[0]!.source !== options.worktreePath || actual.mounts[0]!.destination !== '/workdir' || actual.mounts[0]!.readOnly) fail('Docker container mount does not match the locked worktree bind');
+  if (actual.mounts.length !== 1 || actual.mounts[0]!.type !== 'bind' || actual.mounts[0]!.source !== options.worktreePath || actual.mounts[0]!.destination !== '/workdir' || actual.mounts[0]!.readOnly !== operationReadOnly(options)) fail('Docker container mount does not match the locked worktree bind');
   if (actual.user !== `${options.uid}:${options.gid}` || actual.workingDir !== definition.workingDirectory || actual.networkMode !== operationNetworkMode(options)) fail('Docker container user, workdir, or network does not match');
-  if (JSON.stringify(actual.capDrop) !== JSON.stringify(['ALL']) || actual.capAdd.length !== 0 || actual.privileged || actual.devices.length !== 0 || actual.securityOpt.length !== 1 || actual.securityOpt[0] !== 'no-new-privileges:true' || actual.readonlyRootfs || actual.pidsLimit !== 4096 || JSON.stringify(actual.ulimits) !== JSON.stringify([{ name: 'nofile', soft: 1024, hard: 4096 }])) fail('Docker container security does not match the locked definition');
+  if (JSON.stringify(actual.capDrop) !== JSON.stringify(['ALL']) || actual.capAdd.length !== 0 || actual.privileged || actual.devices.length !== 0 || actual.securityOpt.length !== 1 || actual.securityOpt[0] !== 'no-new-privileges:true' || actual.readonlyRootfs !== operationReadOnly(options) || actual.pidsLimit !== 4096 || JSON.stringify(actual.ulimits) !== JSON.stringify([{ name: 'nofile', soft: 1024, hard: 4096 }])) fail('Docker container security does not match the locked definition');
   if (!exactRecord(actual.environment, env(sourceEpoch))) fail('Docker container environment is not the exact fixed environment');
   if (phase === 'created') {
     if (actual.running || actual.status !== 'created' || actual.startedAt !== null || actual.finishedAt !== null || (actual.exitCode !== null && actual.exitCode !== 0)) fail('Docker create did not produce a pristine created container');
@@ -451,11 +470,11 @@ function runner(options: DockerExecutorOptions, build: (snapshot: RunnerLeaseSna
 }
 
 function security(options: DockerExecutorOptions, definition: OperationDefinition): JsonObject {
-  return { capDrop: ['ALL'], capAdd: [], devices: [], sockets: [], privileged: false, noNewPrivileges: true, pidsLimit: 4096, ulimit: 'nofile=1024:4096', user: `${options.uid}:${options.gid}`, workdir: definition.workingDirectory, network: operationNetworkMode(options) };
+  return { capDrop: ['ALL'], capAdd: [], devices: [], sockets: [], privileged: false, noNewPrivileges: true, readonlyRootfs: operationReadOnly(options), pidsLimit: 4096, ulimit: 'nofile=1024:4096', user: `${options.uid}:${options.gid}`, workdir: definition.workingDirectory, network: operationNetworkMode(options) };
 }
 
 function containerCommand(options: DockerExecutorOptions, definition: OperationDefinition, sourceEpoch: string, snapshot: RunnerLeaseSnapshot, lifecycle: 'created' | 'started' | 'stopped', id: string, labels: JsonObject, inspection: JsonObject, occurredAt: string, createdAt: string, startedAt?: string | null, stoppedAt?: string | null): RunnerWriteCommand {
-  return { kind: 'container', jobId: options.jobId, owner: snapshot.owner, runnerUnit: snapshot.unit, leaseExpiresAt: snapshot.leaseExpiresAt, at: occurredAt, lifecycle, containerId: id, containerName: options.containerName, imageDigest: options.imageDigest, labels, mount: { type: 'bind', source: options.worktreePath, destination: '/workdir', readOnly: false }, environment: env(sourceEpoch), security: security(options, definition), inspection, occurredAt, createdAt, startedAt, stoppedAt };
+  return { kind: 'container', jobId: options.jobId, owner: snapshot.owner, runnerUnit: snapshot.unit, leaseExpiresAt: snapshot.leaseExpiresAt, at: occurredAt, lifecycle, containerId: id, containerName: options.containerName, imageDigest: options.imageDigest, labels, mount: worktreeMount(options), environment: env(sourceEpoch), security: security(options, definition), inspection, occurredAt, createdAt, startedAt, stoppedAt };
 }
 
 function identityIsNull(job: DockerJobRead): boolean {
@@ -679,7 +698,7 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
       let persisted = false;
       try {
         const labels: JsonObject = { [JOB_LABEL]: options.jobId, [MANIFEST_LABEL]: options.manifestSha256 };
-        const created = await runDocker(options, ['create', `--name=${options.containerName}`, `--label=${JOB_LABEL}=${options.jobId}`, `--label=${MANIFEST_LABEL}=${options.manifestSha256}`, `--mount=type=bind,source=${options.worktreePath},destination=/workdir`, `--user=${options.uid}:${options.gid}`, `--workdir=${definition.workingDirectory}`, `--network=${operationNetworkMode(options)}`, '--platform=linux/amd64', '--cap-drop=ALL', '--security-opt=no-new-privileges:true', '--pids-limit=4096', '--ulimit=nofile=1024:4096', '--pull=never', ...Object.entries(env(sourceEpoch)).map(([key, value]) => `--env=${key}=${value}`), options.imageReference, ...argv]);
+        const created = await runDocker(options, ['create', `--name=${options.containerName}`, `--label=${JOB_LABEL}=${options.jobId}`, `--label=${MANIFEST_LABEL}=${options.manifestSha256}`, worktreeMountArgument(options), ...(operationReadOnly(options) ? ['--read-only'] : []), `--user=${options.uid}:${options.gid}`, `--workdir=${definition.workingDirectory}`, `--network=${operationNetworkMode(options)}`, '--platform=linux/amd64', '--cap-drop=ALL', '--security-opt=no-new-privileges:true', '--pids-limit=4096', '--ulimit=nofile=1024:4096', '--pull=never', ...Object.entries(env(sourceEpoch)).map(([key, value]) => `--env=${key}=${value}`), options.imageReference, ...argv]);
         id = containerId(requireSuccess(created, 'Docker create'));
         const inspectedResult = await inspectContainer(options, definition, id, image, sourceEpoch, 'created');
         const inspected = inspectedResult.inspection;
@@ -741,7 +760,7 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
         const operationError = outcome === 'failed' ? { code: lifecycleMismatch ? 'DOCKER_EXECUTION_DEFINITION_MISMATCH' : 'BUILD_FAILED', message: lifecycleMismatch ? 'Docker lifecycle inspection contradicts the attach result' : attachError ? 'Docker attach failed' : 'Docker operation exited unsuccessfully' } as const : null;
         const evidenceValue: JsonObject = { operationId: options.operationId, attempt: options.attempt, argv, argvHash, workingDirectory: definition.workingDirectory, containerId: id, inspection: stoppedJson, command: commandEvidence, outcome, ...(acceptedDisposition === null ? {} : { acceptedDisposition }), ...(operationError === null ? {} : { errorCode: operationError.code, error: operationError }) };
         const evidence = await options.evidence(evidenceValue);
-        const input: OperationInput = { operationId: options.operationId, attempt: options.attempt, argvHash, argv, startedAt, finishedAt: operationFinishedAt, containerId: id, containerName: options.containerName, containerImageDigest: options.imageDigest, containerLabelJobId: options.jobId, containerLabelManifestSha: options.manifestSha256, containerMount: { type: 'bind', source: options.worktreePath, destination: '/workdir', readOnly: false }, containerEnvironment: env(sourceEpoch), containerSecurity: security(options, definition), inspection: stoppedJson, timedOut: result.timedOut, lifecyclePhase: hasStarted ? 'stopped' : 'created', exitCode: result.exitCode, signal: result.signal, outcome, ...(acceptedDisposition === null ? {} : { acceptedDisposition }), evidencePath: evidence.path, evidenceSha256: evidence.sha256, ...(operationError === null ? {} : { errorCode: operationError.code, error: operationError }) };
+        const input: OperationInput = { operationId: options.operationId, attempt: options.attempt, argvHash, argv, startedAt, finishedAt: operationFinishedAt, containerId: id, containerName: options.containerName, containerImageDigest: options.imageDigest, containerLabelJobId: options.jobId, containerLabelManifestSha: options.manifestSha256, containerMount: worktreeMount(options), containerEnvironment: env(sourceEpoch), containerSecurity: security(options, definition), inspection: stoppedJson, timedOut: result.timedOut, lifecyclePhase: hasStarted ? 'stopped' : 'created', exitCode: result.exitCode, signal: result.signal, outcome, ...(acceptedDisposition === null ? {} : { acceptedDisposition }), evidencePath: evidence.path, evidenceSha256: evidence.sha256, ...(operationError === null ? {} : { errorCode: operationError.code, error: operationError }) };
         const completionAt = now(options);
         if (logs.verifiedAt > completionAt) fail('log proof is from the future relative to operation completion');
         runner(options, (snapshot) => ({ kind: 'operation-complete', jobId: options.jobId, owner: snapshot.owner, runnerUnit: snapshot.unit, leaseExpiresAt: snapshot.leaseExpiresAt, at: completionAt, expectedState: snapshot.expectedState, operationId: options.operationId, attempt: options.attempt, input }));
