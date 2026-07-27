@@ -28,6 +28,7 @@ import {
   type CleanupWorkerClock,
   type CleanupWorkerOptions,
   type CleanupWorkerResult,
+  validateCleanupWorkerArgv,
 } from './main.js';
 import {
   createRecoveryFileSystem,
@@ -159,6 +160,7 @@ interface FileIdentity {
 interface HashedFile extends FileIdentity {
   readonly sha256: string;
   readonly size: number;
+  readonly partial: 0 | 1;
 }
 
 function message(error: unknown): string {
@@ -375,15 +377,22 @@ async function hashFileHandle(handle: FileHandle, field: string): Promise<Hashed
   const hash = createHash('sha256');
   const buffer = Buffer.allocUnsafe(LOG_CHUNK_BYTES);
   let total = 0;
+  let lastByte: number | null = null;
   while (total < before.size) {
     const result = await handle.read(buffer, 0, Math.min(buffer.length, before.size - total), total);
     if (result.bytesRead <= 0) throw new Error(`${field} changed while hashing`);
     hash.update(buffer.subarray(0, result.bytesRead));
+    lastByte = buffer[result.bytesRead - 1] ?? null;
     total += result.bytesRead;
   }
   const after = await handle.stat();
   if (total !== before.size || after.size !== before.size || after.dev !== before.dev || after.ino !== before.ino) throw new Error(`${field} changed while hashing`);
-  return { ...fileIdentity(before), sha256: hash.digest('hex'), size: total };
+  return {
+    ...fileIdentity(before),
+    sha256: hash.digest('hex'),
+    size: total,
+    partial: total > 0 && lastByte !== 0x0a ? 1 : 0,
+  };
 }
 
 async function openRelativeFile(parent: FileHandle, relative: string, code: 'QUARANTINE_PENDING' | 'RECOVERY_LOG_GAP'): Promise<{ readonly file: FileHandle; readonly handles: readonly FileHandle[] }> {
@@ -571,9 +580,14 @@ function safeLogPath(jobId: string, value: string): readonly string[] {
   return parts;
 }
 
-async function hashLogFile(state: StateRootSnapshot, jobId: string, relativePath: string): Promise<HashedFile> {
+async function openHashedLogFile(
+  state: StateRootSnapshot,
+  jobId: string,
+  relativePath: string,
+): Promise<{ readonly physical: HashedFile; readonly handle: FileHandle }> {
   const parts = safeLogPath(jobId, relativePath);
   const handles: FileHandle[] = [];
+  let file: FileHandle | null = null;
   const root = await open(state.path, DIRECTORY_FLAGS);
   handles.push(root);
   try {
@@ -583,10 +597,16 @@ async function hashLogFile(state: StateRootSnapshot, jobId: string, relativePath
     const job = await openDirectoryChild(jobs, jobId, 'RECOVERY_LOG_GAP'); handles.push(job);
     const logs = await openDirectoryChild(job, 'logs', 'RECOVERY_LOG_GAP'); handles.push(logs);
     const opened = await openRelativeFile(logs, parts.join('/'), 'RECOVERY_LOG_GAP');
-    handles.push(opened.file, ...opened.handles);
-    return await hashFileHandle(opened.file, `log ${relativePath}`);
-  } finally {
+    handles.push(...opened.handles);
+    file = opened.file;
+    await file.sync();
+    const physical = await hashFileHandle(file, `log ${relativePath}`);
     await closeFileHandles(handles);
+    return { physical, handle: file };
+  } catch (error) {
+    await closeFileHandles(handles).catch(() => undefined);
+    await file?.close().catch(() => undefined);
+    throw error;
   }
 }
 
@@ -594,6 +614,7 @@ interface LogSealPlan {
   readonly row: LogRow;
   readonly stream: 'runner' | 'docker';
   readonly physical: HashedFile;
+  readonly handle: FileHandle;
   readonly tailOffset: number;
   readonly tailLength: number;
 }
@@ -637,6 +658,7 @@ async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stat
   void clock;
   return {
     seal: async (input): Promise<CleanupLogSeal> => stateRootSnapshot(async (state) => {
+      const heldLogFiles: FileHandle[] = [];
       db.exec('BEGIN IMMEDIATE');
       try {
         const rows = db.prepare('SELECT stream, generation, path, started_at, sealed_at, size_bytes, sha256 FROM job_log_generations WHERE job_id=? ORDER BY stream, generation LIMIT ?').all(input.jobId, MAX_LOG_GENERATIONS + 1) as unknown as LogRow[];
@@ -656,7 +678,9 @@ async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stat
             if (startedAt > input.at) throw workerError('RECOVERY_LOG_GAP', `${stream} log generation starts in the future`);
             const sealedAt = row.sealed_at === null ? null : canonicalInstant(row.sealed_at, `${stream} log sealedAt`);
             if (sealedAt !== null && sealedAt > input.at) throw workerError('RECOVERY_LOG_GAP', `${stream} log generation seal is from the future`);
-            const physical = await hashLogFile(state, input.jobId, row.path);
+            const opened = await openHashedLogFile(state, input.jobId, row.path);
+            const physical = opened.physical;
+            heldLogFiles.push(opened.handle);
             totalPhysicalBytes += physical.size;
             if (totalPhysicalBytes > MAX_TOTAL_LOG_BYTES) throw workerError('RECOVERY_LOG_GAP', 'cleanup log bytes exceed the bounded recovery limit');
             if (physical.size < row.size_bytes) throw workerError('RECOVERY_LOG_GAP', `${stream} log is shorter than persisted generation size`);
@@ -666,18 +690,20 @@ async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stat
             if (sealedAt !== null) {
               if (coveredEnd !== row.size_bytes) throw workerError('RECOVERY_LOG_GAP', `${stream} sealed log coverage is incomplete`);
             } else {
-              plans.push({ row, stream, physical, tailOffset: coveredEnd, tailLength: physical.size - coveredEnd });
+              plans.push({ row, stream, physical, handle: opened.handle, tailOffset: coveredEnd, tailLength: physical.size - coveredEnd });
             }
           }
           if (streamRows.length > 0) states[stream] = 'sealed';
         }
         for (const plan of plans) {
+          const stable = await hashFileHandle(plan.handle, `${plan.stream} log before seal`);
+          if (stable.size !== plan.physical.size || stable.sha256 !== plan.physical.sha256 || !sameIdentity(stable, plan.physical)) throw workerError('RECOVERY_LOG_GAP', `${plan.stream} log changed before seal`);
           if (plan.tailLength > 0) {
             const resized = db.prepare('UPDATE job_log_generations SET size_bytes=? WHERE job_id=? AND stream=? AND generation=? AND sealed_at IS NULL AND size_bytes=?').run(plan.physical.size, input.jobId, plan.stream, plan.row.generation, plan.row.size_bytes);
             if (Number(resized.changes) !== 1) throw workerError('RECOVERY_LOG_GAP', `${plan.stream} log size update CAS was lost`);
             const next = db.prepare('SELECT COALESCE(MAX(seq) + 1, 0) AS seq FROM job_events WHERE job_id=?').get(input.jobId) as { seq: number };
             const seq = numberField(next.seq, 'log event sequence');
-            db.prepare('INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at, stream, file_generation, byte_offset, byte_length, partial) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)').run(input.jobId, seq, 'log_orphan_tail', '{}', input.at, plan.stream, plan.row.generation, plan.tailOffset, plan.tailLength, 0);
+            db.prepare('INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at, stream, file_generation, byte_offset, byte_length, partial) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)').run(input.jobId, seq, 'log_orphan_tail', '{}', input.at, plan.stream, plan.row.generation, plan.tailOffset, plan.tailLength, stable.partial);
           }
           const sealed = db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=? AND stream=? AND generation=? AND sealed_at IS NULL AND sha256 IS NULL AND size_bytes=?').run(input.at, plan.physical.sha256, input.jobId, plan.stream, plan.row.generation, plan.physical.size);
           if (Number(sealed.changes) !== 1) throw workerError('RECOVERY_LOG_GAP', `${plan.stream} log seal CAS was lost`);
@@ -688,6 +714,8 @@ async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stat
         try { db.exec('ROLLBACK'); } catch (rollbackError) { throw workerError('RECOVERY_LOG_GAP', 'cleanup log rollback failed', rollbackError); }
         if (error instanceof CleanupWorkerError) throw error;
         throw workerError('RECOVERY_LOG_GAP', `cleanup log sealing failed: ${message(error)}`, error);
+      } finally {
+        await closeFileHandles(heldLogFiles);
       }
     }),
   };
@@ -877,6 +905,7 @@ export async function createCleanupProduction(options: CleanupProductionDependen
 }
 
 export async function runCleanupWorker(argv: readonly string[], options: CleanupProductionDependencies = {}): Promise<CleanupWorkerResult> {
+  validateCleanupWorkerArgv(argv);
   const composition = await createCleanupProduction(options);
   try { return await composition.run(argv); } finally { await composition.close(); }
 }

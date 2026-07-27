@@ -129,6 +129,13 @@ export class CleanupWorkerError extends Error {
   }
 }
 
+export function validateCleanupWorkerArgv(argv: readonly string[]): string {
+  if (!Array.isArray(argv) || argv.length !== 1 || typeof argv[0] !== 'string' || !ADMISSION_ID_PATTERN.test(argv[0])) {
+    throw new CleanupWorkerError('CLEANUP_ADMISSION_BLOCKED', 'cleanup worker requires exactly one valid admission ID argument');
+  }
+  return argv[0];
+}
+
 class CleanupActionGuardError extends CleanupWorkerError {
   constructor(message: string, options?: ErrorOptions) {
     super('CLEANUP_ADMISSION_BLOCKED', message, options);
@@ -667,10 +674,7 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
   }
 
   async function run(argv: readonly string[]): Promise<CleanupWorkerResult> {
-    if (!Array.isArray(argv) || argv.length !== 1 || typeof argv[0] !== 'string' || !ADMISSION_ID_PATTERN.test(argv[0])) {
-      throw new CleanupWorkerError('CLEANUP_ADMISSION_BLOCKED', 'cleanup worker requires exactly one valid admission ID argument');
-    }
-    const admissionId = argv[0];
+    const admissionId = validateCleanupWorkerArgv(argv);
     const resolved = resolveAdmission(admissionId);
     const at = canonicalInstant(options.clock.now(), 'cleanup worker start time');
     if (resolved.admission.expiresAt <= at) throw new CleanupWorkerError('CLEANUP_ADMISSION_BLOCKED', 'cleanup admission is expired');

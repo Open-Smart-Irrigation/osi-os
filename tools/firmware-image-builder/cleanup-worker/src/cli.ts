@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { runCleanupWorker } from './production.js';
-import type { CleanupWorkerResult } from './main.js';
+import { validateCleanupWorkerArgv, type CleanupWorkerResult } from './main.js';
 
 const MAX_ERROR_BYTES = 1_024;
 
@@ -25,7 +25,7 @@ export async function runCleanupWorkerCli(
   const run = options.run ?? ((args: readonly string[]) => runCleanupWorker(args));
   const writeStderr = options.writeStderr ?? ((text: string) => process.stderr.write(text));
   try {
-    await run(argv);
+    await run([validateCleanupWorkerArgv(argv)]);
     return 0;
   } catch (error) {
     writeStderr(`cleanup worker failed: ${errorText(error)}\n`);

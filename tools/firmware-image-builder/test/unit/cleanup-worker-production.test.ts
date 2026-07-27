@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +9,7 @@ import type { LoadedConfig } from '../../config/load.js';
 
 import { createRecoveryFileSystem } from '../../api/src/recovery.js';
 import { runCleanupWorkerCli } from '../../cleanup-worker/src/cli.js';
-import { createCleanupProduction } from '../../cleanup-worker/src/production.js';
+import { createCleanupProduction, runCleanupWorker } from '../../cleanup-worker/src/production.js';
 
 const NOW = '2026-07-27T12:00:00.000Z';
 const HASH = 'a'.repeat(64);
@@ -135,6 +135,7 @@ function logDatabase(rows: LogFixtureRow[], events: LogFixtureEvent[]) {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -315,9 +316,13 @@ describe('cleanup production composition', () => {
 
   it('seals bounded contiguous persisted log generations from the physical bytes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
-    const bytes = Buffer.from('runner cleanup log');
+    const bytes = Buffer.from('runner cleanup log\n');
     await mkdir(join(root, 'jobs', JOB, 'logs'), { recursive: true });
-    await writeFile(join(root, 'jobs', JOB, 'logs', 'runner-0.log'), bytes);
+    const logPath = join(root, 'jobs', JOB, 'logs', 'runner-0.log');
+    await writeFile(logPath, bytes);
+    const probe = await open(logPath, 'r');
+    const sync = vi.spyOn(Object.getPrototypeOf(probe) as { sync: () => Promise<void> }, 'sync');
+    await probe.close();
     const rows = [{
       stream: 'runner', generation: 0, path: 'logs/runner-0.log', started_at: NOW,
       sealed_at: null as string | null, size_bytes: bytes.length, sha256: null as string | null,
@@ -364,6 +369,7 @@ describe('cleanup production composition', () => {
     expect(resize).toHaveBeenCalledWith(bytes.length, JOB, 'runner', 0, bytes.length);
     expect(insertEvent).toHaveBeenCalledWith(JOB, 0, 'log_orphan_tail', '{}', NOW, 'runner', 0, 0, bytes.length, 0);
     expect(update).toHaveBeenCalledWith(NOW, createHash('sha256').update(bytes).digest('hex'), JOB, 'runner', 0, bytes.length);
+    expect(sync).toHaveBeenCalled();
     rows.splice(0, rows.length, ...Array.from({ length: 129 }, (_, generation) => ({
       stream: 'runner', generation, path: `logs/runner-${generation}.log`, started_at: NOW,
       sealed_at: NOW, size_bytes: 0, sha256: HASH,
@@ -374,6 +380,33 @@ describe('cleanup production composition', () => {
       at: NOW,
       snapshot: {} as never,
     })).rejects.toMatchObject({ code: 'RECOVERY_LOG_GAP' });
+    await composition.close();
+  });
+
+  it('marks an unterminated durable orphan tail as partial', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const bytes = Buffer.from('partial tail');
+    await mkdir(join(root, 'jobs', JOB, 'logs'), { recursive: true });
+    await writeFile(join(root, 'jobs', JOB, 'logs', 'runner-0.log'), bytes);
+    const rows: LogFixtureRow[] = [{
+      stream: 'runner',
+      generation: 0,
+      path: 'logs/runner-0.log',
+      started_at: NOW,
+      sealed_at: null,
+      size_bytes: 0,
+      sha256: null,
+    }];
+    const database = logDatabase(rows, []);
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const composition = await createCleanupProduction(deps(root, executor, vi.fn(), database.database));
+    await expect(composition.adapters.logSealer.seal({
+      jobId: JOB,
+      admissionId: ADMISSION,
+      at: NOW,
+      snapshot: {} as never,
+    })).resolves.toMatchObject({ runner: 'sealed', contiguous: true });
+    expect(database.insertEvent).toHaveBeenCalledWith(JOB, 0, 'log_orphan_tail', '{}', NOW, 'runner', 0, 0, bytes.length, 1);
     await composition.close();
   });
 
@@ -435,5 +468,17 @@ describe('cleanup production composition', () => {
     expect(await runCleanupWorkerCli([ADMISSION], { run: async () => { throw new Error(`${'x'.repeat(10_000)}\nsecret-line`); }, writeStderr: (text) => { stderr += text; } })).toBe(1);
     expect(Buffer.byteLength(stderr, 'utf8')).toBeLessThanOrEqual(1_024 + Buffer.byteLength('cleanup worker failed: \n', 'utf8'));
     expect(stderr).not.toContain('\nsecret-line');
+  });
+
+  it('rejects invalid argv before production composition or an injected CLI runner', async () => {
+    const loadStateRoot = vi.fn(async () => { throw new Error('composition must not start'); });
+    await expect(runCleanupWorker(['invalid'], { loadStateRoot })).rejects.toThrow('exactly one valid admission ID');
+    expect(loadStateRoot).not.toHaveBeenCalled();
+
+    const runner = vi.fn(async () => ({ status: 'completed' as const, jobId: JOB, admissionId: ADMISSION, exactContainerId: null }));
+    let stderr = '';
+    expect(await runCleanupWorkerCli(['invalid'], { run: runner, writeStderr: (text) => { stderr += text; } })).toBe(1);
+    expect(runner).not.toHaveBeenCalled();
+    expect(stderr).toContain('exactly one valid admission ID');
   });
 });
