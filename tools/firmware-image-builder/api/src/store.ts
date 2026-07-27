@@ -35,6 +35,17 @@ export { JSON_LIMITS } from './validation.js';
 export type { JsonObject, JsonPrimitive, JsonValue } from './validation.js';
 export const EVENT_PAGE_DEFAULT_LIMIT = 100;
 export const EVENT_PAGE_MAX_LIMIT = 1_000;
+export const CANCELLATION_PROTOCOL_EVENT_QUERY = `
+  SELECT job_id, seq, event_type, state, stage, payload_json, at,
+         stream, file_generation, byte_offset, byte_length, partial
+  FROM job_events INDEXED BY job_events_cancellation_protocol
+  WHERE job_id = ?
+    AND event_type = 'cleanup'
+    AND json_extract(payload_json, '$.kind')
+      IN ('cancellation-evidence', 'cancellation-cleanup')
+  ORDER BY seq
+  LIMIT 3
+`;
 type PublishState = 'not_started' | 'staged' | 'publishing' | 'published' | 'quarantined' | 'blocked';
 type StageOutcome = 'running' | 'passed' | 'failed' | 'cancelled' | 'interrupted';
 type LifecyclePhase = 'not_created' | 'created' | 'started' | 'stopped' | 'removed';
@@ -616,17 +627,9 @@ export class BuilderStore {
 
   getCancellationProtocolEvents(jobId: string): readonly EventRecord[] {
     this.#requireJob(jobId);
-    const rows = this.#db.prepare(`
-      SELECT job_id, seq, event_type, state, stage, payload_json, at,
-             stream, file_generation, byte_offset, byte_length, partial
-      FROM job_events
-      WHERE job_id = ?
-        AND event_type = 'cleanup'
-        AND json_extract(payload_json, '$.kind')
-          IN ('cancellation-evidence', 'cancellation-cleanup')
-      ORDER BY seq
-      LIMIT 3
-    `).all(jobId) as unknown as DbRow[];
+    const rows = this.#db.prepare(
+      CANCELLATION_PROTOCOL_EVENT_QUERY,
+    ).all(jobId) as unknown as DbRow[];
     return rows.map((row) => this.#mapEvent(row));
   }
 

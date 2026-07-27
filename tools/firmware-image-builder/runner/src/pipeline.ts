@@ -54,6 +54,8 @@ import type {
   CancellationBlockerCode,
   CancellationBudget,
   CancellationObservation,
+  ContainerCreateAuthorization,
+  ContainerCreateAuthorizationInput,
 } from './cancellation.js';
 import { CancellationBlockedError } from './cancellation.js';
 import { DockerCancellationRequestedError } from './docker-executor.js';
@@ -349,6 +351,9 @@ export interface PipelineInput {
 export interface PipelineCancellation {
   readonly isRequested: () => boolean;
   readonly cancellationBudget?: () => CancellationBudget;
+  readonly authorizeContainerCreate?: (
+    input: ContainerCreateAuthorizationInput,
+  ) => Promise<ContainerCreateAuthorization>;
   readonly authorizeActiveOperationStop?: () => Promise<ActiveOperationCancellationAuthorization>;
   readonly observeBetweenStages: (stage: PipelineStageName) => Promise<CancellationObservation>;
   readonly observeBetweenOperations: (operationId: TrustedOperationId) => Promise<CancellationObservation>;
@@ -1369,6 +1374,9 @@ export function createPipeline(input: PipelineInput): {
     } catch (error) {
       if (error instanceof DockerCancellationRequestedError) {
         if (input.cancellation === undefined) throw error;
+        if (error.observation !== null) {
+          throw new PipelineCancelled(error.observation);
+        }
         if (error.recoveryRequired) {
           if (!error.recoveryPersisted) {
             try {

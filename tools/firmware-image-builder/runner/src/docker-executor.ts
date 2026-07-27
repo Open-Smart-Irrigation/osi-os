@@ -4,7 +4,15 @@ import { OFFLINE_OPERATION_IDS, parseCanonicalBuilderImageReference, READ_ONLY_O
 import type { BuilderErrorCode, JobState, TrustedOperationId } from '../../domain/types.js';
 import type { LogCleanupProof, OperationCleanupProof, RunnerWriteCommand } from '../../api/src/ownership.js';
 import type { JobRecord, JsonObject, OperationInput, StoredOperation } from '../../api/src/store.js';
-import type { ActiveOperationCancellationAuthorization, CancellationBudget } from './cancellation.js';
+import {
+  CancellationBlockedError,
+  type ActiveOperationCancellationAuthorization,
+  type CancellationBlockerCode,
+  type CancellationBudget,
+  type CancellationObservation,
+  type ContainerCreateAuthorization,
+  type ContainerCreateAuthorizationInput,
+} from './cancellation.js';
 
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const JOB_LABEL = 'org.osi.image-builder.job-id';
@@ -131,6 +139,9 @@ export interface DockerExecutorOptions {
   readonly evidence: (value: JsonObject) => Promise<{ readonly path: string; readonly sha256: string }>;
   readonly finalizeLogs: (input: LogFinalizeInput) => Promise<LogCleanupProof>;
   readonly cancellationBudget?: () => CancellationBudget;
+  readonly authorizeContainerCreate: (
+    input: ContainerCreateAuthorizationInput,
+  ) => Promise<ContainerCreateAuthorization>;
   readonly authorizeCancellation?: () => Promise<ActiveOperationCancellationAuthorization>;
   readonly persistCancellationBlocker?: (reason: string) => Promise<void>;
   readonly classifyAcceptedResult?: (
@@ -174,14 +185,16 @@ export class DockerCancellationRequestedError extends Error {
   readonly code: 'CANCELLED' | 'DOCKER_CONTAINER_ORPHANED';
   readonly recoveryRequired: boolean;
   readonly recoveryPersisted: boolean;
-  readonly blockerCode: 'RUNNER_DISAPPEARED' | 'DOCKER_CONTAINER_ORPHANED';
+  readonly blockerCode: CancellationBlockerCode;
+  readonly observation: Extract<CancellationObservation, { readonly handled: true }> | null;
 
   constructor(
     message = 'Docker operation stopped cooperatively for cancellation',
     options: Readonly<{
       recoveryRequired?: boolean;
       recoveryPersisted?: boolean;
-      blockerCode?: 'RUNNER_DISAPPEARED' | 'DOCKER_CONTAINER_ORPHANED';
+      blockerCode?: CancellationBlockerCode;
+      observation?: Extract<CancellationObservation, { readonly handled: true }>;
     }> = {},
   ) {
     super(message);
@@ -189,6 +202,7 @@ export class DockerCancellationRequestedError extends Error {
     this.recoveryRequired = options.recoveryRequired ?? false;
     this.recoveryPersisted = options.recoveryPersisted ?? false;
     this.blockerCode = options.blockerCode ?? 'DOCKER_CONTAINER_ORPHANED';
+    this.observation = options.observation ?? null;
     this.code = this.recoveryRequired ? 'DOCKER_CONTAINER_ORPHANED' : 'CANCELLED';
   }
 }
@@ -486,6 +500,7 @@ function validateOptions(options: DockerExecutorOptions): OperationDefinition {
   if (!Number.isSafeInteger(options.maxCaptureBytes) || options.maxCaptureBytes < 1 || options.maxCaptureBytes > 16 * 1024 * 1024) fail('operation capture limit is invalid');
   if (typeof options.evidence !== 'function') fail('immutable evidence writer is required');
   if (typeof options.finalizeLogs !== 'function') fail('internal log finalizer is required');
+  if (typeof options.authorizeContainerCreate !== 'function') fail('pre-container create authorization is required');
   if (
     options.classifyAcceptedResult !== undefined
     && (
@@ -835,7 +850,33 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
       await proveLabelAbsent(options);
       const startedAt = now(options);
       const argvHash = hashOperationDefinition(definition);
-      runner(options, (snapshot) => ({ kind: 'operation-begin', jobId: options.jobId, owner: snapshot.owner, runnerUnit: snapshot.unit, leaseExpiresAt: snapshot.leaseExpiresAt, at: startedAt, expectedState: snapshot.expectedState, operationId: options.operationId, attempt: options.attempt, argvHash, argv, startedAt }));
+      let createAuthorization: ContainerCreateAuthorization;
+      try {
+        const authorizationLease = lease(options);
+        createAuthorization = await options.authorizeContainerCreate({
+          lease: authorizationLease,
+          operationId: options.operationId,
+          attempt: options.attempt,
+          argvHash,
+          argv,
+          startedAt,
+        });
+      } catch (error) {
+        if (error instanceof CancellationBlockedError) {
+          throw new DockerCancellationRequestedError(error.message, {
+            recoveryRequired: true,
+            recoveryPersisted: error.blockerCode !== 'RUNNER_DISAPPEARED',
+            blockerCode: error.blockerCode,
+          });
+        }
+        throw error;
+      }
+      if (!createAuthorization.authorized) {
+        throw new DockerCancellationRequestedError(
+          'Docker container creation was cancelled before authorization',
+          { observation: createAuthorization.observation },
+        );
+      }
       let id: string | null = null;
       let persisted = false;
       try {

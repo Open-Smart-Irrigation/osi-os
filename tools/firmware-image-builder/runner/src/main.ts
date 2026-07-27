@@ -1953,6 +1953,12 @@ async function createProductionComposition(
             deadline: null,
             remainingMs: null,
           },
+          authorizeContainerCreate: async (input) => {
+            if (cancellation?.authorizeContainerCreate === undefined) {
+              throw new Error('runner pre-container authorization is unavailable');
+            }
+            return cancellation.authorizeContainerCreate(input);
+          },
           authorizeCancellation: async () => {
             if (cancellation?.authorizeActiveOperationStop === undefined) {
               throw new Error('runner cancellation authorization is unavailable');
@@ -2025,6 +2031,9 @@ async function createProductionComposition(
         } catch (error) {
           executorError = error;
         }
+        if (executorError instanceof DockerCancellationRequestedError) {
+          throw executorError;
+        }
         const persisted = store.getOperation(
           context.job.jobId,
           operationId,
@@ -2032,9 +2041,6 @@ async function createProductionComposition(
         );
         if (persisted === null) {
           throw executorError ?? new Error('Docker executor did not persist an operation');
-        }
-        if (executorError instanceof DockerCancellationRequestedError) {
-          throw executorError;
         }
         const execution = mapOperation(
           persisted,

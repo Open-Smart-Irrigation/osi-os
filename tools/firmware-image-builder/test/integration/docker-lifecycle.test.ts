@@ -96,6 +96,7 @@ describe('Docker lifecycle integration capability', () => {
       leaseSnapshot: () => ({ owner: 'runner', unit: 'osi-image-builder-runner@integration-job.service', leaseExpiresAt: '2026-07-24T10:10:00.000Z', expectedState: 'starting' }),
       evidence: async () => ({ path: 'evidence/integration.json', sha256: 'c'.repeat(64) }),
       finalizeLogs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt: '2026-07-24T10:00:00.000Z' }),
+      authorizeContainerCreate: async () => ({ authorized: true }),
     }).run();
     expect(result.available).toBe(false);
     expect(result.mutationCount).toBe(0);
@@ -126,6 +127,28 @@ describe('Docker lifecycle integration capability', () => {
       clock: (() => { let tick = 0; return () => new Date(Date.parse(NOW) + tick++ * 1000).toISOString(); })(),
       evidence: async () => ({ path: 'evidence/integration.json', sha256: 'd'.repeat(64) }),
       finalizeLogs: async ({ operationFinishedAt }) => ({ runner: 'absent', docker: 'absent', verifiedAt: operationFinishedAt }),
+      authorizeContainerCreate: async (input) => {
+        const job = store.getJob('integration-job');
+        if (!job.runnerLeaseOwner || !job.runnerUnit || !job.runnerLeaseExpiresAt) {
+          throw new Error('lease missing');
+        }
+        const authorization = ownership.runnerWrite({
+          kind: 'operation-begin',
+          jobId: 'integration-job',
+          owner: job.runnerLeaseOwner,
+          runnerUnit: job.runnerUnit,
+          leaseExpiresAt: job.runnerLeaseExpiresAt,
+          at: input.startedAt,
+          expectedState: input.lease.expectedState,
+          operationId: input.operationId,
+          attempt: input.attempt,
+          argvHash: input.argvHash,
+          argv: input.argv,
+          startedAt: input.startedAt,
+        });
+        if (!authorization.ok) throw new Error('operation authorization failed');
+        return { authorized: true };
+      },
     }).run();
     expect(result).toMatchObject({ available: true, outcome: 'passed', containerId: CONTAINER_ID });
     expect(store.getJob('integration-job')).toMatchObject({ containerId: null, containerName: null, containerStartedAt: null, containerStoppedAt: null, containerRemovedAt: null, containerCleanupOutcome: null });

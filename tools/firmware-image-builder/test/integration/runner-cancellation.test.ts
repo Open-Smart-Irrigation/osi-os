@@ -138,6 +138,48 @@ function appendUnrelatedEvents(
   }
 }
 
+function persistSealedLogCoverage(
+  fixtureValue: Awaited<ReturnType<typeof fixture>>,
+): void {
+  fixtureValue.db.exec('BEGIN IMMEDIATE');
+  try {
+    const insertGeneration = fixtureValue.db.prepare(
+      'INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, size_bytes) VALUES (?, ?, 0, ?, ?, 1)',
+    );
+    const insertEvent = fixtureValue.db.prepare(
+      "INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at, stream, file_generation, byte_offset, byte_length, partial) VALUES (?, ?, 'log', ?, ?, '{}', ?, ?, 0, 0, 1, 0)",
+    );
+    for (const stream of ['runner', 'docker'] as const) {
+      insertGeneration.run(
+        fixtureValue.input.jobId,
+        stream,
+        `logs/${stream}-0.log`,
+        NOW,
+      );
+      const current = fixtureValue.store.getJob(fixtureValue.input.jobId);
+      insertEvent.run(
+        fixtureValue.input.jobId,
+        fixtureValue.store.getNextEventSequence(fixtureValue.input.jobId),
+        current.state,
+        current.currentStage,
+        '2026-07-27T09:00:01.500Z',
+        stream,
+      );
+    }
+    fixtureValue.db.prepare(
+      'UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=?',
+    ).run(
+      '2026-07-27T09:00:02.000Z',
+      SHA64,
+      fixtureValue.input.jobId,
+    );
+    fixtureValue.db.exec('COMMIT');
+  } catch (error) {
+    fixtureValue.db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 describe('runner cancellation with the persisted ownership store', () => {
   it('commits cancellation authorization before fresh exact inspection and exposes no Docker mutation', async () => {
     const fixtureValue = await fixture({ cancellation: false });
@@ -208,6 +250,106 @@ describe('runner cancellation with the persisted ownership store', () => {
     ]);
     expect(stop).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
+    fixtureValue.db.close();
+  });
+
+  it('lets a committed API cancellation beat the pre-container operation authorization CAS', async () => {
+    const fixtureValue = await fixture({ cancellation: false });
+    const competingDb = openBuilderDatabase(join(fixtureValue.directory, 'jobs.sqlite'));
+    const competingOwnership = new OwnershipStore(competingDb);
+    const stop = vi.fn(async () => undefined);
+    const remove = vi.fn(async () => undefined);
+    let cancellationCommitted = false;
+    const ownership = {
+      runnerWrite: (command: Parameters<typeof fixtureValue.ownership.runnerWrite>[0]) => {
+        if (command.kind === 'operation-begin' && !cancellationCommitted) {
+          cancellationCommitted = true;
+          expect(competingOwnership.apiWrite({
+            kind: 'request-cancellation',
+            jobId: fixtureValue.input.jobId,
+            reason: 'operator at create barrier',
+            at: '2026-07-27T09:00:02.000Z',
+          }).ok).toBe(true);
+        }
+        return fixtureValue.ownership.runnerWrite(command);
+      },
+    };
+    const controller = createRunnerCancellation({
+      jobId: fixtureValue.input.jobId,
+      runnerUnit: `osi-image-builder-runner@${fixtureValue.input.jobId}.service`,
+      owner: 'runner-integration',
+      leaseExpiresAt: () => '2026-07-27T09:10:00.000Z',
+      store: fixtureValue.store,
+      ownership,
+      docker: {
+        inspect: async () => { throw new Error('pre-container cancellation must not inspect an exact container'); },
+        stop,
+        waitForStopped: async () => { throw new Error('pre-container cancellation must not wait for a container'); },
+        remove,
+        listByLabels: async () => [],
+      },
+      evidence: async () => ({
+        path: `jobs/${fixtureValue.input.jobId}/evidence/cancellation.json`,
+        sha256: SHA64,
+      }),
+      cleanup: {
+        staging: async () => ({ kind: 'absent', path: null }),
+        logs: async () => fixtureValue.ownership.cancellationLogProof(
+          fixtureValue.input.jobId,
+          '2026-07-27T09:00:03.000Z',
+        ),
+      },
+      clock: () => '2026-07-27T09:00:03.000Z',
+      signals: { on: () => undefined, off: () => undefined },
+    });
+
+    const result = await (controller as typeof controller & {
+      authorizeContainerCreate: (input: {
+        readonly lease: {
+          readonly owner: string;
+          readonly unit: string;
+          readonly leaseExpiresAt: string;
+          readonly expectedState: 'starting';
+        };
+        readonly operationId: 'verify-image';
+        readonly attempt: number;
+        readonly argvHash: string;
+        readonly argv: readonly string[];
+        readonly startedAt: string;
+      }) => Promise<{
+        readonly authorized: boolean;
+        readonly observation?: { readonly state: 'cancelled' };
+      }>;
+    }).authorizeContainerCreate({
+      lease: {
+        owner: 'runner-integration',
+        unit: `osi-image-builder-runner@${fixtureValue.input.jobId}.service`,
+        leaseExpiresAt: '2026-07-27T09:10:00.000Z',
+        expectedState: 'starting',
+      },
+      operationId: 'verify-image',
+      attempt: 1,
+      argvHash: SHA64,
+      argv: ['verify-image'],
+      startedAt: '2026-07-27T09:00:03.000Z',
+    });
+
+    expect(result).toMatchObject({
+      authorized: false,
+      observation: { state: 'cancelled' },
+    });
+    expect(stop).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(fixtureValue.store.getOperation(
+      fixtureValue.input.jobId,
+      'verify-image',
+      1,
+    )).toBeNull();
+    expect(fixtureValue.store.getJob(fixtureValue.input.jobId)).toMatchObject({
+      state: 'cancelled',
+      containerId: null,
+    });
+    competingDb.close();
     fixtureValue.db.close();
   });
 
@@ -501,7 +643,10 @@ describe('runner cancellation with the persisted ownership store', () => {
       evidence: async () => { throw new Error('retry must reuse the immutable evidence file'); },
       cleanup: {
         staging: async () => { throw new Error('retry must reuse persisted staging proof'); },
-        logs: async () => { throw new Error('retry must reuse persisted log proof'); },
+        logs: async () => fixtureValue.ownership.cancellationLogProof(
+          fixtureValue.input.jobId,
+          '2026-07-27T09:00:06.000Z',
+        ),
       },
       clock: () => '2026-07-27T09:00:06.000Z',
       signals: { on: () => undefined, off: () => undefined },
@@ -518,6 +663,131 @@ describe('runner cancellation with the persisted ownership store', () => {
       (event) => event.eventType === 'cleanup' && event.payload.kind === 'cancellation-evidence',
     )).toEqual([evidenceEvent]);
     expect(fixtureValue.store.getJob(fixtureValue.input.jobId)).toMatchObject({ state: 'cancelled', containerId: null });
+    fixtureValue.db.close();
+  });
+
+  it.each([
+    'sealed generation addition',
+    'sealed event replacement',
+  ] as const)('blocks %s before removing a container on cancellation restart', async (mutation) => {
+    const fixtureValue = await fixture({ cancellation: false });
+    persistContainer(fixtureValue, 'created');
+    persistContainer(fixtureValue, 'stopped');
+    persistSealedLogCoverage(fixtureValue);
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'request-cancellation',
+      jobId: fixtureValue.input.jobId,
+      reason: 'operator',
+      at: '2026-07-27T09:00:03.000Z',
+    }).ok).toBe(true);
+    const stoppedContainer = {
+      id: CONTAINER_ID,
+      name: CONTAINER_NAME,
+      imageDigest: SHA64,
+      labels: {
+        'org.osi.image-builder.job-id': fixtureValue.input.jobId,
+        'org.osi.image-builder.manifest-sha': SHA64,
+      },
+      running: false,
+      status: 'exited',
+      createdAt: LATER,
+      startedAt: LATER,
+      stoppedAt: '2026-07-27T09:00:02.000Z',
+    };
+    let inspectCalls = 0;
+    const first = createRunnerCancellation({
+      jobId: fixtureValue.input.jobId,
+      runnerUnit: `osi-image-builder-runner@${fixtureValue.input.jobId}.service`,
+      owner: 'runner-integration',
+      leaseExpiresAt: () => '2026-07-27T09:10:00.000Z',
+      store: fixtureValue.store,
+      ownership: fixtureValue.ownership,
+      docker: {
+        inspect: async () => {
+          inspectCalls += 1;
+          if (inspectCalls === 1) return stoppedContainer;
+          throw new Error('injected crash after evidence commit and before rm');
+        },
+        stop: async () => { throw new Error('stopped container must not be stopped again'); },
+        waitForStopped: async () => { throw new Error('stopped container must not be waited again'); },
+        remove: async () => { throw new Error('first attempt must crash before rm'); },
+        listByLabels: async () => [],
+      },
+      evidence: async () => ({
+        path: `jobs/${fixtureValue.input.jobId}/evidence/cancellation.json`,
+        sha256: SHA64,
+      }),
+      cleanup: {
+        staging: async () => ({ kind: 'absent', path: null }),
+        logs: async () => fixtureValue.ownership.cancellationLogProof(
+          fixtureValue.input.jobId,
+          '2026-07-27T09:00:05.000Z',
+        ),
+      },
+      clock: () => '2026-07-27T09:00:05.000Z',
+      signals: { on: () => undefined, off: () => undefined },
+    });
+
+    await expect(first.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    });
+    expect(fixtureValue.store.getCancellationProtocolEvents(
+      fixtureValue.input.jobId,
+    )).toHaveLength(1);
+
+    if (mutation === 'sealed generation addition') {
+      fixtureValue.db.prepare(
+        'INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, sealed_at, size_bytes, sha256) VALUES (?, ?, 1, ?, ?, ?, 0, ?)',
+      ).run(
+        fixtureValue.input.jobId,
+        'runner',
+        'logs/runner-1.log',
+        '2026-07-27T09:00:05.500Z',
+        '2026-07-27T09:00:05.500Z',
+        'd'.repeat(64),
+      );
+    } else {
+      fixtureValue.db.exec('DROP TRIGGER job_events_immutable_update_guard');
+      fixtureValue.db.prepare(
+        "UPDATE job_events SET event_type='log_orphan_tail' WHERE job_id=? AND stream='runner' AND file_generation=0",
+      ).run(fixtureValue.input.jobId);
+    }
+
+    const remove = vi.fn(async () => undefined);
+    const second = createRunnerCancellation({
+      jobId: fixtureValue.input.jobId,
+      runnerUnit: `osi-image-builder-runner@${fixtureValue.input.jobId}.service`,
+      owner: 'runner-integration',
+      leaseExpiresAt: () => '2026-07-27T09:10:00.000Z',
+      store: fixtureValue.store,
+      ownership: fixtureValue.ownership,
+      docker: {
+        inspect: async () => stoppedContainer,
+        stop: async () => { throw new Error('restart must not stop durable stopped identity'); },
+        waitForStopped: async () => { throw new Error('restart must not wait for durable stopped identity'); },
+        remove,
+        listByLabels: async () => [],
+      },
+      evidence: async () => { throw new Error('restart must reuse immutable evidence'); },
+      cleanup: {
+        staging: async () => { throw new Error('restart must reuse staging proof'); },
+        logs: async () => fixtureValue.ownership.cancellationLogProof(
+          fixtureValue.input.jobId,
+          '2026-07-27T09:00:06.000Z',
+        ),
+      },
+      clock: () => '2026-07-27T09:00:06.000Z',
+      signals: { on: () => undefined, off: () => undefined },
+    });
+
+    await expect(second.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'RECOVERY_LOG_GAP',
+    });
+    expect(remove).not.toHaveBeenCalled();
+    expect(fixtureValue.store.getJob(fixtureValue.input.jobId)).toMatchObject({
+      state: 'cancel_requested',
+      containerId: CONTAINER_ID,
+    });
     fixtureValue.db.close();
   });
 

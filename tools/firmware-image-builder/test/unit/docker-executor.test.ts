@@ -152,6 +152,24 @@ function options(executor: DockerCommandExecutor, overrides: Partial<DockerExecu
     clock: () => NOW,
     evidence: async () => ({ path: 'evidence/operation-1.json', sha256: 'c'.repeat(64) }),
     finalizeLogs: async () => ({ runner: 'absent', docker: 'absent', verifiedAt: NOW }),
+    authorizeContainerCreate: async (input) => {
+      const authorization = ownershipWriter({
+        kind: 'operation-begin',
+        jobId: 'job-1',
+        owner: input.lease.owner,
+        runnerUnit: input.lease.unit,
+        leaseExpiresAt: input.lease.leaseExpiresAt,
+        at: input.startedAt,
+        expectedState: input.lease.expectedState,
+        operationId: input.operationId,
+        attempt: input.attempt,
+        argvHash: input.argvHash,
+        argv: input.argv,
+        startedAt: input.startedAt,
+      });
+      if (!authorization.ok) throw new Error('test create authorization was rejected');
+      return { authorized: true };
+    },
     ...rest,
   };
   if (result.cancellationBudget !== undefined && result.authorizeCancellation === undefined) {
@@ -1255,6 +1273,122 @@ describe('DockerExecutor', () => {
     await expect(createDockerExecutor(options(labelDocker, { ownership: labelOwnership })).run()).rejects.toThrow(/label/i);
     expect(labelOwnership.runnerWrite).not.toHaveBeenCalled();
     expect(labelDocker.calls.map((call) => call[1])).toEqual(['version', 'image', 'ps']);
+  });
+
+  it('does not create a container when cancellation commits during pre-create setup', async () => {
+    const baseDocker = fakeDocker(successfulResponses());
+    let releaseLabelProof!: () => void;
+    let labelProofStarted!: () => void;
+    const labelProofReached = new Promise<void>((resolve) => {
+      labelProofStarted = resolve;
+    });
+    const labelProofRelease = new Promise<void>((resolve) => {
+      releaseLabelProof = resolve;
+    });
+    let cancellationRequested = false;
+    const docker: DockerCommandExecutor & { calls: string[][] } = {
+      calls: baseDocker.calls,
+      run: vi.fn(async (argv, runOptions) => {
+        if (argv[1] === 'ps') {
+          labelProofStarted();
+          await labelProofRelease;
+        }
+        return baseDocker.run(argv, runOptions);
+      }),
+    };
+    const writes: RunnerWriteCommand[] = [];
+    const authorizeContainerCreate = vi.fn(async () => cancellationRequested
+      ? {
+          authorized: false as const,
+          observation: {
+            requested: true as const,
+            handled: true as const,
+            state: 'cancelled' as const,
+            evidencePath: 'jobs/job-1/evidence/cancellation.json',
+            evidenceSha256: 'f'.repeat(64),
+          },
+        }
+      : { authorized: true as const });
+    const run = createDockerExecutor({
+      ...options(docker, {
+        ownership: {
+          runnerWrite: (command) => {
+            writes.push(command);
+            return { ok: true, kind: 'committed', eventSeq: 1 };
+          },
+        },
+      }),
+      authorizeContainerCreate,
+    } as DockerExecutorOptions).run();
+
+    await labelProofReached;
+    cancellationRequested = true;
+    releaseLabelProof();
+
+    await expect(run).rejects.toMatchObject({
+      code: 'CANCELLED',
+      observation: {
+        requested: true,
+        handled: true,
+        state: 'cancelled',
+      },
+    });
+    expect(authorizeContainerCreate).toHaveBeenCalledOnce();
+    expect(writes).toEqual([]);
+    expect(docker.calls.some((call) => ['create', 'start', 'stop', 'rm'].includes(call[1] ?? ''))).toBe(false);
+  });
+
+  it('uses the immediate coordinator checkpoint as the final boundary before create', async () => {
+    const docker = fakeDocker(successfulResponses());
+    const writes: RunnerWriteCommand[] = [];
+    const authorizeContainerCreate = vi.fn(async () => ({
+      authorized: false as const,
+      observation: {
+        requested: true as const,
+        handled: true as const,
+        state: 'cancelled' as const,
+        evidencePath: 'jobs/job-1/evidence/cancellation.json',
+        evidenceSha256: 'f'.repeat(64),
+      },
+    }));
+
+    await expect(createDockerExecutor({
+      ...options(docker, {
+        ownership: {
+          runnerWrite: (command) => {
+            writes.push(command);
+            return { ok: true, kind: 'committed', eventSeq: 1 };
+          },
+        },
+      }),
+      authorizeContainerCreate,
+    } as DockerExecutorOptions).run()).rejects.toMatchObject({
+      code: 'CANCELLED',
+      observation: { state: 'cancelled' },
+    });
+
+    expect(docker.calls.map((call) => call[1])).toEqual(['version', 'image', 'ps']);
+    expect(writes).toEqual([]);
+  });
+
+  it('surfaces pre-create cancellation recovery without Docker mutation', async () => {
+    const docker = fakeDocker(successfulResponses());
+    const authorizeContainerCreate = vi.fn(async () => {
+      throw new CancellationBlockedError(
+        'pre-container cancellation ownership was lost',
+        'RUNNER_DISAPPEARED',
+      );
+    });
+
+    await expect(createDockerExecutor({
+      ...options(docker),
+      authorizeContainerCreate,
+    } as DockerExecutorOptions).run()).rejects.toMatchObject({
+      code: 'DOCKER_CONTAINER_ORPHANED',
+      recoveryRequired: true,
+      blockerCode: 'RUNNER_DISAPPEARED',
+    });
+    expect(docker.calls.map((call) => call[1])).toEqual(['version', 'image', 'ps']);
   });
 
   it.each(['containerStartedAt', 'containerStoppedAt', 'containerRemovedAt', 'containerCleanupOutcome'] as const)('rejects stale %s before create with no ownership write', async (field) => {

@@ -57,6 +57,27 @@ export interface ActiveOperationCancellationAuthorization {
   readonly running: boolean;
 }
 
+export interface ContainerCreateAuthorizationInput {
+  readonly lease: Readonly<{
+    readonly owner: string;
+    readonly unit: string;
+    readonly leaseExpiresAt: string;
+    readonly expectedState: JobState;
+  }>;
+  readonly operationId: TrustedOperationId;
+  readonly attempt: number;
+  readonly argvHash: string;
+  readonly argv: readonly string[];
+  readonly startedAt: string;
+}
+
+export type ContainerCreateAuthorization =
+  | Readonly<{ readonly authorized: true }>
+  | Readonly<{
+      readonly authorized: false;
+      readonly observation: Extract<CancellationObservation, { readonly handled: true }>;
+    }>;
+
 export interface RunnerCancellationSignals {
   readonly on: (signal: 'SIGUSR1', listener: () => void) => void;
   readonly off: (signal: 'SIGUSR1', listener: () => void) => void;
@@ -158,6 +179,18 @@ function exactJson(left: unknown, right: unknown): boolean {
   const rightKeys = Object.keys(rightRecord).sort();
   return JSON.stringify(leftKeys) === JSON.stringify(rightKeys)
     && leftKeys.every((key) => exactJson(leftRecord[key], rightRecord[key]));
+}
+
+function exactLogBinding(
+  left: CancellationLogProof,
+  right: CancellationLogProof,
+): boolean {
+  return left.runner === right.runner
+    && left.docker === right.docker
+    && exactJson(
+      'generations' in left ? left.generations : { runner: [], docker: [] },
+      'generations' in right ? right.generations : { runner: [], docker: [] },
+    );
 }
 
 function labels(job: CancellationJob): JsonObject {
@@ -451,6 +484,9 @@ function recoveredCancellationRecord(
 export function createRunnerCancellation(options: RunnerCancellationOptions): {
   readonly isRequested: () => boolean;
   readonly cancellationBudget: () => CancellationBudget;
+  readonly authorizeContainerCreate: (
+    input: ContainerCreateAuthorizationInput,
+  ) => Promise<ContainerCreateAuthorization>;
   readonly authorizeActiveOperationStop: () => Promise<ActiveOperationCancellationAuthorization>;
   readonly observeBetweenStages: (stage: PipelineStageName) => Promise<CancellationObservation>;
   readonly observeBetweenOperations: (operationId: TrustedOperationId) => Promise<CancellationObservation>;
@@ -645,10 +681,7 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
           blockedPhase = 'log coverage';
           blockedCode = 'RECOVERY_LOG_GAP';
           const currentLogs = await options.cleanup.logs();
-          if (
-            currentLogs.runner !== protocol.cleanupProof.logs.runner
-            || currentLogs.docker !== protocol.cleanupProof.logs.docker
-          ) {
+          if (!exactLogBinding(currentLogs, protocol.cleanupProof.logs)) {
             throw new CancellationBlockedError('persisted log generations changed after cancellation cleanup', 'RECOVERY_LOG_GAP');
           }
           blockedPhase = 'terminal ownership';
@@ -719,9 +752,19 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
           if (observed?.running === true) {
             throw new CancellationIdentityError('Docker container is running after durable stopped evidence');
           }
+          blockedPhase = 'log coverage';
+          blockedCode = 'RECOVERY_LOG_GAP';
+          const currentLogs = await options.cleanup.logs();
+          if (!exactLogBinding(currentLogs, protocol.evidence.logs)) {
+            throw new CancellationBlockedError(
+              'persisted log generations changed after cancellation evidence',
+              'RECOVERY_LOG_GAP',
+            );
+          }
         }
 
         blockedPhase = 'Docker container control';
+        blockedCode = 'DOCKER_CONTAINER_ORPHANED';
         if (identity !== null) {
           if (protocol === null && observed !== null) {
             if (observed.running) {
@@ -913,6 +956,70 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
     }
   };
 
+  const authorizeContainerCreate = async (
+    input: ContainerCreateAuthorizationInput,
+  ): Promise<ContainerCreateAuthorization> => {
+    const current = options.store.getJob(options.jobId);
+    if (observeRequested(current.cancelRequestedAt !== null || signalRequested)) {
+      const observation = await cancelIfRequested();
+      if (observation.handled) {
+        return { authorized: false, observation };
+      }
+      signalRequested = false;
+      throw new CancellationBlockedError(
+        'pre-container cancellation was not handled in an active runner state',
+        'RUNNER_DISAPPEARED',
+      );
+    }
+    if (
+      !activeState(current.state)
+      || current.state === 'cancel_requested'
+      || current.runnerUnit !== options.runnerUnit
+      || current.runnerLeaseOwner !== options.owner
+      || current.runnerLeaseExpiresAt !== options.leaseExpiresAt()
+      || input.lease.owner !== options.owner
+      || input.lease.unit !== options.runnerUnit
+      || input.lease.leaseExpiresAt !== options.leaseExpiresAt()
+      || input.lease.expectedState !== current.state
+    ) {
+      signalRequested = false;
+      throw new CancellationBlockedError(
+        'pre-container create authorization lost active runner ownership',
+        'RUNNER_DISAPPEARED',
+      );
+    }
+    const authorization = options.ownership.runnerWrite({
+      kind: 'operation-begin',
+      jobId: options.jobId,
+      owner: options.owner,
+      runnerUnit: options.runnerUnit,
+      leaseExpiresAt: options.leaseExpiresAt(),
+      at: now(options),
+      expectedState: input.lease.expectedState,
+      operationId: input.operationId,
+      attempt: input.attempt,
+      argvHash: input.argvHash,
+      argv: input.argv,
+      startedAt: input.startedAt,
+    });
+    if (authorization.ok === true) return { authorized: true };
+
+    const afterConflict = options.store.getJob(options.jobId);
+    if (observeRequested(
+      afterConflict.cancelRequestedAt !== null || signalRequested,
+    )) {
+      const observation = await cancelIfRequested();
+      if (observation.handled) {
+        return { authorized: false, observation };
+      }
+    }
+    signalRequested = false;
+    throw new CancellationBlockedError(
+      `pre-container create authorization lost ownership: ${authorization.conflict.kind}`,
+      'RUNNER_DISAPPEARED',
+    );
+  };
+
   const blockRecoveryRequired = async (blockerCode: CancellationBlockerCode, reason: string): Promise<never> => {
     const current = options.store.getJob(options.jobId);
     if (!observeRequested(current.cancelRequestedAt !== null || signalRequested)) {
@@ -953,6 +1060,7 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
   return Object.freeze({
     isRequested,
     cancellationBudget,
+    authorizeContainerCreate,
     authorizeActiveOperationStop,
     observeBetweenStages: async (_stage) => cancelIfRequested(),
     observeBetweenOperations: async (_operationId) => cancelIfRequested(),

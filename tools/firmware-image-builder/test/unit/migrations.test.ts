@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { openBuilderDatabase, MIGRATION_REGISTRY, MigrationError, validateMigrationRegistry } from '../../api/src/store-schema.js';
-import { BuilderStore } from '../../api/src/store.js';
+import {
+  BuilderStore,
+  CANCELLATION_PROTOCOL_EVENT_QUERY,
+} from '../../api/src/store.js';
 import { OwnershipStore } from '../../api/src/ownership.js';
 
 const repoMigrationDir = fileURLToPath(new URL('../../api/migrations/', import.meta.url));
@@ -210,6 +213,7 @@ describe('versioned builder database migrations', () => {
       { version: 6, filename: '006_blocked_publish_artifact_location.sql' },
       { version: 7, filename: '007_publish_intent_and_accepted_operations.sql' },
       { version: 8, filename: '008_preparation_artifact_ownership.sql' },
+      { version: 9, filename: '009_cancellation_protocol_index.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
       .toEqual(['cleanup_leases', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_entries', 'schema_migrations']);
@@ -271,7 +275,7 @@ describe('versioned builder database migrations', () => {
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'").all()
       .map((row) => (row as { name: string }).name);
     expect(indexes.sort()).toEqual([
-      'cleanup_leases_expiry', 'cleanup_leases_fence_identity', 'cleanup_leases_fence_token_identity', 'cleanup_leases_job', 'job_events_log_range', 'job_events_sequence', 'job_log_generations_active', 'job_operations_identity',
+      'cleanup_leases_expiry', 'cleanup_leases_fence_identity', 'cleanup_leases_fence_token_identity', 'cleanup_leases_job', 'job_events_cancellation_protocol', 'job_events_log_range', 'job_events_sequence', 'job_log_generations_active', 'job_operations_identity',
       'job_stages_job', 'jobs_cleanup_admission', 'jobs_recovery', 'queue_entries_fifo',
     ]);
     const normalizeForeignKeys = (child: string) => db.prepare(`PRAGMA foreign_key_list(${child})`).all()
@@ -314,6 +318,77 @@ describe('versioned builder database migrations', () => {
     db.close();
   });
 
+  it('uses the selective cancellation protocol index through large unrelated event history', async () => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    insertValidJob(db, 'cancellation-protocol-index', 'starting');
+    const insert = db.prepare(
+      'INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at) VALUES (?, ?, ?, ?, NULL, ?, ?)',
+    );
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (let seq = 0; seq < 20_000; seq += 1) {
+        insert.run(
+          'cancellation-protocol-index',
+          seq,
+          'recovery',
+          'starting',
+          '{"unrelated":true}',
+          '2026-07-23T00:00:00.000Z',
+        );
+      }
+      insert.run(
+        'cancellation-protocol-index',
+        20_000,
+        'cleanup',
+        'cancel_requested',
+        '{"kind":"cancellation-evidence"}',
+        '2026-07-23T00:00:01.000Z',
+      );
+      insert.run(
+        'cancellation-protocol-index',
+        20_001,
+        'cleanup',
+        'cancel_requested',
+        '{"kind":"cancellation-cleanup"}',
+        '2026-07-23T00:00:02.000Z',
+      );
+      for (let seq = 20_002; seq < 40_002; seq += 1) {
+        insert.run(
+          'cancellation-protocol-index',
+          seq,
+          'recovery',
+          'cancel_requested',
+          '{"unrelated":true}',
+          '2026-07-23T00:00:02.000Z',
+        );
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+
+    const plan = db.prepare(
+      `EXPLAIN QUERY PLAN ${CANCELLATION_PROTOCOL_EVENT_QUERY}`,
+    ).all(
+      'cancellation-protocol-index',
+    ) as Array<{ detail: string }>;
+    expect(plan.map((row) => row.detail).join('\n')).toMatch(
+      /USING INDEX job_events_cancellation_protocol/u,
+    );
+    expect(plan.map((row) => row.detail).join('\n')).not.toMatch(
+      /USE TEMP B-TREE/u,
+    );
+    expect(new BuilderStore(db).getCancellationProtocolEvents(
+      'cancellation-protocol-index',
+    ).map((event) => event.payload.kind)).toEqual([
+      'cancellation-evidence',
+      'cancellation-cleanup',
+    ]);
+    db.close();
+  });
+
   it('is idempotent and keeps the final schema identical across a restart', async () => {
     const path = await temporaryDatabase();
     const first = openBuilderDatabase(path);
@@ -324,7 +399,7 @@ describe('versioned builder database migrations', () => {
     const second = openBuilderDatabase(path);
     expect(second.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name").all())
       .toEqual(schema);
-    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 8 });
+    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 9 });
     second.close();
   });
 
@@ -427,7 +502,7 @@ describe('versioned builder database migrations', () => {
     physicalOrderDb.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(1, '001_initial.sql', MIGRATION_REGISTRY[0].sha256, 'x');
     physicalOrderDb.close();
     const accepted = openBuilderDatabase(physicalOrderPath);
-    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 8 });
+    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 9 });
     accepted.close();
   });
 
@@ -768,7 +843,7 @@ describe('versioned builder database migrations', () => {
     fresh.close();
 
     const reopened = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
-    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 8 });
+    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 9 });
     expect(reopened.prepare('SELECT COUNT(*) AS count FROM legacy_blocked_publish_evidence').get()).toEqual({ count: 2 });
     expect(reopened.prepare("SELECT terminal_error_json FROM jobs WHERE job_id='legacy-terminal'").get())
       .toEqual({ terminal_error_json: terminalSentinel });

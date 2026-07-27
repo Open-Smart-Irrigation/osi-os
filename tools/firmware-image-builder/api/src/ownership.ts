@@ -2939,6 +2939,12 @@ export class OwnershipStore {
     this.#runnerGuard(command, command.expectedState); instant(command.startedAt, 'operation start time');
     requirePersistedTimeline(this.#db, command.jobId, [['operation command time', command.at], ['operation start time', command.startedAt]], true);
     const job = this.#job(command.jobId);
+    if (job.cancel_requested_at !== null) {
+      conflict(
+        'stale-predecessor',
+        'container create authorization lost to a cancellation request',
+      );
+    }
     const previous = this.#db.prepare("SELECT MAX(finished_at) AS finished_at FROM job_operations WHERE job_id=? AND finished_at IS NOT NULL").get(command.jobId) as Row;
     requireChronology([['accepted time', String(job.accepted_at)], ['prior operation finish time', previous.finished_at === null ? null : String(previous.finished_at)], ['operation start time', command.startedAt], ['operation write time', command.at]]);
     if (job.container_id !== null || job.container_name !== null || job.container_image_digest !== null || job.container_labels_json !== null) conflict('identity-mismatch', 'next operation requires cleared active container identity');
