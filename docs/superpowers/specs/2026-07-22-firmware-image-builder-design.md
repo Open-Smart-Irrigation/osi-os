@@ -1103,6 +1103,17 @@ following:
 11. A Node resolution check from the rootfs Node-RED directory resolves
    `protobufjs` and every required local helper. This check runs with the
    builder's Node runtime and does not execute target binaries.
+   The trusted CommonJS probe accepts synchronous package initialization only.
+   It launches one permission-constrained child for each fixed package, warms
+   the approved real builtins before observation (including `dns`, whose first
+   load creates a trusted `DNSCHANNEL` resource), and enables a private
+   `async_hooks` observer only around the package `require`. Any package-created
+   scheduled or still-pending asynchronous resource, including a `PROMISE`,
+   `Immediate`, `Timeout`, `TickObject`, DNS, or network resource, fails the
+   check; the probe does not use a finite event-loop drain. The child seals the
+   CommonJS loader, extension surface, loader arrays, and captured intrinsic
+   calls for its lifetime, and the parent enforces the fixed timeout and
+   `SIGKILL` boundary.
 12. The runner requests a final freshness result from the API source resolver
    over the local service socket. A successful equal-SHA result records
    `freshnessStatus: "fresh"`; a different SHA records

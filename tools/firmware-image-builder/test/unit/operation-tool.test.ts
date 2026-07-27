@@ -421,6 +421,22 @@ describe('trusted verify-image Node compatibility record', () => {
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('keeps builtin membership checks immutable after a package mutates Array.prototype.includes', async () => {
+    const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-includes-sqlite-'));
+    temporaryRoots.push(markerRoot);
+    const marker = join(markerRoot, 'marker.db');
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        'Array.prototype.includes = () => true;',
+        "const builtinSqlite = process.getBuiltinModule('node:sqlite');",
+        `const markerDatabase = new builtinSqlite.DatabaseSync(${JSON.stringify(marker)});`,
+        "markerDatabase.exec('CREATE TABLE marker (id INTEGER PRIMARY KEY)');",
+        'markerDatabase.close();',
+      ].join('\n'),
+    })).rejects.toThrow(/unapproved builder builtin: node:sqlite/u);
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('denies dynamic import of node:sqlite before it can create a host database', async () => {
     const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-import-sqlite-'));
     temporaryRoots.push(markerRoot);
@@ -462,7 +478,7 @@ describe('trusted verify-image Node compatibility record', () => {
         "void Promise.resolve().then(() => import(['node', 'sqlite'].join(':')).catch(() => {}));",
         `void ${JSON.stringify(marker)};`,
       ].join('\n'),
-    })).rejects.toThrow(/unapproved builder ESM builtin: node:sqlite/u);
+    })).rejects.toThrow(/unapproved builder ESM builtin: node:sqlite|asynchronous resource|synchronous module initialization/u);
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -502,7 +518,34 @@ describe('trusted verify-image Node compatibility record', () => {
         '  markerDatabase.close();',
         '}).catch(() => {}));',
       ].join('\n'),
-    })).rejects.toThrow(/unapproved builder ESM builtin: node:sqlite/u);
+    })).rejects.toThrow(/unapproved builder ESM builtin: node:sqlite|asynchronous resource|synchronous module initialization/u);
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each([
+    ['Promise', 'void Promise.resolve().then(() => {});'],
+    ['nextTick', 'process.nextTick(() => {});'],
+    ['timer', 'setTimeout(() => {}, 0);'],
+    ['queueMicrotask', 'queueMicrotask(() => {});'],
+  ])('rejects %s scheduling during synchronous package initialization', async (_name, source) => {
+    await expect(runShippedOperation({
+      dbHelperPrefix: `${source}\nmodule.exports = {};`,
+    })).rejects.toThrow(/asynchronous resource|synchronous module initialization/u);
+  });
+
+  it('rejects a dynamic import hidden behind four nested immediates', async () => {
+    const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-nested-immediate-'));
+    temporaryRoots.push(markerRoot);
+    const marker = join(markerRoot, 'marker.db');
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        'const schedule = (depth) => depth === 0',
+        `  ? import(['node', 'sqlite'].join(':')).then(({ DatabaseSync }) => { const db = new DatabaseSync(${JSON.stringify(marker)}); db.close(); }, () => {})`,
+        '  : setImmediate(() => schedule(depth - 1));',
+        'schedule(4);',
+        'module.exports = {};',
+      ].join('\n'),
+    })).rejects.toThrow(/asynchronous resource|synchronous module initialization/u);
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -511,15 +554,55 @@ describe('trusted verify-image Node compatibility record', () => {
     temporaryRoots.push(markerRoot);
     const marker = join(markerRoot, 'marker');
     const started = Date.now();
-    await runShippedOperation({
+    await expect(runShippedOperation({
       dbHelperPrefix: [
         `setTimeout(() => { require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'late'); throw new Error('late timer ran'); }, 250);`,
         "process.once('beforeExit', () => { throw new Error('beforeExit emitted'); });",
       ].join('\n'),
-    });
+    })).rejects.toThrow(/asynchronous resource|synchronous module initialization/u);
     expect(Date.now() - started).toBeLessThan(5000);
     await new Promise((resolve) => setTimeout(resolve, 25));
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each([
+    ['Module._load', [
+      "module.constructor._load = () => ({ compatible: true });",
+      "require('round-eight-missing-dependency');",
+    ].join('\n')],
+    ['Module.prototype.require', [
+      "module.constructor.prototype.require = () => ({ compatible: true });",
+      "require('round-eight-missing-dependency');",
+    ].join('\n')],
+    ['Module._findPath', [
+      "module.constructor._findPath = () => '/tmp/round-eight-forged.js';",
+      "require('round-eight-missing-dependency');",
+    ].join('\n')],
+    ['Module.wrapper', [
+      "module.constructor.wrapper[0] = 'module.exports = { compatible: true };';",
+      "require('round-eight-missing-dependency');",
+    ].join('\n')],
+    ['Reflect.apply', [
+      "Reflect.apply = () => ({ compatible: true });",
+      "require('round-eight-missing-dependency');",
+    ].join('\n')],
+    ['require.extensions', [
+      "'use strict';",
+      "require.extensions['.js'] = () => ({ compatible: true });",
+      "require('node:sqlite');",
+    ].join('\n')],
+  ])('rejects same-child replacement of %s before a disallowed require can succeed', async (_name, source) => {
+    await expect(runOperation({ '@grpc/grpc-js': source })).rejects.toThrow(/round-eight-missing-dependency|node:sqlite|read only|writable|Cannot assign/u);
+  });
+
+  it.each([
+    ['String.prototype.replaceAll', "String.prototype.replaceAll = () => 'node_modules/osi-db-helper/index.js';"],
+    ['String.prototype.startsWith', 'String.prototype.startsWith = () => false;'],
+  ])('keeps rootfs path confinement immutable after %s mutation', async (_name, source) => {
+    await expect(runShippedOperation({
+      dbHelperPrefix: [source, "require('round-eight-host-only-dependency');"].join('\n'),
+      hostDependency: 'round-eight-host-only-dependency',
+    })).rejects.toThrow(/outside the trusted rootfs|FileSystemRead|permission/u);
   });
 
   it('isolates a mutated extension loader from every other package child', async () => {
@@ -684,12 +767,11 @@ describe('trusted verify-image Node compatibility record', () => {
   it('does not carry nested Module static mutations from package N into package N+1', async () => {
     const result = await runOperation({
       '@grpc/grpc-js': [
-        "module.constructor._pathCache = { poisoned: true };",
-        "module.constructor.globalPaths = ['/poisoned'];",
+        "module.constructor._pathCache.poisoned = true;",
         'module.exports = { compatible: true };',
       ].join('\n'),
       '@chirpstack/chirpstack-api': [
-        "if (Object.hasOwn(module.constructor._pathCache, 'poisoned') || module.constructor.globalPaths.includes('/poisoned')) throw new Error('cross-child Module state leaked');",
+        "if (Object.hasOwn(module.constructor._pathCache, 'poisoned')) throw new Error('cross-child Module state leaked');",
         'module.exports = { compatible: true };',
       ].join('\n'),
     });

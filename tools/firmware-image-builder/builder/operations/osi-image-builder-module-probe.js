@@ -1,22 +1,41 @@
 #!/usr/bin/env node
 
+import { createHook } from 'node:async_hooks';
 import Module, { createRequire, isBuiltin } from 'node:module';
 import { dirname, isAbsolute, normalize, relative } from 'node:path';
 import { runInThisContext } from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PROBE_PROGRAM = fileURLToPath(import.meta.url);
-const ORIGINAL_SET_IMMEDIATE = setImmediate;
 const ORIGINAL_PROMISE = Promise;
-const ORIGINAL_PROMISE_RESOLVE = ORIGINAL_PROMISE.resolve.bind(ORIGINAL_PROMISE);
 const ORIGINAL_PROMISE_REJECT = ORIGINAL_PROMISE.reject.bind(ORIGINAL_PROMISE);
 const ORIGINAL_JSON_STRINGIFY = JSON.stringify.bind(JSON);
 const ORIGINAL_OBJECT_CREATE = Object.create.bind(Object);
 const ORIGINAL_BUFFER_BYTE_LENGTH = Buffer.byteLength.bind(Buffer);
 const ORIGINAL_ERROR = Error;
+const ORIGINAL_STRING = String;
+const ORIGINAL_MODULE_WRAP = Module.wrap;
+const ORIGINAL_ARRAY_FILTER = Function.call.bind(Array.prototype.filter);
+const ORIGINAL_ARRAY_INCLUDES = Function.call.bind(Array.prototype.includes);
+const ORIGINAL_ARRAY_JOIN = Function.call.bind(Array.prototype.join);
+const ORIGINAL_ARRAY_SLICE = Function.call.bind(Array.prototype.slice);
+const ORIGINAL_STRING_INCLUDES = Function.call.bind(String.prototype.includes);
+const ORIGINAL_STRING_REPLACE_ALL = Function.call.bind(String.prototype.replaceAll);
+const ORIGINAL_STRING_SLICE = Function.call.bind(String.prototype.slice);
+const ORIGINAL_STRING_STARTS_WITH = Function.call.bind(String.prototype.startsWith);
+const ORIGINAL_MAP_DELETE = Function.call.bind(Map.prototype.delete);
+const ORIGINAL_MAP_ENTRIES = Function.call.bind(Map.prototype.entries);
+const ORIGINAL_MAP_SET = Function.call.bind(Map.prototype.set);
+const ORIGINAL_MAP_ITERATOR_NEXT = Function.call.bind(
+  Object.getPrototypeOf(new Map().entries()).next,
+);
+const ORIGINAL_REFLECT_APPLY = Reflect.apply.bind(Reflect);
+const ORIGINAL_REFLECT_GET = Reflect.get.bind(Reflect);
+const ORIGINAL_REFLECT_HAS = Reflect.has.bind(Reflect);
 const ORIGINAL_STDOUT_WRITE = process.stdout.write.bind(process.stdout);
 const ORIGINAL_STDERR_WRITE = process.stderr.write.bind(process.stderr);
 const ORIGINAL_PROCESS_EXIT = process.exit.bind(process);
+const ORIGINAL_CREATE_ASYNC_HOOK = createHook.bind(null);
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const ALLOWED_ROOTFS_BUILTINS = Object.freeze([
   'buffer',
@@ -70,27 +89,48 @@ const NODE_MODULES = Object.freeze([
 const RELATIVE_HELPER_START = 4;
 const RELATIVE_HELPER_END = 13;
 const ORIGINAL_GET_BUILTIN_MODULE = process.getBuiltinModule.bind(process);
+const TRUSTED_REAL_BUILTINS_TO_WARM = Object.freeze([
+  'buffer',
+  'crypto',
+  'dns',
+  'events',
+  'http',
+  'http2',
+  'https',
+  'net',
+  'node:crypto',
+  'os',
+  'path',
+  'process',
+  'stream',
+  'tls',
+  'url',
+  'util',
+  'zlib',
+]);
+
+for (const builtin of TRUSTED_REAL_BUILTINS_TO_WARM) ORIGINAL_GET_BUILTIN_MODULE(builtin);
 
 function deniedFilesystemCapability() {
-  throw new Error('rootfs Node module attempted to use a denied builder filesystem capability');
+  throw new ORIGINAL_ERROR('rootfs Node module attempted to use a denied builder filesystem capability');
 }
 
 const ROOTFS_FILESYSTEM_CAPABILITY = Object.freeze(new Proxy(
   Object.freeze({ readFile: deniedFilesystemCapability }),
   {
     get(target, property, receiver) {
-      if (!Reflect.has(target, property)) {
-        throw new Error(
-          `rootfs Node module requested a denied builder filesystem capability: ${String(property)}`,
+      if (!ORIGINAL_REFLECT_HAS(target, property)) {
+        throw new ORIGINAL_ERROR(
+          `rootfs Node module requested a denied builder filesystem capability: ${ORIGINAL_STRING(property)}`,
         );
       }
-      return Reflect.get(target, property, receiver);
+      return ORIGINAL_REFLECT_GET(target, property, receiver);
     },
   },
 ));
 
 function deniedChildProcessCapability() {
-  throw new Error('rootfs Node module attempted to use a denied builder process capability');
+  throw new ORIGINAL_ERROR('rootfs Node module attempted to use a denied builder process capability');
 }
 
 const ROOTFS_CHILD_PROCESS_CAPABILITY = Object.freeze({
@@ -106,7 +146,7 @@ const BUILTIN_CAPABILITY_STUBS = Object.freeze({
 
 class NativeDatabaseInitializerStub {
   constructor() {
-    throw new Error('the sqlite3 initializer stub cannot open a database');
+    throw new ORIGINAL_ERROR('the sqlite3 initializer stub cannot open a database');
   }
 }
 Object.freeze(NativeDatabaseInitializerStub.prototype);
@@ -134,8 +174,8 @@ function recordDynamicImportViolation(specifier) {
 }
 
 function sealedGetBuiltinModule(request) {
-  if (typeof request !== 'string' || !ALLOWED_ROOTFS_BUILTINS.includes(request)) {
-    throw new Error(`rootfs Node module requested an unapproved builder builtin: ${request}`);
+  if (typeof request !== 'string' || !ORIGINAL_ARRAY_INCLUDES(ALLOWED_ROOTFS_BUILTINS, request)) {
+    throw new ORIGINAL_ERROR(`rootfs Node module requested an unapproved builder builtin: ${request}`);
   }
   if (request === 'fs' || request === 'node:fs') {
     return ROOTFS_FILESYSTEM_CAPABILITY;
@@ -152,8 +192,8 @@ function requireCanonicalAbsolutePath(value, field) {
     typeof value !== 'string'
     || !isAbsolute(value)
     || normalize(value) !== value
-    || value.includes('\0')
-  ) throw new Error(`${field} is not one canonical absolute path`);
+    || ORIGINAL_STRING_INCLUDES(value, '\0')
+  ) throw new ORIGINAL_ERROR(`${field} is not one canonical absolute path`);
 }
 
 function assertPermissionBoundary(nodeRed) {
@@ -164,7 +204,7 @@ function assertPermissionBoundary(nodeRed) {
     `--allow-fs-read=${nodeRed}`,
   ];
   if (JSON.stringify(process.execArgv) !== JSON.stringify(expectedExecArgv)) {
-    throw new Error('probe process permission arguments changed');
+    throw new ORIGINAL_ERROR('probe process permission arguments changed');
   }
   if (
     !process.permission
@@ -176,7 +216,7 @@ function assertPermissionBoundary(nodeRed) {
     || !process.permission.has('fs.read', PROBE_PROGRAM)
     || !process.permission.has('fs.read', nodeRed)
   ) {
-    throw new Error('probe process permissions are not read-only and fail-closed');
+    throw new ORIGINAL_ERROR('probe process permissions are not read-only and fail-closed');
   }
 }
 
@@ -188,7 +228,7 @@ function sealProcessBuiltinAccess() {
     configurable: false,
   });
   Object.defineProperty(process, 'exit', {
-    value: () => { throw new Error('rootfs Node module attempted to exit the probe'); },
+    value: () => { throw new ORIGINAL_ERROR('rootfs Node module attempted to exit the probe'); },
     writable: false,
     enumerable: true,
     configurable: false,
@@ -199,7 +239,7 @@ function sealProcessBuiltinAccess() {
     || descriptor.writable !== false
     || descriptor.enumerable !== true
     || descriptor.configurable !== false
-  ) throw new Error('probe process builtin access is not sealed');
+  ) throw new ORIGINAL_ERROR('probe process builtin access is not sealed');
 }
 
 function silenceProcessOutput() {
@@ -218,11 +258,11 @@ function silenceProcessOutput() {
 
 function confinedRootfsModulePath(nodeRed, value) {
   if (typeof value !== 'string') return false;
-  const relativePath = relative(nodeRed, value).replaceAll('\\', '/');
+  const relativePath = ORIGINAL_STRING_REPLACE_ALL(relative(nodeRed, value), '\\', '/');
   return relativePath.length > 0
     && relativePath !== '..'
-    && !relativePath.startsWith('../')
-    && !relativePath.startsWith('/');
+    && !ORIGINAL_STRING_STARTS_WITH(relativePath, '../')
+    && !ORIGINAL_STRING_STARTS_WITH(relativePath, '/');
 }
 
 function installRootfsLoader({ nodeRed, packageName, resolvedEntrypoint }) {
@@ -231,18 +271,18 @@ function installRootfsLoader({ nodeRed, packageName, resolvedEntrypoint }) {
   const originalCompile = Module.prototype._compile;
   const sealedResolveFilename = function sealedResolveFilename(request, parent, isMain, options) {
     if (isBuiltin(request)) {
-      if (!ALLOWED_ROOTFS_BUILTINS.includes(request)) {
-        throw new Error(`rootfs Node module requested an unapproved builder builtin: ${request}`);
+      if (!ORIGINAL_ARRAY_INCLUDES(ALLOWED_ROOTFS_BUILTINS, request)) {
+        throw new ORIGINAL_ERROR(`rootfs Node module requested an unapproved builder builtin: ${request}`);
       }
-      return Reflect.apply(originalResolveFilename, Module, [request, parent, isMain, options]);
+      return ORIGINAL_REFLECT_APPLY(originalResolveFilename, Module, [request, parent, isMain, options]);
     }
-    const resolved = Reflect.apply(
+    const resolved = ORIGINAL_REFLECT_APPLY(
       originalResolveFilename,
       Module,
       [request, parent, isMain, options],
     );
     if (!confinedRootfsModulePath(nodeRed, resolved)) {
-      throw new Error(`rootfs Node module dependency resolved outside the trusted rootfs: ${request}`);
+      throw new ORIGINAL_ERROR(`rootfs Node module dependency resolved outside the trusted rootfs: ${request}`);
     }
     return resolved;
   };
@@ -250,7 +290,7 @@ function installRootfsLoader({ nodeRed, packageName, resolvedEntrypoint }) {
     const nativeStub = NATIVE_DEPENDENCY_STUBS[request];
     if (nativeStub !== undefined) {
       if (packageName !== nativeStub.packageName || parent?.filename !== resolvedEntrypoint) {
-        throw new Error(`rootfs Node module requested an unapproved native dependency stub: ${request}`);
+        throw new ORIGINAL_ERROR(`rootfs Node module requested an unapproved native dependency stub: ${request}`);
       }
       return nativeStub.value;
     }
@@ -259,48 +299,88 @@ function installRootfsLoader({ nodeRed, packageName, resolvedEntrypoint }) {
     const builtinStub = BUILTIN_CAPABILITY_STUBS[request];
     if (builtinStub !== undefined) {
       const parentRelativePath = typeof parent?.filename === 'string'
-        ? relative(nodeRed, parent.filename).replaceAll('\\', '/')
+        ? ORIGINAL_STRING_REPLACE_ALL(relative(nodeRed, parent.filename), '\\', '/')
         : '';
       if (
         packageName !== builtinStub.packageName
         || parentRelativePath !== builtinStub.parentRelativePath
-      ) throw new Error(`rootfs Node module requested an unapproved builder builtin: ${request}`);
+      ) throw new ORIGINAL_ERROR(`rootfs Node module requested an unapproved builder builtin: ${request}`);
       return builtinStub.value;
     }
-    return Reflect.apply(originalLoad, this, [request, parent, isMain]);
+    return ORIGINAL_REFLECT_APPLY(originalLoad, this, [request, parent, isMain]);
   };
   const sealedCompile = function sealedCompile(content, filename) {
     if (!confinedRootfsModulePath(nodeRed, filename)) {
-      return Reflect.apply(originalCompile, this, [content, filename]);
+      return ORIGINAL_REFLECT_APPLY(originalCompile, this, [content, filename]);
     }
     const module = this;
-    const compiledWrapper = runInThisContext(Module.wrap(content), {
+    const compiledWrapper = runInThisContext(ORIGINAL_MODULE_WRAP(content), {
       filename,
       displayErrors: true,
       importModuleDynamically(specifier) {
         return ORIGINAL_PROMISE_REJECT(recordDynamicImportViolation(specifier));
       },
     });
-    compiledWrapper.call(
-      module.exports,
+    ORIGINAL_REFLECT_APPLY(compiledWrapper, module.exports, [
       module.exports,
       createRequire(filename),
       module,
       filename,
       dirname(filename),
-    );
+    ]);
   };
-  Module._resolveFilename = sealedResolveFilename;
-  Module._load = sealedLoad;
-  Module.prototype._compile = sealedCompile;
-}
-
-async function drainAsyncBarrier() {
-  await ORIGINAL_PROMISE_RESOLVE();
-  await new ORIGINAL_PROMISE((resolve) => ORIGINAL_SET_IMMEDIATE(resolve));
-  await ORIGINAL_PROMISE_RESOLVE();
-  await new ORIGINAL_PROMISE((resolve) => ORIGINAL_SET_IMMEDIATE(resolve));
-  await ORIGINAL_PROMISE_RESOLVE();
+  const originalRequire = Module.prototype.require;
+  const extensionSurface = Module._extensions;
+  if (!extensionSurface || typeof extensionSurface !== 'object') {
+    throw new ORIGINAL_ERROR('Node extension loader surface is unavailable');
+  }
+  Object.freeze(extensionSurface);
+  const seal = (target, property, value, label) => {
+    const previous = Object.getOwnPropertyDescriptor(target, property);
+    if (!previous || !('value' in previous)) {
+      throw new ORIGINAL_ERROR(`${label} descriptor is unavailable`);
+    }
+    Object.defineProperty(target, property, {
+      value,
+      writable: false,
+      enumerable: previous.enumerable,
+      configurable: false,
+    });
+    const descriptor = Object.getOwnPropertyDescriptor(target, property);
+    if (
+      descriptor?.value !== value
+      || descriptor.writable !== false
+      || descriptor.enumerable !== previous.enumerable
+      || descriptor.configurable !== false
+    ) throw new ORIGINAL_ERROR(`${label} is not sealed for the probe lifetime`);
+  };
+  seal(Module, '_resolveFilename', sealedResolveFilename, 'Module._resolveFilename');
+  seal(Module, '_load', sealedLoad, 'Module._load');
+  seal(Module.prototype, '_compile', sealedCompile, 'Module.prototype._compile');
+  seal(Module.prototype, 'require', originalRequire, 'Module.prototype.require');
+  seal(Module, '_extensions', extensionSurface, 'Module._extensions');
+  const javascriptExtension = Object.getOwnPropertyDescriptor(extensionSurface, '.js');
+  if (
+    !javascriptExtension
+    || javascriptExtension.writable !== false
+    || javascriptExtension.configurable !== false
+  ) throw new ORIGINAL_ERROR('JavaScript extension loader is not sealed for the probe lifetime');
+  for (const [property, label] of [
+    ['wrapper', 'Module.wrapper'],
+    ['builtinModules', 'Module.builtinModules'],
+    ['globalPaths', 'Module.globalPaths'],
+  ]) {
+    const value = Module[property];
+    if (Array.isArray(value)) {
+      Object.freeze(value);
+      if (!Object.isFrozen(value)) throw new ORIGINAL_ERROR(`${label} is not frozen`);
+    }
+  }
+  Object.freeze(Module.prototype);
+  Object.freeze(Module);
+  if (!Object.isFrozen(Module.prototype) || !Object.isFrozen(Module)) {
+    throw new ORIGINAL_ERROR('Node module loader surfaces are not frozen for the probe lifetime');
+  }
 }
 
 function exportType(value) {
@@ -321,50 +401,88 @@ function createSuccessRecord(packageIndex, packageName, specifier, resolvedRelat
   return record;
 }
 
-async function probePackage(nodeRed, packageIndex) {
+function observeSynchronousModuleLoad(load) {
+  const pendingResources = new Map();
+  let firstPendingResource = null;
+  const selectFirstPendingResource = () => {
+    const iterator = ORIGINAL_MAP_ENTRIES(pendingResources);
+    const next = ORIGINAL_MAP_ITERATOR_NEXT(iterator);
+    firstPendingResource = next.done
+      ? null
+      : { id: next.value[0], type: next.value[1] };
+  };
+  const hook = ORIGINAL_CREATE_ASYNC_HOOK({
+    init(asyncId, type) {
+      ORIGINAL_MAP_SET(pendingResources, asyncId, type);
+      if (firstPendingResource === null) firstPendingResource = { id: asyncId, type };
+    },
+    promiseResolve(asyncId) {
+      ORIGINAL_MAP_DELETE(pendingResources, asyncId);
+      if (firstPendingResource?.id === asyncId) selectFirstPendingResource();
+    },
+  });
+  hook.enable();
+  try {
+    return { exported: load(), firstPendingResource };
+  } finally {
+    hook.disable();
+  }
+}
+
+function probePackage(nodeRed, packageIndex) {
   const [packageName, specifier, loadSpecifier = specifier] = NODE_MODULES[packageIndex];
   const rootfsRequire = createRequire(`${nodeRed}/__osi_verification__.cjs`);
   const resolved = rootfsRequire.resolve(loadSpecifier);
-  const actualRelativePath = relative(nodeRed, resolved).replaceAll('\\', '/');
-  if (actualRelativePath.startsWith('../') || actualRelativePath.startsWith('/')) {
-    throw new Error(`resolved Node module escaped the trusted rootfs base: ${packageName}`);
+  const actualRelativePath = ORIGINAL_STRING_REPLACE_ALL(relative(nodeRed, resolved), '\\', '/');
+  if (
+    ORIGINAL_STRING_STARTS_WITH(actualRelativePath, '../')
+    || ORIGINAL_STRING_STARTS_WITH(actualRelativePath, '/')
+  ) {
+    throw new ORIGINAL_ERROR(`resolved Node module escaped the trusted rootfs base: ${packageName}`);
   }
   const directRoot = `${packageName}/`;
   const nodeModulesRoot = `node_modules/${packageName}/`;
   const resolvedRelativePath = packageIndex >= RELATIVE_HELPER_START
     && packageIndex < RELATIVE_HELPER_END
-    && actualRelativePath.startsWith(directRoot)
-    ? `${nodeModulesRoot}${actualRelativePath.slice(directRoot.length)}`
+    && ORIGINAL_STRING_STARTS_WITH(actualRelativePath, directRoot)
+    ? `${nodeModulesRoot}${ORIGINAL_STRING_SLICE(actualRelativePath, directRoot.length)}`
     : actualRelativePath;
-  const expectedRoot = specifier.startsWith('./') ? directRoot : nodeModulesRoot;
-  if (!resolvedRelativePath.startsWith(expectedRoot)) {
-    throw new Error(`resolved Node module changed package identity: ${packageName}`);
+  const expectedRoot = ORIGINAL_STRING_STARTS_WITH(specifier, './') ? directRoot : nodeModulesRoot;
+  if (!ORIGINAL_STRING_STARTS_WITH(resolvedRelativePath, expectedRoot)) {
+    throw new ORIGINAL_ERROR(`resolved Node module changed package identity: ${packageName}`);
   }
   installRootfsLoader({ nodeRed, packageName, resolvedEntrypoint: resolved });
-  const exported = rootfsRequire(loadSpecifier);
-  await drainAsyncBarrier();
+  const observation = observeSynchronousModuleLoad(() => rootfsRequire(loadSpecifier));
   if (firstDynamicImportViolation !== null) {
     throw firstDynamicImportViolation;
+  }
+  if (observation.firstPendingResource !== null) {
+    throw new ORIGINAL_ERROR(
+      `rootfs Node module created asynchronous resource during synchronous module initialization: ${ORIGINAL_STRING(observation.firstPendingResource.type)}`,
+    );
   }
   return createSuccessRecord(
     packageIndex,
     packageName,
     specifier,
     resolvedRelativePath,
-    exported,
+    observation.exported,
   );
 }
 
 function boundedDetails(error) {
   const details = error && typeof error === 'object'
-    ? [
+    ? ORIGINAL_ARRAY_JOIN(
+      ORIGINAL_ARRAY_FILTER([
         'code' in error ? error.code : undefined,
         'permission' in error ? error.permission : undefined,
         'resource' in error ? error.resource : undefined,
         'message' in error ? error.message : undefined,
-      ].filter((value) => typeof value === 'string').join(' ')
-    : String(error);
-  return details.slice(0, 4096);
+      ], (value) => typeof value === 'string'),
+      ' ',
+    )
+    : ORIGINAL_STRING(error);
+  return ORIGINAL_STRING_SLICE(details, 0, 4096);
 }
 
 function flushAndExit(record, code) {
@@ -383,31 +501,33 @@ function flushAndExit(record, code) {
   write(output, () => ORIGINAL_PROCESS_EXIT(code));
 }
 
-async function main() {
-  const args = process.argv.slice(2);
+function main() {
+  const args = ORIGINAL_ARRAY_SLICE(process.argv, 2);
   if (
     args.length !== 4
     || args[0] !== '--rootfs-node-red'
     || args[2] !== '--package-index'
     || !/^\d+$/u.test(args[3])
-  ) throw new Error('exactly one fixed rootfs Node-RED path and package index are required');
+  ) throw new ORIGINAL_ERROR('exactly one fixed rootfs Node-RED path and package index are required');
   const nodeRed = args[1];
   const packageIndex = Number(args[3]);
   requireCanonicalAbsolutePath(nodeRed, 'rootfs Node-RED path');
   if (!Number.isSafeInteger(packageIndex) || packageIndex < 0 || packageIndex >= NODE_MODULES.length) {
-    throw new Error('package index is outside the fixed module list');
+    throw new ORIGINAL_ERROR('package index is outside the fixed module list');
   }
   assertPermissionBoundary(nodeRed);
   silenceProcessOutput();
   sealProcessBuiltinAccess();
-  const result = await probePackage(nodeRed, packageIndex);
+  const result = probePackage(nodeRed, packageIndex);
   flushAndExit(result, 0);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => {
+  try {
+    main();
+  } catch (error) {
     const record = ORIGINAL_OBJECT_CREATE(null);
     record.error = boundedDetails(error);
     flushAndExit(record, 2);
-  });
+  }
 }

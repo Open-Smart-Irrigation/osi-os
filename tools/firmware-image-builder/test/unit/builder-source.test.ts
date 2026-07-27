@@ -243,6 +243,30 @@ describe('locked builder source', () => {
         'const ORIGINAL_PROMISE_REJECT = Promise.reject;',
       ),
       probeContents.replace(
+        'const ORIGINAL_ARRAY_INCLUDES = Function.call.bind(Array.prototype.includes);',
+        'const ORIGINAL_ARRAY_INCLUDES = Array.prototype.includes;',
+      ),
+      probeContents.replace(
+        'const ORIGINAL_REFLECT_APPLY = Reflect.apply.bind(Reflect);',
+        'const ORIGINAL_REFLECT_APPLY = Reflect.apply;',
+      ),
+      probeContents.replace(
+        "seal(Module, '_load', sealedLoad, 'Module._load');",
+        '',
+      ),
+      probeContents.replace(
+        'promiseResolve(asyncId)',
+        'promiseResolveRemoved(asyncId)',
+      ),
+      probeContents.replace(
+        'Object.freeze(Module);',
+        '',
+      ),
+      probeContents.replace(
+        'const ORIGINAL_MAP_ITERATOR_NEXT = Function.call.bind(',
+        'const ORIGINAL_MAP_ITERATOR_NEXT_REMOVED = Function.call.bind(',
+      ),
+      probeContents.replace(
         'const record = ORIGINAL_OBJECT_CREATE(null);',
         'const record = {};',
       ),
@@ -781,7 +805,7 @@ describe('locked builder source', () => {
     } finally {
       await rm(localSelfTest, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it.each(['absent', 'wrong-owner', 'wrong-mode', 'unrunnable'] as const)('rejects an installed helper self-test failure: %s', async (failure) => {
     const canonical = `registry.example.invalid/osi-builder@sha256:${digest('a')}`;

@@ -22,7 +22,7 @@ const DIGEST = /^[0-9a-f]{64}$/u;
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const DOCKER_REPOSITORY = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9]\d{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/u;
 const TRUSTED_OPERATION_TOOL_SHA256 = 'c0dece51babce3b3e5707603e6afaaa734859f61705ebe2ec129f854eb24ced3';
-const TRUSTED_MODULE_PROBE_SHA256 = 'e594a0c5055d87a05b420a47dcc34abfa2de0fa469be13051a3a7ccd65092cf7';
+const TRUSTED_MODULE_PROBE_SHA256 = '2c12d5ccad9306304b6fbf68818f2ca0bf5c897c1ee2f0ac58ce2b0023b24e52';
 export const TRUSTED_OPERATION_TOOL_RELATIVE_PATH = 'operations/osi-image-builder-tool.js';
 export const TRUSTED_MODULE_PROBE_RELATIVE_PATH =
   'operations/osi-image-builder-module-probe.js';
@@ -280,8 +280,8 @@ function recordDynamicImportViolation(specifier) {
     || !contents.includes("packageName: 'osi-health-helper',\n    parentRelativePath: 'osi-health-helper/index.js'")
     || !contents.includes('return builtinStub.value;')
     || !contents.includes("'@chirpstack/chirpstack-api/api/application_grpc_pb',")
-    || !contents.includes('Module._resolveFilename = sealedResolveFilename;')
-    || !contents.includes('Module._load = sealedLoad;')
+    || !contents.includes("seal(Module, '_resolveFilename', sealedResolveFilename, 'Module._resolveFilename');")
+    || !contents.includes("seal(Module, '_load', sealedLoad, 'Module._load');")
     || !contents.includes("    '--permission',")
     || !contents.includes('`--allow-fs-read=${PROBE_PROGRAM}`')
     || !contents.includes('`--allow-fs-read=${nodeRed}`')
@@ -301,35 +301,61 @@ function recordDynamicImportViolation(specifier) {
     || !contents.includes('writable: false')
     || !contents.includes('configurable: false')
     || !contents.includes("import Module, { createRequire, isBuiltin } from 'node:module';")
+    || !contents.includes("import { createHook } from 'node:async_hooks';")
     || !contents.includes("import { runInThisContext } from 'node:vm';")
+    || !contents.includes('const ORIGINAL_MODULE_WRAP = Module.wrap;')
     || !contents.includes(exactDynamicImportRestriction)
     || !contents.includes('const ORIGINAL_STDOUT_WRITE = process.stdout.write.bind(process.stdout);')
     || !contents.includes('const ORIGINAL_STDERR_WRITE = process.stderr.write.bind(process.stderr);')
     || !contents.includes('const ORIGINAL_PROCESS_EXIT = process.exit.bind(process);')
     || !contents.includes('const ORIGINAL_ERROR = Error;')
     || !contents.includes('const ORIGINAL_PROMISE = Promise;')
-    || !contents.includes('const ORIGINAL_PROMISE_RESOLVE = ORIGINAL_PROMISE.resolve.bind(ORIGINAL_PROMISE);')
     || !contents.includes('const ORIGINAL_PROMISE_REJECT = ORIGINAL_PROMISE.reject.bind(ORIGINAL_PROMISE);')
+    || !contents.includes('const ORIGINAL_ARRAY_INCLUDES = Function.call.bind(Array.prototype.includes);')
+    || !contents.includes('const ORIGINAL_STRING_REPLACE_ALL = Function.call.bind(String.prototype.replaceAll);')
+    || !contents.includes('const ORIGINAL_STRING_STARTS_WITH = Function.call.bind(String.prototype.startsWith);')
+    || !contents.includes('const ORIGINAL_REFLECT_APPLY = Reflect.apply.bind(Reflect);')
+    || !contents.includes('const ORIGINAL_REFLECT_GET = Reflect.get.bind(Reflect);')
+    || !contents.includes('const ORIGINAL_REFLECT_HAS = Reflect.has.bind(Reflect);')
+    || !contents.includes('const ORIGINAL_MAP_DELETE = Function.call.bind(Map.prototype.delete);')
+    || !contents.includes('const ORIGINAL_MAP_ENTRIES = Function.call.bind(Map.prototype.entries);')
+    || !contents.includes('const ORIGINAL_MAP_SET = Function.call.bind(Map.prototype.set);')
+    || !contents.includes('const ORIGINAL_MAP_ITERATOR_NEXT = Function.call.bind(')
+    || !contents.includes('Object.getPrototypeOf(new Map().entries()).next,')
+    || !contents.includes('const ORIGINAL_CREATE_ASYNC_HOOK = createHook.bind(null);')
     || !contents.includes('const ORIGINAL_JSON_STRINGIFY = JSON.stringify.bind(JSON);')
     || !contents.includes('const ORIGINAL_OBJECT_CREATE = Object.create.bind(Object);')
     || !contents.includes('const ORIGINAL_BUFFER_BYTE_LENGTH = Buffer.byteLength.bind(Buffer);')
     || !contents.includes('const MAX_OUTPUT_BYTES = 1024 * 1024;')
     || !contents.includes('return ORIGINAL_PROMISE_REJECT(recordDynamicImportViolation(specifier));')
     || !contents.includes('function installRootfsLoader(')
+    || !contents.includes('const TRUSTED_REAL_BUILTINS_TO_WARM = Object.freeze([')
+    || !contents.includes('for (const builtin of TRUSTED_REAL_BUILTINS_TO_WARM) ORIGINAL_GET_BUILTIN_MODULE(builtin);')
     || !contents.includes('let firstDynamicImportViolation = null;')
     || !contents.includes('const violation = new ORIGINAL_ERROR(')
     || !contents.includes('if (firstDynamicImportViolation === null) firstDynamicImportViolation = violation;')
     || !contents.includes('if (firstDynamicImportViolation !== null)')
-    || !contents.includes('Module.prototype._compile = sealedCompile;')
-    || !contents.includes('const ORIGINAL_SET_IMMEDIATE = setImmediate;')
-    || !contents.includes('await ORIGINAL_PROMISE_RESOLVE();')
-    || !contents.includes('await new ORIGINAL_PROMISE((resolve) => ORIGINAL_SET_IMMEDIATE(resolve));')
+    || !contents.includes("seal(Module.prototype, '_compile', sealedCompile, 'Module.prototype._compile');")
+    || !contents.includes("seal(Module.prototype, 'require', originalRequire, 'Module.prototype.require');")
+    || !contents.includes("seal(Module, '_extensions', extensionSurface, 'Module._extensions');")
+    || !contents.includes("const javascriptExtension = Object.getOwnPropertyDescriptor(extensionSurface, '.js');")
+    || !contents.includes('for (const [property, label] of [')
+    || !contents.includes("['wrapper', 'Module.wrapper']")
+    || !contents.includes("['builtinModules', 'Module.builtinModules']")
+    || !contents.includes("['globalPaths', 'Module.globalPaths']")
+    || !contents.includes('Object.freeze(Module.prototype);')
+    || !contents.includes('Object.freeze(Module);')
+    || !contents.includes('const pendingResources = new Map();')
+    || !contents.includes('function observeSynchronousModuleLoad(load)')
+    || !contents.includes('promiseResolve(asyncId)')
+    || !contents.includes('return { exported: load(), firstPendingResource };')
+    || !contents.includes('hook.enable();')
+    || !contents.includes('hook.disable();')
     || !contents.includes('const record = ORIGINAL_OBJECT_CREATE(null);')
     || !contents.includes('function createSuccessRecord(')
     || !contents.includes('const serialized = ORIGINAL_JSON_STRINGIFY(record);')
     || !contents.includes('ORIGINAL_BUFFER_BYTE_LENGTH(serialized)')
     || !contents.includes('write(output, () => ORIGINAL_PROCESS_EXIT(code));')
-    || !contents.includes('await drainAsyncBarrier();')
     || !contents.includes('function flushAndExit(record, code)')
     || !contents.includes('write(output, () => ORIGINAL_PROCESS_EXIT(code));')
     || contents.includes('snapshotModuleLoaderState')
@@ -340,6 +366,9 @@ function recordDynamicImportViolation(specifier) {
     || contents.includes('--allow-worker')
     || contents.includes('--allow-wasi')
     || contents.includes('--allow-addons')
+    || contents.includes('async function probePackage(')
+    || contents.includes('async function main(')
+    || /Reflect\.(?:apply|get|has)\(/u.test(contents)
     || contents.includes('process.argv.slice(2).join')
     || /(?:process\.env\.)?NODE_PATH\s*=/u.test(contents)) {
     throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted module probe is not a read-only, fail-closed implementation');
@@ -660,13 +689,12 @@ if (JSON.stringify(actual) !== JSON.stringify(expected)) {
 EOF
 cat > "$node_red/node_modules/@grpc/grpc-js/index.js" <<'EOF'
 'use strict';
-module.constructor._pathCache = { poisoned: true };
-module.constructor.globalPaths = ['/poisoned'];
+module.constructor._pathCache.poisoned = true;
 module.exports = { compatible: true };
 EOF
 cat > "$node_red/node_modules/@chirpstack/chirpstack-api/api/application_grpc_pb.js" <<'EOF'
 'use strict';
-if (Object.hasOwn(module.constructor._pathCache, 'poisoned') || module.constructor.globalPaths.includes('/poisoned')) {
+if (Object.hasOwn(module.constructor._pathCache, 'poisoned')) {
   throw new Error('cross-child Module state leaked');
 }
 module.exports = { compatible: true };
@@ -767,6 +795,38 @@ rm -f /tmp/osi-module-probe-deferred-sqlite-marker.db
 status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
 test "$status" -eq 2
 test ! -e /tmp/osi-module-probe-deferred-sqlite-marker.db
+cat > "$node_red/osi-db-helper/index.js" <<'EOF'
+'use strict';
+Array.prototype.includes = () => true;
+const sqlite = process.getBuiltinModule('node:sqlite');
+const marker = new sqlite.DatabaseSync('/tmp/osi-module-probe-mutated-includes-marker.db');
+marker.exec('CREATE TABLE marker (id INTEGER PRIMARY KEY)');
+marker.close();
+module.exports = {};
+EOF
+rm -f /tmp/osi-module-probe-mutated-includes-marker.db
+status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
+test "$status" -eq 2
+test ! -e /tmp/osi-module-probe-mutated-includes-marker.db
+cat > "$node_red/node_modules/@grpc/grpc-js/index.js" <<'EOF'
+'use strict';
+module.constructor._load = () => ({ compatible: true });
+require('osi-round-eight-missing-dependency');
+module.exports = { compatible: true };
+EOF
+status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
+test "$status" -eq 2
+cat > "$node_red/node_modules/@grpc/grpc-js/index.js" <<'EOF'
+'use strict';
+const schedule = (depth) => depth === 0
+  ? import('node:sqlite').catch(() => {})
+  : setImmediate(() => schedule(depth - 1));
+schedule(4);
+module.exports = { compatible: true };
+EOF
+status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
+test "$status" -eq 2
+test ! -e /tmp/osi-module-probe-nested-sqlite-marker.db
 rm -rf /workdir/openwrt /workdir/web /workdir/feeds /workdir/feeds.conf.default
 status=0; node "$tool" unknown-operation >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?; test "$status" -eq 2
 for operation in copy-feed-config verify-image mirror-gui; do
