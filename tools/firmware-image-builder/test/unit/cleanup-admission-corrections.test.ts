@@ -8,6 +8,8 @@ import {
   ADMISSION_ID_PATTERN,
   createCleanupAdmissionRecovery,
   createRecoveryFileSystem,
+  decodeAdmissionId,
+  encodeAdmissionId,
   type CleanupAdmissionRecoveryOptions,
   type RecoveryDirectoryHandle,
   type RecoveryFileHandle,
@@ -59,6 +61,7 @@ function fakeRecovery(options: {
     prepare(sql: string) {
       return {
         get(...parameters: readonly unknown[]) {
+          if (sql.includes('cleanup_credential_reservations')) return undefined;
           if (sql.includes('cleanup_leases')) {
             if (lease === null) return undefined;
             const admissionId = sql.includes('admission_id=? AND job_id=?') ? parameters[0] : parameters[1];
@@ -73,6 +76,7 @@ function fakeRecovery(options: {
   };
   const ownership = {
     apiWrite(command: Record<string, unknown>) {
+      if (command.kind === 'cleanup-credential-reserve' || command.kind === 'cleanup-credential-abort') return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined } as const;
       writes.push(command);
       if (command.kind === 'cleanup-admission') {
         generation += 1;
@@ -127,6 +131,12 @@ afterEach(async () => {
 });
 
 describe('Task 20 cleanup admission corrections', () => {
+  it('does not retain a legacy path-based filesystem adapter', async () => {
+    const source = await readFile(new URL('../../api/src/recovery.ts', import.meta.url), 'utf8');
+
+    expect(source).not.toMatch(/RecoveryLegacyFileSystem|legacyFileSystem|join\(path, name\)/);
+  });
+
   it('keeps admissions closed before startup prune and forbids prune after openAdmissions', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-lifecycle-')); roots.push(root);
     const { recovery } = fakeRecovery({ root });
@@ -164,6 +174,9 @@ describe('Task 20 cleanup admission corrections', () => {
         const result = (recovery as never);
         void result;
         const write = (writes as unknown[]);
+        if ((command as { kind?: string }).kind === 'cleanup-credential-reserve') {
+          return { ok: true, kind: 'committed', eventSeq: write.length, value: undefined } as const;
+        }
         write.push(command);
         lease.status = 'expired';
         return { ok: true, kind: 'committed', eventSeq: write.length, value: undefined } as const;
@@ -348,6 +361,44 @@ describe('Task 20 cleanup admission corrections', () => {
     let cursor = -1;
     for (const event of expected) { cursor = events.indexOf(event, cursor + 1); expect(cursor).toBeGreaterThan(-1); }
     expect(events.indexOf('sync:file:' + events.find((event) => event.startsWith('open-file:'))?.slice('open-file:'.length))).toBeGreaterThan(-1);
+  });
+
+  it('retries the held parent fsync when a child directory already exists', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-parent-retry-')); roots.push(root);
+    const base = createRecoveryFileSystem();
+    let rootSyncs = 0;
+    const fileSystem: RecoveryFileSystem = {
+      openDirectory: async (path) => {
+        const directory = await base.openDirectory(path);
+        if (path !== root) return directory;
+        return {
+          ...directory,
+          async sync() {
+            rootSyncs += 1;
+            if (rootSyncs === 1) throw new Error('simulated parent fsync failure');
+            await directory.sync();
+          },
+        };
+      },
+    };
+    const { recovery } = fakeRecovery({ root, fileSystem });
+    await recovery.openAdmissions();
+    await expect(recovery.admitAndStart({ jobId: 'job-parent-retry', owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-parent-retry'), at: NOW })).rejects.toThrow('simulated parent fsync failure');
+    await recovery.admitAndStart({ jobId: 'job-parent-retry', owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-parent-retry'), at: NOW });
+    expect(rootSyncs).toBeGreaterThanOrEqual(2);
+  });
+
+  it('encodes lowercase time-ordered 48-bit ULID admission ids', () => {
+    const timestamp = Date.parse('2026-07-27T12:00:00.000Z');
+    const first = encodeAdmissionId(timestamp, new Uint8Array(10).fill(1));
+    const sameMillisecond = encodeAdmissionId(timestamp, new Uint8Array(10).fill(2));
+    const later = encodeAdmissionId(timestamp + 1, new Uint8Array(10).fill(1));
+
+    expect(first).toMatch(ADMISSION_ID_PATTERN);
+    expect(first.slice(4, 5)).toMatch(/[0-7]/);
+    expect(first).not.toBe(sameMillisecond);
+    expect(first < later).toBe(true);
+    expect(decodeAdmissionId(first)).toEqual({ timestampMs: timestamp, randomness: new Uint8Array(10).fill(1) });
   });
 
   it.each(['jobs', 'job', 'recovery', 'cleanup-credentials'] as const)('fails closed when fsync ancestor boundary fails at %s', async (boundary) => {

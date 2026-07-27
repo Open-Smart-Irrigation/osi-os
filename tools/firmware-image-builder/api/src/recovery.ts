@@ -1,6 +1,6 @@
 import { createHash, randomBytes as nodeRandomBytes } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { lstat as nodeLstat, mkdir as nodeMkdir, open as nodeOpen, readdir as nodeReaddir, unlink as nodeUnlink } from 'node:fs/promises';
+import { mkdir as nodeMkdir, open as nodeOpen, readdir as nodeReaddir, unlink as nodeUnlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -15,14 +15,16 @@ import type {
 } from './ownership.js';
 import type { JsonObject } from './store.js';
 
-export const ADMISSION_ID_PATTERN = /^cln_[0-9a-hj-km-np-tv-z]{26}$/;
-const ADMISSION_BODY_PATTERN = /^[0-9a-hj-km-np-tv-z]{26}$/;
-const CREDENTIAL_NAME_PATTERN = /^([0-9a-hj-km-np-tv-z]{26})\.token$/;
+export const ADMISSION_ID_PATTERN = /^cln_[0-7][0-9a-hj-km-np-tv-z]{25}$/;
+const ADMISSION_BODY_PATTERN = /^[0-7][0-9a-hj-km-np-tv-z]{25}$/;
+const CREDENTIAL_NAME_PATTERN = /^cln_([0-7][0-9a-hj-km-np-tv-z]{25})\.token$/;
 const CREDENTIAL_DIRECTORY = 'recovery/cleanup-credentials';
 const FILE_MODE = 0o600;
 const DIRECTORY_MODE = 0o700;
 const MAX_CREDENTIAL_BYTES = 16 * 1024;
 const CROCKFORD = '0123456789abcdefghjkmnpqrstvwxyz';
+const ULID_TIMESTAMP_MAX = 0xffffffffffffn;
+const RESERVATION_MIN_HOLD_MS = 5 * 60 * 1000;
 
 export interface RecoveryStats {
   readonly uid: number;
@@ -53,16 +55,7 @@ export interface RecoveryDescriptorFileSystem {
   readonly openDirectory: (path: string) => Promise<RecoveryDirectoryHandle>;
 }
 
-// Retained as an adapter seam for Task 19 tests and callers. Production uses descriptors.
-export interface RecoveryLegacyFileSystem {
-  readonly lstat: (path: string) => Promise<RecoveryStats>;
-  readonly mkdir: (path: string, mode: number) => Promise<void>;
-  readonly open: (path: string, flags: number, mode?: number) => Promise<RecoveryFileHandle>;
-  readonly readdir: (path: string) => Promise<readonly string[]>;
-  readonly unlink: (path: string) => Promise<void>;
-}
-
-export type RecoveryFileSystem = RecoveryDescriptorFileSystem | RecoveryLegacyFileSystem;
+export type RecoveryFileSystem = RecoveryDescriptorFileSystem;
 
 export interface RecoveryCrypto {
   readonly randomBytes: (size: number) => Uint8Array;
@@ -80,7 +73,12 @@ export interface RecoveryClock {
 }
 
 export interface RecoveryDatabase {
-  readonly prepare: (sql: string) => { readonly get: (...parameters: readonly unknown[]) => unknown; readonly all?: (...parameters: readonly unknown[]) => readonly unknown[] };
+  readonly prepare: (sql: string) => {
+    readonly get: (...parameters: readonly unknown[]) => unknown;
+    readonly all?: (...parameters: readonly unknown[]) => readonly unknown[];
+    readonly run?: (...parameters: readonly unknown[]) => { readonly changes?: number };
+  };
+  readonly exec?: (sql: string) => unknown;
 }
 
 export interface CleanupAdmissionRecoveryOptions {
@@ -93,6 +91,7 @@ export interface CleanupAdmissionRecoveryOptions {
   readonly clock?: RecoveryClock;
   readonly ownerUid?: number;
   readonly onAdmissionCommitted?: () => void;
+  readonly onCredentialWritten?: () => void | Promise<void>;
 }
 
 export interface CleanupAdmissionInput {
@@ -121,6 +120,14 @@ export interface CleanupAdmissionResult {
   readonly credentialSha256: string;
   readonly rotated: boolean;
   readonly started: true;
+}
+
+export interface CleanupAdmissionRecovery {
+  readonly admitAndStart: (input: CleanupAdmissionInput) => Promise<CleanupAdmissionResult>;
+  readonly reconcileAndStart: (input: ReconcileAdmissionInput) => Promise<CleanupAdmissionResult>;
+  readonly retryCorrectedAndStart: (input: CorrectedRetryAdmissionInput) => Promise<CleanupAdmissionResult>;
+  readonly openAdmissions: () => Promise<void>;
+  readonly pruneOrphanCredentials: () => Promise<number>;
 }
 
 export class RecoveryBoundaryError extends Error {
@@ -157,10 +164,12 @@ function verifyCredentialFile(stats: RecoveryStats, path: string, ownerUid: numb
   if (stats.isSymbolicLink() || !stats.isFile() || stats.uid !== ownerUid || modeOf(stats) !== FILE_MODE || stats.nlink !== 1) throw new RecoveryBoundaryError(`unsafe cleanup credential: ${path}`);
 }
 
-function encodeAdmissionId(bytes: Uint8Array): string {
-  if (bytes.length < 16) throw new RecoveryBoundaryError('admission ID entropy is too short');
-  let value = 0n;
-  for (const byte of bytes.subarray(0, 16)) value = (value << 8n) | BigInt(byte);
+export function encodeAdmissionId(timestampMs: number, randomness: Uint8Array): string {
+  if (!Number.isSafeInteger(timestampMs) || timestampMs < 0 || BigInt(timestampMs) > ULID_TIMESTAMP_MAX) throw new RecoveryBoundaryError('admission ID timestamp is invalid');
+  if (randomness.length < 10) throw new RecoveryBoundaryError('admission ID entropy is too short');
+  let entropy = 0n;
+  for (const byte of randomness.subarray(0, 10)) entropy = (entropy << 8n) | BigInt(byte);
+  let value = (BigInt(timestampMs) << 80n) | entropy;
   let body = '';
   for (let index = 0; index < 26; index += 1) {
     body = CROCKFORD[Number(value & 31n)]! + body;
@@ -168,6 +177,34 @@ function encodeAdmissionId(bytes: Uint8Array): string {
   }
   if (!ADMISSION_BODY_PATTERN.test(body)) throw new RecoveryBoundaryError('generated admission ID is invalid');
   return `cln_${body}`;
+}
+
+export function decodeAdmissionId(admissionId: string): { readonly timestampMs: number; readonly randomness: Uint8Array } {
+  if (!ADMISSION_ID_PATTERN.test(admissionId)) throw new RecoveryBoundaryError('admission ID is invalid');
+  let value = 0n;
+  for (const character of admissionId.slice(4)) {
+    const digit = CROCKFORD.indexOf(character);
+    if (digit < 0) throw new RecoveryBoundaryError('admission ID alphabet is invalid');
+    value = (value << 5n) | BigInt(digit);
+  }
+  const timestampMs = Number(value >> 80n);
+  const randomness = new Uint8Array(10);
+  let entropy = value & ((1n << 80n) - 1n);
+  for (let index = randomness.length - 1; index >= 0; index -= 1) {
+    randomness[index] = Number(entropy & 0xffn);
+    entropy >>= 8n;
+  }
+  return { timestampMs, randomness };
+}
+
+function databaseRun(db: DatabaseSync | RecoveryDatabase, sql: string, ...parameters: readonly unknown[]): number {
+  const statement = db.prepare(sql);
+  if (typeof statement.run !== 'function') return 0;
+  return Number(statement.run(...(parameters as any)).changes ?? 0);
+}
+
+function databaseExec(db: DatabaseSync | RecoveryDatabase, sql: string): void {
+  if (typeof (db as RecoveryDatabase).exec === 'function') (db as RecoveryDatabase).exec!(sql);
 }
 
 function credentialRecord(admissionId: string, generation: number, token: string): Buffer {
@@ -230,22 +267,6 @@ export function createRecoveryFileSystem(): RecoveryDescriptorFileSystem {
   return { openDirectory: openDefaultDirectory };
 }
 
-function legacyFileSystem(fileSystem: RecoveryLegacyFileSystem): RecoveryDescriptorFileSystem {
-  const legacy = fileSystem;
-  async function openDirectory(path: string): Promise<RecoveryDirectoryHandle> {
-    const handle = await legacy.open(path, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW);
-    return {
-      ...handle,
-      openDirectoryChild: async (name) => openDirectory(join(path, name)),
-      mkdirChild: async (name, mode) => { await legacy.mkdir(join(path, name), mode); },
-      openFileChild: async (name, flags, mode) => legacy.open(join(path, name), flags | fsConstants.O_NOFOLLOW, mode),
-      readdir: async () => legacy.readdir(path),
-      unlinkChild: async (name) => { await legacy.unlink(join(path, name)); },
-    };
-  }
-  return { openDirectory };
-}
-
 interface DirectoryLease {
   readonly directory: RecoveryDirectoryHandle;
   readonly close: () => Promise<void>;
@@ -259,18 +280,13 @@ async function closeHandles(handles: readonly RecoveryFileHandle[]): Promise<voi
   if (firstError !== undefined) throw firstError;
 }
 
-export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecoveryOptions) {
-  const suppliedFileSystem = options.fileSystem;
-  const fileSystem: RecoveryDescriptorFileSystem = suppliedFileSystem === undefined
-    ? createRecoveryFileSystem()
-    : 'openDirectory' in suppliedFileSystem
-      ? suppliedFileSystem
-      : legacyFileSystem(suppliedFileSystem);
+export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecoveryOptions): CleanupAdmissionRecovery {
+  const fileSystem: RecoveryDescriptorFileSystem = options.fileSystem ?? createRecoveryFileSystem();
   const crypto: RecoveryCrypto = { randomBytes: (size) => nodeRandomBytes(size), sha256: (value) => createHash('sha256').update(value).digest('hex'), ...options.crypto };
   const clock = options.clock ?? { now: () => new Date().toISOString() };
   const ownerUid = options.ownerUid ?? (process.getuid?.() ?? 0);
   const jobLocks = new Map<string, Promise<void>>();
-  let admissionSequence = 0;
+  const issuedAdmissionIds = new Set<string>();
   let admissionsOpen = false;
   let lifecycleTail = Promise.resolve();
 
@@ -302,8 +318,14 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     safeSegment(name, 'recovery directory child');
     try {
       const child = await parent.openDirectoryChild(name);
-      verifyDirectory(await child.stat(), path, ownerUid);
-      return child;
+      try {
+        verifyDirectory(await child.stat(), path, ownerUid);
+        await parent.sync();
+        return child;
+      } catch (error) {
+        try { await child.close(); } catch (closeError) { throw new RecoveryBoundaryError('recovery child close failed', { cause: closeError }); }
+        throw error;
+      }
     } catch (error) {
       if (errorCode(error) !== 'ENOENT' || !create) {
         if (errorCode(error) === 'ENOENT' && !create) return null;
@@ -311,10 +333,10 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       }
       try {
         await parent.mkdirChild(name, DIRECTORY_MODE);
-        await parent.sync();
       } catch (mkdirError) {
         if (errorCode(mkdirError) !== 'EEXIST') throw mkdirError;
       }
+      await parent.sync();
       const child = await parent.openDirectoryChild(name);
       verifyDirectory(await child.stat(), path, ownerUid);
       return child;
@@ -352,12 +374,19 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     return null;
   }
 
-  async function writeCredential(jobId: string, admissionId: string, generation: number, token: string): Promise<{ readonly relativePath: string; readonly sha256: string }> {
+  async function writeCredential(
+    jobId: string,
+    admissionId: string,
+    generation: number,
+    token: string,
+    reservation: Readonly<{ owner: string; createdAt: string; expiresAt: string }>,
+  ): Promise<{ readonly relativePath: string; readonly sha256: string }> {
     const lease = await directoryLease(jobId, true);
     if (lease === null) throw new RecoveryBoundaryError('cleanup credential directory is unavailable');
     const filename = `${admissionId}.token`;
     const relativePath = `${CREDENTIAL_DIRECTORY}/${filename}`;
     const contents = credentialRecord(admissionId, generation, token);
+    let failure: unknown;
     try {
       const handle = await lease.directory.openFileChild(filename, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, FILE_MODE);
       try {
@@ -366,22 +395,73 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
         verifyCredentialFile(await handle.stat(), relativePath, ownerUid);
       } finally { await handle.close(); }
       await lease.directory.sync();
+      await options.onCredentialWritten?.();
       return { relativePath, sha256: crypto.sha256(contents) };
     } catch (error) {
-      throw new RecoveryBoundaryError(`cleanup credential filesystem operation failed${closeErrorMessage(error)}`, { cause: error });
+      failure = error;
     } finally {
       await lease.close();
     }
+    let abortFailure: unknown;
+    try {
+      ownershipCommandResult(options.ownership.apiWrite({
+        kind: 'cleanup-credential-abort',
+        jobId,
+        admissionId,
+        owner: reservation.owner,
+        credentialRelativePath: relativePath,
+        createdAt: reservation.createdAt,
+        expiresAt: reservation.expiresAt,
+        at: reservation.createdAt,
+      }));
+    } catch (error) { abortFailure = error; }
+    throw new RecoveryBoundaryError(
+      `cleanup credential filesystem operation failed${closeErrorMessage(failure)}`,
+      { cause: abortFailure ?? failure },
+    );
   }
 
-  function newAdmission(): { readonly admissionId: string; readonly token: string } {
-    admissionSequence += 1;
-    const idBytes = new Uint8Array(crypto.randomBytes(16));
-    for (let index = 0, value = admissionSequence; index < 8; index += 1, value = Math.floor(value / 256)) idBytes[15 - index] = (idBytes[15 - index]! ^ (value & 0xff));
-    const admissionId = encodeAdmissionId(idBytes);
+  function newAdmission(at: string): { readonly admissionId: string; readonly token: string } {
+    const timestampMs = Date.parse(at);
+    if (Number.isNaN(timestampMs)) throw new RecoveryBoundaryError('admission timestamp is invalid');
+    const suppliedRandomness = new Uint8Array(crypto.randomBytes(10));
+    if (suppliedRandomness.length < 10) throw new RecoveryBoundaryError('admission ID entropy is too short');
+    const randomness = suppliedRandomness.slice(0, 10);
+    let admissionId = encodeAdmissionId(timestampMs, randomness);
+    while (issuedAdmissionIds.has(admissionId)) {
+      for (let index = randomness.length - 1; index >= 0; index -= 1) {
+        randomness[index] = (randomness[index]! + 1) & 0xff;
+        if (randomness[index] !== 0) break;
+      }
+      admissionId = encodeAdmissionId(timestampMs, randomness);
+    }
+    issuedAdmissionIds.add(admissionId);
     const tokenBytes = new Uint8Array(crypto.randomBytes(32));
-    for (let index = 0, value = admissionSequence; index < 8; index += 1, value = Math.floor(value / 256)) tokenBytes[31 - index] = tokenBytes[31 - index]! ^ (value & 0xff);
     return { admissionId, token: Buffer.from(tokenBytes).toString('base64url') };
+  }
+
+  function reservationExpiry(at: string, leaseExpiresAt: string): string {
+    const atMs = Date.parse(at);
+    const leaseMs = Date.parse(leaseExpiresAt);
+    if (Number.isNaN(atMs) || Number.isNaN(leaseMs)) throw new RecoveryBoundaryError('cleanup reservation chronology is invalid');
+    return new Date(Math.max(leaseMs, atMs + RESERVATION_MIN_HOLD_MS)).toISOString();
+  }
+
+  function reservationPath(admissionId: string): string {
+    return `${CREDENTIAL_DIRECTORY}/${admissionId}.token`;
+  }
+
+  function reserveCredential(jobId: string, admissionId: string, owner: string, createdAt: string, expiresAt: string): void {
+    ownershipCommandResult(options.ownership.apiWrite({
+      kind: 'cleanup-credential-reserve',
+      jobId,
+      admissionId,
+      owner,
+      credentialRelativePath: reservationPath(admissionId),
+      createdAt,
+      expiresAt,
+      at: createdAt,
+    }));
   }
 
   function jobGeneration(jobId: string): number {
@@ -481,10 +561,12 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     return withJobLock(input.jobId, async () => {
       const at = input.at ?? clock.now();
       const generation = jobGeneration(input.jobId);
-      const material = newAdmission();
-      const credential = await writeCredential(input.jobId, material.admissionId, generation, material.token);
+      const material = newAdmission(at);
+      const reservation = { createdAt: at, expiresAt: reservationExpiry(at, input.expiresAt), owner: input.owner };
+      reserveCredential(input.jobId, material.admissionId, input.owner, reservation.createdAt, reservation.expiresAt);
+      const credential = await writeCredential(input.jobId, material.admissionId, generation, material.token, reservation);
       const unitName = `osi-image-builder-cleanup@${material.admissionId}.service`;
-      const command: ApiWriteCommand = { kind: 'cleanup-admission', jobId: input.jobId, admissionId: material.admissionId, owner: input.owner, unitName, expiresAt: input.expiresAt, credentialRelativePath: credential.relativePath, credentialSha256: credential.sha256, fenceTokenHash: crypto.sha256(material.token), snapshot: input.snapshot, at };
+      const command: ApiWriteCommand = { kind: 'cleanup-admission', jobId: input.jobId, admissionId: material.admissionId, owner: input.owner, unitName, expiresAt: input.expiresAt, credentialRelativePath: credential.relativePath, credentialSha256: credential.sha256, fenceTokenHash: crypto.sha256(material.token), reservationCreatedAt: reservation.createdAt, reservationExpiresAt: reservation.expiresAt, snapshot: input.snapshot, at };
       ownershipCommandResult(options.ownership.apiWrite(command));
       options.onAdmissionCommitted?.();
       await start(unitName);
@@ -534,16 +616,18 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       await start(oldUnit);
       return { admissionId: expected.previousAdmissionId, generation: expected.previousFenceGeneration, unitName: oldUnit, credentialRelativePath: String(old.credential_relative_path), credentialSha256: String(old.credential_sha256), rotated: false, started: true };
     }
-    const generation = jobGeneration(input.jobId);
-    const material = newAdmission();
-    const credential = await writeCredential(input.jobId, material.admissionId, generation, material.token);
     await ensurePredecessorStillMatches(input.jobId, expected);
+    const generation = jobGeneration(input.jobId);
+    const material = newAdmission(at);
+    const reservation = { createdAt: at, expiresAt: reservationExpiry(at, input.expiresAt), owner: input.owner };
+    reserveCredential(input.jobId, material.admissionId, input.owner, reservation.createdAt, reservation.expiresAt);
+    const credential = await writeCredential(input.jobId, material.admissionId, generation, material.token, reservation);
     await stopAndConfirmInactive(oldUnit);
     await ensurePredecessorStillMatches(input.jobId, expected);
     const unitName = `osi-image-builder-cleanup@${material.admissionId}.service`;
     const command: ApiWriteCommand = retry === null
-      ? { kind: 'cleanup-admission-rotate', ...expected, jobId: input.jobId, admissionId: material.admissionId, owner: input.owner, unitName, expiresAt: input.expiresAt, credentialRelativePath: credential.relativePath, credentialSha256: credential.sha256, fenceTokenHash: crypto.sha256(material.token), snapshot: input.snapshot, at }
-      : { kind: 'cleanup-admission-retry', ...expected, jobId: input.jobId, admissionId: material.admissionId, owner: input.owner, unitName, expiresAt: input.expiresAt, credentialRelativePath: credential.relativePath, credentialSha256: credential.sha256, fenceTokenHash: crypto.sha256(material.token), expectedBlockerCode: retry.expectedBlockerCode, expectedBlocker: retry.expectedBlocker, snapshot: retry.correctedSnapshot, at };
+      ? { kind: 'cleanup-admission-rotate', ...expected, jobId: input.jobId, admissionId: material.admissionId, owner: input.owner, unitName, expiresAt: input.expiresAt, credentialRelativePath: credential.relativePath, credentialSha256: credential.sha256, fenceTokenHash: crypto.sha256(material.token), reservationCreatedAt: reservation.createdAt, reservationExpiresAt: reservation.expiresAt, snapshot: input.snapshot, at }
+      : { kind: 'cleanup-admission-retry', ...expected, jobId: input.jobId, admissionId: material.admissionId, owner: input.owner, unitName, expiresAt: input.expiresAt, credentialRelativePath: credential.relativePath, credentialSha256: credential.sha256, fenceTokenHash: crypto.sha256(material.token), reservationCreatedAt: reservation.createdAt, reservationExpiresAt: reservation.expiresAt, expectedBlockerCode: retry.expectedBlockerCode, expectedBlocker: retry.expectedBlocker, snapshot: retry.correctedSnapshot, at };
     ownershipCommandResult(options.ownership.apiWrite(command));
     if (await options.systemd.isActive(oldUnit)) await stopAndConfirmInactive(oldUnit);
     options.onAdmissionCommitted?.();
@@ -563,43 +647,69 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     return withJobLock(input.jobId, () => rotateInternal(input, input));
   }
 
-  async function pruneInternal(): Promise<number> {
-    const root = await fileSystem.openDirectory(options.stateRoot);
-    verifyDirectory(await root.stat(), options.stateRoot, ownerUid);
-    let jobs: RecoveryDirectoryHandle | null = null;
+  async function withPruneTransaction<T>(work: () => Promise<T>): Promise<T> {
+    const transactional = typeof (options.db as RecoveryDatabase).exec === 'function';
+    if (!transactional) return work();
+    databaseExec(options.db, 'BEGIN IMMEDIATE');
     try {
-      jobs = await openChildDirectory(root, 'jobs', join(options.stateRoot, 'jobs'), false);
-      if (jobs === null) return 0;
-      let removed = 0;
-      for (const jobId of await jobs.readdir()) {
-        try { safeSegment(jobId, 'job ID'); } catch { continue; }
-        let directory: DirectoryLease | null = null;
-        try { directory = await directoryLease(jobId, false); } catch { continue; }
-        if (directory === null) continue;
-        try {
-          for (const name of await directory.directory.readdir()) {
-            const match = name.match(/^cln_([0-9a-hj-km-np-tv-z]{26})\.token$/);
-            if (!match) continue;
-            const admissionId = `cln_${match[1]}`;
-            let handle: RecoveryFileHandle | null = null;
-            try {
-              handle = await directory.directory.openFileChild(name, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-              verifyCredentialFile(await handle.stat(), `${CREDENTIAL_DIRECTORY}/${name}`, ownerUid);
-            } catch { if (handle !== null) await handle.close(); continue; }
-            await handle.close(); handle = null;
-            const matching = options.db.prepare('SELECT 1 FROM cleanup_leases WHERE job_id=? AND admission_id=?').get(jobId, admissionId);
-            if (matching !== undefined && matching !== null) continue;
-            await directory.directory.unlinkChild(name);
-            await directory.directory.sync();
-            removed += 1;
-          }
-        } finally { await directory.close(); }
-      }
-      return removed;
-    } finally {
-      if (jobs !== null) await jobs.close();
-      await root.close();
+      const result = await work();
+      databaseExec(options.db, 'COMMIT');
+      return result;
+    } catch (error) {
+      try { databaseExec(options.db, 'ROLLBACK'); } catch (rollbackError) { throw new RecoveryBoundaryError('cleanup prune transaction rollback failed', { cause: rollbackError }); }
+      throw error;
     }
+  }
+
+  async function pruneInternal(): Promise<number> {
+    return withPruneTransaction(async () => {
+      const now = clock.now();
+      databaseRun(options.db, 'DELETE FROM cleanup_credential_reservations WHERE expires_at <= ?', now);
+      const root = await fileSystem.openDirectory(options.stateRoot);
+      verifyDirectory(await root.stat(), options.stateRoot, ownerUid);
+      let jobs: RecoveryDirectoryHandle | null = null;
+      try {
+        jobs = await openChildDirectory(root, 'jobs', join(options.stateRoot, 'jobs'), false);
+        if (jobs === null) return 0;
+        let removed = 0;
+        for (const jobId of await jobs.readdir()) {
+          try { safeSegment(jobId, 'job ID'); } catch { continue; }
+          let directory: DirectoryLease | null = null;
+          try { directory = await directoryLease(jobId, false); } catch { continue; }
+          if (directory === null) continue;
+          try {
+            for (const name of await directory.directory.readdir()) {
+              const match = name.match(CREDENTIAL_NAME_PATTERN);
+              if (!match) continue;
+              const admissionId = `cln_${match[1]}`;
+              let handle: RecoveryFileHandle | null = null;
+              try {
+                handle = await directory.directory.openFileChild(name, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+                verifyCredentialFile(await handle.stat(), `${CREDENTIAL_DIRECTORY}/${name}`, ownerUid);
+              } catch (error) {
+                if (handle !== null) await handle.close();
+                void error;
+                continue;
+              }
+              await handle.close(); handle = null;
+              const matchingLease = options.db.prepare('SELECT 1 FROM cleanup_leases WHERE job_id=? AND admission_id=?').get(jobId, admissionId);
+              const matchingReservation = options.db.prepare(
+                `SELECT 1 FROM cleanup_credential_reservations
+                 WHERE job_id=? AND admission_id=? AND credential_relative_path=? AND expires_at > ?`,
+              ).get(jobId, admissionId, `${CREDENTIAL_DIRECTORY}/${name}`, now);
+              if ((matchingLease !== undefined && matchingLease !== null) || (matchingReservation !== undefined && matchingReservation !== null)) continue;
+              await directory.directory.unlinkChild(name);
+              await directory.directory.sync();
+              removed += 1;
+            }
+          } finally { await directory.close(); }
+        }
+        return removed;
+      } finally {
+        if (jobs !== null) await jobs.close();
+        await root.close();
+      }
+    });
   }
 
   async function openAdmissions(): Promise<void> {

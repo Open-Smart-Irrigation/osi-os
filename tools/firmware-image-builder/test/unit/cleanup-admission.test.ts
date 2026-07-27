@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { lstat, mkdir, mkdtemp, open, readFile, readdir, stat, unlink } from 'node:fs/promises';
+import { mkdtemp, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ADMISSION_ID_PATTERN, createCleanupAdmissionRecovery, type RecoveryFileSystem, type RecoveryLegacyFileSystem, type RecoverySystemd } from '../../api/src/recovery.js';
+import { ADMISSION_ID_PATTERN, createCleanupAdmissionRecovery, createRecoveryFileSystem, type RecoveryDirectoryHandle, type RecoveryFileSystem, type RecoverySystemd } from '../../api/src/recovery.js';
 
 const NOW = '2026-07-27T12:00:00.000Z';
 const EXPIRES = '2026-07-27T12:05:00.000Z';
@@ -15,16 +15,62 @@ function snapshot(jobId: string) {
   return { runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: null, leaseExpiresAt: null, inactiveAt: NOW, observedAt: NOW }, state: 'starting' as const, container: { kind: 'absent' as const, globalLabelResult: 'no-match' as const, observedAt: NOW }, staging: { kind: 'absent' as const, path: null }, logs: { runner: 'absent' as const, docker: 'absent' as const, verifiedAt: NOW }, blocker: 'none' as const };
 }
 
-function fakeOwnership() { const writes: unknown[] = []; return { writes, apiWrite(command: unknown) { writes.push(command); return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined } as const; } }; }
+function fakeOwnership() { const writes: unknown[] = []; return { writes, apiWrite(command: unknown) { const kind = (command as { kind?: string }).kind; if (kind !== 'cleanup-credential-reserve' && kind !== 'cleanup-credential-abort') writes.push(command); return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined } as const; } }; }
 function realFileSystem(): RecoveryFileSystem { return undefined as never; }
 function fakeSystemd(events: string[] = []): RecoverySystemd { return { async start(unit) { events.push(`systemd:start:${unit}`); }, async stop(unit) { events.push(`systemd:stop:${unit}`); }, async isActive() { return false; } }; }
-function recordingFileSystem(events: string[]): RecoveryLegacyFileSystem {
+function recordingFileSystem(events: string[]): RecoveryFileSystem {
+  const base = createRecoveryFileSystem();
+  const wrap = (directory: RecoveryDirectoryHandle, path: string): RecoveryDirectoryHandle => ({
+    ...directory,
+    async sync() { events.push('parent:fsync'); await directory.sync(); },
+    async openDirectoryChild(name) { return wrap(await directory.openDirectoryChild(name), join(path, name)); },
+    async openFileChild(name, flags, mode) {
+      const file = await directory.openFileChild(name, flags, mode);
+      return { ...file, async sync() { events.push('file:fsync'); await file.sync(); } };
+    },
+  });
+  return { openDirectory: async (path) => wrap(await base.openDirectory(path), path) };
+}
+
+function readFailureFileSystem(base: RecoveryFileSystem, shouldFail: () => boolean): RecoveryFileSystem {
   return {
-    lstat: (path) => lstat(path),
-    mkdir: async (path, mode) => { await mkdir(path, { mode }); },
-    open: async (path, flags, mode) => { const handle = await open(path, flags, mode); return { writeFile: (contents) => handle.writeFile(contents), readFile: () => handle.readFile(), sync: async () => { events.push(path.endsWith('.token') ? 'file:fsync' : 'parent:fsync'); await handle.sync(); }, stat: () => handle.stat(), close: () => handle.close() }; },
-    readdir: (path) => readdir(path, { encoding: 'utf8' }),
-    unlink: (path) => unlink(path),
+    openDirectory: async (path) => {
+      const wrap = async (directory: RecoveryDirectoryHandle): Promise<RecoveryDirectoryHandle> => ({
+        ...directory,
+        async openDirectoryChild(name) { return wrap(await directory.openDirectoryChild(name)); },
+        async openFileChild(name, flags, mode) {
+          if (shouldFail() && (flags & fsConstants.O_WRONLY) === 0 && (flags & fsConstants.O_DIRECTORY) === 0) {
+            throw Object.assign(new Error('disk read failure'), { code: 'EIO' });
+          }
+          return directory.openFileChild(name, flags, mode);
+        },
+      });
+      return wrap(await base.openDirectory(path));
+    },
+  };
+}
+
+function wrongOwnerFileSystem(base: RecoveryFileSystem, ownerUid: number, shouldSpoof: () => boolean): RecoveryFileSystem {
+  return {
+    openDirectory: async (path) => {
+      const wrap = async (directory: RecoveryDirectoryHandle): Promise<RecoveryDirectoryHandle> => ({
+        ...directory,
+        async openDirectoryChild(name) { return wrap(await directory.openDirectoryChild(name)); },
+        async openFileChild(name, flags, mode) {
+          const handle = await directory.openFileChild(name, flags, mode);
+          const readOnly = (flags & (fsConstants.O_WRONLY | fsConstants.O_RDWR)) === 0;
+          if (!shouldSpoof() || !name.endsWith('.token') || !readOnly || (flags & fsConstants.O_DIRECTORY) !== 0) return handle;
+          const stats = await handle.stat();
+          return {
+            ...handle,
+            async stat() {
+              return { uid: ownerUid + 1, mode: stats.mode, nlink: stats.nlink, isFile: () => stats.isFile(), isDirectory: () => stats.isDirectory(), isSymbolicLink: () => stats.isSymbolicLink() };
+            },
+          };
+        },
+      });
+      return wrap(await base.openDirectory(path));
+    },
   };
 }
 
@@ -56,7 +102,7 @@ describe('cleanup admission credentials', () => {
 
   it('fails closed on an unexpected credential filesystem read failure', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-fs-failure-')); tempDirectories.push(root); const events: string[] = []; const base = recordingFileSystem(events); let failRead = false; let lease: Record<string, unknown> | undefined; const writes: unknown[] = [];
-    const ownerUid = process.getuid?.() ?? 0; const fileSystem: RecoveryLegacyFileSystem = { ...base, open: async (path, flags, mode) => { if (failRead && (flags & fsConstants.O_WRONLY) === 0 && (flags & fsConstants.O_DIRECTORY) === 0) { const error = Object.assign(new Error('disk read failure'), { code: 'EIO' }); throw error; } return base.open(path, flags, mode); } }; const ownership = { apiWrite(command: unknown) { writes.push(command); if ((command as { kind: string }).kind === 'cleanup-admission') { const value = command as Record<string, unknown>; lease = { admission_id: value.admissionId, job_id: 'job-fs-failure', status: 'admitted', expires_at: EXPIRES, credential_relative_path: value.credentialRelativePath, credential_sha256: value.credentialSha256, fence_generation: 1, fence_token_hash: value.fenceTokenHash, unit_name: value.unitName }; } return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined } as const; } }; const db = { prepare: (sql: string) => ({ get: () => sql.includes('cleanup_leases') ? lease : { cleanup_generation: 0 } }) } as never; let randomCall = 0; const recovery = createCleanupAdmissionRecovery({ stateRoot: root, db, ownership, systemd: fakeSystemd(), clock: { now: () => NOW }, crypto: { randomBytes: (size) => Buffer.alloc(size, ++randomCall) }, fileSystem, ownerUid }); await recovery.openAdmissions(); const first = await recovery.admitAndStart({ jobId: 'job-fs-failure', owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot('job-fs-failure') }); failRead = true;
+    const ownerUid = process.getuid?.() ?? 0; const fileSystem = readFailureFileSystem(base, () => failRead); const ownership = { apiWrite(command: unknown) { const kind = (command as { kind: string }).kind; if (kind === 'cleanup-credential-reserve' || kind === 'cleanup-credential-abort') return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined } as const; writes.push(command); if (kind === 'cleanup-admission') { const value = command as Record<string, unknown>; lease = { admission_id: value.admissionId, job_id: 'job-fs-failure', status: 'admitted', expires_at: EXPIRES, credential_relative_path: value.credentialRelativePath, credential_sha256: value.credentialSha256, fence_generation: 1, fence_token_hash: value.fenceTokenHash, unit_name: value.unitName }; } return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined } as const; } }; const db = { prepare: (sql: string) => ({ get: () => sql.includes('cleanup_credential_reservations') ? undefined : sql.includes('cleanup_leases') ? lease : { cleanup_generation: 0 } }) } as never; let randomCall = 0; const recovery = createCleanupAdmissionRecovery({ stateRoot: root, db, ownership, systemd: fakeSystemd(), clock: { now: () => NOW }, crypto: { randomBytes: (size) => Buffer.alloc(size, ++randomCall) }, fileSystem, ownerUid }); await recovery.openAdmissions(); const first = await recovery.admitAndStart({ jobId: 'job-fs-failure', owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot('job-fs-failure') }); failRead = true;
     await expect(recovery.reconcileAndStart({ jobId: 'job-fs-failure', admissionId: first.admissionId, owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot('job-fs-failure') })).rejects.toThrow('cleanup credential filesystem read failed'); expect(writes).toHaveLength(1);
   });
 
@@ -98,7 +144,7 @@ describe('cleanup admission credentials', () => {
     ['expired credential', async () => {}],
     ['wrong owner credential', async () => {}],
   ])('rotates a %s without starting the invalid predecessor', async (_name, mutate) => {
-    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-invalid-')); tempDirectories.push(root); const writes: unknown[] = []; let lease: Record<string, unknown> | undefined; const ownership = { writes, apiWrite(command: unknown) { writes.push(command); if ((command as { kind: string }).kind === 'cleanup-admission') { const value = command as Record<string, unknown>; lease = { admission_id: value.admissionId, job_id: 'job-invalid', status: 'admitted', expires_at: EXPIRES, credential_relative_path: value.credentialRelativePath, credential_sha256: value.credentialSha256, fence_generation: 1, fence_token_hash: value.fenceTokenHash, unit_name: value.unitName }; } return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined } as const; } };
-    const ownerUid = process.getuid?.() ?? 0; let wrongOwner = false; const baseFileSystem = recordingFileSystem([]); const fileSystem: RecoveryLegacyFileSystem = { ...baseFileSystem, open: async (path, flags, mode) => { const handle = await baseFileSystem.open(path, flags, mode); const readOnly = (flags & (fsConstants.O_WRONLY | fsConstants.O_RDWR)) === 0; if (!wrongOwner || !path.endsWith('.token') || !readOnly || (flags & fsConstants.O_DIRECTORY) !== 0) return handle; const stats = await handle.stat(); return { ...handle, stat: async () => ({ uid: ownerUid + 1, mode: stats.mode, nlink: stats.nlink, isFile: () => stats.isFile(), isDirectory: () => stats.isDirectory(), isSymbolicLink: () => stats.isSymbolicLink() }) }; } }; const db = { prepare: (sql: string) => ({ get: () => sql.includes('cleanup_leases') ? lease : { cleanup_generation: 0 } }) } as never; const systemd = fakeSystemd(); let randomCall = 0; const recovery = createCleanupAdmissionRecovery({ stateRoot: root, db, ownership, systemd, clock: { now: () => NOW }, crypto: { randomBytes: (size) => Buffer.alloc(size, ++randomCall) }, fileSystem, ownerUid }); await recovery.openAdmissions(); const first = await recovery.admitAndStart({ jobId: 'job-invalid', owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot('job-invalid') }); const path = join(root, 'jobs', 'job-invalid', first.credentialRelativePath); await mutate(path); wrongOwner = _name === 'wrong owner credential'; const at = _name === 'expired credential' ? '2026-07-27T12:06:00.000Z' : NOW; const rotated = await recovery.reconcileAndStart({ jobId: 'job-invalid', admissionId: first.admissionId, owner: 'api', expiresAt: '2026-07-27T12:10:00.000Z', at, snapshot: snapshot('job-invalid') }); expect(rotated.rotated).toBe(true); expect(writes.at(-1)).toMatchObject({ kind: 'cleanup-admission-rotate', previousAdmissionId: first.admissionId });
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-invalid-')); tempDirectories.push(root); const writes: unknown[] = []; let lease: Record<string, unknown> | undefined; const ownership = { writes, apiWrite(command: unknown) { const kind = (command as { kind: string }).kind; if (kind === 'cleanup-credential-reserve' || kind === 'cleanup-credential-abort') return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined } as const; writes.push(command); if (kind === 'cleanup-admission') { const value = command as Record<string, unknown>; lease = { admission_id: value.admissionId, job_id: 'job-invalid', status: 'admitted', expires_at: EXPIRES, credential_relative_path: value.credentialRelativePath, credential_sha256: value.credentialSha256, fence_generation: 1, fence_token_hash: value.fenceTokenHash, unit_name: value.unitName }; } return { ok: true, kind: 'committed', eventSeq: writes.length, value: undefined } as const; } };
+    const ownerUid = process.getuid?.() ?? 0; let wrongOwner = false; const baseFileSystem = recordingFileSystem([]); const fileSystem = wrongOwnerFileSystem(baseFileSystem, ownerUid, () => wrongOwner); const db = { prepare: (sql: string) => ({ get: () => sql.includes('cleanup_credential_reservations') ? undefined : sql.includes('cleanup_leases') ? lease : { cleanup_generation: 0 } }) } as never; const systemd = fakeSystemd(); let randomCall = 0; const recovery = createCleanupAdmissionRecovery({ stateRoot: root, db, ownership, systemd, clock: { now: () => NOW }, crypto: { randomBytes: (size) => Buffer.alloc(size, ++randomCall) }, fileSystem, ownerUid }); await recovery.openAdmissions(); const first = await recovery.admitAndStart({ jobId: 'job-invalid', owner: 'api', expiresAt: EXPIRES, at: NOW, snapshot: snapshot('job-invalid') }); const path = join(root, 'jobs', 'job-invalid', first.credentialRelativePath); await mutate(path); wrongOwner = _name === 'wrong owner credential'; const at = _name === 'expired credential' ? '2026-07-27T12:06:00.000Z' : NOW; const rotated = await recovery.reconcileAndStart({ jobId: 'job-invalid', admissionId: first.admissionId, owner: 'api', expiresAt: '2026-07-27T12:10:00.000Z', at, snapshot: snapshot('job-invalid') }); expect(rotated.rotated).toBe(true); expect(writes.at(-1)).toMatchObject({ kind: 'cleanup-admission-rotate', previousAdmissionId: first.admissionId });
   });
 });

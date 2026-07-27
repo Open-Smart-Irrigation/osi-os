@@ -267,6 +267,7 @@ function admitPreparationCleanup(value: Fixture): void {
     blocker: 'staging-or-log',
   };
   const admissionId = 'cln_0123456789abcdefghjkmnpqrs';
+  expect(value.ownership.apiWrite({ kind: 'cleanup-credential-reserve', jobId: value.input.jobId, admissionId, owner: 'cleanup-a', credentialRelativePath: `recovery/cleanup-credentials/${admissionId}.token`, createdAt: at, expiresAt: new Date(Date.parse(at) + 60_000).toISOString(), at }).ok).toBe(true);
   const result = value.ownership.apiWrite({
     kind: 'cleanup-admission',
     jobId: value.input.jobId,
@@ -277,6 +278,8 @@ function admitPreparationCleanup(value: Fixture): void {
     credentialRelativePath: `recovery/cleanup-credentials/${admissionId}.token`,
     credentialSha256: HASH_A,
     fenceTokenHash: HASH_B,
+    reservationCreatedAt: at,
+    reservationExpiresAt: new Date(Date.parse(at) + 60_000).toISOString(),
     snapshot,
     at,
   });

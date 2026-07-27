@@ -17,7 +17,7 @@ const tempPaths: string[] = [];
 const SHA40 = 'a'.repeat(40);
 const HASH64 = 'b'.repeat(64);
 const HISTORICAL_V6_SHA256 = 'c6334dd0fd03b34b8261e5b34bc0b09501e35a02ee4b57f81c98fd62af6e54a0';
-const ADMISSION_ID = `cln_${'a'.repeat(26)}`;
+const ADMISSION_ID = `cln_0${'a'.repeat(25)}`;
 
 function sourcePreparationJson(sourceSha = SHA40): string {
   return JSON.stringify({
@@ -219,7 +219,7 @@ describe('versioned builder database migrations', () => {
       { version: 12, filename: '012_cleanup_admission_supersession_evidence.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
-      .toEqual(['cleanup_leases', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_entries', 'schema_migrations']);
+      .toEqual(['cleanup_credential_reservations', 'cleanup_leases', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_entries', 'schema_migrations']);
     expectColumns(db, 'jobs', [
       'job_id', 'request_id', 'request_json', 'source_remote', 'source_ref', 'source_branch', 'branch', 'expected_sha', 'pinned_sha',
       'target_id', 'root_id', 'target_manifest_sha256', 'source_commit_time', 'source_author', 'source_subject',
@@ -267,6 +267,9 @@ describe('versioned builder database migrations', () => {
       'superseded_by_admission_id', 'predecessor_status', 'predecessor_claim_at', 'predecessor_renew_at',
       'predecessor_blocker_code', 'predecessor_blocker_json',
     ]);
+    expectColumns(db, 'cleanup_credential_reservations', [
+      'job_id', 'admission_id', 'owner', 'credential_relative_path', 'created_at', 'expires_at',
+    ]);
     expectColumns(db, 'job_log_generations', [
       'job_id', 'stream', 'generation', 'path', 'started_at', 'sealed_at', 'size_bytes', 'sha256',
     ]);
@@ -286,7 +289,7 @@ describe('versioned builder database migrations', () => {
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'").all()
       .map((row) => (row as { name: string }).name);
     expect(indexes.sort()).toEqual([
-      'cleanup_leases_expiry', 'cleanup_leases_fence_identity', 'cleanup_leases_fence_token_identity', 'cleanup_leases_job', 'job_events_cancellation_protocol', 'job_events_log_range', 'job_events_sequence', 'job_log_generations_active', 'job_operations_identity',
+      'cleanup_credential_reservations_expiry', 'cleanup_credential_reservations_job_path', 'cleanup_leases_expiry', 'cleanup_leases_fence_identity', 'cleanup_leases_fence_token_identity', 'cleanup_leases_job', 'job_events_cancellation_protocol', 'job_events_log_range', 'job_events_sequence', 'job_log_generations_active', 'job_operations_identity',
       'job_stages_job', 'jobs_cleanup_admission', 'jobs_recovery', 'queue_entries_fifo',
     ]);
     const normalizeForeignKeys = (child: string) => db.prepare(`PRAGMA foreign_key_list(${child})`).all()
@@ -298,6 +301,7 @@ describe('versioned builder database migrations', () => {
     expect(normalizeForeignKeys('job_stages')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('job_operations')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('cleanup_leases')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
+    expect(normalizeForeignKeys('cleanup_credential_reservations')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('job_log_generations')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('legacy_blocked_publish_evidence')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('job_events').sort((a, b) => `${a.table}${a.from}`.localeCompare(`${b.table}${b.from}`))).toEqual([
@@ -311,7 +315,8 @@ describe('versioned builder database migrations', () => {
     expect(triggers.sort()).toEqual([
       'cleanup_leases_fence_delete_guard', 'cleanup_leases_fence_update_guard', 'cleanup_leases_status_guard',
       'cleanup_leases_status_guard_update', 'cleanup_leases_identity_guard', 'job_events_append_guard', 'job_events_immutable_update_guard', 'job_log_generations_append_guard',
-      'cleanup_leases_supersession_evidence_guard',
+      'cleanup_leases_admission_id_guard', 'cleanup_leases_admission_id_guard_update',
+      'cleanup_credential_reservations_immutable_update_guard', 'cleanup_leases_supersession_insert_guard', 'cleanup_leases_supersession_transition_guard', 'cleanup_leases_expired_immutable_guard',
       'job_log_generations_immutable_guard', 'job_log_generations_seal_guard', 'job_log_generations_size_guard',
       'job_operations_committed_delete_guard', 'job_operations_committed_update_guard', 'job_operations_manifest_label_guard',
       'job_operations_manifest_label_guard_update', 'jobs_cleanup_generation_guard', 'jobs_container_guard',
@@ -1028,19 +1033,94 @@ describe('versioned builder database migrations', () => {
     check(db, "UPDATE jobs SET cleanup_generation=0 WHERE job_id='job-valid'", /cleanup generation is monotonic/);
     db.prepare("UPDATE jobs SET cleanup_generation=1, cleanup_fence_generation=1, cleanup_fence_token_hash=?, cleanup_admission_id=? WHERE job_id='job-valid'").run('c'.repeat(64), ADMISSION_ID);
     check(db, "UPDATE jobs SET cleanup_fence_token_hash=NULL WHERE job_id='job-valid'", /invalid cleanup fence/);
-    check(db, `INSERT INTO cleanup_leases (admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256, fence_generation, fence_token_hash, proof_json, admitted_at) VALUES ('cln_iiiiiiiiiiiiiiiiiiiiiiiiii', 'job-valid', 'osi-image-builder-cleanup@cln_iiiiiiiiiiiiiiiiiiiiiiiiii.service', 'x', 'x', 'admitted', 'recovery/cleanup-credentials/cln_iiiiiiiiiiiiiiiiiiiiiiiiii.token', '${HASH64}', 2, '${'e'.repeat(64)}', '{}', 'x')`, /CHECK constraint failed/);
-    check(db, `INSERT INTO cleanup_leases (admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256, fence_generation, fence_token_hash, proof_json, admitted_at) VALUES ('cln_${'b'.repeat(26)}', 'job-valid', 'osi-image-builder-cleanup@cln_${'b'.repeat(26)}.service', 'x', 'x', 'failed', 'recovery/cleanup-credentials/cln_${'b'.repeat(26)}.token', '${HASH64}', 2, '${'e'.repeat(64)}', '{}', 'x')`, /CHECK constraint failed/);
+    check(db, `INSERT INTO cleanup_leases (admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256, fence_generation, fence_token_hash, proof_json, admitted_at) VALUES ('cln_iiiiiiiiiiiiiiiiiiiiiiiiii', 'job-valid', 'osi-image-builder-cleanup@cln_iiiiiiiiiiiiiiiiiiiiiiiiii.service', 'x', 'x', 'admitted', 'recovery/cleanup-credentials/cln_iiiiiiiiiiiiiiiiiiiiiiiiii.token', '${HASH64}', 2, '${'e'.repeat(64)}', '{}', 'x')`, /lowercase ULID|CHECK constraint failed/);
+    check(db, `INSERT INTO cleanup_leases (admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256, fence_generation, fence_token_hash, proof_json, admitted_at) VALUES ('cln_0${'b'.repeat(25)}', 'job-valid', 'osi-image-builder-cleanup@cln_0${'b'.repeat(25)}.service', 'x', 'x', 'failed', 'recovery/cleanup-credentials/cln_0${'b'.repeat(25)}.token', '${HASH64}', 2, '${'e'.repeat(64)}', '{}', 'x')`, /CHECK constraint failed/);
     db.prepare(`UPDATE cleanup_leases SET status='claimed', claim_at='2026-07-23T00:10:00.000Z' WHERE admission_id=?`).run(ADMISSION_ID);
     check(db, `UPDATE cleanup_leases SET status='failed', complete_at='2026-07-23T00:15:00.000Z', blocker_code='BUILD_FAILED', blocker_json='{}' WHERE admission_id='${ADMISSION_ID}'`, /CHECK constraint failed/);
     db.prepare(`UPDATE cleanup_leases SET status='completed', complete_at='2026-07-23T00:20:00.000Z', completion_evidence_path='evidence/cleanup.json', completion_evidence_sha256=? WHERE admission_id=?`).run(HASH64, ADMISSION_ID);
     db.prepare(`UPDATE jobs SET cleanup_fence_generation=NULL, cleanup_fence_token_hash=NULL, cleanup_admission_id=NULL WHERE job_id=?`).run('job-valid');
     db.prepare(`UPDATE cleanup_leases SET status='handed_back', handback_at='2026-07-23T00:30:00.000Z' WHERE admission_id=?`).run(ADMISSION_ID);
-    check(db, `INSERT INTO cleanup_leases (admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256, fence_generation, fence_token_hash, proof_json, admitted_at) VALUES ('cln_${'b'.repeat(26)}', 'job-valid', 'osi-image-builder-cleanup@cln_${'b'.repeat(26)}.service', 'x', 'x', 'admitted', 'recovery/cleanup-credentials/cln_${'b'.repeat(26)}.token', '${HASH64}', 1, '${'d'.repeat(64)}', '{}', 'x')`, /UNIQUE constraint failed: cleanup_leases\.job_id, cleanup_leases\.fence_generation/);
-    check(db, `INSERT INTO cleanup_leases (admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256, fence_generation, fence_token_hash, proof_json, admitted_at) VALUES ('cln_${'c'.repeat(26)}', 'job-valid', 'osi-image-builder-cleanup@cln_${'c'.repeat(26)}.service', 'x', 'x', 'admitted', 'recovery/cleanup-credentials/cln_${'c'.repeat(26)}.token', '${HASH64}', 2, '${'c'.repeat(64)}', '{}', 'x')`, /UNIQUE constraint failed: cleanup_leases\.job_id, cleanup_leases\.fence_token_hash/);
+    check(db, `INSERT INTO cleanup_leases (admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256, fence_generation, fence_token_hash, proof_json, admitted_at) VALUES ('cln_0${'b'.repeat(25)}', 'job-valid', 'osi-image-builder-cleanup@cln_0${'b'.repeat(25)}.service', 'x', 'x', 'admitted', 'recovery/cleanup-credentials/cln_0${'b'.repeat(25)}.token', '${HASH64}', 1, '${'d'.repeat(64)}', '{}', 'x')`, /UNIQUE constraint failed: cleanup_leases\.job_id, cleanup_leases\.fence_generation/);
+    check(db, `INSERT INTO cleanup_leases (admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256, fence_generation, fence_token_hash, proof_json, admitted_at) VALUES ('cln_0${'c'.repeat(25)}', 'job-valid', 'osi-image-builder-cleanup@cln_0${'c'.repeat(25)}.service', 'x', 'x', 'admitted', 'recovery/cleanup-credentials/cln_0${'c'.repeat(25)}.token', '${HASH64}', 2, '${'c'.repeat(64)}', '{}', 'x')`, /UNIQUE constraint failed: cleanup_leases\.job_id, cleanup_leases\.fence_token_hash/);
     check(db, "UPDATE jobs SET cleanup_generation=0 WHERE job_id='job-valid'", /cleanup generation is monotonic/);
     db.prepare("UPDATE jobs SET cleanup_generation=2 WHERE job_id='job-valid'").run();
     check(db, "UPDATE jobs SET cleanup_generation=1 WHERE job_id='job-valid'", /cleanup generation is monotonic/);
     expect(db.prepare('SELECT status, handback_at FROM cleanup_leases WHERE admission_id=?').get(ADMISSION_ID)).toMatchObject({ status: 'handed_back' });
+    db.close();
+  });
+
+  it('rejects forged supersession evidence and freezes a coherent expired predecessor', async () => {
+    const probe = async (write: (db: DatabaseSync) => void): Promise<void> => {
+      const path = await temporaryDatabase();
+      const db = openBuilderDatabase(path);
+      insertValidJob(db);
+      insertAdmittedLease(db);
+      expect(() => write(db)).toThrow();
+      db.close();
+    };
+    await probe((db) => db.prepare(`INSERT INTO cleanup_leases (
+      admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256,
+      fence_generation, fence_token_hash, proof_json, admitted_at
+    ) VALUES (?, 'job-valid', ?, 'builder', ?, 'expired', ?, ?, 1, ?, '{}', ?)`).run(
+      'cln_0' + 'b'.repeat(25),
+      'osi-image-builder-cleanup@cln_0' + 'b'.repeat(25) + '.service',
+      '2026-07-23T01:00:00.000Z',
+      'recovery/cleanup-credentials/cln_0' + 'b'.repeat(25) + '.token',
+      HASH64,
+      'd'.repeat(64),
+      '2026-07-23T00:00:00.000Z',
+    ));
+    await probe((db) => db.prepare('UPDATE cleanup_leases SET expired_at=? WHERE admission_id=?').run('2026-07-23T00:01:00.000Z', ADMISSION_ID));
+    await probe((db) => db.prepare(`UPDATE cleanup_leases SET status='expired', expired_at=?, superseded_at=?, superseded_by_admission_id=?, predecessor_status=? WHERE admission_id=?`).run(
+      '2026-07-23T00:01:00.000Z', '2026-07-23T00:01:00.000Z', 'cln_0' + 'b'.repeat(25), 'admitted', ADMISSION_ID,
+    ));
+
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    insertValidJob(db);
+    insertAdmittedLease(db);
+    db.prepare("UPDATE cleanup_leases SET status='claimed', claim_at='2026-07-23T00:10:00.000Z' WHERE admission_id=?").run(ADMISSION_ID);
+    db.prepare("UPDATE cleanup_leases SET status='failed', blocker_code='CLEANUP_ADMISSION_BLOCKED', blocker_json='{}' WHERE admission_id=?").run(ADMISSION_ID);
+    const replacement = 'cln_0' + 'b'.repeat(25);
+    db.prepare(`INSERT INTO cleanup_leases (
+      admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256,
+      fence_generation, fence_token_hash, proof_json, admitted_at
+    ) VALUES (?, 'job-valid', ?, 'replacement', ?, 'admitted', ?, ?, 2, ?, '{}', ?)`).run(
+      replacement,
+      `osi-image-builder-cleanup@${replacement}.service`,
+      '2026-07-23T01:01:00.000Z',
+      `recovery/cleanup-credentials/${replacement}.token`,
+      HASH64,
+      'd'.repeat(64),
+      '2026-07-23T00:11:00.000Z',
+    );
+    db.prepare('UPDATE jobs SET cleanup_generation=2, cleanup_fence_generation=2, cleanup_fence_token_hash=?, cleanup_admission_id=? WHERE job_id=?').run('d'.repeat(64), replacement, 'job-valid');
+    db.prepare(`UPDATE cleanup_leases SET
+      status='expired', blocker_code=NULL, blocker_json=NULL, expired_at=?, superseded_at=?, superseded_by_admission_id=?,
+      predecessor_status='failed', predecessor_claim_at='2026-07-23T00:10:00.000Z', predecessor_renew_at=NULL,
+      predecessor_blocker_code='CLEANUP_ADMISSION_BLOCKED', predecessor_blocker_json='{}'
+      WHERE admission_id=?`).run('2026-07-23T00:12:00.000Z', '2026-07-23T00:12:00.000Z', replacement, ADMISSION_ID);
+    expect(() => db.prepare("UPDATE cleanup_leases SET owner='forged' WHERE admission_id=?").run(ADMISSION_ID)).toThrow();
+    db.close();
+  });
+
+  it('keeps cleanup credential reservation identity immutable', async () => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    insertValidJob(db);
+    const reservation = 'cln_0' + 'd'.repeat(25);
+    db.prepare(`INSERT INTO cleanup_credential_reservations (
+      job_id, admission_id, owner, credential_relative_path, created_at, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?)`).run(
+      'job-valid',
+      reservation,
+      'builder',
+      `recovery/cleanup-credentials/${reservation}.token`,
+      '2026-07-23T00:00:00.000Z',
+      '2026-07-23T01:00:00.000Z',
+    );
+    expect(() => db.prepare('UPDATE cleanup_credential_reservations SET owner=? WHERE admission_id=?').run('forged', reservation))
+      .toThrow(/immutable/);
     db.close();
   });
 
