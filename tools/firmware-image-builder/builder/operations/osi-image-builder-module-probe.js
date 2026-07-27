@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import Module, { createRequire, isBuiltin } from 'node:module';
-import { isAbsolute, normalize, relative } from 'node:path';
+import { dirname, isAbsolute, normalize, relative } from 'node:path';
+import { runInThisContext } from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PROBE_PROGRAM = fileURLToPath(import.meta.url);
@@ -139,6 +140,7 @@ function requireCanonicalAbsolutePath(path, field) {
 
 function assertPermissionBoundary(nodeRed) {
   const expectedExecArgv = [
+    '--experimental-vm-modules',
     '--permission',
     `--allow-fs-read=${PROBE_PROGRAM}`,
     `--allow-fs-read=${nodeRed}`,
@@ -196,6 +198,7 @@ function loadFixedRootfsEntrypoint({
 }) {
   const originalLoad = Module._load;
   const originalResolveFilename = Module._resolveFilename;
+  const originalCompile = Module.prototype._compile;
   const sealedResolveFilename = function sealedResolveFilename(
     request,
     parent,
@@ -253,9 +256,35 @@ function loadFixedRootfsEntrypoint({
     }
     return Reflect.apply(originalLoad, this, [request, parent, isMain]);
   };
+  const sealedCompile = function sealedCompile(content, filename) {
+    if (!confinedRootfsModulePath(nodeRed, filename)) {
+      return Reflect.apply(originalCompile, this, [content, filename]);
+    }
+    const literalDynamicImport = content.match(/\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/u);
+    if (literalDynamicImport !== null) {
+      throw new Error(`rootfs Node module requested an unapproved builder ESM builtin: ${literalDynamicImport[2]}`);
+    }
+    const module = this;
+    const compiledWrapper = runInThisContext(Module.wrap(content), {
+      filename,
+      displayErrors: true,
+      importModuleDynamically(specifier) {
+        throw new Error(`rootfs Node module requested an unapproved builder ESM builtin: ${specifier}`);
+      },
+    });
+    compiledWrapper.call(
+      module.exports,
+      module.exports,
+      createRequire(filename),
+      module,
+      filename,
+      dirname(filename),
+    );
+  };
 
   Module._resolveFilename = sealedResolveFilename;
   Module._load = sealedLoad;
+  Module.prototype._compile = sealedCompile;
   let exported;
   let failure;
   let failed = false;
@@ -266,9 +295,11 @@ function loadFixedRootfsEntrypoint({
     failure = error;
   }
   const loaderChanged = Module._load !== sealedLoad
-    || Module._resolveFilename !== sealedResolveFilename;
+    || Module._resolveFilename !== sealedResolveFilename
+    || Module.prototype._compile !== sealedCompile;
   Module._load = originalLoad;
   Module._resolveFilename = originalResolveFilename;
+  Module.prototype._compile = originalCompile;
   if (failed) throw failure;
   if (loaderChanged) {
     throw new Error(`rootfs Node module changed the sealed builder loader: ${packageName}`);

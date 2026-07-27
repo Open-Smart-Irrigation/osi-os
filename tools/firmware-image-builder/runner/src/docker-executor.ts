@@ -1,6 +1,6 @@
 import { CommandExecutionError, createCommandExecutor, type CommandResult, type CommandRunOptions } from './command-executor.js';
 import { createOperationDefinition, hashOperationDefinition, type OperationArgvContext, type OperationDefinition } from './operation-registry.js';
-import { parseCanonicalBuilderImageReference, READ_ONLY_OPERATION_IDS, selectExactRepositoryDigest } from '../../builder/validate-builder.js';
+import { OFFLINE_OPERATION_IDS, parseCanonicalBuilderImageReference, READ_ONLY_OPERATION_IDS, selectExactRepositoryDigest } from '../../builder/validate-builder.js';
 import type { BuilderErrorCode, JobState, TrustedOperationId } from '../../domain/types.js';
 import type { LogCleanupProof, OperationCleanupProof, RunnerWriteCommand } from '../../api/src/ownership.js';
 import type { JobRecord, JsonObject, OperationInput, StoredOperation } from '../../api/src/store.js';
@@ -376,17 +376,8 @@ function inspectImage(stdout: string, options: DockerExecutorOptions): ImageIden
 
 function noLabel(stdout: string): boolean { return stdout.split(/\r?\n/u).every((line) => line.trim().length === 0); }
 
-const OFFLINE_OPERATION_IDS = new Set([
-  'activate-target',
-  'copy-feed-config',
-  'update-feeds',
-  'install-feeds',
-  'resolve-config',
-  'verify-image',
-]);
-
 function operationNetworkMode(options: DockerExecutorOptions): 'bridge' | 'none' {
-  return OFFLINE_OPERATION_IDS.has(options.operationId) ? 'none' : 'bridge';
+  return (OFFLINE_OPERATION_IDS as readonly string[]).includes(options.operationId) ? 'none' : 'bridge';
 }
 
 function operationReadOnly(options: DockerExecutorOptions): boolean {

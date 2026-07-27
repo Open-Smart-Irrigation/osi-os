@@ -25,6 +25,14 @@ export const TRUSTED_OPERATION_TOOL_RELATIVE_PATH = 'operations/osi-image-builde
 export const TRUSTED_MODULE_PROBE_RELATIVE_PATH =
   'operations/osi-image-builder-module-probe.js';
 export const READ_ONLY_OPERATION_IDS = Object.freeze(['verify-image'] as const);
+export const OFFLINE_OPERATION_IDS = Object.freeze([
+  'activate-target',
+  'copy-feed-config',
+  'update-feeds',
+  'install-feeds',
+  'resolve-config',
+  'verify-image',
+] as const);
 export const RUST_TARGETS = Object.freeze(['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const);
 const TARGET_PACKAGE_NAMES = Object.freeze(['musl:arm64', 'musl-dev:arm64', 'musl:armhf', 'musl-dev:armhf'] as const);
 
@@ -185,6 +193,7 @@ export function validateTrustedOperationToolSource(contents: string): void {
     || !contents.includes("const INSTALLED_NODE_BINARY = '/usr/local/bin/node';")
     || !contents.includes("'/opt/osi-image-builder/operations/osi-image-builder-module-probe.js';")
     || !contents.includes("    '--permission',")
+    || !contents.includes("    '--experimental-vm-modules',")
     || !contents.includes('`--allow-fs-read=${dependencies.probeProgram}`')
     || !contents.includes('`--allow-fs-read=${nodeRed}`')
     || !contents.includes('const execution = spawnSync(dependencies.nodeBinary, args, {')
@@ -262,6 +271,17 @@ Object.freeze(sealedGetBuiltinModule);`;
     throw new Error('probe process builtin access is not sealed');
   }
 }`;
+  const exactDynamicImportRestriction = `const compiledWrapper = runInThisContext(Module.wrap(content), {
+      filename,
+      displayErrors: true,
+      importModuleDynamically(specifier) {
+        throw new Error(\`rootfs Node module requested an unapproved builder ESM builtin: \${specifier}\`);
+      },
+    });`;
+  const exactLiteralDynamicImportRestriction = `const literalDynamicImport = content.match(/\\bimport\\s*\\(\\s*(['"])([^'"]+)\\1\\s*\\)/u);
+    if (literalDynamicImport !== null) {
+      throw new Error(\`rootfs Node module requested an unapproved builder ESM builtin: \${literalDynamicImport[2]}\`);
+    }`;
   if (!contents.startsWith('#!/usr/bin/env node\n')
     || !contents.includes("args.length !== 2 || args[0] !== '--rootfs-node-red'")
     || !contents.includes("sqlite3: Object.freeze({\n    packageName: 'osi-db-helper'")
@@ -278,6 +298,7 @@ Object.freeze(sealedGetBuiltinModule);`;
     || !contents.includes("    '--permission',")
     || !contents.includes('`--allow-fs-read=${PROBE_PROGRAM}`')
     || !contents.includes('`--allow-fs-read=${nodeRed}`')
+    || !contents.includes("    '--experimental-vm-modules',")
     || !contents.includes("process.permission.has('fs.write')")
     || !contents.includes("process.permission.has('child')")
     || !contents.includes("process.permission.has('worker')")
@@ -285,7 +306,12 @@ Object.freeze(sealedGetBuiltinModule);`;
     || !contents.includes("process.permission.has('addons')")
     || !contents.includes(exactGetBuiltinModuleWrapper)
     || !contents.includes(exactGetBuiltinModuleSeal)
-    || !contents.includes('    sealProcessBuiltinAccess();')
+    || !contents.includes("import Module, { createRequire, isBuiltin } from 'node:module';")
+    || !contents.includes("import { runInThisContext } from 'node:vm';")
+    || !contents.includes(exactDynamicImportRestriction)
+    || !contents.includes(exactLiteralDynamicImportRestriction)
+    || !contents.includes('Module.prototype._compile = sealedCompile;')
+    || !contents.includes('Module.prototype._compile = originalCompile;')
     || contents.includes('--allow-fs-write')
     || contents.includes('--allow-child-process')
     || contents.includes('--allow-worker')
@@ -301,7 +327,7 @@ export function validateExecutionDefinition(value: unknown, imageTemplate = '{{i
   const fail = (message: string): never => { throw new BuilderSourceError('BUILDER_DOCKERFILE_INVALID', message); };
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('Execution definition must be an object');
   const record = value as Record<string, unknown>;
-  const expectedTop = ['architecture', 'environment', 'image', 'mount', 'network', 'operationIds', 'readOnlyOperationIds', 'runtime', 'schemaVersion', 'security', 'user', 'workdir'];
+  const expectedTop = ['architecture', 'environment', 'image', 'mount', 'network', 'offlineOperationIds', 'operationIds', 'readOnlyOperationIds', 'runtime', 'schemaVersion', 'security', 'user', 'workdir'];
   if (!exactKeys(record, expectedTop)) fail('Execution definition contains unknown or missing top-level fields');
   if (record.schemaVersion !== 1 || record.runtime !== 'docker' || record.architecture !== 'linux/amd64' || record.user !== '<uid>:<gid>' || record.workdir !== '/workdir' || record.network !== 'bridge') fail('Execution definition runtime contract is invalid');
   if (!record.image || typeof record.image !== 'object' || Array.isArray(record.image) || !exactKeys(record.image as object, ['pullPolicy', 'reference']) || (record.image as Record<string, unknown>).pullPolicy !== 'never' || (record.image as Record<string, unknown>).reference !== imageTemplate) fail('Execution definition image contract is invalid');
@@ -313,6 +339,7 @@ export function validateExecutionDefinition(value: unknown, imageTemplate = '{{i
   if (!security || typeof security !== 'object' || Array.isArray(security) || !exactKeys(security as object, ['capAdd', 'capDrop', 'devices', 'noNewPrivileges', 'pidsLimit', 'privileged', 'sockets', 'ulimit']) || JSON.stringify(security) !== JSON.stringify({ capDrop: ['ALL'], capAdd: [], devices: [], sockets: [], privileged: false, noNewPrivileges: true, pidsLimit: 4096, ulimit: 'nofile=1024:4096' })) fail('Execution definition security is invalid');
   if (!Array.isArray(record.operationIds) || JSON.stringify(record.operationIds) !== JSON.stringify(TRUSTED_OPERATION_IDS)) fail('Execution definition operation IDs are not synchronized with the trusted manifest');
   if (!Array.isArray(record.readOnlyOperationIds) || JSON.stringify(record.readOnlyOperationIds) !== JSON.stringify(READ_ONLY_OPERATION_IDS)) fail('Execution definition read-only operation IDs are invalid');
+  if (!Array.isArray(record.offlineOperationIds) || JSON.stringify(record.offlineOperationIds) !== JSON.stringify(OFFLINE_OPERATION_IDS)) fail('Execution definition offline operation IDs are invalid');
 }
 
 export function builderImageReference(lock: Pick<BuilderLock, 'imageRepository' | 'imageDigest'>): string {
@@ -638,6 +665,22 @@ rm -f /tmp/osi-module-probe-sqlite-marker.db
 status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
 test "$status" -eq 2
 test ! -e /tmp/osi-module-probe-sqlite-marker.db
+cat > "$node_red/osi-db-helper/index.js" <<'EOF'
+'use strict';
+import('node:sqlite').then(({ DatabaseSync }) => {
+  const marker = new DatabaseSync('/tmp/osi-module-probe-dynamic-sqlite-marker.db');
+  marker.exec('CREATE TABLE marker (id INTEGER PRIMARY KEY)');
+  marker.close();
+  process.exitCode = 1;
+}, (error) => {
+  if (!(error instanceof Error) || !/unapproved builder ESM builtin/u.test(error.message)) process.exitCode = 1;
+});
+module.exports = {};
+EOF
+rm -f /tmp/osi-module-probe-dynamic-sqlite-marker.db
+status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
+test "$status" -eq 2
+test ! -e /tmp/osi-module-probe-dynamic-sqlite-marker.db
 rm -rf /workdir/openwrt /workdir/web /workdir/feeds /workdir/feeds.conf.default
 status=0; node "$tool" unknown-operation >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?; test "$status" -eq 2
 for operation in copy-feed-config verify-image mirror-gui; do

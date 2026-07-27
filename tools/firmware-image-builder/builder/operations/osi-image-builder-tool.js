@@ -86,6 +86,7 @@ function runModuleProbe(nodeRed, dependencies) {
   requireAbsoluteRoot(dependencies.nodeBinary);
   requireAbsoluteRoot(dependencies.probeProgram);
   const args = [
+    '--experimental-vm-modules',
     '--permission',
     `--allow-fs-read=${dependencies.probeProgram}`,
     `--allow-fs-read=${nodeRed}`,

@@ -22,6 +22,7 @@
     "destination": "/workdir",
     "readOnly": false
   },
+  "offlineOperationIds": ["activate-target", "copy-feed-config", "update-feeds", "install-feeds", "resolve-config", "verify-image"],
   "readOnlyOperationIds": ["verify-image"],
   "security": {
     "capDrop": ["ALL"],
