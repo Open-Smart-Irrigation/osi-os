@@ -404,6 +404,22 @@ describe('trusted verify-image Node compatibility record', () => {
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('denies dynamic import of node:sqlite before it can create a host database', async () => {
+    const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-import-sqlite-'));
+    temporaryRoots.push(markerRoot);
+    const marker = join(markerRoot, 'marker.db');
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        "void import('node:sqlite').then(({ DatabaseSync }) => {",
+        `  const markerDatabase = new DatabaseSync(${JSON.stringify(marker)});`,
+        "  markerDatabase.exec('CREATE TABLE marker (id INTEGER PRIMARY KEY)');",
+        '  markerDatabase.close();',
+        '}).catch(() => {});',
+      ].join('\n'),
+    })).rejects.toThrow(/unapproved builder ESM builtin: node:sqlite/u);
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('seals process.getBuiltinModule while preserving approved harmless builtins', async () => {
     const { result } = await runShippedOperation({
       dbHelperPrefix: [

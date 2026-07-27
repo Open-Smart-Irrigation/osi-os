@@ -69,6 +69,14 @@ describe('locked builder source', () => {
     const definition = JSON.parse(await readFile(definitionPath, 'utf8')) as Record<string, unknown>;
     expect(() => validateExecutionDefinition(definition)).not.toThrow();
     expect(definition.readOnlyOperationIds).toEqual(READ_ONLY_OPERATION_IDS);
+    expect(definition.offlineOperationIds).toEqual([
+      'activate-target',
+      'copy-feed-config',
+      'update-feeds',
+      'install-feeds',
+      'resolve-config',
+      'verify-image',
+    ]);
     const mutations: Array<(candidate: Record<string, unknown>) => void> = [
       (candidate) => { (candidate.environment as Record<string, unknown>).HOME = '/home/buildbot'; },
       (candidate) => { (candidate.environment as Record<string, unknown>).PATH = '/host/bin'; },
@@ -82,6 +90,10 @@ describe('locked builder source', () => {
       (candidate) => { candidate.readOnlyOperationIds = []; },
       (candidate) => { candidate.readOnlyOperationIds = ['verify-image', 'build-image']; },
       (candidate) => { candidate.readOnlyOperationIds = ['build-image']; },
+      (candidate) => { candidate.offlineOperationIds = []; },
+      (candidate) => { candidate.offlineOperationIds = ['activate-target', 'copy-feed-config', 'update-feeds', 'install-feeds', 'resolve-config']; },
+      (candidate) => { candidate.offlineOperationIds = ['activate-target', 'copy-feed-config', 'update-feeds', 'install-feeds', 'resolve-config', 'verify-image', 'build-image']; },
+      (candidate) => { candidate.offlineOperationIds = ['verify-image', 'activate-target', 'copy-feed-config', 'update-feeds', 'install-feeds', 'resolve-config']; },
       (candidate) => { (candidate as Record<string, unknown>).operations = { 'build-image': ['make'] }; },
     ];
     for (const mutate of mutations) {
