@@ -268,6 +268,14 @@ export interface JobRecord extends SourceIdentityBase {
   readonly queuePosition: number | null;
   readonly cancelRequestedAt: string | null;
   readonly cancelReason: string | null;
+  readonly cancellationCooperativeDeadlineAt: string | null;
+  readonly cancellationEscalationOwner: string | null;
+  readonly cancellationEscalationLeaseExpiresAt: string | null;
+  readonly cancellationStopIntentAt: string | null;
+  readonly cancellationGraceDeadlineAt: string | null;
+  readonly cancellationSignalObservation: JsonObject | null;
+  readonly cancellationStopObservation: JsonObject | null;
+  readonly cancellationInspectionObservations: JsonObject | null;
   readonly dispatchedAt: string | null;
   readonly runnerUnit: string | null;
   readonly runnerLeaseOwner: string | null;
@@ -320,6 +328,26 @@ export interface JobRecord extends SourceIdentityBase {
   readonly freshnessError: JsonObject | null;
   readonly freshnessErrorEvidencePath: string | null;
   readonly freshnessErrorEvidenceSha256: string | null;
+}
+
+export interface CancellationJobRecord {
+  readonly jobId: string;
+  readonly state: JobState;
+  readonly cancelRequestedAt: string | null;
+  readonly cancelReason: string | null;
+  readonly runnerUnit: string | null;
+  readonly runnerLeaseOwner: string | null;
+  readonly runnerLeaseExpiresAt: string | null;
+  readonly cancellationCooperativeDeadlineAt: string | null;
+  readonly cancellationEscalationOwner: string | null;
+  readonly cancellationEscalationLeaseExpiresAt: string | null;
+  readonly cancellationStopIntentAt: string | null;
+  readonly cancellationGraceDeadlineAt: string | null;
+  readonly cancellationSignalObservation: JsonObject | null;
+  readonly cancellationStopObservation: JsonObject | null;
+  readonly cancellationInspectionObservations: JsonObject | null;
+  readonly cleanupBlockerCode: BuilderErrorCode | null;
+  readonly cleanupBlocker: JsonObject | null;
 }
 
 export interface QueueClaim {
@@ -573,6 +601,42 @@ export class BuilderStore {
     return this.#mapJob(row);
   }
 
+  getCancellationJob(jobId: string): CancellationJobRecord {
+    const row = this.#db.prepare(`SELECT
+      job_id, state, cancel_requested_at, cancel_reason,
+      runner_unit, runner_lease_owner, runner_lease_expires_at,
+      cancellation_cooperative_deadline_at,
+      cancellation_escalation_owner, cancellation_escalation_lease_expires_at,
+      cancellation_stop_intent_at, cancellation_grace_deadline_at,
+      cancellation_signal_observation_json, cancellation_stop_observation_json,
+      cancellation_inspection_observations_json,
+      cleanup_blocker_code, cleanup_blocker_json
+      FROM jobs WHERE job_id = ?`).get(jobId) as DbRow | undefined;
+    if (!row) throw new StoreNotFoundError(`job not found: ${jobId}`);
+    const cleanupBlockerCode = persistedEnum(row, 'cleanup_blocker_code', BUILDER_ERROR_CODES) as BuilderErrorCode | null;
+    const cleanupBlocker = parseJsonObject(nullableString(row, 'cleanup_blocker_json'), 'cleanup_blocker_json');
+    if ((cleanupBlockerCode === null) !== (cleanupBlocker === null)) throw new StoreDataError('cleanup blocker evidence is incomplete');
+    return {
+      jobId: asString(row, 'job_id'),
+      state: persistedEnum(row, 'state', JOB_STATES, false)! as JobState,
+      cancelRequestedAt: nullableInstant(row, 'cancel_requested_at'),
+      cancelReason: nullableString(row, 'cancel_reason'),
+      runnerUnit: nullableString(row, 'runner_unit'),
+      runnerLeaseOwner: nullableString(row, 'runner_lease_owner'),
+      runnerLeaseExpiresAt: nullableString(row, 'runner_lease_expires_at'),
+      cancellationCooperativeDeadlineAt: nullableInstant(row, 'cancellation_cooperative_deadline_at'),
+      cancellationEscalationOwner: nullableString(row, 'cancellation_escalation_owner'),
+      cancellationEscalationLeaseExpiresAt: nullableInstant(row, 'cancellation_escalation_lease_expires_at'),
+      cancellationStopIntentAt: nullableInstant(row, 'cancellation_stop_intent_at'),
+      cancellationGraceDeadlineAt: nullableInstant(row, 'cancellation_grace_deadline_at'),
+      cancellationSignalObservation: parseJsonObject(nullableString(row, 'cancellation_signal_observation_json'), 'cancellation_signal_observation_json'),
+      cancellationStopObservation: parseJsonObject(nullableString(row, 'cancellation_stop_observation_json'), 'cancellation_stop_observation_json'),
+      cancellationInspectionObservations: parseJsonObject(nullableString(row, 'cancellation_inspection_observations_json'), 'cancellation_inspection_observations_json'),
+      cleanupBlockerCode,
+      cleanupBlocker,
+    };
+  }
+
   getQueuePosition(jobId: string): number | null {
     const row = this.#db.prepare("SELECT COUNT(*) AS count FROM queue_entries q JOIN jobs j ON j.job_id = q.job_id WHERE q.fifo_seq < COALESCE((SELECT fifo_seq FROM queue_entries WHERE job_id = ?), -1) AND j.queue_state = 'queued'").get(jobId) as DbRow;
     const entry = this.#db.prepare("SELECT queue_state, queue_position FROM jobs WHERE job_id = ?").get(jobId) as DbRow | undefined;
@@ -679,6 +743,12 @@ export class BuilderStore {
     const sourceRunnable = sourcePreparation !== null && offlineFeedPreparation !== null;
     nullableGroup(row, ['preflight_sha', 'preflight_checked_at', 'preflight_expires_at'], 'preflight evidence');
     nullableGroup(row, ['cancel_requested_at', 'cancel_reason'], 'cancellation request');
+    nullableGroup(row, [
+      'cancellation_escalation_owner',
+      'cancellation_escalation_lease_expires_at',
+      'cancellation_stop_intent_at',
+      'cancellation_grace_deadline_at',
+    ], 'cancellation escalation');
     nullableGroup(row, ['dispatched_at', 'runner_unit'], 'dispatch evidence');
     nullableGroup(row, ['runner_lease_owner', 'runner_lease_expires_at'], 'runner lease');
     nullableGroup(row, ['container_id', 'container_name', 'container_image_digest', 'container_label_job_id', 'container_label_manifest_sha', 'container_labels_json', 'container_mount_json', 'container_env_json', 'container_security_json', 'container_inspection_json', 'container_created_at'], 'container identity');
@@ -770,6 +840,14 @@ export class BuilderStore {
       targetManifestSha256: readHash(row, 'target_manifest_sha256', HASH64)!, sourceCommitTime: canonicalInstant(asString(row, 'source_commit_time'), 'source_commit_time'), sourceAuthor: asString(row, 'source_author'), sourceSubject: asString(row, 'source_subject'),
       acceptedAt: canonicalInstant(asString(row, 'accepted_at'), 'accepted_at'), state, currentStage: persistedEnum(row, 'current_stage', PIPELINE_STAGE_NAMES) as PipelineStageName | null,
       queueState: persistedEnum(row, 'queue_state', QUEUE_STATES, false)!, queuePosition: queuePosition(row), cancelRequestedAt: nullableInstant(row, 'cancel_requested_at'), cancelReason: nullableString(row, 'cancel_reason'),
+      cancellationCooperativeDeadlineAt: nullableInstant(row, 'cancellation_cooperative_deadline_at'),
+      cancellationEscalationOwner: nullableString(row, 'cancellation_escalation_owner'),
+      cancellationEscalationLeaseExpiresAt: nullableInstant(row, 'cancellation_escalation_lease_expires_at'),
+      cancellationStopIntentAt: nullableInstant(row, 'cancellation_stop_intent_at'),
+      cancellationGraceDeadlineAt: nullableInstant(row, 'cancellation_grace_deadline_at'),
+      cancellationSignalObservation: parseJsonObject(nullableString(row, 'cancellation_signal_observation_json'), 'cancellation_signal_observation_json'),
+      cancellationStopObservation: parseJsonObject(nullableString(row, 'cancellation_stop_observation_json'), 'cancellation_stop_observation_json'),
+      cancellationInspectionObservations: parseJsonObject(nullableString(row, 'cancellation_inspection_observations_json'), 'cancellation_inspection_observations_json'),
       dispatchedAt: nullableInstant(row, 'dispatched_at'), runnerUnit: nullableString(row, 'runner_unit'), runnerLeaseOwner: nullableString(row, 'runner_lease_owner'), runnerLeaseExpiresAt: nullableInstant(row, 'runner_lease_expires_at'),
       containerId: nullableString(row, 'container_id'), containerName: nullableString(row, 'container_name'), containerImageDigest: nullableString(row, 'container_image_digest'), containerLabelJobId: nullableString(row, 'container_label_job_id'), containerLabelManifestSha: nullableString(row, 'container_label_manifest_sha'),
       containerLabels: parseJsonObject(nullableString(row, 'container_labels_json'), 'container_labels_json'), containerMount: parseJsonObject(nullableString(row, 'container_mount_json'), 'container_mount_json'), containerEnvironment: parseJsonObject(nullableString(row, 'container_env_json'), 'container_env_json'), containerSecurity: parseJsonObject(nullableString(row, 'container_security_json'), 'container_security_json'), containerInspection: parseJsonObject(nullableString(row, 'container_inspection_json'), 'container_inspection_json'),

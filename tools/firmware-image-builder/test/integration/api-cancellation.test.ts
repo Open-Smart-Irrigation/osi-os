@@ -66,10 +66,10 @@ function input(jobId: string): CreateJobInput {
   };
 }
 
-function clock(): ApiCancellationClock {
+function clock(wallStart = NOW): ApiCancellationClock {
   let monotonic = 0;
   return {
-    now: () => NOW,
+    now: () => new Date(Date.parse(wallStart) + monotonic).toISOString(),
     monotonicNow: () => monotonic,
     sleep: async (milliseconds) => { monotonic += milliseconds; },
   };
@@ -79,20 +79,32 @@ function systemd(): ApiCancellationSystemd & { readonly calls: string[][] } {
   const calls: string[][] = [];
   return {
     calls,
-    signalCancellation: vi.fn(async (unit) => { calls.push(['signal', unit]); return { active: true, argv: [], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false }; }),
-    stopRunner: vi.fn(async (unit) => { calls.push(['stop', unit]); return { active: true, argv: [], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false }; }),
-    inspectRunner: vi.fn(async (unit) => { calls.push(['inspect', unit]); return { active: true, argv: [], exitCode: 0, signal: null, stdout: 'active\n', stderr: '', timedOut: false }; }),
+    signalCancellation: vi.fn(async (unit) => { calls.push(['signal', unit]); return { commandOutcome: 'completed' as const, activity: 'unknown' as const, argv: [], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false }; }),
+    stopRunner: vi.fn(async (unit) => { calls.push(['stop', unit]); return { commandOutcome: 'completed' as const, activity: 'unknown' as const, argv: [], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false }; }),
+    inspectRunner: vi.fn(async (unit) => { calls.push(['inspect', unit]); return { commandOutcome: 'completed' as const, activity: 'active' as const, argv: [], exitCode: 0, signal: null, stdout: 'active\n', stderr: '', timedOut: false }; }),
   };
 }
 
 async function fixture(jobIds: readonly string[]) {
   const directory = await mkdtemp(join(tmpdir(), 'osi-api-cancellation-'));
   directories.push(directory);
-  const db = openBuilderDatabase(join(directory, 'jobs.sqlite'));
+  const databasePath = join(directory, 'jobs.sqlite');
+  const db = openBuilderDatabase(databasePath);
   const ownership = new OwnershipStore(db, { now: () => NOW });
   const store = new BuilderStore(db);
   for (const jobId of jobIds) expect(ownership.apiWrite({ kind: 'enqueue', input: input(jobId) }).ok).toBe(true);
-  return { db, ownership, store };
+  return { databasePath, db, ownership, store };
+}
+
+function activate(
+  fixtureValue: Awaited<ReturnType<typeof fixture>>,
+  jobId: string,
+  owner = 'runner-a',
+  leaseExpiresAt = '2026-07-27T12:10:00.000Z',
+): void {
+  const runnerUnit = `osi-image-builder-runner@${jobId}.service`;
+  expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId, runnerUnit, at: LATER }).ok).toBe(true);
+  expect(fixtureValue.ownership.runnerWrite({ kind: 'acquire-lease', jobId, runnerUnit, owner, expiresAt: leaseExpiresAt, at: LATER }).ok).toBe(true);
 }
 
 function toPublishing(fixtureValue: Awaited<ReturnType<typeof fixture>>, jobId: string): void {
@@ -173,14 +185,24 @@ describe('API cancellation against the durable ownership store', () => {
     expect(outcome).toMatchObject({ kind: 'recovery-blocked', blockerCode: 'RUNNER_DISAPPEARED' });
     expect(systemdValue.calls[0]).toEqual(['signal', 'osi-image-builder-runner@active-a.service']);
     expect(systemdValue.calls.some(([kind]) => kind === 'stop')).toBe(true);
-    expect(fixtureValue.store.getJob('active-a')).toMatchObject({ state: 'starting', cancelRequestedAt: '2026-07-27T12:00:02.000Z', cleanupBlockerCode: 'RUNNER_DISAPPEARED' });
+    expect(fixtureValue.store.getJob('active-a')).toMatchObject({
+      state: 'starting',
+      cancelRequestedAt: '2026-07-27T12:00:02.000Z',
+      cancellationCooperativeDeadlineAt: '2026-07-27T12:00:32.000Z',
+      cancellationStopIntentAt: '2026-07-27T12:00:32.000Z',
+      cancellationGraceDeadlineAt: '2026-07-27T12:00:47.000Z',
+      cancellationSignalObservation: expect.objectContaining({ commandOutcome: 'completed', activity: 'unknown' }),
+      cancellationStopObservation: expect.objectContaining({ commandOutcome: 'completed', activity: 'unknown' }),
+      cancellationInspectionObservations: expect.objectContaining({ observations: expect.any(Array) }),
+      cleanupBlockerCode: 'RUNNER_DISAPPEARED',
+    });
     expect(fixtureValue.store.listEvents('active-a').events.filter((event) => event.eventType === 'cancellation_requested')).toHaveLength(1);
     expect(fixtureValue.store.listEvents('active-a').events.some((event) => event.eventType === 'terminal')).toBe(false);
   });
 
   it('makes repeated requests idempotent after the request transaction and never gives API a runner terminal write', async () => {
     const fixtureValue = await fixture(['repeat-a']);
-    expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId: 'repeat-a', runnerUnit: 'osi-image-builder-runner@repeat-a.service', at: LATER }).ok).toBe(true);
+    activate(fixtureValue, 'repeat-a');
     const systemdValue = systemd();
     const options = { store: fixtureValue.store, ownership: fixtureValue.ownership, systemd: systemdValue, clock: clock(), cooperativeTimeoutMs: 0, systemdGraceMs: 0, pollIntervalMs: 1 };
 
@@ -191,6 +213,8 @@ describe('API cancellation against the durable ownership store', () => {
     expect(second).toMatchObject({ kind: 'recovery-blocked' });
     expect(fixtureValue.store.listEvents('repeat-a').events.filter((event) => event.eventType === 'cancellation_requested')).toHaveLength(1);
     expect(fixtureValue.store.listEvents('repeat-a').events.some((event) => event.eventType === 'terminal')).toBe(false);
+    expect(systemdValue.calls.filter(([kind]) => kind === 'signal')).toHaveLength(1);
+    expect(systemdValue.calls.filter(([kind]) => kind === 'stop')).toHaveLength(1);
   });
 
   it('makes concurrent cancellation requests converge on one durable request event and existing recovery evidence', async () => {
@@ -208,6 +232,264 @@ describe('API cancellation against the durable ownership store', () => {
     expect(outcomes).toEqual([expect.objectContaining({ kind: 'recovery-blocked' }), expect.objectContaining({ kind: 'recovery-blocked' })]);
     expect(fixtureValue.store.listEvents('concurrent-a').events.filter((event) => event.eventType === 'cancellation_requested')).toHaveLength(1);
     expect(fixtureValue.store.getJob('concurrent-a').cleanupBlockerCode).toBe('RUNNER_DISAPPEARED');
+  });
+
+  it('coordinates one stop across separate SQLite stores and survives restart after a persisted stop intent', async () => {
+    const fixtureValue = await fixture(['separate-a', 'preintent-a', 'restart-a', 'stopresult-a']);
+    activate(fixtureValue, 'separate-a');
+    activate(fixtureValue, 'preintent-a');
+    activate(fixtureValue, 'restart-a');
+    activate(fixtureValue, 'stopresult-a');
+    const secondDb = openBuilderDatabase(fixtureValue.databasePath);
+    const secondOwnership = new OwnershipStore(secondDb, { now: () => NOW });
+    const secondStore = new BuilderStore(secondDb);
+    const sharedSystemd = systemd();
+    const requestAt = '2026-07-27T12:00:02.000Z';
+    const base = { systemd: sharedSystemd, cooperativeTimeoutMs: 0, systemdGraceMs: 0, pollIntervalMs: 1 } as const;
+
+    const outcomes = await Promise.all([
+      requestCancellation({ ...base, store: fixtureValue.store, ownership: fixtureValue.ownership, clock: clock(requestAt), coordinatorId: 'coordinator-one' }, { jobId: 'separate-a', reason: 'one', at: requestAt }),
+      requestCancellation({ ...base, store: secondStore, ownership: secondOwnership, clock: clock(requestAt), coordinatorId: 'coordinator-two' }, { jobId: 'separate-a', reason: 'two', at: requestAt }),
+    ]);
+
+    expect(outcomes).toEqual([expect.objectContaining({ kind: 'recovery-blocked' }), expect.objectContaining({ kind: 'recovery-blocked' })]);
+    expect(sharedSystemd.calls.filter(([kind]) => kind === 'stop')).toHaveLength(1);
+
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'request-cancellation', jobId: 'preintent-a', reason: 'operator', at: requestAt,
+      cooperativeDeadlineAt: requestAt,
+    }).ok).toBe(true);
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'record-cancellation-signal',
+      jobId: 'preintent-a',
+      expectedState: 'starting',
+      cancelRequestedAt: requestAt,
+      runnerUnit: 'osi-image-builder-runner@preintent-a.service',
+      observedOwner: 'runner-a',
+      observedLeaseExpiresAt: '2026-07-27T12:10:00.000Z',
+      observation: { commandOutcome: 'completed', activity: 'unknown', argv: ['signal-before-crash'] },
+      at: requestAt,
+    }).ok).toBe(true);
+    const preIntentSystemd = systemd();
+    const resumedBeforeIntent = await requestCancellation({
+      store: secondStore,
+      ownership: secondOwnership,
+      systemd: preIntentSystemd,
+      clock: clock('2026-07-27T12:00:03.000Z'),
+      coordinatorId: 'preintent-restart',
+      systemdGraceMs: 0,
+    }, { jobId: 'preintent-a', reason: 'restart', at: '2026-07-27T12:00:03.000Z' });
+    expect(resumedBeforeIntent).toMatchObject({ kind: 'recovery-blocked' });
+    expect(preIntentSystemd.calls.filter(([kind]) => kind === 'stop')).toHaveLength(1);
+
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'request-cancellation', jobId: 'restart-a', reason: 'operator', at: requestAt,
+      cooperativeDeadlineAt: requestAt,
+    }).ok).toBe(true);
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'claim-cancellation-escalation',
+      jobId: 'restart-a',
+      expectedState: 'starting',
+      cancelRequestedAt: requestAt,
+      cooperativeDeadlineAt: requestAt,
+      runnerUnit: 'osi-image-builder-runner@restart-a.service',
+      observedOwner: 'runner-a',
+      observedLeaseExpiresAt: '2026-07-27T12:10:00.000Z',
+      escalationOwner: 'crashed-coordinator',
+      escalationLeaseExpiresAt: '2026-07-27T12:00:17.000Z',
+      stopIntentAt: requestAt,
+      graceDeadlineAt: '2026-07-27T12:00:17.000Z',
+      at: requestAt,
+    }).ok).toBe(true);
+    const restartSystemd = systemd();
+
+    const restarted = await requestCancellation({
+      store: secondStore,
+      ownership: secondOwnership,
+      systemd: restartSystemd,
+      clock: clock('2026-07-27T12:00:18.000Z'),
+      coordinatorId: 'restarted-coordinator',
+    }, { jobId: 'restart-a', reason: 'restart', at: '2026-07-27T12:00:18.000Z' });
+
+    expect(restarted).toMatchObject({ kind: 'recovery-blocked' });
+    expect(restartSystemd.calls.filter(([kind]) => kind === 'stop')).toHaveLength(0);
+    expect(restartSystemd.calls.filter(([kind]) => kind === 'inspect')).toHaveLength(1);
+    expect(secondStore.getCancellationJob('restart-a')).toMatchObject({
+      cancellationEscalationOwner: 'crashed-coordinator',
+      cancellationStopIntentAt: requestAt,
+      cleanupBlockerCode: 'RUNNER_DISAPPEARED',
+    });
+
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'request-cancellation', jobId: 'stopresult-a', reason: 'operator', at: requestAt,
+      cooperativeDeadlineAt: requestAt,
+    }).ok).toBe(true);
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'claim-cancellation-escalation',
+      jobId: 'stopresult-a',
+      expectedState: 'starting',
+      cancelRequestedAt: requestAt,
+      cooperativeDeadlineAt: requestAt,
+      runnerUnit: 'osi-image-builder-runner@stopresult-a.service',
+      observedOwner: 'runner-a',
+      observedLeaseExpiresAt: '2026-07-27T12:10:00.000Z',
+      escalationOwner: 'stop-result-coordinator',
+      escalationLeaseExpiresAt: '2026-07-27T12:00:17.000Z',
+      stopIntentAt: requestAt,
+      graceDeadlineAt: '2026-07-27T12:00:17.000Z',
+      at: requestAt,
+    }).ok).toBe(true);
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'record-cancellation-stop',
+      jobId: 'stopresult-a',
+      expectedState: 'starting',
+      cancelRequestedAt: requestAt,
+      runnerUnit: 'osi-image-builder-runner@stopresult-a.service',
+      observedOwner: 'runner-a',
+      observedLeaseExpiresAt: '2026-07-27T12:10:00.000Z',
+      escalationOwner: 'stop-result-coordinator',
+      stopIntentAt: requestAt,
+      observation: {
+        commandOutcome: 'timed-out',
+        activity: 'unknown',
+        argv: ['/usr/bin/systemctl', '--user', 'stop', 'osi-image-builder-runner@stopresult-a.service'],
+        timedOut: true,
+      },
+      at: requestAt,
+    }).ok).toBe(true);
+    const afterStopSystemd = systemd();
+    const resumedAfterStop = await requestCancellation({
+      store: secondStore,
+      ownership: secondOwnership,
+      systemd: afterStopSystemd,
+      clock: clock('2026-07-27T12:00:18.000Z'),
+      coordinatorId: 'after-stop-restart',
+    }, { jobId: 'stopresult-a', reason: 'restart', at: '2026-07-27T12:00:18.000Z' });
+    expect(resumedAfterStop).toMatchObject({
+      kind: 'recovery-blocked',
+      evidence: expect.objectContaining({
+        systemd: expect.objectContaining({
+          stop: expect.objectContaining({ commandOutcome: 'timed-out', timedOut: true }),
+        }),
+      }),
+    });
+    expect(afterStopSystemd.calls.filter(([kind]) => kind === 'stop')).toHaveLength(0);
+    secondDb.close();
+  });
+
+  it.each([
+    ['null unit', null, null, null],
+    ['malformed unit', 'not-a-systemd-unit', 'runner-a', '2026-07-27T12:10:00.000Z'],
+    ['mismatched unit', 'osi-image-builder-runner@different.service', 'runner-a', '2026-07-27T12:10:00.000Z'],
+    ['null owner and lease', 'osi-image-builder-runner@anomaly-a.service', null, null],
+    ['malformed lease', 'osi-image-builder-runner@anomaly-a.service', 'runner-a', 'not-an-instant'],
+    ['expired lease', 'osi-image-builder-runner@anomaly-a.service', 'runner-a', '2026-07-27T12:00:02.500Z'],
+  ])('persists raw fail-closed evidence for %s', async (_label, runnerUnit, owner, leaseExpiresAt) => {
+    const fixtureValue = await fixture(['anomaly-a']);
+    activate(fixtureValue, 'anomaly-a');
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'request-cancellation',
+      jobId: 'anomaly-a',
+      reason: 'operator',
+      at: '2026-07-27T12:00:02.000Z',
+      cooperativeDeadlineAt: '2026-07-27T12:00:02.000Z',
+    }).ok).toBe(true);
+    fixtureValue.db.exec('DROP TRIGGER jobs_runner_lease_guard_update');
+    fixtureValue.db.exec('PRAGMA ignore_check_constraints=ON');
+    fixtureValue.db.prepare('UPDATE jobs SET runner_unit=?, runner_lease_owner=?, runner_lease_expires_at=? WHERE job_id=?')
+      .run(runnerUnit, owner, leaseExpiresAt, 'anomaly-a');
+    const systemdValue = systemd();
+
+    const outcome = await requestCancellation({
+      store: fixtureValue.store,
+      ownership: fixtureValue.ownership,
+      systemd: systemdValue,
+      clock: clock('2026-07-27T12:00:03.000Z'),
+    }, { jobId: 'anomaly-a', reason: 'retry', at: '2026-07-27T12:00:03.000Z' });
+
+    expect(outcome).toMatchObject({
+      kind: 'recovery-blocked',
+      evidence: expect.objectContaining({
+        persistedRunnerUnit: runnerUnit,
+        observedOwner: owner,
+        observedLeaseExpiresAt: leaseExpiresAt,
+      }),
+    });
+    expect(systemdValue.calls).toEqual([]);
+    expect(fixtureValue.store.getCancellationJob('anomaly-a')).toMatchObject({
+      cleanupBlockerCode: 'RUNNER_DISAPPEARED',
+      cleanupBlocker: expect.objectContaining({
+        persistedRunnerUnit: runnerUnit,
+        observedOwner: owner,
+        observedLeaseExpiresAt: leaseExpiresAt,
+      }),
+    });
+  });
+
+  it('rejects stale anomaly CAS and rolls blocker persistence back with its event', async () => {
+    const fixtureValue = await fixture(['cas-a', 'rollback-a']);
+    activate(fixtureValue, 'cas-a');
+    activate(fixtureValue, 'rollback-a');
+    for (const jobId of ['cas-a', 'rollback-a']) {
+      expect(fixtureValue.ownership.apiWrite({
+        kind: 'request-cancellation', jobId, reason: 'operator',
+        at: '2026-07-27T12:00:02.000Z', cooperativeDeadlineAt: '2026-07-27T12:00:02.000Z',
+      }).ok).toBe(true);
+    }
+    const stale = fixtureValue.ownership.apiWrite({
+      kind: 'cancellation-recovery-blocker',
+      jobId: 'cas-a',
+      expectedState: 'starting',
+      cancelRequestedAt: '2026-07-27T12:00:02.000Z',
+      observedRunnerUnit: 'osi-image-builder-runner@cas-a.service',
+      observedOwner: 'wrong-owner',
+      observedLeaseExpiresAt: '2026-07-27T12:10:00.000Z',
+      blocker: { kind: 'stale' },
+      at: '2026-07-27T12:00:03.000Z',
+    });
+    expect(stale).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(fixtureValue.store.getCancellationJob('cas-a').cleanupBlocker).toBeNull();
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'runner-recovery-blocker',
+      jobId: 'cas-a',
+      expectedState: 'starting',
+      runnerUnit: 'osi-image-builder-runner@cas-a.service',
+      observedOwner: 'runner-a',
+      observedLeaseExpiresAt: '2026-07-27T12:10:00.000Z',
+      blocker: { kind: 'unrelated-runner-recovery' },
+      at: '2026-07-27T12:00:03.000Z',
+    }).ok).toBe(true);
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'cancellation-recovery-blocker',
+      jobId: 'cas-a',
+      expectedState: 'starting',
+      cancelRequestedAt: '2026-07-27T12:00:02.000Z',
+      observedRunnerUnit: 'osi-image-builder-runner@cas-a.service',
+      observedOwner: 'runner-a',
+      observedLeaseExpiresAt: '2026-07-27T12:10:00.000Z',
+      blocker: { kind: 'must-not-overwrite' },
+      at: '2026-07-27T12:00:04.000Z',
+    })).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
+    expect(fixtureValue.store.getCancellationJob('cas-a').cleanupBlocker).toEqual({ kind: 'unrelated-runner-recovery' });
+
+    const eventsBefore = fixtureValue.store.listEvents('rollback-a').events.length;
+    const rollbackOwnership = new OwnershipStore(fixtureValue.db, {
+      now: () => NOW,
+      failBeforeCommit: () => { throw new Error('injected rollback'); },
+    });
+    expect(() => rollbackOwnership.apiWrite({
+      kind: 'cancellation-recovery-blocker',
+      jobId: 'rollback-a',
+      expectedState: 'starting',
+      cancelRequestedAt: '2026-07-27T12:00:02.000Z',
+      observedRunnerUnit: 'osi-image-builder-runner@rollback-a.service',
+      observedOwner: 'runner-a',
+      observedLeaseExpiresAt: '2026-07-27T12:10:00.000Z',
+      blocker: { kind: 'rollback' },
+      at: '2026-07-27T12:00:03.000Z',
+    })).toThrow(/rolled back/i);
+    expect(fixtureValue.store.getCancellationJob('rollback-a').cleanupBlocker).toBeNull();
+    expect(fixtureValue.store.listEvents('rollback-a').events).toHaveLength(eventsBefore);
   });
 
   it('durably records a late publishing request and leaves the publisher unit untouched', async () => {

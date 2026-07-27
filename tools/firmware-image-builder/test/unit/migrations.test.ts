@@ -214,6 +214,7 @@ describe('versioned builder database migrations', () => {
       { version: 7, filename: '007_publish_intent_and_accepted_operations.sql' },
       { version: 8, filename: '008_preparation_artifact_ownership.sql' },
       { version: 9, filename: '009_cancellation_protocol_index.sql' },
+      { version: 10, filename: '010_cancellation_escalation_coordination.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
       .toEqual(['cleanup_leases', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_entries', 'schema_migrations']);
@@ -234,6 +235,10 @@ describe('versioned builder database migrations', () => {
       'freshness_status', 'freshness_observed_sha', 'newer_source_available', 'freshness_requested_at', 'freshness_checked_at',
       'freshness_error_code', 'freshness_error_json', 'freshness_error_evidence_path', 'freshness_error_evidence_sha256',
       'source_preparation_json', 'offline_feed_preparation_json', 'artifact_quarantine_intent_path',
+      'cancellation_cooperative_deadline_at', 'cancellation_escalation_owner',
+      'cancellation_escalation_lease_expires_at', 'cancellation_stop_intent_at',
+      'cancellation_grace_deadline_at', 'cancellation_signal_observation_json',
+      'cancellation_stop_observation_json', 'cancellation_inspection_observations_json',
     ]);
     expectColumns(db, 'job_stages', [
       'job_id', 'stage', 'outcome', 'started_at', 'finished_at', 'evidence_path', 'evidence_sha256', 'error_code',
@@ -318,6 +323,44 @@ describe('versioned builder database migrations', () => {
     db.close();
   });
 
+  it('backfills an active historical cancellation deadline without inventing escalation ownership', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    for (const migration of MIGRATION_REGISTRY.slice(0, 9)) {
+      historical.exec(await readFile(join(repoMigrationDir, migration.filename), 'utf8'));
+      historical.prepare('INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)')
+        .run(migration.version, migration.filename, migration.sha256, '2026-07-23T00:00:00.000Z');
+    }
+    insertValidJob(historical, 'cancel-backfill', 'starting');
+    historical.prepare(`UPDATE jobs SET
+      cancel_requested_at=?, cancel_reason=?, dispatched_at=?, runner_unit=?,
+      runner_lease_owner=?, runner_lease_expires_at=?
+      WHERE job_id=?`).run(
+      '2026-07-23T00:00:02.125Z',
+      'operator',
+      '2026-07-23T00:00:01.000Z',
+      'osi-image-builder-runner@cancel-backfill.service',
+      'runner-a',
+      '2026-07-23T00:10:00.000Z',
+      'cancel-backfill',
+    );
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare(`SELECT
+      cancellation_cooperative_deadline_at AS deadline,
+      cancellation_escalation_owner AS owner,
+      cancellation_stop_intent_at AS intent,
+      cancellation_grace_deadline_at AS grace
+      FROM jobs WHERE job_id=?`).get('cancel-backfill')).toEqual({
+      deadline: '2026-07-23T00:00:32.125Z',
+      owner: null,
+      intent: null,
+      grace: null,
+    });
+    upgraded.close();
+  });
+
   it('uses the selective cancellation protocol index through large unrelated event history', async () => {
     const path = await temporaryDatabase();
     const db = openBuilderDatabase(path);
@@ -399,7 +442,7 @@ describe('versioned builder database migrations', () => {
     const second = openBuilderDatabase(path);
     expect(second.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name").all())
       .toEqual(schema);
-    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 9 });
+    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 10 });
     second.close();
   });
 
@@ -502,7 +545,7 @@ describe('versioned builder database migrations', () => {
     physicalOrderDb.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(1, '001_initial.sql', MIGRATION_REGISTRY[0].sha256, 'x');
     physicalOrderDb.close();
     const accepted = openBuilderDatabase(physicalOrderPath);
-    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 9 });
+    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 10 });
     accepted.close();
   });
 
@@ -843,7 +886,7 @@ describe('versioned builder database migrations', () => {
     fresh.close();
 
     const reopened = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
-    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 9 });
+    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 10 });
     expect(reopened.prepare('SELECT COUNT(*) AS count FROM legacy_blocked_publish_evidence').get()).toEqual({ count: 2 });
     expect(reopened.prepare("SELECT terminal_error_json FROM jobs WHERE job_id='legacy-terminal'").get())
       .toEqual({ terminal_error_json: terminalSentinel });
