@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   OwnershipStore,
+  type CleanupSnapshot,
   type OwnershipResult,
   type RunnerWriteCommand,
 } from '../../api/src/ownership.js';
@@ -177,6 +178,44 @@ function hash(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function admitPreparationCleanup(value: Fixture): void {
+  const job = value.store.getJob(value.input.jobId);
+  value.clock.advance(120_000);
+  const at = value.clock.now();
+  if (job.runnerUnit === null || job.runnerLeaseOwner === null || job.runnerLeaseExpiresAt === null) {
+    throw new Error('recovery cleanup fixture lost its runner lease identity');
+  }
+  const snapshot: CleanupSnapshot = {
+    runner: {
+      unit: job.runnerUnit,
+      owner: job.runnerLeaseOwner,
+      leaseExpiresAt: job.runnerLeaseExpiresAt,
+      inactiveAt: at,
+      observedAt: at,
+    },
+    state: job.state as CleanupSnapshot['state'],
+    container: { kind: 'absent', globalLabelResult: 'no-match', observedAt: at },
+    staging: { kind: 'absent', path: null },
+    logs: { runner: 'absent', docker: 'absent', verifiedAt: at },
+    blocker: 'staging-or-log',
+  };
+  const admissionId = 'cln_0123456789abcdefghjkmnpqrs';
+  const result = value.ownership.apiWrite({
+    kind: 'cleanup-admission',
+    jobId: value.input.jobId,
+    admissionId,
+    owner: 'cleanup-a',
+    unitName: `osi-image-builder-cleanup@${admissionId}.service`,
+    expiresAt: new Date(Date.parse(at) + 60_000).toISOString(),
+    credentialRelativePath: `recovery/cleanup-credentials/${admissionId}.token`,
+    credentialSha256: HASH_A,
+    fenceTokenHash: HASH_B,
+    snapshot,
+    at,
+  });
+  expect(result).toMatchObject({ ok: true });
+}
+
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -252,6 +291,8 @@ async function fixture(options: {
   readonly predictPublishPassed?: boolean;
   readonly requirePreparationIntentBeforePrepare?: boolean;
   readonly throwPublicationPrepare?: boolean;
+  readonly throwPublicationReopen?: boolean;
+  readonly throwArtifactOwnershipWrite?: boolean;
   readonly distinctPublisherIdentities?: boolean;
 } = {}): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), 'osi-pipeline-order-'));
@@ -760,6 +801,9 @@ async function fixture(options: {
     },
     reopenStaging: async () => {
       if (prepared === null) throw new Error('publication was not prepared');
+      if (options.throwPublicationReopen === true) {
+        throw new Error('injected publication reopen failure');
+      }
       return prepared;
     },
     verifyFinal: async (value: Parameters<PipelineInput['services']['publicationFiles']['verifyFinal']>[0]) => ({
@@ -836,6 +880,9 @@ async function fixture(options: {
   const root = loaded.config.approvedOutputRoots[0]!;
   const pipelineOwnership: PipelineInput['ownership'] = {
     runnerWrite(command): OwnershipResult {
+      if (command.kind === 'artifact' && options.throwArtifactOwnershipWrite === true) {
+        throw new Error('injected artifact ownership completion failure');
+      }
       if (command.kind === options.rejectOwnershipWrite) {
         return {
           ok: false,
@@ -1635,6 +1682,57 @@ describe('trusted pipeline integration', () => {
       expect(value.store.getStage(value.input.jobId, 'publish')).toBeNull();
       expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
         .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(0);
+      admitPreparationCleanup(value);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('returns recovery-required when reopening fails after durable intent', async () => {
+    const value = await fixture({
+      requirePreparationIntentBeforePrepare: true,
+      throwPublicationReopen: true,
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'QUARANTINE_PENDING',
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'verifying',
+        publishState: 'not_started',
+        artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
+        terminalAt: null,
+      });
+      expect(value.store.getStage(value.input.jobId, 'publish')).toBeNull();
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(0);
+      admitPreparationCleanup(value);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('returns recovery-required when artifact ownership completion throws after durable intent', async () => {
+    const value = await fixture({
+      requirePreparationIntentBeforePrepare: true,
+      throwArtifactOwnershipWrite: true,
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'QUARANTINE_PENDING',
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'verifying',
+        publishState: 'not_started',
+        artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
+        terminalAt: null,
+      });
+      expect(value.store.getStage(value.input.jobId, 'publish')).toBeNull();
+      expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
+        .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(0);
+      admitPreparationCleanup(value);
     } finally {
       value.close();
     }
@@ -1817,18 +1915,22 @@ describe('trusted pipeline integration', () => {
       const value = await fixture({ tamperMetadata });
       try {
         await expect(createPipeline(value.input).run()).resolves.toMatchObject({
-          state: 'failed',
+          state: 'recovery-required',
+          blockerCode: 'QUARANTINE_PENDING',
         });
         expect(value.store.getStage(value.input.jobId, 'verify')).toMatchObject({
           outcome: 'passed',
           errorCode: null,
         });
-        expect(value.store.getStage(value.input.jobId, 'publish')).toMatchObject({
-          outcome: 'failed',
-          errorCode: 'CHECKSUM_FAILED',
+        expect(value.store.getStage(value.input.jobId, 'publish')).toBeNull();
+        expect(value.store.getJob(value.input.jobId)).toMatchObject({
+          state: 'verifying',
+          publishState: 'not_started',
+          terminalAt: null,
         });
         expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
-          .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
+          .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(0);
+        admitPreparationCleanup(value);
       } finally {
         value.close();
       }

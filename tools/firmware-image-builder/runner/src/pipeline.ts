@@ -1135,7 +1135,6 @@ export function createPipeline(input: PipelineInput): {
   let verifiedArtifact: VerifiedPipelineArtifact | null = null;
   let preparedArtifact: ArtifactInput | null = null;
   let preparedPublication: PreparedPublication | null = null;
-  let preparationIntentWritten = false;
   let publicationBinding: PublicationBinding | null = null;
   let publishStartedAt: string | null = null;
   let publicationFailure: Readonly<{
@@ -1163,6 +1162,7 @@ export function createPipeline(input: PipelineInput): {
       } as RunnerWriteCommand));
     } catch (error) {
       if (error instanceof PipelineOwnershipLostError) throw error;
+      if (command.kind === 'artifact') throw error;
       throw new PipelineOwnershipLostError('ownership-write-exception');
     }
   };
@@ -1539,10 +1539,8 @@ export function createPipeline(input: PipelineInput): {
       stagingDirectory,
       artifact: plannedArtifact,
     });
-    preparationIntentWritten = true;
-    let prepared: PreparedPublication;
     try {
-      prepared = await input.services.publicationFiles.prepare({
+      const prepared = await input.services.publicationFiles.prepare({
         job,
         target: input.target,
         root: input.approvedRoot,
@@ -1553,39 +1551,37 @@ export function createPipeline(input: PipelineInput): {
         verificationManifestBytes: metadata.verificationBytes,
         checksumBytes: metadata.checksumBytes,
       });
-    } catch (error) {
-      if (preparationIntentWritten) {
-        throw new PipelineRecoveryRequiredError(
-          `publication preparation failed after durable ownership intent: ${error instanceof Error ? error.message : String(error)}`,
-        );
+      const reopened = await input.services.publicationFiles.reopenStaging({
+        job,
+        root: input.approvedRoot,
+        artifact: prepared.artifact,
+      });
+      const artifactInput = validatePreparedPublication(prepared, reopened, {
+        artifact: artifact.artifact,
+        buildManifestBytes: metadata.buildBytes,
+        verificationManifestBytes: metadata.verificationBytes,
+        checksumBytes: metadata.checksumBytes,
+        jobId: job.jobId,
+      });
+      if (!sameArtifact(plannedArtifact, artifactInput)) {
+        throw new Error('publication preparation differs from persisted staging ownership');
       }
-      throw error;
+      write({
+        kind: 'artifact',
+        expectedState: 'verifying',
+        state: 'verifying',
+        ...artifactInput,
+      });
+      preparedPublication = reopened;
+      preparedArtifact = artifactInput;
+      buildManifest = metadata.build;
+      verificationManifest = metadata.verification;
+    } catch (error) {
+      if (error instanceof PipelineOwnershipLostError) throw error;
+      throw new PipelineRecoveryRequiredError(
+        `publication preparation recovery required after durable ownership intent: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-    const reopened = await input.services.publicationFiles.reopenStaging({
-      job,
-      root: input.approvedRoot,
-      artifact: prepared.artifact,
-    });
-    const artifactInput = validatePreparedPublication(prepared, reopened, {
-      artifact: artifact.artifact,
-      buildManifestBytes: metadata.buildBytes,
-      verificationManifestBytes: metadata.verificationBytes,
-      checksumBytes: metadata.checksumBytes,
-      jobId: job.jobId,
-    });
-    if (!sameArtifact(plannedArtifact, artifactInput)) {
-      throw new Error('publication preparation differs from persisted staging ownership');
-    }
-    write({
-      kind: 'artifact',
-      expectedState: 'verifying',
-      state: 'verifying',
-      ...artifactInput,
-    });
-    preparedPublication = reopened;
-    preparedArtifact = artifactInput;
-    buildManifest = metadata.build;
-    verificationManifest = metadata.verification;
   };
 
   const terminalVerification = (): Readonly<{ manifest: JsonObject; bytes: string }> => {
