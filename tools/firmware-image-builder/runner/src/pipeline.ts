@@ -49,6 +49,9 @@ import type {
   TargetSetupConfigObservations,
   TargetSetupSourceObservations,
 } from './target-setup.js';
+import type { CancellationObservation } from './cancellation.js';
+import { CancellationBlockedError } from './cancellation.js';
+import { DockerCancellationRequestedError } from './docker-executor.js';
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SHA40 = /^[0-9a-f]{40}$/u;
@@ -334,7 +337,16 @@ export interface PipelineInput {
     readonly readTargetManifest: () => Promise<Buffer>;
   };
   readonly evidenceWriter: PipelineEvidenceWriter;
+  readonly cancellation?: PipelineCancellation;
   readonly services: PipelineServices;
+}
+
+export interface PipelineCancellation {
+  readonly isRequested: () => boolean;
+  readonly observeBetweenStages: (stage: PipelineStageName) => Promise<CancellationObservation>;
+  readonly observeBetweenOperations: (operationId: TrustedOperationId) => Promise<CancellationObservation>;
+  readonly cancelIfRequested: () => Promise<CancellationObservation>;
+  readonly dispose: () => void;
 }
 
 export type PipelineResult =
@@ -356,6 +368,14 @@ export type PipelineResult =
       verificationManifest: JsonObject | null;
       blockerCode: 'RUNNER_DISAPPEARED' | 'QUARANTINE_PENDING';
       reason: string;
+    }>
+  | Readonly<{
+      state: 'cancelled';
+      buildManifest: null;
+      verificationManifest: null;
+      blockerCode: 'CANCELLED';
+      evidencePath: string;
+      evidenceSha256: string;
     }>;
 
 export interface PublicationBindingInput {
@@ -468,6 +488,16 @@ class PipelineTerminalFailure extends Error {
     super('pipeline terminated with a recorded failure');
     this.name = 'PipelineTerminalFailure';
     this.result = result;
+  }
+}
+
+class PipelineCancelled extends Error {
+  readonly observation: Extract<CancellationObservation, { readonly handled: true }>;
+
+  constructor(observation: Extract<CancellationObservation, { readonly handled: true }>) {
+    super('pipeline cancelled through the durable runner cancellation protocol');
+    this.name = 'PipelineCancelled';
+    this.observation = observation;
   }
 }
 
@@ -1288,6 +1318,17 @@ export function createPipeline(input: PipelineInput): {
     }
   };
 
+  const observeCancellation = async (
+    boundary: 'stage' | 'operation',
+    value: PipelineStageName | TrustedOperationId,
+  ): Promise<void> => {
+    if (input.cancellation === undefined) return;
+    const observation = boundary === 'stage'
+      ? await input.cancellation.observeBetweenStages(value as PipelineStageName)
+      : await input.cancellation.observeBetweenOperations(value as TrustedOperationId);
+    if (observation.handled) throw new PipelineCancelled(observation);
+  };
+
   const runOperationResult = async (
     job: JobRecord,
     stage: PipelineStageName,
@@ -1303,6 +1344,21 @@ export function createPipeline(input: PipelineInput): {
         requestedDefinition,
       );
     } catch (error) {
+      if (error instanceof DockerCancellationRequestedError) {
+        if (input.cancellation === undefined) throw error;
+        let observation: CancellationObservation;
+        try {
+          observation = await input.cancellation.cancelIfRequested();
+        } catch (cancellationError) {
+          if (cancellationError instanceof CancellationBlockedError) {
+            throw new PipelineRecoveryRequiredError(cancellationError.message);
+          }
+          throw cancellationError;
+        }
+        if (observation.handled) throw new PipelineCancelled(observation);
+        const race = 'ignored' in observation ? observation.ignored : 'not-handled';
+        throw new PipelineOwnershipLostError(`docker-cancellation-${race}`);
+      }
       throw new PipelineExpectedError(errorContract(
         error,
         stage,
@@ -1315,6 +1371,7 @@ export function createPipeline(input: PipelineInput): {
       throw new TypeError('operation executor changed the trusted operation ID');
     }
     operationExecutions.push(execution);
+    await observeCancellation('operation', operationId);
     renewLease();
     return execution;
   };
@@ -2022,6 +2079,7 @@ export function createPipeline(input: PipelineInput): {
     job: JobRecord,
   ): Promise<void> => {
     renewLease();
+    await observeCancellation('stage', stage);
     const stageState = STAGE_STATE[stage];
     const startedAt = now();
     let result: StageResult | null = null;
@@ -2181,6 +2239,7 @@ export function createPipeline(input: PipelineInput): {
       });
       renewLease();
     } catch (error) {
+      if (error instanceof PipelineCancelled) throw error;
       if (
         error instanceof PipelineOwnershipLostError
         || error instanceof PipelineRecoveryRequiredError
@@ -2265,6 +2324,16 @@ export function createPipeline(input: PipelineInput): {
       };
     } catch (error) {
       if (error instanceof PipelineTerminalFailure) return error.result;
+      if (error instanceof PipelineCancelled) {
+        return {
+          state: 'cancelled',
+          buildManifest: null,
+          verificationManifest: null,
+          blockerCode: 'CANCELLED',
+          evidencePath: error.observation.evidencePath,
+          evidenceSha256: error.observation.evidenceSha256,
+        };
+      }
       if (error instanceof PipelineOwnershipLostError) {
         return {
           state: 'recovery-required',

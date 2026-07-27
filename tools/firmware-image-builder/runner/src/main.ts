@@ -16,6 +16,7 @@ import {
 import {
   OwnershipStore,
   type LogCleanupProof,
+  type StagingCleanupProof,
   type RunnerWriteCommand,
 } from '../../api/src/ownership.js';
 import {
@@ -60,7 +61,8 @@ import {
 } from '../../manifest/validate.js';
 import type { TargetManifest } from '../../manifest/schema.js';
 import { createRunnerPublisherClient } from './publisher-client.js';
-import { createDockerExecutor } from './docker-executor.js';
+import { createDockerCancellationControls, createDockerExecutor } from './docker-executor.js';
+import { createRunnerCancellation } from './cancellation.js';
 import { createEvidenceWriter } from './evidence.js';
 import { createApiFreshnessSocketClient } from './freshness.js';
 import {
@@ -75,6 +77,7 @@ import {
   type PipelineInput,
   type PipelineLease,
   type PipelineOperationExecution,
+  type PipelineCancellation,
   type PipelineResult,
   type PreparedPublication,
   type PublicationFilesPrepareInput,
@@ -796,6 +799,96 @@ async function writeOperationEvidence(
     }
   });
   return Object.freeze({ path: relativePath, sha256: sha256(bytes) });
+}
+
+async function writeRunnerCancellationEvidence(
+  stateRoot: StateRootAuthority,
+  jobId: string,
+  value: JsonObject,
+): Promise<Readonly<{ path: string; sha256: string }>> {
+  const relativePath = `jobs/${jobId}/evidence/cancellation.json`;
+  const bytes = Buffer.from(`${encodeJson(value, 'cancellation evidence', true)}\n`);
+  await withStateRootSnapshot(stateRoot, async ({ snapshot }) => {
+    const root = await open(snapshot.path, DIRECTORY_FLAGS);
+    let chain: DirectoryChain | null = null;
+    try {
+      chain = await openDirectoryChain(root, ['jobs', jobId, 'evidence'], true);
+      try {
+        await writeHeldFile(chain.directory, 'cancellation.json', bytes);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        const existing = await readHeldFile(chain.directory, 'cancellation.json');
+        if (existing.sha256 !== sha256(bytes) || !existing.bytes.equals(bytes)) {
+          throw new Error('immutable cancellation evidence does not match the retry payload');
+        }
+      }
+      await chain.directory.sync();
+    } finally {
+      if (chain !== null) await closeHandles(chain.handles);
+      await root.close();
+    }
+  });
+  return Object.freeze({ path: relativePath, sha256: sha256(bytes) });
+}
+
+async function quarantineCancellationStaging(
+  loaded: LoadedConfig,
+  job: JobRecord,
+): Promise<StagingCleanupProof> {
+  if (job.artifactStagingPath === null) return { kind: 'absent', path: null };
+  if (job.artifactSha256 === null || job.artifactSize === null) {
+    throw new Error('cancellation staging identity is incomplete');
+  }
+  return withApprovedRootSnapshot(
+    loaded.pathAuthorities.approvedRoots,
+    job.rootId,
+    async ({ snapshot }) => {
+      const source = join(snapshot.path, '.osi-image-builder', 'staging', job.jobId);
+      const destination = join(snapshot.path, '.osi-image-builder', 'quarantine', job.jobId);
+      let sourceStats;
+      try {
+        sourceStats = await lstat(source);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        try {
+          const destinationStats = await lstat(destination);
+          if (!destinationStats.isDirectory() || destinationStats.isSymbolicLink()) throw new Error('cancellation quarantine destination is not a directory');
+          return {
+            kind: 'quarantined',
+            sourcePath: job.artifactStagingPath!,
+            destinationPath: `quarantine/${job.jobId}`,
+            sourceAbsent: true,
+            destinationPresent: true,
+            sha256: job.artifactSha256!,
+            size: job.artifactSize!,
+            verifiedAt: new Date().toISOString(),
+          };
+        } catch (destinationError) {
+          if ((destinationError as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('cancellation staging disappeared without quarantine evidence');
+          throw destinationError;
+        }
+      }
+      if (!sourceStats.isDirectory() || sourceStats.isSymbolicLink()) throw new Error('cancellation staging directory is not safe');
+      await mkdir(join(snapshot.path, '.osi-image-builder', 'quarantine'), { recursive: true, mode: 0o700 });
+      await rename(source, destination);
+      const sourceAfter = await lstat(source).then(() => true).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+      });
+      const destinationAfter = await lstat(destination);
+      if (sourceAfter || !destinationAfter.isDirectory() || destinationAfter.isSymbolicLink()) throw new Error('cancellation staging quarantine was not proven');
+      return {
+        kind: 'quarantined',
+        sourcePath: job.artifactStagingPath!,
+        destinationPath: `quarantine/${job.jobId}`,
+        sourceAbsent: true,
+        destinationPresent: true,
+        sha256: job.artifactSha256!,
+        size: job.artifactSize!,
+        verifiedAt: new Date().toISOString(),
+      };
+    },
+  );
 }
 
 export function createNodeVerifier(
@@ -1549,6 +1642,7 @@ async function createProductionComposition(
     let workspaceIdentity: Readonly<{ device: number; inode: number }> | null = null;
     let heldOperationWorkspacePath: string | null = null;
     let activeTargetSetupEnvironment: string | null = null;
+    let cancellation: PipelineCancellation | null = null;
     const requireWorkspace = (): FileHandle => {
       if (workspaceHandle === null) throw new Error('held source workspace is unavailable');
       return workspaceHandle;
@@ -1658,6 +1752,7 @@ async function createProductionComposition(
           ).slice(0, 48)}`,
           store,
           ownership,
+          cancellationRequested: () => cancellation?.isRequested() === true,
           leaseSnapshot: () => ({
             owner: context.lease.owner,
             unit: context.lease.runnerUnit,
@@ -2085,6 +2180,34 @@ async function createProductionComposition(
       }),
     };
 
+    const cancellationControls = createDockerCancellationControls({
+      dockerPath: TRUSTED_PREFLIGHT_EXECUTABLES.docker,
+      expectedImageDigest: lock.imageDigest,
+      maxCaptureBytes: MAX_OPERATION_CAPTURE_BYTES,
+    });
+    cancellation = createRunnerCancellation({
+      jobId: args.jobId,
+      runnerUnit: args.runnerUnit,
+      owner: args.owner,
+      leaseExpiresAt: () => store.getJob(args.jobId).runnerLeaseExpiresAt ?? args.leaseExpiresAt,
+      store,
+      ownership,
+      docker: cancellationControls,
+      evidence: (value) => writeRunnerCancellationEvidence(
+        loaded.pathAuthorities.stateRoot,
+        args.jobId,
+        value,
+      ),
+      cleanup: {
+        staging: async () => quarantineCancellationStaging(loaded, store.getJob(args.jobId)),
+        logs: async () => ({
+          runner: 'absent',
+          docker: 'absent',
+          verifiedAt: new Date().toISOString(),
+        }),
+      },
+    });
+
     return Object.freeze({
       input: Object.freeze({
         jobId: args.jobId,
@@ -2106,9 +2229,11 @@ async function createProductionComposition(
         evidenceWriter: createEvidenceWriter({
           stateRoot: loaded.pathAuthorities.stateRoot,
         }),
+        cancellation,
         services,
       }),
       close: async () => {
+        cancellation?.dispose();
         await workspaceHandle?.close().catch(() => undefined);
         await approvedRootHandle?.close().catch(() => undefined);
         await stateRootHandle?.close().catch(() => undefined);

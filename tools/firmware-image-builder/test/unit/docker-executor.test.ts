@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TRUSTED_OPERATION_IDS } from '../../domain/types.js';
 import {
+  DockerCancellationRequestedError,
   DockerLifecycleError,
+  createDockerCancellationControls,
   createDockerExecutor,
   type DockerCommandExecutor,
   type DockerExecutorOptions,
@@ -229,6 +231,73 @@ describe('operation registry', () => {
 
 describe('DockerExecutor', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it('stops cooperatively when cancellation arrives during attached Docker execution and waits for the child', async () => {
+    const calls: string[][] = [];
+    const trace: string[] = [];
+    let inspectCount = 0;
+    let attachStarted = false;
+    let stopIssued = false;
+    let releaseAttach: (() => void) | undefined;
+    const commandExecutor: DockerCommandExecutor = {
+      run: vi.fn(async (argv: readonly string[]) => {
+        calls.push([...argv]);
+        switch (argv[1]) {
+          case 'version': return { argv: [...argv], exitCode: 0, signal: null, stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'image': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'ps': return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'create': return { argv: [...argv], exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'inspect': {
+            const value = inspectCount++ === 0 ? realisticCreatedRawInspection() : realisticRawInspection();
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify(value), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          }
+          case 'start':
+            attachStarted = true;
+            await new Promise<void>((resolve) => { releaseAttach = resolve; });
+            trace.push('attach-resolved');
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'stop':
+            stopIssued = true;
+            trace.push('stop-resolved');
+            releaseAttach?.();
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          default: throw new Error(`unexpected Docker command ${argv.join(' ')}`);
+        }
+      }),
+    };
+    const writes: RunnerWriteCommand[] = [];
+    const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true, kind: 'committed', eventSeq: writes.length }; }) };
+    const run = createDockerExecutor(options(commandExecutor, {
+      ownership,
+      clock: () => '2026-07-24T10:00:10.000Z',
+      cancellationRequested: () => attachStarted,
+      finalizeLogs: async ({ operationFinishedAt }) => ({ runner: 'absent', docker: 'absent', verifiedAt: operationFinishedAt }),
+    })).run();
+
+    await expect(run).rejects.toBeInstanceOf(DockerCancellationRequestedError);
+    expect(stopIssued).toBe(true);
+    expect(trace).toEqual(['stop-resolved', 'attach-resolved']);
+    expect(calls.map((call) => call[1])).toEqual(['version', 'image', 'ps', 'create', 'inspect', 'start', 'stop', 'inspect']);
+    expect(calls.find((call) => call[1] === 'stop')).toEqual(['/usr/bin/docker', 'stop', '--time=30', '1'.repeat(64)]);
+    expect(calls.some((call) => call[1] === 'kill' || call[1] === 'rm')).toBe(false);
+    expect(writes.map((command) => command.kind)).toContain('operation-complete');
+    const complete = writes.find((command): command is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => command.kind === 'operation-complete');
+    expect(complete?.input).toMatchObject({ outcome: 'failed', errorCode: 'CANCELLED' });
+  });
+
+  it('rejects cancellation control inspection when the exact image digest differs', async () => {
+    const raw = realisticRawInspection();
+    (raw.Config as Record<string, unknown>).Image = `registry.example/builder@sha256:${'f'.repeat(64)}`;
+    const docker = fakeDocker([{ stdout: JSON.stringify(raw) }]);
+    const controls = createDockerCancellationControls({
+      commandExecutor: docker,
+      dockerPath: '/usr/bin/docker',
+      expectedImageDigest: DIGEST,
+      maxCaptureBytes: 16 * 1024,
+    });
+
+    await expect(controls.inspect('1'.repeat(64))).rejects.toThrow(/image digest/i);
+  });
 
   it('creates an inspected stopped container with the locked lifecycle contract and cleans the exact ID after committing evidence', async () => {
     const trace: string[] = [];

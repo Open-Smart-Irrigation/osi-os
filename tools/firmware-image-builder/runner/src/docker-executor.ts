@@ -128,11 +128,30 @@ export interface DockerExecutorOptions {
   readonly clock?: () => string;
   readonly evidence: (value: JsonObject) => Promise<{ readonly path: string; readonly sha256: string }>;
   readonly finalizeLogs: (input: LogFinalizeInput) => Promise<LogCleanupProof>;
+  readonly cancellationRequested?: () => boolean;
   readonly classifyAcceptedResult?: (
     result: CommandResult,
   ) => 'expected-rootfs-already-present' | null;
   readonly onStdout?: (chunk: string) => void;
   readonly onStderr?: (chunk: string) => void;
+}
+
+export interface DockerCancellationControlOptions {
+  readonly commandExecutor?: DockerCommandExecutor;
+  readonly dockerPath: string;
+  readonly expectedImageDigest: string;
+  readonly maxCaptureBytes: number;
+  readonly clock?: () => string;
+}
+
+export interface DockerCancellationContainer {
+  readonly id: string;
+  readonly name: string;
+  readonly imageDigest: string;
+  readonly labels: JsonObject;
+  readonly running: boolean;
+  readonly status: string;
+  readonly stoppedAt: string | null;
 }
 
 export type DockerExecutionResult =
@@ -142,6 +161,15 @@ export type DockerExecutionResult =
 export class DockerLifecycleError extends Error {
   readonly code = 'DOCKER_EXECUTION_DEFINITION_MISMATCH';
   constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = 'DockerLifecycleError'; }
+}
+
+export class DockerCancellationRequestedError extends Error {
+  readonly code = 'CANCELLED';
+
+  constructor(message = 'Docker operation stopped cooperatively for cancellation') {
+    super(message);
+    this.name = 'DockerCancellationRequestedError';
+  }
 }
 
 function fail(message: string): never { throw new DockerLifecycleError(message); }
@@ -175,6 +203,77 @@ function runDocker(options: DockerExecutorOptions, args: readonly string[], call
 function requireSuccess(result: CommandResult, action: string): string {
   if (result.exitCode !== 0 || result.signal !== null || result.timedOut) fail(`${action} failed: ${result.stderr || result.stdout}`);
   return result.stdout;
+}
+
+function cancellationCommand(options: DockerCancellationControlOptions, args: readonly string[], timeoutMs = DOCKER_CONTROL_TIMEOUT_MS): Promise<CommandResult> {
+  const executor = options.commandExecutor ?? createCommandExecutor();
+  return executor.run([options.dockerPath, ...args], {
+    env: dockerEnv(),
+    maxCaptureBytes: options.maxCaptureBytes,
+    timeoutMs,
+  });
+}
+
+function cancellationInspection(stdout: string, expectedImageDigest: string): DockerCancellationContainer {
+  const parsed = parseJson(stdout, 'Docker cancellation inspect');
+  const root = Array.isArray(parsed) ? parsed.length === 1 ? record(parsed[0], 'Docker cancellation inspect') : fail('Docker cancellation inspect returned an invalid number of containers') : record(parsed, 'Docker cancellation inspect');
+  const config = record(root.Config ?? root.config, 'Docker cancellation Config');
+  const state = record(root.State ?? root.state, 'Docker cancellation State');
+  const rawLabels = record(config.Labels ?? root.labels, 'Docker cancellation labels');
+  const labels: JsonObject = Object.fromEntries(Object.entries(rawLabels).map(([key, value]) => [key, requiredString(value, `Docker cancellation label ${key}`)]));
+  const image = requiredString(config.Image ?? root.image, 'Docker cancellation image');
+  const match = /@sha256:([0-9a-f]{64})$/u.exec(image);
+  if (match === null || match[1] !== expectedImageDigest) fail('Docker cancellation image digest does not match the locked image');
+  const finishedAt = normalizeDockerInstant(state.FinishedAt ?? state.finishedAt, 'Docker cancellation FinishedAt', false);
+  return {
+    id: requiredString(root.Id ?? root.id, 'Docker cancellation ID'),
+    name: requiredString(root.Name ?? root.name, 'Docker cancellation name').replace(/^\//u, ''),
+    imageDigest: match[1],
+    labels,
+    running: requiredBoolean(state.Running ?? state.running, 'Docker cancellation Running'),
+    status: requiredString(state.Status ?? state.status, 'Docker cancellation Status'),
+    stoppedAt: finishedAt,
+  };
+}
+
+function exactCancellationLabels(actual: JsonObject, expected: JsonObject): boolean {
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  return JSON.stringify(actualKeys) === JSON.stringify(expectedKeys)
+    && expectedKeys.every((key) => actual[key] === expected[key]);
+}
+
+export function createDockerCancellationControls(options: DockerCancellationControlOptions) {
+  const inspect = async (containerId: string): Promise<DockerCancellationContainer | null> => {
+    const response = await cancellationCommand(options, ['inspect', '--type=container', '--format={{json .}}', containerId]);
+    if (response.exitCode !== 0 && /no such container/iu.test(`${response.stderr}\n${response.stdout}`)) return null;
+    return cancellationInspection(requireSuccess(response, 'Docker cancellation inspect'), options.expectedImageDigest);
+  };
+  const listByLabels = async (labels: JsonObject): Promise<readonly DockerCancellationContainer[]> => {
+    const filters = Object.entries(labels).flatMap(([key, value]) => [`--filter=label=${key}=${requiredString(value, `Docker cancellation filter ${key}`)}`]);
+    const response = await cancellationCommand(options, ['ps', '--all', ...filters, '--format={{.ID}}']);
+    const ids = requireSuccess(response, 'Docker cancellation label query').split(/\r?\n/u).map((value) => value.trim()).filter((value) => value.length > 0);
+    const containers = await Promise.all(ids.map((id) => inspect(id)));
+    return containers.filter((value): value is DockerCancellationContainer => value !== null && exactCancellationLabels(value.labels, labels));
+  };
+  const stop = async (containerId: string): Promise<void> => {
+    requireSuccess(await cancellationCommand(options, ['stop', '--time=30', containerId]), 'Docker cooperative stop');
+  };
+  const waitForStopped = async (containerId: string, timeoutMs: number): Promise<DockerCancellationContainer> => {
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+      const value = await inspect(containerId);
+      if (value === null) throw new DockerLifecycleError('Docker container disappeared while waiting for cooperative stop');
+      if (!value.running) return value;
+      if (Date.now() >= deadline) throw new DockerLifecycleError('Docker container did not stop within the cooperative deadline');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  };
+  const remove = async (containerId: string): Promise<void> => {
+    const response = await cancellationCommand(options, ['rm', containerId]);
+    if (response.exitCode !== 0 && !/no such container/iu.test(`${response.stderr}\n${response.stdout}`)) requireSuccess(response, 'Docker cancellation rm');
+  };
+  return Object.freeze({ inspect, stop, waitForStopped, remove, listByLabels });
 }
 
 function record(value: unknown, field: string): Record<string, unknown> {
@@ -596,7 +695,7 @@ async function inspectContainer(options: DockerExecutorOptions, definition: Oper
 
 type RecoveryAction = 'inspect' | 'stop' | 'kill';
 
-async function recoverStopped(options: DockerExecutorOptions, definition: OperationDefinition, id: string, image: ImageIdentity, sourceEpoch: string, primaryFailure: unknown | null): Promise<{ readonly inspection: DockerInspection; readonly observedAt: string; readonly recoveryAttempted: boolean; readonly recoveryActions: readonly RecoveryAction[]; readonly recoveryFailures: readonly unknown[] }> {
+async function recoverStopped(options: DockerExecutorOptions, definition: OperationDefinition, id: string, image: ImageIdentity, sourceEpoch: string, primaryFailure: unknown | null, allowKill = true): Promise<{ readonly inspection: DockerInspection; readonly observedAt: string; readonly recoveryAttempted: boolean; readonly recoveryActions: readonly RecoveryAction[]; readonly recoveryFailures: readonly unknown[] }> {
   try {
     const actions: RecoveryAction[] = ['inspect'];
     let inspected = await inspectContainer(options, definition, id, image, sourceEpoch, 'recovery');
@@ -609,6 +708,9 @@ async function recoverStopped(options: DockerExecutorOptions, definition: Operat
       inspected = await inspectContainer(options, definition, id, image, sourceEpoch, 'recovery');
       if (!inspected.inspection.running) return { ...inspected, recoveryAttempted: true, recoveryActions: actions, recoveryFailures: failures };
     } catch (error) { failures.push(error); }
+    if (!allowKill) {
+      throw new AggregateError([...(primaryFailure === null ? [] : [primaryFailure]), ...failures], 'Docker attach ended and cooperative stop did not prove a stopped container');
+    }
     actions.push('kill');
     try { requireSuccess(await runDocker(options, ['kill', id]), 'Docker kill escalation'); } catch (error) { failures.push(error); }
     actions.push('inspect');
@@ -698,6 +800,27 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
         runner(options, (snapshot) => containerCommand(options, definition, sourceEpoch, snapshot, 'created', id!, labels, inspectedJson, createdWriteAt, inspected.createdAt));
         persisted = true;
         const startArgv = [options.dockerPath, 'start', '--attach', id];
+        let cancellationStop: Promise<void> | null = null;
+        let cancellationStopError: unknown = null;
+        const cancellationDeadline = Date.now() + DOCKER_CONTROL_TIMEOUT_MS;
+        const requestCooperativeStop = (): void => {
+          if (cancellationStop !== null) return;
+          cancellationStop = runDocker(
+            options,
+            ['stop', '--time=30', id!],
+            {},
+            { timeoutMs: Math.max(1, cancellationDeadline - Date.now()) },
+          ).then((response) => {
+            requireSuccess(response, 'Docker cooperative stop');
+          }).catch((error) => {
+            cancellationStopError = error;
+          });
+        };
+        if (options.cancellationRequested?.() === true) requestCooperativeStop();
+        const cancellationPoll = setInterval(() => {
+          if (options.cancellationRequested?.() === true) requestCooperativeStop();
+        }, 50);
+        cancellationPoll.unref();
         let result: CommandResult;
         let attachError: unknown = null;
         try {
@@ -706,10 +829,16 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
           attachError = error;
           if (!(error instanceof CommandExecutionError) || !error.result) throw error;
           result = error.result;
+        } finally {
+          clearInterval(cancellationPoll);
         }
+        if (cancellationStop !== null) await cancellationStop;
+        const cancellationObserved = cancellationStop !== null || options.cancellationRequested?.() === true;
+        const childWaitWithinDeadline = !cancellationObserved || Date.now() <= cancellationDeadline;
+        if (cancellationStopError !== null) throw new DockerCancellationRequestedError(`Docker cooperative stop failed: ${cancellationStopError instanceof Error ? cancellationStopError.message : String(cancellationStopError)}`);
         const commandTimes = validateStartResult(result, startArgv);
         const primaryFailure = attachError ?? startFailure(result);
-        const stoppedInspection = await recoverStopped(options, definition, id, image, sourceEpoch, primaryFailure);
+        const stoppedInspection = await recoverStopped(options, definition, id, image, sourceEpoch, primaryFailure, !cancellationObserved);
         const stoppedJsonBase = inspectionJson(stoppedInspection.inspection, image);
         const stoppedJson: JsonObject = { ...stoppedJsonBase, recoveryAttempted: stoppedInspection.recoveryAttempted, recoveryActions: stoppedInspection.recoveryActions, ...(stoppedInspection.recoveryFailures.length > 0 ? { recoveryFailures: recoveryEvidence(stoppedInspection.recoveryFailures) } : {}) };
         const createdAt = inspected.createdAt;
@@ -739,22 +868,23 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
             acceptedDisposition = null;
           }
         }
-        const outcome: 'passed' | 'failed' | 'accepted' = coherentResult && result.exitCode === 0
+        const outcome: 'passed' | 'failed' | 'accepted' = !cancellationObserved && coherentResult && result.exitCode === 0
           ? 'passed'
-          : coherentResult && acceptedDisposition !== null
+          : !cancellationObserved && coherentResult && acceptedDisposition !== null
             ? 'accepted'
             : 'failed';
         const commandEvidence: JsonObject = { argv: result.argv, exitCode: result.exitCode, signal: result.signal, stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut, startedAt: result.startedAt, finishedAt: result.finishedAt, ...(attachError ? { attachError: errorJson(attachError) } : {}) };
         const operationFinishedAt = now(options);
         const logs = validateLogProof(await options.finalizeLogs({ operationFinishedAt }), operationFinishedAt);
         const lifecycleMismatch = !hasStarted || (!attachError && !result.timedOut && stoppedInspection.recoveryAttempted) || (!attachError && !result.timedOut && result.exitCode !== null && stoppedInspection.inspection.exitCode !== result.exitCode);
-        const operationError = outcome === 'failed' ? { code: lifecycleMismatch ? 'DOCKER_EXECUTION_DEFINITION_MISMATCH' : 'BUILD_FAILED', message: lifecycleMismatch ? 'Docker lifecycle inspection contradicts the attach result' : attachError ? 'Docker attach failed' : 'Docker operation exited unsuccessfully' } as const : null;
+        const operationError = outcome === 'failed' ? cancellationObserved ? { code: 'CANCELLED', message: childWaitWithinDeadline ? 'Docker operation stopped cooperatively for cancellation' : 'Docker attached child exceeded the cooperative cancellation deadline' } as const : { code: lifecycleMismatch ? 'DOCKER_EXECUTION_DEFINITION_MISMATCH' : 'BUILD_FAILED', message: lifecycleMismatch ? 'Docker lifecycle inspection contradicts the attach result' : attachError ? 'Docker attach failed' : 'Docker operation exited unsuccessfully' } as const : null;
         const evidenceValue: JsonObject = { operationId: options.operationId, attempt: options.attempt, argv, argvHash, workingDirectory: definition.workingDirectory, containerId: id, inspection: stoppedJson, command: commandEvidence, outcome, ...(acceptedDisposition === null ? {} : { acceptedDisposition }), ...(operationError === null ? {} : { errorCode: operationError.code, error: operationError }) };
         const evidence = await options.evidence(evidenceValue);
         const input: OperationInput = { operationId: options.operationId, attempt: options.attempt, argvHash, argv, startedAt, finishedAt: operationFinishedAt, containerId: id, containerName: options.containerName, containerImageDigest: options.imageDigest, containerLabelJobId: options.jobId, containerLabelManifestSha: options.manifestSha256, containerMount: worktreeMount(options), containerEnvironment: env(sourceEpoch), containerSecurity: security(options, definition), inspection: stoppedJson, timedOut: result.timedOut, lifecyclePhase: hasStarted ? 'stopped' : 'created', exitCode: result.exitCode, signal: result.signal, outcome, ...(acceptedDisposition === null ? {} : { acceptedDisposition }), evidencePath: evidence.path, evidenceSha256: evidence.sha256, ...(operationError === null ? {} : { errorCode: operationError.code, error: operationError }) };
         const completionAt = now(options);
         if (logs.verifiedAt > completionAt) fail('log proof is from the future relative to operation completion');
         runner(options, (snapshot) => ({ kind: 'operation-complete', jobId: options.jobId, owner: snapshot.owner, runnerUnit: snapshot.unit, leaseExpiresAt: snapshot.leaseExpiresAt, at: completionAt, expectedState: snapshot.expectedState, operationId: options.operationId, attempt: options.attempt, input }));
+        if (cancellationObserved) throw new DockerCancellationRequestedError(childWaitWithinDeadline ? undefined : 'Docker attached child exceeded the cooperative cancellation deadline');
         const persistedIdentity = options.store.getJob(options.jobId);
         if (persistedIdentity.containerId !== id || persistedIdentity.containerName !== options.containerName) fail('persisted Docker identity changed before cleanup');
         const removed = await runDocker(options, ['rm', id]);

@@ -41,6 +41,7 @@ import {
   type StageActionContext,
 } from '../../runner/src/pipeline.js';
 import { runGuardedComposition, runRunner } from '../../runner/src/main.js';
+import { CancellationBlockedError } from '../../runner/src/cancellation.js';
 import { createEvidenceWriter } from '../../runner/src/evidence.js';
 import { createOperationDefinition, hashOperationDefinition } from '../../runner/src/operation-registry.js';
 import {
@@ -49,6 +50,7 @@ import {
   createTargetSetupSourceObservations,
 } from '../../runner/src/target-setup.js';
 import { verifyTargetSetupConfiguration } from '../../runner/src/verification.js';
+import { DockerCancellationRequestedError } from '../../runner/src/docker-executor.js';
 import type { PublisherClient, PublisherResponse } from '../../publisher/client.js';
 
 const SHA40 = 'a'.repeat(40);
@@ -274,6 +276,7 @@ async function fixture(options: {
   readonly failOperation?: TrustedOperationId;
   readonly failStage?: 'preflight' | 'feeds' | 'config';
   readonly throwOperation?: TrustedOperationId;
+  readonly cancelOperation?: TrustedOperationId;
   readonly failSource?: boolean;
   readonly publisher?: Partial<PublisherClient>;
   readonly tamperMetadata?: 'manifest' | 'verification' | 'checksum';
@@ -459,6 +462,9 @@ async function fixture(options: {
       options.operationHook?.(operationId, clock);
       if (options.throwOperation === operationId) {
         throw new Error('injected operation exception');
+      }
+      if (options.cancelOperation === operationId) {
+        throw new DockerCancellationRequestedError('attached Docker operation cancelled');
       }
       const attempt = (operationAttempts.get(operationId) ?? 0) + 1;
       operationAttempts.set(operationId, attempt);
@@ -1157,6 +1163,86 @@ async function fixture(options: {
 }
 
 describe('trusted pipeline integration', () => {
+  it('drives a persisted cancellation through the production pipeline boundary', async () => {
+    const value = await fixture();
+    try {
+      const cancellation = {
+        isRequested: () => true,
+        observeBetweenStages: vi.fn(async () => ({
+          requested: true,
+          handled: true,
+          state: 'cancelled' as const,
+          evidencePath: `jobs/${value.input.jobId}/evidence/cancellation.json`,
+          evidenceSha256: HASH_D,
+        })),
+        observeBetweenOperations: vi.fn(async () => ({ requested: false, handled: false } as const)),
+        cancelIfRequested: vi.fn(async () => ({ requested: false, handled: false } as const)),
+        dispose: vi.fn(),
+      };
+      const input = {
+        ...value.input,
+        cancellation,
+      } as PipelineInput & { readonly cancellation: typeof cancellation };
+
+      await expect(createPipeline(input).run()).resolves.toMatchObject({
+        state: 'cancelled',
+      });
+      expect(cancellation.observeBetweenStages).toHaveBeenCalled();
+    } finally {
+      value.close();
+    }
+  });
+
+  it('converts an attached Docker cancellation into the durable pipeline result', async () => {
+    const value = await fixture({ cancelOperation: 'verify-profile-parity' });
+    try {
+      const cancellation = {
+        isRequested: () => true,
+        observeBetweenStages: vi.fn(async () => ({ requested: false, handled: false } as const)),
+        observeBetweenOperations: vi.fn(async () => ({ requested: false, handled: false } as const)),
+        cancelIfRequested: vi.fn(async () => ({
+          requested: true,
+          handled: true,
+          state: 'cancelled' as const,
+          evidencePath: `jobs/${value.input.jobId}/evidence/cancellation.json`,
+          evidenceSha256: HASH_D,
+        })),
+        dispose: vi.fn(),
+      };
+      const input = { ...value.input, cancellation } as PipelineInput & { readonly cancellation: typeof cancellation };
+
+      await expect(createPipeline(input).run()).resolves.toMatchObject({
+        state: 'cancelled',
+        blockerCode: 'CANCELLED',
+      });
+      expect(cancellation.cancelIfRequested).toHaveBeenCalledTimes(1);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('keeps a cancellation cleanup blocker out of the normal failed terminal path', async () => {
+    const value = await fixture({ cancelOperation: 'verify-profile-parity' });
+    try {
+      const cancellation = {
+        isRequested: () => true,
+        observeBetweenStages: vi.fn(async () => ({ requested: false, handled: false } as const)),
+        observeBetweenOperations: vi.fn(async () => ({ requested: false, handled: false } as const)),
+        cancelIfRequested: vi.fn(async () => { throw new CancellationBlockedError('staging quarantine ambiguous'); }),
+        dispose: vi.fn(),
+      };
+      const input = { ...value.input, cancellation } as PipelineInput & { readonly cancellation: typeof cancellation };
+
+      await expect(createPipeline(input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'QUARANTINE_PENDING',
+      });
+      expect(value.store.getJob(value.input.jobId).state).not.toBe('failed');
+    } finally {
+      value.close();
+    }
+  });
+
   it('continues from the exact lease acquired by guarded production composition', async () => {
     const value = await fixture();
     try {

@@ -158,8 +158,26 @@ export type DirectLogProof = Readonly<{
 }>;
 
 export type CancellationProof =
-  | Readonly<{ readonly kind: 'pre-container'; readonly runnerUnit: string; readonly unitInactiveAt: string; readonly container: NullContainerProof; readonly staging: StagingCleanupProof; readonly logs: LogCleanupProof }>
-  | Readonly<{ readonly kind: 'container'; readonly runnerUnit: string; readonly unitInactiveAt: string; readonly container: Readonly<{ readonly kind: 'removed'; readonly id: string; readonly name: string; readonly imageDigest: string; readonly labels: JsonObject; readonly stoppedAt: string; readonly removedAt: string; readonly globalLabelResult: 'no-match'; readonly observedAt: string }>; readonly staging: StagingCleanupProof; readonly logs: LogCleanupProof }>;
+  | Readonly<{ readonly kind: 'pre-container'; readonly runnerUnit: string; readonly unitInactiveAt: string | null; readonly container: NullContainerProof; readonly staging: StagingCleanupProof; readonly logs: LogCleanupProof }>
+  | Readonly<{ readonly kind: 'container'; readonly runnerUnit: string; readonly unitInactiveAt: string | null; readonly container: Readonly<{ readonly kind: 'removed'; readonly id: string; readonly name: string; readonly imageDigest: string; readonly labels: JsonObject; readonly stoppedAt: string; readonly removedAt: string; readonly globalLabelResult: 'no-match'; readonly observedAt: string }>; readonly staging: StagingCleanupProof; readonly logs: LogCleanupProof }>;
+
+export type CancellationEvidence = Readonly<{
+  readonly kind: 'pre-container' | 'container';
+  readonly runnerUnit: string;
+  readonly runnerObservedAt: string;
+  readonly evidencePath: string;
+  readonly evidenceSha256: string;
+  readonly container: NullContainerProof | Readonly<{
+    readonly kind: 'stopped';
+    readonly id: string;
+    readonly name: string;
+    readonly imageDigest: string;
+    readonly labels: JsonObject;
+    readonly stoppedAt: string;
+  }>;
+  readonly staging: StagingCleanupProof;
+  readonly logs: LogCleanupProof;
+}>;
 
 export type CleanupSnapshot = Readonly<{
   readonly runner: Readonly<{ readonly unit: string; readonly owner: string | null; readonly leaseExpiresAt: string | null; readonly inactiveAt: string; readonly observedAt: string }>;
@@ -231,7 +249,9 @@ export type RunnerWriteCommand =
   | Readonly<{ kind: 'acquire-lease'; jobId: string; runnerUnit: string; owner: string; expiresAt: string; at: string }>
   | Readonly<{ kind: 'renew-lease'; jobId: string; runnerUnit: string; owner: string; expectedExpiresAt: string; expiresAt: string; at: string }>
   | (CommonRunner & Readonly<{ kind: 'cancellation-transition'; expectedState: ActiveRecoveryState }>)
-  | (CommonRunner & Readonly<{ kind: 'cancellation-cleanup'; expectedState: 'cancel_requested'; proof: CancellationProof }>)
+  | (CommonRunner & Readonly<{ kind: 'cancellation-evidence'; expectedState: 'cancel_requested'; evidence: CancellationEvidence }>)
+  | (CommonRunner & Readonly<{ kind: 'cancellation-blocker'; expectedState: 'cancel_requested'; blockerCode: BuilderErrorCode; blocker: JsonObject }>)
+  | (CommonRunner & Readonly<{ kind: 'cancellation-cleanup'; expectedState: 'cancel_requested'; evidenceEventSeq: number; proof: CancellationProof }>)
   | (CommonRunner & Readonly<{ kind: 'cancellation-terminal'; expectedState: 'cancel_requested'; terminalAt: string; cleanupEventSeq: number }>)
   | (CommonRunner & Readonly<{ kind: 'stage'; expectedState: JobState; state: JobState; stage: PipelineStageName; outcome: 'running' | 'passed' | 'failed' | 'cancelled' | 'interrupted'; startedAt: string; finishedAt?: string | null; evidencePath?: string | null; evidenceSha256?: string | null; errorCode?: BuilderErrorCode | null; error?: JsonInput }>)
   | (CommonRunner & Readonly<{ kind: 'container'; lifecycle: 'created' | 'started' | 'stopped' | 'removed'; containerId: string; containerName: string; imageDigest: string; labels: JsonObject; mount: JsonObject; environment: JsonObject; security: JsonObject; inspection: JsonObject; occurredAt: string; createdAt?: string | null; startedAt?: string | null; stoppedAt?: string | null; removedAt?: string | null; cleanupOutcome?: 'passed' | 'failed' | 'blocking' | null }>)
@@ -508,10 +528,34 @@ function shapeDirectProof(value: unknown, at: string): void {
 }
 
 function shapeCancellationProof(value: unknown, at: string): void {
-  const proof = shapeRecord(value, 'cancellation proof'); preparedEnum(proof.kind, ['pre-container', 'container'], 'cancellation kind'); preparedString(proof.runnerUnit, 'cancellation runner unit', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(proof.unitInactiveAt, 'cancellation inactive time'); shapeLogs(proof.logs, 'cancellation logs', false, at as string); shapeStaging(proof.staging, 'cancellation staging', false, true);
+  const proof = shapeRecord(value, 'cancellation proof'); preparedEnum(proof.kind, ['pre-container', 'container'], 'cancellation kind'); preparedString(proof.runnerUnit, 'cancellation runner unit', TEXT_LIMITS.maxIdentifierBytes); preparedOptionalInstant(proof.unitInactiveAt, 'cancellation inactive time'); shapeLogs(proof.logs, 'cancellation logs', false, at as string); shapeStaging(proof.staging, 'cancellation staging', false, true);
   if (proof.kind === 'pre-container') shapeNullContainer(proof.container, 'cancellation container', at as string);
   else { const container = shapeRecord(proof.container, 'cancellation container'); shapeLiteral(container.kind, 'removed', 'cancellation container kind'); preparedString(container.id, 'cancellation container id', TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, 'cancellation container name', TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, 'cancellation image digest'); preparedJsonObject(container.labels, 'cancellation labels'); preparedInstant(container.stoppedAt, 'cancellation stoppedAt'); preparedInstant(container.removedAt, 'cancellation removedAt'); preparedInstant(container.observedAt, 'cancellation observedAt'); shapeLiteral(container.globalLabelResult, 'no-match', 'cancellation globalLabelResult'); shapeChronology([['cancellation stoppedAt', container.stoppedAt], ['cancellation removedAt', container.removedAt], ['cancellation observedAt', container.observedAt], ['cancellation command.at', at]], 'cancellation container'); }
   const logs = shapeRecord(proof.logs, 'cancellation logs'); const staging = shapeRecord(proof.staging, 'cancellation staging'); shapeChronology([['cancellation inactiveAt', proof.unitInactiveAt], ['cancellation at', at]], 'cancellation proof'); shapeChronology([['cancellation logs verifiedAt', logs.verifiedAt], ['cancellation at', at]], 'cancellation logs'); if (staging.kind === 'quarantined') shapeChronology([['cancellation quarantine verifiedAt', staging.verifiedAt], ['cancellation at', at]], 'cancellation staging');
+}
+
+function shapeCancellationEvidence(value: unknown, at: string): void {
+  const evidence = shapeRecord(value, 'cancellation evidence');
+  preparedEnum(evidence.kind, ['pre-container', 'container'], 'cancellation evidence kind');
+  preparedString(evidence.runnerUnit, 'cancellation evidence runner unit', TEXT_LIMITS.maxIdentifierBytes);
+  preparedInstant(evidence.runnerObservedAt, 'cancellation evidence runner observation');
+  preparedPath(evidence.evidencePath, 'cancellation evidence path');
+  preparedHash(evidence.evidenceSha256, 'cancellation evidence SHA');
+  shapeLogs(evidence.logs, 'cancellation evidence logs', false, at);
+  shapeStaging(evidence.staging, 'cancellation evidence staging', false, true);
+  const container = shapeRecord(evidence.container, 'cancellation evidence container');
+  if (evidence.kind === 'pre-container') {
+    shapeNullContainer(evidence.container, 'cancellation evidence container', at);
+  } else {
+    shapeLiteral(container.kind, 'stopped', 'cancellation evidence container kind');
+    preparedString(container.id, 'cancellation evidence container id', TEXT_LIMITS.maxIdentifierBytes);
+    preparedString(container.name, 'cancellation evidence container name', TEXT_LIMITS.maxIdentifierBytes);
+    preparedHash(container.imageDigest, 'cancellation evidence image digest');
+    preparedJsonObject(container.labels, 'cancellation evidence labels');
+    preparedInstant(container.stoppedAt, 'cancellation evidence stoppedAt');
+    shapeChronology([['cancellation evidence stoppedAt', container.stoppedAt], ['cancellation evidence command.at', at]], 'cancellation evidence container');
+  }
+  shapeChronology([['cancellation evidence runner observation', evidence.runnerObservedAt], ['cancellation evidence command.at', at]], 'cancellation evidence');
 }
 
 function shapeCleanupSnapshot(value: unknown, field: string, at: string): void {
@@ -621,7 +665,9 @@ function validateRunnerCommand(command: RunnerWriteCommand): void {
     case 'acquire-lease': preparedCommon(value, 'runner'); runnerUnit(preparedString(value.jobId, 'lease jobId'), preparedString(value.runnerUnit, 'lease runnerUnit')); preparedString(value.owner, 'lease owner'); preparedInstant(value.expiresAt, 'lease expiry'); return;
     case 'renew-lease': preparedCommon(value, 'runner'); runnerUnit(preparedString(value.jobId, 'renew jobId'), preparedString(value.runnerUnit, 'renew runnerUnit')); preparedString(value.owner, 'renew owner'); preparedInstant(value.expectedExpiresAt, 'renew expected expiry'); preparedInstant(value.expiresAt, 'renew expiry'); return;
     case 'cancellation-transition': preparedRunnerCommon(value); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation expectedState'); return;
-    case 'cancellation-cleanup': preparedRunnerCommon(value); preparedEnum(value.expectedState, ['cancel_requested'], 'cancellation cleanup expectedState'); shapeCancellationProof(value.proof, value.at as string); return;
+    case 'cancellation-evidence': preparedRunnerCommon(value); preparedEnum(value.expectedState, ['cancel_requested'], 'cancellation evidence expectedState'); shapeCancellationEvidence(value.evidence, value.at as string); return;
+    case 'cancellation-blocker': preparedRunnerCommon(value); preparedEnum(value.expectedState, ['cancel_requested'], 'cancellation blocker expectedState'); preparedEnum(value.blockerCode, BUILDER_ERROR_CODES, 'cancellation blocker code'); preparedJsonObject(value.blocker, 'cancellation blocker'); return;
+    case 'cancellation-cleanup': preparedRunnerCommon(value); preparedEnum(value.expectedState, ['cancel_requested'], 'cancellation cleanup expectedState'); if (!Number.isSafeInteger(value.evidenceEventSeq) || Number(value.evidenceEventSeq) < 0) throw new OwnershipValidationError('cancellation evidence event sequence is invalid'); shapeCancellationProof(value.proof, value.at as string); return;
     case 'cancellation-terminal': preparedRunnerCommon(value); preparedEnum(value.expectedState, ['cancel_requested'], 'cancellation terminal expectedState'); preparedInstant(value.terminalAt, 'cancellation terminal time'); shapeChronology([['cancellation terminal time', value.terminalAt], ['cancellation command.at', value.at]], 'cancellation terminal'); if (!Number.isSafeInteger(value.cleanupEventSeq) || Number(value.cleanupEventSeq) < 0) throw new OwnershipValidationError('cancellation cleanup event sequence is invalid'); return;
     case 'stage': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'stage expectedState'); preparedEnum(value.state, JOB_STATES, 'stage state'); preparedEnum(value.stage, PIPELINE_STAGE_NAMES, 'stage name'); preparedEnum(value.outcome, [...COMMAND_OUTCOMES], 'stage outcome'); preparedInstant(value.startedAt, 'stage startedAt'); preparedOptionalInstant(value.finishedAt, 'stage finishedAt'); preparedOptionalPath(value.evidencePath, 'stage evidence path'); preparedOptionalHash(value.evidenceSha256, 'stage evidence SHA'); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'stage errorCode'); preparedJsonObject(value.error, 'stage error', true); shapeStageCommand(value, value.at as string); return;
     case 'container': preparedRunnerCommon(value); preparedEnum(value.lifecycle, CONTAINER_LIFECYCLES, 'container lifecycle'); for (const field of ['containerId', 'containerName']) preparedString(value[field], `container ${field}`, TEXT_LIMITS.maxIdentifierBytes); preparedHash(value.imageDigest, 'container image digest'); preparedJsonObject(value.labels, 'container labels'); preparedJsonObject(value.mount, 'container mount'); preparedJsonObject(value.environment, 'container environment'); preparedJsonObject(value.security, 'container security'); preparedJsonObject(value.inspection, 'container inspection'); preparedInstant(value.occurredAt, 'container occurredAt'); preparedOptionalInstant(value.createdAt, 'container createdAt'); preparedOptionalInstant(value.startedAt, 'container startedAt'); preparedOptionalInstant(value.stoppedAt, 'container stoppedAt'); preparedOptionalInstant(value.removedAt, 'container removedAt'); preparedOptionalEnum(value.cleanupOutcome, ['passed', 'failed', 'blocking'], 'container cleanup outcome'); shapeContainerCommand(value, value.at as string); return;
@@ -764,7 +810,7 @@ function proofJson(value: object, field: string): string {
 }
 
 function validateCleanupProof(proof: StagingCleanupProof | LogCleanupProof | CleanupStagingSnapshot | LogCleanupSnapshot, field: string): void {
-  if (field === 'staging') {
+  if (field === 'staging' || field.endsWith(' staging')) {
     const value = proof as StagingCleanupProof | CleanupStagingSnapshot;
     if (value.kind === 'absent') return;
     if (value.kind === 'present') {
@@ -1008,9 +1054,9 @@ function validateCleanupPostcondition(db: DbFacade, post: CleanupPostcondition, 
 }
 
 function validateCancellationProof(proof: CancellationProof, job: Row, at: string): void {
-  string(proof.runnerUnit, 'cancellation runner unit'); instant(proof.unitInactiveAt, 'runner inactive time');
+  string(proof.runnerUnit, 'cancellation runner unit'); if (proof.unitInactiveAt !== null) instant(proof.unitInactiveAt, 'runner inactive time');
   if (proof.runnerUnit !== job.runner_unit) throw new OwnershipConflictError('stale-runner-owner', 'cancellation proof runner unit does not match the job');
-  if (proof.unitInactiveAt > at) throw new OwnershipValidationError('cancellation unit inactivity is from the future');
+  if (proof.unitInactiveAt !== null && proof.unitInactiveAt > at) throw new OwnershipValidationError('cancellation unit inactivity is from the future');
   if (proof.kind === 'pre-container') {
     validateNullContainerProof(proof.container, at);
     if (job.container_id !== null || job.container_name !== null || job.container_image_digest !== null || job.container_label_job_id !== null || job.container_label_manifest_sha !== null) throw new OwnershipConflictError('identity-mismatch', 'pre-container cancellation has persisted container identity');
@@ -1025,6 +1071,30 @@ function validateCancellationProof(proof: CancellationProof, job: Row, at: strin
   } else throw new OwnershipValidationError('cancellation proof kind is invalid');
   validateCleanupProof(proof.staging, 'staging'); validateCleanupProof(proof.logs, 'logs');
   if (proof.logs.verifiedAt > at || proof.staging.kind === 'quarantined' && proof.staging.verifiedAt > at) throw new OwnershipValidationError('cancellation cleanup proof is from the future');
+}
+
+function validateCancellationEvidence(evidence: CancellationEvidence, job: Row, at: string): void {
+  string(evidence.runnerUnit, 'cancellation evidence runner unit');
+  instant(evidence.runnerObservedAt, 'cancellation evidence runner observation');
+  preparedPath(evidence.evidencePath, 'cancellation evidence path');
+  hash(evidence.evidenceSha256, 'cancellation evidence SHA');
+  if (evidence.runnerUnit !== job.runner_unit) throw new OwnershipConflictError('stale-runner-owner', 'cancellation evidence runner unit does not match the job');
+  if (evidence.runnerObservedAt > at) throw new OwnershipValidationError('cancellation evidence runner observation is from the future');
+  validateCleanupProof(evidence.staging, 'cancellation evidence staging');
+  validateCleanupProof(evidence.logs, 'cancellation evidence logs');
+  if (evidence.logs.verifiedAt > at || evidence.staging.kind === 'quarantined' && evidence.staging.verifiedAt > at) throw new OwnershipValidationError('cancellation evidence cleanup proof is from the future');
+  if (evidence.kind === 'pre-container') {
+    validateNullContainerProof(evidence.container as Extract<CancellationEvidence['container'], { readonly kind: 'absent' }>, at);
+    if (job.container_id !== null || job.container_name !== null || job.container_image_digest !== null || job.container_label_job_id !== null || job.container_label_manifest_sha !== null || job.container_labels_json !== null) throw new OwnershipConflictError('identity-mismatch', 'pre-container cancellation evidence has persisted container identity');
+    return;
+  }
+  const container = evidence.container;
+  if (container.kind !== 'stopped') throw new OwnershipValidationError('cancellation evidence container is not stopped');
+  hash(container.imageDigest, 'cancellation evidence image digest');
+  const persistedLabels = labels(container.labels, String(job.job_id), String(job.target_manifest_sha256));
+  if (job.container_id !== container.id || job.container_name !== container.name || job.container_image_digest !== container.imageDigest || job.container_labels_json !== persistedLabels) throw new OwnershipConflictError('identity-mismatch', 'cancellation evidence container identity does not match the job');
+  instant(container.stoppedAt, 'cancellation evidence stopped time');
+  if (container.stoppedAt > at) throw new OwnershipValidationError('cancellation evidence stopped time is from the future');
 }
 
 function validateDirectLogProof(db: DbFacade, proof: DirectLogProof, jobId: string, at: string): void {
@@ -1406,7 +1476,7 @@ export class OwnershipStore {
   runnerWrite(command: RunnerWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as RunnerWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['acquire-lease', 'renew-lease', 'cancellation-transition', 'cancellation-cleanup', 'cancellation-terminal', 'stage', 'container', 'artifact-preparation-intent', 'artifact', 'publish-stage-start', 'publish-quarantine-intent', 'publish-quarantine-ambiguous', 'publish-terminal', 'publish-failure-terminal', 'publish', 'normal-terminal', 'operation-begin', 'operation-complete', 'operation-cleanup'].includes(prepared.kind)) {
+    if (!['acquire-lease', 'renew-lease', 'cancellation-transition', 'cancellation-evidence', 'cancellation-blocker', 'cancellation-cleanup', 'cancellation-terminal', 'stage', 'container', 'artifact-preparation-intent', 'artifact', 'publish-stage-start', 'publish-quarantine-intent', 'publish-quarantine-ambiguous', 'publish-terminal', 'publish-failure-terminal', 'publish', 'normal-terminal', 'operation-begin', 'operation-complete', 'operation-cleanup'].includes(prepared.kind)) {
       throw new OwnershipViolationError('runner', prepared.kind);
     }
     validateRunnerCommand(prepared);
@@ -1415,6 +1485,8 @@ export class OwnershipStore {
       case 'acquire-lease': return this.#transaction(() => this.#acquireLease(prepared));
       case 'renew-lease': return this.#transaction(() => this.#renewLease(prepared));
       case 'cancellation-transition': return this.#transaction(() => this.#cancellationTransition(prepared));
+      case 'cancellation-evidence': return this.#transaction(() => this.#cancellationEvidence(prepared));
+      case 'cancellation-blocker': return this.#transaction(() => this.#cancellationBlocker(prepared));
       case 'cancellation-cleanup': return this.#transaction(() => this.#cancellationCleanup(prepared));
       case 'cancellation-terminal': return this.#transaction(() => this.#cancellationTerminal(prepared));
       case 'stage': return this.#transaction(() => this.#stage(prepared));
@@ -1917,9 +1989,39 @@ export class OwnershipStore {
     this.#event(command.jobId, 'state', { state: 'cancel_requested' }, command.at);
   }
 
+  #cancellationEvidence(command: Extract<RunnerWriteCommand, { kind: 'cancellation-evidence' }>): void {
+    this.#runnerGuard(command, 'cancel_requested');
+    const row = this.#job(command.jobId);
+    validateCancellationEvidence(command.evidence, row, command.at);
+    const evidenceJson = json(command.evidence, 'cancellation evidence', true);
+    const result = this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=NULL, cleanup_blocker_json=NULL,
+      container_cleanup_outcome=CASE WHEN container_id IS NULL THEN NULL ELSE container_cleanup_outcome END,
+      updated_at=? WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND cleanup_fence_generation IS NULL`).run(
+      command.at, command.jobId, command.runnerUnit, command.owner, command.leaseExpiresAt,
+    );
+    if (Number(result.changes) !== 1) conflict('cas-lost', 'cancellation evidence CAS lost');
+    this.#event(command.jobId, 'cleanup', { kind: 'cancellation-evidence', evidence: JSON.parse(evidenceJson as string) as JsonObject }, command.at);
+  }
+
+  #cancellationBlocker(command: Extract<RunnerWriteCommand, { kind: 'cancellation-blocker' }>): void {
+    this.#runnerGuard(command, 'cancel_requested');
+    const blocker = json(command.blocker, 'cancellation blocker', true);
+    const result = this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=?, cleanup_blocker_json=?,
+      container_cleanup_outcome=CASE WHEN container_id IS NULL THEN NULL ELSE 'blocking' END, updated_at=?
+      WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND cleanup_fence_generation IS NULL`).run(
+      command.blockerCode, blocker, command.at, command.jobId, command.runnerUnit, command.owner, command.leaseExpiresAt,
+    );
+    if (Number(result.changes) !== 1) conflict('cas-lost', 'cancellation blocker CAS lost');
+    this.#event(command.jobId, 'recovery', { kind: 'cancellation-blocker', blockerCode: command.blockerCode, blocker: JSON.parse(blocker as string) as JsonObject }, command.at);
+  }
+
   #cancellationCleanup(command: Extract<RunnerWriteCommand, { kind: 'cancellation-cleanup' }>): void {
     this.#runnerGuard(command, 'cancel_requested');
     const row = this.#job(command.jobId); validateCancellationProof(command.proof, row, command.at);
+    const evidence = this.#db.prepare("SELECT payload_json FROM job_events WHERE job_id=? AND seq=? AND event_type='cleanup'").get(command.jobId, command.evidenceEventSeq) as Row | undefined;
+    if (!evidence) conflict('stale-predecessor', 'cancellation evidence event is missing');
+    const evidencePayload = JSON.parse(String(evidence.payload_json)) as Record<string, unknown>;
+    if (evidencePayload.kind !== 'cancellation-evidence') conflict('stale-predecessor', 'cancellation cleanup requires the durable evidence phase');
     const stagingProof = command.proof.staging;
     if (stagingProof.kind === 'absent') {
       if (row.artifact_staging_path !== null) conflict('identity-mismatch', 'cancellation staging absence does not match persisted staging');
@@ -1933,12 +2035,12 @@ export class OwnershipStore {
       const c = command.proof.container;
       const clear = this.#db.prepare(`UPDATE jobs SET container_id=NULL, container_name=NULL, container_image_digest=NULL, container_label_job_id=NULL, container_label_manifest_sha=NULL,
         container_labels_json=NULL, container_mount_json=NULL, container_env_json=NULL, container_security_json=NULL, container_inspection_json=NULL, container_created_at=NULL,
-        container_started_at=NULL, container_stopped_at=NULL, container_removed_at=NULL, container_cleanup_outcome=NULL, updated_at=?
+        container_started_at=NULL, container_stopped_at=NULL, container_removed_at=NULL, container_cleanup_outcome=NULL, cleanup_blocker_code=NULL, cleanup_blocker_json=NULL, updated_at=?
         WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND container_id=? AND container_name=? AND container_image_digest=? AND container_label_job_id=? AND container_label_manifest_sha=? AND cleanup_fence_generation IS NULL`).run(
         command.at, command.jobId, command.runnerUnit, command.owner, command.leaseExpiresAt, c.id, c.name, c.imageDigest, command.jobId, row.target_manifest_sha256);
       if (Number(clear.changes) !== 1) conflict('identity-mismatch', 'cancellation container cleanup CAS lost');
     }
-    this.#event(command.jobId, 'cleanup', { kind: 'cancellation-cleanup', proof: command.proof }, command.at);
+    this.#event(command.jobId, 'cleanup', { kind: 'cancellation-cleanup', evidenceEventSeq: command.evidenceEventSeq, proof: command.proof }, command.at);
   }
 
   #cancellationTerminal(command: Extract<RunnerWriteCommand, { kind: 'cancellation-terminal' }>): void {

@@ -174,6 +174,7 @@ describe('runner cooperative cancellation', () => {
     });
     expect(fixture.writes.map((write) => write.kind)).toEqual([
       'cancellation-transition',
+      'cancellation-evidence',
       'cancellation-cleanup',
       'cancellation-terminal',
     ]);
@@ -194,7 +195,7 @@ describe('runner cooperative cancellation', () => {
       requested: true,
       handled: true,
     });
-    expect(fixture.writes).toHaveLength(3);
+    expect(fixture.writes).toHaveLength(4);
   });
 
   it('validates persisted ID, name, and both labels before controlled stop', async () => {
@@ -270,10 +271,109 @@ describe('runner cooperative cancellation', () => {
     expect(fixture.docker.calls).toEqual(['stop', 'remove']);
     expect(fixture.docker.waitForStopped).toHaveBeenCalledWith(CONTAINER_ID, 30_000);
     expect(fixture.writes[1]).toMatchObject({
-      kind: 'cancellation-cleanup',
-      proof: { kind: 'container', container: { id: CONTAINER_ID, name: CONTAINER_NAME, globalLabelResult: 'no-match' } },
+      kind: 'cancellation-evidence',
+      evidence: {
+        evidencePath: `jobs/${JOB_ID}/evidence/cancellation.json`,
+        evidenceSha256: 'd'.repeat(64),
+        container: { id: CONTAINER_ID },
+      },
     });
-    expect(fixture.writes[2]).toMatchObject({ kind: 'cancellation-terminal', cleanupEventSeq: 2 });
+    expect(fixture.writes[2]).toMatchObject({
+      kind: 'cancellation-cleanup',
+      proof: { kind: 'container', unitInactiveAt: null, container: { id: CONTAINER_ID, name: CONTAINER_NAME, globalLabelResult: 'no-match' } },
+    });
+    expect(fixture.writes[3]).toMatchObject({ kind: 'cancellation-terminal', cleanupEventSeq: 3 });
+  });
+
+  it('does not call rm when the persisted stopped identity is already absent', async () => {
+    const fixture = dependencies();
+    fixture.setJob(job({
+      cancelRequestedAt: NOW,
+      containerId: CONTAINER_ID,
+      containerName: CONTAINER_NAME,
+      containerImageDigest: IMAGE_DIGEST,
+      containerLabelJobId: JOB_ID,
+      containerLabelManifestSha: MANIFEST_SHA,
+      containerLabels: LABELS,
+      containerStoppedAt: STOPPED,
+    }));
+    fixture.docker.inspect.mockResolvedValue(null);
+    fixture.docker.listByLabels.mockResolvedValue([]);
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.cancelIfRequested()).resolves.toMatchObject({ state: 'cancelled' });
+    expect(fixture.docker.remove).not.toHaveBeenCalled();
+  });
+
+  it('persists a blocker when an active exact container disappears before stopped evidence', async () => {
+    const fixture = dependencies();
+    fixture.setJob(job({
+      cancelRequestedAt: NOW,
+      containerId: CONTAINER_ID,
+      containerName: CONTAINER_NAME,
+      containerImageDigest: IMAGE_DIGEST,
+      containerLabelJobId: JOB_ID,
+      containerLabelManifestSha: MANIFEST_SHA,
+      containerLabels: LABELS,
+    }));
+    fixture.docker.inspect.mockResolvedValue(null);
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.cancelIfRequested()).rejects.toBeInstanceOf(CancellationBlockedError);
+    expect(fixture.docker.remove).not.toHaveBeenCalled();
+    expect(fixture.writes).toEqual([
+      expect.objectContaining({ kind: 'cancellation-transition' }),
+      expect.objectContaining({ kind: 'cancellation-blocker', blocker: expect.objectContaining({ reason: expect.stringMatching(/disappeared/i) }) }),
+    ]);
+  });
+
+  it('persists a cleanup blocker when staging or log cleanup fails', async () => {
+    const fixture = dependencies({
+      cleanup: {
+        staging: async () => { throw new Error('staging quarantine ambiguous'); },
+        logs: async () => ({ runner: 'sealed', docker: 'sealed', verifiedAt: NOW } as const),
+      },
+    });
+    fixture.setJob(job({ cancelRequestedAt: NOW }));
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.cancelIfRequested()).rejects.toBeInstanceOf(CancellationBlockedError);
+    expect(fixture.writes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'cancellation-blocker', blocker: expect.objectContaining({ reason: expect.stringMatching(/staging/i) }) }),
+    ]));
+  });
+
+  it('reports stale terminal state distinctly and clears the signal latch', async () => {
+    const fixture = dependencies();
+    fixture.setJob(job({ state: 'cancelled', cancelRequestedAt: NOW, currentStage: null }));
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.cancelIfRequested()).resolves.toEqual({
+      requested: true,
+      handled: false,
+      ignored: 'stale',
+    });
+    fixture.setJob(job({ cancelRequestedAt: null }));
+    expect(controller.isRequested()).toBe(false);
+  });
+
+  it('clears a latched signal when the cancellation transition loses its CAS race', async () => {
+    const fixture = dependencies();
+    fixture.setJob(job({ cancelRequestedAt: NOW }));
+    vi.spyOn(fixture.value.ownership, 'runnerWrite').mockReturnValue({
+      ok: false,
+      conflict: { kind: 'cas-lost', message: 'state changed before cancellation transition' },
+    });
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.cancelIfRequested()).rejects.toThrow(/ownership lost/i);
+    fixture.setJob(job({ cancelRequestedAt: null }));
+    expect(controller.isRequested()).toBe(false);
   });
 
   it('does not cancel or stop a job after publishing has started', async () => {
@@ -311,6 +411,7 @@ describe('runner cooperative cancellation', () => {
 
     await expect(controller.cancelIfRequested()).rejects.toBeInstanceOf(CancellationBlockedError);
     expect(fixture.docker.remove).not.toHaveBeenCalled();
-    expect(fixture.writes).toHaveLength(1);
+    expect(fixture.writes).toHaveLength(2);
+    expect(fixture.writes[1]).toMatchObject({ kind: 'cancellation-blocker' });
   });
 });

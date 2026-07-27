@@ -1,4 +1,5 @@
 import type {
+  CancellationEvidence,
   CancellationProof,
   LogCleanupProof,
   OwnershipResult,
@@ -79,7 +80,7 @@ export interface RunnerCancellationOptions {
 export type CancellationObservation =
   | Readonly<{ requested: false; handled: false }>
   | Readonly<{ requested: true; handled: true; state: 'cancelled'; evidencePath: string; evidenceSha256: string }>
-  | Readonly<{ requested: true; handled: false; ignored: 'publishing' }>;
+  | Readonly<{ requested: true; handled: false; ignored: 'publishing' | 'stale' }>;
 
 export class CancellationBlockedError extends Error {
   readonly code = 'CANCELLATION_BLOCKED';
@@ -206,7 +207,7 @@ function cancellationProof(
   staging: StagingCleanupProof,
   logs: LogCleanupProof,
 ): CancellationProof {
-  const unitInactiveAt = now(options);
+  const unitInactiveAt = null;
   if (identity === null) {
     return {
       kind: 'pre-container',
@@ -233,6 +234,37 @@ function cancellationProof(
       globalLabelResult: 'no-match',
       observedAt,
     },
+    staging,
+    logs,
+  };
+}
+
+function cancellationEvidence(
+  options: RunnerCancellationOptions,
+  job: CancellationJob,
+  identity: Readonly<{ id: string; name: string; imageDigest: string; labels: JsonObject }> | null,
+  stopped: CancellationContainer | null,
+  publication: RunnerCancellationEvidencePublication,
+  staging: StagingCleanupProof,
+  logs: LogCleanupProof,
+): CancellationEvidence {
+  if (identity !== null && stopped === null) throw new CancellationBlockedError('cancellation evidence requires a stopped container');
+  return {
+    kind: identity === null ? 'pre-container' : 'container',
+    runnerUnit: options.runnerUnit,
+    runnerObservedAt: now(options),
+    evidencePath: publication.path,
+    evidenceSha256: publication.sha256,
+    container: identity === null
+      ? { kind: 'absent', globalLabelResult: 'no-match', observedAt: now(options) }
+      : {
+          kind: 'stopped',
+          id: identity.id,
+          name: identity.name,
+          imageDigest: identity.imageDigest,
+          labels: identity.labels,
+          stoppedAt: stopped!.stoppedAt ?? job.containerStoppedAt ?? now(options),
+        },
     staging,
     logs,
   };
@@ -265,9 +297,16 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
       const current = options.store.getJob(options.jobId);
       const requested = current.cancelRequestedAt !== null;
       if (!requested) return { requested: false, handled: false };
-      if (current.state === 'publishing') return { requested: true, handled: false, ignored: 'publishing' };
-      if (!activeState(current.state)) return { requested: true, handled: false, ignored: 'publishing' };
+      if (current.state === 'publishing') {
+        signalRequested = false;
+        return { requested: true, handled: false, ignored: 'publishing' };
+      }
+      if (!activeState(current.state)) {
+        signalRequested = false;
+        return { requested: true, handled: false, ignored: 'stale' };
+      }
       if (current.runnerUnit !== options.runnerUnit || current.runnerLeaseOwner !== options.owner || current.runnerLeaseExpiresAt !== options.leaseExpiresAt()) {
+        signalRequested = false;
         throw new CancellationBlockedError('runner cancellation lease identity changed');
       }
       const expectedLabels = labels(current);
@@ -281,9 +320,7 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
         if (observed !== null) {
           assertObservedIdentity(observed, identity);
           if (!observed.running) stopped = observed;
-        } else if (current.containerStoppedAt === null) {
-          throw new CancellationIdentityError('persisted container disappeared before a stopped identity was recorded');
-        } else {
+        } else if (current.containerStoppedAt !== null) {
           stopped = {
             id: identity.id,
             name: identity.name,
@@ -297,91 +334,139 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
       }
       if (current.state !== 'cancel_requested') {
         const expectedState = current.state as ActiveRecoveryState;
-        runnerWrite(options, (at) => ({
-          kind: 'cancellation-transition',
+        try {
+          runnerWrite(options, (at) => ({
+            kind: 'cancellation-transition',
+            jobId: options.jobId,
+            owner: options.owner,
+            runnerUnit: options.runnerUnit,
+            leaseExpiresAt: options.leaseExpiresAt(),
+            at,
+            expectedState,
+          }));
+        } catch (error) {
+          signalRequested = false;
+          throw error;
+        }
+      }
+      const persistBlocker = (error: unknown, phase: string): never => {
+        const reason = error instanceof Error ? error.message : String(error);
+        try {
+          runnerWrite(options, (at) => ({
+            kind: 'cancellation-blocker',
+            jobId: options.jobId,
+            owner: options.owner,
+            runnerUnit: options.runnerUnit,
+            leaseExpiresAt: options.leaseExpiresAt(),
+            at,
+            expectedState: 'cancel_requested',
+            blockerCode: 'CANCELLED',
+            blocker: { reason: `cancellation ${phase} blocked: ${reason}`, cause: reason },
+          }));
+        } catch (blockerError) {
+          signalRequested = false;
+          throw new CancellationBlockedError(`cancellation ${phase} failed and blocker persistence failed`, { cause: new AggregateError([error, blockerError]) });
+        }
+        signalRequested = false;
+        throw new CancellationBlockedError(`cancellation ${phase} blocked`, { cause: error });
+      };
+      try {
+        if (identity !== null) {
+          const present = await options.docker.inspect(identity.id);
+          if (present !== null) {
+            assertObservedIdentity(present, identity);
+            if (present.running) {
+              await options.docker.stop(identity.id);
+              stopped = await options.docker.waitForStopped(identity.id, COOPERATIVE_STOP_TIMEOUT_MS);
+              assertObservedIdentity(stopped, identity);
+              if (stopped.running) throw new CancellationBlockedError('Docker wait returned a running container');
+              if (stopped.stoppedAt === null && current.containerStoppedAt === null) throw new CancellationBlockedError('Docker wait did not provide a stopped timestamp');
+            } else {
+              stopped = present;
+            }
+          } else if (current.containerStoppedAt === null) {
+            throw new CancellationIdentityError('persisted container disappeared before controlled stop');
+          } else if (stopped === null) {
+            stopped = {
+              id: identity.id,
+              name: identity.name,
+              imageDigest: identity.imageDigest,
+              labels: identity.labels,
+              running: false,
+              status: 'exited',
+              stoppedAt: current.containerStoppedAt,
+            };
+          }
+        }
+        const staging = await options.cleanup.staging();
+        const logs = await options.cleanup.logs();
+        const evidence = await options.evidence({
+          schemaVersion: 1,
+          kind: 'runner-cancellation',
+          jobId: options.jobId,
+          state: 'cancel_requested',
+          stage: current.currentStage,
+          outcome: 'controlled',
+          container: identity === null ? { kind: 'absent', globalLabelResult: 'no-match' } : {
+            kind: 'present', id: identity.id, name: identity.name, imageDigest: identity.imageDigest, labels: identity.labels,
+            stoppedAt: stopped?.stoppedAt ?? current.containerStoppedAt,
+          },
+          staging,
+          logs,
+        });
+        const durableEvidence = cancellationEvidence(options, current, identity, stopped, evidence, staging, logs);
+        const evidenceResult = runnerWrite(options, (at) => ({
+          kind: 'cancellation-evidence',
           jobId: options.jobId,
           owner: options.owner,
           runnerUnit: options.runnerUnit,
           leaseExpiresAt: options.leaseExpiresAt(),
           at,
-          expectedState,
+          expectedState: 'cancel_requested',
+          evidence: durableEvidence,
         }));
-      }
-      if (identity !== null) {
-        const present = await options.docker.inspect(identity.id);
-        if (present !== null) {
-          assertObservedIdentity(present, identity);
-          if (present.running) {
-            await options.docker.stop(identity.id);
-            stopped = await options.docker.waitForStopped(identity.id, COOPERATIVE_STOP_TIMEOUT_MS);
-            assertObservedIdentity(stopped, identity);
-            if (stopped.running) throw new CancellationBlockedError('Docker wait returned a running container');
-            if (stopped.stoppedAt === null && current.containerStoppedAt === null) throw new CancellationBlockedError('Docker wait did not provide a stopped timestamp');
-          } else {
-            stopped = present;
+        const evidenceEventSeq = eventSeq(evidenceResult);
+        let removedAt = now(options);
+        if (identity !== null) {
+          const present = await options.docker.inspect(identity.id);
+          if (present !== null) {
+            assertObservedIdentity(present, identity);
+            await options.docker.remove(identity.id);
+            removedAt = now(options);
+            if (await options.docker.inspect(identity.id) !== null) throw new CancellationBlockedError('Docker rm did not prove exact container absence');
           }
-        } else if (current.containerStoppedAt === null) {
-          throw new CancellationIdentityError('persisted container disappeared before controlled stop');
-        } else if (stopped === null) {
-          stopped = {
-            id: identity.id,
-            name: identity.name,
-            imageDigest: identity.imageDigest,
-            labels: identity.labels,
-            running: false,
-            status: 'exited',
-            stoppedAt: current.containerStoppedAt,
-          };
         }
+        if ((await options.docker.listByLabels(expectedLabels)).length !== 0) throw new CancellationBlockedError('Docker label query did not prove cancellation container absence');
+        const observedAt = now(options);
+        const proof = cancellationProof(options, current, identity, stopped, removedAt, observedAt, staging, logs);
+        const cleanupResult = runnerWrite(options, (at) => ({
+          kind: 'cancellation-cleanup',
+          jobId: options.jobId,
+          owner: options.owner,
+          runnerUnit: options.runnerUnit,
+          leaseExpiresAt: options.leaseExpiresAt(),
+          at,
+          expectedState: 'cancel_requested',
+          evidenceEventSeq,
+          proof,
+        }));
+        const cleanupEventSeq = eventSeq(cleanupResult);
+        runnerWrite(options, (at) => ({
+          kind: 'cancellation-terminal',
+          jobId: options.jobId,
+          owner: options.owner,
+          runnerUnit: options.runnerUnit,
+          leaseExpiresAt: options.leaseExpiresAt(),
+          at,
+          expectedState: 'cancel_requested',
+          terminalAt: at,
+          cleanupEventSeq,
+        }));
+        signalRequested = false;
+        return { requested: true, handled: true, state: 'cancelled', evidencePath: evidence.path, evidenceSha256: evidence.sha256 };
+      } catch (error) {
+        return persistBlocker(error, 'cleanup');
       }
-      const staging = await options.cleanup.staging();
-      const logs = await options.cleanup.logs();
-      const evidence = await options.evidence({
-        schemaVersion: 1,
-        kind: 'runner-cancellation',
-        jobId: options.jobId,
-        state: 'cancel_requested',
-        stage: current.currentStage,
-        outcome: 'controlled',
-        container: identity === null ? { kind: 'absent', globalLabelResult: 'no-match' } : {
-          kind: 'present', id: identity.id, name: identity.name, imageDigest: identity.imageDigest, labels: identity.labels,
-          stoppedAt: stopped?.stoppedAt ?? current.containerStoppedAt,
-        },
-        staging,
-        logs,
-      });
-      if (identity !== null) {
-        await options.docker.remove(identity.id);
-        if (await options.docker.inspect(identity.id) !== null) throw new CancellationBlockedError('Docker rm did not prove exact container absence');
-      }
-      if ((await options.docker.listByLabels(expectedLabels)).length !== 0) throw new CancellationBlockedError('Docker label query did not prove cancellation container absence');
-      const removedAt = now(options);
-      const observedAt = now(options);
-      const proof = cancellationProof(options, current, identity, stopped, removedAt, observedAt, staging, logs);
-      const cleanupResult = runnerWrite(options, (at) => ({
-        kind: 'cancellation-cleanup',
-        jobId: options.jobId,
-        owner: options.owner,
-        runnerUnit: options.runnerUnit,
-        leaseExpiresAt: options.leaseExpiresAt(),
-        at,
-        expectedState: 'cancel_requested',
-        proof,
-      }));
-      const cleanupEventSeq = eventSeq(cleanupResult);
-      runnerWrite(options, (at) => ({
-        kind: 'cancellation-terminal',
-        jobId: options.jobId,
-        owner: options.owner,
-        runnerUnit: options.runnerUnit,
-        leaseExpiresAt: options.leaseExpiresAt(),
-        at,
-        expectedState: 'cancel_requested',
-        terminalAt: at,
-        cleanupEventSeq,
-      }));
-      signalRequested = false;
-      return { requested: true, handled: true, state: 'cancelled', evidencePath: evidence.path, evidenceSha256: evidence.sha256 };
     })();
     running = work;
     try {
