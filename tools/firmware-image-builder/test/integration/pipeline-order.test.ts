@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { Worker } from 'node:worker_threads';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -64,6 +65,66 @@ const ROOTFS_ALREADY_PRESENT_STDERR = [
   'make: *** [Makefile:60: switch-env] Error 1',
   '',
 ].join('\n');
+
+function ownershipWorkerWrite(
+  path: string,
+  actor: 'api' | 'runner',
+  command: object,
+  barrier: SharedArrayBuffer,
+  delayMs: number,
+): Promise<unknown> {
+  const ownershipUrl = new URL('../../api/src/ownership.ts', import.meta.url).href;
+  const schemaUrl = new URL('../../api/src/store-schema.ts', import.meta.url).href;
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(`
+      import { parentPort, workerData } from 'node:worker_threads';
+      const { openBuilderDatabase } = await import(workerData.schemaUrl);
+      const { OwnershipStore } = await import(workerData.ownershipUrl);
+      const barrier = new Int32Array(workerData.barrier);
+      Atomics.add(barrier, 0, 1);
+      Atomics.notify(barrier, 0);
+      while (Atomics.load(barrier, 1) === 0) Atomics.wait(barrier, 1, 0);
+      if (workerData.delayMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, workerData.delayMs);
+      const db = openBuilderDatabase(workerData.path, { busyTimeoutMs: 2_000 });
+      try {
+        const ownership = new OwnershipStore(db);
+        parentPort.postMessage(ownership[workerData.actor + 'Write'](workerData.command));
+      } finally {
+        db.close();
+      }
+    `, {
+      eval: true,
+      workerData: { path, actor, command, barrier, delayMs, ownershipUrl, schemaUrl },
+      execArgv: ['--import', 'tsx'],
+    });
+    worker.once('message', resolve);
+    worker.once('error', reject);
+    worker.once('exit', (code) => {
+      if (code !== 0) reject(new Error(`ownership race worker exited ${code}`));
+    });
+  });
+}
+
+async function synchronizedOwnershipRace(
+  path: string,
+  writes: ReadonlyArray<Readonly<{
+    actor: 'api' | 'runner';
+    command: object;
+    delayMs: number;
+  }>>,
+): Promise<unknown[]> {
+  const barrier = new SharedArrayBuffer(8);
+  const state = new Int32Array(barrier);
+  const results = writes.map(({ actor, command, delayMs }) => (
+    ownershipWorkerWrite(path, actor, command, barrier, delayMs)
+  ));
+  while (Atomics.load(state, 0) !== writes.length) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  Atomics.store(state, 1, 1);
+  Atomics.notify(state, 1);
+  return Promise.all(results);
+}
 
 function rootfsAlreadyPresentStdout(environment: string): string {
   return [
@@ -1180,6 +1241,11 @@ describe('trusted pipeline integration', () => {
         'quarantine',
         value.input.jobId,
       );
+      await mkdir(join(
+        value.input.approvedRoot.path,
+        '.osi-image-builder',
+        'staging',
+      ), { recursive: true });
       await mkdir(quarantineDirectory, { recursive: true });
       await writeFile(join(quarantineDirectory, 'factory.img.gz'), 'tampered artifact');
       const persisted = value.store.getJob(value.input.jobId);
@@ -1240,6 +1306,143 @@ describe('trusted pipeline integration', () => {
       expect(quarantine).toHaveBeenCalledOnce();
       expect(await readFile(join(source, 'factory.img.gz'))).toEqual(artifact);
       expect((await lstat(destination)).ino).toBe(destinationBefore.ino);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('verifies a native quarantine move through the held destination directory', async () => {
+    const value = await fixture();
+    try {
+      const source = join(
+        value.input.approvedRoot.path,
+        '.osi-image-builder',
+        'staging',
+        value.input.jobId,
+      );
+      const destination = join(
+        value.input.approvedRoot.path,
+        '.osi-image-builder',
+        'quarantine',
+        value.input.jobId,
+      );
+      const artifact = Buffer.from('native cancellation artifact');
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, 'factory.img.gz'), artifact);
+      const quarantine = vi.fn(async (): Promise<PublisherResponse> => {
+        await rename(source, destination);
+        return {
+          available: true,
+          published: false,
+          quarantined: true,
+          selfTest: false,
+          mutationCount: 2,
+          renameResult: 'RENAMED',
+          publisherVersion: LOCK.packageVersion,
+          publisherSourceSha256: HASH_C,
+          sourceRelativePath: `.osi-image-builder/staging/${value.input.jobId}`,
+          destinationRelativePath: `.osi-image-builder/quarantine/${value.input.jobId}`,
+        };
+      });
+      const persisted = value.store.getJob(value.input.jobId);
+
+      await expect(quarantineCancellationStaging(value.loaded, {
+        ...persisted,
+        artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
+        artifactSha256: createHash('sha256').update(artifact).digest('hex'),
+        artifactSize: artifact.length,
+      }, { quarantine })).resolves.toMatchObject({
+        kind: 'quarantined',
+        sourceAbsent: true,
+        destinationPresent: true,
+        size: artifact.length,
+      });
+      expect(await readFile(join(destination, 'factory.img.gz'))).toEqual(artifact);
+    } finally {
+      value.close();
+    }
+  });
+
+  it.each(['approved root', 'builder parent'] as const)(
+    'rejects a %s replacement during the held quarantine protocol',
+    async (replacement) => {
+      const value = await fixture();
+      try {
+        const root = value.input.approvedRoot.path;
+        const source = join(root, '.osi-image-builder', 'staging', value.input.jobId);
+        const artifact = Buffer.from('held cancellation artifact');
+        await mkdir(source, { recursive: true });
+        await writeFile(join(source, 'factory.img.gz'), artifact);
+        let retainedSource: string;
+        const quarantine = vi.fn(async (): Promise<PublisherResponse> => {
+          if (replacement === 'approved root') {
+            const retainedRoot = `${root}-retained`;
+            await rename(root, retainedRoot);
+            retainedSource = join(retainedRoot, '.osi-image-builder', 'staging', value.input.jobId);
+          } else {
+            const builderParent = join(root, '.osi-image-builder');
+            const retainedParent = join(root, '.osi-image-builder-retained');
+            await rename(builderParent, retainedParent);
+            retainedSource = join(retainedParent, 'staging', value.input.jobId);
+          }
+          const replacementDestination = join(
+            root,
+            '.osi-image-builder',
+            'quarantine',
+            value.input.jobId,
+          );
+          await mkdir(replacementDestination, { recursive: true });
+          await writeFile(join(replacementDestination, 'factory.img.gz'), artifact);
+          return {
+            available: true,
+            published: false,
+            quarantined: true,
+            selfTest: false,
+            mutationCount: 2,
+            renameResult: 'RENAMED',
+            publisherVersion: LOCK.packageVersion,
+            publisherSourceSha256: HASH_C,
+            sourceRelativePath: `.osi-image-builder/staging/${value.input.jobId}`,
+            destinationRelativePath: `.osi-image-builder/quarantine/${value.input.jobId}`,
+          };
+        });
+        const persisted = value.store.getJob(value.input.jobId);
+
+        await expect(quarantineCancellationStaging(value.loaded, {
+          ...persisted,
+          artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
+          artifactSha256: createHash('sha256').update(artifact).digest('hex'),
+          artifactSize: artifact.length,
+        }, { quarantine })).rejects.toThrow(/authority|replacement|source|quarantine.*proven/i);
+
+        expect(await readFile(join(retainedSource!, 'factory.img.gz'))).toEqual(artifact);
+      } finally {
+        value.close();
+      }
+    },
+  );
+
+  it('rejects physical fixed staging when the persisted staging path is null', async () => {
+    const value = await fixture();
+    try {
+      const source = join(
+        value.input.approvedRoot.path,
+        '.osi-image-builder',
+        'staging',
+        value.input.jobId,
+      );
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, 'factory.img.gz'), 'unexpected physical staging');
+      const persisted = value.store.getJob(value.input.jobId);
+      const quarantine = vi.fn();
+
+      await expect(quarantineCancellationStaging(value.loaded, {
+        ...persisted,
+        artifactStagingPath: null,
+        artifactSha256: null,
+        artifactSize: null,
+      }, { quarantine })).rejects.toThrow(/physical staging|staging.*present/i);
+      expect(quarantine).not.toHaveBeenCalled();
     } finally {
       value.close();
     }
@@ -1487,6 +1690,105 @@ describe('trusted pipeline integration', () => {
       value.close();
     }
   });
+
+  it('serializes real two-writer cancellation and publish-start races without orphan mutations', async () => {
+    type RaceResult = Readonly<{
+      ok: boolean;
+      kind?: string;
+      conflict?: Readonly<{ kind: string }>;
+    }>;
+    const at = '2026-07-26T08:01:00.000Z';
+    const leaseExpiresAt = '2026-07-26T08:10:00.000Z';
+    for (const expectedWinner of ['cancellation', 'publish'] as const) {
+      for (let repetition = 0; repetition < 3; repetition += 1) {
+        const value = await fixture();
+        try {
+          const path = join(value.statePath, 'jobs.sqlite');
+          const setup = openBuilderDatabase(path);
+          setup.prepare(`UPDATE jobs SET
+            state='verifying', current_stage='verify', publish_state='staged',
+            runner_lease_owner=?, runner_lease_expires_at=?, runner_started_at=?,
+            artifact_staging_path=?, artifact_sha256=?, artifact_size=100,
+            artifact_mtime=?, checksum_path=?, checksum_sha256=?,
+            manifest_path=?, manifest_sha256=?, verification_path=?,
+            verification_sha256=?, updated_at=?
+            WHERE job_id=?`).run(
+            value.input.owner,
+            leaseExpiresAt,
+            '2026-07-26T08:00:11.000Z',
+            `staging/${value.input.jobId}/factory.img.gz`,
+            HASH_A,
+            '2026-07-26T08:00:20.000Z',
+            `staging/${value.input.jobId}/sha256sums`,
+            HASH_B,
+            `staging/${value.input.jobId}/build-manifest.json`,
+            HASH_C,
+            `staging/${value.input.jobId}/verification.json`,
+            HASH_D,
+            '2026-07-26T08:00:20.000Z',
+            value.input.jobId,
+          );
+          setup.close();
+          const finalDirectory = `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5`;
+          const [cancellationResult, publishResult] = await synchronizedOwnershipRace(path, [
+            {
+              actor: 'api',
+              command: {
+                kind: 'request-cancellation',
+                jobId: value.input.jobId,
+                reason: `race-${expectedWinner}-${repetition}`,
+                at,
+              },
+              delayMs: expectedWinner === 'cancellation' ? 0 : 20,
+            },
+            {
+              actor: 'runner',
+              command: {
+                kind: 'publish-stage-start',
+                jobId: value.input.jobId,
+                owner: value.input.owner,
+                runnerUnit: value.input.runnerUnit,
+                leaseExpiresAt,
+                at,
+                expectedState: 'verifying',
+                startedAt: at,
+                finalDirectory,
+                finalPath: `${finalDirectory}/factory.img.gz`,
+                publishStartedAt: at,
+              },
+              delayMs: expectedWinner === 'publish' ? 0 : 20,
+            },
+          ]) as [RaceResult, RaceResult];
+          const persisted = value.store.getJob(value.input.jobId);
+          const database = openBuilderDatabase(path);
+          const publishStageCount = Number((database.prepare("SELECT COUNT(*) AS count FROM job_stages WHERE job_id=? AND stage='publish'").get(value.input.jobId) as { count: number }).count);
+          const publishEventCount = Number((database.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id=? AND event_type='publish'").get(value.input.jobId) as { count: number }).count);
+          const publishStageEventCount = Number((database.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id=? AND event_type='stage' AND json_extract(payload_json, '$.stage')='publish'").get(value.input.jobId) as { count: number }).count);
+          database.close();
+
+          expect([cancellationResult, publishResult].filter(({ ok }) => ok)).toHaveLength(1);
+          if (expectedWinner === 'cancellation') {
+            expect(cancellationResult.ok).toBe(true);
+            expect(publishResult).toMatchObject({ ok: false, conflict: { kind: 'cas-lost' } });
+            expect(persisted).toMatchObject({ state: 'verifying', publishState: 'staged' });
+            expect(persisted.cancelRequestedAt).not.toBeNull();
+            expect([publishStageCount, publishEventCount, publishStageEventCount]).toEqual([0, 0, 0]);
+          } else {
+            expect(publishResult.ok).toBe(true);
+            expect(cancellationResult).toMatchObject({ ok: false, conflict: { kind: 'illegal-predecessor' } });
+            expect(persisted).toMatchObject({
+              state: 'publishing',
+              publishState: 'publishing',
+              cancelRequestedAt: null,
+            });
+            expect([publishStageCount, publishEventCount, publishStageEventCount]).toEqual([1, 1, 1]);
+          }
+        } finally {
+          value.close();
+        }
+      }
+    }
+  }, 30_000);
 
   it('continues from the exact lease acquired by guarded production composition', async () => {
     const value = await fixture();

@@ -128,6 +128,33 @@ export type StagingCleanupProof =
 export type LogCleanupProof = Readonly<{ readonly runner: 'absent' | 'sealed'; readonly docker: 'absent' | 'sealed'; readonly verifiedAt: string }>;
 export type LogCleanupSnapshot = Readonly<{ readonly runner: 'absent' | 'sealed' | 'unsealed'; readonly docker: 'absent' | 'sealed' | 'unsealed'; readonly verifiedAt: string }>;
 
+export type CancellationLogEventRange = Readonly<{
+  readonly seq: number;
+  readonly eventType: 'log' | 'log_orphan_tail' | 'log-truncated';
+  readonly at: string;
+  readonly byteOffset: number;
+  readonly byteLength: number;
+  readonly partial: boolean;
+}>;
+export type CancellationLogGeneration = Readonly<{
+  readonly generation: number;
+  readonly path: string;
+  readonly startedAt: string;
+  readonly sealedAt: string;
+  readonly sizeBytes: number;
+  readonly sha256: string;
+  readonly sealStatus: 'sealed';
+  readonly eventRange: Readonly<{ readonly firstSeq: number; readonly lastSeq: number; readonly count: number }> | null;
+  readonly events: readonly CancellationLogEventRange[];
+}>;
+export type CancellationLogGenerations = Readonly<{
+  readonly runner: readonly CancellationLogGeneration[];
+  readonly docker: readonly CancellationLogGeneration[];
+}>;
+export type CancellationLogProof =
+  | LogCleanupProof
+  | Readonly<{ readonly runner: 'absent' | 'sealed'; readonly docker: 'absent' | 'sealed'; readonly verifiedAt: string; readonly generations: CancellationLogGenerations }>;
+
 export type DirectLogGeneration = Readonly<{ readonly generation: number; readonly path: string; readonly startedAt: string }>;
 type LogGenerationIdentity = DirectLogGeneration;
 type PersistedLogCleanupSnapshot = LogCleanupSnapshot & Readonly<{ readonly generationIdentity: Readonly<{ readonly runner: readonly LogGenerationIdentity[]; readonly docker: readonly LogGenerationIdentity[] }> }>;
@@ -158,8 +185,8 @@ export type DirectLogProof = Readonly<{
 }>;
 
 export type CancellationProof =
-  | Readonly<{ readonly kind: 'pre-container'; readonly runnerUnit: string; readonly unitInactiveAt: string | null; readonly container: NullContainerProof; readonly staging: StagingCleanupProof; readonly logs: LogCleanupProof }>
-  | Readonly<{ readonly kind: 'container'; readonly runnerUnit: string; readonly unitInactiveAt: string | null; readonly container: Readonly<{ readonly kind: 'removed'; readonly id: string; readonly name: string; readonly imageDigest: string; readonly labels: JsonObject; readonly stoppedAt: string; readonly removedAt: string; readonly globalLabelResult: 'no-match'; readonly observedAt: string }>; readonly staging: StagingCleanupProof; readonly logs: LogCleanupProof }>;
+  | Readonly<{ readonly kind: 'pre-container'; readonly runnerUnit: string; readonly unitInactiveAt: string | null; readonly container: NullContainerProof; readonly staging: StagingCleanupProof; readonly logs: CancellationLogProof }>
+  | Readonly<{ readonly kind: 'container'; readonly runnerUnit: string; readonly unitInactiveAt: string | null; readonly container: Readonly<{ readonly kind: 'removed'; readonly id: string; readonly name: string; readonly imageDigest: string; readonly labels: JsonObject; readonly stoppedAt: string; readonly removedAt: string; readonly globalLabelResult: 'no-match'; readonly observedAt: string }>; readonly staging: StagingCleanupProof; readonly logs: CancellationLogProof }>;
 
 export type CancellationEvidence = Readonly<{
   readonly kind: 'pre-container' | 'container';
@@ -176,7 +203,7 @@ export type CancellationEvidence = Readonly<{
     readonly stoppedAt: string;
   }>;
   readonly staging: StagingCleanupProof;
-  readonly logs: LogCleanupProof;
+  readonly logs: CancellationLogProof;
 }>;
 
 export type CleanupSnapshot = Readonly<{
@@ -493,6 +520,61 @@ function shapeLogs(value: unknown, field: string, allowUnsealed: boolean, at: st
   preparedEnum(proof.runner, states, `${field}.runner`); preparedEnum(proof.docker, states, `${field}.docker`); preparedInstant(proof.verifiedAt, `${field}.verifiedAt`); shapeChronology([[`${field}.verifiedAt`, proof.verifiedAt], [`${field}.command.at`, at]], field);
 }
 
+function shapeCancellationLogs(value: unknown, field: string, at: string): void {
+  shapeLogs(value, field, false, at);
+  const proof = shapeRecord(value, field);
+  if (proof.generations === undefined && proof.runner === 'absent' && proof.docker === 'absent') return;
+  const generations = shapeRecord(proof.generations, `${field}.generations`);
+  for (const stream of ['runner', 'docker'] as const) {
+    const streamGenerations = generations[stream];
+    if (!Array.isArray(streamGenerations)) throw new OwnershipValidationError(`${field}.generations.${stream} is required`);
+    if (proof[stream] === 'absent' && streamGenerations.length !== 0 || proof[stream] === 'sealed' && streamGenerations.length === 0) {
+      throw new OwnershipValidationError(`${field}.generations.${stream} does not match its coverage state`);
+    }
+    for (const [index, candidate] of streamGenerations.entries()) {
+      const generation = shapeRecord(candidate, `${field}.generations.${stream}[${index}]`);
+      if (generation.generation !== index) throw new OwnershipValidationError(`${field}.generations.${stream}[${index}].generation is not contiguous`);
+      preparedPath(generation.path, `${field}.generations.${stream}[${index}].path`);
+      if (!(generation.path as string).startsWith('logs/') || (generation.path as string).includes('..')) throw new OwnershipValidationError(`${field}.generations.${stream}[${index}].path is invalid`);
+      preparedInstant(generation.startedAt, `${field}.generations.${stream}[${index}].startedAt`);
+      preparedInstant(generation.sealedAt, `${field}.generations.${stream}[${index}].sealedAt`);
+      preparedHash(generation.sha256, `${field}.generations.${stream}[${index}].sha256`);
+      shapeLiteral(generation.sealStatus, 'sealed', `${field}.generations.${stream}[${index}].sealStatus`);
+      if (!Number.isSafeInteger(generation.sizeBytes) || Number(generation.sizeBytes) < 0) throw new OwnershipValidationError(`${field}.generations.${stream}[${index}].sizeBytes is invalid`);
+      shapeChronology([
+        [`${field}.generations.${stream}[${index}].startedAt`, generation.startedAt],
+        [`${field}.generations.${stream}[${index}].sealedAt`, generation.sealedAt],
+        [`${field}.verifiedAt`, proof.verifiedAt],
+      ], `${field}.generations.${stream}[${index}]`);
+      if (!Array.isArray(generation.events)) throw new OwnershipValidationError(`${field}.generations.${stream}[${index}].events is required`);
+      let expectedOffset = 0;
+      let priorSeq = -1;
+      for (const [eventIndex, candidateEvent] of generation.events.entries()) {
+        const event = shapeRecord(candidateEvent, `${field}.generations.${stream}[${index}].events[${eventIndex}]`);
+        if (!Number.isSafeInteger(event.seq) || Number(event.seq) <= priorSeq) throw new OwnershipValidationError(`${field} event sequence is invalid`);
+        preparedEnum(event.eventType, ['log', 'log_orphan_tail', 'log-truncated'], `${field} event type`);
+        preparedInstant(event.at, `${field} event time`);
+        if (!Number.isSafeInteger(event.byteOffset) || Number(event.byteOffset) !== expectedOffset || !Number.isSafeInteger(event.byteLength) || Number(event.byteLength) < 1 || expectedOffset + Number(event.byteLength) > Number(generation.sizeBytes)) {
+          throw new OwnershipValidationError(`${field} event range is not contiguous`);
+        }
+        if (typeof event.partial !== 'boolean') throw new OwnershipValidationError(`${field} event partial flag is invalid`);
+        shapeChronology([[`${field} event time`, event.at], [`${field} generation sealedAt`, generation.sealedAt]], `${field} event`);
+        priorSeq = Number(event.seq);
+        expectedOffset += Number(event.byteLength);
+      }
+      if (expectedOffset !== Number(generation.sizeBytes)) throw new OwnershipValidationError(`${field} generation bytes are not fully covered`);
+      if (generation.events.length === 0) {
+        shapeLiteral(generation.eventRange, null, `${field} empty eventRange`);
+      } else {
+        const range = shapeRecord(generation.eventRange, `${field}.generations.${stream}[${index}].eventRange`);
+        if (range.firstSeq !== (generation.events[0] as Record<string, unknown>).seq || range.lastSeq !== (generation.events.at(-1) as Record<string, unknown>).seq || range.count !== generation.events.length) {
+          throw new OwnershipValidationError(`${field} eventRange does not bind its events`);
+        }
+      }
+    }
+  }
+}
+
 function shapeStaging(value: unknown, field: string, allowPresent: boolean, allowQuarantined: boolean): void {
   const proof = shapeRecord(value, field);
   if (proof.kind === 'absent') { shapeLiteral(proof.path, null, `${field}.path`); if (proof.sha256 !== undefined && proof.sha256 !== null) throw new OwnershipValidationError(`${field}.sha256 must be absent`); if (proof.size !== undefined && proof.size !== null) throw new OwnershipValidationError(`${field}.size must be absent`); return; }
@@ -528,7 +610,7 @@ function shapeDirectProof(value: unknown, at: string): void {
 }
 
 function shapeCancellationProof(value: unknown, at: string): void {
-  const proof = shapeRecord(value, 'cancellation proof'); preparedEnum(proof.kind, ['pre-container', 'container'], 'cancellation kind'); preparedString(proof.runnerUnit, 'cancellation runner unit', TEXT_LIMITS.maxIdentifierBytes); preparedOptionalInstant(proof.unitInactiveAt, 'cancellation inactive time'); shapeLogs(proof.logs, 'cancellation logs', false, at as string); shapeStaging(proof.staging, 'cancellation staging', false, true);
+  const proof = shapeRecord(value, 'cancellation proof'); preparedEnum(proof.kind, ['pre-container', 'container'], 'cancellation kind'); preparedString(proof.runnerUnit, 'cancellation runner unit', TEXT_LIMITS.maxIdentifierBytes); preparedOptionalInstant(proof.unitInactiveAt, 'cancellation inactive time'); shapeCancellationLogs(proof.logs, 'cancellation logs', at as string); shapeStaging(proof.staging, 'cancellation staging', false, true);
   if (proof.kind === 'pre-container') shapeNullContainer(proof.container, 'cancellation container', at as string);
   else { const container = shapeRecord(proof.container, 'cancellation container'); shapeLiteral(container.kind, 'removed', 'cancellation container kind'); preparedString(container.id, 'cancellation container id', TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, 'cancellation container name', TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, 'cancellation image digest'); preparedJsonObject(container.labels, 'cancellation labels'); preparedInstant(container.stoppedAt, 'cancellation stoppedAt'); preparedInstant(container.removedAt, 'cancellation removedAt'); preparedInstant(container.observedAt, 'cancellation observedAt'); shapeLiteral(container.globalLabelResult, 'no-match', 'cancellation globalLabelResult'); shapeChronology([['cancellation stoppedAt', container.stoppedAt], ['cancellation removedAt', container.removedAt], ['cancellation observedAt', container.observedAt], ['cancellation command.at', at]], 'cancellation container'); }
   const logs = shapeRecord(proof.logs, 'cancellation logs'); const staging = shapeRecord(proof.staging, 'cancellation staging'); shapeChronology([['cancellation inactiveAt', proof.unitInactiveAt], ['cancellation at', at]], 'cancellation proof'); shapeChronology([['cancellation logs verifiedAt', logs.verifiedAt], ['cancellation at', at]], 'cancellation logs'); if (staging.kind === 'quarantined') shapeChronology([['cancellation quarantine verifiedAt', staging.verifiedAt], ['cancellation at', at]], 'cancellation staging');
@@ -541,7 +623,7 @@ function shapeCancellationEvidence(value: unknown, at: string): void {
   preparedInstant(evidence.runnerObservedAt, 'cancellation evidence runner observation');
   preparedPath(evidence.evidencePath, 'cancellation evidence path');
   preparedHash(evidence.evidenceSha256, 'cancellation evidence SHA');
-  shapeLogs(evidence.logs, 'cancellation evidence logs', false, at);
+  shapeCancellationLogs(evidence.logs, 'cancellation evidence logs', at);
   shapeStaging(evidence.staging, 'cancellation evidence staging', false, true);
   const container = shapeRecord(evidence.container, 'cancellation evidence container');
   if (evidence.kind === 'pre-container') {
@@ -996,9 +1078,9 @@ function logGenerationCoverage(rows: { readonly generations: readonly Row[]; rea
 }
 
 function loadLogRows(db: DbFacade, jobId: string): { readonly generations: readonly Row[]; readonly events: readonly Row[] } {
-  const generations = db.prepare('SELECT stream, generation, sealed_at, size_bytes, sha256 FROM job_log_generations WHERE job_id=? ORDER BY stream, generation LIMIT ?').all(jobId, MAX_LOG_GENERATIONS + 1) as Row[];
+  const generations = db.prepare('SELECT stream, generation, path, started_at, sealed_at, size_bytes, sha256 FROM job_log_generations WHERE job_id=? ORDER BY stream, generation LIMIT ?').all(jobId, MAX_LOG_GENERATIONS + 1) as Row[];
   if (generations.length > MAX_LOG_GENERATIONS) throw new OwnershipConflictError('identity-mismatch', 'log generations exceed the bounded recovery limit');
-  const events = db.prepare('SELECT stream, file_generation, seq, event_type, byte_offset, byte_length FROM job_events WHERE job_id=? AND stream IS NOT NULL ORDER BY stream, file_generation, seq LIMIT ?').all(jobId, MAX_LOG_EVENTS + 1) as Row[];
+  const events = db.prepare('SELECT stream, file_generation, seq, event_type, at, byte_offset, byte_length, partial FROM job_events WHERE job_id=? AND stream IS NOT NULL ORDER BY stream, file_generation, seq LIMIT ?').all(jobId, MAX_LOG_EVENTS + 1) as Row[];
   if (events.length > MAX_LOG_EVENTS) throw new OwnershipConflictError('identity-mismatch', 'log events exceed the bounded recovery limit');
   return { generations, events };
 }
@@ -1023,11 +1105,83 @@ function reconcileCleanupLogs(db: DbFacade, jobId: string, claimed: LogCleanupSn
   return actual;
 }
 
-function reconcileCancellationLogs(db: DbFacade, jobId: string, claimed: LogCleanupProof, at: string): void {
-  const actual = logCoverageSnapshot(db, jobId, at, true);
+function cancellationLogGenerations(
+  rows: ReturnType<typeof loadLogRows>,
+  stream: 'runner' | 'docker',
+): readonly CancellationLogGeneration[] {
+  return rows.generations
+    .filter((generation) => generation.stream === stream)
+    .map((generation) => {
+      const generationNumber = Number(generation.generation);
+      const events = rows.events
+        .filter((event) => event.stream === stream && Number(event.file_generation) === generationNumber)
+        .map((event): CancellationLogEventRange => ({
+          seq: Number(event.seq),
+          eventType: String(event.event_type) as CancellationLogEventRange['eventType'],
+          at: String(event.at),
+          byteOffset: Number(event.byte_offset),
+          byteLength: Number(event.byte_length),
+          partial: Number(event.partial) === 1,
+        }));
+      return Object.freeze({
+        generation: generationNumber,
+        path: String(generation.path),
+        startedAt: String(generation.started_at),
+        sealedAt: String(generation.sealed_at),
+        sizeBytes: Number(generation.size_bytes),
+        sha256: String(generation.sha256),
+        sealStatus: 'sealed' as const,
+        eventRange: events.length === 0
+          ? null
+          : Object.freeze({
+              firstSeq: events[0]!.seq,
+              lastSeq: events.at(-1)!.seq,
+              count: events.length,
+            }),
+        events: Object.freeze(events),
+      });
+    });
+}
+
+function cancellationLogSnapshot(db: DbFacade, jobId: string, at: string): CancellationLogProof {
+  const rows = loadLogRows(db, jobId);
+  const runner = logGenerationCoverage(rows, 'runner', at, true);
+  const docker = logGenerationCoverage(rows, 'docker', at, true);
   if (
-    claimed.runner !== actual.runner
-    || claimed.docker !== actual.docker
+    (runner !== 'absent' && runner !== 'sealed')
+    || (docker !== 'absent' && docker !== 'sealed')
+  ) {
+    throw new OwnershipConflictError('identity-mismatch', 'cancellation logs do not have strict sealed coverage or true absence');
+  }
+  if (runner === 'absent' && docker === 'absent') return { runner, docker, verifiedAt: at };
+  return {
+    runner,
+    docker,
+    verifiedAt: at,
+    generations: Object.freeze({
+      runner: cancellationLogGenerations(rows, 'runner'),
+      docker: cancellationLogGenerations(rows, 'docker'),
+    }),
+  };
+}
+
+function cancellationLogBinding(proof: CancellationLogProof): Readonly<{
+  readonly runner: CancellationLogProof['runner'];
+  readonly docker: CancellationLogProof['docker'];
+  readonly generations: CancellationLogGenerations;
+}> {
+  return {
+    runner: proof.runner,
+    docker: proof.docker,
+    generations: 'generations' in proof ? proof.generations : { runner: [], docker: [] },
+  };
+}
+
+function reconcileCancellationLogs(db: DbFacade, jobId: string, claimed: CancellationLogProof, at: string): void {
+  const actual = cancellationLogSnapshot(db, jobId, at);
+  if (
+    proofJson(cancellationLogBinding(claimed), 'claimed cancellation log binding')
+      !== proofJson(cancellationLogBinding(actual), 'current cancellation log binding')
     || (actual.runner !== 'absent' && actual.runner !== 'sealed')
     || (actual.docker !== 'absent' && actual.docker !== 'sealed')
   ) {
@@ -1111,12 +1265,18 @@ function validateCancellationEvidence(evidence: CancellationEvidence, job: Row, 
 }
 
 function validateCancellationEvidenceBinding(evidence: CancellationEvidence, proof: CancellationProof): void {
+  const evidenceLogs = {
+    verifiedAt: evidence.logs.verifiedAt,
+    ...cancellationLogBinding(evidence.logs),
+  };
+  const proofLogs = {
+    verifiedAt: proof.logs.verifiedAt,
+    ...cancellationLogBinding(proof.logs),
+  };
   if (
     evidence.runnerUnit !== proof.runnerUnit
     || proofJson(evidence.staging, 'cancellation evidence staging binding') !== proofJson(proof.staging, 'cancellation proof staging binding')
-    || evidence.logs.runner !== proof.logs.runner
-    || evidence.logs.docker !== proof.logs.docker
-    || evidence.logs.verifiedAt !== proof.logs.verifiedAt
+    || proofJson(evidenceLogs, 'cancellation evidence log binding') !== proofJson(proofLogs, 'cancellation proof log binding')
   ) {
     throw new OwnershipConflictError('identity-mismatch', 'cancellation cleanup proof does not exactly bind the durable evidence');
   }
@@ -1500,22 +1660,11 @@ export class OwnershipStore {
     this.#beforeEvent = options.beforeEvent;
   }
 
-  cancellationLogProof(jobId: string, at: string): LogCleanupProof {
+  cancellationLogProof(jobId: string, at: string): CancellationLogProof {
     preparedString(jobId, 'cancellation log jobId', TEXT_LIMITS.maxIdentifierBytes);
     preparedInstant(at, 'cancellation log proof time');
     this.#job(jobId);
-    const actual = logCoverageSnapshot(this.#db, jobId, at, true);
-    if (
-      (actual.runner !== 'absent' && actual.runner !== 'sealed')
-      || (actual.docker !== 'absent' && actual.docker !== 'sealed')
-    ) {
-      throw new OwnershipConflictError('identity-mismatch', 'cancellation logs do not have strict sealed coverage or true absence');
-    }
-    return {
-      runner: actual.runner,
-      docker: actual.docker,
-      verifiedAt: actual.verifiedAt,
-    };
+    return cancellationLogSnapshot(this.#db, jobId, at);
   }
 
   apiWrite(command: ApiWriteCommand): OwnershipResult {
@@ -2110,6 +2259,12 @@ export class OwnershipStore {
         WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND container_id=? AND container_name=? AND container_image_digest=? AND container_label_job_id=? AND container_label_manifest_sha=? AND cleanup_fence_generation IS NULL`).run(
         command.at, command.jobId, command.runnerUnit, command.owner, command.leaseExpiresAt, c.id, c.name, c.imageDigest, command.jobId, row.target_manifest_sha256);
       if (Number(clear.changes) !== 1) conflict('identity-mismatch', 'cancellation container cleanup CAS lost');
+    } else {
+      const clear = this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=NULL, cleanup_blocker_json=NULL, updated_at=?
+        WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND cleanup_fence_generation IS NULL`).run(
+        command.at, command.jobId, command.runnerUnit, command.owner, command.leaseExpiresAt,
+      );
+      if (Number(clear.changes) !== 1) conflict('cas-lost', 'cancellation pre-container cleanup CAS lost');
     }
     this.#event(command.jobId, 'cleanup', { kind: 'cancellation-cleanup', evidenceEventSeq: command.evidenceEventSeq, proof: command.proof }, command.at);
   }
@@ -2127,11 +2282,11 @@ export class OwnershipStore {
     if (proof === undefined) conflict('identity-mismatch', 'cancellation cleanup proof is missing');
     reconcileCancellationLogs(this.#db, command.jobId, proof.logs, command.at);
     const row = this.#job(command.jobId);
-    if (row.container_id !== null || row.container_name !== null || row.container_image_digest !== null || row.container_label_job_id !== null || row.container_label_manifest_sha !== null || row.container_labels_json !== null || row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null || row.artifact_staging_path !== null) {
-      conflict('identity-mismatch', 'cancellation cleanup did not clear all active identity and blockers');
+    if (row.container_id !== null || row.container_name !== null || row.container_image_digest !== null || row.container_label_job_id !== null || row.container_label_manifest_sha !== null || row.container_labels_json !== null || row.artifact_staging_path !== null) {
+      conflict('identity-mismatch', 'cancellation cleanup did not clear all active identity');
     }
-    const terminal = this.#db.prepare(`UPDATE jobs SET state='cancelled', queue_state='complete', queue_position=NULL, terminal_at=?, terminal_error_code='CANCELLED', terminal_error_json=?, runner_finished_at=?, updated_at=?
-      WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND container_id IS NULL AND container_name IS NULL AND container_image_digest IS NULL AND container_label_job_id IS NULL AND container_label_manifest_sha IS NULL AND container_labels_json IS NULL AND artifact_staging_path IS NULL AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL AND cleanup_fence_generation IS NULL`).run(
+    const terminal = this.#db.prepare(`UPDATE jobs SET state='cancelled', queue_state='complete', queue_position=NULL, terminal_at=?, terminal_error_code='CANCELLED', terminal_error_json=?, runner_finished_at=?, cleanup_blocker_code=NULL, cleanup_blocker_json=NULL, updated_at=?
+      WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND container_id IS NULL AND container_name IS NULL AND container_image_digest IS NULL AND container_label_job_id IS NULL AND container_label_manifest_sha IS NULL AND container_labels_json IS NULL AND artifact_staging_path IS NULL AND cleanup_fence_generation IS NULL`).run(
       command.terminalAt, json({ reason: 'cancelled' }, 'cancellation terminal error', true), command.terminalAt, command.at, command.jobId, command.runnerUnit, command.owner, command.leaseExpiresAt);
     if (Number(terminal.changes) !== 1) conflict('cas-lost', 'cancellation terminal CAS lost');
     this.#event(command.jobId, 'terminal', { state: 'cancelled', errorCode: 'CANCELLED', cleanupEventSeq: command.cleanupEventSeq }, command.terminalAt);
@@ -2921,7 +3076,11 @@ export class OwnershipStore {
     if (expectedState !== undefined && !matchesExpectedState(String(row.state), expectedState)) conflict('stale-predecessor', 'runner predecessor changed');
     if (row.runner_unit !== command.runnerUnit || row.runner_lease_owner !== command.owner) conflict('stale-runner-owner', 'runner identity changed');
     if (row.cleanup_fence_generation !== null || row.cleanup_admission_id !== null) conflict('fenced', 'runner is fenced for recovery');
-    if (row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null) conflict('fenced', 'runner has a persisted recovery blocker');
+    const commandKind = (command as CommonRunner & { readonly kind?: string }).kind;
+    const cancellationRetry = row.state === 'cancel_requested'
+      && commandKind !== undefined
+      && ['cancellation-evidence', 'cancellation-blocker', 'cancellation-cleanup', 'cancellation-terminal'].includes(commandKind);
+    if ((row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null) && !cancellationRetry) conflict('fenced', 'runner has a persisted recovery blocker');
     if (!skipLatest) requirePersistedTimeline(this.#db, command.jobId, [['runner command time', command.at]]);
     if (row.runner_lease_expires_at !== command.leaseExpiresAt || row.runner_lease_expires_at <= command.at) conflict('stale-lease', 'runner lease is stale');
   }

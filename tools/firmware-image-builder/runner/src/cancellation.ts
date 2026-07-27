@@ -1,7 +1,7 @@
 import type {
   CancellationEvidence,
+  CancellationLogProof,
   CancellationProof,
-  LogCleanupProof,
   OwnershipResult,
   RunnerWriteCommand,
   StagingCleanupProof,
@@ -44,11 +44,11 @@ export interface CancellationContainer {
  * API/systemd operation, which keeps cancellation cooperative by construction.
  */
 export interface CancellationDockerExecutor {
-  readonly inspect: (containerId: string) => Promise<CancellationContainer | null>;
-  readonly stop: (containerId: string, timeoutMs: number) => Promise<void>;
-  readonly waitForStopped: (containerId: string, timeoutMs: number) => Promise<CancellationContainer>;
-  readonly remove: (containerId: string) => Promise<void>;
-  readonly listByLabels: (labels: JsonObject) => Promise<readonly CancellationContainer[]>;
+  readonly inspect: (containerId: string, deadline: number) => Promise<CancellationContainer | null>;
+  readonly stop: (containerId: string, deadline: number) => Promise<void>;
+  readonly waitForStopped: (containerId: string, deadline: number) => Promise<CancellationContainer>;
+  readonly remove: (containerId: string, deadline: number) => Promise<void>;
+  readonly listByLabels: (labels: JsonObject, deadline: number) => Promise<readonly CancellationContainer[]>;
 }
 
 export interface RunnerCancellationSignals {
@@ -82,7 +82,7 @@ export interface RunnerCancellationOptions {
   readonly recoverEvidence?: () => Promise<RecoveredRunnerCancellationEvidence | null>;
   readonly cleanup: Readonly<{
     readonly staging: () => Promise<StagingCleanupProof>;
-    readonly logs: () => Promise<LogCleanupProof>;
+    readonly logs: () => Promise<CancellationLogProof>;
   }>;
   readonly clock?: () => string;
   readonly monotonicNow?: () => number;
@@ -329,7 +329,7 @@ function cancellationProof(
   removedAt: string,
   observedAt: string,
   staging: StagingCleanupProof,
-  logs: LogCleanupProof,
+  logs: CancellationLogProof,
 ): CancellationProof {
   const unitInactiveAt = null;
   if (identity === null) {
@@ -370,7 +370,7 @@ function cancellationEvidence(
   stopped: CancellationContainer | null,
   publication: RunnerCancellationEvidencePublication,
   staging: StagingCleanupProof,
-  logs: LogCleanupProof,
+  logs: CancellationLogProof,
   runnerObservedAt = now(options),
 ): CancellationEvidence {
   if (identity !== null && stopped === null) throw new CancellationBlockedError('cancellation evidence requires a stopped container', 'DOCKER_CONTAINER_ORPHANED');
@@ -403,7 +403,7 @@ function recoveredCancellationRecord(
 ): {
   readonly publication: RunnerCancellationEvidencePublication;
   readonly staging: StagingCleanupProof;
-  readonly logs: LogCleanupProof;
+  readonly logs: CancellationLogProof;
   readonly runnerObservedAt: string;
 } {
   const value = recovered.value as Record<string, unknown>;
@@ -442,7 +442,7 @@ function recoveredCancellationRecord(
   return {
     publication: { path: recovered.path, sha256: recovered.sha256 },
     staging: value.staging as StagingCleanupProof,
-    logs: value.logs as LogCleanupProof,
+    logs: value.logs as CancellationLogProof,
     runnerObservedAt: value.runnerObservedAt,
   };
 }
@@ -469,6 +469,10 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
   const remainingBudget = (): number => {
     if (cancellationDeadline === null) throw new CancellationBlockedError('cooperative cancellation budget was not started', 'DOCKER_CONTAINER_ORPHANED');
     return Math.max(0, Math.ceil(cancellationDeadline - monotonicNow(options)));
+  };
+  const absoluteDeadline = (): number => {
+    if (cancellationDeadline === null) throw new CancellationBlockedError('cooperative cancellation budget was not started', 'DOCKER_CONTAINER_ORPHANED');
+    return cancellationDeadline;
   };
   const onSignal = (): void => {
     signalRequested = true;
@@ -607,10 +611,10 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
         let stopped: CancellationContainer | null = null;
         let observed: CancellationContainer | null = null;
         if (identity === null) {
-          const matching = await options.docker.listByLabels(expectedLabels);
+          const matching = await options.docker.listByLabels(expectedLabels, absoluteDeadline());
           if (matching.length !== 0) throw new CancellationIdentityError('Docker contains a matching labeled container without persisted identity');
         } else {
-          observed = await options.docker.inspect(identity.id);
+          observed = await options.docker.inspect(identity.id, absoluteDeadline());
           if (observed !== null) {
             assertObservedIdentity(observed, identity);
             if (!observed.running) stopped = observed;
@@ -644,10 +648,10 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
             if (observed.running) {
               const stopBudget = remainingBudget();
               if (stopBudget < 1) throw new CancellationBlockedError('cooperative cancellation deadline expired before Docker stop', 'DOCKER_CONTAINER_ORPHANED');
-              await options.docker.stop(identity.id, stopBudget);
+              await options.docker.stop(identity.id, absoluteDeadline());
               const waitBudget = remainingBudget();
               if (waitBudget < 1) throw new CancellationBlockedError('cooperative cancellation deadline expired before stopped-state proof', 'DOCKER_CONTAINER_ORPHANED');
-              stopped = await options.docker.waitForStopped(identity.id, waitBudget);
+              stopped = await options.docker.waitForStopped(identity.id, absoluteDeadline());
               assertObservedIdentity(stopped, identity);
               if (stopped.running) throw new CancellationBlockedError('Docker wait returned a running container', 'DOCKER_CONTAINER_ORPHANED');
               if (stopped.stoppedAt === null && current.containerStoppedAt === null) throw new CancellationBlockedError('Docker wait did not provide a stopped timestamp', 'DOCKER_CONTAINER_ORPHANED');
@@ -703,7 +707,7 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
         }
 
         let staging: StagingCleanupProof;
-        let logs: LogCleanupProof;
+        let logs: CancellationLogProof;
         let evidence: RunnerCancellationEvidencePublication;
         let evidenceEventSeq: number;
         if (protocol === null) {
@@ -769,15 +773,15 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
         blockedCode = 'DOCKER_CONTAINER_ORPHANED';
         let removedAt = now(options);
         if (identity !== null) {
-          const present = await options.docker.inspect(identity.id);
+          const present = await options.docker.inspect(identity.id, absoluteDeadline());
           if (present !== null) {
             assertObservedIdentity(present, identity);
-            await options.docker.remove(identity.id);
+            await options.docker.remove(identity.id, absoluteDeadline());
             removedAt = now(options);
-            if (await options.docker.inspect(identity.id) !== null) throw new CancellationBlockedError('Docker rm did not prove exact container absence', 'DOCKER_CONTAINER_ORPHANED');
+            if (await options.docker.inspect(identity.id, absoluteDeadline()) !== null) throw new CancellationBlockedError('Docker rm did not prove exact container absence', 'DOCKER_CONTAINER_ORPHANED');
           }
         }
-        if ((await options.docker.listByLabels(expectedLabels)).length !== 0) throw new CancellationBlockedError('Docker label query did not prove cancellation container absence', 'DOCKER_CONTAINER_ORPHANED');
+        if ((await options.docker.listByLabels(expectedLabels, absoluteDeadline())).length !== 0) throw new CancellationBlockedError('Docker label query did not prove cancellation container absence', 'DOCKER_CONTAINER_ORPHANED');
         const observedAt = now(options);
         const proof = cancellationProof(options, current, identity, stopped, removedAt, observedAt, staging, logs);
         blockedPhase = 'cleanup ownership';

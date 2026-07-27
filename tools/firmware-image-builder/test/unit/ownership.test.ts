@@ -724,7 +724,35 @@ describe('actor-owned compare-and-set writes', () => {
       evidence: {
         ...cancellationEvidence(jobId),
         runnerObservedAt: RECOVERY,
-        logs: { runner: 'sealed', docker: 'sealed', verifiedAt: RECOVERY },
+        logs: {
+          runner: 'sealed',
+          docker: 'sealed',
+          verifiedAt: RECOVERY,
+          generations: {
+            runner: [{
+              generation: 0,
+              path: 'logs/runner-0.log',
+              startedAt: NOW,
+              sealedAt: RECOVERY,
+              sizeBytes: 1,
+              sha256: SHA64,
+              sealStatus: 'sealed',
+              eventRange: { firstSeq: 1, lastSeq: 1, count: 1 },
+              events: [{ seq: 1, eventType: 'log', at: NOW, byteOffset: 0, byteLength: 1, partial: false }],
+            }],
+            docker: [{
+              generation: 0,
+              path: 'logs/docker-0.log',
+              startedAt: NOW,
+              sealedAt: RECOVERY,
+              sizeBytes: 1,
+              sha256: SHA64,
+              sealStatus: 'sealed',
+              eventRange: { firstSeq: 2, lastSeq: 2, count: 1 },
+              events: [{ seq: 2, eventType: 'log', at: NOW, byteOffset: 0, byteLength: 1, partial: false }],
+            }],
+          },
+        },
       },
     })).toMatchObject({
       ok: false,
@@ -814,6 +842,108 @@ describe('actor-owned compare-and-set writes', () => {
     )).toBe(false);
   });
 
+  it('rejects a fully sealed generation added after cancellation evidence', async () => {
+    const jobId = 'cancellation-sealed-log-after-evidence';
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    seedLogs(target.path, jobId);
+    const boundLogs = target.ownership.cancellationLogProof(jobId, RECOVERY);
+    const evidence = target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-evidence',
+      expectedState: 'cancel_requested',
+      evidence: {
+        ...cancellationEvidence(jobId),
+        runnerObservedAt: RECOVERY,
+        logs: boundLogs,
+      },
+    });
+    const db = openBuilderDatabase(target.path);
+    for (const stream of ['runner', 'docker']) {
+      db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, sealed_at, size_bytes, sha256) VALUES (?, ?, 1, ?, ?, ?, 0, ?)').run(
+        jobId,
+        stream,
+        `logs/${stream}-1.log`,
+        LATER,
+        RECOVERY,
+        SHA64_B,
+      );
+    }
+    db.close();
+
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: AFTER,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-cleanup',
+      expectedState: 'cancel_requested',
+      evidenceEventSeq: eventSeq(evidence),
+      proof: {
+        kind: 'pre-container',
+        runnerUnit: runnerBase(jobId).runnerUnit,
+        unitInactiveAt: null,
+        container: absent(AFTER),
+        staging,
+        logs: boundLogs,
+      },
+    })).toMatchObject({
+      ok: false,
+      conflict: { kind: 'identity-mismatch' },
+    });
+  });
+
+  it('rejects a sealed generation identity or byte-hash replacement after cancellation evidence', async () => {
+    const jobId = 'cancellation-sealed-log-replaced';
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    seedLogs(target.path, jobId);
+    const boundLogs = target.ownership.cancellationLogProof(jobId, RECOVERY);
+    const evidence = target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-evidence',
+      expectedState: 'cancel_requested',
+      evidence: {
+        ...cancellationEvidence(jobId),
+        runnerObservedAt: RECOVERY,
+        logs: boundLogs,
+      },
+    });
+    const db = openBuilderDatabase(target.path);
+    db.exec('DROP TRIGGER job_log_generations_immutable_guard; DROP TRIGGER job_log_generations_seal_guard');
+    db.prepare("UPDATE job_log_generations SET path='logs/runner-replacement.log', sha256=? WHERE job_id=? AND stream='runner' AND generation=0").run(SHA64_B, jobId);
+    db.close();
+
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: AFTER,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-cleanup',
+      expectedState: 'cancel_requested',
+      evidenceEventSeq: eventSeq(evidence),
+      proof: {
+        kind: 'pre-container',
+        runnerUnit: runnerBase(jobId).runnerUnit,
+        unitInactiveAt: null,
+        container: absent(AFTER),
+        staging,
+        logs: boundLogs,
+      },
+    })).toMatchObject({
+      ok: false,
+      conflict: { kind: 'identity-mismatch' },
+    });
+  });
+
   it('rejects log generations added after cancellation cleanup and before terminal', async () => {
     const jobId = 'cancellation-log-after-cleanup';
     const target = await fixture(jobId);
@@ -862,6 +992,152 @@ describe('actor-owned compare-and-set writes', () => {
     expect(target.store.getJob(jobId).state).toBe('cancel_requested');
   });
 
+  it.each(['addition', 'replacement'] as const)('rejects a fully sealed generation %s after cleanup during terminal restart recovery', async (mutation) => {
+    const jobId = `cancellation-sealed-log-after-cleanup-${mutation}`;
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    seedLogs(target.path, jobId);
+    const boundLogs = target.ownership.cancellationLogProof(jobId, RECOVERY);
+    const evidence = target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-evidence',
+      expectedState: 'cancel_requested',
+      evidence: {
+        ...cancellationEvidence(jobId),
+        runnerObservedAt: RECOVERY,
+        logs: boundLogs,
+      },
+    });
+    const cleanup = target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-cleanup',
+      expectedState: 'cancel_requested',
+      evidenceEventSeq: eventSeq(evidence),
+      proof: {
+        kind: 'pre-container',
+        runnerUnit: runnerBase(jobId).runnerUnit,
+        unitInactiveAt: null,
+        container: absent(RECOVERY),
+        staging,
+        logs: boundLogs,
+      },
+    });
+    const db = openBuilderDatabase(target.path);
+    if (mutation === 'addition') {
+      for (const stream of ['runner', 'docker']) {
+        db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, sealed_at, size_bytes, sha256) VALUES (?, ?, 1, ?, ?, ?, 0, ?)').run(
+          jobId,
+          stream,
+          `logs/${stream}-1.log`,
+          LATER,
+          RECOVERY,
+          SHA64_B,
+        );
+      }
+    } else {
+      db.exec('DROP TRIGGER job_log_generations_immutable_guard; DROP TRIGGER job_log_generations_seal_guard');
+      db.prepare("UPDATE job_log_generations SET path='logs/docker-replacement.log', sha256=? WHERE job_id=? AND stream='docker' AND generation=0").run(SHA64_B, jobId);
+    }
+    db.close();
+
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: AFTER,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-terminal',
+      expectedState: 'cancel_requested',
+      terminalAt: AFTER,
+      cleanupEventSeq: eventSeq(cleanup),
+    })).toMatchObject({
+      ok: false,
+      conflict: { kind: 'identity-mismatch' },
+    });
+    expect(target.store.getJob(jobId).state).toBe('cancel_requested');
+  });
+
+  it('allows only cancellation protocol retry writes through a persisted blocker', async () => {
+    const jobId = 'cancellation-blocker-retry';
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: RECOVERY,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-blocker',
+      expectedState: 'cancel_requested',
+      blockerCode: 'QUARANTINE_PENDING',
+      blocker: { reason: 'temporary staging observation failure' },
+    }).ok).toBe(true);
+
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: AFTER,
+      leaseExpiresAt: EXPIRY,
+      kind: 'stage',
+      expectedState: 'cancel_requested',
+      state: 'cancel_requested',
+      stage: 'preflight',
+      outcome: 'running',
+      startedAt: AFTER,
+    })).toMatchObject({
+      ok: false,
+      conflict: { kind: 'fenced' },
+    });
+
+    const boundLogs = target.ownership.cancellationLogProof(jobId, AFTER);
+    const evidence = target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: AFTER,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-evidence',
+      expectedState: 'cancel_requested',
+      evidence: {
+        ...cancellationEvidence(jobId),
+        runnerObservedAt: AFTER,
+        logs: boundLogs,
+      },
+    });
+    expect(evidence.ok).toBe(true);
+    expect((target.db.prepare('SELECT cleanup_blocker_code FROM jobs WHERE job_id=?').get(jobId) as { cleanup_blocker_code: string | null }).cleanup_blocker_code).toBeNull();
+    const cleanup = target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: AFTER,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-cleanup',
+      expectedState: 'cancel_requested',
+      evidenceEventSeq: eventSeq(evidence),
+      proof: {
+        kind: 'pre-container',
+        runnerUnit: runnerBase(jobId).runnerUnit,
+        unitInactiveAt: null,
+        container: absent(AFTER),
+        staging,
+        logs: boundLogs,
+      },
+    });
+    expect(cleanup.ok).toBe(true);
+    expect(target.ownership.runnerWrite({
+      ...runnerBase(jobId),
+      at: AFTER,
+      leaseExpiresAt: EXPIRY,
+      kind: 'cancellation-terminal',
+      expectedState: 'cancel_requested',
+      terminalAt: AFTER,
+      cleanupEventSeq: eventSeq(cleanup),
+    }).ok).toBe(true);
+    expect(target.store.getJob(jobId).state).toBe('cancelled');
+  });
+
   it('accepts strict sealed cancellation coverage alongside a truly absent log stream', async () => {
     const jobId = 'cancellation-one-log-stream';
     const target = await fixture(jobId);
@@ -880,6 +1156,20 @@ describe('actor-owned compare-and-set writes', () => {
       runner: 'sealed',
       docker: 'absent',
       verifiedAt: RECOVERY,
+      generations: {
+        runner: [{
+          generation: 0,
+          path: 'logs/runner-0.log',
+          startedAt: NOW,
+          sealedAt: LATER,
+          sizeBytes: 0,
+          sha256: SHA64,
+          sealStatus: 'sealed',
+          eventRange: null,
+          events: [],
+        }],
+        docker: [],
+      },
     });
   });
 

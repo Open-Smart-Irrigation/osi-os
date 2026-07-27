@@ -366,6 +366,48 @@ async function openDirectoryChain(
   }
 }
 
+async function openOptionalDirectory(
+  parent: FileHandle,
+  name: string,
+): Promise<FileHandle | null> {
+  let handle: FileHandle;
+  try {
+    handle = await open(
+      fdPath(parent, safeSegment(name, 'directory component')),
+      DIRECTORY_FLAGS,
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  try {
+    if (!(await handle.stat()).isDirectory()) {
+      throw new Error('held path component is not a directory');
+    }
+    return handle;
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function openOrCreateDirectory(
+  parent: FileHandle,
+  name: string,
+): Promise<FileHandle> {
+  const existing = await openOptionalDirectory(parent, name);
+  if (existing !== null) return existing;
+  const segment = safeSegment(name, 'directory component');
+  try {
+    await mkdir(fdPath(parent, segment), { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  const created = await openOptionalDirectory(parent, segment);
+  if (created === null) throw new Error('held directory creation was not observable');
+  return created;
+}
+
 async function hashHandle(handle: FileHandle): Promise<string> {
   const digest = createHash('sha256');
   const buffer = Buffer.allocUnsafe(1024 * 1024);
@@ -915,51 +957,74 @@ export async function quarantineCancellationStaging(
   job: JobRecord,
   publisher: Pick<RunnerPublisherClient, 'quarantine'>,
 ): Promise<StagingCleanupProof> {
-  if (job.artifactStagingPath === null) return { kind: 'absent', path: null };
-  if (job.artifactSha256 === null || job.artifactSize === null) {
+  if (
+    job.artifactStagingPath !== null
+    && (job.artifactSha256 === null || job.artifactSize === null)
+  ) {
     throw new Error('cancellation staging identity is incomplete');
   }
   return withApprovedRootSnapshot(
     loaded.pathAuthorities.approvedRoots,
     job.rootId,
     async ({ snapshot }) => {
-      const source = join(snapshot.path, '.osi-image-builder', 'staging', job.jobId);
-      const destination = join(snapshot.path, '.osi-image-builder', 'quarantine', job.jobId);
-      const verifyQuarantinedArtifact = async (): Promise<Readonly<{
-        sha256: string;
-        size: number;
-      }>> => {
-        const destinationStats = await lstat(destination);
-        if (!destinationStats.isDirectory() || destinationStats.isSymbolicLink()) {
-          throw new Error('cancellation quarantine destination is not a directory');
+      const handles: FileHandle[] = [];
+      const root = await open(snapshot.path, DIRECTORY_FLAGS);
+      handles.push(root);
+      try {
+        const rootIdentity = await root.stat();
+        if (
+          rootIdentity.dev !== snapshot.device
+          || rootIdentity.ino !== snapshot.inode
+        ) {
+          throw new Error('approved root identity changed before the held quarantine protocol');
         }
-        const directory = await open(destination, DIRECTORY_FLAGS);
-        try {
-          const observed = await hashHeldFile(
-            directory,
-            basename(job.artifactStagingPath!),
-          );
+        const builder = await openOptionalDirectory(root, '.osi-image-builder');
+        if (builder === null) {
+          if (job.artifactStagingPath === null) return { kind: 'absent', path: null };
+          throw new Error('cancellation staging parent is absent');
+        }
+        handles.push(builder);
+        const stagingParent = await openOptionalDirectory(builder, 'staging');
+        if (stagingParent === null) {
+          if (job.artifactStagingPath === null) return { kind: 'absent', path: null };
+          throw new Error('cancellation staging parent is absent');
+        }
+        handles.push(stagingParent);
+        const source = await openOptionalDirectory(stagingParent, job.jobId);
+        if (job.artifactStagingPath === null) {
+          if (source !== null) {
+            await source.close();
+            throw new Error('physical staging is present while the persisted staging path is null');
+          }
+          return { kind: 'absent', path: null };
+        }
+        const artifactName = basename(job.artifactStagingPath);
+        if (job.artifactStagingPath !== `staging/${job.jobId}/${artifactName}`) {
+          if (source !== null) await source.close();
+          throw new Error('cancellation staging path does not bind the fixed staging directory');
+        }
+        const quarantineParent = await openOrCreateDirectory(builder, 'quarantine');
+        handles.push(quarantineParent);
+        const destinationBefore = await openOptionalDirectory(quarantineParent, job.jobId);
+        if (destinationBefore !== null) handles.push(destinationBefore);
+        const verifyDestination = async (
+          destination: FileHandle,
+        ): Promise<Readonly<{ sha256: string; size: number }>> => {
+          const observed = await hashHeldFile(destination, artifactName);
           if (
             observed.sha256 !== job.artifactSha256
             || observed.size !== job.artifactSize
           ) {
             throw new Error('cancellation quarantined artifact size or SHA does not match persisted identity');
           }
-          return { sha256: observed.sha256, size: observed.size };
-        } finally {
-          await directory.close();
-        }
-      };
-      let sourceStats;
-      try {
-        sourceStats = await lstat(source);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        try {
-          const observed = await verifyQuarantinedArtifact();
+          return observed;
+        };
+        if (source === null) {
+          if (destinationBefore === null) throw new Error('cancellation staging disappeared without quarantine evidence');
+          const observed = await verifyDestination(destinationBefore);
           return {
             kind: 'quarantined',
-            sourcePath: job.artifactStagingPath!,
+            sourcePath: job.artifactStagingPath,
             destinationPath: `quarantine/${job.jobId}`,
             sourceAbsent: true,
             destinationPresent: true,
@@ -967,41 +1032,52 @@ export async function quarantineCancellationStaging(
             size: observed.size,
             verifiedAt: new Date().toISOString(),
           };
-        } catch (destinationError) {
-          if ((destinationError as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('cancellation staging disappeared without quarantine evidence');
-          throw destinationError;
         }
+        handles.push(source);
+        const sourceIdentity = await source.stat();
+        const result = await publisher.quarantine({
+          rootId: job.rootId,
+          jobId: job.jobId,
+        });
+        if (
+          result.available !== true
+          || result.quarantined !== true
+          || result.renameResult !== 'RENAMED'
+          || result.sourceRelativePath !== `.osi-image-builder/staging/${job.jobId}`
+          || result.destinationRelativePath !== `.osi-image-builder/quarantine/${job.jobId}`
+        ) {
+          throw new Error(`native no-overwrite cancellation quarantine failed: ${result.renameResult ?? result.errorCode ?? 'unknown'}`);
+        }
+        const sourceAfter = await openOptionalDirectory(stagingParent, job.jobId);
+        if (sourceAfter !== null) {
+          await sourceAfter.close();
+          throw new Error('cancellation staging quarantine was not proven through the held staging parent');
+        }
+        const destination = await openOptionalDirectory(quarantineParent, job.jobId);
+        if (destination === null) throw new Error('cancellation quarantine destination is absent through the held parent');
+        handles.push(destination);
+        const destinationIdentity = await destination.stat();
+        if (
+          destinationBefore !== null
+          || sourceIdentity.dev !== destinationIdentity.dev
+          || sourceIdentity.ino !== destinationIdentity.ino
+        ) {
+          throw new Error('cancellation quarantine destination does not bind the held source directory');
+        }
+        const observed = await verifyDestination(destination);
+        return {
+          kind: 'quarantined',
+          sourcePath: job.artifactStagingPath,
+          destinationPath: `quarantine/${job.jobId}`,
+          sourceAbsent: true,
+          destinationPresent: true,
+          sha256: observed.sha256,
+          size: observed.size,
+          verifiedAt: new Date().toISOString(),
+        };
+      } finally {
+        await closeHandles(handles);
       }
-      if (!sourceStats.isDirectory() || sourceStats.isSymbolicLink()) throw new Error('cancellation staging directory is not safe');
-      const result = await publisher.quarantine({
-        rootId: job.rootId,
-        jobId: job.jobId,
-      });
-      if (
-        result.available !== true
-        || result.quarantined !== true
-        || result.renameResult !== 'RENAMED'
-        || result.sourceRelativePath !== `.osi-image-builder/staging/${job.jobId}`
-        || result.destinationRelativePath !== `.osi-image-builder/quarantine/${job.jobId}`
-      ) {
-        throw new Error(`native no-overwrite cancellation quarantine failed: ${result.renameResult ?? result.errorCode ?? 'unknown'}`);
-      }
-      const sourceAfter = await lstat(source).then(() => true).catch((error: unknown) => {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-        throw error;
-      });
-      if (sourceAfter) throw new Error('cancellation staging quarantine was not proven');
-      const observed = await verifyQuarantinedArtifact();
-      return {
-        kind: 'quarantined',
-        sourcePath: job.artifactStagingPath!,
-        destinationPath: `quarantine/${job.jobId}`,
-        sourceAbsent: true,
-        destinationPresent: true,
-        sha256: observed.sha256,
-        size: observed.size,
-        verifiedAt: new Date().toISOString(),
-      };
     },
   );
 }

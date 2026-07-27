@@ -269,38 +269,48 @@ function exactCancellationLabels(actual: JsonObject, expected: JsonObject): bool
 }
 
 export function createDockerCancellationControls(options: DockerCancellationControlOptions) {
-  const inspect = async (containerId: string, timeoutMs = DOCKER_CONTROL_TIMEOUT_MS): Promise<DockerCancellationContainer | null> => {
+  const remainingBudget = (deadline: number, action: string): number => {
+    if (!Number.isFinite(deadline) || deadline < 0) fail(`${action} deadline is invalid`);
+    const remaining = Math.max(0, Math.ceil(deadline - monotonicNow(options)));
+    if (remaining < 1) throw new DockerLifecycleError(`${action} exceeded the cooperative deadline`);
+    if (remaining > DOCKER_CONTROL_TIMEOUT_MS) fail(`${action} deadline exceeds the cooperative budget`);
+    return remaining;
+  };
+  const inspect = async (containerId: string, deadline: number): Promise<DockerCancellationContainer | null> => {
+    const timeoutMs = remainingBudget(deadline, 'Docker cancellation inspect');
     const response = await cancellationCommand(options, ['inspect', '--type=container', '--format={{json .}}', containerId], timeoutMs);
     if (response.exitCode !== 0 && /no such container/iu.test(`${response.stderr}\n${response.stdout}`)) return null;
     return cancellationInspection(requireSuccess(response, 'Docker cancellation inspect'), options.expectedImageDigest);
   };
-  const listByLabels = async (labels: JsonObject): Promise<readonly DockerCancellationContainer[]> => {
+  const listByLabels = async (labels: JsonObject, deadline: number): Promise<readonly DockerCancellationContainer[]> => {
     const filters = Object.entries(labels).flatMap(([key, value]) => [`--filter=label=${key}=${requiredString(value, `Docker cancellation filter ${key}`)}`]);
-    const response = await cancellationCommand(options, ['ps', '--all', ...filters, '--format={{.ID}}']);
+    const response = await cancellationCommand(
+      options,
+      ['ps', '--all', ...filters, '--format={{.ID}}'],
+      remainingBudget(deadline, 'Docker cancellation label query'),
+    );
     const ids = requireSuccess(response, 'Docker cancellation label query').split(/\r?\n/u).map((value) => value.trim()).filter((value) => value.length > 0);
-    const containers = await Promise.all(ids.map((id) => inspect(id)));
+    const containers: Array<DockerCancellationContainer | null> = [];
+    for (const id of ids) containers.push(await inspect(id, deadline));
     return containers.filter((value): value is DockerCancellationContainer => value !== null && exactCancellationLabels(value.labels, labels));
   };
-  const stop = async (containerId: string, timeoutMs: number): Promise<void> => {
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > DOCKER_CONTROL_TIMEOUT_MS) fail('Docker cooperative stop budget is invalid');
+  const stop = async (containerId: string, deadline: number): Promise<void> => {
+    const timeoutMs = remainingBudget(deadline, 'Docker cooperative stop');
     const graceSeconds = Math.max(1, Math.ceil(timeoutMs / 1_000));
     requireSuccess(await cancellationCommand(options, ['stop', `--time=${graceSeconds}`, containerId], timeoutMs), 'Docker cooperative stop');
   };
-  const waitForStopped = async (containerId: string, timeoutMs: number): Promise<DockerCancellationContainer> => {
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > DOCKER_CONTROL_TIMEOUT_MS) fail('Docker stopped proof budget is invalid');
-    const deadline = monotonicNow(options) + timeoutMs;
+  const waitForStopped = async (containerId: string, deadline: number): Promise<DockerCancellationContainer> => {
     while (true) {
-      const remaining = Math.max(0, Math.ceil(deadline - monotonicNow(options)));
-      if (remaining < 1) throw new DockerLifecycleError('Docker container did not stop within the cooperative deadline');
-      const value = await inspect(containerId, remaining);
+      remainingBudget(deadline, 'Docker stopped proof');
+      const value = await inspect(containerId, deadline);
       if (value === null) throw new DockerLifecycleError('Docker container disappeared while waiting for cooperative stop');
       if (!value.running) return value;
       if (monotonicNow(options) >= deadline) throw new DockerLifecycleError('Docker container did not stop within the cooperative deadline');
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
   };
-  const remove = async (containerId: string): Promise<void> => {
-    const response = await cancellationCommand(options, ['rm', containerId]);
+  const remove = async (containerId: string, deadline: number): Promise<void> => {
+    const response = await cancellationCommand(options, ['rm', containerId], remainingBudget(deadline, 'Docker cancellation rm'));
     if (response.exitCode !== 0 && !/no such container/iu.test(`${response.stderr}\n${response.stdout}`)) requireSuccess(response, 'Docker cancellation rm');
   };
   return Object.freeze({ inspect, stop, waitForStopped, remove, listByLabels });

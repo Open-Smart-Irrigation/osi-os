@@ -539,7 +539,87 @@ describe('DockerExecutor', () => {
       maxCaptureBytes: 16 * 1024,
     });
 
-    await expect(controls.inspect('1'.repeat(64))).rejects.toThrow(/image digest/i);
+    await expect(controls.inspect('1'.repeat(64), performance.now() + 30_000)).rejects.toThrow(/image digest/i);
+  });
+
+  it('uses one supplied absolute deadline after time spent in label and inspect controls', async () => {
+    let monotonic = 5_000;
+    const calls: Array<{ argv: readonly string[]; timeoutMs: number }> = [];
+    const commandExecutor: DockerCommandExecutor = {
+      run: vi.fn(async (argv: readonly string[], runOptions: CommandRunOptions) => {
+        calls.push({ argv: [...argv], timeoutMs: runOptions.timeoutMs ?? -1 });
+        if (argv[1] === 'ps') {
+          monotonic += 7_000;
+          return {
+            argv: [...argv],
+            exitCode: 0,
+            signal: null,
+            stdout: `${'1'.repeat(64)}\n`,
+            stderr: '',
+            timedOut: false,
+            startedAt: NOW,
+            finishedAt: NOW,
+          };
+        }
+        if (argv[1] === 'inspect') {
+          return {
+            argv: [...argv],
+            exitCode: 0,
+            signal: null,
+            stdout: JSON.stringify(realisticRawInspection()),
+            stderr: '',
+            timedOut: false,
+            startedAt: NOW,
+            finishedAt: NOW,
+          };
+        }
+        if (argv[1] === 'stop') {
+          return {
+            argv: [...argv],
+            exitCode: 0,
+            signal: null,
+            stdout: '',
+            stderr: '',
+            timedOut: false,
+            startedAt: NOW,
+            finishedAt: NOW,
+          };
+        }
+        throw new Error(`unexpected Docker cancellation command: ${argv.join(' ')}`);
+      }),
+    };
+    const controls = createDockerCancellationControls({
+      commandExecutor,
+      dockerPath: '/usr/bin/docker',
+      expectedImageDigest: DIGEST,
+      maxCaptureBytes: 16 * 1024,
+      monotonicNow: () => monotonic,
+    });
+    const labels = {
+      'org.osi.image-builder.job-id': 'job-1',
+      'org.osi.image-builder.manifest-sha': MANIFEST,
+    };
+    const deadline = 35_000;
+    const listByDeadline = controls.listByLabels as unknown as (
+      value: JsonObject,
+      absoluteDeadline: number,
+    ) => ReturnType<typeof controls.listByLabels>;
+    const waitByDeadline = controls.waitForStopped as unknown as (
+      containerId: string,
+      absoluteDeadline: number,
+    ) => ReturnType<typeof controls.waitForStopped>;
+
+    await expect(listByDeadline(labels, deadline)).resolves.toHaveLength(1);
+    await expect(controls.stop('1'.repeat(64), deadline)).resolves.toBeUndefined();
+    await expect(waitByDeadline('1'.repeat(64), deadline)).resolves.toMatchObject({
+      running: false,
+    });
+    expect(calls.map(({ argv, timeoutMs }) => [argv[1], timeoutMs])).toEqual([
+      ['ps', 30_000],
+      ['inspect', 23_000],
+      ['stop', 23_000],
+      ['inspect', 23_000],
+    ]);
   });
 
   it('creates an inspected stopped container with the locked lifecycle contract and cleans the exact ID after committing evidence', async () => {

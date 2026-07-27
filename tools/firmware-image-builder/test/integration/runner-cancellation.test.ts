@@ -156,6 +156,64 @@ describe('runner cancellation with the persisted ownership store', () => {
     fixtureValue.db.close();
   });
 
+  it('retries a repaired cancellation blocker after a fresh signal and reaches cancelled', async () => {
+    const fixtureValue = await fixture();
+    const listeners = new Set<() => void>();
+    const signals = {
+      on: (_signal: 'SIGUSR1', listener: () => void) => { listeners.add(listener); },
+      off: (_signal: 'SIGUSR1', listener: () => void) => { listeners.delete(listener); },
+      emit: () => { for (const listener of listeners) listener(); },
+    };
+    let stagingBlocked = true;
+    const controller = createRunnerCancellation({
+      jobId: fixtureValue.input.jobId,
+      runnerUnit: `osi-image-builder-runner@${fixtureValue.input.jobId}.service`,
+      owner: 'runner-integration',
+      leaseExpiresAt: () => '2026-07-27T09:10:00.000Z',
+      store: fixtureValue.store,
+      ownership: fixtureValue.ownership,
+      docker: {
+        inspect: async () => null,
+        stop: async () => { throw new Error('pre-container retry must not stop'); },
+        remove: async () => { throw new Error('pre-container retry must not remove'); },
+        waitForStopped: async () => { throw new Error('pre-container retry must not wait'); },
+        listByLabels: async () => [],
+      },
+      evidence: async () => ({
+        path: `jobs/${fixtureValue.input.jobId}/evidence/cancellation.json`,
+        sha256: SHA64,
+      }),
+      cleanup: {
+        staging: async () => {
+          if (stagingBlocked) throw new Error('temporary quarantine inspection failure');
+          return { kind: 'absent', path: null };
+        },
+        logs: async () => fixtureValue.ownership.cancellationLogProof(
+          fixtureValue.input.jobId,
+          '2026-07-27T09:00:03.000Z',
+        ),
+      },
+      clock: () => '2026-07-27T09:00:03.000Z',
+      signals,
+    });
+
+    signals.emit();
+    await expect(controller.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'QUARANTINE_PENDING',
+    });
+    expect(fixtureValue.store.getJob(fixtureValue.input.jobId).state).toBe('cancel_requested');
+    expect((fixtureValue.db.prepare('SELECT cleanup_blocker_code FROM jobs WHERE job_id=?').get(fixtureValue.input.jobId) as { cleanup_blocker_code: string | null }).cleanup_blocker_code).toBe('QUARANTINE_PENDING');
+
+    stagingBlocked = false;
+    signals.emit();
+    await expect(controller.cancelIfRequested()).resolves.toMatchObject({
+      state: 'cancelled',
+    });
+    expect(fixtureValue.store.getJob(fixtureValue.input.jobId).state).toBe('cancelled');
+    expect((fixtureValue.db.prepare('SELECT cleanup_blocker_code FROM jobs WHERE job_id=?').get(fixtureValue.input.jobId) as { cleanup_blocker_code: string | null }).cleanup_blocker_code).toBeNull();
+    fixtureValue.db.close();
+  });
+
   it('retains a present exact container through durable evidence before cleanup CAS', async () => {
     const fixtureValue = await fixture({ cancellation: false });
     persistContainer(fixtureValue, 'created');

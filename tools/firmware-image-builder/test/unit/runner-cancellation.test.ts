@@ -359,11 +359,12 @@ describe('runner cooperative cancellation', () => {
     };
     const controller = createRunnerCancellation(fixture.value);
     fixture.value.signals.emit('SIGUSR1');
+    const deadline = controller.cancellationBudget().deadline;
 
     await expect(controller.cancelIfRequested()).resolves.toMatchObject({ state: 'cancelled' });
     expect(identityAtEvidence).toEqual([CONTAINER_ID]);
     expect(fixture.docker.calls).toEqual(['stop', 'remove']);
-    expect(fixture.docker.stop).toHaveBeenCalledWith(CONTAINER_ID, 30_000);
+    expect(fixture.docker.stop).toHaveBeenCalledWith(CONTAINER_ID, deadline);
     expect(fixture.docker.waitForStopped).toHaveBeenCalledWith(CONTAINER_ID, expect.any(Number));
     expect(fixture.writes[1]).toMatchObject({
       kind: 'container',
@@ -402,8 +403,8 @@ describe('runner cooperative cancellation', () => {
     }));
 
     await expect(controller.cancelIfRequested()).resolves.toMatchObject({ state: 'cancelled' });
-    expect(fixture.docker.stop).toHaveBeenCalledWith(CONTAINER_ID, 30_000);
-    expect(fixture.docker.waitForStopped).toHaveBeenCalledWith(CONTAINER_ID, 30_000);
+    expect(fixture.docker.stop).toHaveBeenCalledWith(CONTAINER_ID, 150_000);
+    expect(fixture.docker.waitForStopped).toHaveBeenCalledWith(CONTAINER_ID, 150_000);
   });
 
   it('shares one exact 30-second budget across cooperative stop and stopped proof', async () => {
@@ -422,8 +423,45 @@ describe('runner cooperative cancellation', () => {
     fixture.value.signals.emit('SIGUSR1');
 
     await expect(controller.cancelIfRequested()).resolves.toMatchObject({ state: 'cancelled' });
-    expect(fixture.docker.stop).toHaveBeenCalledWith(CONTAINER_ID, 30_000);
-    expect(fixture.docker.waitForStopped).toHaveBeenCalledWith(CONTAINER_ID, 18_000);
+    expect(fixture.docker.stop).toHaveBeenCalledWith(CONTAINER_ID, 40_000);
+    expect(fixture.docker.waitForStopped).toHaveBeenCalledWith(CONTAINER_ID, 40_000);
+  });
+
+  it('passes the coordinator absolute deadline through every Docker cancellation control', async () => {
+    let monotonic = 10_000;
+    const fixture = dependencies({ monotonicNow: () => monotonic });
+    fixture.setJob(containerJob({ cancelRequestedAt: NOW }));
+    fixture.docker.current = container();
+    fixture.docker.inspect.mockImplementation(async () => {
+      monotonic += 4_000;
+      return fixture.docker.current;
+    });
+    fixture.docker.stop.mockImplementation(async () => {
+      fixture.docker.calls.push('stop');
+      monotonic += 6_000;
+      fixture.docker.current = container({ running: false, status: 'exited', stoppedAt: STOPPED });
+    });
+    fixture.docker.waitForStopped.mockImplementation(async () => {
+      if (fixture.docker.current === null || fixture.docker.current.running) throw new Error('container did not stop cooperatively');
+      return fixture.docker.current;
+    });
+    fixture.docker.remove.mockImplementation(async () => {
+      fixture.docker.calls.push('remove');
+      fixture.docker.current = null;
+    });
+    fixture.docker.listByLabels.mockResolvedValue([]);
+    const controller = createRunnerCancellation(fixture.value);
+    fixture.value.signals.emit('SIGUSR1');
+
+    await expect(controller.cancelIfRequested()).resolves.toMatchObject({ state: 'cancelled' });
+    expect(controller.cancellationBudget()).toMatchObject({ deadline: 40_000 });
+    for (const call of fixture.docker.inspect.mock.calls) {
+      expect(call).toEqual([CONTAINER_ID, 40_000]);
+    }
+    expect(fixture.docker.stop).toHaveBeenCalledWith(CONTAINER_ID, 40_000);
+    expect(fixture.docker.waitForStopped).toHaveBeenCalledWith(CONTAINER_ID, 40_000);
+    expect(fixture.docker.remove).toHaveBeenCalledWith(CONTAINER_ID, 40_000);
+    expect(fixture.docker.listByLabels).toHaveBeenCalledWith(LABELS, 40_000);
   });
 
   it('does not call rm when the persisted stopped identity is already absent', async () => {
