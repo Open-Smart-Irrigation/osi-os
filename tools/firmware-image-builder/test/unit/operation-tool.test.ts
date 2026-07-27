@@ -644,29 +644,29 @@ describe('trusted verify-image Node compatibility record', () => {
     expect(result.nodeResolution).toHaveLength(21);
   });
 
-  it('rejects require.cache poisoning before a missing dependency can be forged', async () => {
+  it.each([
+    ['module.constructor._cache', "module.constructor._cache.poisoned = true;", /Cannot read properties of null/u],
+    ['module.constructor._pathCache', "module.constructor._pathCache.poisoned = true;", /Cannot read properties of null/u],
+    ['require.cache set', "require.cache.poisoned = true;", /rootfs Node module attempted to mutate Module\._cache/u],
+    ['require.cache define', "Object.defineProperty(require.cache, 'poisoned', { value: true });", /rootfs Node module attempted to mutate Module\._cache/u],
+    ['require.cache delete', "delete require.cache.poisoned;", /rootfs Node module attempted to mutate Module\._cache/u],
+  ])('rejects same-child %s mutation', async (_name, source, expected) => {
+    await expect(runOperation({
+      '@grpc/grpc-js': [
+        source,
+        'module.exports = { compatible: true };',
+      ].join('\n'),
+    })).rejects.toThrow(expected);
+  });
+
+  it('rejects require.cache poisoning at the Module._cache mutation', async () => {
     await expect(runOperation({
       '@grpc/grpc-js': [
         "const future = require.resolve('@chirpstack/chirpstack-api');",
         "require.cache[future] = { exports: { poisoned: true }, loaded: true };",
-        "require('round-nine-missing-dependency');",
+        'module.exports = { compatible: true };',
       ].join('\n'),
-    })).rejects.toThrow(/Module._cache|round-nine-missing-dependency/u);
-  });
-
-  it.each([
-    ['Module._cache', "module.constructor._cache.poisoned = true;"],
-    ['Module._pathCache', "module.constructor._pathCache.poisoned = true;"],
-    ['require.cache set', "require.cache.poisoned = true;"],
-    ['require.cache define', "Object.defineProperty(require.cache, 'poisoned', { value: true });"],
-    ['require.cache delete', "delete require.cache.poisoned;"],
-  ])('rejects same-child %s mutation before resolution can be poisoned', async (_name, source) => {
-    await expect(runOperation({
-      '@grpc/grpc-js': [
-        source,
-        "require('round-nine-missing-dependency');",
-      ].join('\n'),
-    })).rejects.toThrow(/Module\._cache|Module\._pathCache|round-nine-missing-dependency|mutate|Cannot read/u);
+    })).rejects.toThrow(/rootfs Node module attempted to mutate Module\._cache/u);
   });
 
   it('ignores inherited native and builtin stub entries', async () => {
