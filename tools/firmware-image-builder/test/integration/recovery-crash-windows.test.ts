@@ -132,19 +132,20 @@ function systemdState() {
   const systemd: RecoverySystemd = {
     start: vi.fn(async (unit: string) => { starts.push(unit); }),
     isActive: vi.fn(async (unit: string) => active.get(unit) ?? false),
+    inspect: vi.fn(async (unit: string) => ({ unit, active: active.get(unit) ?? false, observedAt: NOW })),
   };
   return { active, starts, systemd };
 }
 
 function handBackDependencies(postcondition: CleanupPostcondition): RecoveryHandBackDependencies {
   const docker: RecoveryDocker = {
-    inspect: vi.fn(async () => null),
-    listByLabels: vi.fn(async () => []),
+    inspect: vi.fn(async () => ({ container: null, observedAt: NOW })),
+    listByLabels: vi.fn(async () => ({ containers: [], observedAt: NOW })),
   };
   return {
     docker,
     evidence: { read: vi.fn(async () => ({ jobId: '', admissionId: '', sha256: EVIDENCE_SHA, postcondition })) },
-    staging: { verify: vi.fn(async () => true) },
+    staging: { verify: vi.fn(async () => true as const) },
   };
 }
 
@@ -362,6 +363,58 @@ describe('cleanup recovery crash windows', () => {
     expect((handBack.docker.inspect as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(`container-${value.jobId}`);
   });
 
+  it('keeps admissions open when startup reconciliation finds a recovery boundary', async () => {
+    const value = await createFixture();
+    const postcondition = completeAdmission(value);
+    const handBack = boundHandBack(value, postcondition);
+    (handBack.evidence.read as ReturnType<typeof vi.fn>).mockResolvedValue({
+      jobId: value.jobId,
+      admissionId: value.admission.admissionId,
+      sha256: 'f'.repeat(64),
+      postcondition,
+    });
+    const restarted = createCleanupAdmissionRecovery({
+      stateRoot: value.root,
+      db: value.db,
+      ownership: new OwnershipStore(value.db, { now: () => NOW }),
+      systemd: systemdState().systemd,
+      handBack,
+      clock: { now: () => NOW },
+      ownerUid: UID,
+    });
+
+    await expect(restarted.openAdmissions()).resolves.toBeUndefined();
+    await expect(restarted.reconcileCompletedAdmissions()).rejects.toThrow('cleanup completion file does not match');
+    expect(value.db.prepare('SELECT cleanup_admission_id, cleanup_fence_generation FROM jobs WHERE job_id=?').get(value.jobId)).toMatchObject({
+      cleanup_admission_id: value.admission.admissionId,
+      cleanup_fence_generation: 1,
+    });
+  });
+
+  it('fails startup on infrastructure errors and can retry after the dependency recovers', async () => {
+    const value = await createFixture();
+    const postcondition = completeAdmission(value);
+    const handBack = boundHandBack(value, postcondition);
+    const restartedSystemd = systemdState();
+    (restartedSystemd.systemd.inspect as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('systemd unavailable'));
+    const restarted = createCleanupAdmissionRecovery({
+      stateRoot: value.root,
+      db: value.db,
+      ownership: new OwnershipStore(value.db, { now: () => NOW }),
+      systemd: restartedSystemd.systemd,
+      handBack,
+      clock: { now: () => NOW },
+      ownerUid: UID,
+    });
+
+    await expect(restarted.openAdmissions()).rejects.toThrow('systemd unavailable');
+    await expect(restarted.openAdmissions()).resolves.toBeUndefined();
+    expect(value.db.prepare('SELECT state, cleanup_admission_id FROM jobs WHERE job_id=?').get(value.jobId)).toMatchObject({
+      state: 'interrupted',
+      cleanup_admission_id: null,
+    });
+  });
+
   it('leaves an already-interrupted job terminal after hand-back', async () => {
     const value = await createFixture('interrupted');
     const postcondition = removedPostcondition(value.jobId, value.snapshot);
@@ -451,6 +504,7 @@ describe('cleanup recovery crash windows', () => {
     'matching global label remains',
     'staging postcondition is unverified',
     'stale runner unit is active',
+    'systemd observation is stale',
   ] as const)('retains the completed fence when %s', async (condition) => {
     const value = await createFixture();
     const postcondition = completeAdmission(value);
@@ -458,18 +512,26 @@ describe('cleanup recovery crash windows', () => {
     const restartedSystemd = systemdState();
     if (condition === 'exact container still present') {
       (handBack.docker.inspect as ReturnType<typeof vi.fn>).mockResolvedValue({
-        id: `container-${value.jobId}`,
-        labels: labels(value.jobId),
+        container: {
+          id: `container-${value.jobId}`,
+          labels: labels(value.jobId),
+        },
+        observedAt: NOW,
       });
     } else if (condition === 'matching global label remains') {
-      (handBack.docker.listByLabels as ReturnType<typeof vi.fn>).mockResolvedValue([{
-        id: `container-${value.jobId}`,
-        labels: labels(value.jobId),
-      }]);
+      (handBack.docker.listByLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+        containers: [{
+          id: `container-${value.jobId}`,
+          labels: labels(value.jobId),
+        }],
+        observedAt: NOW,
+      });
     } else if (condition === 'staging postcondition is unverified') {
       (handBack.staging.verify as ReturnType<typeof vi.fn>).mockResolvedValue(false);
-    } else {
+    } else if (condition === 'stale runner unit is active') {
       restartedSystemd.active.set(`osi-image-builder-runner@${value.jobId}.service`, true);
+    } else {
+      (restartedSystemd.systemd.inspect as ReturnType<typeof vi.fn>).mockImplementation(async (unit: string) => ({ unit, active: false, observedAt: RUNNER_EXPIRES }));
     }
     const restarted = createCleanupAdmissionRecovery({
       stateRoot: value.root,

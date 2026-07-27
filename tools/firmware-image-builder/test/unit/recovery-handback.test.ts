@@ -66,6 +66,7 @@ function fixture() {
     stale_container_name: null,
     stale_container_labels_json: null,
     proof_json: JSON.stringify(current),
+    complete_at: NOW,
   };
   const job = {
     job_id: JOB_ID,
@@ -96,9 +97,14 @@ function fixture() {
     artifact_staging_path: null,
     artifact_quarantine_path: null,
     publish_state: null,
+    root_id: 'release',
+    artifact_sha256: null,
+    artifact_size: null,
     target_manifest_sha256: 'c'.repeat(64),
   };
   const completionEvent = {
+    seq: 10,
+    at: NOW,
     payload_json: JSON.stringify({ admissionId: ADMISSION_ID, evidencePath: `jobs/${JOB_ID}/evidence/cleanup/cleanup.json`, postcondition: completedPostcondition }),
   };
   const logGenerations: Record<string, unknown>[] = [];
@@ -128,17 +134,18 @@ function fixture() {
   const systemd: RecoverySystemd = {
     start: vi.fn(),
     isActive: vi.fn(async () => false),
+    inspect: vi.fn(async (unit: string) => ({ unit, active: false, observedAt: NOW })),
   };
   const handBack: RecoveryHandBackDependencies = {
     docker: {
-      inspect: vi.fn(async () => null),
-      listByLabels: vi.fn(async () => []),
+      inspect: vi.fn(async () => ({ container: null, observedAt: NOW })),
+      listByLabels: vi.fn(async () => ({ containers: [], observedAt: NOW })),
     },
     evidence: {
       read: vi.fn(async () => ({ jobId: JOB_ID, admissionId: ADMISSION_ID, sha256: EVIDENCE_HASH, postcondition: completedPostcondition })),
     },
     staging: {
-      verify: vi.fn(async () => true),
+      verify: vi.fn(async () => true as const),
     },
   };
   return { db, ownership, systemd, handBack, writes, completed, job, completionEvent, completedPostcondition, logGenerations, logEvents };
@@ -207,7 +214,7 @@ describe('cleanup hand-back recovery', () => {
       stream: 'runner',
       file_generation: 0,
       seq: 0,
-      event_type: 'log_orphan_tail',
+      event_type: 'log-truncated',
       at: NOW,
       byte_offset: 0,
       byte_length: 4,
@@ -225,6 +232,80 @@ describe('cleanup hand-back recovery', () => {
     try {
       await recovery.openAdmissions();
       await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW })).resolves.toMatchObject({ handedBack: true });
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed when the staging verifier returns no affirmative result', async () => {
+    const value = fixture();
+    (value.handBack.staging.verify as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const stateRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-staging-'));
+    const recovery = createCleanupAdmissionRecovery({
+      stateRoot,
+      db: value.db as never,
+      ownership: value.ownership,
+      systemd: value.systemd,
+      handBack: value.handBack,
+      clock: { now: () => NOW },
+    });
+    try {
+      await recovery.openAdmissions();
+      await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW })).rejects.toThrow('staging postcondition is not verified');
+      expect(value.ownership.apiWrite).not.toHaveBeenCalled();
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects log evidence inserted at or after the cleanup completion event', async () => {
+    const value = fixture();
+    const sealedPostcondition: CleanupPostcondition = {
+      ...value.completedPostcondition,
+      logs: { runner: 'sealed', docker: 'absent', verifiedAt: NOW },
+    };
+    value.completionEvent.payload_json = JSON.stringify({
+      admissionId: ADMISSION_ID,
+      evidencePath: `jobs/${JOB_ID}/evidence/cleanup/cleanup.json`,
+      postcondition: sealedPostcondition,
+    });
+    vi.spyOn(value.handBack.evidence, 'read').mockResolvedValue({
+      jobId: JOB_ID,
+      admissionId: ADMISSION_ID,
+      sha256: EVIDENCE_HASH,
+      postcondition: sealedPostcondition,
+    });
+    value.logGenerations.push({
+      stream: 'runner',
+      generation: 0,
+      started_at: STALE,
+      sealed_at: NOW,
+      size_bytes: 4,
+      sha256: 'd'.repeat(64),
+    });
+    value.logEvents.push({
+      stream: 'runner',
+      file_generation: 0,
+      seq: value.completionEvent.seq,
+      event_type: 'log',
+      at: NOW,
+      byte_offset: 0,
+      byte_length: 4,
+      partial: 0,
+    });
+    const stateRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-post-completion-log-'));
+    const recovery = createCleanupAdmissionRecovery({
+      stateRoot,
+      db: value.db as never,
+      ownership: value.ownership,
+      systemd: value.systemd,
+      handBack: value.handBack,
+      clock: { now: () => NOW },
+    });
+    try {
+      await recovery.openAdmissions();
+      await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW })).rejects.toThrow('cleanup log ranges are not contiguous');
+      expect(value.ownership.apiWrite).not.toHaveBeenCalled();
     } finally {
       await rm(stateRoot, { recursive: true, force: true });
     }
@@ -252,7 +333,7 @@ describe('cleanup hand-back recovery', () => {
       await recovery.openAdmissions();
       await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW })).rejects.toThrow('cleanup completion file does not match');
       expect(value.ownership.apiWrite).not.toHaveBeenCalled();
-      expect(value.systemd.isActive).not.toHaveBeenCalled();
+      expect(value.systemd.inspect).not.toHaveBeenCalled();
       expect(value.handBack.docker.inspect).not.toHaveBeenCalled();
       expect(value.handBack.docker.listByLabels).not.toHaveBeenCalled();
       expect(value.handBack.staging.verify).not.toHaveBeenCalled();
