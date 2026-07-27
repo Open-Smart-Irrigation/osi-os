@@ -158,7 +158,8 @@ type PersistedCleanupSnapshot = Omit<CleanupSnapshot, 'logs'> & Readonly<{ reado
 
 export type CleanupStagingSnapshot =
   | Readonly<{ readonly kind: 'absent'; readonly path: null }>
-  | Readonly<{ readonly kind: 'present'; readonly path: string; readonly sha256: string | null; readonly size: number | null }>;
+  | Readonly<{ readonly kind: 'present'; readonly path: string; readonly sha256: string | null; readonly size: number | null }>
+  | Readonly<{ readonly kind: 'physical-present'; readonly path: string; readonly sha256: null; readonly size: null; readonly observedAt: string }>;
 
 export type ObservedJsonEvidence = Readonly<{
   readonly present: true;
@@ -235,13 +236,18 @@ export type CleanupAdmissionPredecessor = Readonly<{
 
 export type CleanupPostContainer =
   | Readonly<{ readonly kind: 'removed'; readonly id: string; readonly name: string; readonly imageDigest: string; readonly labels: JsonObject; readonly exactIdAbsent: true; readonly globalLabelResult: 'no-match'; readonly stoppedAt: string; readonly removedAt: string; readonly observedAt: string }>
+  | Readonly<{ readonly kind: 'already-absent'; readonly id: string; readonly name: string; readonly imageDigest: string; readonly labels: JsonObject; readonly exactIdAbsent: true; readonly dockerAction: 'none'; readonly globalLabelResult: 'no-match'; readonly observedAt: string }>
   | Readonly<{ readonly kind: 'null-identity'; readonly dockerAction: 'none'; readonly globalLabelResult: 'no-match'; readonly observedAt: string }>;
+
+export type CleanupStagingPostcondition =
+  | Readonly<{ readonly kind: 'absent'; readonly path: null; readonly sourcePath: string; readonly sourceAbsent: true; readonly verifiedAt: string }>
+  | Readonly<{ readonly kind: 'quarantined'; readonly sourcePath: string; readonly destinationPath: string; readonly sourceAbsent: true; readonly destinationPresent: true; readonly sha256: string | null; readonly size: number | null; readonly verifiedAt: string }>;
 
 export type CleanupPostcondition = Readonly<{
   readonly runner: CleanupSnapshot['runner'];
   readonly state: CleanupSnapshot['state'];
   readonly container: CleanupPostContainer;
-  readonly staging: StagingCleanupProof;
+  readonly staging: CleanupStagingPostcondition;
   readonly logs: LogCleanupProof;
   readonly blocker: 'none';
 }>;
@@ -901,11 +907,26 @@ function shapeCancellationEvidence(value: unknown, at: string): void {
 }
 
 function shapeCleanupSnapshot(value: unknown, field: string, at: string): void {
-  const snapshot = shapeRecord(value, field); const runner = shapeRecord(snapshot.runner, `${field}.runner`); preparedString(runner.unit, `${field}.runner.unit`, TEXT_LIMITS.maxIdentifierBytes); shapeNullableString(runner.owner, `${field}.runner.owner`); shapeNullableString(runner.leaseExpiresAt, `${field}.runner.leaseExpiresAt`); if ((runner.owner == null) !== (runner.leaseExpiresAt == null)) throw new OwnershipValidationError(`${field}.runner owner/lease pair is incomplete`); preparedInstant(runner.inactiveAt, `${field}.runner.inactiveAt`); preparedInstant(runner.observedAt, `${field}.runner.observedAt`); preparedEnum(snapshot.state, ['starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup', 'feeds', 'config', 'building', 'verifying', 'publishing', 'cancel_requested', 'interrupted'], `${field}.state`); preparedEnum(snapshot.blocker, ['none', 'container', 'staging-or-log'], `${field}.blocker`); shapeStaging(snapshot.staging, `${field}.staging`, true, false);
+  const snapshot = shapeRecord(value, field); const runner = shapeRecord(snapshot.runner, `${field}.runner`); preparedString(runner.unit, `${field}.runner.unit`, TEXT_LIMITS.maxIdentifierBytes); shapeNullableString(runner.owner, `${field}.runner.owner`); shapeNullableString(runner.leaseExpiresAt, `${field}.runner.leaseExpiresAt`); if ((runner.owner == null) !== (runner.leaseExpiresAt == null)) throw new OwnershipValidationError(`${field}.runner owner/lease pair is incomplete`); preparedInstant(runner.inactiveAt, `${field}.runner.inactiveAt`); preparedInstant(runner.observedAt, `${field}.runner.observedAt`); preparedEnum(snapshot.state, ['starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup', 'feeds', 'config', 'building', 'verifying', 'publishing', 'cancel_requested', 'interrupted'], `${field}.state`); preparedEnum(snapshot.blocker, ['none', 'container', 'staging-or-log'], `${field}.blocker`); shapeCleanupStagingSnapshot(snapshot.staging, `${field}.staging`, at);
   const container = shapeRecord(snapshot.container, `${field}.container`);
   if (container.kind === 'absent') shapeNullContainer(snapshot.container, `${field}.container`, at as string);
   else { shapeLiteral(container.kind, 'present', `${field}.container.kind`); preparedString(container.id, `${field}.container.id`, TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, `${field}.container.name`, TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, `${field}.container.imageDigest`); preparedJsonObject(container.labels, `${field}.container.labels`); shapeLiteral(container.globalLabelResult, 'single-exact-match', `${field}.container.globalLabelResult`); preparedInstant(container.observedAt, `${field}.container.observedAt`); shapeChronology([[`${field}.container.observedAt`, container.observedAt], [`${field}.command.at`, at]], field); }
-  const logs = shapeRecord(snapshot.logs, `${field}.logs`); const staging = shapeRecord(snapshot.staging, `${field}.staging`); shapeChronology([[`${field}.runner.inactiveAt`, runner.inactiveAt], [`${field}.runner.observedAt`, runner.observedAt], [`${field}.at`, at]], field); shapeLogs(snapshot.logs, `${field}.logs`, true, at as string); if (staging.kind === 'quarantined') shapeChronology([[`${field}.staging.verifiedAt`, staging.verifiedAt], [`${field}.at`, at]], field);
+  shapeRecord(snapshot.logs, `${field}.logs`); shapeChronology([[`${field}.runner.inactiveAt`, runner.inactiveAt], [`${field}.runner.observedAt`, runner.observedAt], [`${field}.at`, at]], field); shapeLogs(snapshot.logs, `${field}.logs`, true, at as string);
+}
+
+function shapeCleanupStagingSnapshot(value: unknown, field: string, at: string): void {
+  const staging = shapeRecord(value, field);
+  if (staging.kind !== 'physical-present') {
+    shapeStaging(value, field, true, false);
+    return;
+  }
+  preparedPath(staging.path, `${field}.path`);
+  const path = staging.path as string;
+  if (!path.startsWith('staging/')) throw new OwnershipValidationError(`${field}.path is not a staging path`);
+  shapeLiteral(staging.sha256, null, `${field}.sha256`);
+  shapeLiteral(staging.size, null, `${field}.size`);
+  preparedInstant(staging.observedAt, `${field}.observedAt`);
+  shapeChronology([[`${field}.observedAt`, staging.observedAt], [`${field}.at`, at]], field);
 }
 
 function shapeCleanupPostcondition(value: unknown, at: string): void {
@@ -913,9 +934,28 @@ function shapeCleanupPostcondition(value: unknown, at: string): void {
   const runner = shapeRecord(post.runner, 'cleanup postcondition runner'); preparedString(runner.unit, 'cleanup postcondition runner unit', TEXT_LIMITS.maxIdentifierBytes); shapeNullableString(runner.owner, 'cleanup postcondition runner owner'); shapeNullableString(runner.leaseExpiresAt, 'cleanup postcondition runner leaseExpiresAt'); if ((runner.owner == null) !== (runner.leaseExpiresAt == null)) throw new OwnershipValidationError('cleanup postcondition runner owner/lease pair is incomplete'); preparedInstant(runner.inactiveAt, 'cleanup postcondition runner inactiveAt'); preparedInstant(runner.observedAt, 'cleanup postcondition runner observedAt'); preparedEnum(post.state, ['starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup', 'feeds', 'config', 'building', 'verifying', 'publishing', 'cancel_requested', 'interrupted'], 'cleanup postcondition state');
   const container = shapeRecord(post.container, 'cleanup postcondition container');
   if (container.kind === 'removed') { preparedString(container.id, 'cleanup postcondition container id', TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, 'cleanup postcondition container name', TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, 'cleanup postcondition image digest'); preparedJsonObject(container.labels, 'cleanup postcondition labels'); shapeLiteral(container.exactIdAbsent, true, 'cleanup postcondition exactIdAbsent'); shapeLiteral(container.globalLabelResult, 'no-match', 'cleanup postcondition globalLabelResult'); preparedInstant(container.stoppedAt, 'cleanup postcondition stoppedAt'); preparedInstant(container.removedAt, 'cleanup postcondition removedAt'); preparedInstant(container.observedAt, 'cleanup postcondition observedAt'); }
+  else if (container.kind === 'already-absent') { preparedString(container.id, 'cleanup postcondition container id', TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, 'cleanup postcondition container name', TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, 'cleanup postcondition image digest'); preparedJsonObject(container.labels, 'cleanup postcondition labels'); shapeLiteral(container.exactIdAbsent, true, 'cleanup postcondition exactIdAbsent'); shapeLiteral(container.dockerAction, 'none', 'cleanup postcondition dockerAction'); shapeLiteral(container.globalLabelResult, 'no-match', 'cleanup postcondition globalLabelResult'); preparedInstant(container.observedAt, 'cleanup postcondition observedAt'); }
   else if (container.kind === 'null-identity') { shapeLiteral(container.dockerAction, 'none', 'cleanup postcondition dockerAction'); shapeLiteral(container.globalLabelResult, 'no-match', 'cleanup postcondition globalLabelResult'); preparedInstant(container.observedAt, 'cleanup postcondition observedAt'); }
   else throw new OwnershipValidationError('cleanup postcondition container kind is invalid');
-  shapeStaging(post.staging, 'cleanup postcondition staging', false, true); shapeLogs(post.logs, 'cleanup postcondition logs', false, at as string); shapeLiteral(post.blocker, 'none', 'cleanup postcondition blocker'); const logs = shapeRecord(post.logs, 'cleanup postcondition logs'); const staging = shapeRecord(post.staging, 'cleanup postcondition staging'); shapeChronology([['cleanup runner inactiveAt', runner.inactiveAt], ['cleanup runner observedAt', runner.observedAt], ['cleanup at', at]], 'cleanup postcondition'); if (staging.kind === 'quarantined') shapeChronology([['cleanup quarantine verifiedAt', staging.verifiedAt], ['cleanup at', at]], 'cleanup postcondition'); if (container.kind === 'removed') shapeChronology([['cleanup stoppedAt', container.stoppedAt], ['cleanup removedAt', container.removedAt], ['cleanup observedAt', container.observedAt], ['cleanup at', at]], 'cleanup container'); else shapeChronology([['cleanup null-container observedAt', container.observedAt], ['cleanup at', at]], 'cleanup container');
+  shapeCleanupStagingPostcondition(post.staging, at); shapeLogs(post.logs, 'cleanup postcondition logs', false, at as string); shapeLiteral(post.blocker, 'none', 'cleanup postcondition blocker'); const logs = shapeRecord(post.logs, 'cleanup postcondition logs'); const staging = shapeRecord(post.staging, 'cleanup postcondition staging'); shapeChronology([['cleanup runner inactiveAt', runner.inactiveAt], ['cleanup runner observedAt', runner.observedAt], ['cleanup at', at]], 'cleanup postcondition'); if (container.kind === 'removed') shapeChronology([['cleanup stoppedAt', container.stoppedAt], ['cleanup removedAt', container.removedAt], ['cleanup observedAt', container.observedAt], ['cleanup at', at]], 'cleanup container'); else shapeChronology([['cleanup container observedAt', container.observedAt], ['cleanup at', at]], 'cleanup container');
+}
+
+function shapeCleanupStagingPostcondition(value: unknown, at: string): void {
+  const staging = shapeRecord(value, 'cleanup postcondition staging');
+  preparedPath(staging.sourcePath, 'cleanup postcondition staging sourcePath');
+  shapeLiteral(staging.sourceAbsent, true, 'cleanup postcondition staging sourceAbsent');
+  preparedInstant(staging.verifiedAt, 'cleanup postcondition staging verifiedAt');
+  if (staging.kind === 'absent') {
+    shapeLiteral(staging.path, null, 'cleanup postcondition staging path');
+  } else if (staging.kind === 'quarantined') {
+    preparedPath(staging.destinationPath, 'cleanup postcondition staging destinationPath');
+    shapeLiteral(staging.destinationPresent, true, 'cleanup postcondition staging destinationPresent');
+    shapeNullableHash(staging.sha256, 'cleanup postcondition staging sha256');
+    if (staging.size !== null && (!Number.isSafeInteger(staging.size) || Number(staging.size) < 0)) throw new OwnershipValidationError('cleanup postcondition staging size is invalid');
+  } else {
+    throw new OwnershipValidationError('cleanup postcondition staging kind is invalid');
+  }
+  shapeChronology([['cleanup staging verifiedAt', staging.verifiedAt], ['cleanup at', at]], 'cleanup postcondition staging');
 }
 
 function shapeOperationCleanupProof(value: unknown, at: string): void {
@@ -1155,6 +1195,12 @@ function validateCleanupProof(proof: StagingCleanupProof | LogCleanupProof | Cle
   if (field === 'staging' || field.endsWith(' staging')) {
     const value = proof as StagingCleanupProof | CleanupStagingSnapshot;
     if (value.kind === 'absent') return;
+    if (value.kind === 'physical-present') {
+      confinedPath(value.path, 'physical staging source path');
+      if (!value.path.startsWith('staging/') || value.sha256 !== null || value.size !== null) throw new OwnershipValidationError('physical staging source snapshot is invalid');
+      instant(value.observedAt, 'physical staging observation time');
+      return;
+    }
     if (value.kind === 'present') {
       confinedPath(value.path, 'staging source path');
       if (value.sha256 !== null) hash(value.sha256, 'staging source SHA-256');
@@ -1206,7 +1252,8 @@ function validateCleanupSnapshot(db: DbFacade, snapshot: CleanupSnapshot, job: R
     const matchesCurrent = snapshot.logs.runner === actualLogs.runner && snapshot.logs.docker === actualLogs.docker;
     if (!matchesAdmission && !matchesCurrent) throw new OwnershipConflictError('identity-mismatch', 'cleanup log snapshot is neither the admitted nor current state');
   }
-  if (snapshot.staging.kind === 'present' && snapshot.staging.path && snapshot.staging.path.startsWith('staging/') === false) throw new OwnershipValidationError('cleanup staging snapshot path is invalid');
+  if (snapshot.staging.kind !== 'absent' && snapshot.staging.path.startsWith('staging/') === false) throw new OwnershipValidationError('cleanup staging snapshot path is invalid');
+  if (snapshot.staging.kind === 'physical-present' && snapshot.staging.observedAt > at) throw new OwnershipValidationError('physical staging observation is from the future');
   if (snapshot.logs.verifiedAt > at) throw new OwnershipValidationError('cleanup log proof is from the future');
   if (snapshot.blocker !== 'none' && snapshot.blocker !== 'container' && snapshot.blocker !== 'staging-or-log') throw new OwnershipValidationError('cleanup blocker kind is invalid');
   const preparationIntent = job.publish_state === 'not_started' && job.artifact_staging_path !== null;
@@ -1218,6 +1265,9 @@ function validateCleanupSnapshot(db: DbFacade, snapshot: CleanupSnapshot, job: R
   if (snapshot.staging.kind === 'present') {
     if (job.artifact_staging_path !== snapshot.staging.path || job.artifact_quarantine_path !== null) throw new OwnershipConflictError('identity-mismatch', 'cleanup staging snapshot path conflicts with persisted artifact');
     if (!preparationIntent && (snapshot.staging.sha256 === null || snapshot.staging.size === null || job.artifact_sha256 !== snapshot.staging.sha256 || Number(job.artifact_size) !== snapshot.staging.size)) throw new OwnershipConflictError('identity-mismatch', 'cleanup staging snapshot conflicts with persisted artifact');
+  } else if (snapshot.staging.kind === 'physical-present') {
+    if (snapshot.staging.path !== `staging/${String(job.job_id)}`) throw new OwnershipValidationError('physical staging snapshot does not bind the fixed job staging path');
+    if (job.artifact_staging_path !== null || job.artifact_quarantine_path !== null) throw new OwnershipConflictError('identity-mismatch', 'physical staging snapshot conflicts with persisted artifact identity');
   }
   if (snapshot.container.kind === 'present') {
     instant(snapshot.container.observedAt, 'container observation time');
@@ -1480,13 +1530,17 @@ function validateCleanupPostcondition(db: DbFacade, post: CleanupPostcondition, 
   requireChronology([['cleanup postcondition inactive time', post.runner.inactiveAt], ['cleanup postcondition observation time', post.runner.observedAt]]);
   if (post.runner.inactiveAt > at || post.runner.observedAt > at) throw new OwnershipValidationError('cleanup postcondition is from the future');
   if (post.blocker !== 'none') throw new OwnershipValidationError('cleanup completion postcondition retains a blocker');
-  validateCleanupProof(post.staging, 'staging'); validateCleanupProof(post.logs, 'logs');
+  validateCleanupStagingPostcondition(post.staging, String(job.job_id), at); validateCleanupProof(post.logs, 'logs');
   if (post.logs.verifiedAt > at) throw new OwnershipValidationError('cleanup completion log proof is from the future');
   if (post.staging.kind === 'quarantined' && post.staging.verifiedAt > at) throw new OwnershipValidationError('cleanup completion quarantine proof is from the future');
   if (post.container.kind === 'removed') {
     instant(post.container.stoppedAt, 'cleanup postcondition container stopped time'); instant(post.container.removedAt, 'cleanup postcondition container removed time'); instant(post.container.observedAt, 'cleanup postcondition container absence time');
     if (post.container.exactIdAbsent !== true || post.container.globalLabelResult !== 'no-match' || post.container.removedAt < post.container.stoppedAt || post.container.observedAt < post.container.removedAt || post.container.stoppedAt > at || post.container.removedAt > at || post.container.observedAt > at) throw new OwnershipValidationError('cleanup postcondition exact absence proof is incomplete');
     if (job.container_id !== post.container.id || job.container_name !== post.container.name || job.container_image_digest !== post.container.imageDigest || job.container_label_job_id !== job.job_id || job.container_label_manifest_sha !== job.target_manifest_sha256 || job.container_labels_json !== labels(post.container.labels, String(job.job_id), String(job.target_manifest_sha256))) throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition container does not match the persisted identity');
+  } else if (post.container.kind === 'already-absent') {
+    instant(post.container.observedAt, 'cleanup postcondition existing absence time');
+    if (post.container.exactIdAbsent !== true || post.container.dockerAction !== 'none' || post.container.globalLabelResult !== 'no-match' || post.container.observedAt > at) throw new OwnershipValidationError('cleanup postcondition existing absence proof is incomplete');
+    if (job.container_id !== post.container.id || job.container_name !== post.container.name || job.container_image_digest !== post.container.imageDigest || job.container_label_job_id !== job.job_id || job.container_label_manifest_sha !== job.target_manifest_sha256 || job.container_labels_json !== labels(post.container.labels, String(job.job_id), String(job.target_manifest_sha256))) throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition existing absence does not match the persisted identity');
   } else if (post.container.kind === 'null-identity') {
     if (post.container.dockerAction !== 'none' || post.container.globalLabelResult !== 'no-match') throw new OwnershipValidationError('null-container cleanup postcondition is not a no-Docker proof');
     validateNullContainerProof({ kind: 'absent', globalLabelResult: post.container.globalLabelResult, observedAt: post.container.observedAt }, at);
@@ -1497,12 +1551,32 @@ function validateCleanupPostcondition(db: DbFacade, post: CleanupPostcondition, 
   reconcileCleanupLogs(db, String(job.job_id), post.logs, at);
   const preparationIntent = job.publish_state === 'not_started' && job.artifact_staging_path !== null;
   if (admission.staging.kind === 'present') {
-    if (post.staging.kind !== 'quarantined' || post.staging.sourcePath !== admission.staging.path || job.artifact_staging_path !== admission.staging.path || job.artifact_quarantine_path !== null) throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition does not prove the admitted staging quarantine');
-    if (!preparationIntent && (post.staging.sha256 !== admission.staging.sha256 || post.staging.size !== admission.staging.size)) throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition does not prove the admitted staging identity');
-  } else if (post.staging.kind !== 'absent' || job.artifact_staging_path !== null && !preparationIntent) {
+    if (post.staging.kind !== 'quarantined' || job.artifact_staging_path !== admission.staging.path || job.artifact_quarantine_path !== null) throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition does not prove the admitted staging quarantine');
+    if (post.staging.sha256 !== admission.staging.sha256 || post.staging.size !== admission.staging.size) throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition does not prove the admitted staging identity');
+  } else if (admission.staging.kind === 'physical-present') {
+    if (post.staging.kind !== 'quarantined' || post.staging.sourcePath !== admission.staging.path || job.artifact_staging_path !== null || job.artifact_quarantine_path !== null) throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition does not prove the admitted physical staging quarantine');
+    if (post.staging.sha256 !== null || post.staging.size !== null) throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition invents identity for untracked staging');
+  } else if (post.staging.kind === 'quarantined') {
     throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition introduces unadmitted staging work');
+  } else if (job.artifact_staging_path !== null && !preparationIntent) {
+    throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition omits admitted staging work');
   }
   return proofJson(post, 'cleanup postcondition');
+}
+
+function validateCleanupStagingPostcondition(proof: CleanupStagingPostcondition, jobId: string, at: string): void {
+  const sourcePath = `staging/${jobId}`;
+  const destinationPath = `quarantine/${jobId}`;
+  if (proof.sourcePath !== sourcePath || proof.sourceAbsent !== true) throw new OwnershipValidationError('cleanup staging proof does not bind the fixed job staging path');
+  instant(proof.verifiedAt, 'cleanup staging verification time');
+  if (proof.verifiedAt > at) throw new OwnershipValidationError('cleanup staging proof is from the future');
+  if (proof.kind === 'absent') {
+    if (proof.path !== null) throw new OwnershipValidationError('cleanup staging absence proof is invalid');
+    return;
+  }
+  if (proof.kind !== 'quarantined' || proof.destinationPath !== destinationPath || proof.destinationPresent !== true) throw new OwnershipValidationError('cleanup staging quarantine proof is invalid');
+  if (proof.sha256 !== null) hash(proof.sha256, 'cleanup staging SHA-256');
+  if (proof.size !== null && (!Number.isSafeInteger(proof.size) || proof.size < 0)) throw new OwnershipValidationError('cleanup staging size is invalid');
 }
 
 function validateCancellationProof(proof: CancellationProof, job: Row, at: string): void {
@@ -3254,25 +3328,40 @@ export class OwnershipStore {
     let completionPayload: Record<string, unknown>;
     try { completionPayload = JSON.parse(String(completion.payload_json)) as Record<string, unknown>; } catch (error) { throw new OwnershipTransactionError('cleanup completion evidence is corrupt', { cause: error }); }
     if (completionPayload.admissionId !== command.admissionId || completionPayload.postcondition === undefined || typeof completionPayload.postcondition !== 'object' || completionPayload.postcondition === null) conflict('admission-mismatch', 'cleanup completion evidence does not match the admission');
-    const completionPostcondition = completionPayload.postcondition as { logs?: LogCleanupProof };
-    if (completionPostcondition.logs === undefined) conflict('admission-mismatch', 'cleanup completion log evidence is missing');
+    const completionPostcondition = completionPayload.postcondition as { logs?: LogCleanupProof; staging?: CleanupStagingPostcondition };
+    if (completionPostcondition.logs === undefined || completionPostcondition.staging === undefined) conflict('admission-mismatch', 'cleanup completion evidence is incomplete');
     reconcileCleanupLogs(this.#db, command.jobId, completionPostcondition.logs, command.at);
+    validateCleanupStagingPostcondition(completionPostcondition.staging, command.jobId, command.at);
     validateNullContainerProof(command.proof.container, command.at);
     if (command.proof.runner.unit !== row.runner_unit || command.proof.runner.owner !== row.runner_lease_owner || command.proof.runner.leaseExpiresAt !== row.runner_lease_expires_at) conflict('stale-lease', 'hand-back snapshot does not match the job');
     const next = isActiveState(row.state as JobState) ? 'interrupted' : row.state as JobState;
     const terminal = next === 'interrupted' && row.state !== 'interrupted';
-    const result = this.#db.prepare(`UPDATE jobs SET state=?, queue_state=CASE WHEN ?='interrupted' THEN 'complete' ELSE queue_state END, queue_position=NULL,
+    const preparationIntent = row.publish_state === 'not_started' && row.artifact_staging_path !== null;
+    const preparationClear = preparationIntent
+      ? 'artifact_sha256=NULL, artifact_size=NULL, artifact_mtime=NULL, checksum_path=NULL, checksum_sha256=NULL, manifest_path=NULL, manifest_sha256=NULL, verification_path=NULL, verification_sha256=NULL, '
+      : '';
+    const stagingUpdate = completionPostcondition.staging.kind === 'quarantined'
+      ? `artifact_staging_path=NULL, artifact_quarantine_path=?, publish_state='quarantined', ${preparationClear}publish_started_at=NULL, published_at=NULL, `
+      : preparationIntent
+        ? `artifact_staging_path=NULL, artifact_quarantine_path=NULL, publish_state=NULL, ${preparationClear}`
+        : '';
+    const stagingParams = completionPostcondition.staging.kind === 'quarantined'
+      ? [completionPostcondition.staging.destinationPath]
+      : [];
+    const result = this.#db.prepare(`UPDATE jobs SET ${stagingUpdate}state=?, queue_state=CASE WHEN ?='interrupted' THEN 'complete' ELSE queue_state END, queue_position=NULL,
       terminal_at=CASE WHEN ?=1 THEN ? ELSE terminal_at END, terminal_error_code=CASE WHEN ?=1 THEN 'RUNNER_DISAPPEARED' ELSE terminal_error_code END,
       terminal_error_json=CASE WHEN ?=1 THEN ? ELSE terminal_error_json END, cleanup_fence_generation=NULL, cleanup_fence_token_hash=NULL, cleanup_admission_id=NULL,
       cleanup_blocker_code=NULL, cleanup_blocker_json=NULL, updated_at=? WHERE job_id=? AND state=? AND cleanup_fence_generation=? AND cleanup_fence_token_hash=?
       AND cleanup_admission_id=? AND container_id IS NULL AND container_name IS NULL AND container_image_digest IS NULL AND container_label_job_id IS NULL AND container_label_manifest_sha IS NULL AND container_labels_json IS NULL
-      AND artifact_staging_path IS NULL AND (publish_state IS NULL OR publish_state NOT IN ('staged','publishing','blocked')) AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL
+      AND artifact_staging_path IS ? AND artifact_quarantine_path IS ? AND publish_state IS ? AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL
       AND ((runner_lease_expires_at IS NULL AND runner_lease_owner IS NULL) OR runner_lease_expires_at < ?)
       AND NOT EXISTS (SELECT 1 FROM job_log_generations WHERE job_id=? AND sealed_at IS NULL)
       AND NOT EXISTS (SELECT 1 FROM cleanup_leases WHERE job_id=? AND status IN ('admitted','claimed','failed','blocking'))
       AND EXISTS (SELECT 1 FROM cleanup_leases WHERE admission_id=? AND job_id=? AND fence_generation=? AND fence_token_hash=? AND status='completed')`).run(
-      next, next, terminal ? 1 : 0, command.at, terminal ? 1 : 0, terminal ? 1 : 0, terminal ? json({ reason: 'cleanup completed' }, 'hand-back error', true) : null,
-      command.at, command.jobId, row.state, command.fenceGeneration, command.fenceTokenHash, command.admissionId, command.at, command.jobId, command.jobId, command.admissionId, command.jobId, command.fenceGeneration, command.fenceTokenHash,
+      ...stagingParams, next, next, terminal ? 1 : 0, command.at, terminal ? 1 : 0, terminal ? 1 : 0, terminal ? json({ reason: 'cleanup completed' }, 'hand-back error', true) : null,
+      command.at, command.jobId, row.state, command.fenceGeneration, command.fenceTokenHash, command.admissionId,
+      row.artifact_staging_path, row.artifact_quarantine_path, row.publish_state,
+      command.at, command.jobId, command.jobId, command.admissionId, command.jobId, command.fenceGeneration, command.fenceTokenHash,
     );
     if (Number(result.changes) !== 1) conflict('admission-mismatch', 'cleanup hand-back lost its fence CAS');
     const lease = this.#db.prepare(`UPDATE cleanup_leases SET status='handed_back', handback_at=? WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=?
@@ -3986,7 +4075,7 @@ export class OwnershipStore {
     if (!leaseTimeline) conflict('admission-mismatch', 'cleanup lease does not exist');
     requireChronology([['cleanup admitted time', String(leaseTimeline.admitted_at)], ['cleanup claim time', leaseTimeline.claim_at === null ? null : String(leaseTimeline.claim_at)], ['cleanup renew time', leaseTimeline.renew_at === null ? null : String(leaseTimeline.renew_at)], ['cleanup completion time', command.at]]);
     validateCleanupPostcondition(this.#db, command.postcondition, admission.snapshot, row, command.at);
-    const present = command.postcondition.container.kind === 'removed';
+    const present = command.postcondition.container.kind === 'removed' || command.postcondition.container.kind === 'already-absent';
     if (present) {
       if (command.exactContainerId === null || command.postcondition.container.id !== command.exactContainerId) conflict('identity-mismatch', 'cleanup completion requires the exact admitted container');
     } else if (command.exactContainerId !== null) {
@@ -4000,23 +4089,13 @@ export class OwnershipStore {
       const unsealed = this.#db.prepare("SELECT 1 FROM job_log_generations WHERE job_id=? AND sealed_at IS NULL LIMIT 1").get(command.jobId);
       if (unsealed) conflict('identity-mismatch', 'cleanup log blocker is not sealed in the database');
     }
-    const preparationIntent = row.publish_state === 'not_started' && row.artifact_staging_path !== null;
-    const preparationClear = preparationIntent
-      ? 'artifact_sha256=NULL, artifact_size=NULL, artifact_mtime=NULL, checksum_path=NULL, checksum_sha256=NULL, manifest_path=NULL, manifest_sha256=NULL, verification_path=NULL, verification_sha256=NULL, '
-      : '';
-    const quarantineUpdate = command.postcondition.staging.kind === 'quarantined'
-      ? `artifact_staging_path=NULL, artifact_quarantine_path=?, publish_state='quarantined', ${preparationClear}publish_started_at=NULL, published_at=NULL, `
-      : preparationIntent
-        ? `artifact_staging_path=NULL, artifact_quarantine_path=NULL, publish_state=NULL, ${preparationClear}`
-        : '';
-    const quarantineParams = command.postcondition.staging.kind === 'quarantined' ? [command.postcondition.staging.destinationPath] : [];
     const result = present
       ? this.#db.prepare(`UPDATE jobs SET container_id=NULL, container_name=NULL, container_image_digest=NULL, container_label_job_id=NULL, container_label_manifest_sha=NULL,
           container_labels_json=NULL, container_mount_json=NULL, container_env_json=NULL, container_security_json=NULL, container_inspection_json=NULL, container_created_at=NULL,
-          container_started_at=NULL, container_stopped_at=NULL, container_removed_at=NULL, container_cleanup_outcome=NULL, ${quarantineUpdate}updated_at=? WHERE job_id=? AND container_id=? AND cleanup_admission_id=?
-          AND cleanup_fence_generation=? AND cleanup_fence_token_hash=? AND EXISTS (SELECT 1 FROM cleanup_leases WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=? AND proof_json=? AND status='claimed' AND expires_at > ?)`).run(...quarantineParams, command.at, command.jobId, command.exactContainerId, command.admissionId, command.fenceGeneration, command.fenceTokenHash, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash, snapshotJson, command.at)
-      : this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=NULL, cleanup_blocker_json=NULL, ${quarantineUpdate}updated_at=? WHERE job_id=? AND container_id IS NULL AND container_name IS NULL AND container_image_digest IS NULL AND container_labels_json IS NULL AND cleanup_admission_id=?
-          AND cleanup_fence_generation=? AND cleanup_fence_token_hash=? AND EXISTS (SELECT 1 FROM cleanup_leases WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=? AND proof_json=? AND status IN ('claimed','blocking') AND expires_at > ?)`).run(...quarantineParams, command.at, command.jobId, command.admissionId, command.fenceGeneration, command.fenceTokenHash, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash, snapshotJson, command.at);
+          container_started_at=NULL, container_stopped_at=NULL, container_removed_at=NULL, container_cleanup_outcome=NULL, updated_at=? WHERE job_id=? AND container_id=? AND cleanup_admission_id=?
+          AND cleanup_fence_generation=? AND cleanup_fence_token_hash=? AND EXISTS (SELECT 1 FROM cleanup_leases WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=? AND proof_json=? AND status='claimed' AND expires_at > ?)`).run(command.at, command.jobId, command.exactContainerId, command.admissionId, command.fenceGeneration, command.fenceTokenHash, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash, snapshotJson, command.at)
+      : this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=NULL, cleanup_blocker_json=NULL, updated_at=? WHERE job_id=? AND container_id IS NULL AND container_name IS NULL AND container_image_digest IS NULL AND container_labels_json IS NULL AND cleanup_admission_id=?
+          AND cleanup_fence_generation=? AND cleanup_fence_token_hash=? AND EXISTS (SELECT 1 FROM cleanup_leases WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=? AND proof_json=? AND status IN ('claimed','blocking') AND expires_at > ?)`).run(command.at, command.jobId, command.admissionId, command.fenceGeneration, command.fenceTokenHash, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash, snapshotJson, command.at);
     if (Number(result.changes) !== 1) conflict('identity-mismatch', 'cleanup completion identity or lease changed');
     const lease = this.#db.prepare(`UPDATE cleanup_leases SET status='completed', blocker_code=NULL, blocker_json=NULL, complete_at=?, completion_evidence_path=?, completion_evidence_sha256=? WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=? AND proof_json=? AND status IN ('claimed','blocking') AND expires_at > ?`).run(command.at, command.evidencePath, command.evidenceSha256, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash, snapshotJson, command.at);
     if (Number(lease.changes) !== 1) conflict('admission-mismatch', 'cleanup completion lease CAS lost');
@@ -4033,7 +4112,17 @@ export class OwnershipStore {
     if (command.snapshot.blocker === 'none') throw new OwnershipValidationError('cleanup blocker evidence requires a blocker snapshot');
     const result = this.#db.prepare("UPDATE cleanup_leases SET status=?, blocker_code=?, blocker_json=? WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=? AND proof_json=? AND status='claimed' AND expires_at > ? AND EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND cleanup_admission_id=? AND cleanup_fence_generation=? AND cleanup_fence_token_hash=?)").run(command.status, command.blockerCode, blocker, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash, snapshotJson, command.at, command.jobId, command.admissionId, command.fenceGeneration, command.fenceTokenHash);
     if (Number(result.changes) !== 1) conflict('admission-mismatch', 'cleanup evidence lease CAS lost');
-    const jobResult = this.#db.prepare('UPDATE jobs SET cleanup_blocker_code=?, cleanup_blocker_json=?, updated_at=? WHERE job_id=? AND cleanup_admission_id=? AND cleanup_fence_generation=? AND cleanup_fence_token_hash=? AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL').run(command.blockerCode, blocker, command.at, command.jobId, command.admissionId, command.fenceGeneration, command.fenceTokenHash);
+    const jobResult = this.#db.prepare('UPDATE jobs SET cleanup_blocker_code=?, cleanup_blocker_json=?, updated_at=? WHERE job_id=? AND cleanup_admission_id=? AND cleanup_fence_generation=? AND cleanup_fence_token_hash=? AND cleanup_blocker_code IS ? AND cleanup_blocker_json IS ?').run(
+      command.blockerCode,
+      blocker,
+      command.at,
+      command.jobId,
+      command.admissionId,
+      command.fenceGeneration,
+      command.fenceTokenHash,
+      row.cleanup_blocker_code,
+      row.cleanup_blocker_json,
+    );
     if (Number(jobResult.changes) !== 1) conflict('admission-mismatch', 'cleanup blocker persistence CAS lost');
     this.#event(command.jobId, 'cleanup', { admissionId: command.admissionId, status: command.status, blockerCode: command.blockerCode }, command.at);
   }

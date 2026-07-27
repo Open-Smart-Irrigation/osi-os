@@ -191,8 +191,9 @@ function snapshot(containerState: 'present' | 'absent' = 'present', jobId = 'job
 }; }
 function postcondition(s: CleanupSnapshot): CleanupPostcondition {
   const sealedLog = (value: 'absent' | 'sealed' | 'unsealed'): 'absent' | 'sealed' => value === 'unsealed' ? 'sealed' : value;
+  const jobId = s.runner.unit.slice('osi-image-builder-runner@'.length, -'.service'.length);
   const postContainer = s.container.kind === 'present' ? { kind: 'removed' as const, id: s.container.id, name: s.container.name, imageDigest: s.container.imageDigest, labels: s.container.labels, exactIdAbsent: true as const, globalLabelResult: 'no-match' as const, stoppedAt: NOW, removedAt: LATER, observedAt: RECOVERY } : { kind: 'null-identity' as const, dockerAction: 'none' as const, globalLabelResult: 'no-match' as const, observedAt: RECOVERY };
-  return { ...s, container: postContainer, staging: s.staging.kind === 'absent' ? staging : { kind: 'quarantined', sourcePath: s.staging.path, destinationPath: 'quarantine/image', sourceAbsent: true, destinationPresent: true, sha256: s.staging.sha256 ?? SHA64, size: s.staging.size ?? 0, verifiedAt: RECOVERY }, logs: { runner: sealedLog(s.logs.runner), docker: sealedLog(s.logs.docker), verifiedAt: s.logs.verifiedAt }, blocker: 'none' };
+  return { ...s, container: postContainer, staging: s.staging.kind === 'absent' ? { kind: 'absent', path: null, sourcePath: `staging/${jobId}`, sourceAbsent: true, verifiedAt: RECOVERY } : { kind: 'quarantined', sourcePath: `staging/${jobId}`, destinationPath: `quarantine/${jobId}`, sourceAbsent: true, destinationPresent: true, sha256: s.staging.sha256, size: s.staging.size, verifiedAt: RECOVERY }, logs: { runner: sealedLog(s.logs.runner), docker: sealedLog(s.logs.docker), verifiedAt: s.logs.verifiedAt }, blocker: 'none' };
 }
 function nullLeaseSnapshot(jobId = 'job-1'): CleanupSnapshot { return {
   runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: null, leaseExpiresAt: null, inactiveAt: LATER, observedAt: RECOVERY },
@@ -200,10 +201,23 @@ function nullLeaseSnapshot(jobId = 'job-1'): CleanupSnapshot { return {
 }; }
 function stagedSnapshot(jobId = 'job-1'): CleanupSnapshot { return {
   runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', leaseExpiresAt: ACTIVE, inactiveAt: LATER, observedAt: RECOVERY },
-  state: 'starting', container: absent(RECOVERY), staging: { kind: 'present', path: 'staging/image', sha256: SHA64, size: 10 }, logs, blocker: 'staging-or-log',
+  state: 'starting', container: absent(RECOVERY), staging: { kind: 'present', path: `staging/${jobId}/image`, sha256: SHA64, size: 10 }, logs, blocker: 'staging-or-log',
 }; }
-function stagedPostcondition(destinationPath = 'quarantine/image', jobId = 'job-1'): CleanupPostcondition { const admission = stagedSnapshot(jobId); return {
-  ...admission, container: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt: RECOVERY }, logs, staging: { kind: 'quarantined', sourcePath: 'staging/image', destinationPath, sourceAbsent: true, destinationPresent: true, sha256: SHA64, size: 10, verifiedAt: RECOVERY }, blocker: 'none',
+function stagedPostcondition(destinationPath = 'quarantine/job-1', jobId = 'job-1'): CleanupPostcondition { const admission = stagedSnapshot(jobId); return {
+  ...admission, container: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt: RECOVERY }, logs, staging: { kind: 'quarantined', sourcePath: `staging/${jobId}`, destinationPath, sourceAbsent: true, destinationPresent: true, sha256: SHA64, size: 10, verifiedAt: RECOVERY }, blocker: 'none',
+}; }
+function physicalStagingSnapshot(jobId = 'job-1'): CleanupSnapshot { return {
+  runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', leaseExpiresAt: ACTIVE, inactiveAt: LATER, observedAt: RECOVERY },
+  state: 'starting', container: absent(RECOVERY),
+  staging: { kind: 'physical-present', path: `staging/${jobId}`, sha256: null, size: null, observedAt: RECOVERY },
+  logs, blocker: 'staging-or-log',
+}; }
+function physicalStagingPostcondition(jobId = 'job-1'): CleanupPostcondition { const admission = physicalStagingSnapshot(jobId); return {
+  ...admission,
+  container: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt: RECOVERY },
+  staging: { kind: 'quarantined', sourcePath: `staging/${jobId}`, destinationPath: `quarantine/${jobId}`, sourceAbsent: true, destinationPresent: true, sha256: null, size: null, verifiedAt: RECOVERY },
+  logs,
+  blocker: 'none',
 }; }
 function blockedCleanupSnapshot(containerState: 'present' | 'absent', jobId: string): CleanupSnapshot {
   const base = containerState === 'present' ? snapshot('present', jobId) : nullLeaseSnapshot(jobId);
@@ -604,10 +618,22 @@ describe('actor-owned compare-and-set writes', () => {
         fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, status: 'blocking', blockerCode: 'QUARANTINE_PENDING', blocker: { reason: 'preparation intent cleanup' }, at: RECOVERY,
       };
       expect(reopened.cleanupWrite(evidence).ok).toBe(true);
+      const beforeCompletion = reopenedStore.getJob(jobId);
       expect(reopened.cleanupWrite({
         kind: 'complete', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
         fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, postcondition: postcondition(snapshotValue),
         exactContainerId: null, containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY,
+      }).ok).toBe(true);
+      expect(reopenedStore.getJob(jobId)).toMatchObject({
+        publishState: beforeCompletion.publishState,
+        artifactStagingPath: beforeCompletion.artifactStagingPath,
+        artifactQuarantinePath: beforeCompletion.artifactQuarantinePath,
+        artifactSha256: beforeCompletion.artifactSha256,
+      });
+      expect(reopened.apiWrite({
+        kind: 'hand-back', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+        fenceGeneration: 1, fenceTokenHash: SHA64_B, at: RECOVERY,
+        proof: { runner: snapshotValue.runner, container: absent(RECOVERY), blocker: 'none' },
       }).ok).toBe(true);
       expect(reopenedStore.getJob(jobId)).toMatchObject({
         publishState: stagingSnapshot.kind === 'absent' ? null : 'quarantined',
@@ -1613,13 +1639,51 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('admits a pre-cleanup staging source and completes with a separate quarantine postcondition', async () => {
     const { ownership, store } = await fixture(); ownership.apiWrite(dispatch()); ownership.runnerWrite(lease(ACTIVE));
-    ownership.runnerWrite({ ...runnerBase(), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256: manifestHash('job-1'), verificationPath: 'staging/verify', verificationSha256: verificationHash('job-1') });
+    ownership.runnerWrite({ ...runnerBase(), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/job-1/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/job-1/sha256sums', checksumSha256: checksumHash(), manifestPath: 'staging/job-1/build-manifest.json', manifestSha256: manifestHash('job-1'), verificationPath: 'staging/job-1/verification.json', verificationSha256: verificationHash('job-1') });
     const admission = cleanupAdmission(stagedSnapshot()); expect(ownership.apiWrite(admission).ok).toBe(true);
     const claim: CleanupWriteCommand = { kind: 'claim-lease', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: stagedSnapshot(), at: RECOVERY }; expect(ownership.cleanupWrite(claim).ok).toBe(true);
     const complete: CleanupWriteCommand = { kind: 'complete', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: stagedSnapshot(), postcondition: stagedPostcondition(), exactContainerId: null, containerAbsent: true, evidencePath: 'recovery/quarantine.json', evidenceSha256: SHA64, at: RECOVERY };
-    expect(ownership.cleanupWrite({ ...complete, postcondition: { ...stagedPostcondition(), staging: { kind: 'quarantined', sourcePath: 'staging/wrong', destinationPath: 'quarantine/image', sourceAbsent: true, destinationPresent: true, sha256: SHA64, size: 10, verifiedAt: RECOVERY } } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
-    expect(ownership.cleanupWrite(complete).ok).toBe(true); expect(store.getJob('job-1')).toMatchObject({ artifactStagingPath: null, artifactQuarantinePath: 'quarantine/image', publishState: 'quarantined' });
+    expect(() => ownership.cleanupWrite({ ...complete, postcondition: { ...stagedPostcondition(), staging: { kind: 'quarantined', sourcePath: 'staging/wrong', destinationPath: 'quarantine/job-1', sourceAbsent: true, destinationPresent: true, sha256: SHA64, size: 10, verifiedAt: RECOVERY } } })).toThrow(OwnershipValidationError);
+    expect(ownership.cleanupWrite(complete).ok).toBe(true); expect(store.getJob('job-1')).toMatchObject({ artifactStagingPath: 'staging/job-1/image', artifactQuarantinePath: null, publishState: 'staged' });
     expect(ownership.apiWrite({ kind: 'hand-back', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, at: RECOVERY, proof: { runner: stagedSnapshot().runner, container: absent(RECOVERY), blocker: 'none' } }).ok).toBe(true);
+  });
+
+  it('admits exact physical staging without persisted artifact identity and defers publish mutation to hand-back', async () => {
+    const { ownership, store } = await fixture();
+    ownership.apiWrite(dispatch());
+    ownership.runnerWrite(lease(ACTIVE));
+    const snapshotValue = physicalStagingSnapshot();
+    const admission = cleanupAdmission(snapshotValue);
+    expect(apiWriteAdmission(ownership, admission).ok).toBe(true);
+    expect(ownership.cleanupWrite({
+      kind: 'claim-lease', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a',
+      unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B,
+      snapshot: snapshotValue, at: RECOVERY,
+    }).ok).toBe(true);
+    const beforeCompletion = store.getJob('job-1');
+    expect(ownership.cleanupWrite({
+      kind: 'complete', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a',
+      unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B,
+      snapshot: snapshotValue, postcondition: physicalStagingPostcondition(), exactContainerId: null,
+      containerAbsent: true, evidencePath: 'recovery/physical-quarantine.json', evidenceSha256: SHA64, at: RECOVERY,
+    }).ok).toBe(true);
+    expect(store.getJob('job-1')).toMatchObject({
+      publishState: beforeCompletion.publishState,
+      artifactStagingPath: beforeCompletion.artifactStagingPath,
+      artifactQuarantinePath: beforeCompletion.artifactQuarantinePath,
+      artifactSha256: beforeCompletion.artifactSha256,
+    });
+    expect(ownership.apiWrite({
+      kind: 'hand-back', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a',
+      unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, at: RECOVERY,
+      proof: { runner: snapshotValue.runner, container: absent(RECOVERY), blocker: 'none' },
+    }).ok).toBe(true);
+    expect(store.getJob('job-1')).toMatchObject({
+      publishState: 'quarantined',
+      artifactStagingPath: null,
+      artifactQuarantinePath: 'quarantine/job-1',
+      artifactSha256: null,
+    });
   });
 
   it.each([
@@ -1818,9 +1882,9 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('retains the staging source and fence across a cleanup crash window', async () => {
     const { ownership, store, path } = await fixture(); ownership.apiWrite(dispatch()); ownership.runnerWrite(lease(ACTIVE));
-    ownership.runnerWrite({ ...runnerBase(), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256: manifestHash('job-1'), verificationPath: 'staging/verify', verificationSha256: verificationHash('job-1') });
+    ownership.runnerWrite({ ...runnerBase(), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/job-1/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/job-1/sums', checksumSha256: checksumHash(), manifestPath: 'staging/job-1/manifest', manifestSha256: manifestHash('job-1'), verificationPath: 'staging/job-1/verify', verificationSha256: verificationHash('job-1') });
     const admission = cleanupAdmission(stagedSnapshot()); ownership.apiWrite(admission); ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: stagedSnapshot(), at: RECOVERY });
-    expect(store.getJob('job-1').artifactStagingPath).toBe('staging/image'); const db = openBuilderDatabase(path); expect((db.prepare('SELECT cleanup_fence_generation FROM jobs WHERE job_id=?').get('job-1') as { cleanup_fence_generation: number }).cleanup_fence_generation).toBe(1); db.close();
+    expect(store.getJob('job-1').artifactStagingPath).toBe('staging/job-1/image'); const db = openBuilderDatabase(path); expect((db.prepare('SELECT cleanup_fence_generation FROM jobs WHERE job_id=?').get('job-1') as { cleanup_fence_generation: number }).cleanup_fence_generation).toBe(1); db.close();
     expect(ownership.apiWrite({ kind: 'hand-back', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, at: RECOVERY, proof: { runner: stagedSnapshot().runner, container: absent(RECOVERY), blocker: 'none' } })).toMatchObject({ ok: false });
   });
 
@@ -1975,10 +2039,10 @@ describe('actor-owned compare-and-set writes', () => {
     expect(setup.ownership.cleanupWrite(complete).ok).toBe(true);
     const event = setup.store.listEvents('job-1').events.find((item) => item.eventType === 'cleanup_complete');
     expect(event?.payload).toMatchObject({ postcondition: { container: { kind: 'removed', id: 'container-job-1', exactIdAbsent: true, globalLabelResult: 'no-match', stoppedAt: NOW, removedAt: LATER, observedAt: RECOVERY } } });
-    const blocker = await fixture('cleanup-evidence'); blocker.ownership.apiWrite(dispatch('cleanup-evidence')); blocker.ownership.runnerWrite(lease(ACTIVE, 'cleanup-evidence')); blocker.ownership.runnerWrite({ ...container('cleanup-evidence'), at: NOW }); blocker.ownership.runnerWrite({ ...runnerBase('cleanup-evidence'), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256: manifestHash('cleanup-evidence'), verificationPath: 'staging/verify', verificationSha256: verificationHash('cleanup-evidence') });
+    const blocker = await fixture('cleanup-evidence'); blocker.ownership.apiWrite(dispatch('cleanup-evidence')); blocker.ownership.runnerWrite(lease(ACTIVE, 'cleanup-evidence')); blocker.ownership.runnerWrite({ ...container('cleanup-evidence'), at: NOW }); blocker.ownership.runnerWrite({ ...runnerBase('cleanup-evidence'), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/cleanup-evidence/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/cleanup-evidence/sums', checksumSha256: checksumHash(), manifestPath: 'staging/cleanup-evidence/manifest', manifestSha256: manifestHash('cleanup-evidence'), verificationPath: 'staging/cleanup-evidence/verify', verificationSha256: verificationHash('cleanup-evidence') });
     const evidenceSnapshot = { ...stagedSnapshot('cleanup-evidence'), container: snapshot('present', 'cleanup-evidence').container, blocker: 'container' as const }; const evidenceAdmission = cleanupAdmission(evidenceSnapshot, 'cleanup-evidence'); expect(blocker.ownership.apiWrite(evidenceAdmission).ok).toBe(true); blocker.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'cleanup-evidence', admissionId: evidenceAdmission.admissionId, owner: 'cleanup-a', unitName: evidenceAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: evidenceSnapshot, at: RECOVERY });
     expect(blocker.ownership.cleanupWrite({ kind: 'evidence', jobId: 'cleanup-evidence', admissionId: evidenceAdmission.admissionId, owner: 'cleanup-a', unitName: evidenceAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: evidenceSnapshot, status: 'blocking', blockerCode: 'QUARANTINE_PENDING', blocker: { reason: 'move failed' }, at: RECOVERY }).ok).toBe(true);
-    expect(blocker.store.getJob('cleanup-evidence').artifactStagingPath).toBe('staging/image'); expect(blocker.store.listEvents('cleanup-evidence').events.at(-1)?.eventType).toBe('cleanup');
+    expect(blocker.store.getJob('cleanup-evidence').artifactStagingPath).toBe('staging/cleanup-evidence/image'); expect(blocker.store.listEvents('cleanup-evidence').events.at(-1)?.eventType).toBe('cleanup');
   });
 
   it('requires complete publishing evidence for runner terminal and typed API recovery', async () => {
@@ -2748,7 +2812,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(renewCase.store.listEvents('rollback-renew-each').events).toHaveLength(renewEvents);
     { const db = openBuilderDatabase(renewCase.path); expect((db.prepare('SELECT expires_at FROM cleanup_leases WHERE admission_id=?').get(renewCase.admission.admissionId) as { expires_at: string }).expires_at).toBe(EXPIRY); db.close(); }
 
-    const evidenceCase = await fixture('rollback-evidence-each'); evidenceCase.ownership.apiWrite(dispatch('rollback-evidence-each')); evidenceCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-evidence-each')); evidenceCase.ownership.runnerWrite({ ...runnerBase('rollback-evidence-each'), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256: manifestHash('rollback-evidence-each'), verificationPath: 'staging/verify', verificationSha256: verificationHash('rollback-evidence-each') });
+    const evidenceCase = await fixture('rollback-evidence-each'); evidenceCase.ownership.apiWrite(dispatch('rollback-evidence-each')); evidenceCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-evidence-each')); evidenceCase.ownership.runnerWrite({ ...runnerBase('rollback-evidence-each'), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/rollback-evidence-each/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/rollback-evidence-each/sums', checksumSha256: checksumHash(), manifestPath: 'staging/rollback-evidence-each/manifest', manifestSha256: manifestHash('rollback-evidence-each'), verificationPath: 'staging/rollback-evidence-each/verify', verificationSha256: verificationHash('rollback-evidence-each') });
     const evidenceSnapshot = stagedSnapshot('rollback-evidence-each'); const evidenceAdmission = cleanupAdmission(evidenceSnapshot, 'rollback-evidence-each'); evidenceCase.ownership.apiWrite(evidenceAdmission);
     const evidenceClaim: CleanupWriteCommand = { kind: 'claim-lease', jobId: 'rollback-evidence-each', admissionId: evidenceAdmission.admissionId, owner: 'cleanup-a', unitName: evidenceAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: evidenceSnapshot, at: RECOVERY }; evidenceCase.ownership.cleanupWrite(evidenceClaim);
     const evidenceEvents = evidenceCase.store.listEvents('rollback-evidence-each').events.length;
