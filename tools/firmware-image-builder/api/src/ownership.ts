@@ -273,6 +273,7 @@ export type ApiWriteCommand =
   | Readonly<{ kind: 'direct-interrupt'; jobId: string; expectedState: ActiveRecoveryState; at: string; proof: DirectInterruptionProof; errorCode: BuilderErrorCode; error: JsonObject }>
   | Readonly<{ kind: 'publish-recovery'; jobId: string; expectedState: 'publishing'; at: string; state: 'succeeded' | 'failed'; evidence: PublishRecoveryEvidence; errorCode?: BuilderErrorCode; error?: JsonObject }>
   | Readonly<{ kind: 'cleanup-admission'; jobId: string; admissionId: string; owner: string; unitName: string; expiresAt: string; credentialRelativePath: string; credentialSha256: string; fenceTokenHash: string; snapshot: CleanupSnapshot; at: string }>
+  | Readonly<{ kind: 'cleanup-admission-rotate'; previousAdmissionId: string; jobId: string; admissionId: string; owner: string; unitName: string; expiresAt: string; credentialRelativePath: string; credentialSha256: string; fenceTokenHash: string; snapshot: CleanupSnapshot; at: string }>
   | Readonly<{ kind: 'hand-back'; jobId: string; admissionId: string; owner: string; unitName: string; fenceGeneration: number; fenceTokenHash: string; at: string; proof: HandBackProof }>;
 
 export type RunnerWriteCommand =
@@ -526,6 +527,7 @@ function validateApiCommand(command: ApiWriteCommand): void {
     case 'direct-interrupt': preparedCommon(value, 'API'); preparedEnum(value.expectedState, JOB_STATES, 'direct interruption expectedState'); shapeDirectProof(value.proof, value.at as string); preparedEnum(value.errorCode, BUILDER_ERROR_CODES, 'direct interruption errorCode'); preparedJsonObject(value.error, 'direct interruption error'); return;
     case 'publish-recovery': preparedCommon(value, 'API'); preparedEnum(value.expectedState, ['publishing'], 'publish recovery expectedState'); preparedEnum(value.state, ['succeeded', 'failed'], 'publish recovery state'); shapePublishEvidence(value.evidence, value.at as string); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'publish recovery errorCode'); preparedJsonObject(value.error, 'publish recovery error', true); return;
     case 'cleanup-admission': preparedCommon(value, 'API'); preparedString(value.admissionId, 'cleanup admission id', TEXT_LIMITS.maxIdentifierBytes); preparedString(value.owner, 'cleanup admission owner', TEXT_LIMITS.maxIdentifierBytes); preparedString(value.unitName, 'cleanup admission unit', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.expiresAt, 'cleanup admission expiry'); preparedPath(value.credentialRelativePath, 'cleanup credential path'); preparedHash(value.credentialSha256, 'cleanup credential SHA'); preparedHash(value.fenceTokenHash, 'cleanup fence token hash'); shapeCleanupSnapshot(value.snapshot, 'cleanup admission snapshot', value.at as string); return;
+    case 'cleanup-admission-rotate': preparedCommon(value, 'API'); preparedString(value.previousAdmissionId, 'previous cleanup admission id', TEXT_LIMITS.maxIdentifierBytes); preparedString(value.admissionId, 'cleanup admission id', TEXT_LIMITS.maxIdentifierBytes); preparedString(value.owner, 'cleanup admission owner', TEXT_LIMITS.maxIdentifierBytes); preparedString(value.unitName, 'cleanup admission unit', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.expiresAt, 'cleanup admission expiry'); preparedPath(value.credentialRelativePath, 'cleanup credential path'); preparedHash(value.credentialSha256, 'cleanup credential SHA'); preparedHash(value.fenceTokenHash, 'cleanup fence token hash'); shapeCleanupSnapshot(value.snapshot, 'cleanup admission snapshot', value.at as string); return;
     case 'hand-back': preparedCommon(value, 'API'); preparedString(value.admissionId, 'hand-back admission id'); preparedString(value.owner, 'hand-back owner'); preparedString(value.unitName, 'hand-back unit'); preparedHash(value.fenceTokenHash, 'hand-back fence token hash'); if (!Number.isSafeInteger(value.fenceGeneration) || Number(value.fenceGeneration) < 0) throw new OwnershipValidationError('hand-back fence generation is invalid'); shapeHandBackProof(value.proof, value.at as string); return;
     default: throw new OwnershipValidationError('API command kind is invalid');
   }
@@ -1778,7 +1780,7 @@ export class OwnershipStore {
   apiWrite(command: ApiWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as ApiWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['enqueue', 'dispatch', 'request-cancellation', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'cleanup-admission', 'hand-back'].includes(prepared.kind)) {
+    if (!['enqueue', 'dispatch', 'request-cancellation', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'cleanup-admission', 'cleanup-admission-rotate', 'hand-back'].includes(prepared.kind)) {
       throw new OwnershipViolationError('api', prepared.kind);
     }
     validateApiCommand(prepared);
@@ -1800,6 +1802,7 @@ export class OwnershipStore {
       case 'direct-interrupt': return this.#transaction(() => this.#directInterrupt(prepared));
       case 'publish-recovery': return this.#transaction(() => this.#publishRecovery(prepared));
       case 'cleanup-admission': return this.#transaction(() => this.#cleanupAdmission(prepared));
+      case 'cleanup-admission-rotate': return this.#transaction(() => this.#cleanupAdmissionRotate(prepared));
       case 'hand-back': return this.#transaction(() => this.#handBack(prepared));
     }
   }
@@ -2629,6 +2632,40 @@ export class OwnershipStore {
       WHERE job_id=? AND state=? AND ((runner_lease_expires_at IS NULL AND runner_lease_owner IS NULL) OR runner_lease_expires_at < ?) AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL`).run(generation, generation, command.fenceTokenHash, command.admissionId, command.at, command.jobId, row.state, command.at);
     if (Number(result.changes) !== 1) conflict('cas-lost', 'cleanup admission lost its fence CAS');
     this.#event(command.jobId, 'cleanup_admission', { admissionId: command.admissionId, generation }, command.at);
+  }
+
+  #cleanupAdmissionRotate(command: Extract<ApiWriteCommand, { kind: 'cleanup-admission-rotate' }>): void {
+    instant(command.at, 'admission rotation time'); instant(command.expiresAt, 'admission rotation expiry');
+    if (command.expiresAt <= command.at) conflict('stale-lease', 'cleanup admission expiry must be in the future');
+    if (!ADMISSION_ID.test(command.previousAdmissionId) || !ADMISSION_ID.test(command.admissionId) || command.previousAdmissionId === command.admissionId) throw new TypeError('cleanup admission rotation IDs are invalid');
+    cleanupUnit(command.admissionId, command.unitName); hash(command.credentialSha256, 'rotated credential SHA-256'); hash(command.fenceTokenHash, 'rotated fence token hash');
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [['cleanup admission rotation time', command.at]]);
+    requireChronology([['accepted time', String(row.accepted_at)], ['cleanup admission rotation time', command.at]]);
+    const snapshot = validateCleanupSnapshot(this.#db, command.snapshot, row, command.at);
+    const old = this.#db.prepare('SELECT status, fence_generation, fence_token_hash FROM cleanup_leases WHERE admission_id=? AND job_id=?').get(command.previousAdmissionId, command.jobId) as Row | undefined;
+    if (!old) conflict('admission-mismatch', 'previous cleanup admission does not exist');
+    if (row.cleanup_admission_id !== command.previousAdmissionId || row.cleanup_fence_generation !== Number(old.fence_generation) || row.cleanup_fence_token_hash !== old.fence_token_hash) conflict('admission-mismatch', 'previous cleanup admission is not the active fence');
+    if (!['admitted', 'claimed', 'failed', 'blocking'].includes(String(old.status))) conflict('admission-mismatch', 'previous cleanup admission is not rotatable');
+    if (this.#db.prepare('SELECT 1 FROM cleanup_leases WHERE admission_id=?').get(command.admissionId)) conflict('admission-mismatch', 'replacement cleanup admission already exists');
+    const generation = Number(row.cleanup_generation) + 1;
+    const expired = this.#db.prepare(`UPDATE cleanup_leases SET status='expired', claim_at=NULL, renew_at=NULL, blocker_code=NULL, blocker_json=NULL WHERE admission_id=? AND job_id=? AND status IN ('admitted','claimed','failed','blocking')`).run(command.previousAdmissionId, command.jobId);
+    if (Number(expired.changes) !== 1) conflict('cas-lost', 'previous cleanup admission expiry CAS lost');
+    const cleared = this.#db.prepare(`UPDATE jobs SET cleanup_fence_generation=NULL, cleanup_fence_token_hash=NULL, cleanup_admission_id=NULL, updated_at=? WHERE job_id=? AND cleanup_admission_id=? AND cleanup_fence_generation=? AND cleanup_fence_token_hash=?`).run(command.at, command.jobId, command.previousAdmissionId, Number(old.fence_generation), old.fence_token_hash);
+    if (Number(cleared.changes) !== 1) conflict('cas-lost', 'previous cleanup fence clear CAS lost');
+    const proof = persistCleanupSnapshot(this.#db, command.jobId, command.snapshot);
+    this.#db.prepare(`INSERT INTO cleanup_leases (admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256,
+      fence_generation, fence_token_hash, stale_runner_unit, stale_runner_owner, stale_runner_lease_expires_at, stale_state, stale_container_id, stale_container_name,
+      stale_container_labels_json, proof_json, admitted_at) VALUES (?, ?, ?, ?, ?, 'admitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      command.admissionId, command.jobId, command.unitName, command.owner, command.expiresAt, command.credentialRelativePath, command.credentialSha256,
+      generation, command.fenceTokenHash, row.runner_unit, row.runner_lease_owner, row.runner_lease_expires_at, row.state, row.container_id, row.container_name, row.container_labels_json, proof, command.at,
+    );
+    const installed = this.#db.prepare(`UPDATE jobs SET cleanup_generation=?, cleanup_fence_generation=?, cleanup_fence_token_hash=?, cleanup_admission_id=?, updated_at=?
+      WHERE job_id=? AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL`).run(generation, generation, command.fenceTokenHash, command.admissionId, command.at, command.jobId);
+    if (Number(installed.changes) !== 1) {
+      conflict('cas-lost', 'replacement cleanup fence CAS lost');
+    }
+    this.#event(command.jobId, 'cleanup_admission', { admissionId: command.admissionId, generation, rotatedFrom: command.previousAdmissionId }, command.at);
   }
 
   #handBack(command: Extract<ApiWriteCommand, { kind: 'hand-back' }>): void {
