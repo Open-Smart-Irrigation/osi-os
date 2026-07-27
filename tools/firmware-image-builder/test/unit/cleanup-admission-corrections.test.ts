@@ -217,6 +217,22 @@ describe('Task 20 cleanup admission corrections', () => {
     expect(writes.filter((command) => (command as { kind?: string }).kind === 'cleanup-admission-rotate')).toHaveLength(0);
   });
 
+  it('restarts an inactive unexpired admitted lease with a valid credential without rotating', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-admitted-fresh-')); roots.push(root);
+    const events: string[] = [];
+    const active = { value: false };
+    const { recovery, writes } = fakeRecovery({ root, events, active });
+    await recovery.openAdmissions();
+    const first = await recovery.admitAndStart({ jobId: 'job-admitted-fresh', owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-admitted-fresh'), at: NOW });
+    active.value = false;
+
+    const result = await recovery.reconcileAndStart({ jobId: 'job-admitted-fresh', admissionId: first.admissionId, owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-admitted-fresh'), at: NOW });
+    expect(result).toMatchObject({ admissionId: first.admissionId, generation: first.generation, rotated: false, started: true });
+    expect(events.filter((event) => event.startsWith('stop:'))).toHaveLength(0);
+    expect(events.filter((event) => event.startsWith('start:'))).toHaveLength(2);
+    expect(writes.filter((command) => (command as { kind?: string }).kind === 'cleanup-admission-rotate')).toHaveLength(0);
+  });
+
   it('rotates an inactive unexpired lease as an unexpected exit instead of restarting its old fence', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-inactive-fresh-')); roots.push(root);
     const events: string[] = [];
@@ -348,15 +364,9 @@ describe('Task 20 cleanup admission corrections', () => {
     const outside = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-outside-')); roots.push(outside);
     const base = createRecoveryFileSystem();
     let phase: 'create' | 'read' | 'prune' | null = 'create';
-    let readSwapped = false;
     const wrap = (directory: RecoveryDirectoryHandle, path: string): RecoveryDirectoryHandle => ({
       ...directory,
       async openDirectoryChild(name) {
-        if (readSwapped && path.endsWith('/recovery') && name === 'cleanup-credentials') {
-          await unlink(join(path, name));
-          await rename(join(path, `${name}-held`), join(path, name));
-          readSwapped = false;
-        }
         const child = await directory.openDirectoryChild(name);
         if (phase === 'create' && path === join(root, 'jobs') && name === 'job-descriptor') {
           await rename(join(path, name), join(path, `${name}-held`));
@@ -365,8 +375,6 @@ describe('Task 20 cleanup admission corrections', () => {
         if (phase === 'read' && path.endsWith('/recovery') && name === 'cleanup-credentials') {
           await rename(join(path, name), join(path, `${name}-held`));
           await symlink(outside, join(path, name));
-          readSwapped = true;
-          phase = null;
         }
         if (phase === 'prune' && path.endsWith('/recovery') && name === 'cleanup-credentials') {
           await rename(join(path, name), join(path, `${name}-held`));
@@ -397,13 +405,16 @@ describe('Task 20 cleanup admission corrections', () => {
     });
     await readRecovery.recovery.openAdmissions();
     phase = 'read';
-    await expect(readRecovery.recovery.reconcileAndStart({ jobId: 'job-descriptor', admissionId: admission.admissionId, owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-descriptor'), at: NOW })).resolves.toMatchObject({ rotated: true });
+    await expect(readRecovery.recovery.reconcileAndStart({ jobId: 'job-descriptor', admissionId: admission.admissionId, owner: 'api', expiresAt: EXPIRES, snapshot: snapshot('job-descriptor'), at: NOW })).resolves.toMatchObject({ rotated: false });
     expect(await (await import('node:fs/promises')).readdir(outside)).toEqual([]);
+    await unlink(join(root, 'jobs', 'job-descriptor', 'recovery', 'cleanup-credentials'));
+    await rename(join(root, 'jobs', 'job-descriptor', 'recovery', 'cleanup-credentials-held'), join(root, 'jobs', 'job-descriptor', 'recovery', 'cleanup-credentials'));
+
     phase = 'prune';
     const orphanPath = join(root, 'jobs', 'job-descriptor', 'recovery', 'cleanup-credentials', 'cln_00000000000000000000000000.token');
     await writeFile(orphanPath, 'orphan\n', { mode: 0o600 });
     const pruneRecovery = fakeRecovery({ root, fileSystem, lease: first.getLease(), generation: 1 });
-    await expect(pruneRecovery.recovery.pruneOrphanCredentials()).resolves.toBe(2);
+    await expect(pruneRecovery.recovery.pruneOrphanCredentials()).resolves.toBe(1);
     await expect(stat(join(outside, 'cln_00000000000000000000000000.token'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 

@@ -609,13 +609,31 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       await stopAndConfirmInactive(oldUnit);
       stopped = true;
     }
+    let credentialValid = true;
     if (retry === null) {
       try { await readCredential(input.jobId, old); }
       catch (error) {
         if (!(error instanceof CleanupCredentialInvalidError)) throw error;
+        credentialValid = false;
       }
     } else if (expected.previousBlockerCode !== retry.expectedBlockerCode || JSON.stringify(expected.previousBlocker) !== JSON.stringify(retry.expectedBlocker)) {
       throw new RecoveryBoundaryError('corrected cleanup retry blocker does not match persisted evidence');
+    }
+    if (retry === null && credentialValid && expected.previousStatus === 'admitted' && oldUnexpired) {
+      await ensurePredecessorStillMatches(input.jobId, expected);
+      if (await options.systemd.isActive(oldUnit)) {
+        throw new RecoveryBoundaryError('cleanup worker became active during recovery');
+      }
+      await start(oldUnit);
+      return {
+        admissionId: expected.previousAdmissionId,
+        generation: expected.previousFenceGeneration,
+        unitName: oldUnit,
+        credentialRelativePath: String(old.credential_relative_path),
+        credentialSha256: String(old.credential_sha256),
+        rotated: false,
+        started: true,
+      };
     }
     await ensurePredecessorStillMatches(input.jobId, expected);
     if (await options.systemd.isActive(oldUnit)) {
