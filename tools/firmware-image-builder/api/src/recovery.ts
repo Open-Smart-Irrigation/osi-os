@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import {
+  ACTIVE_RECOVERY_STATES,
   ADMISSION_ID_PATTERN,
   CLEANUP_CREDENTIAL_TOKEN_MAX_CHARS,
   CLEANUP_CREDENTIAL_TOKEN_MIN_CHARS,
@@ -13,12 +14,15 @@ import {
 import type {
   CleanupAdmissionPredecessor,
   CleanupAdmissionPredecessorStatus,
+  CleanupPostcondition,
   CleanupSnapshot,
   OwnershipResult,
   ApiWriteCommand,
+  HandBackProof,
   OwnershipStore,
 } from './ownership.js';
 import type { JsonObject } from './store.js';
+import { canonicalInstant } from './validation.js';
 
 export { ADMISSION_ID_PATTERN } from '../../domain/types.js';
 const ADMISSION_BODY_PATTERN = /^[0-7][0-9a-hj-km-np-tv-z]{25}$/;
@@ -27,11 +31,15 @@ const CREDENTIAL_DIRECTORY = 'recovery/cleanup-credentials';
 const FILE_MODE = 0o600;
 const DIRECTORY_MODE = 0o700;
 const MAX_CREDENTIAL_BYTES = 16 * 1024;
+const HASH64 = /^[0-9a-f]{64}$/;
 const CROCKFORD = '0123456789abcdefghjkmnpqrstvwxyz';
 const ULID_TIMESTAMP_MAX = 0xffffffffffffn;
 const RESERVATION_MIN_HOLD_MS = 5 * 60 * 1000;
 const STOP_AUTHORIZATION_HOLD_MS = 30 * 1000;
 const STOP_AUTHORIZATION_ATTEMPT_PATTERN = /^sta_[a-f0-9]{32}$/;
+const HAND_BACK_ACTIVE_STATES = new Set<string>(ACTIVE_RECOVERY_STATES);
+const MAX_LOG_GENERATIONS = 128;
+const MAX_LOG_EVENTS = 8_192;
 
 export interface RecoveryStats {
   readonly uid: number;
@@ -75,6 +83,37 @@ export interface RecoverySystemd {
   readonly stop?: (unit: string) => Promise<void>;
 }
 
+export interface RecoveryDockerObservation {
+  readonly id: string;
+  readonly labels: JsonObject;
+}
+
+export interface RecoveryDocker {
+  readonly inspect: (containerId: string) => Promise<RecoveryDockerObservation | null>;
+  readonly listByLabels: (labels: JsonObject) => Promise<readonly RecoveryDockerObservation[]>;
+}
+
+export interface RecoveryCleanupEvidence {
+  readonly jobId: string;
+  readonly admissionId: string;
+  readonly sha256: string;
+  readonly postcondition: CleanupPostcondition;
+}
+
+export interface RecoveryCleanupEvidenceReader {
+  readonly read: (input: Readonly<{ jobId: string; admissionId: string; path: string; sha256: string }>) => Promise<RecoveryCleanupEvidence>;
+}
+
+export interface RecoveryStagingVerifier {
+  readonly verify: (input: Readonly<{ jobId: string; admissionId: string; postcondition: CleanupPostcondition['staging'] }>) => Promise<boolean | void>;
+}
+
+export interface RecoveryHandBackDependencies {
+  readonly docker: RecoveryDocker;
+  readonly evidence: RecoveryCleanupEvidenceReader;
+  readonly staging: RecoveryStagingVerifier;
+}
+
 export interface RecoveryClock {
   readonly now: () => string;
 }
@@ -93,6 +132,7 @@ export interface CleanupAdmissionRecoveryOptions {
   readonly db: DatabaseSync | RecoveryDatabase;
   readonly ownership: Pick<OwnershipStore, 'apiWrite'>;
   readonly systemd: RecoverySystemd;
+  readonly handBack?: RecoveryHandBackDependencies;
   readonly fileSystem?: RecoveryFileSystem;
   readonly crypto?: Partial<RecoveryCrypto>;
   readonly clock?: RecoveryClock;
@@ -129,10 +169,26 @@ export interface CleanupAdmissionResult {
   readonly started: true;
 }
 
+export interface CompletedCleanupInput {
+  readonly jobId: string;
+  readonly admissionId: string;
+  readonly at?: string;
+}
+
+export interface CleanupHandBackResult {
+  readonly jobId: string;
+  readonly admissionId: string;
+  readonly state: 'interrupted' | 'already-interrupted';
+  readonly handedBack: boolean;
+  readonly started: false;
+}
+
 export interface CleanupAdmissionRecovery {
   readonly admitAndStart: (input: CleanupAdmissionInput) => Promise<CleanupAdmissionResult>;
   readonly reconcileAndStart: (input: ReconcileAdmissionInput) => Promise<CleanupAdmissionResult>;
   readonly retryCorrectedAndStart: (input: CorrectedRetryAdmissionInput) => Promise<CleanupAdmissionResult>;
+  readonly handBackCompleted: (input: CompletedCleanupInput) => Promise<CleanupHandBackResult>;
+  readonly reconcileCompletedAdmissions: () => Promise<readonly CleanupHandBackResult[]>;
   readonly openAdmissions: () => Promise<void>;
   readonly pruneOrphanCredentials: () => Promise<number>;
 }
@@ -336,6 +392,102 @@ async function closeHandles(handles: readonly RecoveryFileHandle[]): Promise<voi
     try { await handle.close(); } catch (error) { firstError ??= error; }
   }
   if (firstError !== undefined) throw firstError;
+}
+
+function databaseAll(db: DatabaseSync | RecoveryDatabase, sql: string, ...parameters: readonly unknown[]): readonly Record<string, unknown>[] {
+  const statement = db.prepare(sql);
+  if (typeof statement.all !== 'function') return [];
+  return statement.all(...(parameters as any[])) as readonly Record<string, unknown>[];
+}
+
+function requiredRowString(row: Record<string, unknown>, field: string): string {
+  if (typeof row[field] !== 'string' || row[field] === '') throw new RecoveryBoundaryError(`persisted recovery ${field} is invalid`);
+  return row[field] as string;
+}
+
+function nullableRowString(row: Record<string, unknown>, field: string): string | null {
+  if (row[field] === null || row[field] === undefined) return null;
+  return requiredRowString(row, field);
+}
+
+function jsonRecord(value: unknown, field: string): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RecoveryBoundaryError(`${field} is not an object`);
+  return value as Record<string, unknown>;
+}
+
+function parseJsonRecord(value: unknown, field: string): Record<string, unknown> {
+  try { return jsonRecord(JSON.parse(String(value)), field); }
+  catch (error) { throw new RecoveryBoundaryError(`${field} is corrupt`, { cause: error }); }
+}
+
+function cleanupEvidencePath(path: string, jobId: string): string {
+  const parts = path.split('/');
+  if (parts.length < 5 || parts[0] !== 'jobs' || parts[1] !== jobId || parts[2] !== 'evidence' || parts[3] !== 'cleanup' || parts.some((part) => part.length === 0)) throw new RecoveryBoundaryError('cleanup evidence path is outside the fixed job evidence directory');
+  for (const part of parts.slice(1)) safeSegment(part, 'cleanup evidence path segment');
+  return path;
+}
+
+function notFuture(value: unknown, at: string, field: string): void {
+  const instant = canonicalInstant(value, field);
+  const upperBound = canonicalInstant(at, `${field} upper bound`);
+  if (instant > upperBound) throw new RecoveryBoundaryError(`${field} is invalid or from the future`);
+}
+
+function cleanupIdentityIsNull(row: Record<string, unknown>): boolean {
+  return [
+    'container_id', 'container_name', 'container_image_digest', 'container_label_job_id',
+    'container_label_manifest_sha', 'container_labels_json', 'container_mount_json',
+    'container_env_json', 'container_security_json', 'container_inspection_json',
+    'container_created_at', 'container_started_at', 'container_stopped_at',
+    'container_removed_at', 'container_cleanup_outcome',
+  ].every((field) => row[field] === null || row[field] === undefined);
+}
+
+function verifyLogContinuity(db: DatabaseSync | RecoveryDatabase, jobId: string, logs: CleanupPostcondition['logs'], at: string): void {
+  const generations = databaseAll(db, 'SELECT stream, generation, started_at, size_bytes, sealed_at, sha256 FROM job_log_generations WHERE job_id=? ORDER BY stream, generation LIMIT ?', jobId, MAX_LOG_GENERATIONS + 1);
+  const events = databaseAll(db, `SELECT stream, file_generation, seq, event_type, at, byte_offset, byte_length, partial
+    FROM job_events WHERE job_id=? AND stream IS NOT NULL ORDER BY stream, file_generation, seq LIMIT ?`, jobId, MAX_LOG_EVENTS + 1);
+  if (generations.length > MAX_LOG_GENERATIONS || events.length > MAX_LOG_EVENTS) throw new RecoveryBoundaryError('cleanup log evidence exceeds the bounded recovery limit');
+  if (generations.some((row) => row.stream !== 'runner' && row.stream !== 'docker') || events.some((row) => row.stream !== 'runner' && row.stream !== 'docker')) throw new RecoveryBoundaryError('cleanup log evidence has an invalid stream');
+  for (const stream of ['runner', 'docker'] as const) {
+    const streamGenerations = generations.filter((row) => row.stream === stream);
+    const streamEvents = events.filter((candidate) => candidate.stream === stream);
+    if (logs[stream] === 'absent') {
+      if (streamGenerations.length !== 0 || streamEvents.length !== 0) throw new RecoveryBoundaryError(`${stream} cleanup logs are present but evidence says absent`);
+      continue;
+    }
+    if (streamGenerations.length === 0) throw new RecoveryBoundaryError(`${stream} cleanup logs are not indexed`);
+    let expectedGeneration = 0;
+    for (const generation of streamGenerations) {
+      if (generation.sealed_at === null || generation.sealed_at === undefined) throw new RecoveryBoundaryError(`${stream} cleanup log generation is not sealed`);
+      const generationNumber = Number(generation.generation);
+      const size = Number(generation.size_bytes);
+      if (!Number.isSafeInteger(generationNumber) || generationNumber < 0 || !Number.isSafeInteger(size) || size < 0) throw new RecoveryBoundaryError(`${stream} cleanup log generation metadata is invalid`);
+      if (generationNumber !== expectedGeneration || typeof generation.sha256 !== 'string' || !HASH64.test(generation.sha256)) throw new RecoveryBoundaryError(`${stream} cleanup log generations are not contiguous and sealed`);
+      const startedAt = canonicalInstant(generation.started_at, `${stream} cleanup log start time`);
+      const sealedAt = canonicalInstant(generation.sealed_at, `${stream} cleanup log seal time`);
+      if (sealedAt < startedAt || sealedAt > at) throw new RecoveryBoundaryError(`${stream} cleanup log seal chronology is invalid`);
+      expectedGeneration += 1;
+      let offset = 0;
+      let previousSequence = -1;
+      for (const event of streamEvents.filter((candidate) => Number(candidate.file_generation) === generationNumber)) {
+        const sequence = Number(event.seq);
+        const eventOffset = Number(event.byte_offset);
+        const length = Number(event.byte_length);
+        const partial = Number(event.partial);
+        const eventAt = canonicalInstant(event.at, `${stream} cleanup log event time`);
+        if (!Number.isSafeInteger(sequence) || sequence <= previousSequence || !Number.isSafeInteger(eventOffset) || !Number.isSafeInteger(length) || length <= 0 || eventOffset !== offset || eventOffset + length > size || !Number.isSafeInteger(partial) || partial !== 0 && partial !== 1 || eventAt < startedAt || eventAt > sealedAt) {
+          throw new RecoveryBoundaryError(`${stream} cleanup log ranges are not contiguous`);
+        }
+        if (!['log', 'log_orphan_tail', 'log-truncated', 'log-gap'].includes(String(event.event_type)) || event.event_type === 'log-gap') throw new RecoveryBoundaryError(`${stream} cleanup logs contain invalid or gap evidence`);
+        previousSequence = sequence;
+        offset += length;
+      }
+      if (offset !== size) throw new RecoveryBoundaryError(`${stream} cleanup log ranges do not cover the sealed file`);
+    }
+    if (streamEvents.some((event) => !streamGenerations.some((generation) => Number(generation.generation) === Number(event.file_generation)))) throw new RecoveryBoundaryError(`${stream} cleanup log event references an unknown generation`);
+  }
+  if (generations.some((row) => row.sealed_at === null || row.sealed_at === undefined)) throw new RecoveryBoundaryError('cleanup logs retain an unsealed generation');
 }
 
 export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecoveryOptions): CleanupAdmissionRecovery {
@@ -672,6 +824,143 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
 
   function replacementResult(admissionId: string, generation: number, unitName: string, credential: { readonly relativePath: string; readonly sha256: string }, rotated: boolean): CleanupAdmissionResult {
     return { admissionId, generation, unitName, credentialRelativePath: credential.relativePath, credentialSha256: credential.sha256, rotated, started: true };
+  }
+
+  async function handBackCompleted(input: CompletedCleanupInput): Promise<CleanupHandBackResult> {
+    requireAdmissionsOpen();
+    safeSegment(input.jobId, 'job ID');
+    if (!ADMISSION_ID_PATTERN.test(input.admissionId)) throw new RecoveryBoundaryError('cleanup admission ID is invalid');
+    return withJobLock(input.jobId, async () => {
+      const at = canonicalInstant(input.at ?? clock.now(), 'cleanup hand-back time');
+      const lease = dbLease(input.admissionId, input.jobId);
+      if (lease === null) throw new RecoveryBoundaryError('completed cleanup admission does not exist');
+      const status = requiredRowString(lease, 'status');
+      const job = options.db.prepare('SELECT * FROM jobs WHERE job_id=?').get(input.jobId) as Record<string, unknown> | undefined;
+      if (job === undefined) throw new RecoveryBoundaryError('cleanup hand-back job does not exist');
+      const jobState = requiredRowString(job, 'state');
+      if (status === 'handed_back') {
+        if (jobState !== 'interrupted') throw new RecoveryBoundaryError('handed-back cleanup admission has a non-terminal job state');
+        return { jobId: input.jobId, admissionId: input.admissionId, state: 'already-interrupted', handedBack: false, started: false };
+      }
+      if (status !== 'completed') throw new RecoveryBoundaryError('cleanup admission is not completed');
+      const dependencies = options.handBack;
+      if (dependencies === undefined) throw new RecoveryBoundaryError('cleanup hand-back verification dependencies are unavailable');
+
+      const owner = requiredRowString(lease, 'owner');
+      const unitName = exactUnit(input.admissionId, lease.unit_name);
+      const fenceGeneration = Number(lease.fence_generation);
+      if (!Number.isSafeInteger(fenceGeneration) || fenceGeneration <= 0) throw new RecoveryBoundaryError('completed cleanup fence generation is invalid');
+      const fenceTokenHash = requiredRowString(lease, 'fence_token_hash');
+      const evidencePath = cleanupEvidencePath(requiredRowString(lease, 'completion_evidence_path'), input.jobId);
+      const evidenceSha256 = requiredRowString(lease, 'completion_evidence_sha256');
+      if (!HASH64.test(fenceTokenHash) || !HASH64.test(evidenceSha256)) throw new RecoveryBoundaryError('completed cleanup hashes are invalid');
+      const persistedSnapshot = parseJsonRecord(requiredRowString(lease, 'proof_json'), 'cleanup admission proof') as unknown as CleanupSnapshot;
+      const runnerUnit = requiredRowString(job, 'runner_unit');
+      const staleRunnerUnit = requiredRowString(lease, 'stale_runner_unit');
+      if (runnerUnit !== staleRunnerUnit || persistedSnapshot.runner.unit !== runnerUnit || persistedSnapshot.state !== jobState || lease.stale_state !== jobState) throw new RecoveryBoundaryError('completed cleanup runner or state evidence does not match the job');
+      const runnerOwner = nullableRowString(job, 'runner_lease_owner');
+      const runnerLeaseExpiresAt = nullableRowString(job, 'runner_lease_expires_at');
+      if (persistedSnapshot.runner.owner !== runnerOwner || persistedSnapshot.runner.leaseExpiresAt !== runnerLeaseExpiresAt || nullableRowString(lease, 'stale_runner_owner') !== runnerOwner || nullableRowString(lease, 'stale_runner_lease_expires_at') !== runnerLeaseExpiresAt) throw new RecoveryBoundaryError('completed cleanup runner lease evidence does not match the job');
+      if (runnerLeaseExpiresAt !== null && canonicalInstant(runnerLeaseExpiresAt, 'cleanup runner lease expiry') >= at) throw new RecoveryBoundaryError('runner lease is not stale for cleanup hand-back');
+      if (runnerOwner === null && runnerLeaseExpiresAt !== null) throw new RecoveryBoundaryError('runner lease owner and expiry are incomplete');
+      if (runnerOwner !== null && runnerLeaseExpiresAt === null) throw new RecoveryBoundaryError('runner lease owner and expiry are incomplete');
+      if (job.cleanup_admission_id !== input.admissionId || Number(job.cleanup_fence_generation) !== fenceGeneration || job.cleanup_fence_token_hash !== fenceTokenHash) throw new RecoveryBoundaryError('completed cleanup fence does not match the job');
+      if (job.cleanup_blocker_code !== null || job.cleanup_blocker_json !== null || lease.blocker_code !== null || lease.blocker_json !== null) throw new RecoveryBoundaryError('cleanup blocker is not resolved');
+      if (!cleanupIdentityIsNull(job)) throw new RecoveryBoundaryError('cleanup CAS did not clear the active container identity');
+      if (!HAND_BACK_ACTIVE_STATES.has(jobState) && jobState !== 'interrupted') throw new RecoveryBoundaryError(`job state is not eligible for cleanup hand-back: ${jobState}`);
+
+      const completionEvent = options.db.prepare("SELECT payload_json FROM job_events WHERE job_id=? AND event_type='cleanup_complete' ORDER BY seq DESC LIMIT 1").get(input.jobId) as Record<string, unknown> | undefined;
+      if (completionEvent === undefined) throw new RecoveryBoundaryError('cleanup completion event is missing');
+      const completionPayload = parseJsonRecord(completionEvent.payload_json, 'cleanup completion evidence');
+      if (completionPayload.admissionId !== input.admissionId || completionPayload.evidencePath !== evidencePath) throw new RecoveryBoundaryError('cleanup completion event does not match the durable admission evidence');
+      const eventPostcondition = jsonRecord(completionPayload.postcondition, 'cleanup completion postcondition') as unknown as CleanupPostcondition;
+      if (eventPostcondition.blocker !== 'none' || eventPostcondition.state !== persistedSnapshot.state || stableJson(eventPostcondition.runner) !== stableJson(persistedSnapshot.runner)) throw new RecoveryBoundaryError('cleanup completion postcondition does not match its admission');
+      const evidence = await dependencies.evidence.read({ jobId: input.jobId, admissionId: input.admissionId, path: evidencePath, sha256: evidenceSha256 });
+      if (evidence.jobId !== input.jobId || evidence.admissionId !== input.admissionId || evidence.sha256 !== evidenceSha256 || stableJson(evidence.postcondition) !== stableJson(eventPostcondition)) throw new RecoveryBoundaryError('cleanup completion file does not match the durable cleanup CAS evidence');
+      const postcondition = evidence.postcondition;
+      notFuture(postcondition.runner.inactiveAt, at, 'cleanup runner inactivity evidence');
+      notFuture(postcondition.runner.observedAt, at, 'cleanup runner observation evidence');
+      notFuture(postcondition.logs.verifiedAt, at, 'cleanup log evidence');
+      if ((postcondition.logs.runner !== 'absent' && postcondition.logs.runner !== 'sealed') || (postcondition.logs.docker !== 'absent' && postcondition.logs.docker !== 'sealed')) throw new RecoveryBoundaryError('cleanup log evidence state is invalid');
+      notFuture(postcondition.staging.verifiedAt, at, 'cleanup staging evidence');
+      if (postcondition.staging.sourcePath !== `staging/${input.jobId}` || postcondition.staging.sourceAbsent !== true) throw new RecoveryBoundaryError('cleanup staging evidence is not bound to the fixed job path');
+      if (postcondition.staging.kind === 'absent') {
+        if (postcondition.staging.path !== null) throw new RecoveryBoundaryError('cleanup staging absence evidence is invalid');
+      } else if (postcondition.staging.kind === 'quarantined') {
+        if (postcondition.staging.destinationPath !== `quarantine/${input.jobId}` || postcondition.staging.destinationPresent !== true) throw new RecoveryBoundaryError('cleanup quarantine evidence is not bound to the fixed job path');
+      } else throw new RecoveryBoundaryError('cleanup staging evidence state is invalid');
+      const postContainer = postcondition.container;
+      notFuture(postContainer.observedAt, at, 'cleanup container absence evidence');
+      const exactContainerId = nullableRowString(lease, 'stale_container_id');
+      if (exactContainerId === null) {
+        if (persistedSnapshot.container.kind !== 'absent' || nullableRowString(lease, 'stale_container_name') !== null || nullableRowString(lease, 'stale_container_labels_json') !== null || postContainer.kind !== 'null-identity' || postContainer.dockerAction !== 'none' || postContainer.globalLabelResult !== 'no-match') throw new RecoveryBoundaryError('cleanup completion container proof does not match null identity');
+      } else {
+        if ((postContainer.kind !== 'removed' && postContainer.kind !== 'already-absent') || postContainer.id !== exactContainerId || postContainer.exactIdAbsent !== true || postContainer.globalLabelResult !== 'no-match') throw new RecoveryBoundaryError('cleanup completion container proof does not match the persisted identity');
+        if (persistedSnapshot.container.kind !== 'present' || persistedSnapshot.container.id !== exactContainerId || postContainer.name !== persistedSnapshot.container.name || postContainer.imageDigest !== persistedSnapshot.container.imageDigest || stableJson(postContainer.labels) !== stableJson(persistedSnapshot.container.labels) || nullableRowString(lease, 'stale_container_name') !== persistedSnapshot.container.name || stableJson(parseJsonRecord(requiredRowString(lease, 'stale_container_labels_json'), 'stale container labels')) !== stableJson(persistedSnapshot.container.labels)) throw new RecoveryBoundaryError('cleanup completion container proof does not match the persisted identity');
+        if (postContainer.kind === 'already-absent' && postContainer.dockerAction !== 'none') throw new RecoveryBoundaryError('already-absent cleanup proof claims a Docker action');
+        if (postContainer.kind === 'removed') {
+          notFuture(postContainer.stoppedAt, at, 'cleanup container stop evidence');
+          notFuture(postContainer.removedAt, at, 'cleanup container removal evidence');
+          if (postContainer.removedAt < postContainer.stoppedAt || postContainer.observedAt < postContainer.removedAt) throw new RecoveryBoundaryError('cleanup container chronology is invalid');
+        }
+      }
+      verifyLogContinuity(options.db, input.jobId, postcondition.logs, at);
+      if ((await dependencies.staging.verify({ jobId: input.jobId, admissionId: input.admissionId, postcondition: postcondition.staging })) === false) throw new RecoveryBoundaryError('cleanup staging postcondition is not verified');
+
+      if (exactContainerId !== null && await dependencies.docker.inspect(exactContainerId) !== null) throw new RecoveryBoundaryError('exact persisted container is still present');
+      const targetManifestSha = requiredRowString(job, 'target_manifest_sha256');
+      const labels = { 'org.osi.image-builder.job-id': input.jobId, 'org.osi.image-builder.manifest-sha': targetManifestSha } satisfies JsonObject;
+      if ((await dependencies.docker.listByLabels(labels)).length !== 0) throw new RecoveryBoundaryError('global Docker label query is not empty');
+      if (await options.systemd.isActive(unitName)) throw new RecoveryBoundaryError('cleanup unit is still active during hand-back');
+      if (await options.systemd.isActive(runnerUnit)) throw new RecoveryBoundaryError('stale runner unit is still active during hand-back');
+      const runnerProof = {
+        unit: runnerUnit,
+        owner: runnerOwner,
+        leaseExpiresAt: runnerLeaseExpiresAt,
+        inactiveAt: at,
+        observedAt: at,
+      } satisfies HandBackProof['runner'];
+      const proof: HandBackProof = {
+        runner: runnerProof,
+        container: { kind: 'absent', globalLabelResult: 'no-match', observedAt: at },
+        blocker: 'none',
+      };
+      ownershipCommandResult(options.ownership.apiWrite({
+        kind: 'hand-back',
+        jobId: input.jobId,
+        admissionId: input.admissionId,
+        owner,
+        unitName,
+        fenceGeneration,
+        fenceTokenHash,
+        at,
+        proof,
+      }));
+      return { jobId: input.jobId, admissionId: input.admissionId, state: HAND_BACK_ACTIVE_STATES.has(jobState) ? 'interrupted' : 'already-interrupted', handedBack: true, started: false };
+    });
+  }
+
+  function completedAdmissionRows(): readonly Record<string, unknown>[] {
+    return databaseAll(options.db, "SELECT admission_id, job_id FROM cleanup_leases WHERE status='completed' ORDER BY complete_at, admission_id");
+  }
+
+  async function reconcileCompletedAdmissions(): Promise<readonly CleanupHandBackResult[]> {
+    requireAdmissionsOpen();
+    const results: CleanupHandBackResult[] = [];
+    for (const row of completedAdmissionRows()) {
+      results.push(await handBackCompleted({ jobId: requiredRowString(row, 'job_id'), admissionId: requiredRowString(row, 'admission_id') }));
+    }
+    return results;
+  }
+
+  async function reconcileCompletedAdmissionsAtStartup(): Promise<void> {
+    for (const row of completedAdmissionRows()) {
+      try {
+        await handBackCompleted({ jobId: requiredRowString(row, 'job_id'), admissionId: requiredRowString(row, 'admission_id') });
+      } catch (error) {
+        if (!(error instanceof RecoveryBoundaryError)) throw error;
+      }
+    }
   }
 
   async function admitAndStart(input: CleanupAdmissionInput): Promise<CleanupAdmissionResult> {
@@ -1031,6 +1320,12 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       if (admissionsOpen) return;
       await pruneInternal();
       admissionsOpen = true;
+      try {
+        await reconcileCompletedAdmissionsAtStartup();
+      } catch (error) {
+        admissionsOpen = false;
+        throw error;
+      }
     });
   }
 
@@ -1041,5 +1336,5 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     });
   }
 
-  return { admitAndStart, reconcileAndStart, retryCorrectedAndStart, openAdmissions, pruneOrphanCredentials };
+  return { admitAndStart, reconcileAndStart, retryCorrectedAndStart, handBackCompleted, reconcileCompletedAdmissions, openAdmissions, pruneOrphanCredentials };
 }
