@@ -155,8 +155,18 @@ WHEN NOT EXISTS (
     AND json_extract(event.payload_json, '$.authorizationOwner') = NEW.authorization_owner
     AND json_extract(event.payload_json, '$.outcomeState') = NEW.outcome_state
     AND json_extract(event.payload_json, '$.outcome') = json(NEW.outcome_json)
+    AND event.at = NEW.observed_at
     AND json_extract(NEW.outcome_json, '$.unitName') = NEW.unit_name
     AND json_extract(NEW.outcome_json, '$.observedAt') = NEW.observed_at
+    AND (
+      (NEW.outcome_state = 'consumed'
+        AND NEW.observed_at >= attempt.authorization_at
+        AND NEW.observed_at < attempt.authorization_expires_at)
+      OR (NEW.outcome_state = 'failed'
+        AND NEW.observed_at >= attempt.authorization_at)
+      OR (NEW.outcome_state = 'orphaned'
+        AND NEW.observed_at >= attempt.authorization_expires_at)
+    )
     AND (
       (NEW.outcome_state = 'consumed'
         AND json_extract(NEW.outcome_json, '$.kind') = 'cleanup-stop-observation'
@@ -269,6 +279,12 @@ WHEN NOT EXISTS (
 )
 BEGIN
   SELECT RAISE(ABORT, 'cleanup stop authorization head identity is incoherent');
+END;
+
+CREATE TRIGGER cleanup_stop_authorization_heads_delete_guard
+BEFORE DELETE ON cleanup_stop_authorization_heads
+BEGIN
+  SELECT RAISE(ABORT, 'cleanup stop authorization heads are immutable');
 END;
 
 CREATE TRIGGER cleanup_leases_stop_authorization_columns_guard
@@ -453,6 +469,7 @@ WHEN OLD.status <> 'expired'
         AND json_extract(OLD.unexpected_exit_json, '$.active') = 0
         AND json_extract(OLD.unexpected_exit_json, '$.unitName') = OLD.unit_name
         AND json_extract(OLD.unexpected_exit_json, '$.inactiveAt') = json_extract(OLD.unexpected_exit_json, '$.observedAt')
+        AND json_extract(OLD.unexpected_exit_json, '$.observedAt') >= OLD.claim_at
         AND json_extract(OLD.unexpected_exit_json, '$.observedAt') <= NEW.expired_at
       )
     )

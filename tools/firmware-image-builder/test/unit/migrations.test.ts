@@ -342,6 +342,7 @@ describe('versioned builder database migrations', () => {
       'cleanup_leases_admission_id_guard', 'cleanup_leases_admission_id_guard_update',
       'cleanup_credential_reservations_immutable_update_guard', 'cleanup_leases_supersession_insert_guard', 'cleanup_leases_supersession_transition_guard', 'cleanup_leases_expired_immutable_guard',
       'cleanup_stop_authorizations_immutable_update_guard', 'cleanup_stop_authorizations_identity_guard', 'cleanup_stop_authorization_heads_transition_guard', 'cleanup_stop_authorization_head_identity_guard', 'cleanup_stop_authorization_head_identity_update_guard',
+      'cleanup_stop_authorization_heads_delete_guard',
       'cleanup_stop_authorization_outcomes_delete_guard', 'cleanup_stop_authorization_outcomes_identity_guard', 'cleanup_stop_authorization_outcomes_immutable_guard',
       'cleanup_leases_stop_authorization_columns_guard', 'cleanup_leases_stop_authorization_columns_update_guard', 'cleanup_leases_stop_authorization_identity_guard',
       'job_log_generations_immutable_guard', 'job_log_generations_seal_guard', 'job_log_generations_size_guard',
@@ -1244,6 +1245,7 @@ describe('versioned builder database migrations', () => {
     check(db, `UPDATE cleanup_stop_authorization_heads SET attempt_id='sta_${'c'.repeat(32)}' WHERE admission_id='${ADMISSION_ID}'`, /identity is incoherent|transition is incoherent/);
     check(db, `UPDATE cleanup_stop_authorization_heads SET job_id='job-other' WHERE admission_id='${ADMISSION_ID}'`, /identity is incoherent|FOREIGN KEY/);
     check(db, `UPDATE cleanup_stop_authorization_heads SET admission_id='cln_0${'b'.repeat(25)}' WHERE admission_id='${ADMISSION_ID}'`, /identity is incoherent|FOREIGN KEY/);
+    check(db, `DELETE FROM cleanup_stop_authorization_heads WHERE admission_id='${ADMISSION_ID}'`, /immutable|delete|authorization head/);
 
     check(db, `UPDATE cleanup_leases SET stop_authorization_attempt_id='${attemptId}', stop_authorization_owner='stop-owner', stop_authorization_at='2026-07-23T02:00:00.000Z', stop_authorization_expires_at='2026-07-23T03:00:00.000Z', stop_authorization_state='consumed' WHERE admission_id='${ADMISSION_ID}'`, /evidence is incoherent/);
     check(db, `UPDATE cleanup_stop_authorization_heads SET state='consumed', outcome_json='{"active":false}' WHERE admission_id='${ADMISSION_ID}'`, /transition is incoherent/);
@@ -1268,6 +1270,46 @@ describe('versioned builder database migrations', () => {
     ) VALUES (?, 1, 'job-valid', ?, 'api', 'stop-owner', '2026-07-23T02:00:00.000Z', '2026-07-23T03:00:00.000Z', ?, 1, ?, 'admitted', 'builder', '2026-07-23T01:00:00.000Z', NULL, NULL, NULL, NULL)`).run(attemptId, ADMISSION_ID, unitName, 'c'.repeat(64));
     db.prepare(`INSERT INTO cleanup_stop_authorization_heads (admission_id, job_id, attempt_id, state, authorization_owner, updated_at, outcome_json)
       VALUES (?, 'job-valid', ?, 'authorized', 'stop-owner', '2026-07-23T02:00:00.000Z', NULL)`).run(ADMISSION_ID, attemptId);
+    const lateOutcome = JSON.stringify({
+      kind: 'cleanup-stop-observation',
+      code: 'CLEANUP_UNIT_STOP_CONFIRMED_INACTIVE',
+      unitName,
+      active: false,
+      observedAt: '2026-07-23T03:00:01.000Z',
+    });
+    const latePayload = JSON.stringify({
+      admissionId: ADMISSION_ID,
+      kind: 'cleanup-stop-authorization-complete',
+      attemptId,
+      authorizationOwner: 'stop-owner',
+      outcomeState: 'consumed',
+      outcome: JSON.parse(lateOutcome),
+    });
+    db.prepare(`INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at)
+      VALUES ('job-valid', 0, 'cleanup', 'queued', NULL, ?, '2026-07-23T03:00:01.000Z')`).run(latePayload);
+    check(db, `INSERT INTO cleanup_stop_authorization_outcomes (
+      attempt_id, job_id, admission_id, authorization_owner, outcome_state, unit_name, observed_at, outcome_json, event_seq
+    ) VALUES ('${attemptId}', 'job-valid', '${ADMISSION_ID}', 'stop-owner', 'consumed', '${unitName}', '2026-07-23T03:00:01.000Z', '${lateOutcome}', 0)`, /chronology|expiry|evidence is incoherent/);
+    const mismatchedOutcome = JSON.stringify({
+      kind: 'cleanup-stop-observation',
+      code: 'CLEANUP_UNIT_STOP_CONFIRMED_INACTIVE',
+      unitName,
+      active: false,
+      observedAt: '2026-07-23T02:30:00.000Z',
+    });
+    const mismatchedPayload = JSON.stringify({
+      admissionId: ADMISSION_ID,
+      kind: 'cleanup-stop-authorization-complete',
+      attemptId,
+      authorizationOwner: 'stop-owner',
+      outcomeState: 'consumed',
+      outcome: JSON.parse(mismatchedOutcome),
+    });
+    db.prepare(`INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at)
+      VALUES ('job-valid', 1, 'cleanup', 'queued', NULL, ?, '2026-07-23T02:31:00.000Z')`).run(mismatchedPayload);
+    check(db, `INSERT INTO cleanup_stop_authorization_outcomes (
+      attempt_id, job_id, admission_id, authorization_owner, outcome_state, unit_name, observed_at, outcome_json, event_seq
+    ) VALUES ('${attemptId}', 'job-valid', '${ADMISSION_ID}', 'stop-owner', 'consumed', '${unitName}', '2026-07-23T02:30:00.000Z', '${mismatchedOutcome}', 1)`, /chronology|timestamp|evidence is incoherent/);
     check(db, `UPDATE cleanup_leases SET stop_authorization_attempt_id='${attemptId}', stop_authorization_owner='stop-owner', stop_authorization_at='2026-07-23T02:00:00.000Z', stop_authorization_expires_at='2026-07-23T03:00:00.000Z', stop_authorization_state='consumed' WHERE admission_id='${ADMISSION_ID}'`, /evidence|outcome|terminal/);
     check(db, `UPDATE cleanup_stop_authorization_heads SET state='consumed', outcome_json='{}' WHERE admission_id='${ADMISSION_ID}'`, /evidence|outcome|transition/);
     check(db, `UPDATE cleanup_leases SET stop_authorization_attempt_id='${attemptId}', stop_authorization_owner='stop-owner', stop_authorization_at='2026-07-23T02:00:00.000Z', stop_authorization_expires_at='2026-07-23T03:00:00.000Z', stop_authorization_state='failed' WHERE admission_id='${ADMISSION_ID}'`, /evidence|outcome|terminal/);
@@ -1287,6 +1329,9 @@ describe('versioned builder database migrations', () => {
     );
     supersession.prepare('UPDATE jobs SET cleanup_generation=2, cleanup_fence_generation=2, cleanup_fence_token_hash=?, cleanup_admission_id=? WHERE job_id=?').run('d'.repeat(64), replacement, 'job-valid');
     check(supersession, `UPDATE cleanup_leases SET status='expired', blocker_code=NULL, blocker_json=NULL, expired_at='2026-07-23T00:12:00.000Z', superseded_at='2026-07-23T00:12:00.000Z', superseded_by_admission_id='${replacement}', predecessor_status='claimed', predecessor_claim_at='2026-07-23T00:10:00.000Z', predecessor_renew_at=NULL, predecessor_blocker_code=NULL, predecessor_blocker_json=NULL WHERE admission_id='${ADMISSION_ID}'`, /unexpected-exit|supersession|evidence/);
+    const preClaimUnexpected = JSON.stringify({ kind: 'cleanup-unit-unexpected-exit', code: 'CLEANUP_UNIT_UNEXPECTED_EXIT', unitName: `osi-image-builder-cleanup@${ADMISSION_ID}.service`, active: false, inactiveAt: '2026-07-23T00:09:00.000Z', observedAt: '2026-07-23T00:09:00.000Z' });
+    supersession.prepare('UPDATE cleanup_leases SET unexpected_exit_json=? WHERE admission_id=?').run(preClaimUnexpected, ADMISSION_ID);
+    check(supersession, `UPDATE cleanup_leases SET status='expired', blocker_code=NULL, blocker_json=NULL, expired_at='2026-07-23T00:12:00.000Z', superseded_at='2026-07-23T00:12:00.000Z', superseded_by_admission_id='${replacement}', predecessor_status='claimed', predecessor_claim_at='2026-07-23T00:10:00.000Z', predecessor_renew_at=NULL, predecessor_blocker_code=NULL, predecessor_blocker_json=NULL, predecessor_unexpected_exit_json='${preClaimUnexpected}' WHERE admission_id='${ADMISSION_ID}'`, /claim|chronology|supersession|evidence/);
     const unexpected = JSON.stringify({ kind: 'cleanup-unit-unexpected-exit', code: 'CLEANUP_UNIT_UNEXPECTED_EXIT', unitName: `osi-image-builder-cleanup@${ADMISSION_ID}.service`, active: false, inactiveAt: '2026-07-23T00:11:00.000Z', observedAt: '2026-07-23T00:11:00.000Z' });
     supersession.prepare('UPDATE cleanup_leases SET unexpected_exit_json=? WHERE admission_id=?').run(unexpected, ADMISSION_ID);
     supersession.prepare(`UPDATE cleanup_leases SET status='expired', blocker_code=NULL, blocker_json=NULL, expired_at='2026-07-23T00:12:00.000Z', superseded_at='2026-07-23T00:12:00.000Z', superseded_by_admission_id=?, predecessor_status='claimed', predecessor_claim_at='2026-07-23T00:10:00.000Z', predecessor_renew_at=NULL, predecessor_blocker_code=NULL, predecessor_blocker_json=NULL, predecessor_unexpected_exit_json=? WHERE admission_id=?`).run(replacement, unexpected, ADMISSION_ID);
