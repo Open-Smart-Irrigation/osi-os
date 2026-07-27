@@ -189,6 +189,86 @@ function confinedRootfsModulePath(nodeRed, path) {
     && !relativePath.startsWith('/');
 }
 
+function samePropertyDescriptor(left, right) {
+  if (left === undefined || right === undefined) return left === right;
+  return left.value === right.value
+    && left.writable === right.writable
+    && left.get === right.get
+    && left.set === right.set
+    && left.enumerable === right.enumerable
+    && left.configurable === right.configurable;
+}
+
+function sameObjectState(target, snapshot) {
+  if (Object.getPrototypeOf(target) !== snapshot.prototype) return false;
+  const currentKeys = Reflect.ownKeys(target);
+  const snapshotKeys = Reflect.ownKeys(snapshot.descriptors);
+  if (currentKeys.length !== snapshotKeys.length) return false;
+  return snapshotKeys.every((key) => samePropertyDescriptor(
+    Object.getOwnPropertyDescriptor(target, key),
+    snapshot.descriptors[key],
+  ));
+}
+
+function restoreObjectState(target, snapshot, field) {
+  if (!Object.setPrototypeOf(target, snapshot.prototype)) {
+    throw new Error(`could not restore ${field} prototype`);
+  }
+  for (const key of Reflect.ownKeys(target)) {
+    if (!Reflect.deleteProperty(target, key)) {
+      throw new Error(`could not restore ${field} entry: ${String(key)}`);
+    }
+  }
+  for (const key of Reflect.ownKeys(snapshot.descriptors)) {
+    const descriptor = snapshot.descriptors[key];
+    if (descriptor === undefined || !Reflect.defineProperty(target, key, descriptor)) {
+      throw new Error(`could not restore ${field} entry: ${String(key)}`);
+    }
+  }
+}
+
+function snapshotModuleLoaderState() {
+  return {
+    load: Module._load,
+    resolveFilename: Module._resolveFilename,
+    compile: Module.prototype._compile,
+    extensions: Module._extensions,
+    extensionsDescriptor: Object.getOwnPropertyDescriptor(Module, '_extensions'),
+    extensionsState: {
+      prototype: Object.getPrototypeOf(Module._extensions),
+      descriptors: Object.getOwnPropertyDescriptors(Module._extensions),
+    },
+    cache: Module._cache,
+    cacheDescriptor: Object.getOwnPropertyDescriptor(Module, '_cache'),
+    cacheState: {
+      prototype: Object.getPrototypeOf(Module._cache),
+      descriptors: Object.getOwnPropertyDescriptors(Module._cache),
+    },
+  };
+}
+
+function moduleLoaderStateChanged(snapshot, sealedLoad, sealedResolveFilename, sealedCompile) {
+  return Module._load !== sealedLoad
+    || Module._resolveFilename !== sealedResolveFilename
+    || Module.prototype._compile !== sealedCompile
+    || Module._extensions !== snapshot.extensions
+    || !sameObjectState(Module._extensions, snapshot.extensionsState);
+}
+
+function restoreModuleLoaderState(snapshot) {
+  if (snapshot.extensionsDescriptor !== undefined) {
+    Object.defineProperty(Module, '_extensions', snapshot.extensionsDescriptor);
+  }
+  if (snapshot.cacheDescriptor !== undefined) {
+    Object.defineProperty(Module, '_cache', snapshot.cacheDescriptor);
+  }
+  restoreObjectState(snapshot.extensions, snapshot.extensionsState, 'Module._extensions');
+  restoreObjectState(snapshot.cache, snapshot.cacheState, 'Module._cache');
+  Module._load = snapshot.load;
+  Module._resolveFilename = snapshot.resolveFilename;
+  Module.prototype._compile = snapshot.compile;
+}
+
 function loadFixedRootfsEntrypoint({
   nodeRed,
   packageName,
@@ -196,6 +276,7 @@ function loadFixedRootfsEntrypoint({
   resolvedEntrypoint,
   rootfsRequire,
 }) {
+  const loaderSnapshot = snapshotModuleLoaderState();
   const originalLoad = Module._load;
   const originalResolveFilename = Module._resolveFilename;
   const originalCompile = Module.prototype._compile;
@@ -260,16 +341,17 @@ function loadFixedRootfsEntrypoint({
     if (!confinedRootfsModulePath(nodeRed, filename)) {
       return Reflect.apply(originalCompile, this, [content, filename]);
     }
-    const literalDynamicImport = content.match(/\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/u);
-    if (literalDynamicImport !== null) {
-      throw new Error(`rootfs Node module requested an unapproved builder ESM builtin: ${literalDynamicImport[2]}`);
-    }
     const module = this;
+    const dynamicImportViolations = [];
     const compiledWrapper = runInThisContext(Module.wrap(content), {
       filename,
       displayErrors: true,
       importModuleDynamically(specifier) {
-        throw new Error(`rootfs Node module requested an unapproved builder ESM builtin: ${specifier}`);
+        const violation = new Error(
+          `rootfs Node module requested an unapproved builder ESM builtin: ${specifier}`,
+        );
+        dynamicImportViolations.push(violation);
+        return Promise.reject(violation);
       },
     });
     compiledWrapper.call(
@@ -280,6 +362,9 @@ function loadFixedRootfsEntrypoint({
       filename,
       dirname(filename),
     );
+    if (dynamicImportViolations.length > 0) {
+      throw dynamicImportViolations[0];
+    }
   };
 
   Module._resolveFilename = sealedResolveFilename;
@@ -287,23 +372,21 @@ function loadFixedRootfsEntrypoint({
   Module.prototype._compile = sealedCompile;
   let exported;
   let failure;
-  let failed = false;
   try {
     exported = rootfsRequire(specifier);
+    if (moduleLoaderStateChanged(loaderSnapshot, sealedLoad, sealedResolveFilename, sealedCompile)) {
+      throw new Error(`rootfs Node module changed the sealed builder loader: ${packageName}`);
+    }
   } catch (error) {
-    failed = true;
     failure = error;
+  } finally {
+    try {
+      restoreModuleLoaderState(loaderSnapshot);
+    } catch (error) {
+      failure ??= error;
+    }
   }
-  const loaderChanged = Module._load !== sealedLoad
-    || Module._resolveFilename !== sealedResolveFilename
-    || Module.prototype._compile !== sealedCompile;
-  Module._load = originalLoad;
-  Module._resolveFilename = originalResolveFilename;
-  Module.prototype._compile = originalCompile;
-  if (failed) throw failure;
-  if (loaderChanged) {
-    throw new Error(`rootfs Node module changed the sealed builder loader: ${packageName}`);
-  }
+  if (failure !== undefined) throw failure;
   return exported;
 }
 

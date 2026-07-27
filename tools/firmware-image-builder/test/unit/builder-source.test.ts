@@ -221,7 +221,7 @@ describe('locked builder source', () => {
         "'@chirpstack/chirpstack-api/api/application_grpc_pb',",
         "'@chirpstack/chirpstack-api',",
       ),
-      probeContents.replace('Module._load = originalLoad;', ''),
+      probeContents.replace('Module._load = snapshot.load;', ''),
       probeContents.replace(
         "    '--permission',",
         "    '--allow-fs-write=/tmp',",

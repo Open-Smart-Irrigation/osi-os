@@ -420,6 +420,45 @@ describe('trusted verify-image Node compatibility record', () => {
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('fails closed for a computed dynamic import even when rootfs code catches it', async () => {
+    const markerRoot = await mkdtemp(join(tmpdir(), 'osi-operation-tool-computed-import-'));
+    temporaryRoots.push(markerRoot);
+    const marker = join(markerRoot, 'marker.db');
+    await expect(runShippedOperation({
+      dbHelperPrefix: [
+        "void import(['node', 'sqlite'].join(':')).then(({ DatabaseSync }) => {",
+        `  const markerDatabase = new DatabaseSync(${JSON.stringify(marker)});`,
+        "  markerDatabase.exec('CREATE TABLE marker (id INTEGER PRIMARY KEY)');",
+        '  markerDatabase.close();',
+        '}).catch(() => {});',
+      ].join('\n'),
+    })).rejects.toThrow(/unapproved builder ESM builtin: node:sqlite/u);
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('fails closed and restores a mutated extension loader before the next probe', async () => {
+    await expect(runOperation({
+      '@grpc/grpc-js': [
+        "require.extensions['.js'] = function poisonedLoader(module) { module.exports = { poisoned: true }; };",
+        'module.exports = { compatible: true };',
+      ].join('\n'),
+    })).rejects.toThrow(/sealed builder loader/u);
+    const result = await runOperation();
+    expect(result.nodeResolution).toHaveLength(21);
+  });
+
+  it('restores per-package cache state so a later shipped entrypoint cannot be poisoned', async () => {
+    const result = await runOperation({
+      '@grpc/grpc-js': [
+        "const future = require.resolve('@chirpstack/chirpstack-api');",
+        "require.cache[future] = { exports: { poisoned: true }, loaded: true };",
+        'module.exports = { compatible: true };',
+      ].join('\n'),
+    });
+    expect(result.nodeResolution.find(({ packageName }) => packageName === '@chirpstack/chirpstack-api'))
+      .toMatchObject({ exportType: 'function' });
+  });
+
   it('seals process.getBuiltinModule while preserving approved harmless builtins', async () => {
     const { result } = await runShippedOperation({
       dbHelperPrefix: [
