@@ -68,30 +68,7 @@ const ROOTFS_REVERSE_LINES = Object.freeze([
 const ROOTFS_REVERSE_OUTPUT = `${ROOTFS_REVERSE_LINES.join('\n')}\n`;
 const EXPECTED_MAKE_REVERSE_ERROR = 'make: *** [Makefile:60: switch-env] Error 1\n';
 const EXPECTED_FRESH_MAKE_REVERSE_ERROR = `No series file found\n${EXPECTED_MAKE_REVERSE_ERROR}`;
-const CONDENSED_MAKE_PRELUDES = Object.freeze([
-  Object.freeze(['Applying patches']),
-  Object.freeze([
-    'Cleaning patch state',
-    'Restoring clean source tree',
-    'Switching configuration',
-    'Recreating openwrt symlinks',
-    'Initializing quilt',
-    'Applying patches',
-  ]),
-]);
 const PATCH_TRANSCRIPTS = Object.freeze({
-  'no-uart-console.patch': Object.freeze({
-    apply: Object.freeze([
-      'Applying patch patches/no-uart-console.patch',
-      'patching file target/linux/bcm27xx/image/cmdline.txt',
-      '',
-    ]),
-    remove: Object.freeze([
-      'Removing patch patches/no-uart-console.patch',
-      'Restoring target/linux/bcm27xx/image/cmdline.txt',
-      '',
-    ]),
-  }),
   'boot-config.patch': Object.freeze({
     apply: Object.freeze([
       'Applying patch patches/boot-config.patch',
@@ -104,30 +81,13 @@ const PATCH_TRANSCRIPTS = Object.freeze({
       '',
     ]),
   }),
-  'add_designware_spi_kmod.patch': Object.freeze({
-    apply: Object.freeze([
-      'Applying patch patches/add_designware_spi_kmod.patch',
-      'patching file target/linux/bcm27xx/bcm2712/config-6.6',
-      '',
-    ]),
-    remove: Object.freeze([
-      'Removing patch patches/add_designware_spi_kmod.patch',
-      'Restoring target/linux/bcm27xx/bcm2712/config-6.6',
-      '',
-    ]),
-  }),
 });
 type PreludePatch = keyof typeof PATCH_TRANSCRIPTS;
 const TARGET_PATCH_PRELUDES = Object.freeze({
   full_raspberrypi_bcm27xx_bcm2712: Object.freeze([
-    'no-uart-console.patch',
-    'boot-config.patch',
-    'add_designware_spi_kmod.patch',
-  ] as const),
-  full_raspberrypi_bcm27xx_bcm2709: Object.freeze([
-    'no-uart-console.patch',
     'boot-config.patch',
   ] as const),
+  full_raspberrypi_bcm27xx_bcm2709: Object.freeze([] as const),
 });
 type ApprovedTargetEnvironment = keyof typeof TARGET_PATCH_PRELUDES;
 
@@ -782,15 +742,12 @@ function hasExactFullMakeTranscript(
   index = consumeCleanupTranscript(lines, index);
   if (index === null) return false;
   index = consumeExactLines(lines, index, [
-    'rm -rf openwrt/.pc',
     'Restoring clean source tree',
     'cd openwrt && git checkout -- . || true',
     'cd openwrt && git clean -fd || true',
+    'rm -rf openwrt/.pc',
   ]);
   if (index === null) return false;
-  for (const removal of ['Removing .config', 'Removing files', 'Removing patches']) {
-    if (lines[index] === removal) index += 1;
-  }
   index = consumeExactLines(lines, index, [
     'Switching configuration',
     'rm -f conf/files conf/patches conf/.config',
@@ -806,9 +763,9 @@ function hasExactFullMakeTranscript(
     'mkdir -p openwrt/.pc',
     'echo "patches" > openwrt/.pc/.quilt_patches',
     'cd openwrt && quilt upgrade || true',
+    'Converting meta-data to version 2',
   ]);
   if (index === null) return false;
-  if (lines[index] === 'Converting meta-data to version 2') index += 1;
   index = consumeExactLines(lines, index, [
     'Applying patches',
     'cd openwrt && quilt push -a || [ $? -eq 2 ]',
@@ -822,24 +779,16 @@ function hasExactFullMakeTranscript(
   return index === lines.length;
 }
 
-type RootfsReverseTranscript = 'quilt' | 'condensed-make' | 'full-make';
-
-function parseRootfsReverseTranscript(
+function hasExactFullMakeReverseTranscript(
   stdout: string,
   expectedEnvironment?: ApprovedTargetEnvironment,
-): RootfsReverseTranscript | null {
-  if (!stdout.endsWith('\n') || stdout.includes('\r')) return null;
+): boolean {
+  if (!stdout.endsWith('\n') || stdout.includes('\r')) return false;
   const lines = stdout.slice(0, -1).split('\n');
-  if (hasExactList(lines, ROOTFS_REVERSE_LINES)) return 'quilt';
-  for (const prelude of CONDENSED_MAKE_PRELUDES) {
-    if (hasExactList(lines, [...prelude, ...ROOTFS_REVERSE_LINES])) return 'condensed-make';
-  }
   const environments = expectedEnvironment === undefined
     ? Object.keys(TARGET_PATCH_PRELUDES) as ApprovedTargetEnvironment[]
     : [expectedEnvironment];
-  return environments.some((environment) => hasExactFullMakeTranscript(lines, environment))
-    ? 'full-make'
-    : null;
+  return environments.some((environment) => hasExactFullMakeTranscript(lines, environment));
 }
 
 function hasExactRootfsReverseResult(
@@ -847,14 +796,11 @@ function hasExactRootfsReverseResult(
   stderr: string,
   expectedEnvironment?: ApprovedTargetEnvironment,
 ): boolean {
-  const transcript = parseRootfsReverseTranscript(stdout, expectedEnvironment);
-  if (transcript === null) return false;
-  if (transcript === 'quilt') {
-    return stderr === '' || stderr === EXPECTED_MAKE_REVERSE_ERROR;
-  }
-  if (transcript === 'condensed-make') return stderr === EXPECTED_MAKE_REVERSE_ERROR;
-  return stderr === EXPECTED_MAKE_REVERSE_ERROR
-    || stderr === EXPECTED_FRESH_MAKE_REVERSE_ERROR;
+  return hasExactFullMakeReverseTranscript(stdout, expectedEnvironment)
+    && (
+      stderr === EXPECTED_MAKE_REVERSE_ERROR
+      || stderr === EXPECTED_FRESH_MAKE_REVERSE_ERROR
+    );
 }
 
 function hasExactCombinedRootfsReverseOutput(output: string): boolean {

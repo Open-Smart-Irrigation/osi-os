@@ -2,6 +2,7 @@ import { execFile as execFileCallback } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmod,
+  cp,
   copyFile,
   lstat,
   mkdir,
@@ -12,7 +13,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -27,8 +28,12 @@ import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { loadManifest } from '../../manifest/validate.js';
 import { createCommandExecutor } from '../../runner/src/command-executor.js';
 import { createEvidenceWriter } from '../../runner/src/evidence.js';
-import { INTERNAL_OPERATION_TOOL_PATH } from '../../runner/src/operation-registry.js';
 import {
+  createOperationDefinition,
+  INTERNAL_OPERATION_TOOL_PATH,
+} from '../../runner/src/operation-registry.js';
+import {
+  classifyTargetSetupOperationResult,
   createTargetSetupConfigObservations,
   createTargetSetupSourceObservations,
   createLockedTargetSetupOperations,
@@ -49,6 +54,7 @@ const packagesGitignoreBlob = '5e2eb9a79195dc242db25c07c782372a3f5dcf01';
 const packagesSnapshotPackSha256 = '41c9cecc99835f1d2fda29133d9683bc07d8437f28fd24415ed6ad1d81380db6';
 const packagesSnapshotIndexSha256 = 'd988fb93e92117964e0ef7365a30e6f120d894982aae69a768cf9882559d9ee3';
 const operationTool = new URL('../../builder/operations/osi-image-builder-tool.js', import.meta.url).pathname;
+const repositoryFixtureRoot = new URL('../../../../', import.meta.url).pathname;
 const temporaryDirectories: string[] = [];
 const execFile = promisify(execFileCallback);
 
@@ -65,6 +71,98 @@ function configFor(target: (typeof manifest.targets)[number]): string {
 }
 
 describe('feed configuration integration boundary', () => {
+  it('runs the exact repository switch-env recipe to the approved rootfs state for both profiles', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-switch-env-reality-'));
+    temporaryDirectories.push(root);
+    await copyFile(join(repositoryFixtureRoot, 'Makefile'), join(root, 'Makefile'));
+    await copyFile(join(repositoryFixtureRoot, '.gitignore'), join(root, '.gitignore'));
+    await mkdir(join(root, 'openwrt/target/linux/bcm27xx/image'), { recursive: true });
+    await copyFile(
+      join(repositoryFixtureRoot, 'openwrt/.gitignore'),
+      join(root, 'openwrt/.gitignore'),
+    );
+    await cp(
+      join(repositoryFixtureRoot, 'openwrt/.pc'),
+      join(root, 'openwrt/.pc'),
+      { recursive: true },
+    );
+    for (const relativePath of [
+      'openwrt/target/linux/bcm27xx/image/cmdline.txt',
+      'openwrt/target/linux/bcm27xx/image/config.txt',
+      'openwrt/target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
+      'openwrt/target/linux/bcm27xx/bcm2712/config-6.6',
+    ]) {
+      await mkdir(dirname(join(root, relativePath)), { recursive: true });
+      await copyFile(join(repositoryFixtureRoot, relativePath), join(root, relativePath));
+    }
+    for (const target of manifest.targets) {
+      const sourceProfile = join(repositoryFixtureRoot, 'conf', target.environment);
+      const targetProfile = join(root, 'conf', target.environment);
+      await mkdir(join(targetProfile, 'files'), { recursive: true });
+      await mkdir(join(targetProfile, 'patches'), { recursive: true });
+      await copyFile(join(sourceProfile, '.config'), join(targetProfile, '.config'));
+      const series = await readFile(join(sourceProfile, 'patches/series'), 'utf8');
+      await writeFile(join(targetProfile, 'patches/series'), series);
+      for (const patch of series.split(/\r?\n/u).filter((line) => line.length > 0)) {
+        await copyFile(
+          join(sourceProfile, 'patches', patch),
+          join(targetProfile, 'patches', patch),
+        );
+      }
+    }
+    const gitEnvironment = {
+      PATH: process.env.PATH ?? '/usr/bin:/bin',
+      HOME: join(root, 'git-home'),
+      LANG: 'C',
+      LC_ALL: 'C',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_SYSTEM: '/dev/null',
+    };
+    await mkdir(gitEnvironment.HOME);
+    for (const argv of [
+      ['init', '--quiet'],
+      ['config', 'user.name', 'Fixture Author'],
+      ['config', 'user.email', 'fixture@example.test'],
+      ['add', '.'],
+      ['commit', '--quiet', '-m', 'exact switch-env source'],
+    ]) {
+      await execFile('/usr/bin/git', argv, { cwd: root, env: gitEnvironment });
+    }
+    const executor = createCommandExecutor();
+    for (const target of manifest.targets) {
+      const definition = createOperationDefinition('activate-target', {
+        environment: target.environment,
+      });
+      const command = await executor.run(definition.argv, {
+        cwd: root,
+        env: gitEnvironment,
+        timeoutMs: 10_000,
+        maxCaptureBytes: 64 * 1024,
+      });
+      expect(classifyTargetSetupOperationResult(
+        'activate-target',
+        definition,
+        command,
+      )).toMatchObject({ disposition: 'expected-rootfs-already-present' });
+      expect(command.stdout).not.toContain('Applying patch patches/no-uart-console.patch');
+      expect(command.stdout.includes('Applying patch patches/boot-config.patch'))
+        .toBe(target.id === 'rpi-5');
+      expect(command.stdout.trimEnd()).toMatch(
+        /Patch patches\/image-with-padded-rootfs\.patch can be reverse-applied$/u,
+      );
+      expect(await readFile(
+        join(root, 'openwrt/target/linux/bcm27xx/image/cmdline.txt'),
+        'utf8',
+      )).toBe('console=tty1 root=@ROOT@ rootfstype=squashfs,ext4 rootwait\n');
+      const bootConfig = await readFile(
+        join(root, 'openwrt/target/linux/bcm27xx/image/config.txt'),
+        'utf8',
+      );
+      expect(bootConfig.includes('dtparam=cooling_fan=okay')).toBe(target.id === 'rpi-5');
+    }
+  }, 30_000);
+
   it('prepares a fresh worktree offline and executes fixture switch-env, feed update/install, and defconfig scripts for both profiles', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-feed-config-'));
     temporaryDirectories.push(root);
@@ -107,9 +205,7 @@ describe('feed configuration integration boundary', () => {
       await mkdir(join(directory, 'patches'), { recursive: true });
       await writeFile(join(directory, '.config'), configFor(target));
       await writeFile(join(directory, 'patches/series'), [
-        'no-uart-console.patch',
-        'boot-config.patch',
-        ...(target.id === 'rpi-5' ? ['add_designware_spi_kmod.patch'] : []),
+        ...(target.id === 'rpi-5' ? ['boot-config.patch'] : []),
         'image-with-padded-rootfs.patch',
         '',
       ].join('\n'));

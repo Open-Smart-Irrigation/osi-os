@@ -78,17 +78,13 @@ function fullMakeReverseOutput(
           'Removing patch patches/boot-config.patch',
           'Restoring target/linux/bcm27xx/image/config.txt',
           '',
-          'Removing patch patches/no-uart-console.patch',
-          'Restoring target/linux/bcm27xx/image/cmdline.txt',
-          '',
           'No patches applied',
         ]
       : []),
-    'rm -rf openwrt/.pc',
     'Restoring clean source tree',
     'cd openwrt && git checkout -- . || true',
     'cd openwrt && git clean -fd || true',
-    ...(cleanup ? ['Removing .config', 'Removing files', 'Removing patches'] : []),
+    'rm -rf openwrt/.pc',
     'Switching configuration',
     'rm -f conf/files conf/patches conf/.config',
     `ln -s ${environment}/files conf/files`,
@@ -106,16 +102,10 @@ function fullMakeReverseOutput(
     'Converting meta-data to version 2',
     'Applying patches',
     'cd openwrt && quilt push -a || [ $? -eq 2 ]',
-    'Applying patch patches/no-uart-console.patch',
-    'patching file target/linux/bcm27xx/image/cmdline.txt',
-    '',
-    'Applying patch patches/boot-config.patch',
-    'patching file target/linux/bcm27xx/image/config.txt',
-    '',
     ...(environment === targets[0]!.environment
       ? [
-          'Applying patch patches/add_designware_spi_kmod.patch',
-          'patching file target/linux/bcm27xx/bcm2712/config-6.6',
+          'Applying patch patches/boot-config.patch',
+          'patching file target/linux/bcm27xx/image/config.txt',
           '',
         ]
       : []),
@@ -234,9 +224,7 @@ async function authorityFixture(pathAuthorityDependencies?: Partial<PathAuthorit
     await mkdir(join(workspace, 'conf', target.environment, 'patches'), { recursive: true });
     await writeFile(join(workspace, 'conf', target.environment, '.config'), configFor(target));
     await writeFile(join(workspace, 'conf', target.environment, 'patches', 'series'), [
-      'no-uart-console.patch',
-      'boot-config.patch',
-      ...(target.id === 'rpi-5' ? ['add_designware_spi_kmod.patch'] : []),
+      ...(target.id === 'rpi-5' ? ['boot-config.patch'] : []),
       ROOTFS_PADDING_PATCH,
       '',
     ].join('\n'));
@@ -633,52 +621,36 @@ describe('target setup', () => {
   it('accepts the exact approved rootfs implementation in the named reverse-applicable state', async () => {
     const approved = await readFile(rootfsFixture, 'utf8');
     const inputValue = {
-      series: ['no-uart-console.patch', ROOTFS_PADDING_PATCH],
-      applied: ['no-uart-console.patch'],
-      output: ROOTFS_REVERSE_OUTPUT,
+      series: ['boot-config.patch', ROOTFS_PADDING_PATCH],
+      applied: ['boot-config.patch'],
+      output: `${fullMakeReverseOutput(targets[0]!.environment)}${EXPECTED_FRESH_MAKE_REVERSE_ERROR}`,
       rootfsScript: approved,
     };
     expect(sha256(approved)).toBe(APPROVED_ROOTFS_SCRIPT_SHA256);
     expect(decideRootfsPatchState(inputValue)).toBe('already-present');
   });
 
-  it('classifies only the exact real rootfs quilt transcript and make exit as expected already-present', () => {
+  it.each([
+    ['bare quilt output', ROOTFS_REVERSE_OUTPUT, ''],
+    ['bare quilt output with make error', ROOTFS_REVERSE_OUTPUT, EXPECTED_MAKE_REVERSE_ERROR],
+    ['condensed make output', `Applying patches\n${ROOTFS_REVERSE_OUTPUT}`, EXPECTED_MAKE_REVERSE_ERROR],
+    ['condensed recipe headings', [
+      'Cleaning patch state',
+      'Restoring clean source tree',
+      'Switching configuration',
+      'Recreating openwrt symlinks',
+      'Initializing quilt',
+      'Applying patches',
+      ROOTFS_REVERSE_OUTPUT,
+    ].join('\n'), EXPECTED_MAKE_REVERSE_ERROR],
+  ])('rejects %s without the complete registered make recipe transcript', (_case, stdout, stderr) => {
     const definition = createOperationDefinition('activate-target', {
       environment: targets[0]!.environment,
     });
-    const command = result(definition.argv, {
-      exitCode: 2,
-      stdout: ROOTFS_REVERSE_OUTPUT,
-    });
-
-    expect(classifyTargetSetupOperationResult('activate-target', definition, command)).toEqual({
-      disposition: 'expected-rootfs-already-present',
-      command,
-    });
-  });
-
-  it('classifies the exact terminal quilt block in the real make switch-env result', () => {
-    const definition = createOperationDefinition('activate-target', {
-      environment: targets[0]!.environment,
-    });
-    const command = result(definition.argv, {
-      exitCode: 2,
-      stdout: [
-        'Cleaning patch state',
-        'Restoring clean source tree',
-        'Switching configuration',
-        'Recreating openwrt symlinks',
-        'Initializing quilt',
-        'Applying patches',
-        ROOTFS_REVERSE_OUTPUT,
-      ].join('\n'),
-      stderr: EXPECTED_MAKE_REVERSE_ERROR,
-    });
-
-    expect(classifyTargetSetupOperationResult('activate-target', definition, command)).toEqual({
-      disposition: 'expected-rootfs-already-present',
-      command,
-    });
+    expect(() => classifyTargetSetupOperationResult('activate-target', definition, result(
+      definition.argv,
+      { exitCode: 2, stdout, stderr },
+    ))).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
   });
 
   it.each([
@@ -704,6 +676,7 @@ describe('target setup', () => {
   it('resolves both profiles when activate-target returns the exact expected rootfs nonzero result', async () => {
     const fixture = await authorityFixture();
     const base = operations(fixture);
+    let activation = 0;
     const runner = createLockedTargetSetupOperations(async (request) => {
       const command = await base.execute(request);
       if (request.operationId !== 'activate-target') return command;
@@ -713,10 +686,13 @@ describe('target setup', () => {
         .filter((patch) => patch !== ROOTFS_PADDING_PATCH)
         .join('\n');
       await writeFile(appliedPath, applied);
+      const environment = request.definition.argv[2]!.slice('ENV='.length);
+      const cleanup = activation > 0;
+      activation += 1;
       return result(request.definition.argv, {
         exitCode: 2,
-        stdout: `Applying patches\n${ROOTFS_REVERSE_OUTPUT}`,
-        stderr: EXPECTED_MAKE_REVERSE_ERROR,
+        stdout: fullMakeReverseOutput(environment, cleanup),
+        stderr: cleanup ? EXPECTED_MAKE_REVERSE_ERROR : EXPECTED_FRESH_MAKE_REVERSE_ERROR,
       });
     });
 
@@ -764,6 +740,31 @@ describe('target setup', () => {
   });
 
   it.each([
+    ['stdout prefix', `Permission denied while restoring source\n${fullMakeReverseOutput(targets[0]!.environment)}`],
+    ['stdout suffix', `${fullMakeReverseOutput(targets[0]!.environment)}unexpected output\n`],
+    ['missing quilt conversion output', fullMakeReverseOutput(targets[0]!.environment).replace(
+      'Converting meta-data to version 2\n',
+      '',
+    )],
+    ['impossible git-clean output', fullMakeReverseOutput(targets[0]!.environment).replace(
+      'Switching configuration\n',
+      'Removing .config\nSwitching configuration\n',
+    )],
+  ])('rejects a complete make transcript with an unknown %s', (_case, stdout) => {
+    const definition = createOperationDefinition('activate-target', {
+      environment: targets[0]!.environment,
+    });
+    expect(() => classifyTargetSetupOperationResult('activate-target', definition, result(
+      definition.argv,
+      {
+        exitCode: 2,
+        stdout,
+        stderr: EXPECTED_FRESH_MAKE_REVERSE_ERROR,
+      },
+    ))).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
+  });
+
+  it.each([
     ['permission denied', `Permission denied while restoring source\n${EXPECTED_MAKE_REVERSE_ERROR}`],
     ['missing file', `No such file or directory\n${EXPECTED_MAKE_REVERSE_ERROR}`],
     ['unknown line', `source tree restored\n${EXPECTED_MAKE_REVERSE_ERROR}`],
@@ -775,7 +776,11 @@ describe('target setup', () => {
     });
     expect(() => classifyTargetSetupOperationResult('activate-target', definition, result(
       definition.argv,
-      { exitCode: 2, stdout: ROOTFS_REVERSE_OUTPUT, stderr },
+      {
+        exitCode: 2,
+        stdout: fullMakeReverseOutput(targets[0]!.environment),
+        stderr,
+      },
     ))).toThrowError(expect.objectContaining({ code: 'PATCH_STATE_AMBIGUOUS' }));
   });
 
