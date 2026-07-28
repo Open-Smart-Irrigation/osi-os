@@ -218,9 +218,10 @@ describe('versioned builder database migrations', () => {
       { version: 11, filename: '011_cancellation_clock_and_stop_authorization.sql' },
       { version: 12, filename: '012_cleanup_admission_supersession_evidence.sql' },
       { version: 13, filename: '013_queue_dispatch_claim.sql' },
+      { version: 14, filename: '014_retention_prunes.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
-      .toEqual(['cleanup_credential_reservations', 'cleanup_leases', 'cleanup_stop_authorization_heads', 'cleanup_stop_authorization_outcomes', 'cleanup_stop_authorizations', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_dispatch_claims', 'queue_entries', 'schema_migrations']);
+      .toEqual(['cleanup_credential_reservations', 'cleanup_leases', 'cleanup_stop_authorization_heads', 'cleanup_stop_authorization_outcomes', 'cleanup_stop_authorizations', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_dispatch_claims', 'queue_entries', 'retention_prunes', 'retention_purge_authorizations', 'schema_migrations', 'sqlite_sequence']);
     expectColumns(db, 'jobs', [
       'job_id', 'request_id', 'request_json', 'source_remote', 'source_ref', 'source_branch', 'branch', 'expected_sha', 'pinned_sha',
       'target_id', 'root_id', 'target_manifest_sha256', 'source_commit_time', 'source_author', 'source_subject',
@@ -307,7 +308,7 @@ describe('versioned builder database migrations', () => {
       .map((row) => (row as { name: string }).name);
     expect(indexes.sort()).toEqual([
       'cleanup_credential_reservations_expiry', 'cleanup_credential_reservations_job_path', 'cleanup_leases_expiry', 'cleanup_leases_fence_identity', 'cleanup_leases_fence_token_identity', 'cleanup_leases_job', 'cleanup_stop_authorization_outcomes_admission', 'cleanup_stop_authorizations_admission', 'cleanup_stop_authorizations_expiry', 'job_events_cancellation_protocol', 'job_events_log_range', 'job_events_sequence', 'job_log_generations_active', 'job_operations_identity',
-      'job_stages_job', 'jobs_cleanup_admission', 'jobs_recovery', 'queue_dispatch_claims_expiry', 'queue_entries_fifo',
+      'job_stages_job', 'jobs_cleanup_admission', 'jobs_recovery', 'queue_dispatch_claims_expiry', 'queue_entries_fifo', 'retention_prunes_at',
     ]);
     const normalizeForeignKeys = (child: string) => db.prepare(`PRAGMA foreign_key_list(${child})`).all()
       .map((row) => {
@@ -506,7 +507,7 @@ describe('versioned builder database migrations', () => {
     const second = openBuilderDatabase(path);
     expect(second.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name").all())
       .toEqual(schema);
-    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 13 });
+    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 14 });
     second.close();
   });
 
@@ -609,7 +610,7 @@ describe('versioned builder database migrations', () => {
     physicalOrderDb.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(1, '001_initial.sql', MIGRATION_REGISTRY[0].sha256, 'x');
     physicalOrderDb.close();
     const accepted = openBuilderDatabase(physicalOrderPath);
-    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 13 });
+    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 14 });
     accepted.close();
   });
 
@@ -952,7 +953,7 @@ describe('versioned builder database migrations', () => {
     fresh.close();
 
     const reopened = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
-    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 13 });
+    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 14 });
     expect(reopened.prepare('SELECT COUNT(*) AS count FROM legacy_blocked_publish_evidence').get()).toEqual({ count: 2 });
     expect(reopened.prepare("SELECT terminal_error_json FROM jobs WHERE job_id='legacy-terminal'").get())
       .toEqual({ terminal_error_json: terminalSentinel });
