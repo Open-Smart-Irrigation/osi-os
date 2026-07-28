@@ -2,8 +2,10 @@ import {
   BUILDER_ERROR_CODES,
   JOB_STATES,
   PIPELINE_STAGE_NAMES,
+  TARGET_IDS,
   type PipelineStageName,
 } from '../../domain/types.js';
+import { encodeBranchSlug } from '../../domain/paths.js';
 import type { BuilderConfig } from '../../config/load.js';
 import type { HealthSnapshot } from './health.js';
 import {
@@ -289,8 +291,9 @@ function evidencePath(stage: StoredStage): string | null {
   return `${directPrefix}${filename}`;
 }
 
-function stageDto(stage: StoredStage, expectedJobId: string): JsonRecord {
+function stageDto(stage: StoredStage, expectedJobId: string, expectedStage: PipelineStageName): JsonRecord {
   if (storedJobId(stage.jobId) !== expectedJobId) throw new Error('stage belongs to another job');
+  if (storedStage(stage.stage, 'stage name') !== expectedStage) throw new Error('stage does not match the requested stage');
   return {
     stage: storedStage(stage.stage, 'stage name'),
     outcome: stage.outcome === null ? null : identifier(stage.outcome, 'stage outcome'),
@@ -314,11 +317,18 @@ async function detail(job: JobRecord, store: ApiJobStore): Promise<JsonRecord> {
   const branch = branchName(job.branch, 'job branch');
   const sourceRef = text(job.sourceRef, 'source ref', 512);
   if (sourceRef !== `refs/remotes/origin/${branch}`) throw new Error('source ref does not match the stored origin branch');
-  const stages = await Promise.all(PIPELINE_STAGE_NAMES.map(async (stage) => store.getStage(jobId, stage)));
+  const stages = await Promise.all(PIPELINE_STAGE_NAMES.map(async (requestedStage) => {
+    const stored = await store.getStage(jobId, requestedStage);
+    return stored === null ? null : { requestedStage, stored };
+  }));
   const artifactSha256 = nullableHash64(job.artifactSha256, 'artifact SHA');
   const artifact = artifactSha256 === null ? null : (() => {
     const directory = stableRelativePath(job.artifactFinalDirectory, 'artifact final directory');
     const path = stableRelativePath(job.artifactFinalPath, 'artifact final path');
+    const targetId = identifier(job.targetId, 'artifact target ID');
+    if (!(TARGET_IDS as readonly string[]).includes(targetId)) throw new Error('artifact target ID is invalid');
+    const expectedDirectory = `${encodeBranchSlug(branch)}/${job.pinnedSha}/${targetId}`;
+    if (directory !== expectedDirectory) throw new Error('artifact final directory is not the deterministic release directory');
     if (!path.startsWith(`${directory}/`)) throw new Error('artifact final path is outside its release directory');
     return {
       rootId: identifier(job.rootId, 'artifact output root ID'),
@@ -372,7 +382,8 @@ async function detail(job: JobRecord, store: ApiJobStore): Promise<JsonRecord> {
       dispatchedAt: nullableInstant(job.dispatchedAt, 'dispatchedAt'),
       cleanupOutcome: job.containerCleanupOutcome === null ? null : identifier(job.containerCleanupOutcome, 'cleanup outcome'),
     },
-    evidence: stages.filter((stage): stage is StoredStage => stage !== null).map((stage) => stageDto(stage, jobId)),
+    evidence: stages.filter((entry): entry is { readonly requestedStage: PipelineStageName; readonly stored: StoredStage } => entry !== null)
+      .map(({ requestedStage, stored }) => stageDto(stored, jobId, requestedStage)),
   };
 }
 
@@ -610,6 +621,7 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
       const jobRecord = getJob(dependencies.store, jobId);
       const indexedStage = dependencies.store.getStage(jobRecord.jobId, stage);
       if (indexedStage === null || indexedStage.evidenceSha256 === null) notFound();
+      stageDto(indexedStage, jobId, stage);
       return jsonResponse(200, publicEvidence(await dependencies.readEvidence(jobRecord, stage), jobId, stage));
     }
     const eventsMatch = context.path.match(/^\/api\/jobs\/([^/]+)\/events$/u);

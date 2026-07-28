@@ -267,4 +267,45 @@ describe('read-only builder API routes', () => {
     server = invalidEvents.server;
     expect((await get(invalidEvents.port, '/api/jobs/job-1/events')).status).toBe(500);
   });
+
+  it('rejects repeated stage rows and artifacts outside the deterministic release directory', async () => {
+    const repeatedStage = await start(dependencies((value) => {
+      Object.assign(value.store as object, { getStage: (id: string) => id === 'job-1' ? {
+        jobId: 'job-1', stage: 'publish' as const, outcome: 'passed' as const, startedAt: now, finishedAt: now,
+        evidencePath: 'jobs/job-1/evidence/09-publish.json', evidenceSha256: 'd'.repeat(64), errorCode: null, error: null,
+      } : null });
+    }));
+    server = repeatedStage.server;
+    expect((await get(repeatedStage.port, '/api/jobs/job-1')).status).toBe(500);
+    await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
+    server = undefined;
+
+    const mismatchedEvidenceStage = await start(dependencies((value) => {
+      Object.assign(value.store as object, { getStage: (id: string, requestedStage: string) => id === 'job-1' && requestedStage === 'publish' ? {
+        jobId: 'job-1', stage: 'build' as const, outcome: 'passed' as const, startedAt: now, finishedAt: now,
+        evidencePath: 'jobs/job-1/evidence/07-build.json', evidenceSha256: 'd'.repeat(64), errorCode: null, error: null,
+      } : null });
+    }));
+    server = mismatchedEvidenceStage.server;
+    expect((await get(mismatchedEvidenceStage.port, '/api/jobs/job-1/evidence/publish')).status).toBe(500);
+    await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
+    server = undefined;
+
+    const mismatchedEvidenceJob = await start(dependencies((value) => {
+      Object.assign(value.store as object, { getStage: (id: string, requestedStage: string) => id === 'job-1' && requestedStage === 'publish' ? {
+        jobId: 'job-2', stage: 'publish' as const, outcome: 'passed' as const, startedAt: now, finishedAt: now,
+        evidencePath: 'jobs/job-2/evidence/09-publish.json', evidenceSha256: 'd'.repeat(64), errorCode: null, error: null,
+      } : null });
+    }));
+    server = mismatchedEvidenceJob.server;
+    expect((await get(mismatchedEvidenceJob.port, '/api/jobs/job-1/evidence/publish')).status).toBe(500);
+    await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
+    server = undefined;
+
+    const unrelatedArtifact = await start(dependencies((value) => {
+      Object.assign(value.store as object, { getJob: () => ({ ...job('job-1'), artifactFinalDirectory: 'unrelated/location', artifactFinalPath: 'unrelated/location/image' }) });
+    }));
+    server = unrelatedArtifact.server;
+    expect((await get(unrelatedArtifact.port, '/api/jobs/job-1')).status).toBe(500);
+  });
 });
