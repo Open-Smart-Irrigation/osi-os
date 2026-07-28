@@ -1,14 +1,16 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createCleanupAdmissionRecovery, reconcileCleanupAdmissionAtStartup, type RecoverySystemd } from '../../api/src/recovery.js';
-import { OwnershipStore, type CleanupSnapshot } from '../../api/src/ownership.js';
+import { OwnershipStore, type CleanupSnapshot, type DirectInterruptionProof, type PublishRecoveryEvidence, type RunnerWriteCommand } from '../../api/src/ownership.js';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { createStartupBootstrap, type StartupPhaseResult } from '../../api/src/startup-order.js';
 import type { QueueSystemd } from '../../api/src/queue.js';
-import type { CreateJobInput } from '../../api/src/store.js';
+import { encodeJson } from '../../api/src/validation.js';
+import type { CreateJobInput, JsonObject } from '../../api/src/store.js';
 
 const NOW = '2026-07-28T12:00:00.000Z';
 const EXPIRED = '2026-07-28T11:59:00.000Z';
@@ -52,8 +54,8 @@ function committed(result: { readonly ok: boolean; readonly conflict?: { readonl
   if (!result.ok) throw new Error(result.conflict?.message ?? 'ownership write failed');
 }
 
-function seedStarting(ownership: OwnershipStore, jobId: string): void {
-  committed(ownership.apiWrite({ kind: 'enqueue', input: input(jobId) }));
+function seedStarting(ownership: OwnershipStore, jobId: string, alreadyEnqueued = false): void {
+  if (!alreadyEnqueued) committed(ownership.apiWrite({ kind: 'enqueue', input: input(jobId) }));
   committed(ownership.apiWrite({ kind: 'dispatch', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, claimOwner: `dispatcher-${jobId}`, claimExpiresAt: CLAIM_EXPIRES, at: NOW }));
   committed(ownership.apiWrite({ kind: 'dispatch-start', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, claimOwner: `dispatcher-${jobId}`, expectedClaimExpiresAt: CLAIM_EXPIRES, claimExpiresAt: CLAIM_EXPIRES, unitInactiveAt: NOW, startAttemptedAt: NOW, at: NOW }));
 }
@@ -111,6 +113,106 @@ async function seedClaimedCleanup(value: Awaited<ReturnType<typeof fixture>>, jo
 }
 
 function clear(): StartupPhaseResult { return { blockers: [] }; }
+
+const PUBLISH_FINISHED = '2026-07-28T12:00:30.000Z';
+const PUBLISH_RECOVERY = '2026-07-28T12:01:00.000Z';
+const DIRECT_CLAIM_EXPIRES = '2026-07-28T12:02:00.000Z';
+
+function canonical(value: Record<string, unknown>): string {
+  return JSON.stringify(Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))));
+}
+
+function hash(value: string): string { return createHash('sha256').update(value).digest('hex'); }
+
+function publishManifest(jobId: string): JsonObject {
+  return { artifactSha256: SHA64, branch: 'main', jobId, pinnedSha: SHA40, targetId: 'rpi-5' };
+}
+
+function publishRecoveryEvidence(jobId: string): PublishRecoveryEvidence {
+  const manifest = publishManifest(jobId);
+  const manifestSha256 = hash(canonical(manifest));
+  const stageContent: JsonObject = {
+    schemaVersion: 1, jobId, stage: 'publish', startedAt: NOW, finishedAt: PUBLISH_RECOVERY, outcome: 'failed', operationId: null,
+    commands: [], inputs: { targetId: 'rpi-5', rootId: 'release', branch: 'main', pinnedSha: SHA40 },
+    observations: { final: { verificationSha256: manifestSha256 } }, error: null,
+  };
+  const stageBytes = `${encodeJson(stageContent, 'startup publish stage evidence', true)}\n`;
+  const stageSha256 = hash(stageBytes);
+  const checksumContents = `${SHA64}  image\n`;
+  const checksumSha256 = hash(checksumContents);
+  return {
+    runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', leaseExpiresAt: CLAIM_EXPIRES, inactiveAt: PUBLISH_FINISHED, observedAt: PUBLISH_RECOVERY },
+    container: { kind: 'absent', globalLabelResult: 'no-match', observedAt: PUBLISH_RECOVERY },
+    stage: { startedAt: NOW, finishedAt: PUBLISH_RECOVERY, evidencePath: `jobs/${jobId}/evidence/09-publish.json`, evidenceSha256: stageSha256 },
+    artifact: {
+      stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW,
+      checksumPath: 'staging/sums', checksumSha256, manifestPath: 'staging/manifest', manifestSha256,
+      verificationPath: 'staging/verify', verificationSha256: manifestSha256,
+    },
+    final: { directory: `release/${jobId}`, path: `release/${jobId}/image`, publishStartedAt: NOW, publishedAt: null },
+    observed: {
+      stageEvidence: { present: true, path: `jobs/${jobId}/evidence/09-publish.json`, bytes: stageBytes, sha256: stageSha256 },
+      final: { present: false, path: `release/${jobId}/image`, held: false, size: null, sha256: null },
+      checksum: { present: true, path: 'staging/sums', contents: checksumContents, sha256: checksumSha256 },
+      manifest: { present: true, path: 'staging/manifest', bytes: canonical(manifest), content: manifest, sha256: manifestSha256 },
+      verification: { present: true, path: 'staging/verify', bytes: canonical(manifest), content: manifest, sha256: manifestSha256 },
+      staging: { state: 'present', path: 'staging/image', sha256: SHA64 },
+      logs: { runner: 'sealed', docker: 'sealed', verifiedAt: PUBLISH_RECOVERY, noGap: true },
+    },
+  };
+}
+
+function runnerBase(jobId: string): Pick<Extract<RunnerWriteCommand, { kind: 'stage' }>, 'jobId' | 'owner' | 'runnerUnit' | 'leaseExpiresAt' | 'at'> {
+  return { jobId, owner: 'runner-a', runnerUnit: `osi-image-builder-runner@${jobId}.service`, leaseExpiresAt: CLAIM_EXPIRES, at: NOW };
+}
+
+function seedPublishing(ownership: OwnershipStore, jobId: string, alreadyEnqueued = false): void {
+  seedStarting(ownership, jobId, alreadyEnqueued);
+  committed(ownership.runnerWrite({ kind: 'acquire-lease', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', expiresAt: CLAIM_EXPIRES, at: NOW }));
+  const stages = [
+    ['preflight', 'starting', 'preflight'], ['source', 'preflight', 'source'], ['release-gates', 'source', 'release_gates'],
+    ['frontend', 'release_gates', 'frontend'], ['target-setup', 'frontend', 'target_setup'], ['feeds', 'target_setup', 'feeds'],
+    ['config', 'feeds', 'config'], ['build', 'config', 'building'], ['verify', 'building', 'verifying'],
+  ] as const;
+  for (const [stage, expectedState, state] of stages) committed(ownership.runnerWrite({ ...runnerBase(jobId), kind: 'stage', expectedState, state, stage, outcome: 'passed', startedAt: NOW, finishedAt: NOW, evidencePath: `evidence/${stage}`, evidenceSha256: SHA64 }));
+  const manifest = publishManifest(jobId);
+  const manifestSha256 = hash(canonical(manifest));
+  committed(ownership.runnerWrite({ ...runnerBase(jobId), kind: 'artifact', expectedState: 'verifying', state: 'verifying', stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: hash(`${SHA64}  image\n`), manifestPath: 'staging/manifest', manifestSha256, verificationPath: 'staging/verify', verificationSha256: manifestSha256 }));
+  committed(ownership.runnerWrite({ ...runnerBase(jobId), kind: 'publish-stage-start', expectedState: 'verifying', startedAt: NOW, finalDirectory: `release/${jobId}`, finalPath: `release/${jobId}/image`, publishStartedAt: NOW }));
+}
+
+function directProof(jobId: string): DirectInterruptionProof {
+  return {
+    kind: 'start-failure', runnerUnit: `osi-image-builder-runner@${jobId}.service`, startAttemptedAt: NOW, unitInactiveAt: PUBLISH_FINISHED,
+    runnerLeaseOwner: null, runnerLeaseExpiresAt: null, container: { kind: 'absent', globalLabelResult: 'no-match', observedAt: PUBLISH_FINISHED },
+    staging: { kind: 'absent', path: null }, logs: { runner: 'absent', docker: 'absent', verifiedAt: PUBLISH_FINISHED, generationIdentity: { runner: [], docker: [] } },
+    blocker: 'none', cleanupAdmission: null, cleanupFence: null,
+  };
+}
+
+function sealPublishLogs(db: ReturnType<typeof openBuilderDatabase>, jobId: string): void {
+  for (const stream of ['runner', 'docker'] as const) {
+    db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, size_bytes) VALUES (?, ?, 0, ?, ?, 0)').run(jobId, stream, `logs/${stream}-0.log`, NOW);
+  }
+  db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=?').run(PUBLISH_FINISHED, SHA64, jobId);
+}
+
+function seedDirectStartingRow(db: ReturnType<typeof openBuilderDatabase>, jobId: string): void {
+  const job = input(jobId);
+  db.prepare(`INSERT INTO jobs (
+    job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha,
+    source_preparation_json, offline_feed_preparation_json, target_id, root_id, target_manifest_sha256,
+    source_commit_time, source_author, source_subject, accepted_at, state, queue_state, queue_position,
+    created_at, updated_at, dispatched_at, runner_unit
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'starting', 'dispatched', NULL, ?, ?, ?, ?)`).run(
+    job.jobId, job.requestId, JSON.stringify(job.request), job.sourceRemote, job.sourceRef, job.sourceBranch, job.branch,
+    job.expectedSha, job.pinnedSha, JSON.stringify(job.sourcePreparation), JSON.stringify(job.offlineFeedPreparation), job.targetId,
+    job.rootId, job.targetManifestSha256, job.sourceCommitTime, job.sourceAuthor, job.sourceSubject, job.acceptedAt, NOW, NOW, NOW,
+    `osi-image-builder-runner@${jobId}.service`,
+  );
+  db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at) VALUES (?, 0, 'state', 'starting', NULL, '{}', ?)").run(jobId, NOW);
+  db.prepare("INSERT INTO queue_dispatch_claims (claim_id, job_id, owner, claimed_at, lease_expires_at, phase, start_attempted_at, unit_inactive_at) VALUES (1, ?, ?, ?, ?, 'start-attempted', ?, ?)").run(jobId, `dispatcher-${jobId}`, NOW, DIRECT_CLAIM_EXPIRES, NOW, PUBLISH_FINISHED);
+}
 
 afterEach(async () => {
   for (const db of databases.splice(0)) db.close();
@@ -175,5 +277,45 @@ describe('startup recovery with real SQLite stores', () => {
     expect(value.systemd.recovery.stop).toHaveBeenCalledTimes(1);
     expect(value.systemd.starts.filter((unit) => unit.startsWith('osi-image-builder-cleanup@'))).toHaveLength(1);
     expect(value.db.prepare('SELECT cleanup_blocker_code, cleanup_fence_generation FROM jobs WHERE job_id=?').get('stop-failure')).toMatchObject({ cleanup_blocker_code: 'CLEANUP_UNIT_STOP_FAILED' });
+  });
+
+  it('commits stale publishing recovery before direct interruption and opens the queue only afterward', async () => {
+    const value = await fixture();
+    seedPublishing(value.ownership, 'publishing-recovery');
+    sealPublishLogs(value.db, 'publishing-recovery');
+    const trace: string[] = [];
+    const bootstrap = createStartupBootstrap({
+      queue: { db: value.db, ownership: value.ownership, systemd: value.systemd.queue, safety: { inspect: async () => null }, clock: { now: () => NOW } },
+      services: {
+        migrations: async () => { value.db.prepare('SELECT 1').get(); return clear(); },
+        cleanupAdmissions: async () => { value.db.prepare('SELECT COUNT(*) FROM cleanup_leases').get(); return clear(); },
+        liveRunnerClassification: async () => { value.db.prepare("SELECT COUNT(*) FROM jobs WHERE state='publishing'").get(); return clear(); },
+        stalePublishingRecovery: async () => {
+          const row = value.db.prepare("SELECT state FROM jobs WHERE job_id=? AND state='publishing'").get('publishing-recovery');
+          if (row === undefined) throw new Error('publishing recovery row was not found');
+          committed(value.ownership.apiWrite({ kind: 'publish-recovery', jobId: 'publishing-recovery', expectedState: 'publishing', at: PUBLISH_RECOVERY, state: 'failed', evidence: publishRecoveryEvidence('publishing-recovery'), errorCode: 'PUBLISH_FAILED', error: { reason: 'startup recovery proof' } }));
+          trace.push('publishing-recovery-committed');
+          return clear();
+        },
+        nonPublishingInterruption: async () => {
+          seedDirectStartingRow(value.db, 'direct-interruption');
+          const row = value.db.prepare("SELECT state FROM jobs WHERE job_id=? AND state='starting'").get('direct-interruption');
+          if (row === undefined) throw new Error('direct interruption row was not found');
+          committed(value.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-interruption', expectedState: 'starting', at: PUBLISH_FINISHED, proof: directProof('direct-interruption'), errorCode: 'SERVICE_START_FAILED', error: { reason: 'startup direct interruption proof' }, dispatchClaimOwner: 'dispatcher-direct-interruption', expectedClaimExpiresAt: DIRECT_CLAIM_EXPIRES, expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: PUBLISH_FINISHED }));
+          trace.push('direct-interruption-committed');
+          return clear();
+        },
+        retention: async () => { value.db.prepare('SELECT COUNT(*) FROM job_events').get(); return clear(); },
+      },
+    });
+
+    const result = await bootstrap.start();
+    expect(trace).toEqual(['publishing-recovery-committed', 'direct-interruption-committed']);
+    expect(result.dispatched).toBe(false);
+    expect(result.blockers.length).toBeGreaterThan(0);
+    expect(value.db.prepare('SELECT state FROM jobs WHERE job_id=?').get('publishing-recovery')).toEqual({ state: 'failed' });
+    expect(value.db.prepare('SELECT state, queue_state FROM jobs WHERE job_id=?').get('direct-interruption')).toEqual({ state: 'interrupted', queue_state: 'complete' });
+    expect(bootstrap.events().map((event) => event.phase)).toEqual(['migrations', 'cleanup-admissions', 'live-runner-classification', 'stale-publishing-recovery', 'non-publishing-interruption', 'retention', 'dispatch']);
+    expect(value.systemd.queue.start).not.toHaveBeenCalled();
   });
 });
