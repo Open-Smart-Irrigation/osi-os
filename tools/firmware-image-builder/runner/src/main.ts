@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
+import type { DatabaseSync } from 'node:sqlite';
 import {
   lstat,
   mkdir,
@@ -76,6 +77,11 @@ import {
 } from './cancellation.js';
 import { createEvidenceWriter } from './evidence.js';
 import { createApiFreshnessSocketClient } from './freshness.js';
+import {
+  createByteBoundedTextCapture,
+  createRunnerLogCoordinator,
+  type RunnerLogCoordinator,
+} from './log-coordinator.js';
 import {
   createOperationDefinition,
   type OperationDefinition,
@@ -1766,6 +1772,7 @@ export async function runGuardedComposition(
 async function createProductionComposition(
   args: RunnerArguments,
   loaded: LoadedConfig,
+  database: DatabaseSync,
   store: BuilderStore,
   ownership: OwnershipStore,
 ): Promise<ProductionComposition> {
@@ -1777,6 +1784,7 @@ async function createProductionComposition(
   let stateRootIdentity: Readonly<{ path: string; device: number; inode: number }> | null = null;
   let approvedRootHandle: FileHandle | null = null;
   let heldPublisher: Awaited<ReturnType<typeof holdInstalledPublisher>> | null = null;
+  let coordinator: RunnerLogCoordinator | null = null;
   try {
     heldPublisher = await holdInstalledPublisher(publisherPath);
     const [lockBytes, manifestBytes] = await Promise.all([
@@ -1820,6 +1828,12 @@ async function createProductionComposition(
     );
     stateRootHandle = await open(stateRootIdentity.path, DIRECTORY_FLAGS);
     approvedRootHandle = await open(approvedRoot.path, DIRECTORY_FLAGS);
+    coordinator = createRunnerLogCoordinator({
+      db: database,
+      jobRoot: join(stateRootIdentity.path, 'jobs', args.jobId),
+      jobId: args.jobId,
+      clock: { now: () => new Date().toISOString() },
+    });
     const preflight = createReadOnlyPreflightDefaults();
     const attempts = new Map<TrustedOperationId, number>();
     const completedExecutions = new Map<TrustedOperationId, PipelineOperationExecution>();
@@ -1925,8 +1939,8 @@ async function createProductionComposition(
           activeTargetSetupEnvironment,
         });
         const { definition } = operation;
-        const stdout: string[] = [];
-        const stderr: string[] = [];
+        const stdout = createByteBoundedTextCapture(MAX_OPERATION_CAPTURE_BYTES);
+        const stderr = createByteBoundedTextCapture(MAX_OPERATION_CAPTURE_BYTES);
         const stageTimeout = manifest.manifest.stageDefinitions[context.stage]
           .timeoutSeconds * 1000;
         const executor = createDockerExecutor({
@@ -1998,11 +2012,10 @@ async function createProductionComposition(
             attempt,
             value,
           ),
-          finalizeLogs: async ({ operationFinishedAt }): Promise<LogCleanupProof> => ({
-            runner: 'absent',
-            docker: 'absent',
-            verifiedAt: operationFinishedAt,
-          }),
+          finalizeLogs: async ({ operationFinishedAt }): Promise<LogCleanupProof> => {
+            if (coordinator === null) throw new Error('runner log coordinator is unavailable');
+            return coordinator.finalize(operationFinishedAt);
+          },
           ...(requestedDefinition !== undefined && operationId === 'activate-target'
             ? {
                 classifyAcceptedResult(result: CommandResult) {
@@ -2021,8 +2034,16 @@ async function createProductionComposition(
                 },
               }
             : {}),
-          onStdout: (chunk) => stdout.push(chunk),
-          onStderr: (chunk) => stderr.push(chunk),
+          onStdoutBytes: (chunk) => {
+            if (coordinator === null) throw new Error('runner log coordinator is unavailable');
+            coordinator.appendDockerBytes(chunk);
+            stdout.append(chunk);
+          },
+          onStderrBytes: (chunk) => {
+            if (coordinator === null) throw new Error('runner log coordinator is unavailable');
+            coordinator.appendDockerBytes(chunk);
+            stderr.append(chunk);
+          },
         });
         let executorError: unknown;
         try {
@@ -2046,8 +2067,8 @@ async function createProductionComposition(
           persisted,
           context.stage,
           context.job.requestId,
-          stdout.join(''),
-          stderr.join(''),
+          stdout.toString(),
+          stderr.toString(),
         );
         if (executorError !== undefined && execution.outcome === 'passed') {
           throw executorError;
@@ -2435,7 +2456,9 @@ async function createProductionComposition(
         ),
         logs: async () => {
           const verifiedAt = new Date().toISOString();
-          return ownership.cancellationLogProof(args.jobId, verifiedAt);
+          if (coordinator === null) throw new Error('runner log coordinator is unavailable');
+          const coordinatorProof = coordinator.sealForCancellation(verifiedAt);
+          return ownership.cancellationLogProof(args.jobId, coordinatorProof.verifiedAt);
         },
       },
       monotonicNow: monotonicClock,
@@ -2463,18 +2486,27 @@ async function createProductionComposition(
         evidenceWriter: createEvidenceWriter({
           stateRoot: loaded.pathAuthorities.stateRoot,
         }),
+        pipelineLogWriter: coordinator.pipelineLogWriter,
         cancellation: runnerCancellation,
         services,
       }),
       close: async () => {
         cancellation?.dispose();
-        await workspaceHandle?.close().catch(() => undefined);
-        await approvedRootHandle?.close().catch(() => undefined);
-        await stateRootHandle?.close().catch(() => undefined);
-        await heldPublisher?.close().catch(() => undefined);
+        const errors: unknown[] = [];
+        try { coordinator?.close(); } catch (error) { errors.push(error); }
+        for (const close of [
+          () => workspaceHandle?.close(),
+          () => approvedRootHandle?.close(),
+          () => stateRootHandle?.close(),
+          () => heldPublisher?.close(),
+        ]) {
+          try { await close(); } catch (error) { errors.push(error); }
+        }
+        if (errors.length > 0) throw new AggregateError(errors, 'runner composition close failed');
       },
     });
   } catch (error) {
+    try { coordinator?.close(); } catch { /* preserve composition error */ }
     await approvedRootHandle?.close().catch(() => undefined);
     await stateRootHandle?.close().catch(() => undefined);
     await heldPublisher?.close().catch(() => undefined);
@@ -2553,6 +2585,7 @@ export async function runRunner(argv: readonly string[]): Promise<PipelineResult
         return createProductionComposition(
           args,
           loaded,
+          database,
           store,
           ownership,
         );

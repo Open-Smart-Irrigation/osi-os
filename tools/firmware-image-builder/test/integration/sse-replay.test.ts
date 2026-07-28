@@ -2,6 +2,8 @@ import { renameSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import * as ts from 'typescript';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { DurableLogStream } from '../../api/src/log-stream.js';
@@ -9,6 +11,51 @@ import { DurableLogStream } from '../../api/src/log-stream.js';
 const roots: string[] = [];
 const dbs: Array<ReturnType<typeof openBuilderDatabase>> = [];
 const NOW = '2026-07-28T10:00:00.000Z';
+
+function descendants<T extends ts.Node>(node: ts.Node, kind: ts.SyntaxKind): T[] {
+  const found: T[] = [];
+  const visit = (current: ts.Node): void => {
+    if (current.kind === kind) found.push(current as T);
+    current.forEachChild(visit);
+  };
+  visit(node);
+  return found;
+}
+
+function callsNamed(source: ts.SourceFile, name: string): ts.CallExpression[] {
+  return descendants<ts.CallExpression>(source, ts.SyntaxKind.CallExpression)
+    .filter((call) => ts.isIdentifier(call.expression) && call.expression.text === name);
+}
+
+function property(object: ts.ObjectLiteralExpression, name: string): ts.PropertyAssignment {
+  const match = object.properties.find(
+    (candidate): candidate is ts.PropertyAssignment => (
+      ts.isPropertyAssignment(candidate)
+      && ((ts.isIdentifier(candidate.name) && candidate.name.text === name)
+        || (ts.isStringLiteral(candidate.name) && candidate.name.text === name))
+    ),
+  );
+  expect(match, `missing object property ${name}`).toBeDefined();
+  return match!;
+}
+
+function objectArgument(call: ts.CallExpression, context: string): ts.ObjectLiteralExpression {
+  const argument = call.arguments[0];
+  expect(argument && ts.isObjectLiteralExpression(argument), `${context} object argument`).toBe(true);
+  return argument as ts.ObjectLiteralExpression;
+}
+
+function memberCalls(node: ts.Node, receiver: string, member: string): ts.CallExpression[] {
+  return descendants<ts.CallExpression>(node, ts.SyntaxKind.CallExpression).filter((call) => (
+    ts.isPropertyAccessExpression(call.expression)
+    && call.expression.name.text === member
+    && call.expression.expression.getText() === receiver
+  ));
+}
+
+function expectIdentifier(node: ts.Node | undefined, name: string): void {
+  expect(node !== undefined && ts.isIdentifier(node) && node.text === name).toBe(true);
+}
 
 function seed(db: ReturnType<typeof openBuilderDatabase>): void {
   db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json, offline_feed_preparation_json,
@@ -23,6 +70,125 @@ afterEach(async () => {
 });
 
 describe('SSE durable replay', () => {
+  it('pins runner production log coordinator wiring', async () => {
+    const source = await readFile(
+      fileURLToPath(new URL('../../runner/src/main.ts', import.meta.url)),
+      'utf8',
+    );
+    const file = ts.createSourceFile(
+      'main.ts',
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const parseDiagnostics = (file as ts.SourceFile & {
+      parseDiagnostics?: readonly ts.Diagnostic[];
+    }).parseDiagnostics ?? [];
+    expect(parseDiagnostics).toEqual([]);
+
+    const coordinatorCalls = callsNamed(file, 'createRunnerLogCoordinator');
+    expect(coordinatorCalls).toHaveLength(1);
+    const coordinatorOptions = objectArgument(coordinatorCalls[0]!, 'createRunnerLogCoordinator');
+    expect(property(coordinatorOptions, 'db').initializer.getText()).toBe('database');
+    expect(property(coordinatorOptions, 'jobRoot').initializer.getText())
+      .toBe("join(stateRootIdentity.path, 'jobs', args.jobId)");
+    expect(property(coordinatorOptions, 'jobId').initializer.getText()).toBe('args.jobId');
+
+    const executorCalls = callsNamed(file, 'createDockerExecutor');
+    expect(executorCalls).toHaveLength(1);
+    const executorOptions = objectArgument(executorCalls[0]!, 'createDockerExecutor');
+    for (const [callbackName, captureName] of [['onStdoutBytes', 'stdout'], ['onStderrBytes', 'stderr']] as const) {
+      const callback = property(executorOptions, callbackName).initializer;
+      expect(ts.isArrowFunction(callback), `${callbackName} callback`).toBe(true);
+      const callbackCalls = ts.isArrowFunction(callback)
+        ? descendants<ts.CallExpression>(callback, ts.SyntaxKind.CallExpression)
+        : [];
+      const appendDockerCalls = callbackCalls.filter((call) => (
+        ts.isPropertyAccessExpression(call.expression)
+        && call.expression.expression.getText() === 'coordinator'
+        && call.expression.name.text === 'appendDockerBytes'
+      ));
+      const captureAppendCalls = callbackCalls.filter((call) => (
+        ts.isPropertyAccessExpression(call.expression)
+        && call.expression.expression.getText() === captureName
+        && call.expression.name.text === 'append'
+      ));
+      expect(appendDockerCalls).toHaveLength(1);
+      expect(captureAppendCalls).toHaveLength(1);
+      expectIdentifier(appendDockerCalls[0]!.arguments[0], 'chunk');
+      expectIdentifier(captureAppendCalls[0]!.arguments[0], 'chunk');
+      expect(appendDockerCalls[0]!.pos).toBeLessThan(captureAppendCalls[0]!.pos);
+    }
+
+    const finalize = property(executorOptions, 'finalizeLogs').initializer;
+    expect(ts.isArrowFunction(finalize)).toBe(true);
+    const finalizeCalls = memberCalls(finalize, 'coordinator', 'finalize');
+    expect(finalizeCalls).toHaveLength(1);
+    expectIdentifier(finalizeCalls[0]!.arguments[0], 'operationFinishedAt');
+
+    const pipelineObject = descendants<ts.ObjectLiteralExpression>(file, ts.SyntaxKind.ObjectLiteralExpression)
+      .find((object) => object.properties.some((candidate) => (
+        ts.isPropertyAssignment(candidate)
+        && ts.isIdentifier(candidate.name)
+        && candidate.name.text === 'pipelineLogWriter'
+      )));
+    expect(pipelineObject).toBeDefined();
+    expect(property(pipelineObject!, 'pipelineLogWriter').initializer.getText())
+      .toBe('coordinator.pipelineLogWriter');
+
+    const cleanupObject = descendants<ts.ObjectLiteralExpression>(file, ts.SyntaxKind.ObjectLiteralExpression)
+      .find((object) => object.properties.some((candidate) => (
+        ts.isPropertyAssignment(candidate)
+        && ts.isIdentifier(candidate.name)
+        && candidate.name.text === 'logs'
+      )));
+    expect(cleanupObject).toBeDefined();
+    const logs = property(cleanupObject!, 'logs').initializer;
+    expect(ts.isArrowFunction(logs)).toBe(true);
+    const cancellationLogs = logs as ts.ArrowFunction;
+    const sealCalls = memberCalls(cancellationLogs, 'coordinator', 'sealForCancellation');
+    expect(sealCalls).toHaveLength(1);
+    expectIdentifier(sealCalls[0]!.arguments[0], 'verifiedAt');
+    const proofCalls = memberCalls(cancellationLogs, 'ownership', 'cancellationLogProof');
+    expect(proofCalls).toHaveLength(1);
+    expect(proofCalls[0]!.arguments[0]!.getText()).toBe('args.jobId');
+    expect(proofCalls[0]!.arguments[1]!.getText()).toBe('coordinatorProof.verifiedAt');
+
+    const closeProperty = descendants<ts.PropertyAssignment>(file, ts.SyntaxKind.PropertyAssignment)
+      .find((candidate) => (
+        ts.isIdentifier(candidate.name)
+        && candidate.name.text === 'close'
+        && ts.isArrowFunction(candidate.initializer)
+        && descendants<ts.CallExpression>(candidate.initializer.body, ts.SyntaxKind.CallExpression)
+          .some((call) => (
+            ts.isPropertyAccessExpression(call.expression)
+            && call.expression.name.text === 'close'
+            && call.expression.expression.getText() === 'stateRootHandle'
+          ))
+      ));
+    expect(closeProperty).toBeDefined();
+    const closeBody = (closeProperty!.initializer as ts.ArrowFunction).body;
+    const closeCalls = descendants<ts.CallExpression>(closeBody, ts.SyntaxKind.CallExpression);
+    const coordinatorClose = closeCalls.find((call) => (
+      ts.isPropertyAccessExpression(call.expression)
+      && call.expression.name.text === 'close'
+      && call.expression.expression.getText() === 'coordinator'
+    ));
+    const stateRootClose = closeCalls.find((call) => (
+      ts.isPropertyAccessExpression(call.expression)
+      && call.expression.name.text === 'close'
+      && call.expression.expression.getText() === 'stateRootHandle'
+    ));
+    expect(coordinatorClose).toBeDefined();
+    expect(stateRootClose).toBeDefined();
+    expect(coordinatorClose!.pos).toBeLessThan(stateRootClose!.pos);
+
+    const productionCompositionCalls = callsNamed(file, 'createProductionComposition');
+    expect(productionCompositionCalls).toHaveLength(1);
+    expect(productionCompositionCalls[0]!.arguments[2]!.getText()).toBe('database');
+  });
+
   it('replays stage, exact log, terminal, and keepalive-compatible frames without duplicates', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-sse-replay-')); roots.push(root);
     const db = openBuilderDatabase(join(root, 'jobs.sqlite')); dbs.push(db); seed(db);
