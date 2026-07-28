@@ -25,6 +25,30 @@ const READ_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
 const COMMAND_KEYS = Object.freeze(['argv', 'exitCode', 'finishedAt', 'outputLimit', 'signal', 'startedAt', 'timedOut']);
 const ERROR_REQUIRED_KEYS = Object.freeze(['code', 'details', 'diagnosis', 'recovery', 'requestId', 'retryable', 'stage']);
 const ERROR_OPTIONAL_KEYS = Object.freeze(['evidencePath', 'operationId']);
+const STORED_EVIDENCE_KEYS = Object.freeze([
+  'commands', 'error', 'finishedAt', 'inputs', 'jobId', 'observations',
+  'operationId', 'outcome', 'schemaVersion', 'stage', 'startedAt',
+]);
+const STAGE_OPERATION_IDS: Readonly<Record<PipelineStageName, readonly TrustedOperationId[]>> = Object.freeze({
+  preflight: [],
+  source: [],
+  'release-gates': [
+    'verify-profile-parity',
+    'verify-chameleon',
+    'verify-db-schema',
+    'verify-sync-flow',
+    'verify-strega',
+    'verify-communication',
+    'check-mqtt-topics',
+  ],
+  frontend: ['frontend-install', 'frontend-test', 'frontend-typecheck', 'frontend-build', 'mirror-gui'],
+  'target-setup': ['activate-target'],
+  feeds: ['copy-feed-config', 'update-feeds', 'install-feeds'],
+  config: ['resolve-config'],
+  build: ['build-image'],
+  verify: ['verify-image'],
+  publish: [],
+});
 
 export interface EvidenceCommand {
   readonly argv: readonly string[];
@@ -115,6 +139,11 @@ function exactKeys(value: Readonly<Record<string, unknown>>, required: readonly 
   const keys = Object.keys(value).sort();
   return required.every((key) => keys.includes(key))
     && keys.every((key) => required.includes(key) || optional.includes(key));
+}
+
+function isOperationAllowedForStage(stage: PipelineStageName, operationId: TrustedOperationId | null): boolean {
+  const allowed = STAGE_OPERATION_IDS[stage];
+  return operationId === null || allowed.includes(operationId);
 }
 
 function validateCommand(input: EvidenceCommand, index: number): EvidenceCommand {
@@ -238,7 +267,7 @@ function validateInput(input: StageEvidenceInput): StageEvidence {
   if (jobId.includes('/')) return invalid('jobId must be one stable path segment');
   if (!isPipelineStageName(input.stage)
     || (input.operationId !== null && !isTrustedOperationId(input.operationId))
-    || (input.stage === 'source' && input.operationId !== null)) {
+    || !isOperationAllowedForStage(input.stage, input.operationId)) {
     return invalid('stage or operation is not trusted');
   }
   let startedAt: string;
@@ -280,6 +309,25 @@ function validateInput(input: StageEvidenceInput): StageEvidence {
     observations,
     error,
   });
+}
+
+export function decodeStoredStageEvidence(value: unknown): StageEvidence {
+  let normalized: Readonly<Record<string, unknown>>;
+  try {
+    const candidate = normalizeJson(value, 'stored stage evidence');
+    if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      return invalid('stored stage evidence is invalid');
+    }
+    normalized = candidate as Readonly<Record<string, unknown>>;
+    encodeJson(normalized, 'stored stage evidence', true);
+  } catch (error) {
+    return invalid('stored stage evidence is not bounded JSON', error);
+  }
+  if (!exactKeys(normalized, STORED_EVIDENCE_KEYS) || normalized.schemaVersion !== 1) {
+    return invalid('stored stage evidence has an invalid shape');
+  }
+  const { schemaVersion: _schemaVersion, ...input } = normalized;
+  return validateInput(input as unknown as StageEvidenceInput);
 }
 
 function procChild(parent: FileHandle, basename: string): string {

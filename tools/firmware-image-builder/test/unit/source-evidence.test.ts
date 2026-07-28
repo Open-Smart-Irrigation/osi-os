@@ -6,7 +6,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadConfig, type PathAuthorityDependencies, type StateRootAuthority } from '../../config/load.js';
 import { PIPELINE_STAGE_NAMES, type PipelineStageName, type TrustedOperationId } from '../../domain/types.js';
-import { createEvidenceWriter, type EvidenceFileSystem, type StageEvidenceInput } from '../../runner/src/evidence.js';
+import {
+  createEvidenceWriter,
+  decodeStoredStageEvidence,
+  type EvidenceFileSystem,
+  type StageEvidenceInput,
+} from '../../runner/src/evidence.js';
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
 const temporaryDirectories: string[] = [];
@@ -143,6 +148,63 @@ async function replaceEvidenceAncestor(statePath: string, jobId: string, ancesto
 }
 
 describe('stage evidence', () => {
+  it('decodes a valid failure with the exact stored shape', () => {
+    const decoded = decodeStoredStageEvidence({ schemaVersion: 1, ...failedInput() });
+
+    expect(decoded).toMatchObject({
+      schemaVersion: 1,
+      jobId: 'job-2',
+      stage: 'source',
+      outcome: 'failed',
+      operationId: null,
+      error: { code: 'SOURCE_NOT_COMMIT', stage: 'source' },
+    });
+    expect(Object.keys(decoded).sort()).toEqual([
+      'commands', 'error', 'finishedAt', 'inputs', 'jobId', 'observations',
+      'operationId', 'outcome', 'schemaVersion', 'stage', 'startedAt',
+    ]);
+  });
+
+  it('rejects an extra stored key', () => {
+    expect(() => decodeStoredStageEvidence({ schemaVersion: 1, ...failedInput(), extra: true })).toThrowError();
+  });
+
+  it('rejects stored evidence larger than 65,536 encoded bytes', () => {
+    expect(() => decodeStoredStageEvidence({
+      schemaVersion: 1,
+      ...passedInput('job-large'),
+      inputs: { payload: 'x'.repeat(65_500) },
+    })).toThrowError();
+  });
+
+  it('rejects reversed stage or command times', () => {
+    expect(() => decodeStoredStageEvidence({
+      schemaVersion: 1,
+      ...passedInput('job-reversed-stage'),
+      startedAt: '2026-07-26T10:00:02.000Z',
+      finishedAt: '2026-07-26T10:00:01.000Z',
+    })).toThrowError();
+    expect(() => decodeStoredStageEvidence({
+      schemaVersion: 1,
+      ...passedInput('job-reversed-command'),
+      commands: [{ ...command(), startedAt: '2026-07-26T10:00:02.000Z' }],
+    })).toThrowError();
+  });
+
+  it('requires passed evidence to have no error and failed evidence to have an error', () => {
+    expect(() => decodeStoredStageEvidence({ schemaVersion: 1, ...passedInput('job-passed-error'), error: failedInput().error })).toThrowError();
+    expect(() => decodeStoredStageEvidence({ schemaVersion: 1, ...failedInput('job-failed-null'), error: null })).toThrowError();
+  });
+
+  it('rejects source and wrong-stage operation identities', () => {
+    expect(() => decodeStoredStageEvidence({ schemaVersion: 1, ...passedInput('job-source-operation'), operationId: 'build-image' })).toThrowError();
+    expect(() => decodeStoredStageEvidence({
+      schemaVersion: 1,
+      ...summaryInput('build', 'passed', 'job-wrong-stage-operation'),
+      operationId: 'verify-image',
+    })).toThrowError();
+  });
+
   it('publishes canonical immutable evidence and retains complete command execution fields', async () => {
     const fileSystem = new MemoryEvidenceFileSystem();
     const authority = await authorityFixture();
