@@ -67,7 +67,6 @@ export interface DirectInterruptionInput {
   readonly runnerUnit: string;
   readonly startAttemptedAt: string;
   readonly unitInactiveAt: string;
-  readonly at: string;
   readonly reason: string;
 }
 
@@ -223,11 +222,12 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
         OR state IN ('starting','preflight','source','release_gates','frontend','target_setup','feeds','config','building','verifying','cancel_requested')
         OR cleanup_fence_generation IS NOT NULL
         OR cleanup_admission_id IS NOT NULL
-        OR cleanup_blocker_code IS NOT NULL
+        OR cleanup_blocker_code IS NOT NULL OR cleanup_blocker_json IS NOT NULL
         OR container_id IS NOT NULL OR container_name IS NOT NULL OR container_image_digest IS NOT NULL
         OR container_label_job_id IS NOT NULL OR container_label_manifest_sha IS NOT NULL OR container_labels_json IS NOT NULL
         OR artifact_staging_path IS NOT NULL OR artifact_quarantine_path IS NOT NULL OR artifact_quarantine_intent_path IS NOT NULL
-        OR publish_blocker_code IS NOT NULL
+        OR publish_blocker_code IS NOT NULL OR publish_blocker_json IS NOT NULL
+        OR publish_state IN ('blocked','publishing')
         OR EXISTS (SELECT 1 FROM job_log_generations AS logs WHERE logs.job_id=jobs.job_id AND logs.sealed_at IS NULL))${suffix}
       LIMIT 1`, ...(excludeJobId === undefined ? [] : [excludeJobId]));
     const jobId = row === undefined ? null : rowJobId(row);
@@ -285,19 +285,19 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
     if (jobId === null || !isActiveState(row.state)) return { kind: 'blocked', reason: 'claimed job identity is invalid' };
     const inspected = await inspectInactive(unit);
     if ('code' in inspected) return persistRecoveryBlocker(row, unit, reason, inspected, laterInstant(clockReading(), attemptedAt));
-    const at = laterInstant(clockReading(), inspected.observedAt);
-    if (inspected.active) return persistRecoveryBlocker(row, unit, reason, { code: 'LIVE_RUNNER_UNIT', details: { unit } }, at);
+    if (inspected.active) return persistRecoveryBlocker(row, unit, reason, { code: 'LIVE_RUNNER_UNIT', details: { unit } }, laterInstant(clockReading(), inspected.observedAt));
     const safety = await safetyBlocker('direct-proof', jobId);
-    if (safety !== null) return persistRecoveryBlocker(row, unit, reason, safety, at);
+    if (safety !== null) return persistRecoveryBlocker(row, unit, reason, safety, laterInstant(clockReading(), inspected.observedAt));
     let proof: DirectInterruptionProof | null = null;
     try {
       proof = options.directInterrupt === undefined
         ? null
-        : await options.directInterrupt({ jobId, runnerUnit: unit, startAttemptedAt: attemptedAt, unitInactiveAt: inspected.observedAt, at, reason });
+        : await options.directInterrupt({ jobId, runnerUnit: unit, startAttemptedAt: attemptedAt, unitInactiveAt: inspected.observedAt, reason });
     } catch (error) {
-      return persistRecoveryBlocker(row, unit, reason, { code: 'DIRECT_PROOF_UNAVAILABLE', details: { error: error instanceof Error ? error.message : String(error) } }, at);
+      return persistRecoveryBlocker(row, unit, reason, { code: 'DIRECT_PROOF_UNAVAILABLE', details: { error: error instanceof Error ? error.message : String(error) } }, laterInstant(clockReading(), inspected.observedAt));
     }
-    if (proof === null) return persistRecoveryBlocker(row, unit, reason, { code: 'DIRECT_PROOF_UNAVAILABLE' }, at);
+    if (proof === null) return persistRecoveryBlocker(row, unit, reason, { code: 'DIRECT_PROOF_UNAVAILABLE' }, laterInstant(clockReading(), inspected.observedAt));
+    const at = laterInstant(clockReading(), inspected.observedAt);
     const result = options.ownership.apiWrite({ kind: 'direct-interrupt', jobId, expectedState: row.state, at, proof, errorCode: 'SERVICE_START_FAILED', error: { reason } });
     if (!success(result)) return { kind: 'blocked', reason: resultMessage(result), jobId };
     return { kind: 'interrupted', jobId };
@@ -312,10 +312,13 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
       if (row.state !== 'starting') return { kind: 'blocked', reason: 'active runner is unresolved', jobId };
       const unit = nullableText(row, 'runner_unit');
       if (unit === null || unit !== runnerUnit(jobId)) return { kind: 'blocked', reason: 'persisted runner unit is invalid', jobId };
+      const dispatchedAt = canonicalInstant(row.dispatched_at);
+      if (dispatchedAt === null) return { kind: 'blocked', reason: 'persisted dispatch time is invalid', jobId };
+      if (Date.parse(dispatchedAt) > Date.parse(clockReading())) return { kind: 'blocked', reason: 'persisted dispatch time is from the future', jobId };
       const observation = await inspectInactive(unit);
       if ('code' in observation) return { kind: 'blocked', reason: observation.code, jobId };
       if (observation.active) return { kind: 'blocked', reason: 'runner unit is live', jobId };
-      const recovered = await recoverClaimed(row, unit, 'dispatcher found a claimed starting job before service start', observation.observedAt);
+      const recovered = await recoverClaimed(row, unit, 'dispatcher found a claimed starting job before service start', dispatchedAt);
       return recovered;
     }
     return null;
@@ -341,15 +344,19 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
       const claimed = options.ownership.apiWrite({ kind: 'dispatch', jobId, runnerUnit: unit, at: clockReading() });
       if (!success(claimed)) return { kind: 'blocked', reason: resultMessage(claimed), jobId };
       const afterClaimSafety = await safetyBlocker('before-start', jobId);
-      const observation = await inspectInactive(unit);
       const claimedRow = currentJob(jobId) ?? { ...candidate, state: 'starting', queue_state: 'dispatched', runner_unit: unit };
+      const afterClaimDatabase = databaseBlocker(jobId);
       if (afterClaimSafety !== null) return recoverClaimed(claimedRow, unit, 'runtime blocker appeared after queue claim', clockReading());
+      if (afterClaimDatabase !== null) return recoverClaimed(claimedRow, unit, 'SQLite blocker appeared after queue claim', clockReading());
+      const observation = await inspectInactive(unit);
       if ('code' in observation) return recoverClaimed(claimedRow, unit, observation.code, clockReading());
       if (observation.active) return recoverClaimed(currentJob(jobId) ?? { ...candidate, state: 'starting', runner_unit: unit }, unit, 'runner unit became live before service start', observation.observedAt);
       const beforeStart = await safetyBlocker('before-start', jobId);
       if (beforeStart !== null) return recoverClaimed(claimedRow, unit, 'runtime blocker appeared during final start check', observation.observedAt);
       const liveBeforeStart = await systemdBlocker(unit);
       if (liveBeforeStart !== null) return recoverClaimed(claimedRow, unit, 'runner unit became live during final start check', observation.observedAt);
+      const sqliteBeforeStart = databaseBlocker(jobId);
+      if (sqliteBeforeStart !== null) return recoverClaimed(claimedRow, unit, 'SQLite blocker appeared during final start check', observation.observedAt);
       const startAttemptedAt = clockReading();
       let start: unknown;
       try { start = await options.systemd.start(unit); }

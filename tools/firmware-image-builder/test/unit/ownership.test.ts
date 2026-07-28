@@ -816,6 +816,27 @@ describe('actor-owned compare-and-set writes', () => {
     expect(target.ownership.apiWrite(dispatch('job-2'))).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
   });
 
+  it.each([
+    ['cleanup blocker code half', ["DROP TRIGGER jobs_cleanup_blocker_guard_update", "UPDATE jobs SET cleanup_blocker_code='SERVICE_START_FAILED' WHERE job_id=?"]],
+    ['cleanup blocker JSON half', ["DROP TRIGGER jobs_cleanup_blocker_guard_update", "UPDATE jobs SET cleanup_blocker_json='{}' WHERE job_id=?"]],
+    ['publish blocker code half', ["DROP TRIGGER jobs_publish_null_guard_update", "UPDATE jobs SET publish_blocker_code='PUBLISH_FAILED' WHERE job_id=?"]],
+    ['publish blocker JSON half', ["DROP TRIGGER jobs_publish_null_guard_update", "UPDATE jobs SET publish_blocker_json='{}' WHERE job_id=?"]],
+    ['blocked publish state', ["DROP TRIGGER jobs_publish_guard", "UPDATE jobs SET publish_state='blocked' WHERE job_id=?"]],
+    ['publishing publish state', ["DROP TRIGGER jobs_publish_guard", "UPDATE jobs SET publish_state='publishing' WHERE job_id=?"]],
+  ])('fails closed for the malformed or blocked global %s predicate', async (_label, statements) => {
+    const jobId = `global-${String(_label).replaceAll(' ', '-')}`;
+    const target = await fixture(jobId);
+    expect(target.ownership.apiWrite(dispatch(jobId)).ok).toBe(true);
+    for (const statement of statements) {
+      if (statement.startsWith('DROP')) target.db.exec(statement);
+      else target.db.prepare(statement).run(jobId);
+    }
+    expect(target.ownership.apiWrite({ kind: 'enqueue', input: {
+      jobId: 'job-2', requestId: 'request-global-predicate-job-2', request: { branch: 'main', target: 'rpi-5' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'global predicate', acceptedAt: NOW,
+    } }).ok).toBe(true);
+    expect(target.ownership.apiWrite({ kind: 'dispatch', jobId: 'job-2', runnerUnit: 'osi-image-builder-runner@job-2.service', at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
+  });
+
   it('allows the next dispatch only after a terminal clearance', async () => {
     const target = await fixture('terminal-clearance');
     expect(target.ownership.apiWrite(dispatch('terminal-clearance')).ok).toBe(true);

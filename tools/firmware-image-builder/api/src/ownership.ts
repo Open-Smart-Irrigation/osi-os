@@ -2268,6 +2268,7 @@ export class OwnershipStore {
         OR cleanup_fence_generation IS NOT NULL
         OR cleanup_admission_id IS NOT NULL
         OR cleanup_blocker_code IS NOT NULL
+        OR cleanup_blocker_json IS NOT NULL
         OR container_id IS NOT NULL
         OR container_name IS NOT NULL
         OR container_image_digest IS NOT NULL
@@ -2278,6 +2279,8 @@ export class OwnershipStore {
         OR artifact_quarantine_path IS NOT NULL
         OR artifact_quarantine_intent_path IS NOT NULL
         OR publish_blocker_code IS NOT NULL
+        OR publish_blocker_json IS NOT NULL
+        OR publish_state IN ('blocked', 'publishing')
         OR EXISTS (SELECT 1 FROM job_log_generations AS logs WHERE logs.job_id=jobs.job_id AND logs.sealed_at IS NULL)
       LIMIT 1`).get() as Row | undefined;
     if (blocker !== undefined && blocker.job_id !== command.jobId) {
