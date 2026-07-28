@@ -59,9 +59,22 @@ async function copyUnitFixture(): Promise<{ readonly root: string; readonly path
   const unitRoot = join(root, 'units');
   const installRoot = join(root, 'selected');
   const binRoot = join(installRoot, 'bin');
+  const repositoryRoot = join(root, 'repository');
+  const configHome = join(root, 'config-home');
+  const configRoot = join(configHome, 'osi-image-builder');
+  const stateHome = join(root, 'state-home');
+  const stateRoot = join(stateHome, 'osi-image-builder');
+  const outputRoot = join(root, 'output');
+  const stagingRoot = join(outputRoot, '.osi-image-builder', 'staging');
+  const quarantineRoot = join(outputRoot, '.osi-image-builder', 'quarantine');
   await mkdir(binRoot, { recursive: true });
+  await mkdir(repositoryRoot, { recursive: true });
+  await mkdir(configRoot, { recursive: true });
+  await mkdir(stateRoot, { recursive: true });
+  await mkdir(stagingRoot, { recursive: true });
+  await mkdir(quarantineRoot, { recursive: true });
 
-  for (const executable of ['osi-image-builder-api', 'osi-image-builder-runner', 'osi-image-builder-cleanup']) {
+  for (const executable of ['osi-image-builder-api', 'osi-image-builder-runner', 'osi-image-builder-cleanup', 'osi-image-publish']) {
     const path = join(binRoot, executable);
     await writeFile(path, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     await chmod(path, 0o755);
@@ -71,7 +84,15 @@ async function copyUnitFixture(): Promise<{ readonly root: string; readonly path
   const paths: string[] = [];
   for (const name of UNIT_NAMES) {
     const source = await readFile(new URL(name, unitDirectory), 'utf8');
-    const copied = source.replaceAll('%h/.local/lib/osi-image-builder/selected', installRoot);
+    const copied = source
+      .replaceAll('%h/.local/lib/osi-image-builder/selected', installRoot)
+      .replaceAll('@OSI_IMAGE_BUILDER_REPOSITORY_PATH@', repositoryRoot)
+      .replaceAll('@OSI_IMAGE_BUILDER_XDG_CONFIG_HOME@', configHome)
+      .replaceAll('@OSI_IMAGE_BUILDER_CONFIG_ROOT@', configRoot)
+      .replaceAll('@OSI_IMAGE_BUILDER_XDG_STATE_HOME@', stateHome)
+      .replaceAll('@OSI_IMAGE_BUILDER_STATE_ROOT@', stateRoot)
+      .replaceAll('@OSI_IMAGE_BUILDER_OUTPUT_ROOT_PATHS@', outputRoot)
+      .replaceAll('@OSI_IMAGE_BUILDER_CLEANUP_WRITE_PATHS@', `${stagingRoot} ${quarantineRoot}`);
     const path = join(unitRoot, basename(name));
     await writeFile(path, copied);
     paths.push(path);
@@ -81,7 +102,7 @@ async function copyUnitFixture(): Promise<{ readonly root: string; readonly path
 
 async function verifyCopiedUnits(paths: readonly string[]): Promise<VerificationProbe> {
   try {
-    const result = await execFile('systemd-analyze', ['verify', ...paths], {
+    const result = await execFile('systemd-analyze', ['--user', 'verify', ...paths], {
       env: { ...process.env, SYSTEMD_COLORS: '0', SYSTEMD_PAGER: 'cat' },
       maxBuffer: 64 * 1024,
       timeout: 15_000,

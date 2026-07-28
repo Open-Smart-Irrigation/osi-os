@@ -70,6 +70,18 @@ function installValues(unit: UnitSections): readonly string[] {
   ];
 }
 
+function credentialDirectives(unit: UnitSections): readonly string[] {
+  return [
+    ...values(unit, 'Service', 'EnvironmentFile'),
+    ...values(unit, 'Service', 'PassEnvironment'),
+    ...values(unit, 'Service', 'LoadCredential'),
+    ...values(unit, 'Service', 'LoadCredentialEncrypted'),
+    ...values(unit, 'Service', 'SetCredential'),
+    ...values(unit, 'Service', 'SetCredentialEncrypted'),
+    ...values(unit, 'Service', 'ImportCredential'),
+  ];
+}
+
 describe('user systemd unit contracts', () => {
   it('ships the API unit as a loopback service wanted by default.target', async () => {
     const { unit } = await readUnit('osi-image-builder.service');
@@ -87,19 +99,23 @@ describe('user systemd unit contracts', () => {
 
     expect(text).not.toMatch(/(?:Requires|Requisite|Wants|BindsTo|PartOf|After|Before)=.*osi-image-builder\.service/u);
     expect(text).not.toMatch(/PartOf=/u);
-    expect(installValues(unit)).not.toContain('default.target');
+    expect(unit.has('Install')).toBe(false);
     expect(value(unit, 'Service', 'KillMode')).toBe('control-group');
     expect(value(unit, 'Service', 'TimeoutStopSec')).toBe('15s');
     expect(value(unit, 'Service', 'KillSignal')).toBe('SIGUSR1');
     expect(value(unit, 'Service', 'Restart')).toBe('no');
+    expect(values(unit, 'Service', 'ExecStart')).toHaveLength(1);
+    expect(credentialDirectives(unit)).toEqual([]);
   });
 
   it('starts cleanup only as a single-use API admission worker', async () => {
     const { text, unit } = await readUnit('osi-image-builder-cleanup@.service');
     const exec = execWords(unit);
     const environment = values(unit, 'Service', 'Environment').join('\n');
-    const writePaths = values(unit, 'Service', 'ReadWritePaths');
-    const readPaths = values(unit, 'Service', 'ReadOnlyPaths');
+    const bindPaths = values(unit, 'Service', 'BindPaths');
+    const bindReadOnlyPaths = values(unit, 'Service', 'BindReadOnlyPaths');
+    const inaccessiblePaths = values(unit, 'Service', 'InaccessiblePaths');
+    const execPaths = values(unit, 'Service', 'ExecPaths');
 
     expect(value(unit, 'Service', 'Type')).toBe('oneshot');
     expect(value(unit, 'Service', 'RemainAfterExit')).toBe('no');
@@ -108,23 +124,42 @@ describe('user systemd unit contracts', () => {
     expect(value(unit, 'Service', 'NoNewPrivileges')).toBe('yes');
     expect(value(unit, 'Service', 'PrivateTmp')).toBe('yes');
     expect(value(unit, 'Service', 'ProtectSystem')).toBe('strict');
-    expect(value(unit, 'Service', 'ProtectHome')).toBe('read-only');
+    expect(value(unit, 'Service', 'ProtectHome')).toBe('tmpfs');
 
+    expect(values(unit, 'Service', 'ExecStart')).toHaveLength(1);
     expect(exec.slice(1)).toEqual(['%i']);
     expect(exec.filter((word) => /%[iI]/u.test(word))).toEqual(['%i']);
     expect(exec.join(' ')).not.toMatch(/(?:job[_-]?id|token|credential)/iu);
     expect(environment).not.toMatch(/(?:job[_-]?id|token|credential)/iu);
-    expect(text).not.toMatch(/EnvironmentFile=/u);
-    expect(text).not.toMatch(/LoadCredential=/u);
-    expect(installValues(unit)).not.toContain('default.target');
+    expect(credentialDirectives(unit)).toEqual([]);
+    expect(unit.has('Install')).toBe(false);
 
-    expect(writePaths).toContain('%h/.local/state/osi-image-builder');
-    expect(writePaths).toContain('%h/.local/share/osi-image-builder/quarantine');
-    expect(writePaths.every((path) => path.startsWith('%h/.local/'))).toBe(true);
-    expect(writePaths).not.toContain('%h/.local/lib/osi-image-builder');
-    expect(writePaths).not.toContain('%h');
-    expect(writePaths).not.toContain('/');
-    expect(readPaths).toContain('%h/.local/lib/osi-image-builder');
+    expect(values(unit, 'Service', 'Environment')).toEqual([
+      'XDG_CONFIG_HOME=@OSI_IMAGE_BUILDER_XDG_CONFIG_HOME@',
+      'XDG_STATE_HOME=@OSI_IMAGE_BUILDER_XDG_STATE_HOME@',
+    ]);
+    expect(values(unit, 'Service', 'StateDirectory')).toEqual([]);
+    expect(bindPaths).toEqual([
+      '@OSI_IMAGE_BUILDER_STATE_ROOT@',
+      '@OSI_IMAGE_BUILDER_CLEANUP_WRITE_PATHS@',
+    ]);
+    expect(bindReadOnlyPaths).toEqual([
+      '%h/.local/lib/osi-image-builder/selected',
+      '@OSI_IMAGE_BUILDER_CONFIG_ROOT@',
+      '@OSI_IMAGE_BUILDER_OUTPUT_ROOT_PATHS@',
+    ]);
+    expect(inaccessiblePaths).toEqual(['@OSI_IMAGE_BUILDER_REPOSITORY_PATH@']);
+    expect(values(unit, 'Service', 'ReadWritePaths')).toEqual([]);
+    expect(values(unit, 'Service', 'ReadOnlyPaths')).toEqual([]);
+    expect(values(unit, 'Service', 'NoExecPaths')).toEqual(['/']);
+    expect(execPaths).toEqual([
+      '%h/.local/lib/osi-image-builder/selected/bin/osi-image-builder-cleanup',
+      '%h/.local/lib/osi-image-builder/selected/bin/osi-image-publish',
+      '/usr/bin/node',
+      '/usr/bin/systemctl',
+      '/usr/bin/docker',
+    ]);
+    expect(text).not.toMatch(/^Exec(?:StartPre|StartPost|Reload|Stop|StopPost)=/mu);
   });
 
   it('keeps the three service names templated only where their lifecycle requires it', async () => {
@@ -142,6 +177,6 @@ describe('user systemd unit contracts', () => {
     const environment = values(unit, 'Service', 'Environment');
 
     expect(environment).not.toContain(expect.stringMatching(/JOB_ID|ADMISSION_TOKEN|CLEANUP_TOKEN/u));
-    expect(values(unit, 'Service', 'EnvironmentFile')).toHaveLength(0);
+    expect(credentialDirectives(unit)).toEqual([]);
   });
 });
