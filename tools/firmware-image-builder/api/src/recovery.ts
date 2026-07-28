@@ -42,8 +42,15 @@ const MAX_LOG_GENERATIONS = 128;
 const MAX_LOG_EVENTS = 8_192;
 const STARTUP_COMPLETED_PAGE_SIZE = 64;
 const MAX_STARTUP_COMPLETED_ADMISSIONS = 256;
+const O_CLOEXEC = (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC ?? 0x80000;
+const O_PATH = (fsConstants as typeof fsConstants & { readonly O_PATH?: number }).O_PATH ?? 0x200000;
+const O_ACCMODE = (fsConstants as typeof fsConstants & { readonly O_ACCMODE?: number }).O_ACCMODE ?? 3;
+const READ_INSPECTION_FLAGS = O_PATH | fsConstants.O_NOFOLLOW | O_CLOEXEC;
+const READABLE_DESCRIPTOR_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | O_CLOEXEC;
 
 export interface RecoveryStats {
+  readonly dev?: number;
+  readonly ino?: number;
   readonly uid: number;
   readonly mode: number;
   readonly nlink: number;
@@ -334,12 +341,12 @@ function safeSegment(value: string, field: string): void {
 
 function modeOf(stats: RecoveryStats): number { return stats.mode & 0o7777; }
 
-function verifyDirectory(stats: RecoveryStats, path: string, ownerUid: number): void {
-  if (stats.isSymbolicLink() || !stats.isDirectory() || stats.uid !== ownerUid || modeOf(stats) !== DIRECTORY_MODE) throw new RecoveryBoundaryError(`unsafe recovery directory: ${path}`);
+function verifyDirectory(stats: RecoveryStats, path: string, ownerUid: number, expectedDevice?: number): void {
+  if (stats.isSymbolicLink() || !stats.isDirectory() || stats.uid !== ownerUid || modeOf(stats) !== DIRECTORY_MODE || expectedDevice !== undefined && stats.dev !== expectedDevice) throw new RecoveryBoundaryError(`unsafe recovery directory: ${path}`);
 }
 
-function verifyCredentialFile(stats: RecoveryStats, path: string, ownerUid: number): void {
-  if (stats.isSymbolicLink() || !stats.isFile() || stats.uid !== ownerUid || modeOf(stats) !== FILE_MODE || stats.nlink !== 1) throw new RecoveryBoundaryError(`unsafe cleanup credential: ${path}`);
+function verifyCredentialFile(stats: RecoveryStats, path: string, ownerUid: number, expectedDevice?: number): void {
+  if (stats.isSymbolicLink() || !stats.isFile() || stats.uid !== ownerUid || modeOf(stats) !== FILE_MODE || stats.nlink !== 1 || expectedDevice !== undefined && stats.dev !== expectedDevice) throw new RecoveryBoundaryError(`unsafe cleanup credential: ${path}`);
 }
 
 export function encodeAdmissionId(timestampMs: number, randomness: Uint8Array): string {
@@ -419,6 +426,38 @@ function procChildPath(fd: number, name: string): string {
   return `/proc/self/fd/${fd}/${name}`;
 }
 
+function stableNativeMetadata(before: Awaited<ReturnType<import('node:fs/promises').FileHandle['stat']>>, after: Awaited<ReturnType<import('node:fs/promises').FileHandle['stat']>>): boolean {
+  return before.dev === after.dev
+    && before.ino === after.ino
+    && before.mode === after.mode
+    && before.uid === after.uid
+    && before.gid === after.gid
+    && before.nlink === after.nlink
+    && before.size === after.size
+    && before.mtimeMs === after.mtimeMs
+    && before.ctimeMs === after.ctimeMs;
+}
+
+async function openDefaultReadableFile(path: string): Promise<import('node:fs/promises').FileHandle> {
+  if (process.platform !== 'linux') throw new RecoveryBoundaryError('Linux no-follow descriptor recovery is unavailable');
+  let inspected: import('node:fs/promises').FileHandle | null = null;
+  let readable: import('node:fs/promises').FileHandle | null = null;
+  try {
+    inspected = await nodeOpen(path, READ_INSPECTION_FLAGS);
+    const inspectedStats = await inspected.stat();
+    if (!inspectedStats.isFile() || inspectedStats.isSymbolicLink() || inspectedStats.nlink !== 1) throw new RecoveryBoundaryError('recovery read candidate is not a safe regular file');
+    readable = await nodeOpen(`/proc/self/fd/${inspected.fd}`, READABLE_DESCRIPTOR_FLAGS);
+    const readableStats = await readable.stat();
+    if (!readableStats.isFile() || readableStats.isSymbolicLink() || readableStats.nlink !== 1 || !stableNativeMetadata(inspectedStats, readableStats)) throw new RecoveryBoundaryError('recovery read candidate identity changed while opening');
+    const result = readable;
+    readable = null;
+    return result;
+  } finally {
+    await readable?.close().catch(() => undefined);
+    await inspected?.close().catch(() => undefined);
+  }
+}
+
 function wrapFileHandle(handle: import('node:fs/promises').FileHandle): RecoveryFileHandle {
   return {
     writeFile: async (contents) => { await handle.writeFile(contents); },
@@ -438,7 +477,15 @@ async function openDefaultDirectory(path: string): Promise<RecoveryDirectoryHand
       ...file,
       openDirectoryChild: async (name) => openDefaultDirectory(procChildPath(handle.fd, name)),
       mkdirChild: async (name, mode) => { await nodeMkdir(procChildPath(handle.fd, name), { mode }); },
-      openFileChild: async (name, flags, mode) => wrapFileHandle(await nodeOpen(procChildPath(handle.fd, name), flags, mode)),
+      openFileChild: async (name, flags, mode) => {
+        const accessMode = flags & O_ACCMODE;
+        const isReadOnly = accessMode === fsConstants.O_RDONLY
+          && (flags & (fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_APPEND | fsConstants.O_WRONLY | fsConstants.O_RDWR)) === 0;
+        const child = isReadOnly
+          ? await openDefaultReadableFile(procChildPath(handle.fd, name))
+          : await nodeOpen(procChildPath(handle.fd, name), flags, mode);
+        return wrapFileHandle(child);
+      },
       readdir: async () => nodeReaddir(`/proc/self/fd/${handle.fd}`, { encoding: 'utf8' }),
       unlinkChild: async (name) => { await nodeUnlink(procChildPath(handle.fd, name)); },
     };
@@ -454,6 +501,7 @@ export function createRecoveryFileSystem(): RecoveryDescriptorFileSystem {
 
 interface DirectoryLease {
   readonly directory: RecoveryDirectoryHandle;
+  readonly device?: number;
   readonly close: () => Promise<void>;
 }
 
@@ -525,6 +573,19 @@ function freshObservation(value: unknown, field: string, startedAt: string, comp
   if (observedAt < startedAt || observedAt < completedAt || observedAt > handedBackAt) {
     throw new RecoveryBoundaryError(`${field} is not fresh for cleanup hand-back`);
   }
+  return observedAt;
+}
+
+function inactiveSystemdObservation(
+  observation: RecoverySystemdObservation,
+  unit: string,
+  notBefore: string,
+  field: string,
+): string {
+  if (observation.unit !== unit) throw new RecoveryBoundaryError(`${field} does not match the completed admission`);
+  if (observation.active !== false) throw new RecoveryBoundaryError(`${field} is still active during hand-back verification`);
+  const observedAt = recoveryInstant(observation.observedAt, `${field} observation time`);
+  if (observedAt < notBefore) throw new RecoveryBoundaryError(`${field} observation is stale for hand-back verification`);
   return observedAt;
 }
 
@@ -654,12 +715,12 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     if (!admissionsOpen) throw new RecoveryBoundaryError('cleanup admissions are not open');
   }
 
-  async function openChildDirectory(parent: RecoveryDirectoryHandle, name: string, path: string, create: boolean): Promise<RecoveryDirectoryHandle | null> {
+  async function openChildDirectory(parent: RecoveryDirectoryHandle, name: string, path: string, create: boolean, expectedDevice?: number): Promise<RecoveryDirectoryHandle | null> {
     safeSegment(name, 'recovery directory child');
     try {
       const child = await parent.openDirectoryChild(name);
       try {
-        verifyDirectory(await child.stat(), path, ownerUid);
+        verifyDirectory(await child.stat(), path, ownerUid, expectedDevice);
         await parent.sync();
         return child;
       } catch (error) {
@@ -679,7 +740,7 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       await parent.sync();
       const child = await parent.openDirectoryChild(name);
       try {
-        verifyDirectory(await child.stat(), path, ownerUid);
+        verifyDirectory(await child.stat(), path, ownerUid, expectedDevice);
         return child;
       } catch (error) {
         try { await child.close(); } catch (closeError) { throw new RecoveryBoundaryError('recovery child close failed', { cause: closeError }); }
@@ -694,20 +755,22 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     try {
       const root = await fileSystem.openDirectory(options.stateRoot);
       handles.push(root);
-      verifyDirectory(await root.stat(), options.stateRoot, ownerUid);
-      const jobs = await openChildDirectory(root, 'jobs', join(options.stateRoot, 'jobs'), create);
+      const rootStats = await root.stat();
+      verifyDirectory(rootStats, options.stateRoot, ownerUid);
+      const rootDevice = rootStats.dev;
+      const jobs = await openChildDirectory(root, 'jobs', join(options.stateRoot, 'jobs'), create, rootDevice);
       if (jobs === null) return await closeAndNull(handles);
       handles.push(jobs);
-      const job = await openChildDirectory(jobs, jobId, join(options.stateRoot, 'jobs', jobId), create);
+      const job = await openChildDirectory(jobs, jobId, join(options.stateRoot, 'jobs', jobId), create, rootDevice);
       if (job === null) return await closeAndNull(handles);
       handles.push(job);
-      const recovery = await openChildDirectory(job, 'recovery', join(options.stateRoot, 'jobs', jobId, 'recovery'), create);
+      const recovery = await openChildDirectory(job, 'recovery', join(options.stateRoot, 'jobs', jobId, 'recovery'), create, rootDevice);
       if (recovery === null) return await closeAndNull(handles);
       handles.push(recovery);
-      const credentials = await openChildDirectory(recovery, 'cleanup-credentials', join(options.stateRoot, 'jobs', jobId, CREDENTIAL_DIRECTORY), create);
+      const credentials = await openChildDirectory(recovery, 'cleanup-credentials', join(options.stateRoot, 'jobs', jobId, CREDENTIAL_DIRECTORY), create, rootDevice);
       if (credentials === null) return await closeAndNull(handles);
       handles.push(credentials);
-      return { directory: credentials, close: async () => { await closeHandles(handles); } };
+      return { directory: credentials, device: rootDevice, close: async () => { await closeHandles(handles); } };
     } catch (error) {
       try { await closeHandles(handles); } catch (closeError) { throw new RecoveryBoundaryError('recovery directory close failed', { cause: closeError }); }
       throw error;
@@ -737,7 +800,7 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       try {
         await handle.writeFile(contents);
         await handle.sync();
-        verifyCredentialFile(await handle.stat(), relativePath, ownerUid);
+        verifyCredentialFile(await handle.stat(), relativePath, ownerUid, lease.device);
       } finally { await handle.close(); }
       await lease.directory.sync();
       await options.onCredentialWritten?.();
@@ -893,7 +956,7 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       }
       let bytes: Buffer;
       try {
-        verifyCredentialFile(await handle.stat(), relativePath, ownerUid);
+        verifyCredentialFile(await handle.stat(), relativePath, ownerUid, directory.device);
         bytes = await handle.readFile();
       } catch (error) {
         if (error instanceof RecoveryBoundaryError && error.message.startsWith('unsafe cleanup credential')) throw new CleanupCredentialInvalidError(error.message, { cause: error });
@@ -1008,6 +1071,12 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       if (completionPayload.admissionId !== input.admissionId || completionPayload.evidencePath !== evidencePath) throw new RecoveryBoundaryError('cleanup completion event does not match the durable admission evidence');
       const eventPostcondition = jsonRecord(completionPayload.postcondition, 'cleanup completion postcondition') as unknown as CleanupPostcondition;
       if (eventPostcondition.blocker !== 'none' || eventPostcondition.state !== persistedSnapshot.state || stableJson(eventPostcondition.runner) !== stableJson(persistedSnapshot.runner)) throw new RecoveryBoundaryError('cleanup completion postcondition does not match its admission');
+      const inspectSystemd = options.systemd.inspect;
+      if (inspectSystemd === undefined) throw new RecoveryBoundaryError('timestamped systemd verification is unavailable');
+      const initialCleanupUnitObservation = await inspectSystemd(unitName);
+      const initialCleanupObservedAt = inactiveSystemdObservation(initialCleanupUnitObservation, unitName, completionAt > verificationStartedAt ? completionAt : verificationStartedAt, 'cleanup unit initial observation');
+      const initialRunnerUnitObservation = await inspectSystemd(runnerUnit);
+      const initialRunnerObservedAt = inactiveSystemdObservation(initialRunnerUnitObservation, runnerUnit, completionAt > verificationStartedAt ? completionAt : verificationStartedAt, 'runner unit initial observation');
       const evidence = await dependencies.evidence.read({ jobId: input.jobId, admissionId: input.admissionId, path: evidencePath, sha256: evidenceSha256 });
       if (evidence.jobId !== input.jobId || evidence.admissionId !== input.admissionId || evidence.sha256 !== evidenceSha256 || stableJson(evidence.postcondition) !== stableJson(eventPostcondition)) throw new RecoveryBoundaryError('cleanup completion file does not match the durable cleanup CAS evidence');
       const postcondition = evidence.postcondition;
@@ -1039,15 +1108,6 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       }
       const logVerification = verifyLogContinuity(options.db, input.jobId, postcondition.logs, completionAt, completionEventSeq);
       if (await dependencies.logs.verify(logVerification) !== true) throw new RecoveryBoundaryError('cleanup physical log postcondition is not verified');
-
-      const inspectSystemd = options.systemd.inspect;
-      if (inspectSystemd === undefined) throw new RecoveryBoundaryError('timestamped systemd verification is unavailable');
-      const cleanupUnitObservation = await inspectSystemd(unitName);
-      if (cleanupUnitObservation.unit !== unitName) throw new RecoveryBoundaryError('cleanup unit observation does not match the completed admission');
-      if (cleanupUnitObservation.active !== false) throw new RecoveryBoundaryError('cleanup unit is still active during hand-back');
-      const runnerUnitObservation = await inspectSystemd(runnerUnit);
-      if (runnerUnitObservation.unit !== runnerUnit) throw new RecoveryBoundaryError('runner unit observation does not match the stale runner');
-      if (runnerUnitObservation.active !== false) throw new RecoveryBoundaryError('stale runner unit is still active during hand-back');
 
       const rootId = requiredRowString(job, 'root_id');
       const publishState = nullableRowString(job, 'publish_state');
@@ -1087,6 +1147,11 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
         postcondition: postcondition.staging,
       }) !== true) throw new RecoveryBoundaryError('cleanup staging postcondition is not verified');
 
+      const finalCleanupUnitObservation = await inspectSystemd(unitName);
+      const finalCleanupObservedAt = inactiveSystemdObservation(finalCleanupUnitObservation, unitName, initialCleanupObservedAt, 'cleanup unit final observation');
+      const finalRunnerUnitObservation = await inspectSystemd(runnerUnit);
+      const finalRunnerObservedAt = inactiveSystemdObservation(finalRunnerUnitObservation, runnerUnit, initialRunnerObservedAt, 'runner unit final observation');
+
       let exactContainerObservation: RecoveryDockerInspectResult | null = null;
       if (exactContainerId !== null) {
         exactContainerObservation = await dependencies.docker.inspect(exactContainerId);
@@ -1098,8 +1163,10 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
 
       const handBackAt = recoveryInstant(clock.now(), 'cleanup hand-back time');
       if (handBackAt < verificationStartedAt || handBackAt < completionAt) throw new RecoveryBoundaryError('cleanup hand-back clock moved backwards');
-      freshObservation(cleanupUnitObservation.observedAt, 'cleanup unit observation time', verificationStartedAt, completionAt, handBackAt);
-      const runnerObservedAt = freshObservation(runnerUnitObservation.observedAt, 'runner unit observation time', verificationStartedAt, completionAt, handBackAt);
+      freshObservation(initialCleanupObservedAt, 'cleanup unit initial observation time', verificationStartedAt, completionAt, handBackAt);
+      freshObservation(initialRunnerObservedAt, 'runner unit initial observation time', verificationStartedAt, completionAt, handBackAt);
+      freshObservation(finalCleanupObservedAt, 'cleanup unit final observation time', verificationStartedAt, completionAt, handBackAt);
+      const runnerObservedAt = freshObservation(finalRunnerObservedAt, 'runner unit final observation time', verificationStartedAt, completionAt, handBackAt);
       if (exactContainerObservation !== null) freshObservation(exactContainerObservation.observedAt, 'exact container observation time', verificationStartedAt, completionAt, handBackAt);
       const globalContainerObservedAt = freshObservation(globalContainerObservation.observedAt, 'global container observation time', verificationStartedAt, completionAt, handBackAt);
       const runnerProof = {
@@ -1143,50 +1210,45 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     return { completeAt, admissionId, jobId };
   }
 
-  async function reconcileCompletedAdmissions(): Promise<readonly CleanupHandBackResult[]> {
-    requireAdmissionsOpen();
-    const results: CleanupHandBackResult[] = [];
+  async function preflightCompletedAdmissions(): Promise<readonly { readonly completeAt: string; readonly admissionId: string; readonly jobId: string }[]> {
+    const records: Array<{ readonly completeAt: string; readonly admissionId: string; readonly jobId: string }> = [];
     let cursor: { completeAt: string; admissionId: string } | undefined;
-    let processed = 0;
-    while (true) {
-      const remaining = MAX_STARTUP_COMPLETED_ADMISSIONS - processed;
-      const page = completedAdmissionPage(cursor, Math.min(STARTUP_COMPLETED_PAGE_SIZE, remaining + 1));
-      if (page.length === 0) return results;
-      if (page.length > remaining) throw new RecoveryBoundaryError('completed admission reconciliation exceeds its bounded limit');
-      let previousKey = cursor === undefined ? undefined : `${cursor.completeAt}\u0000${cursor.admissionId}`;
+    let previousKey: string | undefined;
+    while (records.length <= MAX_STARTUP_COMPLETED_ADMISSIONS) {
+      const remaining = MAX_STARTUP_COMPLETED_ADMISSIONS + 1 - records.length;
+      const limit = Math.min(STARTUP_COMPLETED_PAGE_SIZE, remaining);
+      const page = completedAdmissionPage(cursor, limit);
+      if (page.length === 0) return records;
+      if (page.length > limit) throw new RecoveryBoundaryError('completed admission reconciliation page exceeds its bounded limit');
       for (const row of page) {
         const key = startupAdmissionCursor(row);
         const currentKey = `${key.completeAt}\u0000${key.admissionId}`;
         if (previousKey !== undefined && currentKey <= previousKey) throw new RecoveryBoundaryError('completed admission ordering is corrupt');
         previousKey = currentKey;
-        results.push(await handBackCompleted({ jobId: key.jobId, admissionId: key.admissionId }));
+        records.push(key);
         cursor = { completeAt: key.completeAt, admissionId: key.admissionId };
-        processed += 1;
+        if (records.length > MAX_STARTUP_COMPLETED_ADMISSIONS) throw new RecoveryBoundaryError('completed admission reconciliation exceeds its bounded limit');
       }
+      if (page.length < limit) return records;
     }
+    throw new RecoveryBoundaryError('completed admission reconciliation exceeds its bounded limit');
+  }
+
+  async function reconcileCompletedAdmissions(): Promise<readonly CleanupHandBackResult[]> {
+    requireAdmissionsOpen();
+    const records = await preflightCompletedAdmissions();
+    const results: CleanupHandBackResult[] = [];
+    for (const key of records) results.push(await handBackCompleted({ jobId: key.jobId, admissionId: key.admissionId }));
+    return results;
   }
 
   async function reconcileCompletedAdmissionsAtStartup(): Promise<void> {
-    let cursor: { completeAt: string; admissionId: string } | undefined;
-    let processed = 0;
-    while (true) {
-      const remaining = MAX_STARTUP_COMPLETED_ADMISSIONS - processed;
-      const page = completedAdmissionPage(cursor, Math.min(STARTUP_COMPLETED_PAGE_SIZE, remaining + 1));
-      if (page.length === 0) return;
-      if (page.length > remaining) throw new RecoveryBoundaryError('startup completed admission reconciliation exceeds its bounded limit');
-      let previousKey = cursor === undefined ? undefined : `${cursor.completeAt}\u0000${cursor.admissionId}`;
-      for (const row of page) {
-        const key = startupAdmissionCursor(row);
-        const currentKey = `${key.completeAt}\u0000${key.admissionId}`;
-        if (previousKey !== undefined && currentKey <= previousKey) throw new RecoveryBoundaryError('startup completed admission ordering is corrupt');
-        previousKey = currentKey;
-        try {
-          await handBackCompleted({ jobId: key.jobId, admissionId: key.admissionId });
-        } catch (error) {
-          if (!(error instanceof RecoveryBoundaryError)) throw error;
-        }
-        cursor = { completeAt: key.completeAt, admissionId: key.admissionId };
-        processed += 1;
+    const records = await preflightCompletedAdmissions();
+    for (const key of records) {
+      try {
+        await handBackCompleted({ jobId: key.jobId, admissionId: key.admissionId });
+      } catch (error) {
+        if (!(error instanceof RecoveryBoundaryError)) throw error;
       }
     }
   }
@@ -1495,10 +1557,12 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       databaseRun(options.db, 'DELETE FROM cleanup_credential_reservations WHERE expires_at <= ?', now);
       const root = await fileSystem.openDirectory(options.stateRoot);
       try {
-        verifyDirectory(await root.stat(), options.stateRoot, ownerUid);
+        const rootStats = await root.stat();
+        verifyDirectory(rootStats, options.stateRoot, ownerUid);
+        const rootDevice = rootStats.dev;
         let jobs: RecoveryDirectoryHandle | null = null;
         try {
-          jobs = await openChildDirectory(root, 'jobs', join(options.stateRoot, 'jobs'), false);
+          jobs = await openChildDirectory(root, 'jobs', join(options.stateRoot, 'jobs'), false, rootDevice);
           if (jobs === null) return 0;
           let removed = 0;
           for (const jobId of await jobs.readdir()) {
@@ -1514,7 +1578,7 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
                 let handle: RecoveryFileHandle | null = null;
                 try {
                   handle = await directory.directory.openFileChild(name, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-                  verifyCredentialFile(await handle.stat(), `${CREDENTIAL_DIRECTORY}/${name}`, ownerUid);
+                  verifyCredentialFile(await handle.stat(), `${CREDENTIAL_DIRECTORY}/${name}`, ownerUid, directory.device);
                 } catch (error) {
                   if (handle !== null) await handle.close();
                   void error;

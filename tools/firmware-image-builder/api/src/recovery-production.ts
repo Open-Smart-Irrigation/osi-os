@@ -35,8 +35,10 @@ const HASH64 = /^[0-9a-f]{64}$/u;
 const RUNNER_UNIT_PATTERN = /^osi-image-builder-runner@[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.service$/u;
 const PROC_FD = '/proc/self/fd';
 const O_CLOEXEC = (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC ?? 0x80000;
+const O_PATH = (fsConstants as typeof fsConstants & { readonly O_PATH?: number }).O_PATH ?? 0x200000;
 const DIRECTORY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW | O_CLOEXEC;
-const FILE_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | O_CLOEXEC;
+const FILE_INSPECTION_FLAGS = O_PATH | fsConstants.O_NOFOLLOW | O_CLOEXEC;
+const FILE_READ_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | O_CLOEXEC;
 const FATAL_DECODER = new TextDecoder('utf-8', { fatal: true });
 const BOUNDARY_OPEN_ERROR_CODES = new Set([
   'EACCES',
@@ -48,6 +50,10 @@ const BOUNDARY_OPEN_ERROR_CODES = new Set([
 ]);
 const MAX_LOG_TREE_ENTRIES = 8_192;
 const MAX_LOG_TREE_DEPTH = 16;
+const MAX_LOG_PATH_BYTES = 4_096;
+const MAX_LOG_COMPONENT_BYTES = 255;
+const MAX_LOG_COMPONENTS = MAX_LOG_TREE_DEPTH;
+const MAX_LOG_DESCRIPTORS = 1_024;
 
 export interface RecoveryPhysicalVerificationOptions {
   readonly stateRootAuthority: StateRootAuthority;
@@ -259,6 +265,10 @@ function childPath(parent: FileHandle, name: string, field: string): string {
   return join(PROC_FD, String(parent.fd), name);
 }
 
+function assertRegularCandidate(stats: NativeStats, field: string): void {
+  if (stats.isSymbolicLink() || !stats.isFile()) return fail(`recovery candidate is not a regular file: ${field}`);
+}
+
 async function openDirectoryChild(parent: FileHandle, name: string, field: string): Promise<FileHandle> {
   try {
     return await open(childPath(parent, name, field), DIRECTORY_FLAGS);
@@ -276,11 +286,35 @@ async function openOptionalDirectoryChild(parent: FileHandle, name: string, fiel
   }
 }
 
-async function openFileChild(parent: FileHandle, name: string, field: string): Promise<FileHandle> {
+async function openFileChild(
+  parent: FileHandle,
+  name: string,
+  field: string,
+  ownerUid?: number,
+  device?: number,
+  assertion?: (stats: NativeStats, field: string, owner: number, dev: number) => void,
+): Promise<FileHandle> {
+  let inspected: FileHandle | null = null;
+  let readable: FileHandle | null = null;
   try {
-    return await open(childPath(parent, name, field), FILE_FLAGS);
+    if (process.platform !== 'linux') return fail('descriptor recovery verification requires Linux no-follow semantics');
+    inspected = await open(childPath(parent, name, field), FILE_INSPECTION_FLAGS);
+    const inspectedStats = await descriptorStat(inspected, `${field} inspection`);
+    assertRegularCandidate(inspectedStats, field);
+    if (assertion !== undefined && ownerUid !== undefined && device !== undefined) assertion(inspectedStats, field, ownerUid, device);
+    readable = await open(join(PROC_FD, String(inspected.fd)), FILE_READ_FLAGS);
+    const readableStats = await descriptorStat(readable, `${field} readable descriptor`);
+    assertRegularCandidate(readableStats, field);
+    if (!stableStats(inspectedStats, readableStats)) return fail(`recovery candidate identity changed while opening: ${field}`);
+    if (assertion !== undefined && ownerUid !== undefined && device !== undefined) assertion(readableStats, field, ownerUid, device);
+    const result = readable;
+    readable = null;
+    return result;
   } catch (error) {
     return fileSystemFailure('open', `cannot open recovery evidence: ${field}`, error);
+  } finally {
+    if (readable !== null) await closeHandles([readable]);
+    if (inspected !== null) await closeHandles([inspected]);
   }
 }
 
@@ -404,15 +438,16 @@ async function revalidateHeldChain(
   if (!stableStats(rootStats, currentRoot)) return fail(`recovery root identity changed while verifying ${leaf.path}`);
   let current = root;
   const opened: FileHandle[] = [];
+  let path = '';
   try {
     for (let index = 0; index < leaf.parts.length; index += 1) {
-      const path = leaf.parts.slice(0, index + 1).join('/');
+      path = path.length === 0 ? leaf.parts[index]! : `${path}/${leaf.parts[index]!}`;
       const expected = descriptors.get(path);
       if (expected === undefined) return fail(`recovery descriptor chain is incomplete for ${leaf.path}`);
       const name = leaf.parts[index]!;
       const child = expected.kind === 'directory'
         ? await openDirectoryChild(current, name, path)
-        : await openFileChild(current, name, path);
+        : await openFileChild(current, name, path, ownerUid, device, fileAssertion);
       opened.push(child);
       const stats = await descriptorStat(child, path);
       if (expected.kind === 'directory') {
@@ -726,7 +761,7 @@ async function readCompletionEvidence(
                         held.set(cleanupPath, { path: cleanupPath, parts: ['jobs', jobId, 'evidence', 'cleanup'], handle: cleanup, stats: cleanupStats, kind: 'directory' });
                         const fileName = `${admissionId}.complete.json`;
                         return withDirectory(
-                          () => openFileChild(cleanup, fileName, expectedPath),
+                          () => openFileChild(cleanup, fileName, expectedPath, ownerUid, snapshot.device, assertRegularEvidence),
                           async (file) => {
                             const fileStats = await descriptorStat(file, expectedPath);
                             assertRegularEvidence(fileStats, expectedPath, ownerUid, snapshot.device);
@@ -783,9 +818,17 @@ function assertLogFile(stats: NativeStats, field: string, ownerUid: number, devi
 
 function safeLogPath(value: string, jobId: string): readonly string[] {
   const prefix = 'logs/';
-  if (!value.startsWith(prefix) || value.includes('\\')) return fail(`cleanup log path is invalid for ${jobId}`);
-  const parts = value.slice(prefix.length).split('/');
-  if (parts.length === 0 || parts.some((part) => part.length === 0 || part === '.' || part === '..')) return fail(`cleanup log path is invalid for ${jobId}`);
+  if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > MAX_LOG_PATH_BYTES || !value.startsWith(prefix) || value.includes('\\')) return fail(`cleanup log path is invalid for ${jobId}`);
+  const parts: string[] = [];
+  let start = prefix.length;
+  for (let index = prefix.length; index <= value.length; index += 1) {
+    if (index !== value.length && value[index] !== '/') continue;
+    const part = value.slice(start, index);
+    if (part.length === 0 || part === '.' || part === '..' || Buffer.byteLength(part, 'utf8') > MAX_LOG_COMPONENT_BYTES) return fail(`cleanup log path is invalid for ${jobId}`);
+    parts.push(part);
+    if (parts.length > MAX_LOG_COMPONENTS) return fail(`cleanup log path exceeds its depth bound for ${jobId}`);
+    start = index + 1;
+  }
   return parts;
 }
 
@@ -847,8 +890,13 @@ async function verifyPhysicalLogs(
     const path = row.path;
     rows.set(path, row);
     const parts = safeLogPath(path, jobId);
-    for (let index = 1; index < parts.length; index += 1) allowedDirectories.add(`logs/${parts.slice(0, index).join('/')}`);
+    let prefix = 'logs';
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      prefix += `/${parts[index]}`;
+      allowedDirectories.add(prefix);
+    }
   }
+  if (3 + allowedDirectories.size + rows.size > MAX_LOG_DESCRIPTORS) return fail('cleanup physical log descriptor plan exceeds its bounded limit');
 
   async function readEntries(directory: FileHandle, field: string): Promise<readonly Dirent[]> {
     try {
@@ -899,9 +947,10 @@ async function verifyPhysicalLogs(
               const isDirectory = allowedDirectories.has(path);
               if (entry.isSymbolicLink()) return fail(`cleanup physical log tree contains a symlink: ${path}`);
               if (!isDirectory && row === undefined) return fail(`cleanup physical log tree contains an unindexed entry: ${path}`);
+              if (!revalidate && handles.length + 1 > MAX_LOG_DESCRIPTORS) return fail('cleanup physical log descriptor count exceeds its bounded limit');
               const child = isDirectory
                 ? await openDirectoryChild(directory, entry.name, path)
-                : await openFileChild(directory, entry.name, path);
+                : await openFileChild(directory, entry.name, path, ownerUid, snapshot.device, assertLogFile);
               if (!revalidate) handles.push(child);
               try {
                 const stats = await descriptorStat(child, path);
@@ -956,6 +1005,8 @@ async function verifyPhysicalLogs(
             verified.add(descriptor);
             await revalidateHeldChain(root, rootStats, chain, descriptor, ownerUid, snapshot.device, assertLogFile);
           }
+          treeEntries = 0;
+          await walk(logs, 'logs', 0, true);
         }
         await withStateRootSnapshot(stateRootAuthority, async ({ snapshot: current }) => {
           if (current.path !== snapshot.path || current.device !== snapshot.device || current.inode !== snapshot.inode) return fail('state root authority changed after cleanup log verification');
@@ -1033,6 +1084,14 @@ async function inspectStaging(
   } else if (!identityIsNull) {
     return fail('physical-present staging must have null artifact identity');
   }
+  if (identityIsComplete) {
+    artifactName = stagingFileName(persistedArtifactPath!, jobId, 'persisted staging artifact path');
+    checksumName = stagingFileName(input.checksumPath!, jobId, 'persisted checksum sidecar path', 'sha256sums');
+    manifestName = stagingFileName(input.manifestPath!, jobId, 'persisted manifest sidecar path', 'build-manifest.json');
+    verificationName = stagingFileName(input.verificationPath!, jobId, 'persisted verification sidecar path', 'verification.json');
+    const names = [artifactName, checksumName, manifestName, verificationName];
+    if (new Set(names).size !== names.length) return fail('tracked staging artifact and sidecar paths must be pairwise distinct');
+  }
   if (expected.kind === 'quarantined') {
     if (trackedArtifact && (expected.sha256 !== input.artifactSha256 || expected.size !== input.artifactSize)) return fail('cleanup quarantine evidence does not match the persisted artifact identity');
     if (!trackedArtifact && (expected.sha256 !== null || expected.size !== null)) return fail('physical-present quarantine evidence contains artifact identity');
@@ -1083,12 +1142,16 @@ async function inspectStaging(
               { name: manifestName!, sha256: input.manifestSha256!, size: null, maxBytes: Math.min(JSON_LIMITS.maxEncodedBytes, TEXT_LIMITS.maxManifestBytes) },
               { name: verificationName!, sha256: input.verificationSha256!, size: null, maxBytes: Math.min(JSON_LIMITS.maxEncodedBytes, TEXT_LIMITS.maxManifestBytes) },
             ] as const;
+            const openedIdentities = new Set<string>();
             for (const tracked of files) {
               const field = `quarantine/${jobId}/${tracked.name}`;
-              const file = await openFileChild(destination!, tracked.name, field);
+              const file = await openFileChild(destination!, tracked.name, field, ownerUid, snapshot.device, assertRegularArtifact);
               try {
                 const fileStats = await descriptorStat(file, field);
                 assertRegularArtifact(fileStats, field, ownerUid, snapshot.device);
+                const identity = `${fileStats.dev}:${fileStats.ino}`;
+                if (openedIdentities.has(identity)) return fail('tracked quarantine files must have distinct inode identities');
+                openedIdentities.add(identity);
                 try {
                   await dependencies.beforeRead(file);
                 } catch (error) {

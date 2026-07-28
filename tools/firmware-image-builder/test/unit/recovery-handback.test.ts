@@ -297,6 +297,44 @@ describe('cleanup hand-back recovery', () => {
     }
   });
 
+  it('establishes an inactive systemd bracket before reading physical recovery evidence', async () => {
+    const value = fixture();
+    const order: string[] = [];
+    vi.spyOn(value.systemd, 'inspect').mockImplementation(async (unit: string) => { order.push(`systemd:${unit}`); return { unit, active: false, observedAt: NOW }; });
+    (value.handBack.evidence.read as ReturnType<typeof vi.fn>).mockImplementation(async () => { order.push('evidence'); return { jobId: JOB_ID, admissionId: ADMISSION_ID, sha256: EVIDENCE_HASH, postcondition: value.completedPostcondition }; });
+    (value.handBack.logs.verify as ReturnType<typeof vi.fn>).mockImplementation(async () => { order.push('logs'); return true as const; });
+    (value.handBack.staging.verify as ReturnType<typeof vi.fn>).mockImplementation(async () => { order.push('staging'); return true as const; });
+    const stateRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-bracket-'));
+    try {
+      const recovery = createCleanupAdmissionRecovery({ stateRoot, db: value.db as never, ownership: value.ownership, systemd: value.systemd, handBack: value.handBack, clock: { now: () => NOW } });
+      await recovery.openAdmissions();
+      await recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW });
+      expect(order.indexOf('systemd:' + CLEANUP_UNIT)).toBeLessThan(order.indexOf('evidence'));
+      expect(order.filter((entry) => entry.startsWith('systemd:'))).toHaveLength(4);
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the cleanup fence when either unit activates in the post-verification bracket', async () => {
+    const value = fixture();
+    let inspections = 0;
+    vi.spyOn(value.systemd, 'inspect').mockImplementation(async (unit: string) => {
+      inspections += 1;
+      return { unit, active: inspections === 3, observedAt: NOW };
+    });
+    const stateRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-post-bracket-'));
+    try {
+      const recovery = createCleanupAdmissionRecovery({ stateRoot, db: value.db as never, ownership: value.ownership, systemd: value.systemd, handBack: value.handBack, clock: { now: () => NOW } });
+      await recovery.openAdmissions();
+      await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW })).rejects.toThrow(/active|inactive/);
+      expect(inspections).toBeGreaterThanOrEqual(3);
+      expect(value.ownership.apiWrite).not.toHaveBeenCalled();
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ['missing manifest label', { [LABEL_JOB]: JOB_ID }],
     ['wrong manifest label', { [LABEL_JOB]: JOB_ID, [LABEL_MANIFEST]: 'f'.repeat(64) }],
@@ -362,7 +400,7 @@ describe('cleanup hand-back recovery', () => {
     try {
       await recovery.openAdmissions();
       await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW })).resolves.toMatchObject({ handedBack: true });
-      expect(trace).toEqual(['cleanup-unit', 'runner-unit', 'staging', 'exact-container', 'job-label-list', 'api-write']);
+      expect(trace).toEqual(['cleanup-unit', 'runner-unit', 'staging', 'cleanup-unit', 'runner-unit', 'exact-container', 'job-label-list', 'api-write']);
       expect(value.handBack.docker.listByLabels).toHaveBeenCalledWith({ [LABEL_JOB]: JOB_ID });
     } finally {
       await rm(stateRoot, { recursive: true, force: true });
@@ -587,7 +625,7 @@ describe('cleanup hand-back recovery', () => {
       await recovery.openAdmissions();
       await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW })).rejects.toThrow('cleanup completion file does not match');
       expect(value.ownership.apiWrite).not.toHaveBeenCalled();
-      expect(value.systemd.inspect).not.toHaveBeenCalled();
+      expect(value.systemd.inspect).toHaveBeenCalledTimes(2);
       expect(value.handBack.docker.inspect).not.toHaveBeenCalled();
       expect(value.handBack.docker.listByLabels).not.toHaveBeenCalled();
       expect(value.handBack.staging.verify).not.toHaveBeenCalled();

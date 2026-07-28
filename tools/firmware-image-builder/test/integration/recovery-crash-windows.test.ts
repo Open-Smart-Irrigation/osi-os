@@ -376,6 +376,9 @@ describe('cleanup recovery crash windows', () => {
     await runReplacementWorker({ ...value, jobId: extraJob, snapshot: extraSnapshot, admission: extraAdmission }, NOW, { present: true, stopCalls: 0, removeCalls: 0 });
     allow.value = true;
     await expect(recovery.reconcileCompletedAdmissions()).rejects.toThrow(/bounded|limit|completed admissions/);
+    expect((value.db.prepare("SELECT COUNT(*) AS count FROM cleanup_leases WHERE status='completed'").get() as { count: number }).count).toBe(257);
+    await expect(recovery.reconcileCompletedAdmissions()).rejects.toThrow(/bounded|limit|completed admissions/);
+    expect((value.db.prepare("SELECT COUNT(*) AS count FROM cleanup_leases WHERE status='completed'").get() as { count: number }).count).toBe(257);
   });
 
   it('rejects a corrupt real SQLite completion ordering key before hand-back', async () => {
@@ -592,7 +595,7 @@ describe('cleanup recovery crash windows', () => {
     value.systemd.active.set(value.admission.unitName, true);
     const restarted = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: new OwnershipStore(value.db, { now: () => NOW }), systemd: value.systemd.systemd, handBack, clock: { now: () => NOW }, ownerUid: UID });
     await expect(restarted.openAdmissions()).resolves.toBeUndefined();
-    await expect(restarted.handBackCompleted({ jobId: value.jobId, admissionId: value.admission.admissionId, at: NOW })).rejects.toThrow('cleanup unit is still active');
+    await expect(restarted.handBackCompleted({ jobId: value.jobId, admissionId: value.admission.admissionId, at: NOW })).rejects.toThrow(/cleanup unit .* active/);
     expect((value.db.prepare('SELECT cleanup_admission_id, cleanup_fence_generation FROM jobs WHERE job_id=?').get(value.jobId) as Record<string, unknown>)).toMatchObject({ cleanup_admission_id: value.admission.admissionId, cleanup_fence_generation: 1 });
     expect((value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(value.admission.admissionId) as { status: string }).status).toBe('completed');
   });

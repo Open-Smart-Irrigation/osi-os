@@ -211,14 +211,14 @@ function directoryMode(stats: RecoveryStats): number {
   return stats.mode & 0o7777;
 }
 
-function verifyDirectory(stats: RecoveryStats, path: string, ownerUid: number): void {
-  if (stats.isSymbolicLink() || !stats.isDirectory() || stats.uid !== ownerUid || directoryMode(stats) !== DIRECTORY_MODE) {
+function verifyDirectory(stats: RecoveryStats, path: string, ownerUid: number, expectedDevice?: number): void {
+  if (stats.isSymbolicLink() || !stats.isDirectory() || stats.uid !== ownerUid || directoryMode(stats) !== DIRECTORY_MODE || expectedDevice !== undefined && stats.dev !== expectedDevice) {
     throw new CleanupWorkerError('CLEANUP_CREDENTIAL_INVALID', `unsafe cleanup credential directory: ${path}`);
   }
 }
 
-function verifyCredential(stats: RecoveryStats, path: string, ownerUid: number): void {
-  if (stats.isSymbolicLink() || !stats.isFile() || stats.uid !== ownerUid || directoryMode(stats) !== CREDENTIAL_MODE || stats.nlink !== 1) {
+function verifyCredential(stats: RecoveryStats, path: string, ownerUid: number, expectedDevice?: number): void {
+  if (stats.isSymbolicLink() || !stats.isFile() || stats.uid !== ownerUid || directoryMode(stats) !== CREDENTIAL_MODE || stats.nlink !== 1 || expectedDevice !== undefined && stats.dev !== expectedDevice) {
     throw new CleanupWorkerError('CLEANUP_CREDENTIAL_INVALID', `unsafe cleanup credential: ${path}`);
   }
 }
@@ -347,15 +347,17 @@ async function openCredential(
   try {
     const root = await fileSystem.openDirectory(stateRoot);
     handles.push(root);
-    verifyDirectory(await root.stat(), stateRoot, ownerUid);
-    const jobs = await root.openDirectoryChild('jobs'); handles.push(jobs); verifyDirectory(await jobs.stat(), `${stateRoot}/jobs`, ownerUid);
-    const job = await jobs.openDirectoryChild(jobId); handles.push(job); verifyDirectory(await job.stat(), `${stateRoot}/jobs/${jobId}`, ownerUid);
-    const recovery = await job.openDirectoryChild('recovery'); handles.push(recovery); verifyDirectory(await recovery.stat(), `${stateRoot}/jobs/${jobId}/recovery`, ownerUid);
-    directory = await recovery.openDirectoryChild('cleanup-credentials'); handles.push(directory); verifyDirectory(await directory.stat(), `${stateRoot}/jobs/${jobId}/${CREDENTIAL_DIRECTORY}`, ownerUid);
+    const rootStats = await root.stat();
+    verifyDirectory(rootStats, stateRoot, ownerUid);
+    const rootDevice = rootStats.dev;
+    const jobs = await root.openDirectoryChild('jobs'); handles.push(jobs); verifyDirectory(await jobs.stat(), `${stateRoot}/jobs`, ownerUid, rootDevice);
+    const job = await jobs.openDirectoryChild(jobId); handles.push(job); verifyDirectory(await job.stat(), `${stateRoot}/jobs/${jobId}`, ownerUid, rootDevice);
+    const recovery = await job.openDirectoryChild('recovery'); handles.push(recovery); verifyDirectory(await recovery.stat(), `${stateRoot}/jobs/${jobId}/recovery`, ownerUid, rootDevice);
+    directory = await recovery.openDirectoryChild('cleanup-credentials'); handles.push(directory); verifyDirectory(await directory.stat(), `${stateRoot}/jobs/${jobId}/${CREDENTIAL_DIRECTORY}`, ownerUid, rootDevice);
     const filename = `${admission.admissionId}.token`;
     const credential = await directory.openFileChild(filename, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
     try {
-      verifyCredential(await credential.stat(), expectedRelativePath, ownerUid);
+      verifyCredential(await credential.stat(), expectedRelativePath, ownerUid, rootDevice);
       const bytes = await credential.readFile();
       const record = parseCredential(bytes);
       const fileSha = createHash('sha256').update(bytes).digest('hex');

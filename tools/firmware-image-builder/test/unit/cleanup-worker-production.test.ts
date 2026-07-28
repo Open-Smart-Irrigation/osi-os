@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
+import { execFile as nodeExecFile } from 'node:child_process';
 import { chmod, link, lstat, mkdir, open, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
 import type { LoadedConfig } from '../../config/load.js';
@@ -10,6 +12,8 @@ import type { LoadedConfig } from '../../config/load.js';
 import { createRecoveryFileSystem } from '../../api/src/recovery.js';
 import { runCleanupWorkerCli } from '../../cleanup-worker/src/cli.js';
 import { createCleanupProduction, runCleanupWorker } from '../../cleanup-worker/src/production.js';
+
+const execFile = promisify(nodeExecFile);
 
 const NOW = '2026-07-27T12:00:00.000Z';
 const AFTER = '2026-07-27T12:00:01.000Z';
@@ -81,6 +85,10 @@ async function createSecureLogFile(root: string, relativePath: string, bytes: Bu
   const path = join(current, relativePath.split('/').at(-1)!);
   await writeFile(path, bytes, { mode: 0o600 });
   return path;
+}
+
+async function createFifo(path: string): Promise<void> {
+  await execFile('/usr/bin/mkfifo', [path], { windowsHide: true });
 }
 
 function deps(root: string, executor: { run: ReturnType<typeof vi.fn> }, publisherCalls: ReturnType<typeof vi.fn>, database?: DatabaseSync) {
@@ -470,6 +478,33 @@ describe('cleanup production composition', () => {
     await composition.close();
   });
 
+  it.skipIf(process.platform !== 'linux')('rejects a FIFO staged artifact before any publisher mutation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const output = join(root, 'output');
+    const paths = await createPublisherTree(output);
+    await createFifo(join(paths.source, 'image'));
+    const publisherCalls = vi.fn();
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const base = loaded(root);
+    const composition = await createCleanupProduction({
+      ...deps(root, executor, publisherCalls),
+      loadConfiguration: vi.fn(async () => ({
+        ...base,
+        config: { ...base.config, approvedOutputRoots: [{ id: ROOT_ID, label: 'release', path: output, quarantinePath: paths.quarantine }] },
+      })),
+    });
+    await expect(composition.adapters.quarantine.quarantine({
+      rootId: ROOT_ID,
+      jobId: JOB,
+      admittedStaging: { kind: 'present', path: `staging/${JOB}/image`, sha256: null, size: null },
+      stagingPath: `staging/${JOB}/image`,
+      artifactSha256: null,
+      artifactSize: null,
+    })).rejects.toMatchObject({ code: 'QUARANTINE_PENDING' });
+    expect(publisherCalls).not.toHaveBeenCalled();
+    await composition.close();
+  });
+
   it('rejects wrong owner and cross-device authority metadata before mutation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
     const output = join(root, 'output');
@@ -701,6 +736,20 @@ describe('cleanup production composition', () => {
     const composition = await createCleanupProduction(deps(root, executor, vi.fn(), database.database));
     await expect(composition.adapters.logSealer.seal({ jobId: JOB, admissionId: ADMISSION, at: NOW, snapshot: {} as never })).rejects.toMatchObject({ code: 'RECOVERY_LOG_GAP' });
     expect(database.update).not.toHaveBeenCalled();
+    await composition.close();
+  });
+
+  it.skipIf(process.platform !== 'linux')('rejects a FIFO log candidate before attempting to hash it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const logPath = await createSecureLogFile(root, 'runner-0.log', Buffer.from('runner cleanup log\n'));
+    await rm(logPath);
+    await createFifo(logPath);
+    const rows: LogFixtureRow[] = [{ stream: 'runner', generation: 0, path: 'logs/runner-0.log', started_at: NOW, sealed_at: null, size_bytes: 0, sha256: null }];
+    const database = logDatabase(rows, []);
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const composition = await createCleanupProduction(deps(root, executor, vi.fn(), database.database));
+    await expect(composition.adapters.logSealer.seal({ jobId: JOB, admissionId: ADMISSION, at: NOW, snapshot: {} as never })).rejects.toMatchObject({ code: 'RECOVERY_LOG_GAP' });
+    expect(database.exec).toHaveBeenLastCalledWith('ROLLBACK');
     await composition.close();
   });
 

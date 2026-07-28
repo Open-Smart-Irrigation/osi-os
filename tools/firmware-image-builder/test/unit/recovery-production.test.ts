@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
+import { execFile as nodeExecFile } from 'node:child_process';
 import { access, chmod, link, mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, utimes, writeFile, type FileHandle } from 'node:fs/promises';
+import { createServer, type Server } from 'node:net';
+import { once } from 'node:events';
+import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -23,6 +27,7 @@ const HASH64 = /^[0-9a-f]{64}$/u;
 const CHECKSUM_BYTES = Buffer.from(`${'1'.repeat(64)}  image.img.gz\n`, 'utf8');
 const MANIFEST_BYTES = Buffer.from('{"schemaVersion":1,"target":"rpi-5"}\n', 'utf8');
 const VERIFICATION_BYTES = Buffer.from('{"schemaVersion":1,"verified":true}\n', 'utf8');
+const execFile = promisify(nodeExecFile);
 
 function postcondition(staging: CleanupPostcondition['staging'] = {
   kind: 'absent',
@@ -175,6 +180,33 @@ async function writeLog(loaded: LoadedConfig, bytes = Buffer.from('runner cleanu
   const path = join(directory, 'runner-0.log');
   await writeFile(path, bytes, { mode: 0o600 });
   return path;
+}
+
+async function createUnixSocket(path: string): Promise<Server> {
+  const server = createServer();
+  const boundPath = `/tmp/osi-recovery-socket-${process.pid}-${Math.random().toString(36).slice(2)}`;
+  server.listen(boundPath);
+  await once(server, 'listening');
+  await rename(boundPath, path);
+  return server;
+}
+
+async function createFifo(path: string): Promise<void> {
+  await execFile('/usr/bin/mkfifo', [path], { windowsHide: true });
+}
+
+async function physicalReadWithTimeout<T>(operation: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('physical recovery read timed out')), 250);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function stagingInput(staging: CleanupPostcondition['staging'], overrides: Partial<{
@@ -496,6 +528,52 @@ describe('production recovery physical verification', () => {
     }
   });
 
+  it.each([
+    ['a single oversized log path segment', `logs/${'x'.repeat(5000)}`],
+    ['an excessively deep log path', `logs/${Array.from({ length: 17 }, (_, index) => `d${index}`).join('/')}/runner.log`],
+    ['a log path whose encoded bytes exceed the total bound', `logs/${Array.from({ length: 16 }, () => 'x'.repeat(255)).join('/')}`],
+  ])('rejects %s before opening the state root', async (_label, path) => {
+    const value = await fixture();
+    try {
+      const physical = createFactory(value.loaded);
+      await expect(physical.logs.verify({
+        jobId: JOB_ID,
+        completedAt: NOW,
+        completionEventSeq: 10,
+        postcondition: { ...postcondition().logs, runner: 'sealed' },
+        generations: [{ stream: 'runner', generation: 0, path, startedAt: STALE, sealedAt: NOW, sizeBytes: 0, sha256: 'a'.repeat(64) }],
+        events: [],
+      })).rejects.toThrow(/path|depth|bounded|descriptor/);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a log descriptor plan overflow before any physical traversal', async () => {
+    const value = await fixture();
+    try {
+      const generations = Array.from({ length: 128 }, (_, generation) => ({
+        stream: 'runner' as const,
+        generation,
+        path: `logs/${Array.from({ length: 15 }, (_, depth) => `g${generation}-${depth}`).join('/')}/runner.log`,
+        startedAt: STALE,
+        sealedAt: NOW,
+        sizeBytes: 0,
+        sha256: 'a'.repeat(64),
+      }));
+      await expect(createFactory(value.loaded).logs.verify({
+        jobId: JOB_ID,
+        completedAt: NOW,
+        completionEventSeq: 10,
+        postcondition: { ...postcondition().logs, runner: 'sealed' },
+        generations,
+        events: [],
+      })).rejects.toThrow(/descriptor|plan|bounded|depth/);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
   it('rejects a path outside the fixed completion file, a wrong hash, and a non-canonical extra field', async () => {
     const value = await fixture();
     try {
@@ -539,7 +617,7 @@ describe('production recovery physical verification', () => {
       await writeFile(outside, await readFile(join(value.loaded.stateRoot, first.path)), { mode: 0o600 });
       await unlink(first.absolutePath);
       await symlink(outside, first.absolutePath);
-      await expect(physical.evidence.read({ jobId: JOB_ID, admissionId: ADMISSION_ID, path: first.path, sha256: first.sha256 })).rejects.toThrow(/open recovery evidence|unsafe/);
+      await expect(physical.evidence.read({ jobId: JOB_ID, admissionId: ADMISSION_ID, path: first.path, sha256: first.sha256 })).rejects.toThrow(/open recovery evidence|unsafe|regular/);
       await unlink(first.absolutePath);
       const second = await writeCompletion(value.loaded, completionEnvelope());
       await link(second.absolutePath, join(value.loaded.stateRoot, 'hard-link-evidence.json'));
@@ -548,6 +626,60 @@ describe('production recovery physical verification', () => {
       await chmod(second.absolutePath, 0o644);
       await expect(physical.evidence.read({ jobId: JOB_ID, admissionId: ADMISSION_ID, path: second.path, sha256: second.sha256 })).rejects.toThrow(/unsafe cleanup evidence/);
     } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a Unix socket completion candidate without waiting for a readable stream', async () => {
+    const value = await fixture();
+    let server: Server | null = null;
+    try {
+      const file = await writeCompletion(value.loaded, completionEnvelope());
+      await unlink(file.absolutePath);
+      server = await createUnixSocket(file.absolutePath);
+      const operation = physicalReadWithTimeout(createFactory(value.loaded).evidence.read({ jobId: JOB_ID, admissionId: ADMISSION_ID, path: file.path, sha256: file.sha256 }));
+      await expect(operation).rejects.toThrow(/evidence|regular|unsafe|socket/);
+    } finally {
+      await new Promise<void>((resolve) => server?.close(() => resolve()) ?? resolve());
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== 'linux')('rejects a FIFO completion candidate without blocking the recovery read', async () => {
+    const value = await fixture();
+    try {
+      const file = await writeCompletion(value.loaded, completionEnvelope());
+      await unlink(file.absolutePath);
+      await createFifo(file.absolutePath);
+      await expect(physicalReadWithTimeout(createFactory(value.loaded).evidence.read({ jobId: JOB_ID, admissionId: ADMISSION_ID, path: file.path, sha256: file.sha256 }))).rejects.toThrow(/evidence|regular|unsafe/);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects Unix socket log and quarantine candidates without waiting for a readable stream', async () => {
+    const value = await fixture();
+    let logServer: Server | null = null;
+    let artifactServer: Server | null = null;
+    try {
+      const bytes = Buffer.from('runner cleanup log\n');
+      const logPath = await writeLog(value.loaded, bytes);
+      await unlink(logPath);
+      logServer = await createUnixSocket(logPath);
+      await expect(physicalReadWithTimeout(createFactory(value.loaded).logs.verify(logVerificationInput(bytes)))).rejects.toThrow(/log|regular|unsafe|socket/);
+
+      const artifact = Buffer.from('tracked artifact bytes\n', 'utf8');
+      const tracked = trackedIdentity(artifact);
+      const destination = await writeTrackedQuarantine(value.loaded, artifact);
+      const artifactPath = join(destination, 'image.img.gz');
+      await unlink(artifactPath);
+      artifactServer = await createUnixSocket(artifactPath);
+      await expect(physicalReadWithTimeout(createFactory(value.loaded).staging.verify(stagingInput(
+        quarantinedPostcondition(tracked.artifactSha256, tracked.artifactSize), tracked,
+      )))).rejects.toThrow(/artifact|regular|unsafe|socket/);
+    } finally {
+      await new Promise<void>((resolve) => logServer?.close(() => resolve()) ?? resolve());
+      await new Promise<void>((resolve) => artifactServer?.close(() => resolve()) ?? resolve());
       await rm(value.base, { recursive: true, force: true });
     }
   });
@@ -607,6 +739,24 @@ describe('production recovery physical verification', () => {
 
       await writeFile(join(destination, 'image.img.gz'), Buffer.from('tampered\n'), { mode: 0o600 });
       await expect(physical.staging.verify(stagingInput(quarantinedPostcondition(tracked.artifactSha256, artifact.byteLength), tracked))).rejects.toThrow(/hash|size/);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a tracked artifact path that aliases the canonical checksum sidecar', async () => {
+    const value = await fixture();
+    try {
+      const artifact = CHECKSUM_BYTES;
+      const tracked = {
+        ...trackedIdentity(artifact),
+        artifactStagingPath: `staging/${JOB_ID}/sha256sums`,
+      };
+      const destination = await writeTrackedQuarantine(value.loaded, artifact);
+      expect(destination).toContain(JOB_ID);
+      await expect(createFactory(value.loaded).staging.verify(stagingInput(
+        quarantinedPostcondition(tracked.artifactSha256, tracked.artifactSize), tracked,
+      ))).rejects.toThrow(/distinct|collision|alias|path/);
     } finally {
       await rm(value.base, { recursive: true, force: true });
     }

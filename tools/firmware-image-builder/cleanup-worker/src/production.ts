@@ -59,6 +59,10 @@ const MAX_TOTAL_LOG_BYTES = 512 * 1024 * 1024;
 const MAX_LOG_GENERATIONS = 128;
 const MAX_LOG_EVENTS = 8_192;
 const LOG_CHUNK_BYTES = 64 * 1024;
+const MAX_LOG_PATH_BYTES = 4_096;
+const MAX_LOG_COMPONENT_BYTES = 255;
+const MAX_LOG_COMPONENTS = 16;
+const MAX_LOG_DESCRIPTORS = 1_024;
 const LABEL_JOB = 'org.osi.image-builder.job-id';
 const PUBLISHER_ENV = Object.freeze({ PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' });
 
@@ -351,7 +355,10 @@ function safeRelative(value: string, prefix: string): string {
 }
 
 const DIRECTORY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW;
-const FILE_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
+const O_CLOEXEC = (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC ?? 0x80000;
+const O_PATH = (fsConstants as typeof fsConstants & { readonly O_PATH?: number }).O_PATH ?? 0x200000;
+const FILE_INSPECTION_FLAGS = O_PATH | fsConstants.O_NOFOLLOW | O_CLOEXEC;
+const FILE_READ_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | O_CLOEXEC;
 
 function descriptorChild(parent: FileHandle, name: string, code: 'QUARANTINE_PENDING' | 'RECOVERY_LOG_GAP'): string {
   if (name.length === 0 || name === '.' || name === '..' || name.includes('/') || name.includes('\\') || name.includes('\0')) throw workerError(code, 'descriptor child name is unsafe');
@@ -445,6 +452,31 @@ function sameStableMetadata(before: Stats, after: Stats): boolean {
     && before.ctimeMs === after.ctimeMs;
 }
 
+async function openSafeReadableCandidate(
+  path: string,
+  field: string,
+  validate: (stats: Stats) => void,
+): Promise<FileHandle> {
+  if (process.platform !== 'linux') throw new Error('Linux no-follow descriptor recovery is unavailable');
+  let inspected: FileHandle | null = null;
+  let readable: FileHandle | null = null;
+  try {
+    inspected = await open(path, FILE_INSPECTION_FLAGS);
+    const inspectedStats = await inspected.stat();
+    validate(inspectedStats);
+    readable = await open(`/proc/self/fd/${inspected.fd}`, FILE_READ_FLAGS);
+    const readableStats = await readable.stat();
+    validate(readableStats);
+    if (!sameStableMetadata(inspectedStats, readableStats)) throw new Error(`${field} identity changed while opening`);
+    const result = readable;
+    readable = null;
+    return result;
+  } finally {
+    if (readable !== null) await readable.close().catch(() => undefined);
+    if (inspected !== null) await inspected.close().catch(() => undefined);
+  }
+}
+
 async function hashFileHandle(handle: FileHandle, field: string): Promise<HashedFile> {
   const before = await handle.stat();
   if (!before.isFile() || before.isSymbolicLink() || before.size > MAX_LOG_BYTES) throw new Error(`${field} is unsafe or oversized`);
@@ -495,8 +527,11 @@ async function openManagedRelativeFile(
     }
     const final = parts.at(-1);
     if (final === undefined) throw workerError('QUARANTINE_PENDING', 'relative file path is empty');
-    file = await open(descriptorChild(current, final, 'QUARANTINE_PENDING'), FILE_FLAGS);
-    verifyManagedFileMetadata(await file.stat(), `artifact file ${final}`, ownerUid, device);
+    file = await openSafeReadableCandidate(
+      descriptorChild(current, final, 'QUARANTINE_PENDING'),
+      `artifact file ${final}`,
+      (stats) => verifyManagedFileMetadata(stats, `artifact file ${final}`, ownerUid, device),
+    );
     return { file, handles };
   } catch (error) {
     await closeFileHandles(handles).catch(() => undefined);
@@ -755,9 +790,17 @@ function createQuarantineAdapter(
 
 function safeLogPath(jobId: string, value: string): readonly string[] {
   const prefix = 'logs/';
-  if (!value.startsWith(prefix) || value.includes('\\')) throw workerError('RECOVERY_LOG_GAP', `log path is unsafe for ${jobId}`);
-  const parts = value.slice(prefix.length).split('/');
-  if (parts.length === 0 || parts.some((part) => part.length === 0 || part === '.' || part === '..')) throw workerError('RECOVERY_LOG_GAP', `log path is unsafe for ${jobId}`);
+  if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > MAX_LOG_PATH_BYTES || !value.startsWith(prefix) || value.includes('\\')) throw workerError('RECOVERY_LOG_GAP', `log path is unsafe for ${jobId}`);
+  const parts: string[] = [];
+  let start = prefix.length;
+  for (let index = prefix.length; index <= value.length; index += 1) {
+    if (index !== value.length && value[index] !== '/') continue;
+    const part = value.slice(start, index);
+    if (part.length === 0 || part === '.' || part === '..' || Buffer.byteLength(part, 'utf8') > MAX_LOG_COMPONENT_BYTES) throw workerError('RECOVERY_LOG_GAP', `log path is unsafe for ${jobId}`);
+    parts.push(part);
+    if (parts.length > MAX_LOG_COMPONENTS) throw workerError('RECOVERY_LOG_GAP', `log path exceeds its depth bound for ${jobId}`);
+    start = index + 1;
+  }
   return parts;
 }
 
@@ -789,8 +832,11 @@ async function openHashedLogFile(
     }
     const filename = parts.at(-1);
     if (filename === undefined) throw workerError('RECOVERY_LOG_GAP', 'log path is empty');
-    file = await open(descriptorChild(current, filename, 'RECOVERY_LOG_GAP'), FILE_FLAGS);
-    verifyManagedFileMetadata(await file.stat(), `log ${relativePath}`, ownerUid, state.device);
+    file = await openSafeReadableCandidate(
+      descriptorChild(current, filename, 'RECOVERY_LOG_GAP'),
+      `log ${relativePath}`,
+      (stats) => verifyManagedFileMetadata(stats, `log ${relativePath}`, ownerUid, state.device),
+    );
     await file.sync();
     const physical = await hashManagedArtifact(file, `log ${relativePath}`, ownerUid, state.device);
     await closeFileHandles(handles);
@@ -870,6 +916,19 @@ async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stat
         if (rows.length > MAX_LOG_GENERATIONS || events.length > MAX_LOG_EVENTS || rows.some((row) => row.stream !== 'runner' && row.stream !== 'docker') || events.some((event) => event.stream !== 'runner' && event.stream !== 'docker')) throw workerError('RECOVERY_LOG_GAP', 'cleanup log identity exceeds the bounded stream contract');
         const generationKeys = new Set(rows.map((row) => `${row.stream}:${row.generation}`));
         if (events.some((event) => !generationKeys.has(`${event.stream}:${event.file_generation}`))) throw workerError('RECOVERY_LOG_GAP', 'log event references an unknown generation');
+        const indexedPaths = new Set<string>();
+        const indexedDirectories = new Set<string>(['logs']);
+        for (const row of rows) {
+          const parts = safeLogPath(input.jobId, row.path);
+          if (indexedPaths.has(row.path)) throw workerError('RECOVERY_LOG_GAP', 'cleanup log paths are ambiguous');
+          indexedPaths.add(row.path);
+          let prefix = 'logs';
+          for (let index = 0; index < parts.length - 1; index += 1) {
+            prefix += `/${parts[index]}`;
+            indexedDirectories.add(prefix);
+          }
+        }
+        if (3 + indexedDirectories.size + indexedPaths.size > MAX_LOG_DESCRIPTORS) throw workerError('RECOVERY_LOG_GAP', 'cleanup log descriptor plan exceeds its bounded limit');
         const plans: LogSealPlan[] = [];
         const states: Record<'runner' | 'docker', 'absent' | 'sealed'> = { runner: 'absent', docker: 'absent' };
         let totalPhysicalBytes = 0;
@@ -877,7 +936,6 @@ async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stat
           const streamRows = rows.filter((row) => row.stream === stream);
           for (const [index, row] of streamRows.entries()) {
             if (row.generation !== index || !Number.isSafeInteger(row.size_bytes) || row.size_bytes < 0 || row.size_bytes > MAX_LOG_BYTES) throw workerError('RECOVERY_LOG_GAP', `${stream} log generations are not contiguous`);
-            safeLogPath(input.jobId, row.path);
             const startedAt = canonicalInstant(row.started_at, `${stream} log startedAt`);
             if (startedAt > input.at) throw workerError('RECOVERY_LOG_GAP', `${stream} log generation starts in the future`);
             const sealedAt = row.sealed_at === null ? null : canonicalInstant(row.sealed_at, `${stream} log sealedAt`);
@@ -1004,7 +1062,9 @@ function createEvidenceWriter(stateRoot: string, ownerUid: number, fileSystem: R
 async function defaultPublisherAuthority(loaded: LoadedConfig, executor: CommandExecutor): Promise<CleanupPublisherAuthority & { readonly heldClose: () => Promise<void> }> {
   const lockPath = loaded.config.builderLockPath;
   const installedVersion = basename(dirname(lockPath));
-  const lockHandle = await open(lockPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  const lockHandle = await openSafeReadableCandidate(lockPath, 'builder lock', (stats) => {
+    if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) throw new Error('builder lock is not a safe regular file');
+  });
   let lockBytes: Buffer;
   try { lockBytes = await lockHandle.readFile(); } finally { await lockHandle.close(); }
   let parsed: unknown;
