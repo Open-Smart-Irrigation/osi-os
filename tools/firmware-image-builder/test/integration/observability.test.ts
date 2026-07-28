@@ -11,6 +11,7 @@ import { createStartupCoordinator } from '../../api/src/startup-order.js';
 const pathsToRemove: string[] = [];
 const SHA40 = 'a'.repeat(40);
 const SHA64 = 'b'.repeat(64);
+const NOW = '2026-07-28T12:00:00.000Z';
 
 function insertTerminalJob(db: ReturnType<typeof openBuilderDatabase>, jobId: string, terminalAt: string): void {
   db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
@@ -95,5 +96,18 @@ describe('observability integration', () => {
     expect(snapshot).not.toHaveProperty('credentialPath');
     expect(snapshot).not.toHaveProperty('token');
     expect(JSON.stringify(record)).not.toContain('/secret/token');
+  });
+
+  it('uses the global last event when no job is active and only completed cleanup is pending', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-image-builder-health-'));
+    pathsToRemove.push(root);
+    const db = openBuilderDatabase(join(root, 'jobs.sqlite'));
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+      .run('health-terminal', 'request-health-terminal', SHA40, SHA40, SHA64, '2026-07-28T11:00:00.000Z', '2026-07-28T11:00:00.000Z', '2026-07-28T11:00:00.000Z', '2026-07-28T11:00:00.000Z', '2026-07-28T11:00:00.000Z');
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, 0, 'terminal', 'succeeded', '{}', ?)").run('health-terminal', '2026-07-28T11:59:00.000Z');
+    const snapshot = (await import('../../api/src/health.js')).collectHealthSnapshot({ db, now: NOW, diskFreeBytes: 25 * 1024 ** 3, builderImage: null });
+    expect(snapshot.lastEventAt).toBe('2026-07-28T11:59:00.000Z');
+    expect(snapshot.lastEventAgeSeconds).toBe(60);
+    db.close();
   });
 });

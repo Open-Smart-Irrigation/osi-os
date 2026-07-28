@@ -47,6 +47,7 @@ export interface HealthInput {
   readonly now: string;
   readonly queueDepth: number;
   readonly activeJob: HealthActiveJob | null;
+  readonly globalLastEventAt?: string | null;
   readonly diskFreeBytes: number;
   readonly builderImage: Readonly<{ readonly id: string | null; readonly digest: string | null }> | null;
   readonly lastTerminalError?: HealthTerminalError | null;
@@ -151,7 +152,7 @@ export function createStructuredRecord(input: StructuredRecordInput): Structured
 
 export function buildHealthSnapshot(input: HealthInput): HealthSnapshot {
   const active = input.activeJob;
-  const lastEventAt = active?.lastEventAt ?? null;
+  const lastEventAt = active?.lastEventAt ?? input.globalLastEventAt ?? null;
   const staleLogAt = active?.staleLogAt ?? null;
   return Object.freeze({
     queueDepth: input.queueDepth,
@@ -221,7 +222,7 @@ export function collectHealthSnapshot(options: CollectHealthOptions): HealthSnap
       cleanup: {
         status: leaseStatus,
         generation: Number(activeRow.cleanup_generation ?? 0),
-        handBackPending: leaseStatus === 'completed' || leaseStatus === 'claimed',
+        handBackPending: leaseStatus === 'completed',
       },
       container: {
         id: typeof activeRow.container_id === 'string' ? activeRow.container_id : null,
@@ -238,6 +239,7 @@ export function collectHealthSnapshot(options: CollectHealthOptions): HealthSnap
     now: options.now,
     queueDepth: Number(queued?.count ?? 0),
     activeJob,
+    globalLastEventAt: typeof lastEvent?.at === 'string' ? lastEvent.at : null,
     diskFreeBytes: options.diskFreeBytes,
     builderImage: options.builderImage,
     lastTerminalError: terminalError,

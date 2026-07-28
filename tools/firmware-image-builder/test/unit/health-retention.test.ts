@@ -40,7 +40,7 @@ function healthInput(overrides: Partial<HealthInput> = {}): HealthInput {
       recoveryBlockers: [{ code: 'QUARANTINE_PENDING', details: { path: 'jobs/job-1' } }],
       staleLogAt: '2026-07-28T11:45:00.000Z',
       runner: { liveness: 'active' },
-      cleanup: { status: 'claimed', generation: 4, handBackPending: true },
+      cleanup: { status: 'completed', generation: 4, handBackPending: true },
       container: {
         id: 'container-1',
         name: 'osi-job-1',
@@ -67,7 +67,7 @@ describe('builder health and structured records', () => {
       builderImage: { id: 'osi-builder:locked', digest: 'c'.repeat(64) },
       container: { id: 'container-1', name: 'osi-job-1', imageDigest: 'a'.repeat(64) },
       preflightExpiresAt: '2026-07-28T13:00:00.000Z',
-      cleanup: { status: 'claimed', generation: 4, handBackPending: true },
+      cleanup: { status: 'completed', generation: 4, handBackPending: true },
     });
     expect(snapshot.lastEventAgeSeconds).toBe(60);
     expect(snapshot.staleLogAgeSeconds).toBe(900);
@@ -167,11 +167,42 @@ describe('startup retention', () => {
     expect(RETENTION_DAYS).toEqual({ rows: 180, evidence: 180, logs: 180, worktrees: 7, caches: 30, quarantine: 180 });
   });
 
-  it('does not prune caches below the 20 GiB floor', async () => {
+  it('evicts eligible caches below the 20 GiB floor', async () => {
     const paths = await retentionWorkspace();
     const records: RetentionPruneRecord[] = [];
     await createRetentionStartupHook({ paths, now: NOW, freeBytes: 19 * 1024 ** 3, recordPrune: async (record) => { records.push(record); } })();
-    await expect(import('node:fs/promises').then(({ access }) => access(join(paths.builderOwnedRoots[0]!, 'cache', 'docker', 'old')))).resolves.toBeUndefined();
-    expect(records.some((record) => record.category === 'cache')).toBe(false);
+    await expect(import('node:fs/promises').then(({ access }) => access(join(paths.builderOwnedRoots[0]!, 'cache', 'docker', 'old')))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(records.some((record) => record.category === 'cache')).toBe(true);
+  });
+
+  it('rejects a release root used as its own quarantine and arbitrary containment', async () => {
+    const paths = await retentionWorkspace();
+    await expect(createRetentionStartupHook({
+      paths: { ...paths, approvedQuarantineRoots: [paths.approvedReleaseRoots[0]!] },
+      now: NOW,
+      freeBytes: 25 * 1024 ** 3,
+    })()).resolves.toMatchObject({ blockers: [{ code: 'RETENTION_ROOT_INVALID' }] });
+    await expect(createRetentionStartupHook({
+      paths: { ...paths, approvedQuarantineRoots: [join(paths.approvedReleaseRoots[0]!, 'arbitrary-quarantine')] },
+      now: NOW,
+      freeBytes: 25 * 1024 ** 3,
+    })()).resolves.toMatchObject({ blockers: [{ code: 'RETENTION_ROOT_INVALID' }] });
+  });
+
+  it('does not prune a replayable terminal log generation', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+      .run('replayable', 'request-replayable', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
+    const logPath = join(paths.stateRoot, 'jobs', 'replayable', 'logs');
+    await mkdir(logPath, { recursive: true });
+    await writeFile(join(logPath, 'runner-0.log'), 'keep');
+    db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, size_bytes) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('replayable', 'runner', 0, 'logs/runner-0.log', OLD, 4);
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at, stream, file_generation, byte_offset, byte_length, partial) VALUES (?, 0, 'log', 'succeeded', '{}', ?, 'runner', 0, 0, 4, 0)")
+      .run('replayable', OLD);
+    await createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })();
+    await expect(import('node:fs/promises').then(({ access }) => access(join(logPath, 'runner-0.log')))).resolves.toBeUndefined();
   });
 });

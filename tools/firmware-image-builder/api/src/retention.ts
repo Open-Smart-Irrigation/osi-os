@@ -55,6 +55,10 @@ function contained(base: string, child: string): boolean {
   return target === root || target.startsWith(`${root}${sep}`);
 }
 
+function overlaps(left: string, right: string): boolean {
+  return contained(left, right) || contained(right, left);
+}
+
 function safeSegment(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value !== '.' && value !== '..'
     && !value.includes('/') && !value.includes('\\') && !value.includes('\0');
@@ -82,13 +86,13 @@ async function directoryChildren(path: string): Promise<readonly string[]> {
 
 function protectedLogPaths(db: DatabaseSync | undefined): ReadonlySet<string> {
   if (!db) return new Set();
-  const rows = db.prepare(`SELECT DISTINCT generation.path AS path
+  const rows = db.prepare(`SELECT DISTINCT generation.job_id AS job_id, generation.path AS path
     FROM job_log_generations AS generation
     JOIN job_events AS event
       ON event.job_id = generation.job_id
      AND event.stream = generation.stream
-     AND event.file_generation = generation.generation`).all() as Array<{ path?: unknown }>;
-  return new Set(rows.flatMap((row) => typeof row.path === 'string' ? [row.path] : []));
+     AND event.file_generation = generation.generation`).all() as Array<{ job_id?: unknown; path?: unknown }>;
+  return new Set(rows.flatMap((row) => typeof row.job_id === 'string' && typeof row.path === 'string' ? [`${row.job_id}:${row.path}`] : []));
 }
 
 function validateRootShape(path: string): boolean {
@@ -104,6 +108,11 @@ async function validateConfiguredRoots(paths: RetentionPaths): Promise<QueueBloc
     if (stats.isSymbolicLink() || !stats.isDirectory()) return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'root-not-directory' } };
   }
   if (paths.builderOwnedRoots.some((root) => !contained(paths.stateRoot, root))) return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'builder-root-outside-state' } };
+  for (let left = 0; left < paths.builderOwnedRoots.length; left += 1) {
+    for (let right = left + 1; right < paths.builderOwnedRoots.length; right += 1) {
+      if (overlaps(paths.builderOwnedRoots[left]!, paths.builderOwnedRoots[right]!)) return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'builder-roots-overlap' } };
+    }
+  }
   for (let left = 0; left < paths.approvedReleaseRoots.length; left += 1) {
     for (let right = left + 1; right < paths.approvedReleaseRoots.length; right += 1) {
       if (contained(paths.approvedReleaseRoots[left]!, paths.approvedReleaseRoots[right]!) || contained(paths.approvedReleaseRoots[right]!, paths.approvedReleaseRoots[left]!)) {
@@ -111,8 +120,15 @@ async function validateConfiguredRoots(paths: RetentionPaths): Promise<QueueBloc
       }
     }
   }
-  if (paths.approvedQuarantineRoots.some((root) => !paths.approvedReleaseRoots.some((release) => contained(release, root)))) {
-    return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'quarantine-outside-approved-release-root' } };
+  const expectedQuarantines = paths.approvedReleaseRoots.map((release) => resolve(join(release, '.osi-image-builder', 'quarantine')));
+  const actualQuarantines = paths.approvedQuarantineRoots.map((root) => resolve(root));
+  if (actualQuarantines.length !== expectedQuarantines.length || actualQuarantines.some((root) => !expectedQuarantines.includes(root))) {
+    return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'quarantine-is-not-canonical' } };
+  }
+  for (let left = 0; left < actualQuarantines.length; left += 1) {
+    for (let right = left + 1; right < actualQuarantines.length; right += 1) {
+      if (overlaps(actualQuarantines[left]!, actualQuarantines[right]!)) return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'quarantine-roots-overlap' } };
+    }
   }
   if (paths.worktreeRoot !== undefined && (!validateRootShape(paths.worktreeRoot) || !contained(paths.stateRoot, paths.worktreeRoot))) {
     return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'worktree-root-outside-state' } };
@@ -167,16 +183,13 @@ async function databaseCandidates(options: RetentionOptions, now: string, result
     for (const path of await directoryChildren(join(jobRoot, 'evidence'))) {
       result.push({ base: options.paths.stateRoot, auditBase: options.paths.stateRoot, path, category: 'evidence', cutoffDays: 0, stateEligible: true });
     }
-    for (const path of await directoryChildren(join(jobRoot, 'logs'))) {
-      result.push({ base: options.paths.stateRoot, auditBase: options.paths.stateRoot, path, category: 'log', cutoffDays: 0, stateEligible: true });
-    }
   }
   const logRows = options.db.prepare(`SELECT job_id, stream, generation, path, started_at FROM job_log_generations
     WHERE started_at < ? ORDER BY job_id, stream, generation`).all(new Date(threshold(now, RETENTION_DAYS.logs)).toISOString()) as Array<{ job_id?: unknown; stream?: unknown; generation?: unknown; path?: unknown }>;
   const protectedLogs = protectedLogPaths(options.db);
   for (const row of logRows) {
     if (!safeSegment(row.job_id) || (row.stream !== 'runner' && row.stream !== 'docker') || !Number.isSafeInteger(Number(row.generation)) || typeof row.path !== 'string' || !row.path.startsWith('logs/') || row.path.split('/').some((part) => !safeSegment(part))) continue;
-    if (protectedLogs.has(row.path) && !expiredRows.some((job) => job.job_id === row.job_id)) continue;
+    if (protectedLogs.has(`${row.job_id}:${row.path}`)) continue;
     const path = join(options.paths.stateRoot, 'jobs', row.job_id, row.path);
     if (contained(options.paths.stateRoot, path)) result.push({ base: options.paths.stateRoot, auditBase: options.paths.stateRoot, path, category: 'log', cutoffDays: 0, stateEligible: true });
   }
@@ -279,13 +292,14 @@ export function createRetentionStartupHook(options: RetentionOptions): Retention
     const invalid = await validateConfiguredRoots(options.paths);
     if (invalid) return { blockers: [invalid] };
     const freeBytes = typeof options.freeBytes === 'function' ? await options.freeBytes() : options.freeBytes;
-    const allowCaches = freeBytes >= MIN_CACHE_FREE_BYTES;
-    const protectedLogs = protectedLogPaths(options.db);
     const candidates: Candidate[] = [];
+    const cacheCandidates: Candidate[] = [];
     for (const root of options.paths.builderOwnedRoots) {
-      await addChildren(candidates, options.paths, join(root, 'logs'), options.paths.stateRoot, 'log', RETENTION_DAYS.logs, protectedLogs);
-      await addChildren(candidates, options.paths, join(root, 'evidence'), options.paths.stateRoot, 'evidence', RETENTION_DAYS.evidence, new Set());
-      for (const cache of await directoryChildren(join(root, 'cache'))) await addChildren(candidates, options.paths, cache, options.paths.stateRoot, 'cache', RETENTION_DAYS.caches, new Set());
+      for (const cache of await directoryChildren(join(root, 'cache'))) {
+        for (const path of await directoryChildren(cache)) {
+          cacheCandidates.push({ base: options.paths.stateRoot, auditBase: options.paths.stateRoot, path, category: 'cache', cutoffDays: RETENTION_DAYS.caches, stateEligible: false });
+        }
+      }
     }
     for (const root of options.paths.approvedQuarantineRoots) {
       const auditBase = options.paths.approvedReleaseRoots.find((release) => contained(release, root)) ?? root;
@@ -295,12 +309,38 @@ export function createRetentionStartupHook(options: RetentionOptions): Retention
     const blockers: QueueBlocker[] = [];
     const uniqueCandidates = [...new Map(candidates.map((candidate) => [`${candidate.category}:${resolve(candidate.path)}`, candidate])).values()];
     for (const candidate of uniqueCandidates) {
-      if (candidate.category === 'cache' && !allowCaches) continue;
       try { await pruneCandidate(options, candidate, now); }
       catch (error) {
         const details = { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), reason: error instanceof Error ? error.message : String(error) };
         try { await recordAudit(options, { category: candidate.category, relativePath: details.relativePath, action: 'failed', bytes: 0, timestamp: now }); }
         catch { /* the blocker below is the durable signal when audit storage also fails */ }
+        blockers.push({ code: 'RETENTION_PRUNE_FAILED', details });
+      }
+    }
+    const uniqueCaches = [...new Map(cacheCandidates.map((candidate) => [resolve(candidate.path), candidate])).values()];
+    const cacheStats = await Promise.all(uniqueCaches.map(async (candidate) => {
+      try { return { candidate, mtimeMs: (await lstat(candidate.path)).mtimeMs }; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+    }));
+    const orderedCaches = cacheStats
+      .filter((value): value is { candidate: Candidate; mtimeMs: number } => value !== null)
+      .sort((left, right) => left.mtimeMs - right.mtimeMs);
+    let currentFreeBytes = freeBytes;
+    const dynamicFreeBytes = typeof options.freeBytes === 'function';
+    const belowFloor = currentFreeBytes < MIN_CACHE_FREE_BYTES;
+    for (const { candidate } of orderedCaches) {
+      if (belowFloor && dynamicFreeBytes) {
+        currentFreeBytes = await options.freeBytes();
+        if (currentFreeBytes >= MIN_CACHE_FREE_BYTES) break;
+      }
+      let stats;
+      try { stats = await lstat(candidate.path); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
+      if (!belowFloor && stats.mtimeMs >= threshold(now, RETENTION_DAYS.caches)) continue;
+      try { await pruneCandidate(options, { ...candidate, stateEligible: belowFloor }, now); }
+      catch (error) {
+        const details = { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), reason: error instanceof Error ? error.message : String(error) };
+        try { await recordAudit(options, { category: 'cache', relativePath: details.relativePath, action: 'failed', bytes: 0, timestamp: now }); } catch { /* blocker remains the durable signal */ }
         blockers.push({ code: 'RETENTION_PRUNE_FAILED', details });
       }
     }
