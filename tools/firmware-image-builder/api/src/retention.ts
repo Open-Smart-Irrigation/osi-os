@@ -581,7 +581,13 @@ async function reconcileIntents(options: RetentionOptionsWithRoots, now: string,
         const expectedPath = join(root, parts[parts.length - 1]!);
         if (relativePath(auditBase, expectedPath) !== intent.relative_path) continue;
         const candidate = quarantineCandidate(options, root, auditBase, expectedPath, now);
-        if (candidate && !existing.has(`quarantine:${intent.relative_path}`)) candidates.push(candidate);
+        if (candidate) {
+          const resumed = { ...candidate, stateEligible: true };
+          const existingIndex = candidates.findIndex((value) => value.category === 'quarantine'
+            && relativePath(value.auditBase, value.path) === intent.relative_path);
+          if (existingIndex === -1) candidates.push(resumed);
+          else candidates[existingIndex] = resumed;
+        }
         break;
       }
       continue;
