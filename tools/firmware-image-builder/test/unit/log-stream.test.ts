@@ -80,6 +80,24 @@ describe('DurableLogStream', () => {
     expect(() => zeroReadStream.sealSync('runner')).toThrow(/zero progress/i);
   });
 
+  it('hashes a generation incrementally while sealing', async () => {
+    const readLengths: number[] = [];
+    const value = await fixture({
+      io: {
+        readSync: (fd, buffer, offset, length, position) => {
+          readLengths.push(length);
+          return systemReadSync(fd, buffer, offset, length, position);
+        },
+      },
+    });
+    value.stream.appendSync('runner', Buffer.alloc(128 * 1024, 0x61));
+
+    value.stream.sealSync('runner');
+
+    expect(Math.max(...readLengths)).toBeLessThanOrEqual(64 * 1024);
+    expect(readLengths.length).toBeGreaterThan(1);
+  });
+
   it('fsyncs newly created directory entries before committing the first range', async () => {
     const calls: string[] = [];
     let eventsAtLogsFsync = -1;
@@ -194,6 +212,36 @@ describe('DurableLogStream', () => {
     expect(sealed.length).toBe(Buffer.byteLength('orphan\n'));
     expect(stream.sealOrphanTailSync('docker', { unitInactive: true, leaseStale: true, noMatchingContainer: true })).toEqual(sealed);
     expect((db.prepare('SELECT sealed_at FROM job_log_generations WHERE job_id=? AND stream=? AND generation=0').get('job-log', 'docker') as { sealed_at: string | null }).sealed_at).not.toBeNull();
+  });
+
+  it('hashes an orphan generation incrementally and reads only its final byte for partial state', async () => {
+    const readLengths: number[] = [];
+    const value = await fixture({
+      io: {
+        readSync: (fd, buffer, offset, length, position) => {
+          readLengths.push(length);
+          return systemReadSync(fd, buffer, offset, length, position);
+        },
+      },
+    });
+    value.stream.appendSync('docker', Buffer.from('indexed\n'));
+    await writeFile(join(value.root, 'logs/docker.0'), Buffer.concat([Buffer.from('indexed\n'), Buffer.alloc(128 * 1024, 0x62)]));
+
+    const sealed = value.stream.sealOrphanTailSync('docker', { unitInactive: true, leaseStale: true, noMatchingContainer: true });
+
+    expect(sealed).toMatchObject({ eventType: 'log_orphan_tail', length: 128 * 1024 });
+    expect(Math.max(...readLengths)).toBeLessThanOrEqual(64 * 1024);
+    expect(readLengths).toContain(1);
+  });
+
+  it('reports a single source range larger than the replay budget explicitly', async () => {
+    const { stream } = await fixture();
+    stream.appendSync('runner', Buffer.from('large'));
+
+    const replay = stream.replaySync(-1, { maxDecodedBytes: 2 });
+
+    expect(replay).toHaveLength(1);
+    expect(replay[0]).toMatchObject({ seq: 0, event: 'log-truncated', data: { truncated: true, reason: 'REPLAY_EVENT_TOO_LARGE', length: 5 } });
   });
 
   it('returns the same persisted seal result when there is no orphan tail', async () => {

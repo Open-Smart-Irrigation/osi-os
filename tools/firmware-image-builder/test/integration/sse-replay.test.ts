@@ -63,17 +63,16 @@ describe('SSE durable replay', () => {
     stream.appendSync('runner', Buffer.from('cdef\n'));
     stream.appendMetadataSync('terminal', { state: 'succeeded' });
 
-    const first = stream.replaySync(-1, { eventLimit: 2, maxDecodedBytes: 2 });
+    const first = stream.replaySync(-1, { eventLimit: 4, maxDecodedBytes: 2 });
     const second = stream.replaySync(first.at(-1)?.seq ?? -1, { eventLimit: 2, maxDecodedBytes: 2 });
-    const third = stream.replaySync(second.at(-1)?.seq ?? -1, { eventLimit: 2, maxDecodedBytes: 2 });
-    const replayed = [...first, ...second, ...third];
+    const replayed = [...first, ...second];
 
     expect(first).toHaveLength(2);
+    expect(first.map(({ seq, event }) => [seq, event])).toEqual([[0, 'stage'], [1, 'log']]);
     expect(second).toHaveLength(2);
-    expect(third).toEqual([]);
     expect(replayed.map(({ seq, event }) => [seq, event])).toEqual([[0, 'stage'], [1, 'log'], [2, 'log-truncated'], [3, 'terminal']]);
     expect(Buffer.from(String(replayed[1]?.data.bytesBase64), 'base64')).toEqual(Buffer.from('ab'));
-    expect(replayed[2]?.data).toMatchObject({ offset: 2, length: 5, truncated: true, reason: 'REPLAY_BYTE_LIMIT' });
+    expect(replayed[2]?.data).toMatchObject({ offset: 2, length: 5, truncated: true, reason: 'REPLAY_EVENT_TOO_LARGE' });
     expect(await readFile(join(root, 'logs/runner.0'))).toEqual(Buffer.from('abcdef\n'));
   });
 

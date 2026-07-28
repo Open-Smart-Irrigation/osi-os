@@ -8,6 +8,7 @@ const DEFAULT_REPLAY_EVENT_LIMIT = 256;
 const MAX_REPLAY_EVENT_LIMIT = 1_000;
 const DEFAULT_REPLAY_DECODED_BYTES = 512 * 1024;
 const MAX_REPLAY_DECODED_BYTES = 16 * 1024 * 1024;
+const HASH_BUFFER_SIZE = 64 * 1024;
 const O_CLOEXEC = (constants as typeof constants & { readonly O_CLOEXEC?: number }).O_CLOEXEC ?? 0;
 const DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | O_CLOEXEC;
 type StreamName = 'runner' | 'docker';
@@ -203,12 +204,13 @@ export class DurableLogStream {
     if (!row || row.sealed_at !== null) return;
     const path = this.#generationPath(stream, Number(row.generation), row.path);
     if (path === null) throw new Error(`${stream} log directory is missing`);
-    const bytes = readRegularFile(path, this.#readSync, this.#fsyncSync);
-    if (bytes.byteLength !== Number(row.size_bytes)) throw new Error(`${stream} log size diverged before seal`);
-    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try { this.#fsyncSync(fd); } finally { closeSync(fd); }
-    const sha256 = createHash('sha256').update(bytes).digest('hex');
-    this.#transaction(() => this.#db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=? AND stream=? AND generation=?').run(this.#now(), sha256, this.#jobId, stream, row.generation));
+    const opened = openRegularFile(path);
+    try {
+      this.#fsyncSync(opened.fd);
+      if (opened.size !== Number(row.size_bytes)) throw new Error(`${stream} log size diverged before seal`);
+      const sha256 = hashRegularFile(opened.fd, opened.size, this.#readSync);
+      this.#transaction(() => this.#db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=? AND stream=? AND generation=?').run(this.#now(), sha256, this.#jobId, stream, row.generation));
+    } finally { closeSync(opened.fd); }
   }
 
   rotateSync(stream: StreamName): { readonly generation: number; readonly path: string } {
@@ -226,30 +228,40 @@ export class DurableLogStream {
     if (!row) throw new Error('log generation does not exist');
     const path = this.#generationPath(stream, Number(row.generation), row.path);
     if (path === null) throw new Error(`${stream} log directory is missing`);
-    const bytes = readRegularFile(path, this.#readSync, this.#fsyncSync);
+    const opened = openRegularFile(path);
     const indexed = Number(row.size_bytes);
-    if (bytes.byteLength < indexed) {
-      return this.#persistOrphanGap(stream, Number(row.generation), bytes.byteLength, indexed - bytes.byteLength);
-    }
-    if (row.sealed_at !== null) {
-      const existing = this.#orphanResult(stream, Number(row.generation));
-      return existing ?? this.#sealedResult(stream, Number(row.generation), indexed);
-    }
-    const tailLength = bytes.byteLength - indexed;
-    if (tailLength === 0) {
-      this.sealSync(stream);
-      return this.#sealedResult(stream, Number(row.generation), indexed);
-    }
-    let seq = -1;
-    this.#transaction(() => {
-      const next = this.#nextSeq();
-      this.#db.prepare('UPDATE job_log_generations SET size_bytes=? WHERE job_id=? AND stream=? AND generation=?').run(bytes.byteLength, this.#jobId, stream, row.generation);
-      this.#db.prepare(`INSERT INTO job_events (job_id, seq, event_type, payload_json, at, stream, file_generation, byte_offset, byte_length, partial)
-        VALUES (?, ?, 'log_orphan_tail', ?, ?, ?, ?, ?, ?, ?)`).run(this.#jobId, next, json({ jobId: this.#jobId, stream, generation: row.generation, offset: indexed, length: tailLength, partial: bytes[bytes.length - 1] !== 0x0a }), this.#now(), stream, row.generation, indexed, tailLength, bytes[bytes.length - 1] !== 0x0a ? 1 : 0);
-      this.#db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=? AND stream=? AND generation=?').run(this.#now(), createHash('sha256').update(bytes).digest('hex'), this.#jobId, stream, row.generation);
-      seq = next;
-    });
-    return { eventType: 'log_orphan_tail', seq, stream, generation: Number(row.generation), offset: indexed, length: tailLength };
+    try {
+      this.#fsyncSync(opened.fd);
+      if (opened.size < indexed) {
+        return this.#persistOrphanGap(stream, Number(row.generation), opened.size, indexed - opened.size);
+      }
+      if (row.sealed_at !== null) {
+        const existing = this.#orphanResult(stream, Number(row.generation));
+        return existing ?? this.#sealedResult(stream, Number(row.generation), indexed);
+      }
+      const tailLength = opened.size - indexed;
+      if (tailLength === 0) {
+        const sha256 = hashRegularFile(opened.fd, opened.size, this.#readSync);
+        this.#transaction(() => {
+          this.#db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=? AND stream=? AND generation=?').run(this.#now(), sha256, this.#jobId, stream, row.generation);
+        });
+        return this.#sealedResult(stream, Number(row.generation), indexed);
+      }
+      const finalByte = Buffer.alloc(1);
+      readExactly(opened.fd, finalByte, opened.size - 1, this.#readSync);
+      const partial = finalByte[0] !== 0x0a;
+      const sha256 = hashRegularFile(opened.fd, opened.size, this.#readSync);
+      let seq = -1;
+      this.#transaction(() => {
+        const next = this.#nextSeq();
+        this.#db.prepare('UPDATE job_log_generations SET size_bytes=? WHERE job_id=? AND stream=? AND generation=?').run(opened.size, this.#jobId, stream, row.generation);
+        this.#db.prepare(`INSERT INTO job_events (job_id, seq, event_type, payload_json, at, stream, file_generation, byte_offset, byte_length, partial)
+          VALUES (?, ?, 'log_orphan_tail', ?, ?, ?, ?, ?, ?, ?)`).run(this.#jobId, next, json({ jobId: this.#jobId, stream, generation: row.generation, offset: indexed, length: tailLength, partial }), this.#now(), stream, row.generation, indexed, tailLength, partial ? 1 : 0);
+        this.#db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=? AND stream=? AND generation=?').run(this.#now(), sha256, this.#jobId, stream, row.generation);
+        seq = next;
+      });
+      return { eventType: 'log_orphan_tail', seq, stream, generation: Number(row.generation), offset: indexed, length: tailLength };
+    } finally { closeSync(opened.fd); }
   }
 
   replaySync(afterSeq: number, requestedLimits: ReplayLimits = {}): LogStreamEvent[] {
@@ -290,6 +302,7 @@ export class DurableLogStream {
         continue;
       }
       if (source.range.length > limits.maxDecodedBytes - decodedBytes) {
+        if (decodedBytes > 0) break;
         output.push({
           seq,
           event: 'log-truncated',
@@ -302,7 +315,7 @@ export class DurableLogStream {
             length: source.range.length,
             partial: Number(row.partial) === 1,
             truncated: true,
-            reason: 'REPLAY_BYTE_LIMIT',
+            reason: 'REPLAY_EVENT_TOO_LARGE',
           },
         });
         continue;
@@ -529,18 +542,27 @@ function readExactly(fd: number, buffer: Buffer, position: number, read: LogStre
   }
 }
 
-function readRegularFile(path: string, read: LogStreamIo['readSync'], fsync: LogStreamIo['fsyncSync']): Buffer {
+function openRegularFile(path: string): { readonly fd: number; readonly size: number } {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile()) throw new Error('log generation is not a regular file');
-    fsync(fd);
-    const data = Buffer.alloc(stat.size);
-    readExactly(fd, data, 0, read);
-    return data;
-  } finally {
+    return { fd, size: stat.size };
+  } catch (error) {
     closeSync(fd);
+    throw error;
   }
+}
+
+function hashRegularFile(fd: number, size: number, read: LogStreamIo['readSync']): string {
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(Math.min(HASH_BUFFER_SIZE, size));
+  for (let position = 0; position < size; position += buffer.byteLength) {
+    const length = Math.min(buffer.byteLength, size - position);
+    readExactly(fd, buffer.subarray(0, length), position, read);
+    hash.update(buffer.subarray(0, length));
+  }
+  return hash.digest('hex');
 }
 
 function readRegularRange(path: string, offset: number, length: number, expected: FileIdentity, read: LogStreamIo['readSync']): Buffer {
