@@ -73,6 +73,13 @@ function contentTypeIsJson(value: string | string[] | undefined): boolean {
   return value.split(';', 1)[0]!.trim().toLowerCase() === 'application/json';
 }
 
+function checkHost(request: IncomingMessage): void {
+  const localPort = request.socket.localPort;
+  const value = request.headers.host;
+  if (!Number.isSafeInteger(localPort) || typeof value !== 'string' || value.length === 0) fail('HOST_REQUIRED', 400);
+  if (value !== `${LOOPBACK_HOST}:${localPort}`) fail('HOST_FORBIDDEN', 400);
+}
+
 function safeErrorEnvelope(error: unknown, id: string): { readonly error: Readonly<Record<string, unknown>> } {
   if (error instanceof BuilderError) {
     return {
@@ -115,6 +122,8 @@ function publicMessage(code: string): string {
   switch (code) {
     case 'ORIGIN_REQUIRED': return 'A same-origin request is required.';
     case 'ORIGIN_FORBIDDEN': return 'The request origin is not allowed.';
+    case 'HOST_REQUIRED': return 'A loopback Host header is required.';
+    case 'HOST_FORBIDDEN': return 'The request Host is not allowed.';
     case 'JSON_REQUIRED': return 'Mutating requests must use application/json.';
     case 'INVALID_JSON': return 'The request body is not valid JSON.';
     case 'BODY_TOO_LARGE': return 'The request body exceeds its size limit.';
@@ -187,7 +196,8 @@ function parseRequestUrl(request: IncomingMessage, origin: string): URL {
   } catch {
     fail('INVALID_PATH', 400);
   }
-  if (url.origin !== origin || !url.pathname.startsWith(API_PREFIX) || url.pathname.startsWith(CLOUD_PREFIX)) {
+  if (url.origin !== origin || !url.pathname.startsWith(API_PREFIX)
+    || url.pathname === '/api/v1' || url.pathname.startsWith(CLOUD_PREFIX)) {
     fail('NOT_FOUND', 404);
   }
   return url;
@@ -222,6 +232,7 @@ export function createHttpServer(options: HttpServerOptions): Server {
   const server = createServer(async (request, response) => {
     const id = requestId();
     try {
+      checkHost(request);
       const url = parseRequestUrl(request, options.origin);
       if (request.method === 'OPTIONS') {
         preflight(response, request, options.origin, id);
@@ -254,9 +265,14 @@ export function createHttpServer(options: HttpServerOptions): Server {
   });
 
   const listen = server.listen.bind(server);
-  server.listen = ((...args: Parameters<Server['listen']>) => {
-    const callback = typeof args.at(-1) === 'function' ? args.pop() as () => void : undefined;
-    return listen({ ...(typeof args[0] === 'object' && args[0] !== null ? args[0] : { port: args[0] }), host: LOOPBACK_HOST }, callback);
+  server.listen = ((...args: unknown[]) => {
+    if (args.length > 2 || typeof args[0] !== 'number' || !Number.isInteger(args[0]) || args[0] < 0 || args[0] > 65_535) {
+      throw new TypeError('HTTP API listen accepts only a numeric TCP port and optional callback');
+    }
+    if (args.length === 2 && typeof args[1] !== 'function') {
+      throw new TypeError('HTTP API listen accepts only a numeric TCP port and optional callback');
+    }
+    return listen({ port: args[0], host: LOOPBACK_HOST }, args[1] as (() => void) | undefined);
   }) as Server['listen'];
   return server;
 }

@@ -1,4 +1,5 @@
 import { once } from 'node:events';
+import { connect } from 'node:net';
 import { request } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import {
@@ -55,6 +56,17 @@ async function call(port: number, options: {
 async function stop(server: ReturnType<typeof createHttpServer>) {
   server.close();
   await once(server, 'close');
+}
+
+async function raw(port: number, input: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(port, '127.0.0.1');
+    const chunks: Buffer[] = [];
+    socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+    socket.on('error', reject);
+    socket.on('close', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    socket.on('connect', () => socket.end(input));
+  });
 }
 
 describe('loopback HTTP security boundary', () => {
@@ -174,6 +186,7 @@ describe('loopback HTTP security boundary', () => {
 
       const cloud = await call(port, { path: '/api/v1/sync/gateways/eui/status' });
       expect(cloud.status).toBe(404);
+      expect((await call(port, { path: '/api/v1' })).status).toBe(404);
 
       const unsupported = await call(port, { method: 'PUT', path: '/api/jobs' });
       expect(unsupported.status).toBe(405);
@@ -181,5 +194,43 @@ describe('loopback HTTP security boundary', () => {
     } finally {
       await stop(server);
     }
+  });
+
+  it('requires the exact loopback Host for the bound local port and rejects foreign absolute URLs', async () => {
+    let dispatched = 0;
+    const { server, port } = await start(() => {
+      dispatched += 1;
+      return jsonResponse(200, { ok: true });
+    });
+    try {
+      expect((await call(port, { headers: { host: `127.0.0.1:${port - 1}` } })).status).toBe(400);
+      expect((await call(port, { headers: { host: 'localhost' } })).status).toBe(400);
+      expect((await raw(port, 'GET /api/health HTTP/1.1\r\nConnection: close\r\n\r\n'))).toMatch(/^HTTP\/1\.1 400 /u);
+      expect((await call(port, { path: 'http://evil.example/api/health' })).status).toBe(404);
+      expect(dispatched).toBe(0);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('accepts only numeric TCP listen ports and reports listener errors', async () => {
+    const server = createHttpServer({ origin: ORIGIN, routeHandler: () => jsonResponse(200, {}) });
+    expect(() => server.listen('/tmp/osi-image-builder.sock' as never)).toThrow();
+    expect(() => server.listen({ port: 0 } as never)).toThrow();
+    expect(() => server.listen(0, 128 as never)).toThrow();
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, () => resolve());
+    });
+    const address = server.address();
+    expect(address).toMatchObject({ address: '127.0.0.1' });
+    if (address === null || typeof address === 'string') throw new Error('server did not bind to a TCP port');
+
+    const conflicting = createHttpServer({ origin: ORIGIN, routeHandler: () => jsonResponse(200, {}) });
+    const listenerErrorPromise = once(conflicting, 'error');
+    conflicting.listen(address.port);
+    const [listenerError] = await listenerErrorPromise as [NodeJS.ErrnoException];
+    expect(listenerError.code).toBe('EADDRINUSE');
+    await stop(server);
   });
 });
