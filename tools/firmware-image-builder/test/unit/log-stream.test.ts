@@ -124,6 +124,37 @@ describe('DurableLogStream', () => {
     expect(calls).toEqual(['directory', 'file', 'directory', 'file']);
   });
 
+  it('reserves before fsync, fails closed on an ambiguous retry, and recovers the exact orphan once', async () => {
+    let injected = false;
+    const failed = await fixture({
+      io: {
+        fsyncSync: (fd) => {
+          systemFsyncSync(fd);
+          if (!injected && fstatSync(fd).isFile()) {
+            injected = true;
+            throw new Error('injected post-fsync failure');
+          }
+        },
+      },
+    });
+    const bytes = Buffer.from('durable before metadata\n');
+
+    expect(() => failed.stream.appendSync('runner', bytes)).toThrow('injected post-fsync failure');
+    expect(failed.db.prepare('SELECT generation, sealed_at, size_bytes FROM job_log_generations WHERE job_id=? AND stream=?').get('job-log', 'runner')).toEqual({ generation: 0, sealed_at: null, size_bytes: 0 });
+    expect(await readFile(join(failed.root, 'logs/runner.0'))).toEqual(bytes);
+    expect(() => failed.stream.appendSync('runner', bytes)).toThrow(/ambiguous/i);
+
+    const recovery = new DurableLogStream({ db: failed.db, root: failed.root, jobId: 'job-log', now: () => NOW });
+    const orphan = recovery.sealOrphanTailSync('runner', { unitInactive: true, leaseStale: true, noMatchingContainer: true });
+    expect(orphan).toMatchObject({ eventType: 'log_orphan_tail', generation: 0, offset: 0, length: bytes.length });
+
+    const later = recovery.appendSync('runner', Buffer.from('replayed once\n'));
+    expect(later.generation).toBe(1);
+    const replayed = recovery.replaySync(-1).filter((event) => event.event === 'log');
+    expect(replayed.map((event) => event.data.text)).toEqual(['durable before metadata\n', 'replayed once\n']);
+    expect(recovery.replaySync(-1).filter((event) => event.event === 'log')).toHaveLength(2);
+  });
+
   it('seals and rotates contiguous generations, then replays exact bytes after a cursor', async () => {
     const { stream, db, root } = await fixture();
     stream.appendSync('docker', Buffer.from('one\n'));

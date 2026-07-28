@@ -163,8 +163,24 @@ export class DurableLogStream {
   appendSync(stream: StreamName, bytes: Uint8Array): AppendResult {
     this.#assertOpen();
     if (bytes.byteLength === 0) throw new Error('log append must contain bytes');
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      // Commit the generation identity before opening the file. If the later
+      // append becomes ambiguous, recovery can still index the exact bytes.
+      const generation = this.#openGeneration(stream);
+      try {
+        return this.#appendReserved(stream, generation, bytes);
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== 'log generation sealed before append') throw error;
+        if (attempt === 2) throw new Error('log generation kept sealing before append');
+      }
+    }
+    throw new Error('log append retry budget exhausted');
+  }
+
+  #appendReserved(stream: StreamName, generation: number, bytes: Uint8Array): AppendResult {
     return this.#transaction(() => {
-      const generation = this.#openGenerationInTransaction(stream);
+      const latest = this.#db.prepare('SELECT generation, sealed_at FROM job_log_generations WHERE job_id=? AND stream=? ORDER BY generation DESC LIMIT 1').get(this.#jobId, stream) as { generation: number; sealed_at: string | null } | undefined;
+      if (!latest || Number(latest.generation) !== generation || latest.sealed_at !== null) throw new Error('log generation sealed before append');
       const row = this.#db.prepare('SELECT path, size_bytes FROM job_log_generations WHERE job_id=? AND stream=? AND generation=?').get(this.#jobId, stream, generation) as { path: string; size_bytes: number };
       const path = this.#generationPath(stream, generation, row.path, true);
       if (path === null) throw new Error('log directory could not be created');
@@ -173,7 +189,11 @@ export class DurableLogStream {
       const partial = bytes[bytes.byteLength - 1] !== 0x0a;
       try {
         const before = fstatSync(opened.fd);
-        if (!before.isFile() || before.size !== offset) throw new Error(`${stream} log is not a regular contiguous file`);
+        if (!before.isFile()) throw new Error(`${stream} log is not a regular file`);
+        if (before.size !== offset) {
+          if (before.size > offset) throw new Error(`${stream} log append is ambiguous after durable file write`);
+          throw new Error(`${stream} log is not a regular contiguous file`);
+        }
         allBytes(opened.fd, bytes, this.#writeSync);
         this.#fsyncSync(opened.fd);
         const expectedSize = offset + bytes.byteLength;
