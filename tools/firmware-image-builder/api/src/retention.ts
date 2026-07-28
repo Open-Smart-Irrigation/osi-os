@@ -19,6 +19,7 @@ import type { StartupPhaseResult, StartupService } from './startup-order.js';
 export const RETENTION_DAYS = Object.freeze({ rows: 180, evidence: 180, logs: 180, worktrees: 7, caches: 30, quarantine: 180 });
 const MIN_CACHE_FREE_BYTES = 20 * 1024 ** 3;
 const RETENTION_CATEGORIES = ['row', 'evidence', 'log', 'worktree', 'cache', 'quarantine'] as const;
+const PRE_V15_QUARANTINE_INTENT_REASON = 'pre-v15-quarantine-intent-missing-target-identity';
 const ELIGIBLE_TERMINAL_ROW_SQL = `state IN ('succeeded', 'failed', 'cancelled', 'interrupted')
   AND terminal_at IS NOT NULL AND terminal_at < ?
   AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL AND cleanup_blocker_code IS NULL
@@ -516,7 +517,7 @@ async function pruneCandidate(options: RetentionOptionsWithRoots, candidate: Can
   try { parent = await openRelativeDirectory(root.handle, parts.slice(0, -1)); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT' && candidate.durable) {
-      planIntent(options, candidate, now, 0);
+      if (!candidate.replayIdentity) planIntent(options, candidate, now, 0);
       await finalizeIntent(options, candidate, { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), action: 'removed', bytes: 0, timestamp: now });
       return;
     }
@@ -524,6 +525,7 @@ async function pruneCandidate(options: RetentionOptionsWithRoots, candidate: Can
   }
   const name = parts[parts.length - 1]!;
   let held: FileHandle | undefined;
+  let initial: EntryIdentity | undefined;
   try {
     const linkStats = await lstat(procPath(parent, name));
     if (linkStats.isSymbolicLink()) {
@@ -533,7 +535,7 @@ async function pruneCandidate(options: RetentionOptionsWithRoots, candidate: Can
       return;
     }
     held = await openEntry(parent, name);
-    const initial = identity(await held.stat());
+    initial = identity(await held.stat());
     if (initial.isSymbolicLink) return;
     if (candidate.replayIdentity
       && (initial.dev !== candidate.replayIdentity.dev || initial.ino !== candidate.replayIdentity.ino)) {
@@ -572,7 +574,14 @@ async function pruneCandidate(options: RetentionOptionsWithRoots, candidate: Can
     await finalizeIntent(options, candidate, record);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT' && candidate.durable) {
-      planIntent(options, candidate, now, 0);
+      let rootAbsent = false;
+      try { lstatSync(procPath(parent, name)); }
+      catch (rootError) {
+        if ((rootError as NodeJS.ErrnoException).code === 'ENOENT') rootAbsent = true;
+        else throw rootError;
+      }
+      if (!rootAbsent) throw error;
+      if (!candidate.replayIdentity && !initial) planIntent(options, candidate, now, 0);
       await finalizeIntent(options, candidate, { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), action: 'removed', bytes: 0, timestamp: now });
       return;
     }
@@ -722,11 +731,31 @@ async function reconcileIntents(options: RetentionOptionsWithRoots, now: string,
         const auditBase = options.paths.approvedReleaseRoots.find((release) => contained(release, root)) ?? root;
         const expectedPath = join(root, parts[parts.length - 1]!);
         if (relativePath(auditBase, expectedPath) !== intent.relative_path) continue;
-        const candidate = quarantineCandidate(options, root, auditBase, expectedPath, now);
         const targetDev = Number(intent.target_dev);
         const targetIno = Number(intent.target_ino);
-        if (candidate && intent.target_dev !== null && intent.target_ino !== null
-          && Number.isSafeInteger(targetDev) && targetDev >= 0 && Number.isSafeInteger(targetIno) && targetIno >= 0) {
+        const hasTargetIdentity = intent.target_dev !== null && intent.target_ino !== null
+          && Number.isSafeInteger(targetDev) && targetDev >= 0 && Number.isSafeInteger(targetIno) && targetIno >= 0;
+        if (!hasTargetIdentity) {
+          const legacyCandidate: Candidate = {
+            base: root,
+            auditBase,
+            path: expectedPath,
+            category: 'quarantine',
+            cutoffDays: RETENTION_DAYS.quarantine,
+            stateEligible: false,
+            durable: true,
+          };
+          await finalizeIntent(options, legacyCandidate, {
+            category: 'quarantine',
+            relativePath: intent.relative_path,
+            action: 'skipped',
+            bytes: 0,
+            timestamp: now,
+          }, PRE_V15_QUARANTINE_INTENT_REASON);
+          break;
+        }
+        const candidate = quarantineCandidate(options, root, auditBase, expectedPath, now);
+        if (candidate) {
           const resumed = { ...candidate, stateEligible: true, replayIdentity: { dev: targetDev, ino: targetIno } };
           const existingIndex = candidates.findIndex((value) => value.category === 'quarantine'
             && relativePath(value.auditBase, value.path) === intent.relative_path);

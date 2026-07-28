@@ -1,4 +1,4 @@
-import { lstat, mkdtemp, mkdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -225,7 +225,8 @@ describe('startup retention', () => {
     for (const jobId of ['active-quarantine', 'recovery-quarantine']) {
       await expect(import('node:fs/promises').then(({ access }) => access(join(quarantineRoot, jobId)))).resolves.toBeUndefined();
     }
-    expect(db.prepare("SELECT status FROM retention_prune_intents WHERE relative_path='.osi-image-builder/quarantine/active-quarantine'").get()).toEqual({ status: 'planned' });
+    expect(db.prepare("SELECT status, error FROM retention_prune_intents WHERE relative_path='.osi-image-builder/quarantine/active-quarantine'").get())
+      .toEqual({ status: 'skipped', error: 'pre-v15-quarantine-intent-missing-target-identity' });
     expect(db.prepare("SELECT status FROM retention_prune_intents WHERE relative_path='.osi-image-builder/quarantine/recovery-quarantine'").get()).toEqual({ status: 'removed' });
     await expect(import('node:fs/promises').then(({ access }) => access(join(quarantineRoot, 'terminal-quarantine')))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(import('node:fs/promises').then(({ access }) => access(join(quarantineRoot, 'orphan-quarantine')))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -272,6 +273,47 @@ describe('startup retention', () => {
       expect(db.prepare('SELECT status, error FROM retention_prune_intents WHERE category=? AND relative_path=?').get('quarantine', `.osi-image-builder/quarantine/${jobId}`)).toEqual({ status: 'removed', error: null });
       expect(db.prepare('SELECT action FROM retention_prunes WHERE category=? AND relative_path=? ORDER BY prune_id DESC LIMIT 1').get('quarantine', `.osi-image-builder/quarantine/${jobId}`)).toEqual({ action: 'removed' });
     }
+  });
+
+  it.each([
+    ['planned', 'present'],
+    ['failed', 'present'],
+    ['planned', 'absent'],
+    ['failed', 'absent'],
+  ] as const)('retires a pre-v15 %s quarantine intent when its recent target is %s', async (status, presence) => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    const jobId = `legacy-${status}-${presence}`;
+    const quarantineRoot = join(paths.approvedQuarantineRoots[0]!, jobId);
+    const relativePath = `.osi-image-builder/quarantine/${jobId}`;
+    if (presence === 'present') {
+      await mkdir(quarantineRoot, { recursive: true });
+      await writeFile(join(quarantineRoot, 'partial.bin'), 'partial');
+      await utimes(quarantineRoot, new Date(NOW), new Date(NOW));
+    }
+    db.prepare(`INSERT INTO retention_prune_intents
+        (category, relative_path, status, planned_at, updated_at, bytes, target_dev, target_ino)
+      VALUES ('quarantine', ?, ?, ?, ?, 7, NULL, NULL)`)
+      .run(relativePath, status, OLD, OLD);
+
+    await expect(createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })()).resolves.toEqual({ blockers: [] });
+
+    if (presence === 'present') {
+      await expect(import('node:fs/promises').then(({ readFile }) => readFile(join(quarantineRoot, 'partial.bin'), 'utf8'))).resolves.toBe('partial');
+    } else {
+      await expect(import('node:fs/promises').then(({ access }) => access(quarantineRoot))).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+    expect(db.prepare(`SELECT status, error, target_dev, target_ino FROM retention_prune_intents
+      WHERE category='quarantine' AND relative_path=?`).get(relativePath)).toEqual({
+      status: 'skipped',
+      error: 'pre-v15-quarantine-intent-missing-target-identity',
+      target_dev: null,
+      target_ino: null,
+    });
+    expect(db.prepare(`SELECT action FROM retention_prunes
+      WHERE category='quarantine' AND relative_path=? ORDER BY prune_id DESC LIMIT 1`).get(relativePath))
+      .toEqual({ action: 'skipped' });
   });
 
   it.each(['mtime', 'entry'] as const)('retains a fresh-scan quarantine when beforeDelete refreshes its %s', async (mutation) => {
@@ -376,6 +418,92 @@ describe('startup retention', () => {
       message: expect.stringContaining('database is locked'),
     });
     await expect(import('node:fs/promises').then(({ access }) => access(quarantineRoot))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('attributes recursive child ENOENT as failed while the held quarantine root still exists', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    const jobId = 'child-enoent';
+    const quarantineRoot = join(paths.approvedQuarantineRoots[0]!, jobId);
+    const relativePath = `.osi-image-builder/quarantine/${jobId}`;
+    await mkdir(join(quarantineRoot, 'left'), { recursive: true });
+    await mkdir(join(quarantineRoot, 'right'), { recursive: true });
+    const [triggerName, victimName] = await readdir(quarantineRoot);
+    const triggerRoot = join(quarantineRoot, triggerName!);
+    const victimRoot = join(quarantineRoot, victimName!);
+    await Promise.all(Array.from({ length: 512 }, (_, index) => writeFile(
+      join(triggerRoot, `${String(index).padStart(4, '0')}.bin`),
+      String(index),
+    )));
+    await writeFile(join(victimRoot, 'victim.bin'), 'victim');
+    await utimes(quarantineRoot, new Date(OLD), new Date(OLD));
+    const targetIdentity = await lstat(quarantineRoot);
+
+    let workerResult: Promise<{ outcome: string; message?: string }> | undefined;
+    const startup = createRetentionStartupHook({
+      paths,
+      db,
+      now: NOW,
+      freeBytes: 25 * 1024 ** 3,
+      beforeDelete: async ({ path }) => {
+        if (path !== quarantineRoot) return;
+        let ready!: () => void;
+        const readyPromise = new Promise<void>((resolve) => { ready = resolve; });
+        workerResult = new Promise((resolve, reject) => {
+          const worker = new Worker(`
+            const { existsSync, readdirSync, rmSync } = require('node:fs');
+            const { parentPort, workerData } = require('node:worker_threads');
+            (() => {
+              parentPort.postMessage({ kind: 'ready' });
+              const sleep = new Int32Array(new SharedArrayBuffer(4));
+              const deadline = Date.now() + 5000;
+              while (existsSync(workerData.triggerRoot) && readdirSync(workerData.triggerRoot).length === workerData.initialEntries) {
+                if (Date.now() >= deadline) {
+                  parentPort.postMessage({ kind: 'result', outcome: 'timeout' });
+                  return;
+                }
+                Atomics.wait(sleep, 0, 0, 1);
+              }
+              try {
+                rmSync(workerData.victimRoot, { recursive: true });
+                parentPort.postMessage({ kind: 'result', outcome: 'injected' });
+              } catch (error) {
+                parentPort.postMessage({ kind: 'result', outcome: 'error', message: error.message });
+              }
+            })();
+          `, { eval: true, workerData: { triggerRoot, victimRoot, initialEntries: 512 } });
+          worker.once('error', reject);
+          worker.on('message', (message: { kind: string; outcome?: string; message?: string }) => {
+            if (message.kind === 'ready') ready();
+            if (message.kind === 'result') resolve({ outcome: message.outcome!, message: message.message });
+          });
+        });
+        await readyPromise;
+      },
+    });
+
+    await expect(startup()).resolves.toEqual({
+      blockers: [{
+        code: 'RETENTION_PRUNE_FAILED',
+        details: {
+          category: 'quarantine',
+          relativePath,
+          reason: expect.stringContaining('ENOENT'),
+        },
+      }],
+    });
+    await expect(workerResult).resolves.toEqual({ outcome: 'injected', message: undefined });
+    await expect(import('node:fs/promises').then(({ access }) => access(quarantineRoot))).resolves.toBeUndefined();
+    expect(db.prepare(`SELECT status, target_dev, target_ino FROM retention_prune_intents
+      WHERE category='quarantine' AND relative_path=?`).get(relativePath)).toEqual({
+      status: 'failed',
+      target_dev: targetIdentity.dev,
+      target_ino: targetIdentity.ino,
+    });
+    expect(db.prepare(`SELECT action FROM retention_prunes
+      WHERE category='quarantine' AND relative_path=? ORDER BY prune_id DESC LIMIT 1`).get(relativePath))
+      .toEqual({ action: 'failed' });
   });
 
   it.each(['planned', 'failed'] as const)('resumes a %s quarantine intent despite a refreshed root mtime after partial deletion', async (status) => {
