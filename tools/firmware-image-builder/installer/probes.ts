@@ -54,7 +54,7 @@ export type NativePrerequisiteResult =
       readonly available: false;
       readonly code: string;
       readonly detail: string;
-      readonly mutation: 'none';
+      readonly mutation: 'none' | 'unknown';
     }>;
 
 async function defaultExec(executable: string, args: readonly string[], options: Readonly<Record<string, unknown>>): Promise<ProbeCommandResult> {
@@ -77,6 +77,15 @@ const defaultFileSystem: ProbeFileSystem = Object.freeze({ mkdtemp, rm });
 
 function unavailable(code: string, detail: string): NativePrerequisiteResult {
   return Object.freeze({ available: false, code, detail, mutation: 'none' });
+}
+
+function cleanupUnproven(): NativePrerequisiteResult {
+  return Object.freeze({
+    available: false,
+    code: 'PROBE_CLEANUP_FAILED',
+    detail: 'private probe scratch cleanup could not be proven',
+    mutation: 'unknown',
+  });
 }
 
 function compileFailure(result: ProbeCommandResult): NativePrerequisiteResult | null {
@@ -132,6 +141,8 @@ function mappedEvidence(evidence: NativeProbeEvidence): NativePrerequisiteResult
     return unavailable('FILESYSTEM_UNSUPPORTED', 'selected filesystem does not support RENAME_NOREPLACE');
   case 'FILESYSTEM_UNAVAILABLE':
     return unavailable('FILESYSTEM_UNAVAILABLE', 'selected filesystem cannot run the rename probe');
+  case 'PROBE_CLEANUP_FAILED':
+    return cleanupUnproven();
   default:
     return unavailable('PROBE_OUTPUT_INVALID', 'native prerequisite probe returned malformed evidence');
   }

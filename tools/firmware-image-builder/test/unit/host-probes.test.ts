@@ -149,6 +149,54 @@ describe('native host probes', () => {
     expect(await snapshotTree(fixture.output)).toEqual(beforeOutput);
   });
 
+  it('cleans the approved-output scratch tree after a post-creation ENOSYS failure', async () => {
+    const fixture = await createMutationFixture();
+    const beforeOutput = await snapshotTree(fixture.output);
+    const buildRoot = await temporaryDirectory('osi-image-builder-probe-enosys-');
+    const binary = join(buildRoot, 'probe-renameat2-enosys');
+    await execFile('/usr/bin/gcc', [
+      ...flags,
+      '-DPROBE_TEST_FORCE_ENOSYS_AFTER_CREATE',
+      renameSource,
+      '-o',
+      binary,
+    ], { maxBuffer: 64 * 1024 });
+
+    const result = await run(binary, [fixture.output]);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.result).toMatchObject({
+      available: false,
+      code: 'LINUX_RENAMEAT2_UNAVAILABLE',
+      detail: 'Linux kernel does not expose renameat2',
+    });
+    expect(await snapshotTree(fixture.output)).toEqual(beforeOutput);
+  });
+
+  it('overrides support evidence when scratch cleanup cannot be proven', async () => {
+    const fixture = await createMutationFixture();
+    const beforeOutput = await snapshotTree(fixture.output);
+    const buildRoot = await temporaryDirectory('osi-image-builder-probe-cleanup-');
+    const binary = join(buildRoot, 'probe-renameat2-cleanup-failure');
+    await execFile('/usr/bin/gcc', [
+      ...flags,
+      '-DPROBE_TEST_FORCE_CLEANUP_FAILURE',
+      renameSource,
+      '-o',
+      binary,
+    ], { maxBuffer: 64 * 1024 });
+
+    const result = await run(binary, [fixture.output]);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.result).toMatchObject({
+      available: false,
+      code: 'PROBE_CLEANUP_FAILED',
+      detail: 'private probe scratch cleanup failed',
+    });
+    expect(await snapshotTree(fixture.output)).toEqual(beforeOutput);
+  });
+
   it('maps a missing fixed GCC to typed unavailable and cleans compile scratch', async () => {
     const calls: Array<{ readonly executable: string; readonly args: readonly string[]; readonly options: Readonly<Record<string, unknown>> }> = [];
     const removals: string[] = [];
@@ -311,6 +359,42 @@ describe('native host probes', () => {
     expect(removals).toEqual(['/private/mapping-probe']);
     expect(await readFile(fixture.selection)).toEqual(beforeSelection);
     expect(await snapshotTree(fixture.output)).toEqual(beforeOutput);
+  });
+
+  it('preserves cleanup failure evidence without claiming zero mutation', async () => {
+    const result = await runNativePrerequisiteProbes({
+      scratchParent: '/approved-output',
+      sourceDirectory: installer,
+      dependencies: {
+        fs: { mkdtemp: async () => '/private/cleanup-map', rm: async () => undefined },
+        exec: async (executable, args) => {
+          if (executable === '/usr/bin/gcc' || executable === '/usr/bin/make') {
+            return { stdout: '', stderr: '', exitCode: 0, signal: null };
+          }
+          if (args.length === 0) {
+            return {
+              stdout: JSON.stringify({ available: true, code: 'HOST_PREREQUISITES_AVAILABLE', detail: 'ok' }),
+              stderr: '',
+              exitCode: 0,
+              signal: null,
+            };
+          }
+          return {
+            stdout: JSON.stringify({ available: false, code: 'PROBE_CLEANUP_FAILED', detail: 'untrusted detail' }),
+            stderr: '',
+            exitCode: 2,
+            signal: null,
+          };
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      available: false,
+      code: 'PROBE_CLEANUP_FAILED',
+      detail: 'private probe scratch cleanup could not be proven',
+      mutation: 'unknown',
+    });
   });
 
   it('fails closed on malformed probe output and rejects a relative adapter scratch parent', async () => {

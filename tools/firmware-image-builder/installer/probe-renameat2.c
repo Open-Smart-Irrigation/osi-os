@@ -120,6 +120,9 @@ static int cleanup_scratch(const char *path) {
     if (unlink(source) < 0 && errno != ENOENT) cleanup_error = 1;
     if (unlink(destination) < 0 && errno != ENOENT) cleanup_error = 1;
     if (rmdir(path) < 0) cleanup_error = 1;
+#ifdef PROBE_TEST_FORCE_CLEANUP_FAILURE
+    if (cleanup_error == 0) return -1;
+#endif
     return cleanup_error == 0 ? 0 : -1;
 }
 
@@ -129,8 +132,6 @@ int main(int argc, char **argv) {
     const char *destination_contents = "destination-content\n";
     char scratch_template[PATH_MAX];
     int directory = -1;
-    int source_created = 0;
-    int destination_created = 0;
     struct probe_result result = { 0, "FILESYSTEM_UNAVAILABLE", "probe scratch location is unavailable", 0, 0, 0 };
 
     if (argc != 2 || argv[1][0] != '/') {
@@ -160,56 +161,50 @@ int main(int argc, char **argv) {
     if (directory < 0) {
         result.code = "FILESYSTEM_UNAVAILABLE";
         result.detail = "private probe directory could not be opened";
-        cleanup_scratch(scratch_template);
-        print_result(&result);
-        return 2;
+        goto cleanup;
     }
 
 #if !defined(__linux__) || !defined(SYS_renameat2)
     result.code = "LINUX_RENAMEAT2_UNAVAILABLE";
     result.detail = "Linux renameat2 syscall is unavailable on this host";
-    close(directory);
-    cleanup_scratch(scratch_template);
-    print_result(&result);
-    return 2;
+    goto cleanup;
 #elif !defined(RENAME_NOREPLACE)
     result.code = "RENAME_NOREPLACE_UNAVAILABLE";
     result.detail = "RENAME_NOREPLACE is unavailable in the host headers";
-    close(directory);
-    cleanup_scratch(scratch_template);
-    print_result(&result);
-    return 2;
+    goto cleanup;
 #else
+    {
+    long rename_result;
     {
         int source = openat(directory, "source.bin", O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (source < 0 || write_all(source, source_contents, strlen(source_contents)) < 0 || fsync(source) < 0) {
+            int saved_error = errno;
             if (source >= 0) close(source);
-            result.code = filesystem_failure_code(errno);
+            result.code = filesystem_failure_code(saved_error);
             result.detail = "private probe source could not be created";
-            close(directory);
-            cleanup_scratch(scratch_template);
-            print_result(&result);
-            return 2;
+            goto cleanup;
         }
         close(source);
-        source_created = 1;
     }
     {
         int destination = openat(directory, "destination.bin", O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (destination < 0 || write_all(destination, destination_contents, strlen(destination_contents)) < 0 || fsync(destination) < 0) {
+            int saved_error = errno;
             if (destination >= 0) close(destination);
-            result.code = filesystem_failure_code(errno);
+            result.code = filesystem_failure_code(saved_error);
             result.detail = "private probe destination could not be created";
-            close(directory);
-            cleanup_scratch(scratch_template);
-            print_result(&result);
-            return 2;
+            goto cleanup;
         }
         close(destination);
-        destination_created = 1;
     }
     errno = 0;
-    if (syscall(SYS_renameat2, directory, "source.bin", directory, "destination.bin", RENAME_NOREPLACE) == 0) {
+#ifdef PROBE_TEST_FORCE_ENOSYS_AFTER_CREATE
+    errno = ENOSYS;
+    rename_result = -1;
+#else
+    rename_result = syscall(SYS_renameat2, directory, "source.bin", directory, "destination.bin", RENAME_NOREPLACE);
+#endif
+    if (rename_result == 0) {
         result.code = "RENAME_NOREPLACE_UNAVAILABLE";
         result.detail = "collision rename succeeded and would replace the destination";
     } else if (errno == EEXIST) {
@@ -237,9 +232,14 @@ int main(int argc, char **argv) {
         result.code = "FILESYSTEM_UNAVAILABLE";
         result.detail = "filesystem probe syscall failed";
     }
-    (void)source_created;
-    (void)destination_created;
-    close(directory);
+    }
+#endif
+
+cleanup:
+    if (directory >= 0) {
+        close(directory);
+        directory = -1;
+    }
     if (cleanup_scratch(scratch_template) < 0) {
         result.available = 0;
         result.code = "PROBE_CLEANUP_FAILED";
@@ -248,5 +248,4 @@ int main(int argc, char **argv) {
     }
     print_result(&result);
     return result.available ? 0 : 2;
-#endif
 }

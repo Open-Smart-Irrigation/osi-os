@@ -33,7 +33,8 @@ describe('real native host probes', () => {
     const beforeOutput = await snapshotTree(output);
     const result = await runNativePrerequisiteProbes({ scratchParent: output });
     expect(typeof result.available).toBe('boolean');
-    expect(result.mutation).toBe('none');
+    if (result.code === 'PROBE_CLEANUP_FAILED') expect(result.mutation).toBe('unknown');
+    else expect(result.mutation).toBe('none');
     expect(result.detail.length).toBeGreaterThan(0);
     expect(result.detail.length).toBeLessThanOrEqual(240);
     if (result.available) expect(result.code).toBe('HOST_PREREQUISITES_AVAILABLE');
@@ -47,6 +48,7 @@ describe('real native host probes', () => {
       'FILESYSTEM_UNAVAILABLE',
       'PROBE_COMPILE_FAILED',
       'PROBE_OUTPUT_INVALID',
+      'PROBE_CLEANUP_FAILED',
     ]).toContain(result.code);
     expect(await readFile(selection)).toEqual(beforeSelection);
     expect(await snapshotTree(output)).toEqual(beforeOutput);
