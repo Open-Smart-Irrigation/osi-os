@@ -98,6 +98,24 @@ function nullableText(row: QueueRow, key: string): string | null {
   return text(row[key]);
 }
 
+type RunnerLeaseState =
+  | Readonly<{ readonly kind: 'none' }>
+  | Readonly<{ readonly kind: 'live' }>
+  | Readonly<{ readonly kind: 'stale' }>
+  | Readonly<{ readonly kind: 'malformed' }>;
+
+function runnerLeaseState(row: QueueRow, now: string): RunnerLeaseState {
+  const owner = row.runner_lease_owner;
+  const expiresAt = row.runner_lease_expires_at;
+  const ownerAbsent = owner === null || owner === undefined;
+  const expiryAbsent = expiresAt === null || expiresAt === undefined;
+  if (ownerAbsent && expiryAbsent) return { kind: 'none' };
+  if (ownerAbsent !== expiryAbsent || typeof owner !== 'string' || owner.length === 0 || typeof expiresAt !== 'string') return { kind: 'malformed' };
+  const canonicalExpiry = canonicalInstant(expiresAt);
+  if (canonicalExpiry === null) return { kind: 'malformed' };
+  return Date.parse(canonicalExpiry) > Date.parse(now) ? { kind: 'live' } : { kind: 'stale' };
+}
+
 function isActiveState(value: unknown): value is ActiveRecoveryState {
   return typeof value === 'string' && ACTIVE_STATES.has(value as ActiveRecoveryState);
 }
@@ -225,7 +243,8 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
         OR cleanup_blocker_code IS NOT NULL OR cleanup_blocker_json IS NOT NULL
         OR container_id IS NOT NULL OR container_name IS NOT NULL OR container_image_digest IS NOT NULL
         OR container_label_job_id IS NOT NULL OR container_label_manifest_sha IS NOT NULL OR container_labels_json IS NOT NULL
-        OR artifact_staging_path IS NOT NULL OR artifact_quarantine_path IS NOT NULL OR artifact_quarantine_intent_path IS NOT NULL
+        OR artifact_staging_path IS NOT NULL OR artifact_quarantine_intent_path IS NOT NULL
+        OR (artifact_quarantine_path IS NOT NULL AND publish_state IS NOT 'quarantined')
         OR publish_blocker_code IS NOT NULL OR publish_blocker_json IS NOT NULL
         OR publish_state IN ('blocked','publishing')
         OR EXISTS (SELECT 1 FROM job_log_generations AS logs WHERE logs.job_id=jobs.job_id AND logs.sealed_at IS NULL))${suffix}
@@ -315,6 +334,10 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
       const dispatchedAt = canonicalInstant(row.dispatched_at);
       if (dispatchedAt === null) return { kind: 'blocked', reason: 'persisted dispatch time is invalid', jobId };
       if (Date.parse(dispatchedAt) > Date.parse(clockReading())) return { kind: 'blocked', reason: 'persisted dispatch time is from the future', jobId };
+      const lease = runnerLeaseState(row, clockReading());
+      if (lease.kind === 'malformed') return { kind: 'blocked', reason: 'RUNNER_LEASE_MALFORMED', jobId };
+      if (lease.kind === 'live') return { kind: 'blocked', reason: 'RUNNER_LEASE_LIVE', jobId };
+      if (lease.kind === 'stale') return { kind: 'blocked', reason: 'RUNNER_DISAPPEARED', jobId };
       const observation = await inspectInactive(unit);
       if ('code' in observation) return { kind: 'blocked', reason: observation.code, jobId };
       if (observation.active) return { kind: 'blocked', reason: 'runner unit is live', jobId };

@@ -115,6 +115,28 @@ function nullCleanupPostcondition(jobId: string): CleanupPostcondition {
   };
 }
 
+function physicalCleanupSnapshot(jobId: string): CleanupSnapshot {
+  return {
+    runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: null, leaseExpiresAt: null, inactiveAt: OBSERVED, observedAt: OBSERVED },
+    state: 'starting',
+    container: { kind: 'absent', globalLabelResult: 'no-match', observedAt: OBSERVED },
+    staging: { kind: 'physical-present', path: `staging/${jobId}`, sha256: null, size: null, observedAt: OBSERVED },
+    logs: { runner: 'absent', docker: 'absent', verifiedAt: OBSERVED },
+    blocker: 'staging-or-log',
+  };
+}
+
+function physicalCleanupPostcondition(jobId: string): CleanupPostcondition {
+  return {
+    runner: physicalCleanupSnapshot(jobId).runner,
+    state: 'starting',
+    container: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt: WRITTEN },
+    staging: { kind: 'quarantined', sourcePath: `staging/${jobId}`, destinationPath: `quarantine/${jobId}`, sourceAbsent: true, destinationPresent: true, sha256: null, size: null, verifiedAt: WRITTEN },
+    logs: { runner: 'absent', docker: 'absent', verifiedAt: WRITTEN },
+    blocker: 'none',
+  };
+}
+
 async function fixture(jobIds: readonly string[]) {
   const directory = await mkdtemp(join(tmpdir(), 'osi-queue-service-start-'));
   directories.push(directory);
@@ -173,6 +195,54 @@ afterEach(async () => {
 });
 
 describe('queue service-start recovery with real SQLite stores', () => {
+  it('defers an inactive starting row with an unexpired runner lease without mutation', async () => {
+    const target = await fixture(['first', 'second']);
+    expect(target.ownership.apiWrite({ kind: 'dispatch', jobId: 'first', runnerUnit: 'osi-image-builder-runner@first.service', at: DISPATCHED }).ok).toBe(true);
+    expect(target.ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'first', runnerUnit: 'osi-image-builder-runner@first.service', owner: 'runner-a', expiresAt: LATER, at: OBSERVED }).ok).toBe(true);
+    const before = target.db.prepare('SELECT state, queue_state, runner_lease_owner, runner_lease_expires_at, cleanup_blocker_code FROM jobs WHERE job_id=?').get('first');
+    const state = systemdState();
+    const directInterrupt = vi.fn(async () => null);
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: state.systemd, safety: { inspect: async () => null }, directInterrupt, clock: { now: () => WRITTEN } });
+
+    await expect(coordinator.dispatchNext()).resolves.toEqual({ kind: 'blocked', reason: 'RUNNER_LEASE_LIVE', jobId: 'first' });
+    expect(target.db.prepare('SELECT state, queue_state, runner_lease_owner, runner_lease_expires_at, cleanup_blocker_code FROM jobs WHERE job_id=?').get('first')).toEqual(before);
+    expect(directInterrupt).not.toHaveBeenCalled();
+    expect(state.starts).toHaveLength(0);
+  });
+
+  it.each([
+    ['owner without expiry', 'runner-a', null],
+    ['expiry without owner', null, LATER],
+    ['invalid expiry', 'runner-a', 'not-an-instant'],
+  ])('fails closed for a malformed runner lease pair: %s', async (_label, owner, expiresAt) => {
+    const target = await fixture(['first', 'second']);
+    expect(target.ownership.apiWrite({ kind: 'dispatch', jobId: 'first', runnerUnit: 'osi-image-builder-runner@first.service', at: DISPATCHED }).ok).toBe(true);
+    target.db.exec('DROP TRIGGER jobs_runner_lease_guard_update');
+    target.db.prepare('UPDATE jobs SET runner_lease_owner=?, runner_lease_expires_at=? WHERE job_id=?').run(owner, expiresAt, 'first');
+    const before = target.db.prepare('SELECT state, queue_state, runner_lease_owner, runner_lease_expires_at, cleanup_blocker_code FROM jobs WHERE job_id=?').get('first');
+    const state = systemdState();
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: state.systemd, safety: { inspect: async () => null }, clock: { now: () => WRITTEN } });
+
+    await expect(coordinator.dispatchNext()).resolves.toEqual({ kind: 'blocked', reason: 'RUNNER_LEASE_MALFORMED', jobId: 'first' });
+    expect(target.db.prepare('SELECT state, queue_state, runner_lease_owner, runner_lease_expires_at, cleanup_blocker_code FROM jobs WHERE job_id=?').get('first')).toEqual(before);
+    expect(state.starts).toHaveLength(0);
+  });
+
+  it('defers a stale lease to RUNNER_DISAPPEARED recovery without SERVICE_START_FAILED mutation', async () => {
+    const target = await fixture(['first', 'second']);
+    expect(target.ownership.apiWrite({ kind: 'dispatch', jobId: 'first', runnerUnit: 'osi-image-builder-runner@first.service', at: DISPATCHED }).ok).toBe(true);
+    expect(target.ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'first', runnerUnit: 'osi-image-builder-runner@first.service', owner: 'runner-a', expiresAt: OBSERVED, at: DISPATCHED }).ok).toBe(true);
+    const before = target.db.prepare('SELECT state, queue_state, runner_lease_owner, runner_lease_expires_at, cleanup_blocker_code, terminal_error_code FROM jobs WHERE job_id=?').get('first');
+    const state = systemdState();
+    const directInterrupt = vi.fn(async () => null);
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: state.systemd, safety: { inspect: async () => null }, directInterrupt, clock: { now: () => WRITTEN } });
+
+    await expect(coordinator.dispatchNext()).resolves.toEqual({ kind: 'blocked', reason: 'RUNNER_DISAPPEARED', jobId: 'first' });
+    expect(target.db.prepare('SELECT state, queue_state, runner_lease_owner, runner_lease_expires_at, cleanup_blocker_code, terminal_error_code FROM jobs WHERE job_id=?').get('first')).toEqual(before);
+    expect(directInterrupt).not.toHaveBeenCalled();
+    expect(state.starts).toHaveLength(0);
+  });
+
   it('uses SQLite FIFO CAS when two coordinators dispatch concurrently', async () => {
     const target = await fixture(['first', 'second']);
     const state = systemdState();
@@ -332,6 +402,25 @@ describe('queue service-start recovery with real SQLite stores', () => {
     const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: state.systemd, safety: { inspect: async () => null }, clock: { now: () => WRITTEN } });
     await expect(coordinator.dispatchNext()).resolves.toMatchObject({ kind: 'started', jobId: 'second' });
     expect(target.db.prepare('SELECT 1 AS present FROM queue_entries WHERE job_id=?').get('first')).toBeUndefined();
+    expect(state.starts).toEqual(['osi-image-builder-runner@second.service']);
+  });
+
+  it('releases FIFO after cleanup hand-back quarantines staging', async () => {
+    const target = await fixture(['first', 'second']);
+    expect(target.ownership.apiWrite({ kind: 'dispatch', jobId: 'first', runnerUnit: 'osi-image-builder-runner@first.service', at: DISPATCHED }).ok).toBe(true);
+    const admissionId = 'cln_0123456789abcdefghjkmnpqrs';
+    const unitName = `osi-image-builder-cleanup@${admissionId}.service`;
+    const snapshot = physicalCleanupSnapshot('first');
+    expect(target.ownership.apiWrite({ kind: 'cleanup-credential-reserve', jobId: 'first', admissionId, owner: 'cleanup-worker', credentialRelativePath: `recovery/cleanup-credentials/${admissionId}.token`, createdAt: OBSERVED, expiresAt: LATER, at: OBSERVED }).ok).toBe(true);
+    expect(target.ownership.apiWrite({ kind: 'cleanup-admission', jobId: 'first', admissionId, owner: 'cleanup-worker', unitName, expiresAt: LATER, credentialRelativePath: `recovery/cleanup-credentials/${admissionId}.token`, credentialSha256: SHA64, fenceTokenHash: SHA64, reservationCreatedAt: OBSERVED, reservationExpiresAt: LATER, snapshot, at: OBSERVED }).ok).toBe(true);
+    expect(target.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'first', admissionId, owner: 'cleanup-worker', unitName, fenceGeneration: 1, fenceTokenHash: SHA64, snapshot, at: OBSERVED }).ok).toBe(true);
+    expect(target.ownership.cleanupWrite({ kind: 'complete', jobId: 'first', admissionId, owner: 'cleanup-worker', unitName, fenceGeneration: 1, fenceTokenHash: SHA64, snapshot, postcondition: physicalCleanupPostcondition('first'), exactContainerId: null, containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: WRITTEN }).ok).toBe(true);
+    expect(target.ownership.apiWrite({ kind: 'hand-back', jobId: 'first', admissionId, owner: 'cleanup-worker', unitName, fenceGeneration: 1, fenceTokenHash: SHA64, at: LATER, proof: { runner: { ...snapshot.runner, inactiveAt: LATER, observedAt: LATER }, container: { kind: 'absent', globalLabelResult: 'no-match', observedAt: LATER }, blocker: 'none' } }).ok).toBe(true);
+    expect(target.db.prepare('SELECT state, queue_state, artifact_staging_path, artifact_quarantine_path, publish_state FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'interrupted', queue_state: 'complete', artifact_staging_path: null, artifact_quarantine_path: 'quarantine/first', publish_state: 'quarantined' });
+
+    const state = systemdState();
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: state.systemd, safety: { inspect: async () => null }, clock: { now: () => WRITTEN } });
+    await expect(coordinator.dispatchNext()).resolves.toMatchObject({ kind: 'started', jobId: 'second' });
     expect(state.starts).toEqual(['osi-image-builder-runner@second.service']);
   });
 });

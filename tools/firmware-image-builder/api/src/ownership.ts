@@ -2276,7 +2276,7 @@ export class OwnershipStore {
         OR container_label_manifest_sha IS NOT NULL
         OR container_labels_json IS NOT NULL
         OR artifact_staging_path IS NOT NULL
-        OR artifact_quarantine_path IS NOT NULL
+        OR (artifact_quarantine_path IS NOT NULL AND publish_state IS NOT 'quarantined')
         OR artifact_quarantine_intent_path IS NOT NULL
         OR publish_blocker_code IS NOT NULL
         OR publish_blocker_json IS NOT NULL
