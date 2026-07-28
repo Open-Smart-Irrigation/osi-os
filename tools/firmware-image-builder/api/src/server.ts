@@ -75,8 +75,12 @@ function contentTypeIsJson(value: string | string[] | undefined): boolean {
 
 function checkHost(request: IncomingMessage): void {
   const localPort = request.socket.localPort;
-  const value = request.headers.host;
-  if (!Number.isSafeInteger(localPort) || typeof value !== 'string' || value.length === 0) fail('HOST_REQUIRED', 400);
+  const hostHeaders = [] as string[];
+  for (let index = 0; index < request.rawHeaders.length; index += 2) {
+    if (request.rawHeaders[index]!.toLowerCase() === 'host') hostHeaders.push(request.rawHeaders[index + 1]!);
+  }
+  if (!Number.isSafeInteger(localPort) || hostHeaders.length !== 1) fail('HOST_REQUIRED', 400);
+  const value = hostHeaders[0]!;
   if (value !== `${LOOPBACK_HOST}:${localPort}`) fail('HOST_FORBIDDEN', 400);
 }
 
@@ -189,18 +193,30 @@ async function readBody(request: IncomingMessage, limit: number): Promise<JsonVa
   }
 }
 
-function parseRequestUrl(request: IncomingMessage, origin: string): URL {
+function parseRequestUrl(request: IncomingMessage, origin: string): { readonly url: URL; readonly pathname: string } {
   let url: URL;
   try {
     url = new URL(request.url ?? '', origin);
   } catch {
     fail('INVALID_PATH', 400);
   }
-  if (url.origin !== origin || !url.pathname.startsWith(API_PREFIX)
-    || url.pathname === '/api/v1' || url.pathname.startsWith(CLOUD_PREFIX)) {
+  let pathname: string;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    fail('INVALID_PATH', 400);
+  }
+  if ([...pathname].some((character) => {
+    const code = character.codePointAt(0)!;
+    return character === '\\' || code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+  })) {
+    fail('INVALID_PATH', 400);
+  }
+  if (url.origin !== origin || !pathname.startsWith(API_PREFIX)
+    || pathname === '/api/v1' || pathname.startsWith(CLOUD_PREFIX)) {
     fail('NOT_FOUND', 404);
   }
-  return url;
+  return { url, pathname };
 }
 
 function checkOrigin(request: IncomingMessage, origin: string): void {
@@ -233,7 +249,7 @@ export function createHttpServer(options: HttpServerOptions): Server {
     const id = requestId();
     try {
       checkHost(request);
-      const url = parseRequestUrl(request, options.origin);
+      const parsedUrl = parseRequestUrl(request, options.origin);
       if (request.method === 'OPTIONS') {
         preflight(response, request, options.origin, id);
         return;
@@ -249,8 +265,8 @@ export function createHttpServer(options: HttpServerOptions): Server {
         request,
         requestId: id,
         method,
-        path: url.pathname,
-        query: url.searchParams,
+        path: parsedUrl.pathname,
+        query: parsedUrl.url.searchParams,
         headers: request.headers,
         body,
       });

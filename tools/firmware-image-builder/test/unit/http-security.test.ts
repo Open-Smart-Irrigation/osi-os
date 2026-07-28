@@ -213,6 +213,96 @@ describe('loopback HTTP security boundary', () => {
     }
   });
 
+  it('rejects duplicate Host header lines regardless of their ordering', async () => {
+    let dispatched = 0;
+    const { server, port } = await start(() => {
+      dispatched += 1;
+      return jsonResponse(200, { ok: true });
+    });
+    try {
+      const first = await raw(port, [
+        'GET /api/health HTTP/1.1',
+        `Host: 127.0.0.1:${port}`,
+        'Host: 127.0.0.1:1',
+        'Connection: close',
+        '',
+        '',
+      ].join('\r\n'));
+      const second = await raw(port, [
+        'GET /api/health HTTP/1.1',
+        'Host: 127.0.0.1:1',
+        `hOsT: 127.0.0.1:${port}`,
+        'Connection: close',
+        '',
+        '',
+      ].join('\r\n'));
+
+      expect(first).toMatch(/^HTTP\/1\.1 400 /u);
+      expect(second).toMatch(/^HTTP\/1\.1 400 /u);
+      expect(dispatched).toBe(0);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('decodes the pathname once before routing and reserves encoded cloud paths', async () => {
+    const seen: string[] = [];
+    let dispatched = 0;
+    const { server, port } = await start((context) => {
+      dispatched += 1;
+      seen.push(context.path);
+      return jsonResponse(200, { ok: true });
+    });
+    try {
+      const decoded = await call(port, { path: '/api/%68ealth' });
+      expect(decoded.status).toBe(200);
+      expect(seen).toEqual(['/api/health']);
+
+      const reserved = await Promise.all([
+        call(port, { path: '/api/%76%31' }),
+        call(port, { path: '/api/%76%31/secret' }),
+        call(port, { path: '/api/v1%2Fsecret' }),
+      ]);
+      expect(reserved.map((response) => response.status)).toEqual([404, 404, 404]);
+      expect(reserved.map((response) => response.json)).toEqual([
+        { error: expect.objectContaining({ code: 'NOT_FOUND' }) },
+        { error: expect.objectContaining({ code: 'NOT_FOUND' }) },
+        { error: expect.objectContaining({ code: 'NOT_FOUND' }) },
+      ]);
+      expect(dispatched).toBe(1);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('rejects malformed or unsafe decoded pathnames without dispatch', async () => {
+    let dispatched = 0;
+    const { server, port } = await start(() => {
+      dispatched += 1;
+      return jsonResponse(200, { ok: true });
+    });
+    try {
+      const responses = await Promise.all([
+        call(port, { path: '/api/%' }),
+        call(port, { path: '/api/%80' }),
+        call(port, { path: '/api/%00' }),
+        call(port, { path: '/api/%0A' }),
+        call(port, { path: '/api/%5Csecret' }),
+      ]);
+      expect(responses.map((response) => response.status)).toEqual([400, 400, 400, 400, 400]);
+      expect(responses.map((response) => response.json)).toEqual([
+        { error: expect.objectContaining({ code: 'INVALID_PATH' }) },
+        { error: expect.objectContaining({ code: 'INVALID_PATH' }) },
+        { error: expect.objectContaining({ code: 'INVALID_PATH' }) },
+        { error: expect.objectContaining({ code: 'INVALID_PATH' }) },
+        { error: expect.objectContaining({ code: 'INVALID_PATH' }) },
+      ]);
+      expect(dispatched).toBe(0);
+    } finally {
+      await stop(server);
+    }
+  });
+
   it('accepts only numeric TCP listen ports and reports listener errors', async () => {
     const server = createHttpServer({ origin: ORIGIN, routeHandler: () => jsonResponse(200, {}) });
     expect(() => server.listen('/tmp/osi-image-builder.sock' as never)).toThrow();
