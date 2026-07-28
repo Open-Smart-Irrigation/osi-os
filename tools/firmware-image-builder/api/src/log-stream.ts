@@ -169,6 +169,7 @@ export class DurableLogStream {
   readonly #fsyncSync: LogStreamIo['fsyncSync'];
   readonly #rootFd: number;
   #logsFd: number | null = null;
+  #gapIndexAvailable: boolean | undefined;
   #closed = false;
 
   constructor(options: Options) {
@@ -356,6 +357,10 @@ export class DurableLogStream {
       if (Number(row.payload_too_large) === 1) {
         output.push(replayTruncated(seq, this.#jobId, 'REPLAY_METADATA_TOO_LARGE'));
         continue;
+      }
+      if (Number(row.is_metadata) === 1
+        && Number(row.payload_bytes) > limits.maxMetadataBytes - metadataBytes) {
+        break;
       }
       let payload: Record<string, unknown>;
       try {
@@ -558,40 +563,43 @@ export class DurableLogStream {
   #nextSeq(): number { return Number((this.#db.prepare('SELECT COALESCE(MAX(seq)+1, 0) AS next FROM job_events WHERE job_id=?').get(this.#jobId) as { next: number }).next); }
 
   #eventRows(afterSeq: number, limit: number, maxMetadataBytes: number): Array<Record<string, unknown>> {
-    return this.#db.prepare(`WITH RECURSIVE gap_candidates AS (
-      SELECT gap.seq AS gap_seq,
-        octet_length(gap.payload_json) AS payload_bytes,
-        CASE WHEN json_valid(gap.payload_json) THEN json_type(gap.payload_json, '$.sourceSeq') ELSE NULL END AS source_type,
-        CASE WHEN json_valid(gap.payload_json) THEN json_extract(gap.payload_json, '$.sourceSeq') ELSE NULL END AS source_seq
-      FROM job_events AS gap
-      WHERE gap.job_id=? AND gap.event_type='log-gap'
-    ), valid_source_gaps AS (
-      SELECT gap.gap_seq, gap.payload_bytes, gap.source_seq
-      FROM gap_candidates AS gap
-      JOIN job_events AS source
-        ON source.job_id=?
-        AND source.seq=gap.source_seq
-        AND source.stream IS NOT NULL
-      WHERE gap.source_type IN ('integer', 'real')
-        AND gap.source_seq BETWEEN 0 AND 9007199254740991
-        AND gap.source_seq=CAST(gap.source_seq AS INTEGER)
+    const gapTable = this.#gapLookupTable();
+    return this.#db.prepare(`WITH RECURSIVE page AS MATERIALIZED (
+      SELECT event.seq, event.event_type, event.at, event.payload_json, event.stream, event.file_generation, event.byte_offset, event.byte_length, event.partial
+      FROM job_events AS event
+      WHERE event.job_id=? AND event.seq>?
+      ORDER BY event.seq
+      LIMIT ?
     ), candidates AS (
-      SELECT event.seq, event.event_type, event.at, event.stream, event.file_generation, event.byte_offset, event.byte_length, event.partial,
-          replacement.gap_seq AS replacement_gap_seq,
-          CASE WHEN replacement.gap_seq IS NOT NULL THEN replacement.payload_bytes ELSE octet_length(event.payload_json) END AS payload_bytes,
-          CASE WHEN replacement.gap_seq IS NOT NULL THEN 1 WHEN event.stream IS NULL THEN 1 ELSE 0 END AS is_metadata,
-          CASE WHEN replacement.gap_seq IS NOT NULL THEN 'log-gap'
-            WHEN event.stream IS NOT NULL THEN 'log'
-            WHEN event.event_type='terminal' THEN 'terminal'
-            WHEN event.event_type IN ('log-gap', 'log-truncated') THEN event.event_type
+      SELECT page.seq, page.event_type, page.at, page.stream, page.file_generation, page.byte_offset, page.byte_length, page.partial,
+          replacement.seq AS replacement_gap_seq,
+          CASE WHEN replacement.seq IS NOT NULL THEN octet_length(replacement.payload_json) ELSE octet_length(page.payload_json) END AS payload_bytes,
+          CASE WHEN replacement.seq IS NOT NULL THEN 1 WHEN page.stream IS NULL THEN 1 ELSE 0 END AS is_metadata,
+          CASE WHEN replacement.seq IS NOT NULL THEN 'log-gap'
+            WHEN page.stream IS NOT NULL THEN 'log'
+            WHEN page.event_type='terminal' THEN 'terminal'
+            WHEN page.event_type IN ('log-gap', 'log-truncated') THEN page.event_type
             ELSE 'stage' END AS public_event
-        FROM job_events AS event
-        LEFT JOIN valid_source_gaps AS replacement
-          ON event.stream IS NOT NULL AND replacement.source_seq=event.seq
-        WHERE event.job_id=? AND event.seq>?
-          AND NOT EXISTS (SELECT 1 FROM valid_source_gaps AS hidden WHERE hidden.gap_seq=event.seq)
-        ORDER BY event.seq
-        LIMIT ?
+      FROM page
+      LEFT JOIN job_events AS replacement
+        ON replacement.job_id=?
+        AND replacement.event_type='log-gap'
+        AND replacement.seq=(
+          SELECT gap.seq
+          FROM ${gapTable}
+          WHERE gap.job_id=?
+            AND gap.event_type='log-gap'
+            AND json_valid(gap.payload_json)=1
+            AND json_type(gap.payload_json, '$.sourceSeq') IN ('integer', 'real')
+            AND json_extract(gap.payload_json, '$.sourceSeq') BETWEEN 0 AND 9007199254740991
+            AND json_extract(gap.payload_json, '$.sourceSeq')=CAST(json_extract(gap.payload_json, '$.sourceSeq') AS INTEGER)
+            AND json_extract(gap.payload_json, '$.sourceSeq')=page.seq
+            AND gap.seq>page.seq
+          ORDER BY gap.seq
+          LIMIT 1
+        )
+        AND page.stream IS NOT NULL
+        AND page.event_type IN ('log', 'log_orphan_tail')
       ), bounded AS (
         SELECT candidates.*,
           (payload_bytes > (? - (21 + length(CAST(seq AS TEXT)) + octet_length(public_event)))) AS payload_too_large
@@ -621,10 +629,10 @@ export class DurableLogStream {
       LEFT JOIN job_events AS replacement ON replacement.job_id=? AND replacement.seq=prefix.replacement_gap_seq
       ORDER BY prefix.seq`).all(
       this.#jobId,
-      this.#jobId,
-      this.#jobId,
       afterSeq,
       limit,
+      this.#jobId,
+      this.#jobId,
       MAX_SSE_BYTES,
       maxMetadataBytes,
       maxMetadataBytes,
@@ -659,14 +667,29 @@ export class DurableLogStream {
 
   #sourceGap(sourceSeq: number): SourceGapRow | undefined {
     const framePayloadLimit = MAX_SSE_BYTES - (21 + String(sourceSeq).length + Buffer.byteLength('log-gap'));
-    return this.#db.prepare(`SELECT seq, octet_length(payload_json) AS payload_bytes,
-      CASE WHEN octet_length(payload_json)>? THEN NULL ELSE payload_json END AS payload_json,
-      CASE WHEN octet_length(payload_json)>? THEN 1 ELSE 0 END AS payload_too_large
-      FROM job_events
-      WHERE job_id=? AND event_type='log-gap'
-        AND CASE WHEN json_valid(payload_json) THEN json_type(payload_json, '$.sourceSeq') ELSE NULL END IN ('integer', 'real')
-        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.sourceSeq') ELSE NULL END=?`)
-      .get(framePayloadLimit, framePayloadLimit, this.#jobId, sourceSeq) as SourceGapRow | undefined;
+    const gapTable = this.#gapLookupTable();
+    return this.#db.prepare(`SELECT gap.seq, octet_length(gap.payload_json) AS payload_bytes,
+      CASE WHEN octet_length(gap.payload_json)>? THEN NULL ELSE gap.payload_json END AS payload_json,
+      CASE WHEN octet_length(gap.payload_json)>? THEN 1 ELSE 0 END AS payload_too_large
+      FROM ${gapTable}
+      JOIN job_events AS source
+        ON source.job_id=?
+        AND source.seq=?
+        AND source.stream IS NOT NULL
+        AND source.event_type IN ('log', 'log_orphan_tail')
+        AND gap.seq>source.seq
+      WHERE gap.job_id=? AND gap.event_type='log-gap'
+        AND json_valid(gap.payload_json)=1
+        AND json_type(gap.payload_json, '$.sourceSeq') IN ('integer', 'real')
+        AND json_extract(gap.payload_json, '$.sourceSeq')=source.seq`)
+      .get(framePayloadLimit, framePayloadLimit, this.#jobId, sourceSeq, this.#jobId) as SourceGapRow | undefined;
+  }
+
+  #gapLookupTable(): string {
+    if (this.#gapIndexAvailable === undefined) {
+      this.#gapIndexAvailable = this.#db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type='index' AND name='job_events_log_gap_source_seq'").get() !== undefined;
+    }
+    return this.#gapIndexAvailable ? 'job_events AS gap INDEXED BY job_events_log_gap_source_seq' : 'job_events AS gap';
   }
 
   #sealGenerationInTransaction(stream: StreamName, generation: number, size: number, sha256: string): void {

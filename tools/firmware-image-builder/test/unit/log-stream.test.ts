@@ -243,12 +243,12 @@ describe('DurableLogStream', () => {
     const replay = stream.replaySync(-1);
     expect(replay.filter((event) => event.event === 'log-gap')).toHaveLength(1);
     expect(db.prepare("SELECT event_type, json_extract(payload_json, '$.code') AS code FROM job_events WHERE job_id=? ORDER BY seq DESC LIMIT 1").get('job-log')).toEqual({ event_type: 'log-gap', code: 'RECOVERY_LOG_GAP' });
-    expect(stream.replaySync(-1).filter((event) => event.event === 'log-gap')).toHaveLength(1);
-    expect(stream.replaySync(appended.seq).filter((event) => event.event === 'log-gap')).toHaveLength(0);
+    expect(stream.replaySync(-1).filter((event) => event.event === 'log-gap')).toHaveLength(2);
+    expect(stream.replaySync(appended.seq).filter((event) => event.event === 'log-gap')).toHaveLength(1);
     expect(replay.find((event) => event.event === 'log-gap')?.seq).toBe(appended.seq);
   });
 
-  it('replaces a preexisting numeric source gap in place and hides its index row', async () => {
+  it('replaces a preexisting numeric source gap in place and replays its durable row later', async () => {
     const { stream, db, root } = await fixture();
     const source = stream.appendSync('runner', Buffer.from('lost\n'));
     const terminal = stream.appendMetadataSync('terminal', { state: 'failed' });
@@ -260,9 +260,14 @@ describe('DurableLogStream', () => {
     expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([
       [source.seq, 'log-gap'],
       [terminal, 'terminal'],
+      [terminal + 1, 'log-gap'],
     ]);
-    expect(stream.replaySync(source.seq).map(({ seq, event }) => [seq, event])).toEqual([[terminal, 'terminal']]);
-    expect(stream.replaySync(-1).map((event) => event.seq)).toEqual([source.seq, terminal]);
+    expect(stream.replaySync(source.seq).map(({ seq, event }) => [seq, event])).toEqual([
+      [terminal, 'terminal'],
+      [terminal + 1, 'log-gap'],
+    ]);
+    expect(stream.replaySync(terminal).map((event) => [event.seq, event.event])).toEqual([[terminal + 1, 'log-gap']]);
+    expect(stream.replaySync(-1).map((event) => event.seq)).toEqual([source.seq, terminal, terminal + 1]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id=? AND event_type='log-gap'").get('job-log')).toEqual({ count: 1 });
   });
 
@@ -274,13 +279,12 @@ describe('DurableLogStream', () => {
 
     const replay = stream.replaySync(-1);
 
-    expect(replay).toEqual([{
-      seq: source.seq,
-      event: 'log-truncated',
-      data: { jobId: 'job-log', truncated: true, reason: 'REPLAY_METADATA_TOO_LARGE' },
-    }]);
+    expect(replay).toEqual([
+      { seq: source.seq, event: 'log-truncated', data: { jobId: 'job-log', truncated: true, reason: 'REPLAY_METADATA_TOO_LARGE' } },
+      { seq: source.seq + 1, event: 'log-truncated', data: { jobId: 'job-log', truncated: true, reason: 'REPLAY_METADATA_TOO_LARGE' } },
+    ]);
     expect(Buffer.byteLength(stream.encodeSse(replay[0]!))).toBeLessThanOrEqual(64 * 1024);
-    expect(stream.replaySync(source.seq)).toEqual([]);
+    expect(stream.replaySync(source.seq)).toEqual([replay[1]]);
   });
 
   it('defers a source-gap replacement and every later row when its metadata budget is exhausted', async () => {
@@ -294,6 +298,7 @@ describe('DurableLogStream', () => {
     expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([
       [source.seq, 'log-gap'],
       [terminal, 'terminal'],
+      [terminal + 1, 'log-gap'],
     ]);
   });
 
@@ -336,6 +341,56 @@ describe('DurableLogStream', () => {
       [4, 'log-gap'],
       [5, 'log-gap'],
     ]);
+  });
+
+  it('does not replace a forward-referenced indexed log row', async () => {
+    const { stream, db } = await fixture();
+    const source = stream.appendSync('runner', Buffer.from('source\n'));
+    const terminal = stream.appendMetadataSync('terminal', { state: 'failed' });
+    db.exec('DROP TRIGGER job_events_append_guard');
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, 'log-gap', ?, ?)")
+      .run('job-log', terminal + 1, JSON.stringify({ sourceSeq: terminal + 2, reason: 'forward' }), NOW);
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, payload_json, at, stream, file_generation, byte_offset, byte_length, partial) VALUES (?, ?, 'log', '{}', ?, 'runner', 0, 0, 7, 0)")
+      .run('job-log', terminal + 2, NOW);
+
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([
+      [source.seq, 'log'],
+      [terminal, 'terminal'],
+      [terminal + 1, 'log-gap'],
+      [terminal + 2, 'log'],
+    ]);
+  });
+
+  it('bounds source-gap lookup to the durable candidate page', async () => {
+    const { stream, db } = await fixture();
+    stream.appendSync('runner', Buffer.from('source\n'));
+    db.exec('DROP TRIGGER job_events_append_guard');
+    const insert = db.prepare("INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, 'log-gap', ?, ?)");
+    for (let seq = 1; seq <= 2_000; seq += 1) {
+      insert.run('job-log', seq, JSON.stringify({ sourceSeq: 100_000 + seq, reason: 'history' }), NOW);
+    }
+    const statements: string[] = [];
+    const originalPrepare = db.prepare.bind(db);
+    const prepareSpy = vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      statements.push(sql);
+      return originalPrepare(sql);
+    });
+    try {
+      expect(stream.replaySync(-1, { eventLimit: 1 })).toHaveLength(1);
+    } finally {
+      prepareSpy.mockRestore();
+    }
+    const replaySql = statements.find((sql) => sql.includes('WITH RECURSIVE page AS MATERIALIZED'));
+    expect(replaySql).toBeDefined();
+    expect(replaySql).not.toContain('valid_source_gaps');
+    expect(replaySql).toMatch(/page AS MATERIALIZED \([\s\S]*ORDER BY event\.seq\s+LIMIT \?/);
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${replaySql}`).all(
+      'job-log', -1, 1, 'job-log', 'job-log', 65_536, 512 * 1024, 512 * 1024, 'job-log', 'job-log',
+    ) as Array<{ detail: string }>;
+    const details = plan.map(({ detail }) => detail).join('\n');
+    expect(details).not.toMatch(/MATERIALIZE (?:gap|replacement|valid_source_gaps)/i);
+    expect(details).not.toMatch(/SCAN gap\b/i);
+    expect(details).toMatch(/job_events_log_gap_source_seq/i);
   });
 
   it('keeps a replay-created source gap within the requested candidate page', async () => {
@@ -407,7 +462,7 @@ describe('DurableLogStream', () => {
     db.prepare('UPDATE job_log_generations SET path=? WHERE job_id=? AND stream=? AND generation=?').run('logs/other.0', 'job-log', 'runner', 0);
     expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[0, 'log-gap']]);
     expect(db.prepare("SELECT json_extract(payload_json, '$.code') AS code, json_extract(payload_json, '$.reason') AS reason FROM job_events WHERE job_id=? AND event_type='log-gap'").get('job-log')).toEqual({ code: 'RECOVERY_LOG_GAP', reason: 'GENERATION_PATH_MISMATCH' });
-    expect(stream.replaySync(-1).filter((event) => event.event === 'log-gap')).toHaveLength(1);
+    expect(stream.replaySync(-1).filter((event) => event.event === 'log-gap')).toHaveLength(2);
   });
 
   it('rejects symlinks in the root authority chain and at the logs directory', async () => {

@@ -328,7 +328,7 @@ describe('SSE durable replay', () => {
     expect(terminal).toBe(1);
     expect(stream.replaySync(0).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal']]);
     expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[0, 'log-gap'], [1, 'terminal']]);
-    expect(stream.replaySync(1)).toEqual([]);
+    expect(stream.replaySync(1).map(({ seq, event }) => [seq, event])).toEqual([[2, 'log-gap']]);
     expect(stream.replaySync(2)).toEqual([]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='job-sse' AND event_type='log-gap'").get()).toEqual({ count: 1 });
   });
@@ -369,8 +369,8 @@ describe('SSE durable replay', () => {
     stream.appendMetadataSync('terminal', { jobId: 'job-sse', state: 'failed', at: NOW });
 
     expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[0, 'log-gap'], [1, 'terminal']]);
-    expect(stream.replaySync(0).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal']]);
-    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[0, 'log-gap'], [1, 'terminal']]);
+    expect(stream.replaySync(0).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal'], [2, 'log-gap']]);
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[0, 'log-gap'], [1, 'terminal'], [2, 'log-gap']]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='job-sse' AND event_type='log-gap'").get()).toEqual({ count: 1 });
   });
 
@@ -397,11 +397,41 @@ describe('SSE durable replay', () => {
     expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([
       [source.seq, 'log-gap'],
       [terminal, 'terminal'],
+      [2, 'log-gap'],
     ]);
     expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([
       [source.seq, 'log-gap'],
       [terminal, 'terminal'],
+      [2, 'log-gap'],
     ]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='job-sse' AND event_type='log-gap'").get()).toEqual({ count: 1 });
+  });
+
+  it('stops before a preselected metadata row when a read-time gap consumes the runtime budget', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-sse-gap-budget-')); roots.push(root);
+    const db = openBuilderDatabase(join(root, 'jobs.sqlite')); dbs.push(db); seed(db);
+    let inserted = false;
+    const stream = new DurableLogStream({
+      db,
+      root,
+      jobId: 'job-sse',
+      now: () => NOW,
+      beforeReplayRead: (sourceSeq) => {
+        if (inserted) return;
+        inserted = true;
+        db.prepare("INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, 'log-gap', ?, ?)")
+          .run('job-sse', 2, JSON.stringify({ sourceSeq }), NOW);
+      },
+    });
+    stream.appendSync('runner', Buffer.from('readable\n'));
+    stream.appendMetadataSync('terminal', { state: 'failed' });
+
+    const first = stream.replaySync(-1, { maxMetadataBytes: 30 });
+    expect(first).toEqual([{ seq: 0, event: 'log-gap', data: { sourceSeq: 0 } }]);
+
+    expect(stream.replaySync(0, { maxMetadataBytes: 30 }).map(({ seq, event }) => [seq, event]))
+      .toEqual([[1, 'terminal']]);
+    expect(stream.replaySync(1, { maxMetadataBytes: 30 }).map(({ seq, event }) => [seq, event]))
+      .toEqual([[2, 'log-gap']]);
   });
 });
