@@ -1,12 +1,55 @@
 import { request } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PIPELINE_STAGE_NAMES } from '../../domain/types.js';
+import { PIPELINE_STAGE_NAMES, type PipelineStageName } from '../../domain/types.js';
 import { createHttpServer, type ApiRouteContext } from '../../api/src/server.js';
 import { createApiRouteHandler, type ApiRouteDependencies } from '../../api/src/routes.js';
 import { StoreNotFoundError } from '../../api/src/store.js';
 
 const sha = 'a'.repeat(40);
 const now = '2026-07-28T10:00:00.000Z';
+const later = '2026-07-28T10:00:01.000Z';
+
+function stageEvidence(stage: PipelineStageName = 'publish', outcome: 'passed' | 'failed' = 'passed') {
+  const index = PIPELINE_STAGE_NAMES.indexOf(stage);
+  return {
+    schemaVersion: 1,
+    jobId: 'job-1',
+    stage,
+    startedAt: now,
+    finishedAt: later,
+    outcome,
+    operationId: null,
+    commands: [],
+    inputs: { pinnedSha: sha },
+    observations: { artifactSha256: 'c'.repeat(64) },
+    error: outcome === 'passed' ? null : {
+      code: 'BUILD_FAILED',
+      stage,
+      details: { expectedSha: sha, secret: 'redact-me' },
+      retryable: false,
+      requestId: 'request-1',
+      diagnosis: 'The stage failed.',
+      recovery: 'Retry the stage.',
+      evidencePath: `jobs/job-1/evidence/${String(index).padStart(2, '0')}-${stage}.json`,
+    },
+  };
+}
+
+function useEvidence(
+  dependencies: ApiRouteDependencies,
+  evidence: Record<string, unknown>,
+  stage: PipelineStageName,
+  outcome: 'passed' | 'failed',
+): void {
+  Object.assign(dependencies.store as object, {
+    getStage: (id: string, requestedStage: string) => id === 'job-1' && requestedStage === stage ? {
+      jobId: 'job-1', stage, outcome, startedAt: now, finishedAt: later,
+      evidencePath: `jobs/job-1/evidence/${String(PIPELINE_STAGE_NAMES.indexOf(stage)).padStart(2, '0')}-${stage}.json`,
+      evidenceSha256: 'd'.repeat(64), errorCode: outcome === 'failed' ? 'BUILD_FAILED' : null, error: null,
+    } : null,
+  });
+  Object.assign(dependencies as object, { readEvidence: async () => evidence });
+}
 
 function job(id: string) {
   return {
@@ -168,6 +211,63 @@ describe('read-only builder API routes', () => {
     const events = await get(started.port, '/api/jobs/job-1/events?after=0');
     expect(events.body).toEqual({ events: [{ seq: 2, event: 'terminal', state: 'succeeded', stage: 'publish', at: now, data: {} }], next: 2 });
     expect((await get(started.port, '/api/jobs/job-1/events?after=2')).body).toEqual({ events: [], next: 2 });
+  });
+
+  it('serves complete validated production failure evidence', async () => {
+    const base = stageEvidence('build', 'failed');
+    const evidence = {
+      ...base,
+      operationId: 'build-image' as const,
+      error: {
+        ...base.error!,
+        details: { expectedSha: sha, observedSha: 'b'.repeat(40), operationId: 'build-image', secret: 'redact-me' },
+        operationId: 'build-image' as const,
+      },
+    };
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, evidence, 'build', 'failed');
+    const started = await start(routeDependencies); server = started.server;
+
+    expect(await get(started.port, '/api/jobs/job-1/evidence/build')).toEqual({
+      status: 200,
+      body: {
+        schemaVersion: 1, jobId: 'job-1', stage: 'build', startedAt: now, finishedAt: later,
+        outcome: 'failed', operationId: 'build-image', commands: [],
+        inputs: { pinnedSha: sha }, observations: { artifactSha256: 'c'.repeat(64) },
+        error: {
+          code: 'BUILD_FAILED',
+          details: { expectedSha: sha, observedSha: 'b'.repeat(40), operationId: 'build-image' },
+          stage: 'build', retryable: false, requestId: 'request-1',
+          diagnosis: 'The stage failed.', recovery: 'Retry the stage.',
+          evidencePath: 'jobs/job-1/evidence/07-build.json', operationId: 'build-image',
+        },
+      },
+    });
+  });
+
+  it('rejects malformed stored stage evidence', async () => {
+    const rejected = async (evidence: Record<string, unknown>, stage: PipelineStageName, outcome: 'passed' | 'failed') => {
+      const routeDependencies = dependencies();
+      useEvidence(routeDependencies, evidence, stage, outcome);
+      const started = await start(routeDependencies); server = started.server;
+      expect((await get(started.port, `/api/jobs/job-1/evidence/${stage}`)).status).toBe(500);
+      await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
+      server = undefined;
+    };
+    const validFailure = stageEvidence('publish', 'failed');
+
+    await rejected({ ...stageEvidence(), error: validFailure.error }, 'publish', 'passed');
+    await rejected({ ...stageEvidence('publish', 'failed'), error: null }, 'publish', 'failed');
+    await rejected({ ...stageEvidence(), startedAt: later, finishedAt: now }, 'publish', 'passed');
+    await rejected({
+      ...stageEvidence(),
+      commands: [{ argv: ['make'], startedAt: later, finishedAt: now, exitCode: 0, signal: null, timedOut: false, outputLimit: false }],
+    }, 'publish', 'passed');
+    await rejected({ ...stageEvidence('source'), operationId: 'frontend-test' }, 'source', 'passed');
+    await rejected({ ...stageEvidence(), operationId: 'build-image' }, 'publish', 'passed');
+    await rejected({ ...stageEvidence(), unexpected: true }, 'publish', 'passed');
+    await rejected({ ...validFailure, error: { ...validFailure.error!, unexpected: true } }, 'publish', 'failed');
+    await rejected({ ...stageEvidence(), inputs: { payload: 'x'.repeat(65_536) } }, 'publish', 'passed');
   });
 
   it('rejects malformed and unbounded read parameters and unknown resources', async () => {

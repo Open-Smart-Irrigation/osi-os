@@ -20,11 +20,11 @@ import {
   boundedText,
   canonicalAbsolutePath,
   canonicalInstant,
-  normalizeJson,
   optionalInstant,
   sourceMetadataSubject,
   stableRelativePath,
 } from './validation.js';
+import { decodeStoredStageEvidence } from '../../runner/src/evidence.js';
 import {
   HttpTransportError,
   type ApiRouteContext,
@@ -509,74 +509,33 @@ function eventPageDto(page: EventPage, jobId: string, after: number): JsonRecord
   return { events, next: page.nextAfterSeq ?? events.at(-1)?.seq ?? after };
 }
 
-function evidenceCommand(value: unknown, index: number): JsonRecord {
-  const command = record(value, `evidence command ${index}`);
-  const keys = Object.keys(command).sort();
-  const expected = ['argv', 'exitCode', 'finishedAt', 'outputLimit', 'signal', 'startedAt', 'timedOut'];
-  if (keys.length !== expected.length || keys.some((key, keyIndex) => key !== expected[keyIndex])) {
-    throw new Error(`evidence command ${index} has an invalid shape`);
-  }
-  if (!Array.isArray(command.argv) || command.argv.length === 0 || command.argv.length > MAX_CONFIG_ITEMS) {
-    throw new Error(`evidence command ${index} argv is invalid`);
-  }
-  const argv = command.argv.map((argument, argumentIndex) => text(argument, `evidence command ${index} argv ${argumentIndex}`, 65_536));
-  const exitCode = command.exitCode === null ? null : safeInteger(command.exitCode, `evidence command ${index} exit code`, -255);
-  const signal = command.signal === null ? null : identifier(command.signal, `evidence command ${index} signal`);
-  if (typeof command.timedOut !== 'boolean' || typeof command.outputLimit !== 'boolean') {
-    throw new Error(`evidence command ${index} flags are invalid`);
-  }
-  return {
-    argv,
-    startedAt: canonicalInstant(command.startedAt, `evidence command ${index} startedAt`),
-    finishedAt: canonicalInstant(command.finishedAt, `evidence command ${index} finishedAt`),
-    exitCode,
-    signal,
-    timedOut: command.timedOut,
-    outputLimit: command.outputLimit,
-  };
-}
-
-function evidenceObject(value: unknown, field: string): Readonly<Record<string, unknown>> {
-  const normalized = normalizeJson(value, field);
-  if (normalized === null || typeof normalized !== 'object' || Array.isArray(normalized)) {
-    throw new Error(`${field} is not an object`);
-  }
-  return normalized as Readonly<Record<string, unknown>>;
-}
-
 function publicEvidence(value: unknown, expectedJobId: string, expectedStage: PipelineStageName): JsonRecord {
-  const input = record(value, 'evidence response');
-  const requiredKeys = ['commands', 'error', 'finishedAt', 'inputs', 'jobId', 'observations', 'operationId', 'outcome', 'schemaVersion', 'stage', 'startedAt'];
-  if (Object.keys(input).length !== requiredKeys.length || Object.keys(input).some((key) => !requiredKeys.includes(key))) {
-    throw new Error('evidence response has an invalid top-level shape');
-  }
-  if (input.schemaVersion !== 1 || storedJobId(input.jobId) !== expectedJobId || storedStage(input.stage, 'evidence stage') !== expectedStage) {
+  const evidence = decodeStoredStageEvidence(value);
+  if (evidence.jobId !== expectedJobId || evidence.stage !== expectedStage) {
     throw new Error('evidence response identity is invalid');
   }
-  if (!Array.isArray(input.commands) || input.commands.length > MAX_CONFIG_ITEMS) throw new Error('evidence commands are invalid');
-  const operationId = input.operationId === null ? null : identifier(input.operationId, 'evidence operation ID');
-  const outcome = identifier(input.outcome, 'evidence outcome');
-  if (!['passed', 'failed'].includes(outcome)) throw new Error('evidence outcome is invalid');
-  let error: JsonRecord | null = null;
-  if (input.error !== null) {
-    const source = record(input.error, 'evidence error');
-    const selected = publicError(source.code, source.details);
-    if (selected === null || source.stage !== expectedStage || typeof source.retryable !== 'boolean') {
-      throw new Error('evidence error is invalid');
-    }
-    error = { ...selected, stage: expectedStage, retryable: source.retryable };
-  }
+  const error = evidence.error === null ? null : {
+    code: evidence.error.code,
+    details: publicDetails(evidence.error.details),
+    stage: evidence.error.stage,
+    retryable: evidence.error.retryable,
+    requestId: evidence.error.requestId,
+    diagnosis: evidence.error.diagnosis,
+    recovery: evidence.error.recovery,
+    ...(evidence.error.evidencePath === undefined ? {} : { evidencePath: evidence.error.evidencePath }),
+    ...(evidence.error.operationId === undefined ? {} : { operationId: evidence.error.operationId }),
+  };
   return {
-    schemaVersion: 1,
+    schemaVersion: evidence.schemaVersion,
     jobId: expectedJobId,
     stage: expectedStage,
-    startedAt: canonicalInstant(input.startedAt, 'evidence startedAt'),
-    finishedAt: canonicalInstant(input.finishedAt, 'evidence finishedAt'),
-    outcome,
-    operationId,
-    commands: input.commands.map(evidenceCommand),
-    inputs: evidenceObject(input.inputs, 'evidence inputs'),
-    observations: evidenceObject(input.observations, 'evidence observations'),
+    startedAt: evidence.startedAt,
+    finishedAt: evidence.finishedAt,
+    outcome: evidence.outcome,
+    operationId: evidence.operationId,
+    commands: evidence.commands,
+    inputs: evidence.inputs,
+    observations: evidence.observations,
     error,
   };
 }
