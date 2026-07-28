@@ -9,6 +9,20 @@ CREATE TABLE retention_prunes (
 
 CREATE INDEX retention_prunes_at ON retention_prunes (at, prune_id);
 
+CREATE TABLE retention_prune_intents (
+  intent_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL CHECK (category IN ('row', 'evidence', 'log', 'worktree', 'cache', 'quarantine')),
+  relative_path TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('planned', 'removed', 'skipped', 'failed')),
+  planned_at TEXT NOT NULL CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', planned_at) = planned_at),
+  updated_at TEXT NOT NULL CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) = updated_at),
+  bytes INTEGER NOT NULL DEFAULT 0 CHECK (bytes >= 0),
+  error TEXT,
+  UNIQUE (category, relative_path)
+);
+
+CREATE INDEX retention_prune_intents_status ON retention_prune_intents (status, updated_at);
+
 CREATE TABLE retention_purge_authorizations (
   job_id TEXT PRIMARY KEY,
   authorized_at TEXT NOT NULL CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', authorized_at) = authorized_at),

@@ -221,7 +221,7 @@ describe('versioned builder database migrations', () => {
       { version: 14, filename: '014_retention_prunes.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
-      .toEqual(['cleanup_credential_reservations', 'cleanup_leases', 'cleanup_stop_authorization_heads', 'cleanup_stop_authorization_outcomes', 'cleanup_stop_authorizations', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_dispatch_claims', 'queue_entries', 'retention_prunes', 'retention_purge_authorizations', 'schema_migrations', 'sqlite_sequence']);
+      .toEqual(['cleanup_credential_reservations', 'cleanup_leases', 'cleanup_stop_authorization_heads', 'cleanup_stop_authorization_outcomes', 'cleanup_stop_authorizations', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_dispatch_claims', 'queue_entries', 'retention_prune_intents', 'retention_prunes', 'retention_purge_authorizations', 'schema_migrations', 'sqlite_sequence']);
     expectColumns(db, 'jobs', [
       'job_id', 'request_id', 'request_json', 'source_remote', 'source_ref', 'source_branch', 'branch', 'expected_sha', 'pinned_sha',
       'target_id', 'root_id', 'target_manifest_sha256', 'source_commit_time', 'source_author', 'source_subject',
@@ -299,6 +299,7 @@ describe('versioned builder database migrations', () => {
     expectColumns(db, 'schema_migrations', ['version', 'filename', 'sha256', 'applied_at']);
     expectColumns(db, 'queue_entries', ['job_id', 'fifo_seq', 'enqueued_at', 'claimed_at']);
     expectColumns(db, 'queue_dispatch_claims', ['claim_id', 'job_id', 'owner', 'claimed_at', 'lease_expires_at', 'phase', 'start_attempted_at', 'unit_inactive_at']);
+    expectColumns(db, 'retention_prune_intents', ['intent_id', 'category', 'relative_path', 'status', 'planned_at', 'updated_at', 'bytes', 'error']);
     expectColumns(db, 'job_events', [
       'job_id', 'seq', 'event_type', 'state', 'stage', 'payload_json', 'at', 'stream', 'file_generation',
       'byte_offset', 'byte_length', 'partial',
@@ -308,7 +309,7 @@ describe('versioned builder database migrations', () => {
       .map((row) => (row as { name: string }).name);
     expect(indexes.sort()).toEqual([
       'cleanup_credential_reservations_expiry', 'cleanup_credential_reservations_job_path', 'cleanup_leases_expiry', 'cleanup_leases_fence_identity', 'cleanup_leases_fence_token_identity', 'cleanup_leases_job', 'cleanup_stop_authorization_outcomes_admission', 'cleanup_stop_authorizations_admission', 'cleanup_stop_authorizations_expiry', 'job_events_cancellation_protocol', 'job_events_log_range', 'job_events_sequence', 'job_log_generations_active', 'job_operations_identity',
-      'job_stages_job', 'jobs_cleanup_admission', 'jobs_recovery', 'queue_dispatch_claims_expiry', 'queue_entries_fifo', 'retention_prunes_at',
+      'job_stages_job', 'jobs_cleanup_admission', 'jobs_recovery', 'queue_dispatch_claims_expiry', 'queue_entries_fifo', 'retention_prune_intents_status', 'retention_prunes_at',
     ]);
     const normalizeForeignKeys = (child: string) => db.prepare(`PRAGMA foreign_key_list(${child})`).all()
       .map((row) => {
