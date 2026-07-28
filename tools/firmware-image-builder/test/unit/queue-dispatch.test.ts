@@ -118,7 +118,7 @@ describe('FIFO queue dispatch', () => {
   it('rejects observations outside their canonical systemd bracket and out of chronology', async () => {
     const outside = coordinator({ directInterrupt: vi.fn(async () => null) });
     outside.systemd.inspect.mockResolvedValue({ unit: UNIT, active: false, observedAt: LATER });
-    await expect(outside.queue.dispatchNext()).resolves.toMatchObject({ kind: 'recovery-blocked' });
+    await expect(outside.queue.dispatchNext()).resolves.toMatchObject({ kind: 'blocked', reason: 'INVALID_SYSTEMD_OBSERVATION' });
     expect(outside.systemd.start).not.toHaveBeenCalled();
 
     const clock = vi.fn().mockReturnValue(AFTER);
@@ -126,7 +126,7 @@ describe('FIFO queue dispatch', () => {
     chronological.systemd.inspect
       .mockResolvedValueOnce({ unit: UNIT, active: false, observedAt: LATER })
       .mockResolvedValueOnce({ unit: UNIT, active: true, observedAt: NOW });
-    await expect(chronological.queue.dispatchNext()).resolves.toMatchObject({ kind: 'recovery-blocked' });
+    await expect(chronological.queue.dispatchNext()).resolves.toMatchObject({ kind: 'blocked', reason: 'INVALID_SYSTEMD_OBSERVATION' });
     expect(chronological.systemd.start).not.toHaveBeenCalled();
   });
 

@@ -2979,6 +2979,27 @@ describe('actor-owned compare-and-set writes', () => {
 });
 
 describe('Task 7 recovery proof chronology', () => {
+  it('rejects SERVICE_START_FAILED recovery beside a matching non-null runner lease', async () => {
+    const target = await fixture('service-start-live-lease');
+    expect(target.ownership.apiWrite(dispatch('service-start-live-lease')).ok).toBe(true);
+    expect(target.ownership.runnerWrite(lease(ACTIVE, 'service-start-live-lease')).ok).toBe(true);
+
+    const result = target.ownership.apiWrite({
+      kind: 'runner-recovery-blocker',
+      jobId: 'service-start-live-lease',
+      expectedState: 'starting',
+      runnerUnit: 'osi-image-builder-runner@service-start-live-lease.service',
+      observedOwner: 'runner-a',
+      observedLeaseExpiresAt: ACTIVE,
+      blockerCode: 'SERVICE_START_FAILED',
+      blocker: { reason: 'inactive proof was unavailable' },
+      at: RECOVERY,
+    });
+
+    expect(result).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.getJob('service-start-live-lease')).toMatchObject({ cleanupBlockerCode: null, runnerLeaseOwner: 'runner-a', runnerLeaseExpiresAt: ACTIVE });
+  });
+
   it('rejects intrinsic recovery proof chronology before BEGIN', async () => {
     const { db, store } = await fixture('proof-chronology'); let beginAttempts = 0;
     const guarded = new OwnershipStore(db, { now: () => NOW, beforeBegin: () => { beginAttempts += 1; } });

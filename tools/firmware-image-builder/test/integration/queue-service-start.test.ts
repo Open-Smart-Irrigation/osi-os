@@ -310,6 +310,71 @@ describe('queue service-start recovery with real SQLite stores', () => {
     expect(target.db.prepare('SELECT state, terminal_error_code, terminal_at FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'interrupted', terminal_error_code: 'SERVICE_START_FAILED', terminal_at: LATER });
   });
 
+  it('does not mutate or advance FIFO when the failed start leaves the runner unit active without a lease', async () => {
+    const target = await fixture(['first', 'second']);
+    const state = systemdState('failure');
+    let inspectCount = 0;
+    const directInterrupt = vi.fn(async () => directProof('first', WRITTEN, WRITTEN, WRITTEN));
+    const systemd: QueueSystemd = {
+      ...state.systemd,
+      inspect: async (unit) => ({ unit, active: inspectCount++ > 0, observedAt: WRITTEN }),
+    };
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd, safety: { inspect: async () => null }, directInterrupt, clock: { now: () => WRITTEN } });
+
+    await expect(coordinator.dispatchNext()).resolves.toEqual({ kind: 'blocked', reason: 'runner unit is live', jobId: 'first' });
+    expect(target.db.prepare('SELECT state, queue_state, cleanup_blocker_code, terminal_error_code FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'starting', queue_state: 'dispatched', cleanup_blocker_code: null, terminal_error_code: null });
+    expect(target.db.prepare('SELECT state, queue_state FROM jobs WHERE job_id=?').get('second')).toEqual({ state: 'queued', queue_state: 'queued' });
+    expect(directInterrupt).not.toHaveBeenCalled();
+    expect(state.starts).toHaveLength(1);
+  });
+
+  it('does not mutate or advance FIFO when the failed start leaves the runner unit active with a live lease', async () => {
+    const target = await fixture(['first', 'second']);
+    const state = systemdState('failure');
+    let inspectCount = 0;
+    const directInterrupt = vi.fn(async () => directProof('first', WRITTEN, WRITTEN, WRITTEN));
+    const systemd: QueueSystemd = {
+      ...state.systemd,
+      inspect: async (unit) => ({ unit, active: inspectCount++ > 0, observedAt: WRITTEN }),
+      start: async (unit) => {
+        state.starts.push(unit);
+        target.ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'first', runnerUnit: unit, owner: 'runner-a', expiresAt: LATER, at: WRITTEN });
+        return { unit, argv: ['systemctl', '--user', 'start', unit], exitCode: 1, timedOut: false };
+      },
+    };
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd, safety: { inspect: async () => null }, directInterrupt, clock: { now: () => WRITTEN } });
+
+    await expect(coordinator.dispatchNext()).resolves.toEqual({ kind: 'blocked', reason: 'runner unit is live', jobId: 'first' });
+    expect(target.db.prepare('SELECT state, queue_state, runner_lease_owner, runner_lease_expires_at, cleanup_blocker_code, terminal_error_code FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'starting', queue_state: 'dispatched', runner_lease_owner: 'runner-a', runner_lease_expires_at: LATER, cleanup_blocker_code: null, terminal_error_code: null });
+    expect(target.db.prepare('SELECT state, queue_state FROM jobs WHERE job_id=?').get('second')).toEqual({ state: 'queued', queue_state: 'queued' });
+    expect(directInterrupt).not.toHaveBeenCalled();
+    expect(state.starts).toHaveLength(1);
+  });
+
+  it.each([
+    ['unavailable', async () => { throw new Error('systemd unavailable'); }, 'SYSTEMD_INSPECTION_UNAVAILABLE'],
+    ['malformed', async (unit: string) => ({ unit } as never), 'INVALID_SYSTEMD_OBSERVATION'],
+  ] as const)('does not mutate or advance FIFO when failed-start inactivity proof is %s', async (_label, recoveryInspection, reason) => {
+    const target = await fixture(['first', 'second']);
+    const state = systemdState('failure');
+    let inspectCount = 0;
+    const directInterrupt = vi.fn(async () => directProof('first', WRITTEN, WRITTEN, WRITTEN));
+    const systemd: QueueSystemd = {
+      ...state.systemd,
+      inspect: async (unit) => {
+        if (inspectCount++ === 0) return { unit, active: false, observedAt: WRITTEN };
+        return recoveryInspection(unit);
+      },
+    };
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd, safety: { inspect: async () => null }, directInterrupt, clock: { now: () => WRITTEN } });
+
+    await expect(coordinator.dispatchNext()).resolves.toEqual({ kind: 'blocked', reason, jobId: 'first' });
+    expect(target.db.prepare('SELECT state, queue_state, cleanup_blocker_code, terminal_error_code FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'starting', queue_state: 'dispatched', cleanup_blocker_code: null, terminal_error_code: null });
+    expect(target.db.prepare('SELECT state, queue_state FROM jobs WHERE job_id=?').get('second')).toEqual({ state: 'queued', queue_state: 'queued' });
+    expect(directInterrupt).not.toHaveBeenCalled();
+    expect(state.starts).toHaveLength(1);
+  });
+
   it.each(['null', 'unavailable'])('persists durable SERVICE_START_FAILED recovery when trusted direct proof is %s', async (mode) => {
     const target = await fixture(['first', 'second']);
     const state = systemdState('failure');

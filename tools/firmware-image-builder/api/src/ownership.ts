@@ -2776,12 +2776,19 @@ export class OwnershipStore {
     if (row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null) {
       conflict('fenced', 'runner recovery blocker is already persisted');
     }
+    if (blockerCode === 'SERVICE_START_FAILED' && (row.runner_lease_owner !== null || row.runner_lease_expires_at !== null)) {
+      conflict('identity-mismatch', 'service-start recovery blocker requires a null runner lease');
+    }
+    const leasePredicate = blockerCode === 'SERVICE_START_FAILED'
+      ? 'AND runner_lease_owner IS NULL AND runner_lease_expires_at IS NULL'
+      : '';
     const result = this.#db.prepare(`UPDATE jobs SET
       cleanup_blocker_code=?, cleanup_blocker_json=?, updated_at=?
       WHERE job_id=? AND state=? AND runner_unit=?
         AND runner_lease_owner IS ? AND runner_lease_expires_at IS ?
         AND terminal_at IS NULL AND cleanup_blocker_code IS NULL
         AND cleanup_blocker_json IS NULL AND cleanup_fence_generation IS NULL
+        ${leasePredicate}
         AND cleanup_admission_id IS NULL`).run(
       blockerCode,
       blockerJson,
