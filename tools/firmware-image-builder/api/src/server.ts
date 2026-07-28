@@ -237,8 +237,10 @@ function parseRequestUrl(request: IncomingMessage): { readonly pathname: string;
 
 function actualOrigin(request: IncomingMessage): string {
   const localPort = request.socket.localPort;
-  if (!Number.isSafeInteger(localPort) || localPort < 1 || localPort > 65_535) fail('ORIGIN_FORBIDDEN', 403);
-  return `http://${LOOPBACK_HOST}:${localPort as number}`;
+  if (typeof localPort !== 'number' || !Number.isSafeInteger(localPort) || localPort < 1 || localPort > 65_535) {
+    fail('ORIGIN_FORBIDDEN', 403);
+  }
+  return `http://${LOOPBACK_HOST}:${localPort}`;
 }
 
 function checkOrigin(request: IncomingMessage): string {
