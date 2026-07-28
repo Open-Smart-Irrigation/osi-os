@@ -201,7 +201,8 @@ export function collectHealthSnapshot(options: CollectHealthOptions): HealthSnap
     ORDER BY accepted_at, job_id LIMIT 1`).get();
   const lastEvent = options.db.prepare('SELECT MAX(at) AS at FROM job_events').get();
   const lastTerminal = options.db.prepare(`SELECT terminal_error_code, terminal_error_json, terminal_at
-    FROM jobs WHERE terminal_at IS NOT NULL ORDER BY terminal_at DESC LIMIT 1`).get();
+    FROM jobs WHERE terminal_error_code IS NOT NULL AND terminal_at IS NOT NULL
+    ORDER BY terminal_at DESC LIMIT 1`).get();
   const activeRow = active ?? null;
   const activeJobId = typeof activeRow?.job_id === 'string' ? activeRow.job_id : null;
   let activeJob: HealthActiveJob | null = null;

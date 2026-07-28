@@ -111,6 +111,25 @@ describe('observability integration', () => {
     db.close();
   });
 
+  it('retains the newest terminal error when a newer terminal job succeeded', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-image-builder-health-terminal-error-'));
+    pathsToRemove.push(root);
+    const db = openBuilderDatabase(join(root, 'jobs.sqlite'));
+    insertTerminalJob(db, 'failed-terminal', '2026-07-28T10:00:00.000Z');
+    db.prepare("UPDATE jobs SET state='failed', terminal_error_code='BUILD_FAILED', terminal_error_json=? WHERE job_id=?")
+      .run('{"reason":"compile"}', 'failed-terminal');
+    insertTerminalJob(db, 'successful-terminal', '2026-07-28T11:00:00.000Z');
+
+    const snapshot = collectHealthSnapshot({ db, now: NOW, diskFreeBytes: 25 * 1024 ** 3, builderImage: null });
+
+    expect(snapshot.lastTerminalError).toEqual({
+      code: 'BUILD_FAILED',
+      details: { reason: 'compile' },
+      at: '2026-07-28T10:00:00.000Z',
+    });
+    db.close();
+  });
+
   it('exposes interrupted jobs with pending cleanup and a completed cleanup lease', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-image-builder-health-cleanup-'));
     pathsToRemove.push(root);
