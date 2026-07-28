@@ -100,6 +100,8 @@ export interface QueueCoordinatorOptions {
   readonly dispatchClaimLeaseMs?: number;
   readonly dispatchClaimRenewIntervalMs?: number;
   readonly operationTimeoutMs?: number;
+  /** Keep dispatch closed until startup reconciliation explicitly completes. */
+  readonly startupReady?: boolean;
 }
 
 export type QueueDispatchResult =
@@ -111,6 +113,13 @@ export type QueueDispatchResult =
 
 export interface QueueCoordinator {
   readonly dispatchNext: () => Promise<QueueDispatchResult>;
+  readonly beginStartupReconciliation: () => void;
+  readonly completeStartupReconciliation: (blockers?: readonly QueueBlocker[]) => void;
+}
+
+export interface QueueStartupGate {
+  readonly beginStartupReconciliation: () => void;
+  readonly completeStartupReconciliation: (blockers?: readonly QueueBlocker[]) => void;
 }
 
 function text(value: unknown): string | null {
@@ -249,6 +258,8 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
   const clock = options.clock ?? { now: () => new Date().toISOString() };
   const coordinatorId = options.coordinatorId ?? `queue-dispatcher-${randomUUID()}`;
   let dispatchInFlight = false;
+  let startupReady = options.startupReady ?? true;
+  let startupBlocker: QueueBlocker | null = null;
   let lastClockAt = Number.NEGATIVE_INFINITY;
   let lastObservationAt = Number.NEGATIVE_INFINITY;
 
@@ -746,6 +757,7 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
   }
 
   async function dispatchNext(): Promise<QueueDispatchResult> {
+    if (!startupReady) return { kind: 'blocked', reason: startupBlocker?.code ?? 'STARTUP_RECONCILIATION_INCOMPLETE' };
     if (dispatchInFlight) return { kind: 'blocked', reason: 'dispatcher already has an in-flight claim' };
     dispatchInFlight = true;
     try {
@@ -821,5 +833,20 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
     }
   }
 
-  return Object.freeze({ dispatchNext });
+  function beginStartupReconciliation(): void {
+    startupReady = false;
+    startupBlocker = null;
+  }
+
+  function completeStartupReconciliation(blockers: readonly QueueBlocker[] = []): void {
+    if (blockers.length > 0) {
+      startupReady = false;
+      startupBlocker = blockers[0] ?? null;
+      return;
+    }
+    startupBlocker = null;
+    startupReady = true;
+  }
+
+  return Object.freeze({ dispatchNext, beginStartupReconciliation, completeStartupReconciliation });
 }

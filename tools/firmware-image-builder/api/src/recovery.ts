@@ -278,6 +278,70 @@ export interface CleanupAdmissionRecovery {
   readonly pruneOrphanCredentials: () => Promise<number>;
 }
 
+export type CleanupLeaseStartupClassification = 'start' | 'defer' | 'rotate' | 'stop-and-rotate' | 'blocked';
+
+export interface CleanupLeaseStartupInput {
+  readonly status: 'admitted' | 'claimed' | 'completed' | 'failed' | 'blocking' | 'expired';
+  readonly active: boolean;
+  readonly expiresAt: string;
+  readonly now: string;
+  readonly stopFailure?: boolean;
+}
+
+export interface StartupAdmissionReconciliationInput extends ReconcileAdmissionInput, CleanupLeaseStartupInput {}
+
+export interface StartupAdmissionReconciliationResult {
+  readonly jobId: string;
+  readonly admissionId: string;
+  readonly classification: CleanupLeaseStartupClassification;
+  readonly action: 'started' | 'rotated' | 'deferred' | 'blocked';
+  readonly blocker?: string;
+}
+
+/**
+ * Classifies the persisted lease before the recovery coordinator performs any
+ * credential, stop, or ownership operation. The coordinator remains the only
+ * component that can rotate or fence a lease.
+ */
+export function classifyCleanupLeaseForStartup(input: CleanupLeaseStartupInput): CleanupLeaseStartupClassification {
+  const expiresAt = recoveryInstant(input.expiresAt, 'cleanup lease expiry');
+  const now = recoveryInstant(input.now, 'startup recovery time');
+  if (input.stopFailure === true) return 'blocked';
+  const unexpired = expiresAt > now;
+  if (input.status === 'admitted') return input.active ? 'defer' : 'start';
+  if (input.status === 'claimed') {
+    if (input.active && unexpired) return 'defer';
+    if (input.active) return 'stop-and-rotate';
+    return 'rotate';
+  }
+  if (input.status === 'completed') return 'defer';
+  return 'blocked';
+}
+
+/**
+ * Applies the startup classification through the existing recovery API. This
+ * adapter deliberately has no ownership writes of its own.
+ */
+export async function reconcileCleanupAdmissionAtStartup(
+  input: StartupAdmissionReconciliationInput,
+  recovery: Pick<CleanupAdmissionRecovery, 'reconcileAndStart'>,
+): Promise<StartupAdmissionReconciliationResult> {
+  const classification = classifyCleanupLeaseForStartup(input);
+  if (classification === 'defer') {
+    return { jobId: input.jobId, admissionId: input.admissionId, classification, action: 'deferred' };
+  }
+  if (classification === 'blocked') {
+    return { jobId: input.jobId, admissionId: input.admissionId, classification, action: 'blocked', blocker: 'CLEANUP_UNIT_STOP_FAILED' };
+  }
+  const result = await recovery.reconcileAndStart(input);
+  return {
+    jobId: input.jobId,
+    admissionId: input.admissionId,
+    classification,
+    action: result.rotated ? 'rotated' : 'started',
+  };
+}
+
 export class RecoveryBoundaryError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
