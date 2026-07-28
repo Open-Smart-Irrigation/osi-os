@@ -1,3 +1,4 @@
+import { renameSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,5 +63,62 @@ describe('SSE durable replay', () => {
     const events = stream.replaySync(-1);
     expect(events.map((event) => event.event)).toEqual(['log-gap', 'log-truncated']);
     expect(events.map((event) => stream.encodeSse(event))).not.toContain(expect.stringContaining('event: terminal'));
+  });
+
+  it('discovers gaps before emitting strictly ascending durable cursor events', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-sse-gap-order-')); roots.push(root);
+    const db = openBuilderDatabase(join(root, 'jobs.sqlite')); dbs.push(db); seed(db);
+    const stream = new DurableLogStream({ db, root, jobId: 'job-sse', now: () => NOW });
+    const source = stream.appendSync('runner', Buffer.from('lost\n'));
+    const terminal = stream.appendMetadataSync('terminal', { jobId: 'job-sse', state: 'failed', at: NOW });
+    await rm(join(root, 'logs/runner.0'));
+
+    expect(source.seq).toBe(0);
+    expect(terminal).toBe(1);
+    expect(stream.replaySync(0).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal'], [2, 'log-gap']]);
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal'], [2, 'log-gap']]);
+    expect(stream.replaySync(1).map(({ seq, event }) => [seq, event])).toEqual([[2, 'log-gap']]);
+    expect(stream.replaySync(2)).toEqual([]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='job-sse' AND event_type='log-gap'").get()).toEqual({ count: 1 });
+  });
+
+  it('replays split UTF-8 ranges as exact bytes without replacement text', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-sse-utf8-')); roots.push(root);
+    const db = openBuilderDatabase(join(root, 'jobs.sqlite')); dbs.push(db); seed(db);
+    const stream = new DurableLogStream({ db, root, jobId: 'job-sse', now: () => NOW });
+    const encoded = Buffer.from('\u20ac\n', 'utf8');
+    const first = stream.appendSync('runner', encoded.subarray(0, 1));
+    stream.appendSync('runner', encoded.subarray(1));
+
+    const events = stream.replaySync(-1).filter((event) => event.event === 'log');
+    const replayed = Buffer.concat(events.map((event) => Buffer.from(String(event.data.bytesBase64), 'base64')));
+    expect(replayed).toEqual(encoded);
+    expect(events.every((event) => event.data.text === undefined || !String(event.data.text).includes('\ufffd'))).toBe(true);
+    expect(stream.replaySync(first.seq).filter((event) => event.event === 'log').map((event) => event.data.text)).not.toContain('\ufffd\n');
+  });
+
+  it('persists one ordered gap when the generation changes between discovery and read', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-sse-read-race-')); roots.push(root);
+    const db = openBuilderDatabase(join(root, 'jobs.sqlite')); dbs.push(db); seed(db);
+    let raced = false;
+    const stream = new DurableLogStream({
+      db,
+      root,
+      jobId: 'job-sse',
+      now: () => NOW,
+      beforeReplayRead: () => {
+        if (raced) return;
+        raced = true;
+        const replacement = join(root, 'logs/replacement');
+        writeFileSync(replacement, Buffer.from('other\n'));
+        renameSync(replacement, join(root, 'logs/runner.0'));
+      },
+    });
+    stream.appendSync('runner', Buffer.from('raced\n'));
+    stream.appendMetadataSync('terminal', { jobId: 'job-sse', state: 'failed', at: NOW });
+
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal'], [2, 'log-gap']]);
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal'], [2, 'log-gap']]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='job-sse' AND event_type='log-gap'").get()).toEqual({ count: 1 });
   });
 });

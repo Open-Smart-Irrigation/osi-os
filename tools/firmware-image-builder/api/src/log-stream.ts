@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, fsyncSync, mkdirSync, openSync, readSync, writeSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { join, relative } from 'node:path';
+import { resolve } from 'node:path';
 
 const MAX_SSE_BYTES = 64 * 1024;
+const O_CLOEXEC = (constants as typeof constants & { readonly O_CLOEXEC?: number }).O_CLOEXEC ?? 0;
+const DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | O_CLOEXEC;
 type StreamName = 'runner' | 'docker';
 type MetadataEvent = 'enqueue' | 'cancellation_requested' | 'dispatch' | 'state' | 'stage' | 'operation' | 'container' | 'artifact' | 'publish' | 'terminal' | 'cleanup_admission' | 'cleanup_claim' | 'cleanup_renew' | 'cleanup_complete' | 'cleanup' | 'recovery' | 'freshness' | 'log-gap' | 'log-truncated';
 
@@ -36,6 +38,16 @@ interface Options {
   readonly root: string;
   readonly jobId: string;
   readonly now?: () => string;
+  readonly beforeReplayRead?: (sourceSeq: number) => void;
+}
+
+interface FileIdentity {
+  readonly dev: number;
+  readonly ino: number;
+  readonly mode: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly ctimeMs: number;
 }
 
 function allBytes(fd: number, bytes: Uint8Array): void {
@@ -49,23 +61,43 @@ function json(value: Record<string, unknown>): string {
 
 export class DurableLogStream {
   readonly #db: DatabaseSync;
-  readonly #root: string;
   readonly #jobId: string;
   readonly #now: () => string;
+  readonly #beforeReplayRead?: (sourceSeq: number) => void;
+  readonly #rootFd: number;
+  #logsFd: number | null = null;
+  #closed = false;
 
   constructor(options: Options) {
+    if (process.platform !== 'linux' || typeof constants.O_DIRECTORY !== 'number' || typeof constants.O_NOFOLLOW !== 'number') {
+      throw new Error('durable log streams require Linux no-follow descriptor support');
+    }
     this.#db = options.db;
-    this.#root = options.root;
     this.#jobId = options.jobId;
     this.#now = options.now ?? (() => new Date().toISOString());
+    this.#beforeReplayRead = options.beforeReplayRead;
+    this.#rootFd = openAbsoluteDirectoryNoFollow(options.root);
+    try {
+      this.#logsFd = openOptionalDirectoryChild(this.#rootFd, 'logs');
+    } catch (error) {
+      closeSync(this.#rootFd);
+      throw error;
+    }
+  }
+
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    if (this.#logsFd !== null) closeSync(this.#logsFd);
+    closeSync(this.#rootFd);
   }
 
   appendSync(stream: StreamName, bytes: Uint8Array): AppendResult {
     if (bytes.byteLength === 0) throw new Error('log append must contain bytes');
     const generation = this.#openGeneration(stream);
     const row = this.#db.prepare('SELECT path, size_bytes FROM job_log_generations WHERE job_id=? AND stream=? AND generation=?').get(this.#jobId, stream, generation) as { path: string; size_bytes: number };
-    mkdirSync(join(this.#root, 'logs'), { recursive: true });
-    const path = this.#generationPath(stream, generation, row.path);
+    const path = this.#generationPath(stream, generation, row.path, true);
+    if (path === null) throw new Error('log directory could not be created');
     const fd = openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o640);
     try {
       const before = fstatSync(fd);
@@ -98,6 +130,7 @@ export class DurableLogStream {
     const row = this.#db.prepare('SELECT generation, path, size_bytes, sealed_at FROM job_log_generations WHERE job_id=? AND stream=? ORDER BY generation DESC LIMIT 1').get(this.#jobId, stream) as { generation: number; path: string; size_bytes: number; sealed_at: string | null } | undefined;
     if (!row || row.sealed_at !== null) return;
     const path = this.#generationPath(stream, Number(row.generation), row.path);
+    if (path === null) throw new Error(`${stream} log directory is missing`);
     const bytes = readRegularFile(path);
     if (bytes.byteLength !== Number(row.size_bytes)) throw new Error(`${stream} log size diverged before seal`);
     const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -118,13 +151,14 @@ export class DurableLogStream {
     const row = this.#db.prepare('SELECT generation, path, size_bytes, sealed_at FROM job_log_generations WHERE job_id=? AND stream=? ORDER BY generation DESC LIMIT 1').get(this.#jobId, stream) as { generation: number; path: string; size_bytes: number; sealed_at: string | null } | undefined;
     if (!row) throw new Error('log generation does not exist');
     const path = this.#generationPath(stream, Number(row.generation), row.path);
+    if (path === null) throw new Error(`${stream} log directory is missing`);
     const bytes = readRegularFile(path);
     const indexed = Number(row.size_bytes);
     if (bytes.byteLength < indexed) {
-      return this.#persistOrphanGap(stream, Number(row.generation), indexed, Math.max(1, indexed - bytes.byteLength), path);
+      return this.#persistOrphanGap(stream, Number(row.generation), bytes.byteLength, indexed - bytes.byteLength);
     }
     if (row.sealed_at !== null) {
-      const existing = this.#orphanResult(stream, Number(row.generation), 'tail');
+      const existing = this.#orphanResult(stream, Number(row.generation));
       if (!existing) throw new Error('sealed generation has no orphan evidence');
       return existing;
     }
@@ -146,10 +180,31 @@ export class DurableLogStream {
   }
 
   replaySync(afterSeq: number): LogStreamEvent[] {
-    const rows = this.#db.prepare(`SELECT seq, event_type, payload_json, at, stream, file_generation, byte_offset, byte_length, partial
-      FROM job_events WHERE job_id=? AND seq>? ORDER BY seq`).all(this.#jobId, afterSeq) as Array<Record<string, unknown>>;
+    const discoveredIdentities = new Map<number, FileIdentity>();
+    for (const row of this.#eventRows(-1)) {
+      if (row.stream === null || row.event_type === 'log-gap') continue;
+      const seq = Number(row.seq);
+      if (this.#sourceGap(seq)) continue;
+      const stream = String(row.stream) as StreamName;
+      const generation = Number(row.file_generation);
+      const range = { offset: Number(row.byte_offset), length: Number(row.byte_length) };
+      const generationRow = this.#db.prepare('SELECT path, size_bytes FROM job_log_generations WHERE job_id=? AND stream=? AND generation=?').get(this.#jobId, stream, generation) as { path: string; size_bytes: number } | undefined;
+      if (!generationRow) {
+        this.#gap(seq, stream, generation, range, 'GENERATION_MISSING');
+        continue;
+      }
+      if (generationRow.path !== `logs/${stream}.${generation}`) {
+        this.#gap(seq, stream, generation, range, 'GENERATION_PATH_MISMATCH');
+        continue;
+      }
+      const path = this.#generationPath(stream, generation, generationRow.path);
+      const identity = this.#rangeIdentity(path, range.offset, range.length);
+      if (identity === null) this.#gap(seq, stream, generation, range, 'RANGE_UNREADABLE');
+      else discoveredIdentities.set(seq, identity);
+    }
+
     const output: LogStreamEvent[] = [];
-    for (const row of rows) {
+    for (const row of this.#eventRows(afterSeq)) {
       const seq = Number(row.seq);
       const payload = JSON.parse(String(row.payload_json)) as Record<string, unknown>;
       if (row.stream === null) {
@@ -161,17 +216,42 @@ export class DurableLogStream {
         else output.push({ seq, event: row.event_type === 'terminal' ? 'terminal' : 'stage', data: payload });
         continue;
       }
+      if (this.#sourceGap(seq)) continue;
       const stream = String(row.stream) as StreamName;
       const generation = Number(row.file_generation);
       const range = { offset: Number(row.byte_offset), length: Number(row.byte_length) };
       const generationRow = this.#db.prepare('SELECT path, size_bytes FROM job_log_generations WHERE job_id=? AND stream=? AND generation=?').get(this.#jobId, stream, generation) as { path: string; size_bytes: number } | undefined;
-      const path = generationRow ? this.#generationPath(stream, generation, generationRow.path) : '';
-      if (!generationRow || !this.#readableRange(path, range.offset, range.length)) {
-        output.push(this.#gap(seq, stream, generation, range, path));
-        continue;
+      if (!generationRow || generationRow.path !== `logs/${stream}.${generation}`) continue;
+      const path = this.#generationPath(stream, generation, generationRow.path);
+      const expectedIdentity = discoveredIdentities.get(seq);
+      if (path === null || expectedIdentity === undefined) {
+        this.#gap(seq, stream, generation, range, 'READ_RACE');
+        return this.replaySync(afterSeq);
       }
-      const bytes = readRegularRange(path, range.offset, range.length);
-      output.push({ seq, event: 'log', data: { ...payload, jobId: this.#jobId, stream, generation, offset: range.offset, length: range.length, partial: Number(row.partial) === 1, text: bytes.toString('utf8') } });
+      this.#beforeReplayRead?.(seq);
+      let bytes: Buffer;
+      try {
+        bytes = readRegularRange(path, range.offset, range.length, expectedIdentity);
+      } catch (error) {
+        if (isUnsafeAuthorityError(error)) throw error;
+        this.#gap(seq, stream, generation, range, 'READ_RACE');
+        return this.replaySync(afterSeq);
+      }
+      output.push({
+        seq,
+        event: 'log',
+        data: {
+          ...payload,
+          jobId: this.#jobId,
+          stream,
+          generation,
+          offset: range.offset,
+          length: range.length,
+          partial: Number(row.partial) === 1,
+          bytesBase64: bytes.toString('base64'),
+          ...validUtf8Text(bytes),
+        },
+      });
     }
     return output;
   }
@@ -208,32 +288,61 @@ export class DurableLogStream {
     return generation;
   }
 
-  #generationPath(stream: StreamName, generation: number, persistedPath: string): string {
+  #generationPath(stream: StreamName, generation: number, persistedPath: string, createLogs = false): string | null {
     const expected = `logs/${stream}.${generation}`;
     if (persistedPath !== expected) throw new Error('log generation path does not match fixed generation identity');
-    const path = join(this.#root, expected);
-    if (relative(this.#root, path).startsWith('..')) throw new Error('log path escapes root');
-    return path;
+    const logsFd = createLogs ? this.#ensureLogsDirectory() : this.#logsFd;
+    return logsFd === null ? null : descriptorChild(logsFd, `${stream}.${generation}`);
   }
 
-  #readableRange(path: string, offset: number, length: number): boolean {
-    try { const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW); try { const stat = fstatSync(fd); if (!stat.isFile()) throw new Error('log generation is not a regular file'); return stat.size >= offset + length; } finally { closeSync(fd); } } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw new Error('log generation path is a symlink'); return false; }
+  #ensureLogsDirectory(): number {
+    if (this.#logsFd !== null) return this.#logsFd;
+    try {
+      mkdirSync(descriptorChild(this.#rootFd, 'logs'), { mode: 0o750 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    this.#logsFd = openDirectoryChild(this.#rootFd, 'logs');
+    return this.#logsFd;
+  }
+
+  #rangeIdentity(path: string | null, offset: number, length: number): FileIdentity | null {
+    if (path === null) return null;
+    try {
+      const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        const stat = fstatSync(fd);
+        if (!stat.isFile()) throw new Error('log generation is not a regular file');
+        return stat.size >= offset + length ? fileIdentity(stat) : null;
+      } finally { closeSync(fd); }
+    } catch (error) {
+      if (isUnsafeAuthorityError(error)) throw error;
+      return null;
+    }
   }
 
   #nextSeq(): number { return Number((this.#db.prepare('SELECT COALESCE(MAX(seq)+1, 0) AS next FROM job_events WHERE job_id=?').get(this.#jobId) as { next: number }).next); }
 
-  #transaction(work: () => void): void { this.#db.exec('BEGIN IMMEDIATE'); try { work(); this.#db.exec('COMMIT'); } catch (error) { try { this.#db.exec('ROLLBACK'); } catch { /* preserve primary error */ } throw error; } }
-
-  #gap(seq: number, stream: StreamName, generation: number, range: { offset: number; length: number }, path: string): LogStreamEvent {
-    const existing = this.#db.prepare("SELECT seq, payload_json FROM job_events WHERE job_id=? AND event_type='log-gap' AND json_extract(payload_json, '$.sourceSeq')=?").get(this.#jobId, seq) as { seq: number; payload_json: string } | undefined;
-    if (existing) return { seq: Number(existing.seq), event: 'log-gap', data: JSON.parse(existing.payload_json) as Record<string, unknown> };
-    let gapSeq = -1;
-    const data = { jobId: this.#jobId, code: 'RECOVERY_LOG_GAP', sourceSeq: seq, stream, generation, offset: range.offset, length: range.length, path: path ? relative(this.#root, path) : null };
-    return this.#persistGap(stream, generation, range.offset, range.length, path, seq, data);
+  #eventRows(afterSeq: number): Array<Record<string, unknown>> {
+    return this.#db.prepare(`SELECT seq, event_type, payload_json, at, stream, file_generation, byte_offset, byte_length, partial
+      FROM job_events WHERE job_id=? AND seq>? ORDER BY seq`).all(this.#jobId, afterSeq) as Array<Record<string, unknown>>;
   }
 
-  #persistGap(stream: StreamName, generation: number, offset: number, length: number, path: string, sourceSeq: number, supplied: Record<string, unknown>): LogStreamEvent {
-    const existing = this.#db.prepare("SELECT seq, payload_json FROM job_events WHERE job_id=? AND event_type='log-gap' AND json_extract(payload_json, '$.sourceSeq')=?").get(this.#jobId, sourceSeq) as { seq: number; payload_json: string } | undefined;
+  #sourceGap(sourceSeq: number): { readonly seq: number; readonly payload_json: string } | undefined {
+    return this.#db.prepare("SELECT seq, payload_json FROM job_events WHERE job_id=? AND event_type='log-gap' AND json_extract(payload_json, '$.sourceSeq')=?").get(this.#jobId, sourceSeq) as { seq: number; payload_json: string } | undefined;
+  }
+
+  #transaction(work: () => void): void { this.#db.exec('BEGIN IMMEDIATE'); try { work(); this.#db.exec('COMMIT'); } catch (error) { try { this.#db.exec('ROLLBACK'); } catch { /* preserve primary error */ } throw error; } }
+
+  #gap(seq: number, stream: StreamName, generation: number, range: { offset: number; length: number }, reason = 'RANGE_UNREADABLE'): LogStreamEvent {
+    const existing = this.#sourceGap(seq);
+    if (existing) return { seq: Number(existing.seq), event: 'log-gap', data: JSON.parse(existing.payload_json) as Record<string, unknown> };
+    const data = { jobId: this.#jobId, code: 'RECOVERY_LOG_GAP', reason, sourceSeq: seq, stream, generation, offset: range.offset, length: range.length, path: `logs/${stream}.${generation}` };
+    return this.#persistGap(seq, data);
+  }
+
+  #persistGap(sourceSeq: number, supplied: Record<string, unknown>): LogStreamEvent {
+    const existing = this.#sourceGap(sourceSeq);
     if (existing) return { seq: Number(existing.seq), event: 'log-gap', data: JSON.parse(existing.payload_json) as Record<string, unknown> };
     const data = supplied;
     data.sourceSeq = sourceSeq;
@@ -242,17 +351,17 @@ export class DurableLogStream {
     return { seq: gapSeq, event: 'log-gap', data };
   }
 
-  #persistOrphanGap(stream: StreamName, generation: number, offset: number, length: number, path: string): OrphanTailResult {
+  #persistOrphanGap(stream: StreamName, generation: number, offset: number, length: number): OrphanTailResult {
     const key = `orphan:${stream}:${generation}`;
     const existing = this.#db.prepare("SELECT seq, payload_json FROM job_events WHERE job_id=? AND event_type='log-gap' AND json_extract(payload_json, '$.orphanKey')=?").get(this.#jobId, key) as { seq: number; payload_json: string } | undefined;
     if (existing) { const data = JSON.parse(existing.payload_json) as Record<string, unknown>; return { eventType: 'log-gap', seq: Number(existing.seq), stream, generation, offset: Number(data.offset), length: Number(data.length) }; }
-    const data = { jobId: this.#jobId, code: 'RECOVERY_LOG_GAP', stream, generation, offset, length, path: relative(this.#root, path), orphanKey: key };
+    const data = { jobId: this.#jobId, code: 'RECOVERY_LOG_GAP', stream, generation, offset, length, path: `logs/${stream}.${generation}`, orphanKey: key };
     let seq = -1;
     this.#transaction(() => { seq = this.#nextSeq(); this.#db.prepare("INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, 'log-gap', ?, ?)").run(this.#jobId, seq, json(data), this.#now()); });
     return { eventType: 'log-gap', seq, stream, generation, offset, length };
   }
 
-  #orphanResult(stream: StreamName, generation: number, kind: 'tail'): OrphanTailResult | undefined {
+  #orphanResult(stream: StreamName, generation: number): OrphanTailResult | undefined {
     const row = this.#db.prepare("SELECT seq, stream, file_generation, byte_offset, byte_length, event_type, payload_json FROM job_events WHERE job_id=? AND event_type='log_orphan_tail' AND stream=? AND file_generation=? ORDER BY seq DESC LIMIT 1").get(this.#jobId, stream, generation) as Record<string, unknown> | undefined;
     if (!row) return undefined;
     return { eventType: row.event_type as 'log_orphan_tail' | 'log-gap', seq: Number(row.seq), stream, generation, offset: Number(row.byte_offset ?? JSON.parse(String(row.payload_json)).offset), length: Number(row.byte_length ?? JSON.parse(String(row.payload_json)).length) };
@@ -260,4 +369,84 @@ export class DurableLogStream {
 }
 
 function readRegularFile(path: string): Buffer { const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW); try { const stat = fstatSync(fd); if (!stat.isFile()) throw new Error('log generation is not a regular file'); fsyncSync(fd); const data = Buffer.alloc(stat.size); const read = readSync(fd, data, 0, stat.size, 0); if (read !== stat.size) throw new Error('short log read'); return data; } finally { closeSync(fd); } }
-function readRegularRange(path: string, offset: number, length: number): Buffer { const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW); try { const stat = fstatSync(fd); if (!stat.isFile() || stat.size < offset + length) throw new Error('short log range'); const data = Buffer.alloc(length); const read = readSync(fd, data, 0, length, offset); if (read !== length) throw new Error('short log range'); return data; } finally { closeSync(fd); } }
+function readRegularRange(path: string, offset: number, length: number, expected: FileIdentity): Buffer {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new Error('log generation is not a regular file');
+    if (!sameFileIdentity(fileIdentity(stat), expected)) throw new Error('log generation changed during replay');
+    if (stat.size < offset + length) throw new Error('short log range');
+    const data = Buffer.alloc(length);
+    const read = readSync(fd, data, 0, length, offset);
+    if (read !== length) throw new Error('short log range');
+    return data;
+  } finally { closeSync(fd); }
+}
+
+function fileIdentity(stat: ReturnType<typeof fstatSync>): FileIdentity {
+  return {
+    dev: Number(stat.dev),
+    ino: Number(stat.ino),
+    mode: Number(stat.mode),
+    size: Number(stat.size),
+    mtimeMs: Number(stat.mtimeMs),
+    ctimeMs: Number(stat.ctimeMs),
+  };
+}
+
+function sameFileIdentity(left: FileIdentity, right: FileIdentity): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
+}
+
+function validUtf8Text(bytes: Uint8Array): { readonly text: string } | Record<string, never> {
+  try {
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) };
+  } catch {
+    return {};
+  }
+}
+
+function isUnsafeAuthorityError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'ELOOP'
+    || (error instanceof Error && error.message.includes('not a regular file'));
+}
+
+function descriptorChild(parentFd: number, name: string): string {
+  if (name.length === 0 || name === '.' || name === '..' || name.includes('/') || name.includes('\\') || name.includes('\0')) {
+    throw new Error('log descriptor child is unsafe');
+  }
+  return `/proc/self/fd/${parentFd}/${name}`;
+}
+
+function openDirectoryChild(parentFd: number, name: string): number {
+  return openSync(descriptorChild(parentFd, name), DIRECTORY_FLAGS);
+}
+
+function openOptionalDirectoryChild(parentFd: number, name: string): number | null {
+  try {
+    return openDirectoryChild(parentFd, name);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function openAbsoluteDirectoryNoFollow(path: string): number {
+  let current = openSync('/', DIRECTORY_FLAGS);
+  try {
+    for (const segment of resolve(path).split('/').filter(Boolean)) {
+      const next = openDirectoryChild(current, segment);
+      closeSync(current);
+      current = next;
+    }
+    return current;
+  } catch (error) {
+    closeSync(current);
+    throw error;
+  }
+}

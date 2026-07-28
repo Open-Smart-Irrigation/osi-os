@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -74,10 +74,32 @@ describe('DurableLogStream', () => {
     await symlink('/etc/hosts', join(root, 'logs/runner.0'));
     expect(() => stream.replaySync(-1)).toThrow();
     expect(() => stream.appendSync('runner', Buffer.from('blocked\n'))).toThrow();
+    await rm(join(root, 'logs/runner.0'));
+    await writeFile(join(root, 'logs/runner.0'), Buffer.from('safe\n'));
     db.exec('DROP TRIGGER job_log_generations_immutable_guard');
     db.prepare('UPDATE job_log_generations SET path=? WHERE job_id=? AND stream=? AND generation=?').run('logs/other.0', 'job-log', 'runner', 0);
-    expect(() => stream.replaySync(-1)).toThrow(/path|generation/i);
-    expect(() => stream.replaySync(-1)).not.toThrow(/mkdir/);
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[1, 'log-gap']]);
+    expect(db.prepare("SELECT json_extract(payload_json, '$.code') AS code, json_extract(payload_json, '$.reason') AS reason FROM job_events WHERE job_id=? AND event_type='log-gap'").get('job-log')).toEqual({ code: 'RECOVERY_LOG_GAP', reason: 'GENERATION_PATH_MISMATCH' });
+    expect(stream.replaySync(-1).filter((event) => event.event === 'log-gap')).toHaveLength(1);
+  });
+
+  it('rejects symlinks in the root authority chain and at the logs directory', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'osi-log-authority-'));
+    roots.push(parent);
+    const realParent = join(parent, 'real');
+    const realRoot = join(realParent, 'job');
+    const aliasParent = join(parent, 'alias');
+    await mkdir(realRoot, { recursive: true });
+    await symlink(realParent, aliasParent);
+    const db = openBuilderDatabase(join(realRoot, 'jobs.sqlite'));
+    dbs.push(db);
+    seedJob(db);
+    expect(() => new DurableLogStream({ db, root: join(aliasParent, 'job'), jobId: 'job-log', now: () => NOW })).toThrow();
+
+    const externalLogs = join(parent, 'external-logs');
+    await mkdir(externalLogs);
+    await symlink(externalLogs, join(realRoot, 'logs'));
+    expect(() => new DurableLogStream({ db, root: realRoot, jobId: 'job-log', now: () => NOW })).toThrow();
   });
 
   it('seals an exact orphan tail only after liveness proof and is idempotent', async () => {
@@ -93,11 +115,12 @@ describe('DurableLogStream', () => {
   });
 
   it('records one durable gap for a short orphan file and maps metadata events to public stage only', async () => {
-    const { stream, root } = await fixture();
+    const { stream, db, root } = await fixture();
     stream.appendSync('docker', Buffer.from('indexed\n'));
     await writeFile(join(root, 'logs/docker.0'), Buffer.from('short'));
     const gap = stream.sealOrphanTailSync('docker', { unitInactive: true, leaseStale: true, noMatchingContainer: true });
-    expect(gap.eventType).toBe('log-gap');
+    expect(gap).toMatchObject({ eventType: 'log-gap', offset: Buffer.byteLength('short'), length: Buffer.byteLength('indexed\n') - Buffer.byteLength('short') });
+    expect(db.prepare("SELECT json_extract(payload_json, '$.offset') AS offset, json_extract(payload_json, '$.length') AS length FROM job_events WHERE job_id=? AND event_type='log-gap'").get('job-log')).toEqual({ offset: 5, length: 3 });
     expect(stream.sealOrphanTailSync('docker', { unitInactive: true, leaseStale: true, noMatchingContainer: true })).toEqual(gap);
     stream.appendMetadataSync('state', { kind: 'state', state: 'building' });
     expect(stream.replaySync(-1).filter((event) => event.event === 'stage' || event.event === 'terminal').every((event) => event.event === 'stage')).toBe(true);
@@ -118,6 +141,14 @@ describe('DurableLogStream', () => {
       expect((await first).value).toBe(': keepalive\n\n');
       await iterator.return?.(undefined);
     } finally { vi.useRealTimers(); }
+  });
+
+  it('closes held authority descriptors idempotently', async () => {
+    const { stream } = await fixture();
+    stream.appendSync('runner', Buffer.from('open\n'));
+    stream.close();
+    expect(() => stream.close()).not.toThrow();
+    expect(() => stream.appendSync('runner', Buffer.from('closed\n'))).toThrow();
   });
 
   it('encodes bounded SSE events and emits log-truncated metadata for an oversized payload', async () => {
