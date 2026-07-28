@@ -133,7 +133,10 @@ async function openEntry(parent: FileHandle, name: string): Promise<FileHandle> 
 }
 
 async function removeEntry(parent: FileHandle, name: string): Promise<void> {
-  if ((await lstat(procPath(parent, name))).isSymbolicLink()) return;
+  if ((await lstat(procPath(parent, name))).isSymbolicLink()) {
+    await unlink(procPath(parent, name));
+    return;
+  }
   const held = await openEntry(parent, name);
   try {
     const initial = identity(await held.stat());
@@ -255,25 +258,6 @@ async function validateConfiguredRoots(paths: RetentionPaths): Promise<QueueBloc
   return null;
 }
 
-async function addChildren(
-  roots: Map<string, OpenRoot>,
-  result: Candidate[],
-  paths: RetentionPaths,
-  base: string,
-  auditBase: string,
-  category: RetentionCategory,
-  days: number,
-  protectedLogs: ReadonlySet<string>,
-): Promise<void> {
-  if (!contained(paths.stateRoot, base) && !paths.approvedQuarantineRoots.some((root) => contained(root, base))) throw new Error('retention scan root is unauthorized');
-  const root = roots.get(resolve(base));
-  if (!root) throw new Error('retention scan root is not held');
-  for (const path of await directoryChildren(root.handle, base)) {
-    if (category === 'log' && protectedLogs.has(relativePath(base, path))) continue;
-    result.push({ base, auditBase, path, category, cutoffDays: days, stateEligible: false, durable: false });
-  }
-}
-
 async function terminalWorktreeCandidates(options: RetentionOptions, roots: Map<string, OpenRoot>, now: string, result: Candidate[]): Promise<void> {
   if (!options.db) return;
   const rows = options.db.prepare(`SELECT job_id FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`)
@@ -332,6 +316,37 @@ async function databaseCandidates(options: RetentionOptions, roots: Map<string, 
     if (contained(options.paths.stateRoot, path)) result.push({ base: options.paths.stateRoot, auditBase: options.paths.stateRoot, path, category: 'log', cutoffDays: 0, stateEligible: true, durable: true });
   }
   result.push(...rowCandidates);
+}
+
+function quarantineCandidate(
+  options: RetentionOptions,
+  root: string,
+  auditBase: string,
+  path: string,
+  now: string,
+): Candidate | null {
+  if (!options.db) return null;
+  const jobId = relativePath(root, path);
+  if (!safeSegment(jobId)) return null;
+  const known = options.db.prepare('SELECT job_id FROM jobs WHERE job_id=?').get(jobId) as { job_id?: unknown } | undefined;
+  if (!known) return { base: root, auditBase, path, category: 'quarantine', cutoffDays: RETENTION_DAYS.quarantine, stateEligible: false, durable: true };
+  const cutoff = new Date(threshold(now, RETENTION_DAYS.quarantine)).toISOString();
+  const eligible = options.db.prepare(`SELECT job_id, artifact_quarantine_path FROM jobs WHERE job_id=? AND ${ELIGIBLE_TERMINAL_ROW_SQL}`)
+    .get(jobId, cutoff) as { job_id?: unknown; artifact_quarantine_path?: unknown } | undefined;
+  if (!eligible || !isCanonicalQuarantinePath(jobId, eligible.artifact_quarantine_path)) return null;
+  return { base: root, auditBase, path, category: 'quarantine', cutoffDays: RETENTION_DAYS.quarantine, stateEligible: false, durable: true };
+}
+
+async function quarantineCandidates(options: RetentionOptions, roots: Map<string, OpenRoot>, now: string, result: Candidate[]): Promise<void> {
+  for (const root of options.paths.approvedQuarantineRoots) {
+    const auditBase = options.paths.approvedReleaseRoots.find((release) => contained(release, root)) ?? root;
+    const held = roots.get(resolve(root));
+    if (!held) throw new Error('retention quarantine root is not held');
+    for (const path of await directoryChildren(held.handle, root)) {
+      const candidate = quarantineCandidate(options, root, auditBase, path, now);
+      if (candidate) result.push(candidate);
+    }
+  }
 }
 
 function transaction(db: DatabaseSync, work: () => void): void {
@@ -401,6 +416,10 @@ async function pruneCandidate(options: RetentionOptionsWithRoots, candidate: Can
     const record: RetentionPruneRecord = { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), action: 'removed', bytes: initial.isDirectory ? 0 : linkStats.size, timestamp: now };
     planIntent(options, candidate, now, record.bytes);
     await options.beforeDelete?.({ category: candidate.category, path: candidate.path });
+    if (candidate.category === 'quarantine' && !quarantineCandidate(options, candidate.base, candidate.auditBase, candidate.path, now)) {
+      if (options.db) options.db.prepare(`DELETE FROM retention_prune_intents WHERE category=? AND relative_path=? AND status='planned'`).run(record.category, record.relativePath);
+      return;
+    }
     if (initial.isDirectory) {
       for (const child of await readdir(procPath(held), { withFileTypes: true })) await removeEntry(held, child.name);
     }
@@ -550,12 +569,23 @@ async function reconcileIntents(options: RetentionOptionsWithRoots, now: string,
   const protectedLogs = protectedLogPaths(options.db);
   const existing = new Set(candidates.map((candidate) => `${candidate.category}:${relativePath(candidate.auditBase, candidate.path)}`));
   const intents = options.db.prepare(`SELECT category, relative_path FROM retention_prune_intents
-    WHERE status IN ('planned', 'failed') ORDER BY intent_id`).all() as Array<{ category?: unknown; relative_path?: unknown }>;
+    WHERE status IN ('planned', 'removed', 'failed') ORDER BY intent_id`).all() as Array<{ category?: unknown; relative_path?: unknown }>;
   for (const intent of intents) {
     if (!RETENTION_CATEGORIES.includes(intent.category as RetentionCategory) || typeof intent.relative_path !== 'string') continue;
     const category = intent.category as RetentionCategory;
     const parts = intent.relative_path.split('/');
     if (parts.some((part) => !safeSegment(part))) continue;
+    if (category === 'quarantine') {
+      for (const root of options.paths.approvedQuarantineRoots) {
+        const auditBase = options.paths.approvedReleaseRoots.find((release) => contained(release, root)) ?? root;
+        const expectedPath = join(root, parts[parts.length - 1]!);
+        if (relativePath(auditBase, expectedPath) !== intent.relative_path) continue;
+        const candidate = quarantineCandidate(options, root, auditBase, expectedPath, now);
+        if (candidate && !existing.has(`quarantine:${intent.relative_path}`)) candidates.push(candidate);
+        break;
+      }
+      continue;
+    }
     const jobId = parts[1];
     if (parts[0] !== 'jobs' || !safeSegment(jobId)) continue;
     if (category === 'worktree' ? !eligibleWorktreeJobs.has(jobId) : !eligibleJobs.has(jobId)) continue;
@@ -611,9 +641,9 @@ export function createRetentionStartupHook(options: RetentionOptions): Retention
         } finally { await cacheRoot.close(); }
       }
       for (const root of options.paths.approvedQuarantineRoots) {
-        const auditBase = options.paths.approvedReleaseRoots.find((release) => contained(release, root)) ?? root;
-        await addChildren(roots, candidates, options.paths, root, auditBase, 'quarantine', RETENTION_DAYS.quarantine, new Set());
+        if (!roots.has(resolve(root))) throw new Error('retention quarantine root is not held');
       }
+      await quarantineCandidates(options, roots, now, candidates);
       await databaseCandidates(options, roots, now, candidates);
       await reconcileIntents(secureOptions, now, candidates);
       const blockers: QueueBlocker[] = [];
