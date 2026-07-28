@@ -14,7 +14,7 @@ const ELIGIBLE_TERMINAL_ROW_SQL = `state IN ('succeeded', 'failed', 'cancelled',
   AND terminal_at IS NOT NULL AND terminal_at < ?
   AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL AND cleanup_blocker_code IS NULL
   AND container_id IS NULL AND container_name IS NULL
-  AND artifact_staging_path IS NULL AND artifact_quarantine_path IS NULL AND artifact_quarantine_intent_path IS NULL
+  AND artifact_staging_path IS NULL AND artifact_quarantine_intent_path IS NULL
   AND publish_blocker_code IS NULL`;
 
 export type RetentionCategory = (typeof RETENTION_CATEGORIES)[number];
@@ -188,6 +188,14 @@ function safeSegment(value: unknown): value is string {
     && !value.includes('/') && !value.includes('\\') && !value.includes('\0');
 }
 
+function isCanonicalQuarantinePath(jobId: string, path: unknown): path is string {
+  return path === `quarantine/${jobId}` || path === `.osi-image-builder/quarantine/${jobId}`;
+}
+
+function assertCanonicalQuarantinePath(jobId: string, path: unknown): void {
+  if (path !== null && !isCanonicalQuarantinePath(jobId, path)) throw new Error('persisted quarantine path is not canonical');
+}
+
 function relativePath(base: string, target: string): string {
   const value = relative(resolve(base), resolve(target));
   return value.split(sep).join('/');
@@ -294,10 +302,11 @@ async function databaseCandidates(options: RetentionOptions, roots: Map<string, 
   if (!options.db) return;
   await terminalWorktreeCandidates(options, roots, now, result);
   const cutoff = new Date(threshold(now, RETENTION_DAYS.rows)).toISOString();
-  const expiredRows = options.db.prepare(`SELECT job_id FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`).all(cutoff) as Array<{ job_id?: unknown }>;
+  const expiredRows = options.db.prepare(`SELECT job_id, artifact_quarantine_path FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`).all(cutoff) as Array<{ job_id?: unknown; artifact_quarantine_path?: unknown }>;
   const rowCandidates: Candidate[] = [];
   for (const row of expiredRows) {
     if (!safeSegment(row.job_id)) continue;
+    if (row.artifact_quarantine_path !== null && !isCanonicalQuarantinePath(row.job_id, row.artifact_quarantine_path)) continue;
     const jobRoot = join(options.paths.stateRoot, 'jobs', row.job_id);
     rowCandidates.push({ base: options.paths.stateRoot, auditBase: options.paths.stateRoot, path: jobRoot, category: 'row', cutoffDays: 0, stateEligible: true, durable: true });
     const stateRoot = roots.get(resolve(options.paths.stateRoot));
@@ -445,11 +454,26 @@ function assertJobRootAbsentSync(stateRoot: FileHandle, jobsRoot: FileHandle | u
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
 }
 
+async function assertQuarantineRootsAbsent(options: RetentionOptionsWithRoots, jobId: string): Promise<void> {
+  for (const root of options.paths.approvedQuarantineRoots) {
+    if (!await pathAbsentThroughRoot(options, root, join(root, jobId))) throw new Error('terminal quarantine root is still present');
+  }
+}
+
+function assertQuarantineRootsAbsentSync(options: RetentionOptionsWithRoots, jobId: string): void {
+  for (const path of options.paths.approvedQuarantineRoots) {
+    const root = options.__retentionRoots.get(resolve(path));
+    if (!root) throw new Error('retention quarantine root is not held');
+    try { lstatSync(procPath(root.handle, jobId)); throw new Error('terminal quarantine root reappeared during row purge'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  }
+}
+
 async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string): Promise<readonly QueueBlocker[]> {
   if (!options.db) return [];
   const blockers: QueueBlocker[] = [];
   const cutoff = new Date(threshold(now, RETENTION_DAYS.rows)).toISOString();
-  const rows = options.db.prepare(`SELECT job_id FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`).all(cutoff) as Array<{ job_id?: unknown }>;
+  const rows = options.db.prepare(`SELECT job_id, artifact_quarantine_path FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`).all(cutoff) as Array<{ job_id?: unknown; artifact_quarantine_path?: unknown }>;
   const stateRoot = options.__retentionRoots.get(resolve(options.paths.stateRoot));
   if (!stateRoot) throw new Error('retention state root is not held');
   let jobsRoot: FileHandle | undefined;
@@ -462,7 +486,9 @@ async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string
       const jobPath = join(options.paths.stateRoot, 'jobs', jobId);
       const record: RetentionPruneRecord = { category: 'row', relativePath: `jobs/${jobId}`, action: 'removed', bytes: 0, timestamp: now };
       try {
+        assertCanonicalQuarantinePath(jobId, row.artifact_quarantine_path);
         if (!await pathAbsentThroughRoot(options, options.paths.stateRoot, jobPath)) throw new Error('terminal job root is still present');
+        if (row.artifact_quarantine_path !== null) await assertQuarantineRootsAbsent(options, jobId);
         const intent = options.db.prepare(`SELECT status FROM retention_prune_intents
           WHERE category='row' AND relative_path=?`).get(record.relativePath) as { status?: unknown } | undefined;
         if (intent?.status !== 'removed') throw new Error('terminal job row intent is not removed');
@@ -479,8 +505,10 @@ async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string
       options.db.exec('BEGIN IMMEDIATE');
       try {
         assertJobRootAbsentSync(stateRoot.handle, jobsRoot, jobId);
-        const eligible = options.db.prepare(`SELECT job_id FROM jobs WHERE job_id=? AND ${ELIGIBLE_TERMINAL_ROW_SQL}`).get(jobId, cutoff);
+        const eligible = options.db.prepare(`SELECT job_id, artifact_quarantine_path FROM jobs WHERE job_id=? AND ${ELIGIBLE_TERMINAL_ROW_SQL}`).get(jobId, cutoff) as { job_id?: unknown; artifact_quarantine_path?: unknown } | undefined;
         if (!eligible) throw new Error('terminal job row eligibility changed before purge');
+        assertCanonicalQuarantinePath(jobId, eligible.artifact_quarantine_path);
+        if (eligible.artifact_quarantine_path !== null) assertQuarantineRootsAbsentSync(options, jobId);
         options.db.prepare('INSERT INTO retention_purge_authorizations (job_id, authorized_at) VALUES (?, ?)').run(jobId, now);
         options.db.prepare('DELETE FROM queue_dispatch_claims WHERE job_id=?').run(jobId);
         options.db.prepare('DELETE FROM cleanup_stop_authorization_outcomes WHERE job_id=?').run(jobId);
@@ -498,6 +526,7 @@ async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string
         const deleted = options.db.prepare(`DELETE FROM jobs WHERE job_id=? AND ${ELIGIBLE_TERMINAL_ROW_SQL}`).run(jobId, cutoff);
         if (deleted.changes !== 1) throw new Error('terminal job row was not deleted');
         assertJobRootAbsentSync(stateRoot.handle, jobsRoot, jobId);
+        if (eligible.artifact_quarantine_path !== null) assertQuarantineRootsAbsentSync(options, jobId);
         options.db.exec('COMMIT');
       } catch (error) {
         try { options.db.exec('ROLLBACK'); } catch { /* preserve row prune failure */ }
@@ -513,8 +542,8 @@ async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string
 async function reconcileIntents(options: RetentionOptionsWithRoots, now: string, candidates: Candidate[]): Promise<void> {
   if (!options.db) return;
   const cutoff = new Date(threshold(now, RETENTION_DAYS.rows)).toISOString();
-  const jobs = options.db.prepare(`SELECT job_id FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`).all(cutoff) as Array<{ job_id?: unknown }>;
-  const eligibleJobs = new Set(jobs.flatMap((row) => safeSegment(row.job_id) ? [row.job_id] : []));
+  const jobs = options.db.prepare(`SELECT job_id, artifact_quarantine_path FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`).all(cutoff) as Array<{ job_id?: unknown; artifact_quarantine_path?: unknown }>;
+  const eligibleJobs = new Set(jobs.flatMap((row) => safeSegment(row.job_id) && (row.artifact_quarantine_path === null || isCanonicalQuarantinePath(row.job_id, row.artifact_quarantine_path)) ? [row.job_id] : []));
   const worktreeCutoff = new Date(threshold(now, RETENTION_DAYS.worktrees)).toISOString();
   const worktreeJobs = options.db.prepare(`SELECT job_id FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`).all(worktreeCutoff) as Array<{ job_id?: unknown }>;
   const eligibleWorktreeJobs = new Set(worktreeJobs.flatMap((row) => safeSegment(row.job_id) ? [row.job_id] : []));

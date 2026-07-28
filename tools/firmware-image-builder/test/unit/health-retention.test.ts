@@ -475,6 +475,70 @@ describe('startup retention', () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM retention_prunes WHERE category='row' AND relative_path='jobs/purgeable' AND action='removed'").get()).toEqual({ count: 1 });
   });
 
+  it('purges an old quarantined terminal job after the canonical quarantine and job roots are removed', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    const jobId = 'quarantined-old';
+    const quarantinePath = `.osi-image-builder/quarantine/${jobId}`;
+    const quarantineRoot = join(paths.approvedQuarantineRoots[0]!, jobId);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
+      .run(jobId, 'request-quarantined-old', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD, quarantinePath);
+    await mkdir(join(paths.stateRoot, 'jobs', jobId, 'child'), { recursive: true });
+    await writeFile(join(paths.stateRoot, 'jobs', jobId, 'child', 'state.json'), '{}');
+    await mkdir(quarantineRoot, { recursive: true });
+    await writeFile(join(quarantineRoot, 'artifact.bin'), 'quarantined');
+    await utimes(quarantineRoot, new Date(OLD), new Date(OLD));
+    db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run(jobId, 903, OLD);
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, 0, 'terminal', 'succeeded', '{}', ?)").run(jobId, OLD);
+
+    await expect(createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })()).resolves.toEqual({ blockers: [] });
+
+    expect(db.prepare('SELECT job_id FROM jobs WHERE job_id=?').get(jobId)).toBeUndefined();
+    expect(db.prepare('SELECT COUNT(*) AS count FROM queue_entries WHERE job_id=?').get(jobId)).toEqual({ count: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM job_events WHERE job_id=?').get(jobId)).toEqual({ count: 0 });
+    await expect(import('node:fs/promises').then(({ access }) => access(join(paths.stateRoot, 'jobs', jobId)))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(import('node:fs/promises').then(({ access }) => access(quarantineRoot))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('retains a terminal job while its young canonical quarantine remains present', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    const jobId = 'quarantined-young';
+    const quarantinePath = `quarantine/${jobId}`;
+    const quarantineRoot = join(paths.approvedQuarantineRoots[0]!, jobId);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
+      .run(jobId, 'request-quarantined-young', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD, quarantinePath);
+    await mkdir(join(paths.stateRoot, 'jobs', jobId), { recursive: true });
+    await mkdir(quarantineRoot, { recursive: true });
+    await writeFile(join(quarantineRoot, 'artifact.bin'), 'quarantined');
+
+    await expect(createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })()).resolves.toEqual({ blockers: [{ code: 'RETENTION_ROW_PRUNE_FAILED', details: expect.objectContaining({ reason: 'terminal quarantine root is still present' }) }] });
+
+    expect(db.prepare('SELECT job_id, artifact_quarantine_path FROM jobs WHERE job_id=?').get(jobId)).toEqual({ job_id: jobId, artifact_quarantine_path: quarantinePath });
+    await expect(import('node:fs/promises').then(({ access }) => access(quarantineRoot))).resolves.toBeUndefined();
+  });
+
+  it('blocks row purge and keeps the job root for a malformed persisted quarantine path', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    const jobId = 'quarantined-malformed';
+    const quarantinePath = `quarantine/${jobId}/extra`;
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
+      .run(jobId, 'request-quarantined-malformed', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD, quarantinePath);
+    await mkdir(join(paths.stateRoot, 'jobs', jobId, 'child'), { recursive: true });
+    await writeFile(join(paths.stateRoot, 'jobs', jobId, 'child', 'state.json'), '{}');
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, 0, 'terminal', 'succeeded', '{}', ?)").run(jobId, OLD);
+
+    await expect(createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })()).resolves.toMatchObject({ blockers: [{ code: 'RETENTION_ROW_PRUNE_FAILED' }] });
+
+    expect(db.prepare('SELECT job_id, artifact_quarantine_path FROM jobs WHERE job_id=?').get(jobId)).toEqual({ job_id: jobId, artifact_quarantine_path: quarantinePath });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM job_events WHERE job_id=?').get(jobId)).toEqual({ count: 1 });
+    await expect(import('node:fs/promises').then(({ access }) => access(join(paths.stateRoot, 'jobs', jobId, 'child', 'state.json')))).resolves.toBeUndefined();
+  });
+
   it('retries a removed row intent when the job root is present', async () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
