@@ -4,4 +4,4 @@ ON job_events (
   json_extract(payload_json, '$.sourceSeq')
 )
 WHERE event_type = 'log-gap'
-  AND json_extract(payload_json, '$.sourceSeq') IS NOT NULL;
+  AND json_type(payload_json, '$.sourceSeq') IN ('integer', 'real');

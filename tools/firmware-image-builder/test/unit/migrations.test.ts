@@ -534,7 +534,19 @@ describe('versioned builder database migrations', () => {
     db.close();
   });
 
-  it('keeps text source sequences distinct from numeric values while enforcing text duplicates', async () => {
+  it('excludes boolean source sequences from numeric source-gap uniqueness', async () => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    insertValidJob(db, 'boolean-source-gap-index', 'building');
+    const insert = db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, ?, ?, ?)');
+
+    insert.run('boolean-source-gap-index', 0, 'log-gap', '{"sourceSeq":true}', '2026-07-28T00:00:00.000Z');
+    insert.run('boolean-source-gap-index', 1, 'log-gap', '{"sourceSeq":1}', '2026-07-28T00:00:01.000Z');
+    expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='boolean-source-gap-index'").get()).toEqual({ count: 2 });
+    db.close();
+  });
+
+  it('excludes text source sequences from source-gap uniqueness', async () => {
     const path = await temporaryDatabase();
     const db = openBuilderDatabase(path);
     insertValidJob(db, 'text-source-gap-index', 'building');
@@ -542,8 +554,8 @@ describe('versioned builder database migrations', () => {
 
     insert.run('text-source-gap-index', 0, 'log-gap', '{"sourceSeq":42}', '2026-07-28T00:00:00.000Z');
     insert.run('text-source-gap-index', 1, 'log-gap', '{"sourceSeq":"42"}', '2026-07-28T00:00:01.000Z');
-    expect(() => insert.run('text-source-gap-index', 2, 'log-gap', '{"sourceSeq":"42"}', '2026-07-28T00:00:02.000Z'))
-      .toThrow(/UNIQUE constraint failed/u);
+    insert.run('text-source-gap-index', 2, 'log-gap', '{"sourceSeq":"42"}', '2026-07-28T00:00:02.000Z');
+    expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='text-source-gap-index'").get()).toEqual({ count: 3 });
     db.close();
   });
 
@@ -583,7 +595,7 @@ describe('versioned builder database migrations', () => {
     db.close();
   });
 
-  it('fails the source-gap migration without deduping preexisting duplicates', async () => {
+  it('fails the source-gap migration atomically for preexisting numeric-equivalent duplicates', async () => {
     const path = await temporaryDatabase();
     const historical = new DatabaseSync(path);
     for (const migration of MIGRATION_REGISTRY.slice(0, 15)) {
@@ -595,13 +607,14 @@ describe('versioned builder database migrations', () => {
     historical.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, \'log-gap\', ?, ?)')
       .run('duplicate-source-gap', 0, '{"sourceSeq":7}', '2026-07-28T00:00:00.000Z');
     historical.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, \'log-gap\', ?, ?)')
-      .run('duplicate-source-gap', 1, '{"sourceSeq":7}', '2026-07-28T00:00:01.000Z');
+      .run('duplicate-source-gap', 1, '{"sourceSeq":7.0}', '2026-07-28T00:00:01.000Z');
     historical.close();
 
     expectMigrationError(() => openBuilderDatabase(path), /migration 016_log_gap_source_seq_unique\.sql failed/u, /UNIQUE constraint failed/u);
     const unchanged = new DatabaseSync(path);
     expect(unchanged.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 15 });
-    expect(unchanged.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='duplicate-source-gap' AND event_type='log-gap'").get()).toEqual({ count: 2 });
+    expect(unchanged.prepare("SELECT payload_json FROM job_events WHERE job_id='duplicate-source-gap' AND event_type='log-gap' ORDER BY seq").all())
+      .toEqual([{ payload_json: '{"sourceSeq":7}' }, { payload_json: '{"sourceSeq":7.0}' }]);
     expect(unchanged.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='job_events_log_gap_source_seq'").get()).toBeUndefined();
     unchanged.close();
   });
