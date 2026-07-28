@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { buildHealthSnapshot, createStructuredRecord } from '../../api/src/health.js';
+import { buildHealthSnapshot, collectHealthSnapshot, createStructuredRecord } from '../../api/src/health.js';
 import { createRetentionStartupHook, type RetentionPaths } from '../../api/src/retention.js';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { createStartupCoordinator } from '../../api/src/startup-order.js';
@@ -108,6 +108,33 @@ describe('observability integration', () => {
     const snapshot = (await import('../../api/src/health.js')).collectHealthSnapshot({ db, now: NOW, diskFreeBytes: 25 * 1024 ** 3, builderImage: null });
     expect(snapshot.lastEventAt).toBe('2026-07-28T11:59:00.000Z');
     expect(snapshot.lastEventAgeSeconds).toBe(60);
+    db.close();
+  });
+
+  it('exposes interrupted jobs with pending cleanup and a completed cleanup lease', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-image-builder-health-cleanup-'));
+    pathsToRemove.push(root);
+    const db = openBuilderDatabase(join(root, 'jobs.sqlite'));
+    insertTerminalJob(db, 'interrupted-cleanup', '2026-07-28T11:00:00.000Z');
+    const admissionId = 'cln_0123456789abcdefghjkmnpqrs';
+    const tokenHash = 'c'.repeat(64);
+    db.prepare(`INSERT INTO cleanup_leases
+      (admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path,
+       credential_sha256, fence_generation, fence_token_hash, proof_json, admitted_at, claim_at,
+       complete_at, completion_evidence_path, completion_evidence_sha256)
+      VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, '{}', ?, ?, ?, ?, ?)`)
+      .run(admissionId, 'interrupted-cleanup', `osi-image-builder-cleanup@${admissionId}.service`, 'health-test', NOW,
+        `recovery/cleanup-credentials/${admissionId}.token`, 'd'.repeat(64), 4, tokenHash,
+        '2026-07-28T10:59:00.000Z', '2026-07-28T10:59:01.000Z', '2026-07-28T10:59:02.000Z',
+        'recovery/cleanup-evidence.json', 'e'.repeat(64));
+    db.prepare(`UPDATE jobs SET state='interrupted', terminal_error_code='CANCELLED', terminal_error_json='{}',
+      cleanup_generation=4, cleanup_fence_generation=4, cleanup_fence_token_hash=?, cleanup_admission_id=?
+      WHERE job_id=?`).run(tokenHash, admissionId, 'interrupted-cleanup');
+
+    const snapshot = collectHealthSnapshot({ db, now: NOW, diskFreeBytes: 25 * 1024 ** 3, builderImage: null });
+    expect(snapshot.activeJobId).toBe('interrupted-cleanup');
+    expect(snapshot.cleanup).toEqual({ status: 'completed', generation: 4, handBackPending: true });
+    expect(snapshot.recoveryBlockers).toEqual([]);
     db.close();
   });
 });

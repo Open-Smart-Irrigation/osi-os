@@ -190,10 +190,13 @@ export function collectHealthSnapshot(options: CollectHealthOptions): HealthSnap
   const active = options.db.prepare(`SELECT
       job_id, current_stage, preflight_expires_at, runner_unit, runner_lease_expires_at,
       container_id, container_name, container_image_digest, container_labels_json,
-      cleanup_generation, cleanup_admission_id, cleanup_blocker_code, cleanup_blocker_json,
+      cleanup_generation, cleanup_fence_generation, cleanup_admission_id, cleanup_blocker_code, cleanup_blocker_json,
       publish_blocker_code, publish_blocker_json
     FROM jobs
-    WHERE state NOT IN ('queued', 'succeeded', 'failed', 'cancelled', 'interrupted')
+    WHERE (state NOT IN ('queued', 'succeeded', 'failed', 'cancelled', 'interrupted')
+      OR (state IN ('succeeded', 'failed', 'cancelled', 'interrupted') AND (
+        cleanup_fence_generation IS NOT NULL OR cleanup_admission_id IS NOT NULL OR cleanup_blocker_code IS NOT NULL
+      )))
     ORDER BY accepted_at, job_id LIMIT 1`).get();
   const lastEvent = options.db.prepare('SELECT MAX(at) AS at FROM job_events').get();
   const lastTerminal = options.db.prepare(`SELECT terminal_error_code, terminal_error_json, terminal_at
@@ -221,7 +224,7 @@ export function collectHealthSnapshot(options: CollectHealthOptions): HealthSnap
       runner: { liveness: options.runnerLiveness ?? (activeRow.runner_unit ? 'unknown' : 'inactive') },
       cleanup: {
         status: leaseStatus,
-        generation: Number(activeRow.cleanup_generation ?? 0),
+        generation: Number(activeRow.cleanup_fence_generation ?? activeRow.cleanup_generation ?? 0),
         handBackPending: leaseStatus === 'completed',
       },
       container: {
