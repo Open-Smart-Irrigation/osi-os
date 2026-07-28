@@ -141,6 +141,10 @@ function isActiveState(value: unknown): value is ActiveRecoveryState {
   return typeof value === 'string' && ACTIVE_STATES.has(value as ActiveRecoveryState);
 }
 
+function isRunnerLeaseOwnedState(value: unknown): boolean {
+  return isActiveState(value) || value === 'publishing';
+}
+
 function runnerUnit(jobId: string): string {
   return `osi-image-builder-runner@${jobId}.service`;
 }
@@ -299,7 +303,7 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
         if (handedOff) {
           const current = currentJob(jobId);
           const lease = current === undefined ? { kind: 'malformed' as const } : runnerLeaseState(current, at);
-          if (current !== undefined && isActiveState(current.state) && current.runner_unit === runnerUnit(jobId) && lease.kind === 'live') return true;
+          if (current !== undefined && isRunnerLeaseOwnedState(current.state) && current.runner_unit === runnerUnit(jobId) && lease.kind === 'live') return true;
           lost = true;
           return false;
         }
@@ -318,7 +322,7 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
         if (claim === undefined || claim.jobId !== jobId || claim.owner !== owner) {
           const current = currentJob(jobId);
           const lease = current === undefined ? { kind: 'malformed' as const } : runnerLeaseState(current, at);
-          if (claim === undefined && current !== undefined && isActiveState(current.state) && current.runner_unit === runnerUnit(jobId) && lease.kind === 'live') {
+          if (claim === undefined && current !== undefined && isRunnerLeaseOwnedState(current.state) && current.runner_unit === runnerUnit(jobId) && lease.kind === 'live') {
             handedOff = true;
             if (timer !== undefined) clearInterval(timer);
             return true;
@@ -615,8 +619,8 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
         return persistRecoveryBlocker(current, unit, reason, { code: 'DIRECT_PROOF_UNAVAILABLE' }, at, 'SERVICE_START_FAILED', finalClaim.owner, finalClaim.leaseExpiresAt);
       }
       if (!heartbeat.checkpoint() || proof.kind !== 'start-failure' || proof.runnerUnit !== unit || proof.startAttemptedAt !== claim.startAttemptedAt || proof.unitInactiveAt !== claim.unitInactiveAt
-        || Date.parse(proof.container.observedAt) < Date.parse(claim.unitInactiveAt)
-        || Date.parse(proof.logs.verifiedAt) < Date.parse(claim.unitInactiveAt)) {
+        || Date.parse(proof.container.observedAt) < Date.parse(claim.startAttemptedAt)
+        || Date.parse(proof.logs.verifiedAt) < Date.parse(claim.startAttemptedAt)) {
         return { kind: 'blocked', reason: 'DIRECT_PROOF_MISMATCH', jobId };
       }
       const final = await inspectInactive(unit);

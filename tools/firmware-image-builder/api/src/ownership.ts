@@ -942,7 +942,16 @@ function shapeDirectLog(value: unknown, field: string, at: string): void {
 function shapeDirectProof(value: unknown, at: string): void {
   const proof = shapeRecord(value, 'direct interruption proof'); preparedEnum(proof.kind, ['start-failure', 'active'], 'direct interruption kind'); preparedString(proof.runnerUnit, 'direct interruption runner unit', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(proof.unitInactiveAt, 'direct interruption inactive time');
   shapeNullContainer(proof.container, 'direct interruption container', at); shapeStaging(proof.staging, 'direct interruption staging', false, false); shapeLiteral(proof.blocker, 'none', 'direct interruption blocker'); shapeLiteral(proof.cleanupAdmission, null, 'direct interruption cleanupAdmission'); shapeLiteral(proof.cleanupFence, null, 'direct interruption cleanupFence'); shapeDirectLog(proof.logs, 'direct interruption logs', at); shapeChronology([['direct unit inactiveAt', proof.unitInactiveAt], ['direct command.at', at]], 'direct interruption');
-  if (proof.kind === 'start-failure') { preparedInstant(proof.startAttemptedAt, 'direct interruption startAttemptedAt'); shapeChronology([['direct startAttemptedAt', proof.startAttemptedAt], ['direct unitInactiveAt', proof.unitInactiveAt]], 'direct interruption'); shapeLiteral(proof.runnerLeaseOwner, null, 'direct interruption runnerLeaseOwner'); shapeLiteral(proof.runnerLeaseExpiresAt, null, 'direct interruption runnerLeaseExpiresAt'); }
+  if (proof.kind === 'start-failure') {
+    const container = shapeRecord(proof.container, 'direct interruption container');
+    const logs = shapeRecord(proof.logs, 'direct interruption logs');
+    preparedInstant(proof.startAttemptedAt, 'direct interruption startAttemptedAt');
+    shapeChronology([['direct startAttemptedAt', proof.startAttemptedAt], ['direct unitInactiveAt', proof.unitInactiveAt]], 'direct interruption');
+    shapeChronology([['direct startAttemptedAt', proof.startAttemptedAt], ['direct container observedAt', container.observedAt]], 'direct interruption container');
+    shapeChronology([['direct startAttemptedAt', proof.startAttemptedAt], ['direct logs verifiedAt', logs.verifiedAt]], 'direct interruption logs');
+    shapeLiteral(proof.runnerLeaseOwner, null, 'direct interruption runnerLeaseOwner');
+    shapeLiteral(proof.runnerLeaseExpiresAt, null, 'direct interruption runnerLeaseExpiresAt');
+  }
   else { preparedString(proof.runnerLeaseOwner, 'direct interruption runnerLeaseOwner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(proof.runnerLeaseExpiresAt, 'direct interruption runnerLeaseExpiresAt'); preparedInstant(proof.leaseStaleAt, 'direct interruption leaseStaleAt'); shapeChronology([['direct runner lease expiry', proof.runnerLeaseExpiresAt], ['direct lease stale time', proof.leaseStaleAt], ['direct command.at', at]], 'direct interruption lease'); }
 }
 
@@ -1772,9 +1781,11 @@ function validateDirectProof(db: DbFacade, proof: DirectInterruptionProof, job: 
   }
   if (job.runner_unit !== proof.runnerUnit) throw new OwnershipConflictError('stale-runner-owner', 'interruption unit does not match the job');
   validateNullContainerProof(proof.container, at);
+  if (proof.kind === 'start-failure' && proof.container.observedAt < proof.startAttemptedAt) throw new OwnershipValidationError('start failure container proof predates the start attempt');
   if (job.container_id !== null || job.container_name !== null || job.container_image_digest !== null || job.container_label_job_id !== null || job.container_label_manifest_sha !== null || job.container_labels_json !== null) throw new OwnershipConflictError('identity-mismatch', 'interruption proof has persisted container identity');
   if (proof.staging.kind !== 'absent' || proof.blocker !== 'none' || proof.cleanupAdmission !== null || proof.cleanupFence !== null) throw new OwnershipValidationError('direct interruption proof retains cleanup work');
   validateDirectLogProof(db, proof.logs, String(job.job_id), at);
+  if (proof.kind === 'start-failure' && proof.logs.verifiedAt < proof.startAttemptedAt) throw new OwnershipValidationError('start failure log proof predates the start attempt');
 }
 
 function validatePersistedLogEvidence(db: DbFacade, jobId: string, at: string): void {
