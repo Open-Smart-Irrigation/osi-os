@@ -124,7 +124,7 @@ static int cleanup_scratch(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    const char *parent = argc == 2 ? argv[1] : getenv("TMPDIR");
+    const char *parent;
     const char *source_contents = "source-content\n";
     const char *destination_contents = "destination-content\n";
     char scratch_template[PATH_MAX];
@@ -133,14 +133,13 @@ int main(int argc, char **argv) {
     int destination_created = 0;
     struct probe_result result = { 0, "FILESYSTEM_UNAVAILABLE", "probe scratch location is unavailable", 0, 0, 0 };
 
-    if (argc > 2) {
-        result.code = "PROBE_USAGE";
-        result.detail = "expected zero or one scratch parent argument";
+    if (argc != 2 || argv[1][0] != '/') {
+        result.code = "SCRATCH_PARENT_INVALID";
+        result.detail = "exactly one absolute scratch parent is required";
         print_result(&result);
-        return 64;
+        return 2;
     }
-    if (parent == NULL || (parent[0] != '\0' && parent[0] != '/')) parent = "/tmp";
-    if (parent[0] == '\0') parent = "/tmp";
+    parent = argv[1];
     if (snprintf(scratch_template, sizeof(scratch_template), "%s%sosi-image-builder-probe-XXXXXX",
         parent, parent[strlen(parent) - 1] == '/' ? "" : "/") >= (int)sizeof(scratch_template)) {
         result.code = "FILESYSTEM_UNAVAILABLE";

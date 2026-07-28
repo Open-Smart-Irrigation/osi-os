@@ -1,15 +1,18 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { access, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { runNativePrerequisiteProbes } from '../../installer/probes.js';
 
 const execFile = promisify(execFileCallback);
 const installer = new URL('../../installer/', import.meta.url).pathname;
 const hostSource = join(installer, 'probe-host.c');
 const renameSource = join(installer, 'probe-renameat2.c');
 const flags = ['-std=c17', '-D_GNU_SOURCE', '-O2', '-Wall', '-Wextra', '-Werror'];
+const temporaryDirectories: string[] = [];
 
 type ProbeResult = Readonly<{
   readonly available: boolean;
@@ -43,29 +46,54 @@ async function snapshotTree(root: string): Promise<readonly unknown[]> {
   }));
 }
 
+async function temporaryDirectory(prefix: string): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
 async function createMutationFixture(): Promise<{ readonly root: string; readonly selection: string; readonly output: string }> {
-  const root = await mkdtemp(join(tmpdir(), 'osi-image-builder-probe-unit-'));
+  const root = await temporaryDirectory('osi-image-builder-probe-unit-');
   const selection = join(root, 'selection.json');
   const output = join(root, 'approved-output');
-  await stat(root);
   await writeFile(selection, '{"selected":"old-version"}\n');
-  await import('node:fs/promises').then(({ mkdir }) => mkdir(output));
+  await mkdir(output);
   await writeFile(join(output, 'release.bin'), 'immutable fixture\n');
   return { root, selection, output };
 }
 
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
+
 describe('native host probes', () => {
   it('compiles both probes with the required C17 warning-as-error contract', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'osi-image-builder-probe-build-'));
+    const root = await temporaryDirectory('osi-image-builder-probe-build-');
     await expect(compile(hostSource, join(root, 'probe-host'))).resolves.toBeUndefined();
     await expect(compile(renameSource, join(root, 'probe-renameat2'))).resolves.toBeUndefined();
+  });
+
+  it('requires exactly one absolute selected-filesystem scratch parent', async () => {
+    const root = await temporaryDirectory('osi-image-builder-probe-argv-');
+    const binary = join(root, 'probe-renameat2');
+    await compile(renameSource, binary);
+
+    for (const args of [[], ['relative-output'], ['/tmp', '/tmp']] as const) {
+      const result = await run(binary, args);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.result).toMatchObject({
+        available: false,
+        code: 'SCRATCH_PARENT_INVALID',
+        detail: 'exactly one absolute scratch parent is required',
+      });
+    }
   });
 
   it('returns typed host evidence and never writes selection or approved output', async () => {
     const fixture = await createMutationFixture();
     const beforeSelection = await readFile(fixture.selection);
     const beforeOutput = await snapshotTree(fixture.output);
-    const root = await mkdtemp(join(tmpdir(), 'osi-image-builder-probe-host-'));
+    const root = await temporaryDirectory('osi-image-builder-probe-host-');
     const binary = join(root, 'probe-host');
     await compile(hostSource, binary);
 
@@ -86,7 +114,7 @@ describe('native host probes', () => {
     const fixture = await createMutationFixture();
     const beforeSelection = await readFile(fixture.selection);
     const beforeOutput = await snapshotTree(fixture.output);
-    const root = await mkdtemp(join(tmpdir(), 'osi-image-builder-probe-rename-'));
+    const root = await temporaryDirectory('osi-image-builder-probe-rename-');
     const binary = join(root, 'probe-renameat2');
     await compile(renameSource, binary);
 
@@ -108,7 +136,7 @@ describe('native host probes', () => {
     const fixture = await createMutationFixture();
     const beforeSelection = await readFile(fixture.selection);
     const beforeOutput = await snapshotTree(fixture.output);
-    const root = await mkdtemp(join(tmpdir(), 'osi-image-builder-probe-unsupported-'));
+    const root = await temporaryDirectory('osi-image-builder-probe-unsupported-');
     const binary = join(root, 'probe-renameat2');
     await compile(renameSource, binary);
 
@@ -119,5 +147,211 @@ describe('native host probes', () => {
     expect(result.result.detail.length).toBeLessThanOrEqual(240);
     expect(await readFile(fixture.selection)).toEqual(beforeSelection);
     expect(await snapshotTree(fixture.output)).toEqual(beforeOutput);
+  });
+
+  it('maps a missing fixed GCC to typed unavailable and cleans compile scratch', async () => {
+    const calls: Array<{ readonly executable: string; readonly args: readonly string[]; readonly options: Readonly<Record<string, unknown>> }> = [];
+    const removals: string[] = [];
+
+    const result = await runNativePrerequisiteProbes({
+      scratchParent: '/approved-output',
+      sourceDirectory: installer,
+      dependencies: {
+        fs: {
+          mkdtemp: async () => '/private/compile-scratch',
+          rm: async (path) => { removals.push(path); },
+        },
+        exec: async (executable, args, options) => {
+          calls.push({ executable, args, options });
+          return { stdout: '', stderr: '', exitCode: null, signal: null, spawnError: 'ENOENT' };
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      available: false,
+      code: 'GCC_MISSING',
+      detail: 'required compiler /usr/bin/gcc is unavailable',
+      mutation: 'none',
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      executable: '/usr/bin/gcc',
+      args: ['-std=c17', '-D_GNU_SOURCE', '-O2', '-Wall', '-Wextra', '-Werror', join(installer, 'probe-host.c'), '-o', '/private/compile-scratch/probe-host'],
+      options: {
+        env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent', LANG: 'C', LC_ALL: 'C' },
+        timeout: 10_000,
+        maxBuffer: 16 * 1024,
+        shell: false,
+      },
+    });
+    expect(removals).toEqual(['/private/compile-scratch']);
+  });
+
+  it('maps a required header compile failure without mutating selection or output', async () => {
+    const fixture = await createMutationFixture();
+    const beforeSelection = await readFile(fixture.selection);
+    const beforeOutput = await snapshotTree(fixture.output);
+    const removals: string[] = [];
+
+    const result = await runNativePrerequisiteProbes({
+      scratchParent: fixture.output,
+      sourceDirectory: installer,
+      dependencies: {
+        fs: {
+          mkdtemp: async () => '/private/header-compile',
+          rm: async (path) => { removals.push(path); },
+        },
+        exec: async () => ({
+          stdout: '',
+          stderr: 'probe-host.c: fatal error: linux/fs.h: No such file or directory\n',
+          exitCode: 1,
+          signal: null,
+        }),
+      },
+    });
+
+    expect(result).toEqual({
+      available: false,
+      code: 'LIBC_HEADERS_MISSING',
+      detail: 'required libc or Linux filesystem headers are unavailable',
+      mutation: 'none',
+    });
+    expect(removals).toEqual(['/private/header-compile']);
+    expect(await readFile(fixture.selection)).toEqual(beforeSelection);
+    expect(await snapshotTree(fixture.output)).toEqual(beforeOutput);
+  });
+
+  it('maps a missing absolute make executable and keeps the environment fixed', async () => {
+    const calls: Array<{ readonly executable: string; readonly args: readonly string[]; readonly options: Readonly<Record<string, unknown>> }> = [];
+    const result = await runNativePrerequisiteProbes({
+      scratchParent: '/approved-output',
+      sourceDirectory: installer,
+      dependencies: {
+        fs: {
+          mkdtemp: async () => '/private/make-probe',
+          rm: async () => undefined,
+        },
+        exec: async (executable, args, options) => {
+          calls.push({ executable, args, options });
+          if (executable === '/usr/bin/make') {
+            return { stdout: '', stderr: '', exitCode: null, signal: null, spawnError: 'ENOENT' };
+          }
+          return { stdout: '', stderr: '', exitCode: 0, signal: null };
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      available: false,
+      code: 'MAKE_MISSING',
+      detail: 'required build tool /usr/bin/make is unavailable',
+      mutation: 'none',
+    });
+    expect(calls.map(({ executable, args }) => [executable, args])).toEqual([
+      ['/usr/bin/gcc', ['-std=c17', '-D_GNU_SOURCE', '-O2', '-Wall', '-Wextra', '-Werror', join(installer, 'probe-host.c'), '-o', '/private/make-probe/probe-host']],
+      ['/usr/bin/make', ['--version']],
+    ]);
+    expect(calls[1]?.options).toMatchObject({
+      env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent', LANG: 'C', LC_ALL: 'C' },
+      timeout: 10_000,
+      maxBuffer: 16 * 1024,
+      shell: false,
+    });
+  });
+
+  it.each([
+    ['LINUX_RENAMEAT2_UNAVAILABLE', 'LINUX_RENAMEAT2_MISSING', true],
+    ['RENAME_NOREPLACE_UNAVAILABLE', 'RENAME_NOREPLACE_UNAVAILABLE', false],
+    ['FILESYSTEM_UNSUPPORTED', 'FILESYSTEM_UNSUPPORTED', false],
+  ] as const)('maps %s probe evidence with zero fixture mutation', async (expectedCode, emittedCode, failAtHost) => {
+    const fixture = await createMutationFixture();
+    const beforeSelection = await readFile(fixture.selection);
+    const beforeOutput = await snapshotTree(fixture.output);
+    const removals: string[] = [];
+    let compiled = 0;
+
+    const result = await runNativePrerequisiteProbes({
+      scratchParent: fixture.output,
+      sourceDirectory: installer,
+      dependencies: {
+        fs: {
+          mkdtemp: async () => '/private/mapping-probe',
+          rm: async (path) => { removals.push(path); },
+        },
+        exec: async (executable, args) => {
+          if (executable === '/usr/bin/gcc') {
+            compiled += 1;
+            return { stdout: '', stderr: '', exitCode: 0, signal: null };
+          }
+          if (executable === '/usr/bin/make') return { stdout: 'GNU Make', stderr: '', exitCode: 0, signal: null };
+          if (args.length === 0) {
+            return {
+              stdout: JSON.stringify(failAtHost
+                ? { available: false, code: emittedCode, detail: 'untrusted detail' }
+                : { available: true, code: 'HOST_PREREQUISITES_AVAILABLE', detail: 'ok' }),
+              stderr: '',
+              exitCode: failAtHost ? 2 : 0,
+              signal: null,
+            };
+          }
+          return {
+            stdout: JSON.stringify({ available: false, code: emittedCode, detail: 'untrusted detail' }),
+            stderr: '',
+            exitCode: 2,
+            signal: null,
+          };
+        },
+      },
+    });
+
+    expect(result).toMatchObject({ available: false, code: expectedCode, mutation: 'none' });
+    expect(result.detail).not.toContain('untrusted');
+    expect(compiled).toBe(failAtHost ? 1 : 2);
+    expect(removals).toEqual(['/private/mapping-probe']);
+    expect(await readFile(fixture.selection)).toEqual(beforeSelection);
+    expect(await snapshotTree(fixture.output)).toEqual(beforeOutput);
+  });
+
+  it('fails closed on malformed probe output and rejects a relative adapter scratch parent', async () => {
+    let executions = 0;
+    let scratchCreates = 0;
+    const relative = await runNativePrerequisiteProbes({
+      scratchParent: 'relative-output',
+      dependencies: {
+        fs: {
+          mkdtemp: async () => { scratchCreates += 1; return '/unused'; },
+          rm: async () => undefined,
+        },
+        exec: async () => { executions += 1; return { stdout: '', stderr: '', exitCode: 0, signal: null }; },
+      },
+    });
+    expect(relative).toEqual({
+      available: false,
+      code: 'SCRATCH_PARENT_INVALID',
+      detail: 'selected-filesystem scratch parent must be absolute',
+      mutation: 'none',
+    });
+    expect({ executions, scratchCreates }).toEqual({ executions: 0, scratchCreates: 0 });
+
+    const malformed = await runNativePrerequisiteProbes({
+      scratchParent: '/approved-output',
+      sourceDirectory: installer,
+      dependencies: {
+        fs: { mkdtemp: async () => '/private/malformed', rm: async () => undefined },
+        exec: async (executable, args) => {
+          if (executable === '/usr/bin/gcc' || executable === '/usr/bin/make') {
+            return { stdout: '', stderr: '', exitCode: 0, signal: null };
+          }
+          return { stdout: '{not-json', stderr: '', exitCode: 0, signal: null };
+        },
+      },
+    });
+    expect(malformed).toEqual({
+      available: false,
+      code: 'PROBE_OUTPUT_INVALID',
+      detail: 'native prerequisite probe returned malformed evidence',
+      mutation: 'none',
+    });
   });
 });
