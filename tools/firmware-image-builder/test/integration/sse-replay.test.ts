@@ -278,6 +278,33 @@ describe('SSE durable replay', () => {
     expect(await readFile(join(root, 'logs/runner.0'))).toEqual(Buffer.from('abcdef\n'));
   });
 
+  it('defers the next medium metadata event when the aggregate metadata budget is full', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-sse-metadata-pages-')); roots.push(root);
+    const db = openBuilderDatabase(join(root, 'jobs.sqlite')); dbs.push(db); seed(db);
+    const stream = new DurableLogStream({ db, root, jobId: 'job-sse', now: () => NOW });
+    const first = stream.appendMetadataSync('stage', { message: 'a'.repeat(40) });
+    const second = stream.appendMetadataSync('stage', { message: 'b'.repeat(40) });
+
+    const firstPage = stream.replaySync(-1, { eventLimit: 10, maxMetadataBytes: 70 });
+    expect(firstPage.map(({ seq, event }) => [seq, event])).toEqual([[first, 'stage']]);
+    expect(stream.replaySync(first, { eventLimit: 10, maxMetadataBytes: 70 }).map(({ seq, event }) => [seq, event]))
+      .toEqual([[second, 'stage']]);
+  });
+
+  it('replays a persisted oversized metadata row as a bounded SSE frame', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-sse-oversized-metadata-')); roots.push(root);
+    const db = openBuilderDatabase(join(root, 'jobs.sqlite')); dbs.push(db); seed(db);
+    const stream = new DurableLogStream({ db, root, jobId: 'job-sse', now: () => NOW });
+    db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, ?, ?, ?)')
+      .run('job-sse', 0, 'stage', JSON.stringify({ message: 'x'.repeat(70_000) }), NOW);
+
+    const replay = stream.replaySync(-1);
+    expect(replay).toHaveLength(1);
+    expect(replay[0]).toMatchObject({ seq: 0, event: 'log-truncated', data: { reason: 'REPLAY_METADATA_TOO_LARGE' } });
+    expect(Buffer.byteLength(stream.encodeSse(replay[0]!))).toBeLessThanOrEqual(64 * 1024);
+    expect(stream.replaySync(replay[0]!.seq)).toEqual([]);
+  });
+
   it('does not expose stream-null log-gap or log-truncated as stage or terminal', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-sse-mapping-')); roots.push(root);
     const db = openBuilderDatabase(join(root, 'jobs.sqlite')); dbs.push(db); seed(db);

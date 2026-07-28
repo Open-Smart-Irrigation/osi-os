@@ -284,6 +284,8 @@ describe('DurableLogStream', () => {
     expect(() => stream.replaySync(-1, { eventLimit: Number.MAX_SAFE_INTEGER })).toThrow(/event limit/i);
     expect(() => stream.replaySync(-1, { maxDecodedBytes: 0 })).toThrow(/decoded byte limit/i);
     expect(() => stream.replaySync(-1, { maxDecodedBytes: Number.MAX_SAFE_INTEGER })).toThrow(/decoded byte limit/i);
+    expect(() => stream.replaySync(-1, { maxMetadataBytes: 0 })).toThrow(/metadata byte limit/i);
+    expect(() => stream.replaySync(-1, { maxMetadataBytes: Number.MAX_SAFE_INTEGER })).toThrow(/metadata byte limit/i);
 
     db.exec('DROP TRIGGER job_events_immutable_update_guard');
     db.exec('PRAGMA ignore_check_constraints=ON');
@@ -366,6 +368,23 @@ describe('DurableLogStream', () => {
 
     expect(replay).toHaveLength(1);
     expect(replay[0]).toMatchObject({ seq: 0, event: 'log-truncated', data: { truncated: true, reason: 'REPLAY_EVENT_TOO_LARGE', length: 5 } });
+  });
+
+  it('rejects metadata that cannot fit in a 64 KiB SSE frame before persistence', async () => {
+    const { stream, db } = await fixture();
+
+    expect(() => stream.appendMetadataSync('stage', { message: 'x'.repeat(70_000) })).toThrow(/SSE metadata/i);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM job_events WHERE job_id=?').get('job-log')).toEqual({ count: 0 });
+  });
+
+  it('turns an oversized persisted metadata row into one cursor-advancing compact event', async () => {
+    const { stream, db } = await fixture();
+    db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, ?, ?, ?)')
+      .run('job-log', 0, 'stage', JSON.stringify({ message: 'x'.repeat(70_000) }), NOW);
+
+    const replay = stream.replaySync(-1);
+    expect(replay).toEqual([{ seq: 0, event: 'log-truncated', data: { jobId: 'job-log', truncated: true, reason: 'REPLAY_METADATA_TOO_LARGE' } }]);
+    expect(stream.replaySync(0)).toEqual([]);
   });
 
   it('returns the same persisted seal result when there is no orphan tail', async () => {

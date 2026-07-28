@@ -8,6 +8,9 @@ const DEFAULT_REPLAY_EVENT_LIMIT = 256;
 const MAX_REPLAY_EVENT_LIMIT = 1_000;
 const DEFAULT_REPLAY_DECODED_BYTES = 512 * 1024;
 const MAX_REPLAY_DECODED_BYTES = 16 * 1024 * 1024;
+const DEFAULT_REPLAY_METADATA_BYTES = 512 * 1024;
+const MAX_REPLAY_METADATA_BYTES = 16 * 1024 * 1024;
+const MAX_METADATA_JSON_BYTES = MAX_SSE_BYTES - 128;
 const HASH_BUFFER_SIZE = 64 * 1024;
 const O_CLOEXEC = (constants as typeof constants & { readonly O_CLOEXEC?: number }).O_CLOEXEC ?? 0;
 const DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | O_CLOEXEC;
@@ -53,6 +56,7 @@ export function assertOrphanLogLivenessProof(proof: OrphanLogLivenessProof): voi
 export interface ReplayLimits {
   readonly eventLimit?: number;
   readonly maxDecodedBytes?: number;
+  readonly maxMetadataBytes?: number;
 }
 
 export interface LogStreamIo {
@@ -103,7 +107,12 @@ function json(value: Record<string, unknown>): string {
   return JSON.stringify(value);
 }
 
-function replayLimits(afterSeq: number, requested: ReplayLimits): { readonly eventLimit: number; readonly maxDecodedBytes: number } {
+function metadataFrameFits(seq: number, event: MetadataEvent, payload: string): boolean {
+  const frame = `id: ${seq}\nevent: ${event}\ndata: ${payload}\n\n`;
+  return Buffer.byteLength(frame) <= MAX_SSE_BYTES;
+}
+
+function replayLimits(afterSeq: number, requested: ReplayLimits): { readonly eventLimit: number; readonly maxDecodedBytes: number; readonly maxMetadataBytes: number } {
   if (!Number.isSafeInteger(afterSeq) || afterSeq < -1) throw new Error('replay cursor must be a safe integer at least -1');
   const eventLimit = requested.eventLimit ?? DEFAULT_REPLAY_EVENT_LIMIT;
   if (!Number.isSafeInteger(eventLimit) || eventLimit < 1 || eventLimit > MAX_REPLAY_EVENT_LIMIT) {
@@ -113,7 +122,11 @@ function replayLimits(afterSeq: number, requested: ReplayLimits): { readonly eve
   if (!Number.isSafeInteger(maxDecodedBytes) || maxDecodedBytes < 1 || maxDecodedBytes > MAX_REPLAY_DECODED_BYTES) {
     throw new Error(`replay decoded byte limit must be between 1 and ${MAX_REPLAY_DECODED_BYTES}`);
   }
-  return { eventLimit, maxDecodedBytes };
+  const maxMetadataBytes = requested.maxMetadataBytes ?? DEFAULT_REPLAY_METADATA_BYTES;
+  if (!Number.isSafeInteger(maxMetadataBytes) || maxMetadataBytes < 1 || maxMetadataBytes > MAX_REPLAY_METADATA_BYTES) {
+    throw new Error(`replay metadata byte limit must be between 1 and ${MAX_REPLAY_METADATA_BYTES}`);
+  }
+  return { eventLimit, maxDecodedBytes, maxMetadataBytes };
 }
 
 function sourceCoordinates(row: Record<string, unknown>): SourceCoordinates {
@@ -226,7 +239,9 @@ export class DurableLogStream {
     let seq = -1;
     this.#transaction(() => {
       seq = this.#nextSeq();
-      this.#db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, ?, ?, ?)').run(this.#jobId, seq, event, json(data), this.#now());
+      const payload = json(data);
+      if (!metadataFrameFits(seq, event, payload)) throw new Error('SSE metadata exceeds 64 KiB');
+      this.#db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, ?, ?, ?)').run(this.#jobId, seq, event, payload, this.#now());
     });
     return seq;
   }
@@ -312,13 +327,18 @@ export class DurableLogStream {
 
     const output: LogStreamEvent[] = [];
     let decodedBytes = 0;
-    for (const row of this.#eventRows(afterSeq, limits.eventLimit)) {
+    for (const row of this.#eventRows(afterSeq, limits.eventLimit, limits.maxMetadataBytes)) {
       const seq = Number(row.seq);
-      const payload = JSON.parse(String(row.payload_json)) as Record<string, unknown>;
+      const metadataTooLarge = row.stream === null && Number(row.metadata_too_large) === 1;
+      const payload = metadataTooLarge
+        ? undefined
+        : JSON.parse(String(row.payload_json)) as Record<string, unknown>;
       if (row.stream === null) {
-        if (row.event_type === 'log-gap') output.push({ seq, event: 'log-gap', data: payload });
-        else if (row.event_type === 'log-truncated') output.push({ seq, event: 'log-truncated', data: payload });
-        else output.push({ seq, event: row.event_type === 'terminal' ? 'terminal' : 'stage', data: payload });
+        if (metadataTooLarge) {
+          output.push({ seq, event: 'log-truncated', data: { jobId: this.#jobId, truncated: true, reason: 'REPLAY_METADATA_TOO_LARGE' } });
+        } else if (row.event_type === 'log-gap') output.push({ seq, event: 'log-gap', data: payload as Record<string, unknown> });
+        else if (row.event_type === 'log-truncated') output.push({ seq, event: 'log-truncated', data: payload as Record<string, unknown> });
+        else output.push({ seq, event: row.event_type === 'terminal' ? 'terminal' : 'stage', data: payload as Record<string, unknown> });
         continue;
       }
 
@@ -476,18 +496,52 @@ export class DurableLogStream {
 
   #nextSeq(): number { return Number((this.#db.prepare('SELECT COALESCE(MAX(seq)+1, 0) AS next FROM job_events WHERE job_id=?').get(this.#jobId) as { next: number }).next); }
 
-  #eventRows(afterSeq: number, limit: number): Array<Record<string, unknown>> {
-    return this.#db.prepare(`SELECT event.seq, event.event_type, event.payload_json, event.at, event.stream, event.file_generation, event.byte_offset, event.byte_length, event.partial
-      FROM job_events AS event
-      WHERE event.job_id=? AND event.seq>?
-        AND NOT (event.stream IS NOT NULL AND EXISTS (
-          SELECT 1 FROM job_events AS gap
-          WHERE gap.job_id=event.job_id
-            AND gap.event_type='log-gap'
-            AND json_extract(gap.payload_json, '$.sourceSeq')=event.seq
-        ))
-      ORDER BY event.seq
-      LIMIT ?`).all(this.#jobId, afterSeq, limit) as Array<Record<string, unknown>>;
+  #eventRows(afterSeq: number, limit: number, maxMetadataBytes: number): Array<Record<string, unknown>> {
+    return this.#db.prepare(`WITH candidates AS (
+      SELECT event.seq, event.event_type, event.at, event.stream, event.file_generation, event.byte_offset, event.byte_length, event.partial,
+          length(CAST(event.payload_json AS BLOB)) AS metadata_bytes
+        FROM job_events AS event
+        WHERE event.job_id=? AND event.seq>?
+          AND NOT (event.stream IS NOT NULL AND EXISTS (
+            SELECT 1 FROM job_events AS gap
+            WHERE gap.job_id=event.job_id
+              AND gap.event_type='log-gap'
+              AND json_extract(gap.payload_json, '$.sourceSeq')=event.seq
+          ))
+        ORDER BY event.seq
+        LIMIT ?
+      ), measured AS (
+        SELECT candidates.*,
+          COALESCE(SUM(CASE WHEN stream IS NULL AND metadata_bytes <= ? THEN metadata_bytes ELSE 0 END)
+            OVER (ORDER BY seq ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS prior_metadata_bytes
+        FROM candidates
+      ), selected AS (
+        SELECT seq, event_type, at, stream, file_generation, byte_offset, byte_length, partial, metadata_bytes,
+        CASE WHEN stream IS NULL AND metadata_bytes > ? THEN 1 ELSE 0 END AS metadata_too_large
+        FROM measured
+        WHERE stream IS NOT NULL
+          OR (metadata_bytes <= ? AND prior_metadata_bytes + metadata_bytes <= ?)
+          OR (metadata_bytes > ? AND prior_metadata_bytes <= ?)
+      )
+      SELECT selected.seq, selected.event_type,
+        CASE WHEN selected.metadata_too_large=1 THEN NULL ELSE event.payload_json END AS payload_json,
+        selected.at, selected.stream,
+        selected.file_generation, selected.byte_offset, selected.byte_length, selected.partial,
+        selected.metadata_bytes, selected.metadata_too_large
+      FROM selected
+      JOIN job_events AS event ON event.job_id=? AND event.seq=selected.seq
+      ORDER BY selected.seq`).all(
+      this.#jobId,
+      afterSeq,
+      limit,
+      MAX_METADATA_JSON_BYTES,
+      MAX_METADATA_JSON_BYTES,
+      MAX_METADATA_JSON_BYTES,
+      maxMetadataBytes,
+      MAX_METADATA_JSON_BYTES,
+      maxMetadataBytes,
+      this.#jobId,
+    ) as Array<Record<string, unknown>>;
   }
 
   #sourceRows(fromSeq: number, limit: number): Array<Record<string, unknown>> {
