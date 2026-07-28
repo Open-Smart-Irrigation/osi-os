@@ -87,7 +87,11 @@ describe('SSE durable replay', () => {
     }).parseDiagnostics ?? [];
     expect(parseDiagnostics).toEqual([]);
 
-    const coordinatorAssignment = descendants<ts.BinaryExpression>(file, ts.SyntaxKind.BinaryExpression)
+    const productionFunction = descendants<ts.FunctionDeclaration>(file, ts.SyntaxKind.FunctionDeclaration)
+      .find((fn) => fn.name?.text === 'createProductionComposition');
+    expect(productionFunction).toBeDefined();
+
+    const coordinatorAssignment = descendants<ts.BinaryExpression>(productionFunction!, ts.SyntaxKind.BinaryExpression)
       .find((assignment) => (
         assignment.operatorToken.kind === ts.SyntaxKind.EqualsToken
         && ts.isIdentifier(assignment.left)
@@ -104,7 +108,7 @@ describe('SSE durable replay', () => {
       .toBe("join(stateRootIdentity.path, 'jobs', args.jobId)");
     expect(property(coordinatorOptions, 'jobId').initializer.getText()).toBe('args.jobId');
 
-    const executorCalls = callsNamed(file, 'createDockerExecutor');
+    const executorCalls = callsNamed(productionFunction!, 'createDockerExecutor');
     expect(executorCalls).toHaveLength(1);
     const executorOptions = objectArgument(executorCalls[0]!, 'createDockerExecutor');
     for (const [callbackName, captureName] of [['onStdoutBytes', 'stdout'], ['onStderrBytes', 'stderr']] as const) {
@@ -136,9 +140,6 @@ describe('SSE durable replay', () => {
     expect(finalizeCalls).toHaveLength(1);
     expectIdentifier(finalizeCalls[0]!.arguments[0], 'operationFinishedAt');
 
-    const productionFunction = descendants<ts.FunctionDeclaration>(file, ts.SyntaxKind.FunctionDeclaration)
-      .find((fn) => fn.name?.text === 'createProductionComposition');
-    expect(productionFunction).toBeDefined();
     const cancellationCall = callsNamed(productionFunction!, 'createRunnerCancellation')[0];
     expect(cancellationCall).toBeDefined();
     const cancellationOptions = objectArgument(cancellationCall!, 'createRunnerCancellation');
@@ -156,7 +157,7 @@ describe('SSE durable replay', () => {
     expect(proofCalls[0]!.arguments[0]!.getText()).toBe('args.jobId');
     expect(proofCalls[0]!.arguments[1]!.getText()).toBe('coordinatorProof.verifiedAt');
 
-    const returnedComposition = descendants<ts.ObjectLiteralExpression>(file, ts.SyntaxKind.ObjectLiteralExpression)
+    const returnedComposition = descendants<ts.ObjectLiteralExpression>(productionFunction!, ts.SyntaxKind.ObjectLiteralExpression)
       .find((object) => object.parent && ts.isCallExpression(object.parent)
         && ts.isPropertyAccessExpression(object.parent.expression)
         && object.parent.expression.name.text === 'freeze'
@@ -193,8 +194,16 @@ describe('SSE durable replay', () => {
     expect(stateRootClose).toBeDefined();
     expect(coordinatorClose!.pos).toBeLessThan(stateRootClose!.pos);
 
-    const composeProperty = descendants<ts.PropertyAssignment>(file, ts.SyntaxKind.PropertyAssignment)
-      .find((candidate) => ts.isIdentifier(candidate.name) && candidate.name.text === 'compose');
+    const runRunnerFunction = descendants<ts.FunctionDeclaration>(file, ts.SyntaxKind.FunctionDeclaration)
+      .find((fn) => fn.name?.text === 'runRunner');
+    expect(runRunnerFunction).toBeDefined();
+    const guardedCompositionCalls = callsNamed(runRunnerFunction!, 'runGuardedComposition');
+    expect(guardedCompositionCalls).toHaveLength(1);
+    const guardedCompositionOptions = objectArgument(
+      guardedCompositionCalls[0]!,
+      'runGuardedComposition',
+    );
+    const composeProperty = property(guardedCompositionOptions, 'compose');
     expect(composeProperty).toBeDefined();
     expect(ts.isArrowFunction(composeProperty!.initializer)).toBe(true);
     const compositionCall = callsNamed(composeProperty!.initializer, 'createProductionComposition')[0];
