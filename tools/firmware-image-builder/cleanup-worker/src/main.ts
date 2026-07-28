@@ -271,12 +271,12 @@ function validateDockerIdentity(
   }
 }
 
-function validateLogSeal(seal: CleanupLogSeal, at: string): LogCleanupProof {
+function validateLogSeal(seal: CleanupLogSeal, requestedAt: string, completedAt: string): LogCleanupProof {
   if (seal.contiguous !== true || !['absent', 'sealed'].includes(seal.runner) || !['absent', 'sealed'].includes(seal.docker)) {
     throw new CleanupWorkerError('RECOVERY_LOG_GAP', 'cleanup log sealer did not provide contiguous sealed evidence');
   }
   const verifiedAt = canonicalInstant(seal.verifiedAt, 'cleanup log verifiedAt');
-  if (verifiedAt > at) throw new CleanupWorkerError('RECOVERY_LOG_GAP', 'cleanup log evidence is from the future');
+  if (verifiedAt < requestedAt || verifiedAt > completedAt) throw new CleanupWorkerError('RECOVERY_LOG_GAP', 'cleanup log evidence is outside the sealing operation chronology');
   return { runner: seal.runner, docker: seal.docker, verifiedAt };
 }
 
@@ -601,7 +601,7 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
       throw new CleanupWorkerError('RECOVERY_LOG_GAP', `cleanup log sealing failed: ${errorMessage(error)}`, { cause: error });
     }
     const upperBound = canonicalInstant(options.clock.now(), 'log sealing completion time');
-    return validateLogSeal(seal, upperBound);
+    return validateLogSeal(seal, requestedAt, upperBound);
   }
 
   async function quarantineStaging(admission: PersistedAdmission, job: JobRecord): Promise<CleanupStagingPostcondition> {

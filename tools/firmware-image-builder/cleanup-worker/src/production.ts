@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, type Stats } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -52,6 +52,7 @@ const FIXED_MAX_CAPTURE_BYTES = 64 * 1024;
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const DEFAULT_OWNER = 'cleanup-worker';
 const DIRECTORY_MODE = 0o700;
+const PUBLISHER_DIRECTORY_MODE = 0o750;
 const EVIDENCE_MODE = 0o600;
 const MAX_LOG_BYTES = 256 * 1024 * 1024;
 const MAX_TOTAL_LOG_BYTES = 512 * 1024 * 1024;
@@ -160,6 +161,12 @@ interface HashedFile extends FileIdentity {
   readonly sha256: string;
   readonly size: number;
   readonly partial: 0 | 1;
+  readonly mode: number;
+  readonly uid: number;
+  readonly gid: number;
+  readonly nlink: number;
+  readonly mtimeMs: number;
+  readonly ctimeMs: number;
 }
 
 function message(error: unknown): string {
@@ -359,12 +366,70 @@ function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
   return left.device === right.device && left.inode === right.inode;
 }
 
-async function verifyDirectoryHandle(handle: FileHandle, expected: FileIdentity | null, field: string): Promise<FileIdentity> {
-  const stats = await handle.stat();
-  if (!stats.isDirectory() || stats.isSymbolicLink()) throw new Error(`${field} is not a real directory`);
+type DirectoryContract = 'approved-root' | 'publisher' | 'job';
+
+function verifyDirectoryMetadata(
+  stats: Stats,
+  expected: FileIdentity | null,
+  field: string,
+  ownerUid: number,
+  device: number,
+  contract: DirectoryContract,
+): FileIdentity {
+  const mode = stats.mode & 0o7777;
+  const modeIsValid = contract === 'approved-root'
+    ? (mode & 0o700) === 0o700 && (mode & 0o022) === 0
+    : mode === (contract === 'publisher' ? PUBLISHER_DIRECTORY_MODE : DIRECTORY_MODE);
+  if (
+    !stats.isDirectory()
+    || stats.isSymbolicLink()
+    || stats.uid !== ownerUid
+    || stats.dev !== device
+    || stats.nlink < 2
+    || !modeIsValid
+  ) {
+    throw new Error(`${field} has unsafe metadata`);
+  }
   const identity = fileIdentity(stats);
   if (expected !== null && !sameIdentity(identity, expected)) throw new Error(`${field} identity changed`);
   return identity;
+}
+
+async function verifyDirectoryHandle(
+  handle: FileHandle,
+  expected: FileIdentity | null,
+  field: string,
+  ownerUid: number,
+  device: number,
+  contract: DirectoryContract,
+): Promise<FileIdentity> {
+  const stats = await handle.stat();
+  return verifyDirectoryMetadata(stats, expected, field, ownerUid, device, contract);
+}
+
+function verifyManagedFileMetadata(stats: Stats, field: string, ownerUid: number, device: number): void {
+  if (
+    !stats.isFile()
+    || stats.isSymbolicLink()
+    || stats.uid !== ownerUid
+    || stats.dev !== device
+    || (stats.mode & 0o7777) !== EVIDENCE_MODE
+    || stats.nlink !== 1
+  ) {
+    throw new Error(`${field} has unsafe metadata`);
+  }
+}
+
+function sameStableMetadata(before: Stats, after: Stats): boolean {
+  return before.dev === after.dev
+    && before.ino === after.ino
+    && before.mode === after.mode
+    && before.uid === after.uid
+    && before.gid === after.gid
+    && before.nlink === after.nlink
+    && before.size === after.size
+    && before.mtimeMs === after.mtimeMs
+    && before.ctimeMs === after.ctimeMs;
 }
 
 async function hashFileHandle(handle: FileHandle, field: string): Promise<HashedFile> {
@@ -382,33 +447,59 @@ async function hashFileHandle(handle: FileHandle, field: string): Promise<Hashed
     total += result.bytesRead;
   }
   const after = await handle.stat();
-  if (total !== before.size || after.size !== before.size || after.dev !== before.dev || after.ino !== before.ino) throw new Error(`${field} changed while hashing`);
+  if (total !== before.size || !sameStableMetadata(before, after)) throw new Error(`${field} changed while hashing`);
   return {
     ...fileIdentity(before),
     sha256: hash.digest('hex'),
     size: total,
     partial: total > 0 && lastByte !== 0x0a ? 1 : 0,
+    mode: before.mode,
+    uid: before.uid,
+    gid: before.gid,
+    nlink: before.nlink,
+    mtimeMs: before.mtimeMs,
+    ctimeMs: before.ctimeMs,
   };
 }
 
-async function openRelativeFile(parent: FileHandle, relative: string, code: 'QUARANTINE_PENDING' | 'RECOVERY_LOG_GAP'): Promise<{ readonly file: FileHandle; readonly handles: readonly FileHandle[] }> {
+async function openManagedRelativeFile(
+  parent: FileHandle,
+  relative: string,
+  ownerUid: number,
+  device: number,
+): Promise<{ readonly file: FileHandle; readonly handles: readonly FileHandle[] }> {
   const parts = relative.split('/');
-  if (parts.some((part) => part.length === 0 || part === '.' || part === '..' || part.includes('\\'))) throw workerError(code, 'relative file path is unsafe');
+  if (parts.some((part) => part.length === 0 || part === '.' || part === '..' || part.includes('\\'))) throw workerError('QUARANTINE_PENDING', 'relative file path is unsafe');
   const handles: FileHandle[] = [];
   let current = parent;
+  let file: FileHandle | null = null;
   try {
     for (const part of parts.slice(0, -1)) {
-      const child = await openDirectoryChild(current, part, code);
+      const child = await openDirectoryChild(current, part, 'QUARANTINE_PENDING');
       handles.push(child);
+      await verifyDirectoryHandle(child, null, `artifact directory ${part}`, ownerUid, device, 'job');
       current = child;
     }
     const final = parts.at(-1);
-    if (final === undefined) throw workerError(code, 'relative file path is empty');
-    return { file: await open(descriptorChild(current, final, code), FILE_FLAGS), handles };
+    if (final === undefined) throw workerError('QUARANTINE_PENDING', 'relative file path is empty');
+    file = await open(descriptorChild(current, final, 'QUARANTINE_PENDING'), FILE_FLAGS);
+    verifyManagedFileMetadata(await file.stat(), `artifact file ${final}`, ownerUid, device);
+    return { file, handles };
   } catch (error) {
-    for (const handle of handles.reverse()) await handle.close().catch(() => undefined);
+    await closeFileHandles(handles).catch(() => undefined);
+    await file?.close().catch(() => undefined);
     throw error;
   }
+}
+
+async function hashManagedArtifact(handle: FileHandle, field: string, ownerUid: number, device: number): Promise<HashedFile> {
+  const before = await handle.stat();
+  verifyManagedFileMetadata(before, field, ownerUid, device);
+  const hashed = await hashFileHandle(handle, field);
+  const after = await handle.stat();
+  verifyManagedFileMetadata(after, field, ownerUid, device);
+  if (!sameStableMetadata(before, after)) throw new Error(`${field} metadata changed while hashing`);
+  return hashed;
 }
 
 async function closeFileHandles(handles: readonly FileHandle[]): Promise<void> {
@@ -426,27 +517,70 @@ interface FixedStagingHandles {
   readonly quarantineParent: FileHandle | null;
   readonly source: FileHandle | null;
   readonly destination: FileHandle | null;
+  readonly rootIdentity: FileIdentity;
+  readonly builderIdentity: FileIdentity | null;
+  readonly stagingParentIdentity: FileIdentity | null;
+  readonly quarantineParentIdentity: FileIdentity | null;
+  readonly sourceIdentity: FileIdentity | null;
+  readonly destinationIdentity: FileIdentity | null;
   readonly handles: readonly FileHandle[];
 }
 
-async function openFixedStaging(snapshot: ApprovedRootSnapshot, jobId: string): Promise<FixedStagingHandles> {
+async function openFixedStaging(snapshot: ApprovedRootSnapshot, jobId: string, ownerUid: number): Promise<FixedStagingHandles> {
   const handles: FileHandle[] = [];
   try {
     const root = await open(snapshot.path, DIRECTORY_FLAGS);
     handles.push(root);
-    await verifyDirectoryHandle(root, { device: snapshot.device, inode: snapshot.inode }, 'approved output root');
+    const rootIdentity = await verifyDirectoryHandle(root, { device: snapshot.device, inode: snapshot.inode }, 'approved output root', ownerUid, snapshot.device, 'approved-root');
     const builder = await openOptionalDirectoryChild(root, '.osi-image-builder', 'QUARANTINE_PENDING');
-    if (builder === null) return { root, builder: null, stagingParent: null, quarantineParent: null, source: null, destination: null, handles };
+    if (builder === null) return {
+      root,
+      builder: null,
+      stagingParent: null,
+      quarantineParent: null,
+      source: null,
+      destination: null,
+      rootIdentity,
+      builderIdentity: null,
+      stagingParentIdentity: null,
+      quarantineParentIdentity: null,
+      sourceIdentity: null,
+      destinationIdentity: null,
+      handles,
+    };
     handles.push(builder);
+    const builderIdentity = await verifyDirectoryHandle(builder, null, '.osi-image-builder', ownerUid, snapshot.device, 'publisher');
     const stagingParent = await openOptionalDirectoryChild(builder, 'staging', 'QUARANTINE_PENDING');
     const quarantineParent = await openOptionalDirectoryChild(builder, 'quarantine', 'QUARANTINE_PENDING');
     if (stagingParent !== null) handles.push(stagingParent);
     if (quarantineParent !== null) handles.push(quarantineParent);
+    const stagingParentIdentity = stagingParent === null
+      ? null
+      : await verifyDirectoryHandle(stagingParent, null, '.osi-image-builder/staging', ownerUid, snapshot.device, 'publisher');
+    const quarantineParentIdentity = quarantineParent === null
+      ? null
+      : await verifyDirectoryHandle(quarantineParent, null, '.osi-image-builder/quarantine', ownerUid, snapshot.device, 'publisher');
     const source = stagingParent === null ? null : await openOptionalDirectoryChild(stagingParent, jobId, 'QUARANTINE_PENDING');
     const destination = quarantineParent === null ? null : await openOptionalDirectoryChild(quarantineParent, jobId, 'QUARANTINE_PENDING');
     if (source !== null) handles.push(source);
     if (destination !== null) handles.push(destination);
-    return { root, builder, stagingParent, quarantineParent, source, destination, handles };
+    const sourceIdentity = source === null ? null : await verifyDirectoryHandle(source, null, 'staging source', ownerUid, snapshot.device, 'job');
+    const destinationIdentity = destination === null ? null : await verifyDirectoryHandle(destination, null, 'quarantine destination', ownerUid, snapshot.device, 'job');
+    return {
+      root,
+      builder,
+      stagingParent,
+      quarantineParent,
+      source,
+      destination,
+      rootIdentity,
+      builderIdentity,
+      stagingParentIdentity,
+      quarantineParentIdentity,
+      sourceIdentity,
+      destinationIdentity,
+      handles,
+    };
   } catch (error) {
     await closeFileHandles(handles);
     throw error;
@@ -464,13 +598,17 @@ async function assertSourceAbsent(stagingParent: FileHandle | null, jobId: strin
 async function destinationAfterRename(
   handles: FixedStagingHandles,
   jobId: string,
+  ownerUid: number,
+  device: number,
 ): Promise<{ readonly destination: FileHandle; readonly handles: readonly FileHandle[] }> {
   if (handles.builder === null) throw workerError('QUARANTINE_PENDING', 'quarantine parent is absent after native rename');
   const quarantineParent = handles.quarantineParent ?? await openDirectoryChild(handles.builder, 'quarantine', 'QUARANTINE_PENDING');
   const extra: FileHandle[] = handles.quarantineParent === null ? [quarantineParent] : [];
   try {
+    await verifyDirectoryHandle(quarantineParent, handles.quarantineParentIdentity, '.osi-image-builder/quarantine', ownerUid, device, 'publisher');
     const destination = await openDirectoryChild(quarantineParent, jobId, 'QUARANTINE_PENDING');
     extra.push(destination);
+    await verifyDirectoryHandle(destination, null, 'quarantine destination', ownerUid, device, 'job');
     return { destination, handles: extra };
   } catch (error) {
     await closeFileHandles(extra);
@@ -483,17 +621,47 @@ async function verifyQuarantineDestination(
   input: Parameters<CleanupQuarantine['quarantine']>[0],
   artifactRelative: string | null,
   expectedDirectory: FileIdentity | null,
+  ownerUid: number,
+  device: number,
 ): Promise<{ readonly identity: FileIdentity; readonly artifact: HashedFile | null }> {
-  const identity = await verifyDirectoryHandle(destination, expectedDirectory, 'quarantine destination');
+  const identity = await verifyDirectoryHandle(destination, expectedDirectory, 'quarantine destination', ownerUid, device, 'job');
   let artifact: HashedFile | null = null;
   if (artifactRelative !== null) {
-    const opened = await openRelativeFile(destination, artifactRelative, 'QUARANTINE_PENDING');
-    try { artifact = await hashFileHandle(opened.file, 'quarantined artifact'); }
+    const opened = await openManagedRelativeFile(destination, artifactRelative, ownerUid, device);
+    try { artifact = await hashManagedArtifact(opened.file, 'quarantined artifact', ownerUid, device); }
     finally { await closeFileHandles([opened.file, ...opened.handles]); }
     if (input.artifactSha256 !== null && artifact.sha256 !== input.artifactSha256) throw workerError('QUARANTINE_PENDING', 'quarantined artifact hash differs from persisted identity');
     if (input.artifactSize !== null && artifact.size !== input.artifactSize) throw workerError('QUARANTINE_PENDING', 'quarantined artifact size differs from persisted identity');
   }
   return { identity, artifact };
+}
+
+function equalOptionalIdentity(left: FileIdentity | null, right: FileIdentity | null): boolean {
+  return left === null ? right === null : right !== null && sameIdentity(left, right);
+}
+
+async function revalidateFixedStaging(
+  snapshot: ApprovedRootSnapshot,
+  jobId: string,
+  ownerUid: number,
+  initial: FixedStagingHandles,
+  expectedDestination: FileIdentity | null,
+): Promise<void> {
+  const current = await openFixedStaging(snapshot, jobId, ownerUid);
+  try {
+    if (
+      !sameIdentity(initial.rootIdentity, current.rootIdentity)
+      || !equalOptionalIdentity(initial.builderIdentity, current.builderIdentity)
+      || !equalOptionalIdentity(initial.stagingParentIdentity, current.stagingParentIdentity)
+      || !equalOptionalIdentity(initial.quarantineParentIdentity, current.quarantineParentIdentity)
+      || current.sourceIdentity !== null
+      || !equalOptionalIdentity(expectedDestination, current.destinationIdentity)
+    ) {
+      throw workerError('QUARANTINE_PENDING', 'fixed staging identities changed during quarantine verification');
+    }
+  } finally {
+    await closeFileHandles(current.handles);
+  }
 }
 
 function assertApprovedRootSnapshot(expected: ApprovedRootSnapshot, actual: ApprovedRootSnapshot): void {
@@ -507,6 +675,7 @@ function createQuarantineAdapter(
   publisher: PublisherClient,
   clock: CleanupWorkerClock,
   approvedRootSnapshot: ApprovedRootSnapshotRunner,
+  ownerUid: number,
 ): CleanupQuarantine {
   return {
     quarantine: async (input) => {
@@ -520,40 +689,43 @@ function createQuarantineAdapter(
       try {
         return await approvedRootSnapshot(input.rootId, async (snapshot) => {
           if (snapshot.id !== input.rootId || snapshot.path !== root.path || snapshot.quarantinePath !== root.quarantinePath) throw workerError('QUARANTINE_PENDING', 'approved root configuration changed');
-          const fixed = await openFixedStaging(snapshot, input.jobId);
+          const fixed = await openFixedStaging(snapshot, input.jobId, ownerUid);
           const ownedHandles = [...fixed.handles];
           try {
             if (input.admittedStaging.kind === 'absent') {
               if (fixed.source !== null || fixed.destination !== null) throw workerError('QUARANTINE_PENDING', 'admitted staging absence has physical source or quarantine state');
               await assertSourceAbsent(fixed.stagingParent, input.jobId);
+              await revalidateFixedStaging(snapshot, input.jobId, ownerUid, fixed, null);
               return { kind: 'absent', path: null, sourcePath: sourceInternal, sourceAbsent: true, verifiedAt: clock.now() };
             }
             if (fixed.source !== null && fixed.destination !== null) throw workerError('QUARANTINE_PENDING', 'staging source and quarantine destination are both present');
             if (fixed.source === null && fixed.destination === null) throw workerError('QUARANTINE_PENDING', 'staging source and quarantine destination are both absent');
             if (fixed.source === null && fixed.destination !== null) {
-              await verifyQuarantineDestination(fixed.destination, input, artifactRelative, null);
+              const verified = await verifyQuarantineDestination(fixed.destination, input, artifactRelative, fixed.destinationIdentity, ownerUid, snapshot.device);
               await assertSourceAbsent(fixed.stagingParent, input.jobId);
+              await revalidateFixedStaging(snapshot, input.jobId, ownerUid, fixed, verified.identity);
               await approvedRootSnapshot(input.rootId, async (after) => { assertApprovedRootSnapshot(snapshot, after); return undefined; });
               return { kind: 'quarantined', sourcePath: sourceInternal, destinationPath: destinationInternal, sourceAbsent: true, destinationPresent: true, sha256: input.artifactSha256, size: input.artifactSize, verifiedAt: clock.now() };
             }
             const source = fixed.source!;
-            const sourceIdentity = await verifyDirectoryHandle(source, null, 'staging source');
+            const sourceIdentity = await verifyDirectoryHandle(source, fixed.sourceIdentity, 'staging source', ownerUid, snapshot.device, 'job');
             let sourceArtifact: HashedFile | null = null;
             if (artifactRelative !== null) {
-              const opened = await openRelativeFile(source, artifactRelative, 'QUARANTINE_PENDING');
-              try { sourceArtifact = await hashFileHandle(opened.file, 'staged artifact'); }
+              const opened = await openManagedRelativeFile(source, artifactRelative, ownerUid, snapshot.device);
+              try { sourceArtifact = await hashManagedArtifact(opened.file, 'staged artifact', ownerUid, snapshot.device); }
               finally { await closeFileHandles([opened.file, ...opened.handles]); }
               if (input.artifactSha256 !== null && sourceArtifact.sha256 !== input.artifactSha256) throw workerError('QUARANTINE_PENDING', 'physical staging hash differs from persisted artifact');
               if (input.artifactSize !== null && sourceArtifact.size !== input.artifactSize) throw workerError('QUARANTINE_PENDING', 'physical staging size differs from persisted artifact');
             }
             const response: PublisherResponse = await publisher.quarantine({ rootId: input.rootId, jobId: input.jobId });
             if (!response.available || !response.quarantined || response.sourceRelativePath !== `.osi-image-builder/${sourceInternal}` || response.destinationRelativePath !== `.osi-image-builder/${destinationInternal}`) throw workerError('QUARANTINE_PENDING', `native publisher did not prove quarantine${response.errorCode ? `: ${response.errorCode}` : ''}`);
-            const reopened = await destinationAfterRename(fixed, input.jobId);
+            const reopened = await destinationAfterRename(fixed, input.jobId, ownerUid, snapshot.device);
             ownedHandles.push(...reopened.handles);
-            const verified = await verifyQuarantineDestination(reopened.destination, input, artifactRelative, sourceIdentity);
+            const verified = await verifyQuarantineDestination(reopened.destination, input, artifactRelative, sourceIdentity, ownerUid, snapshot.device);
             if (sourceArtifact !== null && (verified.artifact === null || !sameIdentity(sourceArtifact, verified.artifact))) throw workerError('QUARANTINE_PENDING', 'quarantined artifact inode or device changed');
-            await verifyDirectoryHandle(source, sourceIdentity, 'staging source');
+            await verifyDirectoryHandle(source, sourceIdentity, 'staging source', ownerUid, snapshot.device, 'job');
             await assertSourceAbsent(fixed.stagingParent, input.jobId);
+            await revalidateFixedStaging(snapshot, input.jobId, ownerUid, fixed, sourceIdentity);
             await approvedRootSnapshot(input.rootId, async (after) => { assertApprovedRootSnapshot(snapshot, after); return undefined; });
             return { kind: 'quarantined', sourcePath: sourceInternal, destinationPath: destinationInternal, sourceAbsent: true, destinationPresent: true, sha256: input.artifactSha256, size: input.artifactSize, verifiedAt: clock.now() };
           } finally {
@@ -580,6 +752,7 @@ async function openHashedLogFile(
   state: StateRootSnapshot,
   jobId: string,
   relativePath: string,
+  ownerUid: number,
 ): Promise<{ readonly physical: HashedFile; readonly handle: FileHandle }> {
   const parts = safeLogPath(jobId, relativePath);
   const handles: FileHandle[] = [];
@@ -587,16 +760,26 @@ async function openHashedLogFile(
   const root = await open(state.path, DIRECTORY_FLAGS);
   handles.push(root);
   try {
-    const rootIdentity = await root.stat();
-    if (rootIdentity.dev !== state.device || rootIdentity.ino !== state.inode) throw workerError('RECOVERY_LOG_GAP', 'state root identity changed while reading logs');
+    await verifyDirectoryHandle(root, { device: state.device, inode: state.inode }, 'state root', ownerUid, state.device, 'job');
     const jobs = await openDirectoryChild(root, 'jobs', 'RECOVERY_LOG_GAP'); handles.push(jobs);
+    await verifyDirectoryHandle(jobs, null, 'jobs', ownerUid, state.device, 'job');
     const job = await openDirectoryChild(jobs, jobId, 'RECOVERY_LOG_GAP'); handles.push(job);
+    await verifyDirectoryHandle(job, null, `jobs/${jobId}`, ownerUid, state.device, 'job');
     const logs = await openDirectoryChild(job, 'logs', 'RECOVERY_LOG_GAP'); handles.push(logs);
-    const opened = await openRelativeFile(logs, parts.join('/'), 'RECOVERY_LOG_GAP');
-    handles.push(...opened.handles);
-    file = opened.file;
+    await verifyDirectoryHandle(logs, null, `jobs/${jobId}/logs`, ownerUid, state.device, 'job');
+    let current = logs;
+    for (const part of parts.slice(0, -1)) {
+      const child = await openDirectoryChild(current, part, 'RECOVERY_LOG_GAP');
+      handles.push(child);
+      await verifyDirectoryHandle(child, null, `log directory ${part}`, ownerUid, state.device, 'job');
+      current = child;
+    }
+    const filename = parts.at(-1);
+    if (filename === undefined) throw workerError('RECOVERY_LOG_GAP', 'log path is empty');
+    file = await open(descriptorChild(current, filename, 'RECOVERY_LOG_GAP'), FILE_FLAGS);
+    verifyManagedFileMetadata(await file.stat(), `log ${relativePath}`, ownerUid, state.device);
     await file.sync();
-    const physical = await hashFileHandle(file, `log ${relativePath}`);
+    const physical = await hashManagedArtifact(file, `log ${relativePath}`, ownerUid, state.device);
     await closeFileHandles(handles);
     return { physical, handle: file };
   } catch (error) {
@@ -604,6 +787,18 @@ async function openHashedLogFile(
     await file?.close().catch(() => undefined);
     throw error;
   }
+}
+
+function sameHashedMetadata(left: HashedFile, right: HashedFile): boolean {
+  return left.device === right.device
+    && left.inode === right.inode
+    && left.mode === right.mode
+    && left.uid === right.uid
+    && left.gid === right.gid
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
 }
 
 interface LogSealPlan {
@@ -650,11 +845,11 @@ function validateLogEvents(
   return end;
 }
 
-async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stateRootSnapshot: StateRootSnapshotRunner): Promise<CleanupLogSealer> {
-  void clock;
+async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stateRootSnapshot: StateRootSnapshotRunner, ownerUid: number): Promise<CleanupLogSealer> {
   return {
     seal: async (input): Promise<CleanupLogSeal> => stateRootSnapshot(async (state) => {
       const heldLogFiles: FileHandle[] = [];
+      let committed = false;
       db.exec('BEGIN IMMEDIATE');
       try {
         const rows = db.prepare('SELECT stream, generation, path, started_at, sealed_at, size_bytes, sha256 FROM job_log_generations WHERE job_id=? ORDER BY stream, generation LIMIT ?').all(input.jobId, MAX_LOG_GENERATIONS + 1) as unknown as LogRow[];
@@ -674,7 +869,7 @@ async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stat
             if (startedAt > input.at) throw workerError('RECOVERY_LOG_GAP', `${stream} log generation starts in the future`);
             const sealedAt = row.sealed_at === null ? null : canonicalInstant(row.sealed_at, `${stream} log sealedAt`);
             if (sealedAt !== null && sealedAt > input.at) throw workerError('RECOVERY_LOG_GAP', `${stream} log generation seal is from the future`);
-            const opened = await openHashedLogFile(state, input.jobId, row.path);
+            const opened = await openHashedLogFile(state, input.jobId, row.path, ownerUid);
             const physical = opened.physical;
             heldLogFiles.push(opened.handle);
             totalPhysicalBytes += physical.size;
@@ -692,8 +887,8 @@ async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stat
           if (streamRows.length > 0) states[stream] = 'sealed';
         }
         for (const plan of plans) {
-          const stable = await hashFileHandle(plan.handle, `${plan.stream} log before seal`);
-          if (stable.size !== plan.physical.size || stable.sha256 !== plan.physical.sha256 || !sameIdentity(stable, plan.physical)) throw workerError('RECOVERY_LOG_GAP', `${plan.stream} log changed before seal`);
+          const stable = await hashManagedArtifact(plan.handle, `${plan.stream} log before seal`, ownerUid, state.device);
+          if (stable.sha256 !== plan.physical.sha256 || !sameHashedMetadata(stable, plan.physical)) throw workerError('RECOVERY_LOG_GAP', `${plan.stream} log changed before seal`);
           if (plan.tailLength > 0) {
             const resized = db.prepare('UPDATE job_log_generations SET size_bytes=? WHERE job_id=? AND stream=? AND generation=? AND sealed_at IS NULL AND size_bytes=?').run(plan.physical.size, input.jobId, plan.stream, plan.row.generation, plan.row.size_bytes);
             if (Number(resized.changes) !== 1) throw workerError('RECOVERY_LOG_GAP', `${plan.stream} log size update CAS was lost`);
@@ -705,9 +900,13 @@ async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stat
           if (Number(sealed.changes) !== 1) throw workerError('RECOVERY_LOG_GAP', `${plan.stream} log seal CAS was lost`);
         }
         db.exec('COMMIT');
-        return { runner: states.runner, docker: states.docker, verifiedAt: input.at, contiguous: true };
+        committed = true;
+        const verifiedAt = canonicalInstant(clock.now(), 'cleanup log completion observation');
+        return { runner: states.runner, docker: states.docker, verifiedAt, contiguous: true };
       } catch (error) {
-        try { db.exec('ROLLBACK'); } catch (rollbackError) { throw workerError('RECOVERY_LOG_GAP', 'cleanup log rollback failed', rollbackError); }
+        if (!committed) {
+          try { db.exec('ROLLBACK'); } catch (rollbackError) { throw workerError('RECOVERY_LOG_GAP', 'cleanup log rollback failed', rollbackError); }
+        }
         if (error instanceof CleanupWorkerError) throw error;
         throw workerError('RECOVERY_LOG_GAP', `cleanup log sealing failed: ${message(error)}`, error);
       } finally {
@@ -856,8 +1055,8 @@ export async function createCleanupProduction(options: CleanupProductionDependen
     const adapters: CleanupProductionAdapters = {
       systemd: createSystemdAdapter({ executor, env: commandEnv, timeoutMs }, options.systemdExecutable ?? SYSTEMCTL),
       docker: createDockerAdapter({ executor, env: Object.freeze({ ...FIXED_PREFLIGHT_ENV }), timeoutMs }, options.dockerExecutable ?? DOCKER),
-      logSealer: await createLogSealer(db, clock, stateRootSnapshot),
-      quarantine: createQuarantineAdapter(loaded, publisher, clock, approvedRootSnapshot),
+      logSealer: await createLogSealer(db, clock, stateRootSnapshot, ownerUid),
+      quarantine: createQuarantineAdapter(loaded, publisher, clock, approvedRootSnapshot, ownerUid),
       evidenceWriter: createEvidenceWriter(state.stateRoot, ownerUid, options.fileSystem ?? createRecoveryFileSystem()),
     };
     const workerOptions: CleanupWorkerOptions = {

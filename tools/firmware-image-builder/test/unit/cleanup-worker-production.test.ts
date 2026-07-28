@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, open, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +12,7 @@ import { runCleanupWorkerCli } from '../../cleanup-worker/src/cli.js';
 import { createCleanupProduction, runCleanupWorker } from '../../cleanup-worker/src/production.js';
 
 const NOW = '2026-07-27T12:00:00.000Z';
+const AFTER = '2026-07-27T12:00:01.000Z';
 const HASH = 'a'.repeat(64);
 const JOB = 'job-1';
 const ROOT_ID = 'release';
@@ -24,6 +25,17 @@ function commandResult(argv: readonly string[], stdout: string, exitCode = 0) {
     argv: [...argv], exitCode, signal: null, stdout, stderr: '', timedOut: false,
     startedAt: NOW, finishedAt: NOW,
   } as const;
+}
+
+function physicalQuarantineInput() {
+  return {
+    rootId: ROOT_ID,
+    jobId: JOB,
+    admittedStaging: { kind: 'physical-present' as const, path: `staging/${JOB}`, sha256: null, size: null, observedAt: NOW },
+    stagingPath: null,
+    artifactSha256: null,
+    artifactSize: null,
+  };
 }
 
 function loaded(stateRoot: string): LoadedConfig {
@@ -40,6 +52,35 @@ function loaded(stateRoot: string): LoadedConfig {
     configRoot: '/etc/osi-image-builder',
     pathAuthorities: {} as never,
   } as LoadedConfig;
+}
+
+async function createPublisherTree(output: string, source = true): Promise<{
+  readonly builder: string;
+  readonly staging: string;
+  readonly quarantine: string;
+  readonly source: string;
+}> {
+  const builder = join(output, '.osi-image-builder');
+  const staging = join(builder, 'staging');
+  const quarantine = join(builder, 'quarantine');
+  const sourcePath = join(staging, JOB);
+  await mkdir(output, { mode: 0o700 });
+  await mkdir(builder, { mode: 0o750 });
+  await mkdir(staging, { mode: 0o750 });
+  await mkdir(quarantine, { mode: 0o750 });
+  if (source) await mkdir(sourcePath, { mode: 0o700 });
+  return { builder, staging, quarantine, source: sourcePath };
+}
+
+async function createSecureLogFile(root: string, relativePath: string, bytes: Buffer): Promise<string> {
+  let current = root;
+  for (const part of ['jobs', JOB, 'logs', ...relativePath.split('/').slice(0, -1)]) {
+    current = join(current, part);
+    await mkdir(current, { mode: 0o700 });
+  }
+  const path = join(current, relativePath.split('/').at(-1)!);
+  await writeFile(path, bytes, { mode: 0o600 });
+  return path;
 }
 
 function deps(root: string, executor: { run: ReturnType<typeof vi.fn> }, publisherCalls: ReturnType<typeof vi.fn>, database?: DatabaseSync) {
@@ -189,10 +230,9 @@ describe('cleanup production composition', () => {
   it('proves physical null-identity quarantine through the native publisher and maps paths', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
     const output = join(root, 'output');
-    await mkdir(join(output, '.osi-image-builder', 'staging', JOB), { recursive: true });
-    await mkdir(join(output, '.osi-image-builder', 'quarantine'), { recursive: true });
+    await createPublisherTree(output);
     const artifact = Buffer.from('physical staging');
-    await writeFile(join(output, '.osi-image-builder', 'staging', JOB, 'image'), artifact);
+    await writeFile(join(output, '.osi-image-builder', 'staging', JOB, 'image'), artifact, { mode: 0o600 });
     const publisherCalls = vi.fn(async () => {
       await rename(join(output, '.osi-image-builder', 'staging', JOB), join(output, '.osi-image-builder', 'quarantine', JOB));
       return {
@@ -229,8 +269,7 @@ describe('cleanup production composition', () => {
     const output = join(root, 'output');
     const source = join(output, '.osi-image-builder', 'staging', JOB);
     const destination = join(output, '.osi-image-builder', 'quarantine', JOB);
-    await mkdir(source, { recursive: true });
-    await mkdir(join(output, '.osi-image-builder', 'quarantine'), { recursive: true });
+    await createPublisherTree(output);
     let crashed = false;
     const publisherCalls = vi.fn(async () => {
       await rename(source, destination);
@@ -255,12 +294,11 @@ describe('cleanup production composition', () => {
     const output = join(root, 'output');
     const source = join(output, '.osi-image-builder', 'staging', JOB);
     const destination = join(output, '.osi-image-builder', 'quarantine', JOB);
-    await mkdir(source, { recursive: true });
-    await mkdir(join(output, '.osi-image-builder', 'quarantine'), { recursive: true });
+    await createPublisherTree(output);
     const publisherCalls = vi.fn(async () => {
       await rename(source, destination);
       await rm(destination, { recursive: true });
-      await mkdir(destination);
+      await mkdir(destination, { mode: 0o700 });
       return { available: true, published: false, quarantined: true, selfTest: false, mutationCount: 1, sourceRelativePath: `.osi-image-builder/staging/${JOB}`, destinationRelativePath: `.osi-image-builder/quarantine/${JOB}`, renameResult: 'RENAMED' as const, publisherVersion: '2026.07.27', publisherSourceSha256: HASH };
     });
     const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
@@ -279,12 +317,11 @@ describe('cleanup production composition', () => {
     const movedOutput = join(root, 'output-moved');
     const source = join(output, '.osi-image-builder', 'staging', JOB);
     const destination = join(output, '.osi-image-builder', 'quarantine', JOB);
-    await mkdir(source, { recursive: true });
-    await mkdir(join(output, '.osi-image-builder', 'quarantine'), { recursive: true });
+    await createPublisherTree(output);
     const publisherCalls = vi.fn(async () => {
       await rename(source, destination);
       await rename(output, movedOutput);
-      await mkdir(output);
+      await mkdir(output, { mode: 0o700 });
       return { available: true, published: false, quarantined: true, selfTest: false, mutationCount: 1, sourceRelativePath: `.osi-image-builder/staging/${JOB}`, destinationRelativePath: `.osi-image-builder/quarantine/${JOB}`, renameResult: 'RENAMED' as const, publisherVersion: '2026.07.27', publisherSourceSha256: HASH };
     });
     const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
@@ -294,6 +331,182 @@ describe('cleanup production composition', () => {
       loadConfiguration: vi.fn(async () => ({ ...base, config: { ...base.config, approvedOutputRoots: [{ id: ROOT_ID, label: 'release', path: output, quarantinePath: join(output, '.osi-image-builder', 'quarantine') }] } })),
     });
     await expect(composition.adapters.quarantine.quarantine({ rootId: ROOT_ID, jobId: JOB, admittedStaging: { kind: 'physical-present', path: `staging/${JOB}`, sha256: null, size: null, observedAt: NOW }, stagingPath: null, artifactSha256: null, artifactSize: null })).rejects.toMatchObject({ code: 'QUARANTINE_PENDING' });
+    await composition.close();
+  });
+
+  it.each([
+    ['builder', 0o700],
+    ['builder', 0o755],
+    ['staging', 0o700],
+    ['staging', 0o755],
+    ['quarantine', 0o700],
+    ['quarantine', 0o755],
+  ] as const)('rejects unsafe publisher metadata for %s mode %o before mutation', async (field, mode) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const output = join(root, 'output');
+    const paths = await createPublisherTree(output);
+    await chmod(paths[field], mode);
+    const publisherCalls = vi.fn();
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const base = loaded(root);
+    const composition = await createCleanupProduction({
+      ...deps(root, executor, publisherCalls),
+      loadConfiguration: vi.fn(async () => ({
+        ...base,
+        config: { ...base.config, approvedOutputRoots: [{ id: ROOT_ID, label: 'release', path: output, quarantinePath: paths.quarantine }] },
+      })),
+    });
+    await expect(composition.adapters.quarantine.quarantine(physicalQuarantineInput())).rejects.toMatchObject({ code: 'QUARANTINE_PENDING' });
+    expect(publisherCalls).not.toHaveBeenCalled();
+    await composition.close();
+  });
+
+  it.each([0o750, 0o755])('rejects runner job directory mode %o before mutation', async (mode) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const output = join(root, 'output');
+    const paths = await createPublisherTree(output);
+    await chmod(paths.source, mode);
+    const publisherCalls = vi.fn();
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const base = loaded(root);
+    const composition = await createCleanupProduction({
+      ...deps(root, executor, publisherCalls),
+      loadConfiguration: vi.fn(async () => ({
+        ...base,
+        config: { ...base.config, approvedOutputRoots: [{ id: ROOT_ID, label: 'release', path: output, quarantinePath: paths.quarantine }] },
+      })),
+    });
+    await expect(composition.adapters.quarantine.quarantine(physicalQuarantineInput())).rejects.toMatchObject({ code: 'QUARANTINE_PENDING' });
+    expect(publisherCalls).not.toHaveBeenCalled();
+    await composition.close();
+  });
+
+  it.each(['mode', 'hard-link'] as const)('rejects tracked artifact %s metadata before mutation', async (mutation) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const output = join(root, 'output');
+    const paths = await createPublisherTree(output);
+    const bytes = Buffer.from('tracked artifact bytes');
+    const artifactPath = join(paths.source, 'image');
+    await writeFile(artifactPath, bytes, { mode: mutation === 'mode' ? 0o644 : 0o600 });
+    if (mutation === 'hard-link') await link(artifactPath, join(root, 'artifact-hard-link'));
+    const publisherCalls = vi.fn(async () => {
+      await rename(paths.source, join(paths.quarantine, JOB));
+      return {
+        available: true, published: false, quarantined: true, selfTest: false, mutationCount: 1,
+        sourceRelativePath: `.osi-image-builder/staging/${JOB}`,
+        destinationRelativePath: `.osi-image-builder/quarantine/${JOB}`,
+        renameResult: 'RENAMED' as const, publisherVersion: '2026.07.27', publisherSourceSha256: HASH,
+      };
+    });
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const base = loaded(root);
+    const composition = await createCleanupProduction({
+      ...deps(root, executor, publisherCalls),
+      loadConfiguration: vi.fn(async () => ({
+        ...base,
+        config: { ...base.config, approvedOutputRoots: [{ id: ROOT_ID, label: 'release', path: output, quarantinePath: paths.quarantine }] },
+      })),
+    });
+    await expect(composition.adapters.quarantine.quarantine({
+      rootId: ROOT_ID,
+      jobId: JOB,
+      admittedStaging: { kind: 'present', path: `staging/${JOB}/image`, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length },
+      stagingPath: `staging/${JOB}/image`,
+      artifactSha256: createHash('sha256').update(bytes).digest('hex'),
+      artifactSize: bytes.length,
+    })).rejects.toMatchObject({ code: 'QUARANTINE_PENDING' });
+    expect(publisherCalls).not.toHaveBeenCalled();
+    await composition.close();
+  });
+
+  it('quarantines a canonical tracked artifact with secure metadata', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const output = join(root, 'output');
+    const paths = await createPublisherTree(output);
+    const bytes = Buffer.from('tracked artifact bytes');
+    await writeFile(join(paths.source, 'image'), bytes, { mode: 0o600 });
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const publisherCalls = vi.fn(async () => {
+      await rename(paths.source, join(paths.quarantine, JOB));
+      return {
+        available: true, published: false, quarantined: true, selfTest: false, mutationCount: 1,
+        sourceRelativePath: `.osi-image-builder/staging/${JOB}`,
+        destinationRelativePath: `.osi-image-builder/quarantine/${JOB}`,
+        renameResult: 'RENAMED' as const, publisherVersion: '2026.07.27', publisherSourceSha256: HASH,
+      };
+    });
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const base = loaded(root);
+    const composition = await createCleanupProduction({
+      ...deps(root, executor, publisherCalls),
+      loadConfiguration: vi.fn(async () => ({
+        ...base,
+        config: { ...base.config, approvedOutputRoots: [{ id: ROOT_ID, label: 'release', path: output, quarantinePath: paths.quarantine }] },
+      })),
+    });
+    await expect(composition.adapters.quarantine.quarantine({
+      rootId: ROOT_ID,
+      jobId: JOB,
+      admittedStaging: { kind: 'present', path: `staging/${JOB}/image`, sha256, size: bytes.length },
+      stagingPath: `staging/${JOB}/image`,
+      artifactSha256: sha256,
+      artifactSize: bytes.length,
+    })).resolves.toMatchObject({ kind: 'quarantined', sha256, size: bytes.length });
+    expect(publisherCalls).toHaveBeenCalledOnce();
+    await composition.close();
+  });
+
+  it('rejects wrong owner and cross-device authority metadata before mutation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const output = join(root, 'output');
+    const paths = await createPublisherTree(output);
+    const publisherCalls = vi.fn();
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const base = loaded(root);
+    const wrongOwner = await createCleanupProduction({
+      ...deps(root, executor, publisherCalls),
+      ownerUid: (process.getuid?.() ?? 0) + 1,
+      loadConfiguration: vi.fn(async () => ({
+        ...base,
+        config: { ...base.config, approvedOutputRoots: [{ id: ROOT_ID, label: 'release', path: output, quarantinePath: paths.quarantine }] },
+      })),
+    });
+    await expect(wrongOwner.adapters.quarantine.quarantine(physicalQuarantineInput())).rejects.toMatchObject({ code: 'QUARANTINE_PENDING' });
+    await wrongOwner.close();
+
+    const crossDevice = await createCleanupProduction({
+      ...deps(root, executor, publisherCalls),
+      loadConfiguration: vi.fn(async () => ({
+        ...base,
+        config: { ...base.config, approvedOutputRoots: [{ id: ROOT_ID, label: 'release', path: output, quarantinePath: paths.quarantine }] },
+      })),
+      approvedRootSnapshot: async (rootId, callback) => {
+        const stats = await lstat(output);
+        return callback({ id: rootId, path: output, quarantinePath: paths.quarantine, device: stats.dev + 1, inode: stats.ino });
+      },
+    });
+    await expect(crossDevice.adapters.quarantine.quarantine(physicalQuarantineInput())).rejects.toMatchObject({ code: 'QUARANTINE_PENDING' });
+    expect(publisherCalls).not.toHaveBeenCalled();
+    await crossDevice.close();
+  });
+
+  it('rejects an approved root that violates the secure configured mode contract', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const output = join(root, 'output');
+    const paths = await createPublisherTree(output);
+    await chmod(output, 0o770);
+    const publisherCalls = vi.fn();
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const base = loaded(root);
+    const composition = await createCleanupProduction({
+      ...deps(root, executor, publisherCalls),
+      loadConfiguration: vi.fn(async () => ({
+        ...base,
+        config: { ...base.config, approvedOutputRoots: [{ id: ROOT_ID, label: 'release', path: output, quarantinePath: paths.quarantine }] },
+      })),
+    });
+    await expect(composition.adapters.quarantine.quarantine(physicalQuarantineInput())).rejects.toMatchObject({ code: 'QUARANTINE_PENDING' });
+    expect(publisherCalls).not.toHaveBeenCalled();
     await composition.close();
   });
 
@@ -318,9 +531,7 @@ describe('cleanup production composition', () => {
   it('seals bounded contiguous persisted log generations from the physical bytes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
     const bytes = Buffer.from('runner cleanup log\n');
-    await mkdir(join(root, 'jobs', JOB, 'logs'), { recursive: true });
-    const logPath = join(root, 'jobs', JOB, 'logs', 'runner-0.log');
-    await writeFile(logPath, bytes);
+    const logPath = await createSecureLogFile(root, 'runner-0.log', bytes);
     const probe = await open(logPath, 'r');
     const sync = vi.spyOn(Object.getPrototypeOf(probe) as { sync: () => Promise<void> }, 'sync');
     await probe.close();
@@ -387,8 +598,7 @@ describe('cleanup production composition', () => {
   it('marks an unterminated durable orphan tail as partial', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
     const bytes = Buffer.from('partial tail');
-    await mkdir(join(root, 'jobs', JOB, 'logs'), { recursive: true });
-    await writeFile(join(root, 'jobs', JOB, 'logs', 'runner-0.log'), bytes);
+    await createSecureLogFile(root, 'runner-0.log', bytes);
     const rows: LogFixtureRow[] = [{
       stream: 'runner',
       generation: 0,
@@ -414,8 +624,7 @@ describe('cleanup production composition', () => {
   it('does not seal a generation when persisted event ranges have a gap', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
     const bytes = Buffer.from('four');
-    await mkdir(join(root, 'jobs', JOB, 'logs'), { recursive: true });
-    await writeFile(join(root, 'jobs', JOB, 'logs', 'runner-0.log'), bytes);
+    await createSecureLogFile(root, 'runner-0.log', bytes);
     const rows: LogFixtureRow[] = [{ stream: 'runner', generation: 0, path: 'logs/runner-0.log', started_at: NOW, sealed_at: null, size_bytes: bytes.length, sha256: null }];
     const database = logDatabase(rows, [{ stream: 'runner', file_generation: 0, seq: 0, event_type: 'log', at: NOW, byte_offset: 1, byte_length: 1, partial: 0 }]);
     const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
@@ -430,8 +639,7 @@ describe('cleanup production composition', () => {
   it('rejects tampered physical bytes for an already-sealed generation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
     const bytes = Buffer.from('tampered');
-    await mkdir(join(root, 'jobs', JOB, 'logs'), { recursive: true });
-    await writeFile(join(root, 'jobs', JOB, 'logs', 'runner-0.log'), bytes);
+    await createSecureLogFile(root, 'runner-0.log', bytes);
     const rows: LogFixtureRow[] = [{ stream: 'runner', generation: 0, path: 'logs/runner-0.log', started_at: NOW, sealed_at: NOW, size_bytes: bytes.length, sha256: HASH }];
     const database = logDatabase(rows, [{ stream: 'runner', file_generation: 0, seq: 0, event_type: 'log', at: NOW, byte_offset: 0, byte_length: bytes.length, partial: 0 }]);
     const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
@@ -439,6 +647,139 @@ describe('cleanup production composition', () => {
     await expect(composition.adapters.logSealer.seal({ jobId: JOB, admissionId: ADMISSION, at: NOW, snapshot: {} as never })).rejects.toMatchObject({ code: 'RECOVERY_LOG_GAP' });
     expect(database.update).not.toHaveBeenCalled();
     expect(database.exec).toHaveBeenLastCalledWith('ROLLBACK');
+    await composition.close();
+  });
+
+  it.each([
+    ['jobs', 0o750],
+    [`jobs/${JOB}`, 0o755],
+    [`jobs/${JOB}/logs`, 0o750],
+    [`jobs/${JOB}/logs/nested`, 0o755],
+  ] as const)('rejects log directory %s mode %o', async (relative, mode) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const bytes = Buffer.from('runner cleanup log\n');
+    await createSecureLogFile(root, 'nested/runner-0.log', bytes);
+    await chmod(join(root, relative), mode);
+    const rows: LogFixtureRow[] = [{
+      stream: 'runner', generation: 0, path: 'logs/nested/runner-0.log', started_at: NOW,
+      sealed_at: null, size_bytes: bytes.length, sha256: null,
+    }];
+    const database = logDatabase(rows, []);
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const composition = await createCleanupProduction(deps(root, executor, vi.fn(), database.database));
+    await expect(composition.adapters.logSealer.seal({ jobId: JOB, admissionId: ADMISSION, at: NOW, snapshot: {} as never })).rejects.toMatchObject({ code: 'RECOVERY_LOG_GAP' });
+    expect(database.update).not.toHaveBeenCalled();
+    await composition.close();
+  });
+
+  it.each(['mode', 'hard-link'] as const)('rejects log file %s metadata', async (mutation) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const bytes = Buffer.from('runner cleanup log\n');
+    const logPath = await createSecureLogFile(root, 'runner-0.log', bytes);
+    if (mutation === 'mode') await chmod(logPath, 0o640);
+    else await link(logPath, join(root, 'log-hard-link'));
+    const rows: LogFixtureRow[] = [{
+      stream: 'runner', generation: 0, path: 'logs/runner-0.log', started_at: NOW,
+      sealed_at: null, size_bytes: bytes.length, sha256: null,
+    }];
+    const database = logDatabase(rows, []);
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const composition = await createCleanupProduction(deps(root, executor, vi.fn(), database.database));
+    await expect(composition.adapters.logSealer.seal({ jobId: JOB, admissionId: ADMISSION, at: NOW, snapshot: {} as never })).rejects.toMatchObject({ code: 'RECOVERY_LOG_GAP' });
+    expect(database.update).not.toHaveBeenCalled();
+    await composition.close();
+  });
+
+  it('returns verifiedAt from the clock only after physical hashing and durable COMMIT', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const bytes = Buffer.from('runner cleanup log\n');
+    await createSecureLogFile(root, 'runner-0.log', bytes);
+    const rows: LogFixtureRow[] = [{
+      stream: 'runner', generation: 0, path: 'logs/runner-0.log', started_at: NOW,
+      sealed_at: null, size_bytes: bytes.length, sha256: null,
+    }];
+    const database = logDatabase(rows, []);
+    const clock = {
+      now: vi.fn(() => {
+        expect(database.exec).toHaveBeenCalledWith('COMMIT');
+        return AFTER;
+      }),
+    };
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const composition = await createCleanupProduction({ ...deps(root, executor, vi.fn(), database.database), clock });
+    await expect(composition.adapters.logSealer.seal({
+      jobId: JOB,
+      admissionId: ADMISSION,
+      at: NOW,
+      snapshot: {} as never,
+    })).resolves.toMatchObject({ runner: 'sealed', verifiedAt: AFTER, contiguous: true });
+    expect(database.update).toHaveBeenCalledWith(NOW, expect.any(String), JOB, 'runner', 0, bytes.length);
+    expect(clock.now).toHaveBeenCalledOnce();
+    await composition.close();
+  });
+
+  it('rejects same-size log metadata mutation between physical hash and sealing recheck', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const bytes = Buffer.from('runner cleanup log\n');
+    const logPath = await createSecureLogFile(root, 'runner-0.log', bytes);
+    const inode = (await lstat(logPath)).ino;
+    const probe = await open(logPath, 'r');
+    const prototype = Object.getPrototypeOf(probe) as { stat: (this: FileHandle, ...args: unknown[]) => Promise<Awaited<ReturnType<typeof lstat>>> };
+    await probe.close();
+    const nativeStat = prototype.stat;
+    let matchingStats = 0;
+    vi.spyOn(prototype, 'stat').mockImplementation(async function (this: FileHandle, ...args: unknown[]) {
+      const stats = await nativeStat.apply(this, args);
+      if (stats.ino === inode) {
+        matchingStats += 1;
+        if (matchingStats === 2) await chmod(logPath, 0o640);
+      }
+      return stats;
+    });
+    const rows: LogFixtureRow[] = [{
+      stream: 'runner', generation: 0, path: 'logs/runner-0.log', started_at: NOW,
+      sealed_at: null, size_bytes: bytes.length, sha256: null,
+    }];
+    const database = logDatabase(rows, []);
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const composition = await createCleanupProduction(deps(root, executor, vi.fn(), database.database));
+    await expect(composition.adapters.logSealer.seal({
+      jobId: JOB,
+      admissionId: ADMISSION,
+      at: NOW,
+      snapshot: {} as never,
+    })).rejects.toMatchObject({ code: 'RECOVERY_LOG_GAP' });
+    expect(database.update).not.toHaveBeenCalled();
+    await composition.close();
+  });
+
+  it.each(['owner', 'device'] as const)('rejects wrong log %s authority metadata', async (mismatch) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const bytes = Buffer.from('runner cleanup log\n');
+    await createSecureLogFile(root, 'runner-0.log', bytes);
+    const rows: LogFixtureRow[] = [{
+      stream: 'runner', generation: 0, path: 'logs/runner-0.log', started_at: NOW,
+      sealed_at: null, size_bytes: bytes.length, sha256: null,
+    }];
+    const database = logDatabase(rows, []);
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const base = deps(root, executor, vi.fn(), database.database);
+    const composition = await createCleanupProduction({
+      ...base,
+      ...(mismatch === 'owner' ? { ownerUid: (process.getuid?.() ?? 0) + 1 } : {
+        stateRootSnapshot: async (callback) => {
+          const stats = await lstat(root);
+          return callback({ path: root, device: stats.dev + 1, inode: stats.ino });
+        },
+      }),
+    });
+    await expect(composition.adapters.logSealer.seal({
+      jobId: JOB,
+      admissionId: ADMISSION,
+      at: NOW,
+      snapshot: {} as never,
+    })).rejects.toMatchObject({ code: 'RECOVERY_LOG_GAP' });
+    expect(database.update).not.toHaveBeenCalled();
     await composition.close();
   });
 

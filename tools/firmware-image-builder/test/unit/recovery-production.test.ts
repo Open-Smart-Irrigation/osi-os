@@ -1,16 +1,16 @@
 import { createHash } from 'node:crypto';
-import { access, chmod, link, mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile, type FileHandle } from 'node:fs/promises';
+import { access, chmod, link, mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, utimes, writeFile, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { loadConfig, type LoadedConfig } from '../../config/load.js';
+import { ConfigAuthorityError, loadConfig, type LoadedConfig } from '../../config/load.js';
 import { ADMISSION_ID_PATTERN } from '../../domain/types.js';
 import { encodeJson } from '../../api/src/validation.js';
 import type { CleanupPostcondition } from '../../api/src/ownership.js';
 import { RecoveryBoundaryError, RecoveryInfrastructureError } from '../../api/src/recovery.js';
-import { classifyRecoveryFileSystemError, createRecoveryPhysicalVerification } from '../../api/src/recovery-production.js';
+import { classifyRecoveryAuthorityError, classifyRecoveryFileSystemError, createRecoveryPhysicalVerification } from '../../api/src/recovery-production.js';
 
 const JOB_ID = 'recovery-production-job';
 const ADMISSION_ID = 'cln_0123456789abcdefghjkmnpqrs';
@@ -197,13 +197,41 @@ async function writeTrackedQuarantine(loaded: LoadedConfig, artifact: Buffer): P
 }
 
 async function writeTrackedFiles(destination: string, artifact: Buffer): Promise<void> {
-  await writeFile(join(destination, 'image.img.gz'), artifact, { mode: 0o600 });
+  const artifactPath = join(destination, 'image.img.gz');
+  await writeFile(artifactPath, artifact, { mode: 0o600 });
+  await utimes(artifactPath, new Date(NOW), new Date(NOW));
   await writeFile(join(destination, 'sha256sums'), CHECKSUM_BYTES, { mode: 0o600 });
   await writeFile(join(destination, 'build-manifest.json'), MANIFEST_BYTES, { mode: 0o600 });
   await writeFile(join(destination, 'verification.json'), VERIFICATION_BYTES, { mode: 0o600 });
 }
 
 describe('production recovery physical verification', () => {
+  it('classifies semantic and identity ConfigAuthorityError values as recovery boundaries', () => {
+    const semantic = new ConfigAuthorityError('unknown approved root', undefined, 'OUTPUT_ROOT_ID_UNKNOWN');
+    const identity = new ConfigAuthorityError('approved root identity changed');
+    expect(classifyRecoveryAuthorityError('approved root authority failed', semantic)).toBeInstanceOf(RecoveryBoundaryError);
+    expect(classifyRecoveryAuthorityError('approved root authority failed', identity)).toBeInstanceOf(RecoveryBoundaryError);
+  });
+
+  it.each(['ENOENT', 'ELOOP', 'ENOTDIR', 'EISDIR', 'EACCES', 'EPERM'] as const)('classifies authority-wrapped %s as a recovery boundary', (code) => {
+    const cause = Object.assign(new Error(`authority failed: ${code}`), { code });
+    const classified = classifyRecoveryAuthorityError('approved root authority failed', new ConfigAuthorityError('authority failed', { cause }));
+    expect(classified).toBeInstanceOf(RecoveryBoundaryError);
+    expect(classified).not.toBeInstanceOf(RecoveryInfrastructureError);
+  });
+
+  it.each([
+    Object.assign(new Error('read-only filesystem'), { code: 'EROFS' }),
+    Object.assign(new Error('interrupted operation'), { code: 'EINTR' }),
+    Object.assign(new Error('device failure'), { code: 'EIO' }),
+    Object.assign(new Error('unknown errno'), { code: 'EUNKNOWN' }),
+    new Error('authority cause without errno'),
+  ])('classifies an authority-wrapped unknown or infrastructure cause as recovery infrastructure', (cause) => {
+    const classified = classifyRecoveryAuthorityError('approved root authority failed', new ConfigAuthorityError('authority failed', { cause }));
+    expect(classified).toBeInstanceOf(RecoveryInfrastructureError);
+    expect(classified).not.toBeInstanceOf(RecoveryBoundaryError);
+  });
+
   it.each(['EIO', 'EMFILE', 'ENFILE', 'ENOMEM', 'ESTALE'] as const)('classifies descriptor-open %s as recovery infrastructure failure', (code) => {
     const error = Object.assign(new Error(`open failed: ${code}`), { code });
     const classified = classifyRecoveryFileSystemError('open', 'cannot open recovery evidence', error);
@@ -383,6 +411,23 @@ describe('production recovery physical verification', () => {
       ));
       await expect(operation).rejects.toBeInstanceOf(RecoveryInfrastructureError);
       await expect(operation).rejects.not.toBeInstanceOf(RecoveryBoundaryError);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects expected tracked artifact bytes with a different physical mtime', async () => {
+    const value = await fixture();
+    try {
+      const artifact = Buffer.from('tracked artifact bytes\n', 'utf8');
+      const tracked = trackedIdentity(artifact);
+      const destination = await writeTrackedQuarantine(value.loaded, artifact);
+      await utimes(join(destination, 'image.img.gz'), new Date(STALE), new Date(STALE));
+      const physical = createFactory(value.loaded);
+      await expect(physical.staging.verify(stagingInput(
+        quarantinedPostcondition(tracked.artifactSha256, tracked.artifactSize),
+        tracked,
+      ))).rejects.toThrow(/mtime/);
     } finally {
       await rm(value.base, { recursive: true, force: true });
     }

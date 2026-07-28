@@ -35,20 +35,6 @@ const O_CLOEXEC = (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: nu
 const DIRECTORY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW | O_CLOEXEC;
 const FILE_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | O_CLOEXEC;
 const FATAL_DECODER = new TextDecoder('utf-8', { fatal: true });
-const INFRASTRUCTURE_ERROR_CODES = new Set([
-  'EAGAIN',
-  'EBUSY',
-  'EDQUOT',
-  'EIO',
-  'EMFILE',
-  'ENFILE',
-  'ENODEV',
-  'ENOMEM',
-  'ENOSPC',
-  'ENXIO',
-  'ESTALE',
-  'ETIMEDOUT',
-]);
 const BOUNDARY_OPEN_ERROR_CODES = new Set([
   'EACCES',
   'EISDIR',
@@ -102,16 +88,26 @@ function fileSystemFailure(operation: RecoveryFileSystemOperation, message: stri
   throw classifyRecoveryFileSystemError(operation, message, cause);
 }
 
-function authorityFailure(message: string, error: unknown): never {
-  if (error instanceof RecoveryBoundaryError || error instanceof RecoveryInfrastructureError) throw error;
+export function classifyRecoveryAuthorityError(
+  message: string,
+  error: unknown,
+): RecoveryBoundaryError | RecoveryInfrastructureError {
+  if (error instanceof RecoveryBoundaryError || error instanceof RecoveryInfrastructureError) return error;
   if (error instanceof ConfigAuthorityError) {
-    const cause = error.cause;
-    if (INFRASTRUCTURE_ERROR_CODES.has(errorCode(cause) ?? '')) {
-      throw new RecoveryInfrastructureError(message, { cause: error });
+    if (error.code !== undefined || error.cause === undefined) {
+      return new RecoveryBoundaryError(message, { cause: error });
     }
-    throw new RecoveryBoundaryError(message, { cause: error });
+    const cause = error.cause;
+    if (BOUNDARY_OPEN_ERROR_CODES.has(errorCode(cause) ?? '')) {
+      return new RecoveryBoundaryError(message, { cause: error });
+    }
+    return new RecoveryInfrastructureError(message, { cause: error });
   }
-  throw new RecoveryInfrastructureError(message, { cause: error });
+  return new RecoveryInfrastructureError(message, { cause: error });
+}
+
+function authorityFailure(message: string, error: unknown): never {
+  throw classifyRecoveryAuthorityError(message, error);
 }
 
 async function descriptorStat(handle: FileHandle, field: string): Promise<NativeStats> {
@@ -380,10 +376,19 @@ async function readBoundedFile(handle: FileHandle, maxBytes: number, field: stri
   return bytes;
 }
 
-async function hashBoundedArtifact(handle: FileHandle, expectedSize: number, expectedSha256: string, field: string, ownerUid: number, device: number): Promise<void> {
+async function hashBoundedArtifact(
+  handle: FileHandle,
+  expectedSize: number,
+  expectedSha256: string,
+  expectedMtime: string,
+  field: string,
+  ownerUid: number,
+  device: number,
+): Promise<void> {
   const before = await descriptorStat(handle, field);
   assertRegularArtifact(before, field, ownerUid, device);
   if (before.size !== expectedSize) return fail(`${field} size does not match the persisted artifact identity`);
+  if (before.mtime.toISOString() !== expectedMtime) return fail(`${field} mtime does not match the persisted artifact identity`);
   const digest = createHash('sha256');
   const buffer = Buffer.allocUnsafe(1024 * 1024);
   let position = 0;
@@ -807,7 +812,7 @@ async function inspectStaging(
                 if (tracked.size === null) {
                   await hashBoundedSidecar(file, tracked.sha256, tracked.maxBytes!, field, ownerUid, snapshot.device);
                 } else {
-                  await hashBoundedArtifact(file, tracked.size, tracked.sha256, field, ownerUid, snapshot.device);
+                  await hashBoundedArtifact(file, tracked.size, tracked.sha256, input.artifactMtime!, field, ownerUid, snapshot.device);
                 }
               } finally {
                 await descriptorClose(file);

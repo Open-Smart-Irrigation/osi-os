@@ -703,6 +703,21 @@ describe('cleanup worker exact container protocol', () => {
     expect(result.status).toBe('completed');
   });
 
+  it('rejects log verification observed before the sealing request', async () => {
+    const value = await fixture('staging-log');
+    vi.spyOn(value.options.logSealer, 'seal').mockResolvedValueOnce({
+      runner: 'absent',
+      docker: 'absent',
+      verifiedAt: EXPIRED,
+      contiguous: true,
+    });
+    await expect(value.worker.run([value.admissionId])).resolves.toMatchObject({
+      status: 'blocked',
+      blockerCode: 'RECOVERY_LOG_GAP',
+    });
+    expect(value.options.quarantine.quarantine).not.toHaveBeenCalled();
+  });
+
   it('records typed log and quarantine collaborator failures', async () => {
     const logFailure = await fixture('staging-log');
     vi.spyOn(logFailure.options.logSealer, 'seal').mockRejectedValueOnce(new Error('seal unavailable'));
