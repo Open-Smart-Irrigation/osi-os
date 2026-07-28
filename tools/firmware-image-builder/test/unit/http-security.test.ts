@@ -8,6 +8,7 @@ import {
   type ApiRouteHandler,
   type ApiRouteContext,
 } from '../../api/src/server.js';
+import { BuilderError } from '../../domain/errors.js';
 
 const EPHEMERAL_ORIGIN = 'http://127.0.0.1:0';
 
@@ -365,5 +366,121 @@ describe('loopback HTTP security boundary', () => {
     } finally {
       await stop(server);
     }
+  });
+
+  it('keeps transport headers authoritative and calculates HEAD length from the JSON body', async () => {
+    const { server, port } = await start(() => jsonResponse(200, { ok: true }, {
+      'content-type': 'text/plain',
+      'content-length': '1',
+      'cache-control': 'public, max-age=3600',
+      'x-request-id': 'forged',
+      connection: 'close',
+      'transfer-encoding': 'chunked',
+      'access-control-allow-origin': 'https://evil.example',
+      'x-content-type-options': '0',
+      'referrer-policy': 'unsafe-url',
+      'x-frame-options': 'ALLOWALL',
+      location: '/api/jobs/next',
+      'retry-after': '5',
+      'x-route-private': 'must-not-escape',
+    }));
+    try {
+      const get = await call(port, { path: '/api/health', headers: { origin: originFor(port) } });
+      expect(get.status).toBe(200);
+      expect(get.body).toBe('{"ok":true}');
+      expect(get.headers['content-type']).toBe('application/json; charset=utf-8');
+      expect(get.headers['content-length']).toBe(String(Buffer.byteLength(get.body)));
+      expect(get.headers['cache-control']).toBe('no-store');
+      expect(get.headers['x-request-id']).not.toBe('forged');
+      expect(get.headers.connection).toBe('keep-alive');
+      expect(get.headers['transfer-encoding']).toBeUndefined();
+      expect(get.headers['access-control-allow-origin']).toBe(originFor(port));
+      expect(get.headers['x-content-type-options']).toBe('nosniff');
+      expect(get.headers['referrer-policy']).toBe('no-referrer');
+      expect(get.headers['x-frame-options']).toBe('DENY');
+      expect(get.headers.location).toBe('/api/jobs/next');
+      expect(get.headers['retry-after']).toBe('5');
+      expect(get.headers['x-route-private']).toBeUndefined();
+
+      const head = await call(port, { method: 'HEAD', path: '/api/health', headers: { origin: originFor(port) } });
+      expect(head.status).toBe(200);
+      expect(head.body).toBe('');
+      expect(head.headers['content-length']).toBe(String(Buffer.byteLength('{"ok":true}')));
+      expect(head.headers['content-type']).toBe('application/json; charset=utf-8');
+      expect(head.headers['access-control-allow-origin']).toBe(originFor(port));
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('redacts BuilderError diagnosis, recovery, paths, and unapproved detail values', async () => {
+    const expectedSha = '1111111111111111111111111111111111111111';
+    const observedSha = '2222222222222222222222222222222222222222';
+    const artifactSha256 = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const secret = '/srv/private/token=secret';
+    const { server, port } = await start(() => {
+      throw new BuilderError({
+        code: 'BRANCH_MOVED',
+        stage: 'source',
+        details: {
+          expectedSha,
+          observedSha,
+          artifactSha256,
+          targetId: 'rpi-5',
+          diagnosis: secret,
+          recovery: secret,
+          path: secret,
+          label: 'innocent-looking-but-secret',
+          sha256: 'not-a-sha',
+        },
+        retryable: true,
+        requestId: 'domain-request-id-must-not-escape',
+        diagnosis: `diagnosis ${secret}`,
+        recovery: `recovery ${secret}`,
+      });
+    });
+    try {
+      const response = await call(port, { path: '/api/health' });
+      expect(response.status).toBe(409);
+      expect(response.json).toEqual({
+        error: {
+          code: 'BRANCH_MOVED',
+          message: 'The remote branch changed after the displayed SHA.',
+          stage: 'source',
+          details: { expectedSha, observedSha, artifactSha256, targetId: 'rpi-5' },
+          retryable: true,
+          requestId: response.headers['x-request-id'],
+        },
+      });
+      expect(JSON.stringify(response.json)).not.toContain('secret');
+      expect(JSON.stringify(response.json)).not.toContain('domain-request-id');
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('converts an invalid route status into a stable internal error', async () => {
+    const { server, port } = await start(() => jsonResponse(700, { ok: true }));
+    try {
+      const response = await call(port, { path: '/api/health' });
+      expect(response.status).toBe(500);
+      expect(response.json).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('configures bounded request, header, socket, and keep-alive timeouts', async () => {
+    const server = createHttpServer({ origin: EPHEMERAL_ORIGIN, routeHandler: () => jsonResponse(200, {}) });
+    expect(server.requestTimeout).toBeGreaterThan(0);
+    expect(server.headersTimeout).toBeGreaterThan(0);
+    expect(server.timeout).toBeGreaterThan(0);
+    expect(server.keepAliveTimeout).toBeGreaterThan(0);
+    expect(server.headersTimeout).toBeLessThan(server.requestTimeout);
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, () => resolve());
+    });
+    await stop(server);
   });
 });

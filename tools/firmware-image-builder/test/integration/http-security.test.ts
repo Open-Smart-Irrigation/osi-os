@@ -54,6 +54,25 @@ async function raw(port: number, target: string): Promise<{ readonly status: num
   });
 }
 
+async function rawRequest(port: number, requestText: string): Promise<{ readonly status: number; readonly body: string }> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(port, '127.0.0.1');
+    const chunks: Buffer[] = [];
+    socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+    socket.on('error', reject);
+    socket.on('close', () => {
+      const response = Buffer.concat(chunks).toString('utf8');
+      const match = /^HTTP\/1\.1 (\d{3})/u.exec(response);
+      if (match === null) {
+        reject(new Error(`missing HTTP status in response: ${response}`));
+        return;
+      }
+      resolve({ status: Number(match[1]), body: response });
+    });
+    socket.on('connect', () => socket.end(requestText));
+  });
+}
+
 async function call(port: number, options: {
   readonly method: string;
   readonly path: string;
@@ -141,5 +160,78 @@ describe('HTTP request-target parsing', () => {
     expect(() => createHttpServer({ origin: 'https://127.0.0.1:43129', routeHandler: () => jsonResponse(200, {}) })).toThrow();
     const server = createHttpServer({ origin: 'http://127.0.0.1:43129', routeHandler: () => jsonResponse(200, {}) });
     expect(() => server.listen(43130)).toThrow(/origin port/iu);
+  });
+
+  it.each(['GET', 'HEAD', 'OPTIONS'])('rejects a zero Content-Length on %s before route dispatch', async (method) => {
+    let dispatched = 0;
+    const { server, port } = await start(() => {
+      dispatched += 1;
+      return jsonResponse(200, { ok: true });
+    });
+    try {
+      const response = await rawRequest(port, [
+        `${method} /api/health HTTP/1.1`,
+        `Host: 127.0.0.1:${port}`,
+        'Content-Length: 0',
+        'Connection: close',
+        '',
+        '',
+      ].join('\r\n'));
+      expect(response.status).toBe(400);
+      if (method !== 'HEAD') expect(response.body).toContain('"code":"BODY_NOT_ALLOWED"');
+      expect(dispatched).toBe(0);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it.each(['GET', 'HEAD', 'OPTIONS'])('rejects Transfer-Encoding on %s before route dispatch', async (method) => {
+    let dispatched = 0;
+    const { server, port } = await start(() => {
+      dispatched += 1;
+      return jsonResponse(200, { ok: true });
+    });
+    try {
+      const response = await rawRequest(port, [
+        `${method} /api/health HTTP/1.1`,
+        `Host: 127.0.0.1:${port}`,
+        'Transfer-Encoding: chunked',
+        'Connection: close',
+        '',
+        '0',
+        '',
+        '',
+      ].join('\r\n'));
+      expect(response.status).toBe(400);
+      if (method !== 'HEAD') expect(response.body).toContain('"code":"BODY_NOT_ALLOWED"');
+      expect(dispatched).toBe(0);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('drains and closes an unread mutation body when origin validation rejects it', async () => {
+    let dispatched = 0;
+    const { server, port } = await start(() => {
+      dispatched += 1;
+      return jsonResponse(200, { ok: true });
+    });
+    try {
+      const response = await rawRequest(port, [
+        'POST /api/jobs HTTP/1.1',
+        `Host: 127.0.0.1:${port}`,
+        'Origin: https://evil.example',
+        'Content-Type: application/json',
+        'Content-Length: 2',
+        'Connection: keep-alive',
+        '',
+        '{}',
+      ].join('\r\n'));
+      expect(response.status).toBe(403);
+      expect(response.body).toMatch(/connection: close/iu);
+      expect(dispatched).toBe(0);
+    } finally {
+      await stop(server);
+    }
   });
 });
