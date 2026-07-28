@@ -604,17 +604,37 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
     const requestedAt = canonicalInstant(options.clock.now(), 'log sealing request time');
     let seal: CleanupLogSeal;
     try {
-      seal = await claimedAction(admission, 'log sealing', () => (
-        (() => {
-          assertOrphanLogLivenessProof({
-            unitInactive: true,
-            leaseStale: admission.snapshot.runner.leaseExpiresAt === null
-              || canonicalInstant(admission.snapshot.runner.leaseExpiresAt, 'admitted runner lease expiry') <= requestedAt,
-            noMatchingContainer: containerPost.globalLabelResult === 'no-match',
-          });
-          return options.logSealer.seal({ jobId: admission.jobId, admissionId: admission.admissionId, at: requestedAt, snapshot: admission.snapshot });
-        })()
-      ));
+      seal = await claimedAction(admission, 'log sealing', async () => {
+        if (containerPost.globalLabelResult !== 'no-match') {
+          throw new Error('container cleanup did not prove a global no-match result');
+        }
+        const hasMatchingContainer = await options.docker.hasByJobId(
+          admission.jobId,
+          options.timeouts.dockerMs,
+        );
+        const noMatchingContainer = !hasMatchingContainer;
+        if (!noMatchingContainer) {
+          throw new CleanupWorkerError(
+            'DOCKER_CONTAINER_ORPHANED',
+            'global Docker label query found a container immediately before log sealing',
+          );
+        }
+        assertOrphanLogLivenessProof({
+          unitInactive: true,
+          leaseStale: admission.snapshot.runner.leaseExpiresAt === null
+            || canonicalInstant(admission.snapshot.runner.leaseExpiresAt, 'admitted runner lease expiry') <= requestedAt,
+          noMatchingContainer,
+        });
+        assertClaimActive(admission, 'log sealing after Docker proof');
+        const result = await options.logSealer.seal({
+          jobId: admission.jobId,
+          admissionId: admission.admissionId,
+          at: requestedAt,
+          snapshot: admission.snapshot,
+        });
+        assertClaimActive(admission, 'log sealing completion');
+        return result;
+      });
     } catch (error) {
       if (error instanceof CleanupWorkerError) throw error;
       throw new CleanupWorkerError('RECOVERY_LOG_GAP', `cleanup log sealing failed: ${errorMessage(error)}`, { cause: error });

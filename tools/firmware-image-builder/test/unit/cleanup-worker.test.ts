@@ -368,6 +368,7 @@ describe('cleanup worker argument and admission fence', () => {
       'remove:container-job-1:1000',
       'inspect:container-job-1:1000',
       'has:1000',
+      'has:1000',
     ]);
     expect(await readFile(value.credential.path).catch(() => null)).toBeNull();
     expect((value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(value.admissionId) as { status: string }).status).toBe('completed');
@@ -553,7 +554,7 @@ describe('cleanup worker exact container protocol', () => {
     value.docker.setPresent(false);
     const result = await value.worker.run([value.admissionId]);
     expect(result.status).toBe('completed');
-    expect(value.docker.calls).toEqual(['inspect:container-job-1:1000', 'has:1000']);
+    expect(value.docker.calls).toEqual(['inspect:container-job-1:1000', 'has:1000', 'has:1000']);
     expect((value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(value.admissionId) as { status: string }).status).toBe('completed');
   });
 
@@ -597,6 +598,23 @@ describe('cleanup worker exact container protocol', () => {
     expect(value.docker.stop).not.toHaveBeenCalled();
     expect(value.docker.remove).not.toHaveBeenCalled();
     expect(value.options.logSealer.seal).not.toHaveBeenCalled();
+  });
+
+  it('rechecks the global Docker label immediately before sealing logs', async () => {
+    const value = await fixture('staging-log');
+    vi.spyOn(value.docker, 'hasByJobId')
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    await expect(value.worker.run([value.admissionId])).resolves.toMatchObject({
+      status: 'blocked',
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    });
+
+    expect(value.docker.hasByJobId).toHaveBeenCalledTimes(2);
+    expect(value.options.logSealer.seal).not.toHaveBeenCalled();
+    expect(value.options.quarantine.quarantine).not.toHaveBeenCalled();
+    expect(value.options.evidenceWriter.write).toHaveBeenCalledOnce();
   });
 
   it('timestamps Docker absence and removal only after the corresponding observations complete', async () => {
@@ -736,6 +754,27 @@ describe('cleanup worker exact container protocol', () => {
     expect(result.status).toBe('completed');
   });
 
+  it('rejects a cleanup claim that expires while log sealing is in flight', async () => {
+    const value = await fixture('staging-log');
+    let now = NOW;
+    (value.options.clock as { now: () => string }).now = () => now;
+    vi.spyOn(value.options.logSealer, 'seal').mockImplementationOnce(async () => {
+      now = '2026-07-27T12:06:00.000Z';
+      return {
+        runner: 'absent',
+        docker: 'absent',
+        verifiedAt: now,
+        contiguous: true,
+      };
+    });
+
+    await expect(value.worker.run([value.admissionId])).rejects.toThrow(/claim expired/u);
+
+    expect(value.options.quarantine.quarantine).not.toHaveBeenCalled();
+    expect(value.options.evidenceWriter.write).not.toHaveBeenCalled();
+    expect(value.db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id=? AND event_type='cleanup_complete'").get(value.jobId)).toEqual({ count: 0 });
+  });
+
   it('rejects log verification observed before the sealing request', async () => {
     const value = await fixture('staging-log');
     vi.spyOn(value.options.logSealer, 'seal').mockResolvedValueOnce({
@@ -782,7 +821,7 @@ describe('cleanup worker exact container protocol', () => {
     const value = await fixture('staging-log');
     const result = await value.worker.run([value.admissionId]);
     expect(result.status).toBe('completed');
-    expect(value.docker.calls).toEqual(['has:1000']);
+    expect(value.docker.calls).toEqual(['has:1000', 'has:1000']);
     expect(value.docker.hasByJobId).toHaveBeenCalledWith(value.jobId, 1000);
     expect(value.options.quarantine.quarantine).toHaveBeenCalledOnce();
     expect((value.db.prepare('SELECT status, cleanup_blocker_code, container_id, state, queue_state FROM cleanup_leases JOIN jobs USING (job_id) WHERE admission_id=?').get(value.admissionId) as Record<string, unknown>)).toMatchObject({ status: 'completed', cleanup_blocker_code: null, container_id: null, state: 'starting', queue_state: 'dispatched' });
