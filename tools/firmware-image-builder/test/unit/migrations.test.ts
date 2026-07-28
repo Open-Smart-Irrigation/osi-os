@@ -519,19 +519,67 @@ describe('versioned builder database migrations', () => {
     second.close();
   });
 
-  it('enforces unique source gaps while allowing orphan and non-gap events', async () => {
+  it('treats integer, real, and exponent source sequences as one numeric identity', async () => {
     const path = await temporaryDatabase();
     const db = openBuilderDatabase(path);
-    insertValidJob(db, 'source-gap-index', 'building');
+    insertValidJob(db, 'numeric-source-gap-index', 'building');
     const insert = db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, ?, ?, ?)');
 
-    insert.run('source-gap-index', 0, 'log-gap', '{"sourceSeq":42}', '2026-07-28T00:00:00.000Z');
-    expect(() => insert.run('source-gap-index', 1, 'log-gap', '{"sourceSeq":42}', '2026-07-28T00:00:01.000Z'))
+    insert.run('numeric-source-gap-index', 0, 'log-gap', '{"sourceSeq":42}', '2026-07-28T00:00:00.000Z');
+    expect(() => insert.run('numeric-source-gap-index', 1, 'log-gap', '{"sourceSeq":42.0}', '2026-07-28T00:00:01.000Z'))
       .toThrow(/UNIQUE constraint failed/u);
-    insert.run('source-gap-index', 1, 'log-gap', '{"orphanKey":"runner:0:0"}', '2026-07-28T00:00:01.000Z');
-    insert.run('source-gap-index', 2, 'log-gap', '{"orphanKey":"runner:0:0"}', '2026-07-28T00:00:02.000Z');
-    insert.run('source-gap-index', 3, 'recovery', '{"sourceSeq":42}', '2026-07-28T00:00:03.000Z');
+    expect(() => insert.run('numeric-source-gap-index', 1, 'log-gap', '{"sourceSeq":42e0}', '2026-07-28T00:00:01.000Z'))
+      .toThrow(/UNIQUE constraint failed/u);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='job_events_log_gap_source_seq'").get()).toEqual({ name: 'job_events_log_gap_source_seq' });
+    db.close();
+  });
+
+  it('keeps text source sequences distinct from numeric values while enforcing text duplicates', async () => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    insertValidJob(db, 'text-source-gap-index', 'building');
+    const insert = db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, ?, ?, ?)');
+
+    insert.run('text-source-gap-index', 0, 'log-gap', '{"sourceSeq":42}', '2026-07-28T00:00:00.000Z');
+    insert.run('text-source-gap-index', 1, 'log-gap', '{"sourceSeq":"42"}', '2026-07-28T00:00:01.000Z');
+    expect(() => insert.run('text-source-gap-index', 2, 'log-gap', '{"sourceSeq":"42"}', '2026-07-28T00:00:02.000Z'))
+      .toThrow(/UNIQUE constraint failed/u);
+    db.close();
+  });
+
+  it('allows missing and null source sequences plus non-gap events', async () => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    insertValidJob(db, 'nullable-source-gap-index', 'building');
+    const insert = db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, ?, ?, ?)');
+
+    insert.run('nullable-source-gap-index', 0, 'log-gap', '{"orphanKey":"runner:0:0"}', '2026-07-28T00:00:00.000Z');
+    insert.run('nullable-source-gap-index', 1, 'log-gap', '{"orphanKey":"runner:0:0"}', '2026-07-28T00:00:01.000Z');
+    insert.run('nullable-source-gap-index', 2, 'log-gap', '{"sourceSeq":null}', '2026-07-28T00:00:02.000Z');
+    insert.run('nullable-source-gap-index', 3, 'log-gap', '{"sourceSeq":null}', '2026-07-28T00:00:03.000Z');
+    insert.run('nullable-source-gap-index', 4, 'recovery', '{"sourceSeq":42}', '2026-07-28T00:00:04.000Z');
+    insert.run('nullable-source-gap-index', 5, 'recovery', '{"sourceSeq":42}', '2026-07-28T00:00:05.000Z');
+    expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='nullable-source-gap-index'").get()).toEqual({ count: 6 });
+    db.close();
+  });
+
+  it('does not collapse oversized source sequences that SQLite represents distinctly', async () => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    insertValidJob(db, 'oversized-source-gap-index', 'building');
+    const insert = db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, ?, ?, ?)');
+
+    insert.run('oversized-source-gap-index', 0, 'log-gap', '{"sourceSeq":9223372036854775808}', '2026-07-28T00:00:00.000Z');
+    insert.run('oversized-source-gap-index', 1, 'log-gap', '{"sourceSeq":9223372036854777856}', '2026-07-28T00:00:01.000Z');
+    const represented = db.prepare(`SELECT
+      typeof(json_extract(payload_json, '$.sourceSeq')) AS storage_class,
+      json_extract(payload_json, '$.sourceSeq') AS source_seq
+      FROM job_events WHERE job_id='oversized-source-gap-index' ORDER BY seq`).all() as Array<{
+        storage_class: string;
+        source_seq: number;
+      }>;
+    expect(represented.map((row) => row.storage_class)).toEqual(['real', 'real']);
+    expect(represented[0]!.source_seq).not.toBe(represented[1]!.source_seq);
     db.close();
   });
 
