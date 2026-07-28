@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ConfigValidationError,
+  loadCleanupConfig,
   loadConfig,
   resolveApprovedRoot,
   validateOrigin,
@@ -115,6 +116,35 @@ function fakeDirectoryStats(overrides: Partial<RootStats> = {}): RootStats {
 }
 
 describe('builder configuration', () => {
+  it('loads cleanup authority without probing or opening the configured repository', async () => {
+    const workspace = await createWorkspace();
+    const inaccessibleRepository = join(workspace.directory, 'repository-is-not-mounted');
+    await writeConfig(workspace, configFor(workspace, {
+      repositoryPath: inaccessibleRepository,
+    }));
+
+    const loaded = await loadCleanupConfig({
+      env: {
+        HOME: homedir(),
+        XDG_CONFIG_HOME: workspace.configHome,
+        XDG_STATE_HOME: workspace.stateHome,
+      },
+      rootFs: { statfs: ampleDisk },
+    });
+
+    expect(loaded.stateRoot).toBe(resolve(workspace.stateHome, 'osi-image-builder'));
+    expect(loaded.config).toEqual({
+      approvedOutputRoots: [{
+        id: 'sdcard-images',
+        label: 'SD card images',
+        path: resolve(workspace.outputRoot),
+        quarantinePath: join(resolve(workspace.outputRoot), '.osi-image-builder', 'quarantine'),
+      }],
+      builderLockPath: '/opt/osi-image-builder/2026.07.22.1/builder.lock.json',
+    });
+    await expect(lstat(inaccessibleRepository)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('expands XDG paths, validates SSH origin, and returns canonical approved roots', async () => {
     const workspace = await createWorkspace();
     await writeConfig(workspace, configFor(workspace));

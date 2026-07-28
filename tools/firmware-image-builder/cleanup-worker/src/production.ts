@@ -6,12 +6,13 @@ import type { DatabaseSync } from 'node:sqlite';
 
 import { deriveSystemdBusEnvironment, FIXED_PREFLIGHT_ENV } from '../../api/src/preflight.js';
 import {
-  loadConfig,
+  loadCleanupConfig,
   loadStateRootAuthority,
   withApprovedRootSnapshot as withApprovedRootAuthoritySnapshot,
   withStateRootSnapshot as withStateRootAuthoritySnapshot,
-  type LoadedConfig,
+  type LoadedCleanupConfig,
   type LoadedStateRoot,
+  type RootFileSystem,
 } from '../../config/load.js';
 import { validateBuilderLock } from '../../domain/builder-lock.js';
 import {
@@ -102,7 +103,8 @@ type StateRootSnapshotRunner = <T>(callback: (snapshot: StateRootSnapshot) => Pr
 
 export interface CleanupProductionDependencies {
   readonly loadStateRoot?: (options: { readonly env?: NodeJS.ProcessEnv }) => Promise<LoadedStateRoot>;
-  readonly loadConfiguration?: (options: { readonly env?: NodeJS.ProcessEnv }) => Promise<LoadedConfig>;
+  readonly loadConfiguration?: (options: { readonly env?: NodeJS.ProcessEnv }) => Promise<LoadedCleanupConfig>;
+  readonly configurationRootFs?: Partial<RootFileSystem>;
   readonly openDatabase?: (path: string) => DatabaseSync;
   readonly commandExecutor?: CommandExecutor;
   readonly publisherAuthority?: CleanupPublisherAuthority;
@@ -748,7 +750,7 @@ function assertApprovedRootSnapshot(expected: ApprovedRootSnapshot, actual: Appr
 }
 
 function createQuarantineAdapter(
-  config: LoadedConfig,
+  config: LoadedCleanupConfig,
   publisher: PublisherClient,
   clock: CleanupWorkerClock,
   approvedRootSnapshot: ApprovedRootSnapshotRunner,
@@ -1093,7 +1095,7 @@ function createEvidenceWriter(stateRoot: string, ownerUid: number, fileSystem: R
   };
 }
 
-async function defaultPublisherAuthority(loaded: LoadedConfig, executor: CommandExecutor, ownerUid: number): Promise<CleanupPublisherAuthority & { readonly heldClose: () => Promise<void> }> {
+async function defaultPublisherAuthority(loaded: LoadedCleanupConfig, executor: CommandExecutor, ownerUid: number): Promise<CleanupPublisherAuthority & { readonly heldClose: () => Promise<void> }> {
   const lockPath = loaded.config.builderLockPath;
   const installedVersion = basename(dirname(lockPath));
   const lockParent = await open(dirname(lockPath), DIRECTORY_FLAGS);
@@ -1145,7 +1147,10 @@ export async function createCleanupProduction(options: CleanupProductionDependen
   const workerOwner = options.workerOwner ?? DEFAULT_OWNER;
   const clock = options.clock ?? { now: () => new Date().toISOString() };
   const loadState = options.loadStateRoot ?? ((input: { readonly env?: NodeJS.ProcessEnv }) => loadStateRootAuthority(input));
-  const loadConfiguration = options.loadConfiguration ?? ((input: { readonly env?: NodeJS.ProcessEnv }) => loadConfig(input));
+  const loadConfiguration = options.loadConfiguration ?? ((input: { readonly env?: NodeJS.ProcessEnv }) => loadCleanupConfig({
+    ...input,
+    rootFs: options.configurationRootFs,
+  }));
   const openDatabase = options.openDatabase ?? openBuilderDatabase;
   const state = await loadState({ env });
   let db: DatabaseSync | null = null;

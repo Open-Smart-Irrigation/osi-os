@@ -53,26 +53,38 @@ async function snapshotTree(root: string): Promise<readonly string[]> {
   return entries.sort();
 }
 
-async function copyUnitFixture(): Promise<{ readonly root: string; readonly paths: readonly string[] }> {
+function escapeSystemdWord(value: string): string {
+  if (/[\r\n\0]/u.test(value)) throw new Error('systemd fixture path contains a forbidden control character');
+  return value
+    .replaceAll('\\', '\\\\')
+    .replaceAll('\t', '\\t')
+    .replaceAll(' ', '\\x20');
+}
+
+async function copyUnitFixture(): Promise<{
+  readonly root: string;
+  readonly paths: readonly string[];
+  readonly cleanupPath: string;
+  readonly outputRoots: readonly string[];
+  readonly outputWorkRoots: readonly string[];
+}> {
   const root = await mkdtemp(join(tmpdir(), 'osi-image-builder-systemd-'));
   temporaryDirectories.push(root);
   const unitRoot = join(root, 'units');
-  const installRoot = join(root, 'selected');
+  const installRoot = join(root, 'versioned installs', '2026.07.28');
   const binRoot = join(installRoot, 'bin');
   const repositoryRoot = join(root, 'repository');
   const configHome = join(root, 'config-home');
   const configRoot = join(configHome, 'osi-image-builder');
   const stateHome = join(root, 'state-home');
   const stateRoot = join(stateHome, 'osi-image-builder');
-  const outputRoot = join(root, 'output');
-  const stagingRoot = join(outputRoot, '.osi-image-builder', 'staging');
-  const quarantineRoot = join(outputRoot, '.osi-image-builder', 'quarantine');
+  const outputRoots = [join(root, 'output one'), join(root, 'output-two')] as const;
+  const outputWorkRoots = outputRoots.map((outputRoot) => join(outputRoot, '.osi-image-builder'));
   await mkdir(binRoot, { recursive: true });
   await mkdir(repositoryRoot, { recursive: true });
   await mkdir(configRoot, { recursive: true });
   await mkdir(stateRoot, { recursive: true });
-  await mkdir(stagingRoot, { recursive: true });
-  await mkdir(quarantineRoot, { recursive: true });
+  for (const outputWorkRoot of outputWorkRoots) await mkdir(outputWorkRoot, { recursive: true });
 
   for (const executable of ['osi-image-builder-api', 'osi-image-builder-runner', 'osi-image-builder-cleanup', 'osi-image-publish']) {
     const path = join(binRoot, executable);
@@ -85,19 +97,26 @@ async function copyUnitFixture(): Promise<{ readonly root: string; readonly path
   for (const name of UNIT_NAMES) {
     const source = await readFile(new URL(name, unitDirectory), 'utf8');
     const copied = source
-      .replaceAll('%h/.local/lib/osi-image-builder/selected', installRoot)
-      .replaceAll('@OSI_IMAGE_BUILDER_REPOSITORY_PATH@', repositoryRoot)
-      .replaceAll('@OSI_IMAGE_BUILDER_XDG_CONFIG_HOME@', configHome)
-      .replaceAll('@OSI_IMAGE_BUILDER_CONFIG_ROOT@', configRoot)
-      .replaceAll('@OSI_IMAGE_BUILDER_XDG_STATE_HOME@', stateHome)
-      .replaceAll('@OSI_IMAGE_BUILDER_STATE_ROOT@', stateRoot)
-      .replaceAll('@OSI_IMAGE_BUILDER_OUTPUT_ROOT_PATHS@', outputRoot)
-      .replaceAll('@OSI_IMAGE_BUILDER_CLEANUP_WRITE_PATHS@', `${stagingRoot} ${quarantineRoot}`);
+      .replaceAll('%h/.local/lib/osi-image-builder/selected', escapeSystemdWord(installRoot))
+      .replaceAll('@OSI_IMAGE_BUILDER_VERSIONED_INSTALL_ROOT@', escapeSystemdWord(installRoot))
+      .replaceAll('@OSI_IMAGE_BUILDER_REPOSITORY_PATH@', escapeSystemdWord(repositoryRoot))
+      .replaceAll('@OSI_IMAGE_BUILDER_XDG_CONFIG_HOME@', escapeSystemdWord(configHome))
+      .replaceAll('@OSI_IMAGE_BUILDER_CONFIG_ROOT@', escapeSystemdWord(configRoot))
+      .replaceAll('@OSI_IMAGE_BUILDER_XDG_STATE_HOME@', escapeSystemdWord(stateHome))
+      .replaceAll('@OSI_IMAGE_BUILDER_STATE_ROOT@', escapeSystemdWord(stateRoot))
+      .replaceAll('@OSI_IMAGE_BUILDER_OUTPUT_ROOT_PATHS@', outputRoots.map(escapeSystemdWord).join(' '))
+      .replaceAll('@OSI_IMAGE_BUILDER_OUTPUT_WORK_ROOT_PATHS@', outputWorkRoots.map(escapeSystemdWord).join(' '));
     const path = join(unitRoot, basename(name));
     await writeFile(path, copied);
     paths.push(path);
   }
-  return { root, paths };
+  return {
+    root,
+    paths,
+    cleanupPath: join(unitRoot, 'osi-image-builder-cleanup@.service'),
+    outputRoots,
+    outputWorkRoots,
+  };
 }
 
 async function verifyCopiedUnits(paths: readonly string[]): Promise<VerificationProbe> {
@@ -140,6 +159,10 @@ describe('temporary systemd unit integration boundary', () => {
   it('verifies copied units and probes the user manager without lifecycle mutation', async () => {
     const fixture = await copyUnitFixture();
     const before = await snapshotTree(fixture.root);
+    const cleanup = await readFile(fixture.cleanupPath, 'utf8');
+    expect(cleanup).toContain(`BindReadOnlyPaths=${fixture.outputRoots.map(escapeSystemdWord).join(' ')}`);
+    expect(cleanup).toContain(`BindPaths=${fixture.outputWorkRoots.map(escapeSystemdWord).join(' ')}`);
+    expect(cleanup).not.toMatch(/BindPaths=.*(?:staging|quarantine)/u);
     const verified = await verifyCopiedUnits(fixture.paths);
     expect(verified).toMatchObject({ mutation: 'none' });
 

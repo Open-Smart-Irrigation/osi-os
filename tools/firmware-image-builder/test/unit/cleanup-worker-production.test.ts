@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
-import type { LoadedConfig } from '../../config/load.js';
+import type { LoadedCleanupConfig } from '../../config/load.js';
 
 import { createRecoveryFileSystem } from '../../api/src/recovery.js';
 import { runCleanupWorkerCli } from '../../cleanup-worker/src/cli.js';
@@ -42,20 +42,16 @@ function physicalQuarantineInput() {
   };
 }
 
-function loaded(stateRoot: string): LoadedConfig {
+function loaded(stateRoot: string): LoadedCleanupConfig {
   return {
     stateRoot,
     config: {
-      repository: { path: '/repo', remote: 'origin' as const },
       approvedOutputRoots: [{ id: ROOT_ID, label: 'release', path: join(stateRoot, 'output'), quarantinePath: join(stateRoot, 'output', '.osi-image-builder', 'quarantine') }],
       builderLockPath: '/opt/osi-image-builder/2026.07.27/builder.lock.json',
-      maxQueueLength: 1,
-      diskFreeMinimumBytes: 1,
     },
-    redacted: {} as LoadedConfig['redacted'],
     configRoot: '/etc/osi-image-builder',
     pathAuthorities: {} as never,
-  } as LoadedConfig;
+  } as LoadedCleanupConfig;
 }
 
 async function createPublisherTree(output: string, source = true): Promise<{
@@ -185,10 +181,42 @@ function logDatabase(rows: LogFixtureRow[], events: LogFixtureEvent[]) {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 describe('cleanup production composition', () => {
+  it('uses repository-free configuration in the default cleanup composition', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const configHome = join(root, 'config-home');
+    const stateHome = join(root, 'state-home');
+    const stateRoot = join(stateHome, 'osi-image-builder');
+    const outputRoot = join(root, 'output');
+    await mkdir(join(configHome, 'osi-image-builder'), { recursive: true, mode: 0o700 });
+    await mkdir(stateHome, { mode: 0o700 });
+    await mkdir(outputRoot, { mode: 0o700 });
+    await writeFile(join(configHome, 'osi-image-builder', 'config.json'), JSON.stringify({
+      repositoryPath: join(root, 'repository-is-not-mounted'),
+      approvedOutputRoots: [{ id: ROOT_ID, label: 'release', path: outputRoot }],
+      builderLockPath: '/opt/osi-image-builder/2026.07.27/builder.lock.json',
+      maxQueueLength: 1,
+      diskFreeMinimumBytes: 20 * 1024 ** 3,
+    }));
+    vi.stubEnv('XDG_CONFIG_HOME', configHome);
+    vi.stubEnv('XDG_STATE_HOME', stateHome);
+
+    const executor = { run: vi.fn(async (argv: readonly string[]) => commandResult(argv, 'inactive\n')) };
+    const base = deps(stateRoot, executor, vi.fn());
+    const composition = await createCleanupProduction({
+      ...base,
+      loadConfiguration: undefined,
+      configurationRootFs: { statfs: async () => ({ bavail: 30, bsize: 1024 ** 3 }) },
+    });
+
+    expect(composition.stateRoot).toBe(stateRoot);
+    await composition.close();
+  });
+
   it('instantiates bounded systemd, Docker, publisher, log, quarantine, and evidence boundaries', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
     const run = vi.fn(async (argv: readonly string[]) => {

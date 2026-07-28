@@ -141,10 +141,10 @@ describe('user systemd unit contracts', () => {
     expect(values(unit, 'Service', 'StateDirectory')).toEqual([]);
     expect(bindPaths).toEqual([
       '@OSI_IMAGE_BUILDER_STATE_ROOT@',
-      '@OSI_IMAGE_BUILDER_CLEANUP_WRITE_PATHS@',
+      '@OSI_IMAGE_BUILDER_OUTPUT_WORK_ROOT_PATHS@',
     ]);
     expect(bindReadOnlyPaths).toEqual([
-      '%h/.local/lib/osi-image-builder/selected',
+      '@OSI_IMAGE_BUILDER_VERSIONED_INSTALL_ROOT@',
       '@OSI_IMAGE_BUILDER_CONFIG_ROOT@',
       '@OSI_IMAGE_BUILDER_OUTPUT_ROOT_PATHS@',
     ]);
@@ -153,12 +153,13 @@ describe('user systemd unit contracts', () => {
     expect(values(unit, 'Service', 'ReadOnlyPaths')).toEqual([]);
     expect(values(unit, 'Service', 'NoExecPaths')).toEqual(['/']);
     expect(execPaths).toEqual([
-      '%h/.local/lib/osi-image-builder/selected/bin/osi-image-builder-cleanup',
-      '%h/.local/lib/osi-image-builder/selected/bin/osi-image-publish',
+      '@OSI_IMAGE_BUILDER_VERSIONED_INSTALL_ROOT@/bin/osi-image-builder-cleanup',
+      '@OSI_IMAGE_BUILDER_VERSIONED_INSTALL_ROOT@/bin/osi-image-publish',
       '/usr/bin/node',
       '/usr/bin/systemctl',
       '/usr/bin/docker',
     ]);
+    expect(exec[0]).toBe('@OSI_IMAGE_BUILDER_VERSIONED_INSTALL_ROOT@/bin/osi-image-builder-cleanup');
     expect(text).not.toMatch(/^Exec(?:StartPre|StartPost|Reload|Stop|StopPost)=/mu);
   });
 

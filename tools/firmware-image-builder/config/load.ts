@@ -201,6 +201,18 @@ export interface LoadedConfig {
   readonly pathAuthorities: PathAuthorities;
 }
 
+export interface CleanupBuilderConfig {
+  readonly approvedOutputRoots: readonly ApprovedOutputRoot[];
+  readonly builderLockPath: string;
+}
+
+export interface LoadedCleanupConfig {
+  readonly config: CleanupBuilderConfig;
+  readonly configRoot: string;
+  readonly stateRoot: string;
+  readonly pathAuthorities: PathAuthorities;
+}
+
 export interface LoadedStateRoot {
   readonly stateRoot: string;
   readonly authority: StateRootAuthority;
@@ -307,7 +319,7 @@ async function inspectAuthorityDirectory(path: string, field: string, policy: Di
 async function issuePathAuthorities(
   roots: readonly ApprovedOutputRoot[],
   statePath: string,
-  repositoryPath: string,
+  repositoryPath: string | undefined,
   dependencies: PathAuthorityDependencies,
 ): Promise<PathAuthorities> {
   const inspectedRoots: Array<AuthorityRootRecord> = [];
@@ -320,9 +332,11 @@ async function issuePathAuthorities(
     inspectedRoots.push({ id: root.id, path: inspected.path, quarantinePath: join(inspected.path, '.osi-image-builder', 'quarantine'), device: inspected.device, inode: inspected.inode });
   }
   const state = await inspectAuthorityDirectory(statePath, 'state root', 'state');
-  const repository = await inspectAuthorityDirectory(repositoryPath, 'repository/work root', 'output');
-  if (inspectedRoots.some((root) => pathsOverlap(root.path, state.path) || pathsOverlap(root.path, repository.path))) return authorityReject('approved root overlaps a protected state/work root', undefined, 'OUTPUT_ROOT_OVERLAP');
-  if (pathsOverlap(state.path, repository.path)) return authorityReject('state and work roots may not overlap', undefined, 'OUTPUT_ROOT_OVERLAP');
+  const repository = repositoryPath === undefined
+    ? undefined
+    : await inspectAuthorityDirectory(repositoryPath, 'repository/work root', 'output');
+  if (inspectedRoots.some((root) => pathsOverlap(root.path, state.path) || (repository !== undefined && pathsOverlap(root.path, repository.path)))) return authorityReject('approved root overlaps a protected state/work root', undefined, 'OUTPUT_ROOT_OVERLAP');
+  if (repository !== undefined && pathsOverlap(state.path, repository.path)) return authorityReject('state and work roots may not overlap', undefined, 'OUTPUT_ROOT_OVERLAP');
 
   const registry = Object.freeze({}) as ApprovedRootRegistry;
   const stateAuthority = Object.freeze({}) as StateRootAuthority;
@@ -331,6 +345,29 @@ async function issuePathAuthorities(
   authorityData.set(registry, { roots: new Map(inspectedRoots.map((root) => [root.id, Object.freeze(root)])), state: Object.freeze(state), dependencies });
   authorityData.set(stateAuthority, { roots: new Map(), state: Object.freeze(state), dependencies });
   return Object.freeze({ approvedRoots: registry, stateRoot: stateAuthority });
+}
+
+async function issueConfiguredPathAuthorities(
+  roots: readonly ApprovedOutputRoot[],
+  statePath: string,
+  repositoryPath: string | undefined,
+  dependencies: PathAuthorityDependencies,
+): Promise<PathAuthorities> {
+  await validateStateRootPreflight(statePath);
+  const stateCreated = await createStateRoot(statePath);
+  try {
+    return await issuePathAuthorities(roots, statePath, repositoryPath, dependencies);
+  } catch (error) {
+    if (stateCreated.length > 0) {
+      try {
+        for (const createdPath of stateCreated) await rmdir(createdPath);
+      } catch (cleanupError) {
+        if (error && typeof error === 'object' && Object.isExtensible(error)) Object.defineProperty(error, 'cleanupError', { value: cleanupError, enumerable: false });
+      }
+    }
+    if (error instanceof ConfigAuthorityError && error.code) throw new ConfigValidationError(error.code, error.message);
+    throw error;
+  }
 }
 
 function authorityLookup(registry: ApprovedRootRegistry, rootId: string): AuthorityData {
@@ -410,21 +447,22 @@ const defaultGitOriginProbe: GitOriginProbe = {
   },
 };
 
-export async function loadConfig(options: ConfigLoadOptions = {}): Promise<LoadedConfig> {
-  const directories = resolveConfigDirectories(options.env);
-  const configPath = options.configPath ?? join(directories.configRoot, 'config.json');
-  let raw: unknown;
-
+async function readConfigFile(configPath: string): Promise<ConfigFile> {
   try {
-    raw = JSON.parse(await readFile(configPath, 'utf8')) as unknown;
+    return parseConfigFile(JSON.parse(await readFile(configPath, 'utf8')) as unknown);
   } catch (error) {
+    if (error instanceof ConfigValidationError) throw error;
     throw new ConfigValidationError(
       'CONFIG_FILE_INVALID',
       `Cannot read configuration file ${configPath}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
 
-  const file = parseConfigFile(raw);
+export async function loadConfig(options: ConfigLoadOptions = {}): Promise<LoadedConfig> {
+  const directories = resolveConfigDirectories(options.env);
+  const configPath = options.configPath ?? join(directories.configRoot, 'config.json');
+  const file = await readConfigFile(configPath);
   const repositoryPath = validateRepositoryPath(file.repositoryPath);
   let originPolicy: ValidatedOriginPolicy;
   try {
@@ -450,27 +488,12 @@ export async function loadConfig(options: ConfigLoadOptions = {}): Promise<Loade
     minimumFreeBytes: diskFreeMinimumBytes,
   });
   await validateAuthorityOverlaps(approvedOutputRoots, directories.stateRoot, repositoryPath);
-  await validateStateRootPreflight(directories.stateRoot);
-  const stateCreated = await createStateRoot(directories.stateRoot);
-  let pathAuthorities: PathAuthorities;
-  try {
-    pathAuthorities = await issuePathAuthorities(
-      approvedOutputRoots,
-      directories.stateRoot,
-      repositoryPath,
-      Object.freeze({ ...defaultPathAuthorityDependencies, ...options.pathAuthorityDependencies }),
-    );
-  } catch (error) {
-    if (stateCreated.length > 0) {
-      try {
-        for (const createdPath of stateCreated) await rmdir(createdPath);
-      } catch (cleanupError) {
-        if (error && typeof error === 'object' && Object.isExtensible(error)) Object.defineProperty(error, 'cleanupError', { value: cleanupError, enumerable: false });
-      }
-    }
-    if (error instanceof ConfigAuthorityError && error.code) throw new ConfigValidationError(error.code, error.message);
-    throw error;
-  }
+  const pathAuthorities = await issueConfiguredPathAuthorities(
+    approvedOutputRoots,
+    directories.stateRoot,
+    repositoryPath,
+    Object.freeze({ ...defaultPathAuthorityDependencies, ...options.pathAuthorityDependencies }),
+  );
 
   const config: BuilderConfig = {
     repository: { path: repositoryPath, remote: DEFAULT_REMOTE },
@@ -483,6 +506,35 @@ export async function loadConfig(options: ConfigLoadOptions = {}): Promise<Loade
   return {
     config,
     redacted: { ...config },
+    ...directories,
+    pathAuthorities,
+  };
+}
+
+export async function loadCleanupConfig(
+  options: Omit<ConfigLoadOptions, 'git'> = {},
+): Promise<LoadedCleanupConfig> {
+  const directories = resolveConfigDirectories(options.env);
+  const configPath = options.configPath ?? join(directories.configRoot, 'config.json');
+  const file = await readConfigFile(configPath);
+  const repositoryPath = validateRepositoryPath(file.repositoryPath);
+  validateMaxQueueLength(file.maxQueueLength ?? DEFAULT_MAX_QUEUE_LENGTH);
+  const diskFreeMinimumBytes = validateDiskThreshold(file.diskFreeMinimumBytes ?? MIN_DISK_FREE_BYTES);
+  const builderLockPath = validateBuilderLockPath(file.builderLockPath);
+  const approvedOutputRoots = await validateApprovedRoots(file.approvedOutputRoots, {
+    rootFs: options.rootFs,
+    minimumFreeBytes: diskFreeMinimumBytes,
+  });
+  await validateCleanupAuthorityOverlaps(approvedOutputRoots, directories.stateRoot, repositoryPath);
+  const pathAuthorities = await issueConfiguredPathAuthorities(
+    approvedOutputRoots,
+    directories.stateRoot,
+    undefined,
+    Object.freeze({ ...defaultPathAuthorityDependencies, ...options.pathAuthorityDependencies }),
+  );
+
+  return {
+    config: { approvedOutputRoots, builderLockPath },
     ...directories,
     pathAuthorities,
   };
@@ -501,6 +553,25 @@ async function validateAuthorityOverlaps(
   }
   const rootsOverlap = roots.some((root, index) => roots.slice(index + 1).some((other) => pathsOverlap(root.path, other.path)));
   if (rootsOverlap || roots.some((root) => pathsOverlap(root.path, repositoryCanonical) || pathsOverlap(root.path, stateCanonical)) || pathsOverlap(stateCanonical, repositoryCanonical)) {
+    throw new ConfigValidationError('OUTPUT_ROOT_OVERLAP', 'Approved output, state, and work roots may not overlap.');
+  }
+}
+
+async function validateCleanupAuthorityOverlaps(
+  roots: readonly ApprovedOutputRoot[],
+  statePath: string,
+  repositoryPath: string,
+): Promise<void> {
+  let stateCanonical = resolve(statePath);
+  try { stateCanonical = await realpath(statePath); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new ConfigValidationError('OUTPUT_ROOT_OVERLAP', 'Cannot canonicalize protected state root.');
+  }
+  const rootsOverlap = roots.some((root, index) => roots.slice(index + 1).some((other) => pathsOverlap(root.path, other.path)));
+  if (
+    rootsOverlap
+    || roots.some((root) => pathsOverlap(root.path, stateCanonical) || pathsOverlap(root.path, repositoryPath))
+    || pathsOverlap(stateCanonical, repositoryPath)
+  ) {
     throw new ConfigValidationError('OUTPUT_ROOT_OVERLAP', 'Approved output, state, and work roots may not overlap.');
   }
 }
