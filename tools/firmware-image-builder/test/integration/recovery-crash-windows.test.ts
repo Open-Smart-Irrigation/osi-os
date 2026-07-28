@@ -361,6 +361,7 @@ describe('cleanup recovery crash windows', () => {
     expect((value.db.prepare('SELECT state, queue_state, cleanup_admission_id, cleanup_fence_generation FROM jobs WHERE job_id=?').get(value.jobId) as Record<string, unknown>)).toMatchObject({ state: 'interrupted', queue_state: 'complete', cleanup_admission_id: null, cleanup_fence_generation: null });
     expect((value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(value.admission.admissionId) as { status: string }).status).toBe('handed_back');
     expect((handBack.docker.inspect as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(`container-${value.jobId}`);
+    expect((handBack.docker.listByLabels as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith({ [LABEL_JOB]: value.jobId });
   });
 
   it('keeps admissions open when startup reconciliation finds a recovery boundary', async () => {
@@ -501,7 +502,7 @@ describe('cleanup recovery crash windows', () => {
 
   it.each([
     'exact container still present',
-    'matching global label remains',
+    'job-labeled container with wrong manifest remains',
     'staging postcondition is unverified',
     'stale runner unit is active',
     'systemd observation is stale',
@@ -518,11 +519,11 @@ describe('cleanup recovery crash windows', () => {
         },
         observedAt: NOW,
       });
-    } else if (condition === 'matching global label remains') {
+    } else if (condition === 'job-labeled container with wrong manifest remains') {
       (handBack.docker.listByLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
         containers: [{
           id: `container-${value.jobId}`,
-          labels: labels(value.jobId),
+          labels: { [LABEL_JOB]: value.jobId, [LABEL_MANIFEST]: 'f'.repeat(64) },
         }],
         observedAt: NOW,
       });

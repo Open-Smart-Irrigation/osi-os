@@ -128,6 +128,12 @@ export interface RecoveryStagingVerificationInput {
   readonly artifactStagingPath: string | null;
   readonly artifactSha256: string | null;
   readonly artifactSize: number | null;
+  readonly checksumPath: string | null;
+  readonly checksumSha256: string | null;
+  readonly manifestPath: string | null;
+  readonly manifestSha256: string | null;
+  readonly verificationPath: string | null;
+  readonly verificationSha256: string | null;
   readonly postcondition: CleanupPostcondition['staging'];
 }
 
@@ -961,21 +967,6 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
         }
       }
       verifyLogContinuity(options.db, input.jobId, postcondition.logs, completionAt, completionEventSeq);
-      const rootId = requiredRowString(job, 'root_id');
-      const artifactStagingPath = nullableRowString(job, 'artifact_staging_path');
-      const artifactSha256 = nullableRowString(job, 'artifact_sha256');
-      if (artifactSha256 !== null && !HASH64.test(artifactSha256)) throw new RecoveryBoundaryError('persisted staging artifact hash is invalid');
-      const artifactSize = job.artifact_size === null || job.artifact_size === undefined ? null : Number(job.artifact_size);
-      if (artifactSize !== null && (!Number.isSafeInteger(artifactSize) || artifactSize < 0)) throw new RecoveryBoundaryError('persisted staging artifact size is invalid');
-      if (await dependencies.staging.verify({
-        jobId: input.jobId,
-        admissionId: input.admissionId,
-        rootId,
-        artifactStagingPath,
-        artifactSha256,
-        artifactSize,
-        postcondition: postcondition.staging,
-      }) !== true) throw new RecoveryBoundaryError('cleanup staging postcondition is not verified');
 
       const inspectSystemd = options.systemd.inspect;
       if (inspectSystemd === undefined) throw new RecoveryBoundaryError('timestamped systemd verification is unavailable');
@@ -986,13 +977,45 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       if (runnerUnitObservation.unit !== runnerUnit) throw new RecoveryBoundaryError('runner unit observation does not match the stale runner');
       if (runnerUnitObservation.active !== false) throw new RecoveryBoundaryError('stale runner unit is still active during hand-back');
 
+      const rootId = requiredRowString(job, 'root_id');
+      const artifactStagingPath = nullableRowString(job, 'artifact_staging_path');
+      const artifactSha256 = nullableRowString(job, 'artifact_sha256');
+      if (artifactSha256 !== null && !HASH64.test(artifactSha256)) throw new RecoveryBoundaryError('persisted staging artifact hash is invalid');
+      const artifactSize = job.artifact_size === null || job.artifact_size === undefined ? null : Number(job.artifact_size);
+      if (artifactSize !== null && (!Number.isSafeInteger(artifactSize) || artifactSize < 0)) throw new RecoveryBoundaryError('persisted staging artifact size is invalid');
+      const checksumPath = nullableRowString(job, 'checksum_path');
+      const checksumSha256 = nullableRowString(job, 'checksum_sha256');
+      const manifestPath = nullableRowString(job, 'manifest_path');
+      const manifestSha256 = nullableRowString(job, 'manifest_sha256');
+      const verificationPath = nullableRowString(job, 'verification_path');
+      const verificationSha256 = nullableRowString(job, 'verification_sha256');
+      if (
+        checksumSha256 !== null && !HASH64.test(checksumSha256)
+        || manifestSha256 !== null && !HASH64.test(manifestSha256)
+        || verificationSha256 !== null && !HASH64.test(verificationSha256)
+      ) throw new RecoveryBoundaryError('persisted staging sidecar hash is invalid');
+      if (await dependencies.staging.verify({
+        jobId: input.jobId,
+        admissionId: input.admissionId,
+        rootId,
+        artifactStagingPath,
+        artifactSha256,
+        artifactSize,
+        checksumPath,
+        checksumSha256,
+        manifestPath,
+        manifestSha256,
+        verificationPath,
+        verificationSha256,
+        postcondition: postcondition.staging,
+      }) !== true) throw new RecoveryBoundaryError('cleanup staging postcondition is not verified');
+
       let exactContainerObservation: RecoveryDockerInspectResult | null = null;
       if (exactContainerId !== null) {
         exactContainerObservation = await dependencies.docker.inspect(exactContainerId);
         if (exactContainerObservation.container !== null) throw new RecoveryBoundaryError('exact persisted container is still present');
       }
-      const targetManifestSha = requiredRowString(job, 'target_manifest_sha256');
-      const labels = { 'org.osi.image-builder.job-id': input.jobId, 'org.osi.image-builder.manifest-sha': targetManifestSha } satisfies JsonObject;
+      const labels = { 'org.osi.image-builder.job-id': input.jobId } satisfies JsonObject;
       const globalContainerObservation = await dependencies.docker.listByLabels(labels);
       if (!Array.isArray(globalContainerObservation.containers) || globalContainerObservation.containers.length !== 0) throw new RecoveryBoundaryError('global Docker label query is not empty');
 

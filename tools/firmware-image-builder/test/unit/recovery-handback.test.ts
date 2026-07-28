@@ -18,6 +18,9 @@ const RUNNER_UNIT = `osi-image-builder-runner@${JOB_ID}.service`;
 const CLEANUP_UNIT = `osi-image-builder-cleanup@${ADMISSION_ID}.service`;
 const TOKEN_HASH = 'a'.repeat(64);
 const EVIDENCE_HASH = 'b'.repeat(64);
+const LABEL_JOB = 'org.osi.image-builder.job-id';
+const LABEL_MANIFEST = 'org.osi.image-builder.manifest-sha';
+const MANIFEST_SHA = 'c'.repeat(64);
 
 function snapshot(): CleanupSnapshot {
   return {
@@ -100,7 +103,13 @@ function fixture() {
     root_id: 'release',
     artifact_sha256: null,
     artifact_size: null,
-    target_manifest_sha256: 'c'.repeat(64),
+    checksum_path: null,
+    checksum_sha256: null,
+    manifest_path: null,
+    manifest_sha256: null,
+    verification_path: null,
+    verification_sha256: null,
+    target_manifest_sha256: MANIFEST_SHA,
   };
   const completionEvent = {
     seq: 10,
@@ -151,6 +160,41 @@ function fixture() {
   return { db, ownership, systemd, handBack, writes, completed, job, completionEvent, completedPostcondition, logGenerations, logEvents };
 }
 
+function exactIdentityFixture() {
+  const value = fixture();
+  const identity = {
+    id: `container-${JOB_ID}`,
+    name: `osi-${JOB_ID}`,
+    imageDigest: 'd'.repeat(64),
+    labels: { [LABEL_JOB]: JOB_ID, [LABEL_MANIFEST]: MANIFEST_SHA },
+  };
+  const persisted = JSON.parse(value.completed.proof_json) as Record<string, unknown>;
+  persisted.container = { kind: 'present', ...identity, globalLabelResult: 'single-exact-match', observedAt: NOW };
+  persisted.blocker = 'container';
+  Object.assign(value.completed as Record<string, unknown>, {
+    stale_container_id: identity.id,
+    stale_container_name: identity.name,
+    stale_container_labels_json: JSON.stringify(identity.labels),
+    proof_json: JSON.stringify(persisted),
+  });
+  Object.assign(value.completedPostcondition, {
+    container: {
+      kind: 'already-absent',
+      ...identity,
+      exactIdAbsent: true,
+      dockerAction: 'none',
+      globalLabelResult: 'no-match',
+      observedAt: NOW,
+    },
+  });
+  value.completionEvent.payload_json = JSON.stringify({
+    admissionId: ADMISSION_ID,
+    evidencePath: `jobs/${JOB_ID}/evidence/cleanup/cleanup.json`,
+    postcondition: value.completedPostcondition,
+  });
+  return value;
+}
+
 describe('cleanup hand-back recovery', () => {
   it('hands back a completed admission without starting another worker', async () => {
     const value = fixture();
@@ -180,6 +224,143 @@ describe('cleanup hand-back recovery', () => {
         fenceTokenHash: TOKEN_HASH,
         proof: expect.objectContaining({ blocker: 'none' }),
       }));
+      expect(value.handBack.docker.listByLabels).toHaveBeenCalledWith({ [LABEL_JOB]: JOB_ID });
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['missing manifest label', { [LABEL_JOB]: JOB_ID }],
+    ['wrong manifest label', { [LABEL_JOB]: JOB_ID, [LABEL_MANIFEST]: 'f'.repeat(64) }],
+  ])('blocks null-identity hand-back for a job-labeled container with %s', async (_case, labels) => {
+    const value = fixture();
+    (value.handBack.docker.listByLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      containers: [{ id: 'unexpected-container', labels }],
+      observedAt: NOW,
+    });
+    const stateRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-job-label-'));
+    const recovery = createCleanupAdmissionRecovery({
+      stateRoot,
+      db: value.db as never,
+      ownership: value.ownership,
+      systemd: value.systemd,
+      handBack: value.handBack,
+      clock: { now: () => NOW },
+    });
+    try {
+      await recovery.openAdmissions();
+      await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW })).rejects.toThrow('global Docker label query is not empty');
+      expect(value.handBack.docker.inspect).not.toHaveBeenCalled();
+      expect(value.handBack.docker.listByLabels).toHaveBeenCalledWith({ [LABEL_JOB]: JOB_ID });
+      expect(value.ownership.apiWrite).not.toHaveBeenCalled();
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('orders exact-identity physical checks before the final job-label observation and synchronous hand-back write', async () => {
+    const value = exactIdentityFixture();
+    const trace: string[] = [];
+    (value.systemd.inspect as ReturnType<typeof vi.fn>).mockImplementation(async (unit: string) => {
+      trace.push(unit === CLEANUP_UNIT ? 'cleanup-unit' : 'runner-unit');
+      return { unit, active: false, observedAt: NOW };
+    });
+    (value.handBack.staging.verify as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      trace.push('staging');
+      return true as const;
+    });
+    (value.handBack.docker.inspect as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      trace.push('exact-container');
+      return { container: null, observedAt: NOW };
+    });
+    (value.handBack.docker.listByLabels as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      trace.push('job-label-list');
+      return { containers: [], observedAt: NOW };
+    });
+    value.ownership.apiWrite.mockImplementation((command: unknown) => {
+      trace.push('api-write');
+      value.writes.push(command);
+      return { ok: true, kind: 'committed', eventSeq: value.writes.length, value: undefined } as const;
+    });
+    const stateRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-order-'));
+    const recovery = createCleanupAdmissionRecovery({
+      stateRoot,
+      db: value.db as never,
+      ownership: value.ownership,
+      systemd: value.systemd,
+      handBack: value.handBack,
+      clock: { now: () => NOW },
+    });
+    try {
+      await recovery.openAdmissions();
+      await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW })).resolves.toMatchObject({ handedBack: true });
+      expect(trace).toEqual(['cleanup-unit', 'runner-unit', 'staging', 'exact-container', 'job-label-list', 'api-write']);
+      expect(value.handBack.docker.listByLabels).toHaveBeenCalledWith({ [LABEL_JOB]: JOB_ID });
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('binds every persisted tracked release file into staging verification', async () => {
+    const value = fixture();
+    const tracked = {
+      artifactStagingPath: `staging/${JOB_ID}/image.img.gz`,
+      artifactSha256: '1'.repeat(64),
+      artifactSize: 123,
+      checksumPath: `staging/${JOB_ID}/sha256sums`,
+      checksumSha256: '2'.repeat(64),
+      manifestPath: `staging/${JOB_ID}/build-manifest.json`,
+      manifestSha256: '3'.repeat(64),
+      verificationPath: `staging/${JOB_ID}/verification.json`,
+      verificationSha256: '4'.repeat(64),
+    };
+    Object.assign(value.job, {
+      artifact_staging_path: tracked.artifactStagingPath,
+      artifact_sha256: tracked.artifactSha256,
+      artifact_size: tracked.artifactSize,
+      checksum_path: tracked.checksumPath,
+      checksum_sha256: tracked.checksumSha256,
+      manifest_path: tracked.manifestPath,
+      manifest_sha256: tracked.manifestSha256,
+      verification_path: tracked.verificationPath,
+      verification_sha256: tracked.verificationSha256,
+    });
+    const staging: CleanupPostcondition['staging'] = {
+      kind: 'quarantined',
+      sourcePath: `staging/${JOB_ID}`,
+      destinationPath: `quarantine/${JOB_ID}`,
+      sourceAbsent: true,
+      destinationPresent: true,
+      sha256: tracked.artifactSha256,
+      size: tracked.artifactSize,
+      verifiedAt: NOW,
+    };
+    (value.completedPostcondition as { staging: CleanupPostcondition['staging'] }).staging = staging;
+    value.completionEvent.payload_json = JSON.stringify({
+      admissionId: ADMISSION_ID,
+      evidencePath: `jobs/${JOB_ID}/evidence/cleanup/cleanup.json`,
+      postcondition: value.completedPostcondition,
+    });
+    const stateRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-sidecars-'));
+    const recovery = createCleanupAdmissionRecovery({
+      stateRoot,
+      db: value.db as never,
+      ownership: value.ownership,
+      systemd: value.systemd,
+      handBack: value.handBack,
+      clock: { now: () => NOW },
+    });
+    try {
+      await recovery.openAdmissions();
+      await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW })).resolves.toMatchObject({ handedBack: true });
+      expect(value.handBack.staging.verify).toHaveBeenCalledWith({
+        jobId: JOB_ID,
+        admissionId: ADMISSION_ID,
+        rootId: 'release',
+        ...tracked,
+        postcondition: staging,
+      });
     } finally {
       await rm(stateRoot, { recursive: true, force: true });
     }

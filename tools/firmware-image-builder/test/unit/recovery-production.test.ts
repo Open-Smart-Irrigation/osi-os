@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { access, chmod, link, mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, link, mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,6 +18,9 @@ const OTHER_ROOT_ID = 'other-images';
 const NOW = '2026-07-28T12:00:00.000Z';
 const STALE = '2026-07-28T11:55:00.000Z';
 const HASH64 = /^[0-9a-f]{64}$/u;
+const CHECKSUM_BYTES = Buffer.from(`${'1'.repeat(64)}  image.img.gz\n`, 'utf8');
+const MANIFEST_BYTES = Buffer.from('{"schemaVersion":1,"target":"rpi-5"}\n', 'utf8');
+const VERIFICATION_BYTES = Buffer.from('{"schemaVersion":1,"verified":true}\n', 'utf8');
 
 function postcondition(staging: CleanupPostcondition['staging'] = {
   kind: 'absent',
@@ -58,7 +61,7 @@ function completionEnvelope(condition = postcondition()): Record<string, unknown
   };
 }
 
-async function fixture(): Promise<{ readonly base: string; readonly loaded: LoadedConfig }> {
+async function fixture(beforeRead?: (handle: FileHandle) => Promise<void>): Promise<{ readonly base: string; readonly loaded: LoadedConfig }> {
   const base = await mkdtemp(join(tmpdir(), 'osi-image-builder-recovery-production-'));
   const configHome = join(base, 'config-home');
   const stateHome = join(base, 'state-home');
@@ -84,6 +87,7 @@ async function fixture(): Promise<{ readonly base: string; readonly loaded: Load
     env: { HOME: base, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome },
     git: { getOriginPolicy: async () => ({ url: 'git@example.com:osi/osi-os.git', fetchRefspec: '+refs/heads/*:refs/remotes/origin/*' }) },
     rootFs: { statfs: async () => ({ bavail: 30, bsize: 1024 ** 3 }) },
+    ...(beforeRead === undefined ? {} : { pathAuthorityDependencies: { beforeRead } }),
   });
   return { base, loaded };
 }
@@ -107,8 +111,10 @@ async function writeRawCompletion(loaded: LoadedConfig, bytes: Buffer, name = `$
 
 async function setupOutput(loaded: LoadedConfig, rootId = ROOT_ID): Promise<string> {
   const output = loaded.config.approvedOutputRoots.find((root) => root.id === rootId)!.path;
-  await mkdir(join(output, '.osi-image-builder', 'staging'), { recursive: true, mode: 0o700 });
-  await mkdir(join(output, '.osi-image-builder', 'quarantine'), { recursive: true, mode: 0o700 });
+  const builder = join(output, '.osi-image-builder');
+  await mkdir(builder, { mode: 0o750 });
+  await mkdir(join(builder, 'staging'), { mode: 0o750 });
+  await mkdir(join(builder, 'quarantine'), { mode: 0o750 });
   return output;
 }
 
@@ -138,6 +144,12 @@ function stagingInput(staging: CleanupPostcondition['staging'], overrides: Parti
   readonly artifactStagingPath: string | null;
   readonly artifactSha256: string | null;
   readonly artifactSize: number | null;
+  readonly checksumPath: string | null;
+  readonly checksumSha256: string | null;
+  readonly manifestPath: string | null;
+  readonly manifestSha256: string | null;
+  readonly verificationPath: string | null;
+  readonly verificationSha256: string | null;
 }> = {}) {
   return {
     jobId: JOB_ID,
@@ -146,8 +158,43 @@ function stagingInput(staging: CleanupPostcondition['staging'], overrides: Parti
     artifactStagingPath: overrides.artifactStagingPath ?? null,
     artifactSha256: overrides.artifactSha256 ?? null,
     artifactSize: overrides.artifactSize ?? null,
+    checksumPath: overrides.checksumPath ?? null,
+    checksumSha256: overrides.checksumSha256 ?? null,
+    manifestPath: overrides.manifestPath ?? null,
+    manifestSha256: overrides.manifestSha256 ?? null,
+    verificationPath: overrides.verificationPath ?? null,
+    verificationSha256: overrides.verificationSha256 ?? null,
     postcondition: staging,
   } as const;
+}
+
+function trackedIdentity(artifact: Buffer) {
+  return {
+    artifactStagingPath: `staging/${JOB_ID}/image.img.gz`,
+    artifactSha256: createHash('sha256').update(artifact).digest('hex'),
+    artifactSize: artifact.byteLength,
+    checksumPath: `staging/${JOB_ID}/sha256sums`,
+    checksumSha256: createHash('sha256').update(CHECKSUM_BYTES).digest('hex'),
+    manifestPath: `staging/${JOB_ID}/build-manifest.json`,
+    manifestSha256: createHash('sha256').update(MANIFEST_BYTES).digest('hex'),
+    verificationPath: `staging/${JOB_ID}/verification.json`,
+    verificationSha256: createHash('sha256').update(VERIFICATION_BYTES).digest('hex'),
+  } as const;
+}
+
+async function writeTrackedQuarantine(loaded: LoadedConfig, artifact: Buffer): Promise<string> {
+  const output = await setupOutput(loaded);
+  const destination = join(output, '.osi-image-builder', 'quarantine', JOB_ID);
+  await mkdir(destination, { mode: 0o750 });
+  await writeTrackedFiles(destination, artifact);
+  return destination;
+}
+
+async function writeTrackedFiles(destination: string, artifact: Buffer): Promise<void> {
+  await writeFile(join(destination, 'image.img.gz'), artifact, { mode: 0o600 });
+  await writeFile(join(destination, 'sha256sums'), CHECKSUM_BYTES, { mode: 0o600 });
+  await writeFile(join(destination, 'build-manifest.json'), MANIFEST_BYTES, { mode: 0o600 });
+  await writeFile(join(destination, 'verification.json'), VERIFICATION_BYTES, { mode: 0o600 });
 }
 
 describe('production recovery physical verification', () => {
@@ -271,28 +318,101 @@ describe('production recovery physical verification', () => {
   it('verifies a tracked quarantined artifact by hash and size, selecting the root from each request', async () => {
     const value = await fixture();
     try {
-      const output = await setupOutput(value.loaded);
       const artifact = Buffer.from('tracked artifact bytes\n', 'utf8');
-      const artifactSha256 = createHash('sha256').update(artifact).digest('hex');
-      await mkdir(join(output, '.osi-image-builder', 'quarantine', JOB_ID), { mode: 0o700 });
-      await writeFile(join(output, '.osi-image-builder', 'quarantine', JOB_ID, 'image.img.gz'), artifact, { mode: 0o600 });
+      const tracked = trackedIdentity(artifact);
+      const destination = await writeTrackedQuarantine(value.loaded, artifact);
       const physical = createFactory(value.loaded);
-      await expect(physical.staging.verify(stagingInput(quarantinedPostcondition(artifactSha256, artifact.byteLength), {
-        artifactStagingPath: `staging/${JOB_ID}/image.img.gz`,
-        artifactSha256,
-        artifactSize: artifact.byteLength,
-      }))).resolves.toBe(true);
+      await expect(physical.staging.verify(stagingInput(quarantinedPostcondition(tracked.artifactSha256, artifact.byteLength), tracked))).resolves.toBe(true);
 
       const otherOutput = await setupOutput(value.loaded, OTHER_ROOT_ID);
-      await mkdir(join(otherOutput, '.osi-image-builder', 'quarantine', JOB_ID), { mode: 0o700 });
+      await mkdir(join(otherOutput, '.osi-image-builder', 'quarantine', JOB_ID), { mode: 0o750 });
       await expect(physical.staging.verify(stagingInput(quarantinedPostcondition(), { rootId: OTHER_ROOT_ID }))).resolves.toBe(true);
 
-      await writeFile(join(output, '.osi-image-builder', 'quarantine', JOB_ID, 'image.img.gz'), Buffer.from('tampered\n'), { mode: 0o600 });
-      await expect(physical.staging.verify(stagingInput(quarantinedPostcondition(artifactSha256, artifact.byteLength), {
-        artifactStagingPath: `staging/${JOB_ID}/image.img.gz`,
-        artifactSha256,
-        artifactSize: artifact.byteLength,
-      }))).rejects.toThrow(/hash|size/);
+      await writeFile(join(destination, 'image.img.gz'), Buffer.from('tampered\n'), { mode: 0o600 });
+      await expect(physical.staging.verify(stagingInput(quarantinedPostcondition(tracked.artifactSha256, artifact.byteLength), tracked))).rejects.toThrow(/hash|size/);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['checksum', 'missing', 'sha256sums', CHECKSUM_BYTES],
+    ['checksum', 'tampered', 'sha256sums', CHECKSUM_BYTES],
+    ['manifest', 'missing', 'build-manifest.json', MANIFEST_BYTES],
+    ['manifest', 'tampered', 'build-manifest.json', MANIFEST_BYTES],
+    ['verification', 'missing', 'verification.json', VERIFICATION_BYTES],
+    ['verification', 'tampered', 'verification.json', VERIFICATION_BYTES],
+  ] as const)('rejects a %s sidecar when it is %s', async (_sidecar, mutation, name, original) => {
+    const value = await fixture();
+    try {
+      const artifact = Buffer.from('tracked artifact bytes\n', 'utf8');
+      const tracked = trackedIdentity(artifact);
+      const destination = await writeTrackedQuarantine(value.loaded, artifact);
+      const sidecar = join(destination, name);
+      if (mutation === 'missing') {
+        await unlink(sidecar);
+      } else {
+        await writeFile(sidecar, Buffer.concat([original, Buffer.from('tampered\n')]), { mode: 0o600 });
+      }
+      const physical = createFactory(value.loaded);
+      await expect(physical.staging.verify(stagingInput(
+        quarantinedPostcondition(tracked.artifactSha256, tracked.artifactSize),
+        tracked,
+      ))).rejects.toThrow(/sidecar|evidence|hash|open/);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an identical quarantine destination swapped in while tracked files are held', async () => {
+    let destination = '';
+    let replacement = '';
+    let swapped = false;
+    const value = await fixture(async () => {
+      if (swapped || destination.length === 0) return;
+      swapped = true;
+      await rename(destination, `${destination}.held`);
+      await rename(replacement, destination);
+    });
+    try {
+      const artifact = Buffer.from('tracked artifact bytes\n', 'utf8');
+      const tracked = trackedIdentity(artifact);
+      destination = await writeTrackedQuarantine(value.loaded, artifact);
+      replacement = `${destination}.replacement`;
+      await mkdir(replacement, { mode: 0o750 });
+      await writeTrackedFiles(replacement, artifact);
+      const physical = createFactory(value.loaded);
+      await expect(physical.staging.verify(stagingInput(
+        quarantinedPostcondition(tracked.artifactSha256, tracked.artifactSize),
+        tracked,
+      ))).rejects.toThrow(/destination|identity|changed/);
+      expect(swapped).toBe(true);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an approved-root pathname swapped while tracked files are held', async () => {
+    let output = '';
+    let swapped = false;
+    const value = await fixture(async () => {
+      if (swapped || output.length === 0) return;
+      swapped = true;
+      await rename(output, `${output}.held`);
+      await mkdir(output, { mode: 0o700 });
+    });
+    try {
+      const artifact = Buffer.from('tracked artifact bytes\n', 'utf8');
+      const tracked = trackedIdentity(artifact);
+      const destination = await writeTrackedQuarantine(value.loaded, artifact);
+      output = value.loaded.config.approvedOutputRoots.find((root) => root.id === ROOT_ID)!.path;
+      expect(destination.startsWith(output)).toBe(true);
+      const physical = createFactory(value.loaded);
+      await expect(physical.staging.verify(stagingInput(
+        quarantinedPostcondition(tracked.artifactSha256, tracked.artifactSize),
+        tracked,
+      ))).rejects.toThrow(/approved root|authority|identity|changed/);
+      expect(swapped).toBe(true);
     } finally {
       await rm(value.base, { recursive: true, force: true });
     }

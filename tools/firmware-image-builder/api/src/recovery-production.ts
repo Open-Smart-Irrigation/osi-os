@@ -18,7 +18,7 @@ import {
   type RecoveryStagingVerifier,
 } from './recovery.js';
 import type { CleanupPostcondition } from './ownership.js';
-import { JSON_LIMITS, canonicalInstant, encodeJson, type JsonObject } from './validation.js';
+import { JSON_LIMITS, TEXT_LIMITS, canonicalInstant, encodeJson, type JsonObject } from './validation.js';
 import { ACTIVE_RECOVERY_STATES, ADMISSION_ID_PATTERN } from '../../domain/types.js';
 
 const DIRECTORY_MODE = 0o700;
@@ -91,6 +91,24 @@ function assertDirectory(stats: NativeStats, field: string, ownerUid: number, de
   ) {
     fail(`unsafe recovery directory: ${field}`);
   }
+}
+
+function assertManagedDirectory(stats: NativeStats, field: string, ownerUid: number, device: number): void {
+  const mode = modeOf(stats);
+  if (
+    stats.isSymbolicLink()
+    || !stats.isDirectory()
+    || stats.uid !== ownerUid
+    || (mode !== 0o700 && mode !== 0o750)
+    || stats.nlink < 2
+    || stats.dev !== device
+  ) {
+    fail(`unsafe recovery directory: ${field}`);
+  }
+}
+
+function sameDirectoryIdentity(left: NativeStats, right: NativeStats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
 }
 
 function assertApprovedRoot(stats: NativeStats, field: string, ownerUid: number, device: number, inode: number): void {
@@ -178,6 +196,51 @@ async function closeHandles(handles: readonly (FileHandle | null)[]): Promise<vo
   if (firstError !== undefined) throw firstError;
 }
 
+async function revalidateManagedJob(
+  root: FileHandle,
+  heldBuilder: FileHandle | null,
+  heldParent: FileHandle | null,
+  parentName: 'staging' | 'quarantine',
+  jobId: string,
+  expectedJob: FileHandle | null,
+  ownerUid: number,
+  device: number,
+): Promise<void> {
+  const currentBuilder = await openOptionalDirectoryChild(root, '.osi-image-builder', '.osi-image-builder');
+  let currentParent: FileHandle | null = null;
+  let currentJob: FileHandle | null = null;
+  try {
+    if (currentBuilder === null) {
+      if (heldBuilder !== null || expectedJob !== null) return fail('managed output directory changed during staging verification');
+      return;
+    }
+    const currentBuilderStats = await currentBuilder.stat();
+    assertManagedDirectory(currentBuilderStats, '.osi-image-builder', ownerUid, device);
+    if (heldBuilder !== null && !sameDirectoryIdentity(await heldBuilder.stat(), currentBuilderStats)) return fail('managed output directory identity changed during staging verification');
+
+    currentParent = await openOptionalDirectoryChild(currentBuilder, parentName, `.osi-image-builder/${parentName}`);
+    if (currentParent === null) {
+      if (heldParent !== null || expectedJob !== null) return fail(`managed ${parentName} directory changed during staging verification`);
+      return;
+    }
+    const currentParentStats = await currentParent.stat();
+    assertManagedDirectory(currentParentStats, `.osi-image-builder/${parentName}`, ownerUid, device);
+    if (heldParent !== null && !sameDirectoryIdentity(await heldParent.stat(), currentParentStats)) return fail(`managed ${parentName} directory identity changed during staging verification`);
+
+    currentJob = await openOptionalDirectoryChild(currentParent, jobId, `${parentName}/${jobId}`);
+    if (currentJob === null) {
+      if (expectedJob !== null) return fail(`managed ${parentName} job directory disappeared during staging verification`);
+      return;
+    }
+    const currentJobStats = await currentJob.stat();
+    assertManagedDirectory(currentJobStats, `${parentName}/${jobId}`, ownerUid, device);
+    if (expectedJob === null) return fail(`managed ${parentName} job directory appeared during staging verification`);
+    if (!sameDirectoryIdentity(await expectedJob.stat(), currentJobStats)) return fail(`managed ${parentName} destination identity changed during staging verification`);
+  } finally {
+    await closeHandles([currentJob, currentParent, currentBuilder]);
+  }
+}
+
 async function withDirectory<T>(
   openDirectory: () => Promise<FileHandle>,
   callback: (directory: FileHandle) => Promise<T>,
@@ -234,6 +297,32 @@ async function hashBoundedArtifact(handle: FileHandle, expectedSize: number, exp
   const after = await handle.stat();
   if (!stableStats(before, after) || after.size !== expectedSize) return fail(`${field} changed during bounded hash`);
   if (digest.digest('hex') !== expectedSha256) return fail(`${field} hash does not match the persisted artifact identity`);
+}
+
+async function hashBoundedSidecar(handle: FileHandle, expectedSha256: string, maxBytes: number, field: string, ownerUid: number, device: number): Promise<void> {
+  const before = await handle.stat();
+  assertRegularArtifact(before, field, ownerUid, device);
+  if (!Number.isSafeInteger(before.size) || before.size < 0 || before.size > maxBytes) return fail(`${field} exceeds its bounded sidecar limit`);
+  const digest = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, Math.max(before.size, 1)));
+  let position = 0;
+  while (position < before.size) {
+    const result = await handle.read(buffer, 0, Math.min(buffer.length, before.size - position), position);
+    if (result.bytesRead <= 0) return fail(`${field} changed during bounded hash`);
+    digest.update(buffer.subarray(0, result.bytesRead));
+    position += result.bytesRead;
+  }
+  const after = await handle.stat();
+  if (!stableStats(before, after)) return fail(`${field} changed during bounded hash`);
+  if (digest.digest('hex') !== expectedSha256) return fail(`${field} hash does not match the persisted sidecar identity`);
+}
+
+function stagingFileName(value: string, jobId: string, field: string, expectedName?: string): string {
+  const parts = value.split('/');
+  if (parts.length !== 3 || parts[0] !== 'staging' || parts[1] !== jobId) return fail(`${field} is outside the fixed job directory`);
+  const name = safeSegment(parts[2], field);
+  if (value !== `staging/${jobId}/${name}` || (expectedName !== undefined && name !== expectedName)) return fail(`${field} is not the fixed staging file`);
+  return name;
 }
 
 function record(value: unknown, field: string): RecordValue {
@@ -502,28 +591,41 @@ async function inspectStaging(
   const rootId = safeSegment(input.rootId, 'approved root ID');
   const expected = validateStaging(input.postcondition, jobId, 'cleanup staging postcondition');
   const persistedArtifactPath = input.artifactStagingPath;
-  if (persistedArtifactPath !== null && !persistedArtifactPath.startsWith(`staging/${jobId}/`)) {
-    return fail('persisted staging artifact path is outside the fixed job directory');
-  }
+  if (persistedArtifactPath !== null) stagingFileName(persistedArtifactPath, jobId, 'persisted staging artifact path');
   const trackedArtifact = expected.kind === 'quarantined' && persistedArtifactPath !== null;
   let artifactName: string | null = null;
+  let checksumName: string | null = null;
+  let manifestName: string | null = null;
+  let verificationName: string | null = null;
+  const trackedIdentity = [
+    input.artifactSha256,
+    input.artifactSize,
+    input.checksumPath,
+    input.checksumSha256,
+    input.manifestPath,
+    input.manifestSha256,
+    input.verificationPath,
+    input.verificationSha256,
+  ];
   if (trackedArtifact) {
-    const artifactPath = persistedArtifactPath;
-    const prefix = `staging/${jobId}/`;
-    const parts = artifactPath.split('/');
-    if (artifactPath !== `${prefix}${parts.at(-1) ?? ''}` || parts.length !== 3 || parts[0] !== 'staging' || parts[1] !== jobId) return fail('persisted staging artifact path is outside the fixed job directory');
-    artifactName = safeSegment(parts[2], 'persisted staging artifact name');
-    if (input.artifactSha256 === null || input.artifactSize === null) return fail('persisted staging artifact identity is incomplete');
+    if (trackedIdentity.some((value) => value === null)) return fail('persisted staging artifact set identity is incomplete');
+    artifactName = stagingFileName(persistedArtifactPath, jobId, 'persisted staging artifact path');
+    checksumName = stagingFileName(input.checksumPath!, jobId, 'persisted checksum sidecar path', 'sha256sums');
+    manifestName = stagingFileName(input.manifestPath!, jobId, 'persisted manifest sidecar path', 'build-manifest.json');
+    verificationName = stagingFileName(input.verificationPath!, jobId, 'persisted verification sidecar path', 'verification.json');
     hash(input.artifactSha256, 'persisted staging artifact SHA-256');
     number(input.artifactSize, 'persisted staging artifact size');
-  } else if (input.artifactSha256 !== null || input.artifactSize !== null) {
+    hash(input.checksumSha256, 'persisted checksum sidecar SHA-256');
+    hash(input.manifestSha256, 'persisted manifest sidecar SHA-256');
+    hash(input.verificationSha256, 'persisted verification sidecar SHA-256');
+  } else if (trackedIdentity.some((value) => value !== null)) {
     return fail(expected.kind === 'absent' ? 'absent staging retains artifact identity' : 'physical-present staging must have null artifact identity');
   }
   if (expected.kind === 'quarantined') {
     if (trackedArtifact && (expected.sha256 !== input.artifactSha256 || expected.size !== input.artifactSize)) return fail('cleanup quarantine evidence does not match the persisted artifact identity');
     if (!trackedArtifact && (expected.sha256 !== null || expected.size !== null)) return fail('physical-present quarantine evidence contains artifact identity');
   }
-  return withApprovedRootSnapshot(approvedRootRegistry, rootId, async ({ snapshot }) => withDirectory(
+  return withApprovedRootSnapshot(approvedRootRegistry, rootId, async ({ snapshot, dependencies }) => withDirectory(
     async () => {
       try {
         return await open(snapshot.path, DIRECTORY_FLAGS);
@@ -541,19 +643,19 @@ async function inspectStaging(
       let destination: FileHandle | null = null;
       try {
         if (builder !== null) {
-          assertDirectory(await builder.stat(), '.osi-image-builder', ownerUid, snapshot.device);
+          assertManagedDirectory(await builder.stat(), '.osi-image-builder', ownerUid, snapshot.device);
           stagingParent = await openOptionalDirectoryChild(builder, 'staging', '.osi-image-builder/staging');
           quarantineParent = await openOptionalDirectoryChild(builder, 'quarantine', '.osi-image-builder/quarantine');
           if (stagingParent !== null) {
-            assertDirectory(await stagingParent.stat(), '.osi-image-builder/staging', ownerUid, snapshot.device);
+            assertManagedDirectory(await stagingParent.stat(), '.osi-image-builder/staging', ownerUid, snapshot.device);
             source = await openOptionalDirectoryChild(stagingParent, jobId, `staging/${jobId}`);
           }
           if (quarantineParent !== null) {
-            assertDirectory(await quarantineParent.stat(), '.osi-image-builder/quarantine', ownerUid, snapshot.device);
+            assertManagedDirectory(await quarantineParent.stat(), '.osi-image-builder/quarantine', ownerUid, snapshot.device);
             destination = await openOptionalDirectoryChild(quarantineParent, jobId, `quarantine/${jobId}`);
           }
-          if (source !== null) assertDirectory(await source.stat(), `staging/${jobId}`, ownerUid, snapshot.device);
-          if (destination !== null) assertDirectory(await destination.stat(), `quarantine/${jobId}`, ownerUid, snapshot.device);
+          if (source !== null) assertManagedDirectory(await source.stat(), `staging/${jobId}`, ownerUid, snapshot.device);
+          if (destination !== null) assertManagedDirectory(await destination.stat(), `quarantine/${jobId}`, ownerUid, snapshot.device);
         }
         if (expected.kind === 'absent') {
           if (source !== null || destination !== null) return fail('cleanup staging absence does not match physical source and destination state');
@@ -561,13 +663,38 @@ async function inspectStaging(
           return fail('cleanup quarantine does not match physical source and destination state');
         }
         if (expected.kind === 'quarantined' && trackedArtifact) {
-          const artifact = await openFileChild(destination!, artifactName!, `quarantine/${jobId}/${artifactName!}`);
-          try {
-            await hashBoundedArtifact(artifact, input.artifactSize!, input.artifactSha256!, `quarantine/${jobId}/${artifactName!}`, ownerUid, snapshot.device);
-          } finally {
-            await artifact.close();
+          const files = [
+            { name: artifactName!, sha256: input.artifactSha256!, size: input.artifactSize!, maxBytes: null },
+            { name: checksumName!, sha256: input.checksumSha256!, size: null, maxBytes: TEXT_LIMITS.maxChecksumBytes },
+            { name: manifestName!, sha256: input.manifestSha256!, size: null, maxBytes: Math.min(JSON_LIMITS.maxEncodedBytes, TEXT_LIMITS.maxManifestBytes) },
+            { name: verificationName!, sha256: input.verificationSha256!, size: null, maxBytes: Math.min(JSON_LIMITS.maxEncodedBytes, TEXT_LIMITS.maxManifestBytes) },
+          ] as const;
+          for (const tracked of files) {
+            const field = `quarantine/${jobId}/${tracked.name}`;
+            const file = await openFileChild(destination!, tracked.name, field);
+            try {
+              await dependencies.beforeRead(file);
+              if (tracked.size === null) {
+                await hashBoundedSidecar(file, tracked.sha256, tracked.maxBytes!, field, ownerUid, snapshot.device);
+              } else {
+                await hashBoundedArtifact(file, tracked.size, tracked.sha256, field, ownerUid, snapshot.device);
+              }
+            } finally {
+              await file.close();
+            }
           }
         }
+        await revalidateManagedJob(root, builder, stagingParent, 'staging', jobId, null, ownerUid, snapshot.device);
+        await revalidateManagedJob(root, builder, quarantineParent, 'quarantine', jobId, expected.kind === 'quarantined' ? destination : null, ownerUid, snapshot.device);
+        await withApprovedRootSnapshot(approvedRootRegistry, rootId, async ({ snapshot: current }) => {
+          if (
+            current.id !== snapshot.id
+            || current.path !== snapshot.path
+            || current.quarantinePath !== snapshot.quarantinePath
+            || current.device !== snapshot.device
+            || current.inode !== snapshot.inode
+          ) return fail('approved output root authority changed during staging verification');
+        });
         return true as const;
       } finally {
         await closeHandles([source, destination, stagingParent, quarantineParent, builder]);
