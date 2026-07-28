@@ -353,6 +353,26 @@ describe('startup retention', () => {
       .toEqual({ action: 'removed', bytes: 0 });
   });
 
+  it('reconciles a planned absent worktree at the 7-day cutoff without purging the younger job row', async () => {
+    const paths = await retentionWorkspace();
+    const defaultWorktreePaths: RetentionPaths = { ...paths, worktreeRoot: undefined };
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    const terminalAt = '2026-07-18T12:00:00.000Z';
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+      .run('young-worktree', 'request-young-worktree', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), terminalAt, terminalAt, terminalAt, terminalAt, terminalAt);
+    db.prepare(`INSERT INTO retention_prune_intents (category, relative_path, status, planned_at, updated_at, bytes)
+      VALUES ('worktree', ?, 'planned', ?, ?, 12)`).run('jobs/young-worktree/workspace/source', NOW, NOW);
+
+    await createRetentionStartupHook({ paths: defaultWorktreePaths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })();
+
+    expect(db.prepare('SELECT status, bytes, error FROM retention_prune_intents WHERE category=? AND relative_path=?').get('worktree', 'jobs/young-worktree/workspace/source'))
+      .toEqual({ status: 'removed', bytes: 0, error: null });
+    expect(db.prepare('SELECT action, bytes FROM retention_prunes WHERE category=? AND relative_path=? ORDER BY prune_id DESC LIMIT 1').get('worktree', 'jobs/young-worktree/workspace/source'))
+      .toEqual({ action: 'removed', bytes: 0 });
+    expect(db.prepare('SELECT job_id FROM jobs WHERE job_id=?').get('young-worktree')).toEqual({ job_id: 'young-worktree' });
+  });
+
   it('plans before callback and finalizes a present candidate after deletion', async () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));

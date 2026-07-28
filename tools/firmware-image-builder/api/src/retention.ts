@@ -515,6 +515,9 @@ async function reconcileIntents(options: RetentionOptionsWithRoots, now: string,
   const cutoff = new Date(threshold(now, RETENTION_DAYS.rows)).toISOString();
   const jobs = options.db.prepare(`SELECT job_id FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`).all(cutoff) as Array<{ job_id?: unknown }>;
   const eligibleJobs = new Set(jobs.flatMap((row) => safeSegment(row.job_id) ? [row.job_id] : []));
+  const worktreeCutoff = new Date(threshold(now, RETENTION_DAYS.worktrees)).toISOString();
+  const worktreeJobs = options.db.prepare(`SELECT job_id FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`).all(worktreeCutoff) as Array<{ job_id?: unknown }>;
+  const eligibleWorktreeJobs = new Set(worktreeJobs.flatMap((row) => safeSegment(row.job_id) ? [row.job_id] : []));
   const protectedLogs = protectedLogPaths(options.db);
   const existing = new Set(candidates.map((candidate) => `${candidate.category}:${relativePath(candidate.auditBase, candidate.path)}`));
   const intents = options.db.prepare(`SELECT category, relative_path FROM retention_prune_intents
@@ -525,7 +528,8 @@ async function reconcileIntents(options: RetentionOptionsWithRoots, now: string,
     const parts = intent.relative_path.split('/');
     if (parts.some((part) => !safeSegment(part))) continue;
     const jobId = parts[1];
-    if (parts[0] !== 'jobs' || !safeSegment(jobId) || !eligibleJobs.has(jobId)) continue;
+    if (parts[0] !== 'jobs' || !safeSegment(jobId)) continue;
+    if (category === 'worktree' ? !eligibleWorktreeJobs.has(jobId) : !eligibleJobs.has(jobId)) continue;
     let path: string | undefined;
     if (category === 'row' && parts.length === 2) {
       const expectedPath = join(options.paths.stateRoot, 'jobs', jobId);
