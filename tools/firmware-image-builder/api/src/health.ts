@@ -189,6 +189,7 @@ export function collectHealthSnapshot(options: CollectHealthOptions): HealthSnap
   const queued = options.db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE queue_state = 'queued'").get();
   const active = options.db.prepare(`SELECT
       job_id, current_stage, preflight_expires_at, runner_unit, runner_lease_expires_at,
+      terminal_error_code, terminal_error_json, terminal_at,
       container_id, container_name, container_image_digest, container_labels_json,
       cleanup_generation, cleanup_fence_generation, cleanup_admission_id, cleanup_blocker_code, cleanup_blocker_json,
       publish_blocker_code, publish_blocker_json
@@ -213,11 +214,15 @@ export function collectHealthSnapshot(options: CollectHealthOptions): HealthSnap
     const queueBlockers = [rowBlocker(activeRow, 'publish_blocker_code', 'publish_blocker_json')].filter((item): item is HealthBlocker => item !== null);
     const recoveryBlockers = [rowBlocker(activeRow, 'cleanup_blocker_code', 'cleanup_blocker_json')].filter((item): item is HealthBlocker => item !== null);
     const leaseStatus = typeof lease?.status === 'string' ? lease.status : null;
+    const terminalError = typeof activeRow.terminal_error_code === 'string' && typeof activeRow.terminal_at === 'string'
+      ? { code: activeRow.terminal_error_code, details: jsonObject(activeRow.terminal_error_json), at: activeRow.terminal_at }
+      : null;
     activeJob = {
       jobId: activeJobId,
       currentStage: typeof activeRow.current_stage === 'string' ? activeRow.current_stage as PipelineStageName : null,
       lastEventAt: typeof event?.at === 'string' ? event.at : null,
       preflightExpiresAt: typeof activeRow.preflight_expires_at === 'string' ? activeRow.preflight_expires_at : null,
+      terminalError,
       queueBlockers,
       recoveryBlockers,
       staleLogAt: typeof logEvent?.at === 'string' ? logEvent.at : null,

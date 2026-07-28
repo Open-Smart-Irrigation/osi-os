@@ -137,4 +137,32 @@ describe('observability integration', () => {
     expect(snapshot.recoveryBlockers).toEqual([]);
     db.close();
   });
+
+  it('binds the terminal error to the active pending-cleanup job', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-image-builder-health-terminal-ownership-'));
+    pathsToRemove.push(root);
+    const db = openBuilderDatabase(join(root, 'jobs.sqlite'));
+    insertTerminalJob(db, 'cleanup-job-a', '2026-07-28T11:00:00.000Z');
+    insertTerminalJob(db, 'unrelated-job-b', '2026-07-28T11:30:00.000Z');
+    const admissionId = 'cln_0123456789abcdefghjkmnpqrs';
+    const tokenHash = 'c'.repeat(64);
+    db.prepare(`INSERT INTO cleanup_leases
+      (admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path,
+       credential_sha256, fence_generation, fence_token_hash, proof_json, admitted_at, claim_at,
+       complete_at, completion_evidence_path, completion_evidence_sha256)
+      VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, '{}', ?, ?, ?, ?, ?)`).run(
+      admissionId, 'cleanup-job-a', `osi-image-builder-cleanup@${admissionId}.service`, 'health-test', NOW,
+      `recovery/cleanup-credentials/${admissionId}.token`, 'd'.repeat(64), 4, tokenHash,
+      '2026-07-28T10:59:00.000Z', '2026-07-28T10:59:01.000Z', '2026-07-28T10:59:02.000Z',
+      'recovery/cleanup-evidence.json', 'e'.repeat(64));
+    db.prepare(`UPDATE jobs SET state='interrupted', terminal_error_code='CLEANUP_UNIT_STOP_FAILED', terminal_error_json=?,
+      cleanup_generation=4, cleanup_fence_generation=4, cleanup_fence_token_hash=?, cleanup_admission_id=? WHERE job_id=?`)
+      .run('{"job":"A"}', tokenHash, admissionId, 'cleanup-job-a');
+    db.prepare(`UPDATE jobs SET state='failed', terminal_error_code='BUILD_FAILED', terminal_error_json='{"job":"B"}' WHERE job_id=?`).run('unrelated-job-b');
+
+    const snapshot = collectHealthSnapshot({ db, now: NOW, diskFreeBytes: 25 * 1024 ** 3, builderImage: null });
+    expect(snapshot.activeJobId).toBe('cleanup-job-a');
+    expect(snapshot.lastTerminalError).toEqual({ code: 'CLEANUP_UNIT_STOP_FAILED', details: { job: 'A' }, at: '2026-07-28T11:00:00.000Z' });
+    db.close();
+  });
 });
