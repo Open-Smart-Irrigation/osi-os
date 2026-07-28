@@ -165,7 +165,7 @@ export function buildHealthSnapshot(input: HealthInput): HealthSnapshot {
     container: active?.container ?? null,
     queueBlockers: Object.freeze([...(active?.queueBlockers ?? [])]),
     recoveryBlockers: Object.freeze([...(active?.recoveryBlockers ?? [])]),
-    lastTerminalError: active?.terminalError ?? input.lastTerminalError ?? null,
+    lastTerminalError: active ? (active.terminalError ?? null) : (input.lastTerminalError ?? null),
     staleLogAgeSeconds: ageSeconds(input.now, staleLogAt),
     runnerLiveness: active?.runner?.liveness ?? 'inactive',
     preflightExpiresAt: active?.preflightExpiresAt ?? null,
