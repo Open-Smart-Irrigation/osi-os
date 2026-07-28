@@ -51,6 +51,7 @@ export interface CleanupDocker {
   readonly stop: (containerId: string, timeoutMs: number) => Promise<void>;
   readonly waitForStopped: (containerId: string, timeoutMs: number) => Promise<CleanupDockerContainer>;
   readonly remove: (containerId: string, timeoutMs: number) => Promise<void>;
+  readonly hasByJobId: (jobId: string, timeoutMs: number) => Promise<boolean>;
   readonly listByJobId: (jobId: string, timeoutMs: number) => Promise<readonly CleanupDockerContainer[]>;
 }
 
@@ -517,10 +518,10 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
         if (job.containerId !== null || job.containerName !== null || job.containerImageDigest !== null || job.containerLabelJobId !== null || job.containerLabelManifestSha !== null || job.containerLabels !== null) {
           throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'null-container admission has persisted container identity');
         }
-        const matches = await claimedAction(admission, 'Docker label query', () => (
-          options.docker.listByJobId(job.jobId, options.timeouts.dockerMs)
+        const hasMatch = await claimedAction(admission, 'Docker label query', () => (
+          options.docker.hasByJobId(job.jobId, options.timeouts.dockerMs)
         ));
-        if (matches.length !== 0) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'global Docker label query found a container for a null identity');
+        if (hasMatch) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'global Docker label query found a container for a null identity');
         const observedAt = canonicalInstant(options.clock.now(), 'null-container Docker observation time');
         return { exactContainerId: null, post: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt } };
       }
@@ -530,10 +531,10 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
         options.docker.inspect(identity.id, options.timeouts.dockerMs)
       ));
       if (observed === null) {
-        const matches = await claimedAction(admission, 'Docker label query', () => (
-          options.docker.listByJobId(job.jobId, options.timeouts.dockerMs)
+        const hasMatch = await claimedAction(admission, 'Docker label query', () => (
+          options.docker.hasByJobId(job.jobId, options.timeouts.dockerMs)
         ));
-        if (matches.length !== 0) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'exact container is absent but a matching Docker label remains');
+        if (hasMatch) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'exact container is absent but a matching Docker label remains');
         const observedAt = canonicalInstant(options.clock.now(), 'already-absent Docker observation time');
         return {
           exactContainerId: identity.id,
@@ -574,10 +575,10 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
         options.docker.inspect(identity.id, options.timeouts.dockerMs)
       ));
       if (exactAfterRemove !== null) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'Docker rm did not prove exact container absence');
-      const matches = await claimedAction(admission, 'post-remove Docker label query', () => (
-        options.docker.listByJobId(job.jobId, options.timeouts.dockerMs)
+      const hasMatch = await claimedAction(admission, 'post-remove Docker label query', () => (
+        options.docker.hasByJobId(job.jobId, options.timeouts.dockerMs)
       ));
-      if (matches.length !== 0) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'global Docker label query found a matching container after removal');
+      if (hasMatch) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'global Docker label query found a matching container after removal');
       const observedAt = canonicalInstant(options.clock.now(), 'post-remove Docker observation time');
       return {
         exactContainerId: identity.id,

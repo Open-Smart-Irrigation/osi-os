@@ -16,6 +16,8 @@ import {
   RecoveryInfrastructureError,
   type RecoveryCleanupEvidence,
   type RecoveryCleanupEvidenceReader,
+  type RecoveryLogVerificationInput,
+  type RecoveryLogVerifier,
   type RecoveryStagingVerificationInput,
   type RecoveryStagingVerifier,
 } from './recovery.js';
@@ -54,6 +56,7 @@ export interface RecoveryPhysicalVerificationOptions {
 export interface RecoveryPhysicalVerification {
   readonly evidence: RecoveryCleanupEvidenceReader;
   readonly staging: RecoveryStagingVerifier;
+  readonly logs: RecoveryLogVerifier;
 }
 
 type NativeStats = Stats;
@@ -631,7 +634,8 @@ async function readCompletionEvidence(
   if (input.path !== expectedPath) return fail('cleanup evidence path is not the fixed completion path');
   const expectedSha256 = hash(input.sha256, 'cleanup evidence SHA-256');
   try {
-    return await withStateRootSnapshot(stateRootAuthority, async ({ snapshot }) => withDirectory(
+    return await withStateRootSnapshot(stateRootAuthority, async ({ snapshot, dependencies }) => {
+      const evidence = await withDirectory(
       async () => {
         try {
           return await open(snapshot.path, DIRECTORY_FLAGS);
@@ -663,6 +667,11 @@ async function readCompletionEvidence(
                         return withDirectory(
                           () => openFileChild(cleanup, fileName, expectedPath),
                           async (file) => {
+                            try {
+                              await dependencies.beforeRead(file);
+                            } catch (error) {
+                              fileSystemFailure('read', `cannot prepare recovery descriptor read: ${expectedPath}`, error);
+                            }
                             const bytes = await readBoundedFile(file, maxBytes, expectedPath, ownerUid, snapshot.device);
                             const actualSha256 = createHash('sha256').update(bytes).digest('hex');
                             if (actualSha256 !== expectedSha256) return fail('cleanup completion evidence hash does not match the durable hash');
@@ -683,7 +692,144 @@ async function readCompletionEvidence(
           },
         );
       },
-    ));
+      );
+      await withStateRootSnapshot(stateRootAuthority, async ({ snapshot: current }) => {
+        if (current.path !== snapshot.path || current.device !== snapshot.device || current.inode !== snapshot.inode) return fail('state root authority changed after completion evidence read');
+        return undefined;
+      });
+      return evidence;
+    });
+  } catch (error) {
+    return authorityFailure('state root authority verification failed', error);
+  }
+}
+
+function assertLogFile(stats: NativeStats, field: string, ownerUid: number, device: number): void {
+  if (
+    stats.isSymbolicLink()
+    || !stats.isFile()
+    || stats.uid !== ownerUid
+    || modeOf(stats) !== EVIDENCE_MODE
+    || stats.nlink !== 1
+    || stats.dev !== device
+  ) return fail(`unsafe recovery log file: ${field}`);
+}
+
+function safeLogPath(value: string, jobId: string): readonly string[] {
+  const prefix = 'logs/';
+  if (!value.startsWith(prefix) || value.includes('\\')) return fail(`cleanup log path is invalid for ${jobId}`);
+  const parts = value.slice(prefix.length).split('/');
+  if (parts.length === 0 || parts.some((part) => part.length === 0 || part === '.' || part === '..')) return fail(`cleanup log path is invalid for ${jobId}`);
+  return parts;
+}
+
+interface HashedRecoveryLog {
+  readonly stats: NativeStats;
+  readonly sha256: string;
+}
+
+async function hashLogFile(handle: FileHandle, field: string, ownerUid: number, device: number): Promise<HashedRecoveryLog> {
+  const before = await descriptorStat(handle, field);
+  assertLogFile(before, field, ownerUid, device);
+  if (!Number.isSafeInteger(before.size) || before.size > 256 * 1024 * 1024) return fail(`${field} exceeds the bounded log size`);
+  const digest = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  let position = 0;
+  while (position < before.size) {
+    const result = await descriptorRead(handle, buffer, 0, Math.min(buffer.length, before.size - position), position, field);
+    if (result.bytesRead <= 0) return fail(`${field} changed during physical log hashing`);
+    digest.update(result.buffer.subarray(0, result.bytesRead));
+    position += result.bytesRead;
+  }
+  const after = await descriptorStat(handle, field);
+  assertLogFile(after, field, ownerUid, device);
+  if (!stableStats(before, after) || position !== before.size) return fail(`${field} changed during physical log hashing`);
+  return { stats: after, sha256: digest.digest('hex') };
+}
+
+async function verifyPhysicalLogs(
+  stateRootAuthority: StateRootAuthority,
+  ownerUid: number,
+  input: RecoveryLogVerificationInput,
+): Promise<true> {
+  const jobId = safeJobId(input.jobId);
+  const completedAt = instant(input.completedAt, 'cleanup log completion time');
+  if (!Number.isSafeInteger(input.completionEventSeq) || input.completionEventSeq < 0) return fail('cleanup log completion event sequence is invalid');
+  if (input.generations.length > 128) return fail('cleanup physical log generations exceed the bounded recovery limit');
+  const seenPaths = new Set<string>();
+  const streamCounts = { runner: 0, docker: 0 };
+  for (const row of input.generations) {
+    if (row.stream !== 'runner' && row.stream !== 'docker') return fail('cleanup physical log stream is invalid');
+    if (!Number.isSafeInteger(row.generation) || row.generation !== streamCounts[row.stream]) return fail('cleanup physical log generations are not contiguous');
+    streamCounts[row.stream] += 1;
+    safeLogPath(row.path, jobId);
+    if (seenPaths.has(row.path)) return fail('cleanup physical log paths are ambiguous');
+    seenPaths.add(row.path);
+    if (!Number.isSafeInteger(row.sizeBytes) || row.sizeBytes < 0 || row.sizeBytes > 256 * 1024 * 1024 || !HASH64.test(row.sha256)) return fail('cleanup physical log identity is invalid');
+    const startedAt = instant(row.startedAt, 'cleanup physical log start time');
+    const sealedAt = instant(row.sealedAt, 'cleanup physical log seal time');
+    if (sealedAt < startedAt || sealedAt > completedAt) return fail('cleanup physical log chronology is invalid');
+  }
+  for (const stream of ['runner', 'docker'] as const) {
+    const count = streamCounts[stream];
+    if (input.postcondition[stream] === 'absent' && count !== 0 || input.postcondition[stream] === 'sealed' && count === 0) return fail(`${stream} physical log state does not match cleanup evidence`);
+  }
+
+  try {
+    return await withStateRootSnapshot(stateRootAuthority, async ({ snapshot, dependencies }) => {
+      const handles: FileHandle[] = [];
+      try {
+        const root = await open(snapshot.path, DIRECTORY_FLAGS);
+        handles.push(root);
+        const rootStats = await descriptorStat(root, 'state root for cleanup logs');
+        assertDirectory(rootStats, 'state root for cleanup logs', ownerUid, snapshot.device);
+        if (rootStats.ino !== snapshot.inode) return fail('state root identity changed while opening cleanup logs');
+        const jobs = await openDirectoryChild(root, 'jobs', 'jobs for cleanup logs'); handles.push(jobs);
+        assertDirectory(await descriptorStat(jobs, 'jobs for cleanup logs'), 'jobs for cleanup logs', ownerUid, snapshot.device);
+        const job = await openDirectoryChild(jobs, jobId, `jobs/${jobId} for cleanup logs`); handles.push(job);
+        assertDirectory(await descriptorStat(job, `jobs/${jobId} for cleanup logs`), `jobs/${jobId} for cleanup logs`, ownerUid, snapshot.device);
+        const logs = await openOptionalDirectoryChild(job, 'logs', `jobs/${jobId}/logs`);
+        if (logs !== null) {
+          handles.push(logs);
+          assertDirectory(await descriptorStat(logs, `jobs/${jobId}/logs`), `jobs/${jobId}/logs`, ownerUid, snapshot.device);
+        }
+        if (input.generations.length > 0 && logs === null) return fail('cleanup physical log directory is missing');
+        for (const row of input.generations) {
+          if (logs === null) return fail('cleanup physical log directory is missing');
+          const parts = safeLogPath(row.path, jobId);
+          const nested: FileHandle[] = [];
+          let current = logs;
+          let file: FileHandle | null = null;
+          try {
+            for (const part of parts.slice(0, -1)) {
+              const directory = await openDirectoryChild(current, part, `cleanup log directory ${part}`);
+              nested.push(directory);
+              assertDirectory(await descriptorStat(directory, `cleanup log directory ${part}`), `cleanup log directory ${part}`, ownerUid, snapshot.device);
+              current = directory;
+            }
+            const filename = parts.at(-1)!;
+            file = await openFileChild(current, filename, row.path);
+            assertLogFile(await descriptorStat(file, row.path), row.path, ownerUid, snapshot.device);
+            try {
+              await dependencies.beforeRead(file);
+            } catch (error) {
+              fileSystemFailure('read', `cannot prepare cleanup log descriptor read: ${row.path}`, error);
+            }
+            const physical = await hashLogFile(file, row.path, ownerUid, snapshot.device);
+            if (physical.stats.size !== row.sizeBytes || physical.sha256 !== row.sha256) return fail(`cleanup physical log identity does not match ${row.path}`);
+          } finally {
+            await closeHandles([file, ...nested]);
+          }
+        }
+        await withStateRootSnapshot(stateRootAuthority, async ({ snapshot: current }) => {
+          if (current.path !== snapshot.path || current.device !== snapshot.device || current.inode !== snapshot.inode) return fail('state root authority changed after cleanup log verification');
+          return undefined;
+        });
+        return true as const;
+      } finally {
+        await closeHandles(handles);
+      }
+    });
   } catch (error) {
     return authorityFailure('state root authority verification failed', error);
   }
@@ -849,5 +995,6 @@ export function createRecoveryPhysicalVerification(options: RecoveryPhysicalVeri
   return Object.freeze({
     evidence: Object.freeze({ read: (input: Readonly<{ jobId: string; admissionId: string; path: string; sha256: string }>) => readCompletionEvidence(options.stateRootAuthority, ownerUid, maxEvidenceBytes, input) }),
     staging: Object.freeze({ verify: (input: RecoveryStagingVerificationInput) => inspectStaging(options.approvedRootRegistry, ownerUid, input) }),
+    logs: Object.freeze({ verify: (input: RecoveryLogVerificationInput) => verifyPhysicalLogs(options.stateRootAuthority, ownerUid, input) }),
   });
 }

@@ -40,6 +40,8 @@ const STOP_AUTHORIZATION_ATTEMPT_PATTERN = /^sta_[a-f0-9]{32}$/;
 const HAND_BACK_ACTIVE_STATES = new Set<string>(ACTIVE_RECOVERY_STATES);
 const MAX_LOG_GENERATIONS = 128;
 const MAX_LOG_EVENTS = 8_192;
+const STARTUP_COMPLETED_PAGE_SIZE = 64;
+const MAX_STARTUP_COMPLETED_ADMISSIONS = 256;
 
 export interface RecoveryStats {
   readonly uid: number;
@@ -143,10 +145,45 @@ export interface RecoveryStagingVerifier {
   readonly verify: (input: RecoveryStagingVerificationInput) => Promise<true>;
 }
 
+export interface RecoveryPersistedLogGeneration {
+  readonly stream: 'runner' | 'docker';
+  readonly generation: number;
+  readonly path: string;
+  readonly startedAt: string;
+  readonly sealedAt: string;
+  readonly sizeBytes: number;
+  readonly sha256: string;
+}
+
+export interface RecoveryPersistedLogEvent {
+  readonly stream: 'runner' | 'docker';
+  readonly fileGeneration: number;
+  readonly seq: number;
+  readonly eventType: 'log' | 'log_orphan_tail' | 'log-truncated';
+  readonly at: string;
+  readonly byteOffset: number;
+  readonly byteLength: number;
+  readonly partial: 0 | 1;
+}
+
+export interface RecoveryLogVerificationInput {
+  readonly jobId: string;
+  readonly completedAt: string;
+  readonly completionEventSeq: number;
+  readonly postcondition: CleanupPostcondition['logs'];
+  readonly generations: readonly RecoveryPersistedLogGeneration[];
+  readonly events: readonly RecoveryPersistedLogEvent[];
+}
+
+export interface RecoveryLogVerifier {
+  readonly verify: (input: RecoveryLogVerificationInput) => Promise<true>;
+}
+
 export interface RecoveryHandBackDependencies {
   readonly docker: RecoveryDocker;
   readonly evidence: RecoveryCleanupEvidenceReader;
   readonly staging: RecoveryStagingVerifier;
+  readonly logs: RecoveryLogVerifier;
 }
 
 export interface RecoveryClock {
@@ -507,10 +544,10 @@ function verifyLogContinuity(
   logs: CleanupPostcondition['logs'],
   completedAt: string,
   completionEventSeq: number,
-): void {
+): RecoveryLogVerificationInput {
   const verifiedAt = recoveryInstant(logs.verifiedAt, 'cleanup log verification time');
   if (verifiedAt > completedAt) throw new RecoveryBoundaryError('cleanup logs were verified after cleanup completion');
-  const generations = databaseAll(db, 'SELECT stream, generation, started_at, size_bytes, sealed_at, sha256 FROM job_log_generations WHERE job_id=? ORDER BY stream, generation LIMIT ?', jobId, MAX_LOG_GENERATIONS + 1);
+  const generations = databaseAll(db, 'SELECT stream, generation, path, started_at, size_bytes, sealed_at, sha256 FROM job_log_generations WHERE job_id=? ORDER BY stream, generation LIMIT ?', jobId, MAX_LOG_GENERATIONS + 1);
   const events = databaseAll(db, `SELECT stream, file_generation, seq, event_type, at, byte_offset, byte_length, partial
     FROM job_events WHERE job_id=? AND stream IS NOT NULL ORDER BY stream, file_generation, seq LIMIT ?`, jobId, MAX_LOG_EVENTS + 1);
   if (generations.length > MAX_LOG_GENERATIONS || events.length > MAX_LOG_EVENTS) throw new RecoveryBoundaryError('cleanup log evidence exceeds the bounded recovery limit');
@@ -529,7 +566,7 @@ function verifyLogContinuity(
       const generationNumber = Number(generation.generation);
       const size = Number(generation.size_bytes);
       if (!Number.isSafeInteger(generationNumber) || generationNumber < 0 || !Number.isSafeInteger(size) || size < 0) throw new RecoveryBoundaryError(`${stream} cleanup log generation metadata is invalid`);
-      if (generationNumber !== expectedGeneration || typeof generation.sha256 !== 'string' || !HASH64.test(generation.sha256)) throw new RecoveryBoundaryError(`${stream} cleanup log generations are not contiguous and sealed`);
+      if (generationNumber !== expectedGeneration || typeof generation.path !== 'string' || !generation.path.startsWith('logs/') || generation.path.includes('\\') || generation.path.split('/').some((part) => part.length === 0 || part === '.' || part === '..') || typeof generation.sha256 !== 'string' || !HASH64.test(generation.sha256)) throw new RecoveryBoundaryError(`${stream} cleanup log generations are not contiguous and sealed`);
       const startedAt = recoveryInstant(generation.started_at, `${stream} cleanup log start time`);
       const sealedAt = recoveryInstant(generation.sealed_at, `${stream} cleanup log seal time`);
       if (sealedAt < startedAt || sealedAt > verifiedAt) throw new RecoveryBoundaryError(`${stream} cleanup log seal chronology is invalid`);
@@ -554,6 +591,31 @@ function verifyLogContinuity(
     if (streamEvents.some((event) => !streamGenerations.some((generation) => Number(generation.generation) === Number(event.file_generation)))) throw new RecoveryBoundaryError(`${stream} cleanup log event references an unknown generation`);
   }
   if (generations.some((row) => row.sealed_at === null || row.sealed_at === undefined)) throw new RecoveryBoundaryError('cleanup logs retain an unsealed generation');
+  return {
+    jobId,
+    completedAt,
+    completionEventSeq,
+    postcondition: logs,
+    generations: generations.map((row) => ({
+      stream: row.stream as 'runner' | 'docker',
+      generation: Number(row.generation),
+      path: String(row.path),
+      startedAt: recoveryInstant(row.started_at, 'cleanup log start time'),
+      sealedAt: recoveryInstant(row.sealed_at, 'cleanup log seal time'),
+      sizeBytes: Number(row.size_bytes),
+      sha256: String(row.sha256),
+    })),
+    events: events.map((row) => ({
+      stream: row.stream as 'runner' | 'docker',
+      fileGeneration: Number(row.file_generation),
+      seq: Number(row.seq),
+      eventType: row.event_type as 'log' | 'log_orphan_tail' | 'log-truncated',
+      at: recoveryInstant(row.at, 'cleanup log event time'),
+      byteOffset: Number(row.byte_offset),
+      byteLength: Number(row.byte_length),
+      partial: Number(row.partial) as 0 | 1,
+    })),
+  };
 }
 
 export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecoveryOptions): CleanupAdmissionRecovery {
@@ -975,7 +1037,8 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
           if (postContainer.removedAt < postContainer.stoppedAt || postContainer.observedAt < postContainer.removedAt) throw new RecoveryBoundaryError('cleanup container chronology is invalid');
         }
       }
-      verifyLogContinuity(options.db, input.jobId, postcondition.logs, completionAt, completionEventSeq);
+      const logVerification = verifyLogContinuity(options.db, input.jobId, postcondition.logs, completionAt, completionEventSeq);
+      if (await dependencies.logs.verify(logVerification) !== true) throw new RecoveryBoundaryError('cleanup physical log postcondition is not verified');
 
       const inspectSystemd = options.systemd.inspect;
       if (inspectSystemd === undefined) throw new RecoveryBoundaryError('timestamped systemd verification is unavailable');
@@ -1070,6 +1133,20 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     return databaseAll(options.db, "SELECT admission_id, job_id FROM cleanup_leases WHERE status='completed' ORDER BY complete_at, admission_id");
   }
 
+  function completedAdmissionPage(cursor: Readonly<{ completeAt: string; admissionId: string }> | undefined, limit: number): readonly Record<string, unknown>[] {
+    if (cursor === undefined) return databaseAll(options.db, "SELECT admission_id, job_id, complete_at FROM cleanup_leases WHERE status='completed' ORDER BY complete_at, admission_id LIMIT ?", limit);
+    return databaseAll(options.db, "SELECT admission_id, job_id, complete_at FROM cleanup_leases WHERE status='completed' AND (complete_at > ? OR (complete_at = ? AND admission_id > ?)) ORDER BY complete_at, admission_id LIMIT ?", cursor.completeAt, cursor.completeAt, cursor.admissionId, limit);
+  }
+
+  function startupAdmissionCursor(row: Record<string, unknown>): { readonly completeAt: string; readonly admissionId: string; readonly jobId: string } {
+    const completeAt = recoveryInstant(row.complete_at, 'startup cleanup completion time');
+    const admissionId = requiredRowString(row, 'admission_id');
+    const jobId = requiredRowString(row, 'job_id');
+    if (!ADMISSION_ID_PATTERN.test(admissionId)) throw new RecoveryBoundaryError('startup cleanup admission ID is corrupt');
+    safeSegment(jobId, 'startup cleanup job ID');
+    return { completeAt, admissionId, jobId };
+  }
+
   async function reconcileCompletedAdmissions(): Promise<readonly CleanupHandBackResult[]> {
     requireAdmissionsOpen();
     const results: CleanupHandBackResult[] = [];
@@ -1080,11 +1157,26 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
   }
 
   async function reconcileCompletedAdmissionsAtStartup(): Promise<void> {
-    for (const row of completedAdmissionRows()) {
-      try {
-        await handBackCompleted({ jobId: requiredRowString(row, 'job_id'), admissionId: requiredRowString(row, 'admission_id') });
-      } catch (error) {
-        if (!(error instanceof RecoveryBoundaryError)) throw error;
+    let cursor: { completeAt: string; admissionId: string } | undefined;
+    let processed = 0;
+    while (true) {
+      const remaining = MAX_STARTUP_COMPLETED_ADMISSIONS - processed;
+      const page = completedAdmissionPage(cursor, Math.min(STARTUP_COMPLETED_PAGE_SIZE, remaining + 1));
+      if (page.length === 0) return;
+      if (page.length > remaining) throw new RecoveryBoundaryError('startup completed admission reconciliation exceeds its bounded limit');
+      let previousKey = cursor === undefined ? undefined : `${cursor.completeAt}\u0000${cursor.admissionId}`;
+      for (const row of page) {
+        const key = startupAdmissionCursor(row);
+        const currentKey = `${key.completeAt}\u0000${key.admissionId}`;
+        if (previousKey !== undefined && currentKey <= previousKey) throw new RecoveryBoundaryError('startup completed admission ordering is corrupt');
+        previousKey = currentKey;
+        try {
+          await handBackCompleted({ jobId: key.jobId, admissionId: key.admissionId });
+        } catch (error) {
+          if (!(error instanceof RecoveryBoundaryError)) throw error;
+        }
+        cursor = { completeAt: key.completeAt, admissionId: key.admissionId };
+        processed += 1;
       }
     }
   }

@@ -217,6 +217,20 @@ describe('cleanup production composition', () => {
     expect(((options.database as unknown) as { close: ReturnType<typeof vi.fn> }).close).toHaveBeenCalledOnce();
   });
 
+  it('proves a nonzero global label result without inspecting every matching container', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const run = vi.fn(async (argv: readonly string[]) => {
+      if (argv[1] === '--user') return commandResult(argv, 'inactive\n');
+      if (argv[1] === 'ps') return commandResult(argv, `${JSON.stringify('a'.repeat(12))}\n${JSON.stringify('b'.repeat(12))}\n`);
+      if (argv[1] === 'inspect') throw new Error('listByJobId must not inspect each result');
+      throw new Error(`unexpected command: ${argv.join(' ')}`);
+    });
+    const composition = await createCleanupProduction(deps(root, { run }, vi.fn()));
+    await expect(composition.adapters.docker.hasByJobId(JOB, 1000)).resolves.toBe(true);
+    expect(run.mock.calls.filter(([argv]) => argv[1] === 'inspect')).toHaveLength(0);
+    await composition.close();
+  });
+
   it('rejects nonzero, timeout, malformed systemd, Docker, and publisher command evidence', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
     const publisherCalls = vi.fn();

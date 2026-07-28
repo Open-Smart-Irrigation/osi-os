@@ -145,6 +145,7 @@ async function setup(staging = false) {
     stop: vi.fn(async (id: string) => { calls.push(`stop:${id}`); }),
     waitForStopped: vi.fn(async (id: string) => { calls.push(`wait:${id}`); return { id, name: `osi-${jobId}`, imageDigest: IMAGE_DIGEST, labels: labels(jobId), running: false, stoppedAt: NOW }; }),
     remove: vi.fn(async (id: string) => { calls.push(`remove:${id}`); present = false; }),
+    hasByJobId: vi.fn(async () => { calls.push('has'); return false; }),
     listByJobId: vi.fn(async () => { calls.push('list'); return []; }),
   };
   const quarantine = vi.fn(async () => staging
@@ -184,7 +185,7 @@ describe('cleanup worker real SQLite integration', () => {
     await expect(value.worker.run([value.admissionId])).rejects.toThrow();
     expect(value.docker.stop).toHaveBeenCalledOnce();
     expect(value.docker.remove).toHaveBeenCalledOnce();
-    expect(value.docker.listByJobId).toHaveBeenCalledWith(value.jobId, 1_000);
+    expect(value.docker.hasByJobId).toHaveBeenCalledWith(value.jobId, 1_000);
     expect((value.db.prepare(`SELECT status, cleanup_fence_generation, cleanup_admission_id, state, queue_state, terminal_at
       FROM cleanup_leases JOIN jobs USING (job_id) WHERE admission_id=?`).get(value.admissionId) as Record<string, unknown>)).toMatchObject({ status: 'completed', cleanup_fence_generation: 1, cleanup_admission_id: value.admissionId, state: 'starting', queue_state: 'dispatched', terminal_at: null });
     await expect(readFile(value.credentialPath)).rejects.toMatchObject({ code: 'ENOENT' });
@@ -199,7 +200,7 @@ describe('cleanup worker real SQLite integration', () => {
     expect(value.docker.inspect).not.toHaveBeenCalled();
     expect(value.docker.stop).not.toHaveBeenCalled();
     expect(value.docker.remove).not.toHaveBeenCalled();
-    expect(value.docker.listByJobId).toHaveBeenCalledWith(value.jobId, 1_000);
+    expect(value.docker.hasByJobId).toHaveBeenCalledWith(value.jobId, 1_000);
     expect(value.quarantine).toHaveBeenCalledWith({
       rootId: 'release',
       jobId: value.jobId,

@@ -272,6 +272,30 @@ function createSystemdAdapter(policy: CommandPolicy, executable: string): Cleanu
 }
 
 function createDockerAdapter(policy: CommandPolicy, executable: string): CleanupDocker {
+  async function listIds(jobId: string, timeoutMs: number): Promise<readonly string[]> {
+    if (!JOB_ID.test(jobId)) throw new Error('Docker job ID query is invalid');
+    const argv = [
+      executable, 'ps', '--all', '--no-trunc',
+      '--filter', `${LABEL_JOB}=${jobId}`,
+      '--format', '{{json .ID}}',
+    ] as const;
+    const result = await runTrusted({ ...policy, timeoutMs: Math.min(timeoutMs, policy.timeoutMs) }, argv);
+    const output = result.stdout.endsWith('\n') ? result.stdout.slice(0, -1) : result.stdout;
+    if (output === '') return [];
+    const lines = output.split('\n');
+    if (lines.length > 1024 || lines.some((line) => line.length === 0 || line.includes('\r'))) throw new Error('Docker label listing is malformed');
+    const unique = new Set<string>();
+    const ids: string[] = [];
+    for (const line of lines) {
+      let parsed: unknown;
+      try { parsed = JSON.parse(line) as unknown; } catch (error) { throw new Error('Docker label listing JSON is malformed', { cause: error }); }
+      if (JSON.stringify(parsed) !== line || typeof parsed !== 'string' || !/^[a-f0-9]{12,64}$/u.test(parsed) || unique.has(parsed)) throw new Error('Docker label listing identity is invalid');
+      unique.add(parsed);
+      ids.push(parsed);
+    }
+    return ids;
+  }
+
   async function inspect(containerId: string, timeoutMs: number): Promise<CleanupDockerContainer | null> {
     if (!/^[a-f0-9]{12,64}$/u.test(containerId)) throw new Error('Docker container ID is invalid');
     const argv = [executable, 'inspect', '--type=container', '--format', '{{json .}}', containerId] as const;
@@ -304,26 +328,15 @@ function createDockerAdapter(policy: CommandPolicy, executable: string): Cleanup
       if (!/^[a-f0-9]{12,64}$/u.test(containerId)) throw new Error('Docker container ID is invalid');
       await runTrusted({ ...policy, timeoutMs: Math.min(timeoutMs, policy.timeoutMs) }, [executable, 'rm', containerId]);
     },
+    hasByJobId: async (jobId, timeoutMs) => (await listIds(jobId, timeoutMs)).length > 0,
     listByJobId: async (jobId, timeoutMs) => {
-      if (!JOB_ID.test(jobId)) throw new Error('Docker job ID query is invalid');
-      const argv = [
-        executable, 'ps', '--all', '--no-trunc',
-        '--filter', `${LABEL_JOB}=${jobId}`,
-        '--format', '{{json .ID}}',
-      ] as const;
-      const result = await runTrusted({ ...policy, timeoutMs: Math.min(timeoutMs, policy.timeoutMs) }, argv);
-      const output = result.stdout.endsWith('\n') ? result.stdout.slice(0, -1) : result.stdout;
-      if (output === '') return [];
-      const ids = output.split('\n');
-      if (ids.length > 1024 || ids.some((line) => line.length === 0 || line.includes('\r'))) throw new Error('Docker label listing is malformed');
-      const unique = new Set<string>();
+      const ids = await listIds(jobId, timeoutMs);
       const containers: CleanupDockerContainer[] = [];
-      for (const line of ids) {
-        let parsed: unknown;
-        try { parsed = JSON.parse(line) as unknown; } catch (error) { throw new Error('Docker label listing JSON is malformed', { cause: error }); }
-        if (JSON.stringify(parsed) !== line || typeof parsed !== 'string' || !/^[a-f0-9]{12,64}$/u.test(parsed) || unique.has(parsed)) throw new Error('Docker label listing identity is invalid');
-        unique.add(parsed);
-        const item = await inspect(parsed, timeoutMs);
+      const deadline = Date.now() + Math.min(timeoutMs, policy.timeoutMs);
+      for (const id of ids) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new Error('Docker label listing inspection deadline exceeded');
+        const item = await inspect(id, remaining);
         if (item === null) throw new Error('Docker label listing changed while inspected');
         containers.push(item);
       }

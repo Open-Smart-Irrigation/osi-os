@@ -9,6 +9,7 @@ import { ConfigAuthorityError, loadConfig, type LoadedConfig } from '../../confi
 import { ADMISSION_ID_PATTERN } from '../../domain/types.js';
 import { encodeJson } from '../../api/src/validation.js';
 import type { CleanupPostcondition } from '../../api/src/ownership.js';
+import type { RecoveryLogVerificationInput } from '../../api/src/recovery.js';
 import { RecoveryBoundaryError, RecoveryInfrastructureError } from '../../api/src/recovery.js';
 import { classifyRecoveryAuthorityError, classifyRecoveryFileSystemError, createRecoveryPhysicalVerification } from '../../api/src/recovery-production.js';
 
@@ -138,6 +139,42 @@ function createFactory(loaded: LoadedConfig) {
     approvedRootRegistry: loaded.pathAuthorities.approvedRoots,
     ownerUid: process.getuid?.() ?? 0,
   });
+}
+
+function logVerificationInput(bytes: Buffer): RecoveryLogVerificationInput {
+  return {
+    jobId: JOB_ID,
+    completedAt: NOW,
+    completionEventSeq: 10,
+    postcondition: { ...postcondition().logs, runner: 'sealed' },
+    generations: [{
+      stream: 'runner',
+      generation: 0,
+      path: 'logs/runner-0.log',
+      startedAt: STALE,
+      sealedAt: NOW,
+      sizeBytes: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    }],
+    events: [{
+      stream: 'runner',
+      fileGeneration: 0,
+      seq: 0,
+      eventType: 'log',
+      at: NOW,
+      byteOffset: 0,
+      byteLength: bytes.length,
+      partial: 0,
+    }],
+  };
+}
+
+async function writeLog(loaded: LoadedConfig, bytes = Buffer.from('runner cleanup log\n')): Promise<string> {
+  const directory = join(loaded.stateRoot, 'jobs', JOB_ID, 'logs');
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const path = join(directory, 'runner-0.log');
+  await writeFile(path, bytes, { mode: 0o600 });
+  return path;
 }
 
 function stagingInput(staging: CleanupPostcondition['staging'], overrides: Partial<{
@@ -276,6 +313,80 @@ describe('production recovery physical verification', () => {
       });
       await expect(readFile(join(value.loaded.stateRoot, file.path))).resolves.toBeTruthy();
       expect(file.sha256).toMatch(HASH64);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rebinds the state-root pathname after completion evidence is read', async () => {
+    let loadedRoot = '';
+    let swapped = false;
+    const value = await fixture(async () => {
+      if (swapped || loadedRoot === '') return;
+      swapped = true;
+      const replacement = `${loadedRoot}.replacement`;
+      await rename(loadedRoot, replacement);
+      await mkdir(loadedRoot, { mode: 0o700 });
+    });
+    loadedRoot = value.loaded.stateRoot;
+    try {
+      const file = await writeCompletion(value.loaded, completionEnvelope());
+      const physical = createFactory(value.loaded);
+      await expect(physical.evidence.read({ jobId: JOB_ID, admissionId: ADMISSION_ID, path: file.path, sha256: file.sha256 })).rejects.toThrow(/state root|authority|identity/);
+      expect(swapped).toBe(true);
+      await rm(loadedRoot, { recursive: true, force: true });
+      await rename(`${loadedRoot}.replacement`, loadedRoot);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('physically verifies every sealed log generation under the state-root authority', async () => {
+    const value = await fixture();
+    try {
+      const bytes = Buffer.from('runner cleanup log\n');
+      await writeLog(value.loaded, bytes);
+      const physical = createFactory(value.loaded);
+      await expect(physical.logs.verify(logVerificationInput(bytes))).resolves.toBe(true);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['tampered bytes', 'wrong mode', 'hard link'] as const)('rejects post-cleanup physical log %s evidence', async (mutation) => {
+    const value = await fixture();
+    try {
+      const bytes = Buffer.from('runner cleanup log\n');
+      const path = await writeLog(value.loaded, bytes);
+      if (mutation === 'tampered bytes') await writeFile(path, Buffer.from('runner tampered!\n'), { mode: 0o600 });
+      if (mutation === 'wrong mode') await chmod(path, 0o640);
+      if (mutation === 'hard link') await link(path, join(value.loaded.stateRoot, 'hard-linked-log'));
+      const physical = createFactory(value.loaded);
+      await expect(physical.logs.verify(logVerificationInput(bytes))).rejects.toThrow(/log|unsafe|hash|changed/);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a state-root swap while the physical log descriptor is held', async () => {
+    let loadedRoot = '';
+    let swapped = false;
+    const value = await fixture(async () => {
+      if (swapped || loadedRoot === '') return;
+      swapped = true;
+      const replacement = `${loadedRoot}.replacement`;
+      await rename(loadedRoot, replacement);
+      await mkdir(loadedRoot, { mode: 0o700 });
+    });
+    loadedRoot = value.loaded.stateRoot;
+    try {
+      const bytes = Buffer.from('runner cleanup log\n');
+      await writeLog(value.loaded, bytes);
+      const physical = createFactory(value.loaded);
+      await expect(physical.logs.verify(logVerificationInput(bytes))).rejects.toThrow(/state root|authority|identity/);
+      expect(swapped).toBe(true);
+      await rm(loadedRoot, { recursive: true, force: true });
+      await rename(`${loadedRoot}.replacement`, loadedRoot);
     } finally {
       await rm(value.base, { recursive: true, force: true });
     }

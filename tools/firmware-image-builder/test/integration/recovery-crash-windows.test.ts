@@ -126,27 +126,71 @@ function removedPostcondition(jobId: string, snapshot: CleanupSnapshot): Cleanup
   };
 }
 
-function systemdState() {
+function systemdState(observedAt = NOW) {
   const active = new Map<string, boolean>();
   const starts: string[] = [];
   const systemd: RecoverySystemd = {
     start: vi.fn(async (unit: string) => { starts.push(unit); }),
     isActive: vi.fn(async (unit: string) => active.get(unit) ?? false),
-    inspect: vi.fn(async (unit: string) => ({ unit, active: active.get(unit) ?? false, observedAt: NOW })),
+    inspect: vi.fn(async (unit: string) => ({ unit, active: active.get(unit) ?? false, observedAt })),
   };
   return { active, starts, systemd };
 }
 
-function handBackDependencies(postcondition: CleanupPostcondition): RecoveryHandBackDependencies {
+function handBackDependencies(postcondition: CleanupPostcondition, observedAt = NOW): RecoveryHandBackDependencies {
   const docker: RecoveryDocker = {
-    inspect: vi.fn(async () => ({ container: null, observedAt: NOW })),
-    listByLabels: vi.fn(async () => ({ containers: [], observedAt: NOW })),
+    inspect: vi.fn(async () => ({ container: null, observedAt })),
+    listByLabels: vi.fn(async () => ({ containers: [], observedAt })),
   };
   return {
     docker,
     evidence: { read: vi.fn(async () => ({ jobId: '', admissionId: '', sha256: EVIDENCE_SHA, postcondition })) },
     staging: { verify: vi.fn(async () => true as const) },
+    logs: { verify: vi.fn(async () => true as const) },
   };
+}
+
+async function runReplacementWorker(
+  value: Awaited<ReturnType<typeof createFixture>>,
+  at = AFTER,
+): Promise<CleanupPostcondition> {
+  let containerPresent = value.snapshot.container.kind === 'present';
+  let postcondition: CleanupPostcondition | undefined;
+  const identity = value.snapshot.container;
+  const container = (running: boolean): CleanupDockerContainer => {
+    if (identity.kind !== 'present') throw new Error('test fixture lost its exact container identity');
+    return { id: identity.id, name: identity.name, imageDigest: identity.imageDigest, labels: identity.labels, running, stoppedAt: running ? null : at };
+  };
+  const worker = createCleanupWorker({
+    db: value.db,
+    stateRoot: value.root,
+    ownerUid: UID,
+    workerOwner: 'cleanup-worker',
+    ownership: value.ownership,
+    fileSystem: createRecoveryFileSystem(),
+    clock: { now: () => at },
+    timeouts: { dockerMs: 1_000, systemdMs: 1_000 },
+    systemd: { inspect: vi.fn(async (unit: string) => ({ unit, active: false, observedAt: at })) },
+    docker: {
+      inspect: vi.fn(async () => containerPresent ? container(true) : null),
+      stop: vi.fn(async () => undefined),
+      waitForStopped: vi.fn(async () => container(false)),
+      remove: vi.fn(async () => { containerPresent = false; }),
+      hasByJobId: vi.fn(async () => false),
+      listByJobId: vi.fn(async () => []),
+    },
+    logSealer: { seal: vi.fn(async () => ({ runner: 'absent' as const, docker: 'absent' as const, verifiedAt: at, contiguous: true as const })) },
+    quarantine: { quarantine: vi.fn(async () => ({ kind: 'absent' as const, path: null, sourcePath: `staging/${value.jobId}`, sourceAbsent: true as const, verifiedAt: at })) },
+    evidenceWriter: {
+      write: vi.fn(async (input: { readonly evidence: Record<string, unknown> }) => {
+        postcondition = input.evidence.postcondition as CleanupPostcondition;
+        return { path: `jobs/${value.jobId}/evidence/cleanup/${value.admission.admissionId}.complete.json`, sha256: EVIDENCE_SHA };
+      }),
+    },
+  });
+  await expect(worker.run([value.admission.admissionId])).resolves.toMatchObject({ status: 'completed', admissionId: value.admission.admissionId });
+  if (postcondition === undefined) throw new Error('replacement worker did not write completion postcondition');
+  return postcondition;
 }
 
 function boundHandBack(
@@ -247,6 +291,7 @@ async function crashWorker(value: Awaited<ReturnType<typeof createFixture>>, pha
       stop: vi.fn(async () => undefined),
       waitForStopped: vi.fn(async () => container(false)),
       remove: vi.fn(async () => { containerPresent = false; }),
+      hasByJobId: vi.fn(async () => false),
       listByJobId: vi.fn(async () => []),
     },
     logSealer: { seal: vi.fn(async ({ at }: { at: string }) => ({ runner: 'absent' as const, docker: 'absent' as const, verifiedAt: at, contiguous: true as const })) },
@@ -311,6 +356,15 @@ describe('cleanup recovery crash windows', () => {
       at: AFTER,
     })).toMatchObject({ ok: false });
     expect((value.db.prepare('SELECT COUNT(*) AS count FROM job_events WHERE job_id=?').get(value.jobId) as { count: number }).count).toBe(eventsBefore);
+
+    const postcondition = await runReplacementWorker({ ...value, admission: result });
+    const restartedSystemd = systemdState(AFTER);
+    const handBack = handBackDependencies(postcondition, AFTER);
+    (handBack.evidence.read as ReturnType<typeof vi.fn>).mockResolvedValue({ jobId: value.jobId, admissionId: result.admissionId, sha256: EVIDENCE_SHA, postcondition });
+    const restarted = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: new OwnershipStore(value.db, { now: () => AFTER }), systemd: restartedSystemd.systemd, handBack, clock: { now: () => AFTER }, ownerUid: UID });
+    await restarted.openAdmissions();
+    expect((value.db.prepare('SELECT state, cleanup_admission_id, cleanup_fence_generation FROM jobs WHERE job_id=?').get(value.jobId) as Record<string, unknown>)).toMatchObject({ state: 'interrupted', cleanup_admission_id: null, cleanup_fence_generation: null });
+    expect((value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(result.admissionId) as { status: string }).status).toBe('handed_back');
   });
 
   it('hands back after cleanup CAS during startup without starting another worker', async () => {
@@ -418,10 +472,7 @@ describe('cleanup recovery crash windows', () => {
 
   it('leaves an already-interrupted job terminal after hand-back', async () => {
     const value = await createFixture('interrupted');
-    const postcondition = removedPostcondition(value.jobId, value.snapshot);
-    const tokenHash = (value.db.prepare('SELECT fence_token_hash FROM cleanup_leases WHERE admission_id=?').get(value.admission.admissionId) as { fence_token_hash: string }).fence_token_hash;
-    value.ownership.cleanupWrite({ kind: 'claim-lease', jobId: value.jobId, admissionId: value.admission.admissionId, owner: 'cleanup-worker', unitName: value.admission.unitName, fenceGeneration: value.admission.generation, fenceTokenHash: tokenHash, snapshot: value.snapshot, at: NOW });
-    value.ownership.cleanupWrite({ kind: 'complete', jobId: value.jobId, admissionId: value.admission.admissionId, owner: 'cleanup-worker', unitName: value.admission.unitName, fenceGeneration: value.admission.generation, fenceTokenHash: tokenHash, snapshot: value.snapshot, postcondition, exactContainerId: `container-${value.jobId}`, containerAbsent: true, evidencePath: `jobs/${value.jobId}/evidence/cleanup/cleanup.json`, evidenceSha256: EVIDENCE_SHA, at: NOW });
+    const postcondition = await runReplacementWorker(value, NOW);
     const handBack = handBackDependencies(postcondition);
     (handBack.evidence.read as ReturnType<typeof vi.fn>).mockResolvedValue({ jobId: value.jobId, admissionId: value.admission.admissionId, sha256: EVIDENCE_SHA, postcondition });
     const restartedSystemd = systemdState();
