@@ -266,6 +266,78 @@ describe('DurableLogStream', () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id=? AND event_type='log-gap'").get('job-log')).toEqual({ count: 1 });
   });
 
+  it('compacts an oversized source-gap replacement at the source sequence', async () => {
+    const { stream, db } = await fixture();
+    const source = stream.appendSync('runner', Buffer.from('replaced\n'));
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, 'log-gap', ?, ?)")
+      .run('job-log', source.seq + 1, JSON.stringify({ sourceSeq: source.seq, detail: 'x'.repeat(70_000) }), NOW);
+
+    const replay = stream.replaySync(-1);
+
+    expect(replay).toEqual([{
+      seq: source.seq,
+      event: 'log-truncated',
+      data: { jobId: 'job-log', truncated: true, reason: 'REPLAY_METADATA_TOO_LARGE' },
+    }]);
+    expect(Buffer.byteLength(stream.encodeSse(replay[0]!))).toBeLessThanOrEqual(64 * 1024);
+    expect(stream.replaySync(source.seq)).toEqual([]);
+  });
+
+  it('defers a source-gap replacement and every later row when its metadata budget is exhausted', async () => {
+    const { stream, db } = await fixture();
+    const source = stream.appendSync('runner', Buffer.from('replaced\n'));
+    const terminal = stream.appendMetadataSync('terminal', { state: 'failed' });
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, 'log-gap', ?, ?)")
+      .run('job-log', terminal + 1, JSON.stringify({ sourceSeq: source.seq, reason: 'RANGE_UNREADABLE' }), NOW);
+
+    expect(stream.replaySync(-1, { maxMetadataBytes: 1 })).toEqual([]);
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([
+      [source.seq, 'log-gap'],
+      [terminal, 'terminal'],
+    ]);
+  });
+
+  it.each([
+    ['malformed JSON', 'not-json'],
+    ['a non-object JSON value', '[]'],
+  ])('compacts %s in a persisted log-gap diagnostic without aborting SQL', async (_description, payload) => {
+    const { stream, db } = await fixture();
+    const stage = stream.appendMetadataSync('stage', { stage: 'build' });
+    const gap = stream.appendMetadataSync('log-gap', { reason: 'diagnostic' });
+    db.exec('PRAGMA ignore_check_constraints=ON');
+    db.exec('DROP TRIGGER job_events_immutable_update_guard');
+    db.exec('DROP INDEX job_events_log_gap_source_seq');
+    db.prepare('UPDATE job_events SET payload_json=? WHERE job_id=? AND seq=?').run(payload, 'job-log', gap);
+
+    expect(stream.replaySync(-1)).toEqual([
+      expect.objectContaining({ seq: stage, event: 'stage' }),
+      { seq: gap, event: 'log-truncated', data: { jobId: 'job-log', truncated: true, reason: 'REPLAY_METADATA_INVALID' } },
+    ]);
+  });
+
+  it('keeps invalid and unassociated numeric source-gap diagnostics visible at storage sequence', async () => {
+    const { stream, db } = await fixture();
+    const metadata = stream.appendMetadataSync('stage', { stage: 'build' });
+    const payloads = [
+      { sourceSeq: 42, reason: 'orphan' },
+      { sourceSeq: 0.5, reason: 'fractional' },
+      { sourceSeq: -1, reason: 'negative' },
+      { sourceSeq: 9_007_199_254_740_992, reason: 'unsafe' },
+      { sourceSeq: metadata, reason: 'metadata-reference' },
+    ];
+    const insert = db.prepare("INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, 'log-gap', ?, ?)");
+    payloads.forEach((payload, index) => insert.run('job-log', index + 1, JSON.stringify(payload), NOW));
+
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([
+      [metadata, 'stage'],
+      [1, 'log-gap'],
+      [2, 'log-gap'],
+      [3, 'log-gap'],
+      [4, 'log-gap'],
+      [5, 'log-gap'],
+    ]);
+  });
+
   it('keeps a replay-created source gap within the requested candidate page', async () => {
     const { stream, db, root } = await fixture();
     const source = stream.appendSync('runner', Buffer.from('lost\n'));

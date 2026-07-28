@@ -92,6 +92,13 @@ interface SourceCoordinates {
   };
 }
 
+interface SourceGapRow {
+  readonly seq: number;
+  readonly payload_json: string | null;
+  readonly payload_bytes: number;
+  readonly payload_too_large: number;
+}
+
 function allBytes(fd: number, bytes: Uint8Array, write: LogStreamIo['writeSync']): void {
   let offset = 0;
   while (offset < bytes.byteLength) {
@@ -325,6 +332,25 @@ export class DurableLogStream {
     const limits = replayLimits(afterSeq, requestedLimits);
     const output: LogStreamEvent[] = [];
     let decodedBytes = 0;
+    let metadataBytes = 0;
+
+    const replacementFor = (sourceSeq: number): LogStreamEvent | null | undefined => {
+      const gap = this.#sourceGap(sourceSeq);
+      if (gap === undefined) return null;
+      if (gap.payload_too_large === 1) return replayTruncated(sourceSeq, this.#jobId, 'REPLAY_METADATA_TOO_LARGE');
+      let payload: Record<string, unknown>;
+      try {
+        const parsed: unknown = JSON.parse(String(gap.payload_json));
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('persisted source gap is not an object');
+        payload = parsed as Record<string, unknown>;
+      } catch {
+        return replayTruncated(sourceSeq, this.#jobId, 'REPLAY_METADATA_INVALID');
+      }
+      if (gap.payload_bytes > limits.maxMetadataBytes - metadataBytes) return undefined;
+      metadataBytes += gap.payload_bytes;
+      return { seq: sourceSeq, event: 'log-gap', data: payload };
+    };
+
     for (const row of this.#eventRows(afterSeq, limits.eventLimit, limits.maxMetadataBytes)) {
       const seq = Number(row.seq);
       if (Number(row.payload_too_large) === 1) {
@@ -340,6 +366,11 @@ export class DurableLogStream {
         output.push(replayTruncated(seq, this.#jobId, 'REPLAY_METADATA_INVALID'));
         continue;
       }
+      if (Number(row.is_metadata) === 1) metadataBytes += Number(row.payload_bytes);
+      if (row.replacement_gap_seq !== null && row.replacement_gap_seq !== undefined) {
+        output.push({ seq, event: 'log-gap', data: payload });
+        continue;
+      }
       if (row.stream === null) {
         if (row.event_type === 'log-gap') output.push({ seq, event: 'log-gap', data: payload });
         else if (row.event_type === 'log-truncated') output.push({ seq, event: 'log-truncated', data: payload });
@@ -348,27 +379,33 @@ export class DurableLogStream {
       }
 
       const source = sourceCoordinates(row);
-      const existingGap = this.#sourceGap(source.seq);
-      if (existingGap !== undefined) {
-        output.push({ seq, event: 'log-gap', data: JSON.parse(existingGap.payload_json) as Record<string, unknown> });
+      const existingGap = replacementFor(source.seq);
+      if (existingGap === undefined) break;
+      if (existingGap !== null) {
+        output.push(existingGap);
         continue;
       }
       const expectedIdentity = this.#discoverIdentity(source);
       if (expectedIdentity === undefined) {
-        const gap = this.#sourceGap(source.seq);
-        if (gap !== undefined) output.push({ seq, event: 'log-gap', data: JSON.parse(gap.payload_json) as Record<string, unknown> });
+        const gap = replacementFor(source.seq);
+        if (gap === undefined) break;
+        if (gap !== null) output.push(gap);
         continue;
       }
       const generationRow = this.#generationRow(source);
       if (generationRow === undefined || generationRow.path !== `logs/${source.stream}.${source.generation}`) {
-        const gap = this.#gap(source.seq, source.stream, source.generation, source.range, 'READ_RACE');
-        output.push({ seq, event: 'log-gap', data: gap.data });
+        this.#gap(source.seq, source.stream, source.generation, source.range, 'READ_RACE');
+        const gap = replacementFor(source.seq);
+        if (gap === undefined) break;
+        if (gap !== null) output.push(gap);
         continue;
       }
       const path = this.#generationPath(source.stream, source.generation, generationRow.path);
       if (path === null) {
-        const gap = this.#gap(source.seq, source.stream, source.generation, source.range, 'READ_RACE');
-        output.push({ seq, event: 'log-gap', data: gap.data });
+        this.#gap(source.seq, source.stream, source.generation, source.range, 'READ_RACE');
+        const gap = replacementFor(source.seq);
+        if (gap === undefined) break;
+        if (gap !== null) output.push(gap);
         continue;
       }
       if (source.range.length > limits.maxDecodedBytes - decodedBytes) {
@@ -396,8 +433,16 @@ export class DurableLogStream {
         bytes = readRegularRange(path, source.range.offset, source.range.length, expectedIdentity, this.#readSync);
       } catch (error) {
         if (isUnsafeAuthorityError(error)) throw error;
-        const gap = this.#gap(source.seq, source.stream, source.generation, source.range, 'READ_RACE');
-        output.push({ seq, event: 'log-gap', data: gap.data });
+        this.#gap(source.seq, source.stream, source.generation, source.range, 'READ_RACE');
+        const gap = replacementFor(source.seq);
+        if (gap === undefined) break;
+        if (gap !== null) output.push(gap);
+        continue;
+      }
+      const racedGap = replacementFor(source.seq);
+      if (racedGap === undefined) break;
+      if (racedGap !== null) {
+        output.push(racedGap);
         continue;
       }
       decodedBytes += bytes.byteLength;
@@ -513,49 +558,77 @@ export class DurableLogStream {
   #nextSeq(): number { return Number((this.#db.prepare('SELECT COALESCE(MAX(seq)+1, 0) AS next FROM job_events WHERE job_id=?').get(this.#jobId) as { next: number }).next); }
 
   #eventRows(afterSeq: number, limit: number, maxMetadataBytes: number): Array<Record<string, unknown>> {
-    return this.#db.prepare(`WITH RECURSIVE candidates AS (
+    return this.#db.prepare(`WITH RECURSIVE gap_candidates AS (
+      SELECT gap.seq AS gap_seq,
+        octet_length(gap.payload_json) AS payload_bytes,
+        CASE WHEN json_valid(gap.payload_json) THEN json_type(gap.payload_json, '$.sourceSeq') ELSE NULL END AS source_type,
+        CASE WHEN json_valid(gap.payload_json) THEN json_extract(gap.payload_json, '$.sourceSeq') ELSE NULL END AS source_seq
+      FROM job_events AS gap
+      WHERE gap.job_id=? AND gap.event_type='log-gap'
+    ), valid_source_gaps AS (
+      SELECT gap.gap_seq, gap.payload_bytes, gap.source_seq
+      FROM gap_candidates AS gap
+      JOIN job_events AS source
+        ON source.job_id=?
+        AND source.seq=gap.source_seq
+        AND source.stream IS NOT NULL
+      WHERE gap.source_type IN ('integer', 'real')
+        AND gap.source_seq BETWEEN 0 AND 9007199254740991
+        AND gap.source_seq=CAST(gap.source_seq AS INTEGER)
+    ), candidates AS (
       SELECT event.seq, event.event_type, event.at, event.stream, event.file_generation, event.byte_offset, event.byte_length, event.partial,
-          octet_length(event.payload_json) AS payload_bytes,
-          CASE WHEN event.stream IS NOT NULL THEN 'log'
+          replacement.gap_seq AS replacement_gap_seq,
+          CASE WHEN replacement.gap_seq IS NOT NULL THEN replacement.payload_bytes ELSE octet_length(event.payload_json) END AS payload_bytes,
+          CASE WHEN replacement.gap_seq IS NOT NULL THEN 1 WHEN event.stream IS NULL THEN 1 ELSE 0 END AS is_metadata,
+          CASE WHEN replacement.gap_seq IS NOT NULL THEN 'log-gap'
+            WHEN event.stream IS NOT NULL THEN 'log'
             WHEN event.event_type='terminal' THEN 'terminal'
             WHEN event.event_type IN ('log-gap', 'log-truncated') THEN event.event_type
             ELSE 'stage' END AS public_event
         FROM job_events AS event
+        LEFT JOIN valid_source_gaps AS replacement
+          ON event.stream IS NOT NULL AND replacement.source_seq=event.seq
         WHERE event.job_id=? AND event.seq>?
-          AND NOT (event.event_type='log-gap' AND COALESCE(json_type(event.payload_json, '$.sourceSeq'), '') IN ('integer', 'real'))
+          AND NOT EXISTS (SELECT 1 FROM valid_source_gaps AS hidden WHERE hidden.gap_seq=event.seq)
         ORDER BY event.seq
         LIMIT ?
       ), bounded AS (
         SELECT candidates.*,
           (payload_bytes > (? - (21 + length(CAST(seq AS TEXT)) + octet_length(public_event)))) AS payload_too_large
         FROM candidates
-      ), prefix(seq, event_type, at, stream, file_generation, byte_offset, byte_length, partial, payload_bytes, public_event, payload_too_large, prior_metadata_bytes) AS (
-        SELECT seq, event_type, at, stream, file_generation, byte_offset, byte_length, partial, payload_bytes, public_event, payload_too_large,
-          CASE WHEN stream IS NULL AND payload_too_large=0 THEN payload_bytes ELSE 0 END
+      ), prefix(seq, event_type, at, stream, file_generation, byte_offset, byte_length, partial, replacement_gap_seq, payload_bytes, is_metadata, public_event, payload_too_large, prior_metadata_bytes) AS (
+        SELECT seq, event_type, at, stream, file_generation, byte_offset, byte_length, partial, replacement_gap_seq, payload_bytes, is_metadata, public_event, payload_too_large,
+          CASE WHEN is_metadata=1 AND payload_too_large=0 THEN payload_bytes ELSE 0 END
         FROM bounded
         WHERE seq=(SELECT MIN(seq) FROM bounded)
-          AND (stream IS NOT NULL OR payload_too_large=1 OR payload_bytes <= ?)
+          AND (is_metadata=0 OR payload_too_large=1 OR payload_bytes <= ?)
         UNION ALL
-        SELECT next.seq, next.event_type, next.at, next.stream, next.file_generation, next.byte_offset, next.byte_length, next.partial, next.payload_bytes, next.public_event, next.payload_too_large,
-          prefix.prior_metadata_bytes + CASE WHEN next.stream IS NULL AND next.payload_too_large=0 THEN next.payload_bytes ELSE 0 END
+        SELECT next.seq, next.event_type, next.at, next.stream, next.file_generation, next.byte_offset, next.byte_length, next.partial, next.replacement_gap_seq, next.payload_bytes, next.is_metadata, next.public_event, next.payload_too_large,
+          prefix.prior_metadata_bytes + CASE WHEN next.is_metadata=1 AND next.payload_too_large=0 THEN next.payload_bytes ELSE 0 END
         FROM prefix
         JOIN bounded AS next ON next.seq=(SELECT MIN(candidate.seq) FROM bounded AS candidate WHERE candidate.seq > prefix.seq)
-        WHERE next.stream IS NOT NULL OR next.payload_too_large=1 OR prefix.prior_metadata_bytes + next.payload_bytes <= ?
+        WHERE next.is_metadata=0 OR next.payload_too_large=1 OR prefix.prior_metadata_bytes + next.payload_bytes <= ?
       )
       SELECT prefix.seq, prefix.event_type,
-        CASE WHEN prefix.payload_too_large=1 THEN NULL ELSE event.payload_json END AS payload_json,
+        CASE WHEN prefix.payload_too_large=1 THEN NULL
+          WHEN prefix.replacement_gap_seq IS NOT NULL THEN replacement.payload_json
+          ELSE event.payload_json END AS payload_json,
         prefix.at, prefix.stream,
         prefix.file_generation, prefix.byte_offset, prefix.byte_length, prefix.partial,
-        prefix.payload_bytes, prefix.payload_too_large
+        prefix.replacement_gap_seq, prefix.payload_bytes, prefix.is_metadata, prefix.payload_too_large
       FROM prefix
       JOIN job_events AS event ON event.job_id=? AND event.seq=prefix.seq
+      LEFT JOIN job_events AS replacement ON replacement.job_id=? AND replacement.seq=prefix.replacement_gap_seq
       ORDER BY prefix.seq`).all(
+      this.#jobId,
+      this.#jobId,
       this.#jobId,
       afterSeq,
       limit,
       MAX_SSE_BYTES,
       maxMetadataBytes,
       maxMetadataBytes,
+      this.#jobId,
       this.#jobId,
     ) as Array<Record<string, unknown>>;
   }
@@ -584,8 +657,16 @@ export class DurableLogStream {
     return identity;
   }
 
-  #sourceGap(sourceSeq: number): { readonly seq: number; readonly payload_json: string } | undefined {
-    return this.#db.prepare("SELECT seq, payload_json FROM job_events WHERE job_id=? AND event_type='log-gap' AND json_type(payload_json, '$.sourceSeq') IN ('integer', 'real') AND json_extract(payload_json, '$.sourceSeq')=?").get(this.#jobId, sourceSeq) as { seq: number; payload_json: string } | undefined;
+  #sourceGap(sourceSeq: number): SourceGapRow | undefined {
+    const framePayloadLimit = MAX_SSE_BYTES - (21 + String(sourceSeq).length + Buffer.byteLength('log-gap'));
+    return this.#db.prepare(`SELECT seq, octet_length(payload_json) AS payload_bytes,
+      CASE WHEN octet_length(payload_json)>? THEN NULL ELSE payload_json END AS payload_json,
+      CASE WHEN octet_length(payload_json)>? THEN 1 ELSE 0 END AS payload_too_large
+      FROM job_events
+      WHERE job_id=? AND event_type='log-gap'
+        AND CASE WHEN json_valid(payload_json) THEN json_type(payload_json, '$.sourceSeq') ELSE NULL END IN ('integer', 'real')
+        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.sourceSeq') ELSE NULL END=?`)
+      .get(framePayloadLimit, framePayloadLimit, this.#jobId, sourceSeq) as SourceGapRow | undefined;
   }
 
   #sealGenerationInTransaction(stream: StreamName, generation: number, size: number, sha256: string): void {
@@ -605,21 +686,20 @@ export class DurableLogStream {
     }
   }
 
-  #gap(seq: number, stream: StreamName, generation: number, range: { offset: number; length: number }, reason = 'RANGE_UNREADABLE'): LogStreamEvent {
+  #gap(seq: number, stream: StreamName, generation: number, range: { offset: number; length: number }, reason = 'RANGE_UNREADABLE'): void {
     const existing = this.#sourceGap(seq);
-    if (existing) return { seq: Number(existing.seq), event: 'log-gap', data: JSON.parse(existing.payload_json) as Record<string, unknown> };
+    if (existing) return;
     const data = { jobId: this.#jobId, code: 'RECOVERY_LOG_GAP', reason, sourceSeq: seq, stream, generation, offset: range.offset, length: range.length, path: `logs/${stream}.${generation}` };
-    return this.#persistGap(seq, data);
+    this.#persistGap(seq, data);
   }
 
-  #persistGap(sourceSeq: number, supplied: Record<string, unknown>): LogStreamEvent {
-    return this.#transaction(() => {
+  #persistGap(sourceSeq: number, supplied: Record<string, unknown>): void {
+    this.#transaction(() => {
       const existing = this.#sourceGap(sourceSeq);
-      if (existing) return { seq: Number(existing.seq), event: 'log-gap', data: JSON.parse(existing.payload_json) as Record<string, unknown> };
+      if (existing) return;
       const data = { ...supplied, sourceSeq };
       const gapSeq = this.#nextSeq();
       this.#db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, \'log-gap\', ?, ?)').run(this.#jobId, gapSeq, json(data), this.#now());
-      return { seq: gapSeq, event: 'log-gap', data };
     });
   }
 

@@ -373,4 +373,35 @@ describe('SSE durable replay', () => {
     expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[0, 'log-gap'], [1, 'terminal']]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='job-sse' AND event_type='log-gap'").get()).toEqual({ count: 1 });
   });
+
+  it('linearizes replay on a numeric source gap committed after the file read starts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-sse-gap-linearization-')); roots.push(root);
+    const db = openBuilderDatabase(join(root, 'jobs.sqlite')); dbs.push(db); seed(db);
+    let inserted = false;
+    const stream = new DurableLogStream({
+      db,
+      root,
+      jobId: 'job-sse',
+      now: () => NOW,
+      beforeReplayRead: (sourceSeq) => {
+        if (inserted) return;
+        inserted = true;
+        db.prepare("INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, 'log-gap', ?, ?)")
+          .run('job-sse', 2, JSON.stringify({ sourceSeq, reason: 'CONCURRENT_RECOVERY' }), NOW);
+      },
+    });
+    const source = stream.appendSync('runner', Buffer.from('readable\n'));
+    const terminal = stream.appendMetadataSync('terminal', { state: 'failed' });
+
+    expect(stream.replaySync(-1, { maxMetadataBytes: 1 })).toEqual([]);
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([
+      [source.seq, 'log-gap'],
+      [terminal, 'terminal'],
+    ]);
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([
+      [source.seq, 'log-gap'],
+      [terminal, 'terminal'],
+    ]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='job-sse' AND event_type='log-gap'").get()).toEqual({ count: 1 });
+  });
 });
