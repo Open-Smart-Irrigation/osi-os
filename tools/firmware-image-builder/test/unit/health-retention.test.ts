@@ -189,6 +189,50 @@ describe('startup retention', () => {
     })()).resolves.toMatchObject({ blockers: [{ code: 'RETENTION_ROOT_INVALID' }] });
   });
 
+  it('rejects a release root nested under builder cache before mutation', async () => {
+    const paths = await retentionWorkspace();
+    const releaseRoot = join(paths.builderOwnedRoots[0]!, 'cache', 'docker', 'release');
+    const quarantineRoot = join(releaseRoot, '.osi-image-builder', 'quarantine');
+    const releaseFile = join(releaseRoot, 'main', 'sha', 'rpi-5', 'release.img.gz');
+    const cacheFile = join(paths.builderOwnedRoots[0]!, 'cache', 'docker', 'old');
+    await mkdir(quarantineRoot, { recursive: true });
+    await mkdir(join(releaseRoot, 'main', 'sha', 'rpi-5'), { recursive: true });
+    await writeFile(releaseFile, 'protected');
+    let mutationAttempts = 0;
+
+    await expect(createRetentionStartupHook({
+      paths: { ...paths, approvedReleaseRoots: [releaseRoot], approvedQuarantineRoots: [quarantineRoot] },
+      now: NOW,
+      freeBytes: 19 * 1024 ** 3,
+      beforeDelete: () => { mutationAttempts += 1; },
+    })()).resolves.toMatchObject({ blockers: [{ code: 'RETENTION_ROOT_INVALID' }] });
+    expect(mutationAttempts).toBe(0);
+    await expect(import('node:fs/promises').then(({ readFile }) => readFile(cacheFile, 'utf8'))).resolves.toBe('old');
+    await expect(import('node:fs/promises').then(({ readFile }) => readFile(releaseFile, 'utf8'))).resolves.toBe('protected');
+  });
+
+  it('rejects a state root nested under a release root before mutation', async () => {
+    const paths = await retentionWorkspace();
+    const releaseRoot = join(paths.stateRoot, '..');
+    const quarantineRoot = join(releaseRoot, '.osi-image-builder', 'quarantine');
+    const releaseFile = join(releaseRoot, 'main', 'sha', 'rpi-5', 'release.img.gz');
+    const cacheFile = join(paths.builderOwnedRoots[0]!, 'cache', 'docker', 'old');
+    await mkdir(quarantineRoot, { recursive: true });
+    await mkdir(join(releaseRoot, 'main', 'sha', 'rpi-5'), { recursive: true });
+    await writeFile(releaseFile, 'protected');
+    let mutationAttempts = 0;
+
+    await expect(createRetentionStartupHook({
+      paths: { ...paths, approvedReleaseRoots: [releaseRoot], approvedQuarantineRoots: [quarantineRoot] },
+      now: NOW,
+      freeBytes: 19 * 1024 ** 3,
+      beforeDelete: () => { mutationAttempts += 1; },
+    })()).resolves.toMatchObject({ blockers: [{ code: 'RETENTION_ROOT_INVALID' }] });
+    expect(mutationAttempts).toBe(0);
+    await expect(import('node:fs/promises').then(({ readFile }) => readFile(cacheFile, 'utf8'))).resolves.toBe('old');
+    await expect(import('node:fs/promises').then(({ readFile }) => readFile(releaseFile, 'utf8'))).resolves.toBe('protected');
+  });
+
   it('prunes the whole terminal job root after per-file candidates', async () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
