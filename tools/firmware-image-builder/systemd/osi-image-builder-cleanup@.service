@@ -1,0 +1,16 @@
+[Unit]
+Description=OSI firmware image builder cleanup admission %i
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/lib/osi-image-builder/selected/bin/osi-image-builder-cleanup %i
+RemainAfterExit=no
+KillMode=control-group
+Restart=no
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=%h/.local/lib/osi-image-builder
+ReadWritePaths=%h/.local/state/osi-image-builder
+ReadWritePaths=%h/.local/share/osi-image-builder/quarantine

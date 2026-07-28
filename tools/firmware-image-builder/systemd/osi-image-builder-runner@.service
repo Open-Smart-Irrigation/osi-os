@@ -1,0 +1,13 @@
+[Unit]
+Description=OSI firmware image builder runner %i
+
+[Service]
+Type=simple
+ExecStart=%h/.local/lib/osi-image-builder/selected/bin/osi-image-builder-runner %i
+KillMode=control-group
+KillSignal=SIGUSR1
+TimeoutStopSec=15s
+SendSIGKILL=yes
+Restart=no
+NoNewPrivileges=yes
+PrivateTmp=yes

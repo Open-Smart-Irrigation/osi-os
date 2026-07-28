@@ -1,0 +1,15 @@
+[Unit]
+Description=OSI firmware image builder API
+
+[Service]
+Type=simple
+ExecStart=%h/.local/lib/osi-image-builder/selected/bin/osi-image-builder-api
+Environment=OSI_IMAGE_BUILDER_BIND_ADDRESS=127.0.0.1
+Environment=OSI_IMAGE_BUILDER_HOST=127.0.0.1
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target
