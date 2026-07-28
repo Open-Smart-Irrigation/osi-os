@@ -213,6 +213,7 @@ async function validateConfiguredRoots(paths: RetentionPaths): Promise<QueueBloc
   const all = [paths.stateRoot, ...paths.builderOwnedRoots, ...paths.approvedQuarantineRoots, ...paths.approvedReleaseRoots, ...(paths.worktreeRoot === undefined ? [] : [paths.worktreeRoot])];
   if (all.some((path) => !validateRootShape(path))) return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'non-canonical-root' } };
   if (paths.builderOwnedRoots.some((root) => !contained(paths.stateRoot, root))) return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'builder-root-outside-state' } };
+  if (paths.approvedReleaseRoots.some((root) => overlaps(paths.stateRoot, root))) return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'approved-release-root-overlaps-state' } };
   for (let left = 0; left < paths.builderOwnedRoots.length; left += 1) {
     for (let right = left + 1; right < paths.builderOwnedRoots.length; right += 1) {
       if (overlaps(paths.builderOwnedRoots[left]!, paths.builderOwnedRoots[right]!)) return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'builder-roots-overlap' } };
