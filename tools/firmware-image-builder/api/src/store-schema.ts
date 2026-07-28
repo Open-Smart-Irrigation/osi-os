@@ -25,6 +25,7 @@ const migrationRegistry = [
   { version: 12, filename: '012_cleanup_admission_supersession_evidence.sql', sha256: '2ad0bf8a9084ca8a875ca4b1699df827448eb991c5518c78e5aa68048df21a97' },
   { version: 13, filename: '013_queue_dispatch_claim.sql', sha256: '71b0dc3ea317f5c92e79021fbdda17a0639f11061105e325968f75a2094ca3b9' },
   { version: 14, filename: '014_retention_prunes.sql', sha256: '4735a255db547ad3a65ceb48cf26907b02ef3d765f9fdbe7f625a00bf0097418' },
+  { version: 15, filename: '015_retention_prune_target_identity.sql', sha256: '7ce5f98e5a6b373b6d934816373e6bae87de756e443d890b2da399b972d3c317' },
 ] as const;
 
 export const MIGRATION_REGISTRY: readonly MigrationDescriptor[] = Object.freeze(

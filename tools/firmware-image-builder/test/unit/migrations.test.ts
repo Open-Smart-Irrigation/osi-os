@@ -219,6 +219,7 @@ describe('versioned builder database migrations', () => {
       { version: 12, filename: '012_cleanup_admission_supersession_evidence.sql' },
       { version: 13, filename: '013_queue_dispatch_claim.sql' },
       { version: 14, filename: '014_retention_prunes.sql' },
+      { version: 15, filename: '015_retention_prune_target_identity.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
       .toEqual(['cleanup_credential_reservations', 'cleanup_leases', 'cleanup_stop_authorization_heads', 'cleanup_stop_authorization_outcomes', 'cleanup_stop_authorizations', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_dispatch_claims', 'queue_entries', 'retention_prune_intents', 'retention_prunes', 'retention_purge_authorizations', 'schema_migrations', 'sqlite_sequence']);
@@ -299,7 +300,12 @@ describe('versioned builder database migrations', () => {
     expectColumns(db, 'schema_migrations', ['version', 'filename', 'sha256', 'applied_at']);
     expectColumns(db, 'queue_entries', ['job_id', 'fifo_seq', 'enqueued_at', 'claimed_at']);
     expectColumns(db, 'queue_dispatch_claims', ['claim_id', 'job_id', 'owner', 'claimed_at', 'lease_expires_at', 'phase', 'start_attempted_at', 'unit_inactive_at']);
-    expectColumns(db, 'retention_prune_intents', ['intent_id', 'category', 'relative_path', 'status', 'planned_at', 'updated_at', 'bytes', 'error']);
+    expectColumns(db, 'retention_prune_intents', ['intent_id', 'category', 'relative_path', 'status', 'planned_at', 'updated_at', 'bytes', 'error', 'target_dev', 'target_ino']);
+    expect(() => db.prepare(`INSERT INTO retention_prune_intents
+      (category, relative_path, status, planned_at, updated_at, bytes, target_dev)
+      VALUES ('quarantine', '.osi-image-builder/quarantine/partial-identity', 'planned', ?, ?, 0, 1)`)
+      .run('2026-07-28T12:00:00.000Z', '2026-07-28T12:00:00.000Z'))
+      .toThrow(/CHECK constraint failed/u);
     expectColumns(db, 'job_events', [
       'job_id', 'seq', 'event_type', 'state', 'stage', 'payload_json', 'at', 'stream', 'file_generation',
       'byte_offset', 'byte_length', 'partial',
@@ -508,7 +514,7 @@ describe('versioned builder database migrations', () => {
     const second = openBuilderDatabase(path);
     expect(second.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name").all())
       .toEqual(schema);
-    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 14 });
+    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 15 });
     second.close();
   });
 
@@ -611,7 +617,7 @@ describe('versioned builder database migrations', () => {
     physicalOrderDb.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(1, '001_initial.sql', MIGRATION_REGISTRY[0].sha256, 'x');
     physicalOrderDb.close();
     const accepted = openBuilderDatabase(physicalOrderPath);
-    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 14 });
+    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 15 });
     accepted.close();
   });
 
@@ -954,7 +960,7 @@ describe('versioned builder database migrations', () => {
     fresh.close();
 
     const reopened = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
-    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 14 });
+    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 15 });
     expect(reopened.prepare('SELECT COUNT(*) AS count FROM legacy_blocked_publish_evidence').get()).toEqual({ count: 2 });
     expect(reopened.prepare("SELECT terminal_error_json FROM jobs WHERE job_id='legacy-terminal'").get())
       .toEqual({ terminal_error_json: terminalSentinel });

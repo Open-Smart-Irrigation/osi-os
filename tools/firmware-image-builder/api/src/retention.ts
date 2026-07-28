@@ -1,4 +1,13 @@
-import { constants as fsConstants, lstatSync } from 'node:fs';
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  rmdirSync,
+  unlinkSync,
+} from 'node:fs';
 import { lstat, open, readdir, rmdir, unlink } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
@@ -57,6 +66,7 @@ interface Candidate {
   readonly cutoffDays: number;
   readonly stateEligible: boolean;
   readonly durable: boolean;
+  readonly replayIdentity?: Readonly<{ readonly dev: number; readonly ino: number }>;
 }
 
 interface OpenRoot {
@@ -77,7 +87,11 @@ const OPEN_OWNED_DIRECTORY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTOR
 const OPEN_ENTRY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK;
 
 function procPath(handle: FileHandle, name?: string): string {
-  return `/proc/self/fd/${handle.fd}${name === undefined ? '' : `/${name}`}`;
+  return procFdPath(handle.fd, name);
+}
+
+function procFdPath(fd: number, name?: string): string {
+  return `/proc/self/fd/${fd}${name === undefined ? '' : `/${name}`}`;
 }
 
 function identity(stats: { dev: number; ino: number; mode: number; isDirectory: () => boolean; isSymbolicLink: () => boolean }): EntryIdentity {
@@ -154,6 +168,34 @@ async function removeEntry(parent: FileHandle, name: string): Promise<void> {
     else await unlink(procPath(parent, name));
   } finally {
     await held.close();
+  }
+}
+
+function removeEntrySync(parentFd: number, name: string): void {
+  const path = procFdPath(parentFd, name);
+  if (lstatSync(path).isSymbolicLink()) {
+    unlinkSync(path);
+    return;
+  }
+  const heldFd = openSync(path, OPEN_ENTRY_FLAGS);
+  try {
+    const initial = identity(fstatSync(heldFd));
+    if (initial.isSymbolicLink) return;
+    if (initial.isDirectory) {
+      for (const child of readdirSync(procFdPath(heldFd), { withFileTypes: true })) {
+        removeEntrySync(heldFd, child.name);
+      }
+    }
+    const currentFd = openSync(path, OPEN_ENTRY_FLAGS);
+    try {
+      if (!sameIdentity(initial, identity(fstatSync(currentFd)))) throw new Error('retention target changed during prune');
+    } finally {
+      closeSync(currentFd);
+    }
+    if (initial.isDirectory) rmdirSync(path);
+    else unlinkSync(path);
+  } finally {
+    closeSync(heldFd);
   }
 }
 
@@ -350,20 +392,27 @@ async function quarantineCandidates(options: RetentionOptions, roots: Map<string
   }
 }
 
-function transaction(db: DatabaseSync, work: () => void): void {
+function transaction<T>(db: DatabaseSync, work: () => T): T {
   db.exec('BEGIN IMMEDIATE');
-  try { work(); db.exec('COMMIT'); }
+  try {
+    const result = work();
+    db.exec('COMMIT');
+    return result;
+  }
   catch (error) { try { db.exec('ROLLBACK'); } catch { /* preserve the original failure */ } throw error; }
 }
 
-function planIntent(options: RetentionOptionsWithRoots, candidate: Candidate, now: string, bytes: number): void {
+function planIntent(options: RetentionOptionsWithRoots, candidate: Candidate, now: string, bytes: number, target?: EntryIdentity): void {
   if (!options.db || !candidate.durable) return;
   const path = relativePath(candidate.auditBase, candidate.path);
   transaction(options.db, () => {
-    options.db!.prepare(`INSERT INTO retention_prune_intents (category, relative_path, status, planned_at, updated_at, bytes, error)
-      VALUES (?, ?, 'planned', ?, ?, ?, NULL)
+    options.db!.prepare(`INSERT INTO retention_prune_intents
+        (category, relative_path, status, planned_at, updated_at, bytes, error, target_dev, target_ino)
+      VALUES (?, ?, 'planned', ?, ?, ?, NULL, ?, ?)
       ON CONFLICT(category, relative_path) DO UPDATE SET status='planned', planned_at=excluded.planned_at,
-        updated_at=excluded.updated_at, bytes=excluded.bytes, error=NULL`).run(candidate.category, path, now, now, bytes);
+        updated_at=excluded.updated_at, bytes=excluded.bytes, error=NULL,
+        target_dev=excluded.target_dev, target_ino=excluded.target_ino`)
+      .run(candidate.category, path, now, now, bytes, target?.dev ?? null, target?.ino ?? null);
   });
 }
 
@@ -373,22 +422,89 @@ function cancelPlannedIntent(options: RetentionOptions, candidate: Candidate): v
     .run(candidate.category, relativePath(candidate.auditBase, candidate.path));
 }
 
-async function finalizeIntent(options: RetentionOptions, candidate: Candidate, record: RetentionPruneRecord, error?: string): Promise<void> {
+function finalizeIntentInTransaction(options: RetentionOptions, candidate: Candidate, record: RetentionPruneRecord, error?: string): boolean {
   let shouldRecord = true;
   if (options.db) {
-    transaction(options.db, () => {
-      if (candidate.durable) {
-        const changed = options.db!.prepare(`UPDATE retention_prune_intents SET status=?, updated_at=?, bytes=?, error=?
-          WHERE category=? AND relative_path=? AND status IN ('planned', 'failed')`).run(record.action, record.timestamp, record.bytes, error ?? null, record.category, record.relativePath);
-        shouldRecord = changed.changes === 1;
-      }
-      if (shouldRecord) options.db!.prepare('INSERT INTO retention_prunes (category, relative_path, action, bytes, at) VALUES (?, ?, ?, ?, ?)').run(record.category, record.relativePath, record.action, record.bytes, record.timestamp);
-    });
+    if (candidate.durable) {
+      const changed = options.db.prepare(`UPDATE retention_prune_intents SET status=?, updated_at=?, bytes=?, error=?
+        WHERE category=? AND relative_path=? AND status IN ('planned', 'failed')`).run(record.action, record.timestamp, record.bytes, error ?? null, record.category, record.relativePath);
+      shouldRecord = changed.changes === 1;
+    }
+    if (shouldRecord) options.db.prepare('INSERT INTO retention_prunes (category, relative_path, action, bytes, at) VALUES (?, ?, ?, ?, ?)').run(record.category, record.relativePath, record.action, record.bytes, record.timestamp);
   }
+  return shouldRecord;
+}
+
+async function finalizeIntent(options: RetentionOptions, candidate: Candidate, record: RetentionPruneRecord, error?: string): Promise<void> {
+  const shouldRecord = options.db
+    ? transaction(options.db, () => finalizeIntentInTransaction(options, candidate, record, error))
+    : finalizeIntentInTransaction(options, candidate, record, error);
   if (shouldRecord) await options.recordPrune?.(record);
 }
 
 type RetentionOptionsWithRoots = RetentionOptions & { readonly __retentionRoots: Map<string, OpenRoot> };
+
+function finalizeQuarantinePrune(
+  options: RetentionOptionsWithRoots,
+  candidate: Candidate,
+  now: string,
+  parent: FileHandle,
+  name: string,
+  held: FileHandle,
+  initial: EntryIdentity,
+  record: RetentionPruneRecord,
+): RetentionPruneRecord | undefined {
+  if (!options.db) throw new Error('quarantine retention requires database authority');
+  return transaction(options.db, () => {
+    const heldStats = fstatSync(held.fd);
+    const heldIdentity = identity(heldStats);
+    if (!sameIdentity(initial, heldIdentity)) throw new Error('retention target changed during prune');
+
+    const path = procPath(parent, name);
+    let currentFd: number | undefined;
+    try {
+      if (lstatSync(path).isSymbolicLink()) {
+        return finalizeIntentInTransaction(options, candidate, { ...record, action: 'skipped', bytes: 0 }) ? { ...record, action: 'skipped', bytes: 0 } : undefined;
+      }
+      currentFd = openSync(path, OPEN_ENTRY_FLAGS);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return finalizeIntentInTransaction(options, candidate, { ...record, bytes: 0 }) ? { ...record, bytes: 0 } : undefined;
+      }
+      throw error;
+    }
+    try {
+      if (!sameIdentity(initial, identity(fstatSync(currentFd)))) {
+        const skipped = { ...record, action: 'skipped' as const, bytes: 0 };
+        return finalizeIntentInTransaction(options, candidate, skipped) ? skipped : undefined;
+      }
+    } finally {
+      closeSync(currentFd);
+    }
+
+    if (!candidate.stateEligible && heldStats.mtimeMs >= threshold(now, candidate.cutoffDays)) {
+      cancelPlannedIntent(options, candidate);
+      return undefined;
+    }
+    if (!quarantineCandidate(options, candidate.base, candidate.auditBase, candidate.path, now)) {
+      cancelPlannedIntent(options, candidate);
+      return undefined;
+    }
+
+    if (initial.isDirectory) {
+      for (const child of readdirSync(procPath(held), { withFileTypes: true })) removeEntrySync(held.fd, child.name);
+    }
+    const finalFd = openSync(path, OPEN_ENTRY_FLAGS);
+    try {
+      if (!sameIdentity(initial, identity(fstatSync(finalFd)))) throw new Error('retention target changed during prune');
+    } finally {
+      closeSync(finalFd);
+    }
+    if (initial.isDirectory) rmdirSync(path);
+    else unlinkSync(path);
+    return finalizeIntentInTransaction(options, candidate, record) ? record : undefined;
+  });
+}
 
 async function pruneCandidate(options: RetentionOptionsWithRoots, candidate: Candidate, now: string): Promise<void> {
   if (!contained(candidate.base, candidate.path) || !contained(candidate.auditBase, candidate.path)) throw new Error('retention candidate escaped an authorized root');
@@ -412,23 +528,35 @@ async function pruneCandidate(options: RetentionOptionsWithRoots, candidate: Can
     const linkStats = await lstat(procPath(parent, name));
     if (linkStats.isSymbolicLink()) {
       if (candidate.category === 'row') throw new Error('retention row root is symbolic link');
-      planIntent(options, candidate, now, 0);
+      if (!candidate.replayIdentity) planIntent(options, candidate, now, 0);
       await finalizeIntent(options, candidate, { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), action: 'skipped', bytes: 0, timestamp: now });
       return;
     }
     held = await openEntry(parent, name);
     const initial = identity(await held.stat());
     if (initial.isSymbolicLink) return;
-    if (!candidate.stateEligible && linkStats.mtimeMs >= threshold(now, candidate.cutoffDays)) return;
-    const record: RetentionPruneRecord = { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), action: 'removed', bytes: initial.isDirectory ? 0 : linkStats.size, timestamp: now };
-    planIntent(options, candidate, now, record.bytes);
-    await options.beforeDelete?.({ category: candidate.category, path: candidate.path });
-    const currentHeldStats = await held.stat();
-    if (!candidate.stateEligible && currentHeldStats.mtimeMs >= threshold(now, candidate.cutoffDays)) {
-      cancelPlannedIntent(options, candidate);
+    if (candidate.replayIdentity
+      && (initial.dev !== candidate.replayIdentity.dev || initial.ino !== candidate.replayIdentity.ino)) {
+      await finalizeIntent(options, candidate, {
+        category: candidate.category,
+        relativePath: relativePath(candidate.auditBase, candidate.path),
+        action: 'skipped',
+        bytes: 0,
+        timestamp: now,
+      });
       return;
     }
-    if (candidate.category === 'quarantine' && !quarantineCandidate(options, candidate.base, candidate.auditBase, candidate.path, now)) {
+    if (!candidate.stateEligible && linkStats.mtimeMs >= threshold(now, candidate.cutoffDays)) return;
+    const record: RetentionPruneRecord = { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), action: 'removed', bytes: initial.isDirectory ? 0 : linkStats.size, timestamp: now };
+    if (!candidate.replayIdentity) planIntent(options, candidate, now, record.bytes, initial);
+    await options.beforeDelete?.({ category: candidate.category, path: candidate.path });
+    if (candidate.category === 'quarantine') {
+      const finalized = finalizeQuarantinePrune(options, candidate, now, parent, name, held, initial, record);
+      if (finalized) await options.recordPrune?.(finalized);
+      return;
+    }
+    const currentHeldStats = await held.stat();
+    if (!candidate.stateEligible && currentHeldStats.mtimeMs >= threshold(now, candidate.cutoffDays)) {
       cancelPlannedIntent(options, candidate);
       return;
     }
@@ -580,10 +708,10 @@ async function reconcileIntents(options: RetentionOptionsWithRoots, now: string,
   const eligibleWorktreeJobs = new Set(worktreeJobs.flatMap((row) => safeSegment(row.job_id) ? [row.job_id] : []));
   const protectedLogs = protectedLogPaths(options.db);
   const existing = new Set(candidates.map((candidate) => `${candidate.category}:${relativePath(candidate.auditBase, candidate.path)}`));
-  const intents = options.db.prepare(`SELECT category, relative_path FROM retention_prune_intents
+  const intents = options.db.prepare(`SELECT category, relative_path, target_dev, target_ino FROM retention_prune_intents
     WHERE (category='quarantine' AND status IN ('planned', 'failed'))
        OR (category<>'quarantine' AND status IN ('planned', 'removed', 'failed'))
-    ORDER BY intent_id`).all() as Array<{ category?: unknown; relative_path?: unknown }>;
+    ORDER BY intent_id`).all() as Array<{ category?: unknown; relative_path?: unknown; target_dev?: unknown; target_ino?: unknown }>;
   for (const intent of intents) {
     if (!RETENTION_CATEGORIES.includes(intent.category as RetentionCategory) || typeof intent.relative_path !== 'string') continue;
     const category = intent.category as RetentionCategory;
@@ -595,8 +723,11 @@ async function reconcileIntents(options: RetentionOptionsWithRoots, now: string,
         const expectedPath = join(root, parts[parts.length - 1]!);
         if (relativePath(auditBase, expectedPath) !== intent.relative_path) continue;
         const candidate = quarantineCandidate(options, root, auditBase, expectedPath, now);
-        if (candidate) {
-          const resumed = { ...candidate, stateEligible: true };
+        const targetDev = Number(intent.target_dev);
+        const targetIno = Number(intent.target_ino);
+        if (candidate && intent.target_dev !== null && intent.target_ino !== null
+          && Number.isSafeInteger(targetDev) && targetDev >= 0 && Number.isSafeInteger(targetIno) && targetIno >= 0) {
+          const resumed = { ...candidate, stateEligible: true, replayIdentity: { dev: targetDev, ino: targetIno } };
           const existingIndex = candidates.findIndex((value) => value.category === 'quarantine'
             && relativePath(value.auditBase, value.path) === intent.relative_path);
           if (existingIndex === -1) candidates.push(resumed);
