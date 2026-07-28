@@ -317,6 +317,11 @@ describe('read-only builder API routes', () => {
       'Bearer authorization-value',
       'session-cookie-value',
       'secret-value',
+      'api-key-value',
+      'x-api-key-value',
+      'ssh-key-value',
+      'identity-file-value',
+      'client-secret-value',
     ];
     const routeDependencies = dependencies();
     useEvidence(routeDependencies, {
@@ -330,6 +335,11 @@ describe('read-only builder API routes', () => {
           buildAccessToken: forbiddenValues[0],
           Db_PASSWORD: forbiddenValues[1],
           private_key: forbiddenValues[2],
+          apiKey: 'api-key-value',
+          'x-api-key': 'x-api-key-value',
+          sshKey: 'ssh-key-value',
+          identityFile: 'identity-file-value',
+          clientSecret: 'client-secret-value',
           sshAuthSock: '/run/secret-agent.sock',
           git_ssh_command: forbiddenValues[16],
           credentialPath: '/home/builder/.config/credentials.json',
@@ -368,6 +378,86 @@ describe('read-only builder API routes', () => {
             missing: null,
           },
         },
+      },
+    });
+  });
+
+  it('redacts structured credentials and generic absolute paths under neutral keys', async () => {
+    const structuredSecrets = [
+      'https://build-user:build-password@example.test/repository.git',
+      'Authorization: Bearer bearer-secret-value',
+      'authorization: Basic dXNlcjpwYXNz',
+      'token=token-secret-value',
+      'password: password-secret-value',
+      'apiKey=x-api-key-secret-value',
+      'x-api-key: header-key-secret-value',
+      'PuTTY-User-Key-File-2: ssh-rsa\nPrivate-Lines: 2\nprivate-material',
+      '-----BEGIN RSA PRIVATE KEY-----\nrsa-material\n-----END RSA PRIVATE KEY-----',
+      '-----BEGIN EC PRIVATE KEY-----\nec-material\n-----END EC PRIVATE KEY-----',
+      '-----BEGIN DSA PRIVATE KEY-----\ndsa-material\n-----END DSA PRIVATE KEY-----',
+      '---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----\nssh2-material\n---- END SSH2 ENCRYPTED PRIVATE KEY ----',
+    ];
+    const absolutePaths = [
+      '/opt/osi-builder/image.img',
+      'artifact was written to /usr/local/share/image.img',
+      'mounted at /mnt/build/image.img',
+      'copied to /media/usb/image.img',
+      'database is at /data/db/farming.db',
+      'custom root is /custom/root/image.img',
+    ];
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence(),
+      observations: {
+        neutralStructuredValues: structuredSecrets,
+        neutralAbsolutePaths: absolutePaths,
+        safeUrls: [
+          'https://example.test/opt/osi-builder/image.img',
+          'https://example.test/usr/local/share/image.img?path=/data/db',
+        ],
+        safeRelativePaths: ['logs/build/output.txt', './release/image.img', '../cache/image.img'],
+      },
+    }, 'publish', 'passed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      observations: {
+        neutralStructuredValues: Array(structuredSecrets.length).fill('[redacted]'),
+        neutralAbsolutePaths: Array(absolutePaths.length).fill('[redacted]'),
+        safeUrls: [
+          'https://example.test/opt/osi-builder/image.img',
+          'https://example.test/usr/local/share/image.img?path=/data/db',
+        ],
+        safeRelativePaths: ['logs/build/output.txt', './release/image.img', '../cache/image.img'],
+      },
+    });
+  });
+
+  it('preserves safe production multiline text while redacting other controls', async () => {
+    const multiline = {
+      stdout: 'make image\tstarted\r\nmake image\tfinished\r\n',
+      stderr: 'warning: optional package missing\r\n',
+      source: 'diff --git a/Makefile b/Makefile\r\n+\tmake all\n',
+      checksum: 'a'.repeat(64) + '  image.img\r\n',
+    };
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence(),
+      observations: {
+        multiline,
+        controls: ['nul\u0000control', 'vertical\u000btab', 'c1\u0085control', 'delete\u007fcontrol'],
+      },
+    }, 'publish', 'passed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      observations: {
+        multiline,
+        controls: Array(4).fill('[redacted]'),
       },
     });
   });

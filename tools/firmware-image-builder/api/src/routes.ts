@@ -50,14 +50,17 @@ const OPAQUE_CURSOR_PATTERN = /^[A-Za-z0-9_-]{1,512}$/u;
 const HASH40_PATTERN = /^[0-9a-f]{40}$/u;
 const HASH64_PATTERN = /^[0-9a-f]{64}$/u;
 const EVIDENCE_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}\.json$/u;
-const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
-const PRIVATE_KEY_PATTERN = /-----BEGIN [^-\r\n]*PRIVATE KEY-----/iu;
+const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
+const PRIVATE_KEY_PATTERN = /(?:-----BEGIN [^-\r\n]*PRIVATE KEY-----|----+\s*BEGIN [^\r\n]*PRIVATE KEY\s*----+|(?:^|\r?\n)\s*PuTTY-User-Key-File-\d+\s*:|(?:^|\r?\n)\s*(?:SSH|RSA|EC|DSA)\s+PRIVATE KEY\s*[:=-])/imu;
 const SENSITIVE_OBSERVATION_KEY_PARTS = Object.freeze([
   'token', 'password', 'passwd', 'secret', 'credential', 'privatekey', 'authorization', 'cookie',
-  'sshauthsock', 'gitsshcommand', 'sshpath',
+  'sshauthsock', 'gitsshcommand', 'sshpath', 'apikey', 'sshkey', 'identityfile', 'clientsecret',
 ]);
-const CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[\s;,?&])(?:[a-z0-9_.-]*(?:token|password|passwd|secret|credential|authorization|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key)[a-z0-9_.-]*)\s*=\s*[^\s;,?&]+/iu;
-const ABSOLUTE_SENSITIVE_PATH_PATTERN = /\/(?:home|tmp|run|etc|proc|sys|dev|root|var|srv)(?:\/|$)/iu;
+const CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[\s;,?&"'{}])(?:[a-z0-9_.-]*(?:token|password|passwd|secret|credential|authorization|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret)[a-z0-9_.-]*)\s*(?:=|:)\s*[^\s;,?&]+/iu;
+const AUTHORIZATION_HEADER_PATTERN = /\b(?:authorization)\s*[:=]\s*\S+|\b(?:bearer|basic)\s+\S+/iu;
+const URL_USERINFO_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^@\s]+@[^/\s]+(?:[/?#][^\s]*)?/iu;
+const URL_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^\s]*/giu;
+const ABSOLUTE_POSIX_PATH_PATTERN = /(?:^|[^a-z0-9._~\/-])\/(?!\/)[^\s/]+(?:\/[^\s/]+)*/iu;
 const JOB_STATE_SET = new Set<string>(JOB_STATES);
 const STAGE_SET = new Set<string>(PIPELINE_STAGE_NAMES);
 const ERROR_CODE_SET = new Set<string>(BUILDER_ERROR_CODES);
@@ -552,10 +555,16 @@ function isSensitiveObservationKey(key: string): boolean {
   return SENSITIVE_OBSERVATION_KEY_PARTS.some((part) => normalized.includes(part));
 }
 
+function hasAbsolutePosixPath(value: string): boolean {
+  return ABSOLUTE_POSIX_PATH_PATTERN.test(value.replace(URL_PATTERN, ''));
+}
+
 function redactObservationString(value: string): string {
   return CONTROL_PATTERN.test(value)
     || PRIVATE_KEY_PATTERN.test(value)
-    || ABSOLUTE_SENSITIVE_PATH_PATTERN.test(value)
+    || URL_USERINFO_PATTERN.test(value)
+    || AUTHORIZATION_HEADER_PATTERN.test(value)
+    || hasAbsolutePosixPath(value)
     || /file:\/\//iu.test(value)
     || /~\/\.ssh(?:\/|$)/iu.test(value)
     || CREDENTIAL_ASSIGNMENT_PATTERN.test(value)
