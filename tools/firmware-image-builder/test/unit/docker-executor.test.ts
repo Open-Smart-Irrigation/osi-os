@@ -450,6 +450,7 @@ describe('DockerExecutor', () => {
     let releaseAttach: (() => void) | undefined;
     const writes: RunnerWriteCommand[] = [];
     const onStdout = vi.fn();
+    const onStdoutBytes = vi.fn();
     const persistCancellationBlocker = vi.fn(async () => undefined);
     const commandExecutor: DockerCommandExecutor = {
       run: vi.fn(async (argv: readonly string[], runOptions: CommandRunOptions) => {
@@ -462,6 +463,7 @@ describe('DockerExecutor', () => {
           case 'start':
             attachStarted = true;
             startOptions = runOptions;
+            runOptions.onStdoutBytes?.(Buffer.from([0xff, 0x00]));
             await new Promise<void>((resolve) => { releaseAttach = resolve; });
             return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
           case 'stop':
@@ -478,6 +480,7 @@ describe('DockerExecutor', () => {
       }),
       monotonicNow: () => Date.now(),
       onStdout,
+      onStdoutBytes,
       persistCancellationBlocker,
       ownership: { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true, kind: 'committed', eventSeq: writes.length }; }) },
     })).run();
@@ -487,6 +490,9 @@ describe('DockerExecutor', () => {
     await vi.advanceTimersByTimeAsync(30_100);
     await Promise.resolve();
 
+    expect(onStdoutBytes).toHaveBeenCalledWith(Buffer.from([0xff, 0x00]));
+    expect(vi.mocked(commandExecutor.run).mock.calls.filter(([, runOptions]) => runOptions.onStdoutBytes !== undefined).map(([argv]) => argv[1])).toEqual(['start']);
+    onStdoutBytes.mockClear();
     expect(settled).toBe(false);
     expect(writes).toContainEqual(expect.objectContaining({
       kind: 'operation-complete',
@@ -496,7 +502,9 @@ describe('DockerExecutor', () => {
     expect(persistCancellationBlocker).toHaveBeenCalledOnce();
     expect(vi.mocked(commandExecutor.run).mock.calls.some(([argv]) => argv[1] === 'kill')).toBe(false);
     startOptions?.onStdout?.('late child output');
+    startOptions?.onStdoutBytes?.(Buffer.from([0xff]));
     expect(onStdout).not.toHaveBeenCalled();
+    expect(onStdoutBytes).not.toHaveBeenCalled();
     releaseAttach?.();
     await expect(run).rejects.toMatchObject({
       code: 'DOCKER_CONTAINER_ORPHANED',
@@ -1781,6 +1789,45 @@ describe('DockerExecutor', () => {
 
   it('rejects with a controlled command error when an output callback throws', async () => {
     await expect(createCommandExecutor().run([process.execPath, '-e', 'process.stdout.write("output"); setTimeout(() => {}, 1000)'], { env: { PATH: process.env.PATH ?? '', HOME: '/tmp' }, timeoutMs: 5_000, onStdout: () => { throw new Error('observer failed'); } })).rejects.toMatchObject({ name: 'CommandExecutionError', result: expect.objectContaining({ stdout: 'output' }) });
+  });
+
+  it('delivers exact stdout and stderr bytes before their decoded observers', async () => {
+    const order: string[] = [];
+    const stdoutBytes: Buffer[] = [];
+    const stderrBytes: Buffer[] = [];
+    const result = await createCommandExecutor().run([
+      process.execPath,
+      '-e',
+      'process.stdout.write(Buffer.from([0xff, 0x00, 0xfe])); process.stderr.write(Buffer.from([0x80, 0x01, 0xfd]));',
+    ], {
+      env: { PATH: process.env.PATH ?? '', HOME: '/tmp' },
+      onStdoutBytes: (chunk) => { order.push('stdout-bytes'); stdoutBytes.push(chunk); },
+      onStdout: () => { order.push('stdout-text'); },
+      onStderrBytes: (chunk) => { order.push('stderr-bytes'); stderrBytes.push(chunk); },
+      onStderr: () => { order.push('stderr-text'); },
+    });
+
+    expect(stdoutBytes).toEqual([Buffer.from([0xff, 0x00, 0xfe])]);
+    expect(stderrBytes).toEqual([Buffer.from([0x80, 0x01, 0xfd])]);
+    expect(result.stdout).toBe('\ufffd\u0000\ufffd');
+    expect(result.stderr).toBe('\ufffd\u0001\ufffd');
+    expect(order).toEqual(['stdout-bytes', 'stdout-text', 'stderr-bytes', 'stderr-text']);
+  });
+
+  it('kills the command and preserves the result when a byte observer fails', async () => {
+    await expect(createCommandExecutor().run([
+      process.execPath,
+      '-e',
+      'process.stdout.write(Buffer.from([0xff])); setTimeout(() => {}, 1000);',
+    ], {
+      env: { PATH: process.env.PATH ?? '', HOME: '/tmp' },
+      timeoutMs: 5_000,
+      onStdoutBytes: () => { throw new Error('byte observer failed'); },
+      onStdout: () => { throw new Error('text observer must not run'); },
+    })).rejects.toMatchObject({
+      name: 'CommandExecutionError',
+      result: expect.objectContaining({ stdout: '\ufffd' }),
+    });
   });
 });
 

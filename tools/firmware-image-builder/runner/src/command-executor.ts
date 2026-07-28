@@ -17,6 +17,8 @@ export interface CommandRunOptions {
   readonly timeoutMs?: number;
   readonly timeoutDisarmSignal?: AbortSignal;
   readonly maxCaptureBytes?: number;
+  readonly onStdoutBytes?: (chunk: Buffer) => void;
+  readonly onStderrBytes?: (chunk: Buffer) => void;
   readonly onStdout?: (chunk: string) => void;
   readonly onStderr?: (chunk: string) => void;
 }
@@ -98,14 +100,22 @@ export function createCommandExecutor(): CommandExecutor {
           observerKillTimer = setTimeout(() => { if (!settled) child.kill('SIGKILL'); }, 1_000);
         };
         child.stdout?.on('data', (chunk: Buffer | string) => {
-          const text = chunk.toString();
+          const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          if (!observerFailed) {
+            try { options.onStdoutBytes?.(bytes); } catch (error) { failObserver(error); }
+          }
+          const text = bytes.toString();
           appendBounded(stdout, text, maxCaptureBytes);
           if (!observerFailed) {
             try { options.onStdout?.(text); } catch (error) { failObserver(error); }
           }
         });
         child.stderr?.on('data', (chunk: Buffer | string) => {
-          const text = chunk.toString();
+          const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          if (!observerFailed) {
+            try { options.onStderrBytes?.(bytes); } catch (error) { failObserver(error); }
+          }
+          const text = bytes.toString();
           appendBounded(stderr, text, maxCaptureBytes);
           if (!observerFailed) {
             try { options.onStderr?.(text); } catch (error) { failObserver(error); }

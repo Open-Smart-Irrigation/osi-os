@@ -147,6 +147,8 @@ export interface DockerExecutorOptions {
   readonly classifyAcceptedResult?: (
     result: CommandResult,
   ) => 'expected-rootfs-already-present' | null;
+  readonly onStdoutBytes?: (chunk: Buffer) => void;
+  readonly onStderrBytes?: (chunk: Buffer) => void;
   readonly onStdout?: (chunk: string) => void;
   readonly onStderr?: (chunk: string) => void;
 }
@@ -235,13 +237,15 @@ function dockerEnv(): Readonly<Record<string, string>> {
   return { HOME: '/tmp/osi-image-builder-docker-home', PATH: IMAGE_PATH, LANG: 'C', LC_ALL: 'C' };
 }
 
-function runDocker(options: DockerExecutorOptions, args: readonly string[], callbacks: { readonly onStdout?: (chunk: string) => void; readonly onStderr?: (chunk: string) => void } = {}, commandOptions: Pick<CommandRunOptions, 'timeoutMs' | 'timeoutDisarmSignal'> & { readonly control?: boolean } = {}): Promise<CommandResult> {
+function runDocker(options: DockerExecutorOptions, args: readonly string[], callbacks: { readonly onStdoutBytes?: (chunk: Buffer) => void; readonly onStderrBytes?: (chunk: Buffer) => void; readonly onStdout?: (chunk: string) => void; readonly onStderr?: (chunk: string) => void } = {}, commandOptions: Pick<CommandRunOptions, 'timeoutMs' | 'timeoutDisarmSignal'> & { readonly control?: boolean } = {}): Promise<CommandResult> {
   const executor = options.commandExecutor ?? createCommandExecutor();
   return executor.run([options.dockerPath, ...args], {
     env: dockerEnv(),
     maxCaptureBytes: options.maxCaptureBytes,
     timeoutMs: commandOptions.timeoutMs ?? DOCKER_CONTROL_TIMEOUT_MS,
     timeoutDisarmSignal: commandOptions.timeoutDisarmSignal,
+    onStdoutBytes: callbacks.onStdoutBytes,
+    onStderrBytes: callbacks.onStderrBytes,
     onStdout: callbacks.onStdout,
     onStderr: callbacks.onStderr,
   }).catch((error) => {
@@ -973,6 +977,8 @@ export function createDockerExecutor(options: DockerExecutorOptions) {
           options,
           startArgv.slice(1),
           {
+            onStdoutBytes: (chunk) => { if (acceptAttachOutput) options.onStdoutBytes?.(chunk); },
+            onStderrBytes: (chunk) => { if (acceptAttachOutput) options.onStderrBytes?.(chunk); },
             onStdout: (chunk) => { if (acceptAttachOutput) options.onStdout?.(chunk); },
             onStderr: (chunk) => { if (acceptAttachOutput) options.onStderr?.(chunk); },
           },
