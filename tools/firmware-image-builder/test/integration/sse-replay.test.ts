@@ -1,5 +1,5 @@
 import { renameSync, writeFileSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -52,6 +52,29 @@ describe('SSE durable replay', () => {
       expect(events.filter((event) => event.event === 'log')).toHaveLength(cursor < first.seq ? 2 : cursor < second.seq ? 1 : 0);
       expect(events.map((event) => event.data.text).filter(Boolean).join('')).not.toContain('line 1\nline 2 tail tail');
     }
+  });
+
+  it('pages by durable event count and decoded bytes without changing canonical log bytes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-sse-pages-')); roots.push(root);
+    const db = openBuilderDatabase(join(root, 'jobs.sqlite')); dbs.push(db); seed(db);
+    const stream = new DurableLogStream({ db, root, jobId: 'job-sse', now: () => NOW });
+    stream.appendMetadataSync('stage', { stage: 'build' });
+    stream.appendSync('runner', Buffer.from('ab'));
+    stream.appendSync('runner', Buffer.from('cdef\n'));
+    stream.appendMetadataSync('terminal', { state: 'succeeded' });
+
+    const first = stream.replaySync(-1, { eventLimit: 2, maxDecodedBytes: 2 });
+    const second = stream.replaySync(first.at(-1)?.seq ?? -1, { eventLimit: 2, maxDecodedBytes: 2 });
+    const third = stream.replaySync(second.at(-1)?.seq ?? -1, { eventLimit: 2, maxDecodedBytes: 2 });
+    const replayed = [...first, ...second, ...third];
+
+    expect(first).toHaveLength(2);
+    expect(second).toHaveLength(2);
+    expect(third).toEqual([]);
+    expect(replayed.map(({ seq, event }) => [seq, event])).toEqual([[0, 'stage'], [1, 'log'], [2, 'log-truncated'], [3, 'terminal']]);
+    expect(Buffer.from(String(replayed[1]?.data.bytesBase64), 'base64')).toEqual(Buffer.from('ab'));
+    expect(replayed[2]?.data).toMatchObject({ offset: 2, length: 5, truncated: true, reason: 'REPLAY_BYTE_LIMIT' });
+    expect(await readFile(join(root, 'logs/runner.0'))).toEqual(Buffer.from('abcdef\n'));
   });
 
   it('does not expose stream-null log-gap or log-truncated as stage or terminal', async () => {
@@ -117,7 +140,8 @@ describe('SSE durable replay', () => {
     stream.appendSync('runner', Buffer.from('raced\n'));
     stream.appendMetadataSync('terminal', { jobId: 'job-sse', state: 'failed', at: NOW });
 
-    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal'], [2, 'log-gap']]);
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal']]);
+    expect(stream.replaySync(1).map(({ seq, event }) => [seq, event])).toEqual([[2, 'log-gap']]);
     expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal'], [2, 'log-gap']]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='job-sse' AND event_type='log-gap'").get()).toEqual({ count: 1 });
   });

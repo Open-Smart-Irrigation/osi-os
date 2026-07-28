@@ -1,9 +1,10 @@
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { fstatSync, fsyncSync as systemFsyncSync, readSync as systemReadSync, writeSync as systemWriteSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
-import { DurableLogStream, type LogStreamEvent } from '../../api/src/log-stream.js';
+import { DurableLogStream, type LogStreamEvent, type LogStreamIo } from '../../api/src/log-stream.js';
 
 const NOW = '2026-07-28T10:00:00.000Z';
 const roots: string[] = [];
@@ -16,13 +17,13 @@ function seedJob(db: ReturnType<typeof openBuilderDatabase>, jobId = 'job-log'):
     .run(jobId, `${jobId}-request`, 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), NOW, NOW, NOW, NOW);
 }
 
-async function fixture(): Promise<{ root: string; db: ReturnType<typeof openBuilderDatabase>; stream: DurableLogStream }> {
+async function fixture(options: { readonly io?: Partial<LogStreamIo> } = {}): Promise<{ root: string; db: ReturnType<typeof openBuilderDatabase>; stream: DurableLogStream }> {
   const root = await mkdtemp(join(tmpdir(), 'osi-log-stream-'));
   roots.push(root);
   const db = openBuilderDatabase(join(root, 'jobs.sqlite'));
   dbs.push(db);
   seedJob(db);
-  return { root, db, stream: new DurableLogStream({ db, root, jobId: 'job-log', now: () => NOW }) };
+  return { root, db, stream: new DurableLogStream({ db, root, jobId: 'job-log', now: () => NOW, ...options }) };
 }
 
 afterEach(async () => {
@@ -39,6 +40,70 @@ describe('DurableLogStream', () => {
     expect(await readFile(join(root, 'logs/runner.0'))).toEqual(bytes);
     expect(db.prepare('SELECT size_bytes FROM job_log_generations WHERE job_id=? AND stream=? AND generation=0').get('job-log', 'runner')).toEqual({ size_bytes: bytes.length });
     expect(db.prepare('SELECT stream, file_generation, byte_offset, byte_length, partial FROM job_events WHERE job_id=? AND seq=?').get('job-log', event.seq)).toEqual({ stream: 'runner', file_generation: 0, byte_offset: 0, byte_length: bytes.length, partial: 1 });
+  });
+
+  it('completes partial synchronous I/O and fails immediately on zero progress', async () => {
+    let reads = 0;
+    let writes = 0;
+    const partial = await fixture({
+      io: {
+        readSync: (fd, buffer, offset, length, position) => {
+          reads += 1;
+          return systemReadSync(fd, buffer, offset, Math.min(2, length), position);
+        },
+        writeSync: (fd, buffer, offset, length) => {
+          writes += 1;
+          return systemWriteSync(fd, buffer, offset, Math.min(2, length));
+        },
+      },
+    });
+    const bytes = Buffer.from('chunked\n');
+    partial.stream.appendSync('runner', bytes);
+    const replayed = partial.stream.replaySync(-1).find((event) => event.event === 'log');
+    expect(Buffer.from(String(replayed?.data.bytesBase64), 'base64')).toEqual(bytes);
+    expect(reads).toBeGreaterThan(1);
+    expect(writes).toBeGreaterThan(1);
+
+    const zeroWrite = await fixture({ io: { writeSync: () => 0 } });
+    expect(() => zeroWrite.stream.appendSync('runner', Buffer.from('blocked\n'))).toThrow(/zero progress/i);
+
+    const zeroRead = await fixture();
+    zeroRead.stream.appendSync('runner', Buffer.from('indexed\n'));
+    zeroRead.stream.close();
+    const zeroReadStream = new DurableLogStream({
+      db: zeroRead.db,
+      root: zeroRead.root,
+      jobId: 'job-log',
+      now: () => NOW,
+      io: { readSync: () => 0 },
+    });
+    expect(() => zeroReadStream.sealSync('runner')).toThrow(/zero progress/i);
+  });
+
+  it('fsyncs newly created directory entries before committing the first range', async () => {
+    const calls: string[] = [];
+    let eventsAtLogsFsync = -1;
+    let db: ReturnType<typeof openBuilderDatabase>;
+    const value = await fixture({
+      io: {
+        fsyncSync: (fd) => {
+          const kind = fstatSync(fd).isDirectory() ? 'directory' : 'file';
+          calls.push(kind);
+          if (calls.length === 3) {
+            eventsAtLogsFsync = Number((db.prepare('SELECT COUNT(*) AS count FROM job_events WHERE job_id=?').get('job-log') as { count: number }).count);
+          }
+          systemFsyncSync(fd);
+        },
+      },
+    });
+    db = value.db;
+
+    value.stream.appendSync('runner', Buffer.from('first\n'));
+    expect(calls).toEqual(['directory', 'file', 'directory']);
+    expect(eventsAtLogsFsync).toBe(0);
+
+    value.stream.appendSync('runner', Buffer.from('second\n'));
+    expect(calls).toEqual(['directory', 'file', 'directory', 'file']);
   });
 
   it('seals and rotates contiguous generations, then replays exact bytes after a cursor', async () => {
@@ -65,6 +130,23 @@ describe('DurableLogStream', () => {
     expect(stream.replaySync(-1).filter((event) => event.event === 'log-gap')).toHaveLength(1);
     expect(stream.replaySync(appended.seq).filter((event) => event.event === 'log-gap')).toHaveLength(1);
     expect(replay.find((event) => event.event === 'log-gap')?.seq).toBeGreaterThan(appended.seq);
+  });
+
+  it('rejects invalid replay cursors, limits, and persisted ranges before allocation', async () => {
+    const { stream, db } = await fixture();
+    const appended = stream.appendSync('runner', Buffer.from('bounded\n'));
+
+    expect(() => stream.replaySync(-2)).toThrow(/cursor/i);
+    expect(() => stream.replaySync(0.5)).toThrow(/cursor/i);
+    expect(() => stream.replaySync(-1, { eventLimit: 0 })).toThrow(/event limit/i);
+    expect(() => stream.replaySync(-1, { eventLimit: Number.MAX_SAFE_INTEGER })).toThrow(/event limit/i);
+    expect(() => stream.replaySync(-1, { maxDecodedBytes: 0 })).toThrow(/decoded byte limit/i);
+    expect(() => stream.replaySync(-1, { maxDecodedBytes: Number.MAX_SAFE_INTEGER })).toThrow(/decoded byte limit/i);
+
+    db.exec('DROP TRIGGER job_events_immutable_update_guard');
+    db.exec('PRAGMA ignore_check_constraints=ON');
+    db.prepare('UPDATE job_events SET byte_offset=1, byte_length=? WHERE job_id=? AND seq=?').run(Number.MAX_SAFE_INTEGER, 'job-log', appended.seq);
+    expect(() => stream.replaySync(-1)).toThrow(/persisted log range/i);
   });
 
   it('rejects symlinked or mismatched generation paths and never creates directories while replaying', async () => {
@@ -112,6 +194,21 @@ describe('DurableLogStream', () => {
     expect(sealed.length).toBe(Buffer.byteLength('orphan\n'));
     expect(stream.sealOrphanTailSync('docker', { unitInactive: true, leaseStale: true, noMatchingContainer: true })).toEqual(sealed);
     expect((db.prepare('SELECT sealed_at FROM job_log_generations WHERE job_id=? AND stream=? AND generation=0').get('job-log', 'docker') as { sealed_at: string | null }).sealed_at).not.toBeNull();
+  });
+
+  it('returns the same persisted seal result when there is no orphan tail', async () => {
+    const { stream, db } = await fixture();
+    stream.appendSync('runner', Buffer.from('complete\n'));
+    const proof = { unitInactive: true, leaseStale: true, noMatchingContainer: true };
+
+    const first = stream.sealOrphanTailSync('runner', proof);
+    const persisted = db.prepare('SELECT sealed_at, sha256 FROM job_log_generations WHERE job_id=? AND stream=? AND generation=0').get('job-log', 'runner');
+    const second = stream.sealOrphanTailSync('runner', proof);
+
+    expect(first).toEqual({ eventType: 'sealed', seq: -1, stream: 'runner', generation: 0, offset: Buffer.byteLength('complete\n'), length: 0 });
+    expect(second).toEqual(first);
+    expect(persisted).toEqual({ sealed_at: NOW, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id=? AND event_type='log_orphan_tail'").get('job-log')).toEqual({ count: 0 });
   });
 
   it('records one durable gap for a short orphan file and maps metadata events to public stage only', async () => {
