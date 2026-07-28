@@ -1,4 +1,4 @@
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, lstatSync } from 'node:fs';
 import { lstat, open, readdir, rmdir, unlink } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
@@ -39,6 +39,7 @@ export interface RetentionOptions {
   readonly freeBytes: number | (() => number | Promise<number>);
   readonly recordPrune?: (record: RetentionPruneRecord) => void | Promise<void>;
   readonly beforeDelete?: (candidate: { readonly category: RetentionCategory; readonly path: string }) => void | Promise<void>;
+  readonly beforeRowPurge?: (candidate: { readonly jobId: string; readonly path: string }) => void | Promise<void>;
 }
 
 export type RetentionStartupHook = StartupService;
@@ -68,7 +69,7 @@ interface EntryIdentity {
 
 const OPEN_DIRECTORY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW;
 const OPEN_OWNED_DIRECTORY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY;
-const OPEN_ENTRY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
+const OPEN_ENTRY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK;
 
 function procPath(handle: FileHandle, name?: string): string {
   return `/proc/self/fd/${handle.fd}${name === undefined ? '' : `/${name}`}`;
@@ -314,8 +315,10 @@ async function databaseCandidates(options: RetentionOptions, roots: Map<string, 
       }
     } finally { await evidenceRoot.close(); }
   }
-  const logRows = options.db.prepare(`SELECT job_id, stream, generation, path, started_at FROM job_log_generations
-    WHERE started_at < ? ORDER BY job_id, stream, generation`).all(new Date(threshold(now, RETENTION_DAYS.logs)).toISOString()) as Array<{ job_id?: unknown; stream?: unknown; generation?: unknown; path?: unknown }>;
+  const logRows = options.db.prepare(`SELECT generation.job_id AS job_id, generation.stream AS stream, generation.generation AS generation, generation.path AS path, generation.started_at AS started_at
+    FROM job_log_generations AS generation JOIN jobs AS job ON job.job_id = generation.job_id
+    WHERE job.state IN ('succeeded', 'failed', 'cancelled', 'interrupted') AND job.terminal_at IS NOT NULL
+      AND generation.started_at < ? ORDER BY generation.job_id, generation.stream, generation.generation`).all(new Date(threshold(now, RETENTION_DAYS.logs)).toISOString()) as Array<{ job_id?: unknown; stream?: unknown; generation?: unknown; path?: unknown }>;
   const protectedLogs = protectedLogPaths(options.db);
   for (const row of logRows) {
     if (!safeSegment(row.job_id) || (row.stream !== 'runner' && row.stream !== 'docker') || !Number.isSafeInteger(Number(row.generation)) || typeof row.path !== 'string' || !row.path.startsWith('logs/') || row.path.split('/').some((part) => !safeSegment(part))) continue;
@@ -441,6 +444,11 @@ async function candidateMtime(options: RetentionOptionsWithRoots, candidate: Can
   finally { await parent.close(); }
 }
 
+function assertJobRootAbsentSync(stateRoot: FileHandle, jobsRoot: FileHandle | undefined, jobId: string): void {
+  try { lstatSync(jobsRoot ? procPath(jobsRoot, jobId) : procPath(stateRoot, `jobs/${jobId}`)); throw new Error('terminal job root reappeared during row purge'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+}
+
 async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string): Promise<readonly QueueBlocker[]> {
   if (!options.db) return [];
   const blockers: QueueBlocker[] = [];
@@ -452,46 +460,61 @@ async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string
       AND artifact_staging_path IS NULL AND artifact_quarantine_path IS NULL AND artifact_quarantine_intent_path IS NULL
       AND publish_blocker_code IS NULL
       ORDER BY job_id`).all(new Date(threshold(now, RETENTION_DAYS.rows)).toISOString()) as Array<{ job_id?: unknown }>;
-  for (const row of rows) {
-    if (!safeSegment(row.job_id)) continue;
-    const jobId = row.job_id;
-    const record: RetentionPruneRecord = { category: 'row', relativePath: `jobs/${jobId}`, action: 'removed', bytes: 0, timestamp: now };
-    try {
-      if (!await pathAbsentThroughRoot(options, options.paths.stateRoot, join(options.paths.stateRoot, 'jobs', jobId))) throw new Error('terminal job root is still present');
-      const intent = options.db.prepare(`SELECT status FROM retention_prune_intents
-        WHERE category='row' AND relative_path=?`).get(record.relativePath) as { status?: unknown } | undefined;
-      if (intent?.status !== 'removed') throw new Error('terminal job row intent is not removed');
-    } catch (error) {
-      const details = { category: 'row', relativePath: record.relativePath, reason: error instanceof Error ? error.message : String(error) };
-      blockers.push({ code: 'RETENTION_ROW_PRUNE_FAILED', details });
-      continue;
+  const stateRoot = options.__retentionRoots.get(resolve(options.paths.stateRoot));
+  if (!stateRoot) throw new Error('retention state root is not held');
+  let jobsRoot: FileHandle | undefined;
+  try {
+    try { jobsRoot = await openRelativeDirectory(stateRoot.handle, ['jobs']); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    for (const row of rows) {
+      if (!safeSegment(row.job_id)) continue;
+      const jobId = row.job_id;
+      const jobPath = join(options.paths.stateRoot, 'jobs', jobId);
+      const record: RetentionPruneRecord = { category: 'row', relativePath: `jobs/${jobId}`, action: 'removed', bytes: 0, timestamp: now };
+      try {
+        if (!await pathAbsentThroughRoot(options, options.paths.stateRoot, jobPath)) throw new Error('terminal job root is still present');
+        const intent = options.db.prepare(`SELECT status FROM retention_prune_intents
+          WHERE category='row' AND relative_path=?`).get(record.relativePath) as { status?: unknown } | undefined;
+        if (intent?.status !== 'removed') throw new Error('terminal job row intent is not removed');
+        await options.beforeRowPurge?.({ jobId, path: jobPath });
+        if (!jobsRoot) {
+          try { jobsRoot = await openRelativeDirectory(stateRoot.handle, ['jobs']); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+        }
+      } catch (error) {
+        const details = { category: 'row', relativePath: record.relativePath, reason: error instanceof Error ? error.message : String(error) };
+        blockers.push({ code: 'RETENTION_ROW_PRUNE_FAILED', details });
+        continue;
+      }
+      options.db.exec('BEGIN IMMEDIATE');
+      try {
+        assertJobRootAbsentSync(stateRoot.handle, jobsRoot, jobId);
+        options.db.prepare('INSERT INTO retention_purge_authorizations (job_id, authorized_at) VALUES (?, ?)').run(jobId, now);
+        options.db.prepare('DELETE FROM queue_dispatch_claims WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM cleanup_stop_authorization_outcomes WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM cleanup_stop_authorization_heads WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM cleanup_stop_authorizations WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM cleanup_credential_reservations WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM cleanup_leases WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM legacy_blocked_publish_evidence WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM job_events WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM job_log_generations WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM job_stages WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM job_operations WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM queue_entries WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM retention_purge_authorizations WHERE job_id=?').run(jobId);
+        const deleted = options.db.prepare('DELETE FROM jobs WHERE job_id=? AND state IN (?, ?, ?, ?) AND terminal_at < ?').run(jobId, ...TERMINAL_STATES, new Date(threshold(now, RETENTION_DAYS.rows)).toISOString());
+        if (deleted.changes !== 1) throw new Error('terminal job row was not deleted');
+        assertJobRootAbsentSync(stateRoot.handle, jobsRoot, jobId);
+        options.db.exec('COMMIT');
+      } catch (error) {
+        try { options.db.exec('ROLLBACK'); } catch { /* preserve row prune failure */ }
+        const details = { category: 'row', relativePath: record.relativePath, reason: error instanceof Error ? error.message : String(error) };
+        blockers.push({ code: 'RETENTION_ROW_PRUNE_FAILED', details });
+        continue;
+      }
     }
-    options.db.exec('BEGIN IMMEDIATE');
-    try {
-      options.db.prepare('INSERT INTO retention_purge_authorizations (job_id, authorized_at) VALUES (?, ?)').run(jobId, now);
-      options.db.prepare('DELETE FROM queue_dispatch_claims WHERE job_id=?').run(jobId);
-      options.db.prepare('DELETE FROM cleanup_stop_authorization_outcomes WHERE job_id=?').run(jobId);
-      options.db.prepare('DELETE FROM cleanup_stop_authorization_heads WHERE job_id=?').run(jobId);
-      options.db.prepare('DELETE FROM cleanup_stop_authorizations WHERE job_id=?').run(jobId);
-      options.db.prepare('DELETE FROM cleanup_credential_reservations WHERE job_id=?').run(jobId);
-      options.db.prepare('DELETE FROM cleanup_leases WHERE job_id=?').run(jobId);
-      options.db.prepare('DELETE FROM legacy_blocked_publish_evidence WHERE job_id=?').run(jobId);
-      options.db.prepare('DELETE FROM job_events WHERE job_id=?').run(jobId);
-      options.db.prepare('DELETE FROM job_log_generations WHERE job_id=?').run(jobId);
-      options.db.prepare('DELETE FROM job_stages WHERE job_id=?').run(jobId);
-      options.db.prepare('DELETE FROM job_operations WHERE job_id=?').run(jobId);
-      options.db.prepare('DELETE FROM queue_entries WHERE job_id=?').run(jobId);
-      options.db.prepare('DELETE FROM retention_purge_authorizations WHERE job_id=?').run(jobId);
-      const deleted = options.db.prepare('DELETE FROM jobs WHERE job_id=? AND state IN (?, ?, ?, ?) AND terminal_at < ?').run(jobId, ...TERMINAL_STATES, new Date(threshold(now, RETENTION_DAYS.rows)).toISOString());
-      if (deleted.changes !== 1) throw new Error('terminal job row was not deleted');
-      options.db.exec('COMMIT');
-    } catch (error) {
-      try { options.db.exec('ROLLBACK'); } catch { /* preserve row prune failure */ }
-      const details = { category: 'row', relativePath: record.relativePath, reason: error instanceof Error ? error.message : String(error) };
-      blockers.push({ code: 'RETENTION_ROW_PRUNE_FAILED', details });
-      continue;
-    }
-  }
+  } finally { await jobsRoot?.close().catch(() => undefined); }
   return blockers;
 }
 
@@ -527,8 +550,10 @@ async function reconcileIntents(options: RetentionOptionsWithRoots, now: string,
       if (relativePath(options.paths.stateRoot, expectedPath) === intent.relative_path) path = expectedPath;
     } else if (category === 'evidence' && parts.length > 3 && parts[2] === 'evidence') {
       path = join(options.paths.stateRoot, ...parts);
-    } else if (category === 'log' && parts.length > 3 && parts[2] === 'logs' && !protectedLogs.has(`${jobId}:${parts.slice(2).join('/')}`) && options.db.prepare(`SELECT 1 FROM job_log_generations
-      WHERE job_id=? AND path=? AND started_at < ? LIMIT 1`).get(jobId, parts.slice(2).join('/'), new Date(threshold(now, RETENTION_DAYS.logs)).toISOString())) {
+    } else if (category === 'log' && parts.length > 3 && parts[2] === 'logs' && !protectedLogs.has(`${jobId}:${parts.slice(2).join('/')}`) && options.db.prepare(`SELECT 1 FROM job_log_generations AS generation
+      JOIN jobs AS job ON job.job_id = generation.job_id
+      WHERE generation.job_id=? AND generation.path=? AND generation.started_at < ?
+        AND job.state IN ('succeeded', 'failed', 'cancelled', 'interrupted') AND job.terminal_at IS NOT NULL LIMIT 1`).get(jobId, parts.slice(2).join('/'), new Date(threshold(now, RETENTION_DAYS.logs)).toISOString())) {
       path = join(options.paths.stateRoot, ...parts);
     }
     if (!path || !contained(options.paths.stateRoot, path)) continue;

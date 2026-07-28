@@ -206,6 +206,25 @@ describe('startup retention', () => {
     await expect(import('node:fs/promises').then(({ access }) => access(join(paths.stateRoot, 'jobs', 'replayable')))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('does not prune old unreferenced log generations for active jobs', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'building', 'dispatched', ?, ?, '{}', '{}')`)
+      .run('active-log', 'request-active-log', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD);
+    const generation = join(paths.stateRoot, 'jobs', 'active-log', 'logs', 'runner-0.log');
+    await mkdir(join(paths.stateRoot, 'jobs', 'active-log', 'logs'), { recursive: true });
+    await writeFile(generation, 'keep');
+    await utimes(generation, new Date(OLD), new Date(OLD));
+    db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, size_bytes) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('active-log', 'runner', 0, 'logs/runner-0.log', OLD, 4);
+
+    await createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })();
+
+    await expect(import('node:fs/promises').then(({ access }) => access(generation))).resolves.toBeUndefined();
+    expect(db.prepare('SELECT generation FROM job_log_generations WHERE job_id=?').all('active-log')).toEqual([{ generation: 0 }]);
+  });
+
   it('rejects a symlinked ancestor before retention can mutate', async () => {
     const paths = await retentionWorkspace();
     const alias = join(paths.stateRoot, '..', 'retention-alias');
@@ -390,5 +409,33 @@ describe('startup retention', () => {
     expect(db.prepare('SELECT job_id FROM jobs WHERE job_id=?').get('missing-root')).toBeUndefined();
     expect(db.prepare("SELECT status FROM retention_prune_intents WHERE category='row' AND relative_path='jobs/missing-root'").get()).toEqual({ status: 'removed' });
     expect(db.prepare("SELECT COUNT(*) AS count FROM retention_prunes WHERE category='row' AND relative_path='jobs/missing-root'").get()).toEqual({ count: 1 });
+  });
+
+  it('aborts row purge when the job root reappears before the transaction', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+      .run('race-root', 'request-race-root', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
+    await mkdir(join(paths.stateRoot, 'jobs'), { recursive: true });
+    db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run('race-root', 901, OLD);
+    db.prepare('INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, 0, \'terminal\', \'succeeded\', \'{}\', ?)').run('race-root', OLD);
+
+    const result = await createRetentionStartupHook({
+      paths,
+      db,
+      now: NOW,
+      freeBytes: 25 * 1024 ** 3,
+      beforeRowPurge: async ({ path }) => {
+        await mkdir(path, { recursive: true });
+        await writeFile(join(path, 'recreated.txt'), 'retain');
+      },
+    })();
+
+    expect(result).toMatchObject({ blockers: [{ code: 'RETENTION_ROW_PRUNE_FAILED' }] });
+    expect(db.prepare('SELECT job_id FROM jobs WHERE job_id=?').get('race-root')).toEqual({ job_id: 'race-root' });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM queue_entries WHERE job_id=?').get('race-root')).toEqual({ count: 1 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM job_events WHERE job_id=?').get('race-root')).toEqual({ count: 1 });
+    await expect(import('node:fs/promises').then(({ access }) => access(join(paths.stateRoot, 'jobs', 'race-root', 'recreated.txt')))).resolves.toBeUndefined();
   });
 });
