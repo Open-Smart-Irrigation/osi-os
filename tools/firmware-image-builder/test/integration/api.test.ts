@@ -256,6 +256,50 @@ describe('read-only builder API routes', () => {
     });
   });
 
+  it('sanitizes public evidence command argv while preserving production command metadata', async () => {
+    const command = (argv: readonly string[]) => ({
+      argv, startedAt: now, finishedAt: later, exitCode: 17, signal: 'SIGTERM', timedOut: true, outputLimit: true,
+    });
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence(),
+      commands: [
+        command(['/usr/bin/git', '-C', 'worktree/job-1', 'rev-parse', '--verify', sha, 'target=rpi-5', 'osi-image-builder-runner@job-1.service', 'https://example.test/repository.git', './release/image.img', '../cache/image.img', 'status\tok\r\n']),
+        command(['/usr/bin/docker', 'run', '--rm', '--name', 'builder-job-1', '--network=none', `sha256:${'b'.repeat(64)}`, 'targetId=rpi-5']),
+        command(['/usr/bin/node', '/home/builder/build.js', '/opt/osi-builder/tool', '/proc/self/status', '--output=/data/x', 'password=hunter2', 'https://build-user:build-password@example.test/repository.git', '-----BEGIN OPENSSH PRIVATE KEY-----\nprivate-material\n-----END OPENSSH PRIVATE KEY-----', 'safe\tline\r\n']),
+        command(['/opt/unknown/bin/tool', '--flag', 'target=rpi-5']),
+      ],
+    }, 'publish', 'passed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      commands: [
+        {
+          argv: ['/usr/bin/git', '-C', 'worktree/job-1', 'rev-parse', '--verify', sha, 'target=rpi-5', 'osi-image-builder-runner@job-1.service', 'https://example.test/repository.git', './release/image.img', '../cache/image.img', 'status\tok\r\n'],
+          startedAt: now, finishedAt: later, exitCode: 17, signal: 'SIGTERM', timedOut: true, outputLimit: true,
+        },
+        {
+          argv: ['/usr/bin/docker', 'run', '--rm', '--name', 'builder-job-1', '--network=none', `sha256:${'b'.repeat(64)}`, 'targetId=rpi-5'],
+          startedAt: now, finishedAt: later, exitCode: 17, signal: 'SIGTERM', timedOut: true, outputLimit: true,
+        },
+        {
+          argv: ['/usr/bin/node', '[redacted]', '[redacted]', '[redacted]', '[redacted]', '[redacted]', '[redacted]', '[redacted]', 'safe\tline\r\n'],
+          startedAt: now, finishedAt: later, exitCode: 17, signal: 'SIGTERM', timedOut: true, outputLimit: true,
+        },
+        {
+          argv: ['[redacted]', '--flag', 'target=rpi-5'],
+          startedAt: now, finishedAt: later, exitCode: 17, signal: 'SIGTERM', timedOut: true, outputLimit: true,
+        },
+      ],
+    });
+    const encoded = JSON.stringify(response.body);
+    for (const forbidden of ['/home/builder/build.js', '/opt/osi-builder/tool', '/proc/self/status', '/data/x', 'hunter2', 'build-user:build-password', 'private-material']) {
+      expect(encoded).not.toContain(forbidden);
+    }
+  });
+
   it.each([
     ['target ID mismatch', { targetId: 'rpi-2' }],
     ['root ID mismatch', { rootId: 'archive' }],

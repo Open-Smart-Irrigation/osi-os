@@ -26,7 +26,7 @@ import {
   sourceMetadataSubject,
   stableRelativePath,
 } from './validation.js';
-import { decodeStoredStageEvidence } from '../../runner/src/evidence.js';
+import { decodeStoredStageEvidence, type EvidenceCommand } from '../../runner/src/evidence.js';
 import { validateRemoteBranchName } from './git/source-resolver.js';
 import {
   HttpTransportError,
@@ -61,6 +61,14 @@ const AUTHORIZATION_HEADER_PATTERN = /\b(?:authorization)\s*[:=]\s*\S+|\b(?:bear
 const URL_USERINFO_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^@\s]+@[^/\s]+(?:[/?#][^\s]*)?/iu;
 const URL_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^\s]*/giu;
 const ABSOLUTE_POSIX_PATH_PATTERN = /(?:^|[^a-z0-9._~\/-])\/(?!\/)[^\s/]+(?:\/[^\s/]+)*/iu;
+const PUBLIC_EVIDENCE_EXECUTABLES = new Set([
+  '/usr/bin/git', '/usr/bin/docker', '/usr/bin/node', '/usr/bin/npm', '/usr/bin/sqlite3', '/usr/bin/systemctl',
+  '/usr/bin/make', '/usr/bin/gcc', '/usr/bin/llvm-config', '/usr/bin/rustc', '/bin/sh',
+]);
+const COMMAND_ABSOLUTE_PATH_PATTERN = /(?:^|[^a-z0-9._~\/-])\/(?!\/)(?:[^\s/]+(?:\/[^\s/]*)*)/iu;
+const COMMAND_HOME_PATH_PATTERN = /(?:^|[^a-z0-9._-])(?:~(?:[a-z0-9._-]+)?|\$\{?home\}?)(?:\/|$)/iu;
+const COMMAND_CREDENTIAL_URL_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^/\s@]+@/iu;
+const COMMAND_CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[\s;,?&"'{}])(?:--?)?[a-z0-9_.-]*(?:token|password|passwd|secret|credential|authorization|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret)[a-z0-9_.-]*\s*(?:=|:)\s*[^\s;,?&]+/iu;
 const JOB_STATE_SET = new Set<string>(JOB_STATES);
 const STAGE_SET = new Set<string>(PIPELINE_STAGE_NAMES);
 const ERROR_CODE_SET = new Set<string>(BUILDER_ERROR_CODES);
@@ -608,6 +616,28 @@ function publicObservations(value: unknown): unknown {
   return projectPublicObservation(value, 'public observations', 0, { nodes: 0, edges: 0 });
 }
 
+function redactCommandArgument(value: string): string {
+  return CONTROL_PATTERN.test(value)
+    || PRIVATE_KEY_PATTERN.test(value)
+    || AUTHORIZATION_HEADER_PATTERN.test(value)
+    || COMMAND_CREDENTIAL_URL_PATTERN.test(value)
+    || COMMAND_CREDENTIAL_ASSIGNMENT_PATTERN.test(value)
+    || /file:\/\//iu.test(value)
+    || COMMAND_HOME_PATH_PATTERN.test(value)
+    || COMMAND_ABSOLUTE_PATH_PATTERN.test(value)
+    ? '[redacted]'
+    : value;
+}
+
+function publicEvidenceCommands(commands: readonly EvidenceCommand[]): readonly EvidenceCommand[] {
+  return commands.map((command) => ({
+    ...command,
+    argv: command.argv.map((argument, index) => index === 0
+      ? PUBLIC_EVIDENCE_EXECUTABLES.has(argument) ? argument : '[redacted]'
+      : redactCommandArgument(argument)),
+  }));
+}
+
 function publicEvidence(value: unknown, job: JobRecord, expectedJobId: string, expectedStage: PipelineStageName, dependencies: ApiRouteDependencies): JsonRecord {
   const evidence = decodeStoredStageEvidence(value);
   if (evidence.jobId !== expectedJobId || evidence.stage !== expectedStage) {
@@ -632,7 +662,7 @@ function publicEvidence(value: unknown, job: JobRecord, expectedJobId: string, e
     finishedAt: evidence.finishedAt,
     outcome: evidence.outcome,
     operationId: evidence.operationId,
-    commands: evidence.commands,
+    commands: publicEvidenceCommands(evidence.commands),
     inputs: publicEvidenceInputs(evidence.inputs, job, dependencies),
     observations: publicObservations(evidence.observations),
     error,
