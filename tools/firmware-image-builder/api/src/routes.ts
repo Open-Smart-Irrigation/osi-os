@@ -27,6 +27,7 @@ import {
   stableRelativePath,
 } from './validation.js';
 import { decodeStoredStageEvidence } from '../../runner/src/evidence.js';
+import { validateRemoteBranchName } from './git/source-resolver.js';
 import {
   HttpTransportError,
   type ApiRouteContext,
@@ -41,7 +42,6 @@ const MAX_EVENT_LIMIT = 1_000;
 const MAX_BRANCHES = 1_000;
 const MAX_CURSOR_BYTES = 512;
 const MAX_JOB_ID_BYTES = 128;
-const MAX_BRANCH_BYTES = 512;
 const MAX_CONFIG_ITEMS = 256;
 const JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
@@ -217,12 +217,11 @@ function parseAfter(value: string | null): number {
 }
 
 function branchName(value: unknown, field: string): string {
-  const result = text(value, field, MAX_BRANCH_BYTES);
-  if (result.startsWith('/') || result.endsWith('/') || result.includes('\\')
-    || result.split('/').some((part) => part.length === 0 || part === '.' || part === '..')) {
+  try {
+    return validateRemoteBranchName(value);
+  } catch {
     throw new Error(`${field} is not a canonical branch name`);
   }
-  return result;
 }
 
 function nullableQueuePosition(value: unknown): number | null {
@@ -519,18 +518,27 @@ function eventPageDto(page: EventPage, jobId: string, after: number): JsonRecord
   return { events, next: page.nextAfterSeq ?? events.at(-1)?.seq ?? after };
 }
 
-function publicEvidenceInputs(value: unknown): JsonRecord {
+function publicEvidenceInputs(value: unknown, job: JobRecord, dependencies: ApiRouteDependencies): JsonRecord {
   const input = record(value, 'evidence inputs');
   const keys = Object.keys(input);
   if (keys.length !== PUBLIC_EVIDENCE_INPUT_KEYS.size || keys.some((key) => !PUBLIC_EVIDENCE_INPUT_KEYS.has(key))) {
     throw new Error('evidence inputs have an invalid public shape');
   }
   const targetId = identifier(input.targetId, 'evidence target ID');
-  if (!(TARGET_IDS as readonly string[]).includes(targetId)) throw new Error('evidence target ID is invalid');
+  if (!dependencies.targets.some((target) => target.id === targetId)) throw new Error('evidence target ID is not configured');
   const rootId = identifier(input.rootId, 'evidence root ID');
-  const branch = branchName(input.branch, 'evidence branch');
+  if (!dependencies.config.approvedOutputRoots.some((root) => root.id === rootId)) throw new Error('evidence root ID is not configured');
+  let branch: string;
+  try {
+    branch = validateRemoteBranchName(input.branch);
+  } catch {
+    throw new Error('evidence branch is not a canonical branch name');
+  }
   if (typeof input.pinnedSha !== 'string' || !HASH40_PATTERN.test(input.pinnedSha)) {
     throw new Error('evidence pinned SHA is invalid');
+  }
+  if (targetId !== job.targetId || rootId !== job.rootId || branch !== job.branch || input.pinnedSha !== job.pinnedSha) {
+    throw new Error('evidence inputs do not match the owning job');
   }
   return { targetId, rootId, branch, pinnedSha: input.pinnedSha };
 }
@@ -591,7 +599,7 @@ function publicObservations(value: unknown): unknown {
   return projectPublicObservation(value, 'public observations', 0, { nodes: 0, edges: 0 });
 }
 
-function publicEvidence(value: unknown, expectedJobId: string, expectedStage: PipelineStageName): JsonRecord {
+function publicEvidence(value: unknown, job: JobRecord, expectedJobId: string, expectedStage: PipelineStageName, dependencies: ApiRouteDependencies): JsonRecord {
   const evidence = decodeStoredStageEvidence(value);
   if (evidence.jobId !== expectedJobId || evidence.stage !== expectedStage) {
     throw new Error('evidence response identity is invalid');
@@ -616,7 +624,7 @@ function publicEvidence(value: unknown, expectedJobId: string, expectedStage: Pi
     outcome: evidence.outcome,
     operationId: evidence.operationId,
     commands: evidence.commands,
-    inputs: publicEvidenceInputs(evidence.inputs),
+    inputs: publicEvidenceInputs(evidence.inputs, job, dependencies),
     observations: publicObservations(evidence.observations),
     error,
   };
@@ -665,7 +673,7 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
       const indexedStage = dependencies.store.getStage(jobRecord.jobId, stage);
       if (indexedStage === null || indexedStage.evidenceSha256 === null) notFound();
       stageDto(indexedStage, jobId, stage);
-      return jsonResponse(200, publicEvidence(await dependencies.readEvidence(jobRecord, stage), jobId, stage));
+      return jsonResponse(200, publicEvidence(await dependencies.readEvidence(jobRecord, stage), jobRecord, jobId, stage, dependencies));
     }
     const eventsMatch = context.path.match(/^\/api\/jobs\/([^/]+)\/events$/u);
     if (eventsMatch) {

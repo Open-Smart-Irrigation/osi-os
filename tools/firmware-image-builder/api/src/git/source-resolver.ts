@@ -234,6 +234,10 @@ function validateBranch(branch: unknown): string {
   return branch;
 }
 
+export function validateRemoteBranchName(branch: unknown): string {
+  return validateBranch(branch);
+}
+
 function validateSha(sha: unknown): string {
   if (typeof sha !== 'string' || !SHA_PATTERN.test(sha)) throw new SourceResolverError('INVALID_SHA');
   return sha;

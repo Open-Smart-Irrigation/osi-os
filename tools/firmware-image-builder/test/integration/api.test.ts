@@ -245,6 +245,54 @@ describe('read-only builder API routes', () => {
     });
   });
 
+  it('accepts public evidence inputs bound to the configured production job identity', async () => {
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, stageEvidence(), 'publish', 'passed');
+    const started = await start(routeDependencies); server = started.server;
+
+    expect(await get(started.port, '/api/jobs/job-1/evidence/publish')).toMatchObject({
+      status: 200,
+      body: { inputs: { targetId: 'rpi-5', rootId: 'release', branch: 'main', pinnedSha: sha } },
+    });
+  });
+
+  it.each([
+    ['target ID mismatch', { targetId: 'rpi-2' }],
+    ['root ID mismatch', { rootId: 'archive' }],
+    ['branch mismatch', { branch: 'feature/a' }],
+    ['pinned SHA mismatch', { pinnedSha: 'b'.repeat(40) }],
+  ])('rejects public evidence input %s against the owning job', async (_label, override) => {
+    const routeDependencies = dependencies();
+    Object.assign(routeDependencies as object, { targets: [...routeDependencies.targets, {
+      id: 'rpi-2', label: 'Raspberry Pi 2', environment: 'bcm2709', openwrtTarget: 'bcm27xx/bcm2709', profile: 'DEVICE_rpi-2', rootfs: 'ext4', artifactGlob: '*.img',
+      rootfsPartSize: 14336, minimumArtifactBytes: 67108864, configSymbols: [{ name: 'CONFIG_TARGET_PROFILE', type: 'string', value: 'DEVICE_rpi-2' }], operations: ['activate-target'],
+    }] });
+    Object.assign(routeDependencies.config as object, { approvedOutputRoots: [
+      ...routeDependencies.config.approvedOutputRoots,
+      { id: 'archive', label: 'Archive images', path: '/srv/archive', quarantinePath: '/srv/archive/.quarantine' },
+    ] });
+    useEvidence(routeDependencies, { ...stageEvidence(), inputs: { ...stageEvidence().inputs, ...override } }, 'publish', 'passed');
+    const started = await start(routeDependencies); server = started.server;
+
+    expect((await get(started.port, '/api/jobs/job-1/evidence/publish')).status).toBe(500);
+  });
+
+  it.each([
+    ['HEAD', 'release'],
+    ['@', 'release'],
+    ['feature branch', 'release'],
+    ['.hidden', 'release'],
+    ['feature/.hidden', 'release'],
+    ['main', 'RELEASE'],
+    ['main', '../release'],
+  ])('rejects malformed public evidence branch or root %s/%s', async (branch, rootId) => {
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, { ...stageEvidence(), inputs: { ...stageEvidence().inputs, branch, rootId } }, 'publish', 'passed');
+    const started = await start(routeDependencies); server = started.server;
+
+    expect((await get(started.port, '/api/jobs/job-1/evidence/publish')).status).toBe(500);
+  });
+
   it('recursively redacts sensitive public observations without hiding benign evidence', async () => {
     const forbiddenValues = [
       'token-value-123',

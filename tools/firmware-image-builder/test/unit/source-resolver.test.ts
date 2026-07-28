@@ -15,6 +15,7 @@ import {
 import {
   SourceResolver,
   SourceResolverError,
+  validateRemoteBranchName,
   validateOfflineFeedPreparation,
   validateRecursiveSourcePreparation,
   type GitExecutor,
@@ -781,6 +782,17 @@ describe('API-owned source resolver', () => {
       await expect(resolver(fake).resolveAtAcceptance(branch, SHA_A)).rejects.toMatchObject({ code: 'INVALID_BRANCH' });
     }
     expect(fake.calls).toHaveLength(0);
+  });
+
+  it.each([
+    'HEAD', '@', 'feature branch', '.hidden', 'feature/.hidden', 'a..b', 'a.lock',
+    'a~b', 'a^b', 'a:b', 'a?b', 'a*b', 'a\\b', 'a@b', 'a@{b', 'a//b', 'a/',
+  ])('rejects unsafe public remote branch name %s with the source resolver rules', (branch) => {
+    expect(() => validateRemoteBranchName(branch)).toThrowError(SourceResolverError);
+  });
+
+  it.each(['main', 'feature/a', 'release-2026.07'])('accepts canonical public remote branch name %s', (branch) => {
+    expect(validateRemoteBranchName(branch)).toBe(branch);
   });
 
   it.each(['', '.hidden', 'a//b', 'a/./b', 'a/../b', '../main', 'main/', 'main;touch', '-option', `a${'x'.repeat(300)}`])('rejects unsafe branch %s before Git resolution', async (branch) => {
