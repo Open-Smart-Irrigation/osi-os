@@ -1,4 +1,6 @@
-import { lstat, readdir, rm } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { lstat, open, readdir, rmdir, unlink } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 
@@ -36,6 +38,7 @@ export interface RetentionOptions {
   readonly clock?: Readonly<{ readonly now: () => string }>;
   readonly freeBytes: number | (() => number | Promise<number>);
   readonly recordPrune?: (record: RetentionPruneRecord) => void | Promise<void>;
+  readonly beforeDelete?: (candidate: { readonly category: RetentionCategory; readonly path: string }) => void | Promise<void>;
 }
 
 export type RetentionStartupHook = StartupService;
@@ -47,6 +50,118 @@ interface Candidate {
   readonly category: RetentionCategory;
   readonly cutoffDays: number;
   readonly stateEligible: boolean;
+}
+
+interface OpenRoot {
+  readonly path: string;
+  readonly handle: FileHandle;
+}
+
+interface EntryIdentity {
+  readonly dev: number;
+  readonly ino: number;
+  readonly mode: number;
+  readonly isDirectory: boolean;
+  readonly isSymbolicLink: boolean;
+}
+
+const OPEN_DIRECTORY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW;
+const OPEN_ENTRY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
+
+function procPath(handle: FileHandle, name?: string): string {
+  return `/proc/self/fd/${handle.fd}${name === undefined ? '' : `/${name}`}`;
+}
+
+function identity(stats: { dev: number; ino: number; mode: number; isDirectory: () => boolean; isSymbolicLink: () => boolean }): EntryIdentity {
+  return { dev: stats.dev, ino: stats.ino, mode: stats.mode, isDirectory: stats.isDirectory(), isSymbolicLink: stats.isSymbolicLink() };
+}
+
+function sameIdentity(left: EntryIdentity, right: EntryIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.mode === right.mode
+    && left.isDirectory === right.isDirectory && left.isSymbolicLink === right.isSymbolicLink;
+}
+
+async function openAbsoluteDirectory(path: string): Promise<FileHandle> {
+  const segments = resolve(path).split('/').filter(Boolean);
+  let current = await open('/', OPEN_DIRECTORY_FLAGS);
+  try {
+    for (const segment of segments) {
+      const next = await open(procPath(current, segment), OPEN_DIRECTORY_FLAGS);
+      await current.close();
+      current = next;
+    }
+    return current;
+  } catch (error) {
+    await current.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function openRelativeDirectory(root: FileHandle, segments: readonly string[]): Promise<FileHandle> {
+  let current = root;
+  const owned: FileHandle[] = [];
+  try {
+    for (const segment of segments) {
+      const next = await open(procPath(current, segment), OPEN_DIRECTORY_FLAGS);
+      if (current !== root) owned.push(current);
+      current = next;
+    }
+    for (const handle of owned) await handle.close();
+    return current;
+  } catch (error) {
+    for (const handle of owned) await handle.close().catch(() => undefined);
+    if (current !== root) await current.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function directoryChildren(parent: FileHandle, path: string): Promise<readonly string[]> {
+  return (await readdir(procPath(parent), { withFileTypes: true })).map((entry) => join(path, entry.name));
+}
+
+async function openEntry(parent: FileHandle, name: string): Promise<FileHandle> {
+  return open(procPath(parent, name), OPEN_ENTRY_FLAGS);
+}
+
+async function removeEntry(parent: FileHandle, name: string): Promise<void> {
+  if ((await lstat(procPath(parent, name))).isSymbolicLink()) return;
+  const held = await openEntry(parent, name);
+  try {
+    const initial = identity(await held.stat());
+    if (initial.isSymbolicLink) return;
+    if (initial.isDirectory) {
+      for (const child of await readdir(procPath(held), { withFileTypes: true })) await removeEntry(held, child.name);
+    }
+    const current = await openEntry(parent, name);
+    try {
+      if (!sameIdentity(initial, identity(await current.stat()))) throw new Error('retention target changed during prune');
+    } finally {
+      await current.close();
+    }
+    if (initial.isDirectory) await rmdir(procPath(parent, name));
+    else await unlink(procPath(parent, name));
+  } finally {
+    await held.close();
+  }
+}
+
+async function openConfiguredRoots(paths: RetentionPaths): Promise<Map<string, OpenRoot>> {
+  const roots = new Map<string, OpenRoot>();
+  const all = [paths.stateRoot, ...paths.builderOwnedRoots, ...paths.approvedQuarantineRoots, ...paths.approvedReleaseRoots, ...(paths.worktreeRoot === undefined ? [] : [paths.worktreeRoot])];
+  try {
+    for (const path of all) {
+      const normalized = resolve(path);
+      if (!roots.has(normalized)) roots.set(normalized, { path: normalized, handle: await openAbsoluteDirectory(normalized) });
+    }
+    return roots;
+  } catch (error) {
+    await closeConfiguredRoots(roots);
+    throw error;
+  }
+}
+
+async function closeConfiguredRoots(roots: Map<string, OpenRoot>): Promise<void> {
+  for (const root of roots.values()) await root.handle.close().catch(() => undefined);
 }
 
 function contained(base: string, child: string): boolean {
@@ -75,15 +190,6 @@ function threshold(now: string, days: number): number {
   return value;
 }
 
-async function directoryChildren(path: string): Promise<readonly string[]> {
-  try {
-    return (await readdir(path, { withFileTypes: true })).map((entry) => join(path, entry.name));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw error;
-  }
-}
-
 function protectedLogPaths(db: DatabaseSync | undefined): ReadonlySet<string> {
   if (!db) return new Set();
   const rows = db.prepare(`SELECT DISTINCT generation.job_id AS job_id, generation.path AS path
@@ -102,11 +208,6 @@ function validateRootShape(path: string): boolean {
 async function validateConfiguredRoots(paths: RetentionPaths): Promise<QueueBlocker | null> {
   const all = [paths.stateRoot, ...paths.builderOwnedRoots, ...paths.approvedQuarantineRoots, ...paths.approvedReleaseRoots, ...(paths.worktreeRoot === undefined ? [] : [paths.worktreeRoot])];
   if (all.some((path) => !validateRootShape(path))) return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'non-canonical-root' } };
-  for (const path of all) {
-    let stats;
-    try { stats = await lstat(path); } catch { return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'root-unavailable' } }; }
-    if (stats.isSymbolicLink() || !stats.isDirectory()) return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'root-not-directory' } };
-  }
   if (paths.builderOwnedRoots.some((root) => !contained(paths.stateRoot, root))) return { code: 'RETENTION_ROOT_INVALID', details: { reason: 'builder-root-outside-state' } };
   for (let left = 0; left < paths.builderOwnedRoots.length; left += 1) {
     for (let right = left + 1; right < paths.builderOwnedRoots.length; right += 1) {
@@ -137,6 +238,7 @@ async function validateConfiguredRoots(paths: RetentionPaths): Promise<QueueBloc
 }
 
 async function addChildren(
+  roots: Map<string, OpenRoot>,
   result: Candidate[],
   paths: RetentionPaths,
   base: string,
@@ -146,7 +248,9 @@ async function addChildren(
   protectedLogs: ReadonlySet<string>,
 ): Promise<void> {
   if (!contained(paths.stateRoot, base) && !paths.approvedQuarantineRoots.some((root) => contained(root, base))) throw new Error('retention scan root is unauthorized');
-  for (const path of await directoryChildren(base)) {
+  const root = roots.get(resolve(base));
+  if (!root) throw new Error('retention scan root is not held');
+  for (const path of await directoryChildren(root.handle, base)) {
     if (category === 'log' && protectedLogs.has(relativePath(base, path))) continue;
     result.push({ base, auditBase, path, category, cutoffDays: days, stateEligible: false });
   }
@@ -167,7 +271,7 @@ async function terminalWorktreeCandidates(options: RetentionOptions, now: string
   }
 }
 
-async function databaseCandidates(options: RetentionOptions, now: string, result: Candidate[]): Promise<void> {
+async function databaseCandidates(options: RetentionOptions, roots: Map<string, OpenRoot>, now: string, result: Candidate[]): Promise<void> {
   if (!options.db) return;
   await terminalWorktreeCandidates(options, now, result);
   const expiredRows = options.db.prepare(`SELECT job_id FROM jobs
@@ -180,9 +284,16 @@ async function databaseCandidates(options: RetentionOptions, now: string, result
   for (const row of expiredRows) {
     if (!safeSegment(row.job_id)) continue;
     const jobRoot = join(options.paths.stateRoot, 'jobs', row.job_id);
-    for (const path of await directoryChildren(join(jobRoot, 'evidence'))) {
-      result.push({ base: options.paths.stateRoot, auditBase: options.paths.stateRoot, path, category: 'evidence', cutoffDays: 0, stateEligible: true });
-    }
+    const stateRoot = roots.get(resolve(options.paths.stateRoot));
+    if (!stateRoot) throw new Error('retention state root is not held');
+    let evidenceRoot: FileHandle;
+    try { evidenceRoot = await openRelativeDirectory(stateRoot.handle, ['jobs', row.job_id, 'evidence']); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
+    try {
+      for (const path of await directoryChildren(evidenceRoot, join(jobRoot, 'evidence'))) {
+        result.push({ base: options.paths.stateRoot, auditBase: options.paths.stateRoot, path, category: 'evidence', cutoffDays: 0, stateEligible: true });
+      }
+    } finally { await evidenceRoot.close(); }
   }
   const logRows = options.db.prepare(`SELECT job_id, stream, generation, path, started_at FROM job_log_generations
     WHERE started_at < ? ORDER BY job_id, stream, generation`).all(new Date(threshold(now, RETENTION_DAYS.logs)).toISOString()) as Array<{ job_id?: unknown; stream?: unknown; generation?: unknown; path?: unknown }>;
@@ -209,35 +320,77 @@ async function recordAudit(options: RetentionOptions, record: RetentionPruneReco
   await options.recordPrune?.(record);
 }
 
-async function pruneCandidate(options: RetentionOptions, candidate: Candidate, now: string): Promise<void> {
+type RetentionOptionsWithRoots = RetentionOptions & { readonly __retentionRoots: Map<string, OpenRoot> };
+
+async function pruneCandidate(options: RetentionOptionsWithRoots, candidate: Candidate, now: string): Promise<void> {
   if (!contained(candidate.base, candidate.path) || !contained(candidate.auditBase, candidate.path)) throw new Error('retention candidate escaped an authorized root');
-  let stats;
-  try { stats = await lstat(candidate.path); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-    throw error;
-  }
-  if (stats.isSymbolicLink()) {
-    await recordAudit(options, { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), action: 'skipped', bytes: 0, timestamp: now });
-    return;
-  }
-  if (!candidate.stateEligible && stats.mtimeMs >= threshold(now, candidate.cutoffDays)) return;
-  const record: RetentionPruneRecord = { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), action: 'removed', bytes: stats.isFile() ? stats.size : 0, timestamp: now };
-  if (options.db) options.db.exec('BEGIN IMMEDIATE');
+  const root = options.__retentionRoots.get(resolve(candidate.base));
+  if (!root) throw new Error('retention candidate root is not held');
+  const parts = relative(resolve(candidate.base), resolve(candidate.path)).split(sep).filter(Boolean);
+  if (parts.length === 0 || parts.some((part) => !safeSegment(part))) throw new Error('retention candidate path is invalid');
+  let parent: FileHandle;
+  try { parent = await openRelativeDirectory(root.handle, parts.slice(0, -1)); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  const name = parts[parts.length - 1]!;
+  let held: FileHandle | undefined;
   try {
-    await rm(candidate.path, { recursive: true, force: false });
-    if (options.db) {
-      options.db.prepare('INSERT INTO retention_prunes (category, relative_path, action, bytes, at) VALUES (?, ?, ?, ?, ?)').run(record.category, record.relativePath, record.action, record.bytes, record.timestamp);
-      options.db.exec('COMMIT');
+    const linkStats = await lstat(procPath(parent, name));
+    if (linkStats.isSymbolicLink()) {
+      await recordAudit(options, { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), action: 'skipped', bytes: 0, timestamp: now });
+      return;
     }
-  } catch (error) {
-    if (options.db) { try { options.db.exec('ROLLBACK'); } catch { /* preserve prune failure */ } }
-    throw error;
+    held = await openEntry(parent, name);
+    const initial = identity(await held.stat());
+    if (initial.isSymbolicLink) return;
+    if (!candidate.stateEligible && linkStats.mtimeMs >= threshold(now, candidate.cutoffDays)) return;
+    const record: RetentionPruneRecord = { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), action: 'removed', bytes: initial.isDirectory ? 0 : linkStats.size, timestamp: now };
+    await options.beforeDelete?.({ category: candidate.category, path: candidate.path });
+    if (initial.isDirectory) {
+      for (const child of await readdir(procPath(held), { withFileTypes: true })) await removeEntry(held, child.name);
+    }
+    const current = await openEntry(parent, name);
+    try {
+      if (!sameIdentity(initial, identity(await current.stat()))) throw new Error('retention target changed during prune');
+    } finally { await current.close(); }
+    if (initial.isDirectory) await rmdir(procPath(parent, name));
+    else await unlink(procPath(parent, name));
+    await recordAudit(options, record);
+  } finally {
+    await held?.close().catch(() => undefined);
+    await parent.close().catch(() => undefined);
   }
-  await options.recordPrune?.(record);
 }
 
-async function pruneTerminalRows(options: RetentionOptions, now: string): Promise<readonly QueueBlocker[]> {
+async function removeEmptyPathThroughRoot(options: RetentionOptionsWithRoots, base: string, path: string): Promise<void> {
+  const root = options.__retentionRoots.get(resolve(base));
+  if (!root) throw new Error('retention cleanup root is not held');
+  const parts = relative(resolve(base), resolve(path)).split(sep).filter(Boolean);
+  if (parts.length === 0 || parts.some((part) => !safeSegment(part))) throw new Error('retention cleanup path is invalid');
+  const parent = await openRelativeDirectory(root.handle, parts.slice(0, -1));
+  try {
+    const name = parts[parts.length - 1]!;
+    const held = await openEntry(parent, name);
+    try {
+      const initial = identity(await held.stat());
+      const current = await openEntry(parent, name);
+      try { if (!sameIdentity(initial, identity(await current.stat()))) throw new Error('retention cleanup target changed'); }
+      finally { await current.close(); }
+      await rmdir(procPath(parent, name));
+    } finally { await held.close(); }
+  } finally { await parent.close(); }
+}
+
+async function candidateMtime(options: RetentionOptionsWithRoots, candidate: Candidate): Promise<number | null> {
+  const root = options.__retentionRoots.get(resolve(candidate.base));
+  if (!root) throw new Error('retention candidate root is not held');
+  const parts = relative(resolve(candidate.base), resolve(candidate.path)).split(sep).filter(Boolean);
+  const parent = await openRelativeDirectory(root.handle, parts.slice(0, -1));
+  try { return (await lstat(procPath(parent, parts[parts.length - 1]!))).mtimeMs; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+  finally { await parent.close(); }
+}
+
+async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string): Promise<readonly QueueBlocker[]> {
   if (!options.db) return [];
   const blockers: QueueBlocker[] = [];
   const rows = options.db.prepare(`SELECT job_id FROM jobs
@@ -280,7 +433,7 @@ async function pruneTerminalRows(options: RetentionOptions, now: string): Promis
       continue;
     }
     await options.recordPrune?.(record);
-    try { await rm(join(options.paths.stateRoot, 'jobs', jobId), { recursive: false, force: false }); } catch { /* unrelated leftover state remains explicitly retained */ }
+    try { await removeEmptyPathThroughRoot(options, options.paths.stateRoot, join(options.paths.stateRoot, 'jobs', jobId)); } catch { /* unrelated leftover state remains explicitly retained */ }
   }
   return blockers;
 }
@@ -291,64 +444,62 @@ export function createRetentionStartupHook(options: RetentionOptions): Retention
     if (!now) throw new Error('retention requires a clock');
     const invalid = await validateConfiguredRoots(options.paths);
     if (invalid) return { blockers: [invalid] };
-    const freeBytes = typeof options.freeBytes === 'function' ? await options.freeBytes() : options.freeBytes;
-    const candidates: Candidate[] = [];
-    const cacheCandidates: Candidate[] = [];
-    for (const root of options.paths.builderOwnedRoots) {
-      for (const cache of await directoryChildren(join(root, 'cache'))) {
-        for (const path of await directoryChildren(cache)) {
-          cacheCandidates.push({ base: options.paths.stateRoot, auditBase: options.paths.stateRoot, path, category: 'cache', cutoffDays: RETENTION_DAYS.caches, stateEligible: false });
+    let roots: Map<string, OpenRoot>;
+    try { roots = await openConfiguredRoots(options.paths); }
+    catch (error) { return { blockers: [{ code: 'RETENTION_ROOT_INVALID', details: { reason: (error as NodeJS.ErrnoException).code === 'ELOOP' ? 'root-not-directory' : 'root-unavailable' } }] }; }
+    const secureOptions = { ...options, __retentionRoots: roots } as RetentionOptionsWithRoots;
+    try {
+      const freeBytes = typeof options.freeBytes === 'function' ? await options.freeBytes() : options.freeBytes;
+      const candidates: Candidate[] = [];
+      const cacheCandidates: Candidate[] = [];
+      for (const root of options.paths.builderOwnedRoots) {
+        const builder = roots.get(resolve(root));
+        if (!builder) throw new Error('retention builder root is not held');
+        const cacheRoot = await openRelativeDirectory(builder.handle, ['cache']);
+        try {
+          for (const cache of await directoryChildren(cacheRoot, join(root, 'cache'))) {
+            const cacheHandle = await openEntry(cacheRoot, relative(join(root, 'cache'), cache));
+            try { for (const path of await directoryChildren(cacheHandle, cache)) cacheCandidates.push({ base: options.paths.stateRoot, auditBase: options.paths.stateRoot, path, category: 'cache', cutoffDays: RETENTION_DAYS.caches, stateEligible: false }); }
+            finally { await cacheHandle.close(); }
+          }
+        } finally { await cacheRoot.close(); }
+      }
+      for (const root of options.paths.approvedQuarantineRoots) {
+        const auditBase = options.paths.approvedReleaseRoots.find((release) => contained(release, root)) ?? root;
+        await addChildren(roots, candidates, options.paths, root, auditBase, 'quarantine', RETENTION_DAYS.quarantine, new Set());
+      }
+      await databaseCandidates(options, roots, now, candidates);
+      const blockers: QueueBlocker[] = [];
+      const uniqueCandidates = [...new Map(candidates.map((candidate) => [`${candidate.category}:${resolve(candidate.path)}`, candidate])).values()];
+      for (const candidate of uniqueCandidates) {
+        try { await pruneCandidate(secureOptions, candidate, now); }
+        catch (error) {
+          const details = { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), reason: error instanceof Error ? error.message : String(error) };
+          try { await recordAudit(options, { category: candidate.category, relativePath: details.relativePath, action: 'failed', bytes: 0, timestamp: now }); } catch { /* blocker remains the durable signal */ }
+          blockers.push({ code: 'RETENTION_PRUNE_FAILED', details });
         }
       }
-    }
-    for (const root of options.paths.approvedQuarantineRoots) {
-      const auditBase = options.paths.approvedReleaseRoots.find((release) => contained(release, root)) ?? root;
-      await addChildren(candidates, options.paths, root, auditBase, 'quarantine', RETENTION_DAYS.quarantine, new Set());
-    }
-    await databaseCandidates(options, now, candidates);
-    const blockers: QueueBlocker[] = [];
-    const uniqueCandidates = [...new Map(candidates.map((candidate) => [`${candidate.category}:${resolve(candidate.path)}`, candidate])).values()];
-    for (const candidate of uniqueCandidates) {
-      try { await pruneCandidate(options, candidate, now); }
-      catch (error) {
-        const details = { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), reason: error instanceof Error ? error.message : String(error) };
-        try { await recordAudit(options, { category: candidate.category, relativePath: details.relativePath, action: 'failed', bytes: 0, timestamp: now }); }
-        catch { /* the blocker below is the durable signal when audit storage also fails */ }
-        blockers.push({ code: 'RETENTION_PRUNE_FAILED', details });
+      const uniqueCaches = [...new Map(cacheCandidates.map((candidate) => [resolve(candidate.path), candidate])).values()];
+      const cacheStats = await Promise.all(uniqueCaches.map(async (candidate) => { const mtimeMs = await candidateMtime(secureOptions, candidate); return mtimeMs === null ? null : { candidate, mtimeMs }; }));
+      const orderedCaches = cacheStats.filter((value): value is { candidate: Candidate; mtimeMs: number } => value !== null).sort((left, right) => left.mtimeMs - right.mtimeMs);
+      let currentFreeBytes = freeBytes;
+      const dynamicFreeBytes = typeof options.freeBytes === 'function';
+      const belowFloor = currentFreeBytes < MIN_CACHE_FREE_BYTES;
+      for (const { candidate } of orderedCaches) {
+        if (belowFloor && dynamicFreeBytes) { currentFreeBytes = await options.freeBytes(); if (currentFreeBytes >= MIN_CACHE_FREE_BYTES) break; }
+        const mtimeMs = await candidateMtime(secureOptions, candidate);
+        if (mtimeMs === null || (!belowFloor && mtimeMs >= threshold(now, RETENTION_DAYS.caches))) continue;
+        try { await pruneCandidate(secureOptions, { ...candidate, stateEligible: belowFloor }, now); }
+        catch (error) {
+          const details = { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), reason: error instanceof Error ? error.message : String(error) };
+          try { await recordAudit(options, { category: 'cache', relativePath: details.relativePath, action: 'failed', bytes: 0, timestamp: now }); } catch { /* blocker remains the durable signal */ }
+          blockers.push({ code: 'RETENTION_PRUNE_FAILED', details });
+        }
       }
-    }
-    const uniqueCaches = [...new Map(cacheCandidates.map((candidate) => [resolve(candidate.path), candidate])).values()];
-    const cacheStats = await Promise.all(uniqueCaches.map(async (candidate) => {
-      try { return { candidate, mtimeMs: (await lstat(candidate.path)).mtimeMs }; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
-    }));
-    const orderedCaches = cacheStats
-      .filter((value): value is { candidate: Candidate; mtimeMs: number } => value !== null)
-      .sort((left, right) => left.mtimeMs - right.mtimeMs);
-    let currentFreeBytes = freeBytes;
-    const dynamicFreeBytes = typeof options.freeBytes === 'function';
-    const belowFloor = currentFreeBytes < MIN_CACHE_FREE_BYTES;
-    for (const { candidate } of orderedCaches) {
-      if (belowFloor && dynamicFreeBytes) {
-        currentFreeBytes = await options.freeBytes();
-        if (currentFreeBytes >= MIN_CACHE_FREE_BYTES) break;
-      }
-      let stats;
-      try { stats = await lstat(candidate.path); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
-      if (!belowFloor && stats.mtimeMs >= threshold(now, RETENTION_DAYS.caches)) continue;
-      try { await pruneCandidate(options, { ...candidate, stateEligible: belowFloor }, now); }
-      catch (error) {
-        const details = { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), reason: error instanceof Error ? error.message : String(error) };
-        try { await recordAudit(options, { category: 'cache', relativePath: details.relativePath, action: 'failed', bytes: 0, timestamp: now }); } catch { /* blocker remains the durable signal */ }
-        blockers.push({ code: 'RETENTION_PRUNE_FAILED', details });
-      }
-    }
-    blockers.push(...await pruneTerminalRows(options, now));
-    if (options.db) {
-      options.db.prepare('DELETE FROM retention_prunes WHERE at < ?').run(new Date(threshold(now, RETENTION_DAYS.rows)).toISOString());
-    }
-    return { blockers };
+      if (blockers.length === 0) blockers.push(...await pruneTerminalRows(secureOptions, now));
+      if (options.db) options.db.prepare('DELETE FROM retention_prunes WHERE at < ?').run(new Date(threshold(now, RETENTION_DAYS.rows)).toISOString());
+      return { blockers };
+    } finally { await closeConfiguredRoots(roots); }
   };
 }
 
