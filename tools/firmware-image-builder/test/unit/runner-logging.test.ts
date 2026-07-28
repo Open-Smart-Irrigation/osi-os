@@ -111,6 +111,20 @@ describe('runner log coordinator', () => {
     value.coordinator.close();
   });
 
+  it('rejects a regressed verification time before a persisted stream seal', async () => {
+    const clockValues = [NOW, LATER, LATER, LATER, NOW, '2026-07-28T10:00:03.000Z'];
+    const value = await fixture('job-runner-log', { now: () => clockValues.shift() ?? '2026-07-28T10:00:03.000Z' });
+    value.coordinator.appendDockerBytes(Buffer.from('finished\n'));
+
+    expect(() => value.coordinator.finalize(NOW)).toThrow(/sealed_at|seal/i);
+    expect(value.coordinator.finalize(NOW)).toEqual({
+      runner: 'absent',
+      docker: 'sealed',
+      verifiedAt: '2026-07-28T10:00:03.000Z',
+    });
+    value.coordinator.close();
+  });
+
   it('captures raw bytes with a precise cap across chunks and decodes only at the end', () => {
     const capture = createByteBoundedTextCapture(4);
     capture.append(Buffer.from([0x78, 0xe2]));

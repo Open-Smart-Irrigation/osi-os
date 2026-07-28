@@ -114,6 +114,16 @@ export function createRunnerLogCoordinator(options: RunnerLogCoordinatorOptions)
     if (Date.parse(verifiedAt) < Date.parse(canonicalFinishedAt)) {
       throw new Error('verifiedAt is before operationFinishedAt');
     }
+    const presentStreams = STREAMS.filter((kind) => present.has(kind));
+    if (presentStreams.length > 0) {
+      const rows = options.db.prepare(`SELECT stream, sealed_at
+        FROM job_log_generations
+        WHERE job_id=? AND stream IN (${presentStreams.map(() => '?').join(',')}) AND sealed_at IS NOT NULL`).all(options.jobId, ...presentStreams) as Array<{ stream: string; sealed_at: string | null }>;
+      for (const row of rows) {
+        const sealedAt = canonicalInstant(row.sealed_at, `${row.stream} sealed_at`);
+        if (Date.parse(verifiedAt) < Date.parse(sealedAt)) throw new Error('verifiedAt is before persisted log seal');
+      }
+    }
     return {
       runner: present.has('runner') ? 'sealed' : 'absent',
       docker: present.has('docker') ? 'sealed' : 'absent',
