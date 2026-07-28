@@ -93,6 +93,7 @@ export class DurableLogStream {
   }
 
   appendSync(stream: StreamName, bytes: Uint8Array): AppendResult {
+    this.#assertOpen();
     if (bytes.byteLength === 0) throw new Error('log append must contain bytes');
     const generation = this.#openGeneration(stream);
     const row = this.#db.prepare('SELECT path, size_bytes FROM job_log_generations WHERE job_id=? AND stream=? AND generation=?').get(this.#jobId, stream, generation) as { path: string; size_bytes: number };
@@ -118,6 +119,7 @@ export class DurableLogStream {
   }
 
   appendMetadataSync(event: MetadataEvent, data: Record<string, unknown>): number {
+    this.#assertOpen();
     let seq = -1;
     this.#transaction(() => {
       seq = this.#nextSeq();
@@ -127,6 +129,7 @@ export class DurableLogStream {
   }
 
   sealSync(stream: StreamName): void {
+    this.#assertOpen();
     const row = this.#db.prepare('SELECT generation, path, size_bytes, sealed_at FROM job_log_generations WHERE job_id=? AND stream=? ORDER BY generation DESC LIMIT 1').get(this.#jobId, stream) as { generation: number; path: string; size_bytes: number; sealed_at: string | null } | undefined;
     if (!row || row.sealed_at !== null) return;
     const path = this.#generationPath(stream, Number(row.generation), row.path);
@@ -140,6 +143,7 @@ export class DurableLogStream {
   }
 
   rotateSync(stream: StreamName): { readonly generation: number; readonly path: string } {
+    this.#assertOpen();
     this.sealSync(stream);
     const generation = this.#openGeneration(stream, true);
     const path = `logs/${stream}.${generation}`;
@@ -147,6 +151,7 @@ export class DurableLogStream {
   }
 
   sealOrphanTailSync(stream: StreamName, proof: { readonly unitInactive: boolean; readonly leaseStale: boolean; readonly noMatchingContainer: boolean }): OrphanTailResult {
+    this.#assertOpen();
     if (!proof.unitInactive || !proof.leaseStale || !proof.noMatchingContainer) throw new Error('orphan log sealing requires liveness proof');
     const row = this.#db.prepare('SELECT generation, path, size_bytes, sealed_at FROM job_log_generations WHERE job_id=? AND stream=? ORDER BY generation DESC LIMIT 1').get(this.#jobId, stream) as { generation: number; path: string; size_bytes: number; sealed_at: string | null } | undefined;
     if (!row) throw new Error('log generation does not exist');
@@ -180,6 +185,7 @@ export class DurableLogStream {
   }
 
   replaySync(afterSeq: number): LogStreamEvent[] {
+    this.#assertOpen();
     const discoveredIdentities = new Map<number, FileIdentity>();
     for (const row of this.#eventRows(-1)) {
       if (row.stream === null || row.event_type === 'log-gap') continue;
@@ -257,6 +263,7 @@ export class DurableLogStream {
   }
 
   encodeSse(event: LogStreamEvent): string {
+    this.#assertOpen();
     let selected = event;
     let body = JSON.stringify(event.data);
     if (Buffer.byteLength(body) > MAX_SSE_BYTES - 64 && event.event === 'log') {
@@ -268,16 +275,27 @@ export class DurableLogStream {
     return frame;
   }
 
-  keepalive(): string { return ': keepalive\n\n'; }
+  keepalive(): string {
+    this.#assertOpen();
+    return ': keepalive\n\n';
+  }
 
-  async *keepaliveIterator(signal?: AbortSignal): AsyncGenerator<string> {
+  keepaliveIterator(signal?: AbortSignal): AsyncGenerator<string> {
+    this.#assertOpen();
+    return this.#iterateKeepalives(signal);
+  }
+
+  async *#iterateKeepalives(signal?: AbortSignal): AsyncGenerator<string> {
     while (!signal?.aborted) {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, 15_000);
-        signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
-      });
+      this.#assertOpen();
+      await keepaliveDelay(signal);
+      this.#assertOpen();
       if (!signal?.aborted) yield this.keepalive();
     }
+  }
+
+  #assertOpen(): void {
+    if (this.#closed) throw new Error('durable log stream is closed');
   }
 
   #openGeneration(stream: StreamName, forceNew = false): number {
@@ -414,6 +432,24 @@ function validUtf8Text(bytes: Uint8Array): { readonly text: string } | Record<st
 function isUnsafeAuthorityError(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ELOOP'
     || (error instanceof Error && error.message.includes('not a regular file'));
+}
+
+function keepaliveDelay(signal?: AbortSignal): Promise<void> {
+  return new Promise((resolveDelay) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      resolveDelay();
+    };
+    const onAbort = (): void => finish();
+    timer = setTimeout(finish, 15_000);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) finish();
+  });
 }
 
 function descriptorChild(parentFd: number, name: string): string {

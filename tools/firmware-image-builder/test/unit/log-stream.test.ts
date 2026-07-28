@@ -143,12 +143,46 @@ describe('DurableLogStream', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it('closes held authority descriptors idempotently', async () => {
-    const { stream } = await fixture();
+  it('rejects every public operation after close without changing durable state', async () => {
+    const { stream, db } = await fixture();
     stream.appendSync('runner', Buffer.from('open\n'));
+    const beforeEvents = db.prepare('SELECT * FROM job_events WHERE job_id=? ORDER BY seq').all('job-log');
+    const beforeGenerations = db.prepare('SELECT * FROM job_log_generations WHERE job_id=? ORDER BY stream, generation').all('job-log');
     stream.close();
     expect(() => stream.close()).not.toThrow();
-    expect(() => stream.appendSync('runner', Buffer.from('closed\n'))).toThrow();
+    const operations = [
+      () => stream.replaySync(-1),
+      () => stream.appendSync('runner', Buffer.from('closed\n')),
+      () => stream.sealSync('runner'),
+      () => stream.rotateSync('runner'),
+      () => stream.appendMetadataSync('state', { state: 'closed' }),
+      () => stream.sealOrphanTailSync('runner', { unitInactive: true, leaseStale: true, noMatchingContainer: true }),
+      () => stream.encodeSse({ seq: 0, event: 'stage', data: {} }),
+      () => stream.keepalive(),
+      () => stream.keepaliveIterator(),
+    ];
+    for (const operation of operations) expect(operation).toThrow(/closed/i);
+    expect(db.prepare('SELECT * FROM job_events WHERE job_id=? ORDER BY seq').all('job-log')).toEqual(beforeEvents);
+    expect(db.prepare('SELECT * FROM job_log_generations WHERE job_id=? ORDER BY stream, generation').all('job-log')).toEqual(beforeGenerations);
+  });
+
+  it('removes each keepalive abort listener after its timer resolves', async () => {
+    vi.useFakeTimers();
+    try {
+      const { stream } = await fixture();
+      const controller = new AbortController();
+      const added = vi.spyOn(controller.signal, 'addEventListener');
+      const removed = vi.spyOn(controller.signal, 'removeEventListener');
+      const iterator = stream.keepaliveIterator(controller.signal);
+      for (let interval = 0; interval < 3; interval += 1) {
+        const next = iterator.next();
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect((await next).value).toBe(': keepalive\n\n');
+      }
+      expect(added).toHaveBeenCalledTimes(3);
+      expect(removed).toHaveBeenCalledTimes(3);
+      await iterator.return(undefined);
+    } finally { vi.useRealTimers(); }
   });
 
   it('encodes bounded SSE events and emits log-truncated metadata for an oversized payload', async () => {
