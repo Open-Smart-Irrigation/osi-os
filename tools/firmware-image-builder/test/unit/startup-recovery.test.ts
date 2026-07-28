@@ -29,6 +29,43 @@ function startupGate(): QueueStartupGate {
 }
 
 describe('startup reconciliation order', () => {
+  it('single-flights overlapping starts and keeps the queue closed until the shared attempt settles', async () => {
+    let releaseMigrations!: () => void;
+    const migrationsReleased = new Promise<void>((resolve) => { releaseMigrations = resolve; });
+    const calls: string[] = [];
+    const gate = startupGate();
+    const phase = (name: string) => async (): Promise<StartupPhaseResult> => {
+      calls.push(name);
+      if (name === 'migrations') await migrationsReleased;
+      return clear();
+    };
+    const target = createStartupCoordinator({
+      queueGate: gate,
+      migrations: phase('migrations'),
+      cleanupAdmissions: phase('cleanup-admissions'),
+      liveRunnerClassification: phase('live-runner-classification'),
+      stalePublishingRecovery: phase('stale-publishing-recovery'),
+      nonPublishingInterruption: phase('non-publishing-interruption'),
+      retention: phase('retention'),
+      dispatch: phase('dispatch'),
+    });
+
+    const first = target.start();
+    await Promise.resolve();
+    const second = target.start();
+    expect(second).toBe(first);
+    expect(calls).toEqual(['migrations']);
+    expect(gate.completeStartupReconciliation).not.toHaveBeenCalled();
+
+    releaseMigrations();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult).toEqual({ dispatched: true, blockers: [] });
+    expect(secondResult).toEqual(firstResult);
+    expect(calls).toEqual([...STARTUP_PHASES]);
+    expect(gate.beginStartupReconciliation).toHaveBeenCalledOnce();
+    expect(gate.completeStartupReconciliation).toHaveBeenCalledOnce();
+  });
+
   it('binds a fail-closed queue behind one production startup boundary', async () => {
     const phases: string[] = [];
     const phase = (name: string) => async (): Promise<StartupPhaseResult> => {
@@ -110,8 +147,9 @@ describe('startup reconciliation order', () => {
   it('keeps retention as an injected phase and dispatches after a later retry clears blockers', async () => {
     let blocked = true;
     const dispatch = vi.fn(async () => clear());
+    const gate = startupGate();
     const target = createStartupCoordinator({
-      queueGate: startupGate(),
+      queueGate: gate,
       migrations: async () => clear(),
       cleanupAdmissions: async () => clear(),
       liveRunnerClassification: async () => clear(),
@@ -125,6 +163,8 @@ describe('startup reconciliation order', () => {
     blocked = false;
     await expect(target.start()).resolves.toMatchObject({ dispatched: true, blockers: [] });
     expect(dispatch).toHaveBeenCalledOnce();
+    expect(gate.completeStartupReconciliation).toHaveBeenNthCalledWith(1, [{ code: 'UNVERIFIED_FINAL_PATH_BLOCKER', details: { jobId: 'job-publish' } }]);
+    expect(gate.completeStartupReconciliation).toHaveBeenNthCalledWith(2, []);
   });
 });
 

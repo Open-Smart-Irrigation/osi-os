@@ -83,6 +83,14 @@ function coordinator(overrides: Record<string, unknown> = {}) {
 }
 
 describe('FIFO queue dispatch', () => {
+  it('does not expose startup gate controls to normal queue consumers', () => {
+    const target = coordinator().queue;
+
+    expect(Object.keys(target)).toEqual(['dispatchNext']);
+    expect('beginStartupReconciliation' in target).toBe(false);
+    expect('completeStartupReconciliation' in target).toBe(false);
+  });
+
   it.each([
     [0, 1], [40, 0], [40, 20], [40.5, 5],
   ])('rejects invalid dispatch claim lease or renewal intervals: %s/%s', (leaseMs, renewMs) => {
