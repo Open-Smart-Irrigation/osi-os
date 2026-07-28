@@ -551,13 +551,14 @@ export class DurableLogStream {
   }
 
   #persistGap(sourceSeq: number, supplied: Record<string, unknown>): LogStreamEvent {
-    const existing = this.#sourceGap(sourceSeq);
-    if (existing) return { seq: Number(existing.seq), event: 'log-gap', data: JSON.parse(existing.payload_json) as Record<string, unknown> };
-    const data = supplied;
-    data.sourceSeq = sourceSeq;
-    let gapSeq = -1;
-    this.#transaction(() => { gapSeq = this.#nextSeq(); this.#db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, \'log-gap\', ?, ?)').run(this.#jobId, gapSeq, json(data), this.#now()); });
-    return { seq: gapSeq, event: 'log-gap', data };
+    return this.#transaction(() => {
+      const existing = this.#sourceGap(sourceSeq);
+      if (existing) return { seq: Number(existing.seq), event: 'log-gap', data: JSON.parse(existing.payload_json) as Record<string, unknown> };
+      const data = { ...supplied, sourceSeq };
+      const gapSeq = this.#nextSeq();
+      this.#db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, \'log-gap\', ?, ?)').run(this.#jobId, gapSeq, json(data), this.#now());
+      return { seq: gapSeq, event: 'log-gap', data };
+    });
   }
 
   #persistOrphanGapInTransaction(stream: StreamName, generation: number, offset: number, length: number): OrphanTailResult {

@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { fstatSync, fsyncSync as systemFsyncSync, readSync as systemReadSync, renameSync, writeFileSync, writeSync as systemWriteSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
@@ -245,6 +246,32 @@ describe('DurableLogStream', () => {
     expect(stream.replaySync(-1).filter((event) => event.event === 'log-gap')).toHaveLength(1);
     expect(stream.replaySync(appended.seq).filter((event) => event.event === 'log-gap')).toHaveLength(1);
     expect(replay.find((event) => event.event === 'log-gap')?.seq).toBeGreaterThan(appended.seq);
+  });
+
+  it('rechecks a replay-created gap inside the write transaction across stream instances', async () => {
+    const first = await fixture();
+    const secondDb = openBuilderDatabase(join(first.root, 'jobs.sqlite'));
+    dbs.push(secondDb);
+    const second = new DurableLogStream({ db: secondDb, root: first.root, jobId: 'job-log', now: () => NOW });
+    first.stream.appendSync('runner', Buffer.from('interleaved\n'));
+    await rm(join(first.root, 'logs/runner.0'));
+
+    const originalExec = DatabaseSync.prototype.exec;
+    let interleaved = false;
+    const execSpy = vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function (this: DatabaseSync, sql: string) {
+      if (!interleaved && this === first.db && sql === 'BEGIN IMMEDIATE') {
+        interleaved = true;
+        expect(second.replaySync(-1).filter((event) => event.event === 'log-gap')).toHaveLength(1);
+      }
+      return originalExec.call(this, sql);
+    });
+    try {
+      expect(first.stream.replaySync(-1).filter((event) => event.event === 'log-gap')).toHaveLength(1);
+    } finally {
+      execSpy.mockRestore();
+    }
+    expect(interleaved).toBe(true);
+    expect(first.db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id=? AND event_type='log-gap'").get('job-log')).toEqual({ count: 1 });
   });
 
   it('rejects invalid replay cursors, limits, and persisted ranges before allocation', async () => {
