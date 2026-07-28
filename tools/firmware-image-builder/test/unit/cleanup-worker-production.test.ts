@@ -209,7 +209,7 @@ describe('cleanup production composition', () => {
       expect.objectContaining({ timeoutMs: 1000, maxCaptureBytes: 64 * 1024, env: expect.objectContaining({ PATH: '/usr/bin:/bin' }) }),
     );
     expect(run).toHaveBeenCalledWith(
-      ['/usr/bin/docker', 'ps', '--all', '--no-trunc', '--filter', `org.osi.image-builder.job-id=${JOB}`, '--format', '{{json .ID}}'],
+      ['/usr/bin/docker', 'ps', '--all', '--no-trunc', '--filter', `label=org.osi.image-builder.job-id=${JOB}`, '--format', '{{json .ID}}'],
       expect.objectContaining({ timeoutMs: 1000, maxCaptureBytes: 64 * 1024 }),
     );
     await expect(composition.adapters.docker.listByJobId('../other', 1000)).rejects.toThrow(/job ID/);

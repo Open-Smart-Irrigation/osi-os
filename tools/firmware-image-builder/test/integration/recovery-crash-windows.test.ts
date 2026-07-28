@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createCleanupAdmissionRecovery,
+  RecoveryBoundaryError,
   type RecoveryDocker,
   type RecoveryHandBackDependencies,
   type RecoverySystemd,
@@ -150,11 +151,17 @@ function handBackDependencies(postcondition: CleanupPostcondition, observedAt = 
   };
 }
 
+interface DockerPresenceState {
+  present: boolean;
+  stopCalls: number;
+  removeCalls: number;
+}
+
 async function runReplacementWorker(
   value: Awaited<ReturnType<typeof createFixture>>,
   at = AFTER,
+  dockerState: DockerPresenceState = { present: value.snapshot.container.kind === 'present', stopCalls: 0, removeCalls: 0 },
 ): Promise<CleanupPostcondition> {
-  let containerPresent = value.snapshot.container.kind === 'present';
   let postcondition: CleanupPostcondition | undefined;
   const identity = value.snapshot.container;
   const container = (running: boolean): CleanupDockerContainer => {
@@ -172,10 +179,10 @@ async function runReplacementWorker(
     timeouts: { dockerMs: 1_000, systemdMs: 1_000 },
     systemd: { inspect: vi.fn(async (unit: string) => ({ unit, active: false, observedAt: at })) },
     docker: {
-      inspect: vi.fn(async () => containerPresent ? container(true) : null),
-      stop: vi.fn(async () => undefined),
+      inspect: vi.fn(async () => dockerState.present ? container(true) : null),
+      stop: vi.fn(async () => { dockerState.stopCalls += 1; }),
       waitForStopped: vi.fn(async () => container(false)),
-      remove: vi.fn(async () => { containerPresent = false; }),
+      remove: vi.fn(async () => { dockerState.removeCalls += 1; dockerState.present = false; }),
       hasByJobId: vi.fn(async () => false),
       listByJobId: vi.fn(async () => []),
     },
@@ -191,6 +198,40 @@ async function runReplacementWorker(
   await expect(worker.run([value.admission.admissionId])).resolves.toMatchObject({ status: 'completed', admissionId: value.admission.admissionId });
   if (postcondition === undefined) throw new Error('replacement worker did not write completion postcondition');
   return postcondition;
+}
+
+async function completeBatch(value: Awaited<ReturnType<typeof createFixture>>, count: number): Promise<readonly { readonly jobId: string; readonly admissionId: string }[]> {
+  const completed: Array<{ readonly jobId: string; readonly admissionId: string }> = [];
+  for (let index = 0; index < count; index += 1) {
+    const jobId = index === 0 ? value.jobId : `pagination-${index}`;
+    const snapshot = index === 0 ? value.snapshot : seedJob(value.db, jobId, 'building');
+    const admission = index === 0
+      ? value.admission
+      : await value.recovery.admitAndStart({ jobId, owner: 'cleanup-worker', expiresAt: EXPIRES, at: NOW, snapshot });
+    await runReplacementWorker({ ...value, jobId, snapshot, admission }, NOW, { present: true, stopCalls: 0, removeCalls: 0 });
+    completed.push({ jobId, admissionId: admission.admissionId });
+  }
+  return completed;
+}
+
+function dynamicHandBack(value: Awaited<ReturnType<typeof createFixture>>, allow: { value: boolean }): RecoveryHandBackDependencies {
+  return {
+    docker: {
+      inspect: vi.fn(async () => ({ container: null, observedAt: NOW })),
+      listByLabels: vi.fn(async () => ({ containers: [], observedAt: NOW })),
+    },
+    evidence: {
+      read: vi.fn(async (input: { readonly jobId: string; readonly admissionId: string }) => {
+        if (!allow.value) throw new RecoveryBoundaryError('hold completed admission during startup');
+        const event = value.db.prepare("SELECT payload_json FROM job_events WHERE job_id=? AND event_type='cleanup_complete' ORDER BY seq DESC LIMIT 1").get(input.jobId) as { payload_json: string } | undefined;
+        if (event === undefined) throw new Error(`missing completion event for ${input.jobId}`);
+        const payload = JSON.parse(event.payload_json) as { postcondition: CleanupPostcondition };
+        return { jobId: input.jobId, admissionId: input.admissionId, sha256: EVIDENCE_SHA, postcondition: payload.postcondition };
+      }),
+    },
+    staging: { verify: vi.fn(async () => true as const) },
+    logs: { verify: vi.fn(async () => true as const) },
+  };
 }
 
 function boundHandBack(
@@ -263,8 +304,7 @@ function completeAdmission(
   return postcondition;
 }
 
-async function crashWorker(value: Awaited<ReturnType<typeof createFixture>>, phase: 'before-remove' | 'after-remove'): Promise<{ readonly containerPresent: boolean; readonly inspectCount: number }> {
-  let containerPresent = true;
+async function crashWorker(value: Awaited<ReturnType<typeof createFixture>>, phase: 'before-remove' | 'after-remove', dockerState: DockerPresenceState = { present: true, stopCalls: 0, removeCalls: 0 }): Promise<{ readonly containerPresent: boolean; readonly inspectCount: number; readonly dockerState: DockerPresenceState }> {
   let inspectCount = 0;
   const identity = value.snapshot.container;
   if (identity.kind !== 'present') throw new Error('test fixture lost its exact container identity');
@@ -286,11 +326,11 @@ async function crashWorker(value: Awaited<ReturnType<typeof createFixture>>, pha
         return { unit, active: false, observedAt: NOW };
       }),
     },
-    docker: {
-      inspect: vi.fn(async () => containerPresent ? container(true) : null),
-      stop: vi.fn(async () => undefined),
+      docker: {
+      inspect: vi.fn(async () => dockerState.present ? container(true) : null),
+      stop: vi.fn(async () => { dockerState.stopCalls += 1; }),
       waitForStopped: vi.fn(async () => container(false)),
-      remove: vi.fn(async () => { containerPresent = false; }),
+      remove: vi.fn(async () => { dockerState.removeCalls += 1; dockerState.present = false; }),
       hasByJobId: vi.fn(async () => false),
       listByJobId: vi.fn(async () => []),
     },
@@ -303,7 +343,7 @@ async function crashWorker(value: Awaited<ReturnType<typeof createFixture>>, pha
   catch (error) { failure = error; }
   if (!(failure instanceof Error)) throw new Error('expected cleanup worker crash');
   if (inspectCount === 0) throw new Error(`cleanup worker failed before systemd guard: ${failure.message}`);
-  return { containerPresent, inspectCount };
+  return { containerPresent: dockerState.present, inspectCount, dockerState };
 }
 
 afterEach(async () => {
@@ -312,12 +352,60 @@ afterEach(async () => {
 });
 
 describe('cleanup recovery crash windows', () => {
+  it('bounds public completed-admission reconciliation with real SQLite pages and preserves deterministic ordering', async () => {
+    const value = await createFixture();
+    const completed = await completeBatch(value, 256);
+    const allow = { value: false };
+    const recovery = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: new OwnershipStore(value.db, { now: () => NOW }), systemd: systemdState().systemd, handBack: dynamicHandBack(value, allow), clock: { now: () => NOW }, ownerUid: UID });
+    await recovery.openAdmissions();
+    allow.value = true;
+    const results = await recovery.reconcileCompletedAdmissions();
+    expect(results).toHaveLength(256);
+    expect(results.map((item) => item.admissionId)).toEqual([...completed].sort((left, right) => left.admissionId.localeCompare(right.admissionId)).map((item) => item.admissionId));
+  });
+
+  it('fails public reconciliation closed at 257 rows after opening a real SQLite database', async () => {
+    const value = await createFixture();
+    await completeBatch(value, 256);
+    const allow = { value: false };
+    const recovery = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: new OwnershipStore(value.db, { now: () => NOW }), systemd: systemdState().systemd, handBack: dynamicHandBack(value, allow), clock: { now: () => NOW }, ownerUid: UID });
+    await recovery.openAdmissions();
+    const extraJob = 'pagination-256';
+    const extraSnapshot = seedJob(value.db, extraJob, 'building');
+    const extraAdmission = await value.recovery.admitAndStart({ jobId: extraJob, owner: 'cleanup-worker', expiresAt: EXPIRES, at: NOW, snapshot: extraSnapshot });
+    await runReplacementWorker({ ...value, jobId: extraJob, snapshot: extraSnapshot, admission: extraAdmission }, NOW, { present: true, stopCalls: 0, removeCalls: 0 });
+    allow.value = true;
+    await expect(recovery.reconcileCompletedAdmissions()).rejects.toThrow(/bounded|limit|completed admissions/);
+  });
+
+  it('rejects a corrupt real SQLite completion ordering key before hand-back', async () => {
+    const value = await createFixture();
+    const allow = { value: false };
+    const recovery = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: new OwnershipStore(value.db, { now: () => NOW }), systemd: systemdState().systemd, handBack: dynamicHandBack(value, allow), clock: { now: () => NOW }, ownerUid: UID });
+    await recovery.openAdmissions();
+    const jobId = 'pagination-corrupt';
+    seedJob(value.db, jobId, 'building');
+    const admissionId = 'cln_0123456789abcdefghjkmnprst';
+    value.db.prepare(`INSERT INTO cleanup_leases (
+      admission_id, job_id, unit_name, owner, expires_at, status,
+      credential_relative_path, credential_sha256, fence_generation, fence_token_hash,
+      stale_runner_unit, stale_runner_owner, stale_runner_lease_expires_at, stale_state,
+      proof_json, completion_evidence_path, completion_evidence_sha256, admitted_at, claim_at, complete_at
+    ) VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, 1, ?, ?, ?, ?, 'building', ?, ?, ?, ?, ?, ?)`)
+      .run(admissionId, jobId, `osi-image-builder-cleanup@${admissionId}.service`, 'cleanup-worker', EXPIRES,
+        `recovery/cleanup-credentials/${admissionId}.token`, 'a'.repeat(64), 'b'.repeat(64), `osi-image-builder-runner@${jobId}.service`, 'runner-owner', RUNNER_EXPIRES,
+        JSON.stringify(value.snapshot), `jobs/${jobId}/evidence/cleanup/${admissionId}.complete.json`, EVIDENCE_SHA, NOW, NOW, 'not-an-instant');
+    allow.value = true;
+    await expect(recovery.reconcileCompletedAdmissions()).rejects.toThrow(/completion time|invalid|ordering/);
+  });
+
   it.each([
     ['before docker rm', false],
     ['after exact removal before cleanup CAS', true],
   ])('rotates a claimed cleanup admission after a crash %s while retaining the exact recovery handle', async (_label, exactContainerRemoved) => {
     const value = await createFixture();
-    const crash = await crashWorker(value, exactContainerRemoved ? 'after-remove' : 'before-remove');
+    const dockerState: DockerPresenceState = { present: true, stopCalls: 0, removeCalls: 0 };
+    const crash = await crashWorker(value, exactContainerRemoved ? 'after-remove' : 'before-remove', dockerState);
     const oldIdentity = value.snapshot.container;
     expect(oldIdentity.kind).toBe('present');
     expect(crash.containerPresent).toBe(!exactContainerRemoved);
@@ -357,7 +445,12 @@ describe('cleanup recovery crash windows', () => {
     })).toMatchObject({ ok: false });
     expect((value.db.prepare('SELECT COUNT(*) AS count FROM job_events WHERE job_id=?').get(value.jobId) as { count: number }).count).toBe(eventsBefore);
 
-    const postcondition = await runReplacementWorker({ ...value, admission: result });
+    const postcondition = await runReplacementWorker({ ...value, admission: result }, AFTER, dockerState);
+    if (exactContainerRemoved) {
+      expect(dockerState.present).toBe(false);
+      expect(dockerState.stopCalls).toBe(1);
+      expect(dockerState.removeCalls).toBe(1);
+    }
     const restartedSystemd = systemdState(AFTER);
     const handBack = handBackDependencies(postcondition, AFTER);
     (handBack.evidence.read as ReturnType<typeof vi.fn>).mockResolvedValue({ jobId: value.jobId, admissionId: result.admissionId, sha256: EVIDENCE_SHA, postcondition });
@@ -472,13 +565,19 @@ describe('cleanup recovery crash windows', () => {
 
   it('leaves an already-interrupted job terminal after hand-back', async () => {
     const value = await createFixture('interrupted');
-    const postcondition = await runReplacementWorker(value, NOW);
-    const handBack = handBackDependencies(postcondition);
-    (handBack.evidence.read as ReturnType<typeof vi.fn>).mockResolvedValue({ jobId: value.jobId, admissionId: value.admission.admissionId, sha256: EVIDENCE_SHA, postcondition });
-    const restartedSystemd = systemdState();
-    const restarted = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: new OwnershipStore(value.db, { now: () => NOW }), systemd: restartedSystemd.systemd, handBack, clock: { now: () => NOW }, ownerUid: UID });
-    const result = await restarted.openAdmissions().then(() => restarted.handBackCompleted({ jobId: value.jobId, admissionId: value.admission.admissionId, at: NOW }));
-    expect(result).toMatchObject({ state: 'already-interrupted', handedBack: false, started: false });
+    const dockerState: DockerPresenceState = { present: true, stopCalls: 0, removeCalls: 0 };
+    await expect(crashWorker(value, 'after-remove', dockerState)).resolves.toMatchObject({ containerPresent: false });
+    const replacement = await value.recovery.reconcileAndStart({ jobId: value.jobId, admissionId: value.admission.admissionId, owner: 'cleanup-worker', expiresAt: NEXT_EXPIRES, at: AFTER, snapshot: value.snapshot });
+    expect(replacement.rotated).toBe(true);
+    const postcondition = await runReplacementWorker({ ...value, admission: replacement }, AFTER, dockerState);
+    expect(dockerState.stopCalls).toBe(1);
+    expect(dockerState.removeCalls).toBe(1);
+    const handBack = handBackDependencies(postcondition, AFTER);
+    (handBack.evidence.read as ReturnType<typeof vi.fn>).mockResolvedValue({ jobId: value.jobId, admissionId: replacement.admissionId, sha256: EVIDENCE_SHA, postcondition });
+    const restartedSystemd = systemdState(AFTER);
+    const restarted = createCleanupAdmissionRecovery({ stateRoot: value.root, db: value.db, ownership: new OwnershipStore(value.db, { now: () => AFTER }), systemd: restartedSystemd.systemd, handBack, clock: { now: () => AFTER }, ownerUid: UID });
+    const handedBack = await restarted.openAdmissions().then(() => restarted.handBackCompleted({ jobId: value.jobId, admissionId: replacement.admissionId, at: AFTER }));
+    expect(handedBack).toMatchObject({ state: 'already-interrupted', handedBack: false, started: false });
     expect((value.db.prepare('SELECT state FROM jobs WHERE job_id=?').get(value.jobId) as { state: string }).state).toBe('interrupted');
   });
 

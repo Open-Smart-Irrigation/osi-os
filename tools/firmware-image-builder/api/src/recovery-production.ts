@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { constants as fsConstants, type Stats } from 'node:fs';
-import { open, type FileHandle } from 'node:fs/promises';
+import { constants as fsConstants, type Dirent, type Stats } from 'node:fs';
+import { open, readdir, type FileHandle } from 'node:fs/promises';
 import { TextDecoder } from 'node:util';
 import { join } from 'node:path';
 
@@ -29,6 +29,7 @@ const DIRECTORY_MODE = 0o700;
 const PUBLISHER_DIRECTORY_MODE = 0o750;
 const EVIDENCE_MODE = 0o600;
 const MAX_EVIDENCE_BYTES = JSON_LIMITS.maxEncodedBytes + 1;
+const MAX_TOTAL_LOG_BYTES = 512 * 1024 * 1024;
 const JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const HASH64 = /^[0-9a-f]{64}$/u;
 const RUNNER_UNIT_PATTERN = /^osi-image-builder-runner@[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.service$/u;
@@ -45,6 +46,8 @@ const BOUNDARY_OPEN_ERROR_CODES = new Set([
   'ENOTDIR',
   'EPERM',
 ]);
+const MAX_LOG_TREE_ENTRIES = 8_192;
+const MAX_LOG_TREE_DEPTH = 16;
 
 export interface RecoveryPhysicalVerificationOptions {
   readonly stateRootAuthority: StateRootAuthority;
@@ -379,6 +382,52 @@ async function readBoundedFile(handle: FileHandle, maxBytes: number, field: stri
   return bytes;
 }
 
+interface HeldDescriptor {
+  readonly path: string;
+  readonly parts: readonly string[];
+  readonly handle: FileHandle;
+  readonly stats: NativeStats;
+  readonly kind: 'directory' | 'file';
+  readonly directoryMode?: 0o700 | 0o750;
+}
+
+async function revalidateHeldChain(
+  root: FileHandle,
+  rootStats: NativeStats,
+  descriptors: ReadonlyMap<string, HeldDescriptor>,
+  leaf: HeldDescriptor,
+  ownerUid: number,
+  device: number,
+  fileAssertion: (stats: NativeStats, field: string, owner: number, dev: number) => void,
+): Promise<void> {
+  const currentRoot = await descriptorStat(root, `${leaf.path} root`);
+  if (!stableStats(rootStats, currentRoot)) return fail(`recovery root identity changed while verifying ${leaf.path}`);
+  let current = root;
+  const opened: FileHandle[] = [];
+  try {
+    for (let index = 0; index < leaf.parts.length; index += 1) {
+      const path = leaf.parts.slice(0, index + 1).join('/');
+      const expected = descriptors.get(path);
+      if (expected === undefined) return fail(`recovery descriptor chain is incomplete for ${leaf.path}`);
+      const name = leaf.parts[index]!;
+      const child = expected.kind === 'directory'
+        ? await openDirectoryChild(current, name, path)
+        : await openFileChild(current, name, path);
+      opened.push(child);
+      const stats = await descriptorStat(child, path);
+      if (expected.kind === 'directory') {
+        if (expected.directoryMode === PUBLISHER_DIRECTORY_MODE) assertPublisherDirectory(stats, path, ownerUid, device);
+        else assertDirectory(stats, path, ownerUid, device);
+      }
+      else fileAssertion(stats, path, ownerUid, device);
+      if (!stableStats(expected.stats, stats)) return fail(`recovery descriptor identity changed for ${path}`);
+      current = child;
+    }
+  } finally {
+    await closeHandles(opened);
+  }
+}
+
 async function hashBoundedArtifact(
   handle: FileHandle,
   expectedSize: number,
@@ -647,26 +696,40 @@ async function readCompletionEvidence(
         const rootStats = await descriptorStat(root, 'state root');
         assertDirectory(rootStats, 'state root', ownerUid, snapshot.device);
         if (rootStats.ino !== snapshot.inode) return fail('state root identity changed while opening evidence');
+        const held = new Map<string, HeldDescriptor>();
         return withDirectory(
           () => openDirectoryChild(root, 'jobs', 'jobs'),
           async (jobs) => {
-            assertDirectory(await descriptorStat(jobs, 'jobs'), 'jobs', ownerUid, snapshot.device);
+            const jobsStats = await descriptorStat(jobs, 'jobs');
+            assertDirectory(jobsStats, 'jobs', ownerUid, snapshot.device);
+            held.set('jobs', { path: 'jobs', parts: ['jobs'], handle: jobs, stats: jobsStats, kind: 'directory' });
             return withDirectory(
               () => openDirectoryChild(jobs, jobId, `jobs/${jobId}`),
               async (job) => {
-                assertDirectory(await descriptorStat(job, `jobs/${jobId}`), `jobs/${jobId}`, ownerUid, snapshot.device);
+                const jobPath = `jobs/${jobId}`;
+                const jobStats = await descriptorStat(job, jobPath);
+                assertDirectory(jobStats, jobPath, ownerUid, snapshot.device);
+                held.set(jobPath, { path: jobPath, parts: ['jobs', jobId], handle: job, stats: jobStats, kind: 'directory' });
                 return withDirectory(
                   () => openDirectoryChild(job, 'evidence', `jobs/${jobId}/evidence`),
                   async (evidence) => {
-                    assertDirectory(await descriptorStat(evidence, `jobs/${jobId}/evidence`), `jobs/${jobId}/evidence`, ownerUid, snapshot.device);
+                    const evidencePath = `jobs/${jobId}/evidence`;
+                    const evidenceStats = await descriptorStat(evidence, evidencePath);
+                    assertDirectory(evidenceStats, evidencePath, ownerUid, snapshot.device);
+                    held.set(evidencePath, { path: evidencePath, parts: ['jobs', jobId, 'evidence'], handle: evidence, stats: evidenceStats, kind: 'directory' });
                     return withDirectory(
                       () => openDirectoryChild(evidence, 'cleanup', `jobs/${jobId}/evidence/cleanup`),
                       async (cleanup) => {
-                        assertDirectory(await descriptorStat(cleanup, `jobs/${jobId}/evidence/cleanup`), `jobs/${jobId}/evidence/cleanup`, ownerUid, snapshot.device);
+                        const cleanupPath = `jobs/${jobId}/evidence/cleanup`;
+                        const cleanupStats = await descriptorStat(cleanup, cleanupPath);
+                        assertDirectory(cleanupStats, cleanupPath, ownerUid, snapshot.device);
+                        held.set(cleanupPath, { path: cleanupPath, parts: ['jobs', jobId, 'evidence', 'cleanup'], handle: cleanup, stats: cleanupStats, kind: 'directory' });
                         const fileName = `${admissionId}.complete.json`;
                         return withDirectory(
                           () => openFileChild(cleanup, fileName, expectedPath),
                           async (file) => {
+                            const fileStats = await descriptorStat(file, expectedPath);
+                            assertRegularEvidence(fileStats, expectedPath, ownerUid, snapshot.device);
                             try {
                               await dependencies.beforeRead(file);
                             } catch (error) {
@@ -675,6 +738,9 @@ async function readCompletionEvidence(
                             const bytes = await readBoundedFile(file, maxBytes, expectedPath, ownerUid, snapshot.device);
                             const actualSha256 = createHash('sha256').update(bytes).digest('hex');
                             if (actualSha256 !== expectedSha256) return fail('cleanup completion evidence hash does not match the durable hash');
+                            const heldFile: HeldDescriptor = { path: expectedPath, parts: expectedPath.split('/'), handle: file, stats: fileStats, kind: 'file' };
+                            held.set(expectedPath, heldFile);
+                            await revalidateHeldChain(root, rootStats, held, heldFile, ownerUid, snapshot.device, assertRegularEvidence);
                             return {
                               jobId,
                               admissionId,
@@ -775,9 +841,28 @@ async function verifyPhysicalLogs(
     if (input.postcondition[stream] === 'absent' && count !== 0 || input.postcondition[stream] === 'sealed' && count === 0) return fail(`${stream} physical log state does not match cleanup evidence`);
   }
 
+  const rows = new Map<string, RecoveryLogVerificationInput['generations'][number]>();
+  const allowedDirectories = new Set<string>(['logs']);
+  for (const row of input.generations) {
+    const path = row.path;
+    rows.set(path, row);
+    const parts = safeLogPath(path, jobId);
+    for (let index = 1; index < parts.length; index += 1) allowedDirectories.add(`logs/${parts.slice(0, index).join('/')}`);
+  }
+
+  async function readEntries(directory: FileHandle, field: string): Promise<readonly Dirent[]> {
+    try {
+      return await readdir(join(PROC_FD, String(directory.fd)), { withFileTypes: true });
+    } catch (error) {
+      return fileSystemFailure('read', `cannot enumerate recovery log tree: ${field}`, error);
+    }
+  }
+
   try {
     return await withStateRootSnapshot(stateRootAuthority, async ({ snapshot, dependencies }) => {
       const handles: FileHandle[] = [];
+      const held = new Map<string, HeldDescriptor>();
+      let totalBytes = 0;
       try {
         const root = await open(snapshot.path, DIRECTORY_FLAGS);
         handles.push(root);
@@ -785,40 +870,91 @@ async function verifyPhysicalLogs(
         assertDirectory(rootStats, 'state root for cleanup logs', ownerUid, snapshot.device);
         if (rootStats.ino !== snapshot.inode) return fail('state root identity changed while opening cleanup logs');
         const jobs = await openDirectoryChild(root, 'jobs', 'jobs for cleanup logs'); handles.push(jobs);
-        assertDirectory(await descriptorStat(jobs, 'jobs for cleanup logs'), 'jobs for cleanup logs', ownerUid, snapshot.device);
+        const jobsStats = await descriptorStat(jobs, 'jobs for cleanup logs');
+        assertDirectory(jobsStats, 'jobs for cleanup logs', ownerUid, snapshot.device);
+        held.set('jobs', { path: 'jobs', parts: ['jobs'], handle: jobs, stats: jobsStats, kind: 'directory' });
         const job = await openDirectoryChild(jobs, jobId, `jobs/${jobId} for cleanup logs`); handles.push(job);
-        assertDirectory(await descriptorStat(job, `jobs/${jobId} for cleanup logs`), `jobs/${jobId} for cleanup logs`, ownerUid, snapshot.device);
+        const jobPath = `jobs/${jobId}`;
+        const jobStats = await descriptorStat(job, jobPath);
+        assertDirectory(jobStats, jobPath, ownerUid, snapshot.device);
+        held.set(jobPath, { path: jobPath, parts: ['jobs', jobId], handle: job, stats: jobStats, kind: 'directory' });
         const logs = await openOptionalDirectoryChild(job, 'logs', `jobs/${jobId}/logs`);
         if (logs !== null) {
           handles.push(logs);
-          assertDirectory(await descriptorStat(logs, `jobs/${jobId}/logs`), `jobs/${jobId}/logs`, ownerUid, snapshot.device);
+          const logsStats = await descriptorStat(logs, `jobs/${jobId}/logs`);
+          assertDirectory(logsStats, `jobs/${jobId}/logs`, ownerUid, snapshot.device);
+          held.set('logs', { path: 'logs', parts: ['jobs', jobId, 'logs'], handle: logs, stats: logsStats, kind: 'directory' });
         }
         if (input.generations.length > 0 && logs === null) return fail('cleanup physical log directory is missing');
-        for (const row of input.generations) {
-          if (logs === null) return fail('cleanup physical log directory is missing');
-          const parts = safeLogPath(row.path, jobId);
-          const nested: FileHandle[] = [];
-          let current = logs;
-          let file: FileHandle | null = null;
-          try {
-            for (const part of parts.slice(0, -1)) {
-              const directory = await openDirectoryChild(current, part, `cleanup log directory ${part}`);
-              nested.push(directory);
-              assertDirectory(await descriptorStat(directory, `cleanup log directory ${part}`), `cleanup log directory ${part}`, ownerUid, snapshot.device);
-              current = directory;
+        if (logs !== null) {
+          let treeEntries = 0;
+          async function walk(directory: FileHandle, prefix: string, depth: number, revalidate: boolean): Promise<void> {
+            if (depth > MAX_LOG_TREE_DEPTH) return fail('cleanup physical log tree exceeds its depth bound');
+            const entries = [...await readEntries(directory, prefix)].sort((left, right) => left.name.localeCompare(right.name));
+            treeEntries += entries.length;
+            if (treeEntries > MAX_LOG_TREE_ENTRIES) return fail('cleanup physical log tree exceeds its entry bound');
+            for (const entry of entries) {
+              const path = `${prefix}/${entry.name}`;
+              const row = rows.get(path);
+              const isDirectory = allowedDirectories.has(path);
+              if (entry.isSymbolicLink()) return fail(`cleanup physical log tree contains a symlink: ${path}`);
+              if (!isDirectory && row === undefined) return fail(`cleanup physical log tree contains an unindexed entry: ${path}`);
+              const child = isDirectory
+                ? await openDirectoryChild(directory, entry.name, path)
+                : await openFileChild(directory, entry.name, path);
+              if (!revalidate) handles.push(child);
+              try {
+                const stats = await descriptorStat(child, path);
+                if (isDirectory) {
+                  assertDirectory(stats, path, ownerUid, snapshot.device);
+                  if (revalidate) {
+                    const previous = held.get(path);
+                    if (previous === undefined || !stableStats(previous.stats, stats)) return fail(`cleanup physical log directory identity changed: ${path}`);
+                  } else {
+                    held.set(path, { path, parts: ['jobs', jobId, ...path.split('/')], handle: child, stats, kind: 'directory' });
+                  }
+                  await walk(child, path, depth + 1, revalidate);
+                } else {
+                  if (row === undefined) return fail(`cleanup physical log entry is not indexed: ${path}`);
+                  assertLogFile(stats, path, ownerUid, snapshot.device);
+                  if (revalidate) {
+                    const previous = held.get(path);
+                    if (previous === undefined || !stableStats(previous.stats, stats)) return fail(`cleanup physical log file identity changed: ${path}`);
+                    const physical = await hashLogFile(child, path, ownerUid, snapshot.device);
+                    if (physical.stats.size !== row.sizeBytes || physical.sha256 !== row.sha256) return fail(`cleanup physical log identity does not match ${path}`);
+                  } else {
+                    try {
+                      await dependencies.beforeRead(child);
+                    } catch (error) {
+                      fileSystemFailure('read', `cannot prepare cleanup log descriptor read: ${path}`, error);
+                    }
+                    const physical = await hashLogFile(child, path, ownerUid, snapshot.device);
+                    if (physical.stats.size !== row.sizeBytes || physical.sha256 !== row.sha256) return fail(`cleanup physical log identity does not match ${path}`);
+                    totalBytes += physical.stats.size;
+                    if (totalBytes > MAX_TOTAL_LOG_BYTES) return fail('cleanup physical logs exceed the bounded total size');
+                    held.set(path, { path, parts: ['jobs', jobId, 'logs', ...path.slice('logs/'.length).split('/')], handle: child, stats, kind: 'file' });
+                  }
+                }
+              } finally {
+                if (revalidate) await closeHandles([child]);
+              }
             }
-            const filename = parts.at(-1)!;
-            file = await openFileChild(current, filename, row.path);
-            assertLogFile(await descriptorStat(file, row.path), row.path, ownerUid, snapshot.device);
-            try {
-              await dependencies.beforeRead(file);
-            } catch (error) {
-              fileSystemFailure('read', `cannot prepare cleanup log descriptor read: ${row.path}`, error);
-            }
-            const physical = await hashLogFile(file, row.path, ownerUid, snapshot.device);
-            if (physical.stats.size !== row.sizeBytes || physical.sha256 !== row.sha256) return fail(`cleanup physical log identity does not match ${row.path}`);
-          } finally {
-            await closeHandles([file, ...nested]);
+          }
+          await walk(logs, 'logs', 0, false);
+          const fileCount = [...held.values()].filter((descriptor) => descriptor.kind === 'file').length;
+          if (fileCount !== rows.size) return fail('cleanup physical log tree does not contain every indexed generation');
+          treeEntries = 0;
+          await walk(logs, 'logs', 0, true);
+          const chain = new Map<string, HeldDescriptor>([
+            ['jobs', held.get('jobs')!],
+            [jobPath, held.get(jobPath)!],
+          ]);
+          for (const descriptor of held.values()) chain.set(descriptor.parts.join('/'), descriptor);
+          const verified = new Set<HeldDescriptor>();
+          for (const descriptor of held.values()) {
+            if (verified.has(descriptor)) continue;
+            verified.add(descriptor);
+            await revalidateHeldChain(root, rootStats, chain, descriptor, ownerUid, snapshot.device, assertLogFile);
           }
         }
         await withStateRootSnapshot(stateRootAuthority, async ({ snapshot: current }) => {
@@ -918,6 +1054,7 @@ async function inspectStaging(
         let quarantineParent: FileHandle | null = null;
         let source: FileHandle | null = null;
         let destination: FileHandle | null = null;
+        const trackedFiles: HeldDescriptor[] = [];
         try {
           if (builder !== null) {
             assertPublisherDirectory(await descriptorStat(builder, '.osi-image-builder'), '.osi-image-builder', ownerUid, snapshot.device);
@@ -950,6 +1087,8 @@ async function inspectStaging(
               const field = `quarantine/${jobId}/${tracked.name}`;
               const file = await openFileChild(destination!, tracked.name, field);
               try {
+                const fileStats = await descriptorStat(file, field);
+                assertRegularArtifact(fileStats, field, ownerUid, snapshot.device);
                 try {
                   await dependencies.beforeRead(file);
                 } catch (error) {
@@ -960,13 +1099,39 @@ async function inspectStaging(
                 } else {
                   await hashBoundedArtifact(file, tracked.size, tracked.sha256, input.artifactMtime!, field, ownerUid, snapshot.device);
                 }
-              } finally {
+                trackedFiles.push({
+                  path: `.osi-image-builder/${field}`,
+                  parts: ['.osi-image-builder', 'quarantine', jobId, tracked.name],
+                  handle: file,
+                  stats: fileStats,
+                  kind: 'file',
+                });
+              } catch (error) {
                 await descriptorClose(file);
+                throw error;
               }
             }
           }
           await revalidateManagedJob(root, builder, stagingParent, 'staging', jobId, null, ownerUid, snapshot.device);
           await revalidateManagedJob(root, builder, quarantineParent, 'quarantine', jobId, expected.kind === 'quarantined' ? destination : null, ownerUid, snapshot.device);
+          if (trackedFiles.length > 0) {
+            if (builder === null || quarantineParent === null || destination === null) return fail('tracked quarantine descriptor chain is incomplete');
+            const builderStats = await descriptorStat(builder, '.osi-image-builder held');
+            const quarantineStats = await descriptorStat(quarantineParent, '.osi-image-builder/quarantine held');
+            const destinationStats = await descriptorStat(destination, `quarantine/${jobId} held`);
+            assertPublisherDirectory(builderStats, '.osi-image-builder held', ownerUid, snapshot.device);
+            assertPublisherDirectory(quarantineStats, '.osi-image-builder/quarantine held', ownerUid, snapshot.device);
+            assertJobDirectory(destinationStats, `quarantine/${jobId} held`, ownerUid, snapshot.device);
+            const descriptors = new Map<string, HeldDescriptor>([
+              ['.osi-image-builder', { path: '.osi-image-builder', parts: ['.osi-image-builder'], handle: builder, stats: builderStats, kind: 'directory', directoryMode: PUBLISHER_DIRECTORY_MODE }],
+              ['.osi-image-builder/quarantine', { path: '.osi-image-builder/quarantine', parts: ['.osi-image-builder', 'quarantine'], handle: quarantineParent, stats: quarantineStats, kind: 'directory', directoryMode: PUBLISHER_DIRECTORY_MODE }],
+              ['.osi-image-builder/quarantine/' + jobId, { path: `.osi-image-builder/quarantine/${jobId}`, parts: ['.osi-image-builder', 'quarantine', jobId], handle: destination, stats: destinationStats, kind: 'directory', directoryMode: DIRECTORY_MODE }],
+            ]);
+            for (const tracked of trackedFiles) {
+              descriptors.set(tracked.path, tracked);
+              await revalidateHeldChain(root, rootStats, descriptors, tracked, ownerUid, snapshot.device, assertRegularArtifact);
+            }
+          }
           await withApprovedRootSnapshot(approvedRootRegistry, rootId, async ({ snapshot: current }) => {
             if (
               current.id !== snapshot.id
@@ -978,7 +1143,7 @@ async function inspectStaging(
           });
           return true as const;
         } finally {
-          await closeHandles([source, destination, stagingParent, quarantineParent, builder]);
+          await closeHandles([...trackedFiles.map((tracked) => tracked.handle), source, destination, stagingParent, quarantineParent, builder]);
         }
       },
     ));

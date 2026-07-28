@@ -341,6 +341,49 @@ describe('production recovery physical verification', () => {
     }
   });
 
+  it('rejects a completion evidence basename swap after hashing the held descriptor', async () => {
+    let evidencePath = '';
+    let swapped = false;
+    const value = await fixture(async () => {
+      if (swapped || evidencePath === '') return;
+      swapped = true;
+      await rename(evidencePath, `${evidencePath}.held`);
+      const replacement = await writeCompletion(value.loaded, completionEnvelope());
+      expect(replacement.absolutePath).toBe(evidencePath);
+    });
+    try {
+      const file = await writeCompletion(value.loaded, completionEnvelope());
+      evidencePath = file.absolutePath;
+      const physical = createFactory(value.loaded);
+      await expect(physical.evidence.read({ jobId: JOB_ID, admissionId: ADMISSION_ID, path: file.path, sha256: file.sha256 })).rejects.toThrow(/descriptor identity|identity|changed/);
+      expect(swapped).toBe(true);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a completion evidence subtree swap after hashing the held descriptor', async () => {
+    let cleanupPath = '';
+    let swapped = false;
+    const value = await fixture(async () => {
+      if (swapped || cleanupPath === '') return;
+      swapped = true;
+      await rename(cleanupPath, `${cleanupPath}.held`);
+      await mkdir(cleanupPath, { mode: 0o700 });
+      const replacement = await writeCompletion(value.loaded, completionEnvelope());
+      expect(replacement.absolutePath).toBe(join(cleanupPath, `${ADMISSION_ID}.complete.json`));
+    });
+    try {
+      const file = await writeCompletion(value.loaded, completionEnvelope());
+      cleanupPath = join(value.loaded.stateRoot, 'jobs', JOB_ID, 'evidence', 'cleanup');
+      const physical = createFactory(value.loaded);
+      await expect(physical.evidence.read({ jobId: JOB_ID, admissionId: ADMISSION_ID, path: file.path, sha256: file.sha256 })).rejects.toThrow(/descriptor identity|identity|changed/);
+      expect(swapped).toBe(true);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
   it('physically verifies every sealed log generation under the state-root authority', async () => {
     const value = await fixture();
     try {
@@ -387,6 +430,67 @@ describe('production recovery physical verification', () => {
       expect(swapped).toBe(true);
       await rm(loadedRoot, { recursive: true, force: true });
       await rename(`${loadedRoot}.replacement`, loadedRoot);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a physical log basename swap after hashing the held descriptor', async () => {
+    let logPath = '';
+    let swapped = false;
+    const value = await fixture(async () => {
+      if (swapped || logPath === '') return;
+      swapped = true;
+      await rename(logPath, `${logPath}.held`);
+      await writeFile(logPath, Buffer.from('runner cleanup log\n'), { mode: 0o600 });
+    });
+    try {
+      const bytes = Buffer.from('runner cleanup log\n');
+      logPath = await writeLog(value.loaded, bytes);
+      const physical = createFactory(value.loaded);
+      await expect(physical.logs.verify(logVerificationInput(bytes))).rejects.toThrow(/descriptor identity|identity|changed/);
+      expect(swapped).toBe(true);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a physical log subtree swap after hashing the held descriptor', async () => {
+    let logDirectory = '';
+    let swapped = false;
+    const value = await fixture(async () => {
+      if (swapped || logDirectory === '') return;
+      swapped = true;
+      await rename(logDirectory, `${logDirectory}.held`);
+      await mkdir(logDirectory, { mode: 0o700 });
+      await writeFile(join(logDirectory, 'runner-0.log'), Buffer.from('runner cleanup log\n'), { mode: 0o600 });
+    });
+    try {
+      const bytes = Buffer.from('runner cleanup log\n');
+      logDirectory = join(value.loaded.stateRoot, 'jobs', JOB_ID, 'logs');
+      await writeLog(value.loaded, bytes);
+      const physical = createFactory(value.loaded);
+      await expect(physical.logs.verify(logVerificationInput(bytes))).rejects.toThrow(/descriptor identity|identity|changed/);
+      expect(swapped).toBe(true);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an unindexed physical log when both persisted streams are absent', async () => {
+    const value = await fixture();
+    try {
+      await writeLog(value.loaded);
+      const physical = createFactory(value.loaded);
+      const absent: RecoveryLogVerificationInput = {
+        jobId: JOB_ID,
+        completedAt: NOW,
+        completionEventSeq: 10,
+        postcondition: { ...postcondition().logs, runner: 'absent', docker: 'absent' },
+        generations: [],
+        events: [],
+      };
+      await expect(physical.logs.verify(absent)).rejects.toThrow(/unindexed|log tree|entry/);
     } finally {
       await rm(value.base, { recursive: true, force: true });
     }
@@ -595,6 +699,28 @@ describe('production recovery physical verification', () => {
         quarantinedPostcondition(tracked.artifactSha256, tracked.artifactSize),
         tracked,
       ))).rejects.toThrow(/destination|identity|changed/);
+      expect(swapped).toBe(true);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a tracked quarantine basename swap after hashing the held file', async () => {
+    let artifactPath = '';
+    let swapped = false;
+    const value = await fixture(async () => {
+      if (swapped || artifactPath === '') return;
+      swapped = true;
+      await rename(artifactPath, `${artifactPath}.held`);
+      await writeFile(artifactPath, Buffer.from('tracked artifact bytes\n'), { mode: 0o600 });
+    });
+    try {
+      const artifact = Buffer.from('tracked artifact bytes\n', 'utf8');
+      const tracked = trackedIdentity(artifact);
+      const destination = await writeTrackedQuarantine(value.loaded, artifact);
+      artifactPath = join(destination, 'image.img.gz');
+      const physical = createFactory(value.loaded);
+      await expect(physical.staging.verify(stagingInput(quarantinedPostcondition(tracked.artifactSha256, artifact.byteLength), tracked))).rejects.toThrow(/descriptor identity|identity|changed|quarantine/);
       expect(swapped).toBe(true);
     } finally {
       await rm(value.base, { recursive: true, force: true });

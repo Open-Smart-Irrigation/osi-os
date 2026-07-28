@@ -276,7 +276,7 @@ function createDockerAdapter(policy: CommandPolicy, executable: string): Cleanup
     if (!JOB_ID.test(jobId)) throw new Error('Docker job ID query is invalid');
     const argv = [
       executable, 'ps', '--all', '--no-trunc',
-      '--filter', `${LABEL_JOB}=${jobId}`,
+      '--filter', `label=${LABEL_JOB}=${jobId}`,
       '--format', '{{json .ID}}',
     ] as const;
     const result = await runTrusted({ ...policy, timeoutMs: Math.min(timeoutMs, policy.timeoutMs) }, argv);

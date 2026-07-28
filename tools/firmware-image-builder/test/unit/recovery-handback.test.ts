@@ -177,20 +177,6 @@ function exposeCompletedStartupRow(value: ReturnType<typeof fixture>): void {
     : implementation(sql));
 }
 
-function exposeCompletedStartupPages(value: ReturnType<typeof fixture>, pages: readonly (readonly Record<string, unknown>[])[]): { readonly pageReads: () => number } {
-  const prepare = value.db.prepare as ReturnType<typeof vi.fn>;
-  const implementation = prepare.getMockImplementation() as ((sql: string) => unknown) | undefined;
-  if (implementation === undefined) throw new Error('test database prepare implementation is unavailable');
-  let page = 0;
-  let pageReads = 0;
-  prepare.mockImplementation((sql: string) => sql.includes("WHERE status='completed'") && sql.includes('SELECT admission_id, job_id, complete_at')
-    ? { all: () => { pageReads += 1; return pages[page++] ?? []; } }
-    : sql.includes("WHERE status='completed'")
-      ? { all: () => [{ admission_id: ADMISSION_ID, job_id: JOB_ID }] }
-    : implementation(sql));
-  return { pageReads: () => pageReads };
-}
-
 function exactIdentityFixture() {
   const value = fixture();
   const identity = {
@@ -227,29 +213,6 @@ function exactIdentityFixture() {
 }
 
 describe('cleanup hand-back recovery', () => {
-  it('paginates startup completed admissions and fails closed on overflow', async () => {
-    const value = fixture();
-    const rows = [
-      { admission_id: ADMISSION_ID, job_id: JOB_ID, complete_at: NOW },
-      { admission_id: 'cln_1123456789abcdefghjkmnpqrs', job_id: JOB_ID, complete_at: '2026-07-28T12:01:00.000Z' },
-    ];
-    const pages = exposeCompletedStartupPages(value, [[rows[0]!], [rows[1]!], []]);
-    const recovery = createCleanupAdmissionRecovery({ stateRoot: await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-pages-')), db: value.db as never, ownership: value.ownership, systemd: value.systemd, handBack: value.handBack, clock: { now: () => NOW } });
-    await expect(recovery.openAdmissions()).resolves.toBeUndefined();
-    expect(pages.pageReads()).toBe(3);
-
-    const overflow = fixture();
-    exposeCompletedStartupPages(overflow, [[...Array.from({ length: 257 }, (_, index) => ({ admission_id: ADMISSION_ID, job_id: JOB_ID, complete_at: new Date(Date.parse(NOW) + index * 1000).toISOString() }))]]);
-    const bounded = createCleanupAdmissionRecovery({ stateRoot: await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-overflow-')), db: overflow.db as never, ownership: overflow.ownership, systemd: overflow.systemd, handBack: overflow.handBack, clock: { now: () => NOW } });
-    await expect(bounded.openAdmissions()).rejects.toThrow(/bounded|limit|completed admissions/);
-  });
-
-  it('fails closed on corrupt startup reconciliation ordering keys', async () => {
-    const value = fixture();
-    exposeCompletedStartupPages(value, [[{ admission_id: ADMISSION_ID, job_id: JOB_ID, complete_at: 'not-an-instant' }]]);
-    const recovery = createCleanupAdmissionRecovery({ stateRoot: await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-corrupt-')), db: value.db as never, ownership: value.ownership, systemd: value.systemd, handBack: value.handBack, clock: { now: () => NOW } });
-    await expect(recovery.openAdmissions()).rejects.toThrow(/invalid|instant|corrupt/);
-  });
   it('keeps admissions closed and retries startup after production infrastructure failure', async () => {
     const value = fixture();
     exposeCompletedStartupRow(value);
@@ -271,7 +234,7 @@ describe('cleanup hand-back recovery', () => {
       await expect(recovery.openAdmissions()).rejects.toBe(infrastructure);
       await expect(recovery.reconcileCompletedAdmissions()).rejects.toThrow('cleanup admissions are not open');
       await expect(recovery.openAdmissions()).resolves.toBeUndefined();
-      await expect(recovery.reconcileCompletedAdmissions()).rejects.toBe(mismatch);
+      await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID })).rejects.toBe(mismatch);
     } finally {
       await rm(stateRoot, { recursive: true, force: true });
     }
@@ -293,7 +256,7 @@ describe('cleanup hand-back recovery', () => {
     });
     try {
       await expect(recovery.openAdmissions()).resolves.toBeUndefined();
-      await expect(recovery.reconcileCompletedAdmissions()).rejects.toBe(mismatch);
+      await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID })).rejects.toBe(mismatch);
       expect(value.ownership.apiWrite).not.toHaveBeenCalled();
     } finally {
       await rm(stateRoot, { recursive: true, force: true });

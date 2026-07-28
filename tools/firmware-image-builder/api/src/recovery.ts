@@ -1129,10 +1129,6 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     });
   }
 
-  function completedAdmissionRows(): readonly Record<string, unknown>[] {
-    return databaseAll(options.db, "SELECT admission_id, job_id FROM cleanup_leases WHERE status='completed' ORDER BY complete_at, admission_id");
-  }
-
   function completedAdmissionPage(cursor: Readonly<{ completeAt: string; admissionId: string }> | undefined, limit: number): readonly Record<string, unknown>[] {
     if (cursor === undefined) return databaseAll(options.db, "SELECT admission_id, job_id, complete_at FROM cleanup_leases WHERE status='completed' ORDER BY complete_at, admission_id LIMIT ?", limit);
     return databaseAll(options.db, "SELECT admission_id, job_id, complete_at FROM cleanup_leases WHERE status='completed' AND (complete_at > ? OR (complete_at = ? AND admission_id > ?)) ORDER BY complete_at, admission_id LIMIT ?", cursor.completeAt, cursor.completeAt, cursor.admissionId, limit);
@@ -1150,10 +1146,24 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
   async function reconcileCompletedAdmissions(): Promise<readonly CleanupHandBackResult[]> {
     requireAdmissionsOpen();
     const results: CleanupHandBackResult[] = [];
-    for (const row of completedAdmissionRows()) {
-      results.push(await handBackCompleted({ jobId: requiredRowString(row, 'job_id'), admissionId: requiredRowString(row, 'admission_id') }));
+    let cursor: { completeAt: string; admissionId: string } | undefined;
+    let processed = 0;
+    while (true) {
+      const remaining = MAX_STARTUP_COMPLETED_ADMISSIONS - processed;
+      const page = completedAdmissionPage(cursor, Math.min(STARTUP_COMPLETED_PAGE_SIZE, remaining + 1));
+      if (page.length === 0) return results;
+      if (page.length > remaining) throw new RecoveryBoundaryError('completed admission reconciliation exceeds its bounded limit');
+      let previousKey = cursor === undefined ? undefined : `${cursor.completeAt}\u0000${cursor.admissionId}`;
+      for (const row of page) {
+        const key = startupAdmissionCursor(row);
+        const currentKey = `${key.completeAt}\u0000${key.admissionId}`;
+        if (previousKey !== undefined && currentKey <= previousKey) throw new RecoveryBoundaryError('completed admission ordering is corrupt');
+        previousKey = currentKey;
+        results.push(await handBackCompleted({ jobId: key.jobId, admissionId: key.admissionId }));
+        cursor = { completeAt: key.completeAt, admissionId: key.admissionId };
+        processed += 1;
+      }
     }
-    return results;
   }
 
   async function reconcileCompletedAdmissionsAtStartup(): Promise<void> {
