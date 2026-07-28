@@ -37,6 +37,7 @@ import {
   createPipeline,
   type PipelineLease,
   type PipelineInput,
+  type PipelineLogWriter,
   type PipelineOperationExecution,
   type PreparedPublication,
   type StageActionContext,
@@ -369,6 +370,7 @@ async function fixture(options: {
   readonly publicationPrepareHook?: () => void;
   readonly throwArtifactOwnershipWrite?: boolean;
   readonly distinctPublisherIdentities?: boolean;
+  readonly pipelineLogWriter?: PipelineLogWriter;
 } = {}): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), 'osi-pipeline-order-'));
   temporaryDirectories.push(directory);
@@ -1016,6 +1018,7 @@ async function fixture(options: {
       readTargetManifest: async () => readFile(manifestPath),
     },
     evidenceWriter,
+    pipelineLogWriter: options.pipelineLogWriter,
     services: {
       workspace: {
         revalidate: async ({ stage, phase }) => {
@@ -1473,7 +1476,12 @@ describe('trusted pipeline integration', () => {
   });
 
   it('drives a persisted cancellation through the production pipeline boundary', async () => {
-    const value = await fixture();
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      pipelineLogWriter: {
+        write: (entry) => progress.push(entry),
+      },
+    });
     try {
       const cancellation = {
         isRequested: () => true,
@@ -1497,6 +1505,7 @@ describe('trusted pipeline integration', () => {
         state: 'cancelled',
       });
       expect(cancellation.observeBetweenStages).toHaveBeenCalled();
+      expect(progress.every(({ outcome }) => outcome !== 'passed')).toBe(true);
     } finally {
       value.close();
     }
@@ -2312,6 +2321,123 @@ describe('trusted pipeline integration', () => {
         errorCode: 'BUILD_FAILED',
       });
       expect(value.publishedMetadata).toHaveLength(0);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('logs every stage transition in durable lifecycle order', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      pipelineLogWriter: {
+        write: (entry) => progress.push(entry),
+      },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'succeeded',
+      });
+      expect(progress).toHaveLength(PIPELINE_STAGE_NAMES.length * 2);
+      expect(progress.map(({ stage, outcome }) => [stage, outcome])).toEqual(
+        PIPELINE_STAGE_NAMES.flatMap((stage) => [
+          [stage, 'running'],
+          [stage, 'passed'],
+        ]),
+      );
+      for (const entry of progress) {
+        expect(Object.keys(entry).sort()).toEqual(['at', 'jobId', 'outcome', 'stage']);
+        expect(entry.jobId).toBe(value.input.jobId);
+        expect(entry.at).toEqual(expect.stringMatching(/^2026-07-26T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u));
+      }
+    } finally {
+      value.close();
+    }
+  });
+
+  it('logs preflight failure without inventing a passed stage', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      failStage: 'preflight',
+      pipelineLogWriter: {
+        write: (entry) => progress.push(entry),
+      },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'failed',
+      });
+      expect(progress.map(({ stage, outcome }) => [stage, outcome])).toEqual([
+        ['preflight', 'running'],
+        ['preflight', 'failed'],
+      ]);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('logs publish failure as its special terminal transition', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      pipelineLogWriter: {
+        write: (entry) => progress.push(entry),
+      },
+      publisher: {
+        publish: vi.fn(async (): Promise<PublisherResponse> => ({
+          available: true,
+          published: false,
+          quarantined: false,
+          selfTest: false,
+          mutationCount: 1,
+          errorCode: 'OUTPUT_COLLISION',
+          renameResult: 'EEXIST',
+          publisherVersion: LOCK.packageVersion,
+          publisherSourceSha256: HASH_C,
+          sourceRelativePath: `.osi-image-builder/staging/${value.input.jobId}`,
+          destinationRelativePath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5`,
+        })),
+      },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'failed',
+        blockerCode: 'OUTPUT_COLLISION',
+      });
+      expect(progress.at(-1)).toMatchObject({ stage: 'publish', outcome: 'failed' });
+      expect(progress.filter(({ stage }) => stage === 'publish').map(({ outcome }) => outcome))
+        .toEqual(['running', 'failed']);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('fails closed when progress logging fails before a stage can pass', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      pipelineLogWriter: {
+        write: (entry) => {
+          progress.push(entry);
+          if (entry.stage === 'source' && entry.outcome === 'passed') {
+            throw new Error('progress sink unavailable');
+          }
+        },
+      },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'RECOVERY_LOG_GAP',
+      });
+      expect(progress.map(({ stage, outcome }) => [stage, outcome])).toEqual([
+        ['preflight', 'running'],
+        ['preflight', 'passed'],
+        ['source', 'running'],
+        ['source', 'passed'],
+      ]);
+      expect(value.store.getJob(value.input.jobId).state).toBe('source');
+      expect(value.store.getStage(value.input.jobId, 'source')).toMatchObject({
+        outcome: 'running',
+      });
+      expect(value.store.getStage(value.input.jobId, 'release-gates')).toBeNull();
     } finally {
       value.close();
     }

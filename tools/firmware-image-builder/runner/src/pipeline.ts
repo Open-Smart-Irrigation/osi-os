@@ -137,6 +137,15 @@ export interface PipelineEvidenceWriter {
   readonly write: (input: StageEvidenceInput) => Promise<EvidencePublication>;
 }
 
+export interface PipelineLogWriter {
+  readonly write: (entry: Readonly<{
+    readonly jobId: string;
+    readonly stage: PipelineStageName;
+    readonly outcome: 'running' | 'passed' | 'failed';
+    readonly at: string;
+  }>) => void;
+}
+
 export interface PipelineOperationExecution {
   readonly operationId: TrustedOperationId;
   readonly attempt: number;
@@ -344,6 +353,7 @@ export interface PipelineInput {
     readonly readTargetManifest: () => Promise<Buffer>;
   };
   readonly evidenceWriter: PipelineEvidenceWriter;
+  readonly pipelineLogWriter?: PipelineLogWriter;
   readonly cancellation?: PipelineCancellation;
   readonly services: PipelineServices;
 }
@@ -640,6 +650,12 @@ function validateServiceComposition(input: PipelineInput): void {
     .map(([, name]) => name);
   if (missing.length > 0) {
     throw new TypeError(`production pipeline composition is incomplete: ${missing.join(', ')}`);
+  }
+  if (
+    input.pipelineLogWriter !== undefined
+    && typeof input.pipelineLogWriter.write !== 'function'
+  ) {
+    throw new TypeError('pipeline progress log writer is incomplete');
   }
   if (
     typeof input.services.publisherAuthority?.packageVersion !== 'string'
@@ -1176,6 +1192,7 @@ export function createPipeline(input: PipelineInput): {
 } {
   validateServiceComposition(input);
   const now = input.clock.now;
+  const pipelineLogWriter = input.pipelineLogWriter ?? { write: () => undefined };
   let currentState: JobState = 'starting';
   let lease: PipelineLease | null = null;
   let buildManifest: JsonObject | null = null;
@@ -1214,6 +1231,26 @@ export function createPipeline(input: PipelineInput): {
       if (error instanceof PipelineOwnershipLostError) throw error;
       if (command.kind === 'artifact') throw error;
       throw new PipelineOwnershipLostError('ownership-write-exception');
+    }
+  };
+
+  const logStage = (
+    stage: PipelineStageName,
+    outcome: 'running' | 'passed' | 'failed',
+    at: string,
+  ): void => {
+    try {
+      pipelineLogWriter.write(Object.freeze({
+        jobId: input.jobId,
+        stage,
+        outcome,
+        at,
+      }));
+    } catch {
+      throw new PipelineRecoveryRequiredError(
+        'pipeline progress logging failed',
+        'RECOVERY_LOG_GAP',
+      );
     }
   };
 
@@ -2068,6 +2105,7 @@ export function createPipeline(input: PipelineInput): {
       && publicationFailure !== null
     ) {
       const terminalAt = now();
+      logStage(stage, 'failed', finishedAt);
       write({
         kind: 'publish-failure-terminal',
         expectedState: 'publishing',
@@ -2091,6 +2129,7 @@ export function createPipeline(input: PipelineInput): {
         blockerCode,
       });
     }
+    logStage(stage, 'failed', finishedAt);
     write({
       kind: 'stage',
       expectedState: currentState,
@@ -2148,6 +2187,7 @@ export function createPipeline(input: PipelineInput): {
         publicationBinding = binding;
         publishStartedAt = now();
         try {
+          logStage(stage, 'running', startedAt);
           write({
             kind: 'publish-stage-start',
             expectedState: 'verifying',
@@ -2156,6 +2196,7 @@ export function createPipeline(input: PipelineInput): {
             finalPath: binding.finalPath,
             publishStartedAt,
           });
+          currentState = stageState;
         } catch (error) {
           if (error instanceof PipelineOwnershipLostError) {
             await observeCancellation('stage', 'publish');
@@ -2163,6 +2204,7 @@ export function createPipeline(input: PipelineInput): {
           throw error;
         }
       } else {
+        logStage(stage, 'running', startedAt);
         write({
           kind: 'stage',
           expectedState: currentState,
@@ -2171,8 +2213,8 @@ export function createPipeline(input: PipelineInput): {
           outcome: 'running',
           startedAt,
         });
+        currentState = stageState;
       }
-      currentState = stageState;
       if (!workspaceValidatedBefore) {
         await withLeaseHeartbeat(() => input.services.workspace.revalidate({
           job,
@@ -2257,6 +2299,7 @@ export function createPipeline(input: PipelineInput): {
         verificationManifest = terminal.manifest;
         const publishedAt = now();
         const terminalAt = now();
+        logStage(stage, 'passed', finishedAt);
         write({
           kind: 'publish-terminal',
           expectedState: 'publishing',
@@ -2281,6 +2324,7 @@ export function createPipeline(input: PipelineInput): {
         });
         return;
       }
+      logStage(stage, 'passed', finishedAt);
       write({
         kind: 'stage',
         expectedState: currentState,
@@ -2347,6 +2391,7 @@ export function createPipeline(input: PipelineInput): {
       } catch (error) {
         if (error instanceof PipelineOwnershipLostError) throw error;
         const startedAt = now();
+        logStage('preflight', 'running', startedAt);
         write({
           kind: 'stage',
           expectedState: 'starting',
