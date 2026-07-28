@@ -84,6 +84,7 @@ export interface DirectInterruptionInput {
   readonly runnerUnit: string;
   readonly startAttemptedAt: string;
   readonly unitInactiveAt: string;
+  readonly expectedClaimExpiresAt: string;
   readonly reason: string;
 }
 
@@ -279,6 +280,7 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
 
   type ClaimHeartbeat = Readonly<{
     readonly checkpoint: (allowExpired?: boolean) => boolean;
+    readonly pin: () => DispatchClaim | null;
     readonly isLost: () => boolean;
     readonly stop: () => Promise<void>;
   }>;
@@ -286,18 +288,38 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
   function claimHeartbeat(jobId: string, owner: string): ClaimHeartbeat {
     let lost = false;
     let stopped = false;
+    let handedOff = false;
+    let pinnedExpiry: string | null = null;
     let renewal = Promise.resolve();
     let timer: ReturnType<typeof setInterval> | undefined;
     const checkpoint = (allowExpired = false): boolean => {
       if (stopped || lost) return false;
       try {
         const at = clockReading();
+        if (handedOff) {
+          const current = currentJob(jobId);
+          const lease = current === undefined ? { kind: 'malformed' as const } : runnerLeaseState(current, at);
+          if (current !== undefined && isActiveState(current.state) && current.runner_unit === runnerUnit(jobId) && lease.kind === 'live') return true;
+          lost = true;
+          return false;
+        }
         const claim = currentDispatchClaim();
+        if (pinnedExpiry !== null) {
+          if (claim !== undefined
+            && claim.jobId === jobId
+            && claim.owner === owner
+            && claim.leaseExpiresAt === pinnedExpiry
+            && Date.parse(claim.leaseExpiresAt) > Date.parse(at)) {
+            return true;
+          }
+          lost = true;
+          return false;
+        }
         if (claim === undefined || claim.jobId !== jobId || claim.owner !== owner) {
           const current = currentJob(jobId);
           const lease = current === undefined ? { kind: 'malformed' as const } : runnerLeaseState(current, at);
-          if (claim === undefined && lease.kind === 'live') {
-            stopped = true;
+          if (claim === undefined && current !== undefined && isActiveState(current.state) && current.runner_unit === runnerUnit(jobId) && lease.kind === 'live') {
+            handedOff = true;
             if (timer !== undefined) clearInterval(timer);
             return true;
           }
@@ -335,6 +357,17 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
     timer.unref?.();
     return {
       checkpoint,
+      pin: () => {
+        if (!checkpoint() || handedOff) return null;
+        const claim = currentDispatchClaim();
+        if (claim === undefined || claim.jobId !== jobId || claim.owner !== owner) {
+          lost = true;
+          return null;
+        }
+        pinnedExpiry = claim.leaseExpiresAt;
+        if (timer !== undefined) clearInterval(timer);
+        return claim;
+      },
       isLost: () => lost,
       stop: async () => {
         stopped = true;
@@ -369,11 +402,14 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
     }
   }
 
-  function databaseBlocker(excludeJobId?: string): QueueBlocker | null {
-    const suffix = excludeJobId === undefined ? '' : ' AND job_id<>?';
+  function databaseBlocker(expectedDispatchJobId?: string): QueueBlocker | null {
+    const activity = expectedDispatchJobId === undefined
+      ? `(queue_state='dispatched'
+        OR state IN ('starting','preflight','source','release_gates','frontend','target_setup','feeds','config','building','verifying','cancel_requested'))`
+      : `(job_id<>? AND (queue_state='dispatched'
+        OR state IN ('starting','preflight','source','release_gates','frontend','target_setup','feeds','config','building','verifying','cancel_requested')))`;
     const row = one(`SELECT job_id FROM jobs
-      WHERE (queue_state='dispatched'
-        OR state IN ('starting','preflight','source','release_gates','frontend','target_setup','feeds','config','building','verifying','cancel_requested')
+      WHERE (${activity}
         OR cleanup_fence_generation IS NOT NULL
         OR cleanup_admission_id IS NOT NULL
         OR cleanup_blocker_code IS NOT NULL OR cleanup_blocker_json IS NOT NULL
@@ -383,8 +419,8 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
         OR (artifact_quarantine_path IS NOT NULL AND publish_state IS NOT 'quarantined')
         OR publish_blocker_code IS NOT NULL OR publish_blocker_json IS NOT NULL
         OR publish_state IN ('blocked','publishing')
-        OR EXISTS (SELECT 1 FROM job_log_generations AS logs WHERE logs.job_id=jobs.job_id AND logs.sealed_at IS NULL))${suffix}
-      LIMIT 1`, ...(excludeJobId === undefined ? [] : [excludeJobId]));
+        OR EXISTS (SELECT 1 FROM job_log_generations AS logs WHERE logs.job_id=jobs.job_id AND logs.sealed_at IS NULL))
+      LIMIT 1`, ...(expectedDispatchJobId === undefined ? [] : [expectedDispatchJobId]));
     const jobId = row === undefined ? null : rowJobId(row);
     if (row !== undefined && jobId === null) return { code: 'DATABASE_RESULT_INVALID' };
     return jobId === null ? null : { code: 'SQLITE_QUEUE_BLOCKER', details: { jobId } };
@@ -536,11 +572,25 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
         }
         return persistRecoveryBlocker(current, unit, reason, safety, at, 'SERVICE_START_FAILED', finalClaim.owner, finalClaim.leaseExpiresAt);
       }
+      const proofClaim = heartbeat.pin();
+      if (proofClaim === null
+        || proofClaim.phase !== 'start-attempted'
+        || proofClaim.startAttemptedAt !== claim.startAttemptedAt
+        || proofClaim.unitInactiveAt !== claim.unitInactiveAt) {
+        return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+      }
       let proof: DirectInterruptionProof | null = null;
       try {
         proof = options.directInterrupt === undefined
           ? null
-          : await options.directInterrupt({ jobId, runnerUnit: unit, startAttemptedAt: claim.startAttemptedAt, unitInactiveAt: claim.unitInactiveAt, reason });
+          : await options.directInterrupt({
+            jobId,
+            runnerUnit: unit,
+            startAttemptedAt: claim.startAttemptedAt,
+            unitInactiveAt: claim.unitInactiveAt,
+            expectedClaimExpiresAt: proofClaim.leaseExpiresAt,
+            reason,
+          });
       } catch (error) {
         if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
         const final = await inspectInactive(unit);
@@ -577,8 +627,8 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
       const trustedProof: DirectInterruptionProof = { ...proof, unitInactiveAt: final.observedAt };
       if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
       const finalClaim = currentDispatchClaim();
-      if (finalClaim === undefined || finalClaim.jobId !== jobId || finalClaim.owner !== claim.owner || finalClaim.phase !== 'start-attempted' || finalClaim.startAttemptedAt !== claim.startAttemptedAt || finalClaim.unitInactiveAt !== claim.unitInactiveAt) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
-      const result = options.ownership.apiWrite({ kind: 'direct-interrupt', jobId, expectedState: row.state, at, proof: trustedProof, errorCode: 'SERVICE_START_FAILED', error: { reason }, dispatchClaimOwner: finalClaim.owner, expectedStartAttemptedAt: finalClaim.startAttemptedAt, expectedUnitInactiveAt: finalClaim.unitInactiveAt });
+      if (finalClaim === undefined || finalClaim.jobId !== jobId || finalClaim.owner !== claim.owner || finalClaim.phase !== 'start-attempted' || finalClaim.startAttemptedAt !== claim.startAttemptedAt || finalClaim.unitInactiveAt !== claim.unitInactiveAt || finalClaim.leaseExpiresAt !== proofClaim.leaseExpiresAt) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+      const result = options.ownership.apiWrite({ kind: 'direct-interrupt', jobId, expectedState: row.state, at, proof: trustedProof, errorCode: 'SERVICE_START_FAILED', error: { reason }, dispatchClaimOwner: finalClaim.owner, expectedClaimExpiresAt: finalClaim.leaseExpiresAt, expectedStartAttemptedAt: finalClaim.startAttemptedAt, expectedUnitInactiveAt: finalClaim.unitInactiveAt });
       if (!success(result)) return { kind: 'blocked', reason: resultMessage(result), jobId };
       return { kind: 'interrupted', jobId };
     } finally {

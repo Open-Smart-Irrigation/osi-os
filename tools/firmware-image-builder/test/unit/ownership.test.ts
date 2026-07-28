@@ -897,7 +897,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('uses typed direct interruption proofs for pre-lease and stale active failure only', async () => {
     const first = await fixture(); first.ownership.apiWrite(dispatch()); first.ownership.apiWrite(dispatchStart());
     expect(first.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-1', expectedState: 'starting', at: RECOVERY, proof: { ...direct('start-failure'), logs: { ...logs, docker: 'sealed' } as never }, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'start failed' } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
-    expect(first.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-1', expectedState: 'starting', at: RECOVERY, proof: direct('start-failure'), dispatchClaimOwner: 'dispatcher-job-1', expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'start failed' } }).ok).toBe(true);
+    expect(first.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-1', expectedState: 'starting', at: RECOVERY, proof: direct('start-failure'), dispatchClaimOwner: 'dispatcher-job-1', expectedClaimExpiresAt: EXPIRY, expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'start failed' } }).ok).toBe(true);
     const second = await fixture('job-2'); dispatchAndStart(second.ownership, 'job-2'); second.ownership.runnerWrite(lease(ACTIVE, 'job-2'));
     expect(second.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-2', expectedState: 'starting', at: RECOVERY, proof: direct('active', 'job-2'), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'stale' } }).ok).toBe(true);
     expect(second.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-2', expectedState: 'publishing', at: RECOVERY, proof: direct('active', 'job-2'), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'bad' } } as never)).toMatchObject({ ok: false, conflict: { kind: 'illegal-predecessor' } });
@@ -920,6 +920,47 @@ describe('actor-owned compare-and-set writes', () => {
     const proof = { ...direct('start-failure', 'direct-claim-bypass'), unitInactiveAt: NOW, container: absent(NOW), logs: { ...logs, verifiedAt: NOW } };
     expect(target.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-claim-bypass', expectedState: 'starting', at: LATER, proof, errorCode: 'SERVICE_START_FAILED', error: { reason: 'missing claim owner' }, expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
     expect(target.store.getJob('direct-claim-bypass')).toMatchObject({ state: 'starting', terminalErrorCode: null });
+  });
+
+  it('requires the exact verifier claim expiry and rejects a renewal after direct-proof input', async () => {
+    const target = await fixture('direct-claim-expiry-race');
+    expect(target.ownership.apiWrite(dispatch('direct-claim-expiry-race')).ok).toBe(true);
+    expect(target.ownership.apiWrite(dispatchStart('direct-claim-expiry-race')).ok).toBe(true);
+    const proof = direct('start-failure', 'direct-claim-expiry-race');
+    const missingExpiry = {
+      kind: 'direct-interrupt' as const,
+      jobId: 'direct-claim-expiry-race',
+      expectedState: 'starting' as const,
+      at: RECOVERY,
+      proof,
+      errorCode: 'SERVICE_START_FAILED' as const,
+      error: { reason: 'missing verifier expiry' },
+      dispatchClaimOwner: 'dispatcher-direct-claim-expiry-race',
+      expectedStartAttemptedAt: NOW,
+      expectedUnitInactiveAt: NOW,
+    };
+    expect(() => target.ownership.apiWrite(missingExpiry as never)).toThrow(OwnershipValidationError);
+
+    expect(target.ownership.apiWrite({
+      kind: 'dispatch-renew',
+      jobId: 'direct-claim-expiry-race',
+      claimOwner: 'dispatcher-direct-claim-expiry-race',
+      expectedClaimExpiresAt: EXPIRY,
+      claimExpiresAt: STOP_AT,
+      at: LATER,
+    }).ok).toBe(true);
+
+    const result = target.ownership.apiWrite({
+      ...missingExpiry,
+      expectedClaimExpiresAt: EXPIRY,
+    } as never);
+    expect(result).toMatchObject({ ok: false, conflict: { kind: 'cas-lost' } });
+    expect(target.store.getJob('direct-claim-expiry-race')).toMatchObject({ state: 'starting', terminalErrorCode: null });
+    expect(target.db.prepare('SELECT owner, lease_expires_at, phase FROM queue_dispatch_claims WHERE claim_id=1').get()).toEqual({
+      owner: 'dispatcher-direct-claim-expiry-race',
+      lease_expires_at: STOP_AT,
+      phase: 'start-attempted',
+    });
   });
 
   it('requires a live start-attempted claim and consumes exactly that claim on runner handoff', async () => {
@@ -970,13 +1011,13 @@ describe('actor-owned compare-and-set writes', () => {
     expect(unsealed.store.getJob('direct-unsealed').state).toBe('starting');
 
     const sealed = await fixture('direct-sealed'); sealed.ownership.apiWrite(dispatch('direct-sealed')); sealed.ownership.apiWrite(dispatchStart('direct-sealed')); seedLogs(sealed.path, 'direct-sealed');
-    const sealedResult = sealed.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-sealed', expectedState: 'starting', at: RECOVERY, proof: directWithLogs('start-failure', 'direct-sealed', sealedDirectLogs(sealed.path, 'direct-sealed')), dispatchClaimOwner: 'dispatcher-direct-sealed', expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'sealed logs' } }); expect(sealedResult.ok).toBe(true);
+    const sealedResult = sealed.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-sealed', expectedState: 'starting', at: RECOVERY, proof: directWithLogs('start-failure', 'direct-sealed', sealedDirectLogs(sealed.path, 'direct-sealed')), dispatchClaimOwner: 'dispatcher-direct-sealed', expectedClaimExpiresAt: EXPIRY, expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'sealed logs' } }); expect(sealedResult.ok).toBe(true);
 
     const gap = await fixture('direct-gap'); gap.ownership.apiWrite(dispatch('direct-gap')); gap.ownership.apiWrite(dispatchStart('direct-gap')); seedLogGapEvent(gap.path, 'direct-gap');
     expect(gap.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-gap', expectedState: 'starting', at: RECOVERY, proof: directWithLogs('start-failure', 'direct-gap', sealedDirectLogs(gap.path, 'direct-gap')), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'log gap' } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
 
     const orphan = await fixture('direct-orphan'); orphan.ownership.apiWrite(dispatch('direct-orphan')); orphan.ownership.apiWrite(dispatchStart('direct-orphan')); seedLogRanges(orphan.path, 'direct-orphan', [[0, 1, 'log_orphan_tail']]);
-    expect(orphan.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-orphan', expectedState: 'starting', at: RECOVERY, proof: directWithLogs('start-failure', 'direct-orphan', sealedDirectLogs(orphan.path, 'direct-orphan')), dispatchClaimOwner: 'dispatcher-direct-orphan', expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'contiguous recovered tail' } }).ok).toBe(true);
+    expect(orphan.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-orphan', expectedState: 'starting', at: RECOVERY, proof: directWithLogs('start-failure', 'direct-orphan', sealedDirectLogs(orphan.path, 'direct-orphan')), dispatchClaimOwner: 'dispatcher-direct-orphan', expectedClaimExpiresAt: EXPIRY, expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'contiguous recovered tail' } }).ok).toBe(true);
   });
 
   it('accepts only canonical real instants and bounded JSON values', async () => {
@@ -2997,7 +3038,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(publishCase.store.getJob('rollback-live-publish').publishState).toBe('publishing'); expect(publishCase.store.listEvents('rollback-live-publish').events).toHaveLength(publishEvents);
 
     const directCase = await fixture('rollback-direct-interrupt'); directCase.ownership.apiWrite(dispatch('rollback-direct-interrupt')); directCase.ownership.apiWrite(dispatchStart('rollback-direct-interrupt')); const directEvents = directCase.store.listEvents('rollback-direct-interrupt').events.length;
-    expect(() => failingOwnership(directCase.path).apiWrite({ kind: 'direct-interrupt', jobId: 'rollback-direct-interrupt', expectedState: 'starting', at: RECOVERY, proof: direct('start-failure', 'rollback-direct-interrupt'), dispatchClaimOwner: 'dispatcher-rollback-direct-interrupt', expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'rollback' } })).toThrow(OwnershipTransactionError);
+    expect(() => failingOwnership(directCase.path).apiWrite({ kind: 'direct-interrupt', jobId: 'rollback-direct-interrupt', expectedState: 'starting', at: RECOVERY, proof: direct('start-failure', 'rollback-direct-interrupt'), dispatchClaimOwner: 'dispatcher-rollback-direct-interrupt', expectedClaimExpiresAt: EXPIRY, expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'rollback' } })).toThrow(OwnershipTransactionError);
     expect(directCase.store.getJob('rollback-direct-interrupt').state).toBe('starting'); expect(directCase.store.listEvents('rollback-direct-interrupt').events).toHaveLength(directEvents);
   });
 

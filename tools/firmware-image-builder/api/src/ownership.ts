@@ -25,6 +25,28 @@ const ACTIVE_STATES = new Set<JobState>(ACTIVE_RECOVERY_STATES);
 const ACTIVE_RECOVERY_STATE_SQL = ACTIVE_RECOVERY_STATES.map((state) => `'${state}'`).join(',');
 const RUNNER_LEASE_RENEWABLE_STATES = Object.freeze([...ACTIVE_RECOVERY_STATES, 'publishing'] as const);
 const RUNNER_LEASE_RENEWABLE_STATE_SQL = RUNNER_LEASE_RENEWABLE_STATES.map((state) => `'${state}'`).join(',');
+const DISPATCH_NON_ACTIVITY_BLOCKER_SQL = `(
+  cleanup_fence_generation IS NOT NULL
+  OR cleanup_admission_id IS NOT NULL
+  OR cleanup_blocker_code IS NOT NULL
+  OR cleanup_blocker_json IS NOT NULL
+  OR container_id IS NOT NULL
+  OR container_name IS NOT NULL
+  OR container_image_digest IS NOT NULL
+  OR container_label_job_id IS NOT NULL
+  OR container_label_manifest_sha IS NOT NULL
+  OR container_labels_json IS NOT NULL
+  OR artifact_staging_path IS NOT NULL
+  OR (artifact_quarantine_path IS NOT NULL AND publish_state IS NOT 'quarantined')
+  OR artifact_quarantine_intent_path IS NOT NULL
+  OR publish_blocker_code IS NOT NULL
+  OR publish_blocker_json IS NOT NULL
+  OR publish_state IN ('blocked', 'publishing')
+  OR EXISTS (
+    SELECT 1 FROM job_log_generations AS dispatch_logs
+    WHERE dispatch_logs.job_id=jobs.job_id AND dispatch_logs.sealed_at IS NULL
+  )
+)`;
 export const MAX_QUEUE_LENGTH = 50;
 const STAGE_STATE: Readonly<Record<PipelineStageName, JobState>> = Object.freeze({
   preflight: 'preflight', source: 'source', 'release-gates': 'release_gates', frontend: 'frontend',
@@ -305,7 +327,7 @@ export type ApiWriteCommand =
   | Readonly<{ kind: 'freshness-request'; jobId: string; at: string }>
   | Readonly<{ kind: 'freshness-result'; jobId: string; input: FreshnessInput; at: string }>
   | Readonly<{ kind: 'runner-recovery-blocker'; jobId: string; expectedState: ActiveRecoveryState; runnerUnit: string; observedOwner: string | null; observedLeaseExpiresAt: string | null; blocker: JsonObject; blockerCode?: BuilderErrorCode; dispatchClaimOwner?: string; expectedClaimExpiresAt?: string; at: string }>
-  | Readonly<{ kind: 'direct-interrupt'; jobId: string; expectedState: ActiveRecoveryState; at: string; proof: DirectInterruptionProof; errorCode: BuilderErrorCode; error: JsonObject; dispatchClaimOwner?: string; expectedStartAttemptedAt?: string; expectedUnitInactiveAt?: string }>
+  | Readonly<{ kind: 'direct-interrupt'; jobId: string; expectedState: ActiveRecoveryState; at: string; proof: DirectInterruptionProof; errorCode: BuilderErrorCode; error: JsonObject; dispatchClaimOwner?: string; expectedClaimExpiresAt?: string; expectedStartAttemptedAt?: string; expectedUnitInactiveAt?: string }>
   | Readonly<{ kind: 'publish-recovery'; jobId: string; expectedState: 'publishing'; at: string; state: 'succeeded' | 'failed'; evidence: PublishRecoveryEvidence; errorCode?: BuilderErrorCode; error?: JsonObject }>
   | Readonly<{ kind: 'cleanup-credential-reserve'; jobId: string; admissionId: string; owner: string; credentialRelativePath: string; createdAt: string; expiresAt: string; at: string }>
   | Readonly<{ kind: 'cleanup-credential-abort'; jobId: string; admissionId: string; owner: string; credentialRelativePath: string; createdAt: string; expiresAt: string; at: string }>
@@ -741,7 +763,9 @@ function validateApiCommand(command: ApiWriteCommand): void {
       return;
     case 'direct-interrupt':
       preparedCommon(value, 'API'); preparedEnum(value.expectedState, JOB_STATES, 'direct interruption expectedState'); shapeDirectProof(value.proof, value.at as string); preparedEnum(value.errorCode, BUILDER_ERROR_CODES, 'direct interruption errorCode'); preparedJsonObject(value.error, 'direct interruption error');
-      preparedOptionalString(value.dispatchClaimOwner, 'direct interruption dispatch claim owner'); preparedOptionalInstant(value.expectedStartAttemptedAt, 'direct interruption expected start attempt'); preparedOptionalInstant(value.expectedUnitInactiveAt, 'direct interruption expected inactive time');
+      preparedOptionalString(value.dispatchClaimOwner, 'direct interruption dispatch claim owner'); preparedOptionalInstant(value.expectedClaimExpiresAt, 'direct interruption expected claim expiry'); preparedOptionalInstant(value.expectedStartAttemptedAt, 'direct interruption expected start attempt'); preparedOptionalInstant(value.expectedUnitInactiveAt, 'direct interruption expected inactive time');
+      if (value.dispatchClaimOwner !== undefined && value.dispatchClaimOwner !== null && (value.expectedClaimExpiresAt === undefined || value.expectedClaimExpiresAt === null)) throw new OwnershipValidationError('direct interruption expected claim expiry is required with a dispatch claim owner');
+      if (value.dispatchClaimOwner === undefined && value.expectedClaimExpiresAt !== undefined && value.expectedClaimExpiresAt !== null) throw new OwnershipValidationError('direct interruption expected claim expiry requires a dispatch claim owner');
       if ((value.expectedStartAttemptedAt === undefined) !== (value.expectedUnitInactiveAt === undefined)) throw new OwnershipValidationError('direct interruption expected timestamps are incomplete');
       return;
     case 'publish-recovery': preparedCommon(value, 'API'); preparedEnum(value.expectedState, ['publishing'], 'publish recovery expectedState'); preparedEnum(value.state, ['succeeded', 'failed'], 'publish recovery state'); shapePublishEvidence(value.evidence, value.at as string); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'publish recovery errorCode'); preparedJsonObject(value.error, 'publish recovery error', true); return;
@@ -2318,28 +2342,18 @@ export class OwnershipStore {
     const blocker = this.#db.prepare(`SELECT job_id FROM jobs
       WHERE queue_state='dispatched'
         OR state IN (${ACTIVE_RECOVERY_STATE_SQL})
-        OR cleanup_fence_generation IS NOT NULL
-        OR cleanup_admission_id IS NOT NULL
-        OR cleanup_blocker_code IS NOT NULL
-        OR cleanup_blocker_json IS NOT NULL
-        OR container_id IS NOT NULL
-        OR container_name IS NOT NULL
-        OR container_image_digest IS NOT NULL
-        OR container_label_job_id IS NOT NULL
-        OR container_label_manifest_sha IS NOT NULL
-        OR container_labels_json IS NOT NULL
-        OR artifact_staging_path IS NOT NULL
-        OR (artifact_quarantine_path IS NOT NULL AND publish_state IS NOT 'quarantined')
-        OR artifact_quarantine_intent_path IS NOT NULL
-        OR publish_blocker_code IS NOT NULL
-        OR publish_blocker_json IS NOT NULL
-        OR publish_state IN ('blocked', 'publishing')
-        OR EXISTS (SELECT 1 FROM job_log_generations AS logs WHERE logs.job_id=jobs.job_id AND logs.sealed_at IS NULL)
+        OR ${DISPATCH_NON_ACTIVITY_BLOCKER_SQL}
       LIMIT 1`).get() as Row | undefined;
-    if (blocker !== undefined && blocker.job_id !== command.jobId) {
+    if (blocker !== undefined) {
       conflict('fenced', `queue dispatch is blocked by job ${String(blocker.job_id)}`);
     }
-    const result = this.#db.prepare("UPDATE jobs SET state='starting', queue_state='dispatched', queue_position=NULL, dispatched_at=?, runner_unit=?, updated_at=? WHERE job_id=? AND state='queued' AND queue_state='queued' AND runner_unit IS NULL AND EXISTS (SELECT 1 FROM queue_entries AS candidate WHERE candidate.job_id=jobs.job_id AND candidate.fifo_seq=(SELECT MIN(first.fifo_seq) FROM queue_entries AS first JOIN jobs AS first_job ON first_job.job_id=first.job_id WHERE first_job.state='queued' AND first_job.queue_state='queued')) AND NOT EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND cleanup_fence_generation IS NOT NULL)").run(command.at, command.runnerUnit, command.at, command.jobId, command.jobId);
+    const result = this.#db.prepare(`UPDATE jobs SET state='starting', queue_state='dispatched', queue_position=NULL, dispatched_at=?, runner_unit=?, updated_at=?
+      WHERE job_id=? AND state='queued' AND queue_state='queued' AND runner_unit IS NULL
+        AND EXISTS (SELECT 1 FROM queue_entries AS candidate WHERE candidate.job_id=jobs.job_id AND candidate.fifo_seq=(
+          SELECT MIN(first.fifo_seq) FROM queue_entries AS first JOIN jobs AS first_job ON first_job.job_id=first.job_id
+          WHERE first_job.state='queued' AND first_job.queue_state='queued'
+        ))
+        AND NOT COALESCE(${DISPATCH_NON_ACTIVITY_BLOCKER_SQL}, 0)`).run(command.at, command.runnerUnit, command.at, command.jobId);
     if (Number(result.changes) !== 1) conflict('stale-predecessor', 'queued job was already claimed');
     const claim = this.#db.prepare(`INSERT INTO queue_dispatch_claims
       (claim_id, job_id, owner, claimed_at, lease_expires_at, phase, start_attempted_at, unit_inactive_at)
@@ -2374,7 +2388,8 @@ export class OwnershipStore {
       WHERE claim_id=1 AND job_id=? AND owner=? AND lease_expires_at <= ?
         AND EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND state='starting' AND queue_state='dispatched' AND runner_unit=?
           AND runner_lease_owner IS NULL AND runner_lease_expires_at IS NULL AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL
-          AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL)`).run(
+          AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL
+          AND NOT COALESCE(${DISPATCH_NON_ACTIVITY_BLOCKER_SQL}, 0))`).run(
       command.claimOwner, command.claimExpiresAt, command.jobId, command.previousOwner, command.at, command.jobId, command.runnerUnit,
     );
     if (Number(result.changes) !== 1) conflict('cas-lost', 'dispatch reclaim ownership was lost');
@@ -2389,7 +2404,8 @@ export class OwnershipStore {
       WHERE claim_id=1 AND job_id=? AND owner=? AND lease_expires_at=? AND lease_expires_at > ?
         AND EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND state='starting' AND queue_state='dispatched'
           AND runner_lease_owner IS NULL AND runner_lease_expires_at IS NULL AND cleanup_fence_generation IS NULL
-          AND cleanup_admission_id IS NULL AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL)`).run(
+          AND cleanup_admission_id IS NULL AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL
+          AND NOT COALESCE(${DISPATCH_NON_ACTIVITY_BLOCKER_SQL}, 0))`).run(
       command.claimExpiresAt, command.jobId, command.claimOwner, command.expectedClaimExpiresAt, command.at, command.jobId,
     );
     if (Number(result.changes) !== 1) conflict('cas-lost', 'dispatch claim renewal ownership was lost');
@@ -2406,25 +2422,16 @@ export class OwnershipStore {
     if (row.cleanup_fence_generation !== null || row.cleanup_admission_id !== null || row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null) conflict('fenced', 'dispatch start is fenced for recovery');
     requirePersistedTimeline(this.#db, command.jobId, [['dispatch start time', command.at]]);
     const blocker = this.#db.prepare(`SELECT job_id FROM jobs
-      WHERE job_id<>? AND (
-        queue_state='dispatched'
-        OR state IN (${ACTIVE_RECOVERY_STATE_SQL})
-        OR cleanup_fence_generation IS NOT NULL OR cleanup_admission_id IS NOT NULL
-        OR cleanup_blocker_code IS NOT NULL OR cleanup_blocker_json IS NOT NULL
-        OR container_id IS NOT NULL OR container_name IS NOT NULL OR container_image_digest IS NOT NULL
-        OR container_label_job_id IS NOT NULL OR container_label_manifest_sha IS NOT NULL OR container_labels_json IS NOT NULL
-        OR artifact_staging_path IS NOT NULL OR artifact_quarantine_intent_path IS NOT NULL
-        OR (artifact_quarantine_path IS NOT NULL AND publish_state IS NOT 'quarantined')
-        OR publish_blocker_code IS NOT NULL OR publish_blocker_json IS NOT NULL
-        OR publish_state IN ('blocked', 'publishing')
-        OR EXISTS (SELECT 1 FROM job_log_generations AS logs WHERE logs.job_id=jobs.job_id AND logs.sealed_at IS NULL)
-      ) LIMIT 1`).get(command.jobId) as Row | undefined;
+      WHERE (job_id<>? AND (queue_state='dispatched' OR state IN (${ACTIVE_RECOVERY_STATE_SQL})))
+        OR ${DISPATCH_NON_ACTIVITY_BLOCKER_SQL}
+      LIMIT 1`).get(command.jobId) as Row | undefined;
     if (blocker !== undefined) conflict('fenced', `dispatch start is blocked by job ${String(blocker.job_id)}`);
     const result = this.#db.prepare(`UPDATE queue_dispatch_claims SET phase='start-attempted', start_attempted_at=?, unit_inactive_at=?, lease_expires_at=?
       WHERE claim_id=1 AND job_id=? AND owner=? AND phase='pre-start' AND start_attempted_at IS NULL AND unit_inactive_at IS NULL AND lease_expires_at=? AND lease_expires_at > ?
         AND EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND state='starting' AND queue_state='dispatched' AND runner_unit=?
           AND runner_lease_owner IS NULL AND runner_lease_expires_at IS NULL AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL
-          AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL)`).run(
+          AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL
+          AND NOT COALESCE(${DISPATCH_NON_ACTIVITY_BLOCKER_SQL}, 0))`).run(
       command.startAttemptedAt, command.unitInactiveAt, command.claimExpiresAt, command.jobId, command.claimOwner, command.expectedClaimExpiresAt, command.at,
       command.jobId, command.runnerUnit,
     );
@@ -2438,7 +2445,8 @@ export class OwnershipStore {
     const result = this.#db.prepare(`UPDATE queue_dispatch_claims SET unit_inactive_at=?
       WHERE claim_id=1 AND job_id=? AND owner=? AND phase='start-attempted' AND lease_expires_at > ? AND start_attempted_at IS NOT NULL AND unit_inactive_at IS NOT NULL AND start_attempted_at <= ?
         AND EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND state='starting' AND queue_state='dispatched' AND runner_lease_owner IS NULL AND runner_lease_expires_at IS NULL
-          AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL)`).run(
+          AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL
+          AND NOT COALESCE(${DISPATCH_NON_ACTIVITY_BLOCKER_SQL}, 0))`).run(
       command.unitInactiveAt, command.jobId, command.claimOwner, command.at, command.unitInactiveAt, command.jobId,
     );
     if (Number(result.changes) !== 1) conflict('cas-lost', 'dispatch proof observation ownership was lost');
@@ -2998,6 +3006,13 @@ export class OwnershipStore {
     if (command.dispatchClaimOwner !== undefined && (claim === undefined || claim.job_id !== command.jobId || claim.owner !== command.dispatchClaimOwner)) {
       conflict('identity-mismatch', 'direct interruption dispatch claim is stale');
     }
+    if (command.dispatchClaimOwner !== undefined) {
+      const persistedClaimExpiresAt = persistedInstant(claim?.lease_expires_at, 'persisted dispatch claim expiry');
+      if (persistedClaimExpiresAt === null || persistedClaimExpiresAt !== command.expectedClaimExpiresAt) {
+        conflict('cas-lost', 'direct interruption dispatch claim expiry changed');
+      }
+      if (persistedClaimExpiresAt <= command.at) conflict('stale-lease', 'direct interruption dispatch claim is expired');
+    }
     if (startFailure && command.dispatchClaimOwner === undefined) conflict('identity-mismatch', 'start-failure direct interruption requires a durable dispatch claim');
     if (startFailure && (claim === undefined || claim.phase !== 'start-attempted' || claim.lease_expires_at === null || String(claim.lease_expires_at) <= command.at)) {
       conflict('identity-mismatch', 'start-failure direct interruption claim is not live and start-attempted');
@@ -3027,12 +3042,13 @@ export class OwnershipStore {
     const logArguments = command.proof.logs.runner === 'absent' ? [command.jobId] : [command.jobId, command.jobId, command.jobId, command.jobId];
     const claimObservation = startFailure
       ? this.#db.prepare(`UPDATE queue_dispatch_claims SET unit_inactive_at=?
-          WHERE claim_id=1 AND job_id=? AND owner=? AND phase='start-attempted' AND start_attempted_at=? AND unit_inactive_at=? AND lease_expires_at > ?`).run(
+          WHERE claim_id=1 AND job_id=? AND owner=? AND phase='start-attempted' AND start_attempted_at=? AND unit_inactive_at=? AND lease_expires_at=? AND lease_expires_at > ?`).run(
         command.proof.unitInactiveAt,
         command.jobId,
         command.dispatchClaimOwner,
         command.expectedStartAttemptedAt,
         command.expectedUnitInactiveAt,
+        command.expectedClaimExpiresAt,
         command.at,
       )
       : null;
@@ -3053,10 +3069,10 @@ export class OwnershipStore {
     if (Number(result.changes) !== 1) conflict('stale-predecessor', 'direct interruption proof no longer holds');
     if (command.dispatchClaimOwner !== undefined) {
       const released = this.#db.prepare(`DELETE FROM queue_dispatch_claims
-        WHERE claim_id=1 AND job_id=? AND owner=?${startFailure ? " AND phase='start-attempted' AND start_attempted_at=? AND unit_inactive_at=?" : ''}`).run(
+        WHERE claim_id=1 AND job_id=? AND owner=? AND lease_expires_at=?${startFailure ? " AND phase='start-attempted' AND start_attempted_at=? AND unit_inactive_at=?" : ''}`).run(
         ...(startFailure
-          ? [command.jobId, command.dispatchClaimOwner, command.expectedStartAttemptedAt, command.proof.unitInactiveAt]
-          : [command.jobId, command.dispatchClaimOwner]),
+          ? [command.jobId, command.dispatchClaimOwner, command.expectedClaimExpiresAt, command.expectedStartAttemptedAt, command.proof.unitInactiveAt]
+          : [command.jobId, command.dispatchClaimOwner, command.expectedClaimExpiresAt]),
       );
       if (Number(released.changes) !== 1) conflict('cas-lost', 'direct interruption dispatch claim release lost');
     }
@@ -3638,6 +3654,8 @@ export class OwnershipStore {
     if (row.runner_unit !== command.runnerUnit) conflict('stale-runner-owner', 'runner identity changed');
     if (row.cleanup_fence_generation !== null || row.cleanup_admission_id !== null) conflict('fenced', 'runner is fenced for recovery');
     if (row.cleanup_blocker_code !== null || row.cleanup_blocker_json !== null) conflict('fenced', 'runner has a persisted recovery blocker');
+    const dispatchBlocker = this.#db.prepare(`SELECT 1 AS present FROM jobs WHERE job_id=? AND ${DISPATCH_NON_ACTIVITY_BLOCKER_SQL}`).get(command.jobId) as Row | undefined;
+    if (dispatchBlocker !== undefined) conflict('fenced', 'runner handoff has unresolved dispatch identity or recovery state');
     if (row.runner_lease_owner !== null || row.runner_lease_expires_at !== null) conflict('stale-predecessor', 'runner lease was already claimed');
     requirePersistedTimeline(this.#db, command.jobId, [['runner start time', command.at]]);
     requireChronology([['accepted time', String(row.accepted_at)], ['dispatch time', row.dispatched_at === null ? null : String(row.dispatched_at)], ['runner start time', command.at]]);
@@ -3660,7 +3678,9 @@ export class OwnershipStore {
       ['runner start time', command.at],
     ]);
     const result = this.#db.prepare(`UPDATE jobs SET runner_lease_owner=?, runner_lease_expires_at=?, runner_started_at=?, updated_at=? WHERE job_id=? AND state='starting' AND runner_unit=?
-      AND runner_lease_owner IS NULL AND runner_lease_expires_at IS NULL AND cleanup_fence_generation IS NULL`).run(command.owner, command.expiresAt, command.at, command.at, command.jobId, command.runnerUnit);
+      AND runner_lease_owner IS NULL AND runner_lease_expires_at IS NULL AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL
+      AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL
+      AND NOT COALESCE(${DISPATCH_NON_ACTIVITY_BLOCKER_SQL}, 0)`).run(command.owner, command.expiresAt, command.at, command.at, command.jobId, command.runnerUnit);
     if (Number(result.changes) !== 1) conflict('stale-predecessor', 'runner lease was already claimed');
     const released = this.#db.prepare(`DELETE FROM queue_dispatch_claims
       WHERE claim_id=1 AND job_id=? AND owner=? AND phase='start-attempted'

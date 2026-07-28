@@ -11,7 +11,7 @@ import {
 } from '../../api/src/ownership.js';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { type CreateJobInput } from '../../api/src/store.js';
-import { createQueueCoordinator, type QueueCoordinatorOptions, type QueueSystemd } from '../../api/src/queue.js';
+import { createQueueCoordinator, type DirectInterruptionInput, type QueueCoordinatorOptions, type QueueSystemd } from '../../api/src/queue.js';
 
 const ACCEPTED = '2026-07-28T10:00:00.000Z';
 const DISPATCHED = '2026-07-28T10:00:01.000Z';
@@ -705,6 +705,99 @@ describe('queue service-start recovery with real SQLite stores', () => {
     await expect(coordinator.dispatchNext()).resolves.toMatchObject({ kind: 'started', jobId: 'first' });
     expect(state.starts).toEqual(['osi-image-builder-runner@first.service']);
     expect(state.active.has('osi-image-builder-runner@first.service')).toBe(true);
+  });
+
+  it('keeps every later dispatch checkpoint successful after runner handoff during systemd start', async () => {
+    const target = await fixture(['first']);
+    const state = systemdState();
+    const systemd: QueueSystemd = {
+      ...state.systemd,
+      start: async (unit) => {
+        state.starts.push(unit);
+        state.active.add(unit);
+        expect(target.ownership.runnerWrite({
+          kind: 'acquire-lease',
+          jobId: 'first',
+          runnerUnit: unit,
+          owner: 'runner-a',
+          expiresAt: LATER,
+          at: WRITTEN,
+        }).ok).toBe(true);
+        return { unit, argv: ['systemctl', '--user', 'start', unit], exitCode: 0, timedOut: false };
+      },
+    };
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd, safety: { inspect: async () => null }, clock: { now: () => WRITTEN } });
+
+    await expect(coordinator.dispatchNext()).resolves.toEqual({ kind: 'started', jobId: 'first', runnerUnit: 'osi-image-builder-runner@first.service' });
+    expect(target.db.prepare('SELECT runner_lease_owner, runner_lease_expires_at FROM jobs WHERE job_id=?').get('first')).toEqual({ runner_lease_owner: 'runner-a', runner_lease_expires_at: LATER });
+    expect(target.db.prepare('SELECT 1 AS present FROM queue_dispatch_claims WHERE claim_id=1').get()).toBeUndefined();
+  });
+
+  it('does not terminalize when claim renewal wins after direct-proof verifier input', async () => {
+    const target = await fixture(['first']);
+    const state = systemdState('failure');
+    let releaseVerifier!: () => void;
+    const verifierPaused = new Promise<void>((resolve) => { releaseVerifier = resolve; });
+    const proofInputs: DirectInterruptionInput[] = [];
+    const directInterrupt = vi.fn(async (inputValue: DirectInterruptionInput) => {
+      proofInputs.push(inputValue);
+      await verifierPaused;
+      return directProof(String(inputValue.jobId), String(inputValue.startAttemptedAt), String(inputValue.unitInactiveAt), WRITTEN);
+    });
+    const coordinator = createQueueCoordinator({
+      db: target.db,
+      ownership: target.ownership,
+      systemd: state.systemd,
+      safety: { inspect: async () => null },
+      directInterrupt,
+      coordinatorId: 'dispatcher-direct-claim-expiry-race',
+      clock: { now: () => WRITTEN },
+    });
+
+    const dispatch = coordinator.dispatchNext();
+    await vi.waitFor(() => expect(directInterrupt).toHaveBeenCalledTimes(1));
+    const verifierInput = proofInputs[0]!;
+    const expectedClaimExpiresAt = String(verifierInput.expectedClaimExpiresAt);
+    const renewedClaimExpiresAt = new Date(Date.parse(expectedClaimExpiresAt) + 1_000).toISOString();
+    expect(target.ownership.apiWrite({
+      kind: 'dispatch-renew',
+      jobId: 'first',
+      claimOwner: 'dispatcher-direct-claim-expiry-race',
+      expectedClaimExpiresAt,
+      claimExpiresAt: renewedClaimExpiresAt,
+      at: LATER,
+    }).ok).toBe(true);
+    releaseVerifier();
+
+    await expect(dispatch).resolves.toMatchObject({ kind: 'blocked', jobId: 'first' });
+    expect(target.db.prepare('SELECT state, queue_state, terminal_error_code FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'starting', queue_state: 'dispatched', terminal_error_code: null });
+    expect(target.db.prepare('SELECT lease_expires_at FROM queue_dispatch_claims WHERE claim_id=1').get()).toEqual({ lease_expires_at: renewedClaimExpiresAt });
+  });
+
+  it.each([
+    'cleanup blocker', 'container', 'staging', 'unsealed log', 'publish blocker', 'publishing state',
+  ])('retains a claimed-job %s blocker and prevents systemd start', async (kind) => {
+    const target = await fixture(['first', 'second']);
+    const state = systemdState();
+    let injected = false;
+    const safety = { inspect: async ({ phase }: { phase: string }) => {
+      if (phase === 'before-start' && !injected) {
+        injected = true;
+        seedQueueBlocker(target.db, kind);
+      }
+      return null;
+    } };
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: state.systemd, safety, clock: { now: () => WRITTEN } });
+
+    await expect(coordinator.dispatchNext()).resolves.toMatchObject({ kind: expect.stringMatching(/^(blocked|recovery-blocked)$/), jobId: 'first' });
+    expect(state.starts).toHaveLength(0);
+    expect(target.db.prepare('SELECT state, queue_state FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'starting', queue_state: 'dispatched' });
+    expect(target.db.prepare('SELECT state, queue_state FROM jobs WHERE job_id=?').get('second')).toEqual({ state: 'queued', queue_state: 'queued' });
+    const retained = target.db.prepare(`SELECT cleanup_fence_generation, cleanup_admission_id, cleanup_blocker_code,
+      container_id, artifact_staging_path, publish_state, publish_blocker_code,
+      NULLIF((SELECT COUNT(*) FROM job_log_generations WHERE job_id=jobs.job_id AND sealed_at IS NULL), 0) AS unsealed_log_count
+      FROM jobs WHERE job_id=?`).get('first') as Record<string, unknown>;
+    expect(Object.values(retained).some((value) => value !== null)).toBe(true);
   });
 
   it('fails closed when the claim expires between final safety inspection and blocker CAS', async () => {
