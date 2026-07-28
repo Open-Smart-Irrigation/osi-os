@@ -129,7 +129,7 @@ export function createStartupCoordinator(options: StartupCoordinatorOptions): St
 
   function start(): Promise<StartupResult> {
     if (inFlight !== undefined) return inFlight;
-    inFlight = runStartupAttempt();
+    inFlight = Promise.resolve().then(runStartupAttempt);
     void inFlight.then(
       () => { inFlight = undefined; },
       () => { inFlight = undefined; },

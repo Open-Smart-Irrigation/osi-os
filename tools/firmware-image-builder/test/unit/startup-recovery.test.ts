@@ -29,6 +29,65 @@ function startupGate(): QueueStartupGate {
 }
 
 describe('startup reconciliation order', () => {
+  it('single-flights a synchronously reentrant start before opening the queue', async () => {
+    const calls: string[] = [];
+    const gate = startupGate();
+    let target!: ReturnType<typeof createStartupCoordinator>;
+    let reentrant: Promise<unknown> | undefined;
+    const phase = (name: string) => async (): Promise<StartupPhaseResult> => {
+      calls.push(name);
+      if (name === 'migrations') reentrant = target.start();
+      return clear();
+    };
+    target = createStartupCoordinator({
+      queueGate: gate,
+      migrations: phase('migrations'),
+      cleanupAdmissions: phase('cleanup-admissions'),
+      liveRunnerClassification: phase('live-runner-classification'),
+      stalePublishingRecovery: phase('stale-publishing-recovery'),
+      nonPublishingInterruption: phase('non-publishing-interruption'),
+      retention: phase('retention'),
+      dispatch: phase('dispatch'),
+    });
+
+    const first = target.start();
+    await Promise.resolve();
+    expect(reentrant).toBe(first);
+    await expect(first).resolves.toEqual({ dispatched: true, blockers: [] });
+    expect(calls).toEqual([...STARTUP_PHASES]);
+    expect(gate.beginStartupReconciliation).toHaveBeenCalledOnce();
+    expect(gate.completeStartupReconciliation).toHaveBeenCalledOnce();
+  });
+
+  it('allows a rejected attempt to be retried sequentially', async () => {
+    let shouldReject = true;
+    const gate = startupGate();
+    const migrations = vi.fn(async (): Promise<StartupPhaseResult> => {
+      if (shouldReject) throw new Error('migration failed');
+      return clear();
+    });
+    const target = createStartupCoordinator({
+      queueGate: gate,
+      migrations,
+      cleanupAdmissions: async () => clear(),
+      liveRunnerClassification: async () => clear(),
+      stalePublishingRecovery: async () => clear(),
+      nonPublishingInterruption: async () => clear(),
+      retention: async () => clear(),
+      dispatch: async () => clear(),
+    });
+
+    const rejected = target.start();
+    await expect(rejected).rejects.toThrow('migration failed');
+    shouldReject = false;
+    const retried = target.start();
+    expect(retried).not.toBe(rejected);
+    await expect(retried).resolves.toEqual({ dispatched: true, blockers: [] });
+    expect(migrations).toHaveBeenCalledTimes(2);
+    expect(gate.beginStartupReconciliation).toHaveBeenCalledTimes(2);
+    expect(gate.completeStartupReconciliation).toHaveBeenCalledOnce();
+  });
+
   it('single-flights overlapping starts and keeps the queue closed until the shared attempt settles', async () => {
     let releaseMigrations!: () => void;
     const migrationsReleased = new Promise<void>((resolve) => { releaseMigrations = resolve; });
