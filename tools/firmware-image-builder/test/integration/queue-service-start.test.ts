@@ -18,6 +18,7 @@ const DISPATCHED = '2026-07-28T10:00:01.000Z';
 const OBSERVED = '2026-07-28T10:00:02.000Z';
 const WRITTEN = '2026-07-28T10:00:03.000Z';
 const LATER = '2026-07-28T10:00:04.000Z';
+const EXPIRED = '2026-07-28T10:00:35.000Z';
 const SHA40 = 'a'.repeat(40);
 const SHA64 = 'b'.repeat(64);
 const directories: string[] = [];
@@ -237,10 +238,65 @@ describe('queue service-start recovery with real SQLite stores', () => {
     const directInterrupt = vi.fn(async () => null);
     const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: state.systemd, safety: { inspect: async () => null }, directInterrupt, clock: { now: () => WRITTEN } });
 
-    await expect(coordinator.dispatchNext()).resolves.toEqual({ kind: 'blocked', reason: 'RUNNER_DISAPPEARED', jobId: 'first' });
-    expect(target.db.prepare('SELECT state, queue_state, runner_lease_owner, runner_lease_expires_at, cleanup_blocker_code, terminal_error_code FROM jobs WHERE job_id=?').get('first')).toEqual(before);
+    await expect(coordinator.dispatchNext()).resolves.toMatchObject({ kind: 'recovery-blocked', jobId: 'first', blocker: { code: 'RUNNER_DISAPPEARED' } });
+    expect(target.db.prepare('SELECT state, queue_state, runner_lease_owner, runner_lease_expires_at, cleanup_blocker_code, terminal_error_code FROM jobs WHERE job_id=?').get('first')).toEqual({ ...before, cleanup_blocker_code: 'RUNNER_DISAPPEARED' });
     expect(directInterrupt).not.toHaveBeenCalled();
     expect(state.starts).toHaveLength(0);
+  });
+
+  it('defers a stale lease without mutation when the runner unit is active', async () => {
+    const target = await fixture(['first', 'second']);
+    expect(target.ownership.apiWrite({ kind: 'dispatch', jobId: 'first', runnerUnit: 'osi-image-builder-runner@first.service', at: DISPATCHED }).ok).toBe(true);
+    expect(target.ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'first', runnerUnit: 'osi-image-builder-runner@first.service', owner: 'runner-a', expiresAt: OBSERVED, at: DISPATCHED }).ok).toBe(true);
+    const before = target.db.prepare('SELECT state, queue_state, runner_lease_owner, runner_lease_expires_at, cleanup_blocker_code, terminal_error_code FROM jobs WHERE job_id=?').get('first');
+    const state = systemdState();
+    state.active.add('osi-image-builder-runner@first.service');
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: state.systemd, safety: { inspect: async () => null }, clock: { now: () => WRITTEN } });
+
+    await expect(coordinator.dispatchNext()).resolves.toEqual({ kind: 'blocked', reason: 'runner unit is live', jobId: 'first' });
+    expect(target.db.prepare('SELECT state, queue_state, runner_lease_owner, runner_lease_expires_at, cleanup_blocker_code, terminal_error_code FROM jobs WHERE job_id=?').get('first')).toEqual(before);
+    expect(state.starts).toHaveLength(0);
+  });
+
+  it('serializes claim-to-start ownership across coordinators while coordinator A is paused after its dispatch CAS', async () => {
+    const target = await fixture(['first', 'second']);
+    const state = systemdState();
+    let releaseA!: () => void;
+    const pausedA = new Promise<void>((resolve) => { releaseA = resolve; });
+    let afterClaim = false;
+    const safetyA = { inspect: async ({ phase }: { phase: string }) => {
+      if (phase === 'before-start' && !afterClaim) {
+        afterClaim = true;
+        await pausedA;
+      }
+      return null;
+    } };
+    const coordinatorA = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: state.systemd, safety: safetyA, coordinatorId: 'dispatcher-a', clock: { now: () => WRITTEN } });
+    const coordinatorB = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: state.systemd, safety: { inspect: async () => null }, coordinatorId: 'dispatcher-b', clock: { now: () => WRITTEN } });
+    const dispatchA = coordinatorA.dispatchNext();
+    await vi.waitFor(() => expect(target.db.prepare('SELECT job_id, owner, phase FROM queue_dispatch_claims WHERE claim_id=1').get()).toMatchObject({ job_id: 'first', owner: expect.any(String), phase: 'pre-start' }));
+    const beforeB = target.db.prepare('SELECT state, queue_state, runner_unit, dispatched_at FROM jobs ORDER BY job_id').all();
+
+    await expect(coordinatorB.dispatchNext()).resolves.toEqual({ kind: 'blocked', reason: 'DISPATCH_CLAIM_LIVE', jobId: 'first' });
+    expect(target.db.prepare('SELECT state, queue_state, runner_unit, dispatched_at FROM jobs ORDER BY job_id').all()).toEqual(beforeB);
+    expect(state.starts).toHaveLength(0);
+
+    releaseA();
+    await expect(dispatchA).resolves.toMatchObject({ kind: 'started', jobId: 'first' });
+    expect(target.db.prepare('SELECT 1 AS present FROM queue_dispatch_claims WHERE claim_id=1').get()).toBeUndefined();
+  });
+
+  it('reclaims an expired start-attempt claim before physical recovery', async () => {
+    const target = await fixture(['first']);
+    expect(target.ownership.apiWrite({ kind: 'dispatch', jobId: 'first', runnerUnit: 'osi-image-builder-runner@first.service', claimOwner: 'dispatcher-a', claimExpiresAt: '2026-07-28T10:00:33.000Z', at: DISPATCHED }).ok).toBe(true);
+    expect(target.ownership.apiWrite({ kind: 'dispatch-start', jobId: 'first', runnerUnit: 'osi-image-builder-runner@first.service', claimOwner: 'dispatcher-a', unitInactiveAt: WRITTEN, startAttemptedAt: WRITTEN, at: WRITTEN }).ok).toBe(true);
+    const state = systemdState('failure');
+    const directInterrupt = vi.fn(async (inputValue: { jobId: string; startAttemptedAt: string; unitInactiveAt: string }) => directProof(inputValue.jobId, inputValue.startAttemptedAt, inputValue.unitInactiveAt, EXPIRED));
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: { ...state.systemd, inspect: async (unit) => ({ unit, active: false, observedAt: EXPIRED }) }, safety: { inspect: async () => null }, directInterrupt, coordinatorId: 'dispatcher-b', clock: { now: () => EXPIRED } });
+
+    await expect(coordinator.dispatchNext()).resolves.toMatchObject({ kind: 'interrupted', jobId: 'first' });
+    expect(directInterrupt).toHaveBeenCalledWith(expect.objectContaining({ startAttemptedAt: WRITTEN, unitInactiveAt: EXPIRED }));
+    expect(target.db.prepare('SELECT 1 AS present FROM queue_dispatch_claims WHERE claim_id=1').get()).toBeUndefined();
   });
 
   it('uses SQLite FIFO CAS when two coordinators dispatch concurrently', async () => {
@@ -267,7 +323,7 @@ describe('queue service-start recovery with real SQLite stores', () => {
     let proofInput: { startAttemptedAt: string } | undefined;
     const directInterrupt = async (inputValue: { startAttemptedAt: string; jobId: string }) => {
       proofInput = inputValue;
-      return directProof(inputValue.jobId, DISPATCHED, OBSERVED, OBSERVED);
+      return directProof(inputValue.jobId, inputValue.startAttemptedAt, WRITTEN, WRITTEN);
     };
     const firstCoordinator = createQueueCoordinator({
       db: target.db,
@@ -292,6 +348,10 @@ describe('queue service-start recovery with real SQLite stores', () => {
     const target = await fixture(['first']);
     const state = systemdState('failure');
     let proofReturned = false;
+    const systemd: QueueSystemd = {
+      ...state.systemd,
+      inspect: async (unit) => ({ unit, active: false, observedAt: proofReturned ? LATER : WRITTEN }),
+    };
     const directInterrupt = vi.fn(async (inputValue: { jobId: string; startAttemptedAt: string }) => {
       proofReturned = true;
       return directProof(inputValue.jobId, inputValue.startAttemptedAt, WRITTEN, LATER);
@@ -299,7 +359,7 @@ describe('queue service-start recovery with real SQLite stores', () => {
     const coordinator = createQueueCoordinator({
       db: target.db,
       ownership: target.ownership,
-      systemd: state.systemd,
+      systemd,
       safety: { inspect: async () => null },
       directInterrupt,
       clock: { now: () => proofReturned ? LATER : WRITTEN },
@@ -308,6 +368,45 @@ describe('queue service-start recovery with real SQLite stores', () => {
     await expect(coordinator.dispatchNext()).resolves.toMatchObject({ kind: 'interrupted', jobId: 'first' });
     expect(directInterrupt).toHaveBeenCalledWith(expect.objectContaining({ startAttemptedAt: WRITTEN }));
     expect(target.db.prepare('SELECT state, terminal_error_code, terminal_at FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'interrupted', terminal_error_code: 'SERVICE_START_FAILED', terminal_at: LATER });
+  });
+
+  it('rejects a direct proof whose timestamps do not match the verifier input', async () => {
+    const target = await fixture(['first', 'second']);
+    const state = systemdState('failure');
+    const directInterrupt = vi.fn(async (inputValue: { jobId: string; unitInactiveAt: string }) => directProof(inputValue.jobId, DISPATCHED, inputValue.unitInactiveAt, WRITTEN));
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: state.systemd, safety: { inspect: async () => null }, directInterrupt, coordinatorId: 'dispatcher-a', clock: { now: () => WRITTEN } });
+
+    await expect(coordinator.dispatchNext()).resolves.toEqual({ kind: 'blocked', reason: 'DIRECT_PROOF_MISMATCH', jobId: 'first' });
+    expect(target.db.prepare('SELECT state, queue_state, cleanup_blocker_code, terminal_error_code FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'starting', queue_state: 'dispatched', cleanup_blocker_code: null, terminal_error_code: null });
+    expect(target.db.prepare('SELECT phase, start_attempted_at FROM queue_dispatch_claims WHERE claim_id=1').get()).toMatchObject({ phase: 'start-attempted', start_attempted_at: WRITTEN });
+  });
+
+  it('does not terminalize when the runner activates during the physical proof', async () => {
+    const target = await fixture(['first', 'second']);
+    const state = systemdState('failure');
+    let inspectCount = 0;
+    let releaseProof!: () => void;
+    const proofPaused = new Promise<void>((resolve) => { releaseProof = resolve; });
+    const systemd: QueueSystemd = {
+      ...state.systemd,
+      inspect: async (unit) => {
+        inspectCount += 1;
+        if (inspectCount === 3) return { unit, active: true, observedAt: LATER };
+        return { unit, active: false, observedAt: inspectCount === 1 ? WRITTEN : LATER };
+      },
+    };
+    const directInterrupt = vi.fn(async (inputValue: { jobId: string; startAttemptedAt: string; unitInactiveAt: string }) => {
+      await proofPaused;
+      return directProof(inputValue.jobId, inputValue.startAttemptedAt, inputValue.unitInactiveAt, WRITTEN);
+    });
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd, safety: { inspect: async () => null }, directInterrupt, coordinatorId: 'dispatcher-a', clock: { now: () => inspectCount <= 1 ? WRITTEN : LATER } });
+    const dispatch = coordinator.dispatchNext();
+    await vi.waitFor(() => expect(directInterrupt).toHaveBeenCalledTimes(1));
+    releaseProof();
+
+    await expect(dispatch).resolves.toEqual({ kind: 'blocked', reason: 'runner unit is live', jobId: 'first' });
+    expect(target.db.prepare('SELECT state, queue_state, cleanup_blocker_code, terminal_error_code FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'starting', queue_state: 'dispatched', cleanup_blocker_code: null, terminal_error_code: null });
+    expect(target.db.prepare('SELECT phase, unit_inactive_at FROM queue_dispatch_claims WHERE claim_id=1').get()).toEqual({ phase: 'start-attempted', unit_inactive_at: WRITTEN });
   });
 
   it('does not mutate or advance FIFO when the failed start leaves the runner unit active without a lease', async () => {

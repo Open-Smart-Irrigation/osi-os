@@ -718,6 +718,7 @@ describe('Task 20 cleanup admission corrections', () => {
   });
 
   it('records migration 012 as additive expiration and predecessor evidence', () => {
-    expect(MIGRATION_REGISTRY.at(-1)).toMatchObject({ version: 12, filename: '012_cleanup_admission_supersession_evidence.sql' });
+    expect(MIGRATION_REGISTRY.find((migration) => migration.version === 12)).toMatchObject({ version: 12, filename: '012_cleanup_admission_supersession_evidence.sql' });
+    expect(MIGRATION_REGISTRY.at(-1)).toMatchObject({ version: 13, filename: '013_queue_dispatch_claim.sql' });
   });
 });

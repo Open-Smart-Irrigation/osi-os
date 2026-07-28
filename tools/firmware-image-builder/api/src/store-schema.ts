@@ -23,6 +23,7 @@ const migrationRegistry = [
   { version: 10, filename: '010_cancellation_escalation_coordination.sql', sha256: 'e358b53895ae97bdf1778135c957257ab1cb014b44d72caeecb2c511ca02c283' },
   { version: 11, filename: '011_cancellation_clock_and_stop_authorization.sql', sha256: '0e9255cd9ceed96061eaad598821b7a137cb364a6bc530018f3ffaf2984df7ce' },
   { version: 12, filename: '012_cleanup_admission_supersession_evidence.sql', sha256: '2ad0bf8a9084ca8a875ca4b1699df827448eb991c5518c78e5aa68048df21a97' },
+  { version: 13, filename: '013_queue_dispatch_claim.sql', sha256: '71b0dc3ea317f5c92e79021fbdda17a0639f11061105e325968f75a2094ca3b9' },
 ] as const;
 
 export const MIGRATION_REGISTRY: readonly MigrationDescriptor[] = Object.freeze(

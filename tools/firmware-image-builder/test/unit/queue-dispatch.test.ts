@@ -10,11 +10,11 @@ const UNIT = 'osi-image-builder-runner@job-1.service';
 
 function proof() {
   return {
-    kind: 'start-failure' as const, runnerUnit: UNIT, startAttemptedAt: NOW, unitInactiveAt: LATER,
+    kind: 'start-failure' as const, runnerUnit: UNIT, startAttemptedAt: NOW, unitInactiveAt: NOW,
     runnerLeaseOwner: null, runnerLeaseExpiresAt: null,
-    container: { kind: 'absent' as const, globalLabelResult: 'no-match' as const, observedAt: LATER },
+    container: { kind: 'absent' as const, globalLabelResult: 'no-match' as const, observedAt: NOW },
     staging: { kind: 'absent' as const, path: null },
-    logs: { runner: 'absent' as const, docker: 'absent' as const, verifiedAt: LATER, generationIdentity: { runner: [], docker: [] } },
+    logs: { runner: 'absent' as const, docker: 'absent' as const, verifiedAt: NOW, generationIdentity: { runner: [], docker: [] } },
     blocker: 'none' as const, cleanupAdmission: null, cleanupFence: null,
   };
 }
