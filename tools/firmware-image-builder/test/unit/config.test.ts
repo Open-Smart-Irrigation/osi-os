@@ -12,6 +12,7 @@ import {
   resolveApprovedRoot,
   validateOrigin,
   validateApprovedRoots,
+  withApprovedRootSnapshot,
   type RootStats,
 } from '../../config/load.js';
 import { CANONICAL_FETCH_REFSPEC, type ValidatedOriginPolicy } from '../../config/origin-policy.js';
@@ -135,7 +136,13 @@ describe('builder configuration', () => {
         XDG_STATE_HOME: workspace.stateHome,
       },
       rootFs: { access, statfs: ampleDisk },
+      pathAuthorityDependencies: { writableAccess: access },
     });
+    await expect(withApprovedRootSnapshot(
+      loaded.pathAuthorities.approvedRoots,
+      'sdcard-images',
+      async ({ snapshot }) => snapshot.path,
+    )).resolves.toBe(resolve(workspace.outputRoot));
 
     expect(loaded.stateRoot).toBe(resolve(workspace.stateHome, 'osi-image-builder'));
     expect(loaded.config).toEqual({
@@ -148,6 +155,7 @@ describe('builder configuration', () => {
       builderLockPath: '/opt/osi-image-builder/2026.07.22.1/builder.lock.json',
     });
     expect(access).toHaveBeenCalledWith(outputWorkRoot, expect.any(Number));
+    expect(access.mock.calls.filter(([path]) => path === outputWorkRoot)).toHaveLength(3);
     expect(access).not.toHaveBeenCalledWith(resolve(workspace.outputRoot), expect.any(Number));
     await expect(lstat(inaccessibleRepository)).rejects.toMatchObject({ code: 'ENOENT' });
   });

@@ -129,6 +129,7 @@ export interface PathAuthorityDependencies {
   readonly readlink: (path: string) => Promise<string>;
   readonly mountId: (handle: FileHandle) => Promise<number>;
   readonly beforeRead: (handle: FileHandle) => Promise<void>;
+  readonly writableAccess?: (path: string, mode: number) => Promise<void>;
   readonly beforeDirectoryAccess?: (handle: FileHandle) => Promise<void>;
   readonly beforeDirectorySync?: (handle: FileHandle) => Promise<void>;
 }
@@ -139,6 +140,8 @@ interface AuthorityRootRecord {
   readonly quarantinePath: string;
   readonly device: number;
   readonly inode: number;
+  readonly writeScope: 'root' | 'work-root';
+  readonly workRoot?: AuthorityStateRecord;
 }
 
 interface AuthorityStateRecord {
@@ -297,6 +300,7 @@ async function inspectAuthorityDirectory(
   field: string,
   policy: DirectoryPolicy,
   requireWritable = true,
+  writableAccess: (path: string, mode: number) => Promise<void> = access,
 ): Promise<{ path: string; device: number; inode: number }> {
   let stats;
   try { stats = await lstat(path); } catch (error) { return authorityReject(`${field} cannot be inspected`, error); }
@@ -305,7 +309,7 @@ async function inspectAuthorityDirectory(
   let canonical: string;
   try {
     canonical = await realpath(path);
-    if (requireWritable) await access(canonical, fsConstants.W_OK);
+    if (requireWritable) await writableAccess(canonical, fsConstants.W_OK);
   } catch (error) { return authorityReject(`${field} is not canonical${requireWritable ? ' and writable' : ''}`, error); }
   if (canonical !== resolve(path)) return authorityReject(`${field} resolves through a symlink`);
   const flags = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW | (typeof (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC === 'number' ? (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC! : 0);
@@ -333,17 +337,35 @@ async function issuePathAuthorities(
   for (const root of roots) {
     if (ids.has(root.id)) return authorityReject(`duplicate approved root ID: ${root.id}`);
     ids.add(root.id);
-    const inspected = await inspectAuthorityDirectory(root.path, `approved root ${root.id}`, 'output', outputWriteScope === 'root');
+    const writableAccess = dependencies.writableAccess ?? access;
+    const inspected = await inspectAuthorityDirectory(
+      root.path,
+      `approved root ${root.id}`,
+      'output',
+      outputWriteScope === 'root',
+      writableAccess,
+    );
+    let workRoot: AuthorityStateRecord | undefined;
     if (outputWriteScope === 'work-root') {
-      const workRoot = await inspectAuthorityDirectory(
+      workRoot = Object.freeze(await inspectAuthorityDirectory(
         join(inspected.path, '.osi-image-builder'),
         `approved root ${root.id} work root`,
         'output',
-      );
+        true,
+        writableAccess,
+      ));
       if (workRoot.device !== inspected.device) return authorityReject(`approved root ${root.id} work root must share the output filesystem`, undefined, 'OUTPUT_ROOT_OVERLAP');
     }
     if (inspectedRoots.some((candidate) => pathsOverlap(candidate.path, inspected.path))) return authorityReject('approved roots may not overlap', undefined, 'OUTPUT_ROOT_OVERLAP');
-    inspectedRoots.push({ id: root.id, path: inspected.path, quarantinePath: join(inspected.path, '.osi-image-builder', 'quarantine'), device: inspected.device, inode: inspected.inode });
+    inspectedRoots.push({
+      id: root.id,
+      path: inspected.path,
+      quarantinePath: join(inspected.path, '.osi-image-builder', 'quarantine'),
+      device: inspected.device,
+      inode: inspected.inode,
+      writeScope: outputWriteScope,
+      ...(workRoot === undefined ? {} : { workRoot }),
+    });
   }
   const state = await inspectAuthorityDirectory(statePath, 'state root', 'state');
   const repository = repositoryPath === undefined
@@ -403,8 +425,31 @@ function stateAuthorityLookup(stateRoot: StateRootAuthority): AuthorityData {
 export async function withApprovedRootSnapshot<T>(registry: ApprovedRootRegistry, rootId: string, callback: (context: AuthorityContext) => Promise<T>): Promise<T> {
   const data = authorityLookup(registry, rootId);
   const record = data.roots.get(rootId)!;
-  const current = await inspectAuthorityDirectory(record.path, 'approved root', 'output');
+  const writableAccess = data.dependencies.writableAccess ?? access;
+  const current = await inspectAuthorityDirectory(
+    record.path,
+    'approved root',
+    'output',
+    record.writeScope === 'root',
+    writableAccess,
+  );
   if (current.path !== record.path || current.device !== record.device || current.inode !== record.inode) return authorityReject('approved root identity changed');
+  if (record.writeScope === 'work-root') {
+    if (record.workRoot === undefined) return authorityReject('approved output work root authority is unavailable');
+    const currentWorkRoot = await inspectAuthorityDirectory(
+      record.workRoot.path,
+      'approved output work root',
+      'output',
+      true,
+      writableAccess,
+    );
+    if (
+      currentWorkRoot.path !== record.workRoot.path
+      || currentWorkRoot.device !== record.workRoot.device
+      || currentWorkRoot.inode !== record.workRoot.inode
+      || currentWorkRoot.device !== current.device
+    ) return authorityReject('approved output work root identity changed');
+  }
   return callback({ snapshot: record, dependencies: data.dependencies });
 }
 
