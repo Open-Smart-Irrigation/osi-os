@@ -193,30 +193,46 @@ async function readBody(request: IncomingMessage, limit: number): Promise<JsonVa
   }
 }
 
-function parseRequestUrl(request: IncomingMessage, origin: string): { readonly url: URL; readonly pathname: string } {
-  let url: URL;
-  try {
-    url = new URL(request.url ?? '', origin);
-  } catch {
+function hasUnsafeTargetCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const code = character.codePointAt(0)!;
+    return character === '\\' || character === '#' || code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+  });
+}
+
+function validatePercentEncoding(value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== '%') continue;
+    if (!/^[0-9a-f]{2}$/iu.test(value.slice(index + 1, index + 3))) fail('INVALID_PATH', 400);
+    index += 2;
+  }
+}
+
+function parseRequestUrl(request: IncomingMessage): { readonly pathname: string; readonly query: URLSearchParams } {
+  const rawTarget = request.url ?? '';
+  if (rawTarget.length === 0 || !rawTarget.startsWith('/') || rawTarget.startsWith('//')
+    || hasUnsafeTargetCharacter(rawTarget)) {
     fail('INVALID_PATH', 400);
   }
+  validatePercentEncoding(rawTarget);
+
+  const querySeparator = rawTarget.indexOf('?');
+  const rawPath = querySeparator === -1 ? rawTarget : rawTarget.slice(0, querySeparator);
+  const rawQuery = querySeparator === -1 ? '' : rawTarget.slice(querySeparator + 1);
   let pathname: string;
   try {
-    pathname = decodeURIComponent(url.pathname);
+    pathname = decodeURIComponent(rawPath);
   } catch {
     fail('INVALID_PATH', 400);
   }
-  if ([...pathname].some((character) => {
-    const code = character.codePointAt(0)!;
-    return character === '\\' || code <= 0x1f || (code >= 0x7f && code <= 0x9f);
-  })) {
+  if (hasUnsafeTargetCharacter(pathname) || pathname.split('/').some((segment) => segment === '.' || segment === '..')) {
     fail('INVALID_PATH', 400);
   }
-  if (url.origin !== origin || !pathname.startsWith(API_PREFIX)
+  if (!pathname.startsWith(API_PREFIX)
     || pathname === '/api/v1' || pathname.startsWith(CLOUD_PREFIX)) {
     fail('NOT_FOUND', 404);
   }
-  return { url, pathname };
+  return { pathname, query: new URLSearchParams(rawQuery) };
 }
 
 function checkOrigin(request: IncomingMessage, origin: string): void {
@@ -249,7 +265,7 @@ export function createHttpServer(options: HttpServerOptions): Server {
     const id = requestId();
     try {
       checkHost(request);
-      const parsedUrl = parseRequestUrl(request, options.origin);
+      const parsedUrl = parseRequestUrl(request);
       if (request.method === 'OPTIONS') {
         preflight(response, request, options.origin, id);
         return;
@@ -266,7 +282,7 @@ export function createHttpServer(options: HttpServerOptions): Server {
         requestId: id,
         method,
         path: parsedUrl.pathname,
-        query: parsedUrl.url.searchParams,
+        query: parsedUrl.query,
         headers: request.headers,
         body,
       });
