@@ -488,6 +488,33 @@ describe('startup retention', () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM retention_prunes WHERE category='row' AND relative_path='jobs/missing-root'").get()).toEqual({ count: 1 });
   });
 
+  it('retains job metadata when row eligibility changes before atomic purge', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+      .run('blocked-before-purge', 'request-blocked-before-purge', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, 0, 'terminal', 'succeeded', '{}', ?)")
+      .run('blocked-before-purge', OLD);
+
+    const result = await createRetentionStartupHook({
+      paths,
+      db,
+      now: NOW,
+      freeBytes: 25 * 1024 ** 3,
+      beforeRowPurge: async ({ jobId }) => {
+        db.prepare("UPDATE jobs SET cleanup_blocker_code='CLEANUP_ADMISSION_BLOCKED', cleanup_blocker_json='{}' WHERE job_id=?").run(jobId);
+      },
+    })();
+
+    expect(result).toMatchObject({ blockers: [{ code: 'RETENTION_ROW_PRUNE_FAILED' }] });
+    expect(db.prepare('SELECT job_id, cleanup_blocker_code, cleanup_blocker_json FROM jobs WHERE job_id=?').get('blocked-before-purge'))
+      .toEqual({ job_id: 'blocked-before-purge', cleanup_blocker_code: 'CLEANUP_ADMISSION_BLOCKED', cleanup_blocker_json: '{}' });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM job_events WHERE job_id=?').get('blocked-before-purge')).toEqual({ count: 1 });
+    expect(db.prepare("SELECT status FROM retention_prune_intents WHERE category='row' AND relative_path='jobs/blocked-before-purge'").get())
+      .toEqual({ status: 'removed' });
+  });
+
   it('aborts row purge when the job root reappears before the transaction', async () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));

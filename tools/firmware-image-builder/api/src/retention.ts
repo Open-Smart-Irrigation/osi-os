@@ -9,8 +9,13 @@ import type { StartupPhaseResult, StartupService } from './startup-order.js';
 
 export const RETENTION_DAYS = Object.freeze({ rows: 180, evidence: 180, logs: 180, worktrees: 7, caches: 30, quarantine: 180 });
 const MIN_CACHE_FREE_BYTES = 20 * 1024 ** 3;
-const TERMINAL_STATES = ['succeeded', 'failed', 'cancelled', 'interrupted'] as const;
 const RETENTION_CATEGORIES = ['row', 'evidence', 'log', 'worktree', 'cache', 'quarantine'] as const;
+const ELIGIBLE_TERMINAL_ROW_SQL = `state IN ('succeeded', 'failed', 'cancelled', 'interrupted')
+  AND terminal_at IS NOT NULL AND terminal_at < ?
+  AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL AND cleanup_blocker_code IS NULL
+  AND container_id IS NULL AND container_name IS NULL
+  AND artifact_staging_path IS NULL AND artifact_quarantine_path IS NULL AND artifact_quarantine_intent_path IS NULL
+  AND publish_blocker_code IS NULL`;
 
 export type RetentionCategory = (typeof RETENTION_CATEGORIES)[number];
 
@@ -289,13 +294,8 @@ async function terminalWorktreeCandidates(options: RetentionOptions, roots: Map<
 async function databaseCandidates(options: RetentionOptions, roots: Map<string, OpenRoot>, now: string, result: Candidate[]): Promise<void> {
   if (!options.db) return;
   await terminalWorktreeCandidates(options, roots, now, result);
-  const expiredRows = options.db.prepare(`SELECT job_id FROM jobs
-    WHERE state IN ('succeeded', 'failed', 'cancelled', 'interrupted')
-      AND terminal_at IS NOT NULL AND terminal_at < ?
-      AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL AND cleanup_blocker_code IS NULL
-      AND container_id IS NULL AND container_name IS NULL
-      AND artifact_staging_path IS NULL AND artifact_quarantine_path IS NULL AND artifact_quarantine_intent_path IS NULL
-      AND publish_blocker_code IS NULL ORDER BY job_id`).all(new Date(threshold(now, RETENTION_DAYS.rows)).toISOString()) as Array<{ job_id?: unknown }>;
+  const cutoff = new Date(threshold(now, RETENTION_DAYS.rows)).toISOString();
+  const expiredRows = options.db.prepare(`SELECT job_id FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`).all(cutoff) as Array<{ job_id?: unknown }>;
   const rowCandidates: Candidate[] = [];
   for (const row of expiredRows) {
     if (!safeSegment(row.job_id)) continue;
@@ -449,14 +449,8 @@ function assertJobRootAbsentSync(stateRoot: FileHandle, jobsRoot: FileHandle | u
 async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string): Promise<readonly QueueBlocker[]> {
   if (!options.db) return [];
   const blockers: QueueBlocker[] = [];
-  const rows = options.db.prepare(`SELECT job_id FROM jobs
-    WHERE state IN ('succeeded', 'failed', 'cancelled', 'interrupted')
-      AND terminal_at IS NOT NULL AND terminal_at < ?
-      AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL AND cleanup_blocker_code IS NULL
-      AND container_id IS NULL AND container_name IS NULL
-      AND artifact_staging_path IS NULL AND artifact_quarantine_path IS NULL AND artifact_quarantine_intent_path IS NULL
-      AND publish_blocker_code IS NULL
-      ORDER BY job_id`).all(new Date(threshold(now, RETENTION_DAYS.rows)).toISOString()) as Array<{ job_id?: unknown }>;
+  const cutoff = new Date(threshold(now, RETENTION_DAYS.rows)).toISOString();
+  const rows = options.db.prepare(`SELECT job_id FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`).all(cutoff) as Array<{ job_id?: unknown }>;
   const stateRoot = options.__retentionRoots.get(resolve(options.paths.stateRoot));
   if (!stateRoot) throw new Error('retention state root is not held');
   let jobsRoot: FileHandle | undefined;
@@ -486,6 +480,8 @@ async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string
       options.db.exec('BEGIN IMMEDIATE');
       try {
         assertJobRootAbsentSync(stateRoot.handle, jobsRoot, jobId);
+        const eligible = options.db.prepare(`SELECT job_id FROM jobs WHERE job_id=? AND ${ELIGIBLE_TERMINAL_ROW_SQL}`).get(jobId, cutoff);
+        if (!eligible) throw new Error('terminal job row eligibility changed before purge');
         options.db.prepare('INSERT INTO retention_purge_authorizations (job_id, authorized_at) VALUES (?, ?)').run(jobId, now);
         options.db.prepare('DELETE FROM queue_dispatch_claims WHERE job_id=?').run(jobId);
         options.db.prepare('DELETE FROM cleanup_stop_authorization_outcomes WHERE job_id=?').run(jobId);
@@ -500,7 +496,7 @@ async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string
         options.db.prepare('DELETE FROM job_operations WHERE job_id=?').run(jobId);
         options.db.prepare('DELETE FROM queue_entries WHERE job_id=?').run(jobId);
         options.db.prepare('DELETE FROM retention_purge_authorizations WHERE job_id=?').run(jobId);
-        const deleted = options.db.prepare('DELETE FROM jobs WHERE job_id=? AND state IN (?, ?, ?, ?) AND terminal_at < ?').run(jobId, ...TERMINAL_STATES, new Date(threshold(now, RETENTION_DAYS.rows)).toISOString());
+        const deleted = options.db.prepare(`DELETE FROM jobs WHERE job_id=? AND ${ELIGIBLE_TERMINAL_ROW_SQL}`).run(jobId, cutoff);
         if (deleted.changes !== 1) throw new Error('terminal job row was not deleted');
         assertJobRootAbsentSync(stateRoot.handle, jobsRoot, jobId);
         options.db.exec('COMMIT');
@@ -517,13 +513,8 @@ async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string
 
 async function reconcileIntents(options: RetentionOptionsWithRoots, now: string, candidates: Candidate[]): Promise<void> {
   if (!options.db) return;
-  const jobs = options.db.prepare(`SELECT job_id FROM jobs
-    WHERE state IN ('succeeded', 'failed', 'cancelled', 'interrupted')
-      AND terminal_at IS NOT NULL AND terminal_at < ?
-      AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL AND cleanup_blocker_code IS NULL
-      AND container_id IS NULL AND container_name IS NULL
-      AND artifact_staging_path IS NULL AND artifact_quarantine_path IS NULL AND artifact_quarantine_intent_path IS NULL
-      AND publish_blocker_code IS NULL ORDER BY job_id`).all(new Date(threshold(now, RETENTION_DAYS.rows)).toISOString()) as Array<{ job_id?: unknown }>;
+  const cutoff = new Date(threshold(now, RETENTION_DAYS.rows)).toISOString();
+  const jobs = options.db.prepare(`SELECT job_id FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`).all(cutoff) as Array<{ job_id?: unknown }>;
   const eligibleJobs = new Set(jobs.flatMap((row) => safeSegment(row.job_id) ? [row.job_id] : []));
   const protectedLogs = protectedLogPaths(options.db);
   const existing = new Set(candidates.map((candidate) => `${candidate.category}:${relativePath(candidate.auditBase, candidate.path)}`));
