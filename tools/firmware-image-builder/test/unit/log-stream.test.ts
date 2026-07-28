@@ -387,6 +387,92 @@ describe('DurableLogStream', () => {
     expect(stream.replaySync(0)).toEqual([]);
   });
 
+  it('stops replay at the first deferred metadata row and preserves the contiguous cursor prefix', async () => {
+    const { stream } = await fixture();
+    stream.appendMetadataSync('stage', { value: 'a' });
+    stream.appendSync('runner', Buffer.from('interleaved\n'));
+    stream.appendMetadataSync('stage', { value: 'b' });
+    stream.appendSync('runner', Buffer.from('later\n'));
+
+    expect(stream.replaySync(-1, { maxMetadataBytes: Buffer.byteLength(JSON.stringify({ value: 'a' })) })).toEqual([
+      expect.objectContaining({ seq: 0, event: 'stage' }),
+      expect.objectContaining({ seq: 1, event: 'log' }),
+    ]);
+    expect(stream.replaySync(1, { maxMetadataBytes: Buffer.byteLength(JSON.stringify({ value: 'a' })) })).toEqual([
+      expect.objectContaining({ seq: 2, event: 'stage' }),
+      expect.objectContaining({ seq: 3, event: 'log' }),
+    ]);
+  });
+
+  it('does not treat a boolean log-gap sourceSeq as a numeric source sequence', async () => {
+    const { stream, db } = await fixture();
+    stream.appendSync('runner', Buffer.from('first\n'));
+    stream.appendSync('runner', Buffer.from('second\n'));
+    db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, \'log-gap\', ?, ?)')
+      .run('job-log', 2, JSON.stringify({ sourceSeq: true, reason: 'malformed' }), NOW);
+
+    expect(stream.replaySync(-1).map((event) => [event.seq, event.event])).toEqual([
+      [0, 'log'],
+      [1, 'log'],
+      [2, 'log-gap'],
+    ]);
+  });
+
+  it('stops after an over-budget metadata row that follows a log event', async () => {
+    const { stream } = await fixture();
+    stream.appendSync('runner', Buffer.from('accepted\n'));
+    stream.appendMetadataSync('stage', { value: 'deferred' });
+    stream.appendSync('runner', Buffer.from('must-wait\n'));
+
+    expect(stream.replaySync(-1, { maxMetadataBytes: 1 }).map((event) => [event.seq, event.event])).toEqual([[0, 'log']]);
+  });
+
+  it('compacts oversized persisted payloads for log rows without returning their payload', async () => {
+    const { stream, db } = await fixture();
+    const appended = stream.appendSync('runner', Buffer.from('payload\n'));
+    db.exec('DROP TRIGGER job_events_immutable_update_guard');
+    db.prepare('UPDATE job_events SET payload_json=? WHERE job_id=? AND seq=?').run(JSON.stringify({ value: 'x'.repeat(70_000) }), 'job-log', appended.seq);
+
+    expect(stream.replaySync(-1)).toEqual([{
+      seq: appended.seq,
+      event: 'log-truncated',
+      data: { jobId: 'job-log', truncated: true, reason: 'REPLAY_METADATA_TOO_LARGE' },
+    }]);
+  });
+
+  it.each([
+    ['malformed JSON', 'not-json'],
+    ['a non-object JSON value', '[]'],
+  ])('compacts %s persisted payloads deterministically', async (_description, payload) => {
+    const { stream, db } = await fixture();
+    const seq = stream.appendMetadataSync('stage', { valid: true });
+    db.exec('PRAGMA ignore_check_constraints=ON');
+    db.exec('DROP TRIGGER job_events_immutable_update_guard');
+    db.prepare('UPDATE job_events SET payload_json=? WHERE job_id=? AND seq=?').run(payload, 'job-log', seq);
+
+    const expected = [{ seq, event: 'log-truncated', data: { jobId: 'job-log', truncated: true, reason: 'REPLAY_METADATA_INVALID' } }];
+    expect(stream.replaySync(-1)).toEqual(expected);
+    expect(stream.replaySync(-1)).toEqual(expected);
+  });
+
+  it('uses the exact encoded SSE frame boundary for log events', async () => {
+    const { stream } = await fixture();
+    const frameBytes = (event: LogStreamEvent): number => Buffer.byteLength(`id: ${event.seq}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
+    const dataForFrame = (target: number): LogStreamEvent => {
+      const base = frameBytes({ seq: 0, event: 'log', data: { text: '' } });
+      const text = 'x'.repeat(target - base);
+      return { seq: 0, event: 'log', data: { text } };
+    };
+
+    const accepted = dataForFrame(65_536);
+    expect(frameBytes(accepted)).toBe(65_536);
+    expect(stream.encodeSse(accepted)).toHaveLength(65_536);
+
+    const oversized = { ...accepted, data: { ...accepted.data, text: `${String(accepted.data.text)}x` } };
+    expect(frameBytes(oversized)).toBe(65_537);
+    expect(stream.encodeSse(oversized)).toContain('event: log-truncated');
+  });
+
   it('returns the same persisted seal result when there is no orphan tail', async () => {
     const { stream, db } = await fixture();
     stream.appendSync('runner', Buffer.from('complete\n'));

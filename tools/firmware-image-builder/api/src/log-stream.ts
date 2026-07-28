@@ -10,7 +10,6 @@ const DEFAULT_REPLAY_DECODED_BYTES = 512 * 1024;
 const MAX_REPLAY_DECODED_BYTES = 16 * 1024 * 1024;
 const DEFAULT_REPLAY_METADATA_BYTES = 512 * 1024;
 const MAX_REPLAY_METADATA_BYTES = 16 * 1024 * 1024;
-const MAX_METADATA_JSON_BYTES = MAX_SSE_BYTES - 128;
 const HASH_BUFFER_SIZE = 64 * 1024;
 const O_CLOEXEC = (constants as typeof constants & { readonly O_CLOEXEC?: number }).O_CLOEXEC ?? 0;
 const DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | O_CLOEXEC;
@@ -108,8 +107,15 @@ function json(value: Record<string, unknown>): string {
 }
 
 function metadataFrameFits(seq: number, event: MetadataEvent, payload: string): boolean {
-  const frame = `id: ${seq}\nevent: ${event}\ndata: ${payload}\n\n`;
-  return Buffer.byteLength(frame) <= MAX_SSE_BYTES;
+  return Buffer.byteLength(sseFrame(seq, event, payload)) <= MAX_SSE_BYTES;
+}
+
+function sseFrame(seq: number, event: string, payload: string): string {
+  return `id: ${seq}\nevent: ${event}\ndata: ${payload}\n\n`;
+}
+
+function replayTruncated(seq: number, jobId: string, reason: 'REPLAY_METADATA_TOO_LARGE' | 'REPLAY_METADATA_INVALID'): LogStreamEvent {
+  return { seq, event: 'log-truncated', data: { jobId, truncated: true, reason } };
 }
 
 function replayLimits(afterSeq: number, requested: ReplayLimits): { readonly eventLimit: number; readonly maxDecodedBytes: number; readonly maxMetadataBytes: number } {
@@ -329,16 +335,23 @@ export class DurableLogStream {
     let decodedBytes = 0;
     for (const row of this.#eventRows(afterSeq, limits.eventLimit, limits.maxMetadataBytes)) {
       const seq = Number(row.seq);
-      const metadataTooLarge = row.stream === null && Number(row.metadata_too_large) === 1;
-      const payload = metadataTooLarge
-        ? undefined
-        : JSON.parse(String(row.payload_json)) as Record<string, unknown>;
+      if (Number(row.payload_too_large) === 1) {
+        output.push(replayTruncated(seq, this.#jobId, 'REPLAY_METADATA_TOO_LARGE'));
+        continue;
+      }
+      let payload: Record<string, unknown>;
+      try {
+        const parsed: unknown = JSON.parse(String(row.payload_json));
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('persisted payload is not an object');
+        payload = parsed as Record<string, unknown>;
+      } catch {
+        output.push(replayTruncated(seq, this.#jobId, 'REPLAY_METADATA_INVALID'));
+        continue;
+      }
       if (row.stream === null) {
-        if (metadataTooLarge) {
-          output.push({ seq, event: 'log-truncated', data: { jobId: this.#jobId, truncated: true, reason: 'REPLAY_METADATA_TOO_LARGE' } });
-        } else if (row.event_type === 'log-gap') output.push({ seq, event: 'log-gap', data: payload as Record<string, unknown> });
-        else if (row.event_type === 'log-truncated') output.push({ seq, event: 'log-truncated', data: payload as Record<string, unknown> });
-        else output.push({ seq, event: row.event_type === 'terminal' ? 'terminal' : 'stage', data: payload as Record<string, unknown> });
+        if (row.event_type === 'log-gap') output.push({ seq, event: 'log-gap', data: payload });
+        else if (row.event_type === 'log-truncated') output.push({ seq, event: 'log-truncated', data: payload });
+        else output.push({ seq, event: row.event_type === 'terminal' ? 'terminal' : 'stage', data: payload });
         continue;
       }
 
@@ -408,11 +421,11 @@ export class DurableLogStream {
     this.#assertOpen();
     let selected = event;
     let body = JSON.stringify(event.data);
-    if (Buffer.byteLength(body) > MAX_SSE_BYTES - 64 && event.event === 'log') {
+    if (Buffer.byteLength(sseFrame(event.seq, event.event, body)) > MAX_SSE_BYTES && event.event === 'log') {
       selected = { seq: event.seq, event: 'log-truncated', data: { jobId: this.#jobId, stream: event.data.stream, generation: event.data.generation, offset: event.data.offset, length: event.data.length, partial: event.data.partial, truncated: true } };
       body = JSON.stringify(selected.data);
     }
-    const frame = `id: ${selected.seq}\nevent: ${selected.event}\ndata: ${body}\n\n`;
+    const frame = sseFrame(selected.seq, selected.event, body);
     if (Buffer.byteLength(frame) > MAX_SSE_BYTES) throw new Error('SSE metadata exceeds 64 KiB');
     return frame;
   }
@@ -497,48 +510,54 @@ export class DurableLogStream {
   #nextSeq(): number { return Number((this.#db.prepare('SELECT COALESCE(MAX(seq)+1, 0) AS next FROM job_events WHERE job_id=?').get(this.#jobId) as { next: number }).next); }
 
   #eventRows(afterSeq: number, limit: number, maxMetadataBytes: number): Array<Record<string, unknown>> {
-    return this.#db.prepare(`WITH candidates AS (
+    return this.#db.prepare(`WITH RECURSIVE candidates AS (
       SELECT event.seq, event.event_type, event.at, event.stream, event.file_generation, event.byte_offset, event.byte_length, event.partial,
-          length(CAST(event.payload_json AS BLOB)) AS metadata_bytes
+          octet_length(event.payload_json) AS payload_bytes,
+          CASE WHEN event.stream IS NOT NULL THEN 'log'
+            WHEN event.event_type='terminal' THEN 'terminal'
+            WHEN event.event_type IN ('log-gap', 'log-truncated') THEN event.event_type
+            ELSE 'stage' END AS public_event
         FROM job_events AS event
         WHERE event.job_id=? AND event.seq>?
           AND NOT (event.stream IS NOT NULL AND EXISTS (
             SELECT 1 FROM job_events AS gap
             WHERE gap.job_id=event.job_id
               AND gap.event_type='log-gap'
+              AND json_type(gap.payload_json, '$.sourceSeq') IN ('integer', 'real')
               AND json_extract(gap.payload_json, '$.sourceSeq')=event.seq
           ))
         ORDER BY event.seq
         LIMIT ?
-      ), measured AS (
+      ), bounded AS (
         SELECT candidates.*,
-          COALESCE(SUM(CASE WHEN stream IS NULL AND metadata_bytes <= ? THEN metadata_bytes ELSE 0 END)
-            OVER (ORDER BY seq ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS prior_metadata_bytes
+          (payload_bytes > (? - (21 + length(CAST(seq AS TEXT)) + octet_length(public_event)))) AS payload_too_large
         FROM candidates
-      ), selected AS (
-        SELECT seq, event_type, at, stream, file_generation, byte_offset, byte_length, partial, metadata_bytes,
-        CASE WHEN stream IS NULL AND metadata_bytes > ? THEN 1 ELSE 0 END AS metadata_too_large
-        FROM measured
-        WHERE stream IS NOT NULL
-          OR (metadata_bytes <= ? AND prior_metadata_bytes + metadata_bytes <= ?)
-          OR (metadata_bytes > ? AND prior_metadata_bytes <= ?)
+      ), prefix(seq, event_type, at, stream, file_generation, byte_offset, byte_length, partial, payload_bytes, public_event, payload_too_large, prior_metadata_bytes) AS (
+        SELECT seq, event_type, at, stream, file_generation, byte_offset, byte_length, partial, payload_bytes, public_event, payload_too_large,
+          CASE WHEN stream IS NULL AND payload_too_large=0 THEN payload_bytes ELSE 0 END
+        FROM bounded
+        WHERE seq=(SELECT MIN(seq) FROM bounded)
+          AND (stream IS NOT NULL OR payload_too_large=1 OR payload_bytes <= ?)
+        UNION ALL
+        SELECT next.seq, next.event_type, next.at, next.stream, next.file_generation, next.byte_offset, next.byte_length, next.partial, next.payload_bytes, next.public_event, next.payload_too_large,
+          prefix.prior_metadata_bytes + CASE WHEN next.stream IS NULL AND next.payload_too_large=0 THEN next.payload_bytes ELSE 0 END
+        FROM prefix
+        JOIN bounded AS next ON next.seq=(SELECT MIN(candidate.seq) FROM bounded AS candidate WHERE candidate.seq > prefix.seq)
+        WHERE next.stream IS NOT NULL OR next.payload_too_large=1 OR prefix.prior_metadata_bytes + next.payload_bytes <= ?
       )
-      SELECT selected.seq, selected.event_type,
-        CASE WHEN selected.metadata_too_large=1 THEN NULL ELSE event.payload_json END AS payload_json,
-        selected.at, selected.stream,
-        selected.file_generation, selected.byte_offset, selected.byte_length, selected.partial,
-        selected.metadata_bytes, selected.metadata_too_large
-      FROM selected
-      JOIN job_events AS event ON event.job_id=? AND event.seq=selected.seq
-      ORDER BY selected.seq`).all(
+      SELECT prefix.seq, prefix.event_type,
+        CASE WHEN prefix.payload_too_large=1 THEN NULL ELSE event.payload_json END AS payload_json,
+        prefix.at, prefix.stream,
+        prefix.file_generation, prefix.byte_offset, prefix.byte_length, prefix.partial,
+        prefix.payload_bytes, prefix.payload_too_large
+      FROM prefix
+      JOIN job_events AS event ON event.job_id=? AND event.seq=prefix.seq
+      ORDER BY prefix.seq`).all(
       this.#jobId,
       afterSeq,
       limit,
-      MAX_METADATA_JSON_BYTES,
-      MAX_METADATA_JSON_BYTES,
-      MAX_METADATA_JSON_BYTES,
+      MAX_SSE_BYTES,
       maxMetadataBytes,
-      MAX_METADATA_JSON_BYTES,
       maxMetadataBytes,
       this.#jobId,
     ) as Array<Record<string, unknown>>;
@@ -577,7 +596,7 @@ export class DurableLogStream {
   }
 
   #sourceGap(sourceSeq: number): { readonly seq: number; readonly payload_json: string } | undefined {
-    return this.#db.prepare("SELECT seq, payload_json FROM job_events WHERE job_id=? AND event_type='log-gap' AND json_extract(payload_json, '$.sourceSeq')=?").get(this.#jobId, sourceSeq) as { seq: number; payload_json: string } | undefined;
+    return this.#db.prepare("SELECT seq, payload_json FROM job_events WHERE job_id=? AND event_type='log-gap' AND json_type(payload_json, '$.sourceSeq') IN ('integer', 'real') AND json_extract(payload_json, '$.sourceSeq')=?").get(this.#jobId, sourceSeq) as { seq: number; payload_json: string } | undefined;
   }
 
   #sealGenerationInTransaction(stream: StreamName, generation: number, size: number, sha256: string): void {
