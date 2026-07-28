@@ -1533,6 +1533,27 @@ describe('trusted pipeline integration', () => {
     }
   });
 
+  it('does not log publish running progress when publish-stage-start ownership CAS is rejected', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      rejectOwnershipWrite: 'publish-stage-start',
+      pipelineLogWriter: { write: (entry) => progress.push(entry) },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'RUNNER_DISAPPEARED',
+      });
+      expect(progress.filter(({ stage }) => stage === 'publish')).toEqual([]);
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'verifying',
+        publishState: 'staged',
+      });
+    } finally {
+      value.close();
+    }
+  });
+
   it('does not log passed progress when its ownership CAS is rejected', async () => {
     const progress: Array<Record<string, unknown>> = [];
     const value = await fixture({

@@ -2211,7 +2211,6 @@ export function createPipeline(input: PipelineInput): {
         publicationBinding = binding;
         publishStartedAt = now();
         try {
-          logStage(stage, 'running', startedAt);
           write({
             kind: 'publish-stage-start',
             expectedState: 'verifying',
@@ -2221,6 +2220,7 @@ export function createPipeline(input: PipelineInput): {
             publishStartedAt,
           });
           currentState = stageState;
+          logStage(stage, 'running', startedAt);
         } catch (error) {
           if (error instanceof PipelineOwnershipLostError) {
             await observeCancellation('stage', 'publish');
