@@ -230,12 +230,12 @@ describe('startup retention', () => {
     await expect(import('node:fs/promises').then(({ access }) => access(join(quarantineRoot, 'orphan-quarantine')))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('records quarantine intents before mutation and retries stale planned and removed intents', async () => {
+  it('records quarantine intents before mutation and retries stale planned and failed intents', async () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
     const quarantineRoot = paths.approvedQuarantineRoots[0]!;
-    for (const jobId of ['new-quarantine', 'planned-quarantine', 'removed-quarantine']) {
+    for (const jobId of ['new-quarantine', 'planned-quarantine', 'failed-quarantine']) {
       await mkdir(join(quarantineRoot, jobId), { recursive: true });
       await writeFile(join(quarantineRoot, jobId, 'artifact.bin'), jobId);
       await utimes(join(quarantineRoot, jobId), new Date(OLD), new Date(OLD));
@@ -243,7 +243,7 @@ describe('startup retention', () => {
     db.prepare(`INSERT INTO retention_prune_intents (category, relative_path, status, planned_at, updated_at, bytes)
       VALUES ('quarantine', ?, 'planned', ?, ?, 7)`).run('.osi-image-builder/quarantine/planned-quarantine', NOW, NOW);
     db.prepare(`INSERT INTO retention_prune_intents (category, relative_path, status, planned_at, updated_at, bytes)
-      VALUES ('quarantine', ?, 'removed', ?, ?, 7)`).run('.osi-image-builder/quarantine/removed-quarantine', NOW, NOW);
+      VALUES ('quarantine', ?, 'failed', ?, ?, 7)`).run('.osi-image-builder/quarantine/failed-quarantine', NOW, NOW);
     const observed: Array<{ path: string; status: unknown }> = [];
 
     await createRetentionStartupHook({
@@ -259,13 +259,43 @@ describe('startup retention', () => {
     })();
 
     expect(observed).toEqual([{ path: join(quarantineRoot, 'new-quarantine'), status: 'planned' }]);
-    for (const jobId of ['new-quarantine', 'planned-quarantine', 'removed-quarantine']) {
+    for (const jobId of ['new-quarantine', 'planned-quarantine', 'failed-quarantine']) {
       expect(db.prepare('SELECT status, error FROM retention_prune_intents WHERE category=? AND relative_path=?').get('quarantine', `.osi-image-builder/quarantine/${jobId}`)).toEqual({ status: 'removed', error: null });
       expect(db.prepare('SELECT action FROM retention_prunes WHERE category=? AND relative_path=? ORDER BY prune_id DESC LIMIT 1').get('quarantine', `.osi-image-builder/quarantine/${jobId}`)).toEqual({ action: 'removed' });
     }
   });
 
-  it.each(['planned', 'removed'] as const)('resumes a %s quarantine intent despite a refreshed root mtime after partial deletion', async (status) => {
+  it.each(['mtime', 'entry'] as const)('retains a fresh-scan quarantine when beforeDelete refreshes its %s', async (mutation) => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    const jobId = `freshened-${mutation}`;
+    const quarantineRoot = join(paths.approvedQuarantineRoots[0]!, jobId);
+    const intentPath = `.osi-image-builder/quarantine/${jobId}`;
+    await mkdir(quarantineRoot, { recursive: true });
+    await writeFile(join(quarantineRoot, 'original.bin'), 'original');
+    await utimes(quarantineRoot, new Date(OLD), new Date(OLD));
+
+    await expect(createRetentionStartupHook({
+      paths,
+      db,
+      now: NOW,
+      freeBytes: 25 * 1024 ** 3,
+      beforeDelete: async ({ path }) => {
+        if (path !== quarantineRoot) return;
+        if (mutation === 'entry') await writeFile(join(path, 'added.bin'), 'added');
+        else await utimes(path, new Date(NOW), new Date(NOW));
+      },
+    })()).resolves.toEqual({ blockers: [] });
+
+    await expect(import('node:fs/promises').then(({ access }) => access(quarantineRoot))).resolves.toBeUndefined();
+    if (mutation === 'entry') {
+      await expect(import('node:fs/promises').then(({ readFile }) => readFile(join(quarantineRoot, 'added.bin'), 'utf8'))).resolves.toBe('added');
+    }
+    expect(db.prepare('SELECT status FROM retention_prune_intents WHERE category=? AND relative_path=?').get('quarantine', intentPath)).toBeUndefined();
+  });
+
+  it.each(['planned', 'failed'] as const)('resumes a %s quarantine intent despite a refreshed root mtime after partial deletion', async (status) => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
@@ -287,6 +317,26 @@ describe('startup retention', () => {
     await expect(import('node:fs/promises').then(({ access }) => access(quarantineRoot))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(db.prepare('SELECT status, error FROM retention_prune_intents WHERE category=? AND relative_path=?').get('quarantine', relativePath))
       .toEqual({ status: 'removed', error: null });
+  });
+
+  it('does not replay a completed removed intent against a recreated fresh quarantine', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    const jobId = 'recreated-after-removed';
+    const quarantineRoot = join(paths.approvedQuarantineRoots[0]!, jobId);
+    const relativePath = `.osi-image-builder/quarantine/${jobId}`;
+    await mkdir(quarantineRoot, { recursive: true });
+    await writeFile(join(quarantineRoot, 'new-artifact.bin'), 'new');
+    await utimes(quarantineRoot, new Date(NOW), new Date(NOW));
+    db.prepare(`INSERT INTO retention_prune_intents (category, relative_path, status, planned_at, updated_at, bytes)
+      VALUES ('quarantine', ?, 'removed', ?, ?, 9)`).run(relativePath, OLD, OLD);
+
+    await expect(createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })()).resolves.toEqual({ blockers: [] });
+
+    await expect(import('node:fs/promises').then(({ access }) => access(quarantineRoot))).resolves.toBeUndefined();
+    expect(db.prepare('SELECT status FROM retention_prune_intents WHERE category=? AND relative_path=?').get('quarantine', relativePath))
+      .toEqual({ status: 'removed' });
   });
 
   it('unlinks nested quarantine symlinks through the held parent without touching external targets', async () => {
@@ -315,6 +365,26 @@ describe('startup retention', () => {
     await createRetentionStartupHook({ paths, now: NOW, freeBytes: 19 * 1024 ** 3, recordPrune: async (record) => { records.push(record); } })();
     await expect(import('node:fs/promises').then(({ access }) => access(join(paths.builderOwnedRoots[0]!, 'cache', 'docker', 'old')))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(records.some((record) => record.category === 'cache')).toBe(true);
+  });
+
+  it('blocks quarantine retention without DB authority while still pruning unrelated cache state', async () => {
+    const paths = await retentionWorkspace();
+    const quarantine = join(paths.approvedQuarantineRoots[0]!, 'old-job');
+    const cache = join(paths.builderOwnedRoots[0]!, 'cache', 'docker', 'old');
+
+    await expect(createRetentionStartupHook({ paths, now: NOW, freeBytes: 25 * 1024 ** 3 })()).resolves.toEqual({
+      blockers: [{
+        code: 'RETENTION_PRUNE_FAILED',
+        details: {
+          category: 'quarantine',
+          relativePath: '.osi-image-builder/quarantine',
+          reason: 'database-authority-unavailable',
+        },
+      }],
+    });
+
+    await expect(import('node:fs/promises').then(({ access }) => access(quarantine))).resolves.toBeUndefined();
+    await expect(import('node:fs/promises').then(({ access }) => access(cache))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('rejects a release root used as its own quarantine and arbitrary containment', async () => {
@@ -432,10 +502,13 @@ describe('startup retention', () => {
 
   it('detects a component swap after the target descriptor is held', async () => {
     const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
     let swapped = false;
     const target = join(paths.builderOwnedRoots[0]!, 'cache', 'docker', 'old');
     await expect(createRetentionStartupHook({
       paths,
+      db,
       now: NOW,
       freeBytes: 25 * 1024 ** 3,
       beforeDelete: async ({ path }) => {

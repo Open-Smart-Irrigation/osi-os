@@ -328,12 +328,13 @@ function quarantineCandidate(
   if (!options.db) return null;
   const jobId = relativePath(root, path);
   if (!safeSegment(jobId)) return null;
-  const known = options.db.prepare('SELECT job_id FROM jobs WHERE job_id=?').get(jobId) as { job_id?: unknown } | undefined;
-  if (!known) return { base: root, auditBase, path, category: 'quarantine', cutoffDays: RETENTION_DAYS.quarantine, stateEligible: false, durable: true };
   const cutoff = new Date(threshold(now, RETENTION_DAYS.quarantine)).toISOString();
-  const eligible = options.db.prepare(`SELECT job_id, artifact_quarantine_path FROM jobs WHERE job_id=? AND ${ELIGIBLE_TERMINAL_ROW_SQL}`)
-    .get(jobId, cutoff) as { job_id?: unknown; artifact_quarantine_path?: unknown } | undefined;
-  if (!eligible || !isCanonicalQuarantinePath(jobId, eligible.artifact_quarantine_path)) return null;
+  const ownership = options.db.prepare(`SELECT
+      EXISTS (SELECT 1 FROM jobs WHERE job_id=?) AS known,
+      EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND ${ELIGIBLE_TERMINAL_ROW_SQL}
+        AND artifact_quarantine_path IN (?, ?)) AS eligible`)
+    .get(jobId, jobId, cutoff, `quarantine/${jobId}`, `.osi-image-builder/quarantine/${jobId}`) as { known?: unknown; eligible?: unknown };
+  if (Number(ownership.known) === 1 && Number(ownership.eligible) !== 1) return null;
   return { base: root, auditBase, path, category: 'quarantine', cutoffDays: RETENTION_DAYS.quarantine, stateEligible: false, durable: true };
 }
 
@@ -364,6 +365,12 @@ function planIntent(options: RetentionOptionsWithRoots, candidate: Candidate, no
       ON CONFLICT(category, relative_path) DO UPDATE SET status='planned', planned_at=excluded.planned_at,
         updated_at=excluded.updated_at, bytes=excluded.bytes, error=NULL`).run(candidate.category, path, now, now, bytes);
   });
+}
+
+function cancelPlannedIntent(options: RetentionOptions, candidate: Candidate): void {
+  if (!options.db || !candidate.durable) return;
+  options.db.prepare(`DELETE FROM retention_prune_intents WHERE category=? AND relative_path=? AND status='planned'`)
+    .run(candidate.category, relativePath(candidate.auditBase, candidate.path));
 }
 
 async function finalizeIntent(options: RetentionOptions, candidate: Candidate, record: RetentionPruneRecord, error?: string): Promise<void> {
@@ -416,8 +423,13 @@ async function pruneCandidate(options: RetentionOptionsWithRoots, candidate: Can
     const record: RetentionPruneRecord = { category: candidate.category, relativePath: relativePath(candidate.auditBase, candidate.path), action: 'removed', bytes: initial.isDirectory ? 0 : linkStats.size, timestamp: now };
     planIntent(options, candidate, now, record.bytes);
     await options.beforeDelete?.({ category: candidate.category, path: candidate.path });
+    const currentHeldStats = await held.stat();
+    if (!candidate.stateEligible && currentHeldStats.mtimeMs >= threshold(now, candidate.cutoffDays)) {
+      cancelPlannedIntent(options, candidate);
+      return;
+    }
     if (candidate.category === 'quarantine' && !quarantineCandidate(options, candidate.base, candidate.auditBase, candidate.path, now)) {
-      if (options.db) options.db.prepare(`DELETE FROM retention_prune_intents WHERE category=? AND relative_path=? AND status='planned'`).run(record.category, record.relativePath);
+      cancelPlannedIntent(options, candidate);
       return;
     }
     if (initial.isDirectory) {
@@ -569,7 +581,9 @@ async function reconcileIntents(options: RetentionOptionsWithRoots, now: string,
   const protectedLogs = protectedLogPaths(options.db);
   const existing = new Set(candidates.map((candidate) => `${candidate.category}:${relativePath(candidate.auditBase, candidate.path)}`));
   const intents = options.db.prepare(`SELECT category, relative_path FROM retention_prune_intents
-    WHERE status IN ('planned', 'removed', 'failed') ORDER BY intent_id`).all() as Array<{ category?: unknown; relative_path?: unknown }>;
+    WHERE (category='quarantine' AND status IN ('planned', 'failed'))
+       OR (category<>'quarantine' AND status IN ('planned', 'removed', 'failed'))
+    ORDER BY intent_id`).all() as Array<{ category?: unknown; relative_path?: unknown }>;
   for (const intent of intents) {
     if (!RETENTION_CATEGORIES.includes(intent.category as RetentionCategory) || typeof intent.relative_path !== 'string') continue;
     const category = intent.category as RetentionCategory;
@@ -681,6 +695,19 @@ export function createRetentionStartupHook(options: RetentionOptions): Retention
         }
       }
       if (blockers.length === 0) blockers.push(...await pruneTerminalRows(secureOptions, now));
+      if (!options.db) {
+        for (const root of options.paths.approvedQuarantineRoots) {
+          const auditBase = options.paths.approvedReleaseRoots.find((release) => contained(release, root)) ?? root;
+          blockers.push({
+            code: 'RETENTION_PRUNE_FAILED',
+            details: {
+              category: 'quarantine',
+              relativePath: relativePath(auditBase, root),
+              reason: 'database-authority-unavailable',
+            },
+          });
+        }
+      }
       if (options.db) options.db.prepare('DELETE FROM retention_prunes WHERE at < ?').run(new Date(threshold(now, RETENTION_DAYS.rows)).toISOString());
       return { blockers };
     } finally { await closeConfiguredRoots(roots); }
