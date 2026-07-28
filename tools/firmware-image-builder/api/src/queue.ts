@@ -100,7 +100,7 @@ export interface QueueCoordinatorOptions {
   readonly dispatchClaimLeaseMs?: number;
   readonly dispatchClaimRenewIntervalMs?: number;
   readonly operationTimeoutMs?: number;
-  /** Keep dispatch closed until startup reconciliation explicitly completes. */
+  /** Test-only/explicit fixture escape hatch; production callers must use the startup gate. */
   readonly startupReady?: boolean;
 }
 
@@ -258,7 +258,8 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
   const clock = options.clock ?? { now: () => new Date().toISOString() };
   const coordinatorId = options.coordinatorId ?? `queue-dispatcher-${randomUUID()}`;
   let dispatchInFlight = false;
-  let startupReady = options.startupReady ?? true;
+  // Startup is fail-closed. The only normal release path is the typed gate below.
+  let startupReady = options.startupReady ?? false;
   let startupBlocker: QueueBlocker | null = null;
   let lastClockAt = Number.NEGATIVE_INFINITY;
   let lastObservationAt = Number.NEGATIVE_INFINITY;

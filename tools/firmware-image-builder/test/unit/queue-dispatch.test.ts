@@ -77,7 +77,7 @@ function coordinator(overrides: Record<string, unknown> = {}) {
     ownership, systemd, db,
     queue: createQueueCoordinator({
       db, ownership, systemd, safety: { inspect: vi.fn(async () => null) },
-      directInterrupt: vi.fn(async () => proof()), clock: { now: () => NOW }, ...queueOverrides,
+      directInterrupt: vi.fn(async () => proof()), clock: { now: () => NOW }, ...queueOverrides, startupReady: true,
     }),
   };
 }

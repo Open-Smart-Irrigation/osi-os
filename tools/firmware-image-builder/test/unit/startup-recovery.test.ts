@@ -10,6 +10,7 @@ import {
   createStartupCoordinator,
   type StartupPhaseResult,
 } from '../../api/src/startup-order.js';
+import type { QueueBlocker, QueueStartupGate } from '../../api/src/queue.js';
 
 const NOW = '2026-07-28T10:00:00.000Z';
 const FUTURE = '2026-07-28T10:01:00.000Z';
@@ -17,6 +18,13 @@ const EXPIRED = '2026-07-28T09:59:00.000Z';
 
 function clear(): StartupPhaseResult {
   return { blockers: [] };
+}
+
+function startupGate(): QueueStartupGate {
+  return {
+    beginStartupReconciliation: vi.fn(),
+    completeStartupReconciliation: vi.fn(),
+  };
 }
 
 describe('startup reconciliation order', () => {
@@ -27,6 +35,7 @@ describe('startup reconciliation order', () => {
       return clear();
     };
     const target = createStartupCoordinator({
+      queueGate: startupGate(),
       migrations: phase('migrations'),
       cleanupAdmissions: phase('cleanup-admissions'),
       liveRunnerClassification: phase('live-runner-classification'),
@@ -45,6 +54,7 @@ describe('startup reconciliation order', () => {
   it('does not dispatch while an earlier recovery phase reports a blocker', async () => {
     const dispatch = vi.fn(async () => clear());
     const target = createStartupCoordinator({
+      queueGate: startupGate(),
       migrations: async () => clear(),
       cleanupAdmissions: async () => clear(),
       liveRunnerClassification: async () => ({ blockers: [{ code: 'CLEANUP_UNIT_STOP_FAILED', details: { jobId: 'job-a' } }] }),
@@ -66,10 +76,11 @@ describe('startup reconciliation order', () => {
     let blocked = true;
     const dispatch = vi.fn(async () => clear());
     const target = createStartupCoordinator({
+      queueGate: startupGate(),
       migrations: async () => clear(),
       cleanupAdmissions: async () => clear(),
       liveRunnerClassification: async () => clear(),
-      stalePublishingRecovery: async () => ({ blockers: blocked ? [{ code: 'UNVERIFIED_FINAL_PATH_BLOCKER', jobId: 'job-publish' }] : [] }),
+      stalePublishingRecovery: async () => ({ blockers: blocked ? [{ code: 'UNVERIFIED_FINAL_PATH_BLOCKER', details: { jobId: 'job-publish' } }] : [] }),
       nonPublishingInterruption: async () => clear(),
       retention: async () => clear(),
       dispatch,
@@ -89,15 +100,24 @@ describe('cleanup lease startup classification', () => {
     ['claimed inactive and expired', 'claimed', false, EXPIRED, 'rotate'],
     ['claimed active and expired', 'claimed', true, EXPIRED, 'stop-and-rotate'],
     ['admitted inactive and unexpired', 'admitted', false, FUTURE, 'start'],
-  ] as const)('classifies %s as %s', (_name, status, active, expiresAt, expected: CleanupLeaseStartupClassification) => {
-    expect(classifyCleanupLeaseForStartup({ status, active, expiresAt, now: NOW })).toBe(expected);
+  ] as const)('classifies %s as %s', (_name, status, active, predecessorExpiresAt, expected: CleanupLeaseStartupClassification) => {
+    expect(classifyCleanupLeaseForStartup({ status, active, predecessorExpiresAt, now: NOW })).toBe(expected);
   });
 
-  it('does not classify stop failure as replacement-eligible', () => {
-    expect(classifyCleanupLeaseForStartup({ status: 'claimed', active: true, expiresAt: EXPIRED, now: NOW, stopFailure: true })).toBe('blocked');
+  it('does not classify a persisted stop blocker as replacement-eligible', async () => {
+    const reconcileAndStart = vi.fn();
+    await expect(reconcileCleanupAdmissionAtStartup({
+      jobId: 'job-a', admissionId: 'cln_00000000000000000000000000', owner: 'api',
+      predecessorExpiresAt: EXPIRED, replacementExpiresAt: FUTURE, snapshot: {} as never,
+      status: 'blocking', active: true,
+      unitName: 'osi-image-builder-cleanup@cln_00000000000000000000000000.service',
+      observedUnitName: 'osi-image-builder-cleanup@cln_00000000000000000000000000.service',
+      blocker: { code: 'CLEANUP_UNIT_STOP_FAILED', details: { failure: 'still-active' } }, now: NOW, at: NOW,
+    }, { reconcileAndStart })).resolves.toMatchObject({ action: 'blocked', blocker: { code: 'CLEANUP_UNIT_STOP_FAILED' } });
+    expect(reconcileAndStart).not.toHaveBeenCalled();
   });
 
-  it('delegates eligible rotation to the existing recovery coordinator and never writes for a deferral', async () => {
+  it('uses the future replacement expiry when rotating an expired predecessor', async () => {
     const reconcileAndStart = vi.fn(async () => ({
       admissionId: 'cln_00000000000000000000000001',
       generation: 2,
@@ -111,18 +131,100 @@ describe('cleanup lease startup classification', () => {
       jobId: 'job-a',
       admissionId: 'cln_00000000000000000000000000',
       owner: 'api',
-      expiresAt: EXPIRED,
+      predecessorExpiresAt: EXPIRED,
+      replacementExpiresAt: FUTURE,
       snapshot: {} as never,
       status: 'claimed' as const,
       active: false,
+      unitName: 'osi-image-builder-cleanup@cln_00000000000000000000000000.service',
+      observedUnitName: 'osi-image-builder-cleanup@cln_00000000000000000000000000.service',
       now: NOW,
       at: NOW,
     };
     await expect(reconcileCleanupAdmissionAtStartup(input, { reconcileAndStart })).resolves.toMatchObject({ action: 'rotated', classification: 'rotate' });
-    expect(reconcileAndStart).toHaveBeenCalledOnce();
+    expect(reconcileAndStart).toHaveBeenCalledWith(expect.objectContaining({ expiresAt: FUTURE }));
+  });
 
+  it('validates the exact persisted unit before deferring an active unexpired worker', async () => {
+    const reconcileAndStart = vi.fn();
+    const input = {
+      jobId: 'job-a',
+      admissionId: 'cln_00000000000000000000000000',
+      owner: 'api',
+      predecessorExpiresAt: FUTURE,
+      replacementExpiresAt: '2026-07-28T10:02:00.000Z',
+      snapshot: {} as never,
+      status: 'claimed' as const,
+      active: true,
+      unitName: 'osi-image-builder-cleanup@cln_00000000000000000000000000.service',
+      observedUnitName: 'osi-image-builder-cleanup@cln_00000000000000000000000000.service',
+      now: NOW,
+      at: NOW,
+    };
+    await expect(reconcileCleanupAdmissionAtStartup(input, { reconcileAndStart })).resolves.toMatchObject({ action: 'deferred', classification: 'defer' });
+    expect(reconcileAndStart).not.toHaveBeenCalled();
+
+    await expect(reconcileCleanupAdmissionAtStartup({
+      ...input,
+      observedUnitName: 'osi-image-builder-cleanup@cln_00000000000000000000000001.service',
+    }, { reconcileAndStart })).rejects.toThrow('persisted cleanup unit');
+  });
+
+  it('routes completed admissions to hand-back and preserves failed/blocking evidence', async () => {
+    const handBackCompleted = vi.fn(async () => ({
+      jobId: 'job-a',
+      admissionId: 'cln_00000000000000000000000000',
+      state: 'interrupted' as const,
+      handedBack: true,
+      started: false as const,
+    }));
+    const reconcileAndStart = vi.fn();
+    const base = {
+      jobId: 'job-a',
+      admissionId: 'cln_00000000000000000000000000',
+      owner: 'api',
+      predecessorExpiresAt: EXPIRED,
+      replacementExpiresAt: FUTURE,
+      snapshot: {} as never,
+      active: false,
+      unitName: 'osi-image-builder-cleanup@cln_00000000000000000000000000.service',
+      observedUnitName: 'osi-image-builder-cleanup@cln_00000000000000000000000000.service',
+      now: NOW,
+      at: NOW,
+    };
+    await expect(reconcileCleanupAdmissionAtStartup(
+      { ...base, status: 'completed' },
+      { reconcileAndStart, handBackCompleted },
+    )).resolves.toMatchObject({ action: 'handed-back' });
+    expect(handBackCompleted).toHaveBeenCalledWith(expect.objectContaining({ jobId: 'job-a' }));
+
+    const persisted: QueueBlocker = { code: 'QUARANTINE_PENDING', details: { path: 'quarantine/job-a' } };
+    await expect(reconcileCleanupAdmissionAtStartup(
+      { ...base, status: 'blocking', blocker: persisted },
+      { reconcileAndStart, handBackCompleted },
+    )).resolves.toMatchObject({ action: 'blocked', blocker: persisted });
+    expect(reconcileAndStart).not.toHaveBeenCalled();
+  });
+
+  it('never delegates a failed stop to rotation', async () => {
+    const reconcileAndStart = vi.fn();
+    const result = await reconcileCleanupAdmissionAtStartup({
+      jobId: 'job-a',
+      admissionId: 'cln_00000000000000000000000000',
+      owner: 'api',
+      predecessorExpiresAt: EXPIRED,
+      replacementExpiresAt: FUTURE,
+      snapshot: {} as never,
+      status: 'blocking',
+      active: true,
+      unitName: 'osi-image-builder-cleanup@cln_00000000000000000000000000.service',
+      observedUnitName: 'osi-image-builder-cleanup@cln_00000000000000000000000000.service',
+      blocker: { code: 'CLEANUP_UNIT_STOP_FAILED', details: { failure: 'still-active' } },
+      now: NOW,
+      at: NOW,
+    }, { reconcileAndStart });
+    expect(result).toMatchObject({ action: 'blocked' });
     reconcileAndStart.mockClear();
-    await expect(reconcileCleanupAdmissionAtStartup({ ...input, active: true, expiresAt: FUTURE }, { reconcileAndStart })).resolves.toMatchObject({ action: 'deferred', classification: 'defer' });
     expect(reconcileAndStart).not.toHaveBeenCalled();
   });
 });

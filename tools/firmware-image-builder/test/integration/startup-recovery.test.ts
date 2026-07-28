@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createQueueCoordinator, type QueueStartupGate } from '../../api/src/queue.js';
+import { createQueueCoordinator } from '../../api/src/queue.js';
 import { createStartupCoordinator, type StartupPhaseResult } from '../../api/src/startup-order.js';
 
 const NOW = '2026-07-28T10:00:00.000Z';
-const UNIT = 'osi-image-builder-runner@job-1.service';
-
 function clear(): StartupPhaseResult {
   return { blockers: [] };
 }
@@ -29,12 +27,20 @@ function queueFixture() {
     systemd,
     safety: { inspect: vi.fn(async () => null) },
     clock: { now: () => NOW },
-    startupReady: false,
   });
   return { queue, systemd };
 }
 
 describe('startup recovery integration boundary', () => {
+  it('keeps dispatch closed by default when no startup coordinator completes', async () => {
+    const fixture = queueFixture();
+    await expect(fixture.queue.dispatchNext()).resolves.toMatchObject({
+      kind: 'blocked',
+      reason: 'STARTUP_RECONCILIATION_INCOMPLETE',
+    });
+    expect(fixture.systemd.start).not.toHaveBeenCalled();
+  });
+
   it('holds the queue gate through cleanup-worker recovery and direct interruption blockers', async () => {
     const fixture = queueFixture();
     const phases: string[] = [];

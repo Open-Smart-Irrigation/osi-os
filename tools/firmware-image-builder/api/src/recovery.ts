@@ -21,6 +21,7 @@ import type {
   HandBackProof,
   OwnershipStore,
 } from './ownership.js';
+import type { QueueBlocker } from './queue.js';
 import type { JsonObject } from './store.js';
 import { canonicalInstant } from './validation.js';
 
@@ -283,19 +284,28 @@ export type CleanupLeaseStartupClassification = 'start' | 'defer' | 'rotate' | '
 export interface CleanupLeaseStartupInput {
   readonly status: 'admitted' | 'claimed' | 'completed' | 'failed' | 'blocking' | 'expired';
   readonly active: boolean;
-  readonly expiresAt: string;
+  /** Expiry persisted on the predecessor cleanup lease. */
+  readonly predecessorExpiresAt: string;
   readonly now: string;
-  readonly stopFailure?: boolean;
+  /** Persisted blocker evidence from a failed or blocking predecessor. */
+  readonly blocker?: QueueBlocker;
 }
 
-export interface StartupAdmissionReconciliationInput extends ReconcileAdmissionInput, CleanupLeaseStartupInput {}
+export interface StartupAdmissionReconciliationInput extends Omit<ReconcileAdmissionInput, 'expiresAt'>, CleanupLeaseStartupInput {
+  /** Expiry to use for the newly admitted replacement lease. */
+  readonly replacementExpiresAt: string;
+  /** Exact unit name read from the persisted admission row. */
+  readonly unitName: string;
+  /** Exact unit name observed from systemd during startup. */
+  readonly observedUnitName: string;
+}
 
 export interface StartupAdmissionReconciliationResult {
   readonly jobId: string;
   readonly admissionId: string;
   readonly classification: CleanupLeaseStartupClassification;
-  readonly action: 'started' | 'rotated' | 'deferred' | 'blocked';
-  readonly blocker?: string;
+  readonly action: 'started' | 'rotated' | 'deferred' | 'handed-back' | 'blocked';
+  readonly blocker?: QueueBlocker;
 }
 
 /**
@@ -304,9 +314,8 @@ export interface StartupAdmissionReconciliationResult {
  * component that can rotate or fence a lease.
  */
 export function classifyCleanupLeaseForStartup(input: CleanupLeaseStartupInput): CleanupLeaseStartupClassification {
-  const expiresAt = recoveryInstant(input.expiresAt, 'cleanup lease expiry');
+  const expiresAt = recoveryInstant(input.predecessorExpiresAt, 'cleanup predecessor lease expiry');
   const now = recoveryInstant(input.now, 'startup recovery time');
-  if (input.stopFailure === true) return 'blocked';
   const unexpired = expiresAt > now;
   if (input.status === 'admitted') return input.active ? 'defer' : 'start';
   if (input.status === 'claimed') {
@@ -324,16 +333,37 @@ export function classifyCleanupLeaseForStartup(input: CleanupLeaseStartupInput):
  */
 export async function reconcileCleanupAdmissionAtStartup(
   input: StartupAdmissionReconciliationInput,
-  recovery: Pick<CleanupAdmissionRecovery, 'reconcileAndStart'>,
+  recovery: Pick<CleanupAdmissionRecovery, 'reconcileAndStart'> & Partial<Pick<CleanupAdmissionRecovery, 'handBackCompleted' | 'reconcileCompletedAdmissions'>>,
 ): Promise<StartupAdmissionReconciliationResult> {
+  const expectedUnitName = `osi-image-builder-cleanup@${input.admissionId}.service`;
+  if (input.unitName !== expectedUnitName || input.observedUnitName !== expectedUnitName) throw new RecoveryBoundaryError('persisted cleanup unit does not match the admission');
   const classification = classifyCleanupLeaseForStartup(input);
+  if (input.status === 'completed') {
+    if (recovery.handBackCompleted === undefined) {
+      if (recovery.reconcileCompletedAdmissions === undefined) throw new RecoveryBoundaryError('completed cleanup admission requires hand-back recovery');
+      const results = await recovery.reconcileCompletedAdmissions();
+      const result = results.find((entry) => entry.jobId === input.jobId && entry.admissionId === input.admissionId);
+      if (result === undefined) throw new RecoveryBoundaryError('completed cleanup admission was not handed back');
+    } else {
+      await recovery.handBackCompleted({ jobId: input.jobId, admissionId: input.admissionId, at: input.at });
+    }
+    return { jobId: input.jobId, admissionId: input.admissionId, classification, action: 'handed-back' };
+  }
   if (classification === 'defer') {
     return { jobId: input.jobId, admissionId: input.admissionId, classification, action: 'deferred' };
   }
   if (classification === 'blocked') {
-    return { jobId: input.jobId, admissionId: input.admissionId, classification, action: 'blocked', blocker: 'CLEANUP_UNIT_STOP_FAILED' };
+    if (input.blocker === undefined) throw new RecoveryBoundaryError('blocked cleanup admission is missing persisted blocker evidence');
+    return { jobId: input.jobId, admissionId: input.admissionId, classification, action: 'blocked', blocker: input.blocker };
   }
-  const result = await recovery.reconcileAndStart(input);
+  const result = await recovery.reconcileAndStart({
+    jobId: input.jobId,
+    admissionId: input.admissionId,
+    owner: input.owner,
+    expiresAt: input.replacementExpiresAt,
+    snapshot: input.snapshot,
+    at: input.at,
+  });
   return {
     jobId: input.jobId,
     admissionId: input.admissionId,
