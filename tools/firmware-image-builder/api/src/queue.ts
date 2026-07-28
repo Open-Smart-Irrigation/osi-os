@@ -113,11 +113,19 @@ export type QueueDispatchResult =
 
 export interface QueueCoordinator {
   readonly dispatchNext: () => Promise<QueueDispatchResult>;
+}
+
+export interface QueueCoordinatorWithStartupGate {
+  readonly queue: QueueCoordinator;
+  readonly startupGate: QueueStartupGate;
+}
+
+export interface QueueStartupGate {
   readonly beginStartupReconciliation: () => void;
   readonly completeStartupReconciliation: (blockers?: readonly QueueBlocker[]) => void;
 }
 
-export interface QueueStartupGate {
+interface QueueCoordinatorInternal extends QueueCoordinator, QueueStartupGate {
   readonly beginStartupReconciliation: () => void;
   readonly completeStartupReconciliation: (blockers?: readonly QueueBlocker[]) => void;
 }
@@ -253,7 +261,7 @@ class QueueOperationTimeoutError extends Error {
   }
 }
 
-export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueCoordinator {
+function createQueueCoordinatorInternal(options: QueueCoordinatorOptions): QueueCoordinatorInternal {
   const db = database(options.db);
   const clock = options.clock ?? { now: () => new Date().toISOString() };
   const coordinatorId = options.coordinatorId ?? `queue-dispatcher-${randomUUID()}`;
@@ -850,4 +858,20 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
   }
 
   return Object.freeze({ dispatchNext, beginStartupReconciliation, completeStartupReconciliation });
+}
+
+export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueCoordinator {
+  const internal = createQueueCoordinatorInternal(options);
+  return Object.freeze({ dispatchNext: internal.dispatchNext });
+}
+
+export function createQueueCoordinatorWithStartupGate(options: QueueCoordinatorOptions): QueueCoordinatorWithStartupGate {
+  const internal = createQueueCoordinatorInternal(options);
+  return Object.freeze({
+    queue: Object.freeze({ dispatchNext: internal.dispatchNext }),
+    startupGate: Object.freeze({
+      beginStartupReconciliation: internal.beginStartupReconciliation,
+      completeStartupReconciliation: internal.completeStartupReconciliation,
+    }),
+  });
 }

@@ -1,4 +1,4 @@
-import { createQueueCoordinator, type QueueBlocker, type QueueCoordinatorOptions, type QueueStartupGate } from './queue.js';
+import { createQueueCoordinatorWithStartupGate, type QueueBlocker, type QueueCoordinatorOptions, type QueueDispatchResult, type QueueStartupGate } from './queue.js';
 
 export const STARTUP_PHASES = [
   'migrations',
@@ -72,7 +72,7 @@ export interface StartupCoordinator {
   readonly events: () => readonly StartupPhaseEvent[];
 }
 
-function queueDispatchPhase(result: Awaited<ReturnType<ReturnType<typeof createQueueCoordinator>['dispatchNext']>>): StartupPhaseResult {
+function queueDispatchPhase(result: QueueDispatchResult): StartupPhaseResult {
   if (result.kind === 'recovery-blocked') return { blockers: [result.blocker] };
   if (result.kind === 'blocked') return {
     blockers: [{ code: 'QUEUE_DISPATCH_BLOCKED', details: { reason: result.reason, ...(result.jobId === undefined ? {} : { jobId: result.jobId }) } }],
@@ -81,10 +81,10 @@ function queueDispatchPhase(result: Awaited<ReturnType<ReturnType<typeof createQ
 }
 
 export function createStartupBootstrap(options: StartupBootstrapOptions): StartupBootstrap {
-  const queue = createQueueCoordinator(options.queue);
+  const { queue, startupGate } = createQueueCoordinatorWithStartupGate(options.queue);
   const coordinator = createStartupCoordinator({
     ...options.services,
-    queueGate: queue,
+    queueGate: startupGate,
     dispatch: async () => queueDispatchPhase(await queue.dispatchNext()),
   });
   return Object.freeze({ start: coordinator.start, events: coordinator.events });
@@ -97,8 +97,9 @@ function blockers(result: StartupPhaseResult): readonly QueueBlocker[] {
 
 export function createStartupCoordinator(options: StartupCoordinatorOptions): StartupCoordinator {
   const events: StartupPhaseEvent[] = [];
+  let inFlight: Promise<StartupResult> | undefined;
 
-  async function start(): Promise<StartupResult> {
+  async function runStartupAttempt(): Promise<StartupResult> {
     options.queueGate?.beginStartupReconciliation();
     const results: QueueBlocker[] = [];
     const run = async (phase: StartupPhase, work: () => Promise<StartupPhaseResult>): Promise<void> => {
@@ -124,6 +125,16 @@ export function createStartupCoordinator(options: StartupCoordinatorOptions): St
     const dispatchBlockers = blockers(dispatchResult);
     events.push({ phase: 'dispatch', status: 'completed', blockers: dispatchBlockers });
     return { dispatched: dispatchBlockers.length === 0, blockers: dispatchBlockers };
+  }
+
+  function start(): Promise<StartupResult> {
+    if (inFlight !== undefined) return inFlight;
+    inFlight = runStartupAttempt();
+    void inFlight.then(
+      () => { inFlight = undefined; },
+      () => { inFlight = undefined; },
+    );
+    return inFlight;
   }
 
   return Object.freeze({ start, events: () => events.slice() });
