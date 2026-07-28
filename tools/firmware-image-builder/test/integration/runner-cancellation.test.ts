@@ -74,7 +74,7 @@ async function fixture(options: { readonly cancellation?: boolean } = {}) {
     acceptedAt: NOW,
   };
   expect(ownership.apiWrite({ kind: 'enqueue', input }).ok).toBe(true);
-  expect(ownership.apiWrite({ kind: 'dispatch', jobId: input.jobId, runnerUnit: `osi-image-builder-runner@${input.jobId}.service`, at: LATER }).ok).toBe(true);
+  expect(ownership.apiWrite({ kind: 'dispatch', jobId: input.jobId, runnerUnit: `osi-image-builder-runner@${input.jobId}.service`, claimOwner: `dispatcher-${input.jobId}`, claimExpiresAt: '2026-07-27T09:10:00.000Z', at: LATER }).ok).toBe(true);
   expect(ownership.runnerWrite({ kind: 'acquire-lease', jobId: input.jobId, runnerUnit: `osi-image-builder-runner@${input.jobId}.service`, owner: 'runner-integration', expiresAt: '2026-07-27T09:10:00.000Z', at: LATER }).ok).toBe(true);
   if (options.cancellation !== false) {
     expect(ownership.apiWrite({ kind: 'request-cancellation', jobId: input.jobId, reason: 'operator', at: '2026-07-27T09:00:02.000Z' }).ok).toBe(true);

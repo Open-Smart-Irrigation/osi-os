@@ -781,6 +781,8 @@ describe('versioned builder database migrations', () => {
       kind: 'dispatch',
       jobId: 'preserve-me',
       runnerUnit: 'osi-image-builder-runner@preserve-me.service',
+      claimOwner: 'dispatcher-preserve-me',
+      claimExpiresAt: '2026-07-23T00:01:00.000Z',
       at: '2026-07-23T00:00:00.000Z',
     })).toMatchObject({
       ok: false,

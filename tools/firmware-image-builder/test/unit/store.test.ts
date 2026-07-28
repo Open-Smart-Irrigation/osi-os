@@ -87,7 +87,7 @@ function runnerBase(jobId = 'job-1', leaseExpiresAt = '2026-07-23T10:02:00.000Z'
 }
 
 function dispatchCommand(jobId = 'job-1'): Extract<ApiWriteCommand, { kind: 'dispatch' }> {
-  return { kind: 'dispatch', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, at: NOW };
+  return { kind: 'dispatch', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, claimOwner: `dispatcher-${jobId}`, claimExpiresAt: '2026-07-23T10:05:00.000Z', at: NOW };
 }
 
 function acquireAndLease(ownership: OwnershipStore, jobId = 'job-1'): void {
@@ -225,7 +225,12 @@ describe('OwnershipStore persistence coverage', () => {
   });
 
   it('throws typed validation for malformed actor commands', async () => {
-    const { ownership } = await openFixture(); expect(() => ownership.apiWrite({ kind: 'dispatch', jobId: 'job-1', runnerUnit: 'wrong', at: NOW })).toThrow(OwnershipValidationError);
+    const { ownership } = await openFixture(); expect(() => ownership.apiWrite({ kind: 'dispatch', jobId: 'job-1', runnerUnit: 'wrong', claimOwner: 'dispatcher-job-1', claimExpiresAt: '2026-07-23T10:05:00.000Z', at: NOW })).toThrow(OwnershipValidationError);
+  });
+
+  it('requires a durable claim owner and expiry on every dispatch', async () => {
+    const { ownership } = await openFixture();
+    expect(() => ownership.apiWrite({ kind: 'dispatch', jobId: 'job-1', runnerUnit: 'osi-image-builder-runner@job-1.service', at: NOW } as never)).toThrow(OwnershipValidationError);
   });
 
   it('rejects cyclic and oversized JSON before persistence', async () => {
@@ -250,7 +255,7 @@ describe('OwnershipStore persistence coverage', () => {
 
   it('classifies persisted oversized argv, malformed JSON, and hashes as StoreDataError', async () => {
     const { db, store, ownership } = await openFixture();
-    ownership.apiWrite({ kind: 'dispatch', jobId: 'job-1', runnerUnit: 'osi-image-builder-runner@job-1.service', at: NOW });
+    ownership.apiWrite(dispatchCommand());
     ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'job-1', runnerUnit: 'osi-image-builder-runner@job-1.service', owner: 'runner-a', expiresAt: LATER, at: NOW });
     ownership.runnerWrite({ kind: 'operation-begin', expectedState: 'starting', jobId: 'job-1', owner: 'runner-a', runnerUnit: 'osi-image-builder-runner@job-1.service', leaseExpiresAt: LATER, at: NOW, operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW });
     db.exec('PRAGMA ignore_check_constraints=ON'); db.prepare('UPDATE job_operations SET argv_json=? WHERE job_id=?').run(JSON.stringify(['x'.repeat(70_000)]), 'job-1');

@@ -112,7 +112,7 @@ function activate(
   leaseExpiresAt = '2026-07-27T12:10:00.000Z',
 ): void {
   const runnerUnit = `osi-image-builder-runner@${jobId}.service`;
-  expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId, runnerUnit, at: LATER }).ok).toBe(true);
+  expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId, runnerUnit, claimOwner: `dispatcher-${jobId}`, claimExpiresAt: '2026-07-27T12:10:00.000Z', at: LATER }).ok).toBe(true);
   expect(fixtureValue.ownership.runnerWrite({ kind: 'acquire-lease', jobId, runnerUnit, owner, expiresAt: leaseExpiresAt, at: LATER }).ok).toBe(true);
 }
 
@@ -128,7 +128,7 @@ function toPublishing(fixtureValue: Awaited<ReturnType<typeof fixture>>, jobId: 
   const unit = `osi-image-builder-runner@${jobId}.service`;
   const owner = 'runner-publishing';
   const leaseExpiresAt = '2026-07-27T12:10:00.000Z';
-  expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId, runnerUnit: unit, at: LATER }).ok).toBe(true);
+  expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId, runnerUnit: unit, claimOwner: `dispatcher-${jobId}`, claimExpiresAt: '2026-07-27T12:10:00.000Z', at: LATER }).ok).toBe(true);
   expect(fixtureValue.ownership.runnerWrite({ kind: 'acquire-lease', jobId, runnerUnit: unit, owner, expiresAt: leaseExpiresAt, at: LATER }).ok).toBe(true);
   const stages = [
     ['preflight', 'preflight'], ['source', 'source'], ['release-gates', 'release_gates'], ['frontend', 'frontend'],
@@ -201,6 +201,8 @@ describe('API cancellation against the durable ownership store', () => {
             kind: 'dispatch',
             jobId: 'queued-race-cancel',
             runnerUnit: 'osi-image-builder-runner@queued-race-cancel.service',
+            claimOwner: 'dispatcher-queued-race-cancel',
+            claimExpiresAt: '2026-07-27T12:10:00.000Z',
             at: '2026-07-27T12:00:03.000Z',
           });
         }
@@ -243,6 +245,8 @@ describe('API cancellation against the durable ownership store', () => {
             kind: 'dispatch',
             jobId: 'queued-race-dispatch',
             runnerUnit: 'osi-image-builder-runner@queued-race-dispatch.service',
+            claimOwner: 'dispatcher-queued-race-dispatch',
+            claimExpiresAt: '2026-07-27T12:10:00.000Z',
             at: LATER,
           }).ok).toBe(true);
           expect(secondOwnership.runnerWrite({
@@ -286,7 +290,7 @@ describe('API cancellation against the durable ownership store', () => {
 
   it('persists an active cancellation request, signals the persisted unit, and escalates only after the durable 30+15 second windows', async () => {
     const fixtureValue = await fixture(['active-a']);
-    expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId: 'active-a', runnerUnit: 'osi-image-builder-runner@active-a.service', at: LATER }).ok).toBe(true);
+    expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId: 'active-a', runnerUnit: 'osi-image-builder-runner@active-a.service', claimOwner: 'dispatcher-active-a', claimExpiresAt: '2026-07-27T12:10:00.000Z', at: LATER }).ok).toBe(true);
     expect(fixtureValue.ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'active-a', runnerUnit: 'osi-image-builder-runner@active-a.service', owner: 'runner-a', expiresAt: '2026-07-27T12:10:00.000Z', at: LATER }).ok).toBe(true);
     const systemdValue = systemd();
 
@@ -1340,7 +1344,7 @@ describe('API cancellation against the durable ownership store', () => {
 
   it('makes concurrent cancellation requests converge on one durable request event and existing recovery evidence', async () => {
     const fixtureValue = await fixture(['concurrent-a']);
-    expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId: 'concurrent-a', runnerUnit: 'osi-image-builder-runner@concurrent-a.service', at: LATER }).ok).toBe(true);
+    expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId: 'concurrent-a', runnerUnit: 'osi-image-builder-runner@concurrent-a.service', claimOwner: 'dispatcher-concurrent-a', claimExpiresAt: '2026-07-27T12:10:00.000Z', at: LATER }).ok).toBe(true);
     expect(fixtureValue.ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'concurrent-a', runnerUnit: 'osi-image-builder-runner@concurrent-a.service', owner: 'runner-a', expiresAt: '2026-07-27T12:10:00.000Z', at: LATER }).ok).toBe(true);
     const systemdValue = systemd();
     const base = { store: fixtureValue.store, ownership: fixtureValue.ownership, systemd: systemdValue, cooperativeTimeoutMs: 0, systemdGraceMs: 0, pollIntervalMs: 1 } as const;

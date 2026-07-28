@@ -287,9 +287,10 @@ export type DispatchClaimPhase = 'pre-start' | 'start-attempted';
 
 export type ApiWriteCommand =
   | Readonly<{ kind: 'enqueue'; input: CreateJobInput }>
-  | Readonly<{ kind: 'dispatch'; jobId: string; runnerUnit: string; at: string; claimOwner?: string; claimExpiresAt?: string }>
+  | Readonly<{ kind: 'dispatch'; jobId: string; runnerUnit: string; at: string; claimOwner: string; claimExpiresAt: string }>
   | Readonly<{ kind: 'dispatch-reclaim'; jobId: string; runnerUnit: string; previousOwner: string; claimOwner: string; claimExpiresAt: string; at: string }>
-  | Readonly<{ kind: 'dispatch-start'; jobId: string; runnerUnit: string; claimOwner: string; unitInactiveAt: string; startAttemptedAt: string; at: string }>
+  | Readonly<{ kind: 'dispatch-renew'; jobId: string; claimOwner: string; expectedClaimExpiresAt: string; claimExpiresAt: string; at: string }>
+  | Readonly<{ kind: 'dispatch-start'; jobId: string; runnerUnit: string; claimOwner: string; expectedClaimExpiresAt: string; claimExpiresAt: string; unitInactiveAt: string; startAttemptedAt: string; at: string }>
   | Readonly<{ kind: 'dispatch-proof-observation'; jobId: string; claimOwner: string; unitInactiveAt: string; at: string }>
   | Readonly<{ kind: 'dispatch-release'; jobId: string; claimOwner: string; expectedPhase?: DispatchClaimPhase; at: string }>
   | Readonly<{ kind: 'request-cancellation'; jobId: string; reason: string; at: string; cooperativeDeadlineAt?: string; error?: JsonInput }>
@@ -673,11 +674,8 @@ function validateApiCommand(command: ApiWriteCommand): void {
     case 'enqueue': validateCreateJobInput(value.input); return;
     case 'dispatch': {
       preparedCommon(value, 'API'); runnerUnit(preparedString(value.jobId, 'dispatch jobId'), preparedString(value.runnerUnit, 'dispatch runnerUnit'));
-      preparedOptionalString(value.claimOwner, 'dispatch claim owner'); preparedOptionalInstant(value.claimExpiresAt, 'dispatch claim expiry');
-      const hasOwner = value.claimOwner !== undefined && value.claimOwner !== null;
-      const hasExpiry = value.claimExpiresAt !== undefined && value.claimExpiresAt !== null;
-      if (hasOwner !== hasExpiry) throw new OwnershipValidationError('dispatch claim identity is incomplete');
-      if (hasOwner && String(value.claimExpiresAt) <= String(value.at)) throw new OwnershipValidationError('dispatch claim expiry must be in the future');
+      preparedString(value.claimOwner, 'dispatch claim owner'); preparedInstant(value.claimExpiresAt, 'dispatch claim expiry');
+      if (String(value.claimExpiresAt) <= String(value.at)) throw new OwnershipValidationError('dispatch claim expiry must be in the future');
       return;
     }
     case 'dispatch-reclaim':
@@ -685,10 +683,15 @@ function validateApiCommand(command: ApiWriteCommand): void {
       preparedString(value.previousOwner, 'dispatch reclaim previous owner'); preparedString(value.claimOwner, 'dispatch reclaim claim owner'); preparedInstant(value.claimExpiresAt, 'dispatch reclaim claim expiry');
       if (String(value.claimExpiresAt) <= String(value.at)) throw new OwnershipValidationError('dispatch reclaim claim expiry must be in the future');
       return;
+    case 'dispatch-renew':
+      preparedCommon(value, 'API'); preparedString(value.claimOwner, 'dispatch renewal claim owner'); preparedInstant(value.expectedClaimExpiresAt, 'dispatch renewal expected expiry'); preparedInstant(value.claimExpiresAt, 'dispatch renewal expiry');
+      if (String(value.claimExpiresAt) <= String(value.at) || String(value.claimExpiresAt) < String(value.expectedClaimExpiresAt)) throw new OwnershipValidationError('dispatch renewal expiry is invalid');
+      return;
     case 'dispatch-start':
       preparedCommon(value, 'API'); runnerUnit(preparedString(value.jobId, 'dispatch start jobId'), preparedString(value.runnerUnit, 'dispatch start runnerUnit'));
-      preparedString(value.claimOwner, 'dispatch start claim owner'); preparedInstant(value.unitInactiveAt, 'dispatch start inactive time'); preparedInstant(value.startAttemptedAt, 'dispatch start attempt time');
+      preparedString(value.claimOwner, 'dispatch start claim owner'); preparedInstant(value.expectedClaimExpiresAt, 'dispatch start expected expiry'); preparedInstant(value.claimExpiresAt, 'dispatch start expiry'); preparedInstant(value.unitInactiveAt, 'dispatch start inactive time'); preparedInstant(value.startAttemptedAt, 'dispatch start attempt time');
       if (String(value.startAttemptedAt) !== String(value.at)) throw new OwnershipValidationError('dispatch start attempt time must equal command time');
+      if (String(value.claimExpiresAt) <= String(value.at) || String(value.claimExpiresAt) < String(value.expectedClaimExpiresAt)) throw new OwnershipValidationError('dispatch start expiry is invalid');
       requireChronology([['dispatch inactive time', String(value.unitInactiveAt)], ['dispatch start attempt time', String(value.startAttemptedAt)]]);
       return;
     case 'dispatch-proof-observation':
@@ -2100,7 +2103,7 @@ export class OwnershipStore {
   apiWrite(command: ApiWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as ApiWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['enqueue', 'dispatch', 'dispatch-reclaim', 'dispatch-start', 'dispatch-proof-observation', 'dispatch-release', 'request-cancellation', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'cleanup-credential-reserve', 'cleanup-credential-abort', 'cleanup-admission-stop-authorize', 'cleanup-admission-stop-complete', 'cleanup-admission-stop-failed', 'cleanup-admission-unexpected-exit', 'cleanup-admission', 'cleanup-admission-rotate', 'cleanup-admission-retry', 'hand-back'].includes(prepared.kind)) {
+    if (!['enqueue', 'dispatch', 'dispatch-reclaim', 'dispatch-renew', 'dispatch-start', 'dispatch-proof-observation', 'dispatch-release', 'request-cancellation', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'cleanup-credential-reserve', 'cleanup-credential-abort', 'cleanup-admission-stop-authorize', 'cleanup-admission-stop-complete', 'cleanup-admission-stop-failed', 'cleanup-admission-unexpected-exit', 'cleanup-admission', 'cleanup-admission-rotate', 'cleanup-admission-retry', 'hand-back'].includes(prepared.kind)) {
       throw new OwnershipViolationError('api', prepared.kind);
     }
     validateApiCommand(prepared);
@@ -2108,6 +2111,7 @@ export class OwnershipStore {
       case 'enqueue': return this.#transaction(() => this.#enqueue(prepared));
       case 'dispatch': return this.#transaction(() => this.#dispatch(prepared));
       case 'dispatch-reclaim': return this.#transaction(() => this.#dispatchReclaim(prepared));
+      case 'dispatch-renew': return this.#transaction(() => this.#dispatchRenew(prepared));
       case 'dispatch-start': return this.#transaction(() => this.#dispatchStart(prepared));
       case 'dispatch-proof-observation': return this.#transaction(() => this.#dispatchProofObservation(prepared));
       case 'dispatch-release': return this.#transaction(() => this.#dispatchRelease(prepared));
@@ -2302,9 +2306,7 @@ export class OwnershipStore {
     }
     requireChronology([['accepted time', String(job.accepted_at)], ['dispatch time', command.at]]);
     const existingClaim = this.#db.prepare('SELECT job_id FROM queue_dispatch_claims WHERE claim_id=1').get() as Row | undefined;
-    if (existingClaim !== undefined && existingClaim.job_id !== command.jobId) {
-      conflict('fenced', `queue dispatch is owned by job ${String(existingClaim.job_id)}`);
-    }
+    if (existingClaim !== undefined) conflict('fenced', `queue dispatch is owned by job ${String(existingClaim.job_id)}`);
     const blocker = this.#db.prepare(`SELECT job_id FROM jobs
       WHERE queue_state='dispatched'
         OR state IN (${ACTIVE_RECOVERY_STATE_SQL})
@@ -2331,14 +2333,12 @@ export class OwnershipStore {
     }
     const result = this.#db.prepare("UPDATE jobs SET state='starting', queue_state='dispatched', queue_position=NULL, dispatched_at=?, runner_unit=?, updated_at=? WHERE job_id=? AND state='queued' AND queue_state='queued' AND runner_unit IS NULL AND EXISTS (SELECT 1 FROM queue_entries AS candidate WHERE candidate.job_id=jobs.job_id AND candidate.fifo_seq=(SELECT MIN(first.fifo_seq) FROM queue_entries AS first JOIN jobs AS first_job ON first_job.job_id=first.job_id WHERE first_job.state='queued' AND first_job.queue_state='queued')) AND NOT EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND cleanup_fence_generation IS NOT NULL)").run(command.at, command.runnerUnit, command.at, command.jobId, command.jobId);
     if (Number(result.changes) !== 1) conflict('stale-predecessor', 'queued job was already claimed');
-    if (command.claimOwner !== undefined && command.claimExpiresAt !== undefined) {
-      const claim = this.#db.prepare(`INSERT INTO queue_dispatch_claims
-        (claim_id, job_id, owner, claimed_at, lease_expires_at, phase, start_attempted_at, unit_inactive_at)
-        VALUES (1, ?, ?, ?, ?, 'pre-start', NULL, NULL)`).run(
-        command.jobId, command.claimOwner, command.at, command.claimExpiresAt,
-      );
-      if (Number(claim.changes) !== 1) conflict('cas-lost', 'queue dispatch claim was already owned');
-    }
+    const claim = this.#db.prepare(`INSERT INTO queue_dispatch_claims
+      (claim_id, job_id, owner, claimed_at, lease_expires_at, phase, start_attempted_at, unit_inactive_at)
+      VALUES (1, ?, ?, ?, ?, 'pre-start', NULL, NULL)`).run(
+      command.jobId, command.claimOwner, command.at, command.claimExpiresAt,
+    );
+    if (Number(claim.changes) !== 1) conflict('cas-lost', 'queue dispatch claim was already owned');
     const queue = this.#db.prepare('DELETE FROM queue_entries WHERE job_id=?').run(command.jobId);
     if (Number(queue.changes) !== 1) conflict('cas-lost', 'FIFO queue claim lost its queue row');
     this.#resequenceQueue();
@@ -2373,10 +2373,25 @@ export class OwnershipStore {
     this.#event(command.jobId, 'recovery', { kind: 'queue-dispatch-reclaim', previousOwner: command.previousOwner, owner: command.claimOwner }, command.at);
   }
 
+  #dispatchRenew(command: Extract<ApiWriteCommand, { kind: 'dispatch-renew' }>): void {
+    instant(command.at, 'dispatch renewal time'); instant(command.expectedClaimExpiresAt, 'dispatch renewal expected expiry'); instant(command.claimExpiresAt, 'dispatch renewal expiry'); string(command.jobId, 'dispatch renewal jobId'); string(command.claimOwner, 'dispatch renewal owner');
+    requireChronology([['dispatch renewal time', command.at], ['dispatch renewal expiry', command.claimExpiresAt]]);
+    requirePersistedTimeline(this.#db, command.jobId, [['dispatch renewal time', command.at]]);
+    const result = this.#db.prepare(`UPDATE queue_dispatch_claims SET lease_expires_at=?
+      WHERE claim_id=1 AND job_id=? AND owner=? AND lease_expires_at=? AND lease_expires_at > ?
+        AND EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND state='starting' AND queue_state='dispatched'
+          AND runner_lease_owner IS NULL AND runner_lease_expires_at IS NULL AND cleanup_fence_generation IS NULL
+          AND cleanup_admission_id IS NULL AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL)`).run(
+      command.claimExpiresAt, command.jobId, command.claimOwner, command.expectedClaimExpiresAt, command.at, command.jobId,
+    );
+    if (Number(result.changes) !== 1) conflict('cas-lost', 'dispatch claim renewal ownership was lost');
+    this.#event(command.jobId, 'recovery', { kind: 'queue-dispatch-renew', owner: command.claimOwner, claimExpiresAt: command.claimExpiresAt }, command.at);
+  }
+
   #dispatchStart(command: Extract<ApiWriteCommand, { kind: 'dispatch-start' }>): void {
-    instant(command.at, 'dispatch start time'); instant(command.unitInactiveAt, 'dispatch start inactive time'); instant(command.startAttemptedAt, 'dispatch start attempt time');
+    instant(command.at, 'dispatch start time'); instant(command.expectedClaimExpiresAt, 'dispatch start expected expiry'); instant(command.claimExpiresAt, 'dispatch start expiry'); instant(command.unitInactiveAt, 'dispatch start inactive time'); instant(command.startAttemptedAt, 'dispatch start attempt time');
     runnerUnit(command.jobId, command.runnerUnit); string(command.claimOwner, 'dispatch start claim owner');
-    requireChronology([['dispatch inactive time', command.unitInactiveAt], ['dispatch start time', command.at]]);
+    requireChronology([['dispatch inactive time', command.unitInactiveAt], ['dispatch start time', command.at], ['dispatch claim expiry', command.claimExpiresAt]]);
     const row = this.#job(command.jobId);
     if (row.state !== 'starting' || row.queue_state !== 'dispatched' || row.runner_unit !== command.runnerUnit) conflict('stale-predecessor', 'dispatch start predecessor changed');
     if (row.runner_lease_owner !== null || row.runner_lease_expires_at !== null) conflict('stale-lease', 'dispatch start cannot proceed with a runner lease');
@@ -2397,12 +2412,12 @@ export class OwnershipStore {
         OR EXISTS (SELECT 1 FROM job_log_generations AS logs WHERE logs.job_id=jobs.job_id AND logs.sealed_at IS NULL)
       ) LIMIT 1`).get(command.jobId) as Row | undefined;
     if (blocker !== undefined) conflict('fenced', `dispatch start is blocked by job ${String(blocker.job_id)}`);
-    const result = this.#db.prepare(`UPDATE queue_dispatch_claims SET phase='start-attempted', start_attempted_at=?, unit_inactive_at=?
-      WHERE claim_id=1 AND job_id=? AND owner=? AND phase='pre-start' AND start_attempted_at IS NULL AND unit_inactive_at IS NULL AND lease_expires_at > ?
+    const result = this.#db.prepare(`UPDATE queue_dispatch_claims SET phase='start-attempted', start_attempted_at=?, unit_inactive_at=?, lease_expires_at=?
+      WHERE claim_id=1 AND job_id=? AND owner=? AND phase='pre-start' AND start_attempted_at IS NULL AND unit_inactive_at IS NULL AND lease_expires_at=? AND lease_expires_at > ?
         AND EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND state='starting' AND queue_state='dispatched' AND runner_unit=?
           AND runner_lease_owner IS NULL AND runner_lease_expires_at IS NULL AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL
           AND cleanup_blocker_code IS NULL AND cleanup_blocker_json IS NULL)`).run(
-      command.startAttemptedAt, command.unitInactiveAt, command.jobId, command.claimOwner, command.at,
+      command.startAttemptedAt, command.unitInactiveAt, command.claimExpiresAt, command.jobId, command.claimOwner, command.expectedClaimExpiresAt, command.at,
       command.jobId, command.runnerUnit,
     );
     if (Number(result.changes) !== 1) conflict('cas-lost', 'dispatch start ownership was lost');
@@ -2425,17 +2440,7 @@ export class OwnershipStore {
   #dispatchRelease(command: Extract<ApiWriteCommand, { kind: 'dispatch-release' }>): void {
     instant(command.at, 'dispatch release time'); string(command.claimOwner, 'dispatch release claim owner');
     requirePersistedTimeline(this.#db, command.jobId, [['dispatch release time', command.at]]);
-    const phasePredicate = command.expectedPhase === undefined ? '' : ' AND phase=?';
-    const parameters = command.expectedPhase === undefined
-      ? [command.jobId, command.claimOwner]
-      : [command.jobId, command.claimOwner, command.expectedPhase];
-    const result = this.#db.prepare(`DELETE FROM queue_dispatch_claims WHERE claim_id=1 AND job_id=? AND owner=?${phasePredicate}`).run(...parameters);
-    if (Number(result.changes) === 0) {
-      const claim = this.#db.prepare('SELECT job_id, owner FROM queue_dispatch_claims WHERE claim_id=1').get() as Row | undefined;
-      if (claim === undefined) return;
-      conflict('cas-lost', 'dispatch release ownership was lost');
-    }
-    this.#event(command.jobId, 'recovery', { kind: 'queue-dispatch-release', owner: command.claimOwner }, command.at);
+    conflict('fenced', 'dispatch claims are released only by runner lease acquisition or atomic recovery');
   }
 
   #requestCancellation(command: Extract<ApiWriteCommand, { kind: 'request-cancellation' }>): void {
@@ -2900,9 +2905,8 @@ export class OwnershipStore {
     ]);
     const blockerJson = json(command.blocker, 'runner recovery blocker', true);
     const blockerCode = command.blockerCode ?? 'RUNNER_DISAPPEARED';
-    const dispatchClaim = command.dispatchClaimOwner === undefined
-      ? undefined
-      : this.#db.prepare('SELECT job_id, owner, phase FROM queue_dispatch_claims WHERE claim_id=1').get() as Row | undefined;
+    const dispatchClaim = this.#db.prepare('SELECT job_id, owner, phase FROM queue_dispatch_claims WHERE claim_id=1').get() as Row | undefined;
+    if (dispatchClaim !== undefined && command.dispatchClaimOwner === undefined) conflict('identity-mismatch', 'runner recovery blocker must name the durable dispatch claim');
     if (command.dispatchClaimOwner !== undefined && (dispatchClaim === undefined || dispatchClaim.job_id !== command.jobId || dispatchClaim.owner !== command.dispatchClaimOwner)) {
       conflict('identity-mismatch', 'runner recovery blocker dispatch claim is stale');
     }
@@ -2928,6 +2932,9 @@ export class OwnershipStore {
     }
     if (blockerCode === 'SERVICE_START_FAILED' && (row.runner_lease_owner !== null || row.runner_lease_expires_at !== null)) {
       conflict('identity-mismatch', 'service-start recovery blocker requires a null runner lease');
+    }
+    if (blockerCode === 'SERVICE_START_FAILED' && command.dispatchClaimOwner === undefined) {
+      conflict('identity-mismatch', 'service-start recovery blocker requires a durable dispatch claim');
     }
     if (command.blockerCode === 'RUNNER_DISAPPEARED' && (row.runner_lease_owner === null || row.runner_lease_expires_at === null || row.runner_lease_expires_at >= command.at)) {
       conflict('stale-lease', 'runner-disappeared recovery blocker requires an observed stale lease');
@@ -2969,22 +2976,32 @@ export class OwnershipStore {
     instant(command.at, 'interruption time'); const errorJson = json(command.error, 'interruption error', true);
     if (!isActiveState(command.expectedState)) conflict('illegal-predecessor', 'state is not recoverable by direct interruption');
     const row = this.#job(command.jobId); requirePersistedTimeline(this.#db, command.jobId, [['interruption time', command.at]]); validateDirectProof(this.#db, command.proof, row, command.at);
-    const claim = command.dispatchClaimOwner === undefined
-      ? undefined
-      : this.#db.prepare('SELECT job_id, owner, phase, start_attempted_at, unit_inactive_at FROM queue_dispatch_claims WHERE claim_id=1').get() as Row | undefined;
-    if (command.dispatchClaimOwner !== undefined && (claim === undefined || claim.job_id !== command.jobId || claim.owner !== command.dispatchClaimOwner || claim.phase !== 'start-attempted')) {
+    const claim = this.#db.prepare('SELECT job_id, owner, phase, start_attempted_at, unit_inactive_at, lease_expires_at FROM queue_dispatch_claims WHERE claim_id=1').get() as Row | undefined;
+    const startFailure = command.proof.kind === 'start-failure';
+    if (claim !== undefined && command.dispatchClaimOwner === undefined) conflict('identity-mismatch', 'direct interruption must name the durable dispatch claim');
+    if (command.dispatchClaimOwner !== undefined && (claim === undefined || claim.job_id !== command.jobId || claim.owner !== command.dispatchClaimOwner)) {
       conflict('identity-mismatch', 'direct interruption dispatch claim is stale');
+    }
+    if (startFailure && command.dispatchClaimOwner === undefined) conflict('identity-mismatch', 'start-failure direct interruption requires a durable dispatch claim');
+    if (startFailure && (claim === undefined || claim.phase !== 'start-attempted' || claim.lease_expires_at === null || String(claim.lease_expires_at) <= command.at)) {
+      conflict('identity-mismatch', 'start-failure direct interruption claim is not live and start-attempted');
     }
     if (command.expectedStartAttemptedAt !== undefined || command.expectedUnitInactiveAt !== undefined) {
       if (command.proof.kind !== 'start-failure' || command.expectedStartAttemptedAt === undefined || command.expectedUnitInactiveAt === undefined
-        || command.proof.startAttemptedAt !== command.expectedStartAttemptedAt || command.proof.unitInactiveAt !== command.expectedUnitInactiveAt) {
+        || command.proof.startAttemptedAt !== command.expectedStartAttemptedAt || Date.parse(command.proof.unitInactiveAt) < Date.parse(command.expectedUnitInactiveAt)) {
         conflict('identity-mismatch', 'direct interruption proof timestamps do not match the verifier input');
       }
     }
-    if (claim !== undefined && (command.proof.kind !== 'start-failure'
-      || claim.start_attempted_at !== command.proof.startAttemptedAt
-      || claim.unit_inactive_at !== command.proof.unitInactiveAt)) conflict('identity-mismatch', 'direct interruption proof timestamps do not match the durable dispatch claim');
-    const startFailure = command.proof.kind === 'start-failure';
+    if (startFailure && (command.expectedStartAttemptedAt === undefined || command.expectedUnitInactiveAt === undefined
+      || claim?.start_attempted_at !== command.expectedStartAttemptedAt
+      || claim.unit_inactive_at !== command.expectedUnitInactiveAt
+      || command.proof.startAttemptedAt !== command.expectedStartAttemptedAt
+      || Date.parse(command.proof.unitInactiveAt) < Date.parse(command.expectedUnitInactiveAt))) {
+      conflict('identity-mismatch', 'direct interruption proof timestamps do not match the durable dispatch claim');
+    }
+    if (!startFailure && claim !== undefined && (claim.job_id !== command.jobId || claim.owner !== command.dispatchClaimOwner)) {
+      conflict('identity-mismatch', 'direct interruption dispatch claim is stale');
+    }
     const logPredicate = command.proof.logs.runner === 'absent'
       ? 'AND NOT EXISTS (SELECT 1 FROM job_log_generations WHERE job_id=?)'
       : `AND EXISTS (SELECT 1 FROM job_log_generations WHERE job_id=? AND stream='runner')
@@ -2992,6 +3009,18 @@ export class OwnershipStore {
             AND NOT EXISTS (SELECT 1 FROM job_log_generations WHERE job_id=? AND sealed_at IS NULL)
             AND NOT EXISTS (SELECT 1 FROM job_log_generations WHERE job_id=? AND stream NOT IN ('runner', 'docker'))`;
     const logArguments = command.proof.logs.runner === 'absent' ? [command.jobId] : [command.jobId, command.jobId, command.jobId, command.jobId];
+    const claimObservation = startFailure
+      ? this.#db.prepare(`UPDATE queue_dispatch_claims SET unit_inactive_at=?
+          WHERE claim_id=1 AND job_id=? AND owner=? AND phase='start-attempted' AND start_attempted_at=? AND unit_inactive_at=? AND lease_expires_at > ?`).run(
+        command.proof.unitInactiveAt,
+        command.jobId,
+        command.dispatchClaimOwner,
+        command.expectedStartAttemptedAt,
+        command.expectedUnitInactiveAt,
+        command.at,
+      )
+      : null;
+    if (startFailure && Number(claimObservation?.changes) !== 1) conflict('cas-lost', 'direct interruption final proof observation lost ownership');
     const result = startFailure
       ? this.#db.prepare(`UPDATE jobs SET state='interrupted', queue_state='complete', queue_position=NULL, terminal_at=?, terminal_error_code=?, terminal_error_json=?, updated_at=?
           WHERE job_id=? AND state=? AND runner_unit=? AND runner_lease_owner IS NULL AND runner_lease_expires_at IS NULL AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL
@@ -3007,7 +3036,12 @@ export class OwnershipStore {
           command.at, command.errorCode, errorJson, command.at, command.jobId, command.expectedState, command.proof.runnerUnit, command.proof.runnerLeaseOwner, command.proof.runnerLeaseExpiresAt, command.at, ...logArguments);
     if (Number(result.changes) !== 1) conflict('stale-predecessor', 'direct interruption proof no longer holds');
     if (command.dispatchClaimOwner !== undefined) {
-      const released = this.#db.prepare('DELETE FROM queue_dispatch_claims WHERE claim_id=1 AND job_id=? AND owner=?').run(command.jobId, command.dispatchClaimOwner);
+      const released = this.#db.prepare(`DELETE FROM queue_dispatch_claims
+        WHERE claim_id=1 AND job_id=? AND owner=?${startFailure ? " AND phase='start-attempted' AND start_attempted_at=? AND unit_inactive_at=?" : ''}`).run(
+        ...(startFailure
+          ? [command.jobId, command.dispatchClaimOwner, command.expectedStartAttemptedAt, command.proof.unitInactiveAt]
+          : [command.jobId, command.dispatchClaimOwner]),
+      );
       if (Number(released.changes) !== 1) conflict('cas-lost', 'direct interruption dispatch claim release lost');
     }
     this.#event(command.jobId, 'terminal', { state: 'interrupted', errorCode: command.errorCode, error: command.error }, command.at);
@@ -3577,6 +3611,7 @@ export class OwnershipStore {
     const lease = this.#db.prepare(`UPDATE cleanup_leases SET status='handed_back', handback_at=? WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=?
       AND fence_generation=? AND fence_token_hash=? AND status='completed'`).run(command.at, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash);
     if (Number(lease.changes) !== 1) conflict('admission-mismatch', 'cleanup lease is not completed by this worker');
+    this.#db.prepare('DELETE FROM queue_dispatch_claims WHERE claim_id=1 AND job_id=?').run(command.jobId);
     this.#event(command.jobId, 'recovery', { admissionId: command.admissionId, state: next }, command.at);
   }
 

@@ -493,6 +493,8 @@ async function fixture(options: {
     kind: 'dispatch',
     jobId,
     runnerUnit,
+    claimOwner: 'dispatcher-pipeline-order',
+    claimExpiresAt: '2026-07-26T08:10:00.000Z',
     at: '2026-07-26T08:00:10.000Z',
   }).ok).toBe(true);
 

@@ -35,7 +35,23 @@ function coordinator(overrides: Record<string, unknown> = {}) {
   const databaseBlockerJobId = overrides.databaseBlockerJobId as string | (() => string | undefined) | undefined;
   const queueOverrides = { ...overrides };
   delete queueOverrides.databaseBlockerJobId;
-  const ownership = { apiWrite: vi.fn(() => ({ ok: true, kind: 'committed', eventSeq: 1, value: undefined as void } as const)) };
+  let dispatchClaim: Record<string, unknown> | undefined;
+  const ownership = { apiWrite: vi.fn((command: Record<string, unknown>) => {
+    if (command.kind === 'dispatch') {
+      dispatchClaim = { claim_id: 1, job_id: command.jobId, owner: command.claimOwner, claimed_at: command.at, lease_expires_at: command.claimExpiresAt, phase: 'pre-start', start_attempted_at: null, unit_inactive_at: null };
+    } else if (command.kind === 'dispatch-reclaim') {
+      dispatchClaim = { ...dispatchClaim, owner: command.claimOwner, lease_expires_at: command.claimExpiresAt };
+    } else if (command.kind === 'dispatch-renew') {
+      dispatchClaim = { ...dispatchClaim, lease_expires_at: command.claimExpiresAt };
+    } else if (command.kind === 'dispatch-start') {
+      dispatchClaim = { ...dispatchClaim, phase: 'start-attempted', start_attempted_at: command.startAttemptedAt, unit_inactive_at: command.unitInactiveAt, lease_expires_at: command.claimExpiresAt };
+    } else if (command.kind === 'dispatch-proof-observation') {
+      dispatchClaim = { ...dispatchClaim, unit_inactive_at: command.unitInactiveAt };
+    } else if (command.kind === 'runner-recovery-blocker' || command.kind === 'direct-interrupt') {
+      dispatchClaim = undefined;
+    }
+    return { ok: true, kind: 'committed', eventSeq: 1, value: undefined as void } as const;
+  }) };
   const systemd: {
     inspect: ReturnType<typeof vi.fn<QueueSystemd['inspect']>>;
     start: ReturnType<typeof vi.fn<QueueSystemd['start']>>;
@@ -50,6 +66,7 @@ function coordinator(overrides: Record<string, unknown> = {}) {
       all: vi.fn(() => sql.includes('queue_entries') ? [{ ...row('queued'), state: 'queued', queue_state: 'queued' }] : []),
       get: vi.fn(() => {
         if (sql.startsWith('SELECT * FROM jobs')) return row();
+        if (sql.includes('queue_dispatch_claims')) return dispatchClaim;
         if (!sql.includes('SELECT job_id FROM jobs') || databaseBlockerJobId === undefined) return undefined;
         const value = typeof databaseBlockerJobId === 'function' ? databaseBlockerJobId() : databaseBlockerJobId;
         return value === undefined ? undefined : { job_id: value };
@@ -66,6 +83,12 @@ function coordinator(overrides: Record<string, unknown> = {}) {
 }
 
 describe('FIFO queue dispatch', () => {
+  it.each([
+    [0, 1], [40, 0], [40, 20], [40.5, 5],
+  ])('rejects invalid dispatch claim lease or renewal intervals: %s/%s', (leaseMs, renewMs) => {
+    expect(() => coordinator({ dispatchClaimLeaseMs: leaseMs, dispatchClaimRenewIntervalMs: renewMs })).toThrow('dispatch claim lease and renewal intervals are invalid');
+  });
+
   it('claims the oldest queued job and starts only after a fresh active observation', async () => {
     const target = coordinator();
     target.systemd.inspect
@@ -139,7 +162,7 @@ describe('FIFO queue dispatch', () => {
 
     const lateList = coordinator();
     lateList.systemd.listActive.mockResolvedValueOnce([]).mockResolvedValueOnce([UNIT]);
-    await expect(lateList.queue.dispatchNext()).resolves.toMatchObject({ kind: 'interrupted', jobId: 'job-1' });
+    await expect(lateList.queue.dispatchNext()).resolves.toMatchObject({ kind: 'recovery-blocked', jobId: 'job-1' });
     expect(lateList.systemd.start).not.toHaveBeenCalled();
   });
 

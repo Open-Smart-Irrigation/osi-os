@@ -148,7 +148,8 @@ async function fixture(jobId = 'job-1'): Promise<{ store: BuilderStore; ownershi
   const store = new BuilderStore(db); const ownership = new OwnershipStore(db, { now: () => NOW }); closers.push(() => store.close()); return { store, ownership, path, db };
 }
 function eventCount(store: BuilderStore): number { return store.listEvents('job-1').events.length; }
-function dispatch(jobId = 'job-1'): Extract<ApiWriteCommand, { kind: 'dispatch' }> { return { kind: 'dispatch', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, at: NOW }; }
+function dispatch(jobId = 'job-1'): Extract<ApiWriteCommand, { kind: 'dispatch' }> { return { kind: 'dispatch', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, claimOwner: `dispatcher-${jobId}`, claimExpiresAt: EXPIRY, at: NOW }; }
+function dispatchStart(jobId = 'job-1'): Extract<ApiWriteCommand, { kind: 'dispatch-start' }> { return { kind: 'dispatch-start', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, claimOwner: `dispatcher-${jobId}`, expectedClaimExpiresAt: EXPIRY, claimExpiresAt: EXPIRY, unitInactiveAt: NOW, startAttemptedAt: NOW, at: NOW }; }
 function lease(expiresAt = ACTIVE, jobId = 'job-1'): Extract<RunnerWriteCommand, { kind: 'acquire-lease' }> { return { kind: 'acquire-lease', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', expiresAt, at: NOW }; }
 function container(jobId = 'job-1'): Extract<RunnerWriteCommand, { kind: 'container' }> { return {
   kind: 'container', jobId, owner: 'runner-a', runnerUnit: `osi-image-builder-runner@${jobId}.service`, leaseExpiresAt: ACTIVE, at: NOW,
@@ -677,7 +678,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('prevalidates hostile and oversized commands before attempting BEGIN', async () => {
     const { ownership, store, db } = await fixture('prevalidation'); let beginAttempts = 0;
     const guarded = new OwnershipStore(db, { now: () => NOW, beforeBegin: () => { beginAttempts += 1; } }); const events = store.listEvents('prevalidation').events.length;
-    const oversized = { kind: 'dispatch' as const, jobId: 'x'.repeat(100_000), runnerUnit: 'osi-image-builder-runner@prevalidation.service', at: NOW };
+    const oversized = { kind: 'dispatch' as const, jobId: 'x'.repeat(100_000), runnerUnit: 'osi-image-builder-runner@prevalidation.service', claimOwner: 'dispatcher-prevalidation', claimExpiresAt: EXPIRY, at: NOW };
     expect(() => guarded.apiWrite(oversized)).toThrow(OwnershipValidationError);
     const getter = { kind: 'dispatch' as const, runnerUnit: 'osi-image-builder-runner@prevalidation.service', at: NOW } as Record<string, unknown>;
     Object.defineProperty(getter, 'jobId', { enumerable: true, get: () => { throw Object.assign(new Error('spoofed busy'), { code: 'SQLITE_BUSY' }); } });
@@ -834,7 +835,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(target.ownership.apiWrite({ kind: 'enqueue', input: {
       jobId: 'job-2', requestId: 'request-global-predicate-job-2', request: { branch: 'main', target: 'rpi-5' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'global predicate', acceptedAt: NOW,
     } }).ok).toBe(true);
-    expect(target.ownership.apiWrite({ kind: 'dispatch', jobId: 'job-2', runnerUnit: 'osi-image-builder-runner@job-2.service', at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
+    expect(target.ownership.apiWrite({ kind: 'dispatch', jobId: 'job-2', runnerUnit: 'osi-image-builder-runner@job-2.service', claimOwner: 'dispatcher-job-2', claimExpiresAt: EXPIRY, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
   });
 
   it('allows the next dispatch only after a terminal clearance', async () => {
@@ -888,27 +889,54 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('uses typed direct interruption proofs for pre-lease and stale active failure only', async () => {
-    const first = await fixture(); first.ownership.apiWrite(dispatch());
+    const first = await fixture(); first.ownership.apiWrite(dispatch()); first.ownership.apiWrite(dispatchStart());
     expect(first.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-1', expectedState: 'starting', at: RECOVERY, proof: { ...direct('start-failure'), logs: { ...logs, docker: 'sealed' } as never }, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'start failed' } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
-    expect(first.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-1', expectedState: 'starting', at: RECOVERY, proof: direct('start-failure'), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'start failed' } }).ok).toBe(true);
+    expect(first.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-1', expectedState: 'starting', at: RECOVERY, proof: direct('start-failure'), dispatchClaimOwner: 'dispatcher-job-1', expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'start failed' } }).ok).toBe(true);
     const second = await fixture('job-2'); second.ownership.apiWrite(dispatch('job-2')); second.ownership.runnerWrite(lease(ACTIVE, 'job-2'));
     expect(second.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-2', expectedState: 'starting', at: RECOVERY, proof: direct('active', 'job-2'), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'stale' } }).ok).toBe(true);
     expect(second.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-2', expectedState: 'publishing', at: RECOVERY, proof: direct('active', 'job-2'), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'bad' } } as never)).toMatchObject({ ok: false, conflict: { kind: 'illegal-predecessor' } });
   });
 
+  it('rejects recovery writes that omit an existing dispatch claim', async () => {
+    const target = await fixture('claim-bypass');
+    expect(target.ownership.apiWrite({ kind: 'dispatch', jobId: 'claim-bypass', runnerUnit: 'osi-image-builder-runner@claim-bypass.service', claimOwner: 'dispatcher-a', claimExpiresAt: EXPIRY, at: NOW }).ok).toBe(true);
+    expect(target.ownership.apiWrite({
+      kind: 'runner-recovery-blocker', jobId: 'claim-bypass', expectedState: 'starting', runnerUnit: 'osi-image-builder-runner@claim-bypass.service',
+      observedOwner: null, observedLeaseExpiresAt: null, blockerCode: 'SERVICE_START_FAILED', blocker: { reason: 'missing claim owner' }, at: LATER,
+    })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.getJob('claim-bypass')).toMatchObject({ cleanupBlockerCode: null });
+  });
+
+  it('requires a matching durable claim for start-failure direct interruption', async () => {
+    const target = await fixture('direct-claim-bypass');
+    expect(target.ownership.apiWrite({ kind: 'dispatch', jobId: 'direct-claim-bypass', runnerUnit: 'osi-image-builder-runner@direct-claim-bypass.service', claimOwner: 'dispatcher-a', claimExpiresAt: EXPIRY, at: NOW }).ok).toBe(true);
+    expect(target.ownership.apiWrite({ kind: 'dispatch-start', jobId: 'direct-claim-bypass', runnerUnit: 'osi-image-builder-runner@direct-claim-bypass.service', claimOwner: 'dispatcher-a', unitInactiveAt: NOW, startAttemptedAt: NOW, at: NOW, claimExpiresAt: EXPIRY, expectedClaimExpiresAt: EXPIRY } as never).ok).toBe(true);
+    const proof = { ...direct('start-failure', 'direct-claim-bypass'), unitInactiveAt: NOW, container: absent(NOW), logs: { ...logs, verifiedAt: NOW } };
+    expect(target.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-claim-bypass', expectedState: 'starting', at: LATER, proof, errorCode: 'SERVICE_START_FAILED', error: { reason: 'missing claim owner' }, expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.getJob('direct-claim-bypass')).toMatchObject({ state: 'starting', terminalErrorCode: null });
+  });
+
+  it('does not allow a dispatch release to bypass runner handoff ownership', async () => {
+    const target = await fixture('release-bypass');
+    expect(target.ownership.apiWrite(dispatch('release-bypass')).ok).toBe(true);
+    expect(target.ownership.apiWrite(dispatchStart('release-bypass')).ok).toBe(true);
+    expect(target.ownership.apiWrite({ kind: 'dispatch-release', jobId: 'release-bypass', claimOwner: 'dispatcher-release-bypass', expectedPhase: 'start-attempted', at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
+    expect(target.db.prepare('SELECT phase, owner FROM queue_dispatch_claims WHERE claim_id=1').get()).toEqual({ phase: 'start-attempted', owner: 'dispatcher-release-bypass' });
+  });
+
   it('reconciles direct interruption logs in the same transaction', async () => {
-    const unsealed = await fixture('direct-unsealed'); unsealed.ownership.apiWrite(dispatch('direct-unsealed')); seedUnsealedLogs(unsealed.path, 'direct-unsealed');
+    const unsealed = await fixture('direct-unsealed'); unsealed.ownership.apiWrite(dispatch('direct-unsealed')); unsealed.ownership.apiWrite(dispatchStart('direct-unsealed')); seedUnsealedLogs(unsealed.path, 'direct-unsealed');
     expect(unsealed.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-unsealed', expectedState: 'starting', at: RECOVERY, proof: direct('start-failure', 'direct-unsealed'), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'unsealed logs' } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
     expect(unsealed.store.getJob('direct-unsealed').state).toBe('starting');
 
-    const sealed = await fixture('direct-sealed'); sealed.ownership.apiWrite(dispatch('direct-sealed')); seedLogs(sealed.path, 'direct-sealed');
-    const sealedResult = sealed.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-sealed', expectedState: 'starting', at: RECOVERY, proof: directWithLogs('start-failure', 'direct-sealed', sealedDirectLogs(sealed.path, 'direct-sealed')), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'sealed logs' } }); expect(sealedResult.ok).toBe(true);
+    const sealed = await fixture('direct-sealed'); sealed.ownership.apiWrite(dispatch('direct-sealed')); sealed.ownership.apiWrite(dispatchStart('direct-sealed')); seedLogs(sealed.path, 'direct-sealed');
+    const sealedResult = sealed.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-sealed', expectedState: 'starting', at: RECOVERY, proof: directWithLogs('start-failure', 'direct-sealed', sealedDirectLogs(sealed.path, 'direct-sealed')), dispatchClaimOwner: 'dispatcher-direct-sealed', expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'sealed logs' } }); expect(sealedResult.ok).toBe(true);
 
-    const gap = await fixture('direct-gap'); gap.ownership.apiWrite(dispatch('direct-gap')); seedLogGapEvent(gap.path, 'direct-gap');
+    const gap = await fixture('direct-gap'); gap.ownership.apiWrite(dispatch('direct-gap')); gap.ownership.apiWrite(dispatchStart('direct-gap')); seedLogGapEvent(gap.path, 'direct-gap');
     expect(gap.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-gap', expectedState: 'starting', at: RECOVERY, proof: directWithLogs('start-failure', 'direct-gap', sealedDirectLogs(gap.path, 'direct-gap')), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'log gap' } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
 
-    const orphan = await fixture('direct-orphan'); orphan.ownership.apiWrite(dispatch('direct-orphan')); seedLogRanges(orphan.path, 'direct-orphan', [[0, 1, 'log_orphan_tail']]);
-    expect(orphan.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-orphan', expectedState: 'starting', at: RECOVERY, proof: directWithLogs('start-failure', 'direct-orphan', sealedDirectLogs(orphan.path, 'direct-orphan')), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'contiguous recovered tail' } }).ok).toBe(true);
+    const orphan = await fixture('direct-orphan'); orphan.ownership.apiWrite(dispatch('direct-orphan')); orphan.ownership.apiWrite(dispatchStart('direct-orphan')); seedLogRanges(orphan.path, 'direct-orphan', [[0, 1, 'log_orphan_tail']]);
+    expect(orphan.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-orphan', expectedState: 'starting', at: RECOVERY, proof: directWithLogs('start-failure', 'direct-orphan', sealedDirectLogs(orphan.path, 'direct-orphan')), dispatchClaimOwner: 'dispatcher-direct-orphan', expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'contiguous recovered tail' } }).ok).toBe(true);
   });
 
   it('accepts only canonical real instants and bounded JSON values', async () => {
@@ -2711,7 +2739,7 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('wins once across two SQLite connections and emits no orphan event', async () => {
     const { path } = await fixture(); const dbA = openBuilderDatabase(path); const dbB = openBuilderDatabase(path); const a = new OwnershipStore(dbA, { now: () => NOW }); const b = new OwnershipStore(dbB, { now: () => NOW }); closers.push(() => dbA.close(), () => dbB.close());
-    expect(a.apiWrite(dispatch()).ok).toBe(true); expect(b.apiWrite(dispatch())).toMatchObject({ ok: false, conflict: { kind: 'stale-predecessor' } }); const verify = openBuilderDatabase(path); expect((verify.prepare("SELECT COUNT(*) AS count FROM job_events WHERE event_type='dispatch'").get() as { count: number }).count).toBe(1); verify.close();
+    expect(a.apiWrite(dispatch()).ok).toBe(true); expect(b.apiWrite(dispatch())).toMatchObject({ ok: false, conflict: { kind: 'fenced' } }); const verify = openBuilderDatabase(path); expect((verify.prepare("SELECT COUNT(*) AS count FROM job_events WHERE event_type='dispatch'").get() as { count: number }).count).toBe(1); verify.close();
   });
 
   it('serializes runner-vs-fence and cleanup completion races without orphan events', async () => {
@@ -2926,8 +2954,8 @@ describe('actor-owned compare-and-set writes', () => {
     expect(() => failingOwnership(publishCase.path).runnerWrite({ ...runnerBase('rollback-live-publish'), kind: 'publish', expectedState: 'publishing', state: 'blocked', blockerCode: 'PUBLISH_FAILED', blocker: { reason: 'rollback' } })).toThrow(OwnershipTransactionError);
     expect(publishCase.store.getJob('rollback-live-publish').publishState).toBe('publishing'); expect(publishCase.store.listEvents('rollback-live-publish').events).toHaveLength(publishEvents);
 
-    const directCase = await fixture('rollback-direct-interrupt'); directCase.ownership.apiWrite(dispatch('rollback-direct-interrupt')); const directEvents = directCase.store.listEvents('rollback-direct-interrupt').events.length;
-    expect(() => failingOwnership(directCase.path).apiWrite({ kind: 'direct-interrupt', jobId: 'rollback-direct-interrupt', expectedState: 'starting', at: RECOVERY, proof: direct('start-failure', 'rollback-direct-interrupt'), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'rollback' } })).toThrow(OwnershipTransactionError);
+    const directCase = await fixture('rollback-direct-interrupt'); directCase.ownership.apiWrite(dispatch('rollback-direct-interrupt')); directCase.ownership.apiWrite(dispatchStart('rollback-direct-interrupt')); const directEvents = directCase.store.listEvents('rollback-direct-interrupt').events.length;
+    expect(() => failingOwnership(directCase.path).apiWrite({ kind: 'direct-interrupt', jobId: 'rollback-direct-interrupt', expectedState: 'starting', at: RECOVERY, proof: direct('start-failure', 'rollback-direct-interrupt'), dispatchClaimOwner: 'dispatcher-rollback-direct-interrupt', expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'rollback' } })).toThrow(OwnershipTransactionError);
     expect(directCase.store.getJob('rollback-direct-interrupt').state).toBe('starting'); expect(directCase.store.listEvents('rollback-direct-interrupt').events).toHaveLength(directEvents);
   });
 
