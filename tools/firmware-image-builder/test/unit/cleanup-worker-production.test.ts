@@ -195,6 +195,7 @@ describe('cleanup production composition', () => {
     await mkdir(join(configHome, 'osi-image-builder'), { recursive: true, mode: 0o700 });
     await mkdir(stateHome, { mode: 0o700 });
     await mkdir(outputRoot, { mode: 0o700 });
+    await mkdir(join(outputRoot, '.osi-image-builder'), { mode: 0o750 });
     await writeFile(join(configHome, 'osi-image-builder', 'config.json'), JSON.stringify({
       repositoryPath: join(root, 'repository-is-not-mounted'),
       approvedOutputRoots: [{ id: ROOT_ID, label: 'release', path: outputRoot }],

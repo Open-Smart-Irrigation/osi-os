@@ -119,9 +119,14 @@ describe('builder configuration', () => {
   it('loads cleanup authority without probing or opening the configured repository', async () => {
     const workspace = await createWorkspace();
     const inaccessibleRepository = join(workspace.directory, 'repository-is-not-mounted');
+    const outputWorkRoot = join(workspace.outputRoot, '.osi-image-builder');
+    await mkdir(outputWorkRoot, { mode: 0o750 });
     await writeConfig(workspace, configFor(workspace, {
       repositoryPath: inaccessibleRepository,
     }));
+    const access = vi.fn(async (path: string) => {
+      if (path === resolve(workspace.outputRoot)) throw Object.assign(new Error('read-only output root'), { code: 'EROFS' });
+    });
 
     const loaded = await loadCleanupConfig({
       env: {
@@ -129,7 +134,7 @@ describe('builder configuration', () => {
         XDG_CONFIG_HOME: workspace.configHome,
         XDG_STATE_HOME: workspace.stateHome,
       },
-      rootFs: { statfs: ampleDisk },
+      rootFs: { access, statfs: ampleDisk },
     });
 
     expect(loaded.stateRoot).toBe(resolve(workspace.stateHome, 'osi-image-builder'));
@@ -142,7 +147,22 @@ describe('builder configuration', () => {
       }],
       builderLockPath: '/opt/osi-image-builder/2026.07.22.1/builder.lock.json',
     });
+    expect(access).toHaveBeenCalledWith(outputWorkRoot, expect.any(Number));
+    expect(access).not.toHaveBeenCalledWith(resolve(workspace.outputRoot), expect.any(Number));
     await expect(lstat(inaccessibleRepository)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects cleanup authority when the fixed output work root is unavailable', async () => {
+    const workspace = await createWorkspace();
+    await writeConfig(workspace, configFor(workspace));
+
+    await expect(loadCleanupConfig({
+      env: {
+        XDG_CONFIG_HOME: workspace.configHome,
+        XDG_STATE_HOME: workspace.stateHome,
+      },
+      rootFs: { statfs: ampleDisk },
+    })).rejects.toMatchObject({ code: 'OUTPUT_ROOT_NOT_FOUND', field: 'sdcard-images' });
   });
 
   it('expands XDG paths, validates SSH origin, and returns canonical approved roots', async () => {

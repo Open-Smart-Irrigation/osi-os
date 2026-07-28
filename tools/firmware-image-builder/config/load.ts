@@ -292,7 +292,12 @@ function validateDirectoryPolicy(stats: Pick<RootStats, 'uid' | 'mode'>, field: 
   if (!valid) fail(`${field} has an insecure mode`, policy === 'state' ? 'STATE_ROOT_MODE' : 'OUTPUT_ROOT_MODE');
 }
 
-async function inspectAuthorityDirectory(path: string, field: string, policy: DirectoryPolicy): Promise<{ path: string; device: number; inode: number }> {
+async function inspectAuthorityDirectory(
+  path: string,
+  field: string,
+  policy: DirectoryPolicy,
+  requireWritable = true,
+): Promise<{ path: string; device: number; inode: number }> {
   let stats;
   try { stats = await lstat(path); } catch (error) { return authorityReject(`${field} cannot be inspected`, error); }
   if (stats.isSymbolicLink() || !stats.isDirectory()) return authorityReject(`${field} must be a non-symlink directory`);
@@ -300,8 +305,8 @@ async function inspectAuthorityDirectory(path: string, field: string, policy: Di
   let canonical: string;
   try {
     canonical = await realpath(path);
-    await access(canonical, fsConstants.W_OK);
-  } catch (error) { return authorityReject(`${field} is not canonical and writable`, error); }
+    if (requireWritable) await access(canonical, fsConstants.W_OK);
+  } catch (error) { return authorityReject(`${field} is not canonical${requireWritable ? ' and writable' : ''}`, error); }
   if (canonical !== resolve(path)) return authorityReject(`${field} resolves through a symlink`);
   const flags = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW | (typeof (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC === 'number' ? (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC! : 0);
   let handle: FileHandle;
@@ -320,6 +325,7 @@ async function issuePathAuthorities(
   roots: readonly ApprovedOutputRoot[],
   statePath: string,
   repositoryPath: string | undefined,
+  outputWriteScope: 'root' | 'work-root',
   dependencies: PathAuthorityDependencies,
 ): Promise<PathAuthorities> {
   const inspectedRoots: Array<AuthorityRootRecord> = [];
@@ -327,7 +333,15 @@ async function issuePathAuthorities(
   for (const root of roots) {
     if (ids.has(root.id)) return authorityReject(`duplicate approved root ID: ${root.id}`);
     ids.add(root.id);
-    const inspected = await inspectAuthorityDirectory(root.path, `approved root ${root.id}`, 'output');
+    const inspected = await inspectAuthorityDirectory(root.path, `approved root ${root.id}`, 'output', outputWriteScope === 'root');
+    if (outputWriteScope === 'work-root') {
+      const workRoot = await inspectAuthorityDirectory(
+        join(inspected.path, '.osi-image-builder'),
+        `approved root ${root.id} work root`,
+        'output',
+      );
+      if (workRoot.device !== inspected.device) return authorityReject(`approved root ${root.id} work root must share the output filesystem`, undefined, 'OUTPUT_ROOT_OVERLAP');
+    }
     if (inspectedRoots.some((candidate) => pathsOverlap(candidate.path, inspected.path))) return authorityReject('approved roots may not overlap', undefined, 'OUTPUT_ROOT_OVERLAP');
     inspectedRoots.push({ id: root.id, path: inspected.path, quarantinePath: join(inspected.path, '.osi-image-builder', 'quarantine'), device: inspected.device, inode: inspected.inode });
   }
@@ -351,12 +365,13 @@ async function issueConfiguredPathAuthorities(
   roots: readonly ApprovedOutputRoot[],
   statePath: string,
   repositoryPath: string | undefined,
+  outputWriteScope: 'root' | 'work-root',
   dependencies: PathAuthorityDependencies,
 ): Promise<PathAuthorities> {
   await validateStateRootPreflight(statePath);
   const stateCreated = await createStateRoot(statePath);
   try {
-    return await issuePathAuthorities(roots, statePath, repositoryPath, dependencies);
+    return await issuePathAuthorities(roots, statePath, repositoryPath, outputWriteScope, dependencies);
   } catch (error) {
     if (stateCreated.length > 0) {
       try {
@@ -492,6 +507,7 @@ export async function loadConfig(options: ConfigLoadOptions = {}): Promise<Loade
     approvedOutputRoots,
     directories.stateRoot,
     repositoryPath,
+    'root',
     Object.freeze({ ...defaultPathAuthorityDependencies, ...options.pathAuthorityDependencies }),
   );
 
@@ -521,7 +537,7 @@ export async function loadCleanupConfig(
   validateMaxQueueLength(file.maxQueueLength ?? DEFAULT_MAX_QUEUE_LENGTH);
   const diskFreeMinimumBytes = validateDiskThreshold(file.diskFreeMinimumBytes ?? MIN_DISK_FREE_BYTES);
   const builderLockPath = validateBuilderLockPath(file.builderLockPath);
-  const approvedOutputRoots = await validateApprovedRoots(file.approvedOutputRoots, {
+  const approvedOutputRoots = await validateCleanupApprovedRoots(file.approvedOutputRoots, {
     rootFs: options.rootFs,
     minimumFreeBytes: diskFreeMinimumBytes,
   });
@@ -530,6 +546,7 @@ export async function loadCleanupConfig(
     approvedOutputRoots,
     directories.stateRoot,
     undefined,
+    'work-root',
     Object.freeze({ ...defaultPathAuthorityDependencies, ...options.pathAuthorityDependencies }),
   );
 
@@ -666,6 +683,21 @@ export async function validateApprovedRoots(
   roots: readonly ApprovedOutputRootInput[],
   options: RootValidationOptions = {},
 ): Promise<readonly ApprovedOutputRoot[]> {
+  return validateApprovedRootsWithWriteScope(roots, options, 'root');
+}
+
+async function validateCleanupApprovedRoots(
+  roots: readonly ApprovedOutputRootInput[],
+  options: RootValidationOptions = {},
+): Promise<readonly ApprovedOutputRoot[]> {
+  return validateApprovedRootsWithWriteScope(roots, options, 'work-root');
+}
+
+async function validateApprovedRootsWithWriteScope(
+  roots: readonly ApprovedOutputRootInput[],
+  options: RootValidationOptions,
+  writeScope: 'root' | 'work-root',
+): Promise<readonly ApprovedOutputRoot[]> {
   if (!Array.isArray(roots) || roots.length === 0) {
     throw new ConfigValidationError('OUTPUT_ROOTS_INVALID', 'At least one approved output root is required.');
   }
@@ -726,10 +758,44 @@ export async function validateApprovedRoots(
     if (resolve(root.path) !== canonicalPath) {
       throw new ConfigValidationError('OUTPUT_ROOT_SYMLINK', `Approved output root resolves through a symlink: ${root.path}`, root.id);
     }
+    const writablePath = writeScope === 'root'
+      ? canonicalPath
+      : join(canonicalPath, '.osi-image-builder');
+    if (writeScope === 'work-root') {
+      let workStats: RootStats;
+      try {
+        workStats = await rootFs.lstat(writablePath);
+      } catch (error) {
+        throw new ConfigValidationError('OUTPUT_ROOT_NOT_FOUND', `Approved output work root does not exist: ${writablePath}`, root.id);
+      }
+      if (workStats.isSymbolicLink()) {
+        throw new ConfigValidationError('OUTPUT_ROOT_SYMLINK', `Approved output work root may not be a symlink: ${writablePath}`, root.id);
+      }
+      if (workStats.isBlockDevice()) {
+        throw new ConfigValidationError('OUTPUT_ROOT_BLOCK_DEVICE', `Approved output work root may not be a block device: ${writablePath}`, root.id);
+      }
+      if (!workStats.isDirectory()) {
+        throw new ConfigValidationError('OUTPUT_ROOT_NOT_DIRECTORY', `Approved output work root must be a directory: ${writablePath}`, root.id);
+      }
+      validateDirectoryPolicy(workStats, `Approved output work root ${root.id}`, 'output', (message, code) => { throw new ConfigValidationError(code, message, root.id); });
+      let canonicalWorkPath: string;
+      try {
+        canonicalWorkPath = await rootFs.realpath(writablePath);
+      } catch (error) {
+        throw new ConfigValidationError('OUTPUT_ROOT_CANONICALIZE_FAILED', `Cannot canonicalize approved output work root ${writablePath}.`, root.id);
+      }
+      if (canonicalWorkPath !== writablePath) {
+        throw new ConfigValidationError('OUTPUT_ROOT_SYMLINK', `Approved output work root resolves through a symlink: ${writablePath}`, root.id);
+      }
+    }
     try {
-      await rootFs.access(canonicalPath, fsConstants.W_OK);
+      await rootFs.access(writablePath, fsConstants.W_OK);
     } catch (error) {
-      throw new ConfigValidationError('OUTPUT_ROOT_NOT_WRITABLE', `Approved output root is not writable: ${root.path}`, root.id);
+      throw new ConfigValidationError(
+        'OUTPUT_ROOT_NOT_WRITABLE',
+        `${writeScope === 'root' ? 'Approved output root' : 'Approved output work root'} is not writable: ${writablePath}`,
+        root.id,
+      );
     }
 
     let free: StatFsResult;
