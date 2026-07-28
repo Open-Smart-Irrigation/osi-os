@@ -598,6 +598,35 @@ describe('production recovery physical verification', () => {
     }
   });
 
+  it('rejects a near-limit log descriptor plan before traversal or materialization', async () => {
+    let reachedPhysicalTraversal = false;
+    const value = await fixture(async () => {
+      reachedPhysicalTraversal = true;
+    });
+    try {
+      const generations = Array.from({ length: 83 }, (_, generation) => ({
+        stream: 'runner' as const,
+        generation,
+        path: `logs/${Array.from({ length: 11 }, (_, depth) => `g${generation}-${depth}`).join('/')}/runner.log`,
+        startedAt: STALE,
+        sealedAt: NOW,
+        sizeBytes: 0,
+        sha256: 'a'.repeat(64),
+      }));
+      await expect(createFactory(value.loaded).logs.verify({
+        jobId: JOB_ID,
+        completedAt: NOW,
+        completionEventSeq: 10,
+        postcondition: { ...postcondition().logs, runner: 'sealed' },
+        generations,
+        events: [],
+      })).rejects.toThrow(/descriptor|plan|bounded/);
+      expect(reachedPhysicalTraversal).toBe(false);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
   it('rejects a path outside the fixed completion file, a wrong hash, and a non-canonical extra field', async () => {
     const value = await fixture();
     try {

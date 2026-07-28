@@ -54,7 +54,11 @@ const MAX_LOG_PATH_BYTES = 4_096;
 const MAX_LOG_COMPONENT_BYTES = 255;
 const MAX_LOG_COMPONENTS = MAX_LOG_TREE_DEPTH;
 const MAX_LOG_DESCRIPTORS = 1_024;
-const MAX_LOG_REVALIDATION_TEMP_DESCRIPTORS = MAX_LOG_TREE_DEPTH + 4;
+const MAX_LOG_FILE_OPEN_DESCRIPTORS = 2;
+const MAX_LOG_FINAL_CHAIN_DESCRIPTORS = 3;
+// Reserve both descriptor classes retained at each recursive level, the final
+// canonical chain, and the O_PATH/read pair used while opening a log file.
+const MAX_LOG_REVALIDATION_TEMP_DESCRIPTORS = (MAX_LOG_TREE_DEPTH * 2) + MAX_LOG_FINAL_CHAIN_DESCRIPTORS + MAX_LOG_FILE_OPEN_DESCRIPTORS;
 
 export interface RecoveryPhysicalVerificationOptions {
   readonly stateRootAuthority: StateRootAuthority;
@@ -901,6 +905,8 @@ async function verifyPhysicalLogs(
   }
   if (3 + allowedDirectories.size + rows.size + MAX_LOG_REVALIDATION_TEMP_DESCRIPTORS > MAX_LOG_DESCRIPTORS) return fail('cleanup physical log descriptor plan exceeds its bounded limit');
 
+  let activeLogEnumerationDescriptors = 0;
+  let activeLogTraversalDescriptors = 0;
   async function forEachEntry(directory: FileHandle, field: string, visit: (entry: import('node:fs').Dirent) => Promise<void>): Promise<void> {
     let stream: import('node:fs').Dir;
     try {
@@ -908,11 +914,13 @@ async function verifyPhysicalLogs(
     } catch (error) {
       return fileSystemFailure('read', `cannot enumerate recovery log tree: ${field}`, error);
     }
+    activeLogEnumerationDescriptors += 1;
     try {
       for await (const entry of stream) await visit(entry);
     } catch (error) {
       return fileSystemFailure('read', `cannot enumerate recovery log tree: ${field}`, error);
     } finally {
+      activeLogEnumerationDescriptors -= 1;
       await stream.close().catch((error: unknown) => {
         if ((error as NodeJS.ErrnoException).code !== 'ERR_DIR_CLOSED') fileSystemFailure('close', `cannot close recovery log tree: ${field}`, error);
       });
@@ -965,11 +973,13 @@ async function verifyPhysicalLogs(
               if (treeEntries > MAX_LOG_TREE_ENTRIES) return fail('cleanup physical log tree exceeds its entry bound');
               if (entry.isSymbolicLink()) return fail(`cleanup physical log tree contains a symlink: ${path}`);
               if (!isDirectory && row === undefined) return fail(`cleanup physical log tree contains an unindexed entry: ${path}`);
-              if (handles.length + extraHeldDescriptors + 2 > MAX_LOG_DESCRIPTORS) return fail('cleanup physical log descriptor count exceeds its bounded limit');
+              const openingDescriptors = isDirectory ? 1 : MAX_LOG_FILE_OPEN_DESCRIPTORS;
+              if (handles.length + extraHeldDescriptors + activeLogEnumerationDescriptors + activeLogTraversalDescriptors + openingDescriptors > MAX_LOG_DESCRIPTORS) return fail('cleanup physical log descriptor count exceeds its bounded limit');
               const child = isDirectory
                 ? await openDirectoryChild(directory, entry.name, path)
                 : await openFileChild(directory, entry.name, path, ownerUid, snapshot.device, assertLogFile);
-              if (!revalidate) handles.push(child);
+              if (revalidate) activeLogTraversalDescriptors += 1;
+              else handles.push(child);
               try {
                 const stats = await descriptorStat(child, path);
                 if (isDirectory) {
@@ -1003,7 +1013,10 @@ async function verifyPhysicalLogs(
                   }
                 }
               } finally {
-                if (revalidate) await closeHandles([child]);
+                if (revalidate) {
+                  try { await closeHandles([child]); }
+                  finally { activeLogTraversalDescriptors -= 1; }
+                }
               }
             });
           }

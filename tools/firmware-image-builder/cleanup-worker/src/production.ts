@@ -64,7 +64,11 @@ const MAX_LOG_PATH_BYTES = 4_096;
 const MAX_LOG_COMPONENT_BYTES = 255;
 const MAX_LOG_COMPONENTS = 16;
 const MAX_LOG_DESCRIPTORS = 1_024;
-const MAX_LOG_REVALIDATION_TEMP_DESCRIPTORS = MAX_LOG_COMPONENTS + 4;
+const MAX_LOG_FILE_OPEN_DESCRIPTORS = 2;
+const MAX_LOG_FINAL_CHAIN_DESCRIPTORS = 3;
+// Keep the seal preflight compatible with the verifier's recursive descriptor
+// peak, including final-chain and O_PATH/read headroom.
+const MAX_LOG_REVALIDATION_TEMP_DESCRIPTORS = (MAX_LOG_COMPONENTS * 2) + MAX_LOG_FINAL_CHAIN_DESCRIPTORS + MAX_LOG_FILE_OPEN_DESCRIPTORS;
 const LABEL_JOB = 'org.osi.image-builder.job-id';
 const PUBLISHER_ENV = Object.freeze({ PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' });
 

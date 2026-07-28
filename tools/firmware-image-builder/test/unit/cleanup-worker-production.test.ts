@@ -641,6 +641,17 @@ describe('cleanup production composition', () => {
       at: NOW,
       snapshot: {} as never,
     })).rejects.toMatchObject({ code: 'RECOVERY_LOG_GAP' });
+    rows.splice(0, rows.length, ...Array.from({ length: 83 }, (_, generation) => ({
+      stream: 'runner', generation,
+      path: `logs/${Array.from({ length: 11 }, (_, depth) => `g${generation}-${depth}`).join('/')}/runner.log`,
+      started_at: NOW, sealed_at: NOW, size_bytes: 0, sha256: HASH,
+    })));
+    await expect(composition.adapters.logSealer.seal({
+      jobId: JOB,
+      admissionId: ADMISSION,
+      at: NOW,
+      snapshot: {} as never,
+    })).rejects.toMatchObject({ code: 'RECOVERY_LOG_GAP' });
     await composition.close();
   });
 
