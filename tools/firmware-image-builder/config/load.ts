@@ -728,27 +728,30 @@ export async function validateApprovedRoots(
   roots: readonly ApprovedOutputRootInput[],
   options: RootValidationOptions = {},
 ): Promise<readonly ApprovedOutputRoot[]> {
-  return validateApprovedRootsWithWriteScope(roots, options, 'root');
+  return validateApprovedRootsWithWriteScope(roots, options, 'root', true);
 }
 
 async function validateCleanupApprovedRoots(
   roots: readonly ApprovedOutputRootInput[],
   options: RootValidationOptions = {},
 ): Promise<readonly ApprovedOutputRoot[]> {
-  return validateApprovedRootsWithWriteScope(roots, options, 'work-root');
+  return validateApprovedRootsWithWriteScope(roots, options, 'work-root', false);
 }
 
 async function validateApprovedRootsWithWriteScope(
   roots: readonly ApprovedOutputRootInput[],
   options: RootValidationOptions,
   writeScope: 'root' | 'work-root',
+  enforceDiskFloor: boolean,
 ): Promise<readonly ApprovedOutputRoot[]> {
   if (!Array.isArray(roots) || roots.length === 0) {
     throw new ConfigValidationError('OUTPUT_ROOTS_INVALID', 'At least one approved output root is required.');
   }
 
   const seen = new Set<string>();
-  const minimumFreeBytes = validateDiskThreshold(options.minimumFreeBytes ?? MIN_DISK_FREE_BYTES);
+  const minimumFreeBytes = enforceDiskFloor
+    ? validateDiskThreshold(options.minimumFreeBytes ?? MIN_DISK_FREE_BYTES)
+    : null;
   const rootFs: RootFileSystem = {
     lstat: lstat as RootFileSystem['lstat'],
     realpath,
@@ -843,18 +846,20 @@ async function validateApprovedRootsWithWriteScope(
       );
     }
 
-    let free: StatFsResult;
-    try {
-      free = await rootFs.statfs(canonicalPath);
-    } catch (error) {
-      throw new ConfigValidationError(
-        'OUTPUT_ROOT_SPACE_CHECK_FAILED',
-        `Cannot inspect free space for approved output root ${canonicalPath}.${error instanceof Error ? ` ${error.message}` : ''}`,
-        root.id,
-      );
-    }
-    if (free.bavail * free.bsize < minimumFreeBytes) {
-      throw new ConfigValidationError('PREFLIGHT_DISK_SPACE', `Approved output root has less than ${minimumFreeBytes} bytes free: ${canonicalPath}`, root.id);
+    if (minimumFreeBytes !== null) {
+      let free: StatFsResult;
+      try {
+        free = await rootFs.statfs(canonicalPath);
+      } catch (error) {
+        throw new ConfigValidationError(
+          'OUTPUT_ROOT_SPACE_CHECK_FAILED',
+          `Cannot inspect free space for approved output root ${canonicalPath}.${error instanceof Error ? ` ${error.message}` : ''}`,
+          root.id,
+        );
+      }
+      if (free.bavail * free.bsize < minimumFreeBytes) {
+        throw new ConfigValidationError('PREFLIGHT_DISK_SPACE', `Approved output root has less than ${minimumFreeBytes} bytes free: ${canonicalPath}`, root.id);
+      }
     }
     result.push({
       id: root.id,

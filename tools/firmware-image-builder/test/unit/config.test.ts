@@ -135,7 +135,7 @@ describe('builder configuration', () => {
         XDG_CONFIG_HOME: workspace.configHome,
         XDG_STATE_HOME: workspace.stateHome,
       },
-      rootFs: { access, statfs: ampleDisk },
+      rootFs: { access, statfs: async () => ({ bavail: 0, bsize: 1024 ** 3 }) },
       pathAuthorityDependencies: { writableAccess: access },
     });
     await expect(withApprovedRootSnapshot(
