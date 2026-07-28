@@ -38,6 +38,18 @@ export interface OrphanTailResult {
   readonly length: number;
 }
 
+export interface OrphanLogLivenessProof {
+  readonly unitInactive: boolean;
+  readonly leaseStale: boolean;
+  readonly noMatchingContainer: boolean;
+}
+
+export function assertOrphanLogLivenessProof(proof: OrphanLogLivenessProof): void {
+  if (!proof.unitInactive || !proof.leaseStale || !proof.noMatchingContainer) {
+    throw new Error('orphan log sealing requires liveness proof');
+  }
+}
+
 export interface ReplayLimits {
   readonly eventLimit?: number;
   readonly maxDecodedBytes?: number;
@@ -245,9 +257,9 @@ export class DurableLogStream {
     return { generation, path };
   }
 
-  sealOrphanTailSync(stream: StreamName, proof: { readonly unitInactive: boolean; readonly leaseStale: boolean; readonly noMatchingContainer: boolean }): OrphanTailResult {
+  sealOrphanTailSync(stream: StreamName, proof: OrphanLogLivenessProof): OrphanTailResult {
     this.#assertOpen();
-    if (!proof.unitInactive || !proof.leaseStale || !proof.noMatchingContainer) throw new Error('orphan log sealing requires liveness proof');
+    assertOrphanLogLivenessProof(proof);
     return this.#transaction(() => {
       const row = this.#db.prepare('SELECT generation, path, size_bytes, sealed_at FROM job_log_generations WHERE job_id=? AND stream=? ORDER BY generation DESC LIMIT 1').get(this.#jobId, stream) as { generation: number; path: string; size_bytes: number; sealed_at: string | null } | undefined;
       if (!row) throw new Error('log generation does not exist');

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
-import { DurableLogStream, type LogStreamEvent, type LogStreamIo } from '../../api/src/log-stream.js';
+import { assertOrphanLogLivenessProof, DurableLogStream, type LogStreamEvent, type LogStreamIo } from '../../api/src/log-stream.js';
 
 const NOW = '2026-07-28T10:00:00.000Z';
 const roots: string[] = [];
@@ -32,6 +32,17 @@ afterEach(async () => {
 });
 
 describe('DurableLogStream', () => {
+  it('validates every orphan-log liveness fact before sealing', () => {
+    expect(() => assertOrphanLogLivenessProof({ unitInactive: true, leaseStale: true, noMatchingContainer: true })).not.toThrow();
+    for (const proof of [
+      { unitInactive: false, leaseStale: true, noMatchingContainer: true },
+      { unitInactive: true, leaseStale: false, noMatchingContainer: true },
+      { unitInactive: true, leaseStale: true, noMatchingContainer: false },
+    ]) {
+      expect(() => assertOrphanLogLivenessProof(proof)).toThrow(/proof/i);
+    }
+  });
+
   it('appends exact bytes before recording a durable range and partial UTF-8 metadata', async () => {
     const { stream, db, root } = await fixture();
     const bytes = Buffer.from('Gr\u00fczi\nlast line', 'utf8');

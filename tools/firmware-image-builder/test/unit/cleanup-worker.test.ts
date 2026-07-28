@@ -107,7 +107,7 @@ function snapshot(jobId: string, scenario: Scenario, runnerExpiresAt = RUNNER_EX
   };
 }
 
-function seedJob(db: Db, jobId: string, scenario: Scenario, state = 'starting'): void {
+function seedJob(db: Db, jobId: string, scenario: Scenario, state = 'starting', runnerExpiresAt = RUNNER_EXPIRES): void {
   db.prepare(`INSERT INTO jobs (
     job_id, request_id, request_json, source_remote, source_ref, source_branch, branch,
     expected_sha, pinned_sha, source_preparation_json, offline_feed_preparation_json, target_id, root_id, target_manifest_sha256,
@@ -139,7 +139,7 @@ function seedJob(db: Db, jobId: string, scenario: Scenario, state = 'starting'):
   db.prepare(`UPDATE jobs SET dispatched_at=?, runner_unit=?, runner_lease_owner='runner-owner', runner_lease_expires_at=?, runner_started_at=? WHERE job_id=?`).run(
     NOW,
     `osi-image-builder-runner@${jobId}.service`,
-    RUNNER_EXPIRES,
+    runnerExpiresAt,
     NOW,
     jobId,
   );
@@ -308,7 +308,7 @@ async function fixture(scenario: Scenario = 'present', overrides: { status?: str
   const jobId = 'job-1';
   const admissionId = 'cln_0123456789abcdefghjkmnpqrs';
   const token = 'cleanup-token-0123456789';
-  seedJob(db, jobId, scenario);
+  seedJob(db, jobId, scenario, 'starting', overrides.runnerExpiresAt ?? RUNNER_EXPIRES);
   addAdmission(db, jobId, scenario, admissionId, token, overrides.status, overrides.expiresAt, overrides.runnerExpiresAt);
   const credential = await createCredential(root, jobId, admissionId, 1, token);
   db.prepare('UPDATE cleanup_leases SET credential_sha256=? WHERE admission_id=?').run(credential.sha256, admissionId);
@@ -416,6 +416,14 @@ describe('cleanup worker argument and admission fence', () => {
     expect(value.options.evidenceWriter.write).not.toHaveBeenCalled();
     expect(value.db.prepare('SELECT container_id, state, queue_state FROM jobs WHERE job_id=?').get(value.jobId)).toEqual(before);
     await expect(readFile(value.credential.path)).resolves.toBeDefined();
+  });
+
+  it('does not seal logs when the admitted runner lease is not stale', async () => {
+    const value = await fixture('staging-log', { runnerExpiresAt: RUNNER_ACTIVE_EXPIRES });
+    await expect(value.worker.run([value.admissionId])).rejects.toThrow(/stale-lease/u);
+    expect(value.options.logSealer.seal).not.toHaveBeenCalled();
+    expect(value.options.quarantine.quarantine).not.toHaveBeenCalled();
+    expect(value.db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id=? AND event_type='cleanup_complete'").get(value.jobId)).toEqual({ count: 0 });
   });
 
   it('rejects a stale inactive runner observation before the first cleanup side effect', async () => {
@@ -588,6 +596,7 @@ describe('cleanup worker exact container protocol', () => {
     expect(value.docker.hasByJobId).toHaveBeenCalledWith(value.jobId, 1000);
     expect(value.docker.stop).not.toHaveBeenCalled();
     expect(value.docker.remove).not.toHaveBeenCalled();
+    expect(value.options.logSealer.seal).not.toHaveBeenCalled();
   });
 
   it('timestamps Docker absence and removal only after the corresponding observations complete', async () => {

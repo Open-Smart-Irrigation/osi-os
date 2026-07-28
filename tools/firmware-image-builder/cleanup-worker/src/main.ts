@@ -11,6 +11,7 @@ import {
   type RecoveryFileHandle,
   type RecoveryStats,
 } from '../../api/src/recovery.js';
+import { assertOrphanLogLivenessProof } from '../../api/src/log-stream.js';
 import {
   OwnershipStore,
   type CleanupPostcondition,
@@ -599,12 +600,20 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
     }
   }
 
-  async function sealLogs(admission: PersistedAdmission): Promise<LogCleanupProof> {
+  async function sealLogs(admission: PersistedAdmission, containerPost: CleanupPostcondition['container']): Promise<LogCleanupProof> {
     const requestedAt = canonicalInstant(options.clock.now(), 'log sealing request time');
     let seal: CleanupLogSeal;
     try {
       seal = await claimedAction(admission, 'log sealing', () => (
-        options.logSealer.seal({ jobId: admission.jobId, admissionId: admission.admissionId, at: requestedAt, snapshot: admission.snapshot })
+        (() => {
+          assertOrphanLogLivenessProof({
+            unitInactive: true,
+            leaseStale: admission.snapshot.runner.leaseExpiresAt === null
+              || canonicalInstant(admission.snapshot.runner.leaseExpiresAt, 'admitted runner lease expiry') <= requestedAt,
+            noMatchingContainer: containerPost.globalLabelResult === 'no-match',
+          });
+          return options.logSealer.seal({ jobId: admission.jobId, admissionId: admission.admissionId, at: requestedAt, snapshot: admission.snapshot });
+        })()
       ));
     } catch (error) {
       if (error instanceof CleanupWorkerError) throw error;
@@ -707,7 +716,7 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
         claimed = true;
         await claimedAction(resolved.admission, 'credential unlink', credential.unlinkAfterClaim);
         const containerProof = await proveContainer(resolved.admission, resolved.job);
-        const logs = await sealLogs(resolved.admission);
+        const logs = await sealLogs(resolved.admission, containerProof.post);
         const staging = await quarantineStaging(resolved.admission, resolved.job);
         const postcondition: CleanupPostcondition = {
           runner: resolved.admission.snapshot.runner,

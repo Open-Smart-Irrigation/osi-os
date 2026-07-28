@@ -70,6 +70,20 @@ afterEach(async () => {
 });
 
 describe('SSE durable replay', () => {
+  it('keeps cleanup orphan-log validation inside the claimed sealing callback before the sealer', async () => {
+    const source = await readFile(
+      fileURLToPath(new URL('../../cleanup-worker/src/main.ts', import.meta.url)),
+      'utf8',
+    );
+    const file = ts.createSourceFile('main.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const sealLogs = descendants<ts.FunctionDeclaration>(file, ts.SyntaxKind.FunctionDeclaration)
+      .find((fn) => fn.name?.text === 'sealLogs');
+    expect(sealLogs).toBeDefined();
+    const sealLogsText = sealLogs!.getText();
+    expect(sealLogsText).toContain('assertOrphanLogLivenessProof');
+    expect(sealLogsText.indexOf('assertOrphanLogLivenessProof')).toBeLessThan(sealLogsText.indexOf('options.logSealer.seal'));
+  });
+
   it('pins runner production log coordinator wiring', async () => {
     const source = await readFile(
       fileURLToPath(new URL('../../runner/src/main.ts', import.meta.url)),
