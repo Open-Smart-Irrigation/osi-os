@@ -189,7 +189,7 @@ describe('startup retention', () => {
     })()).resolves.toMatchObject({ blockers: [{ code: 'RETENTION_ROOT_INVALID' }] });
   });
 
-  it('does not prune a replayable terminal log generation', async () => {
+  it('prunes the whole terminal job root after per-file candidates', async () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
@@ -203,7 +203,7 @@ describe('startup retention', () => {
     db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at, stream, file_generation, byte_offset, byte_length, partial) VALUES (?, 0, 'log', 'succeeded', '{}', ?, 'runner', 0, 0, 4, 0)")
       .run('replayable', OLD);
     await createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })();
-    await expect(import('node:fs/promises').then(({ access }) => access(join(logPath, 'runner-0.log')))).resolves.toBeUndefined();
+    await expect(import('node:fs/promises').then(({ access }) => access(join(paths.stateRoot, 'jobs', 'replayable')))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('rejects a symlinked ancestor before retention can mutate', async () => {
@@ -338,5 +338,57 @@ describe('startup retention', () => {
     expect(db.prepare('SELECT job_id FROM jobs WHERE job_id=?').get('retryable')).toEqual({ job_id: 'retryable' });
     expect(db.prepare('SELECT COUNT(*) AS count FROM job_events WHERE job_id=?').get('retryable')).toEqual({ count: 1 });
     expect(db.prepare('SELECT status FROM retention_prune_intents WHERE category=? AND relative_path=?').get('evidence', 'jobs/retryable/evidence/terminal.json')).toEqual({ status: 'failed' });
+  });
+
+  it('purges an old terminal job only after its row root is removed', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+      .run('purgeable', 'request-purgeable', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
+    await mkdir(join(paths.stateRoot, 'jobs', 'purgeable', 'nested'), { recursive: true });
+    await writeFile(join(paths.stateRoot, 'jobs', 'purgeable', 'nested', 'state.json'), '{}');
+    db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run('purgeable', 900, OLD);
+    db.prepare('INSERT INTO job_stages (job_id, stage) VALUES (?, ?)').run('purgeable', 'build');
+    db.prepare('INSERT INTO job_operations (job_id, operation_id, argv_hash, argv_json, started_at) VALUES (?, ?, ?, ?, ?)')
+      .run('purgeable', 'build-image', 'c'.repeat(64), '[]', OLD);
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, 0, 'terminal', 'succeeded', '{}', ?)").run('purgeable', OLD);
+
+    await expect(createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })()).resolves.toEqual({ blockers: [] });
+
+    expect(db.prepare('SELECT job_id FROM jobs WHERE job_id=?').get('purgeable')).toBeUndefined();
+    for (const table of ['queue_entries', 'job_stages', 'job_operations', 'job_events']) {
+      expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE job_id=?`).get('purgeable')).toEqual({ count: 0 });
+    }
+    await expect(import('node:fs/promises').then(({ access }) => access(join(paths.stateRoot, 'jobs', 'purgeable')))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM retention_prunes WHERE category='row' AND relative_path='jobs/purgeable' AND action='removed'").get()).toEqual({ count: 1 });
+  });
+
+  it('does not trust a forged removed row intent while the job root is present', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+      .run('forged', 'request-forged', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
+    await mkdir(join(paths.stateRoot, 'jobs', 'forged'), { recursive: true });
+    db.prepare(`INSERT INTO retention_prune_intents (category, relative_path, status, planned_at, updated_at, bytes)
+      VALUES ('row', 'jobs/forged', 'removed', ?, ?, 0)`).run(NOW, NOW);
+
+    await expect(createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })()).resolves.toMatchObject({ blockers: [{ code: 'RETENTION_ROW_PRUNE_FAILED' }] });
+    expect(db.prepare('SELECT job_id FROM jobs WHERE job_id=?').get('forged')).toEqual({ job_id: 'forged' });
+    await expect(import('node:fs/promises').then(({ access }) => access(join(paths.stateRoot, 'jobs', 'forged')))).resolves.toBeUndefined();
+  });
+
+  it('finalizes a missing terminal job root before purging its rows', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+      .run('missing-root', 'request-missing-root', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
+
+    await expect(createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })()).resolves.toEqual({ blockers: [] });
+    expect(db.prepare('SELECT job_id FROM jobs WHERE job_id=?').get('missing-root')).toBeUndefined();
+    expect(db.prepare("SELECT status FROM retention_prune_intents WHERE category='row' AND relative_path='jobs/missing-root'").get()).toEqual({ status: 'removed' });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM retention_prunes WHERE category='row' AND relative_path='jobs/missing-root'").get()).toEqual({ count: 1 });
   });
 });
