@@ -625,7 +625,7 @@ describe('cleanup production composition', () => {
       at: NOW,
       snapshot: {} as never,
     })).resolves.toEqual({ runner: 'sealed', docker: 'absent', verifiedAt: NOW, contiguous: true });
-    expect(all).toHaveBeenCalledWith(JOB, 129);
+    expect(all).toHaveBeenCalledWith(4096, JOB, 129);
     expect(eventsAll).toHaveBeenCalledWith(JOB, 8_193);
     expect(resize).toHaveBeenCalledWith(bytes.length, JOB, 'runner', 0, bytes.length);
     expect(insertEvent).toHaveBeenCalledWith(JOB, 0, 'log_orphan_tail', '{}', NOW, 'runner', 0, 0, bytes.length, 0);

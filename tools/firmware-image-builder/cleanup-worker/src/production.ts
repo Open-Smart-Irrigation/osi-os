@@ -54,6 +54,7 @@ const DEFAULT_OWNER = 'cleanup-worker';
 const DIRECTORY_MODE = 0o700;
 const PUBLISHER_DIRECTORY_MODE = 0o750;
 const EVIDENCE_MODE = 0o600;
+const MAX_BUILDER_LOCK_BYTES = 16 * 1024;
 const MAX_LOG_BYTES = 256 * 1024 * 1024;
 const MAX_TOTAL_LOG_BYTES = 512 * 1024 * 1024;
 const MAX_LOG_GENERATIONS = 128;
@@ -63,6 +64,7 @@ const MAX_LOG_PATH_BYTES = 4_096;
 const MAX_LOG_COMPONENT_BYTES = 255;
 const MAX_LOG_COMPONENTS = 16;
 const MAX_LOG_DESCRIPTORS = 1_024;
+const MAX_LOG_REVALIDATION_TEMP_DESCRIPTORS = MAX_LOG_COMPONENTS + 4;
 const LABEL_JOB = 'org.osi.image-builder.job-id';
 const PUBLISHER_ENV = Object.freeze({ PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' });
 
@@ -139,6 +141,7 @@ interface LogRow {
   readonly stream: string;
   readonly generation: number;
   readonly path: string;
+  readonly path_bytes?: number;
   readonly started_at: string;
   readonly sealed_at: string | null;
   readonly size_bytes: number;
@@ -505,6 +508,28 @@ async function hashFileHandle(handle: FileHandle, field: string): Promise<Hashed
     mtimeMs: before.mtimeMs,
     ctimeMs: before.ctimeMs,
   };
+}
+
+async function readBoundedFileHandle(
+  handle: FileHandle,
+  maxBytes: number,
+  field: string,
+  validate: (stats: Stats) => void,
+): Promise<Buffer> {
+  const before = await handle.stat();
+  validate(before);
+  if (!Number.isSafeInteger(before.size) || before.size < 0 || before.size > maxBytes) throw new Error(`${field} exceeds its bounded read limit`);
+  const bytes = Buffer.alloc(before.size);
+  let position = 0;
+  while (position < before.size) {
+    const result = await handle.read(bytes, position, before.size - position, position);
+    if (!Number.isSafeInteger(result.bytesRead) || result.bytesRead <= 0 || result.bytesRead > before.size - position) throw new Error(`${field} changed during bounded read`);
+    position += result.bytesRead;
+  }
+  const after = await handle.stat();
+  validate(after);
+  if (position !== before.size || !sameStableMetadata(before, after)) throw new Error(`${field} changed during bounded read`);
+  return bytes;
 }
 
 async function openManagedRelativeFile(
@@ -911,7 +936,10 @@ async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stat
       let committed = false;
       db.exec('BEGIN IMMEDIATE');
       try {
-        const rows = db.prepare('SELECT stream, generation, path, started_at, sealed_at, size_bytes, sha256 FROM job_log_generations WHERE job_id=? ORDER BY stream, generation LIMIT ?').all(input.jobId, MAX_LOG_GENERATIONS + 1) as unknown as LogRow[];
+        const rows = db.prepare(`SELECT stream, generation,
+          CASE WHEN typeof(path)='text' AND length(CAST(path AS BLOB)) <= ? THEN path ELSE NULL END AS path,
+          length(CAST(path AS BLOB)) AS path_bytes, started_at, sealed_at, size_bytes, sha256
+          FROM job_log_generations WHERE job_id=? ORDER BY stream, generation LIMIT ?`).all(MAX_LOG_PATH_BYTES, input.jobId, MAX_LOG_GENERATIONS + 1) as unknown as LogRow[];
         const events = db.prepare('SELECT stream, file_generation, seq, event_type, at, byte_offset, byte_length, partial FROM job_events WHERE job_id=? AND stream IS NOT NULL ORDER BY stream, file_generation, seq LIMIT ?').all(input.jobId, MAX_LOG_EVENTS + 1) as unknown as LogEventRow[];
         if (rows.length > MAX_LOG_GENERATIONS || events.length > MAX_LOG_EVENTS || rows.some((row) => row.stream !== 'runner' && row.stream !== 'docker') || events.some((event) => event.stream !== 'runner' && event.stream !== 'docker')) throw workerError('RECOVERY_LOG_GAP', 'cleanup log identity exceeds the bounded stream contract');
         const generationKeys = new Set(rows.map((row) => `${row.stream}:${row.generation}`));
@@ -919,6 +947,8 @@ async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stat
         const indexedPaths = new Set<string>();
         const indexedDirectories = new Set<string>(['logs']);
         for (const row of rows) {
+          const pathBytes = row.path_bytes === undefined ? Buffer.byteLength(String(row.path ?? ''), 'utf8') : Number(row.path_bytes);
+          if (!Number.isSafeInteger(pathBytes) || pathBytes < 0 || pathBytes > MAX_LOG_PATH_BYTES || typeof row.path !== 'string') throw workerError('RECOVERY_LOG_GAP', 'cleanup log path exceeds its bounded SQL projection');
           const parts = safeLogPath(input.jobId, row.path);
           if (indexedPaths.has(row.path)) throw workerError('RECOVERY_LOG_GAP', 'cleanup log paths are ambiguous');
           indexedPaths.add(row.path);
@@ -928,7 +958,7 @@ async function createLogSealer(db: DatabaseSync, clock: CleanupWorkerClock, stat
             indexedDirectories.add(prefix);
           }
         }
-        if (3 + indexedDirectories.size + indexedPaths.size > MAX_LOG_DESCRIPTORS) throw workerError('RECOVERY_LOG_GAP', 'cleanup log descriptor plan exceeds its bounded limit');
+        if (3 + indexedDirectories.size + indexedPaths.size + MAX_LOG_REVALIDATION_TEMP_DESCRIPTORS > MAX_LOG_DESCRIPTORS) throw workerError('RECOVERY_LOG_GAP', 'cleanup log descriptor plan exceeds its bounded limit');
         const plans: LogSealPlan[] = [];
         const states: Record<'runner' | 'docker', 'absent' | 'sealed'> = { runner: 'absent', docker: 'absent' };
         let totalPhysicalBytes = 0;
@@ -1059,14 +1089,30 @@ function createEvidenceWriter(stateRoot: string, ownerUid: number, fileSystem: R
   };
 }
 
-async function defaultPublisherAuthority(loaded: LoadedConfig, executor: CommandExecutor): Promise<CleanupPublisherAuthority & { readonly heldClose: () => Promise<void> }> {
+async function defaultPublisherAuthority(loaded: LoadedConfig, executor: CommandExecutor, ownerUid: number): Promise<CleanupPublisherAuthority & { readonly heldClose: () => Promise<void> }> {
   const lockPath = loaded.config.builderLockPath;
   const installedVersion = basename(dirname(lockPath));
-  const lockHandle = await openSafeReadableCandidate(lockPath, 'builder lock', (stats) => {
-    if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) throw new Error('builder lock is not a safe regular file');
-  });
+  const lockParent = await open(dirname(lockPath), DIRECTORY_FLAGS);
+  let lockHandle: FileHandle | null = null;
   let lockBytes: Buffer;
-  try { lockBytes = await lockHandle.readFile(); } finally { await lockHandle.close(); }
+  try {
+    const parentStats = await lockParent.stat();
+    if (!parentStats.isDirectory() || parentStats.isSymbolicLink() || parentStats.uid !== ownerUid || parentStats.nlink < 2) throw new Error('builder lock installation directory is unsafe');
+    const lockName = basename(lockPath);
+    lockHandle = await openSafeReadableCandidate(
+      descriptorChild(lockParent, lockName, 'QUARANTINE_PENDING'),
+      'builder lock',
+      (stats) => {
+        if (!stats.isFile() || stats.isSymbolicLink() || stats.uid !== ownerUid || stats.nlink !== 1 || (stats.mode & 0o7777) !== EVIDENCE_MODE || stats.dev !== parentStats.dev) throw new Error('builder lock is not a safe regular file');
+      },
+    );
+    lockBytes = await readBoundedFileHandle(lockHandle, MAX_BUILDER_LOCK_BYTES, 'builder lock', (stats) => {
+      if (!stats.isFile() || stats.isSymbolicLink() || stats.uid !== ownerUid || stats.nlink !== 1 || (stats.mode & 0o7777) !== EVIDENCE_MODE || stats.dev !== parentStats.dev) throw new Error('builder lock is not a safe regular file');
+    });
+  } finally {
+    await lockHandle?.close().catch(() => undefined);
+    await lockParent.close();
+  }
   let parsed: unknown;
   try { parsed = JSON.parse(lockBytes.toString('utf8')) as unknown; } catch (error) { throw new Error('builder lock JSON is malformed', { cause: error }); }
   const lock = validateBuilderLock(parsed, installedVersion);
@@ -1108,7 +1154,7 @@ export async function createCleanupProduction(options: CleanupProductionDependen
     const timeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     const systemdEnv = options.systemdEnvironment ?? (() => deriveSystemdBusEnvironment({ uid: ownerUid }));
     const commandEnv = Object.freeze({ ...FIXED_PREFLIGHT_ENV, ...(await systemdEnv()) });
-    const publisherAuthority = options.publisherAuthority ?? await defaultPublisherAuthority(loaded, executor);
+    const publisherAuthority = options.publisherAuthority ?? await defaultPublisherAuthority(loaded, executor, ownerUid);
     const approvedRootSnapshot = options.approvedRootSnapshot ?? ((rootId: string, callback: (snapshot: ApprovedRootSnapshot) => Promise<unknown>) => (
       withApprovedRootAuthoritySnapshot(loaded.pathAuthorities.approvedRoots, rootId, async ({ snapshot }) => callback(snapshot))
     )) as ApprovedRootSnapshotRunner;

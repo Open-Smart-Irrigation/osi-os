@@ -40,6 +40,7 @@ const STOP_AUTHORIZATION_ATTEMPT_PATTERN = /^sta_[a-f0-9]{32}$/;
 const HAND_BACK_ACTIVE_STATES = new Set<string>(ACTIVE_RECOVERY_STATES);
 const MAX_LOG_GENERATIONS = 128;
 const MAX_LOG_EVENTS = 8_192;
+const MAX_LOG_PATH_BYTES = 4_096;
 const STARTUP_COMPLETED_PAGE_SIZE = 64;
 const MAX_STARTUP_COMPLETED_ADMISSIONS = 256;
 const O_CLOEXEC = (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC ?? 0x80000;
@@ -52,8 +53,12 @@ export interface RecoveryStats {
   readonly dev?: number;
   readonly ino?: number;
   readonly uid: number;
+  readonly gid?: number;
   readonly mode: number;
   readonly nlink: number;
+  readonly size?: number;
+  readonly mtimeMs?: number;
+  readonly ctimeMs?: number;
   readonly isFile: () => boolean;
   readonly isDirectory: () => boolean;
   readonly isSymbolicLink: () => boolean;
@@ -62,6 +67,7 @@ export interface RecoveryStats {
 export interface RecoveryFileHandle {
   readonly writeFile: (contents: Uint8Array) => Promise<void>;
   readonly readFile: () => Promise<Buffer>;
+  readonly read?: (buffer: Buffer, offset: number, length: number, position: number) => Promise<Readonly<{ bytesRead: number; buffer: Buffer }>>;
   readonly sync: () => Promise<void>;
   readonly stat: () => Promise<RecoveryStats>;
   readonly close: () => Promise<void>;
@@ -462,10 +468,51 @@ function wrapFileHandle(handle: import('node:fs/promises').FileHandle): Recovery
   return {
     writeFile: async (contents) => { await handle.writeFile(contents); },
     readFile: async () => handle.readFile(),
+    read: async (buffer, offset, length, position) => handle.read(buffer, offset, length, position),
     sync: async () => { await handle.sync(); },
     stat: async () => handle.stat(),
     close: async () => { await handle.close(); },
   };
+}
+
+function stableRecoveryStats(before: RecoveryStats, after: RecoveryStats): boolean {
+  return before.dev === after.dev
+    && before.ino === after.ino
+    && before.uid === after.uid
+    && before.gid === after.gid
+    && before.mode === after.mode
+    && before.nlink === after.nlink
+    && before.size === after.size
+    && before.mtimeMs === after.mtimeMs
+    && before.ctimeMs === after.ctimeMs;
+}
+
+export async function readBoundedRecoveryFile(
+  handle: RecoveryFileHandle,
+  maxBytes: number,
+  field: string,
+  validate?: (stats: RecoveryStats) => void,
+): Promise<Buffer> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new RecoveryBoundaryError(`${field} bounded read limit is invalid`);
+  const before = await handle.stat();
+  validate?.(before);
+  const size = before.size;
+  if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0 || size > maxBytes) throw new RecoveryBoundaryError(`${field} exceeds its bounded read limit`);
+  if (before.dev === undefined || before.ino === undefined || before.gid === undefined || before.mtimeMs === undefined || before.ctimeMs === undefined || handle.read === undefined) {
+    throw new RecoveryBoundaryError(`${field} does not expose a stable positional read descriptor`);
+  }
+  const boundedSize = size;
+  const bytes = Buffer.alloc(boundedSize);
+  let position = 0;
+  while (position < boundedSize) {
+    const result = await handle.read(bytes, position, boundedSize - position, position);
+    if (!Number.isSafeInteger(result.bytesRead) || result.bytesRead <= 0 || result.bytesRead > boundedSize - position) throw new RecoveryBoundaryError(`${field} changed during bounded read`);
+    position += result.bytesRead;
+  }
+  const after = await handle.stat();
+  validate?.(after);
+  if (position !== boundedSize || !stableRecoveryStats(before, after)) throw new RecoveryBoundaryError(`${field} changed during bounded read`);
+  return bytes;
 }
 
 async function openDefaultDirectory(path: string): Promise<RecoveryDirectoryHandle> {
@@ -589,6 +636,21 @@ function inactiveSystemdObservation(
   return observedAt;
 }
 
+async function inspectInactiveSystemdBracket(
+  inspect: (unit: string) => Promise<RecoverySystemdObservation>,
+  clock: RecoveryClock,
+  unit: string,
+  notBefore: string,
+  field: string,
+): Promise<Readonly<{ observedAt: string; startedAt: string; finishedAt: string }>> {
+  const startedAt = recoveryInstant(clock.now(), `${field} inspection start`);
+  const observation = await inspect(unit);
+  const finishedAt = recoveryInstant(clock.now(), `${field} inspection finish`);
+  const observedAt = inactiveSystemdObservation(observation, unit, notBefore, field);
+  if (observedAt < startedAt || observedAt > finishedAt) throw new RecoveryBoundaryError(`${field} observation is outside its inspection bracket`);
+  return { observedAt, startedAt, finishedAt };
+}
+
 function cleanupIdentityIsNull(row: Record<string, unknown>): boolean {
   return [
     'container_id', 'container_name', 'container_image_digest', 'container_label_job_id',
@@ -608,7 +670,10 @@ function verifyLogContinuity(
 ): RecoveryLogVerificationInput {
   const verifiedAt = recoveryInstant(logs.verifiedAt, 'cleanup log verification time');
   if (verifiedAt > completedAt) throw new RecoveryBoundaryError('cleanup logs were verified after cleanup completion');
-  const generations = databaseAll(db, 'SELECT stream, generation, path, started_at, size_bytes, sealed_at, sha256 FROM job_log_generations WHERE job_id=? ORDER BY stream, generation LIMIT ?', jobId, MAX_LOG_GENERATIONS + 1);
+  const generations = databaseAll(db, `SELECT stream, generation,
+    CASE WHEN typeof(path)='text' AND length(CAST(path AS BLOB)) <= ? THEN path ELSE NULL END AS path,
+    length(CAST(path AS BLOB)) AS path_bytes, started_at, size_bytes, sealed_at, sha256
+    FROM job_log_generations WHERE job_id=? ORDER BY stream, generation LIMIT ?`, MAX_LOG_PATH_BYTES, jobId, MAX_LOG_GENERATIONS + 1);
   const events = databaseAll(db, `SELECT stream, file_generation, seq, event_type, at, byte_offset, byte_length, partial
     FROM job_events WHERE job_id=? AND stream IS NOT NULL ORDER BY stream, file_generation, seq LIMIT ?`, jobId, MAX_LOG_EVENTS + 1);
   if (generations.length > MAX_LOG_GENERATIONS || events.length > MAX_LOG_EVENTS) throw new RecoveryBoundaryError('cleanup log evidence exceeds the bounded recovery limit');
@@ -627,7 +692,9 @@ function verifyLogContinuity(
       const generationNumber = Number(generation.generation);
       const size = Number(generation.size_bytes);
       if (!Number.isSafeInteger(generationNumber) || generationNumber < 0 || !Number.isSafeInteger(size) || size < 0) throw new RecoveryBoundaryError(`${stream} cleanup log generation metadata is invalid`);
-      if (generationNumber !== expectedGeneration || typeof generation.path !== 'string' || !generation.path.startsWith('logs/') || generation.path.includes('\\') || generation.path.split('/').some((part) => part.length === 0 || part === '.' || part === '..') || typeof generation.sha256 !== 'string' || !HASH64.test(generation.sha256)) throw new RecoveryBoundaryError(`${stream} cleanup log generations are not contiguous and sealed`);
+      const pathBytes = generation.path_bytes === undefined ? Buffer.byteLength(String(generation.path ?? ''), 'utf8') : Number(generation.path_bytes);
+      if (!Number.isSafeInteger(pathBytes) || pathBytes < 0 || pathBytes > MAX_LOG_PATH_BYTES
+        || generationNumber !== expectedGeneration || typeof generation.path !== 'string' || !generation.path.startsWith('logs/') || generation.path.includes('\\') || generation.path.split('/').some((part) => part.length === 0 || part === '.' || part === '..') || typeof generation.sha256 !== 'string' || !HASH64.test(generation.sha256)) throw new RecoveryBoundaryError(`${stream} cleanup log generations are not contiguous and sealed`);
       const startedAt = recoveryInstant(generation.started_at, `${stream} cleanup log start time`);
       const sealedAt = recoveryInstant(generation.sealed_at, `${stream} cleanup log seal time`);
       if (sealedAt < startedAt || sealedAt > verifiedAt) throw new RecoveryBoundaryError(`${stream} cleanup log seal chronology is invalid`);
@@ -956,10 +1023,22 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       }
       let bytes: Buffer;
       try {
-        verifyCredentialFile(await handle.stat(), relativePath, ownerUid, directory.device);
-        bytes = await handle.readFile();
+        bytes = await readBoundedRecoveryFile(
+          handle,
+          MAX_CREDENTIAL_BYTES,
+          relativePath,
+          (stats) => verifyCredentialFile(stats, relativePath, ownerUid, directory.device),
+        );
       } catch (error) {
-        if (error instanceof RecoveryBoundaryError && error.message.startsWith('unsafe cleanup credential')) throw new CleanupCredentialInvalidError(error.message, { cause: error });
+        if (
+          error instanceof RecoveryBoundaryError
+          && (
+            error.message.startsWith('unsafe cleanup credential')
+            || error.message === `${relativePath} exceeds its bounded read limit`
+          )
+        ) {
+          throw new CleanupCredentialInvalidError(error.message, { cause: error });
+        }
         throw new RecoveryBoundaryError(`cleanup credential filesystem read failed${closeErrorMessage(error)}`, { cause: error });
       }
       let record: { readonly admissionId: string; readonly generation: number; readonly token: string };
@@ -1073,10 +1152,9 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       if (eventPostcondition.blocker !== 'none' || eventPostcondition.state !== persistedSnapshot.state || stableJson(eventPostcondition.runner) !== stableJson(persistedSnapshot.runner)) throw new RecoveryBoundaryError('cleanup completion postcondition does not match its admission');
       const inspectSystemd = options.systemd.inspect;
       if (inspectSystemd === undefined) throw new RecoveryBoundaryError('timestamped systemd verification is unavailable');
-      const initialCleanupUnitObservation = await inspectSystemd(unitName);
-      const initialCleanupObservedAt = inactiveSystemdObservation(initialCleanupUnitObservation, unitName, completionAt > verificationStartedAt ? completionAt : verificationStartedAt, 'cleanup unit initial observation');
-      const initialRunnerUnitObservation = await inspectSystemd(runnerUnit);
-      const initialRunnerObservedAt = inactiveSystemdObservation(initialRunnerUnitObservation, runnerUnit, completionAt > verificationStartedAt ? completionAt : verificationStartedAt, 'runner unit initial observation');
+      const initialNotBefore = completionAt > verificationStartedAt ? completionAt : verificationStartedAt;
+      const initialCleanupObservation = await inspectInactiveSystemdBracket(inspectSystemd, clock, unitName, initialNotBefore, 'cleanup unit initial observation');
+      const initialRunnerObservation = await inspectInactiveSystemdBracket(inspectSystemd, clock, runnerUnit, initialNotBefore, 'runner unit initial observation');
       const evidence = await dependencies.evidence.read({ jobId: input.jobId, admissionId: input.admissionId, path: evidencePath, sha256: evidenceSha256 });
       if (evidence.jobId !== input.jobId || evidence.admissionId !== input.admissionId || evidence.sha256 !== evidenceSha256 || stableJson(evidence.postcondition) !== stableJson(eventPostcondition)) throw new RecoveryBoundaryError('cleanup completion file does not match the durable cleanup CAS evidence');
       const postcondition = evidence.postcondition;
@@ -1147,11 +1225,6 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
         postcondition: postcondition.staging,
       }) !== true) throw new RecoveryBoundaryError('cleanup staging postcondition is not verified');
 
-      const finalCleanupUnitObservation = await inspectSystemd(unitName);
-      const finalCleanupObservedAt = inactiveSystemdObservation(finalCleanupUnitObservation, unitName, initialCleanupObservedAt, 'cleanup unit final observation');
-      const finalRunnerUnitObservation = await inspectSystemd(runnerUnit);
-      const finalRunnerObservedAt = inactiveSystemdObservation(finalRunnerUnitObservation, runnerUnit, initialRunnerObservedAt, 'runner unit final observation');
-
       let exactContainerObservation: RecoveryDockerInspectResult | null = null;
       if (exactContainerId !== null) {
         exactContainerObservation = await dependencies.docker.inspect(exactContainerId);
@@ -1161,14 +1234,17 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       const globalContainerObservation = await dependencies.docker.listByLabels(labels);
       if (!Array.isArray(globalContainerObservation.containers) || globalContainerObservation.containers.length !== 0) throw new RecoveryBoundaryError('global Docker label query is not empty');
 
-      const handBackAt = recoveryInstant(clock.now(), 'cleanup hand-back time');
+      const finalCleanupObservation = await inspectInactiveSystemdBracket(inspectSystemd, clock, unitName, initialCleanupObservation.observedAt, 'cleanup unit final observation');
+      const finalRunnerObservation = await inspectInactiveSystemdBracket(inspectSystemd, clock, runnerUnit, initialRunnerObservation.observedAt, 'runner unit final observation');
+      if (finalRunnerObservation.finishedAt < finalCleanupObservation.finishedAt) throw new RecoveryBoundaryError('cleanup hand-back systemd inspection chronology moved backwards');
+      const handBackAt = finalRunnerObservation.finishedAt;
       if (handBackAt < verificationStartedAt || handBackAt < completionAt) throw new RecoveryBoundaryError('cleanup hand-back clock moved backwards');
-      freshObservation(initialCleanupObservedAt, 'cleanup unit initial observation time', verificationStartedAt, completionAt, handBackAt);
-      freshObservation(initialRunnerObservedAt, 'runner unit initial observation time', verificationStartedAt, completionAt, handBackAt);
-      freshObservation(finalCleanupObservedAt, 'cleanup unit final observation time', verificationStartedAt, completionAt, handBackAt);
-      const runnerObservedAt = freshObservation(finalRunnerObservedAt, 'runner unit final observation time', verificationStartedAt, completionAt, handBackAt);
+      freshObservation(finalCleanupObservation.observedAt, 'cleanup unit final observation time', verificationStartedAt, completionAt, handBackAt);
+      const runnerObservedAt = freshObservation(finalRunnerObservation.observedAt, 'runner unit final observation time', verificationStartedAt, completionAt, handBackAt);
       if (exactContainerObservation !== null) freshObservation(exactContainerObservation.observedAt, 'exact container observation time', verificationStartedAt, completionAt, handBackAt);
       const globalContainerObservedAt = freshObservation(globalContainerObservation.observedAt, 'global container observation time', verificationStartedAt, completionAt, handBackAt);
+      freshObservation(initialCleanupObservation.observedAt, 'cleanup unit initial observation time', verificationStartedAt, completionAt, handBackAt);
+      freshObservation(initialRunnerObservation.observedAt, 'runner unit initial observation time', verificationStartedAt, completionAt, handBackAt);
       const runnerProof = {
         unit: runnerUnit,
         owner: runnerOwner,
@@ -1201,6 +1277,22 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     return databaseAll(options.db, "SELECT admission_id, job_id, complete_at FROM cleanup_leases WHERE status='completed' AND (complete_at > ? OR (complete_at = ? AND admission_id > ?)) ORDER BY complete_at, admission_id LIMIT ?", cursor.completeAt, cursor.completeAt, cursor.admissionId, limit);
   }
 
+  function withReadSnapshot<T>(work: () => T): T {
+    if (typeof (options.db as RecoveryDatabase).exec !== 'function') throw new RecoveryBoundaryError('completed admission reconciliation requires a SQLite read snapshot');
+    try { databaseExec(options.db, 'BEGIN'); }
+    catch (error) { throw new RecoveryBoundaryError('completed admission read snapshot could not be opened', { cause: error }); }
+    let result: T;
+    try {
+      result = work();
+    } catch (error) {
+      try { databaseExec(options.db, 'ROLLBACK'); } catch (rollbackError) { throw new RecoveryBoundaryError('completed admission read snapshot rollback failed', { cause: rollbackError }); }
+      throw error;
+    }
+    try { databaseExec(options.db, 'ROLLBACK'); }
+    catch (error) { throw new RecoveryBoundaryError('completed admission read snapshot could not be closed', { cause: error }); }
+    return result;
+  }
+
   function startupAdmissionCursor(row: Record<string, unknown>): { readonly completeAt: string; readonly admissionId: string; readonly jobId: string } {
     const completeAt = recoveryInstant(row.complete_at, 'startup cleanup completion time');
     const admissionId = requiredRowString(row, 'admission_id');
@@ -1210,7 +1302,7 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     return { completeAt, admissionId, jobId };
   }
 
-  async function preflightCompletedAdmissions(): Promise<readonly { readonly completeAt: string; readonly admissionId: string; readonly jobId: string }[]> {
+  function readCompletedAdmissionPages(): readonly { readonly completeAt: string; readonly admissionId: string; readonly jobId: string }[] {
     const records: Array<{ readonly completeAt: string; readonly admissionId: string; readonly jobId: string }> = [];
     let cursor: { completeAt: string; admissionId: string } | undefined;
     let previousKey: string | undefined;
@@ -1232,6 +1324,11 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       if (page.length < limit) return records;
     }
     throw new RecoveryBoundaryError('completed admission reconciliation exceeds its bounded limit');
+  }
+
+  function preflightCompletedAdmissions(): readonly { readonly completeAt: string; readonly admissionId: string; readonly jobId: string }[] {
+    if (typeof (options.db as RecoveryDatabase).exec !== 'function') throw new RecoveryBoundaryError('completed admission reconciliation requires a SQLite read snapshot');
+    return withReadSnapshot(readCompletedAdmissionPages);
   }
 
   async function reconcileCompletedAdmissions(): Promise<readonly CleanupHandBackResult[]> {

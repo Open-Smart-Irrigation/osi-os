@@ -61,6 +61,7 @@ function fakeRecovery(options: {
   let generation = options.generation ?? 0;
   const writes: unknown[] = [];
   const db = {
+    exec() {},
     prepare(sql: string) {
       return {
         get(...parameters: readonly unknown[]) {
@@ -219,7 +220,7 @@ describe('Task 20 cleanup admission corrections', () => {
     } satisfies RecoverySystemd;
     const replacementRecovery = createCleanupAdmissionRecovery({
       stateRoot: root,
-      db: { prepare: (sql: string) => ({ get: () => sql.includes('cleanup_leases') ? getLease() : { cleanup_generation: 1 } }) } as never,
+      db: { exec() {}, prepare: (sql: string) => ({ get: () => sql.includes('cleanup_leases') ? getLease() : { cleanup_generation: 1 } }) } as never,
       ownership: { apiWrite: (command: never) => {
         const result = (recovery as never);
         void result;
@@ -413,7 +414,7 @@ describe('Task 20 cleanup admission corrections', () => {
     };
     const writes: unknown[] = []; const starts: string[] = []; let statusChecks = 0; let release!: () => void;
     const bothInitialStatusChecks = new Promise<void>((resolve) => { release = resolve; });
-    const db = { prepare(sql: string) { return { get: () => sql.includes('cleanup_leases') ? lease : { cleanup_generation: 1 } }; } };
+    const db = { exec() {}, prepare(sql: string) { return { get: () => sql.includes('cleanup_leases') ? lease : { cleanup_generation: 1 } }; } };
     const ownership = { apiWrite(command: Record<string, unknown>) {
       writes.push(command);
       if (command.kind === 'cleanup-admission-rotate') {

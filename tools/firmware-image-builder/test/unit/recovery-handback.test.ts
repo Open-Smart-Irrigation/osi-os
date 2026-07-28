@@ -121,6 +121,7 @@ function fixture() {
   const logGenerations: Record<string, unknown>[] = [];
   const logEvents: Record<string, unknown>[] = [];
   const db = {
+    exec: vi.fn(),
     prepare: vi.fn((sql: string) => ({
       all: (..._parameters: readonly unknown[]) => sql.includes('FROM job_log_generations')
         ? logGenerations
@@ -213,6 +214,25 @@ function exactIdentityFixture() {
 }
 
 describe('cleanup hand-back recovery', () => {
+  it('fails closed when completed-admission snapshot support is unavailable', async () => {
+    const value = fixture();
+    const { exec: _exec, ...withoutSnapshot } = value.db;
+    const stateRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-no-snapshot-'));
+    const recovery = createCleanupAdmissionRecovery({
+      stateRoot,
+      db: withoutSnapshot as never,
+      ownership: value.ownership,
+      systemd: value.systemd,
+      handBack: value.handBack,
+      clock: { now: () => NOW },
+    });
+    try {
+      await expect(recovery.openAdmissions()).rejects.toThrow(/read snapshot/);
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
   it('keeps admissions closed and retries startup after production infrastructure failure', async () => {
     const value = fixture();
     exposeCompletedStartupRow(value);
@@ -400,7 +420,7 @@ describe('cleanup hand-back recovery', () => {
     try {
       await recovery.openAdmissions();
       await expect(recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW })).resolves.toMatchObject({ handedBack: true });
-      expect(trace).toEqual(['cleanup-unit', 'runner-unit', 'staging', 'cleanup-unit', 'runner-unit', 'exact-container', 'job-label-list', 'api-write']);
+      expect(trace).toEqual(['cleanup-unit', 'runner-unit', 'staging', 'exact-container', 'job-label-list', 'cleanup-unit', 'runner-unit', 'api-write']);
       expect(value.handBack.docker.listByLabels).toHaveBeenCalledWith({ [LABEL_JOB]: JOB_ID });
     } finally {
       await rm(stateRoot, { recursive: true, force: true });

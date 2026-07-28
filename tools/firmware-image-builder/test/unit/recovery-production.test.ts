@@ -509,6 +509,30 @@ describe('production recovery physical verification', () => {
     }
   });
 
+  it('reopens the canonical log chain after the final authority revalidation', async () => {
+    let logDirectory = '';
+    let swapped = false;
+    let beforeReads = 0;
+    const value = await fixture(async () => {
+      beforeReads += 1;
+      if (beforeReads !== 2 || swapped || logDirectory === '') return;
+      swapped = true;
+      await rename(logDirectory, `${logDirectory}.held`);
+      await mkdir(logDirectory, { mode: 0o700 });
+      await writeFile(join(logDirectory, 'runner-0.log'), Buffer.from('runner cleanup log\n'), { mode: 0o600 });
+      await writeFile(join(logDirectory, 'unexpected-extra.log'), Buffer.from('unexpected\n'), { mode: 0o600 });
+    });
+    try {
+      const bytes = Buffer.from('runner cleanup log\n');
+      logDirectory = join(value.loaded.stateRoot, 'jobs', JOB_ID, 'logs');
+      await writeLog(value.loaded, bytes);
+      await expect(createFactory(value.loaded).logs.verify(logVerificationInput(bytes))).rejects.toThrow(/identity|changed|unindexed|entry/);
+      expect(swapped).toBe(true);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
   it('rejects an unindexed physical log when both persisted streams are absent', async () => {
     const value = await fixture();
     try {

@@ -262,6 +262,7 @@ function createDocker(overrides: Partial<{
 }
 
 function baseOptions(db: Db, root: string, docker: ReturnType<typeof createDocker>, jobId = 'job-1'): CleanupWorkerOptions {
+  const clock = { now: () => NOW };
   const logSealer = {
     seal: vi.fn(async ({ at }: { jobId: string; admissionId: string; at: string }) => {
       for (const stream of ['runner', 'docker'] as const) {
@@ -279,11 +280,11 @@ function baseOptions(db: Db, root: string, docker: ReturnType<typeof createDocke
     stateRoot: root,
     ownerUid: OWNER_UID,
     workerOwner: 'cleanup-worker',
-    clock: { now: () => NOW },
+    clock,
     ownership: new OwnershipStore(db, { now: () => NOW }),
     fileSystem: createRecoveryFileSystem(),
     systemd: {
-      inspect: vi.fn(async (unit: string) => ({ unit, active: false, observedAt: NOW })),
+      inspect: vi.fn(async (unit: string) => ({ unit, active: false, observedAt: clock.now() })),
     },
     docker,
     logSealer,
@@ -415,6 +416,30 @@ describe('cleanup worker argument and admission fence', () => {
     expect(value.options.evidenceWriter.write).not.toHaveBeenCalled();
     expect(value.db.prepare('SELECT container_id, state, queue_state FROM jobs WHERE job_id=?').get(value.jobId)).toEqual(before);
     await expect(readFile(value.credential.path)).resolves.toBeDefined();
+  });
+
+  it('rejects a stale inactive runner observation before the first cleanup side effect', async () => {
+    const value = await fixture('present');
+    vi.spyOn(value.options.systemd, 'inspect').mockImplementation(async (unit) => ({
+      unit,
+      active: false,
+      observedAt: EXPIRED,
+    }));
+    await expect(value.worker.run([value.admissionId])).rejects.toThrow(/runner unit is not proven inactive/u);
+    expect(value.docker.calls).toEqual([]);
+    expect(value.options.logSealer.seal).not.toHaveBeenCalled();
+    expect(value.options.quarantine.quarantine).not.toHaveBeenCalled();
+  });
+
+  it('rejects an inactive runner observation that is newer than the completed inspection bracket', async () => {
+    const value = await fixture('present');
+    vi.spyOn(value.options.systemd, 'inspect').mockImplementation(async (unit) => ({
+      unit,
+      active: false,
+      observedAt: '2026-07-27T12:00:01.000Z',
+    }));
+    await expect(value.worker.run([value.admissionId])).rejects.toThrow(/runner unit is not proven inactive/u);
+    expect(value.docker.calls).toEqual([]);
   });
 
   it('rechecks runner inactivity after evidence and immediately before cleanup completion CAS', async () => {

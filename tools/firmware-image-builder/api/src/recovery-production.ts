@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { constants as fsConstants, type Dirent, type Stats } from 'node:fs';
-import { open, readdir, type FileHandle } from 'node:fs/promises';
+import { constants as fsConstants, type Stats } from 'node:fs';
+import { opendir, open, type FileHandle } from 'node:fs/promises';
 import { TextDecoder } from 'node:util';
 import { join } from 'node:path';
 
@@ -54,6 +54,7 @@ const MAX_LOG_PATH_BYTES = 4_096;
 const MAX_LOG_COMPONENT_BYTES = 255;
 const MAX_LOG_COMPONENTS = MAX_LOG_TREE_DEPTH;
 const MAX_LOG_DESCRIPTORS = 1_024;
+const MAX_LOG_REVALIDATION_TEMP_DESCRIPTORS = MAX_LOG_TREE_DEPTH + 4;
 
 export interface RecoveryPhysicalVerificationOptions {
   readonly stateRootAuthority: StateRootAuthority;
@@ -433,6 +434,7 @@ async function revalidateHeldChain(
   ownerUid: number,
   device: number,
   fileAssertion: (stats: NativeStats, field: string, owner: number, dev: number) => void,
+  baseDescriptors = 0,
 ): Promise<void> {
   const currentRoot = await descriptorStat(root, `${leaf.path} root`);
   if (!stableStats(rootStats, currentRoot)) return fail(`recovery root identity changed while verifying ${leaf.path}`);
@@ -445,6 +447,7 @@ async function revalidateHeldChain(
       const expected = descriptors.get(path);
       if (expected === undefined) return fail(`recovery descriptor chain is incomplete for ${leaf.path}`);
       const name = leaf.parts[index]!;
+      if (baseDescriptors + opened.length + 2 > MAX_LOG_DESCRIPTORS) return fail('recovery descriptor revalidation exceeds its bounded limit');
       const child = expected.kind === 'directory'
         ? await openDirectoryChild(current, name, path)
         : await openFileChild(current, name, path, ownerUid, device, fileAssertion);
@@ -896,13 +899,23 @@ async function verifyPhysicalLogs(
       allowedDirectories.add(prefix);
     }
   }
-  if (3 + allowedDirectories.size + rows.size > MAX_LOG_DESCRIPTORS) return fail('cleanup physical log descriptor plan exceeds its bounded limit');
+  if (3 + allowedDirectories.size + rows.size + MAX_LOG_REVALIDATION_TEMP_DESCRIPTORS > MAX_LOG_DESCRIPTORS) return fail('cleanup physical log descriptor plan exceeds its bounded limit');
 
-  async function readEntries(directory: FileHandle, field: string): Promise<readonly Dirent[]> {
+  async function forEachEntry(directory: FileHandle, field: string, visit: (entry: import('node:fs').Dirent) => Promise<void>): Promise<void> {
+    let stream: import('node:fs').Dir;
     try {
-      return await readdir(join(PROC_FD, String(directory.fd)), { withFileTypes: true });
+      stream = await opendir(join(PROC_FD, String(directory.fd)));
     } catch (error) {
       return fileSystemFailure('read', `cannot enumerate recovery log tree: ${field}`, error);
+    }
+    try {
+      for await (const entry of stream) await visit(entry);
+    } catch (error) {
+      return fileSystemFailure('read', `cannot enumerate recovery log tree: ${field}`, error);
+    } finally {
+      await stream.close().catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code !== 'ERR_DIR_CLOSED') fileSystemFailure('close', `cannot close recovery log tree: ${field}`, error);
+      });
     }
   }
 
@@ -911,8 +924,14 @@ async function verifyPhysicalLogs(
       const handles: FileHandle[] = [];
       const held = new Map<string, HeldDescriptor>();
       let totalBytes = 0;
+      let extraHeldDescriptors = 0;
       try {
-        const root = await open(snapshot.path, DIRECTORY_FLAGS);
+        let root: FileHandle;
+        try {
+          root = await open(snapshot.path, DIRECTORY_FLAGS);
+        } catch (error) {
+          return fileSystemFailure('open', 'state root could not be opened no-follow for cleanup logs', error);
+        }
         handles.push(root);
         const rootStats = await descriptorStat(root, 'state root for cleanup logs');
         assertDirectory(rootStats, 'state root for cleanup logs', ownerUid, snapshot.device);
@@ -938,16 +957,15 @@ async function verifyPhysicalLogs(
           let treeEntries = 0;
           async function walk(directory: FileHandle, prefix: string, depth: number, revalidate: boolean): Promise<void> {
             if (depth > MAX_LOG_TREE_DEPTH) return fail('cleanup physical log tree exceeds its depth bound');
-            const entries = [...await readEntries(directory, prefix)].sort((left, right) => left.name.localeCompare(right.name));
-            treeEntries += entries.length;
-            if (treeEntries > MAX_LOG_TREE_ENTRIES) return fail('cleanup physical log tree exceeds its entry bound');
-            for (const entry of entries) {
+            await forEachEntry(directory, prefix, async (entry) => {
               const path = `${prefix}/${entry.name}`;
               const row = rows.get(path);
               const isDirectory = allowedDirectories.has(path);
+              treeEntries += 1;
+              if (treeEntries > MAX_LOG_TREE_ENTRIES) return fail('cleanup physical log tree exceeds its entry bound');
               if (entry.isSymbolicLink()) return fail(`cleanup physical log tree contains a symlink: ${path}`);
               if (!isDirectory && row === undefined) return fail(`cleanup physical log tree contains an unindexed entry: ${path}`);
-              if (!revalidate && handles.length + 1 > MAX_LOG_DESCRIPTORS) return fail('cleanup physical log descriptor count exceeds its bounded limit');
+              if (handles.length + extraHeldDescriptors + 2 > MAX_LOG_DESCRIPTORS) return fail('cleanup physical log descriptor count exceeds its bounded limit');
               const child = isDirectory
                 ? await openDirectoryChild(directory, entry.name, path)
                 : await openFileChild(directory, entry.name, path, ownerUid, snapshot.device, assertLogFile);
@@ -987,7 +1005,7 @@ async function verifyPhysicalLogs(
               } finally {
                 if (revalidate) await closeHandles([child]);
               }
-            }
+            });
           }
           await walk(logs, 'logs', 0, false);
           const fileCount = [...held.values()].filter((descriptor) => descriptor.kind === 'file').length;
@@ -999,14 +1017,49 @@ async function verifyPhysicalLogs(
             [jobPath, held.get(jobPath)!],
           ]);
           for (const descriptor of held.values()) chain.set(descriptor.parts.join('/'), descriptor);
-          const verified = new Set<HeldDescriptor>();
-          for (const descriptor of held.values()) {
-            if (verified.has(descriptor)) continue;
-            verified.add(descriptor);
-            await revalidateHeldChain(root, rootStats, chain, descriptor, ownerUid, snapshot.device, assertLogFile);
+          async function revalidateAll(baseDescriptors: number): Promise<void> {
+            const verified = new Set<HeldDescriptor>();
+            for (const descriptor of held.values()) {
+              if (verified.has(descriptor)) continue;
+              verified.add(descriptor);
+              await revalidateHeldChain(root, rootStats, chain, descriptor, ownerUid, snapshot.device, assertLogFile, baseDescriptors);
+            }
           }
-          treeEntries = 0;
-          await walk(logs, 'logs', 0, true);
+          await revalidateAll(handles.length);
+          try {
+            await dependencies.beforeRead(root);
+          } catch (error) {
+            fileSystemFailure('read', 'cannot prepare final cleanup log chain read', error);
+          }
+          const finalHandles: FileHandle[] = [];
+          let finalLogs: FileHandle | null = null;
+          try {
+            const finalJobs = await openDirectoryChild(root, 'jobs', 'jobs for final cleanup logs');
+            finalHandles.push(finalJobs);
+            const expectedJobs = held.get('jobs');
+            const finalJobsStats = await descriptorStat(finalJobs, 'jobs for final cleanup logs');
+            assertDirectory(finalJobsStats, 'jobs for final cleanup logs', ownerUid, snapshot.device);
+            if (expectedJobs === undefined || !stableStats(expectedJobs.stats, finalJobsStats)) return fail('cleanup physical log jobs directory identity changed before final enumeration');
+            const finalJob = await openDirectoryChild(finalJobs, jobId, `jobs/${jobId} for final cleanup logs`);
+            finalHandles.push(finalJob);
+            const expectedJob = held.get(jobPath);
+            const finalJobStats = await descriptorStat(finalJob, `jobs/${jobId} for final cleanup logs`);
+            assertDirectory(finalJobStats, jobPath, ownerUid, snapshot.device);
+            if (expectedJob === undefined || !stableStats(expectedJob.stats, finalJobStats)) return fail('cleanup physical log job directory identity changed before final enumeration');
+            finalLogs = await openDirectoryChild(finalJob, 'logs', `jobs/${jobId}/logs for final cleanup logs`);
+            finalHandles.push(finalLogs);
+            const expectedLogs = held.get('logs');
+            const finalLogsStats = await descriptorStat(finalLogs, `jobs/${jobId}/logs for final cleanup logs`);
+            assertDirectory(finalLogsStats, `jobs/${jobId}/logs`, ownerUid, snapshot.device);
+            if (expectedLogs === undefined || !stableStats(expectedLogs.stats, finalLogsStats)) return fail('cleanup physical log root identity changed before final enumeration');
+            extraHeldDescriptors = finalHandles.length;
+            treeEntries = 0;
+            await walk(finalLogs, 'logs', 0, true);
+            await revalidateAll(handles.length + finalHandles.length);
+          } finally {
+            extraHeldDescriptors = 0;
+            await closeHandles(finalHandles);
+          }
         }
         await withStateRootSnapshot(stateRootAuthority, async ({ snapshot: current }) => {
           if (current.path !== snapshot.path || current.device !== snapshot.device || current.inode !== snapshot.inode) return fail('state root authority changed after cleanup log verification');

@@ -5,6 +5,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import {
   ADMISSION_ID_PATTERN,
   createRecoveryFileSystem,
+  readBoundedRecoveryFile,
   type RecoveryDescriptorFileSystem,
   type RecoveryDirectoryHandle,
   type RecoveryFileHandle,
@@ -357,8 +358,12 @@ async function openCredential(
     const filename = `${admission.admissionId}.token`;
     const credential = await directory.openFileChild(filename, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
     try {
-      verifyCredential(await credential.stat(), expectedRelativePath, ownerUid, rootDevice);
-      const bytes = await credential.readFile();
+      const bytes = await readBoundedRecoveryFile(
+        credential,
+        MAX_CREDENTIAL_BYTES,
+        expectedRelativePath,
+        (stats) => verifyCredential(stats, expectedRelativePath, ownerUid, rootDevice),
+      );
       const record = parseCredential(bytes);
       const fileSha = createHash('sha256').update(bytes).digest('hex');
       const tokenHash = createHash('sha256').update(record.token).digest('hex');
@@ -491,18 +496,20 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
     operation: () => Promise<T>,
   ): Promise<T> {
     assertClaimActive(admission, action);
+    const inspectionStartedAt = canonicalInstant(options.clock.now(), `runner unit inspection start before ${action}`);
     let runner: CleanupRunnerObservation;
     try {
       runner = await options.systemd.inspect(admission.snapshot.runner.unit, options.timeouts.systemdMs);
     } catch (error) {
       throw new CleanupActionGuardError(`runner unit inspection failed before ${action}: ${errorMessage(error)}`, { cause: error });
     }
+    const inspectionFinishedAt = canonicalInstant(options.clock.now(), `runner unit inspection finish before ${action}`);
     const observedAt = canonicalInstant(runner.observedAt, `runner unit observation before ${action}`);
-    const upperBound = canonicalInstant(options.clock.now(), `runner unit observation upper bound before ${action}`);
     if (
       runner.unit !== admission.snapshot.runner.unit
       || runner.active
-      || observedAt > upperBound
+      || observedAt < inspectionStartedAt
+      || observedAt > inspectionFinishedAt
     ) {
       throw new CleanupActionGuardError(`runner unit is not proven inactive before ${action}`);
     }
