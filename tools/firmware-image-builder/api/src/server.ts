@@ -225,7 +225,7 @@ function parseRequestUrl(request: IncomingMessage): { readonly pathname: string;
   } catch {
     fail('INVALID_PATH', 400);
   }
-  if (hasUnsafeTargetCharacter(pathname) || pathname.split('/').some((segment) => segment === '.' || segment === '..')) {
+  if (hasUnsafeTargetCharacter(pathname) || pathname.includes('?') || pathname.split('/').some((segment) => segment === '.' || segment === '..')) {
     fail('INVALID_PATH', 400);
   }
   if (!pathname.startsWith(API_PREFIX)
@@ -235,14 +235,22 @@ function parseRequestUrl(request: IncomingMessage): { readonly pathname: string;
   return { pathname, query: new URLSearchParams(rawQuery) };
 }
 
-function checkOrigin(request: IncomingMessage, origin: string): void {
+function actualOrigin(request: IncomingMessage): string {
+  const localPort = request.socket.localPort;
+  if (!Number.isSafeInteger(localPort) || localPort < 1 || localPort > 65_535) fail('ORIGIN_FORBIDDEN', 403);
+  return `http://${LOOPBACK_HOST}:${localPort as number}`;
+}
+
+function checkOrigin(request: IncomingMessage): string {
+  const origin = actualOrigin(request);
   const value = request.headers.origin;
   if (value === undefined) fail('ORIGIN_REQUIRED', 403);
   if (Array.isArray(value) || value !== origin) fail('ORIGIN_FORBIDDEN', 403);
+  return origin;
 }
 
-function preflight(response: ServerResponse, request: IncomingMessage, origin: string, id: string): void {
-  checkOrigin(request, origin);
+function preflight(response: ServerResponse, request: IncomingMessage, id: string): void {
+  const origin = checkOrigin(request);
   response.writeHead(204, {
     [REQUEST_ID_HEADER]: id,
     'cache-control': 'no-store',
@@ -255,7 +263,9 @@ function preflight(response: ServerResponse, request: IncomingMessage, origin: s
 }
 
 export function createHttpServer(options: HttpServerOptions): Server {
-  if (!/^https?:\/\/127\.0\.0\.1(?::\d+)?$/u.test(options.origin)) {
+  const originMatch = /^http:\/\/127\.0\.0\.1:(0|[1-9]\d{0,4})$/u.exec(options.origin);
+  const configuredPort = originMatch === null ? -1 : Number(originMatch[1]);
+  if (configuredPort < 0 || configuredPort > 65_535) {
     throw new Error('HTTP API origin must be a loopback HTTP origin');
   }
   const limit = options.maxBodyBytes ?? MAX_BODY_BYTES;
@@ -267,13 +277,13 @@ export function createHttpServer(options: HttpServerOptions): Server {
       checkHost(request);
       const parsedUrl = parseRequestUrl(request);
       if (request.method === 'OPTIONS') {
-        preflight(response, request, options.origin, id);
+        preflight(response, request, id);
         return;
       }
       const method = request.method ?? '';
       if (!['GET', 'HEAD', 'POST', 'OPTIONS'].includes(method)) fail('METHOD_NOT_ALLOWED', 405);
       if (isMutation(method)) {
-        checkOrigin(request, options.origin);
+        checkOrigin(request);
         if (!contentTypeIsJson(request.headers['content-type'])) fail('JSON_REQUIRED', 415);
       }
       const body = isMutation(method) ? await readBody(request, limit) : null;
@@ -287,8 +297,9 @@ export function createHttpServer(options: HttpServerOptions): Server {
         body,
       });
       if (result === null || result === undefined) fail('NOT_FOUND', 404);
-      const cors: Readonly<Record<string, string>> = request.headers.origin === options.origin
-        ? { 'access-control-allow-origin': options.origin, vary: 'Origin' }
+      const origin = actualOrigin(request);
+      const cors: Readonly<Record<string, string>> = request.headers.origin === origin
+        ? { 'access-control-allow-origin': origin, vary: 'Origin' }
         : {};
       sendJson(response, result.status, result.body ?? null, id, { ...cors, ...(result.headers ?? {}) }, method === 'HEAD');
     } catch (error) {
@@ -304,7 +315,11 @@ export function createHttpServer(options: HttpServerOptions): Server {
     if (args.length === 2 && typeof args[1] !== 'function') {
       throw new TypeError('HTTP API listen accepts only a numeric TCP port and optional callback');
     }
-    return listen({ port: args[0], host: LOOPBACK_HOST }, args[1] as (() => void) | undefined);
+    const requestedPort = args[0] as number;
+    if (configuredPort !== requestedPort) {
+      throw new Error('HTTP API configured origin port must match the requested listen port');
+    }
+    return listen({ port: requestedPort, host: LOOPBACK_HOST }, args[1] as (() => void) | undefined);
   }) as Server['listen'];
   return server;
 }

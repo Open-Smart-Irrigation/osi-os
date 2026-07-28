@@ -1,5 +1,6 @@
 import { once } from 'node:events';
 import { connect } from 'node:net';
+import { request } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import {
   createHttpServer,
@@ -8,15 +9,19 @@ import {
   type ApiRouteContext,
 } from '../../api/src/server.js';
 
-const ORIGIN = 'http://127.0.0.1:43129';
+const EPHEMERAL_ORIGIN = 'http://127.0.0.1:0';
+
+function originFor(port: number): string {
+  return `http://127.0.0.1:${port}`;
+}
 
 async function start(handler: ApiRouteHandler) {
-  const server = createHttpServer({ origin: ORIGIN, routeHandler: handler });
+  const server = createHttpServer({ origin: EPHEMERAL_ORIGIN, routeHandler: handler });
   server.listen(0);
   await once(server, 'listening');
   const address = server.address();
   if (address === null || typeof address === 'string') throw new Error('server did not bind to a TCP port');
-  return { server, port: address.port };
+  return { server, port: address.port, origin: originFor(address.port) };
 }
 
 async function stop(server: ReturnType<typeof createHttpServer>) {
@@ -49,10 +54,27 @@ async function raw(port: number, target: string): Promise<{ readonly status: num
   });
 }
 
+async function call(port: number, options: {
+  readonly method: string;
+  readonly path: string;
+  readonly headers: Record<string, string>;
+  readonly body?: string;
+}): Promise<{ readonly status: number; readonly headers: Record<string, string | string[] | undefined> }> {
+  return new Promise((resolve, reject) => {
+    const requestValue = request({ host: '127.0.0.1', port, method: options.method, path: options.path, headers: options.headers }, (response) => {
+      response.resume();
+      response.on('end', () => resolve({ status: response.statusCode ?? 0, headers: response.headers }));
+    });
+    requestValue.on('error', reject);
+    if (options.body === undefined) requestValue.end();
+    else requestValue.end(options.body);
+  });
+}
+
 describe('HTTP request-target parsing', () => {
   it.each([
     ['literal backslash', '/api\\health'],
-    ['same-origin absolute-form', `${ORIGIN}/api/health`],
+    ['same-origin absolute-form', 'http://127.0.0.1:43129/api/health'],
     ['network-path reference', '//127.0.0.1/api/health'],
     ['fragment delimiter', '/api/health#fragment'],
     ['encoded dot-segment cloud escape', '/api/%2e%2e/v1/secret'],
@@ -87,5 +109,37 @@ describe('HTTP request-target parsing', () => {
     } finally {
       await stop(server);
     }
+  });
+
+  it('uses the actual listener port for mutation and preflight origins', async () => {
+    const { server, port, origin } = await start(() => jsonResponse(200, { ok: true }));
+    try {
+      const accepted = await call(port, {
+        method: 'POST', path: '/api/jobs',
+        headers: { origin, 'content-type': 'application/json' }, body: '{}',
+      });
+      expect(accepted.status).toBe(200);
+
+      const rejected = await call(port, {
+        method: 'POST', path: '/api/jobs',
+        headers: { origin: EPHEMERAL_ORIGIN, 'content-type': 'application/json' }, body: '{}',
+      });
+      expect(rejected.status).toBe(403);
+
+      const preflight = await call(port, {
+        method: 'OPTIONS', path: '/api/jobs',
+        headers: { origin, 'access-control-request-method': 'POST' },
+      });
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers['access-control-allow-origin']).toBe(origin);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('rejects HTTPS and mismatched configured origins', async () => {
+    expect(() => createHttpServer({ origin: 'https://127.0.0.1:43129', routeHandler: () => jsonResponse(200, {}) })).toThrow();
+    const server = createHttpServer({ origin: 'http://127.0.0.1:43129', routeHandler: () => jsonResponse(200, {}) });
+    expect(() => server.listen(43130)).toThrow(/origin port/iu);
   });
 });

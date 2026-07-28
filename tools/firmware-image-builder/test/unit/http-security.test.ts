@@ -9,15 +9,19 @@ import {
   type ApiRouteContext,
 } from '../../api/src/server.js';
 
-const ORIGIN = 'http://127.0.0.1:43129';
+const EPHEMERAL_ORIGIN = 'http://127.0.0.1:0';
+
+function originFor(port: number): string {
+  return `http://127.0.0.1:${port}`;
+}
 
 async function start(handler: ApiRouteHandler) {
-  const server = createHttpServer({ origin: ORIGIN, routeHandler: handler });
+  const server = createHttpServer({ origin: EPHEMERAL_ORIGIN, routeHandler: handler });
   server.listen(0);
   await once(server, 'listening');
   const address = server.address();
   if (address === null || typeof address === 'string') throw new Error('server did not bind to a TCP port');
-  return { server, port: address.port };
+  return { server, port: address.port, origin: originFor(address.port) };
 }
 
 async function call(port: number, options: {
@@ -93,7 +97,7 @@ describe('loopback HTTP security boundary', () => {
   });
 
   it('requires the exact origin and JSON media type for mutations', async () => {
-    const { server, port } = await start(() => jsonResponse(200, { accepted: true }));
+    const { server, port, origin } = await start(() => jsonResponse(200, { accepted: true }));
     try {
       const foreign = await call(port, {
         method: 'POST', path: '/api/jobs',
@@ -111,7 +115,7 @@ describe('loopback HTTP security boundary', () => {
 
       const mediaType = await call(port, {
         method: 'POST', path: '/api/jobs',
-        headers: { origin: ORIGIN, 'content-type': 'text/plain' }, body: '{}',
+        headers: { origin, 'content-type': 'text/plain' }, body: '{}',
       });
       expect(mediaType.status).toBe(415);
       expect(mediaType.json).toMatchObject({ error: { code: 'JSON_REQUIRED' } });
@@ -122,28 +126,28 @@ describe('loopback HTTP security boundary', () => {
 
   it('parses bounded JSON and rejects malformed or oversized bodies', async () => {
     const seen: unknown[] = [];
-    const { server, port } = await start((context) => {
+    const { server, port, origin } = await start((context) => {
       seen.push(context.body);
       return jsonResponse(200, { accepted: true });
     });
     try {
       const valid = await call(port, {
         method: 'POST', path: '/api/jobs',
-        headers: { origin: ORIGIN, 'content-type': 'application/json' }, body: '{"branch":"main"}',
+        headers: { origin, 'content-type': 'application/json' }, body: '{"branch":"main"}',
       });
       expect(valid.status).toBe(200);
       expect(seen).toEqual([{ branch: 'main' }]);
 
       const malformed = await call(port, {
         method: 'POST', path: '/api/jobs',
-        headers: { origin: ORIGIN, 'content-type': 'application/json' }, body: '{',
+        headers: { origin, 'content-type': 'application/json' }, body: '{',
       });
       expect(malformed.status).toBe(400);
       expect(malformed.json).toMatchObject({ error: { code: 'INVALID_JSON' } });
 
       const oversized = await call(port, {
         method: 'POST', path: '/api/jobs',
-        headers: { origin: ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ value: 'x'.repeat(70_000) }),
+        headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ value: 'x'.repeat(70_000) }),
       });
       expect(oversized.status).toBe(413);
       expect(oversized.json).toMatchObject({ error: { code: 'BODY_TOO_LARGE' } });
@@ -174,15 +178,15 @@ describe('loopback HTTP security boundary', () => {
   });
 
   it('handles same-origin preflight without exposing a static or cloud route', async () => {
-    const { server, port } = await start(() => jsonResponse(200, { ok: true }));
+    const { server, port, origin } = await start(() => jsonResponse(200, { ok: true }));
     try {
       const preflight = await call(port, {
         method: 'OPTIONS', path: '/api/jobs',
-        headers: { origin: ORIGIN, 'access-control-request-method': 'POST' },
+        headers: { origin, 'access-control-request-method': 'POST' },
       });
       expect(preflight.status).toBe(204);
       expect(preflight.body).toBe('');
-      expect(preflight.headers['access-control-allow-origin']).toBe(ORIGIN);
+      expect(preflight.headers['access-control-allow-origin']).toBe(origin);
 
       const cloud = await call(port, { path: '/api/v1/sync/gateways/eui/status' });
       expect(cloud.status).toBe(404);
@@ -248,7 +252,7 @@ describe('loopback HTTP security boundary', () => {
   it('decodes the pathname once before routing and reserves encoded cloud paths', async () => {
     const seen: string[] = [];
     let dispatched = 0;
-    const { server, port } = await start((context) => {
+    const { server, port, origin } = await start((context) => {
       dispatched += 1;
       seen.push(context.path);
       return jsonResponse(200, { ok: true });
@@ -288,9 +292,13 @@ describe('loopback HTTP security boundary', () => {
         call(port, { path: '/api/%00' }),
         call(port, { path: '/api/%0A' }),
         call(port, { path: '/api/%5Csecret' }),
+        call(port, { path: '/api/v1%3F/secret' }),
+        call(port, { path: '/api/%68ealth%3Fshadow?real=1' }),
       ]);
-      expect(responses.map((response) => response.status)).toEqual([400, 400, 400, 400, 400]);
+      expect(responses.map((response) => response.status)).toEqual([400, 400, 400, 400, 400, 400, 400]);
       expect(responses.map((response) => response.json)).toEqual([
+        { error: expect.objectContaining({ code: 'INVALID_PATH' }) },
+        { error: expect.objectContaining({ code: 'INVALID_PATH' }) },
         { error: expect.objectContaining({ code: 'INVALID_PATH' }) },
         { error: expect.objectContaining({ code: 'INVALID_PATH' }) },
         { error: expect.objectContaining({ code: 'INVALID_PATH' }) },
@@ -304,7 +312,10 @@ describe('loopback HTTP security boundary', () => {
   });
 
   it('accepts only numeric TCP listen ports and reports listener errors', async () => {
-    const server = createHttpServer({ origin: ORIGIN, routeHandler: () => jsonResponse(200, {}) });
+    expect(() => createHttpServer({ origin: 'https://127.0.0.1:43129', routeHandler: () => jsonResponse(200, {}) })).toThrow(/loopback HTTP origin/iu);
+    expect(() => createHttpServer({ origin: 'http://127.0.0.1', routeHandler: () => jsonResponse(200, {}) })).toThrow(/loopback HTTP origin/iu);
+    expect(() => createHttpServer({ origin: 'http://127.0.0.1:65536', routeHandler: () => jsonResponse(200, {}) })).toThrow(/loopback HTTP origin/iu);
+    const server = createHttpServer({ origin: EPHEMERAL_ORIGIN, routeHandler: () => jsonResponse(200, {}) });
     expect(() => server.listen('/tmp/osi-image-builder.sock' as never)).toThrow();
     expect(() => server.listen({ port: 0 } as never)).toThrow();
     expect(() => server.listen(0, 128 as never)).toThrow();
@@ -316,11 +327,43 @@ describe('loopback HTTP security boundary', () => {
     expect(address).toMatchObject({ address: '127.0.0.1' });
     if (address === null || typeof address === 'string') throw new Error('server did not bind to a TCP port');
 
-    const conflicting = createHttpServer({ origin: ORIGIN, routeHandler: () => jsonResponse(200, {}) });
+    const conflicting = createHttpServer({ origin: `http://127.0.0.1:${address.port}`, routeHandler: () => jsonResponse(200, {}) });
     const listenerErrorPromise = once(conflicting, 'error');
     conflicting.listen(address.port);
     const [listenerError] = await listenerErrorPromise as [NodeJS.ErrnoException];
     expect(listenerError.code).toBe('EADDRINUSE');
     await stop(server);
+  });
+
+  it('requires the configured origin port to match a nonzero listen port before binding', () => {
+    const server = createHttpServer({ origin: 'http://127.0.0.1:43129', routeHandler: () => jsonResponse(200, {}) });
+    expect(() => server.listen(43130)).toThrow(/origin port/iu);
+  });
+
+  it('uses the actual listener port for same-origin mutations and preflight', async () => {
+    const { server, port, origin } = await start(() => jsonResponse(200, { ok: true }));
+    try {
+      const accepted = await call(port, {
+        method: 'POST', path: '/api/jobs',
+        headers: { origin, 'content-type': 'application/json' }, body: '{}',
+      });
+      expect(accepted.status).toBe(200);
+
+      const stale = await call(port, {
+        method: 'POST', path: '/api/jobs',
+        headers: { origin: EPHEMERAL_ORIGIN, 'content-type': 'application/json' }, body: '{}',
+      });
+      expect(stale.status).toBe(403);
+      expect(stale.json).toMatchObject({ error: { code: 'ORIGIN_FORBIDDEN' } });
+
+      const preflight = await call(port, {
+        method: 'OPTIONS', path: '/api/jobs',
+        headers: { origin, 'access-control-request-method': 'POST' },
+      });
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers['access-control-allow-origin']).toBe(origin);
+    } finally {
+      await stop(server);
+    }
   });
 });
