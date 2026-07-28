@@ -220,6 +220,7 @@ describe('versioned builder database migrations', () => {
       { version: 13, filename: '013_queue_dispatch_claim.sql' },
       { version: 14, filename: '014_retention_prunes.sql' },
       { version: 15, filename: '015_retention_prune_target_identity.sql' },
+      { version: 16, filename: '016_log_gap_source_seq_unique.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
       .toEqual(['cleanup_credential_reservations', 'cleanup_leases', 'cleanup_stop_authorization_heads', 'cleanup_stop_authorization_outcomes', 'cleanup_stop_authorizations', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_dispatch_claims', 'queue_entries', 'retention_prune_intents', 'retention_prunes', 'retention_purge_authorizations', 'schema_migrations', 'sqlite_sequence']);
@@ -314,7 +315,7 @@ describe('versioned builder database migrations', () => {
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'").all()
       .map((row) => (row as { name: string }).name);
     expect(indexes.sort()).toEqual([
-      'cleanup_credential_reservations_expiry', 'cleanup_credential_reservations_job_path', 'cleanup_leases_expiry', 'cleanup_leases_fence_identity', 'cleanup_leases_fence_token_identity', 'cleanup_leases_job', 'cleanup_stop_authorization_outcomes_admission', 'cleanup_stop_authorizations_admission', 'cleanup_stop_authorizations_expiry', 'job_events_cancellation_protocol', 'job_events_log_range', 'job_events_sequence', 'job_log_generations_active', 'job_operations_identity',
+      'cleanup_credential_reservations_expiry', 'cleanup_credential_reservations_job_path', 'cleanup_leases_expiry', 'cleanup_leases_fence_identity', 'cleanup_leases_fence_token_identity', 'cleanup_leases_job', 'cleanup_stop_authorization_outcomes_admission', 'cleanup_stop_authorizations_admission', 'cleanup_stop_authorizations_expiry', 'job_events_cancellation_protocol', 'job_events_log_gap_source_seq', 'job_events_log_range', 'job_events_sequence', 'job_log_generations_active', 'job_operations_identity',
       'job_stages_job', 'jobs_cleanup_admission', 'jobs_recovery', 'queue_dispatch_claims_expiry', 'queue_entries_fifo', 'retention_prune_intents_status', 'retention_prunes_at',
     ]);
     const normalizeForeignKeys = (child: string) => db.prepare(`PRAGMA foreign_key_list(${child})`).all()
@@ -514,8 +515,47 @@ describe('versioned builder database migrations', () => {
     const second = openBuilderDatabase(path);
     expect(second.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name").all())
       .toEqual(schema);
-    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 15 });
+    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 16 });
     second.close();
+  });
+
+  it('enforces unique source gaps while allowing orphan and non-gap events', async () => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    insertValidJob(db, 'source-gap-index', 'building');
+    const insert = db.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, ?, ?, ?)');
+
+    insert.run('source-gap-index', 0, 'log-gap', '{"sourceSeq":42}', '2026-07-28T00:00:00.000Z');
+    expect(() => insert.run('source-gap-index', 1, 'log-gap', '{"sourceSeq":42}', '2026-07-28T00:00:01.000Z'))
+      .toThrow(/UNIQUE constraint failed/u);
+    insert.run('source-gap-index', 1, 'log-gap', '{"orphanKey":"runner:0:0"}', '2026-07-28T00:00:01.000Z');
+    insert.run('source-gap-index', 2, 'log-gap', '{"orphanKey":"runner:0:0"}', '2026-07-28T00:00:02.000Z');
+    insert.run('source-gap-index', 3, 'recovery', '{"sourceSeq":42}', '2026-07-28T00:00:03.000Z');
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='job_events_log_gap_source_seq'").get()).toEqual({ name: 'job_events_log_gap_source_seq' });
+    db.close();
+  });
+
+  it('fails the source-gap migration without deduping preexisting duplicates', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    for (const migration of MIGRATION_REGISTRY.slice(0, 15)) {
+      historical.exec(await readFile(join(repoMigrationDir, migration.filename), 'utf8'));
+      historical.prepare('INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)')
+        .run(migration.version, migration.filename, migration.sha256, '2026-07-28T00:00:00.000Z');
+    }
+    insertValidJob(historical, 'duplicate-source-gap', 'building');
+    historical.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, \'log-gap\', ?, ?)')
+      .run('duplicate-source-gap', 0, '{"sourceSeq":7}', '2026-07-28T00:00:00.000Z');
+    historical.prepare('INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, \'log-gap\', ?, ?)')
+      .run('duplicate-source-gap', 1, '{"sourceSeq":7}', '2026-07-28T00:00:01.000Z');
+    historical.close();
+
+    expectMigrationError(() => openBuilderDatabase(path), /migration 016_log_gap_source_seq_unique\.sql failed/u, /UNIQUE constraint failed/u);
+    const unchanged = new DatabaseSync(path);
+    expect(unchanged.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 15 });
+    expect(unchanged.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='duplicate-source-gap' AND event_type='log-gap'").get()).toEqual({ count: 2 });
+    expect(unchanged.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='job_events_log_gap_source_seq'").get()).toBeUndefined();
+    unchanged.close();
   });
 
   it('rejects migration drift and unknown files before changing existing jobs', async () => {
@@ -617,7 +657,7 @@ describe('versioned builder database migrations', () => {
     physicalOrderDb.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(1, '001_initial.sql', MIGRATION_REGISTRY[0].sha256, 'x');
     physicalOrderDb.close();
     const accepted = openBuilderDatabase(physicalOrderPath);
-    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 15 });
+    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 16 });
     accepted.close();
   });
 
@@ -960,7 +1000,7 @@ describe('versioned builder database migrations', () => {
     fresh.close();
 
     const reopened = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
-    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 15 });
+    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 16 });
     expect(reopened.prepare('SELECT COUNT(*) AS count FROM legacy_blocked_publish_evidence').get()).toEqual({ count: 2 });
     expect(reopened.prepare("SELECT terminal_error_json FROM jobs WHERE job_id='legacy-terminal'").get())
       .toEqual({ terminal_error_json: terminalSentinel });
