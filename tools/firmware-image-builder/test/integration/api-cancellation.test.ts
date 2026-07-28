@@ -105,6 +105,10 @@ async function fixture(jobIds: readonly string[]) {
   return { databasePath, db, ownership, store };
 }
 
+function dispatchStartCommand(jobId: string, runnerUnit: string, claimOwner: string, at = LATER, claimExpiresAt = '2026-07-27T12:10:00.000Z'): Extract<Parameters<OwnershipStore['apiWrite']>[0], { kind: 'dispatch-start' }> {
+  return { kind: 'dispatch-start', jobId, runnerUnit, claimOwner, expectedClaimExpiresAt: claimExpiresAt, claimExpiresAt, unitInactiveAt: at, startAttemptedAt: at, at };
+}
+
 function activate(
   fixtureValue: Awaited<ReturnType<typeof fixture>>,
   jobId: string,
@@ -113,6 +117,7 @@ function activate(
 ): void {
   const runnerUnit = `osi-image-builder-runner@${jobId}.service`;
   expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId, runnerUnit, claimOwner: `dispatcher-${jobId}`, claimExpiresAt: '2026-07-27T12:10:00.000Z', at: LATER }).ok).toBe(true);
+  expect(fixtureValue.ownership.apiWrite(dispatchStartCommand(jobId, runnerUnit, `dispatcher-${jobId}`)).ok).toBe(true);
   expect(fixtureValue.ownership.runnerWrite({ kind: 'acquire-lease', jobId, runnerUnit, owner, expiresAt: leaseExpiresAt, at: LATER }).ok).toBe(true);
 }
 
@@ -129,6 +134,7 @@ function toPublishing(fixtureValue: Awaited<ReturnType<typeof fixture>>, jobId: 
   const owner = 'runner-publishing';
   const leaseExpiresAt = '2026-07-27T12:10:00.000Z';
   expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId, runnerUnit: unit, claimOwner: `dispatcher-${jobId}`, claimExpiresAt: '2026-07-27T12:10:00.000Z', at: LATER }).ok).toBe(true);
+  expect(fixtureValue.ownership.apiWrite(dispatchStartCommand(jobId, unit, `dispatcher-${jobId}`)).ok).toBe(true);
   expect(fixtureValue.ownership.runnerWrite({ kind: 'acquire-lease', jobId, runnerUnit: unit, owner, expiresAt: leaseExpiresAt, at: LATER }).ok).toBe(true);
   const stages = [
     ['preflight', 'preflight'], ['source', 'source'], ['release-gates', 'release_gates'], ['frontend', 'frontend'],
@@ -249,6 +255,7 @@ describe('API cancellation against the durable ownership store', () => {
             claimExpiresAt: '2026-07-27T12:10:00.000Z',
             at: LATER,
           }).ok).toBe(true);
+          expect(secondOwnership.apiWrite(dispatchStartCommand('queued-race-dispatch', 'osi-image-builder-runner@queued-race-dispatch.service', 'dispatcher-queued-race-dispatch')).ok).toBe(true);
           expect(secondOwnership.runnerWrite({
             kind: 'acquire-lease',
             jobId: 'queued-race-dispatch',
@@ -291,6 +298,7 @@ describe('API cancellation against the durable ownership store', () => {
   it('persists an active cancellation request, signals the persisted unit, and escalates only after the durable 30+15 second windows', async () => {
     const fixtureValue = await fixture(['active-a']);
     expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId: 'active-a', runnerUnit: 'osi-image-builder-runner@active-a.service', claimOwner: 'dispatcher-active-a', claimExpiresAt: '2026-07-27T12:10:00.000Z', at: LATER }).ok).toBe(true);
+    expect(fixtureValue.ownership.apiWrite(dispatchStartCommand('active-a', 'osi-image-builder-runner@active-a.service', 'dispatcher-active-a')).ok).toBe(true);
     expect(fixtureValue.ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'active-a', runnerUnit: 'osi-image-builder-runner@active-a.service', owner: 'runner-a', expiresAt: '2026-07-27T12:10:00.000Z', at: LATER }).ok).toBe(true);
     const systemdValue = systemd();
 
@@ -1345,6 +1353,7 @@ describe('API cancellation against the durable ownership store', () => {
   it('makes concurrent cancellation requests converge on one durable request event and existing recovery evidence', async () => {
     const fixtureValue = await fixture(['concurrent-a']);
     expect(fixtureValue.ownership.apiWrite({ kind: 'dispatch', jobId: 'concurrent-a', runnerUnit: 'osi-image-builder-runner@concurrent-a.service', claimOwner: 'dispatcher-concurrent-a', claimExpiresAt: '2026-07-27T12:10:00.000Z', at: LATER }).ok).toBe(true);
+    expect(fixtureValue.ownership.apiWrite(dispatchStartCommand('concurrent-a', 'osi-image-builder-runner@concurrent-a.service', 'dispatcher-concurrent-a')).ok).toBe(true);
     expect(fixtureValue.ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'concurrent-a', runnerUnit: 'osi-image-builder-runner@concurrent-a.service', owner: 'runner-a', expiresAt: '2026-07-27T12:10:00.000Z', at: LATER }).ok).toBe(true);
     const systemdValue = systemd();
     const base = { store: fixtureValue.store, ownership: fixtureValue.ownership, systemd: systemdValue, cooperativeTimeoutMs: 0, systemdGraceMs: 0, pollIntervalMs: 1 } as const;
@@ -1571,6 +1580,8 @@ describe('API cancellation against the durable ownership store', () => {
         at: '2026-07-27T12:00:02.000Z', cooperativeDeadlineAt: '2026-07-27T12:00:02.000Z',
       }).ok).toBe(true);
     }
+    const staleLeaseExpiresAt = '2026-07-27T11:59:00.000Z';
+    fixtureValue.db.prepare('UPDATE jobs SET runner_lease_expires_at=? WHERE job_id=?').run(staleLeaseExpiresAt, 'cas-a');
     const stale = fixtureValue.ownership.apiWrite({
       kind: 'cancellation-recovery-blocker',
       jobId: 'cas-a',
@@ -1578,7 +1589,7 @@ describe('API cancellation against the durable ownership store', () => {
       cancelRequestedAt: '2026-07-27T12:00:02.000Z',
       observedRunnerUnit: 'osi-image-builder-runner@cas-a.service',
       observedOwner: 'wrong-owner',
-      observedLeaseExpiresAt: '2026-07-27T12:10:00.000Z',
+      observedLeaseExpiresAt: staleLeaseExpiresAt,
       blocker: { kind: 'stale' },
       at: '2026-07-27T12:00:03.000Z',
     });
@@ -1590,7 +1601,7 @@ describe('API cancellation against the durable ownership store', () => {
       expectedState: 'starting',
       runnerUnit: 'osi-image-builder-runner@cas-a.service',
       observedOwner: 'runner-a',
-      observedLeaseExpiresAt: '2026-07-27T12:10:00.000Z',
+      observedLeaseExpiresAt: staleLeaseExpiresAt,
       blocker: { kind: 'unrelated-runner-recovery' },
       at: '2026-07-27T12:00:03.000Z',
     }).ok).toBe(true);
@@ -1601,7 +1612,7 @@ describe('API cancellation against the durable ownership store', () => {
       cancelRequestedAt: '2026-07-27T12:00:02.000Z',
       observedRunnerUnit: 'osi-image-builder-runner@cas-a.service',
       observedOwner: 'runner-a',
-      observedLeaseExpiresAt: '2026-07-27T12:10:00.000Z',
+      observedLeaseExpiresAt: staleLeaseExpiresAt,
       blocker: { kind: 'must-not-overwrite' },
       at: '2026-07-27T12:00:04.000Z',
     })).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });

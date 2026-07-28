@@ -74,7 +74,10 @@ async function fixture(options: { readonly cancellation?: boolean } = {}) {
     acceptedAt: NOW,
   };
   expect(ownership.apiWrite({ kind: 'enqueue', input }).ok).toBe(true);
-  expect(ownership.apiWrite({ kind: 'dispatch', jobId: input.jobId, runnerUnit: `osi-image-builder-runner@${input.jobId}.service`, claimOwner: `dispatcher-${input.jobId}`, claimExpiresAt: '2026-07-27T09:10:00.000Z', at: LATER }).ok).toBe(true);
+  const runnerUnit = `osi-image-builder-runner@${input.jobId}.service`;
+  const claimOwner = `dispatcher-${input.jobId}`;
+  expect(ownership.apiWrite({ kind: 'dispatch', jobId: input.jobId, runnerUnit, claimOwner, claimExpiresAt: '2026-07-27T09:10:00.000Z', at: LATER }).ok).toBe(true);
+  expect(ownership.apiWrite({ kind: 'dispatch-start', jobId: input.jobId, runnerUnit, claimOwner, expectedClaimExpiresAt: '2026-07-27T09:10:00.000Z', claimExpiresAt: '2026-07-27T09:10:00.000Z', unitInactiveAt: LATER, startAttemptedAt: LATER, at: LATER }).ok).toBe(true);
   expect(ownership.runnerWrite({ kind: 'acquire-lease', jobId: input.jobId, runnerUnit: `osi-image-builder-runner@${input.jobId}.service`, owner: 'runner-integration', expiresAt: '2026-07-27T09:10:00.000Z', at: LATER }).ok).toBe(true);
   if (options.cancellation !== false) {
     expect(ownership.apiWrite({ kind: 'request-cancellation', jobId: input.jobId, reason: 'operator', at: '2026-07-27T09:00:02.000Z' }).ok).toBe(true);
@@ -392,7 +395,7 @@ describe('runner cancellation with the persisted ownership store', () => {
     });
     expect(evidence).toHaveLength(1);
     expect(fixtureValue.store.listEvents(fixtureValue.input.jobId).events.map((event) => event.eventType)).toEqual([
-      'enqueue', 'dispatch', 'state', 'cancellation_requested', 'state', 'cleanup', 'cleanup', 'terminal',
+      'enqueue', 'dispatch', 'recovery', 'state', 'cancellation_requested', 'state', 'cleanup', 'cleanup', 'terminal',
     ]);
     fixtureValue.db.close();
   });

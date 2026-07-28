@@ -57,7 +57,7 @@ function coordinator(overrides: Record<string, unknown> = {}) {
     start: ReturnType<typeof vi.fn<QueueSystemd['start']>>;
     listActive: ReturnType<typeof vi.fn<NonNullable<QueueSystemd['listActive']>>>;
   } = {
-    inspect: vi.fn(async (unit: string) => ({ unit, active: false, observedAt: NOW })),
+    inspect: vi.fn(async (unit: string) => ({ unit, active: false, pending: false, observedAt: NOW })),
     start: vi.fn(async (unit: string) => ({ unit, argv: ['systemctl', '--user', 'start', unit], exitCode: 0, timedOut: false })),
     listActive: vi.fn(async () => [] as readonly string[]),
   };
@@ -92,8 +92,8 @@ describe('FIFO queue dispatch', () => {
   it('claims the oldest queued job and starts only after a fresh active observation', async () => {
     const target = coordinator();
     target.systemd.inspect
-      .mockResolvedValueOnce({ unit: UNIT, active: false, observedAt: NOW })
-      .mockResolvedValueOnce({ unit: UNIT, active: true, observedAt: NOW });
+      .mockResolvedValueOnce({ unit: UNIT, active: false, pending: false, observedAt: NOW })
+      .mockResolvedValueOnce({ unit: UNIT, active: true, pending: false, observedAt: NOW });
 
     await expect(target.queue.dispatchNext()).resolves.toEqual({ kind: 'started', jobId: 'job-1', runnerUnit: UNIT });
     expect(target.ownership.apiWrite).toHaveBeenCalledWith(expect.objectContaining({ kind: 'dispatch', jobId: 'job-1', runnerUnit: UNIT }));
@@ -140,15 +140,15 @@ describe('FIFO queue dispatch', () => {
 
   it('rejects observations outside their canonical systemd bracket and out of chronology', async () => {
     const outside = coordinator({ directInterrupt: vi.fn(async () => null) });
-    outside.systemd.inspect.mockResolvedValue({ unit: UNIT, active: false, observedAt: LATER });
+    outside.systemd.inspect.mockResolvedValue({ unit: UNIT, active: false, pending: false, observedAt: LATER });
     await expect(outside.queue.dispatchNext()).resolves.toMatchObject({ kind: 'blocked', reason: 'INVALID_SYSTEMD_OBSERVATION' });
     expect(outside.systemd.start).not.toHaveBeenCalled();
 
     const clock = vi.fn().mockReturnValue(AFTER);
     const chronological = coordinator({ clock: { now: clock } });
     chronological.systemd.inspect
-      .mockResolvedValueOnce({ unit: UNIT, active: false, observedAt: LATER })
-      .mockResolvedValueOnce({ unit: UNIT, active: true, observedAt: NOW });
+      .mockResolvedValueOnce({ unit: UNIT, active: false, pending: false, observedAt: LATER })
+      .mockResolvedValueOnce({ unit: UNIT, active: true, pending: false, observedAt: NOW });
     await expect(chronological.queue.dispatchNext()).resolves.toMatchObject({ kind: 'blocked', reason: 'INVALID_SYSTEMD_OBSERVATION' });
     expect(chronological.systemd.start).not.toHaveBeenCalled();
   });
@@ -172,7 +172,7 @@ describe('FIFO queue dispatch', () => {
     const target = coordinator({
       safety: { inspect: vi.fn(async ({ phase }: { phase: string }) => { events.push(`safety:${phase}`); return null; }) },
       systemd: {
-        inspect: vi.fn(async (unit: string) => { inspectCount += 1; events.push('inspect'); return { unit, active: inspectCount >= 3, observedAt: NOW }; }),
+        inspect: vi.fn(async (unit: string) => { inspectCount += 1; events.push('inspect'); return { unit, active: inspectCount >= 3, pending: false, observedAt: NOW }; }),
         listActive: vi.fn(async () => { events.push('list-active'); return []; }),
         start: vi.fn(async (unit: string) => { events.push('start'); return { unit, argv: ['systemctl', '--user', 'start', unit], exitCode: 0, timedOut: false }; }),
       },
@@ -185,7 +185,7 @@ describe('FIFO queue dispatch', () => {
 
   it('recovers instead of returning started when post-start observation is not fresh and active', async () => {
     const target = coordinator({ directInterrupt: vi.fn(async () => null) });
-    target.systemd.inspect.mockResolvedValue({ unit: UNIT, active: false, observedAt: NOW });
+    target.systemd.inspect.mockResolvedValue({ unit: UNIT, active: false, pending: false, observedAt: NOW });
     await expect(target.queue.dispatchNext()).resolves.toMatchObject({ kind: 'recovery-blocked', jobId: 'job-1' });
     expect(target.systemd.start).toHaveBeenCalledTimes(1);
   });
@@ -200,8 +200,8 @@ describe('FIFO queue dispatch', () => {
     const target = coordinator({ directInterrupt: vi.fn(async () => proof()) });
     await configure(target);
     target.systemd.inspect
-      .mockResolvedValueOnce({ unit: UNIT, active: false, observedAt: NOW })
-      .mockResolvedValueOnce({ unit: UNIT, active: false, observedAt: NOW });
+      .mockResolvedValueOnce({ unit: UNIT, active: false, pending: false, observedAt: NOW })
+      .mockResolvedValueOnce({ unit: UNIT, active: false, pending: false, observedAt: NOW });
 
     await expect(target.queue.dispatchNext()).resolves.toMatchObject({ kind: 'interrupted', jobId: 'job-1' });
     expect(target.systemd.start).toHaveBeenCalledTimes(1);
@@ -210,15 +210,16 @@ describe('FIFO queue dispatch', () => {
   });
 
   it.each([
-    ['inactive', { unit: UNIT, active: false, observedAt: NOW }],
+    ['inactive', { unit: UNIT, active: false, pending: false, observedAt: NOW }],
+    ['missing pending', { unit: UNIT, active: false, observedAt: NOW }],
     ['malformed', {}],
-    ['stale', { unit: UNIT, active: true, observedAt: BEFORE }],
+    ['stale', { unit: UNIT, active: true, pending: false, observedAt: BEFORE }],
   ])('recovers after a post-start %s observation', async (_label, postStart) => {
     const target = coordinator({ directInterrupt: vi.fn(async () => proof()) });
     target.systemd.inspect
-      .mockResolvedValueOnce({ unit: UNIT, active: false, observedAt: NOW })
+      .mockResolvedValueOnce({ unit: UNIT, active: false, pending: false, observedAt: NOW })
       .mockResolvedValueOnce(postStart as never)
-      .mockResolvedValueOnce({ unit: UNIT, active: false, observedAt: NOW });
+      .mockResolvedValueOnce({ unit: UNIT, active: false, pending: false, observedAt: NOW });
 
     await expect(target.queue.dispatchNext()).resolves.toMatchObject({ kind: 'interrupted', jobId: 'job-1' });
     expect(target.systemd.start).toHaveBeenCalledTimes(1);
@@ -232,7 +233,7 @@ describe('FIFO queue dispatch', () => {
       await startFinished;
       return { unit, argv: ['systemctl', '--user', 'start', unit], exitCode: 0, timedOut: false };
     });
-    target.systemd.inspect.mockResolvedValueOnce({ unit: UNIT, active: false, observedAt: NOW }).mockResolvedValueOnce({ unit: UNIT, active: true, observedAt: NOW });
+    target.systemd.inspect.mockResolvedValueOnce({ unit: UNIT, active: false, pending: false, observedAt: NOW }).mockResolvedValueOnce({ unit: UNIT, active: true, pending: false, observedAt: NOW });
     const first = target.queue.dispatchNext();
     await vi.waitFor(() => expect(target.systemd.start).toHaveBeenCalledTimes(1));
     await expect(target.queue.dispatchNext()).resolves.toEqual({ kind: 'blocked', reason: 'dispatcher already has an in-flight claim' });
@@ -257,8 +258,8 @@ describe('FIFO queue dispatch', () => {
     let databaseReads = 0;
     const late = coordinator({ databaseBlockerJobId: () => databaseReads++ >= 1 ? 'job-2' : undefined, directInterrupt: vi.fn(async () => proof()) });
     late.systemd.inspect
-      .mockResolvedValueOnce({ unit: UNIT, active: false, observedAt: NOW })
-      .mockResolvedValueOnce({ unit: UNIT, active: false, observedAt: NOW });
+      .mockResolvedValueOnce({ unit: UNIT, active: false, pending: false, observedAt: NOW })
+      .mockResolvedValueOnce({ unit: UNIT, active: false, pending: false, observedAt: NOW });
     await expect(late.queue.dispatchNext()).resolves.toMatchObject({ kind: expect.stringMatching(/^(interrupted|recovery-blocked)$/), jobId: 'job-1' });
     expect(late.systemd.start).not.toHaveBeenCalled();
   });

@@ -69,6 +69,7 @@ async function openRealStores(): Promise<{ readonly store: BuilderStore; readonl
   const store = new BuilderStore(db);
   const ownership = new OwnershipStore(db, { now: () => NOW });
   ownership.apiWrite({ kind: 'dispatch', jobId: 'integration-job', runnerUnit: 'osi-image-builder-runner@integration-job.service', claimOwner: 'dispatcher-integration-job', claimExpiresAt: '2026-07-24T10:10:00.000Z', at: NOW });
+  ownership.apiWrite({ kind: 'dispatch-start', jobId: 'integration-job', runnerUnit: 'osi-image-builder-runner@integration-job.service', claimOwner: 'dispatcher-integration-job', expectedClaimExpiresAt: '2026-07-24T10:10:00.000Z', claimExpiresAt: '2026-07-24T10:10:00.000Z', unitInactiveAt: NOW, startAttemptedAt: NOW, at: NOW });
   ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'integration-job', runnerUnit: 'osi-image-builder-runner@integration-job.service', owner: 'runner-a', expiresAt: '2026-07-24T10:20:00.000Z', at: NOW });
   return { store, ownership, db, path };
 }

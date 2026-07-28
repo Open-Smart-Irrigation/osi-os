@@ -150,6 +150,12 @@ async function fixture(jobId = 'job-1'): Promise<{ store: BuilderStore; ownershi
 function eventCount(store: BuilderStore): number { return store.listEvents('job-1').events.length; }
 function dispatch(jobId = 'job-1'): Extract<ApiWriteCommand, { kind: 'dispatch' }> { return { kind: 'dispatch', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, claimOwner: `dispatcher-${jobId}`, claimExpiresAt: EXPIRY, at: NOW }; }
 function dispatchStart(jobId = 'job-1'): Extract<ApiWriteCommand, { kind: 'dispatch-start' }> { return { kind: 'dispatch-start', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, claimOwner: `dispatcher-${jobId}`, expectedClaimExpiresAt: EXPIRY, claimExpiresAt: EXPIRY, unitInactiveAt: NOW, startAttemptedAt: NOW, at: NOW }; }
+function dispatchAndStart(ownership: OwnershipStore, jobId = 'job-1'): void {
+  const dispatched = ownership.apiWrite(dispatch(jobId));
+  if (!dispatched.ok) throw new Error(`fixture dispatch failed for ${jobId}`);
+  const started = ownership.apiWrite(dispatchStart(jobId));
+  if (!started.ok) throw new Error(`fixture dispatch-start failed for ${jobId}`);
+}
 function lease(expiresAt = ACTIVE, jobId = 'job-1'): Extract<RunnerWriteCommand, { kind: 'acquire-lease' }> { return { kind: 'acquire-lease', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', expiresAt, at: NOW }; }
 function container(jobId = 'job-1'): Extract<RunnerWriteCommand, { kind: 'container' }> { return {
   kind: 'container', jobId, owner: 'runner-a', runnerUnit: `osi-image-builder-runner@${jobId}.service`, leaseExpiresAt: ACTIVE, at: NOW,
@@ -261,7 +267,7 @@ function apiWriteAdmission(ownership: OwnershipStore, command: AdmissionCommand)
   return ownership.apiWrite(command);
 }
 async function claimedCleanup(jobId = 'job-1'): Promise<{ store: BuilderStore; ownership: OwnershipStore; path: string; admission: Extract<ApiWriteCommand, { kind: 'cleanup-admission' }>; snapshot: CleanupSnapshot; claim: Extract<CleanupWriteCommand, { kind: 'claim-lease' }> }> {
-  const result = await fixture(jobId); result.ownership.apiWrite(dispatch(jobId)); result.ownership.runnerWrite(lease(ACTIVE, jobId)); result.ownership.runnerWrite(container(jobId));
+  const result = await fixture(jobId); dispatchAndStart(result.ownership, jobId); result.ownership.runnerWrite(lease(ACTIVE, jobId)); result.ownership.runnerWrite(container(jobId));
   const snapshotValue = snapshot('present', jobId); const admission = cleanupAdmission(snapshotValue, jobId); result.ownership.apiWrite(admission);
   const claim: Extract<CleanupWriteCommand, { kind: 'claim-lease' }> = { kind: 'claim-lease', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, at: RECOVERY };
   result.ownership.cleanupWrite(claim); return { ...result, admission, snapshot: snapshotValue, claim };
@@ -443,7 +449,7 @@ function seedUnsealedLogs(path: string, jobId: string): void {
   db.close();
 }
 function advanceToVerifying(ownership: OwnershipStore, jobId: string): void {
-  ownership.apiWrite(dispatch(jobId)); ownership.runnerWrite(lease(ACTIVE, jobId));
+  dispatchAndStart(ownership, jobId); ownership.runnerWrite(lease(ACTIVE, jobId));
   const stages: Array<[PipelineStageName, JobState, JobState]> = [['preflight', 'starting', 'preflight'], ['source', 'preflight', 'source'], ['release-gates', 'source', 'release_gates'], ['frontend', 'release_gates', 'frontend'], ['target-setup', 'frontend', 'target_setup'], ['feeds', 'target_setup', 'feeds'], ['config', 'feeds', 'config'], ['build', 'config', 'building'], ['verify', 'building', 'verifying']];
   for (const [name, from, to] of stages) ownership.runnerWrite({ ...runnerBase(jobId), kind: 'stage', expectedState: from, state: to, stage: name, outcome: 'passed', startedAt: NOW, finishedAt: NOW, evidencePath: `evidence/${name}`, evidenceSha256: SHA64 });
 }
@@ -720,7 +726,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('rejects canonical but backward timestamps across command families without events', async () => {
     const { ownership, store } = await fixture('chronology'); const before = store.listEvents('chronology').events.length;
     expect(() => ownership.apiWrite({ kind: 'request-cancellation', jobId: 'chronology', reason: 'early', at: BEFORE })).toThrow(OwnershipValidationError);
-    ownership.apiWrite(dispatch('chronology')); ownership.runnerWrite(lease(ACTIVE, 'chronology'));
+    dispatchAndStart(ownership, 'chronology'); ownership.runnerWrite(lease(ACTIVE, 'chronology'));
     expect(ownership.runnerWrite({ ...runnerBase('chronology'), kind: 'renew-lease', expectedExpiresAt: ACTIVE, expiresAt: NOW, at: NOW })).toMatchObject({ ok: false, conflict: { kind: 'stale-lease' } });
     expect(() => ownership.runnerWrite({ ...runnerBase('chronology'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: BEFORE })).toThrow(OwnershipValidationError);
     expect(() => ownership.runnerWrite({ ...runnerBase('chronology'), kind: 'container', lifecycle: 'created', containerId: 'chronology-container', containerName: 'osi-chronology', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'chronology', 'org.osi.image-builder.manifest-sha': SHA64 }, mount: { source: '/tmp', destination: '/work' }, environment: {}, security: {}, inspection: {}, occurredAt: NOW, createdAt: NOW, startedAt: BEFORE })).toThrow(OwnershipValidationError);
@@ -728,18 +734,18 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('accepts delayed observations before the write and rejects future or backward facts', async () => {
-    const stageCase = await fixture('delayed-stage'); stageCase.ownership.apiWrite(dispatch('delayed-stage')); stageCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-stage'));
+    const stageCase = await fixture('delayed-stage'); dispatchAndStart(stageCase.ownership, 'delayed-stage'); stageCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-stage'));
     expect(stageCase.ownership.runnerWrite({ ...runnerBase('delayed-stage'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'passed', startedAt: NOW, finishedAt: LATER, evidencePath: 'evidence/preflight', evidenceSha256: SHA64 }).ok).toBe(true);
     expect(() => stageCase.ownership.runnerWrite({ ...runnerBase('delayed-stage'), kind: 'stage', expectedState: 'preflight', state: 'source', stage: 'source', outcome: 'running', startedAt: RECOVERY })).toThrow(OwnershipValidationError);
     expect(() => stageCase.ownership.runnerWrite({ ...runnerBase('delayed-stage'), at: RECOVERY, kind: 'stage', expectedState: 'preflight', state: 'source', stage: 'source', outcome: 'passed', startedAt: LATER, finishedAt: NOW, evidencePath: 'evidence/source', evidenceSha256: SHA64 })).toThrow(OwnershipValidationError);
 
-    const operationCase = await fixture('delayed-operation'); operationCase.ownership.apiWrite(dispatch('delayed-operation')); operationCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-operation'));
+    const operationCase = await fixture('delayed-operation'); dispatchAndStart(operationCase.ownership, 'delayed-operation'); operationCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-operation'));
     expect(operationCase.ownership.runnerWrite({ ...runnerBase('delayed-operation'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }).ok).toBe(true);
     const operationInput = { operationId: 'activate-target' as const, attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'not_created' as const, containerMount: null, containerEnvironment: null, containerSecurity: null, inspection: null, exitCode: 1, signal: null, outcome: 'failed' as const, evidencePath: 'evidence/op', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED' as const, error: { reason: 'delayed' } };
     expect(operationCase.ownership.runnerWrite({ ...runnerBase('delayed-operation'), kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: operationInput }).ok).toBe(true);
     expect(() => operationCase.ownership.runnerWrite({ ...runnerBase('delayed-operation'), at: LATER, kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: { ...operationInput, finishedAt: RECOVERY } })).toThrow(OwnershipValidationError);
 
-    const terminalCase = await fixture('delayed-terminal'); terminalCase.ownership.apiWrite(dispatch('delayed-terminal')); terminalCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-terminal'));
+    const terminalCase = await fixture('delayed-terminal'); dispatchAndStart(terminalCase.ownership, 'delayed-terminal'); terminalCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-terminal'));
     terminalCase.ownership.runnerWrite({ ...runnerBase('delayed-terminal'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW });
     expect(terminalCase.ownership.runnerWrite({ ...runnerBase('delayed-terminal'), kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: LATER, errorCode: 'BUILD_FAILED', error: { reason: 'delayed' } }).ok).toBe(true);
     expect(() => terminalCase.ownership.runnerWrite({ ...runnerBase('delayed-terminal'), at: LATER, kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: RECOVERY, errorCode: 'BUILD_FAILED', error: { reason: 'future' } })).toThrow(OwnershipValidationError);
@@ -797,7 +803,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(store.getJob('job-2').state).toBe('queued');
     expect(ownership.apiWrite(dispatch('job-1')).ok).toBe(true);
     expect(ownership.apiWrite(dispatch('job-2'))).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
-    expect(ownership.runnerWrite(lease(ACTIVE, 'job-1')).ok).toBe(true);
+    expect(ownership.apiWrite(dispatchStart('job-1')).ok).toBe(true); expect(ownership.runnerWrite(lease(ACTIVE, 'job-1')).ok).toBe(true);
     expect(ownership.runnerWrite({ ...runnerBase('job-1'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW }).ok).toBe(true);
     expect(ownership.runnerWrite({ ...runnerBase('job-1'), at: LATER, kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: LATER, errorCode: 'BUILD_FAILED', error: { reason: 'test clearance' } }).ok).toBe(true);
     expect(ownership.apiWrite(dispatch('job-2')).ok).toBe(true);
@@ -845,7 +851,7 @@ describe('actor-owned compare-and-set writes', () => {
       jobId: 'job-2', requestId: 'request-job-2', request: { branch: 'main', target: 'rpi-5' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'clearance', acceptedAt: NOW,
     } }).ok).toBe(true);
     expect(target.ownership.apiWrite(dispatch('job-2'))).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
-    expect(target.ownership.runnerWrite(lease(ACTIVE, 'terminal-clearance')).ok).toBe(true);
+    expect(target.ownership.apiWrite(dispatchStart('terminal-clearance')).ok).toBe(true); expect(target.ownership.runnerWrite(lease(ACTIVE, 'terminal-clearance')).ok).toBe(true);
     expect(target.ownership.runnerWrite({ ...runnerBase('terminal-clearance'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW }).ok).toBe(true);
     expect(target.ownership.runnerWrite({ ...runnerBase('terminal-clearance'), at: LATER, kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: LATER, errorCode: 'BUILD_FAILED', error: { reason: 'terminal clearance' } }).ok).toBe(true);
     expect(target.ownership.apiWrite(dispatch('job-2')).ok).toBe(true);
@@ -876,7 +882,7 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('requires exact runner identity, predecessor, lease and fence for normal writes', async () => {
-    const { ownership, store } = await fixture(); ownership.apiWrite(dispatch()); ownership.runnerWrite(lease());
+    const { ownership, store } = await fixture(); dispatchAndStart(ownership); ownership.runnerWrite(lease());
     const stage = (expectedState: JobState, state: JobState, stageName: PipelineStageName, outcome: 'running' | 'passed'): RunnerWriteCommand => ({
       ...runnerBase(), kind: 'stage', expectedState, state, stage: stageName, outcome, startedAt: NOW,
       ...(outcome === 'passed' ? { finishedAt: NOW, evidencePath: `evidence/${stageName}`, evidenceSha256: SHA64 } : {}),
@@ -892,7 +898,7 @@ describe('actor-owned compare-and-set writes', () => {
     const first = await fixture(); first.ownership.apiWrite(dispatch()); first.ownership.apiWrite(dispatchStart());
     expect(first.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-1', expectedState: 'starting', at: RECOVERY, proof: { ...direct('start-failure'), logs: { ...logs, docker: 'sealed' } as never }, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'start failed' } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
     expect(first.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-1', expectedState: 'starting', at: RECOVERY, proof: direct('start-failure'), dispatchClaimOwner: 'dispatcher-job-1', expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'start failed' } }).ok).toBe(true);
-    const second = await fixture('job-2'); second.ownership.apiWrite(dispatch('job-2')); second.ownership.runnerWrite(lease(ACTIVE, 'job-2'));
+    const second = await fixture('job-2'); dispatchAndStart(second.ownership, 'job-2'); second.ownership.runnerWrite(lease(ACTIVE, 'job-2'));
     expect(second.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-2', expectedState: 'starting', at: RECOVERY, proof: direct('active', 'job-2'), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'stale' } }).ok).toBe(true);
     expect(second.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'job-2', expectedState: 'publishing', at: RECOVERY, proof: direct('active', 'job-2'), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'bad' } } as never)).toMatchObject({ ok: false, conflict: { kind: 'illegal-predecessor' } });
   });
@@ -914,6 +920,40 @@ describe('actor-owned compare-and-set writes', () => {
     const proof = { ...direct('start-failure', 'direct-claim-bypass'), unitInactiveAt: NOW, container: absent(NOW), logs: { ...logs, verifiedAt: NOW } };
     expect(target.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'direct-claim-bypass', expectedState: 'starting', at: LATER, proof, errorCode: 'SERVICE_START_FAILED', error: { reason: 'missing claim owner' }, expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
     expect(target.store.getJob('direct-claim-bypass')).toMatchObject({ state: 'starting', terminalErrorCode: null });
+  });
+
+  it('requires a live start-attempted claim and consumes exactly that claim on runner handoff', async () => {
+    const claimless = await fixture('acquire-claimless');
+    expect(claimless.ownership.runnerWrite(lease(ACTIVE, 'acquire-claimless'))).toMatchObject({ ok: false });
+
+    const preStart = await fixture('acquire-pre-start');
+    expect(preStart.ownership.apiWrite(dispatch('acquire-pre-start')).ok).toBe(true);
+    expect(preStart.ownership.runnerWrite(lease(ACTIVE, 'acquire-pre-start'))).toMatchObject({ ok: false });
+    expect(preStart.db.prepare('SELECT phase FROM queue_dispatch_claims WHERE claim_id=1').get()).toEqual({ phase: 'pre-start' });
+
+    const valid = await fixture('acquire-valid');
+    expect(valid.ownership.apiWrite(dispatch('acquire-valid')).ok).toBe(true);
+    expect(valid.ownership.apiWrite(dispatchStart('acquire-valid')).ok).toBe(true);
+    expect(valid.ownership.runnerWrite(lease(ACTIVE, 'acquire-valid')).ok).toBe(true);
+    expect(valid.db.prepare('SELECT 1 AS present FROM queue_dispatch_claims WHERE claim_id=1').get()).toBeUndefined();
+    expect(valid.store.getJob('acquire-valid')).toMatchObject({ runnerLeaseOwner: 'runner-a', runnerLeaseExpiresAt: ACTIVE });
+  });
+
+  it('rejects expired and malformed dispatch evidence without changing the runner row or claim', async () => {
+    const expired = await fixture('acquire-expired');
+    expect(expired.ownership.apiWrite({ ...dispatch('acquire-expired'), claimExpiresAt: LATER }).ok).toBe(true);
+    expect(expired.ownership.apiWrite({ ...dispatchStart('acquire-expired'), expectedClaimExpiresAt: LATER, claimExpiresAt: LATER })).toMatchObject({ ok: true });
+    expect(expired.ownership.runnerWrite({ ...lease(EXPIRY, 'acquire-expired'), at: LATER })).toMatchObject({ ok: false });
+    expect(expired.db.prepare('SELECT phase, start_attempted_at, unit_inactive_at FROM queue_dispatch_claims WHERE claim_id=1').get()).toEqual({ phase: 'start-attempted', start_attempted_at: NOW, unit_inactive_at: NOW });
+
+    const malformed = await fixture('acquire-malformed');
+    expect(malformed.ownership.apiWrite(dispatch('acquire-malformed')).ok).toBe(true);
+    expect(malformed.ownership.apiWrite(dispatchStart('acquire-malformed')).ok).toBe(true);
+    malformed.db.exec('PRAGMA ignore_check_constraints=ON');
+    malformed.db.prepare("UPDATE queue_dispatch_claims SET unit_inactive_at='not-an-instant' WHERE claim_id=1").run();
+    malformed.db.exec('PRAGMA ignore_check_constraints=OFF');
+    expect(malformed.ownership.runnerWrite(lease(ACTIVE, 'acquire-malformed'))).toMatchObject({ ok: false });
+    expect(malformed.db.prepare('SELECT 1 AS present FROM queue_dispatch_claims WHERE claim_id=1').get()).toEqual({ present: 1 });
   });
 
   it('does not allow a dispatch release to bypass runner handoff ownership', async () => {
@@ -962,7 +1002,7 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('requires the runner cancellation protocol for both container paths', async () => {
-    const pre = await fixture(); pre.ownership.apiWrite(dispatch()); pre.ownership.runnerWrite(lease(EXPIRY)); pre.ownership.apiWrite({ kind: 'request-cancellation', jobId: 'job-1', reason: 'stop', at: NOW }); pre.ownership.runnerWrite({ ...runnerBase(), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    const pre = await fixture(); dispatchAndStart(pre.ownership); pre.ownership.runnerWrite(lease(EXPIRY)); pre.ownership.apiWrite({ kind: 'request-cancellation', jobId: 'job-1', reason: 'stop', at: NOW }); pre.ownership.runnerWrite({ ...runnerBase(), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
     expect(pre.ownership.runnerWrite({ ...runnerBase(), kind: 'normal-terminal', expectedState: 'cancel_requested', state: 'failed', terminalAt: LATER, errorCode: 'CANCELLED', error: { reason: 'bad bypass' } } as never)).toMatchObject({ ok: false });
     const preEvidence = pre.ownership.runnerWrite({ ...runnerBase(), at: LATER, leaseExpiresAt: EXPIRY, kind: 'cancellation-evidence', expectedState: 'cancel_requested', evidence: cancellationEvidence() }); expect(preEvidence.ok).toBe(true);
     const preCleanup = pre.ownership.runnerWrite({ ...runnerBase(), at: LATER, leaseExpiresAt: EXPIRY, kind: 'cancellation-cleanup', expectedState: 'cancel_requested', evidenceEventSeq: eventSeq(preEvidence), proof: { kind: 'pre-container', runnerUnit: runnerBase().runnerUnit, unitInactiveAt: null, container: absent(), staging, logs } }); expect(preCleanup.ok).toBe(true);
@@ -970,7 +1010,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(pre.store.getJob('job-1').state).toBe('cancel_requested');
     const recoveredDb = openBuilderDatabase(pre.path); const recovered = new OwnershipStore(recoveredDb); closers.push(() => recoveredDb.close());
     expect(recovered.runnerWrite({ ...runnerBase(), at: LATER, leaseExpiresAt: EXPIRY, kind: 'cancellation-terminal', expectedState: 'cancel_requested', terminalAt: LATER, cleanupEventSeq: eventSeq(preCleanup) }).ok).toBe(true);
-    const withContainer = await fixture('job-2'); withContainer.ownership.apiWrite(dispatch('job-2')); withContainer.ownership.runnerWrite(lease(EXPIRY, 'job-2')); withContainer.ownership.runnerWrite({ ...container('job-2'), leaseExpiresAt: EXPIRY, at: NOW }); withContainer.ownership.apiWrite({ kind: 'request-cancellation', jobId: 'job-2', reason: 'stop', at: NOW }); withContainer.ownership.runnerWrite({ ...runnerBase('job-2'), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    const withContainer = await fixture('job-2'); dispatchAndStart(withContainer.ownership, 'job-2'); withContainer.ownership.runnerWrite(lease(EXPIRY, 'job-2')); withContainer.ownership.runnerWrite({ ...container('job-2'), leaseExpiresAt: EXPIRY, at: NOW }); withContainer.ownership.apiWrite({ kind: 'request-cancellation', jobId: 'job-2', reason: 'stop', at: NOW }); withContainer.ownership.runnerWrite({ ...runnerBase('job-2'), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
     const proof = { kind: 'container' as const, runnerUnit: runnerBase('job-2').runnerUnit, unitInactiveAt: RECOVERY, container: { kind: 'removed' as const, id: 'container-job-2', name: 'osi-job-2', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'job-2', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: LATER, removedAt: LATER, globalLabelResult: 'no-match' as const, observedAt: RECOVERY }, staging, logs };
     const containerEvidence = withContainer.ownership.runnerWrite({ ...runnerBase('job-2'), at: LATER, leaseExpiresAt: EXPIRY, kind: 'cancellation-evidence', expectedState: 'cancel_requested', evidence: cancellationEvidence('job-2', true) });
     const containerCleanup = withContainer.ownership.runnerWrite({ ...runnerBase('job-2'), at: RECOVERY, leaseExpiresAt: EXPIRY, kind: 'cancellation-cleanup', expectedState: 'cancel_requested', evidenceEventSeq: eventSeq(containerEvidence), proof: { ...proof, unitInactiveAt: null } });
@@ -981,7 +1021,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('rejects cancellation evidence that claims sealed logs over persisted generation gaps', async () => {
     const jobId = 'cancellation-log-gap';
     const target = await fixture(jobId);
-    target.ownership.apiWrite(dispatch(jobId));
+    dispatchAndStart(target.ownership, jobId);
     target.ownership.runnerWrite(lease(EXPIRY, jobId));
     target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
     target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
@@ -1030,7 +1070,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('binds more than 256 log events with compact generation metadata', async () => {
     const jobId = 'cancellation-compact-log-coverage';
     const target = await fixture(jobId);
-    target.ownership.apiWrite(dispatch(jobId));
+    dispatchAndStart(target.ownership, jobId);
     target.ownership.runnerWrite(lease(EXPIRY, jobId));
     target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
     target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
@@ -1068,7 +1108,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('keeps the maximum bounded generation set inside command validation limits', async () => {
     const jobId = 'cancellation-max-compact-generations';
     const target = await fixture(jobId);
-    target.ownership.apiWrite(dispatch(jobId));
+    dispatchAndStart(target.ownership, jobId);
     target.ownership.runnerWrite(lease(EXPIRY, jobId));
     target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
     target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
@@ -1095,7 +1135,7 @@ describe('actor-owned compare-and-set writes', () => {
   it.each(['event-type', 'partial-flag'] as const)('rejects a compact coverage digest after an immutable log event %s is tampered', async (mutation) => {
     const jobId = `cancellation-event-coverage-digest-${mutation}`;
     const target = await fixture(jobId);
-    target.ownership.apiWrite(dispatch(jobId));
+    dispatchAndStart(target.ownership, jobId);
     target.ownership.runnerWrite(lease(EXPIRY, jobId));
     target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
     target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
@@ -1146,7 +1186,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('requires cleanup proof to exactly bind the referenced cancellation evidence', async () => {
     const jobId = 'cancellation-proof-binding';
     const target = await fixture(jobId);
-    target.ownership.apiWrite(dispatch(jobId));
+    dispatchAndStart(target.ownership, jobId);
     target.ownership.runnerWrite(lease(EXPIRY, jobId));
     target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
     target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
@@ -1184,7 +1224,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('rejects log generations added after cancellation evidence and before cleanup', async () => {
     const jobId = 'cancellation-log-after-evidence';
     const target = await fixture(jobId);
-    target.ownership.apiWrite(dispatch(jobId));
+    dispatchAndStart(target.ownership, jobId);
     target.ownership.runnerWrite(lease(EXPIRY, jobId));
     target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
     target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
@@ -1225,7 +1265,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('rejects a fully sealed generation added after cancellation evidence', async () => {
     const jobId = 'cancellation-sealed-log-after-evidence';
     const target = await fixture(jobId);
-    target.ownership.apiWrite(dispatch(jobId));
+    dispatchAndStart(target.ownership, jobId);
     target.ownership.runnerWrite(lease(EXPIRY, jobId));
     target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
     target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
@@ -1280,7 +1320,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('rejects a sealed generation identity or byte-hash replacement after cancellation evidence', async () => {
     const jobId = 'cancellation-sealed-log-replaced';
     const target = await fixture(jobId);
-    target.ownership.apiWrite(dispatch(jobId));
+    dispatchAndStart(target.ownership, jobId);
     target.ownership.runnerWrite(lease(EXPIRY, jobId));
     target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
     target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
@@ -1327,7 +1367,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('rejects log generations added after cancellation cleanup and before terminal', async () => {
     const jobId = 'cancellation-log-after-cleanup';
     const target = await fixture(jobId);
-    target.ownership.apiWrite(dispatch(jobId));
+    dispatchAndStart(target.ownership, jobId);
     target.ownership.runnerWrite(lease(EXPIRY, jobId));
     target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
     target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
@@ -1375,7 +1415,7 @@ describe('actor-owned compare-and-set writes', () => {
   it.each(['addition', 'replacement'] as const)('rejects a fully sealed generation %s after cleanup during terminal restart recovery', async (mutation) => {
     const jobId = `cancellation-sealed-log-after-cleanup-${mutation}`;
     const target = await fixture(jobId);
-    target.ownership.apiWrite(dispatch(jobId));
+    dispatchAndStart(target.ownership, jobId);
     target.ownership.runnerWrite(lease(EXPIRY, jobId));
     target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
     target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
@@ -1445,7 +1485,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('allows only cancellation protocol retry writes through a persisted blocker', async () => {
     const jobId = 'cancellation-blocker-retry';
     const target = await fixture(jobId);
-    target.ownership.apiWrite(dispatch(jobId));
+    dispatchAndStart(target.ownership, jobId);
     target.ownership.runnerWrite(lease(EXPIRY, jobId));
     target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
     target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
@@ -1522,6 +1562,7 @@ describe('actor-owned compare-and-set writes', () => {
     const jobId = 'cancellation-blocked-container-stop';
     const target = await fixture(jobId);
     target.ownership.apiWrite(dispatch(jobId));
+    target.ownership.apiWrite(dispatchStart(jobId));
     target.ownership.runnerWrite(lease(EXPIRY, jobId));
     const created = {
       ...container(jobId),
@@ -1644,7 +1685,7 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('persists a distinct staging-to-quarantine move before cancellation terminal', async () => {
     const { ownership, store } = await fixture();
-    ownership.apiWrite(dispatch()); ownership.runnerWrite(lease(EXPIRY));
+    dispatchAndStart(ownership); ownership.runnerWrite(lease(EXPIRY));
     ownership.runnerWrite({ ...container(), leaseExpiresAt: EXPIRY, at: NOW });
     ownership.runnerWrite({ ...runnerBase(), leaseExpiresAt: EXPIRY, kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256: manifestHash('job-1'), verificationPath: 'staging/verify', verificationSha256: SHA64 });
     ownership.apiWrite({ kind: 'request-cancellation', jobId: 'job-1', reason: 'stop', at: LATER });
@@ -1675,7 +1716,7 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('rejects false quarantine moves and preserves the staging path', async () => {
     const { ownership, store } = await fixture();
-    ownership.apiWrite(dispatch()); ownership.runnerWrite(lease(EXPIRY));
+    dispatchAndStart(ownership); ownership.runnerWrite(lease(EXPIRY));
     ownership.runnerWrite({ ...runnerBase(), leaseExpiresAt: EXPIRY, kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256: manifestHash('job-1'), verificationPath: 'staging/verify', verificationSha256: SHA64 });
     ownership.apiWrite({ kind: 'request-cancellation', jobId: 'job-1', reason: 'stop', at: LATER });
     ownership.runnerWrite({ ...runnerBase(), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
@@ -1693,7 +1734,7 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('persists cleanup snapshots and only cleanup CAS can clear exact runtime identity', async () => {
-    const { store, ownership, path } = await fixture(); ownership.apiWrite(dispatch()); ownership.runnerWrite(lease()); ownership.runnerWrite(container());
+    const { store, ownership, path } = await fixture(); dispatchAndStart(ownership); ownership.runnerWrite(lease()); ownership.runnerWrite(container());
     const admission = cleanupAdmission(snapshot()); expect(ownership.apiWrite(admission).ok).toBe(true);
     const claim: CleanupWriteCommand = { kind: 'claim-lease', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshot(), at: RECOVERY };
     expect(ownership.cleanupWrite({ ...claim, owner: 'cleanup-b' })).toMatchObject({ ok: false, conflict: { kind: 'admission-mismatch' } }); expect(ownership.cleanupWrite(claim).ok).toBe(true);
@@ -1718,7 +1759,7 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('admits a pre-cleanup staging source and completes with a separate quarantine postcondition', async () => {
-    const { ownership, store } = await fixture(); ownership.apiWrite(dispatch()); ownership.runnerWrite(lease(ACTIVE));
+    const { ownership, store } = await fixture(); dispatchAndStart(ownership); ownership.runnerWrite(lease(ACTIVE));
     ownership.runnerWrite({ ...runnerBase(), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/job-1/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/job-1/sha256sums', checksumSha256: checksumHash(), manifestPath: 'staging/job-1/build-manifest.json', manifestSha256: manifestHash('job-1'), verificationPath: 'staging/job-1/verification.json', verificationSha256: verificationHash('job-1') });
     const admission = cleanupAdmission(stagedSnapshot()); expect(ownership.apiWrite(admission).ok).toBe(true);
     const claim: CleanupWriteCommand = { kind: 'claim-lease', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: stagedSnapshot(), at: RECOVERY }; expect(ownership.cleanupWrite(claim).ok).toBe(true);
@@ -1730,7 +1771,7 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('admits exact physical staging without persisted artifact identity and defers publish mutation to hand-back', async () => {
     const { ownership, store } = await fixture();
-    ownership.apiWrite(dispatch());
+    dispatchAndStart(ownership);
     ownership.runnerWrite(lease(ACTIVE));
     const snapshotValue = physicalStagingSnapshot();
     const admission = cleanupAdmission(snapshotValue);
@@ -1773,6 +1814,7 @@ describe('actor-owned compare-and-set writes', () => {
     const target = await fixture(jobId);
     target.ownership.apiWrite(dispatch(jobId));
     if (containerState === 'present') {
+      target.ownership.apiWrite(dispatchStart(jobId));
       target.ownership.runnerWrite(lease(ACTIVE, jobId));
       target.ownership.runnerWrite(container(jobId));
     }
@@ -1961,7 +2003,7 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('retains the staging source and fence across a cleanup crash window', async () => {
-    const { ownership, store, path } = await fixture(); ownership.apiWrite(dispatch()); ownership.runnerWrite(lease(ACTIVE));
+    const { ownership, store, path } = await fixture(); dispatchAndStart(ownership); ownership.runnerWrite(lease(ACTIVE));
     ownership.runnerWrite({ ...runnerBase(), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/job-1/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/job-1/sums', checksumSha256: checksumHash(), manifestPath: 'staging/job-1/manifest', manifestSha256: manifestHash('job-1'), verificationPath: 'staging/job-1/verify', verificationSha256: verificationHash('job-1') });
     const admission = cleanupAdmission(stagedSnapshot()); ownership.apiWrite(admission); ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: stagedSnapshot(), at: RECOVERY });
     expect(store.getJob('job-1').artifactStagingPath).toBe('staging/job-1/image'); const db = openBuilderDatabase(path); expect((db.prepare('SELECT cleanup_fence_generation FROM jobs WHERE job_id=?').get('job-1') as { cleanup_fence_generation: number }).cleanup_fence_generation).toBe(1); db.close();
@@ -2035,12 +2077,12 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('reconciles persisted log state at cleanup admission and completion', async () => {
-    const falseAbsent = await fixture('cleanup-false-absent'); falseAbsent.ownership.apiWrite(dispatch('cleanup-false-absent')); falseAbsent.ownership.runnerWrite(lease(ACTIVE, 'cleanup-false-absent')); falseAbsent.ownership.runnerWrite(container('cleanup-false-absent')); seedUnsealedLogs(falseAbsent.path, 'cleanup-false-absent');
+    const falseAbsent = await fixture('cleanup-false-absent'); dispatchAndStart(falseAbsent.ownership, 'cleanup-false-absent'); falseAbsent.ownership.runnerWrite(lease(ACTIVE, 'cleanup-false-absent')); falseAbsent.ownership.runnerWrite(container('cleanup-false-absent')); seedUnsealedLogs(falseAbsent.path, 'cleanup-false-absent');
     expect(falseAbsent.ownership.apiWrite(cleanupAdmission(snapshot('present', 'cleanup-false-absent'), 'cleanup-false-absent'))).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
-    const falseSealed = await fixture('cleanup-false-sealed'); falseSealed.ownership.apiWrite(dispatch('cleanup-false-sealed')); falseSealed.ownership.runnerWrite(lease(ACTIVE, 'cleanup-false-sealed')); falseSealed.ownership.runnerWrite(container('cleanup-false-sealed')); seedUnsealedLogs(falseSealed.path, 'cleanup-false-sealed');
+    const falseSealed = await fixture('cleanup-false-sealed'); dispatchAndStart(falseSealed.ownership, 'cleanup-false-sealed'); falseSealed.ownership.runnerWrite(lease(ACTIVE, 'cleanup-false-sealed')); falseSealed.ownership.runnerWrite(container('cleanup-false-sealed')); seedUnsealedLogs(falseSealed.path, 'cleanup-false-sealed');
     const sealedSnapshot = { ...snapshot('present', 'cleanup-false-sealed'), logs: { runner: 'sealed' as const, docker: 'sealed' as const, verifiedAt: RECOVERY } };
     expect(falseSealed.ownership.apiWrite(cleanupAdmission(sealedSnapshot, 'cleanup-false-sealed'))).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
-    const completion = await fixture('cleanup-false-completion'); completion.ownership.apiWrite(dispatch('cleanup-false-completion')); completion.ownership.runnerWrite(lease(ACTIVE, 'cleanup-false-completion')); completion.ownership.runnerWrite(container('cleanup-false-completion')); seedUnsealedLogs(completion.path, 'cleanup-false-completion');
+    const completion = await fixture('cleanup-false-completion'); dispatchAndStart(completion.ownership, 'cleanup-false-completion'); completion.ownership.runnerWrite(lease(ACTIVE, 'cleanup-false-completion')); completion.ownership.runnerWrite(container('cleanup-false-completion')); seedUnsealedLogs(completion.path, 'cleanup-false-completion');
     const admittedSnapshot = { ...snapshot('present', 'cleanup-false-completion'), logs: { runner: 'unsealed' as const, docker: 'unsealed' as const, verifiedAt: RECOVERY }, blocker: 'container' as const }; const admitted = cleanupAdmission(admittedSnapshot, 'cleanup-false-completion'); expect(completion.ownership.apiWrite(admitted).ok).toBe(true); completion.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'cleanup-false-completion', admissionId: admitted.admissionId, owner: 'cleanup-a', unitName: admitted.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: admittedSnapshot, at: RECOVERY });
     const falseClaim = { ...admittedSnapshot, logs, blocker: 'none' as const };
     expect(completion.ownership.cleanupWrite({ kind: 'complete', jobId: 'cleanup-false-completion', admissionId: admitted.admissionId, owner: 'cleanup-a', unitName: admitted.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: falseClaim, postcondition: postcondition(admittedSnapshot), exactContainerId: 'container-cleanup-false-completion', containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
@@ -2048,7 +2090,7 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('allows admitted unsealed logs to seal across claim renew reopen completion and hand-back', async () => {
-    const target = await fixture('cleanup-log-progress'); target.ownership.apiWrite(dispatch('cleanup-log-progress')); target.ownership.runnerWrite(lease(ACTIVE, 'cleanup-log-progress')); target.ownership.runnerWrite(container('cleanup-log-progress')); seedUnsealedLogs(target.path, 'cleanup-log-progress');
+    const target = await fixture('cleanup-log-progress'); dispatchAndStart(target.ownership, 'cleanup-log-progress'); target.ownership.runnerWrite(lease(ACTIVE, 'cleanup-log-progress')); target.ownership.runnerWrite(container('cleanup-log-progress')); seedUnsealedLogs(target.path, 'cleanup-log-progress');
     const unsealed = { ...snapshot('present', 'cleanup-log-progress'), logs: { runner: 'unsealed' as const, docker: 'unsealed' as const, verifiedAt: RECOVERY }, blocker: 'container' as const };
     const admission = cleanupAdmission(unsealed, 'cleanup-log-progress'); expect(target.ownership.apiWrite(admission).ok).toBe(true);
     const claim: CleanupWriteCommand = { kind: 'claim-lease', jobId: 'cleanup-log-progress', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: unsealed, at: RECOVERY };
@@ -2067,24 +2109,24 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('rejects cleanup log generation replacement, addition, and removal after admission', async () => {
-    const added = await fixture('cleanup-log-added'); added.ownership.apiWrite(dispatch('cleanup-log-added')); added.ownership.runnerWrite(lease(ACTIVE, 'cleanup-log-added')); added.ownership.runnerWrite(container('cleanup-log-added')); seedUnsealedLogs(added.path, 'cleanup-log-added'); const addedSnapshot = { ...snapshot('present', 'cleanup-log-added'), logs: { runner: 'unsealed' as const, docker: 'unsealed' as const, verifiedAt: RECOVERY }, blocker: 'container' as const }; const addedAdmission = cleanupAdmission(addedSnapshot, 'cleanup-log-added'); added.ownership.apiWrite(addedAdmission); added.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'cleanup-log-added', admissionId: addedAdmission.admissionId, owner: 'cleanup-a', unitName: addedAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: addedSnapshot, at: RECOVERY });
+    const added = await fixture('cleanup-log-added'); dispatchAndStart(added.ownership, 'cleanup-log-added'); added.ownership.runnerWrite(lease(ACTIVE, 'cleanup-log-added')); added.ownership.runnerWrite(container('cleanup-log-added')); seedUnsealedLogs(added.path, 'cleanup-log-added'); const addedSnapshot = { ...snapshot('present', 'cleanup-log-added'), logs: { runner: 'unsealed' as const, docker: 'unsealed' as const, verifiedAt: RECOVERY }, blocker: 'container' as const }; const addedAdmission = cleanupAdmission(addedSnapshot, 'cleanup-log-added'); added.ownership.apiWrite(addedAdmission); added.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'cleanup-log-added', admissionId: addedAdmission.admissionId, owner: 'cleanup-a', unitName: addedAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: addedSnapshot, at: RECOVERY });
     { const db = openBuilderDatabase(added.path); for (const stream of ['runner', 'docker']) db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, size_bytes) VALUES (?, ?, 1, ?, ?, 0)').run('cleanup-log-added', stream, `logs/${stream}-1.log`, RECOVERY); db.close(); }
     const addedEvents = added.store.listEvents('cleanup-log-added').events.length;
     expect(added.ownership.cleanupWrite({ kind: 'renew-lease', jobId: 'cleanup-log-added', admissionId: addedAdmission.admissionId, owner: 'cleanup-a', unitName: addedAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, expectedExpiresAt: EXPIRY, expiresAt: '2026-07-23T10:05:00.000Z', snapshot: addedSnapshot, at: RECOVERY })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } }); expect(added.store.listEvents('cleanup-log-added').events).toHaveLength(addedEvents);
 
-    const removed = await fixture('cleanup-log-removed'); removed.ownership.apiWrite(dispatch('cleanup-log-removed')); removed.ownership.runnerWrite(lease(ACTIVE, 'cleanup-log-removed')); removed.ownership.runnerWrite(container('cleanup-log-removed')); seedUnsealedLogs(removed.path, 'cleanup-log-removed'); const removedSnapshot = { ...snapshot('present', 'cleanup-log-removed'), logs: { runner: 'unsealed' as const, docker: 'unsealed' as const, verifiedAt: RECOVERY }, blocker: 'container' as const }; const removedAdmission = cleanupAdmission(removedSnapshot, 'cleanup-log-removed'); removed.ownership.apiWrite(removedAdmission);
+    const removed = await fixture('cleanup-log-removed'); dispatchAndStart(removed.ownership, 'cleanup-log-removed'); removed.ownership.runnerWrite(lease(ACTIVE, 'cleanup-log-removed')); removed.ownership.runnerWrite(container('cleanup-log-removed')); seedUnsealedLogs(removed.path, 'cleanup-log-removed'); const removedSnapshot = { ...snapshot('present', 'cleanup-log-removed'), logs: { runner: 'unsealed' as const, docker: 'unsealed' as const, verifiedAt: RECOVERY }, blocker: 'container' as const }; const removedAdmission = cleanupAdmission(removedSnapshot, 'cleanup-log-removed'); removed.ownership.apiWrite(removedAdmission);
     { const db = openBuilderDatabase(removed.path); db.prepare('DELETE FROM job_log_generations WHERE job_id=?').run('cleanup-log-removed'); db.close(); }
     const removedEvents = removed.store.listEvents('cleanup-log-removed').events.length;
     expect(removed.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'cleanup-log-removed', admissionId: removedAdmission.admissionId, owner: 'cleanup-a', unitName: removedAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: removedSnapshot, at: RECOVERY })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } }); expect(removed.store.listEvents('cleanup-log-removed').events).toHaveLength(removedEvents);
 
-    const replaced = await fixture('cleanup-log-replaced'); replaced.ownership.apiWrite(dispatch('cleanup-log-replaced')); replaced.ownership.runnerWrite(lease(ACTIVE, 'cleanup-log-replaced')); replaced.ownership.runnerWrite(container('cleanup-log-replaced')); seedUnsealedLogs(replaced.path, 'cleanup-log-replaced'); const replacedSnapshot = { ...snapshot('present', 'cleanup-log-replaced'), logs: { runner: 'unsealed' as const, docker: 'unsealed' as const, verifiedAt: RECOVERY }, blocker: 'container' as const }; const replacedAdmission = cleanupAdmission(replacedSnapshot, 'cleanup-log-replaced'); replaced.ownership.apiWrite(replacedAdmission); replaced.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'cleanup-log-replaced', admissionId: replacedAdmission.admissionId, owner: 'cleanup-a', unitName: replacedAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: replacedSnapshot, at: RECOVERY });
+    const replaced = await fixture('cleanup-log-replaced'); dispatchAndStart(replaced.ownership, 'cleanup-log-replaced'); replaced.ownership.runnerWrite(lease(ACTIVE, 'cleanup-log-replaced')); replaced.ownership.runnerWrite(container('cleanup-log-replaced')); seedUnsealedLogs(replaced.path, 'cleanup-log-replaced'); const replacedSnapshot = { ...snapshot('present', 'cleanup-log-replaced'), logs: { runner: 'unsealed' as const, docker: 'unsealed' as const, verifiedAt: RECOVERY }, blocker: 'container' as const }; const replacedAdmission = cleanupAdmission(replacedSnapshot, 'cleanup-log-replaced'); replaced.ownership.apiWrite(replacedAdmission); replaced.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'cleanup-log-replaced', admissionId: replacedAdmission.admissionId, owner: 'cleanup-a', unitName: replacedAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: replacedSnapshot, at: RECOVERY });
     { const db = openBuilderDatabase(replaced.path); db.prepare('DELETE FROM job_log_generations WHERE job_id=?').run('cleanup-log-replaced'); for (const stream of ['runner', 'docker']) db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, size_bytes) VALUES (?, ?, 0, ?, ?, 0)').run('cleanup-log-replaced', stream, `logs/${stream}-replacement.log`, RECOVERY); db.close(); }
     const replacedEvents = replaced.store.listEvents('cleanup-log-replaced').events.length;
     expect(replaced.ownership.cleanupWrite({ kind: 'renew-lease', jobId: 'cleanup-log-replaced', admissionId: replacedAdmission.admissionId, owner: 'cleanup-a', unitName: replacedAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, expectedExpiresAt: EXPIRY, expiresAt: '2026-07-23T10:05:00.000Z', snapshot: replacedSnapshot, at: RECOVERY })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } }); expect(replaced.store.listEvents('cleanup-log-replaced').events).toHaveLength(replacedEvents);
   });
 
   it('rejects a sealed-to-unsealed cleanup log regression without an event', async () => {
-    const target = await fixture('cleanup-log-regression'); target.ownership.apiWrite(dispatch('cleanup-log-regression')); target.ownership.runnerWrite(lease(ACTIVE, 'cleanup-log-regression')); target.ownership.runnerWrite(container('cleanup-log-regression')); seedLogs(target.path, 'cleanup-log-regression');
+    const target = await fixture('cleanup-log-regression'); dispatchAndStart(target.ownership, 'cleanup-log-regression'); target.ownership.runnerWrite(lease(ACTIVE, 'cleanup-log-regression')); target.ownership.runnerWrite(container('cleanup-log-regression')); seedLogs(target.path, 'cleanup-log-regression');
     const sealed = { ...snapshot('present', 'cleanup-log-regression'), logs: { runner: 'sealed' as const, docker: 'sealed' as const, verifiedAt: RECOVERY } }; const admission = cleanupAdmission(sealed, 'cleanup-log-regression'); expect(target.ownership.apiWrite(admission).ok).toBe(true);
     const db = openBuilderDatabase(target.path); db.exec('DROP TRIGGER job_log_generations_seal_guard'); db.prepare('UPDATE job_log_generations SET sealed_at=NULL, sha256=NULL WHERE job_id=?').run('cleanup-log-regression'); db.close();
     const before = target.store.listEvents('cleanup-log-regression').events.length;
@@ -2092,11 +2134,11 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('rejects contiguous log-gap evidence at admission completion and publishing recovery', async () => {
-    const admissionCase = await fixture('log-gap-admission'); admissionCase.ownership.apiWrite(dispatch('log-gap-admission')); admissionCase.ownership.runnerWrite(lease(ACTIVE, 'log-gap-admission')); admissionCase.ownership.runnerWrite(container('log-gap-admission')); seedLogGapEvent(admissionCase.path, 'log-gap-admission');
+    const admissionCase = await fixture('log-gap-admission'); dispatchAndStart(admissionCase.ownership, 'log-gap-admission'); admissionCase.ownership.runnerWrite(lease(ACTIVE, 'log-gap-admission')); admissionCase.ownership.runnerWrite(container('log-gap-admission')); seedLogGapEvent(admissionCase.path, 'log-gap-admission');
     const sealed = { ...snapshot('present', 'log-gap-admission'), logs: { runner: 'sealed' as const, docker: 'sealed' as const, verifiedAt: RECOVERY } };
     expect(admissionCase.ownership.apiWrite(cleanupAdmission(sealed, 'log-gap-admission'))).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
 
-    const completionCase = await fixture('log-gap-completion'); completionCase.ownership.apiWrite(dispatch('log-gap-completion')); completionCase.ownership.runnerWrite(lease(ACTIVE, 'log-gap-completion')); completionCase.ownership.runnerWrite(container('log-gap-completion')); seedLogGapEvent(completionCase.path, 'log-gap-completion', false);
+    const completionCase = await fixture('log-gap-completion'); dispatchAndStart(completionCase.ownership, 'log-gap-completion'); completionCase.ownership.runnerWrite(lease(ACTIVE, 'log-gap-completion')); completionCase.ownership.runnerWrite(container('log-gap-completion')); seedLogGapEvent(completionCase.path, 'log-gap-completion', false);
     const pre = { ...snapshot('present', 'log-gap-completion'), logs: { runner: 'unsealed' as const, docker: 'unsealed' as const, verifiedAt: RECOVERY }, blocker: 'container' as const }; const completionAdmission = cleanupAdmission(pre, 'log-gap-completion'); expect(completionCase.ownership.apiWrite(completionAdmission).ok).toBe(true); completionCase.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'log-gap-completion', admissionId: completionAdmission.admissionId, owner: 'cleanup-a', unitName: completionAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: pre, at: RECOVERY });
     const post = { ...postcondition(pre), logs: { runner: 'sealed' as const, docker: 'sealed' as const, verifiedAt: SEALED } };
     expect(completionCase.ownership.cleanupWrite({ kind: 'complete', jobId: 'log-gap-completion', admissionId: completionAdmission.admissionId, owner: 'cleanup-a', unitName: completionAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: pre, postcondition: post, exactContainerId: 'container-log-gap-completion', containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: SEALED })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
@@ -2106,7 +2148,7 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('rejects sealed full-coverage log-gap evidence at cleanup completion without changing the lease or fence', async () => {
-    const target = await fixture('log-gap-sealed-completion'); target.ownership.apiWrite(dispatch('log-gap-sealed-completion')); target.ownership.runnerWrite(lease(ACTIVE, 'log-gap-sealed-completion')); target.ownership.runnerWrite(container('log-gap-sealed-completion')); seedLogGapEvent(target.path, 'log-gap-sealed-completion', false);
+    const target = await fixture('log-gap-sealed-completion'); dispatchAndStart(target.ownership, 'log-gap-sealed-completion'); target.ownership.runnerWrite(lease(ACTIVE, 'log-gap-sealed-completion')); target.ownership.runnerWrite(container('log-gap-sealed-completion')); seedLogGapEvent(target.path, 'log-gap-sealed-completion', false);
     const pre = { ...snapshot('present', 'log-gap-sealed-completion'), logs: { runner: 'unsealed' as const, docker: 'unsealed' as const, verifiedAt: RECOVERY }, blocker: 'container' as const }; const admission = cleanupAdmission(pre, 'log-gap-sealed-completion'); expect(target.ownership.apiWrite(admission).ok).toBe(true); expect(target.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'log-gap-sealed-completion', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: pre, at: RECOVERY }).ok).toBe(true);
     { const db = openBuilderDatabase(target.path); db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=?').run(SEALED, SHA64, 'log-gap-sealed-completion'); expect((db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id=? AND event_type='log-gap' AND byte_offset=0 AND byte_length=1").get('log-gap-sealed-completion') as { count: number }).count).toBe(2); db.close(); }
     const post = { ...postcondition(pre), logs: { runner: 'sealed' as const, docker: 'sealed' as const, verifiedAt: SEALED } }; const beforeEvents = target.store.listEvents('log-gap-sealed-completion').events.length;
@@ -2119,14 +2161,14 @@ describe('actor-owned compare-and-set writes', () => {
     expect(setup.ownership.cleanupWrite(complete).ok).toBe(true);
     const event = setup.store.listEvents('job-1').events.find((item) => item.eventType === 'cleanup_complete');
     expect(event?.payload).toMatchObject({ postcondition: { container: { kind: 'removed', id: 'container-job-1', exactIdAbsent: true, globalLabelResult: 'no-match', stoppedAt: NOW, removedAt: LATER, observedAt: RECOVERY } } });
-    const blocker = await fixture('cleanup-evidence'); blocker.ownership.apiWrite(dispatch('cleanup-evidence')); blocker.ownership.runnerWrite(lease(ACTIVE, 'cleanup-evidence')); blocker.ownership.runnerWrite({ ...container('cleanup-evidence'), at: NOW }); blocker.ownership.runnerWrite({ ...runnerBase('cleanup-evidence'), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/cleanup-evidence/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/cleanup-evidence/sums', checksumSha256: checksumHash(), manifestPath: 'staging/cleanup-evidence/manifest', manifestSha256: manifestHash('cleanup-evidence'), verificationPath: 'staging/cleanup-evidence/verify', verificationSha256: verificationHash('cleanup-evidence') });
+    const blocker = await fixture('cleanup-evidence'); dispatchAndStart(blocker.ownership, 'cleanup-evidence'); blocker.ownership.runnerWrite(lease(ACTIVE, 'cleanup-evidence')); blocker.ownership.runnerWrite({ ...container('cleanup-evidence'), at: NOW }); blocker.ownership.runnerWrite({ ...runnerBase('cleanup-evidence'), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/cleanup-evidence/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/cleanup-evidence/sums', checksumSha256: checksumHash(), manifestPath: 'staging/cleanup-evidence/manifest', manifestSha256: manifestHash('cleanup-evidence'), verificationPath: 'staging/cleanup-evidence/verify', verificationSha256: verificationHash('cleanup-evidence') });
     const evidenceSnapshot = { ...stagedSnapshot('cleanup-evidence'), container: snapshot('present', 'cleanup-evidence').container, blocker: 'container' as const }; const evidenceAdmission = cleanupAdmission(evidenceSnapshot, 'cleanup-evidence'); expect(blocker.ownership.apiWrite(evidenceAdmission).ok).toBe(true); blocker.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'cleanup-evidence', admissionId: evidenceAdmission.admissionId, owner: 'cleanup-a', unitName: evidenceAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: evidenceSnapshot, at: RECOVERY });
     expect(blocker.ownership.cleanupWrite({ kind: 'evidence', jobId: 'cleanup-evidence', admissionId: evidenceAdmission.admissionId, owner: 'cleanup-a', unitName: evidenceAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: evidenceSnapshot, status: 'blocking', blockerCode: 'QUARANTINE_PENDING', blocker: { reason: 'move failed' }, at: RECOVERY }).ok).toBe(true);
     expect(blocker.store.getJob('cleanup-evidence').artifactStagingPath).toBe('staging/cleanup-evidence/image'); expect(blocker.store.listEvents('cleanup-evidence').events.at(-1)?.eventType).toBe('cleanup');
   });
 
   it('requires complete publishing evidence for runner terminal and typed API recovery', async () => {
-    const { ownership, store } = await fixture(); ownership.apiWrite(dispatch()); ownership.runnerWrite(lease());
+    const { ownership, store } = await fixture(); dispatchAndStart(ownership); ownership.runnerWrite(lease());
     const stages: Array<[PipelineStageName, JobState, JobState]> = [['preflight', 'starting', 'preflight'], ['source', 'preflight', 'source'], ['release-gates', 'source', 'release_gates'], ['frontend', 'release_gates', 'frontend'], ['target-setup', 'frontend', 'target_setup'], ['feeds', 'target_setup', 'feeds'], ['config', 'feeds', 'config'], ['build', 'config', 'building'], ['verify', 'building', 'verifying']];
     for (const [name, from, to] of stages) ownership.runnerWrite({ ...runnerBase(), kind: 'stage', expectedState: from, state: to, stage: name, outcome: 'passed', startedAt: NOW, finishedAt: NOW, evidencePath: `evidence/${name}`, evidenceSha256: SHA64 });
     ownership.runnerWrite({ ...runnerBase(), kind: 'artifact', expectedState: 'verifying', state: 'verifying', stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: SHA64, manifestPath: 'staging/manifest', manifestSha256: SHA64, verificationPath: 'staging/verify', verificationSha256: SHA64 });
@@ -2681,7 +2723,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('supports immutable runner operation begin/complete and no raw SQLite error taxonomy', async () => {
     let fail = true; const { ownership, path } = await fixture('job-1'); const injectedDb = openBuilderDatabase(path); const injected = new OwnershipStore(injectedDb, { now: () => NOW, failBeforeCommit: () => { if (fail) throw new Error('rollback injection'); } }); closers.push(() => injectedDb.close());
     expect(() => injected.apiWrite(dispatch())).toThrow(OwnershipTransactionError); fail = false; expect(ownership.apiWrite(dispatch()).ok).toBe(true);
-    ownership.runnerWrite(lease()); const begin: RunnerWriteCommand = { ...runnerBase(), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }; expect(ownership.runnerWrite(begin).ok).toBe(true);
+    expect(ownership.apiWrite(dispatchStart()).ok).toBe(true); ownership.runnerWrite(lease()); const begin: RunnerWriteCommand = { ...runnerBase(), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }; expect(ownership.runnerWrite(begin).ok).toBe(true);
     const complete = { ...runnerBase(), kind: 'operation-complete' as const, expectedState: 'starting' as const, operationId: 'activate-target' as const, attempt: 1, input: { operationId: 'activate-target' as const, attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'not_created' as const, containerMount: null, containerEnvironment: null, containerSecurity: null, inspection: null, exitCode: 1, signal: null, outcome: 'failed' as const, evidencePath: 'evidence/op', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED' as const, error: { reason: 'process never created' } } };
     expect(ownership.runnerWrite(complete)).toMatchObject({ ok: true, kind: 'committed' });
     expect(ownership.runnerWrite(complete)).toMatchObject({ ok: true, kind: 'idempotent' });
@@ -2691,7 +2733,7 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('retains started-container identity through operation result and clears only exact cleanup', async () => {
-    const { ownership, store } = await fixture(); ownership.apiWrite(dispatch()); ownership.runnerWrite(lease());
+    const { ownership, store } = await fixture(); dispatchAndStart(ownership); ownership.runnerWrite(lease());
     const begin: RunnerWriteCommand = { ...runnerBase(), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW };
     expect(ownership.runnerWrite(begin).ok).toBe(true); expect(ownership.runnerWrite(container()).ok).toBe(true);
     const input = { operationId: 'activate-target' as const, attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'started' as const, containerId: 'container-job-1', containerName: 'osi-job-1', containerImageDigest: SHA64_B, containerLabelJobId: 'job-1', containerLabelManifestSha: SHA64, containerMount: { source: '/tmp', destination: '/work' }, containerEnvironment: { CI: '1' }, containerSecurity: { user: '1000:1000' }, inspection: { running: true }, exitCode: 1, signal: null, outcome: 'failed' as const, evidencePath: 'evidence/op', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED' as const, error: { reason: 'build failed' } };
@@ -2705,7 +2747,7 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('reopens cleanly between an operation result and its container cleanup', async () => {
-    const { ownership, path, store } = await fixture('operation-reopen'); ownership.apiWrite(dispatch('operation-reopen')); ownership.runnerWrite(lease(ACTIVE, 'operation-reopen'));
+    const { ownership, path, store } = await fixture('operation-reopen'); dispatchAndStart(ownership, 'operation-reopen'); ownership.runnerWrite(lease(ACTIVE, 'operation-reopen'));
     ownership.runnerWrite({ ...runnerBase('operation-reopen'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW });
     ownership.runnerWrite({ ...container('operation-reopen'), leaseExpiresAt: ACTIVE, at: NOW });
     const input = { operationId: 'activate-target' as const, attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'started' as const, containerId: 'container-operation-reopen', containerName: 'osi-operation-reopen', containerImageDigest: SHA64_B, containerLabelJobId: 'operation-reopen', containerLabelManifestSha: SHA64, containerMount: { source: '/tmp', destination: '/work' }, containerEnvironment: { CI: '1' }, containerSecurity: { user: '1000:1000' }, inspection: { running: true }, exitCode: 1, signal: null, outcome: 'failed' as const, evidencePath: 'evidence/op', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED' as const, error: { reason: 'crash window' } };
@@ -2719,7 +2761,7 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('reopens after external exact absence before cleanup CAS and keeps the identity blocker', async () => {
-    const { ownership, path, store } = await fixture('operation-external-absence'); ownership.apiWrite(dispatch('operation-external-absence')); ownership.runnerWrite(lease(ACTIVE, 'operation-external-absence'));
+    const { ownership, path, store } = await fixture('operation-external-absence'); dispatchAndStart(ownership, 'operation-external-absence'); ownership.runnerWrite(lease(ACTIVE, 'operation-external-absence'));
     ownership.runnerWrite({ ...runnerBase('operation-external-absence'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW });
     ownership.runnerWrite({ ...container('operation-external-absence'), leaseExpiresAt: ACTIVE, at: NOW });
     const input = { operationId: 'activate-target' as const, attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'started' as const, containerId: 'container-operation-external-absence', containerName: 'osi-operation-external-absence', containerImageDigest: SHA64_B, containerLabelJobId: 'operation-external-absence', containerLabelManifestSha: SHA64, containerMount: { source: '/tmp', destination: '/work' }, containerEnvironment: { CI: '1' }, containerSecurity: { user: '1000:1000' }, inspection: { running: true }, exitCode: 1, signal: null, outcome: 'failed' as const, evidencePath: 'evidence/op', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED' as const, error: { reason: 'external removal' } };
@@ -2743,7 +2785,7 @@ describe('actor-owned compare-and-set writes', () => {
   });
 
   it('serializes runner-vs-fence and cleanup completion races without orphan events', async () => {
-    const fenced = await fixture(); fenced.ownership.apiWrite(dispatch()); fenced.ownership.runnerWrite(lease()); fenced.ownership.runnerWrite(container());
+    const fenced = await fixture(); dispatchAndStart(fenced.ownership); fenced.ownership.runnerWrite(lease()); fenced.ownership.runnerWrite(container());
     const dbB = openBuilderDatabase(fenced.path); const apiB = new OwnershipStore(dbB, { now: () => NOW }); closers.push(() => dbB.close());
     const admission = cleanupAdmission(snapshot()); expect(fenced.ownership.apiWrite(admission).ok).toBe(true);
     const before = eventCount(fenced.store); expect(apiB.runnerWrite({ ...runnerBase(), at: RECOVERY, leaseExpiresAt: ACTIVE, kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: RECOVERY })).toMatchObject({ ok: false, conflict: { kind: 'fenced' } }); expect(eventCount(fenced.store)).toBe(before);
@@ -2754,7 +2796,7 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('classifies delayed runner writes against an existing fence without masking intrinsic chronology errors', async () => {
     const delayed = await fixture('delayed-runner-fence');
-    delayed.ownership.apiWrite(dispatch('delayed-runner-fence'));
+    dispatchAndStart(delayed.ownership, 'delayed-runner-fence');
     delayed.ownership.runnerWrite(lease(ACTIVE, 'delayed-runner-fence'));
     expect(delayed.ownership.apiWrite(cleanupAdmission(snapshot('absent', 'delayed-runner-fence'), 'delayed-runner-fence')).ok).toBe(true);
     const before = delayed.store.listEvents('delayed-runner-fence').events.length;
@@ -2776,7 +2818,7 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('classifies delayed lease acquisition and renewal against a cleanup fence without mutation', async () => {
     const acquireCase = await fixture('delayed-acquire-fence');
-    acquireCase.ownership.apiWrite(dispatch('delayed-acquire-fence'));
+    dispatchAndStart(acquireCase.ownership, 'delayed-acquire-fence');
     expect(acquireCase.ownership.apiWrite(cleanupAdmission(nullLeaseSnapshot('delayed-acquire-fence'), 'delayed-acquire-fence')).ok).toBe(true);
     const acquireEvents = acquireCase.store.listEvents('delayed-acquire-fence').events.length;
     const acquireBefore = acquireCase.store.getJob('delayed-acquire-fence');
@@ -2785,7 +2827,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(acquireCase.store.getJob('delayed-acquire-fence')).toEqual(acquireBefore);
 
     const renewCase = await fixture('delayed-renew-fence');
-    renewCase.ownership.apiWrite(dispatch('delayed-renew-fence'));
+    dispatchAndStart(renewCase.ownership, 'delayed-renew-fence');
     renewCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-renew-fence'));
     renewCase.ownership.runnerWrite(container('delayed-renew-fence'));
     expect(renewCase.ownership.apiWrite(cleanupAdmission(snapshot('present', 'delayed-renew-fence'), 'delayed-renew-fence')).ok).toBe(true);
@@ -2805,10 +2847,10 @@ describe('actor-owned compare-and-set writes', () => {
     expect(() => acquire.runnerWrite({ ...lease(ACTIVE, 'malformed-acquire-timestamp'), at: 'not-an-instant' } as never)).toThrow(OwnershipValidationError);
     expect(acquireBegins).toBe(0); expect(acquireCase.store.listEvents('malformed-acquire-timestamp').events).toHaveLength(1);
 
-    const renewCase = await fixture('malformed-renew-timestamp'); renewCase.ownership.apiWrite(dispatch('malformed-renew-timestamp')); renewCase.ownership.runnerWrite(lease(ACTIVE, 'malformed-renew-timestamp')); let renewBegins = 0;
+    const renewCase = await fixture('malformed-renew-timestamp'); dispatchAndStart(renewCase.ownership, 'malformed-renew-timestamp'); renewCase.ownership.runnerWrite(lease(ACTIVE, 'malformed-renew-timestamp')); let renewBegins = 0;
     const renew = new OwnershipStore(renewCase.db, { now: () => NOW, beforeBegin: () => { renewBegins += 1; } });
     expect(() => renew.runnerWrite({ kind: 'renew-lease', jobId: 'malformed-renew-timestamp', runnerUnit: 'osi-image-builder-runner@malformed-renew-timestamp.service', owner: 'runner-a', expectedExpiresAt: 'not-an-instant', expiresAt: EXPIRY, at: LATER } as never)).toThrow(OwnershipValidationError);
-    expect(renewBegins).toBe(0); expect(renewCase.store.listEvents('malformed-renew-timestamp').events).toHaveLength(3);
+    expect(renewBegins).toBe(0); expect(renewCase.store.listEvents('malformed-renew-timestamp').events).toHaveLength(4);
   });
 
   it('classifies delayed container writes after direct interruption and hand-back as stale predecessors', async () => {
@@ -2823,7 +2865,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(handBackCase.store.getJob('delayed-container-hand-back')).toEqual(handBackBefore);
 
     const directCase = await fixture('delayed-container-direct');
-    directCase.ownership.apiWrite(dispatch('delayed-container-direct')); directCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-container-direct'));
+    dispatchAndStart(directCase.ownership, 'delayed-container-direct'); directCase.ownership.runnerWrite(lease(ACTIVE, 'delayed-container-direct'));
     directCase.ownership.apiWrite({ kind: 'direct-interrupt', jobId: 'delayed-container-direct', expectedState: 'starting', at: RECOVERY, proof: direct('active', 'delayed-container-direct'), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'delayed container' } });
     const directEvents = directCase.store.listEvents('delayed-container-direct').events.length;
     const directBefore = directCase.store.getJob('delayed-container-direct');
@@ -2834,7 +2876,7 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('rejects malformed container lifecycle and derived chronology before a fence can mask them', async () => {
     const target = await fixture('malformed-container-fence');
-    target.ownership.apiWrite(dispatch('malformed-container-fence')); target.ownership.runnerWrite(lease(ACTIVE, 'malformed-container-fence')); target.ownership.runnerWrite(container('malformed-container-fence'));
+    dispatchAndStart(target.ownership, 'malformed-container-fence'); target.ownership.runnerWrite(lease(ACTIVE, 'malformed-container-fence')); target.ownership.runnerWrite(container('malformed-container-fence'));
     expect(target.ownership.apiWrite(cleanupAdmission(snapshot('present', 'malformed-container-fence'), 'malformed-container-fence')).ok).toBe(true);
     const before = target.store.listEvents('malformed-container-fence').events.length;
     expect(() => target.ownership.runnerWrite({ ...container('malformed-container-fence'), lifecycle: 'not_created' } as never)).toThrow(OwnershipValidationError);
@@ -2846,11 +2888,11 @@ describe('actor-owned compare-and-set writes', () => {
     const dispatchRace = await fixture('dispatch-race'); const lock = openBuilderDatabase(dispatchRace.path); const dbB = openBuilderDatabase(dispatchRace.path, { busyTimeoutMs: 1 }); const b = new OwnershipStore(dbB, { now: () => NOW }); closers.push(() => lock.close(), () => dbB.close());
     lock.exec('BEGIN IMMEDIATE'); expect(b.apiWrite(dispatch('dispatch-race'))).toMatchObject({ ok: false, conflict: { kind: 'cas-lost' } }); lock.exec('ROLLBACK'); expect(dispatchRace.ownership.apiWrite(dispatch('dispatch-race')).ok).toBe(true); expect(dispatchRace.store.listEvents('dispatch-race').events).toHaveLength(2);
 
-    const fenceRace = await fixture('fence-race'); fenceRace.ownership.apiWrite(dispatch('fence-race')); fenceRace.ownership.runnerWrite(lease(ACTIVE, 'fence-race')); fenceRace.ownership.runnerWrite(container('fence-race')); const admission = cleanupAdmission(snapshot('present', 'fence-race'), 'fence-race'); expect(fenceRace.ownership.apiWrite(admission).ok).toBe(true);
+    const fenceRace = await fixture('fence-race'); dispatchAndStart(fenceRace.ownership, 'fence-race'); fenceRace.ownership.runnerWrite(lease(ACTIVE, 'fence-race')); fenceRace.ownership.runnerWrite(container('fence-race')); const admission = cleanupAdmission(snapshot('present', 'fence-race'), 'fence-race'); expect(fenceRace.ownership.apiWrite(admission).ok).toBe(true);
     const fenceLock = openBuilderDatabase(fenceRace.path); const fenceDbB = openBuilderDatabase(fenceRace.path, { busyTimeoutMs: 1 }); const fenceRunner = new OwnershipStore(fenceDbB, { now: () => NOW }); closers.push(() => fenceLock.close(), () => fenceDbB.close()); fenceLock.exec('BEGIN IMMEDIATE'); expect(fenceRunner.runnerWrite({ ...runnerBase('fence-race'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW })).toMatchObject({ ok: false, conflict: { kind: 'cas-lost' } }); fenceLock.exec('ROLLBACK');
 
     const cleanupRace = await claimedCleanup('cleanup-race'); const complete: CleanupWriteCommand = { kind: 'complete', jobId: 'cleanup-race', admissionId: cleanupRace.admission.admissionId, owner: 'cleanup-a', unitName: cleanupRace.admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: cleanupRace.snapshot, postcondition: postcondition(cleanupRace.snapshot), exactContainerId: 'container-cleanup-race', containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY };
-    const cleanupLock = openBuilderDatabase(cleanupRace.path); const cleanupDbB = openBuilderDatabase(cleanupRace.path, { busyTimeoutMs: 1 }); const cleanupB = new OwnershipStore(cleanupDbB, { now: () => NOW }); closers.push(() => cleanupLock.close(), () => cleanupDbB.close()); cleanupLock.exec('BEGIN IMMEDIATE'); const loser = cleanupB.cleanupWrite(complete); expect(loser).toMatchObject({ ok: false, conflict: { kind: 'cas-lost' } }); cleanupLock.exec('ROLLBACK'); expect(cleanupRace.ownership.cleanupWrite(complete).ok).toBe(true); expect(cleanupRace.store.listEvents('cleanup-race').events).toHaveLength(7);
+    const cleanupLock = openBuilderDatabase(cleanupRace.path); const cleanupDbB = openBuilderDatabase(cleanupRace.path, { busyTimeoutMs: 1 }); const cleanupB = new OwnershipStore(cleanupDbB, { now: () => NOW }); closers.push(() => cleanupLock.close(), () => cleanupDbB.close()); cleanupLock.exec('BEGIN IMMEDIATE'); const loser = cleanupB.cleanupWrite(complete); expect(loser).toMatchObject({ ok: false, conflict: { kind: 'cas-lost' } }); cleanupLock.exec('ROLLBACK'); expect(cleanupRace.ownership.cleanupWrite(complete).ok).toBe(true); expect(cleanupRace.store.listEvents('cleanup-race').events).toHaveLength(8);
   });
 
   it('wins exactly once under true worker-thread overlap for dispatch, fence, and cleanup', async () => {
@@ -2858,7 +2900,7 @@ describe('actor-owned compare-and-set writes', () => {
     const dispatchResults = await synchronizedWorkers(dispatchRace.path, [['api', dispatch('worker-dispatch')], ['api', dispatch('worker-dispatch')]]) as Array<{ ok: boolean }>;
     expect(dispatchResults.filter((result) => result.ok)).toHaveLength(1); expect(dispatchRace.store.listEvents('worker-dispatch').events.filter((event) => event.eventType === 'dispatch')).toHaveLength(1);
 
-    const fenceRace = await fixture('worker-fence'); fenceRace.ownership.apiWrite(dispatch('worker-fence')); fenceRace.ownership.runnerWrite(lease(ACTIVE, 'worker-fence'));
+    const fenceRace = await fixture('worker-fence'); dispatchAndStart(fenceRace.ownership, 'worker-fence'); fenceRace.ownership.runnerWrite(lease(ACTIVE, 'worker-fence'));
     const fenceSnapshot = snapshot('absent', 'worker-fence'); const fenceAdmission = cleanupAdmission(fenceSnapshot, 'worker-fence');
     const [runnerResult, admissionResult] = await synchronizedWorkers(fenceRace.path, [
       ['runner', { ...runnerBase('worker-fence'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW }],
@@ -2875,14 +2917,14 @@ describe('actor-owned compare-and-set writes', () => {
     const rollback = (path: string) => failingOwnership(path);
 
     const admissionCase = await fixture('rollback-admission-each');
-    admissionCase.ownership.apiWrite(dispatch('rollback-admission-each')); admissionCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-admission-each'));
+    dispatchAndStart(admissionCase.ownership, 'rollback-admission-each'); admissionCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-admission-each'));
     const admissionSnapshot = snapshot('absent', 'rollback-admission-each'); const admission = cleanupAdmission(admissionSnapshot, 'rollback-admission-each');
     const admissionEvents = admissionCase.store.listEvents('rollback-admission-each').events.length;
     expect(() => rollback(admissionCase.path).apiWrite({ ...admission, at: RECOVERY })).toThrow(OwnershipTransactionError);
     expect(admissionCase.store.listEvents('rollback-admission-each').events).toHaveLength(admissionEvents);
     { const db = openBuilderDatabase(admissionCase.path); expect(db.prepare('SELECT cleanup_fence_generation, cleanup_admission_id FROM jobs WHERE job_id=?').get('rollback-admission-each')).toEqual({ cleanup_fence_generation: null, cleanup_admission_id: null }); db.close(); }
 
-    const claimCase = await fixture('rollback-claim-each'); claimCase.ownership.apiWrite(dispatch('rollback-claim-each')); claimCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-claim-each')); claimCase.ownership.runnerWrite(container('rollback-claim-each')); const claimSnapshot = snapshot('present', 'rollback-claim-each'); const claimAdmission = cleanupAdmission(claimSnapshot, 'rollback-claim-each'); claimCase.ownership.apiWrite(claimAdmission); const claim: CleanupWriteCommand = { kind: 'claim-lease', jobId: 'rollback-claim-each', admissionId: claimAdmission.admissionId, owner: 'cleanup-a', unitName: claimAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: claimSnapshot, at: RECOVERY }; const claimEvents = claimCase.store.listEvents('rollback-claim-each').events.length;
+    const claimCase = await fixture('rollback-claim-each'); dispatchAndStart(claimCase.ownership, 'rollback-claim-each'); claimCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-claim-each')); claimCase.ownership.runnerWrite(container('rollback-claim-each')); const claimSnapshot = snapshot('present', 'rollback-claim-each'); const claimAdmission = cleanupAdmission(claimSnapshot, 'rollback-claim-each'); claimCase.ownership.apiWrite(claimAdmission); const claim: CleanupWriteCommand = { kind: 'claim-lease', jobId: 'rollback-claim-each', admissionId: claimAdmission.admissionId, owner: 'cleanup-a', unitName: claimAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: claimSnapshot, at: RECOVERY }; const claimEvents = claimCase.store.listEvents('rollback-claim-each').events.length;
     expect(() => rollback(claimCase.path).cleanupWrite(claim)).toThrow(OwnershipTransactionError);
     expect(claimCase.store.listEvents('rollback-claim-each').events).toHaveLength(claimEvents);
     { const db = openBuilderDatabase(claimCase.path); expect((db.prepare('SELECT cleanup_fence_generation FROM jobs WHERE job_id=?').get('rollback-claim-each') as { cleanup_fence_generation: number }).cleanup_fence_generation).toBe(1); db.close(); }
@@ -2892,7 +2934,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(renewCase.store.listEvents('rollback-renew-each').events).toHaveLength(renewEvents);
     { const db = openBuilderDatabase(renewCase.path); expect((db.prepare('SELECT expires_at FROM cleanup_leases WHERE admission_id=?').get(renewCase.admission.admissionId) as { expires_at: string }).expires_at).toBe(EXPIRY); db.close(); }
 
-    const evidenceCase = await fixture('rollback-evidence-each'); evidenceCase.ownership.apiWrite(dispatch('rollback-evidence-each')); evidenceCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-evidence-each')); evidenceCase.ownership.runnerWrite({ ...runnerBase('rollback-evidence-each'), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/rollback-evidence-each/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/rollback-evidence-each/sums', checksumSha256: checksumHash(), manifestPath: 'staging/rollback-evidence-each/manifest', manifestSha256: manifestHash('rollback-evidence-each'), verificationPath: 'staging/rollback-evidence-each/verify', verificationSha256: verificationHash('rollback-evidence-each') });
+    const evidenceCase = await fixture('rollback-evidence-each'); dispatchAndStart(evidenceCase.ownership, 'rollback-evidence-each'); evidenceCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-evidence-each')); evidenceCase.ownership.runnerWrite({ ...runnerBase('rollback-evidence-each'), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/rollback-evidence-each/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/rollback-evidence-each/sums', checksumSha256: checksumHash(), manifestPath: 'staging/rollback-evidence-each/manifest', manifestSha256: manifestHash('rollback-evidence-each'), verificationPath: 'staging/rollback-evidence-each/verify', verificationSha256: verificationHash('rollback-evidence-each') });
     const evidenceSnapshot = stagedSnapshot('rollback-evidence-each'); const evidenceAdmission = cleanupAdmission(evidenceSnapshot, 'rollback-evidence-each'); evidenceCase.ownership.apiWrite(evidenceAdmission);
     const evidenceClaim: CleanupWriteCommand = { kind: 'claim-lease', jobId: 'rollback-evidence-each', admissionId: evidenceAdmission.admissionId, owner: 'cleanup-a', unitName: evidenceAdmission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: evidenceSnapshot, at: RECOVERY }; evidenceCase.ownership.cleanupWrite(evidenceClaim);
     const evidenceEvents = evidenceCase.store.listEvents('rollback-evidence-each').events.length;
@@ -2908,7 +2950,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(() => rollback(completeCase.path).apiWrite(handBack)).toThrow(OwnershipTransactionError);
     expect(completeCase.store.listEvents('rollback-complete-each').events).toHaveLength(handBackEvents); { const db = openBuilderDatabase(completeCase.path); expect((db.prepare('SELECT cleanup_fence_generation FROM jobs WHERE job_id=?').get('rollback-complete-each') as { cleanup_fence_generation: number }).cleanup_fence_generation).toBe(1); db.close(); }
 
-    const cancellationCase = await fixture('rollback-cancellation'); cancellationCase.ownership.apiWrite(dispatch('rollback-cancellation')); cancellationCase.ownership.runnerWrite(lease(EXPIRY, 'rollback-cancellation')); cancellationCase.ownership.apiWrite({ kind: 'request-cancellation', jobId: 'rollback-cancellation', reason: 'stop', at: NOW }); cancellationCase.ownership.runnerWrite({ ...runnerBase('rollback-cancellation'), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    const cancellationCase = await fixture('rollback-cancellation'); dispatchAndStart(cancellationCase.ownership, 'rollback-cancellation'); cancellationCase.ownership.runnerWrite(lease(EXPIRY, 'rollback-cancellation')); cancellationCase.ownership.apiWrite({ kind: 'request-cancellation', jobId: 'rollback-cancellation', reason: 'stop', at: NOW }); cancellationCase.ownership.runnerWrite({ ...runnerBase('rollback-cancellation'), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
     const cancellationEvidenceWrite = cancellationCase.ownership.runnerWrite({ ...runnerBase('rollback-cancellation'), at: LATER, leaseExpiresAt: EXPIRY, kind: 'cancellation-evidence', expectedState: 'cancel_requested', evidence: cancellationEvidence('rollback-cancellation') });
     const cancellationProof = { kind: 'pre-container' as const, runnerUnit: runnerBase('rollback-cancellation').runnerUnit, unitInactiveAt: null, container: absent(), staging, logs }; const cancellationCleanup: RunnerWriteCommand = { ...runnerBase('rollback-cancellation'), at: LATER, leaseExpiresAt: EXPIRY, kind: 'cancellation-cleanup', expectedState: 'cancel_requested', evidenceEventSeq: eventSeq(cancellationEvidenceWrite), proof: cancellationProof }; const cancellationEvents = cancellationCase.store.listEvents('rollback-cancellation').events.length;
     expect(() => rollback(cancellationCase.path).runnerWrite(cancellationCleanup)).toThrow(OwnershipTransactionError);
@@ -2921,13 +2963,13 @@ describe('actor-owned compare-and-set writes', () => {
     expect(() => rollback(publishCase.path).apiWrite({ kind: 'publish-recovery', jobId: 'rollback-publish-recovery', expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence: recoveryEvidence('rollback-publish-recovery') })).toThrow(OwnershipTransactionError);
     expect(publishCase.store.listEvents('rollback-publish-recovery').events).toHaveLength(publishEvents); expect(publishCase.store.getJob('rollback-publish-recovery')).toMatchObject({ state: 'publishing', publishState: 'publishing' });
 
-    const operationBeginCase = await fixture('rollback-operation-begin'); operationBeginCase.ownership.apiWrite(dispatch('rollback-operation-begin')); operationBeginCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-operation-begin')); const begin: RunnerWriteCommand = { ...runnerBase('rollback-operation-begin'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }; const beginEvents = operationBeginCase.store.listEvents('rollback-operation-begin').events.length;
+    const operationBeginCase = await fixture('rollback-operation-begin'); dispatchAndStart(operationBeginCase.ownership, 'rollback-operation-begin'); operationBeginCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-operation-begin')); const begin: RunnerWriteCommand = { ...runnerBase('rollback-operation-begin'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }; const beginEvents = operationBeginCase.store.listEvents('rollback-operation-begin').events.length;
     expect(() => rollback(operationBeginCase.path).runnerWrite(begin)).toThrow(OwnershipTransactionError); expect(operationBeginCase.store.getOperation('rollback-operation-begin', 'activate-target', 1)).toBeNull(); expect(operationBeginCase.store.listEvents('rollback-operation-begin').events).toHaveLength(beginEvents);
 
-    const operationCompleteCase = await fixture('rollback-operation-complete'); operationCompleteCase.ownership.apiWrite(dispatch('rollback-operation-complete')); operationCompleteCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-operation-complete')); operationCompleteCase.ownership.runnerWrite({ ...runnerBase('rollback-operation-complete'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }); const operationInput = { operationId: 'activate-target' as const, attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'not_created' as const, containerMount: null, containerEnvironment: null, containerSecurity: null, inspection: null, exitCode: 1, signal: null, outcome: 'failed' as const, evidencePath: 'evidence/op', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED' as const, error: { reason: 'rollback' } }; const operationComplete: RunnerWriteCommand = { ...runnerBase('rollback-operation-complete'), kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: operationInput }; const operationCompleteEvents = operationCompleteCase.store.listEvents('rollback-operation-complete').events.length;
+    const operationCompleteCase = await fixture('rollback-operation-complete'); dispatchAndStart(operationCompleteCase.ownership, 'rollback-operation-complete'); operationCompleteCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-operation-complete')); operationCompleteCase.ownership.runnerWrite({ ...runnerBase('rollback-operation-complete'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }); const operationInput = { operationId: 'activate-target' as const, attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'not_created' as const, containerMount: null, containerEnvironment: null, containerSecurity: null, inspection: null, exitCode: 1, signal: null, outcome: 'failed' as const, evidencePath: 'evidence/op', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED' as const, error: { reason: 'rollback' } }; const operationComplete: RunnerWriteCommand = { ...runnerBase('rollback-operation-complete'), kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: operationInput }; const operationCompleteEvents = operationCompleteCase.store.listEvents('rollback-operation-complete').events.length;
     expect(() => rollback(operationCompleteCase.path).runnerWrite(operationComplete)).toThrow(OwnershipTransactionError); expect(operationCompleteCase.store.getOperation('rollback-operation-complete', 'activate-target', 1)).toMatchObject({ outcome: null }); expect(operationCompleteCase.store.listEvents('rollback-operation-complete').events).toHaveLength(operationCompleteEvents);
 
-    const operationCleanupCase = await fixture('rollback-operation-cleanup'); operationCleanupCase.ownership.apiWrite(dispatch('rollback-operation-cleanup')); operationCleanupCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-operation-cleanup')); operationCleanupCase.ownership.runnerWrite({ ...runnerBase('rollback-operation-cleanup'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }); operationCleanupCase.ownership.runnerWrite({ ...container('rollback-operation-cleanup'), leaseExpiresAt: ACTIVE, at: NOW }); const cleanupInput = { ...operationInput, containerId: 'container-rollback-operation-cleanup', containerName: 'osi-rollback-operation-cleanup', containerImageDigest: SHA64_B, containerLabelJobId: 'rollback-operation-cleanup', containerLabelManifestSha: SHA64, containerMount: { source: '/tmp', destination: '/work' }, containerEnvironment: { CI: '1' }, containerSecurity: { user: '1000:1000' }, inspection: { running: true }, lifecyclePhase: 'started' as const }; operationCleanupCase.ownership.runnerWrite({ ...runnerBase('rollback-operation-cleanup'), kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: cleanupInput });
+    const operationCleanupCase = await fixture('rollback-operation-cleanup'); dispatchAndStart(operationCleanupCase.ownership, 'rollback-operation-cleanup'); operationCleanupCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-operation-cleanup')); operationCleanupCase.ownership.runnerWrite({ ...runnerBase('rollback-operation-cleanup'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }); operationCleanupCase.ownership.runnerWrite({ ...container('rollback-operation-cleanup'), leaseExpiresAt: ACTIVE, at: NOW }); const cleanupInput = { ...operationInput, containerId: 'container-rollback-operation-cleanup', containerName: 'osi-rollback-operation-cleanup', containerImageDigest: SHA64_B, containerLabelJobId: 'rollback-operation-cleanup', containerLabelManifestSha: SHA64, containerMount: { source: '/tmp', destination: '/work' }, containerEnvironment: { CI: '1' }, containerSecurity: { user: '1000:1000' }, inspection: { running: true }, lifecyclePhase: 'started' as const }; operationCleanupCase.ownership.runnerWrite({ ...runnerBase('rollback-operation-cleanup'), kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: cleanupInput });
     const operationCleanup: RunnerWriteCommand = { ...runnerBase('rollback-operation-cleanup'), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'container-removed', id: 'container-rollback-operation-cleanup', name: 'osi-rollback-operation-cleanup', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'rollback-operation-cleanup', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match', logs } }; const operationCleanupEvents = operationCleanupCase.store.listEvents('rollback-operation-cleanup').events.length;
     expect(() => rollback(operationCleanupCase.path).runnerWrite(operationCleanup)).toThrow(OwnershipTransactionError); expect(operationCleanupCase.store.getJob('rollback-operation-cleanup').containerId).toBe('container-rollback-operation-cleanup'); expect(operationCleanupCase.store.listEvents('rollback-operation-cleanup').events).toHaveLength(operationCleanupEvents);
   });
@@ -2937,16 +2979,16 @@ describe('actor-owned compare-and-set writes', () => {
     expect(() => failingOwnership(cancellation.path).apiWrite({ kind: 'request-cancellation', jobId: 'rollback-cancellation-request', reason: 'rollback', at: NOW })).toThrow(OwnershipTransactionError);
     expect(cancellation.store.listEvents('rollback-cancellation-request').events).toHaveLength(cancellationEvents); expect(cancellation.store.getJob('rollback-cancellation-request').cancelRequestedAt).toBeNull();
 
-    const runnerLeaseCase = await fixture('rollback-runner-lease'); runnerLeaseCase.ownership.apiWrite(dispatch('rollback-runner-lease')); const leaseEvents = runnerLeaseCase.store.listEvents('rollback-runner-lease').events.length;
+    const runnerLeaseCase = await fixture('rollback-runner-lease'); dispatchAndStart(runnerLeaseCase.ownership, 'rollback-runner-lease'); const leaseEvents = runnerLeaseCase.store.listEvents('rollback-runner-lease').events.length;
     expect(() => failingOwnership(runnerLeaseCase.path).runnerWrite(lease(ACTIVE, 'rollback-runner-lease'))).toThrow(OwnershipTransactionError);
     { const db = openBuilderDatabase(runnerLeaseCase.path); expect(db.prepare('SELECT runner_lease_owner, runner_lease_expires_at FROM jobs WHERE job_id=?').get('rollback-runner-lease')).toEqual({ runner_lease_owner: null, runner_lease_expires_at: null }); db.close(); }
     expect(runnerLeaseCase.store.listEvents('rollback-runner-lease').events).toHaveLength(leaseEvents);
 
-    const containerCase = await fixture('rollback-container'); containerCase.ownership.apiWrite(dispatch('rollback-container')); containerCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-container')); const containerEvents = containerCase.store.listEvents('rollback-container').events.length;
+    const containerCase = await fixture('rollback-container'); dispatchAndStart(containerCase.ownership, 'rollback-container'); containerCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-container')); const containerEvents = containerCase.store.listEvents('rollback-container').events.length;
     expect(() => failingOwnership(containerCase.path).runnerWrite(container('rollback-container'))).toThrow(OwnershipTransactionError);
     expect(containerCase.store.getJob('rollback-container').containerId).toBeNull(); expect(containerCase.store.listEvents('rollback-container').events).toHaveLength(containerEvents);
 
-    const artifactCase = await fixture('rollback-artifact'); artifactCase.ownership.apiWrite(dispatch('rollback-artifact')); artifactCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-artifact')); const artifactEvents = artifactCase.store.listEvents('rollback-artifact').events.length;
+    const artifactCase = await fixture('rollback-artifact'); dispatchAndStart(artifactCase.ownership, 'rollback-artifact'); artifactCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-artifact')); const artifactEvents = artifactCase.store.listEvents('rollback-artifact').events.length;
     expect(() => failingOwnership(artifactCase.path).runnerWrite({ ...runnerBase('rollback-artifact'), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256: manifestHash('rollback-artifact'), verificationPath: 'staging/verify', verificationSha256: verificationHash('rollback-artifact') })).toThrow(OwnershipTransactionError);
     expect(artifactCase.store.getJob('rollback-artifact').artifactStagingPath).toBeNull(); expect(artifactCase.store.listEvents('rollback-artifact').events).toHaveLength(artifactEvents);
 
@@ -2975,11 +3017,11 @@ describe('actor-owned compare-and-set writes', () => {
     expect(() => inject(enqueue.path).apiWrite({ kind: 'enqueue', input: { jobId: 'rollback-enqueued', requestId: 'rollback-enqueued', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('rollback-enqueued'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'rollback', acceptedAt: NOW } })).toThrow(OwnershipTransactionError); expect(enqueue.store.listEvents('rollback-enqueue').events).toHaveLength(enqueueBefore);
 
     const dispatchCase = await fixture('rollback-dispatch'); expect(() => inject(dispatchCase.path).apiWrite(dispatch('rollback-dispatch'))).toThrow(OwnershipTransactionError); expect(dispatchCase.store.getJob('rollback-dispatch').state).toBe('queued');
-    const stageCase = await fixture('rollback-stage'); stageCase.ownership.apiWrite(dispatch('rollback-stage')); stageCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-stage')); const stageEvents = stageCase.store.listEvents('rollback-stage').events.length; expect(() => inject(stageCase.path).runnerWrite({ ...runnerBase('rollback-stage'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW })).toThrow(OwnershipTransactionError); expect(stageCase.store.listEvents('rollback-stage').events).toHaveLength(stageEvents);
-    const operationCase = await fixture('rollback-operation'); operationCase.ownership.apiWrite(dispatch('rollback-operation')); operationCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-operation')); operationCase.ownership.runnerWrite({ ...runnerBase('rollback-operation'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }); const operationInput = { operationId: 'activate-target' as const, attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'not_created' as const, containerMount: null, containerEnvironment: null, containerSecurity: null, inspection: null, exitCode: 1, signal: null, outcome: 'failed' as const, evidencePath: 'evidence/op', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED' as const, error: { reason: 'rollback' } }; expect(() => inject(operationCase.path).runnerWrite({ ...runnerBase('rollback-operation'), kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: operationInput })).toThrow(OwnershipTransactionError); expect(operationCase.store.getOperation('rollback-operation', 'activate-target', 1)).toMatchObject({ outcome: null });
-    const terminalCase = await fixture('rollback-terminal'); terminalCase.ownership.apiWrite(dispatch('rollback-terminal')); terminalCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-terminal')); terminalCase.ownership.runnerWrite({ ...runnerBase('rollback-terminal'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW }); expect(() => inject(terminalCase.path).runnerWrite({ ...runnerBase('rollback-terminal'), kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: LATER, errorCode: 'BUILD_FAILED', error: { reason: 'rollback' } })).toThrow(OwnershipTransactionError); expect(terminalCase.store.getJob('rollback-terminal').state).toBe('preflight');
+    const stageCase = await fixture('rollback-stage'); dispatchAndStart(stageCase.ownership, 'rollback-stage'); stageCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-stage')); const stageEvents = stageCase.store.listEvents('rollback-stage').events.length; expect(() => inject(stageCase.path).runnerWrite({ ...runnerBase('rollback-stage'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW })).toThrow(OwnershipTransactionError); expect(stageCase.store.listEvents('rollback-stage').events).toHaveLength(stageEvents);
+    const operationCase = await fixture('rollback-operation'); dispatchAndStart(operationCase.ownership, 'rollback-operation'); operationCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-operation')); operationCase.ownership.runnerWrite({ ...runnerBase('rollback-operation'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }); const operationInput = { operationId: 'activate-target' as const, attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'not_created' as const, containerMount: null, containerEnvironment: null, containerSecurity: null, inspection: null, exitCode: 1, signal: null, outcome: 'failed' as const, evidencePath: 'evidence/op', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED' as const, error: { reason: 'rollback' } }; expect(() => inject(operationCase.path).runnerWrite({ ...runnerBase('rollback-operation'), kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: operationInput })).toThrow(OwnershipTransactionError); expect(operationCase.store.getOperation('rollback-operation', 'activate-target', 1)).toMatchObject({ outcome: null });
+    const terminalCase = await fixture('rollback-terminal'); dispatchAndStart(terminalCase.ownership, 'rollback-terminal'); terminalCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-terminal')); terminalCase.ownership.runnerWrite({ ...runnerBase('rollback-terminal'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW }); expect(() => inject(terminalCase.path).runnerWrite({ ...runnerBase('rollback-terminal'), kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: LATER, errorCode: 'BUILD_FAILED', error: { reason: 'rollback' } })).toThrow(OwnershipTransactionError); expect(terminalCase.store.getJob('rollback-terminal').state).toBe('preflight');
     const freshnessCase = await fixture('rollback-freshness'); freshnessCase.ownership.apiWrite({ kind: 'freshness-request', jobId: 'rollback-freshness', at: NOW }); expect(() => inject(freshnessCase.path).apiWrite({ kind: 'freshness-result', jobId: 'rollback-freshness', at: LATER, input: { status: 'fresh', pinnedSha: SHA40, observedSha: SHA40, checkedAt: LATER } })).toThrow(OwnershipTransactionError); expect(freshnessCase.store.getJob('rollback-freshness').freshnessStatus).toBeNull();
-    const admissionCase = await fixture('rollback-admission'); admissionCase.ownership.apiWrite(dispatch('rollback-admission')); admissionCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-admission')); const admissionSnapshot = snapshot('absent', 'rollback-admission'); expect(() => inject(admissionCase.path).apiWrite({ ...cleanupAdmission(admissionSnapshot, 'rollback-admission'), at: RECOVERY })).toThrow(OwnershipTransactionError); { const db = openBuilderDatabase(admissionCase.path); expect((db.prepare('SELECT cleanup_fence_generation FROM jobs WHERE job_id=?').get('rollback-admission') as { cleanup_fence_generation: number | null }).cleanup_fence_generation).toBeNull(); db.close(); }
+    const admissionCase = await fixture('rollback-admission'); dispatchAndStart(admissionCase.ownership, 'rollback-admission'); admissionCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-admission')); const admissionSnapshot = snapshot('absent', 'rollback-admission'); expect(() => inject(admissionCase.path).apiWrite({ ...cleanupAdmission(admissionSnapshot, 'rollback-admission'), at: RECOVERY })).toThrow(OwnershipTransactionError); { const db = openBuilderDatabase(admissionCase.path); expect((db.prepare('SELECT cleanup_fence_generation FROM jobs WHERE job_id=?').get('rollback-admission') as { cleanup_fence_generation: number | null }).cleanup_fence_generation).toBeNull(); db.close(); }
     const completionCase = await claimedCleanup('rollback-completion'); const completion: CleanupWriteCommand = { kind: 'complete', jobId: 'rollback-completion', admissionId: completionCase.admission.admissionId, owner: 'cleanup-a', unitName: completionCase.admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: completionCase.snapshot, postcondition: postcondition(completionCase.snapshot), exactContainerId: 'container-rollback-completion', containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY }; expect(() => inject(completionCase.path).cleanupWrite(completion)).toThrow(OwnershipTransactionError); expect(completionCase.store.getJob('rollback-completion').containerId).toBe('container-rollback-completion');
     completionCase.ownership.cleanupWrite(completion); expect(() => inject(completionCase.path).apiWrite({ kind: 'hand-back', jobId: 'rollback-completion', admissionId: completionCase.admission.admissionId, owner: 'cleanup-a', unitName: completionCase.admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, at: RECOVERY, proof: { runner: completionCase.snapshot.runner, container: absent(RECOVERY), blocker: 'none' } })).toThrow(OwnershipTransactionError); { const db = openBuilderDatabase(completionCase.path); expect((db.prepare('SELECT cleanup_fence_generation FROM jobs WHERE job_id=?').get('rollback-completion') as { cleanup_fence_generation: number }).cleanup_fence_generation).toBe(1); db.close(); }
   });
@@ -3010,6 +3052,7 @@ describe('Task 7 recovery proof chronology', () => {
   it('rejects SERVICE_START_FAILED recovery beside a matching non-null runner lease', async () => {
     const target = await fixture('service-start-live-lease');
     expect(target.ownership.apiWrite(dispatch('service-start-live-lease')).ok).toBe(true);
+    expect(target.ownership.apiWrite(dispatchStart('service-start-live-lease')).ok).toBe(true);
     expect(target.ownership.runnerWrite(lease(ACTIVE, 'service-start-live-lease')).ok).toBe(true);
 
     const result = target.ownership.apiWrite({
@@ -3045,6 +3088,30 @@ describe('Task 7 recovery proof chronology', () => {
     expect(store.listEvents('proof-chronology').events).toHaveLength(1);
   });
 
+  it('requires the exact live dispatch claim expiry and consumes that claim with a recovery blocker', async () => {
+    const target = await fixture('blocker-claim-expiry');
+    expect(target.ownership.apiWrite(dispatch('blocker-claim-expiry')).ok).toBe(true);
+    const blocker = {
+      kind: 'runner-recovery-blocker' as const,
+      jobId: 'blocker-claim-expiry',
+      expectedState: 'starting' as const,
+      runnerUnit: 'osi-image-builder-runner@blocker-claim-expiry.service',
+      observedOwner: null,
+      observedLeaseExpiresAt: null,
+      blockerCode: 'SERVICE_START_FAILED' as const,
+      blocker: { reason: 'physical proof unavailable' },
+      dispatchClaimOwner: 'dispatcher-blocker-claim-expiry',
+      at: LATER,
+    };
+    expect(target.ownership.apiWrite({ ...blocker, expectedClaimExpiresAt: ACTIVE })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.db.prepare('SELECT 1 AS present FROM queue_dispatch_claims WHERE claim_id=1').get()).toEqual({ present: 1 });
+    expect(target.store.getJob('blocker-claim-expiry').cleanupBlockerCode).toBeNull();
+
+    expect(target.ownership.apiWrite({ ...blocker, expectedClaimExpiresAt: EXPIRY })).toMatchObject({ ok: true });
+    expect(target.db.prepare('SELECT 1 AS present FROM queue_dispatch_claims WHERE claim_id=1').get()).toBeUndefined();
+    expect(target.store.getJob('blocker-claim-expiry').cleanupBlockerCode).toBe('SERVICE_START_FAILED');
+  });
+
   it('rejects future-only nested observations before BEGIN for every recovery command', async () => {
     const cases: Array<readonly [string, (guarded: OwnershipStore) => void]> = [
       ['direct interruption container', (guarded) => guarded.apiWrite({ kind: 'direct-interrupt', jobId: 'proof-future-direct', expectedState: 'starting', at: RECOVERY, proof: { ...direct('start-failure', 'proof-future-direct'), container: absent(AFTER) }, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'future' } })],
@@ -3074,7 +3141,7 @@ describe('Task 7 recovery proof chronology', () => {
       expect(beginAttempts).toBe(0); expect(store.listEvents(fixtureId).events).toHaveLength(1);
     }
 
-    const delayed = await fixture('stale-lease-delayed'); delayed.ownership.apiWrite(dispatch('stale-lease-delayed')); delayed.ownership.runnerWrite(lease(ACTIVE, 'stale-lease-delayed')); let beginAttempts = 0;
+    const delayed = await fixture('stale-lease-delayed'); dispatchAndStart(delayed.ownership, 'stale-lease-delayed'); delayed.ownership.runnerWrite(lease(ACTIVE, 'stale-lease-delayed')); let beginAttempts = 0;
     const guarded = new OwnershipStore(delayed.db, { now: () => NOW, beforeBegin: () => { beginAttempts += 1; } });
     const result = guarded.apiWrite({ kind: 'direct-interrupt', jobId: 'stale-lease-delayed', expectedState: 'starting', at: AFTER, proof: direct('active', 'stale-lease-delayed'), errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'delayed stale observation' } });
     expect(result.ok).toBe(true); expect(beginAttempts).toBe(1);
@@ -3087,7 +3154,7 @@ describe('Task 7 recovery proof chronology', () => {
     expect(() => guardedFuture.cleanupWrite({ kind: 'complete', jobId: 'null-cleanup-future', admissionId: 'cln_0123456789abcdefghjkmnpqrs', owner: 'cleanup-a', unitName: 'osi-image-builder-cleanup@cln_0123456789abcdefghjkmnpqrs.service', fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: futureSnapshot, postcondition: futurePost, exactContainerId: null, containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY })).toThrow(OwnershipValidationError);
     expect(futureBegins).toBe(0); expect(future.store.listEvents('null-cleanup-future').events).toHaveLength(1);
 
-    const delayed = await fixture('null-cleanup-delayed'); delayed.ownership.apiWrite(dispatch('null-cleanup-delayed')); delayed.ownership.runnerWrite(lease(ACTIVE, 'null-cleanup-delayed')); const delayedSnapshot = snapshot('absent', 'null-cleanup-delayed'); const admission = cleanupAdmission(delayedSnapshot, 'null-cleanup-delayed');
+    const delayed = await fixture('null-cleanup-delayed'); dispatchAndStart(delayed.ownership, 'null-cleanup-delayed'); delayed.ownership.runnerWrite(lease(ACTIVE, 'null-cleanup-delayed')); const delayedSnapshot = snapshot('absent', 'null-cleanup-delayed'); const admission = cleanupAdmission(delayedSnapshot, 'null-cleanup-delayed');
     delayed.ownership.apiWrite(admission); delayed.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'null-cleanup-delayed', admissionId: admission.admissionId, owner: admission.owner, unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: delayedSnapshot, at: RECOVERY });
     let delayedBegins = 0; const guardedDelayed = new OwnershipStore(delayed.db, { now: () => NOW, beforeBegin: () => { delayedBegins += 1; } });
     const result = guardedDelayed.cleanupWrite({ kind: 'complete', jobId: 'null-cleanup-delayed', admissionId: admission.admissionId, owner: admission.owner, unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: delayedSnapshot, postcondition: postcondition(delayedSnapshot), exactContainerId: null, containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: AFTER });

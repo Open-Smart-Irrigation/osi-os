@@ -47,6 +47,8 @@ export interface QueueDatabase {
 export interface SystemdUnitObservation {
   readonly unit: string;
   readonly active: boolean;
+  /** True while systemd has an activating/pending manager transaction for the unit. */
+  readonly pending: boolean;
   readonly observedAt: string;
 }
 
@@ -61,6 +63,7 @@ export interface SystemdStartResult {
 export interface QueueSystemd {
   readonly inspect: (unit: string) => Promise<SystemdUnitObservation>;
   readonly start: (unit: string) => Promise<SystemdStartResult>;
+  /** Lists runner units in either active or activating systemd states. */
   readonly listActive?: () => Promise<readonly string[]>;
 }
 
@@ -210,7 +213,18 @@ function safeResult(result: unknown): result is SystemdStartResult {
 function safeObservation(value: unknown, expectedUnit: string): value is SystemdUnitObservation {
   if (typeof value !== 'object' || value === null) return false;
   const observation = value as Record<string, unknown>;
-  return observation.unit === expectedUnit && typeof observation.active === 'boolean' && canonicalInstant(observation.observedAt) !== null;
+  return observation.unit === expectedUnit
+    && typeof observation.active === 'boolean'
+    && typeof observation.pending === 'boolean'
+    && canonicalInstant(observation.observedAt) !== null;
+}
+
+function observationIsLive(observation: SystemdUnitObservation): boolean {
+  return observation.active || observation.pending;
+}
+
+function observationIsInactive(observation: SystemdUnitObservation): boolean {
+  return !observation.active && !observation.pending;
 }
 
 export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueCoordinator {
@@ -263,43 +277,68 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
     throw new Error('dispatch claim lease and renewal intervals are invalid');
   }
 
-  type ClaimHeartbeat = Readonly<{ readonly isLost: () => boolean; readonly stop: () => Promise<void> }>;
+  type ClaimHeartbeat = Readonly<{
+    readonly checkpoint: (allowExpired?: boolean) => boolean;
+    readonly isLost: () => boolean;
+    readonly stop: () => Promise<void>;
+  }>;
 
   function claimHeartbeat(jobId: string, owner: string): ClaimHeartbeat {
     let lost = false;
     let stopped = false;
     let renewal = Promise.resolve();
-    const tick = (): void => {
-      if (stopped || lost) return;
-      renewal = renewal.then(() => {
-        if (stopped || lost) return;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const checkpoint = (allowExpired = false): boolean => {
+      if (stopped || lost) return false;
+      try {
+        const at = clockReading();
         const claim = currentDispatchClaim();
         if (claim === undefined || claim.jobId !== jobId || claim.owner !== owner) {
           const current = currentJob(jobId);
-          if (claim === undefined && current !== undefined && current.runner_lease_owner !== null && current.runner_lease_expires_at !== null) {
+          const lease = current === undefined ? { kind: 'malformed' as const } : runnerLeaseState(current, at);
+          if (claim === undefined && lease.kind === 'live') {
             stopped = true;
-            clearInterval(timer);
-            return;
+            if (timer !== undefined) clearInterval(timer);
+            return true;
           }
           lost = true;
-          return;
+          return false;
         }
-        try {
-          const at = clockReading();
-          const result = options.ownership.apiWrite({ kind: 'dispatch-renew', jobId, claimOwner: owner, expectedClaimExpiresAt: claim.leaseExpiresAt, claimExpiresAt: dispatchClaimExpiry(at, claimLeaseMs), at });
-          if (!success(result)) lost = true;
-        } catch {
+        if (Date.parse(claim.leaseExpiresAt) <= Date.parse(at)) {
+          if (allowExpired) return true;
           lost = true;
+          return false;
         }
-      }).catch(() => { lost = true; });
+        const result = options.ownership.apiWrite({
+          kind: 'dispatch-renew',
+          jobId,
+          claimOwner: owner,
+          expectedClaimExpiresAt: claim.leaseExpiresAt,
+          claimExpiresAt: dispatchClaimExpiry(at, claimLeaseMs),
+          at,
+        });
+        if (!success(result)) {
+          lost = true;
+          return false;
+        }
+        return true;
+      } catch {
+        lost = true;
+        return false;
+      }
     };
-    const timer = setInterval(tick, claimRenewIntervalMs);
+    const tick = (): void => {
+      if (stopped || lost) return;
+      renewal = renewal.then(() => { checkpoint(); }).catch(() => { lost = true; });
+    };
+    timer = setInterval(tick, claimRenewIntervalMs);
     timer.unref?.();
     return {
+      checkpoint,
       isLost: () => lost,
       stop: async () => {
         stopped = true;
-        clearInterval(timer);
+        if (timer !== undefined) clearInterval(timer);
         await renewal;
       },
     };
@@ -391,6 +430,7 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
     at: string,
     blockerCode: 'SERVICE_START_FAILED' | 'RUNNER_DISAPPEARED' = 'SERVICE_START_FAILED',
     dispatchClaimOwner?: string,
+    dispatchClaimExpiresAt?: string,
   ): Promise<QueueDispatchResult> {
     const jobId = rowJobId(row);
     if (jobId === null || !isActiveState(row.state)) return { kind: 'blocked', reason: 'recovery predecessor is invalid', jobId: jobId ?? undefined };
@@ -398,9 +438,11 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
       kind: 'runner-recovery-blocker', jobId, expectedState: row.state, runnerUnit: unit,
       observedOwner: nullableText(row, 'runner_lease_owner'), observedLeaseExpiresAt: nullableText(row, 'runner_lease_expires_at'),
       blockerCode,
-      blocker: { code: blockerCode, reason, blocker: objectDetails(blocker) }, dispatchClaimOwner, at,
+      blocker: { code: blockerCode, reason, blocker: objectDetails(blocker) }, dispatchClaimOwner, expectedClaimExpiresAt: dispatchClaimExpiresAt, at,
     });
-    if (!success(result)) return { kind: 'blocked', reason: resultMessage(result), jobId };
+    if (!success(result)) {
+      return { kind: 'blocked', reason: resultMessage(result), jobId };
+    }
     return { kind: 'recovery-blocked', jobId, blocker };
   }
 
@@ -438,14 +480,27 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
       const heartbeat = existingHeartbeat ?? claimHeartbeat(jobId, claim.owner);
       const ownsHeartbeat = existingHeartbeat === undefined;
       try {
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
         const inspected = await inspectInactive(unit);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
         if ('code' in inspected) return { kind: 'blocked', reason: inspected.code, jobId };
-        if (inspected.active) return { kind: 'blocked', reason: 'runner unit is live', jobId };
-        if (heartbeat.isLost()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        if (observationIsLive(inspected)) return { kind: 'blocked', reason: 'runner unit is live', jobId };
         const safety = await safetyBlocker('direct-proof', jobId);
-        if (heartbeat.isLost()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
-        const blocker = safety ?? { code: 'SERVICE_START_FAILED', details: { reason, inactiveAt: inspected.observedAt } };
-        return persistRecoveryBlocker(current, unit, reason, blocker, laterInstant(clockReading(), inspected.observedAt), 'SERVICE_START_FAILED', claim.owner);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        const final = await inspectInactive(unit);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        if ('code' in final) return { kind: 'blocked', reason: final.code, jobId };
+        if (!observationIsInactive(final) || Date.parse(final.observedAt) < Date.parse(inspected.observedAt)) {
+          return { kind: 'blocked', reason: 'runner unit is live or final inactivity proof is ambiguous', jobId };
+        }
+        const at = laterInstant(clockReading(), final.observedAt);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        const finalClaim = currentDispatchClaim();
+        if (finalClaim === undefined || finalClaim.jobId !== jobId || finalClaim.owner !== claim.owner || finalClaim.phase !== 'pre-start') {
+          return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        }
+        const blocker = safety ?? { code: 'SERVICE_START_FAILED', details: { reason, inactiveAt: final.observedAt } };
+        return persistRecoveryBlocker(current, unit, reason, blocker, at, 'SERVICE_START_FAILED', finalClaim.owner, finalClaim.leaseExpiresAt);
       } finally {
         if (ownsHeartbeat) await heartbeat.stop();
       }
@@ -454,45 +509,76 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
     const heartbeat = existingHeartbeat ?? claimHeartbeat(jobId, claim.owner);
     const ownsHeartbeat = existingHeartbeat === undefined;
     try {
+      if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
       const inspected = await inspectInactive(unit);
+      if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
       if ('code' in inspected) return { kind: 'blocked', reason: inspected.code, jobId };
-      if (inspected.active) return { kind: 'blocked', reason: 'runner unit is live', jobId };
+      if (observationIsLive(inspected)) return { kind: 'blocked', reason: 'runner unit is live', jobId };
       if (Date.parse(inspected.observedAt) < Date.parse(claim.unitInactiveAt)) return { kind: 'blocked', reason: 'runner inactivity proof is stale', jobId };
       const current = currentRecoveryRow(row, jobId, unit);
       if (isBlockedResult(current)) return current;
       const currentClaim = currentDispatchClaim();
       if (currentClaim === undefined || currentClaim.jobId !== jobId || currentClaim.owner !== claim.owner || currentClaim.phase !== 'start-attempted' || currentClaim.startAttemptedAt !== claim.startAttemptedAt) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
       const safety = await safetyBlocker('direct-proof', jobId);
-      if (safety !== null) return persistRecoveryBlocker(current, unit, reason, safety, laterInstant(clockReading(), inspected.observedAt), 'SERVICE_START_FAILED', claim.owner);
+      if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+      if (safety !== null) {
+        const final = await inspectInactive(unit);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        if ('code' in final) return { kind: 'blocked', reason: final.code, jobId };
+        if (!observationIsInactive(final) || Date.parse(final.observedAt) < Date.parse(inspected.observedAt) || Date.parse(final.observedAt) < Date.parse(claim.startAttemptedAt)) {
+          return { kind: 'blocked', reason: 'runner unit is live or final inactivity proof is ambiguous', jobId };
+        }
+        const at = laterInstant(clockReading(), final.observedAt);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        const finalClaim = currentDispatchClaim();
+        if (finalClaim === undefined || finalClaim.jobId !== jobId || finalClaim.owner !== claim.owner || finalClaim.phase !== 'start-attempted' || finalClaim.startAttemptedAt !== claim.startAttemptedAt || finalClaim.unitInactiveAt !== claim.unitInactiveAt) {
+          return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        }
+        return persistRecoveryBlocker(current, unit, reason, safety, at, 'SERVICE_START_FAILED', finalClaim.owner, finalClaim.leaseExpiresAt);
+      }
       let proof: DirectInterruptionProof | null = null;
       try {
         proof = options.directInterrupt === undefined
           ? null
-          : await options.directInterrupt({ jobId, runnerUnit: unit, startAttemptedAt: claim.startAttemptedAt, unitInactiveAt: inspected.observedAt, reason });
+          : await options.directInterrupt({ jobId, runnerUnit: unit, startAttemptedAt: claim.startAttemptedAt, unitInactiveAt: claim.unitInactiveAt, reason });
       } catch (error) {
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
         const final = await inspectInactive(unit);
-        if (heartbeat.isLost() || 'code' in final || final.active || Date.parse(final.observedAt) < Date.parse(inspected.observedAt) || Date.parse(final.observedAt) < Date.parse(claim.startAttemptedAt)) {
+        if (!heartbeat.checkpoint() || 'code' in final || !observationIsInactive(final) || Date.parse(final.observedAt) < Date.parse(inspected.observedAt) || Date.parse(final.observedAt) < Date.parse(claim.startAttemptedAt)) {
           return { kind: 'blocked', reason: 'runner unit is live or final inactivity proof is ambiguous', jobId };
         }
-        return persistRecoveryBlocker(current, unit, reason, { code: 'DIRECT_PROOF_UNAVAILABLE', details: { error: error instanceof Error ? error.message : String(error) } }, laterInstant(clockReading(), final.observedAt), 'SERVICE_START_FAILED', claim.owner);
+        const at = laterInstant(clockReading(), final.observedAt);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        const finalClaim = currentDispatchClaim();
+        if (finalClaim === undefined || finalClaim.jobId !== jobId || finalClaim.owner !== claim.owner || finalClaim.phase !== 'start-attempted' || finalClaim.startAttemptedAt !== claim.startAttemptedAt || finalClaim.unitInactiveAt !== claim.unitInactiveAt) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        return persistRecoveryBlocker(current, unit, reason, { code: 'DIRECT_PROOF_UNAVAILABLE', details: { error: error instanceof Error ? error.message : String(error) } }, at, 'SERVICE_START_FAILED', finalClaim.owner, finalClaim.leaseExpiresAt);
       }
       if (proof === null) {
         const final = await inspectInactive(unit);
-        if (heartbeat.isLost() || 'code' in final || final.active || Date.parse(final.observedAt) < Date.parse(inspected.observedAt) || Date.parse(final.observedAt) < Date.parse(claim.startAttemptedAt)) {
+        if (!heartbeat.checkpoint() || 'code' in final || !observationIsInactive(final) || Date.parse(final.observedAt) < Date.parse(inspected.observedAt) || Date.parse(final.observedAt) < Date.parse(claim.startAttemptedAt)) {
           return { kind: 'blocked', reason: 'runner unit is live or final inactivity proof is ambiguous', jobId };
         }
-        return persistRecoveryBlocker(current, unit, reason, { code: 'DIRECT_PROOF_UNAVAILABLE' }, laterInstant(clockReading(), final.observedAt), 'SERVICE_START_FAILED', claim.owner);
+        const at = laterInstant(clockReading(), final.observedAt);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        const finalClaim = currentDispatchClaim();
+        if (finalClaim === undefined || finalClaim.jobId !== jobId || finalClaim.owner !== claim.owner || finalClaim.phase !== 'start-attempted' || finalClaim.startAttemptedAt !== claim.startAttemptedAt || finalClaim.unitInactiveAt !== claim.unitInactiveAt) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        return persistRecoveryBlocker(current, unit, reason, { code: 'DIRECT_PROOF_UNAVAILABLE' }, at, 'SERVICE_START_FAILED', finalClaim.owner, finalClaim.leaseExpiresAt);
       }
-      if (heartbeat.isLost() || proof.kind !== 'start-failure' || proof.runnerUnit !== unit || proof.startAttemptedAt !== claim.startAttemptedAt || proof.unitInactiveAt !== inspected.observedAt || proof.container.observedAt !== inspected.observedAt) {
+      if (!heartbeat.checkpoint() || proof.kind !== 'start-failure' || proof.runnerUnit !== unit || proof.startAttemptedAt !== claim.startAttemptedAt || proof.unitInactiveAt !== claim.unitInactiveAt
+        || Date.parse(proof.container.observedAt) < Date.parse(claim.unitInactiveAt)
+        || Date.parse(proof.logs.verifiedAt) < Date.parse(claim.unitInactiveAt)) {
         return { kind: 'blocked', reason: 'DIRECT_PROOF_MISMATCH', jobId };
       }
       const final = await inspectInactive(unit);
-      if (heartbeat.isLost() || 'code' in final) return { kind: 'blocked', reason: 'code' in final ? final.code : 'dispatch claim ownership changed', jobId };
-      if (final.active) return { kind: 'blocked', reason: 'runner unit is live', jobId };
+      if (!heartbeat.checkpoint() || 'code' in final) return { kind: 'blocked', reason: 'code' in final ? final.code : 'dispatch claim ownership changed', jobId };
+      if (!observationIsInactive(final)) return { kind: 'blocked', reason: 'runner unit is live', jobId };
       if (Date.parse(final.observedAt) < Date.parse(inspected.observedAt) || Date.parse(final.observedAt) < Date.parse(claim.startAttemptedAt)) return { kind: 'blocked', reason: 'final inactivity proof is stale', jobId };
       const at = laterInstant(clockReading(), final.observedAt);
-      const trustedProof: DirectInterruptionProof = { ...proof, unitInactiveAt: final.observedAt, container: { ...proof.container, observedAt: final.observedAt } };
-      const result = options.ownership.apiWrite({ kind: 'direct-interrupt', jobId, expectedState: row.state, at, proof: trustedProof, errorCode: 'SERVICE_START_FAILED', error: { reason }, dispatchClaimOwner: claim.owner, expectedStartAttemptedAt: claim.startAttemptedAt, expectedUnitInactiveAt: claim.unitInactiveAt });
+      const trustedProof: DirectInterruptionProof = { ...proof, unitInactiveAt: final.observedAt };
+      if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+      const finalClaim = currentDispatchClaim();
+      if (finalClaim === undefined || finalClaim.jobId !== jobId || finalClaim.owner !== claim.owner || finalClaim.phase !== 'start-attempted' || finalClaim.startAttemptedAt !== claim.startAttemptedAt || finalClaim.unitInactiveAt !== claim.unitInactiveAt) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+      const result = options.ownership.apiWrite({ kind: 'direct-interrupt', jobId, expectedState: row.state, at, proof: trustedProof, errorCode: 'SERVICE_START_FAILED', error: { reason }, dispatchClaimOwner: finalClaim.owner, expectedStartAttemptedAt: finalClaim.startAttemptedAt, expectedUnitInactiveAt: finalClaim.unitInactiveAt });
       if (!success(result)) return { kind: 'blocked', reason: resultMessage(result), jobId };
       return { kind: 'interrupted', jobId };
     } finally {
@@ -517,28 +603,46 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
       if (lease.kind === 'malformed') return { kind: 'blocked', reason: 'RUNNER_LEASE_MALFORMED', jobId };
       if (lease.kind === 'live') return { kind: 'blocked', reason: 'RUNNER_LEASE_LIVE', jobId };
       if (claim !== undefined && claim.jobId !== jobId) return { kind: 'blocked', reason: 'DISPATCH_CLAIM_LIVE', jobId };
-      if (claim !== undefined && Date.parse(claim.leaseExpiresAt) > Date.parse(clockReading())) return { kind: 'blocked', reason: 'DISPATCH_CLAIM_LIVE', jobId };
       if (claim === undefined && lease.kind === 'none') return { kind: 'blocked', reason: 'DISPATCH_CLAIM_MISSING', jobId };
-      if (claim !== undefined && Date.parse(claim.leaseExpiresAt) <= Date.parse(clockReading())) {
-        const reclaimAt = clockReading();
-        const reclaimed = options.ownership.apiWrite({ kind: 'dispatch-reclaim', jobId, runnerUnit: unit, previousOwner: claim.owner, claimOwner: coordinatorId, claimExpiresAt: dispatchClaimExpiry(reclaimAt, claimLeaseMs), at: reclaimAt });
-        if (!success(reclaimed)) return { kind: 'blocked', reason: resultMessage(reclaimed), jobId };
-        claim = currentDispatchClaim();
-        if (claim === undefined || claim.jobId !== jobId || claim.owner !== coordinatorId) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+      if (claim !== undefined) {
+        const claimNow = clockReading();
+        if (Date.parse(claim.leaseExpiresAt) > Date.parse(claimNow)) return { kind: 'blocked', reason: 'DISPATCH_CLAIM_LIVE', jobId };
+        const expiredObservation = await inspectInactive(unit);
+        if ('code' in expiredObservation) return { kind: 'blocked', reason: expiredObservation.code, jobId };
+        if (!observationIsInactive(expiredObservation)) return { kind: 'blocked', reason: 'runner unit is live', jobId };
+        const expiredHeartbeat = claimHeartbeat(jobId, claim.owner);
+        try {
+          if (!expiredHeartbeat.checkpoint(true)) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+          const reclaimAt = clockReading();
+          const verifiedClaim = currentDispatchClaim();
+          if (verifiedClaim === undefined || verifiedClaim.jobId !== jobId || verifiedClaim.owner !== claim.owner || Date.parse(verifiedClaim.leaseExpiresAt) > Date.parse(reclaimAt)) {
+            return { kind: 'blocked', reason: 'DISPATCH_CLAIM_LIVE', jobId };
+          }
+          const reclaimed = options.ownership.apiWrite({ kind: 'dispatch-reclaim', jobId, runnerUnit: unit, previousOwner: verifiedClaim.owner, claimOwner: coordinatorId, claimExpiresAt: dispatchClaimExpiry(reclaimAt, claimLeaseMs), at: reclaimAt });
+          if (!success(reclaimed)) return { kind: 'blocked', reason: resultMessage(reclaimed), jobId };
+          claim = currentDispatchClaim();
+          if (claim === undefined || claim.jobId !== jobId || claim.owner !== coordinatorId) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        } finally {
+          await expiredHeartbeat.stop();
+        }
       }
       const recoveryHeartbeat = claim === undefined ? undefined : claimHeartbeat(jobId, claim.owner);
       try {
         const observation = await inspectInactive(unit);
-        if (recoveryHeartbeat?.isLost()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        if (recoveryHeartbeat !== undefined && !recoveryHeartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
         if ('code' in observation) return { kind: 'blocked', reason: observation.code, jobId };
-        if (observation.active) return { kind: 'blocked', reason: 'runner unit is live', jobId };
+        if (observationIsLive(observation)) return { kind: 'blocked', reason: 'runner unit is live', jobId };
         if (lease.kind === 'stale') {
           const current = currentRecoveryRow(row, jobId, unit, 'stale');
           if (isBlockedResult(current)) return current;
-          return persistRecoveryBlocker(current, unit, 'dispatcher observed an expired runner lease', { code: 'RUNNER_DISAPPEARED', details: { unit, inactiveAt: observation.observedAt } }, laterInstant(clockReading(), observation.observedAt), 'RUNNER_DISAPPEARED', claim?.owner);
+          const at = laterInstant(clockReading(), observation.observedAt);
+          if (recoveryHeartbeat !== undefined && !recoveryHeartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+          const finalClaim = currentDispatchClaim();
+          if (finalClaim !== undefined && (finalClaim.jobId !== jobId || finalClaim.owner !== claim?.owner)) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+          return persistRecoveryBlocker(current, unit, 'dispatcher observed an expired runner lease', { code: 'RUNNER_DISAPPEARED', details: { unit, inactiveAt: observation.observedAt } }, at, 'RUNNER_DISAPPEARED', finalClaim?.owner, finalClaim?.leaseExpiresAt);
         }
         if (claim === undefined) return { kind: 'blocked', reason: 'DISPATCH_CLAIM_MISSING', jobId };
-        return recoverClaimed(row, unit, 'dispatcher found a claimed starting job before service start', claim.owner, recoveryHeartbeat);
+        return await recoverClaimed(row, unit, 'dispatcher found a claimed starting job before service start', claim.owner, recoveryHeartbeat);
       } finally {
         await recoveryHeartbeat?.stop();
       }
@@ -569,25 +673,26 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
       const heartbeat = claimHeartbeat(jobId, coordinatorId);
       try {
         const afterClaimSafety = await safetyBlocker('before-start', jobId);
-        if (heartbeat.isLost()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
         const claimedRow = currentJob(jobId);
         const claimedDispatch = currentDispatchClaim();
         if (claimedRow === undefined || claimedDispatch === undefined || claimedDispatch.jobId !== jobId || claimedDispatch.owner !== coordinatorId || claimedDispatch.phase !== 'pre-start') return { kind: 'blocked', reason: 'DISPATCH_CLAIM_MISSING', jobId };
         const afterClaimDatabase = databaseBlocker(jobId);
-        if (afterClaimSafety !== null) return recoverClaimed(claimedRow, unit, 'runtime blocker appeared after queue claim', coordinatorId, heartbeat);
-        if (afterClaimDatabase !== null) return recoverClaimed(claimedRow, unit, 'SQLite blocker appeared after queue claim', coordinatorId, heartbeat);
+        if (afterClaimSafety !== null) return await recoverClaimed(claimedRow, unit, 'runtime blocker appeared after queue claim', coordinatorId, heartbeat);
+        if (afterClaimDatabase !== null) return await recoverClaimed(claimedRow, unit, 'SQLite blocker appeared after queue claim', coordinatorId, heartbeat);
         const observation = await inspectInactive(unit);
-        if (heartbeat.isLost()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
-        if ('code' in observation) return recoverClaimed(claimedRow, unit, observation.code, coordinatorId, heartbeat);
-        if (observation.active) return recoverClaimed(currentJob(jobId) ?? claimedRow, unit, 'runner unit became live before service start', coordinatorId, heartbeat);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        if ('code' in observation) return await recoverClaimed(claimedRow, unit, observation.code, coordinatorId, heartbeat);
+        if (observationIsLive(observation)) return await recoverClaimed(currentJob(jobId) ?? claimedRow, unit, 'runner unit became live before service start', coordinatorId, heartbeat);
         const beforeStart = await safetyBlocker('before-start', jobId);
-        if (heartbeat.isLost()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
-        if (beforeStart !== null) return recoverClaimed(claimedRow, unit, 'runtime blocker appeared during final start check', coordinatorId, heartbeat);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        if (beforeStart !== null) return await recoverClaimed(claimedRow, unit, 'runtime blocker appeared during final start check', coordinatorId, heartbeat);
         const liveBeforeStart = await systemdBlocker(unit);
-        if (heartbeat.isLost()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
-        if (liveBeforeStart !== null) return recoverClaimed(claimedRow, unit, 'runner unit became live during final start check', coordinatorId, heartbeat);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        if (liveBeforeStart !== null) return await recoverClaimed(claimedRow, unit, 'runner unit became live during final start check', coordinatorId, heartbeat);
         const sqliteBeforeStart = databaseBlocker(jobId);
-        if (sqliteBeforeStart !== null) return recoverClaimed(claimedRow, unit, 'SQLite blocker appeared during final start check', coordinatorId, heartbeat);
+        if (sqliteBeforeStart !== null) return await recoverClaimed(claimedRow, unit, 'SQLite blocker appeared during final start check', coordinatorId, heartbeat);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
         const currentBeforeStart = currentDispatchClaim();
         if (currentBeforeStart === undefined || currentBeforeStart.jobId !== jobId || currentBeforeStart.owner !== coordinatorId || currentBeforeStart.phase !== 'pre-start') return { kind: 'blocked', reason: 'DISPATCH_CLAIM_MISSING', jobId };
         const startAttemptedAt = clockReading();
@@ -596,17 +701,18 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
         let start: unknown;
         try { start = await options.systemd.start(unit); }
         catch (error) {
-          if (heartbeat.isLost()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
-          return recoverClaimed(claimedRow, unit, `systemd start threw: ${error instanceof Error ? error.message : String(error)}`, coordinatorId, heartbeat);
+          if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+          return await recoverClaimed(claimedRow, unit, `systemd start threw: ${error instanceof Error ? error.message : String(error)}`, coordinatorId, heartbeat);
         }
-        if (heartbeat.isLost()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
         if (!safeResult(start) || start.unit !== unit || JSON.stringify(start.argv) !== JSON.stringify(START_ARGV(unit)) || start.exitCode !== 0 || start.timedOut || start.signal !== undefined && start.signal !== null) {
-          return recoverClaimed(claimedRow, unit, 'systemd service start failed or returned an invalid command result', coordinatorId, heartbeat);
+          return await recoverClaimed(claimedRow, unit, 'systemd service start failed or returned an invalid command result', coordinatorId, heartbeat);
         }
         const postStart = await inspectInactive(unit);
-        if (heartbeat.isLost()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
-        if ('code' in postStart) return recoverClaimed(claimedRow, unit, postStart.code, coordinatorId, heartbeat);
-        if (!postStart.active || Date.parse(postStart.observedAt) < Date.parse(startAttemptedAt)) return recoverClaimed(claimedRow, unit, 'systemd start did not produce a fresh active observation', coordinatorId, heartbeat);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
+        if ('code' in postStart) return await recoverClaimed(claimedRow, unit, postStart.code, coordinatorId, heartbeat);
+        if (!postStart.active || postStart.pending || Date.parse(postStart.observedAt) < Date.parse(startAttemptedAt)) return await recoverClaimed(claimedRow, unit, 'systemd start did not produce a fresh active observation', coordinatorId, heartbeat);
+        if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
         return { kind: 'started', jobId, runnerUnit: unit };
       } finally {
         await heartbeat.stop();

@@ -90,8 +90,13 @@ function dispatchCommand(jobId = 'job-1'): Extract<ApiWriteCommand, { kind: 'dis
   return { kind: 'dispatch', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, claimOwner: `dispatcher-${jobId}`, claimExpiresAt: '2026-07-23T10:05:00.000Z', at: NOW };
 }
 
+function dispatchStartCommand(jobId = 'job-1'): Extract<ApiWriteCommand, { kind: 'dispatch-start' }> {
+  return { kind: 'dispatch-start', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, claimOwner: `dispatcher-${jobId}`, expectedClaimExpiresAt: '2026-07-23T10:05:00.000Z', claimExpiresAt: '2026-07-23T10:05:00.000Z', unitInactiveAt: NOW, startAttemptedAt: NOW, at: NOW };
+}
+
 function acquireAndLease(ownership: OwnershipStore, jobId = 'job-1'): void {
   ownership.apiWrite(dispatchCommand(jobId));
+  ownership.apiWrite(dispatchStartCommand(jobId));
   ownership.runnerWrite({ kind: 'acquire-lease', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', expiresAt: '2026-07-23T10:02:00.000Z', at: NOW });
 }
 
@@ -152,7 +157,7 @@ describe('OwnershipStore persistence coverage', () => {
   });
 
   it('acquires and renews the exact runner lease', async () => {
-    const { ownership, store } = await openFixture(); ownership.apiWrite(dispatchCommand());
+    const { ownership, store } = await openFixture(); ownership.apiWrite(dispatchCommand()); ownership.apiWrite(dispatchStartCommand());
     expect(ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'job-1', runnerUnit: runnerBase().runnerUnit, owner: 'runner-a', expiresAt: '2026-07-23T10:02:00.000Z', at: NOW }).ok).toBe(true);
     expect(ownership.runnerWrite({ kind: 'renew-lease', jobId: 'job-1', runnerUnit: runnerBase().runnerUnit, owner: 'runner-a', expectedExpiresAt: '2026-07-23T10:02:00.000Z', expiresAt: '2026-07-23T10:03:00.000Z', at: LATER }).ok).toBe(true);
     expect(store.getJob('job-1')).toMatchObject({ runnerLeaseOwner: 'runner-a', runnerLeaseExpiresAt: '2026-07-23T10:03:00.000Z' });
@@ -167,7 +172,7 @@ describe('OwnershipStore persistence coverage', () => {
   it('does not append an event for a stale stage predecessor', async () => {
     const { ownership, store } = await openFixture(); acquireAndLease(ownership);
     expect(ownership.runnerWrite(stageCommand('job-1', 'source', 'preflight', 'preflight', 'passed'))).toMatchObject({ ok: false });
-    expect(store.listEvents('job-1').events).toHaveLength(3);
+    expect(store.listEvents('job-1').events).toHaveLength(4);
   });
 
   it('round-trips a pre-container operation result', async () => {
@@ -255,7 +260,7 @@ describe('OwnershipStore persistence coverage', () => {
 
   it('classifies persisted oversized argv, malformed JSON, and hashes as StoreDataError', async () => {
     const { db, store, ownership } = await openFixture();
-    ownership.apiWrite(dispatchCommand());
+    ownership.apiWrite(dispatchCommand()); ownership.apiWrite(dispatchStartCommand());
     ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'job-1', runnerUnit: 'osi-image-builder-runner@job-1.service', owner: 'runner-a', expiresAt: LATER, at: NOW });
     ownership.runnerWrite({ kind: 'operation-begin', expectedState: 'starting', jobId: 'job-1', owner: 'runner-a', runnerUnit: 'osi-image-builder-runner@job-1.service', leaseExpiresAt: LATER, at: NOW, operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW });
     db.exec('PRAGMA ignore_check_constraints=ON'); db.prepare('UPDATE job_operations SET argv_json=? WHERE job_id=?').run(JSON.stringify(['x'.repeat(70_000)]), 'job-1');
@@ -336,7 +341,7 @@ describe('OwnershipStore persistence coverage', () => {
     await writeFile(join(dirname(path), 'runtime.json'), JSON.stringify({ state: 'succeeded', containerId: 'stale-container' }));
     const reopened = new BuilderStore(openBuilderDatabase(path)); openStores.push(reopened);
     expect(reopened.getJob('job-1')).toMatchObject({ state: 'starting', runnerUnit: 'osi-image-builder-runner@job-1.service' });
-    expect(reopened.listEvents('job-1').events.map((event) => event.eventType)).toEqual(['enqueue', 'dispatch', 'state']);
+    expect(reopened.listEvents('job-1').events.map((event) => event.eventType)).toEqual(['enqueue', 'dispatch', 'recovery', 'state']);
   });
 });
 

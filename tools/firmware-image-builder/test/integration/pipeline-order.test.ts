@@ -497,6 +497,17 @@ async function fixture(options: {
     claimExpiresAt: '2026-07-26T08:10:00.000Z',
     at: '2026-07-26T08:00:10.000Z',
   }).ok).toBe(true);
+  expect(ownership.apiWrite({
+    kind: 'dispatch-start',
+    jobId,
+    runnerUnit,
+    claimOwner: 'dispatcher-pipeline-order',
+    expectedClaimExpiresAt: '2026-07-26T08:10:00.000Z',
+    claimExpiresAt: '2026-07-26T08:10:00.000Z',
+    unitInactiveAt: '2026-07-26T08:00:10.000Z',
+    startAttemptedAt: '2026-07-26T08:00:10.000Z',
+    at: '2026-07-26T08:00:10.000Z',
+  }).ok).toBe(true);
 
   const clock = new AdvancingClock();
   const evidenceWriter = createEvidenceWriter({
@@ -2167,6 +2178,9 @@ describe('trusted pipeline integration', () => {
         expiresAt,
         at,
       }).ok).toBe(true);
+      const staleLeaseDatabase = openBuilderDatabase(join(value.statePath, 'jobs.sqlite'));
+      staleLeaseDatabase.prepare('UPDATE jobs SET runner_lease_expires_at=? WHERE job_id=?').run('2026-07-26T07:59:00.000Z', value.input.jobId);
+      staleLeaseDatabase.close();
 
       await expect(runGuardedComposition({
         args: {
@@ -2244,11 +2258,23 @@ describe('trusted pipeline integration', () => {
       process.env.XDG_CONFIG_HOME = configHome;
       process.env.XDG_STATE_HOME = stateHome;
 
+      const claimExpiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+      expect(value.ownership.apiWrite({
+        kind: 'dispatch-reclaim',
+        jobId: value.input.jobId,
+        runnerUnit: value.input.runnerUnit,
+        previousOwner: 'dispatcher-pipeline-order',
+        claimOwner: 'dispatcher-pipeline-order',
+        claimExpiresAt,
+        at: new Date().toISOString(),
+      }).ok).toBe(true);
+      const runnerLeaseExpiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+
       await expect(runRunner([
         '--job-id', value.input.jobId,
         '--runner-unit', value.input.runnerUnit,
         '--owner', value.input.owner,
-        '--lease-expires-at', '2026-07-28T09:00:00.000Z',
+        '--lease-expires-at', runnerLeaseExpiresAt,
       ])).resolves.toMatchObject({
         state: 'failed',
       });
