@@ -74,6 +74,34 @@ async function raw(port: number, input: string): Promise<string> {
   });
 }
 
+async function rawWithoutHalfClose(port: number, input: string): Promise<{ readonly response: string; readonly closed: boolean }> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(port, '127.0.0.1');
+    const chunks: Buffer[] = [];
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(new Error('socket was not closed by the server'));
+    }, 2_000);
+    socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+    socket.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+    socket.on('close', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ response: Buffer.concat(chunks).toString('utf8'), closed: true });
+    });
+    socket.on('connect', () => socket.write(input));
+  });
+}
+
 describe('loopback HTTP security boundary', () => {
   it('binds loopback-only and dispatches a request with a request ID', async () => {
     let seen: ApiRouteContext | undefined;
@@ -408,6 +436,24 @@ describe('loopback HTTP security boundary', () => {
       expect(head.headers['content-length']).toBe(String(Buffer.byteLength('{"ok":true}')));
       expect(head.headers['content-type']).toBe('application/json; charset=utf-8');
       expect(head.headers['access-control-allow-origin']).toBe(originFor(port));
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('preserves client Connection: close and closes an open socket after the response', async () => {
+    const { server, port } = await start(() => jsonResponse(200, { ok: true }));
+    try {
+      const response = await rawWithoutHalfClose(port, [
+        'GET /api/health HTTP/1.1',
+        `Host: 127.0.0.1:${port}`,
+        'Connection: close',
+        '',
+        '',
+      ].join('\r\n'));
+      expect(response.response).toMatch(/^HTTP\/1\.1 200 /u);
+      expect(response.response).toMatch(/\r\nconnection: close\r\n/iu);
+      expect(response.closed).toBe(true);
     } finally {
       await stop(server);
     }

@@ -73,6 +73,40 @@ async function rawRequest(port: number, requestText: string): Promise<{ readonly
   });
 }
 
+async function rawWithoutHalfClose(port: number, requestText: string): Promise<{ readonly status: number; readonly body: string; readonly closed: boolean }> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(port, '127.0.0.1');
+    const chunks: Buffer[] = [];
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(new Error('socket was not closed by the server'));
+    }, 2_000);
+    socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+    socket.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+    socket.on('close', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const body = Buffer.concat(chunks).toString('utf8');
+      const match = /^HTTP\/1\.1 (\d{3})/u.exec(body);
+      if (match === null) {
+        reject(new Error(`missing HTTP status in response: ${body}`));
+        return;
+      }
+      resolve({ status: Number(match[1]), body, closed: true });
+    });
+    socket.on('connect', () => socket.write(requestText));
+  });
+}
+
 async function call(port: number, options: {
   readonly method: string;
   readonly path: string;
@@ -230,6 +264,58 @@ describe('HTTP request-target parsing', () => {
       expect(response.status).toBe(403);
       expect(response.body).toMatch(/connection: close/iu);
       expect(dispatched).toBe(0);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it.each(['GET', 'HEAD', 'OPTIONS'])('drains and closes framed %s with an invalid Host without returning a pipelined response', async (method) => {
+    const { server, port } = await start(() => {
+      return jsonResponse(200, { ok: true });
+    });
+    try {
+      const response = await rawWithoutHalfClose(port, [
+        `${method} /api/health HTTP/1.1`,
+        'Host: 127.0.0.1:1',
+        'Content-Length: 4',
+        'Connection: keep-alive',
+        '',
+        'body',
+        'GET /api/health HTTP/1.1',
+        `Host: 127.0.0.1:${port}`,
+        'Connection: close',
+        '',
+        '',
+      ].join('\r\n'));
+      expect(response.status).toBe(400);
+      expect(response.body).not.toContain('HTTP/1.1 200');
+      expect(response.closed).toBe(true);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it.each(['GET', 'HEAD', 'OPTIONS'])('drains and closes framed %s with an invalid path without returning a pipelined response', async (method) => {
+    const { server, port } = await start(() => {
+      return jsonResponse(200, { ok: true });
+    });
+    try {
+      const response = await rawWithoutHalfClose(port, [
+        `${method} /api/% HTTP/1.1`,
+        `Host: 127.0.0.1:${port}`,
+        'Content-Length: 4',
+        'Connection: keep-alive',
+        '',
+        'body',
+        'GET /api/health HTTP/1.1',
+        `Host: 127.0.0.1:${port}`,
+        'Connection: close',
+        '',
+        '',
+      ].join('\r\n'));
+      expect(response.status).toBe(400);
+      expect(response.body).not.toContain('HTTP/1.1 200');
+      expect(response.closed).toBe(true);
     } finally {
       await stop(server);
     }

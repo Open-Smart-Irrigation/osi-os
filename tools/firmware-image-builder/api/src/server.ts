@@ -89,6 +89,10 @@ function isMutation(method: string): boolean {
   return method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
 }
 
+function isReadMethod(method: string): boolean {
+  return method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+}
+
 function contentTypeIsJson(value: string | string[] | undefined): boolean {
   if (typeof value !== 'string') return false;
   return value.split(';', 1)[0]!.trim().toLowerCase() === 'application/json';
@@ -247,7 +251,8 @@ function sendJson(response: ServerResponse, status: number, body: unknown, id: s
     'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS',
     'access-control-allow-headers': 'content-type',
   } : {};
-  response.shouldKeepAlive = options.closeConnection !== true;
+  const shouldKeepAlive = options.closeConnection !== true && response.shouldKeepAlive;
+  response.shouldKeepAlive = shouldKeepAlive;
   response.writeHead(validStatus, {
     ...routeHeaders(options.routeHeaders ?? {}),
     ...corsHeaders,
@@ -256,7 +261,7 @@ function sendJson(response: ServerResponse, status: number, body: unknown, id: s
     'content-length': String(Buffer.byteLength(payload, 'utf8')),
     'cache-control': 'no-store',
     [REQUEST_ID_HEADER]: id,
-    connection: options.closeConnection === true ? 'close' : 'keep-alive',
+    connection: shouldKeepAlive ? 'keep-alive' : 'close',
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
     'x-frame-options': 'DENY',
@@ -379,17 +384,17 @@ export function createHttpServer(options: HttpServerOptions): Server {
 
   const server = createServer(async (request, response) => {
     const id = requestId();
+    const method = request.method ?? '';
+    const framedReadRequest = isReadMethod(method) && hasRequestFraming(request);
     let closeConnection = false;
     let bodyReadSettled = false;
     try {
-      const method = request.method ?? '';
-      checkHost(request);
-      const parsedUrl = parseRequestUrl(request);
-      if (['GET', 'HEAD', 'OPTIONS'].includes(method) && hasRequestFraming(request)) {
+      if (framedReadRequest) {
         closeConnection = true;
-        drainRequest(request);
         fail('BODY_NOT_ALLOWED', 400);
       }
+      checkHost(request);
+      const parsedUrl = parseRequestUrl(request);
       if (request.method === 'OPTIONS') {
         preflight(response, request, id);
         return;
@@ -420,7 +425,7 @@ export function createHttpServer(options: HttpServerOptions): Server {
         corsOrigin: request.headers.origin === origin ? origin : undefined,
       });
     } catch (error) {
-      if (isMutation(request.method ?? '') && !bodyReadSettled) {
+      if ((isMutation(method) || framedReadRequest) && !bodyReadSettled) {
         closeConnection = true;
         drainRequest(request);
       }
