@@ -245,6 +245,85 @@ describe('read-only builder API routes', () => {
     });
   });
 
+  it('recursively redacts sensitive public observations without hiding benign evidence', async () => {
+    const forbiddenValues = [
+      'token-value-123',
+      'password-value-456',
+      '-----BEGIN OPENSSH PRIVATE KEY-----\nprivate-material\n-----END OPENSSH PRIVATE KEY-----',
+      '/home/builder/.config/secret.json',
+      'artifact was written to /tmp/build-output/image.img',
+      'socket=/run/osi-builder.sock',
+      'loaded /etc/osi-image-builder/config.json',
+      'read /proc/self/status',
+      'checked /sys/class/thermal/thermal_zone0/temp',
+      'device at /dev/ttyUSB0',
+      'root is /root/.cache/builder',
+      'stored in /var/lib/osi-builder/state',
+      'served from /srv/images/release.img',
+      'file:///home/builder/.ssh/id_ed25519',
+      'see ~/.ssh/id_ed25519 for details',
+      'password=hunter2',
+      'GIT_SSH_COMMAND=ssh -i /home/builder/.ssh/id_ed25519',
+      '/run/secret-agent.sock',
+      '/home/builder/.config/credentials.json',
+      'Bearer authorization-value',
+      'session-cookie-value',
+      'secret-value',
+    ];
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence(),
+      observations: {
+        neutralHomePath: forbiddenValues[3],
+        neutralEmbeddedPaths: forbiddenValues.slice(4, 13),
+        neutralFileUri: forbiddenValues[13],
+        neutralSshEvidence: forbiddenValues[14],
+        nested: {
+          buildAccessToken: forbiddenValues[0],
+          Db_PASSWORD: forbiddenValues[1],
+          private_key: forbiddenValues[2],
+          sshAuthSock: '/run/secret-agent.sock',
+          git_ssh_command: forbiddenValues[16],
+          credentialPath: '/home/builder/.config/credentials.json',
+          deeplyNested: [{ authorizationHeader: 'Bearer authorization-value' }, { cookieValue: 'session-cookie-value' }, { someSecretValue: 'secret-value' }],
+          benign: {
+            relativeToolEvidence: 'logs/build/output.txt',
+            hash: 'f'.repeat(64),
+            url: 'https://example.test/build/output',
+            enabled: true,
+            count: 3,
+            missing: null,
+          },
+        },
+      },
+    }, 'publish', 'passed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(200);
+    const encoded = JSON.stringify(response.body);
+    for (const forbiddenValue of forbiddenValues) expect(encoded).not.toContain(forbiddenValue);
+    expect(response.body).toMatchObject({
+      observations: {
+        neutralHomePath: '[redacted]',
+        neutralEmbeddedPaths: Array(9).fill('[redacted]'),
+        neutralFileUri: '[redacted]',
+        neutralSshEvidence: '[redacted]',
+        nested: {
+          deeplyNested: [{}, {}, {}],
+          benign: {
+            relativeToolEvidence: 'logs/build/output.txt',
+            hash: 'f'.repeat(64),
+            url: 'https://example.test/build/output',
+            enabled: true,
+            count: 3,
+            missing: null,
+          },
+        },
+      },
+    });
+  });
+
   it('rejects malformed stored stage evidence', async () => {
     const rejected = async (evidence: Record<string, unknown>, stage: PipelineStageName, outcome: 'passed' | 'failed') => {
       const routeDependencies = dependencies();

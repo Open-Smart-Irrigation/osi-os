@@ -21,6 +21,7 @@ import {
   canonicalAbsolutePath,
   canonicalInstant,
   encodeJson,
+  JSON_LIMITS,
   optionalInstant,
   sourceMetadataSubject,
   stableRelativePath,
@@ -50,6 +51,13 @@ const HASH40_PATTERN = /^[0-9a-f]{40}$/u;
 const HASH64_PATTERN = /^[0-9a-f]{64}$/u;
 const EVIDENCE_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}\.json$/u;
 const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
+const PRIVATE_KEY_PATTERN = /-----BEGIN [^-\r\n]*PRIVATE KEY-----/iu;
+const SENSITIVE_OBSERVATION_KEY_PARTS = Object.freeze([
+  'token', 'password', 'passwd', 'secret', 'credential', 'privatekey', 'authorization', 'cookie',
+  'sshauthsock', 'gitsshcommand', 'sshpath',
+]);
+const CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[\s;,?&])(?:[a-z0-9_.-]*(?:token|password|passwd|secret|credential|authorization|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key)[a-z0-9_.-]*)\s*=\s*[^\s;,?&]+/iu;
+const ABSOLUTE_SENSITIVE_PATH_PATTERN = /\/(?:home|tmp|run|etc|proc|sys|dev|root|var|srv)(?:\/|$)/iu;
 const JOB_STATE_SET = new Set<string>(JOB_STATES);
 const STAGE_SET = new Set<string>(PIPELINE_STAGE_NAMES);
 const ERROR_CODE_SET = new Set<string>(BUILDER_ERROR_CODES);
@@ -527,6 +535,62 @@ function publicEvidenceInputs(value: unknown): JsonRecord {
   return { targetId, rootId, branch, pinnedSha: input.pinnedSha };
 }
 
+function normalizedObservationKey(key: string): string {
+  return key.replace(/[^a-z0-9]/giu, '').toLowerCase();
+}
+
+function isSensitiveObservationKey(key: string): boolean {
+  const normalized = normalizedObservationKey(key);
+  return SENSITIVE_OBSERVATION_KEY_PARTS.some((part) => normalized.includes(part));
+}
+
+function redactObservationString(value: string): string {
+  return CONTROL_PATTERN.test(value)
+    || PRIVATE_KEY_PATTERN.test(value)
+    || ABSOLUTE_SENSITIVE_PATH_PATTERN.test(value)
+    || /file:\/\//iu.test(value)
+    || /~\/\.ssh(?:\/|$)/iu.test(value)
+    || CREDENTIAL_ASSIGNMENT_PATTERN.test(value)
+    ? '[redacted]'
+    : value;
+}
+
+interface ObservationProjectionBudget {
+  nodes: number;
+  edges: number;
+}
+
+function projectPublicObservation(value: unknown, field: string, depth: number, budget: ObservationProjectionBudget): unknown {
+  budget.nodes += 1;
+  if (budget.nodes > JSON_LIMITS.maxNodes || depth > JSON_LIMITS.maxDepth) throw new Error(`${field} exceeds JSON bounds`);
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (typeof value === 'string') return redactObservationString(value);
+  if (Array.isArray(value)) {
+    if (value.length > JSON_LIMITS.maxArrayElements) throw new Error(`${field} exceeds JSON array bounds`);
+    return value.map((item, index) => {
+      budget.edges += 1;
+      if (budget.edges > JSON_LIMITS.maxEdges) throw new Error(`${field} exceeds JSON edge bounds`);
+      return projectPublicObservation(item, `${field}[${index}]`, depth + 1, budget);
+    });
+  }
+  if (typeof value !== 'object') throw new Error(`${field} contains a non-JSON value`);
+  const input = value as Record<string, unknown>;
+  const keys = Object.keys(input);
+  if (keys.length > JSON_LIMITS.maxKeys) throw new Error(`${field} exceeds JSON key bounds`);
+  const output = Object.create(null) as JsonRecord;
+  for (const key of keys) {
+    if (isSensitiveObservationKey(key)) continue;
+    budget.edges += 1;
+    if (budget.edges > JSON_LIMITS.maxEdges) throw new Error(`${field} exceeds JSON edge bounds`);
+    output[key] = projectPublicObservation(input[key], `${field}.${key}`, depth + 1, budget);
+  }
+  return output;
+}
+
+function publicObservations(value: unknown): unknown {
+  return projectPublicObservation(value, 'public observations', 0, { nodes: 0, edges: 0 });
+}
+
 function publicEvidence(value: unknown, expectedJobId: string, expectedStage: PipelineStageName): JsonRecord {
   const evidence = decodeStoredStageEvidence(value);
   if (evidence.jobId !== expectedJobId || evidence.stage !== expectedStage) {
@@ -553,7 +617,7 @@ function publicEvidence(value: unknown, expectedJobId: string, expectedStage: Pi
     operationId: evidence.operationId,
     commands: evidence.commands,
     inputs: publicEvidenceInputs(evidence.inputs),
-    observations: evidence.observations,
+    observations: publicObservations(evidence.observations),
     error,
   };
   encodeJson(projected, 'public evidence response', true);
