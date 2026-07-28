@@ -125,9 +125,11 @@ export interface RecoveryStagingVerificationInput {
   readonly jobId: string;
   readonly admissionId: string;
   readonly rootId: string;
+  readonly publishState: string | null;
   readonly artifactStagingPath: string | null;
   readonly artifactSha256: string | null;
   readonly artifactSize: number | null;
+  readonly artifactMtime: string | null;
   readonly checksumPath: string | null;
   readonly checksumSha256: string | null;
   readonly manifestPath: string | null;
@@ -230,6 +232,13 @@ export class RecoveryBoundaryError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'RecoveryBoundaryError';
+  }
+}
+
+export class RecoveryInfrastructureError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'RecoveryInfrastructureError';
   }
 }
 
@@ -978,11 +987,14 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       if (runnerUnitObservation.active !== false) throw new RecoveryBoundaryError('stale runner unit is still active during hand-back');
 
       const rootId = requiredRowString(job, 'root_id');
+      const publishState = nullableRowString(job, 'publish_state');
       const artifactStagingPath = nullableRowString(job, 'artifact_staging_path');
       const artifactSha256 = nullableRowString(job, 'artifact_sha256');
       if (artifactSha256 !== null && !HASH64.test(artifactSha256)) throw new RecoveryBoundaryError('persisted staging artifact hash is invalid');
       const artifactSize = job.artifact_size === null || job.artifact_size === undefined ? null : Number(job.artifact_size);
       if (artifactSize !== null && (!Number.isSafeInteger(artifactSize) || artifactSize < 0)) throw new RecoveryBoundaryError('persisted staging artifact size is invalid');
+      const artifactMtime = nullableRowString(job, 'artifact_mtime');
+      if (artifactMtime !== null) recoveryInstant(artifactMtime, 'persisted staging artifact mtime');
       const checksumPath = nullableRowString(job, 'checksum_path');
       const checksumSha256 = nullableRowString(job, 'checksum_sha256');
       const manifestPath = nullableRowString(job, 'manifest_path');
@@ -998,9 +1010,11 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
         jobId: input.jobId,
         admissionId: input.admissionId,
         rootId,
+        publishState,
         artifactStagingPath,
         artifactSha256,
         artifactSize,
+        artifactMtime,
         checksumPath,
         checksumSha256,
         manifestPath,

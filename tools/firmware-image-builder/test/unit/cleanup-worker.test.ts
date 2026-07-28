@@ -242,7 +242,7 @@ function createDocker(overrides: Partial<{
   stop: (id: string, timeoutMs: number) => Promise<void>;
   waitForStopped: (id: string, timeoutMs: number) => Promise<CleanupDockerContainer>;
   remove: (id: string, timeoutMs: number) => Promise<void>;
-  listByLabels: (value: JsonObject, timeoutMs: number) => Promise<readonly CleanupDockerContainer[]>;
+  listByJobId: (jobId: string, timeoutMs: number) => Promise<readonly CleanupDockerContainer[]>;
 }> = {}) {
   const calls: string[] = [];
   let present = true;
@@ -252,7 +252,7 @@ function createDocker(overrides: Partial<{
     stop: vi.fn(async (id: string, timeoutMs: number) => { calls.push(`stop:${id}:${timeoutMs}`); }),
     waitForStopped: vi.fn(async (id: string, timeoutMs: number) => { calls.push(`wait:${id}:${timeoutMs}`); return container('job-1', id, false, STOPPED); }),
     remove: vi.fn(async (id: string, timeoutMs: number) => { calls.push(`remove:${id}:${timeoutMs}`); present = false; }),
-    listByLabels: vi.fn(async (_value: JsonObject, timeoutMs: number) => { calls.push(`list:${timeoutMs}`); return []; }),
+    listByJobId: vi.fn(async (_jobId: string, timeoutMs: number) => { calls.push(`list:${timeoutMs}`); return []; }),
     setPresent(value: boolean) { present = value; },
     ...overrides,
   };
@@ -542,13 +542,35 @@ describe('cleanup worker exact container protocol', () => {
     });
     expect(evidence.postcondition.container).not.toHaveProperty('stoppedAt');
     expect(evidence.postcondition.container).not.toHaveProperty('removedAt');
+    expect(value.docker.listByJobId).toHaveBeenCalledWith(value.jobId, 1000);
+  });
+
+  it.each([
+    ['null identity', 'staging-log', { [LABEL_JOB]: 'job-1' }],
+    ['null identity with wrong manifest', 'staging-log', { [LABEL_JOB]: 'job-1', [LABEL_MANIFEST]: 'd'.repeat(64) }],
+    ['exact identity', 'absent', { [LABEL_JOB]: 'job-1' }],
+    ['exact identity with wrong manifest', 'absent', { [LABEL_JOB]: 'job-1', [LABEL_MANIFEST]: 'd'.repeat(64) }],
+  ] as const)('blocks %s when global discovery returns a job-labeled container', async (_case, fixtureKind, observedLabels) => {
+    const value = await fixture(fixtureKind);
+    if (fixtureKind === 'absent') value.docker.setPresent(false);
+    vi.spyOn(value.docker, 'listByJobId').mockResolvedValueOnce([{
+      ...container(value.jobId, 'unexpected-container'),
+      labels: observedLabels,
+    }]);
+    await expect(value.worker.run([value.admissionId])).resolves.toMatchObject({
+      status: 'blocked',
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    });
+    expect(value.docker.listByJobId).toHaveBeenCalledWith(value.jobId, 1000);
+    expect(value.docker.stop).not.toHaveBeenCalled();
+    expect(value.docker.remove).not.toHaveBeenCalled();
   });
 
   it('timestamps Docker absence and removal only after the corresponding observations complete', async () => {
     const nullIdentity = await fixture('staging-log');
     let nullNow = NOW;
     (nullIdentity.options.clock as { now: () => string }).now = () => nullNow;
-    vi.spyOn(nullIdentity.docker, 'listByLabels').mockImplementationOnce(async (_labels, timeoutMs) => {
+    vi.spyOn(nullIdentity.docker, 'listByJobId').mockImplementationOnce(async (_jobId, timeoutMs) => {
       nullIdentity.docker.calls.push(`list:${timeoutMs}`);
       nullNow = '2026-07-27T12:00:01.000Z';
       return [];
@@ -563,7 +585,7 @@ describe('cleanup worker exact container protocol', () => {
     let absentNow = NOW;
     (alreadyAbsent.options.clock as { now: () => string }).now = () => absentNow;
     alreadyAbsent.docker.setPresent(false);
-    vi.spyOn(alreadyAbsent.docker, 'listByLabels').mockImplementationOnce(async (_labels, timeoutMs) => {
+    vi.spyOn(alreadyAbsent.docker, 'listByJobId').mockImplementationOnce(async (_jobId, timeoutMs) => {
       alreadyAbsent.docker.calls.push(`list:${timeoutMs}`);
       absentNow = '2026-07-27T12:00:02.000Z';
       return [];
@@ -582,7 +604,7 @@ describe('cleanup worker exact container protocol', () => {
       removed.docker.setPresent(false);
       removedNow = '2026-07-27T12:00:03.000Z';
     });
-    vi.spyOn(removed.docker, 'listByLabels').mockImplementationOnce(async (_labels, timeoutMs) => {
+    vi.spyOn(removed.docker, 'listByJobId').mockImplementationOnce(async (_jobId, timeoutMs) => {
       removed.docker.calls.push(`list:${timeoutMs}`);
       removedNow = '2026-07-27T12:00:04.000Z';
       return [];
@@ -713,6 +735,7 @@ describe('cleanup worker exact container protocol', () => {
     const result = await value.worker.run([value.admissionId]);
     expect(result.status).toBe('completed');
     expect(value.docker.calls).toEqual(['list:1000']);
+    expect(value.docker.listByJobId).toHaveBeenCalledWith(value.jobId, 1000);
     expect(value.options.quarantine.quarantine).toHaveBeenCalledOnce();
     expect((value.db.prepare('SELECT status, cleanup_blocker_code, container_id, state, queue_state FROM cleanup_leases JOIN jobs USING (job_id) WHERE admission_id=?').get(value.admissionId) as Record<string, unknown>)).toMatchObject({ status: 'completed', cleanup_blocker_code: null, container_id: null, state: 'starting', queue_state: 'dispatched' });
   });

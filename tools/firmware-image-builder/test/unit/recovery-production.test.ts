@@ -9,7 +9,8 @@ import { loadConfig, type LoadedConfig } from '../../config/load.js';
 import { ADMISSION_ID_PATTERN } from '../../domain/types.js';
 import { encodeJson } from '../../api/src/validation.js';
 import type { CleanupPostcondition } from '../../api/src/ownership.js';
-import { createRecoveryPhysicalVerification } from '../../api/src/recovery-production.js';
+import { RecoveryBoundaryError, RecoveryInfrastructureError } from '../../api/src/recovery.js';
+import { classifyRecoveryFileSystemError, createRecoveryPhysicalVerification } from '../../api/src/recovery-production.js';
 
 const JOB_ID = 'recovery-production-job';
 const ADMISSION_ID = 'cln_0123456789abcdefghjkmnpqrs';
@@ -141,9 +142,11 @@ function createFactory(loaded: LoadedConfig) {
 
 function stagingInput(staging: CleanupPostcondition['staging'], overrides: Partial<{
   readonly rootId: string;
+  readonly publishState: string | null;
   readonly artifactStagingPath: string | null;
   readonly artifactSha256: string | null;
   readonly artifactSize: number | null;
+  readonly artifactMtime: string | null;
   readonly checksumPath: string | null;
   readonly checksumSha256: string | null;
   readonly manifestPath: string | null;
@@ -155,9 +158,11 @@ function stagingInput(staging: CleanupPostcondition['staging'], overrides: Parti
     jobId: JOB_ID,
     admissionId: ADMISSION_ID,
     rootId: overrides.rootId ?? ROOT_ID,
+    publishState: overrides.publishState ?? null,
     artifactStagingPath: overrides.artifactStagingPath ?? null,
     artifactSha256: overrides.artifactSha256 ?? null,
     artifactSize: overrides.artifactSize ?? null,
+    artifactMtime: overrides.artifactMtime ?? null,
     checksumPath: overrides.checksumPath ?? null,
     checksumSha256: overrides.checksumSha256 ?? null,
     manifestPath: overrides.manifestPath ?? null,
@@ -173,6 +178,7 @@ function trackedIdentity(artifact: Buffer) {
     artifactStagingPath: `staging/${JOB_ID}/image.img.gz`,
     artifactSha256: createHash('sha256').update(artifact).digest('hex'),
     artifactSize: artifact.byteLength,
+    artifactMtime: NOW,
     checksumPath: `staging/${JOB_ID}/sha256sums`,
     checksumSha256: createHash('sha256').update(CHECKSUM_BYTES).digest('hex'),
     manifestPath: `staging/${JOB_ID}/build-manifest.json`,
@@ -185,7 +191,7 @@ function trackedIdentity(artifact: Buffer) {
 async function writeTrackedQuarantine(loaded: LoadedConfig, artifact: Buffer): Promise<string> {
   const output = await setupOutput(loaded);
   const destination = join(output, '.osi-image-builder', 'quarantine', JOB_ID);
-  await mkdir(destination, { mode: 0o750 });
+  await mkdir(destination, { mode: 0o700 });
   await writeTrackedFiles(destination, artifact);
   return destination;
 }
@@ -198,6 +204,30 @@ async function writeTrackedFiles(destination: string, artifact: Buffer): Promise
 }
 
 describe('production recovery physical verification', () => {
+  it.each(['EIO', 'EMFILE', 'ENFILE', 'ENOMEM', 'ESTALE'] as const)('classifies descriptor-open %s as recovery infrastructure failure', (code) => {
+    const error = Object.assign(new Error(`open failed: ${code}`), { code });
+    const classified = classifyRecoveryFileSystemError('open', 'cannot open recovery evidence', error);
+    expect(classified).toBeInstanceOf(RecoveryInfrastructureError);
+    expect(classified).not.toBeInstanceOf(RecoveryBoundaryError);
+  });
+
+  it.each(['ENOENT', 'ELOOP'] as const)('classifies descriptor-open %s as a recovery boundary failure', (code) => {
+    const error = Object.assign(new Error(`open failed: ${code}`), { code });
+    expect(classifyRecoveryFileSystemError('open', 'cannot open recovery evidence', error)).toBeInstanceOf(RecoveryBoundaryError);
+  });
+
+  it('classifies an unknown descriptor-open exception as recovery infrastructure failure', () => {
+    const classified = classifyRecoveryFileSystemError('open', 'cannot open recovery evidence', new Error('unexpected open failure'));
+    expect(classified).toBeInstanceOf(RecoveryInfrastructureError);
+    expect(classified).not.toBeInstanceOf(RecoveryBoundaryError);
+  });
+
+  it.each(['stat', 'read', 'close'] as const)('classifies raw descriptor %s failure as recovery infrastructure failure', (operation) => {
+    const classified = classifyRecoveryFileSystemError(operation, `recovery descriptor ${operation} failed`, new Error('raw I/O failure'));
+    expect(classified).toBeInstanceOf(RecoveryInfrastructureError);
+    expect(classified).not.toBeInstanceOf(RecoveryBoundaryError);
+  });
+
   it('reads a canonical completion envelope from the held state-root authority and hashes its actual bytes', async () => {
     expect(ADMISSION_ID_PATTERN.test(ADMISSION_ID)).toBe(true);
     const value = await fixture();
@@ -302,13 +332,17 @@ describe('production recovery physical verification', () => {
       const physical = createFactory(value.loaded);
       await expect(physical.staging.verify(stagingInput(postcondition().staging))).resolves.toBe(true);
       await expect(physical.staging.verify(stagingInput(postcondition().staging, {
-        artifactStagingPath: `staging/${JOB_ID}/image.img.gz`,
+        publishState: 'not_started',
+        ...trackedIdentity(Buffer.from('planned artifact bytes\n', 'utf8')),
       }))).resolves.toBe(true);
       await expect(physical.staging.verify(stagingInput(postcondition().staging, {
         artifactStagingPath: `staging/${JOB_ID}/image.img.gz`,
-        artifactSha256: 'a'.repeat(64),
-        artifactSize: 1,
-      }))).rejects.toThrow(/absent staging retains artifact identity/);
+        publishState: 'not_started',
+      }))).rejects.toThrow(/complete artifact preparation intent/);
+      await expect(physical.staging.verify(stagingInput(postcondition().staging, {
+        publishState: 'publishing',
+        ...trackedIdentity(Buffer.from('planned artifact bytes\n', 'utf8')),
+      }))).rejects.toThrow(/publish state|not_started/);
       await expect(access(join(output, '.osi-image-builder', 'staging'))).resolves.toBeUndefined();
     } finally {
       await rm(value.base, { recursive: true, force: true });
@@ -325,11 +359,30 @@ describe('production recovery physical verification', () => {
       await expect(physical.staging.verify(stagingInput(quarantinedPostcondition(tracked.artifactSha256, artifact.byteLength), tracked))).resolves.toBe(true);
 
       const otherOutput = await setupOutput(value.loaded, OTHER_ROOT_ID);
-      await mkdir(join(otherOutput, '.osi-image-builder', 'quarantine', JOB_ID), { mode: 0o750 });
+      await mkdir(join(otherOutput, '.osi-image-builder', 'quarantine', JOB_ID), { mode: 0o700 });
       await expect(physical.staging.verify(stagingInput(quarantinedPostcondition(), { rootId: OTHER_ROOT_ID }))).resolves.toBe(true);
 
       await writeFile(join(destination, 'image.img.gz'), Buffer.from('tampered\n'), { mode: 0o600 });
       await expect(physical.staging.verify(stagingInput(quarantinedPostcondition(tracked.artifactSha256, artifact.byteLength), tracked))).rejects.toThrow(/hash|size/);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('surfaces production artifact-read device failure as recovery infrastructure failure', async () => {
+    const ioError = Object.assign(new Error('device read failed'), { code: 'EIO' });
+    const value = await fixture(async () => { throw ioError; });
+    try {
+      const artifact = Buffer.from('tracked artifact bytes\n', 'utf8');
+      const tracked = trackedIdentity(artifact);
+      await writeTrackedQuarantine(value.loaded, artifact);
+      const physical = createFactory(value.loaded);
+      const operation = physical.staging.verify(stagingInput(
+        quarantinedPostcondition(tracked.artifactSha256, tracked.artifactSize),
+        tracked,
+      ));
+      await expect(operation).rejects.toBeInstanceOf(RecoveryInfrastructureError);
+      await expect(operation).rejects.not.toBeInstanceOf(RecoveryBoundaryError);
     } finally {
       await rm(value.base, { recursive: true, force: true });
     }
@@ -379,7 +432,7 @@ describe('production recovery physical verification', () => {
       const tracked = trackedIdentity(artifact);
       destination = await writeTrackedQuarantine(value.loaded, artifact);
       replacement = `${destination}.replacement`;
-      await mkdir(replacement, { mode: 0o750 });
+      await mkdir(replacement, { mode: 0o700 });
       await writeTrackedFiles(replacement, artifact);
       const physical = createFactory(value.loaded);
       await expect(physical.staging.verify(stagingInput(
@@ -434,8 +487,22 @@ describe('production recovery physical verification', () => {
       await expect(physical.staging.verify(stagingInput(quarantinedPostcondition()))).rejects.toThrow(/inspect recovery directory/);
       await unlink(destination);
       await mkdir(destination, { mode: 0o700 });
-      await chmod(destination, 0o755);
-      await expect(physical.staging.verify(stagingInput(quarantinedPostcondition()))).rejects.toThrow(/unsafe recovery directory/);
+      for (const mode of [0o750, 0o755]) {
+        await chmod(destination, mode);
+        await expect(physical.staging.verify(stagingInput(quarantinedPostcondition()))).rejects.toThrow(/unsafe recovery job directory/);
+      }
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it.each([0o700, 0o755])('rejects publisher parent mode %o instead of exact 0750', async (mode) => {
+    const value = await fixture();
+    try {
+      const output = await setupOutput(value.loaded);
+      await chmod(join(output, '.osi-image-builder', 'quarantine'), mode);
+      const physical = createFactory(value.loaded);
+      await expect(physical.staging.verify(stagingInput(postcondition().staging))).rejects.toThrow(/unsafe recovery publisher directory/);
     } finally {
       await rm(value.base, { recursive: true, force: true });
     }

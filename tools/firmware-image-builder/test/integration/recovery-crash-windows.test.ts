@@ -247,7 +247,7 @@ async function crashWorker(value: Awaited<ReturnType<typeof createFixture>>, pha
       stop: vi.fn(async () => undefined),
       waitForStopped: vi.fn(async () => container(false)),
       remove: vi.fn(async () => { containerPresent = false; }),
-      listByLabels: vi.fn(async () => []),
+      listByJobId: vi.fn(async () => []),
     },
     logSealer: { seal: vi.fn(async ({ at }: { at: string }) => ({ runner: 'absent' as const, docker: 'absent' as const, verifiedAt: at, contiguous: true as const })) },
     quarantine: { quarantine: vi.fn(async () => ({ kind: 'absent' as const, path: null, sourcePath: `staging/${value.jobId}`, sourceAbsent: true as const, verifiedAt: NOW })) },

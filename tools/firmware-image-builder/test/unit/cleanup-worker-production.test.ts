@@ -162,15 +162,16 @@ describe('cleanup production composition', () => {
     expect(composition.adapters.quarantine).toBeDefined();
     expect(composition.adapters.evidenceWriter).toBeDefined();
     await composition.adapters.systemd.inspect(`osi-image-builder-runner@${JOB}.service`, 1000);
-    await composition.adapters.docker.listByLabels({ 'org.osi.image-builder.job-id': JOB, 'org.osi.image-builder.manifest-sha': HASH }, 1000);
+    await composition.adapters.docker.listByJobId(JOB, 1000);
     expect(run).toHaveBeenCalledWith(
       ['/usr/bin/systemctl', '--user', 'show', '--no-pager', '--property=ActiveState', '--value', `osi-image-builder-runner@${JOB}.service`],
       expect.objectContaining({ timeoutMs: 1000, maxCaptureBytes: 64 * 1024, env: expect.objectContaining({ PATH: '/usr/bin:/bin' }) }),
     );
     expect(run).toHaveBeenCalledWith(
-      ['/usr/bin/docker', 'ps', '--all', '--no-trunc', '--filter', `org.osi.image-builder.job-id=${JOB}`, '--filter', `org.osi.image-builder.manifest-sha=${HASH}`, '--format', '{{json .ID}}'],
+      ['/usr/bin/docker', 'ps', '--all', '--no-trunc', '--filter', `org.osi.image-builder.job-id=${JOB}`, '--format', '{{json .ID}}'],
       expect.objectContaining({ timeoutMs: 1000, maxCaptureBytes: 64 * 1024 }),
     );
+    await expect(composition.adapters.docker.listByJobId('../other', 1000)).rejects.toThrow(/job ID/);
     await composition.close();
     expect(((options.database as unknown) as { close: ReturnType<typeof vi.fn> }).close).toHaveBeenCalledOnce();
   });

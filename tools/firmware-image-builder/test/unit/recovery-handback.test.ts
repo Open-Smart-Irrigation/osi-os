@@ -5,6 +5,8 @@ import { join } from 'node:path';
 
 import {
   createCleanupAdmissionRecovery,
+  RecoveryBoundaryError,
+  RecoveryInfrastructureError,
   type RecoveryHandBackDependencies,
   type RecoverySystemd,
 } from '../../api/src/recovery.js';
@@ -160,6 +162,15 @@ function fixture() {
   return { db, ownership, systemd, handBack, writes, completed, job, completionEvent, completedPostcondition, logGenerations, logEvents };
 }
 
+function exposeCompletedStartupRow(value: ReturnType<typeof fixture>): void {
+  const prepare = value.db.prepare as ReturnType<typeof vi.fn>;
+  const implementation = prepare.getMockImplementation() as ((sql: string) => unknown) | undefined;
+  if (implementation === undefined) throw new Error('test database prepare implementation is unavailable');
+  prepare.mockImplementation((sql: string) => sql.includes("WHERE status='completed'")
+    ? { all: () => [{ admission_id: ADMISSION_ID, job_id: JOB_ID }] }
+    : implementation(sql));
+}
+
 function exactIdentityFixture() {
   const value = fixture();
   const identity = {
@@ -196,6 +207,56 @@ function exactIdentityFixture() {
 }
 
 describe('cleanup hand-back recovery', () => {
+  it('keeps admissions closed and retries startup after production infrastructure failure', async () => {
+    const value = fixture();
+    exposeCompletedStartupRow(value);
+    const infrastructure = new RecoveryInfrastructureError('state-root descriptor read failed');
+    const mismatch = new RecoveryBoundaryError('cleanup completion evidence is semantically invalid');
+    (value.handBack.evidence.read as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(infrastructure)
+      .mockRejectedValue(mismatch);
+    const stateRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-infrastructure-'));
+    const recovery = createCleanupAdmissionRecovery({
+      stateRoot,
+      db: value.db as never,
+      ownership: value.ownership,
+      systemd: value.systemd,
+      handBack: value.handBack,
+      clock: { now: () => NOW },
+    });
+    try {
+      await expect(recovery.openAdmissions()).rejects.toBe(infrastructure);
+      await expect(recovery.reconcileCompletedAdmissions()).rejects.toThrow('cleanup admissions are not open');
+      await expect(recovery.openAdmissions()).resolves.toBeUndefined();
+      await expect(recovery.reconcileCompletedAdmissions()).rejects.toBe(mismatch);
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('suppresses semantic evidence mismatch at startup while leaving the API open and fenced', async () => {
+    const value = fixture();
+    exposeCompletedStartupRow(value);
+    const mismatch = new RecoveryBoundaryError('cleanup completion evidence is semantically invalid');
+    (value.handBack.evidence.read as ReturnType<typeof vi.fn>).mockRejectedValue(mismatch);
+    const stateRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-boundary-'));
+    const recovery = createCleanupAdmissionRecovery({
+      stateRoot,
+      db: value.db as never,
+      ownership: value.ownership,
+      systemd: value.systemd,
+      handBack: value.handBack,
+      clock: { now: () => NOW },
+    });
+    try {
+      await expect(recovery.openAdmissions()).resolves.toBeUndefined();
+      await expect(recovery.reconcileCompletedAdmissions()).rejects.toBe(mismatch);
+      expect(value.ownership.apiWrite).not.toHaveBeenCalled();
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
   it('hands back a completed admission without starting another worker', async () => {
     const value = fixture();
     const stateRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-handback-unit-'));
@@ -308,6 +369,7 @@ describe('cleanup hand-back recovery', () => {
       artifactStagingPath: `staging/${JOB_ID}/image.img.gz`,
       artifactSha256: '1'.repeat(64),
       artifactSize: 123,
+      artifactMtime: NOW,
       checksumPath: `staging/${JOB_ID}/sha256sums`,
       checksumSha256: '2'.repeat(64),
       manifestPath: `staging/${JOB_ID}/build-manifest.json`,
@@ -316,9 +378,11 @@ describe('cleanup hand-back recovery', () => {
       verificationSha256: '4'.repeat(64),
     };
     Object.assign(value.job, {
+      publish_state: 'quarantined',
       artifact_staging_path: tracked.artifactStagingPath,
       artifact_sha256: tracked.artifactSha256,
       artifact_size: tracked.artifactSize,
+      artifact_mtime: tracked.artifactMtime,
       checksum_path: tracked.checksumPath,
       checksum_sha256: tracked.checksumSha256,
       manifest_path: tracked.manifestPath,
@@ -358,6 +422,7 @@ describe('cleanup hand-back recovery', () => {
         jobId: JOB_ID,
         admissionId: ADMISSION_ID,
         rootId: 'release',
+        publishState: 'quarantined',
         ...tracked,
         postcondition: staging,
       });

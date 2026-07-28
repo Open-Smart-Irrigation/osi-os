@@ -59,7 +59,6 @@ const MAX_LOG_GENERATIONS = 128;
 const MAX_LOG_EVENTS = 8_192;
 const LOG_CHUNK_BYTES = 64 * 1024;
 const LABEL_JOB = 'org.osi.image-builder.job-id';
-const LABEL_MANIFEST = 'org.osi.image-builder.manifest-sha';
 const PUBLISHER_ENV = Object.freeze({ PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' });
 
 export interface CleanupPublisherAuthority {
@@ -298,14 +297,11 @@ function createDockerAdapter(policy: CommandPolicy, executable: string): Cleanup
       if (!/^[a-f0-9]{12,64}$/u.test(containerId)) throw new Error('Docker container ID is invalid');
       await runTrusted({ ...policy, timeoutMs: Math.min(timeoutMs, policy.timeoutMs) }, [executable, 'rm', containerId]);
     },
-    listByLabels: async (labels, timeoutMs) => {
-      const job = labels[LABEL_JOB];
-      const manifest = labels[LABEL_MANIFEST];
-      if (typeof job !== 'string' || typeof manifest !== 'string' || !JOB_ID.test(job) || !HASH64.test(manifest) || Object.keys(labels).length !== 2) throw new Error('Docker label query is not exact');
+    listByJobId: async (jobId, timeoutMs) => {
+      if (!JOB_ID.test(jobId)) throw new Error('Docker job ID query is invalid');
       const argv = [
         executable, 'ps', '--all', '--no-trunc',
-        '--filter', `${LABEL_JOB}=${job}`,
-        '--filter', `${LABEL_MANIFEST}=${manifest}`,
+        '--filter', `${LABEL_JOB}=${jobId}`,
         '--format', '{{json .ID}}',
       ] as const;
       const result = await runTrusted({ ...policy, timeoutMs: Math.min(timeoutMs, policy.timeoutMs) }, argv);

@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, type Stats } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
 import { TextDecoder } from 'node:util';
 import { join } from 'node:path';
 
 import {
+  ConfigAuthorityError,
   withApprovedRootSnapshot,
   withStateRootSnapshot,
   type ApprovedRootRegistry,
@@ -12,6 +13,7 @@ import {
 } from '../../config/load.js';
 import {
   RecoveryBoundaryError,
+  RecoveryInfrastructureError,
   type RecoveryCleanupEvidence,
   type RecoveryCleanupEvidenceReader,
   type RecoveryStagingVerificationInput,
@@ -22,6 +24,7 @@ import { JSON_LIMITS, TEXT_LIMITS, canonicalInstant, encodeJson, type JsonObject
 import { ACTIVE_RECOVERY_STATES, ADMISSION_ID_PATTERN } from '../../domain/types.js';
 
 const DIRECTORY_MODE = 0o700;
+const PUBLISHER_DIRECTORY_MODE = 0o750;
 const EVIDENCE_MODE = 0o600;
 const MAX_EVIDENCE_BYTES = JSON_LIMITS.maxEncodedBytes + 1;
 const JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
@@ -32,6 +35,28 @@ const O_CLOEXEC = (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: nu
 const DIRECTORY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW | O_CLOEXEC;
 const FILE_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | O_CLOEXEC;
 const FATAL_DECODER = new TextDecoder('utf-8', { fatal: true });
+const INFRASTRUCTURE_ERROR_CODES = new Set([
+  'EAGAIN',
+  'EBUSY',
+  'EDQUOT',
+  'EIO',
+  'EMFILE',
+  'ENFILE',
+  'ENODEV',
+  'ENOMEM',
+  'ENOSPC',
+  'ENXIO',
+  'ESTALE',
+  'ETIMEDOUT',
+]);
+const BOUNDARY_OPEN_ERROR_CODES = new Set([
+  'EACCES',
+  'EISDIR',
+  'ELOOP',
+  'ENOENT',
+  'ENOTDIR',
+  'EPERM',
+]);
 
 export interface RecoveryPhysicalVerificationOptions {
   readonly stateRootAuthority: StateRootAuthority;
@@ -45,7 +70,7 @@ export interface RecoveryPhysicalVerification {
   readonly staging: RecoveryStagingVerifier;
 }
 
-type NativeStats = Awaited<ReturnType<FileHandle['stat']>>;
+type NativeStats = Stats;
 type RecordValue = Record<string, unknown>;
 
 function fail(message: string, cause?: unknown): never {
@@ -56,6 +81,68 @@ function errorCode(error: unknown): string | undefined {
   return error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string'
     ? (error as { code: string }).code
     : undefined;
+}
+
+export type RecoveryFileSystemOperation = 'open' | 'stat' | 'read' | 'close';
+
+export function classifyRecoveryFileSystemError(
+  operation: RecoveryFileSystemOperation,
+  message: string,
+  cause: unknown,
+): RecoveryBoundaryError | RecoveryInfrastructureError {
+  if (cause instanceof RecoveryBoundaryError || cause instanceof RecoveryInfrastructureError) return cause;
+  const code = errorCode(cause);
+  if (operation === 'open' && BOUNDARY_OPEN_ERROR_CODES.has(code ?? '')) {
+    return new RecoveryBoundaryError(message, { cause });
+  }
+  return new RecoveryInfrastructureError(message, { cause });
+}
+
+function fileSystemFailure(operation: RecoveryFileSystemOperation, message: string, cause: unknown): never {
+  throw classifyRecoveryFileSystemError(operation, message, cause);
+}
+
+function authorityFailure(message: string, error: unknown): never {
+  if (error instanceof RecoveryBoundaryError || error instanceof RecoveryInfrastructureError) throw error;
+  if (error instanceof ConfigAuthorityError) {
+    const cause = error.cause;
+    if (INFRASTRUCTURE_ERROR_CODES.has(errorCode(cause) ?? '')) {
+      throw new RecoveryInfrastructureError(message, { cause: error });
+    }
+    throw new RecoveryBoundaryError(message, { cause: error });
+  }
+  throw new RecoveryInfrastructureError(message, { cause: error });
+}
+
+async function descriptorStat(handle: FileHandle, field: string): Promise<NativeStats> {
+  try {
+    return await handle.stat();
+  } catch (error) {
+    return fileSystemFailure('stat', `cannot stat recovery descriptor: ${field}`, error);
+  }
+}
+
+async function descriptorRead(
+  handle: FileHandle,
+  buffer: Buffer,
+  offset: number,
+  length: number,
+  position: number,
+  field: string,
+): Promise<Readonly<{ bytesRead: number; buffer: Buffer }>> {
+  try {
+    return await handle.read(buffer, offset, length, position);
+  } catch (error) {
+    return fileSystemFailure('read', `cannot read recovery descriptor: ${field}`, error);
+  }
+}
+
+async function descriptorClose(handle: FileHandle): Promise<void> {
+  try {
+    await handle.close();
+  } catch (error) {
+    fileSystemFailure('close', 'cannot close recovery descriptor', error);
+  }
 }
 
 function safeSegment(value: unknown, field: string): string {
@@ -93,17 +180,29 @@ function assertDirectory(stats: NativeStats, field: string, ownerUid: number, de
   }
 }
 
-function assertManagedDirectory(stats: NativeStats, field: string, ownerUid: number, device: number): void {
-  const mode = modeOf(stats);
+function assertPublisherDirectory(stats: NativeStats, field: string, ownerUid: number, device: number): void {
   if (
     stats.isSymbolicLink()
     || !stats.isDirectory()
     || stats.uid !== ownerUid
-    || (mode !== 0o700 && mode !== 0o750)
+    || modeOf(stats) !== PUBLISHER_DIRECTORY_MODE
     || stats.nlink < 2
     || stats.dev !== device
   ) {
-    fail(`unsafe recovery directory: ${field}`);
+    fail(`unsafe recovery publisher directory: ${field}`);
+  }
+}
+
+function assertJobDirectory(stats: NativeStats, field: string, ownerUid: number, device: number): void {
+  if (
+    stats.isSymbolicLink()
+    || !stats.isDirectory()
+    || stats.uid !== ownerUid
+    || modeOf(stats) !== DIRECTORY_MODE
+    || stats.nlink < 2
+    || stats.dev !== device
+  ) {
+    fail(`unsafe recovery job directory: ${field}`);
   }
 }
 
@@ -162,7 +261,7 @@ async function openDirectoryChild(parent: FileHandle, name: string, field: strin
   try {
     return await open(childPath(parent, name, field), DIRECTORY_FLAGS);
   } catch (error) {
-    return fail(`cannot open recovery directory: ${field}`, error);
+    return fileSystemFailure('open', `cannot open recovery directory: ${field}`, error);
   }
 }
 
@@ -171,7 +270,7 @@ async function openOptionalDirectoryChild(parent: FileHandle, name: string, fiel
     return await open(childPath(parent, name, field), DIRECTORY_FLAGS);
   } catch (error) {
     if (errorCode(error) === 'ENOENT') return null;
-    return fail(`cannot inspect recovery directory: ${field}`, error);
+    return fileSystemFailure('open', `cannot inspect recovery directory: ${field}`, error);
   }
 }
 
@@ -179,7 +278,7 @@ async function openFileChild(parent: FileHandle, name: string, field: string): P
   try {
     return await open(childPath(parent, name, field), FILE_FLAGS);
   } catch (error) {
-    return fail(`cannot open recovery evidence: ${field}`, error);
+    return fileSystemFailure('open', `cannot open recovery evidence: ${field}`, error);
   }
 }
 
@@ -188,7 +287,7 @@ async function closeHandles(handles: readonly (FileHandle | null)[]): Promise<vo
   for (const handle of handles.slice().reverse()) {
     if (handle === null) continue;
     try {
-      await handle.close();
+      await descriptorClose(handle);
     } catch (error) {
       firstError ??= error;
     }
@@ -214,28 +313,28 @@ async function revalidateManagedJob(
       if (heldBuilder !== null || expectedJob !== null) return fail('managed output directory changed during staging verification');
       return;
     }
-    const currentBuilderStats = await currentBuilder.stat();
-    assertManagedDirectory(currentBuilderStats, '.osi-image-builder', ownerUid, device);
-    if (heldBuilder !== null && !sameDirectoryIdentity(await heldBuilder.stat(), currentBuilderStats)) return fail('managed output directory identity changed during staging verification');
+    const currentBuilderStats = await descriptorStat(currentBuilder, '.osi-image-builder');
+    assertPublisherDirectory(currentBuilderStats, '.osi-image-builder', ownerUid, device);
+    if (heldBuilder !== null && !sameDirectoryIdentity(await descriptorStat(heldBuilder, '.osi-image-builder held'), currentBuilderStats)) return fail('managed output directory identity changed during staging verification');
 
     currentParent = await openOptionalDirectoryChild(currentBuilder, parentName, `.osi-image-builder/${parentName}`);
     if (currentParent === null) {
       if (heldParent !== null || expectedJob !== null) return fail(`managed ${parentName} directory changed during staging verification`);
       return;
     }
-    const currentParentStats = await currentParent.stat();
-    assertManagedDirectory(currentParentStats, `.osi-image-builder/${parentName}`, ownerUid, device);
-    if (heldParent !== null && !sameDirectoryIdentity(await heldParent.stat(), currentParentStats)) return fail(`managed ${parentName} directory identity changed during staging verification`);
+    const currentParentStats = await descriptorStat(currentParent, `.osi-image-builder/${parentName}`);
+    assertPublisherDirectory(currentParentStats, `.osi-image-builder/${parentName}`, ownerUid, device);
+    if (heldParent !== null && !sameDirectoryIdentity(await descriptorStat(heldParent, `.osi-image-builder/${parentName} held`), currentParentStats)) return fail(`managed ${parentName} directory identity changed during staging verification`);
 
     currentJob = await openOptionalDirectoryChild(currentParent, jobId, `${parentName}/${jobId}`);
     if (currentJob === null) {
       if (expectedJob !== null) return fail(`managed ${parentName} job directory disappeared during staging verification`);
       return;
     }
-    const currentJobStats = await currentJob.stat();
-    assertManagedDirectory(currentJobStats, `${parentName}/${jobId}`, ownerUid, device);
+    const currentJobStats = await descriptorStat(currentJob, `${parentName}/${jobId}`);
+    assertJobDirectory(currentJobStats, `${parentName}/${jobId}`, ownerUid, device);
     if (expectedJob === null) return fail(`managed ${parentName} job directory appeared during staging verification`);
-    if (!sameDirectoryIdentity(await expectedJob.stat(), currentJobStats)) return fail(`managed ${parentName} destination identity changed during staging verification`);
+    if (!sameDirectoryIdentity(await descriptorStat(expectedJob, `${parentName}/${jobId} held`), currentJobStats)) return fail(`managed ${parentName} destination identity changed during staging verification`);
   } finally {
     await closeHandles([currentJob, currentParent, currentBuilder]);
   }
@@ -266,53 +365,53 @@ function stableStats(before: NativeStats, after: NativeStats): boolean {
 }
 
 async function readBoundedFile(handle: FileHandle, maxBytes: number, field: string, ownerUid: number, device: number): Promise<Buffer> {
-  const before = await handle.stat();
+  const before = await descriptorStat(handle, field);
   assertRegularEvidence(before, field, ownerUid, device);
   if (!Number.isSafeInteger(before.size) || before.size > maxBytes) return fail(`${field} exceeds its bounded read limit`);
   const bytes = Buffer.alloc(before.size);
   let position = 0;
   while (position < bytes.length) {
-    const result = await handle.read(bytes, position, bytes.length - position, position);
+    const result = await descriptorRead(handle, bytes, position, bytes.length - position, position, field);
     if (result.bytesRead <= 0) return fail(`${field} changed during bounded read`);
     position += result.bytesRead;
   }
-  const after = await handle.stat();
+  const after = await descriptorStat(handle, field);
   if (!stableStats(before, after)) return fail(`${field} changed during bounded read`);
   return bytes;
 }
 
 async function hashBoundedArtifact(handle: FileHandle, expectedSize: number, expectedSha256: string, field: string, ownerUid: number, device: number): Promise<void> {
-  const before = await handle.stat();
+  const before = await descriptorStat(handle, field);
   assertRegularArtifact(before, field, ownerUid, device);
   if (before.size !== expectedSize) return fail(`${field} size does not match the persisted artifact identity`);
   const digest = createHash('sha256');
   const buffer = Buffer.allocUnsafe(1024 * 1024);
   let position = 0;
   while (position < expectedSize) {
-    const result = await handle.read(buffer, 0, Math.min(buffer.length, expectedSize - position), position);
+    const result = await descriptorRead(handle, buffer, 0, Math.min(buffer.length, expectedSize - position), position, field);
     if (result.bytesRead <= 0) return fail(`${field} changed during bounded hash`);
     digest.update(buffer.subarray(0, result.bytesRead));
     position += result.bytesRead;
   }
-  const after = await handle.stat();
+  const after = await descriptorStat(handle, field);
   if (!stableStats(before, after) || after.size !== expectedSize) return fail(`${field} changed during bounded hash`);
   if (digest.digest('hex') !== expectedSha256) return fail(`${field} hash does not match the persisted artifact identity`);
 }
 
 async function hashBoundedSidecar(handle: FileHandle, expectedSha256: string, maxBytes: number, field: string, ownerUid: number, device: number): Promise<void> {
-  const before = await handle.stat();
+  const before = await descriptorStat(handle, field);
   assertRegularArtifact(before, field, ownerUid, device);
   if (!Number.isSafeInteger(before.size) || before.size < 0 || before.size > maxBytes) return fail(`${field} exceeds its bounded sidecar limit`);
   const digest = createHash('sha256');
   const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, Math.max(before.size, 1)));
   let position = 0;
   while (position < before.size) {
-    const result = await handle.read(buffer, 0, Math.min(buffer.length, before.size - position), position);
+    const result = await descriptorRead(handle, buffer, 0, Math.min(buffer.length, before.size - position), position, field);
     if (result.bytesRead <= 0) return fail(`${field} changed during bounded hash`);
     digest.update(buffer.subarray(0, result.bytesRead));
     position += result.bytesRead;
   }
-  const after = await handle.stat();
+  const after = await descriptorStat(handle, field);
   if (!stableStats(before, after)) return fail(`${field} changed during bounded hash`);
   if (digest.digest('hex') !== expectedSha256) return fail(`${field} hash does not match the persisted sidecar identity`);
 }
@@ -526,59 +625,63 @@ async function readCompletionEvidence(
   const expectedPath = `jobs/${jobId}/evidence/cleanup/${admissionId}.complete.json`;
   if (input.path !== expectedPath) return fail('cleanup evidence path is not the fixed completion path');
   const expectedSha256 = hash(input.sha256, 'cleanup evidence SHA-256');
-  return withStateRootSnapshot(stateRootAuthority, async ({ snapshot }) => withDirectory(
-    async () => {
-      try {
-        return await open(snapshot.path, DIRECTORY_FLAGS);
-      } catch (error) {
-        return fail('state root could not be opened no-follow', error);
-      }
-    },
-    async (root) => {
-      const rootStats = await root.stat();
-      assertDirectory(rootStats, 'state root', ownerUid, snapshot.device);
-      if (rootStats.ino !== snapshot.inode) return fail('state root identity changed while opening evidence');
-      return withDirectory(
-        () => openDirectoryChild(root, 'jobs', 'jobs'),
-        async (jobs) => {
-          assertDirectory(await jobs.stat(), 'jobs', ownerUid, snapshot.device);
-          return withDirectory(
-            () => openDirectoryChild(jobs, jobId, `jobs/${jobId}`),
-            async (job) => {
-              assertDirectory(await job.stat(), `jobs/${jobId}`, ownerUid, snapshot.device);
-              return withDirectory(
-                () => openDirectoryChild(job, 'evidence', `jobs/${jobId}/evidence`),
-                async (evidence) => {
-                  assertDirectory(await evidence.stat(), `jobs/${jobId}/evidence`, ownerUid, snapshot.device);
-                  return withDirectory(
-                    () => openDirectoryChild(evidence, 'cleanup', `jobs/${jobId}/evidence/cleanup`),
-                    async (cleanup) => {
-                      assertDirectory(await cleanup.stat(), `jobs/${jobId}/evidence/cleanup`, ownerUid, snapshot.device);
-                      const fileName = `${admissionId}.complete.json`;
-                      return withDirectory(
-                        () => openFileChild(cleanup, fileName, expectedPath),
-                        async (file) => {
-                          const bytes = await readBoundedFile(file, maxBytes, expectedPath, ownerUid, snapshot.device);
-                          const actualSha256 = createHash('sha256').update(bytes).digest('hex');
-                          if (actualSha256 !== expectedSha256) return fail('cleanup completion evidence hash does not match the durable hash');
-                          return {
-                            jobId,
-                            admissionId,
-                            sha256: actualSha256,
-                            postcondition: parseCompletion(bytes, jobId, admissionId, maxBytes),
-                          };
-                        },
-                      );
-                    },
-                  );
-                },
-              );
-            },
-          );
-        },
-      );
-    },
-  ));
+  try {
+    return await withStateRootSnapshot(stateRootAuthority, async ({ snapshot }) => withDirectory(
+      async () => {
+        try {
+          return await open(snapshot.path, DIRECTORY_FLAGS);
+        } catch (error) {
+          return fileSystemFailure('open', 'state root could not be opened no-follow', error);
+        }
+      },
+      async (root) => {
+        const rootStats = await descriptorStat(root, 'state root');
+        assertDirectory(rootStats, 'state root', ownerUid, snapshot.device);
+        if (rootStats.ino !== snapshot.inode) return fail('state root identity changed while opening evidence');
+        return withDirectory(
+          () => openDirectoryChild(root, 'jobs', 'jobs'),
+          async (jobs) => {
+            assertDirectory(await descriptorStat(jobs, 'jobs'), 'jobs', ownerUid, snapshot.device);
+            return withDirectory(
+              () => openDirectoryChild(jobs, jobId, `jobs/${jobId}`),
+              async (job) => {
+                assertDirectory(await descriptorStat(job, `jobs/${jobId}`), `jobs/${jobId}`, ownerUid, snapshot.device);
+                return withDirectory(
+                  () => openDirectoryChild(job, 'evidence', `jobs/${jobId}/evidence`),
+                  async (evidence) => {
+                    assertDirectory(await descriptorStat(evidence, `jobs/${jobId}/evidence`), `jobs/${jobId}/evidence`, ownerUid, snapshot.device);
+                    return withDirectory(
+                      () => openDirectoryChild(evidence, 'cleanup', `jobs/${jobId}/evidence/cleanup`),
+                      async (cleanup) => {
+                        assertDirectory(await descriptorStat(cleanup, `jobs/${jobId}/evidence/cleanup`), `jobs/${jobId}/evidence/cleanup`, ownerUid, snapshot.device);
+                        const fileName = `${admissionId}.complete.json`;
+                        return withDirectory(
+                          () => openFileChild(cleanup, fileName, expectedPath),
+                          async (file) => {
+                            const bytes = await readBoundedFile(file, maxBytes, expectedPath, ownerUid, snapshot.device);
+                            const actualSha256 = createHash('sha256').update(bytes).digest('hex');
+                            if (actualSha256 !== expectedSha256) return fail('cleanup completion evidence hash does not match the durable hash');
+                            return {
+                              jobId,
+                              admissionId,
+                              sha256: actualSha256,
+                              postcondition: parseCompletion(bytes, jobId, admissionId, maxBytes),
+                            };
+                          },
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            );
+          },
+        );
+      },
+    ));
+  } catch (error) {
+    return authorityFailure('state root authority verification failed', error);
+  }
 }
 
 async function inspectStaging(
@@ -597,9 +700,11 @@ async function inspectStaging(
   let checksumName: string | null = null;
   let manifestName: string | null = null;
   let verificationName: string | null = null;
-  const trackedIdentity = [
+  const artifactIdentity = [
+    persistedArtifactPath,
     input.artifactSha256,
     input.artifactSize,
+    input.artifactMtime,
     input.checksumPath,
     input.checksumSha256,
     input.manifestPath,
@@ -607,100 +712,128 @@ async function inspectStaging(
     input.verificationPath,
     input.verificationSha256,
   ];
+  const identityIsNull = artifactIdentity.every((value) => value === null);
+  const identityIsComplete = artifactIdentity.every((value) => value !== null);
   if (trackedArtifact) {
-    if (trackedIdentity.some((value) => value === null)) return fail('persisted staging artifact set identity is incomplete');
+    if (!identityIsComplete) return fail('persisted staging artifact set identity is incomplete');
     artifactName = stagingFileName(persistedArtifactPath, jobId, 'persisted staging artifact path');
     checksumName = stagingFileName(input.checksumPath!, jobId, 'persisted checksum sidecar path', 'sha256sums');
     manifestName = stagingFileName(input.manifestPath!, jobId, 'persisted manifest sidecar path', 'build-manifest.json');
     verificationName = stagingFileName(input.verificationPath!, jobId, 'persisted verification sidecar path', 'verification.json');
     hash(input.artifactSha256, 'persisted staging artifact SHA-256');
     number(input.artifactSize, 'persisted staging artifact size');
+    instant(input.artifactMtime, 'persisted staging artifact mtime');
     hash(input.checksumSha256, 'persisted checksum sidecar SHA-256');
     hash(input.manifestSha256, 'persisted manifest sidecar SHA-256');
     hash(input.verificationSha256, 'persisted verification sidecar SHA-256');
-  } else if (trackedIdentity.some((value) => value !== null)) {
-    return fail(expected.kind === 'absent' ? 'absent staging retains artifact identity' : 'physical-present staging must have null artifact identity');
+  } else if (expected.kind === 'absent') {
+    if (identityIsNull) {
+      if (input.publishState !== null) return fail('absent staging without intent must have a null publish state');
+    } else {
+      if (!identityIsComplete) return fail('absent staging requires a complete artifact preparation intent');
+      if (input.publishState !== 'not_started') return fail('absent staging artifact preparation intent requires publish state not_started');
+      stagingFileName(persistedArtifactPath!, jobId, 'persisted staging artifact path');
+      stagingFileName(input.checksumPath!, jobId, 'persisted checksum sidecar path', 'sha256sums');
+      stagingFileName(input.manifestPath!, jobId, 'persisted manifest sidecar path', 'build-manifest.json');
+      stagingFileName(input.verificationPath!, jobId, 'persisted verification sidecar path', 'verification.json');
+      hash(input.artifactSha256, 'persisted staging artifact SHA-256');
+      number(input.artifactSize, 'persisted staging artifact size');
+      instant(input.artifactMtime, 'persisted staging artifact mtime');
+      hash(input.checksumSha256, 'persisted checksum sidecar SHA-256');
+      hash(input.manifestSha256, 'persisted manifest sidecar SHA-256');
+      hash(input.verificationSha256, 'persisted verification sidecar SHA-256');
+    }
+  } else if (!identityIsNull) {
+    return fail('physical-present staging must have null artifact identity');
   }
   if (expected.kind === 'quarantined') {
     if (trackedArtifact && (expected.sha256 !== input.artifactSha256 || expected.size !== input.artifactSize)) return fail('cleanup quarantine evidence does not match the persisted artifact identity');
     if (!trackedArtifact && (expected.sha256 !== null || expected.size !== null)) return fail('physical-present quarantine evidence contains artifact identity');
   }
-  return withApprovedRootSnapshot(approvedRootRegistry, rootId, async ({ snapshot, dependencies }) => withDirectory(
-    async () => {
-      try {
-        return await open(snapshot.path, DIRECTORY_FLAGS);
-      } catch (error) {
-        return fail('approved output root could not be opened no-follow', error);
-      }
-    },
-    async (root) => {
-      const rootStats = await root.stat();
-      assertApprovedRoot(rootStats, 'approved output root', ownerUid, snapshot.device, snapshot.inode);
-      const builder = await openOptionalDirectoryChild(root, '.osi-image-builder', '.osi-image-builder');
-      let stagingParent: FileHandle | null = null;
-      let quarantineParent: FileHandle | null = null;
-      let source: FileHandle | null = null;
-      let destination: FileHandle | null = null;
-      try {
-        if (builder !== null) {
-          assertManagedDirectory(await builder.stat(), '.osi-image-builder', ownerUid, snapshot.device);
-          stagingParent = await openOptionalDirectoryChild(builder, 'staging', '.osi-image-builder/staging');
-          quarantineParent = await openOptionalDirectoryChild(builder, 'quarantine', '.osi-image-builder/quarantine');
-          if (stagingParent !== null) {
-            assertManagedDirectory(await stagingParent.stat(), '.osi-image-builder/staging', ownerUid, snapshot.device);
-            source = await openOptionalDirectoryChild(stagingParent, jobId, `staging/${jobId}`);
-          }
-          if (quarantineParent !== null) {
-            assertManagedDirectory(await quarantineParent.stat(), '.osi-image-builder/quarantine', ownerUid, snapshot.device);
-            destination = await openOptionalDirectoryChild(quarantineParent, jobId, `quarantine/${jobId}`);
-          }
-          if (source !== null) assertManagedDirectory(await source.stat(), `staging/${jobId}`, ownerUid, snapshot.device);
-          if (destination !== null) assertManagedDirectory(await destination.stat(), `quarantine/${jobId}`, ownerUid, snapshot.device);
+  try {
+    return await withApprovedRootSnapshot(approvedRootRegistry, rootId, async ({ snapshot, dependencies }) => withDirectory(
+      async () => {
+        try {
+          return await open(snapshot.path, DIRECTORY_FLAGS);
+        } catch (error) {
+          return fileSystemFailure('open', 'approved output root could not be opened no-follow', error);
         }
-        if (expected.kind === 'absent') {
-          if (source !== null || destination !== null) return fail('cleanup staging absence does not match physical source and destination state');
-        } else if (source !== null || destination === null) {
-          return fail('cleanup quarantine does not match physical source and destination state');
-        }
-        if (expected.kind === 'quarantined' && trackedArtifact) {
-          const files = [
-            { name: artifactName!, sha256: input.artifactSha256!, size: input.artifactSize!, maxBytes: null },
-            { name: checksumName!, sha256: input.checksumSha256!, size: null, maxBytes: TEXT_LIMITS.maxChecksumBytes },
-            { name: manifestName!, sha256: input.manifestSha256!, size: null, maxBytes: Math.min(JSON_LIMITS.maxEncodedBytes, TEXT_LIMITS.maxManifestBytes) },
-            { name: verificationName!, sha256: input.verificationSha256!, size: null, maxBytes: Math.min(JSON_LIMITS.maxEncodedBytes, TEXT_LIMITS.maxManifestBytes) },
-          ] as const;
-          for (const tracked of files) {
-            const field = `quarantine/${jobId}/${tracked.name}`;
-            const file = await openFileChild(destination!, tracked.name, field);
-            try {
-              await dependencies.beforeRead(file);
-              if (tracked.size === null) {
-                await hashBoundedSidecar(file, tracked.sha256, tracked.maxBytes!, field, ownerUid, snapshot.device);
-              } else {
-                await hashBoundedArtifact(file, tracked.size, tracked.sha256, field, ownerUid, snapshot.device);
+      },
+      async (root) => {
+        const rootStats = await descriptorStat(root, 'approved output root');
+        assertApprovedRoot(rootStats, 'approved output root', ownerUid, snapshot.device, snapshot.inode);
+        const builder = await openOptionalDirectoryChild(root, '.osi-image-builder', '.osi-image-builder');
+        let stagingParent: FileHandle | null = null;
+        let quarantineParent: FileHandle | null = null;
+        let source: FileHandle | null = null;
+        let destination: FileHandle | null = null;
+        try {
+          if (builder !== null) {
+            assertPublisherDirectory(await descriptorStat(builder, '.osi-image-builder'), '.osi-image-builder', ownerUid, snapshot.device);
+            stagingParent = await openOptionalDirectoryChild(builder, 'staging', '.osi-image-builder/staging');
+            quarantineParent = await openOptionalDirectoryChild(builder, 'quarantine', '.osi-image-builder/quarantine');
+            if (stagingParent !== null) {
+              assertPublisherDirectory(await descriptorStat(stagingParent, '.osi-image-builder/staging'), '.osi-image-builder/staging', ownerUid, snapshot.device);
+              source = await openOptionalDirectoryChild(stagingParent, jobId, `staging/${jobId}`);
+            }
+            if (quarantineParent !== null) {
+              assertPublisherDirectory(await descriptorStat(quarantineParent, '.osi-image-builder/quarantine'), '.osi-image-builder/quarantine', ownerUid, snapshot.device);
+              destination = await openOptionalDirectoryChild(quarantineParent, jobId, `quarantine/${jobId}`);
+            }
+            if (source !== null) assertJobDirectory(await descriptorStat(source, `staging/${jobId}`), `staging/${jobId}`, ownerUid, snapshot.device);
+            if (destination !== null) assertJobDirectory(await descriptorStat(destination, `quarantine/${jobId}`), `quarantine/${jobId}`, ownerUid, snapshot.device);
+          }
+          if (expected.kind === 'absent') {
+            if (source !== null || destination !== null) return fail('cleanup staging absence does not match physical source and destination state');
+          } else if (source !== null || destination === null) {
+            return fail('cleanup quarantine does not match physical source and destination state');
+          }
+          if (expected.kind === 'quarantined' && trackedArtifact) {
+            const files = [
+              { name: artifactName!, sha256: input.artifactSha256!, size: input.artifactSize!, maxBytes: null },
+              { name: checksumName!, sha256: input.checksumSha256!, size: null, maxBytes: TEXT_LIMITS.maxChecksumBytes },
+              { name: manifestName!, sha256: input.manifestSha256!, size: null, maxBytes: Math.min(JSON_LIMITS.maxEncodedBytes, TEXT_LIMITS.maxManifestBytes) },
+              { name: verificationName!, sha256: input.verificationSha256!, size: null, maxBytes: Math.min(JSON_LIMITS.maxEncodedBytes, TEXT_LIMITS.maxManifestBytes) },
+            ] as const;
+            for (const tracked of files) {
+              const field = `quarantine/${jobId}/${tracked.name}`;
+              const file = await openFileChild(destination!, tracked.name, field);
+              try {
+                try {
+                  await dependencies.beforeRead(file);
+                } catch (error) {
+                  fileSystemFailure('read', `cannot prepare recovery descriptor read: ${field}`, error);
+                }
+                if (tracked.size === null) {
+                  await hashBoundedSidecar(file, tracked.sha256, tracked.maxBytes!, field, ownerUid, snapshot.device);
+                } else {
+                  await hashBoundedArtifact(file, tracked.size, tracked.sha256, field, ownerUid, snapshot.device);
+                }
+              } finally {
+                await descriptorClose(file);
               }
-            } finally {
-              await file.close();
             }
           }
+          await revalidateManagedJob(root, builder, stagingParent, 'staging', jobId, null, ownerUid, snapshot.device);
+          await revalidateManagedJob(root, builder, quarantineParent, 'quarantine', jobId, expected.kind === 'quarantined' ? destination : null, ownerUid, snapshot.device);
+          await withApprovedRootSnapshot(approvedRootRegistry, rootId, async ({ snapshot: current }) => {
+            if (
+              current.id !== snapshot.id
+              || current.path !== snapshot.path
+              || current.quarantinePath !== snapshot.quarantinePath
+              || current.device !== snapshot.device
+              || current.inode !== snapshot.inode
+            ) return fail('approved output root authority changed during staging verification');
+          });
+          return true as const;
+        } finally {
+          await closeHandles([source, destination, stagingParent, quarantineParent, builder]);
         }
-        await revalidateManagedJob(root, builder, stagingParent, 'staging', jobId, null, ownerUid, snapshot.device);
-        await revalidateManagedJob(root, builder, quarantineParent, 'quarantine', jobId, expected.kind === 'quarantined' ? destination : null, ownerUid, snapshot.device);
-        await withApprovedRootSnapshot(approvedRootRegistry, rootId, async ({ snapshot: current }) => {
-          if (
-            current.id !== snapshot.id
-            || current.path !== snapshot.path
-            || current.quarantinePath !== snapshot.quarantinePath
-            || current.device !== snapshot.device
-            || current.inode !== snapshot.inode
-          ) return fail('approved output root authority changed during staging verification');
-        });
-        return true as const;
-      } finally {
-        await closeHandles([source, destination, stagingParent, quarantineParent, builder]);
-      }
-    },
-  ));
+      },
+    ));
+  } catch (error) {
+    return authorityFailure('approved root authority verification failed', error);
+  }
 }
 
 export function createRecoveryPhysicalVerification(options: RecoveryPhysicalVerificationOptions): RecoveryPhysicalVerification {
