@@ -34,6 +34,12 @@ const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const REMOTE_NAME = 'origin';
 const MAX_BRANCH_BYTES = 255;
 const MAX_FIELD_BYTES = 64 * 1024;
+const SHA_BYTES = 40;
+const MAX_COMMIT_TIME_BYTES = 256;
+const MAX_AUTHOR_NAME_BYTES = 4096;
+const MAX_AUTHOR_EMAIL_BYTES = 4096;
+const COMPACT_METADATA_OUTPUT_BYTES = MAX_FIELD_BYTES + SHA_BYTES + MAX_COMMIT_TIME_BYTES + 3;
+const COMPLETE_METADATA_OUTPUT_BYTES = MAX_FIELD_BYTES + SHA_BYTES + MAX_COMMIT_TIME_BYTES + MAX_AUTHOR_NAME_BYTES + MAX_AUTHOR_EMAIL_BYTES + 5;
 const MAX_PREPARED_FEED_FILE_BYTES = 256 * 1024 * 1024;
 const MAX_REF_COUNT = 1000;
 const NUL = '\0';
@@ -245,8 +251,8 @@ function parseRefRecords(output: string, expectedFields: number): string[][] {
   });
 }
 
-function parseSingleMetadataRecord(output: string, expectedFields: number): string[] {
-  if (bytes(output) > MAX_FIELD_BYTES || !output.endsWith(NUL)) throw new SourceResolverError('SOURCE_NOT_COMMIT');
+function parseSingleMetadataRecord(output: string, expectedFields: number, maxOutputBytes: number): string[] {
+  if (bytes(output) > maxOutputBytes || !output.endsWith(NUL)) throw new SourceResolverError('SOURCE_NOT_COMMIT');
   const fields = output.slice(0, -1).split(NUL);
   if (fields.length !== expectedFields) throw new SourceResolverError('SOURCE_NOT_COMMIT');
   return fields;
@@ -1051,9 +1057,10 @@ export class SourceResolver {
 
   async #readMetadata(sha: string, complete: boolean, originUrl = '', branch = ''): Promise<Omit<GitResolutionMetadata, 'sourcePreparation'>> {
     const format = complete ? '%H%x00%cI%x00%an%x00%ae%x00%s%x00' : '%H%x00%cI%x00%s%x00';
+    const outputLimit = complete ? COMPLETE_METADATA_OUTPUT_BYTES : COMPACT_METADATA_OUTPUT_BYTES;
     try {
-      const result = await this.#run(['show', '--no-patch', `--format=format:${format}`, '--end-of-options', sha]);
-      const fields = parseSingleMetadataRecord(result.stdout, complete ? 5 : 3);
+      const result = await this.#run(['show', '--no-patch', `--format=format:${format}`, '--end-of-options', sha], outputLimit);
+      const fields = parseSingleMetadataRecord(result.stdout, complete ? 5 : 3, outputLimit);
       if (complete) {
         const [fullSha, commitTime, authorName, authorEmail, subject] = fields;
         validateCommitMetadata(fullSha!, commitTime!, authorName!, authorEmail!, subject!);
@@ -1088,11 +1095,11 @@ export class SourceResolver {
     }
   }
 
-  async #run(argv: readonly string[]): Promise<GitProcessResult> {
+  async #run(argv: readonly string[], stdoutLimit = MAX_FIELD_BYTES): Promise<GitProcessResult> {
     try {
       const result = await this.#git.run(argv, { cwd: this.#repositoryPath });
       if (result.exitCode !== 0 || result.timedOut || result.aborted) throw new GitCommandError({ code: result.aborted ? 'GIT_COMMAND_ABORTED' : result.timedOut ? 'GIT_COMMAND_TIMEOUT' : 'GIT_COMMAND_FAILED', argv, exitCode: result.exitCode, signal: result.signal, stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut, aborted: result.aborted });
-      if (bytes(result.stdout) > MAX_FIELD_BYTES || bytes(result.stderr) > MAX_FIELD_BYTES) throw new GitCommandError({ code: 'GIT_OUTPUT_LIMIT', argv });
+      if (bytes(result.stdout) > stdoutLimit || bytes(result.stderr) > MAX_FIELD_BYTES) throw new GitCommandError({ code: 'GIT_OUTPUT_LIMIT', argv });
       return result;
     } catch (error) {
       if (error instanceof GitCommandError) throw error;

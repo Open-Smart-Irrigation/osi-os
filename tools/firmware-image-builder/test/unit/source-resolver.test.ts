@@ -122,9 +122,13 @@ class FakeGit implements GitExecutor {
     });
   }
 
+  reply(argv: readonly string[], callNumber: number): Reply {
+    return this.replies(argv, callNumber);
+  }
+
   async run(argv: readonly string[], _options: { readonly cwd?: string; readonly signal?: AbortSignal } = {}): Promise<GitProcessResult> {
     this.calls.push({ argv: [...argv], env: FIXED_GIT_ENV });
-    const reply = this.replies(argv, this.calls.length);
+    const reply = this.reply(argv, this.calls.length);
     return {
       argv,
       exitCode: reply.exitCode ?? 0,
@@ -141,6 +145,25 @@ class FakeGit implements GitExecutor {
 function resolver(fake: FakeGit, now = () => '2026-07-23T12:00:00.000Z'): SourceResolver {
   return new SourceResolver({ repositoryPath: '/work/osi-os', remote: 'origin', git: fake, now });
 }
+
+function metadataBoundaryGit(subject: string): FakeGit {
+  const defaults = new FakeGit();
+  return new FakeGit((argv) => {
+    const sha = argv.at(-1) === SHA_B ? SHA_B : SHA_A;
+    if (argv[0] === 'show' && argv.at(-1)?.endsWith(':.gitmodules')) return {
+      stdout: '[submodule "openwrt"]\n path = openwrt\n url = https://github.com/openwrt/openwrt.git\n branch = openwrt-24.10\n[submodule "feeds/chirpstack-openwrt-feed"]\n path = feeds/chirpstack-openwrt-feed\n url = https://github.com/chirpstack/chirpstack-openwrt-feed.git\n',
+    };
+    if (argv[0] === 'show' && argv.some((part) => part.includes('%an'))) {
+      return { stdout: `${sha}${NUL}2026-07-22T10:00:00+00:00${NUL}Alice Example${NUL}alice@example.test${NUL}${subject}${NUL}` };
+    }
+    if (argv[0] === 'show') return { stdout: `${sha}${NUL}2026-07-22T10:00:00+00:00${NUL}${subject}${NUL}` };
+    return defaults.reply(argv, 0);
+  });
+}
+
+const UTF8_SUBJECT_65536 = '\u20ac'.repeat(21_845) + 'a';
+const UTF8_SUBJECT_65536_FOUR_BYTE = '\u{1F600}'.repeat(16_384);
+const ASCII_SUBJECT_65537 = 'a'.repeat(65_537);
 
 describe('Git command boundary', () => {
   it('uses an absolute executable, argument arrays, fixed environment, and bounded output', async () => {
@@ -673,6 +696,37 @@ describe('API-owned source resolver', () => {
     });
     expect(fake.calls.some(({ argv }) => argv.includes('fetch') && argv.at(-2) === ORIGIN && argv.at(-1) === CANONICAL_FETCH_REFSPEC)).toBe(true);
     expect(fake.calls.every(({ env }) => env.HOME === '/nonexistent' && env.GIT_TERMINAL_PROMPT === '0')).toBe(true);
+  });
+
+  it('accepts a 65536-byte multibyte subject in compact branch metadata framing', async () => {
+    expect(Buffer.byteLength(UTF8_SUBJECT_65536, 'utf8')).toBe(65_536);
+    const fake = metadataBoundaryGit(UTF8_SUBJECT_65536);
+
+    await expect(resolver(fake).listBranches()).resolves.toMatchObject({
+      branches: [{ name: 'feature/a', subject: UTF8_SUBJECT_65536 }, { name: 'main', subject: UTF8_SUBJECT_65536 }],
+    });
+  });
+
+  it('accepts a 65536-byte multibyte subject in complete acceptance metadata framing', async () => {
+    expect(Buffer.byteLength(UTF8_SUBJECT_65536_FOUR_BYTE, 'utf8')).toBe(65_536);
+    const fake = metadataBoundaryGit(UTF8_SUBJECT_65536_FOUR_BYTE);
+
+    await expect(resolver(fake).resolveAtAcceptance('main', SHA_A)).resolves.toMatchObject({
+      sha: SHA_A,
+      subject: UTF8_SUBJECT_65536_FOUR_BYTE,
+    });
+  });
+
+  it('rejects a 65537-byte subject in compact branch metadata framing', async () => {
+    expect(Buffer.byteLength(ASCII_SUBJECT_65537, 'utf8')).toBe(65_537);
+
+    await expect(resolver(metadataBoundaryGit(ASCII_SUBJECT_65537)).listBranches()).rejects.toMatchObject({ code: 'SOURCE_NOT_COMMIT' });
+  });
+
+  it('rejects a 65537-byte subject in complete acceptance metadata framing', async () => {
+    expect(Buffer.byteLength(ASCII_SUBJECT_65537, 'utf8')).toBe(65_537);
+
+    await expect(resolver(metadataBoundaryGit(ASCII_SUBJECT_65537)).resolveAtAcceptance('main', SHA_A)).rejects.toMatchObject({ code: 'SOURCE_NOT_COMMIT' });
   });
 
   it.each([
