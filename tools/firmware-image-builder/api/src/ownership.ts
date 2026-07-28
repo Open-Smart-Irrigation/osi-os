@@ -298,7 +298,7 @@ export type ApiWriteCommand =
   | Readonly<{ kind: 'cancellation-recovery-blocker'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; observedRunnerUnit: string | null; observedOwner: string | null; observedLeaseExpiresAt: string | null; blocker: JsonObject; at: string }>
   | Readonly<{ kind: 'freshness-request'; jobId: string; at: string }>
   | Readonly<{ kind: 'freshness-result'; jobId: string; input: FreshnessInput; at: string }>
-  | Readonly<{ kind: 'runner-recovery-blocker'; jobId: string; expectedState: ActiveRecoveryState; runnerUnit: string; observedOwner: string | null; observedLeaseExpiresAt: string | null; blocker: JsonObject; at: string }>
+  | Readonly<{ kind: 'runner-recovery-blocker'; jobId: string; expectedState: ActiveRecoveryState; runnerUnit: string; observedOwner: string | null; observedLeaseExpiresAt: string | null; blocker: JsonObject; blockerCode?: BuilderErrorCode; at: string }>
   | Readonly<{ kind: 'direct-interrupt'; jobId: string; expectedState: ActiveRecoveryState; at: string; proof: DirectInterruptionProof; errorCode: BuilderErrorCode; error: JsonObject }>
   | Readonly<{ kind: 'publish-recovery'; jobId: string; expectedState: 'publishing'; at: string; state: 'succeeded' | 'failed'; evidence: PublishRecoveryEvidence; errorCode?: BuilderErrorCode; error?: JsonObject }>
   | Readonly<{ kind: 'cleanup-credential-reserve'; jobId: string; admissionId: string; owner: string; credentialRelativePath: string; createdAt: string; expiresAt: string; at: string }>
@@ -694,6 +694,7 @@ function validateApiCommand(command: ApiWriteCommand): void {
       shapeNullableString(value.observedOwner, 'runner recovery blocker owner', true);
       preparedOptionalInstant(value.observedLeaseExpiresAt, 'runner recovery blocker lease expiry');
       if ((value.observedOwner === null) !== (value.observedLeaseExpiresAt === null)) throw new OwnershipValidationError('runner recovery blocker lease identity is incomplete');
+      preparedOptionalEnum(value.blockerCode, BUILDER_ERROR_CODES, 'runner recovery blocker code');
       preparedJsonObject(value.blocker, 'runner recovery blocker');
       return;
     case 'direct-interrupt': preparedCommon(value, 'API'); preparedEnum(value.expectedState, JOB_STATES, 'direct interruption expectedState'); shapeDirectProof(value.proof, value.at as string); preparedEnum(value.errorCode, BUILDER_ERROR_CODES, 'direct interruption errorCode'); preparedJsonObject(value.error, 'direct interruption error'); return;
@@ -2261,6 +2262,27 @@ export class OwnershipStore {
       conflict('stale-predecessor', 'queued job has no authoritative runnable source preparation');
     }
     requireChronology([['accepted time', String(job.accepted_at)], ['dispatch time', command.at]]);
+    const blocker = this.#db.prepare(`SELECT job_id FROM jobs
+      WHERE queue_state='dispatched'
+        OR state IN (${ACTIVE_RECOVERY_STATE_SQL})
+        OR cleanup_fence_generation IS NOT NULL
+        OR cleanup_admission_id IS NOT NULL
+        OR cleanup_blocker_code IS NOT NULL
+        OR container_id IS NOT NULL
+        OR container_name IS NOT NULL
+        OR container_image_digest IS NOT NULL
+        OR container_label_job_id IS NOT NULL
+        OR container_label_manifest_sha IS NOT NULL
+        OR container_labels_json IS NOT NULL
+        OR artifact_staging_path IS NOT NULL
+        OR artifact_quarantine_path IS NOT NULL
+        OR artifact_quarantine_intent_path IS NOT NULL
+        OR publish_blocker_code IS NOT NULL
+        OR EXISTS (SELECT 1 FROM job_log_generations AS logs WHERE logs.job_id=jobs.job_id AND logs.sealed_at IS NULL)
+      LIMIT 1`).get() as Row | undefined;
+    if (blocker !== undefined && blocker.job_id !== command.jobId) {
+      conflict('fenced', `queue dispatch is blocked by job ${String(blocker.job_id)}`);
+    }
     const result = this.#db.prepare("UPDATE jobs SET state='starting', queue_state='dispatched', queue_position=NULL, dispatched_at=?, runner_unit=?, updated_at=? WHERE job_id=? AND state='queued' AND queue_state='queued' AND runner_unit IS NULL AND EXISTS (SELECT 1 FROM queue_entries AS candidate WHERE candidate.job_id=jobs.job_id AND candidate.fifo_seq=(SELECT MIN(first.fifo_seq) FROM queue_entries AS first JOIN jobs AS first_job ON first_job.job_id=first.job_id WHERE first_job.state='queued' AND first_job.queue_state='queued')) AND NOT EXISTS (SELECT 1 FROM jobs WHERE job_id=? AND cleanup_fence_generation IS NOT NULL)").run(command.at, command.runnerUnit, command.at, command.jobId, command.jobId);
     if (Number(result.changes) !== 1) conflict('stale-predecessor', 'queued job was already claimed');
     const queue = this.#db.prepare('DELETE FROM queue_entries WHERE job_id=?').run(command.jobId);
@@ -2730,6 +2752,7 @@ export class OwnershipStore {
       ['runner recovery blocker time', command.at],
     ]);
     const blockerJson = json(command.blocker, 'runner recovery blocker', true);
+    const blockerCode = command.blockerCode ?? 'RUNNER_DISAPPEARED';
     if (
       row.state !== command.expectedState
       || row.runner_unit !== command.runnerUnit
@@ -2742,7 +2765,7 @@ export class OwnershipStore {
       conflict('identity-mismatch', 'runner recovery blocker observation is stale');
     }
     if (
-      row.cleanup_blocker_code === 'RUNNER_DISAPPEARED'
+      row.cleanup_blocker_code === blockerCode
       && row.cleanup_blocker_json === blockerJson
     ) {
       return;
@@ -2751,12 +2774,13 @@ export class OwnershipStore {
       conflict('fenced', 'runner recovery blocker is already persisted');
     }
     const result = this.#db.prepare(`UPDATE jobs SET
-      cleanup_blocker_code='RUNNER_DISAPPEARED', cleanup_blocker_json=?, updated_at=?
+      cleanup_blocker_code=?, cleanup_blocker_json=?, updated_at=?
       WHERE job_id=? AND state=? AND runner_unit=?
         AND runner_lease_owner IS ? AND runner_lease_expires_at IS ?
         AND terminal_at IS NULL AND cleanup_blocker_code IS NULL
         AND cleanup_blocker_json IS NULL AND cleanup_fence_generation IS NULL
         AND cleanup_admission_id IS NULL`).run(
+      blockerCode,
       blockerJson,
       command.at,
       command.jobId,
@@ -2770,7 +2794,7 @@ export class OwnershipStore {
     }
     this.#event(command.jobId, 'recovery', {
       kind: 'runner-composition-blocker',
-      errorCode: 'RUNNER_DISAPPEARED',
+      errorCode: blockerCode,
     }, command.at);
   }
 

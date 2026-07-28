@@ -1,0 +1,373 @@
+import type { DatabaseSync } from 'node:sqlite';
+
+import {
+  OwnershipConflictError,
+  type DirectInterruptionProof,
+  type OwnershipResult,
+  type OwnershipStore,
+} from './ownership.js';
+import type { JsonObject } from './store.js';
+import type { ActiveRecoveryState } from '../../domain/types.js';
+
+const ACTIVE_STATES = new Set<ActiveRecoveryState>([
+  'starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup',
+  'feeds', 'config', 'building', 'verifying', 'cancel_requested',
+]);
+
+const RUNNER_UNIT = /^osi-image-builder-runner@[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.service$/u;
+const START_ARGV = (unit: string): readonly string[] => ['systemctl', '--user', 'start', unit];
+const MAX_ACTIVE_RUNNER_UNITS = 64;
+const MAX_ACTIVE_DATABASE_ROWS = 64;
+
+type QueueRow = Readonly<Record<string, unknown>>;
+
+export interface QueueStatement {
+  readonly all: (...parameters: readonly unknown[]) => readonly QueueRow[];
+  readonly get: (...parameters: readonly unknown[]) => QueueRow | undefined;
+}
+
+export interface QueueDatabase {
+  readonly prepare: (sql: string) => QueueStatement;
+}
+
+export interface SystemdUnitObservation {
+  readonly unit: string;
+  readonly active: boolean;
+  readonly observedAt: string;
+}
+
+export interface SystemdStartResult {
+  readonly unit: string;
+  readonly argv: readonly string[];
+  readonly exitCode: number | null;
+  readonly timedOut: boolean;
+  readonly signal?: string | null;
+}
+
+export interface QueueSystemd {
+  readonly inspect: (unit: string) => Promise<SystemdUnitObservation>;
+  readonly start: (unit: string) => Promise<SystemdStartResult>;
+  readonly listActive?: () => Promise<readonly string[]>;
+}
+
+export interface QueueBlocker {
+  readonly code: string;
+  readonly details?: JsonObject;
+}
+
+export interface QueueSafetyChecks {
+  readonly inspect: (input: Readonly<{
+    readonly phase: 'before-claim' | 'before-start' | 'direct-proof';
+    readonly jobId?: string;
+  }>) => Promise<QueueBlocker | null>;
+}
+
+export interface DirectInterruptionInput {
+  readonly jobId: string;
+  readonly runnerUnit: string;
+  readonly startAttemptedAt: string;
+  readonly unitInactiveAt: string;
+  readonly at: string;
+  readonly reason: string;
+}
+
+export interface QueueCoordinatorOptions {
+  readonly db: DatabaseSync | QueueDatabase;
+  readonly ownership: Pick<OwnershipStore, 'apiWrite'>;
+  readonly systemd: QueueSystemd;
+  readonly safety?: QueueSafetyChecks;
+  readonly directInterrupt?: (input: DirectInterruptionInput) => Promise<DirectInterruptionProof | null>;
+  readonly clock?: Readonly<{ readonly now: () => string }>;
+}
+
+export type QueueDispatchResult =
+  | Readonly<{ readonly kind: 'idle' }>
+  | Readonly<{ readonly kind: 'started'; readonly jobId: string; readonly runnerUnit: string }>
+  | Readonly<{ readonly kind: 'interrupted'; readonly jobId: string }>
+  | Readonly<{ readonly kind: 'recovery-blocked'; readonly jobId: string; readonly blocker: QueueBlocker }>
+  | Readonly<{ readonly kind: 'blocked'; readonly reason: string; readonly jobId?: string }>;
+
+export interface QueueCoordinator {
+  readonly dispatchNext: () => Promise<QueueDispatchResult>;
+}
+
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function nullableText(row: QueueRow, key: string): string | null {
+  return text(row[key]);
+}
+
+function isActiveState(value: unknown): value is ActiveRecoveryState {
+  return typeof value === 'string' && ACTIVE_STATES.has(value as ActiveRecoveryState);
+}
+
+function runnerUnit(jobId: string): string {
+  return `osi-image-builder-runner@${jobId}.service`;
+}
+
+function canonicalInstant(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value ? value : null;
+}
+
+function laterInstant(first: string, second: string): string {
+  return Date.parse(first) >= Date.parse(second) ? first : second;
+}
+
+function objectDetails(value: QueueBlocker): JsonObject {
+  return { code: value.code, ...(value.details ?? {}) };
+}
+
+function success(result: OwnershipResult): boolean {
+  return result.ok;
+}
+
+function resultMessage(result: OwnershipResult): string {
+  return result.ok ? 'ownership write did not return a conflict' : result.conflict.message;
+}
+
+function database(db: DatabaseSync | QueueDatabase): QueueDatabase {
+  return db as unknown as QueueDatabase;
+}
+
+function rowJobId(row: QueueRow): string | null {
+  return text(row.job_id) ?? text(row.jobId);
+}
+
+function safeResult(result: unknown): result is SystemdStartResult {
+  if (typeof result !== 'object' || result === null) return false;
+  const value = result as Record<string, unknown>;
+  return typeof value.unit === 'string'
+    && Array.isArray(value.argv) && value.argv.every((item) => typeof item === 'string')
+    && (typeof value.exitCode === 'number' || value.exitCode === null)
+    && typeof value.timedOut === 'boolean'
+    && (value.signal === undefined || value.signal === null || typeof value.signal === 'string');
+}
+
+function safeObservation(value: unknown, expectedUnit: string): value is SystemdUnitObservation {
+  if (typeof value !== 'object' || value === null) return false;
+  const observation = value as Record<string, unknown>;
+  return observation.unit === expectedUnit && typeof observation.active === 'boolean' && canonicalInstant(observation.observedAt) !== null;
+}
+
+export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueCoordinator {
+  const db = database(options.db);
+  const clock = options.clock ?? { now: () => new Date().toISOString() };
+  let dispatchInFlight = false;
+  let lastClockAt = Number.NEGATIVE_INFINITY;
+  let lastObservationAt = Number.NEGATIVE_INFINITY;
+
+  function clockReading(): string {
+    const value = canonicalInstant(clock.now());
+    if (value === null) throw new Error('clock returned a non-canonical instant');
+    const at = Date.parse(value);
+    if (at < lastClockAt) throw new Error('clock observations moved backwards');
+    lastClockAt = at;
+    return value;
+  }
+
+  function statement(sql: string): QueueStatement {
+    const prepared = db.prepare(sql);
+    if (typeof prepared.all !== 'function' || typeof prepared.get !== 'function') throw new Error('database statement is missing required get/all methods');
+    return prepared;
+  }
+
+  function rows(sql: string, ...parameters: readonly unknown[]): readonly QueueRow[] {
+    const result = statement(sql).all(...parameters);
+    if (!Array.isArray(result) || result.length > MAX_ACTIVE_DATABASE_ROWS || result.some((value) => typeof value !== 'object' || value === null)) throw new Error('database returned malformed or unbounded rows');
+    return result;
+  }
+
+  function one(sql: string, ...parameters: readonly unknown[]): QueueRow | undefined {
+    const result = statement(sql).get(...parameters);
+    if (result !== undefined && (typeof result !== 'object' || result === null)) throw new Error('database returned a malformed row');
+    return result;
+  }
+
+  function currentJob(jobId: string): QueueRow | undefined {
+    return one('SELECT * FROM jobs WHERE job_id=?', jobId);
+  }
+
+  function activeJobs(): readonly QueueRow[] {
+    const result = rows(`SELECT * FROM jobs WHERE state IN ('starting','preflight','source','release_gates','frontend','target_setup','feeds','config','building','verifying','cancel_requested') OR queue_state='dispatched' ORDER BY updated_at, job_id`);
+    if (result.some((value) => rowJobId(value) === null || !isActiveState(value.state))) throw new Error('database returned a malformed active job row');
+    return result;
+  }
+
+  function oldestQueued(): QueueRow | undefined {
+    const result = rows(`SELECT jobs.* FROM queue_entries JOIN jobs ON jobs.job_id=queue_entries.job_id
+      WHERE jobs.state='queued' AND jobs.queue_state='queued' ORDER BY queue_entries.fifo_seq, queue_entries.job_id LIMIT 1`);
+    if (result.some((value) => rowJobId(value) === null || value.state !== 'queued' || value.queue_state !== 'queued')) throw new Error('database returned a malformed queued job row');
+    return result[0];
+  }
+
+  async function safetyBlocker(phase: 'before-claim' | 'before-start' | 'direct-proof', jobId?: string): Promise<QueueBlocker | null> {
+    if (options.safety === undefined) return { code: 'SAFETY_CHECK_UNAVAILABLE', details: { phase } };
+    try {
+      const result = await options.safety.inspect({ phase, jobId });
+      if (result === null) return null;
+      if (typeof result.code !== 'string' || result.code.length === 0) return { code: 'SAFETY_CHECK_INVALID', details: { phase } };
+      return result;
+    } catch (error) {
+      return { code: 'SAFETY_CHECK_UNAVAILABLE', details: { phase, error: error instanceof Error ? error.message : String(error) } };
+    }
+  }
+
+  function databaseBlocker(excludeJobId?: string): QueueBlocker | null {
+    const suffix = excludeJobId === undefined ? '' : ' AND job_id<>?';
+    const row = one(`SELECT job_id FROM jobs
+      WHERE (queue_state='dispatched'
+        OR state IN ('starting','preflight','source','release_gates','frontend','target_setup','feeds','config','building','verifying','cancel_requested')
+        OR cleanup_fence_generation IS NOT NULL
+        OR cleanup_admission_id IS NOT NULL
+        OR cleanup_blocker_code IS NOT NULL
+        OR container_id IS NOT NULL OR container_name IS NOT NULL OR container_image_digest IS NOT NULL
+        OR container_label_job_id IS NOT NULL OR container_label_manifest_sha IS NOT NULL OR container_labels_json IS NOT NULL
+        OR artifact_staging_path IS NOT NULL OR artifact_quarantine_path IS NOT NULL OR artifact_quarantine_intent_path IS NOT NULL
+        OR publish_blocker_code IS NOT NULL
+        OR EXISTS (SELECT 1 FROM job_log_generations AS logs WHERE logs.job_id=jobs.job_id AND logs.sealed_at IS NULL))${suffix}
+      LIMIT 1`, ...(excludeJobId === undefined ? [] : [excludeJobId]));
+    const jobId = row === undefined ? null : rowJobId(row);
+    if (row !== undefined && jobId === null) return { code: 'DATABASE_RESULT_INVALID' };
+    return jobId === null ? null : { code: 'SQLITE_QUEUE_BLOCKER', details: { jobId } };
+  }
+
+  async function systemdBlocker(unit: string): Promise<QueueBlocker | null> {
+    if (!RUNNER_UNIT.test(unit)) return { code: 'INVALID_RUNNER_UNIT', details: { unit } };
+    if (options.systemd.listActive === undefined) return { code: 'SYSTEMD_INSPECTION_UNAVAILABLE' };
+    try {
+      const startedAt = clockReading();
+      const active = await options.systemd.listActive();
+      const finishedAt = clockReading();
+      if (!Array.isArray(active) || active.length > MAX_ACTIVE_RUNNER_UNITS || Date.parse(startedAt) > Date.parse(finishedAt)) return { code: 'INVALID_SYSTEMD_LIST' };
+      for (const activeUnit of active) {
+        if (typeof activeUnit !== 'string' || !RUNNER_UNIT.test(activeUnit)) return { code: 'INVALID_SYSTEMD_UNIT', details: { unit: activeUnit } };
+      }
+      return active.length === 0 ? null : { code: 'LIVE_RUNNER_UNIT', details: { unit: active[0]! } };
+    } catch (error) {
+      return { code: 'SYSTEMD_INSPECTION_UNAVAILABLE', details: { error: error instanceof Error ? error.message : String(error) } };
+    }
+  }
+
+  async function inspectInactive(unit: string): Promise<SystemdUnitObservation | QueueBlocker> {
+    try {
+      const startedAt = clockReading();
+      const observation = await options.systemd.inspect(unit);
+      const finishedAt = clockReading();
+      const observedAt = safeObservation(observation, unit) ? Date.parse(observation.observedAt) : Number.NaN;
+      if (!Number.isFinite(observedAt) || observedAt < Date.parse(startedAt) || observedAt > Date.parse(finishedAt)) return { code: 'INVALID_SYSTEMD_OBSERVATION', details: { unit } };
+      if (observedAt < lastObservationAt) return { code: 'SYSTEMD_OBSERVATION_OUT_OF_ORDER', details: { unit } };
+      lastObservationAt = observedAt;
+      return observation;
+    } catch (error) {
+      return { code: 'SYSTEMD_INSPECTION_UNAVAILABLE', details: { unit, error: error instanceof Error ? error.message : String(error) } };
+    }
+  }
+
+  async function persistRecoveryBlocker(row: QueueRow, unit: string, reason: string, blocker: QueueBlocker, at: string): Promise<QueueDispatchResult> {
+    const jobId = rowJobId(row);
+    if (jobId === null || !isActiveState(row.state)) return { kind: 'blocked', reason: 'recovery predecessor is invalid', jobId: jobId ?? undefined };
+    const result = options.ownership.apiWrite({
+      kind: 'runner-recovery-blocker', jobId, expectedState: row.state, runnerUnit: unit,
+      observedOwner: nullableText(row, 'runner_lease_owner'), observedLeaseExpiresAt: nullableText(row, 'runner_lease_expires_at'),
+      blockerCode: 'SERVICE_START_FAILED',
+      blocker: { code: 'SERVICE_START_FAILED', reason, blocker: objectDetails(blocker) }, at,
+    });
+    if (!success(result)) return { kind: 'blocked', reason: resultMessage(result), jobId };
+    return { kind: 'recovery-blocked', jobId, blocker };
+  }
+
+  async function recoverClaimed(row: QueueRow, unit: string, reason: string, attemptedAt: string): Promise<QueueDispatchResult> {
+    const jobId = rowJobId(row);
+    if (jobId === null || !isActiveState(row.state)) return { kind: 'blocked', reason: 'claimed job identity is invalid' };
+    const inspected = await inspectInactive(unit);
+    if ('code' in inspected) return persistRecoveryBlocker(row, unit, reason, inspected, laterInstant(clockReading(), attemptedAt));
+    const at = laterInstant(clockReading(), inspected.observedAt);
+    if (inspected.active) return persistRecoveryBlocker(row, unit, reason, { code: 'LIVE_RUNNER_UNIT', details: { unit } }, at);
+    const safety = await safetyBlocker('direct-proof', jobId);
+    if (safety !== null) return persistRecoveryBlocker(row, unit, reason, safety, at);
+    let proof: DirectInterruptionProof | null = null;
+    try {
+      proof = options.directInterrupt === undefined
+        ? null
+        : await options.directInterrupt({ jobId, runnerUnit: unit, startAttemptedAt: attemptedAt, unitInactiveAt: inspected.observedAt, at, reason });
+    } catch (error) {
+      return persistRecoveryBlocker(row, unit, reason, { code: 'DIRECT_PROOF_UNAVAILABLE', details: { error: error instanceof Error ? error.message : String(error) } }, at);
+    }
+    if (proof === null) return persistRecoveryBlocker(row, unit, reason, { code: 'DIRECT_PROOF_UNAVAILABLE' }, at);
+    const result = options.ownership.apiWrite({ kind: 'direct-interrupt', jobId, expectedState: row.state, at, proof, errorCode: 'SERVICE_START_FAILED', error: { reason } });
+    if (!success(result)) return { kind: 'blocked', reason: resultMessage(result), jobId };
+    return { kind: 'interrupted', jobId };
+  }
+
+  async function reconcileStarting(): Promise<QueueDispatchResult | null> {
+    for (const row of activeJobs()) {
+      const jobId = rowJobId(row);
+      if (jobId === null) return { kind: 'blocked', reason: 'active job identity is invalid' };
+      if (!isActiveState(row.state)) continue;
+      if (row.cleanup_blocker_code !== null && row.cleanup_blocker_code !== undefined) return { kind: 'blocked', reason: 'active recovery blocker is unresolved', jobId };
+      if (row.state !== 'starting') return { kind: 'blocked', reason: 'active runner is unresolved', jobId };
+      const unit = nullableText(row, 'runner_unit');
+      if (unit === null || unit !== runnerUnit(jobId)) return { kind: 'blocked', reason: 'persisted runner unit is invalid', jobId };
+      const observation = await inspectInactive(unit);
+      if ('code' in observation) return { kind: 'blocked', reason: observation.code, jobId };
+      if (observation.active) return { kind: 'blocked', reason: 'runner unit is live', jobId };
+      const recovered = await recoverClaimed(row, unit, 'dispatcher found a claimed starting job before service start', observation.observedAt);
+      return recovered;
+    }
+    return null;
+  }
+
+  async function dispatchNext(): Promise<QueueDispatchResult> {
+    if (dispatchInFlight) return { kind: 'blocked', reason: 'dispatcher already has an in-flight claim' };
+    dispatchInFlight = true;
+    try {
+      const recovered = await reconcileStarting();
+      if (recovered !== null) return recovered;
+      const global = databaseBlocker();
+      if (global !== null) return { kind: 'blocked', reason: global.code, jobId: (global.details?.jobId as string | undefined) };
+      const safety = await safetyBlocker('before-claim');
+      if (safety !== null) return { kind: 'blocked', reason: safety.code };
+      const candidate = oldestQueued();
+      if (candidate === undefined) return { kind: 'idle' };
+      const jobId = rowJobId(candidate);
+      if (jobId === null) return { kind: 'blocked', reason: 'queued job identity is invalid' };
+      const unit = runnerUnit(jobId);
+      const liveBeforeClaim = await systemdBlocker(unit);
+      if (liveBeforeClaim !== null) return { kind: 'blocked', reason: liveBeforeClaim.code, jobId };
+      const claimed = options.ownership.apiWrite({ kind: 'dispatch', jobId, runnerUnit: unit, at: clockReading() });
+      if (!success(claimed)) return { kind: 'blocked', reason: resultMessage(claimed), jobId };
+      const afterClaimSafety = await safetyBlocker('before-start', jobId);
+      const observation = await inspectInactive(unit);
+      const claimedRow = currentJob(jobId) ?? { ...candidate, state: 'starting', queue_state: 'dispatched', runner_unit: unit };
+      if (afterClaimSafety !== null) return recoverClaimed(claimedRow, unit, 'runtime blocker appeared after queue claim', clockReading());
+      if ('code' in observation) return recoverClaimed(claimedRow, unit, observation.code, clockReading());
+      if (observation.active) return recoverClaimed(currentJob(jobId) ?? { ...candidate, state: 'starting', runner_unit: unit }, unit, 'runner unit became live before service start', observation.observedAt);
+      const beforeStart = await safetyBlocker('before-start', jobId);
+      if (beforeStart !== null) return recoverClaimed(claimedRow, unit, 'runtime blocker appeared during final start check', observation.observedAt);
+      const liveBeforeStart = await systemdBlocker(unit);
+      if (liveBeforeStart !== null) return recoverClaimed(claimedRow, unit, 'runner unit became live during final start check', observation.observedAt);
+      const startAttemptedAt = clockReading();
+      let start: unknown;
+      try { start = await options.systemd.start(unit); }
+      catch (error) { return recoverClaimed(claimedRow, unit, `systemd start threw: ${error instanceof Error ? error.message : String(error)}`, startAttemptedAt); }
+      if (!safeResult(start) || start.unit !== unit || JSON.stringify(start.argv) !== JSON.stringify(START_ARGV(unit)) || start.exitCode !== 0 || start.timedOut || start.signal !== undefined && start.signal !== null) {
+        return recoverClaimed(claimedRow, unit, 'systemd service start failed or returned an invalid command result', startAttemptedAt);
+      }
+      const postStart = await inspectInactive(unit);
+      if ('code' in postStart) return recoverClaimed(claimedRow, unit, postStart.code, startAttemptedAt);
+      if (!postStart.active || Date.parse(postStart.observedAt) < Date.parse(startAttemptedAt)) return recoverClaimed(claimedRow, unit, 'systemd start did not produce a fresh active observation', startAttemptedAt);
+      return { kind: 'started', jobId, runnerUnit: unit };
+    } catch (error) {
+      if (error instanceof OwnershipConflictError) return { kind: 'blocked', reason: error.message };
+      return { kind: 'blocked', reason: error instanceof Error ? error.message : String(error) };
+    } finally {
+      dispatchInFlight = false;
+    }
+  }
+
+  return Object.freeze({ dispatchNext });
+}

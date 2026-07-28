@@ -116,6 +116,14 @@ function activate(
   expect(fixtureValue.ownership.runnerWrite({ kind: 'acquire-lease', jobId, runnerUnit, owner, expiresAt: leaseExpiresAt, at: LATER }).ok).toBe(true);
 }
 
+function seedIndependentActiveRows(fixtureValue: Awaited<ReturnType<typeof fixture>>, jobIds: readonly string[]): void {
+  for (const jobId of jobIds) {
+    const runnerUnit = `osi-image-builder-runner@${jobId}.service`;
+    fixtureValue.db.prepare("UPDATE jobs SET state='starting', queue_state='dispatched', queue_position=NULL, dispatched_at=?, runner_unit=?, runner_lease_owner=?, runner_lease_expires_at=?, updated_at=? WHERE job_id=?").run(LATER, runnerUnit, 'runner-a', '2026-07-27T12:10:00.000Z', LATER, jobId);
+    fixtureValue.db.prepare('DELETE FROM queue_entries WHERE job_id=?').run(jobId);
+  }
+}
+
 function toPublishing(fixtureValue: Awaited<ReturnType<typeof fixture>>, jobId: string): void {
   const unit = `osi-image-builder-runner@${jobId}.service`;
   const owner = 'runner-publishing';
@@ -955,8 +963,7 @@ describe('API cancellation against the durable ownership store', () => {
 
   it('CAS-advances the durable clock and rolls stop authorization back atomically', async () => {
     const fixtureValue = await fixture(['clock-cas-a', 'authorization-rollback-a']);
-    activate(fixtureValue, 'clock-cas-a');
-    activate(fixtureValue, 'authorization-rollback-a');
+    seedIndependentActiveRows(fixtureValue, ['clock-cas-a', 'authorization-rollback-a']);
     const secondDb = openBuilderDatabase(fixtureValue.databasePath);
     const secondOwnership = new OwnershipStore(secondDb, { now: () => NOW });
     for (const jobId of ['clock-cas-a', 'authorization-rollback-a']) {
@@ -1350,10 +1357,7 @@ describe('API cancellation against the durable ownership store', () => {
 
   it('coordinates one stop across separate SQLite stores and survives restart after a persisted stop intent', async () => {
     const fixtureValue = await fixture(['separate-a', 'preintent-a', 'restart-a', 'stopresult-a']);
-    activate(fixtureValue, 'separate-a');
-    activate(fixtureValue, 'preintent-a');
-    activate(fixtureValue, 'restart-a');
-    activate(fixtureValue, 'stopresult-a');
+    seedIndependentActiveRows(fixtureValue, ['separate-a', 'preintent-a', 'restart-a', 'stopresult-a']);
     const secondDb = openBuilderDatabase(fixtureValue.databasePath);
     const secondOwnership = new OwnershipStore(secondDb, { now: () => NOW });
     const secondStore = new BuilderStore(secondDb);
@@ -1556,8 +1560,7 @@ describe('API cancellation against the durable ownership store', () => {
 
   it('rejects stale anomaly CAS and rolls blocker persistence back with its event', async () => {
     const fixtureValue = await fixture(['cas-a', 'rollback-a']);
-    activate(fixtureValue, 'cas-a');
-    activate(fixtureValue, 'rollback-a');
+    seedIndependentActiveRows(fixtureValue, ['cas-a', 'rollback-a']);
     for (const jobId of ['cas-a', 'rollback-a']) {
       expect(fixtureValue.ownership.apiWrite({
         kind: 'request-cancellation', jobId, reason: 'operator',

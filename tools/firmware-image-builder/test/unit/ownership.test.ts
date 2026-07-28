@@ -795,7 +795,38 @@ describe('actor-owned compare-and-set writes', () => {
     expect(ownership.apiWrite(dispatch('job-2'))).toMatchObject({ ok: false, conflict: { kind: 'stale-predecessor' } });
     expect(store.getJob('job-2').state).toBe('queued');
     expect(ownership.apiWrite(dispatch('job-1')).ok).toBe(true);
+    expect(ownership.apiWrite(dispatch('job-2'))).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
+    expect(ownership.runnerWrite(lease(ACTIVE, 'job-1')).ok).toBe(true);
+    expect(ownership.runnerWrite({ ...runnerBase('job-1'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW }).ok).toBe(true);
+    expect(ownership.runnerWrite({ ...runnerBase('job-1'), at: LATER, kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: LATER, errorCode: 'BUILD_FAILED', error: { reason: 'test clearance' } }).ok).toBe(true);
     expect(ownership.apiWrite(dispatch('job-2')).ok).toBe(true);
+  });
+
+  it.each([
+    ['cleanup blocker', 'cleanup_blocker_code', 'SERVICE_START_FAILED'],
+  ])('atomically blocks dispatch for every persisted global %s', async (_label, column, value) => {
+    const jobId = `global-${String(column)}`;
+    const target = await fixture(jobId);
+    expect(target.ownership.apiWrite(dispatch(jobId)).ok).toBe(true);
+    target.db.prepare(`UPDATE jobs SET ${column}=?, cleanup_blocker_json=? WHERE job_id=?`).run(value, JSON.stringify({ reason: 'global blocker' }), jobId);
+    const second = target.ownership.apiWrite({ kind: 'enqueue', input: {
+      jobId: 'job-2', requestId: 'request-job-2', request: { branch: 'main', target: 'rpi-5' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'global', acceptedAt: NOW,
+    } });
+    expect(second.ok).toBe(true);
+    expect(target.ownership.apiWrite(dispatch('job-2'))).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
+  });
+
+  it('allows the next dispatch only after a terminal clearance', async () => {
+    const target = await fixture('terminal-clearance');
+    expect(target.ownership.apiWrite(dispatch('terminal-clearance')).ok).toBe(true);
+    expect(target.ownership.apiWrite({ kind: 'enqueue', input: {
+      jobId: 'job-2', requestId: 'request-job-2', request: { branch: 'main', target: 'rpi-5' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'clearance', acceptedAt: NOW,
+    } }).ok).toBe(true);
+    expect(target.ownership.apiWrite(dispatch('job-2'))).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
+    expect(target.ownership.runnerWrite(lease(ACTIVE, 'terminal-clearance')).ok).toBe(true);
+    expect(target.ownership.runnerWrite({ ...runnerBase('terminal-clearance'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW }).ok).toBe(true);
+    expect(target.ownership.runnerWrite({ ...runnerBase('terminal-clearance'), at: LATER, kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: LATER, errorCode: 'BUILD_FAILED', error: { reason: 'terminal clearance' } }).ok).toBe(true);
+    expect(target.ownership.apiWrite(dispatch('job-2')).ok).toBe(true);
   });
 
   it('returns a stable queue-full conflict before insert at the configured bound', async () => {
