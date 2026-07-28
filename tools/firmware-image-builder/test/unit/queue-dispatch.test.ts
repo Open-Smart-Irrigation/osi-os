@@ -89,6 +89,10 @@ describe('FIFO queue dispatch', () => {
     expect(() => coordinator({ dispatchClaimLeaseMs: leaseMs, dispatchClaimRenewIntervalMs: renewMs })).toThrow('dispatch claim lease and renewal intervals are invalid');
   });
 
+  it.each([0, 1.5, 120_001])('rejects invalid queue operation timeout: %s', (operationTimeoutMs) => {
+    expect(() => coordinator({ operationTimeoutMs })).toThrow('queue operation timeout is invalid');
+  });
+
   it('claims the oldest queued job and starts only after a fresh active observation', async () => {
     const target = coordinator();
     target.systemd.inspect
@@ -97,7 +101,7 @@ describe('FIFO queue dispatch', () => {
 
     await expect(target.queue.dispatchNext()).resolves.toEqual({ kind: 'started', jobId: 'job-1', runnerUnit: UNIT });
     expect(target.ownership.apiWrite).toHaveBeenCalledWith(expect.objectContaining({ kind: 'dispatch', jobId: 'job-1', runnerUnit: UNIT }));
-    expect(target.systemd.start).toHaveBeenCalledWith(UNIT);
+    expect(target.systemd.start).toHaveBeenCalledWith(UNIT, expect.any(AbortSignal));
   });
 
   it.each([

@@ -22,6 +22,7 @@ const MAX_ACTIVE_RUNNER_UNITS = 64;
 const MAX_ACTIVE_DATABASE_ROWS = 64;
 const DISPATCH_CLAIM_LEASE_MS = 30_000;
 const DISPATCH_CLAIM_RENEW_INTERVAL_MS = 5_000;
+const OPERATION_TIMEOUT_MS = 15_000;
 
 type QueueRow = Readonly<Record<string, unknown>>;
 
@@ -61,10 +62,10 @@ export interface SystemdStartResult {
 }
 
 export interface QueueSystemd {
-  readonly inspect: (unit: string) => Promise<SystemdUnitObservation>;
-  readonly start: (unit: string) => Promise<SystemdStartResult>;
+  readonly inspect: (unit: string, signal?: AbortSignal) => Promise<SystemdUnitObservation>;
+  readonly start: (unit: string, signal?: AbortSignal) => Promise<SystemdStartResult>;
   /** Lists runner units in either active or activating systemd states. */
-  readonly listActive?: () => Promise<readonly string[]>;
+  readonly listActive?: (signal?: AbortSignal) => Promise<readonly string[]>;
 }
 
 export interface QueueBlocker {
@@ -76,7 +77,7 @@ export interface QueueSafetyChecks {
   readonly inspect: (input: Readonly<{
     readonly phase: 'before-claim' | 'before-start' | 'direct-proof';
     readonly jobId?: string;
-  }>) => Promise<QueueBlocker | null>;
+  }>, signal?: AbortSignal) => Promise<QueueBlocker | null>;
 }
 
 export interface DirectInterruptionInput {
@@ -93,11 +94,12 @@ export interface QueueCoordinatorOptions {
   readonly ownership: Pick<OwnershipStore, 'apiWrite'>;
   readonly systemd: QueueSystemd;
   readonly safety?: QueueSafetyChecks;
-  readonly directInterrupt?: (input: DirectInterruptionInput) => Promise<DirectInterruptionProof | null>;
+  readonly directInterrupt?: (input: DirectInterruptionInput, signal?: AbortSignal) => Promise<DirectInterruptionProof | null>;
   readonly clock?: Readonly<{ readonly now: () => string }>;
   readonly coordinatorId?: string;
   readonly dispatchClaimLeaseMs?: number;
   readonly dispatchClaimRenewIntervalMs?: number;
+  readonly operationTimeoutMs?: number;
 }
 
 export type QueueDispatchResult =
@@ -232,6 +234,16 @@ function observationIsInactive(observation: SystemdUnitObservation): boolean {
   return !observation.active && !observation.pending;
 }
 
+class QueueOperationTimeoutError extends Error {
+  readonly operation: string;
+
+  constructor(operation: string) {
+    super(`${operation} timed out`);
+    this.name = 'QueueOperationTimeoutError';
+    this.operation = operation;
+  }
+}
+
 export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueCoordinator {
   const db = database(options.db);
   const clock = options.clock ?? { now: () => new Date().toISOString() };
@@ -278,8 +290,32 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
 
   const claimLeaseMs = options.dispatchClaimLeaseMs ?? DISPATCH_CLAIM_LEASE_MS;
   const claimRenewIntervalMs = options.dispatchClaimRenewIntervalMs ?? DISPATCH_CLAIM_RENEW_INTERVAL_MS;
+  const operationTimeoutMs = options.operationTimeoutMs ?? OPERATION_TIMEOUT_MS;
   if (!Number.isSafeInteger(claimLeaseMs) || claimLeaseMs <= 0 || !Number.isSafeInteger(claimRenewIntervalMs) || claimRenewIntervalMs <= 0 || claimRenewIntervalMs * 2 >= claimLeaseMs) {
     throw new Error('dispatch claim lease and renewal intervals are invalid');
+  }
+  if (!Number.isSafeInteger(operationTimeoutMs) || operationTimeoutMs <= 0 || operationTimeoutMs > 120_000) {
+    throw new Error('queue operation timeout is invalid');
+  }
+
+  async function boundedOperation<T>(operation: string, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        const error = new QueueOperationTimeoutError(operation);
+        reject(error);
+        controller.abort(error);
+      }, operationTimeoutMs);
+    });
+    try {
+      return await Promise.race([
+        Promise.resolve().then(() => work(controller.signal)),
+        timeout,
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   type ClaimHeartbeat = Readonly<{
@@ -397,11 +433,12 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
   async function safetyBlocker(phase: 'before-claim' | 'before-start' | 'direct-proof', jobId?: string): Promise<QueueBlocker | null> {
     if (options.safety === undefined) return { code: 'SAFETY_CHECK_UNAVAILABLE', details: { phase } };
     try {
-      const result = await options.safety.inspect({ phase, jobId });
+      const result = await boundedOperation('safety inspection', (signal) => options.safety!.inspect({ phase, jobId }, signal));
       if (result === null) return null;
       if (typeof result.code !== 'string' || result.code.length === 0) return { code: 'SAFETY_CHECK_INVALID', details: { phase } };
       return result;
     } catch (error) {
+      if (error instanceof QueueOperationTimeoutError) return { code: 'SAFETY_CHECK_TIMEOUT', details: { phase } };
       return { code: 'SAFETY_CHECK_UNAVAILABLE', details: { phase, error: error instanceof Error ? error.message : String(error) } };
     }
   }
@@ -435,7 +472,7 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
     if (options.systemd.listActive === undefined) return { code: 'SYSTEMD_INSPECTION_UNAVAILABLE' };
     try {
       const startedAt = clockReading();
-      const active = await options.systemd.listActive();
+      const active = await boundedOperation('systemd active-unit inspection', (signal) => options.systemd.listActive!(signal));
       const finishedAt = clockReading();
       if (!Array.isArray(active) || active.length > MAX_ACTIVE_RUNNER_UNITS || Date.parse(startedAt) > Date.parse(finishedAt)) return { code: 'INVALID_SYSTEMD_LIST' };
       for (const activeUnit of active) {
@@ -443,6 +480,7 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
       }
       return active.length === 0 ? null : { code: 'LIVE_RUNNER_UNIT', details: { unit: active[0]! } };
     } catch (error) {
+      if (error instanceof QueueOperationTimeoutError) return { code: 'SYSTEMD_INSPECTION_TIMEOUT' };
       return { code: 'SYSTEMD_INSPECTION_UNAVAILABLE', details: { error: error instanceof Error ? error.message : String(error) } };
     }
   }
@@ -450,7 +488,7 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
   async function inspectInactive(unit: string): Promise<SystemdUnitObservation | QueueBlocker> {
     try {
       const startedAt = clockReading();
-      const observation = await options.systemd.inspect(unit);
+      const observation = await boundedOperation('systemd unit inspection', (signal) => options.systemd.inspect(unit, signal));
       const finishedAt = clockReading();
       const observedAt = safeObservation(observation, unit) ? Date.parse(observation.observedAt) : Number.NaN;
       if (!Number.isFinite(observedAt) || observedAt < Date.parse(startedAt) || observedAt > Date.parse(finishedAt)) return { code: 'INVALID_SYSTEMD_OBSERVATION', details: { unit } };
@@ -458,6 +496,7 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
       lastObservationAt = observedAt;
       return observation;
     } catch (error) {
+      if (error instanceof QueueOperationTimeoutError) return { code: 'SYSTEMD_INSPECTION_TIMEOUT', details: { unit } };
       return { code: 'SYSTEMD_INSPECTION_UNAVAILABLE', details: { unit, error: error instanceof Error ? error.message : String(error) } };
     }
   }
@@ -546,6 +585,8 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
       }
     }
     if (claim.startAttemptedAt === null || claim.unitInactiveAt === null) return { kind: 'blocked', reason: 'DISPATCH_CLAIM_MALFORMED', jobId };
+    const startAttemptedAt = claim.startAttemptedAt;
+    const unitInactiveAt = claim.unitInactiveAt;
     const heartbeat = existingHeartbeat ?? claimHeartbeat(jobId, claim.owner);
     const ownsHeartbeat = existingHeartbeat === undefined;
     try {
@@ -587,14 +628,14 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
       try {
         proof = options.directInterrupt === undefined
           ? null
-          : await options.directInterrupt({
+          : await boundedOperation('direct interruption proof', (signal) => options.directInterrupt!({
             jobId,
             runnerUnit: unit,
-            startAttemptedAt: claim.startAttemptedAt,
-            unitInactiveAt: claim.unitInactiveAt,
+            startAttemptedAt,
+            unitInactiveAt,
             expectedClaimExpiresAt: proofClaim.leaseExpiresAt,
             reason,
-          });
+          }, signal));
       } catch (error) {
         if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
         const final = await inspectInactive(unit);
@@ -753,8 +794,9 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
         const startOwnership = options.ownership.apiWrite({ kind: 'dispatch-start', jobId, runnerUnit: unit, claimOwner: coordinatorId, expectedClaimExpiresAt: currentBeforeStart.leaseExpiresAt, claimExpiresAt: dispatchClaimExpiry(startAttemptedAt, claimLeaseMs), unitInactiveAt: observation.observedAt, startAttemptedAt, at: startAttemptedAt });
         if (!success(startOwnership)) return { kind: 'blocked', reason: resultMessage(startOwnership), jobId };
         let start: unknown;
-        try { start = await options.systemd.start(unit); }
+        try { start = await boundedOperation('systemd start', (signal) => options.systemd.start(unit, signal)); }
         catch (error) {
+          if (error instanceof QueueOperationTimeoutError) return { kind: 'blocked', reason: 'SYSTEMD_START_TIMEOUT', jobId };
           if (!heartbeat.checkpoint()) return { kind: 'blocked', reason: 'dispatch claim ownership changed', jobId };
           return await recoverClaimed(claimedRow, unit, `systemd start threw: ${error instanceof Error ? error.message : String(error)}`, coordinatorId, heartbeat);
         }

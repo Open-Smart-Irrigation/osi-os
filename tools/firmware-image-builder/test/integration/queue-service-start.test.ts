@@ -420,7 +420,7 @@ describe('queue service-start recovery with real SQLite stores', () => {
     const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd: { ...state.systemd, inspect: async (unit) => ({ unit, active: false, pending: false, observedAt: EXPIRED }) }, safety: { inspect: async () => null }, directInterrupt, coordinatorId: 'dispatcher-b', clock: { now: () => EXPIRED } });
 
     await expect(coordinator.dispatchNext()).resolves.toMatchObject({ kind: 'interrupted', jobId: 'first' });
-    expect(directInterrupt).toHaveBeenCalledWith(expect.objectContaining({ startAttemptedAt: WRITTEN, unitInactiveAt: WRITTEN }));
+    expect(directInterrupt).toHaveBeenCalledWith(expect.objectContaining({ startAttemptedAt: WRITTEN, unitInactiveAt: WRITTEN }), expect.any(AbortSignal));
     expect(target.db.prepare('SELECT 1 AS present FROM queue_dispatch_claims WHERE claim_id=1').get()).toBeUndefined();
   });
 
@@ -497,7 +497,7 @@ describe('queue service-start recovery with real SQLite stores', () => {
     });
 
     await expect(coordinator.dispatchNext()).resolves.toMatchObject({ kind: 'interrupted', jobId: 'first' });
-    expect(directInterrupt).toHaveBeenCalledWith(expect.objectContaining({ startAttemptedAt: WRITTEN }));
+    expect(directInterrupt).toHaveBeenCalledWith(expect.objectContaining({ startAttemptedAt: WRITTEN }), expect.any(AbortSignal));
     expect(capturedProof?.kind).toBe('start-failure');
     expect(capturedProof && capturedProof.kind === 'start-failure' ? capturedProof.unitInactiveAt : undefined).toBe(LATER);
     expect(target.db.prepare('SELECT state, terminal_error_code, terminal_at FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'interrupted', terminal_error_code: 'SERVICE_START_FAILED', terminal_at: LATER });
@@ -916,6 +916,111 @@ describe('queue service-start recovery with real SQLite stores', () => {
       await expect(coordinator.dispatchNext()).resolves.toMatchObject({ kind: 'blocked', jobId: 'first' });
       expect(target.db.prepare('SELECT state, queue_state, cleanup_blocker_code FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'starting', queue_state: 'dispatched', cleanup_blocker_code: null });
       expect(target.db.prepare('SELECT phase FROM queue_dispatch_claims WHERE claim_id=1').get()).toEqual({ phase: 'start-attempted' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds a stalled systemd start and stops renewing its retained claim', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(WRITTEN);
+    try {
+      const target = await fixture(['first', 'second']);
+      let releaseStart!: (result: Awaited<ReturnType<QueueSystemd['start']>>) => void;
+      let startEntered = false;
+      let startSignal: AbortSignal | undefined;
+      const stalledStart = new Promise<Awaited<ReturnType<QueueSystemd['start']>>>((resolve) => { releaseStart = resolve; });
+      const systemd: QueueSystemd = {
+        inspect: async (unit) => ({ unit, active: false, pending: false, observedAt: new Date().toISOString() }),
+        listActive: async () => [],
+        start: async (_unit, signal) => {
+          startEntered = true;
+          startSignal = signal;
+          return stalledStart;
+        },
+      };
+      const coordinator = createQueueCoordinator({
+        db: target.db,
+        ownership: target.ownership,
+        systemd,
+        safety: { inspect: async () => null },
+        dispatchClaimLeaseMs: 40,
+        dispatchClaimRenewIntervalMs: 5,
+        operationTimeoutMs: 20,
+      });
+      let settled = false;
+      const dispatch = coordinator.dispatchNext().then((result) => {
+        settled = true;
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(startEntered).toBe(true);
+      await vi.advanceTimersByTimeAsync(25);
+      const settledBeforeRelease = settled;
+      const expiryAfterTimeout = target.db.prepare('SELECT lease_expires_at FROM queue_dispatch_claims WHERE claim_id=1').get();
+      await vi.advanceTimersByTimeAsync(50);
+      const expiryAfterWait = target.db.prepare('SELECT lease_expires_at FROM queue_dispatch_claims WHERE claim_id=1').get();
+      releaseStart({ unit: 'osi-image-builder-runner@first.service', argv: ['systemctl', '--user', 'start', 'osi-image-builder-runner@first.service'], exitCode: 1, timedOut: false });
+
+      await expect(dispatch).resolves.toEqual({ kind: 'blocked', reason: 'SYSTEMD_START_TIMEOUT', jobId: 'first' });
+      expect(settledBeforeRelease).toBe(true);
+      expect(startSignal?.aborted).toBe(true);
+      expect(expiryAfterWait).toEqual(expiryAfterTimeout);
+      expect(target.db.prepare('SELECT state, queue_state FROM jobs WHERE job_id=?').get('first')).toEqual({ state: 'starting', queue_state: 'dispatched' });
+      expect(target.db.prepare('SELECT state, queue_state FROM jobs WHERE job_id=?').get('second')).toEqual({ state: 'queued', queue_state: 'queued' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds a stalled post-claim safety inspection without starting systemd', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(WRITTEN);
+    try {
+      const target = await fixture(['first']);
+      const state = systemdState();
+      let releaseSafety!: () => void;
+      const stalledSafety = new Promise<void>((resolve) => { releaseSafety = resolve; });
+      let stalled = false;
+      let safetySignal: AbortSignal | undefined;
+      const safety = { inspect: async ({ phase }: { phase: string }, signal?: AbortSignal) => {
+        if (phase === 'before-start' && !stalled) {
+          stalled = true;
+          safetySignal = signal;
+          await stalledSafety;
+        }
+        return null;
+      } };
+      const coordinator = createQueueCoordinator({
+        db: target.db,
+        ownership: target.ownership,
+        systemd: {
+          ...state.systemd,
+          inspect: async (unit) => ({ unit, active: false, pending: false, observedAt: new Date().toISOString() }),
+        },
+        safety,
+        operationTimeoutMs: 20,
+      });
+      let settled = false;
+      const dispatch = coordinator.dispatchNext().then((result) => {
+        settled = true;
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(stalled).toBe(true);
+      await vi.advanceTimersByTimeAsync(25);
+      const settledBeforeRelease = settled;
+      releaseSafety();
+
+      await expect(dispatch).resolves.toMatchObject({ kind: 'recovery-blocked', jobId: 'first' });
+      expect(settledBeforeRelease).toBe(true);
+      expect(safetySignal?.aborted).toBe(true);
+      expect(state.starts).toHaveLength(0);
+      expect(target.db.prepare('SELECT state, queue_state, cleanup_blocker_code FROM jobs WHERE job_id=?').get('first')).toEqual({
+        state: 'starting',
+        queue_state: 'dispatched',
+        cleanup_blocker_code: 'SERVICE_START_FAILED',
+      });
     } finally {
       vi.useRealTimers();
     }
