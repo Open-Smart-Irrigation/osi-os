@@ -7,6 +7,7 @@ import {
 } from '../../api/src/recovery.js';
 import {
   STARTUP_PHASES,
+  createStartupBootstrap,
   createStartupCoordinator,
   type StartupPhaseResult,
 } from '../../api/src/startup-order.js';
@@ -28,6 +29,40 @@ function startupGate(): QueueStartupGate {
 }
 
 describe('startup reconciliation order', () => {
+  it('binds a fail-closed queue behind one production startup boundary', async () => {
+    const phases: string[] = [];
+    const phase = (name: string) => async (): Promise<StartupPhaseResult> => {
+      phases.push(name);
+      return clear();
+    };
+    const bootstrap = createStartupBootstrap({
+      queue: {
+        db: {
+          prepare: vi.fn(() => ({ all: vi.fn(() => []), get: vi.fn(() => undefined) })),
+        },
+        ownership: { apiWrite: vi.fn(() => ({ ok: true, kind: 'committed', eventSeq: 1, value: undefined })) } as never,
+        systemd: {
+          inspect: vi.fn(async (unit: string) => ({ unit, active: false, pending: false, observedAt: NOW })),
+          start: vi.fn(async (unit: string) => ({ unit, argv: ['systemctl', '--user', 'start', unit], exitCode: 0, timedOut: false })),
+        },
+        safety: { inspect: vi.fn(async () => null) },
+        clock: { now: () => NOW },
+      },
+      services: {
+        migrations: phase('migrations'),
+        cleanupAdmissions: phase('cleanup-admissions'),
+        liveRunnerClassification: phase('live-runner-classification'),
+        stalePublishingRecovery: phase('stale-publishing-recovery'),
+        nonPublishingInterruption: phase('non-publishing-interruption'),
+        retention: phase('retention'),
+      },
+    });
+
+    await expect(bootstrap.start()).resolves.toMatchObject({ dispatched: true, blockers: [] });
+    expect(phases).toEqual(STARTUP_PHASES.slice(0, -1));
+    expect(bootstrap.events().map((event) => event.phase)).toEqual([...STARTUP_PHASES]);
+  });
+
   it('runs migrations through dispatch in the exact required order and records phase events', async () => {
     const calls: string[] = [];
     const phase = (name: string): (() => Promise<StartupPhaseResult>) => async () => {

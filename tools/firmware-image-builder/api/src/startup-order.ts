@@ -1,4 +1,4 @@
-import type { QueueBlocker, QueueStartupGate } from './queue.js';
+import { createQueueCoordinator, type QueueBlocker, type QueueCoordinatorOptions, type QueueStartupGate } from './queue.js';
 
 export const STARTUP_PHASES = [
   'migrations',
@@ -37,6 +37,31 @@ export interface StartupCoordinatorOptions extends StartupCoordinatorPhases {
   readonly queueGate?: QueueStartupGate;
 }
 
+export type StartupService = () => Promise<StartupPhaseResult>;
+
+/**
+ * The API bootstrap owns the queue instance. Callers provide named production
+ * services, while dispatch remains reachable only through the startup boundary.
+ */
+export interface StartupProductionServices {
+  readonly migrations: StartupService;
+  readonly cleanupAdmissions: StartupService;
+  readonly liveRunnerClassification: StartupService;
+  readonly stalePublishingRecovery: StartupService;
+  readonly nonPublishingInterruption: StartupService;
+  readonly retention: StartupService;
+}
+
+export interface StartupBootstrapOptions {
+  readonly queue: Omit<QueueCoordinatorOptions, 'startupReady'>;
+  readonly services: StartupProductionServices;
+}
+
+export interface StartupBootstrap {
+  readonly start: () => Promise<StartupResult>;
+  readonly events: () => readonly StartupPhaseEvent[];
+}
+
 export interface StartupResult {
   readonly dispatched: boolean;
   readonly blockers: readonly QueueBlocker[];
@@ -45,6 +70,24 @@ export interface StartupResult {
 export interface StartupCoordinator {
   readonly start: () => Promise<StartupResult>;
   readonly events: () => readonly StartupPhaseEvent[];
+}
+
+function queueDispatchPhase(result: Awaited<ReturnType<ReturnType<typeof createQueueCoordinator>['dispatchNext']>>): StartupPhaseResult {
+  if (result.kind === 'recovery-blocked') return { blockers: [result.blocker] };
+  if (result.kind === 'blocked') return {
+    blockers: [{ code: 'QUEUE_DISPATCH_BLOCKED', details: { reason: result.reason, ...(result.jobId === undefined ? {} : { jobId: result.jobId }) } }],
+  };
+  return { blockers: [] };
+}
+
+export function createStartupBootstrap(options: StartupBootstrapOptions): StartupBootstrap {
+  const queue = createQueueCoordinator(options.queue);
+  const coordinator = createStartupCoordinator({
+    ...options.services,
+    queueGate: queue,
+    dispatch: async () => queueDispatchPhase(await queue.dispatchNext()),
+  });
+  return Object.freeze({ start: coordinator.start, events: coordinator.events });
 }
 
 function blockers(result: StartupPhaseResult): readonly QueueBlocker[] {
