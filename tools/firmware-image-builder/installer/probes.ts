@@ -2,6 +2,7 @@ import { execFile as execFileCallback } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFile = promisify(execFileCallback);
@@ -159,11 +160,20 @@ export async function runNativePrerequisiteProbes(options: {
   if (typeof options.scratchParent !== 'string' || !isAbsolute(options.scratchParent) || options.scratchParent.includes('\0')) {
     return unavailable('SCRATCH_PARENT_INVALID', 'selected-filesystem scratch parent must be absolute');
   }
-  const sourceDirectory = options.sourceDirectory ?? new URL('.', import.meta.url).pathname;
+  const sourceDirectory = options.sourceDirectory ?? fileURLToPath(new URL('.', import.meta.url));
   const execute = options.dependencies?.exec ?? defaultExec;
   const fileSystem = options.dependencies?.fs ?? defaultFileSystem;
-  const compileScratch = await fileSystem.mkdtemp(join(tmpdir(), 'osi-image-builder-probes-'));
+  let compileScratch: string;
   try {
+    compileScratch = await fileSystem.mkdtemp(join(tmpdir(), 'osi-image-builder-probes-'));
+  } catch {
+    return unavailable('COMPILE_SCRATCH_UNAVAILABLE', 'private compile scratch could not be created');
+  }
+  let probeResult: NativePrerequisiteResult | undefined;
+  let probeError: unknown;
+  let probeRejected = false;
+  try {
+    probeResult = await (async (): Promise<NativePrerequisiteResult> => {
     const hostBinary = join(compileScratch, 'probe-host');
     const compile = await execute(
       GCC,
@@ -210,7 +220,16 @@ export async function runNativePrerequisiteProbes(options: {
       detail: 'native host and selected filesystem prerequisites are available',
       mutation: 'none',
     });
-  } finally {
-    await fileSystem.rm(compileScratch, { recursive: true, force: true });
+    })();
+  } catch (error) {
+    probeRejected = true;
+    probeError = error;
   }
+  try {
+    await fileSystem.rm(compileScratch, { recursive: true, force: true });
+  } catch {
+    return cleanupUnproven();
+  }
+  if (probeRejected) throw probeError;
+  return probeResult!;
 }

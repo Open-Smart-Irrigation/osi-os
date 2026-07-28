@@ -197,6 +197,77 @@ describe('native host probes', () => {
     expect(await snapshotTree(fixture.output)).toEqual(beforeOutput);
   });
 
+  it('returns typed unavailable when private compile scratch cannot be created', async () => {
+    let executions = 0;
+    let removals = 0;
+
+    const result = await runNativePrerequisiteProbes({
+      scratchParent: '/approved-output',
+      dependencies: {
+        fs: {
+          mkdtemp: async () => { throw new Error('sensitive filesystem failure'); },
+          rm: async () => { removals += 1; },
+        },
+        exec: async () => {
+          executions += 1;
+          return { stdout: '', stderr: '', exitCode: 0, signal: null };
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      available: false,
+      code: 'COMPILE_SCRATCH_UNAVAILABLE',
+      detail: 'private compile scratch could not be created',
+      mutation: 'none',
+    });
+    expect({ executions, removals }).toEqual({ executions: 0, removals: 0 });
+  });
+
+  it('overrides successful probe evidence when compile-scratch teardown fails', async () => {
+    const result = await runNativePrerequisiteProbes({
+      scratchParent: '/approved-output',
+      sourceDirectory: installer,
+      dependencies: {
+        fs: {
+          mkdtemp: async () => '/private/compile-teardown',
+          rm: async () => { throw new Error('sensitive teardown failure'); },
+        },
+        exec: async (executable, args) => {
+          if (executable === '/usr/bin/gcc' || executable === '/usr/bin/make') {
+            return { stdout: '', stderr: '', exitCode: 0, signal: null };
+          }
+          if (args.length === 0) {
+            return {
+              stdout: JSON.stringify({ available: true, code: 'HOST_PREREQUISITES_AVAILABLE', detail: 'ok' }),
+              stderr: '',
+              exitCode: 0,
+              signal: null,
+            };
+          }
+          return {
+            stdout: JSON.stringify({
+              available: true,
+              code: 'RENAME_NOREPLACE_AVAILABLE',
+              detail: 'ok',
+              collision: { errno: 'EEXIST', sourceUnchanged: true, destinationUnchanged: true },
+            }),
+            stderr: '',
+            exitCode: 0,
+            signal: null,
+          };
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      available: false,
+      code: 'PROBE_CLEANUP_FAILED',
+      detail: 'private probe scratch cleanup could not be proven',
+      mutation: 'unknown',
+    });
+  });
+
   it('maps a missing fixed GCC to typed unavailable and cleans compile scratch', async () => {
     const calls: Array<{ readonly executable: string; readonly args: readonly string[]; readonly options: Readonly<Record<string, unknown>> }> = [];
     const removals: string[] = [];
