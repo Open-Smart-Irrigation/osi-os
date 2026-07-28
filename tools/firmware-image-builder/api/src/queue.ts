@@ -10,6 +10,12 @@ import {
 import type { DispatchClaimPhase } from './ownership.js';
 import type { JsonObject } from './store.js';
 import type { ActiveRecoveryState } from '../../domain/types.js';
+import type {
+  StartupBootstrap,
+  StartupBootstrapOptions,
+  StartupCoordinator,
+  StartupPhaseResult,
+} from './startup-order.js';
 
 const ACTIVE_STATES = new Set<ActiveRecoveryState>([
   'starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup',
@@ -100,8 +106,6 @@ export interface QueueCoordinatorOptions {
   readonly dispatchClaimLeaseMs?: number;
   readonly dispatchClaimRenewIntervalMs?: number;
   readonly operationTimeoutMs?: number;
-  /** Test-only/explicit fixture escape hatch; production callers must use the startup gate. */
-  readonly startupReady?: boolean;
 }
 
 export type QueueDispatchResult =
@@ -113,11 +117,6 @@ export type QueueDispatchResult =
 
 export interface QueueCoordinator {
   readonly dispatchNext: () => Promise<QueueDispatchResult>;
-}
-
-export interface QueueCoordinatorWithStartupGate {
-  readonly queue: QueueCoordinator;
-  readonly startupGate: QueueStartupGate;
 }
 
 export interface QueueStartupGate {
@@ -267,7 +266,7 @@ function createQueueCoordinatorInternal(options: QueueCoordinatorOptions): Queue
   const coordinatorId = options.coordinatorId ?? `queue-dispatcher-${randomUUID()}`;
   let dispatchInFlight = false;
   // Startup is fail-closed. The only normal release path is the typed gate below.
-  let startupReady = options.startupReady ?? false;
+  let startupReady = false;
   let startupBlocker: QueueBlocker | null = null;
   let lastClockAt = Number.NEGATIVE_INFINITY;
   let lastObservationAt = Number.NEGATIVE_INFINITY;
@@ -865,13 +864,46 @@ export function createQueueCoordinator(options: QueueCoordinatorOptions): QueueC
   return Object.freeze({ dispatchNext: internal.dispatchNext });
 }
 
-export function createQueueCoordinatorWithStartupGate(options: QueueCoordinatorOptions): QueueCoordinatorWithStartupGate {
+export function createReadyQueueCoordinatorForTesting(options: QueueCoordinatorOptions): QueueCoordinator {
+  if (process.env.NODE_ENV !== 'test') throw new Error('createReadyQueueCoordinatorForTesting requires NODE_ENV=test');
   const internal = createQueueCoordinatorInternal(options);
+  internal.completeStartupReconciliation([]);
+  return Object.freeze({ dispatchNext: internal.dispatchNext });
+}
+
+function queueDispatchPhase(result: QueueDispatchResult): StartupPhaseResult {
+  if (result.kind === 'recovery-blocked') return { blockers: [result.blocker] };
+  if (result.kind === 'blocked') return {
+    blockers: [{ code: 'QUEUE_DISPATCH_BLOCKED', details: { reason: result.reason, ...(result.jobId === undefined ? {} : { jobId: result.jobId }) } }],
+  };
+  return { blockers: [] };
+}
+
+export function createStartupBootstrap(options: StartupBootstrapOptions): StartupBootstrap {
+  const internal = createQueueCoordinatorInternal(options.queue);
+  const startupGate: QueueStartupGate = {
+    beginStartupReconciliation: internal.beginStartupReconciliation,
+    completeStartupReconciliation: internal.completeStartupReconciliation,
+  };
+  let coordinatorPromise: Promise<StartupCoordinator> | undefined;
+  let coordinatorInstance: StartupCoordinator | undefined;
+  const coordinator = (): Promise<StartupCoordinator> => {
+    if (coordinatorPromise === undefined) {
+      coordinatorPromise = import('./startup-order.js')
+        .then(({ createStartupCoordinator }) => createStartupCoordinator({
+          ...options.services,
+          queueGate: startupGate,
+          dispatch: async () => queueDispatchPhase(await internal.dispatchNext()),
+        }))
+        .then((created) => {
+          coordinatorInstance = created;
+          return created;
+        });
+    }
+    return coordinatorPromise;
+  };
   return Object.freeze({
-    queue: Object.freeze({ dispatchNext: internal.dispatchNext }),
-    startupGate: Object.freeze({
-      beginStartupReconciliation: internal.beginStartupReconciliation,
-      completeStartupReconciliation: internal.completeStartupReconciliation,
-    }),
+    start: async () => (await coordinator()).start(),
+    events: () => coordinatorInstance?.events() ?? [],
   });
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createQueueCoordinator, type QueueSystemd } from '../../api/src/queue.js';
+import { createQueueCoordinator, createReadyQueueCoordinatorForTesting, type QueueSystemd } from '../../api/src/queue.js';
 
 const NOW = '2026-07-28T10:00:00.000Z';
 const LATER = '2026-07-28T10:00:01.000Z';
@@ -75,14 +75,42 @@ function coordinator(overrides: Record<string, unknown> = {}) {
   };
   return {
     ownership, systemd, db,
-    queue: createQueueCoordinator({
+    queue: createReadyQueueCoordinatorForTesting({
       db, ownership, systemd, safety: { inspect: vi.fn(async () => null) },
-      directInterrupt: vi.fn(async () => proof()), clock: { now: () => NOW }, ...queueOverrides, startupReady: true,
+      directInterrupt: vi.fn(async () => proof()), clock: { now: () => NOW }, ...queueOverrides,
     }),
   };
 }
 
 describe('FIFO queue dispatch', () => {
+  it('keeps the normal queue fail-closed and exposes no startup gate', async () => {
+    const target = createQueueCoordinator({
+      db: { prepare: vi.fn(() => ({ all: vi.fn(() => []), get: vi.fn(() => undefined) })) },
+      ownership: { apiWrite: vi.fn(() => ({ ok: true, kind: 'committed', eventSeq: 1, value: undefined })) } as never,
+      systemd: {
+        inspect: vi.fn(async (unit: string) => ({ unit, active: false, pending: false, observedAt: NOW })),
+        start: vi.fn(async (unit: string) => ({ unit, argv: ['systemctl', '--user', 'start', unit], exitCode: 0, timedOut: false })),
+        listActive: vi.fn(async () => []),
+      },
+      safety: { inspect: vi.fn(async () => null) },
+      clock: { now: () => NOW },
+    });
+
+    expect(Object.keys(target)).toEqual(['dispatchNext']);
+    await expect(target.dispatchNext()).resolves.toMatchObject({ kind: 'blocked', reason: 'STARTUP_RECONCILIATION_INCOMPLETE' });
+  });
+
+  it('rejects the ready adapter outside the test environment', () => {
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      expect(() => createReadyQueueCoordinatorForTesting({} as never)).toThrow('NODE_ENV=test');
+    } finally {
+      if (previous === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previous;
+    }
+  });
+
   it('does not expose startup gate controls to normal queue consumers', () => {
     const target = coordinator().queue;
 

@@ -11,7 +11,7 @@ import {
 } from '../../api/src/ownership.js';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { type CreateJobInput } from '../../api/src/store.js';
-import { createQueueCoordinator as createQueueCoordinatorRaw, type DirectInterruptionInput, type QueueCoordinatorOptions, type QueueSystemd } from '../../api/src/queue.js';
+import { createReadyQueueCoordinatorForTesting, type DirectInterruptionInput, type QueueCoordinatorOptions, type QueueSystemd } from '../../api/src/queue.js';
 
 const ACCEPTED = '2026-07-28T10:00:00.000Z';
 const DISPATCHED = '2026-07-28T10:00:01.000Z';
@@ -27,7 +27,7 @@ const databases: Array<ReturnType<typeof openBuilderDatabase>> = [];
 
 // These direct queue tests bypass the not-yet-wired HTTP startup coordinator explicitly.
 function createQueueCoordinator(options: QueueCoordinatorOptions) {
-  return createQueueCoordinatorRaw({ ...options, startupReady: true });
+  return createReadyQueueCoordinatorForTesting(options);
 }
 
 function sourcePreparation() {

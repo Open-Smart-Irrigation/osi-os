@@ -7,11 +7,10 @@ import {
 } from '../../api/src/recovery.js';
 import {
   STARTUP_PHASES,
-  createStartupBootstrap,
   createStartupCoordinator,
   type StartupPhaseResult,
 } from '../../api/src/startup-order.js';
-import type { QueueBlocker, QueueStartupGate } from '../../api/src/queue.js';
+import { createStartupBootstrap, type QueueBlocker, type QueueStartupGate } from '../../api/src/queue.js';
 
 const NOW = '2026-07-28T10:00:00.000Z';
 const FUTURE = '2026-07-28T10:01:00.000Z';

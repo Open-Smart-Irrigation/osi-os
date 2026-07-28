@@ -1,4 +1,4 @@
-import { createQueueCoordinatorWithStartupGate, type QueueBlocker, type QueueCoordinatorOptions, type QueueDispatchResult, type QueueStartupGate } from './queue.js';
+import type { QueueBlocker, QueueCoordinatorOptions, QueueStartupGate } from './queue.js';
 
 export const STARTUP_PHASES = [
   'migrations',
@@ -53,7 +53,7 @@ export interface StartupProductionServices {
 }
 
 export interface StartupBootstrapOptions {
-  readonly queue: Omit<QueueCoordinatorOptions, 'startupReady'>;
+  readonly queue: QueueCoordinatorOptions;
   readonly services: StartupProductionServices;
 }
 
@@ -70,24 +70,6 @@ export interface StartupResult {
 export interface StartupCoordinator {
   readonly start: () => Promise<StartupResult>;
   readonly events: () => readonly StartupPhaseEvent[];
-}
-
-function queueDispatchPhase(result: QueueDispatchResult): StartupPhaseResult {
-  if (result.kind === 'recovery-blocked') return { blockers: [result.blocker] };
-  if (result.kind === 'blocked') return {
-    blockers: [{ code: 'QUEUE_DISPATCH_BLOCKED', details: { reason: result.reason, ...(result.jobId === undefined ? {} : { jobId: result.jobId }) } }],
-  };
-  return { blockers: [] };
-}
-
-export function createStartupBootstrap(options: StartupBootstrapOptions): StartupBootstrap {
-  const { queue, startupGate } = createQueueCoordinatorWithStartupGate(options.queue);
-  const coordinator = createStartupCoordinator({
-    ...options.services,
-    queueGate: startupGate,
-    dispatch: async () => queueDispatchPhase(await queue.dispatchNext()),
-  });
-  return Object.freeze({ start: coordinator.start, events: coordinator.events });
 }
 
 function blockers(result: StartupPhaseResult): readonly QueueBlocker[] {

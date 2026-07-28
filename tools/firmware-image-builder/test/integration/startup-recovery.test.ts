@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCleanupAdmissionRecovery, reconcileCleanupAdmissionAtStartup, type RecoverySystemd } from '../../api/src/recovery.js';
 import { OwnershipStore, type CleanupSnapshot, type DirectInterruptionProof, type PublishRecoveryEvidence, type RunnerWriteCommand } from '../../api/src/ownership.js';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
-import { createStartupBootstrap, type StartupPhaseResult } from '../../api/src/startup-order.js';
-import type { QueueSystemd } from '../../api/src/queue.js';
+import { createStartupBootstrap, type QueueSystemd } from '../../api/src/queue.js';
+import type { StartupPhaseResult } from '../../api/src/startup-order.js';
 import { encodeJson } from '../../api/src/validation.js';
 import type { CreateJobInput, JsonObject } from '../../api/src/store.js';
 
