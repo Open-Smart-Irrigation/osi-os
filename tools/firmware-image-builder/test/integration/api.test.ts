@@ -20,7 +20,7 @@ function stageEvidence(stage: PipelineStageName = 'publish', outcome: 'passed' |
     outcome,
     operationId: null,
     commands: [],
-    inputs: { pinnedSha: sha },
+    inputs: { targetId: 'rpi-5', rootId: 'release', branch: 'main', pinnedSha: sha },
     observations: { artifactSha256: 'c'.repeat(64) },
     error: outcome === 'passed' ? null : {
       code: 'BUILD_FAILED',
@@ -133,7 +133,7 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
       outcome: 'passed',
       operationId: null,
       commands: [],
-      inputs: { pinnedSha: sha },
+      inputs: { targetId: 'rpi-5', rootId: 'release', branch: 'main', pinnedSha: sha },
       observations: { artifactSha256: 'c'.repeat(64) },
       error: null,
     }),
@@ -205,7 +205,7 @@ describe('read-only builder API routes', () => {
     const evidence = await get(started.port, '/api/jobs/job-1/evidence/publish');
     expect(evidence.body).toEqual({
       schemaVersion: 1, jobId: 'job-1', stage: 'publish', startedAt: now, finishedAt: now,
-      outcome: 'passed', operationId: null, commands: [], inputs: { pinnedSha: sha },
+      outcome: 'passed', operationId: null, commands: [], inputs: { targetId: 'rpi-5', rootId: 'release', branch: 'main', pinnedSha: sha },
       observations: { artifactSha256: 'c'.repeat(64) }, error: null,
     });
     const events = await get(started.port, '/api/jobs/job-1/events?after=0');
@@ -233,7 +233,7 @@ describe('read-only builder API routes', () => {
       body: {
         schemaVersion: 1, jobId: 'job-1', stage: 'build', startedAt: now, finishedAt: later,
         outcome: 'failed', operationId: 'build-image', commands: [],
-        inputs: { pinnedSha: sha }, observations: { artifactSha256: 'c'.repeat(64) },
+        inputs: { targetId: 'rpi-5', rootId: 'release', branch: 'main', pinnedSha: sha }, observations: { artifactSha256: 'c'.repeat(64) },
         error: {
           code: 'BUILD_FAILED',
           details: { expectedSha: sha, observedSha: 'b'.repeat(40), operationId: 'build-image' },
@@ -268,6 +268,22 @@ describe('read-only builder API routes', () => {
     await rejected({ ...stageEvidence(), unexpected: true }, 'publish', 'passed');
     await rejected({ ...validFailure, error: { ...validFailure.error!, unexpected: true } }, 'publish', 'failed');
     await rejected({ ...stageEvidence(), inputs: { payload: 'x'.repeat(65_536) } }, 'publish', 'passed');
+    await rejected({ ...stageEvidence(), inputs: { targetId: 'rpi-5', rootId: 'release', branch: 'main', pinnedSha: sha, extra: true } }, 'publish', 'passed');
+    await rejected({ ...stageEvidence(), inputs: { targetId: 'rpi-5', rootId: 'release', branch: 'main' } }, 'publish', 'passed');
+    await rejected({ ...stageEvidence(), inputs: { targetId: 'rpi-4', rootId: 'release', branch: 'main', pinnedSha: sha } }, 'publish', 'passed');
+    await rejected({ ...stageEvidence(), inputs: { targetId: 'rpi-5', rootId: 'release', branch: '/main', pinnedSha: sha } }, 'publish', 'passed');
+    await rejected({ ...stageEvidence(), inputs: { targetId: 'rpi-5', rootId: 'release', branch: 'main', pinnedSha: sha.toUpperCase() } }, 'publish', 'passed');
+  });
+
+  it('rejects a public evidence response whose final encoding exceeds the shared JSON bound', async () => {
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence(),
+      observations: { payload: 'x'.repeat(65_500) },
+    }, 'publish', 'passed');
+    const started = await start(routeDependencies); server = started.server;
+
+    expect((await get(started.port, '/api/jobs/job-1/evidence/publish')).status).toBe(500);
   });
 
   it('rejects malformed and unbounded read parameters and unknown resources', async () => {

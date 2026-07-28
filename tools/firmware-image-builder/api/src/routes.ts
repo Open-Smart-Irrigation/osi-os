@@ -20,6 +20,7 @@ import {
   boundedText,
   canonicalAbsolutePath,
   canonicalInstant,
+  encodeJson,
   optionalInstant,
   sourceMetadataSubject,
   stableRelativePath,
@@ -52,6 +53,7 @@ const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const JOB_STATE_SET = new Set<string>(JOB_STATES);
 const STAGE_SET = new Set<string>(PIPELINE_STAGE_NAMES);
 const ERROR_CODE_SET = new Set<string>(BUILDER_ERROR_CODES);
+const PUBLIC_EVIDENCE_INPUT_KEYS = new Set(['targetId', 'rootId', 'branch', 'pinnedSha']);
 const PUBLIC_DETAIL_KEYS = new Set([
   'availableBytes',
   'expectedSha',
@@ -509,6 +511,22 @@ function eventPageDto(page: EventPage, jobId: string, after: number): JsonRecord
   return { events, next: page.nextAfterSeq ?? events.at(-1)?.seq ?? after };
 }
 
+function publicEvidenceInputs(value: unknown): JsonRecord {
+  const input = record(value, 'evidence inputs');
+  const keys = Object.keys(input);
+  if (keys.length !== PUBLIC_EVIDENCE_INPUT_KEYS.size || keys.some((key) => !PUBLIC_EVIDENCE_INPUT_KEYS.has(key))) {
+    throw new Error('evidence inputs have an invalid public shape');
+  }
+  const targetId = identifier(input.targetId, 'evidence target ID');
+  if (!(TARGET_IDS as readonly string[]).includes(targetId)) throw new Error('evidence target ID is invalid');
+  const rootId = identifier(input.rootId, 'evidence root ID');
+  const branch = branchName(input.branch, 'evidence branch');
+  if (typeof input.pinnedSha !== 'string' || !HASH40_PATTERN.test(input.pinnedSha)) {
+    throw new Error('evidence pinned SHA is invalid');
+  }
+  return { targetId, rootId, branch, pinnedSha: input.pinnedSha };
+}
+
 function publicEvidence(value: unknown, expectedJobId: string, expectedStage: PipelineStageName): JsonRecord {
   const evidence = decodeStoredStageEvidence(value);
   if (evidence.jobId !== expectedJobId || evidence.stage !== expectedStage) {
@@ -525,7 +543,7 @@ function publicEvidence(value: unknown, expectedJobId: string, expectedStage: Pi
     ...(evidence.error.evidencePath === undefined ? {} : { evidencePath: evidence.error.evidencePath }),
     ...(evidence.error.operationId === undefined ? {} : { operationId: evidence.error.operationId }),
   };
-  return {
+  const projected = {
     schemaVersion: evidence.schemaVersion,
     jobId: expectedJobId,
     stage: expectedStage,
@@ -534,10 +552,12 @@ function publicEvidence(value: unknown, expectedJobId: string, expectedStage: Pi
     outcome: evidence.outcome,
     operationId: evidence.operationId,
     commands: evidence.commands,
-    inputs: evidence.inputs,
+    inputs: publicEvidenceInputs(evidence.inputs),
     observations: evidence.observations,
     error,
   };
+  encodeJson(projected, 'public evidence response', true);
+  return projected;
 }
 
 function getJob(store: ApiJobStore, id: string): JobRecord {
