@@ -206,7 +206,7 @@ describe('loopback HTTP security boundary', () => {
       expect((await call(port, { headers: { host: `127.0.0.1:${port - 1}` } })).status).toBe(400);
       expect((await call(port, { headers: { host: 'localhost' } })).status).toBe(400);
       expect((await raw(port, 'GET /api/health HTTP/1.1\r\nConnection: close\r\n\r\n'))).toMatch(/^HTTP\/1\.1 400 /u);
-      expect((await call(port, { path: 'http://evil.example/api/health' })).status).toBe(404);
+      expect((await call(port, { path: 'http://evil.example/api/health' })).status).toBe(400);
       expect(dispatched).toBe(0);
     } finally {
       await stop(server);
