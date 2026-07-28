@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, utimes, writeFile, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -204,5 +204,139 @@ describe('startup retention', () => {
       .run('replayable', OLD);
     await createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })();
     await expect(import('node:fs/promises').then(({ access }) => access(join(logPath, 'runner-0.log')))).resolves.toBeUndefined();
+  });
+
+  it('rejects a symlinked ancestor before retention can mutate', async () => {
+    const paths = await retentionWorkspace();
+    const alias = join(paths.stateRoot, '..', 'retention-alias');
+    await symlink(paths.stateRoot, alias);
+    const remap = (path: string): string => path.startsWith(paths.stateRoot) ? `${alias}${path.slice(paths.stateRoot.length)}` : path;
+    await expect(createRetentionStartupHook({
+      paths: {
+        ...paths,
+        stateRoot: alias,
+        builderOwnedRoots: paths.builderOwnedRoots.map(remap),
+        approvedReleaseRoots: paths.approvedReleaseRoots.map(remap),
+        approvedQuarantineRoots: paths.approvedQuarantineRoots.map(remap),
+        worktreeRoot: remap(paths.worktreeRoot!),
+      },
+      now: NOW,
+      freeBytes: 25 * 1024 ** 3,
+    })()).resolves.toMatchObject({ blockers: [{ code: 'RETENTION_ROOT_INVALID' }] });
+  });
+
+  it('detects a component swap after the target descriptor is held', async () => {
+    const paths = await retentionWorkspace();
+    let swapped = false;
+    const target = join(paths.builderOwnedRoots[0]!, 'cache', 'docker', 'old');
+    await expect(createRetentionStartupHook({
+      paths,
+      now: NOW,
+      freeBytes: 25 * 1024 ** 3,
+      beforeDelete: async ({ path }) => {
+        if (!swapped && path === target) {
+          swapped = true;
+          await rename(path, `${path}.moved`);
+          await writeFile(path, 'replacement');
+        }
+      },
+    })()).resolves.toMatchObject({ blockers: [{ code: 'RETENTION_PRUNE_FAILED' }] });
+    await expect(import('node:fs/promises').then(({ readFile }) => readFile(target, 'utf8'))).resolves.toBe('replacement');
+  });
+
+  it('reconciles a planned absent DB-backed candidate as removed', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+      .run('planned-absent', 'request-planned-absent', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
+    await mkdir(join(paths.stateRoot, 'jobs', 'planned-absent', 'evidence'), { recursive: true });
+    db.prepare(`INSERT INTO retention_prune_intents (category, relative_path, status, planned_at, updated_at, bytes)
+      VALUES ('evidence', 'jobs/planned-absent/evidence/missing.json', 'planned', ?, ?, 12)`).run(NOW, NOW);
+
+    await createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })();
+
+    expect(db.prepare('SELECT status, bytes, error FROM retention_prune_intents WHERE category=? AND relative_path=?').get('evidence', 'jobs/planned-absent/evidence/missing.json'))
+      .toEqual({ status: 'removed', bytes: 0, error: null });
+    expect(db.prepare('SELECT action, bytes FROM retention_prunes WHERE category=? AND relative_path=? ORDER BY prune_id DESC LIMIT 1').get('evidence', 'jobs/planned-absent/evidence/missing.json'))
+      .toEqual({ action: 'removed', bytes: 0 });
+  });
+
+  it('plans before callback and finalizes a present candidate after deletion', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+      .run('planned-present', 'request-planned-present', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
+    const target = join(paths.stateRoot, 'jobs', 'planned-present', 'evidence', 'present.json');
+    await mkdir(join(paths.stateRoot, 'jobs', 'planned-present', 'evidence'), { recursive: true });
+    await writeFile(target, 'evidence');
+    await utimes(target, new Date(OLD), new Date(OLD));
+    db.prepare(`INSERT INTO retention_prune_intents (category, relative_path, status, planned_at, updated_at, bytes)
+      VALUES ('evidence', 'jobs/planned-present/evidence/present.json', 'planned', ?, ?, 8)`).run(NOW, NOW);
+    const observed: string[] = [];
+
+    await createRetentionStartupHook({
+      paths,
+      db,
+      now: NOW,
+      freeBytes: 25 * 1024 ** 3,
+      beforeDelete: async ({ path }) => { if (path === target) observed.push(String(db.prepare("SELECT status FROM retention_prune_intents WHERE category='evidence' AND relative_path='jobs/planned-present/evidence/present.json'").get()?.status)); },
+    })();
+
+    await expect(import('node:fs/promises').then(({ access }) => access(target))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(observed).toEqual(['planned']);
+    expect(db.prepare('SELECT status FROM retention_prune_intents WHERE category=? AND relative_path=?').get('evidence', 'jobs/planned-present/evidence/present.json')).toEqual({ status: 'removed' });
+  });
+
+  it('records failure while beforeDelete can query and write without an open transaction', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+      .run('planned-failure', 'request-planned-failure', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
+    const target = join(paths.stateRoot, 'jobs', 'planned-failure', 'evidence', 'failure.json');
+    await mkdir(join(paths.stateRoot, 'jobs', 'planned-failure', 'evidence'), { recursive: true });
+    await writeFile(target, 'evidence');
+    await utimes(target, new Date(OLD), new Date(OLD));
+    let callbackStatus: unknown;
+
+    await createRetentionStartupHook({
+      paths,
+      db,
+      now: NOW,
+      freeBytes: 25 * 1024 ** 3,
+      beforeDelete: async ({ path }) => {
+        if (path !== target) return;
+        callbackStatus = db.prepare("SELECT status FROM retention_prune_intents WHERE category='evidence' AND relative_path='jobs/planned-failure/evidence/failure.json'").get()?.status;
+        db.prepare('UPDATE retention_prune_intents SET error=NULL WHERE category=? AND relative_path=?').run('evidence', 'jobs/planned-failure/evidence/failure.json');
+        throw new Error('injected callback failure');
+      },
+    })();
+
+    expect(callbackStatus).toBe('planned');
+    expect(db.prepare('SELECT status, error FROM retention_prune_intents WHERE category=? AND relative_path=?').get('evidence', 'jobs/planned-failure/evidence/failure.json'))
+      .toEqual({ status: 'failed', error: 'injected callback failure' });
+  });
+
+  it('keeps terminal job and child metadata when filesystem pruning fails', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+      .run('retryable', 'request-retryable', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
+    await mkdir(join(paths.stateRoot, 'jobs', 'retryable', 'evidence'), { recursive: true });
+    await writeFile(join(paths.stateRoot, 'jobs', 'retryable', 'evidence', 'terminal.json'), 'evidence');
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, 0, 'terminal', 'succeeded', '{}', ?)").run('retryable', OLD);
+    await createRetentionStartupHook({
+      paths,
+      db,
+      now: NOW,
+      freeBytes: 25 * 1024 ** 3,
+      beforeDelete: async ({ category }) => { if (category === 'evidence') throw new Error('injected filesystem failure'); },
+    })();
+    expect(db.prepare('SELECT job_id FROM jobs WHERE job_id=?').get('retryable')).toEqual({ job_id: 'retryable' });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM job_events WHERE job_id=?').get('retryable')).toEqual({ count: 1 });
+    expect(db.prepare('SELECT status FROM retention_prune_intents WHERE category=? AND relative_path=?').get('evidence', 'jobs/retryable/evidence/terminal.json')).toEqual({ status: 'failed' });
   });
 });
