@@ -300,11 +300,7 @@ async function databaseCandidates(options: RetentionOptions, roots: Map<string, 
   for (const row of expiredRows) {
     if (!safeSegment(row.job_id)) continue;
     const jobRoot = join(options.paths.stateRoot, 'jobs', row.job_id);
-    const rowIntent = options.db.prepare(`SELECT status FROM retention_prune_intents
-      WHERE category='row' AND relative_path=?`).get(`jobs/${row.job_id}`) as { status?: unknown } | undefined;
-    if (rowIntent?.status !== 'removed') {
-      rowCandidates.push({ base: options.paths.stateRoot, auditBase: options.paths.stateRoot, path: jobRoot, category: 'row', cutoffDays: 0, stateEligible: true, durable: true });
-    }
+    rowCandidates.push({ base: options.paths.stateRoot, auditBase: options.paths.stateRoot, path: jobRoot, category: 'row', cutoffDays: 0, stateEligible: true, durable: true });
     const stateRoot = roots.get(resolve(options.paths.stateRoot));
     if (!stateRoot) throw new Error('retention state root is not held');
     let evidenceRoot: FileHandle;
