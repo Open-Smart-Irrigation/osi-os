@@ -6,7 +6,7 @@ import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { DurableLogStream } from '../../api/src/log-stream.js';
 import {
   createRunnerLogCoordinator,
-  appendByteBoundedTextCapture,
+  createByteBoundedTextCapture,
 } from '../../runner/src/log-coordinator.js';
 
 const NOW = '2026-07-28T10:00:00.000Z';
@@ -23,13 +23,13 @@ function seedJob(db: ReturnType<typeof openBuilderDatabase>, jobId = 'job-runner
   );
 }
 
-async function fixture(jobId = 'job-runner-log') {
+async function fixture(jobId = 'job-runner-log', clock: { now: () => string } = { now: () => NOW }) {
   const jobRoot = await mkdtemp(join(tmpdir(), 'osi-runner-log-'));
   roots.push(jobRoot);
   const db = openBuilderDatabase(join(jobRoot, 'jobs.sqlite'), { now: () => NOW });
   databases.push(db);
   seedJob(db, jobId);
-  return { db, jobRoot, coordinator: createRunnerLogCoordinator({ db, jobRoot, jobId, clock: { now: () => NOW } }) };
+  return { db, jobRoot, coordinator: createRunnerLogCoordinator({ db, jobRoot, jobId, clock }) };
 }
 
 afterEach(async () => {
@@ -40,7 +40,7 @@ afterEach(async () => {
 describe('runner log coordinator', () => {
   it('writes safe pipeline lines, exact Docker bytes, events, files, and replay', async () => {
     const { db, jobRoot, coordinator } = await fixture();
-    coordinator.pipelineLogWriter.write({ jobId: 'ignored', stage: 'source', outcome: 'running', at: NOW });
+    coordinator.pipelineLogWriter.write({ jobId: 'job-runner-log', stage: 'source', outcome: 'running', at: NOW });
     coordinator.appendDockerBytes(Buffer.from('out\n\xff\n'));
 
     expect(await readFile(join(jobRoot, 'logs/runner.0'))).toEqual(Buffer.from('{"jobId":"job-runner-log","stage":"source","outcome":"running","at":"2026-07-28T10:00:00.000Z"}\n'));
@@ -58,22 +58,22 @@ describe('runner log coordinator', () => {
   });
 
   it('preserves sequential stdout/stderr append order and rotates after finalize', async () => {
-    const { db, jobRoot, coordinator } = await fixture();
+    const { db, jobRoot, coordinator } = await fixture('job-runner-log', { now: () => FINISHED });
     coordinator.appendDockerBytes(Buffer.from('stdout-1\n'));
     coordinator.appendDockerBytes(Buffer.from('stderr-1\n'));
     expect(coordinator.finalize(FINISHED)).toEqual({ runner: 'absent', docker: 'sealed', verifiedAt: FINISHED });
     coordinator.appendDockerBytes(Buffer.from('stdout-2\n'));
     expect(await readFile(join(jobRoot, 'logs/docker.1'))).toEqual(Buffer.from('stdout-2\n'));
     expect(db.prepare('SELECT stream, generation, size_bytes, sealed_at FROM job_log_generations WHERE job_id=? ORDER BY generation').all('job-runner-log')).toEqual([
-      { stream: 'docker', generation: 0, size_bytes: 18, sealed_at: NOW },
+      { stream: 'docker', generation: 0, size_bytes: 18, sealed_at: FINISHED },
       { stream: 'docker', generation: 1, size_bytes: 9, sealed_at: null },
     ]);
     coordinator.close();
   });
 
   it('returns absent/sealed proofs with verified chronology and cancellation parity', async () => {
-    const value = await fixture();
-    expect(value.coordinator.finalize(FINISHED)).toEqual({ runner: 'absent', docker: 'absent', verifiedAt: FINISHED });
+    const value = await fixture('job-runner-log', { now: () => LATER });
+    expect(value.coordinator.finalize(FINISHED)).toEqual({ runner: 'absent', docker: 'absent', verifiedAt: LATER });
     value.coordinator.appendDockerBytes(Buffer.from('cancelled\n'));
     expect(value.coordinator.sealForCancellation(LATER)).toEqual({ runner: 'absent', docker: 'sealed', verifiedAt: LATER });
     value.coordinator.close();
@@ -81,14 +81,60 @@ describe('runner log coordinator', () => {
 
   it('emits only the safe line keys and bounds UTF-8 capture by bytes', async () => {
     const { coordinator, jobRoot } = await fixture();
-    coordinator.pipelineLogWriter.write({ jobId: 'wrong', stage: 'source', outcome: 'passed', at: NOW });
+    coordinator.pipelineLogWriter.write({ jobId: 'job-runner-log', stage: 'source', outcome: 'passed', at: NOW });
     const line = (await readFile(join(jobRoot, 'logs/runner.0'), 'utf8')).trim();
     expect(Object.keys(JSON.parse(line))).toEqual(['jobId', 'stage', 'outcome', 'at']);
-    const capture: string[] = [];
-    appendByteBoundedTextCapture(capture, Buffer.from('a\u00e9b', 'utf8'), 3);
-    expect(capture).toEqual(['a\u00e9']);
-    expect(Buffer.byteLength(capture.join(''))).toBe(3);
+    const capture = createByteBoundedTextCapture(3);
+    capture.append(Buffer.from('a\u00e9b', 'utf8'));
+    expect(capture.toString()).toBe('a\u00e9');
+    expect(capture.bytesUsed).toBe(3);
     coordinator.close();
+  });
+
+  it('validates every pipeline entry field at the coordinator boundary', async () => {
+    const { coordinator } = await fixture();
+    const write = (entry: object) => coordinator.pipelineLogWriter.write(entry as never);
+    expect(() => write({ jobId: 'wrong', stage: 'source', outcome: 'running', at: NOW })).toThrow(/job id/i);
+    expect(() => write({ jobId: 'job-runner-log', stage: 'not-a-stage', outcome: 'running', at: NOW })).toThrow(/stage/i);
+    expect(() => write({ jobId: 'job-runner-log', stage: 'source', outcome: 'unknown', at: NOW })).toThrow(/outcome/i);
+    expect(() => write({ jobId: 'job-runner-log', stage: 'source', outcome: 'running', at: '2026-07-28T10:00:00Z' })).toThrow(/canonical/i);
+    coordinator.close();
+  });
+
+  it('seals before reading the clock and rejects a verification time before completion', async () => {
+    let clockValue = NOW;
+    const value = await fixture('job-runner-log', { now: () => clockValue });
+    value.coordinator.appendDockerBytes(Buffer.from('finished\n'));
+    expect(() => value.coordinator.finalize(FINISHED)).toThrow(/before operationFinishedAt/i);
+    clockValue = FINISHED;
+    expect(value.coordinator.finalize(FINISHED)).toEqual({ runner: 'absent', docker: 'sealed', verifiedAt: FINISHED });
+    value.coordinator.close();
+  });
+
+  it('captures raw bytes with a precise cap across chunks and decodes only at the end', () => {
+    const capture = createByteBoundedTextCapture(4);
+    capture.append(Buffer.from([0x78, 0xe2]));
+    capture.append(Buffer.from([0x82, 0xac]));
+    capture.append(Buffer.from([0x79, 0xef, 0xbf, 0xbd, 0x7a]));
+    expect(capture.bytesUsed).toBe(4);
+    expect(capture.toString()).toBe('x€');
+
+    const replacement = createByteBoundedTextCapture(3);
+    replacement.append(Buffer.from([0xef, 0xbf, 0xbd]));
+    expect(replacement.toString()).toBe('\ufffd');
+
+    const cut = createByteBoundedTextCapture(2);
+    cut.append(Buffer.from([0xe2, 0x82, 0xac]));
+    expect(cut.toString()).toBe('\ufffd');
+
+    const invalid = createByteBoundedTextCapture(2);
+    invalid.append(Buffer.from([0xe2, 0x28]));
+    expect(invalid.toString()).toBe('\ufffd(');
+
+    const many = createByteBoundedTextCapture(100);
+    for (let i = 0; i < 1000; i += 1) many.append('a');
+    expect(many.bytesUsed).toBe(100);
+    expect(many.toString()).toBe('a'.repeat(100));
   });
 
   it('rejects invalid ids, rejects writes after close, and makes close idempotent', async () => {

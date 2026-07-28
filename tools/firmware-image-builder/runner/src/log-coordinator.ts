@@ -2,6 +2,8 @@ import { lstatSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { DurableLogStream } from '../../api/src/log-stream.js';
 import type { LogCleanupProof } from '../../api/src/ownership.js';
+import { canonicalInstant } from '../../api/src/validation.js';
+import { PIPELINE_STAGE_NAMES } from '../../domain/types.js';
 
 export interface RunnerLogClock {
   readonly now: () => string;
@@ -35,39 +37,50 @@ const JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const STREAMS = ['runner', 'docker'] as const;
 type CoordinatedStream = (typeof STREAMS)[number];
 
-function validateJobId(jobId: string): void {
-  if (!JOB_ID_PATTERN.test(jobId)) throw new Error('invalid job id');
+function validateJobId(jobId: unknown): asserts jobId is string {
+  if (typeof jobId !== 'string' || !JOB_ID_PATTERN.test(jobId)) throw new Error('invalid job id');
 }
 
-function validateAt(at: string, field: string): void {
-  if (!Number.isFinite(Date.parse(at))) throw new Error(`${field} must be an ISO timestamp`);
+function validateAt(at: unknown, field: string): asserts at is string {
+  canonicalInstant(at, field);
 }
 
-function maxTimestamp(left: string, right: string): string {
-  return Date.parse(left) >= Date.parse(right) ? left : right;
+export interface ByteBoundedTextCapture {
+  readonly byteLimit: number;
+  readonly bytesUsed: number;
+  readonly truncated: boolean;
+  readonly append: (chunk: Buffer | string) => void;
+  readonly toString: () => string;
 }
 
-function appendUtf8Prefix(target: string[], bytes: Buffer, limit: number): void {
-  if (bytes.length === 0 || limit === 0) return;
-  let end = Math.min(bytes.length, limit);
-  if (end < bytes.length) {
-    while (end > 0 && bytes.subarray(0, end).toString('utf8').includes('\ufffd')) end -= 1;
-  }
-  if (end > 0) target.push(bytes.subarray(0, end).toString('utf8'));
-}
-
-export function appendByteBoundedTextCapture(target: string[], chunk: Buffer | string, byteLimit: number): void {
+export function createByteBoundedTextCapture(byteLimit: number): ByteBoundedTextCapture {
   if (!Number.isSafeInteger(byteLimit) || byteLimit < 0) throw new Error('byte limit must be a non-negative safe integer');
-  const used = Buffer.byteLength(target.join(''), 'utf8');
-  if (used > byteLimit) throw new Error('text capture already exceeds byte limit');
-  appendUtf8Prefix(target, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8'), byteLimit - used);
+  const bytes = Buffer.alloc(byteLimit);
+  let bytesUsed = 0;
+  let truncated = false;
+  return {
+    byteLimit,
+    get bytesUsed() { return bytesUsed; },
+    get truncated() { return truncated; },
+    append: (chunk) => {
+      const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8');
+      const copyLength = Math.min(input.length, byteLimit - bytesUsed);
+      if (copyLength > 0) {
+        input.copy(bytes, bytesUsed, 0, copyLength);
+        bytesUsed += copyLength;
+      }
+      if (copyLength < input.length) truncated = true;
+    },
+    toString: () => bytes.subarray(0, bytesUsed).toString('utf8'),
+  };
 }
 
 export function createRunnerLogCoordinator(options: RunnerLogCoordinatorOptions): RunnerLogCoordinator {
   validateJobId(options.jobId);
-  validateAt(options.clock.now(), 'clock.now()');
+  const now = (): string => canonicalInstant(options.clock.now(), 'clock.now()');
+  now();
   if (!lstatSync(options.jobRoot).isDirectory()) throw new Error('job root must be an existing directory');
-  const stream = new DurableLogStream({ db: options.db, root: options.jobRoot, jobId: options.jobId, now: options.clock.now });
+  const stream = new DurableLogStream({ db: options.db, root: options.jobRoot, jobId: options.jobId, now });
   const present = new Set<CoordinatedStream>();
   const sealed = new Set<CoordinatedStream>();
   let closed = false;
@@ -93,14 +106,18 @@ export function createRunnerLogCoordinator(options: RunnerLogCoordinatorOptions)
     sealed.add(kind);
   }
 
-  function proof(finishedAt: string): LogCleanupProof {
+  function proof(operationFinishedAt: string): LogCleanupProof {
     assertOpen();
-    validateAt(finishedAt, 'operationFinishedAt');
+    const canonicalFinishedAt = canonicalInstant(operationFinishedAt, 'operationFinishedAt');
     for (const kind of STREAMS) seal(kind);
+    const verifiedAt = now();
+    if (Date.parse(verifiedAt) < Date.parse(canonicalFinishedAt)) {
+      throw new Error('verifiedAt is before operationFinishedAt');
+    }
     return {
       runner: present.has('runner') ? 'sealed' : 'absent',
       docker: present.has('docker') ? 'sealed' : 'absent',
-      verifiedAt: maxTimestamp(options.clock.now(), finishedAt),
+      verifiedAt,
     };
   }
 
@@ -108,6 +125,11 @@ export function createRunnerLogCoordinator(options: RunnerLogCoordinatorOptions)
     pipelineLogWriter: {
       write: (entry) => {
         assertOpen();
+        validateJobId(entry.jobId);
+        if (!(PIPELINE_STAGE_NAMES as readonly string[]).includes(entry.stage)) throw new Error('invalid pipeline stage');
+        if (entry.outcome !== 'running' && entry.outcome !== 'passed' && entry.outcome !== 'failed') throw new Error('invalid pipeline outcome');
+        validateAt(entry.at, 'pipeline entry at');
+        if (entry.jobId !== options.jobId) throw new Error('pipeline entry job id does not match coordinator job id');
         append('runner', Buffer.from(`${JSON.stringify({ jobId: options.jobId, stage: entry.stage, outcome: entry.outcome, at: entry.at })}\n`, 'utf8'));
       },
     },
