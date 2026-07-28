@@ -311,8 +311,13 @@ describe('startup recovery with real SQLite stores', () => {
 
     const result = await bootstrap.start();
     expect(trace).toEqual(['publishing-recovery-committed', 'direct-interruption-committed']);
-    expect(result.dispatched).toBe(false);
-    expect(result.blockers.length).toBeGreaterThan(0);
+    expect(result.blockers).toEqual([{
+      code: 'QUEUE_DISPATCH_BLOCKED',
+      details: {
+        reason: 'SQLITE_QUEUE_BLOCKER',
+        jobId: 'publishing-recovery',
+      },
+    }]);
     expect(value.db.prepare('SELECT state FROM jobs WHERE job_id=?').get('publishing-recovery')).toEqual({ state: 'failed' });
     expect(value.db.prepare('SELECT state, queue_state FROM jobs WHERE job_id=?').get('direct-interruption')).toEqual({ state: 'interrupted', queue_state: 'complete' });
     expect(bootstrap.events().map((event) => event.phase)).toEqual(['migrations', 'cleanup-admissions', 'live-runner-classification', 'stale-publishing-recovery', 'non-publishing-interruption', 'retention', 'dispatch']);
