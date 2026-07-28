@@ -204,7 +204,29 @@ export async function runNativePrerequisiteProbes(options: {
       EXEC_OPTIONS,
     ));
     if (renameCompile !== null) return renameCompile;
-    const rename = parseEvidence(await execute(renameBinary, [options.scratchParent], EXEC_OPTIONS));
+    let filesystemScratch: string;
+    try {
+      filesystemScratch = await fileSystem.mkdtemp(join(options.scratchParent, '.osi-image-builder-probe-'));
+    } catch {
+      return unavailable('FILESYSTEM_PROBE_SCRATCH_UNAVAILABLE', 'selected-filesystem probe scratch could not be created');
+    }
+    let renameCommand: ProbeCommandResult | undefined;
+    let renameRejected = false;
+    try {
+      renameCommand = await execute(renameBinary, [filesystemScratch], EXEC_OPTIONS);
+    } catch {
+      renameRejected = true;
+    }
+    try {
+      await fileSystem.rm(filesystemScratch, { recursive: true, force: true });
+    } catch {
+      return cleanupUnproven();
+    }
+    if (renameRejected || renameCommand === undefined
+      || renameCommand.signal !== null || renameCommand.exitCode === null || renameCommand.spawnError !== undefined) {
+      return unavailable('FILESYSTEM_PROBE_FAILED', 'selected-filesystem probe process did not complete');
+    }
+    const rename = parseEvidence(renameCommand);
     if (rename === null) return unavailable('PROBE_OUTPUT_INVALID', 'native prerequisite probe returned malformed evidence');
     const renameFailure = mappedEvidence(rename);
     if (renameFailure !== null) return renameFailure;

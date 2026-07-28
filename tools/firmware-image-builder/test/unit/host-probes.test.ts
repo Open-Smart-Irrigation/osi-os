@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -268,6 +268,140 @@ describe('native host probes', () => {
     });
   });
 
+  it('removes adapter-owned selected-filesystem scratch after a signalled child leaves contents', async () => {
+    const fixture = await createMutationFixture();
+    const beforeOutput = await snapshotTree(fixture.output);
+    let nativeScratchParent: string | undefined;
+
+    const result = await runNativePrerequisiteProbes({
+      scratchParent: fixture.output,
+      sourceDirectory: installer,
+      dependencies: {
+        exec: async (executable, args) => {
+          if (executable === '/usr/bin/gcc' || executable === '/usr/bin/make') {
+            return { stdout: '', stderr: '', exitCode: 0, signal: null };
+          }
+          if (args.length === 0) {
+            return {
+              stdout: JSON.stringify({ available: true, code: 'HOST_PREREQUISITES_AVAILABLE', detail: 'ok' }),
+              stderr: '',
+              exitCode: 0,
+              signal: null,
+            };
+          }
+          nativeScratchParent = args[0];
+          const abandoned = join(nativeScratchParent!, 'osi-image-builder-probe-child', 'nested');
+          await mkdir(abandoned, { recursive: true });
+          await writeFile(join(abandoned, 'leftover.bin'), 'child crashed\n');
+          return { stdout: '', stderr: '', exitCode: null, signal: 'SIGKILL' };
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      available: false,
+      code: 'FILESYSTEM_PROBE_FAILED',
+      detail: 'selected-filesystem probe process did not complete',
+      mutation: 'none',
+    });
+    expect(nativeScratchParent).toBeDefined();
+    expect(dirname(nativeScratchParent!)).toBe(fixture.output);
+    expect(nativeScratchParent).not.toBe(fixture.output);
+    expect(nativeScratchParent).toContain('.osi-image-builder-probe-');
+    expect(await snapshotTree(fixture.output)).toEqual(beforeOutput);
+  });
+
+  it('does not run the filesystem probe when selected-filesystem wrapper creation fails', async () => {
+    let scratchCreations = 0;
+    let filesystemProbeExecutions = 0;
+    const removals: string[] = [];
+
+    const result = await runNativePrerequisiteProbes({
+      scratchParent: '/approved-output',
+      sourceDirectory: installer,
+      dependencies: {
+        fs: {
+          mkdtemp: async () => {
+            scratchCreations += 1;
+            if (scratchCreations === 1) return '/private/compile-wrapper-create';
+            throw new Error('selected filesystem rejected wrapper');
+          },
+          rm: async (path) => { removals.push(path); },
+        },
+        exec: async (executable, args) => {
+          if (executable === '/usr/bin/gcc' || executable === '/usr/bin/make') {
+            return { stdout: '', stderr: '', exitCode: 0, signal: null };
+          }
+          if (args.length === 0) {
+            return {
+              stdout: JSON.stringify({ available: true, code: 'HOST_PREREQUISITES_AVAILABLE', detail: 'ok' }),
+              stderr: '',
+              exitCode: 0,
+              signal: null,
+            };
+          }
+          filesystemProbeExecutions += 1;
+          return { stdout: '', stderr: '', exitCode: 0, signal: null };
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      available: false,
+      code: 'FILESYSTEM_PROBE_SCRATCH_UNAVAILABLE',
+      detail: 'selected-filesystem probe scratch could not be created',
+      mutation: 'none',
+    });
+    expect(filesystemProbeExecutions).toBe(0);
+    expect(removals).toEqual(['/private/compile-wrapper-create']);
+  });
+
+  it('reports unknown mutation when selected-filesystem wrapper removal fails', async () => {
+    let scratchCreations = 0;
+    const removals: string[] = [];
+    const wrapper = '/approved-output/.osi-image-builder-probe-wrapper';
+
+    const result = await runNativePrerequisiteProbes({
+      scratchParent: '/approved-output',
+      sourceDirectory: installer,
+      dependencies: {
+        fs: {
+          mkdtemp: async () => {
+            scratchCreations += 1;
+            return scratchCreations === 1 ? '/private/compile-wrapper-remove' : wrapper;
+          },
+          rm: async (path) => {
+            removals.push(path);
+            if (path === wrapper) throw new Error('wrapper removal failed');
+          },
+        },
+        exec: async (executable, args) => {
+          if (executable === '/usr/bin/gcc' || executable === '/usr/bin/make') {
+            return { stdout: '', stderr: '', exitCode: 0, signal: null };
+          }
+          if (args.length === 0) {
+            return {
+              stdout: JSON.stringify({ available: true, code: 'HOST_PREREQUISITES_AVAILABLE', detail: 'ok' }),
+              stderr: '',
+              exitCode: 0,
+              signal: null,
+            };
+          }
+          expect(args).toEqual([wrapper]);
+          return { stdout: '', stderr: '', exitCode: null, signal: 'SIGTERM' };
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      available: false,
+      code: 'PROBE_CLEANUP_FAILED',
+      detail: 'private probe scratch cleanup could not be proven',
+      mutation: 'unknown',
+    });
+    expect(removals).toEqual([wrapper, '/private/compile-wrapper-remove']);
+  });
+
   it('maps a missing fixed GCC to typed unavailable and cleans compile scratch', async () => {
     const calls: Array<{ readonly executable: string; readonly args: readonly string[]; readonly options: Readonly<Record<string, unknown>> }> = [];
     const removals: string[] = [];
@@ -427,7 +561,9 @@ describe('native host probes', () => {
     expect(result).toMatchObject({ available: false, code: expectedCode, mutation: 'none' });
     expect(result.detail).not.toContain('untrusted');
     expect(compiled).toBe(failAtHost ? 1 : 2);
-    expect(removals).toEqual(['/private/mapping-probe']);
+    expect(removals).toEqual(failAtHost
+      ? ['/private/mapping-probe']
+      : ['/private/mapping-probe', '/private/mapping-probe']);
     expect(await readFile(fixture.selection)).toEqual(beforeSelection);
     expect(await snapshotTree(fixture.output)).toEqual(beforeOutput);
   });
