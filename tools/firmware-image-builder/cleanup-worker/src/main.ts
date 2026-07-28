@@ -639,6 +639,21 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
       if (error instanceof CleanupWorkerError) throw error;
       throw new CleanupWorkerError('RECOVERY_LOG_GAP', `cleanup log sealing failed: ${errorMessage(error)}`, { cause: error });
     }
+    let hasMatchingContainer: boolean;
+    try {
+      hasMatchingContainer = await claimedAction(admission, 'post-seal Docker label query', () => (
+        options.docker.hasByJobId(admission.jobId, options.timeouts.dockerMs)
+      ));
+      assertClaimActive(admission, 'post-seal Docker label query completion');
+    } catch (error) {
+      if (error instanceof CleanupWorkerError && error.code === 'CLEANUP_ADMISSION_BLOCKED') throw error;
+      throw new CleanupWorkerError(
+        'DOCKER_CONTAINER_ORPHANED',
+        `post-seal Docker label query failed: ${errorMessage(error)}`,
+        { cause: error },
+      );
+    }
+    if (hasMatchingContainer) throw new CleanupWorkerError('DOCKER_CONTAINER_ORPHANED', 'global Docker label query found a matching container after log sealing');
     const upperBound = canonicalInstant(options.clock.now(), 'log sealing completion time');
     return validateLogSeal(seal, requestedAt, upperBound);
   }

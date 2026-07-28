@@ -369,6 +369,7 @@ describe('cleanup worker argument and admission fence', () => {
       'inspect:container-job-1:1000',
       'has:1000',
       'has:1000',
+      'has:1000',
     ]);
     expect(await readFile(value.credential.path).catch(() => null)).toBeNull();
     expect((value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(value.admissionId) as { status: string }).status).toBe('completed');
@@ -554,7 +555,7 @@ describe('cleanup worker exact container protocol', () => {
     value.docker.setPresent(false);
     const result = await value.worker.run([value.admissionId]);
     expect(result.status).toBe('completed');
-    expect(value.docker.calls).toEqual(['inspect:container-job-1:1000', 'has:1000', 'has:1000']);
+    expect(value.docker.calls).toEqual(['inspect:container-job-1:1000', 'has:1000', 'has:1000', 'has:1000']);
     expect((value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(value.admissionId) as { status: string }).status).toBe('completed');
   });
 
@@ -615,6 +616,31 @@ describe('cleanup worker exact container protocol', () => {
     expect(value.options.logSealer.seal).not.toHaveBeenCalled();
     expect(value.options.quarantine.quarantine).not.toHaveBeenCalled();
     expect(value.options.evidenceWriter.write).toHaveBeenCalledOnce();
+  });
+
+  it('blocks when a matching container appears after log sealing', async () => {
+    const value = await fixture('staging-log');
+    vi.spyOn(value.docker, 'hasByJobId')
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    const result = await value.worker.run([value.admissionId]);
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    });
+    expect(value.docker.hasByJobId).toHaveBeenCalledTimes(3);
+    expect(value.options.quarantine.quarantine).not.toHaveBeenCalled();
+    expect(value.options.evidenceWriter.write).toHaveBeenCalledOnce();
+    expect((value.db.prepare('SELECT status, cleanup_blocker_code, cleanup_blocker_json FROM cleanup_leases JOIN jobs USING (job_id) WHERE admission_id=?').get(value.admissionId) as Record<string, unknown>)).toMatchObject({
+      status: 'blocking',
+      cleanup_blocker_code: 'DOCKER_CONTAINER_ORPHANED',
+    });
+    expect(JSON.parse((value.db.prepare('SELECT cleanup_blocker_json FROM cleanup_leases JOIN jobs USING (job_id) WHERE admission_id=?').get(value.admissionId) as { cleanup_blocker_json: string }).cleanup_blocker_json)).toMatchObject({
+      code: 'DOCKER_CONTAINER_ORPHANED',
+    });
   });
 
   it('timestamps Docker absence and removal only after the corresponding observations complete', async () => {
@@ -821,7 +847,7 @@ describe('cleanup worker exact container protocol', () => {
     const value = await fixture('staging-log');
     const result = await value.worker.run([value.admissionId]);
     expect(result.status).toBe('completed');
-    expect(value.docker.calls).toEqual(['has:1000', 'has:1000']);
+    expect(value.docker.calls).toEqual(['has:1000', 'has:1000', 'has:1000']);
     expect(value.docker.hasByJobId).toHaveBeenCalledWith(value.jobId, 1000);
     expect(value.options.quarantine.quarantine).toHaveBeenCalledOnce();
     expect((value.db.prepare('SELECT status, cleanup_blocker_code, container_id, state, queue_state FROM cleanup_leases JOIN jobs USING (job_id) WHERE admission_id=?').get(value.admissionId) as Record<string, unknown>)).toMatchObject({ status: 'completed', cleanup_blocker_code: null, container_id: null, state: 'starting', queue_state: 'dispatched' });
