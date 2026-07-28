@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { fstatSync, fsyncSync as systemFsyncSync, readSync as systemReadSync, writeSync as systemWriteSync } from 'node:fs';
+import { fstatSync, fsyncSync as systemFsyncSync, readSync as systemReadSync, renameSync, writeFileSync, writeSync as systemWriteSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -135,6 +135,61 @@ describe('DurableLogStream', () => {
     expect(replay.filter((event) => event.event === 'log').map((event) => event.data.text)).toEqual(['one\n', 'two\n']);
     expect(db.prepare('SELECT COUNT(*) AS count FROM job_log_generations WHERE job_id=? AND stream=?').get('job-log', 'docker')).toEqual({ count: 2 });
     expect(await readFile(join(root, 'logs/docker.1'))).toEqual(Buffer.from('two\n'));
+  });
+
+  it('reopens a logs directory created by another stream instance before replay and seal', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-log-stream-cross-instance-'));
+    roots.push(root);
+    const firstDb = openBuilderDatabase(join(root, 'jobs.sqlite'));
+    const secondDb = openBuilderDatabase(join(root, 'jobs.sqlite'));
+    dbs.push(firstDb, secondDb);
+    seedJob(firstDb);
+    const first = new DurableLogStream({ db: firstDb, root, jobId: 'job-log', now: () => NOW });
+    const seal = new DurableLogStream({ db: firstDb, root, jobId: 'job-log', now: () => NOW });
+    const second = new DurableLogStream({ db: secondDb, root, jobId: 'job-log', now: () => NOW });
+
+    const appended = second.appendSync('runner', Buffer.from('cross-instance\n'));
+    expect(first.replaySync(-1)).toEqual([expect.objectContaining({ seq: appended.seq, event: 'log' })]);
+    seal.sealSync('runner');
+
+    expect(first.replaySync(-1).some((event) => event.event === 'log-gap')).toBe(false);
+    expect(firstDb.prepare('SELECT sealed_at, sha256 FROM job_log_generations WHERE job_id=? AND stream=? AND generation=0').get('job-log', 'runner')).toEqual({ sealed_at: NOW, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(firstDb.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id=? AND event_type='log-gap'").get('job-log')).toEqual({ count: 0 });
+  });
+
+  it('does not seal a generation when its pathname is replaced during hashing', async () => {
+    const replacePathDuringHash = (root: string, contents: Uint8Array, readLength: number): LogStreamIo['readSync'] => {
+      let replaced = false;
+      return (fd, buffer, offset, length, position) => {
+        if (!replaced && length === readLength) {
+          replaced = true;
+          const path = join(root, 'logs/runner.0');
+          const replacement = join(root, 'logs/replacement');
+          writeFileSync(replacement, contents);
+          renameSync(replacement, path);
+        }
+        return systemReadSync(fd, buffer, offset, length, position);
+      };
+    };
+
+    const normal = await fixture();
+    normal.stream.appendSync('runner', Buffer.from('normal\n'));
+    const normalPath = join(normal.root, 'logs/runner.0');
+    const normalIo = replacePathDuringHash(normal.root, Buffer.from('changed\n'), Buffer.byteLength('normal\n'));
+    const normalRacingStream = new DurableLogStream({ db: normal.db, root: normal.root, jobId: 'job-log', now: () => NOW, io: { readSync: normalIo } });
+    expect(() => normalRacingStream.sealSync('runner')).toThrow(/changed|identity|diverged/i);
+    expect(normal.db.prepare('SELECT sealed_at, sha256 FROM job_log_generations WHERE job_id=? AND stream=? AND generation=0').get('job-log', 'runner')).toEqual({ sealed_at: null, sha256: null });
+    expect(await readFile(normalPath)).toEqual(Buffer.from('changed\n'));
+
+    const orphan = await fixture();
+    orphan.stream.appendSync('runner', Buffer.from('indexed\n'));
+    const orphanPath = join(orphan.root, 'logs/runner.0');
+    await writeFile(orphanPath, Buffer.from('indexed\norphan\n'));
+    const orphanIo = replacePathDuringHash(orphan.root, Buffer.from('indexed\nchanged\n'), Buffer.byteLength('indexed\norphan\n'));
+    const orphanRacingStream = new DurableLogStream({ db: orphan.db, root: orphan.root, jobId: 'job-log', now: () => NOW, io: { readSync: orphanIo } });
+    expect(() => orphanRacingStream.sealOrphanTailSync('runner', { unitInactive: true, leaseStale: true, noMatchingContainer: true })).toThrow(/changed|identity|diverged/i);
+    expect(orphan.db.prepare('SELECT sealed_at, sha256, size_bytes FROM job_log_generations WHERE job_id=? AND stream=? AND generation=0').get('job-log', 'runner')).toEqual({ sealed_at: null, sha256: null, size_bytes: Buffer.byteLength('indexed\n') });
+    expect(orphan.db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id=? AND event_type='log_orphan_tail'").get('job-log')).toEqual({ count: 0 });
   });
 
   it('persists a recovery log gap and does not advance over a short source range', async () => {

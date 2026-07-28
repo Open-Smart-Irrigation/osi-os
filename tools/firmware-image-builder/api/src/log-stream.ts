@@ -163,29 +163,30 @@ export class DurableLogStream {
   appendSync(stream: StreamName, bytes: Uint8Array): AppendResult {
     this.#assertOpen();
     if (bytes.byteLength === 0) throw new Error('log append must contain bytes');
-    const generation = this.#openGeneration(stream);
-    const row = this.#db.prepare('SELECT path, size_bytes FROM job_log_generations WHERE job_id=? AND stream=? AND generation=?').get(this.#jobId, stream, generation) as { path: string; size_bytes: number };
-    const path = this.#generationPath(stream, generation, row.path, true);
-    if (path === null) throw new Error('log directory could not be created');
-    const opened = openGenerationForAppend(path);
-    try {
-      const before = fstatSync(opened.fd);
-      if (!before.isFile() || before.size !== Number(row.size_bytes)) throw new Error(`${stream} log is not a regular contiguous file`);
-      allBytes(opened.fd, bytes, this.#writeSync);
-      this.#fsyncSync(opened.fd);
-      if (opened.created) this.#fsyncSync(this.#logsFd as number);
-    } finally { closeSync(opened.fd); }
-    const offset = Number(row.size_bytes);
-    const partial = bytes[bytes.byteLength - 1] !== 0x0a;
-    let seq = -1;
-    this.#transaction(() => {
-      const next = this.#nextSeq();
-      this.#db.prepare('UPDATE job_log_generations SET size_bytes=? WHERE job_id=? AND stream=? AND generation=?').run(offset + bytes.byteLength, this.#jobId, stream, generation);
-      this.#db.prepare(`INSERT INTO job_events (job_id, seq, event_type, payload_json, at, stream, file_generation, byte_offset, byte_length, partial)
-        VALUES (?, ?, 'log', ?, ?, ?, ?, ?, ?, ?)`).run(this.#jobId, next, json({ jobId: this.#jobId, stream, partial }), this.#now(), stream, generation, offset, bytes.byteLength, partial ? 1 : 0);
-      seq = next;
+    return this.#transaction(() => {
+      const generation = this.#openGenerationInTransaction(stream);
+      const row = this.#db.prepare('SELECT path, size_bytes FROM job_log_generations WHERE job_id=? AND stream=? AND generation=?').get(this.#jobId, stream, generation) as { path: string; size_bytes: number };
+      const path = this.#generationPath(stream, generation, row.path, true);
+      if (path === null) throw new Error('log directory could not be created');
+      const opened = openGenerationForAppend(path);
+      const offset = Number(row.size_bytes);
+      const partial = bytes[bytes.byteLength - 1] !== 0x0a;
+      try {
+        const before = fstatSync(opened.fd);
+        if (!before.isFile() || before.size !== offset) throw new Error(`${stream} log is not a regular contiguous file`);
+        allBytes(opened.fd, bytes, this.#writeSync);
+        this.#fsyncSync(opened.fd);
+        const expectedSize = offset + bytes.byteLength;
+        revalidateAppendFile(path, opened.fd, expectedSize, fileIdentity(before));
+        if (opened.created) this.#fsyncSync(this.#logsFd as number);
+        const next = this.#nextSeq();
+        const updated = this.#db.prepare('UPDATE job_log_generations SET size_bytes=? WHERE job_id=? AND stream=? AND generation=? AND sealed_at IS NULL AND size_bytes=?').run(expectedSize, this.#jobId, stream, generation, offset);
+        if (Number(updated.changes) !== 1) throw new Error('log generation changed before append commit');
+        this.#db.prepare(`INSERT INTO job_events (job_id, seq, event_type, payload_json, at, stream, file_generation, byte_offset, byte_length, partial)
+          VALUES (?, ?, 'log', ?, ?, ?, ?, ?, ?, ?)`).run(this.#jobId, next, json({ jobId: this.#jobId, stream, partial }), this.#now(), stream, generation, offset, bytes.byteLength, partial ? 1 : 0);
+        return { seq: next, stream, generation, offset, length: bytes.byteLength, partial };
+      } finally { closeSync(opened.fd); }
     });
-    return { seq, stream, generation, offset, length: bytes.byteLength, partial };
   }
 
   appendMetadataSync(event: MetadataEvent, data: Record<string, unknown>): number {
@@ -200,17 +201,20 @@ export class DurableLogStream {
 
   sealSync(stream: StreamName): void {
     this.#assertOpen();
-    const row = this.#db.prepare('SELECT generation, path, size_bytes, sealed_at FROM job_log_generations WHERE job_id=? AND stream=? ORDER BY generation DESC LIMIT 1').get(this.#jobId, stream) as { generation: number; path: string; size_bytes: number; sealed_at: string | null } | undefined;
-    if (!row || row.sealed_at !== null) return;
-    const path = this.#generationPath(stream, Number(row.generation), row.path);
-    if (path === null) throw new Error(`${stream} log directory is missing`);
-    const opened = openRegularFile(path);
-    try {
-      this.#fsyncSync(opened.fd);
-      if (opened.size !== Number(row.size_bytes)) throw new Error(`${stream} log size diverged before seal`);
-      const sha256 = hashRegularFile(opened.fd, opened.size, this.#readSync);
-      this.#transaction(() => this.#db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=? AND stream=? AND generation=?').run(this.#now(), sha256, this.#jobId, stream, row.generation));
-    } finally { closeSync(opened.fd); }
+    this.#transaction(() => {
+      const row = this.#db.prepare('SELECT generation, path, size_bytes, sealed_at FROM job_log_generations WHERE job_id=? AND stream=? ORDER BY generation DESC LIMIT 1').get(this.#jobId, stream) as { generation: number; path: string; size_bytes: number; sealed_at: string | null } | undefined;
+      if (!row || row.sealed_at !== null) return;
+      const path = this.#generationPath(stream, Number(row.generation), row.path);
+      if (path === null) throw new Error(`${stream} log directory is missing`);
+      const opened = openRegularFile(path);
+      try {
+        this.#fsyncSync(opened.fd);
+        if (opened.size !== Number(row.size_bytes)) throw new Error(`${stream} log size diverged before seal`);
+        const sha256 = hashRegularFile(opened.fd, opened.size, this.#readSync);
+        revalidateHashedFile(path, opened.fd, opened.identity, opened.size);
+        this.#sealGenerationInTransaction(stream, Number(row.generation), Number(row.size_bytes), sha256);
+      } finally { closeSync(opened.fd); }
+    });
   }
 
   rotateSync(stream: StreamName): { readonly generation: number; readonly path: string } {
@@ -224,44 +228,43 @@ export class DurableLogStream {
   sealOrphanTailSync(stream: StreamName, proof: { readonly unitInactive: boolean; readonly leaseStale: boolean; readonly noMatchingContainer: boolean }): OrphanTailResult {
     this.#assertOpen();
     if (!proof.unitInactive || !proof.leaseStale || !proof.noMatchingContainer) throw new Error('orphan log sealing requires liveness proof');
-    const row = this.#db.prepare('SELECT generation, path, size_bytes, sealed_at FROM job_log_generations WHERE job_id=? AND stream=? ORDER BY generation DESC LIMIT 1').get(this.#jobId, stream) as { generation: number; path: string; size_bytes: number; sealed_at: string | null } | undefined;
-    if (!row) throw new Error('log generation does not exist');
-    const path = this.#generationPath(stream, Number(row.generation), row.path);
-    if (path === null) throw new Error(`${stream} log directory is missing`);
-    const opened = openRegularFile(path);
-    const indexed = Number(row.size_bytes);
-    try {
-      this.#fsyncSync(opened.fd);
-      if (opened.size < indexed) {
-        return this.#persistOrphanGap(stream, Number(row.generation), opened.size, indexed - opened.size);
-      }
-      if (row.sealed_at !== null) {
-        const existing = this.#orphanResult(stream, Number(row.generation));
-        return existing ?? this.#sealedResult(stream, Number(row.generation), indexed);
-      }
-      const tailLength = opened.size - indexed;
-      if (tailLength === 0) {
+    return this.#transaction(() => {
+      const row = this.#db.prepare('SELECT generation, path, size_bytes, sealed_at FROM job_log_generations WHERE job_id=? AND stream=? ORDER BY generation DESC LIMIT 1').get(this.#jobId, stream) as { generation: number; path: string; size_bytes: number; sealed_at: string | null } | undefined;
+      if (!row) throw new Error('log generation does not exist');
+      const path = this.#generationPath(stream, Number(row.generation), row.path);
+      if (path === null) throw new Error(`${stream} log directory is missing`);
+      const opened = openRegularFile(path);
+      const indexed = Number(row.size_bytes);
+      try {
+        this.#fsyncSync(opened.fd);
+        if (opened.size < indexed) {
+          return this.#persistOrphanGapInTransaction(stream, Number(row.generation), opened.size, indexed - opened.size);
+        }
+        if (row.sealed_at !== null) {
+          const existing = this.#orphanResult(stream, Number(row.generation));
+          return existing ?? this.#sealedResult(stream, Number(row.generation), indexed);
+        }
+        const tailLength = opened.size - indexed;
+        if (tailLength === 0) {
+          const sha256 = hashRegularFile(opened.fd, opened.size, this.#readSync);
+          revalidateHashedFile(path, opened.fd, opened.identity, opened.size);
+          this.#sealGenerationInTransaction(stream, Number(row.generation), indexed, sha256);
+          return this.#sealedResult(stream, Number(row.generation), indexed);
+        }
+        const finalByte = Buffer.alloc(1);
+        readExactly(opened.fd, finalByte, opened.size - 1, this.#readSync);
+        const partial = finalByte[0] !== 0x0a;
         const sha256 = hashRegularFile(opened.fd, opened.size, this.#readSync);
-        this.#transaction(() => {
-          this.#db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=? AND stream=? AND generation=?').run(this.#now(), sha256, this.#jobId, stream, row.generation);
-        });
-        return this.#sealedResult(stream, Number(row.generation), indexed);
-      }
-      const finalByte = Buffer.alloc(1);
-      readExactly(opened.fd, finalByte, opened.size - 1, this.#readSync);
-      const partial = finalByte[0] !== 0x0a;
-      const sha256 = hashRegularFile(opened.fd, opened.size, this.#readSync);
-      let seq = -1;
-      this.#transaction(() => {
+        revalidateHashedFile(path, opened.fd, opened.identity, opened.size);
         const next = this.#nextSeq();
-        this.#db.prepare('UPDATE job_log_generations SET size_bytes=? WHERE job_id=? AND stream=? AND generation=?').run(opened.size, this.#jobId, stream, row.generation);
+        const updated = this.#db.prepare('UPDATE job_log_generations SET size_bytes=? WHERE job_id=? AND stream=? AND generation=? AND sealed_at IS NULL AND size_bytes=?').run(opened.size, this.#jobId, stream, row.generation, indexed);
+        if (Number(updated.changes) !== 1) throw new Error('log generation changed before orphan seal');
         this.#db.prepare(`INSERT INTO job_events (job_id, seq, event_type, payload_json, at, stream, file_generation, byte_offset, byte_length, partial)
           VALUES (?, ?, 'log_orphan_tail', ?, ?, ?, ?, ?, ?, ?)`).run(this.#jobId, next, json({ jobId: this.#jobId, stream, generation: row.generation, offset: indexed, length: tailLength, partial }), this.#now(), stream, row.generation, indexed, tailLength, partial ? 1 : 0);
-        this.#db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=? AND stream=? AND generation=?').run(this.#now(), sha256, this.#jobId, stream, row.generation);
-        seq = next;
-      });
-      return { eventType: 'log_orphan_tail', seq, stream, generation: Number(row.generation), offset: indexed, length: tailLength };
-    } finally { closeSync(opened.fd); }
+        this.#sealGenerationInTransaction(stream, Number(row.generation), opened.size, sha256);
+        return { eventType: 'log_orphan_tail', seq: next, stream, generation: Number(row.generation), offset: indexed, length: tailLength };
+      } finally { closeSync(opened.fd); }
+    });
   }
 
   replaySync(afterSeq: number, requestedLimits: ReplayLimits = {}): LogStreamEvent[] {
@@ -386,18 +389,28 @@ export class DurableLogStream {
   }
 
   #openGeneration(stream: StreamName, forceNew = false): number {
+    return this.#transaction(() => this.#openGenerationInTransaction(stream, forceNew));
+  }
+
+  #openGenerationInTransaction(stream: StreamName, forceNew = false): number {
     const row = this.#db.prepare('SELECT generation, sealed_at FROM job_log_generations WHERE job_id=? AND stream=? ORDER BY generation DESC LIMIT 1').get(this.#jobId, stream) as { generation: number; sealed_at: string | null } | undefined;
     if (row && row.sealed_at === null && !forceNew) return Number(row.generation);
     const generation = row ? Number(row.generation) + 1 : 0;
-    this.#transaction(() => this.#db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at) VALUES (?, ?, ?, ?, ?)').run(this.#jobId, stream, generation, `logs/${stream}.${generation}`, this.#now()));
+    this.#db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at) VALUES (?, ?, ?, ?, ?)').run(this.#jobId, stream, generation, `logs/${stream}.${generation}`, this.#now());
     return generation;
   }
 
   #generationPath(stream: StreamName, generation: number, persistedPath: string, createLogs = false): string | null {
     const expected = `logs/${stream}.${generation}`;
     if (persistedPath !== expected) throw new Error('log generation path does not match fixed generation identity');
-    const logsFd = createLogs ? this.#ensureLogsDirectory() : this.#logsFd;
+    const logsFd = createLogs ? this.#ensureLogsDirectory() : this.#refreshLogsDirectory();
     return logsFd === null ? null : descriptorChild(logsFd, `${stream}.${generation}`);
+  }
+
+  #refreshLogsDirectory(): number | null {
+    if (this.#logsFd !== null) return this.#logsFd;
+    this.#logsFd = openOptionalDirectoryChild(this.#rootFd, 'logs');
+    return this.#logsFd;
   }
 
   #ensureLogsDirectory(): number {
@@ -481,7 +494,22 @@ export class DurableLogStream {
     return this.#db.prepare("SELECT seq, payload_json FROM job_events WHERE job_id=? AND event_type='log-gap' AND json_extract(payload_json, '$.sourceSeq')=?").get(this.#jobId, sourceSeq) as { seq: number; payload_json: string } | undefined;
   }
 
-  #transaction(work: () => void): void { this.#db.exec('BEGIN IMMEDIATE'); try { work(); this.#db.exec('COMMIT'); } catch (error) { try { this.#db.exec('ROLLBACK'); } catch { /* preserve primary error */ } throw error; } }
+  #sealGenerationInTransaction(stream: StreamName, generation: number, size: number, sha256: string): void {
+    const updated = this.#db.prepare('UPDATE job_log_generations SET sealed_at=?, sha256=? WHERE job_id=? AND stream=? AND generation=? AND sealed_at IS NULL AND size_bytes=?').run(this.#now(), sha256, this.#jobId, stream, generation, size);
+    if (Number(updated.changes) !== 1) throw new Error('log generation changed before seal');
+  }
+
+  #transaction<T>(work: () => T): T {
+    this.#db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = work();
+      this.#db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try { this.#db.exec('ROLLBACK'); } catch { /* preserve primary error */ }
+      throw error;
+    }
+  }
 
   #gap(seq: number, stream: StreamName, generation: number, range: { offset: number; length: number }, reason = 'RANGE_UNREADABLE'): LogStreamEvent {
     const existing = this.#sourceGap(seq);
@@ -500,13 +528,13 @@ export class DurableLogStream {
     return { seq: gapSeq, event: 'log-gap', data };
   }
 
-  #persistOrphanGap(stream: StreamName, generation: number, offset: number, length: number): OrphanTailResult {
+  #persistOrphanGapInTransaction(stream: StreamName, generation: number, offset: number, length: number): OrphanTailResult {
     const key = `orphan:${stream}:${generation}`;
     const existing = this.#db.prepare("SELECT seq, payload_json FROM job_events WHERE job_id=? AND event_type='log-gap' AND json_extract(payload_json, '$.orphanKey')=?").get(this.#jobId, key) as { seq: number; payload_json: string } | undefined;
     if (existing) { const data = JSON.parse(existing.payload_json) as Record<string, unknown>; return { eventType: 'log-gap', seq: Number(existing.seq), stream, generation, offset: Number(data.offset), length: Number(data.length) }; }
     const data = { jobId: this.#jobId, code: 'RECOVERY_LOG_GAP', stream, generation, offset, length, path: `logs/${stream}.${generation}`, orphanKey: key };
-    let seq = -1;
-    this.#transaction(() => { seq = this.#nextSeq(); this.#db.prepare("INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, 'log-gap', ?, ?)").run(this.#jobId, seq, json(data), this.#now()); });
+    const seq = this.#nextSeq();
+    this.#db.prepare("INSERT INTO job_events (job_id, seq, event_type, payload_json, at) VALUES (?, ?, 'log-gap', ?, ?)").run(this.#jobId, seq, json(data), this.#now());
     return { eventType: 'log-gap', seq, stream, generation, offset, length };
   }
 
@@ -542,16 +570,37 @@ function readExactly(fd: number, buffer: Buffer, position: number, read: LogStre
   }
 }
 
-function openRegularFile(path: string): { readonly fd: number; readonly size: number } {
+function openRegularFile(path: string): { readonly fd: number; readonly size: number; readonly identity: FileIdentity } {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile()) throw new Error('log generation is not a regular file');
-    return { fd, size: stat.size };
+    return { fd, size: stat.size, identity: fileIdentity(stat) };
   } catch (error) {
     closeSync(fd);
     throw error;
   }
+}
+
+function revalidateAppendFile(path: string, fd: number, expectedSize: number, before: FileIdentity): void {
+  const current = fileIdentity(fstatSync(fd));
+  if (current.size !== expectedSize || !sameFileLocation(current, before)) throw new Error('log generation changed before append commit');
+  if (!sameFileIdentity(fileIdentityAtPath(path), current)) throw new Error('log generation pathname changed before append commit');
+}
+
+function revalidateHashedFile(path: string, fd: number, expected: FileIdentity, expectedSize: number): void {
+  const current = fileIdentity(fstatSync(fd));
+  if (current.size !== expectedSize || !sameFileIdentity(current, expected)) throw new Error('log generation changed during seal');
+  if (!sameFileIdentity(fileIdentityAtPath(path), current)) throw new Error('log generation pathname changed during seal');
+}
+
+function fileIdentityAtPath(path: string): FileIdentity {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new Error('log generation is not a regular file');
+    return fileIdentity(stat);
+  } finally { closeSync(fd); }
 }
 
 function hashRegularFile(fd: number, size: number, read: LogStreamIo['readSync']): string {
@@ -596,6 +645,10 @@ function sameFileIdentity(left: FileIdentity, right: FileIdentity): boolean {
     && left.size === right.size
     && left.mtimeMs === right.mtimeMs
     && left.ctimeMs === right.ctimeMs;
+}
+
+function sameFileLocation(left: FileIdentity, right: FileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.mode === right.mode;
 }
 
 function validUtf8Text(bytes: Uint8Array): { readonly text: string } | Record<string, never> {
