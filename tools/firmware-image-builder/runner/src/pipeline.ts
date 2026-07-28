@@ -2105,7 +2105,6 @@ export function createPipeline(input: PipelineInput): {
       && publicationFailure !== null
     ) {
       const terminalAt = now();
-      logStage(stage, 'failed', finishedAt);
       write({
         kind: 'publish-failure-terminal',
         expectedState: 'publishing',
@@ -2122,6 +2121,19 @@ export function createPipeline(input: PipelineInput): {
         terminalAt,
         error: canonicalObject(contract, 'publish terminal failure'),
       });
+      try {
+        logStage(stage, 'failed', finishedAt);
+      } catch (error) {
+        if (error instanceof PipelineRecoveryRequiredError) {
+          throw new PipelineTerminalFailure({
+            state: 'failed',
+            buildManifest,
+            verificationManifest,
+            blockerCode,
+          });
+        }
+        throw error;
+      }
       throw new PipelineTerminalFailure({
         state: 'failed',
         buildManifest,
@@ -2129,7 +2141,6 @@ export function createPipeline(input: PipelineInput): {
         blockerCode,
       });
     }
-    logStage(stage, 'failed', finishedAt);
     write({
       kind: 'stage',
       expectedState: currentState,
@@ -2152,6 +2163,19 @@ export function createPipeline(input: PipelineInput): {
       errorCode: contract.code,
       error: canonicalObject(contract, 'terminal failure'),
     });
+    try {
+      logStage(stage, 'failed', finishedAt);
+    } catch (error) {
+      if (error instanceof PipelineRecoveryRequiredError) {
+        throw new PipelineTerminalFailure({
+          state: 'failed',
+          buildManifest,
+          verificationManifest,
+          blockerCode,
+        });
+      }
+      throw error;
+    }
     throw new PipelineTerminalFailure({
       state: 'failed',
       buildManifest,
@@ -2204,7 +2228,6 @@ export function createPipeline(input: PipelineInput): {
           throw error;
         }
       } else {
-        logStage(stage, 'running', startedAt);
         write({
           kind: 'stage',
           expectedState: currentState,
@@ -2214,6 +2237,7 @@ export function createPipeline(input: PipelineInput): {
           startedAt,
         });
         currentState = stageState;
+        logStage(stage, 'running', startedAt);
       }
       if (!workspaceValidatedBefore) {
         await withLeaseHeartbeat(() => input.services.workspace.revalidate({
@@ -2299,7 +2323,6 @@ export function createPipeline(input: PipelineInput): {
         verificationManifest = terminal.manifest;
         const publishedAt = now();
         const terminalAt = now();
-        logStage(stage, 'passed', finishedAt);
         write({
           kind: 'publish-terminal',
           expectedState: 'publishing',
@@ -2322,9 +2345,14 @@ export function createPipeline(input: PipelineInput): {
             sha256: finalProof.verificationSha256,
           },
         });
+        try {
+          logStage(stage, 'passed', finishedAt);
+        } catch (error) {
+          if (error instanceof PipelineRecoveryRequiredError) return;
+          throw error;
+        }
         return;
       }
-      logStage(stage, 'passed', finishedAt);
       write({
         kind: 'stage',
         expectedState: currentState,
@@ -2336,6 +2364,7 @@ export function createPipeline(input: PipelineInput): {
         evidencePath: evidence.path,
         evidenceSha256: evidence.sha256,
       });
+      logStage(stage, 'passed', finishedAt);
       renewLease();
     } catch (error) {
       if (error instanceof PipelineCancelled) throw error;
@@ -2391,7 +2420,6 @@ export function createPipeline(input: PipelineInput): {
       } catch (error) {
         if (error instanceof PipelineOwnershipLostError) throw error;
         const startedAt = now();
-        logStage('preflight', 'running', startedAt);
         write({
           kind: 'stage',
           expectedState: 'starting',
@@ -2401,6 +2429,7 @@ export function createPipeline(input: PipelineInput): {
           startedAt,
         });
         currentState = 'preflight';
+        logStage('preflight', 'running', startedAt);
         await completeFailure('preflight', startedAt, error, null, [], job);
       }
       for (const stage of PIPELINE_STAGE_NAMES) {

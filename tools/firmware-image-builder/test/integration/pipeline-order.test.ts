@@ -356,6 +356,7 @@ async function fixture(options: {
   readonly mutateJob?: (job: JobRecord) => JobRecord;
   readonly operationHook?: (operationId: TrustedOperationId, clock: AdvancingClock) => void;
   readonly rejectOwnershipWrite?: RunnerWriteCommand['kind'];
+  readonly rejectOwnershipWhen?: (command: RunnerWriteCommand) => boolean;
   readonly expectedPatchAlreadyPresent?: boolean;
   readonly publicationBindingMismatch?: boolean;
   readonly workspaceFailureAt?: Readonly<{
@@ -983,7 +984,10 @@ async function fixture(options: {
       if (command.kind === 'artifact' && options.throwArtifactOwnershipWrite === true) {
         throw new Error('injected artifact ownership completion failure');
       }
-      if (command.kind === options.rejectOwnershipWrite) {
+      if (
+        command.kind === options.rejectOwnershipWrite
+        || options.rejectOwnershipWhen?.(command) === true
+      ) {
         return {
           ok: false,
           conflict: {
@@ -1506,6 +1510,111 @@ describe('trusted pipeline integration', () => {
       });
       expect(cancellation.observeBetweenStages).toHaveBeenCalled();
       expect(progress.every(({ outcome }) => outcome !== 'passed')).toBe(true);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('does not log running progress when its ownership CAS is rejected', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      rejectOwnershipWrite: 'stage',
+      pipelineLogWriter: { write: (entry) => progress.push(entry) },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'RUNNER_DISAPPEARED',
+      });
+      expect(progress).toEqual([]);
+      expect(value.store.getStage(value.input.jobId, 'preflight')).toBeNull();
+    } finally {
+      value.close();
+    }
+  });
+
+  it('does not log passed progress when its ownership CAS is rejected', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      rejectOwnershipWhen: (command) => command.kind === 'stage' && command.outcome === 'passed',
+      pipelineLogWriter: { write: (entry) => progress.push(entry) },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'RUNNER_DISAPPEARED',
+      });
+      expect(progress.map(({ stage, outcome }) => [stage, outcome])).toEqual([
+        ['preflight', 'running'],
+      ]);
+      expect(value.store.getStage(value.input.jobId, 'preflight')).toMatchObject({
+        outcome: 'running',
+      });
+    } finally {
+      value.close();
+    }
+  });
+
+  it('does not log a passed publish terminal when its ownership CAS is rejected', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      rejectOwnershipWrite: 'publish-terminal',
+      pipelineLogWriter: { write: (entry) => progress.push(entry) },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'RUNNER_DISAPPEARED',
+      });
+      expect(progress.filter(({ stage }) => stage === 'publish').map(({ outcome }) => outcome))
+        .toEqual(['running']);
+      expect(value.store.getStage(value.input.jobId, 'publish')).toMatchObject({
+        outcome: 'running',
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'publishing',
+        terminalAt: null,
+      });
+    } finally {
+      value.close();
+    }
+  });
+
+  it('stops after a committed mid-pipeline cancellation without inventing a stage result', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      pipelineLogWriter: { write: (entry) => progress.push(entry) },
+    });
+    let observations = 0;
+    const cancellation = {
+      isRequested: () => false,
+      observeBetweenStages: vi.fn(async () => {
+        observations += 1;
+        return observations === 2
+          ? {
+              requested: true,
+              handled: true,
+              state: 'cancelled' as const,
+              evidencePath: `jobs/${value.input.jobId}/evidence/cancellation.json`,
+              evidenceSha256: HASH_D,
+            } as const
+          : { requested: false, handled: false } as const;
+      }),
+      observeBetweenOperations: vi.fn(async () => ({ requested: false, handled: false } as const)),
+      cancelIfRequested: vi.fn(async () => ({ requested: false, handled: false } as const)),
+      dispose: vi.fn(),
+    };
+    try {
+      await expect(createPipeline({ ...value.input, cancellation }).run()).resolves.toMatchObject({
+        state: 'cancelled',
+      });
+      expect(progress.map(({ stage, outcome }) => [stage, outcome])).toEqual([
+        ['preflight', 'running'],
+        ['preflight', 'passed'],
+      ]);
+      expect(value.store.getStage(value.input.jobId, 'preflight')).toMatchObject({ outcome: 'passed' });
+      expect(value.store.getStage(value.input.jobId, 'source')).toBeNull();
+      expect(value.store.getStage(value.input.jobId, 'release-gates')).toBeNull();
     } finally {
       value.close();
     }
@@ -2410,7 +2519,7 @@ describe('trusted pipeline integration', () => {
     }
   });
 
-  it('fails closed when progress logging fails before a stage can pass', async () => {
+  it('stops after a nonterminal stage commits when progress logging fails', async () => {
     const progress: Array<Record<string, unknown>> = [];
     const value = await fixture({
       pipelineLogWriter: {
@@ -2435,9 +2544,111 @@ describe('trusted pipeline integration', () => {
       ]);
       expect(value.store.getJob(value.input.jobId).state).toBe('source');
       expect(value.store.getStage(value.input.jobId, 'source')).toMatchObject({
-        outcome: 'running',
+        outcome: 'passed',
       });
       expect(value.store.getStage(value.input.jobId, 'release-gates')).toBeNull();
+    } finally {
+      value.close();
+    }
+  });
+
+  it('preserves terminal publish success when its final progress log fails', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      pipelineLogWriter: {
+        write: (entry) => {
+          progress.push(entry);
+          if (entry.stage === 'publish' && entry.outcome === 'passed') {
+            throw new Error('progress sink unavailable');
+          }
+        },
+      },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'succeeded',
+        blockerCode: null,
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'succeeded',
+        terminalAt: expect.any(String),
+      });
+      expect(value.store.getStage(value.input.jobId, 'publish')).toMatchObject({
+        outcome: 'passed',
+      });
+    } finally {
+      value.close();
+    }
+  });
+
+  it('preserves terminal publish failure when its final progress log fails', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      publisher: {
+        publish: vi.fn(async (): Promise<PublisherResponse> => ({
+          available: true,
+          published: false,
+          quarantined: false,
+          selfTest: false,
+          mutationCount: 1,
+          errorCode: 'OUTPUT_COLLISION',
+          renameResult: 'EEXIST',
+          publisherVersion: LOCK.packageVersion,
+          publisherSourceSha256: HASH_C,
+          sourceRelativePath: `.osi-image-builder/staging/${value.input.jobId}`,
+          destinationRelativePath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5`,
+        })),
+      },
+      pipelineLogWriter: {
+        write: (entry) => {
+          progress.push(entry);
+          if (entry.stage === 'publish' && entry.outcome === 'failed') {
+            throw new Error('progress sink unavailable');
+          }
+        },
+      },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'failed',
+        blockerCode: 'OUTPUT_COLLISION',
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'failed',
+        terminalAt: expect.any(String),
+      });
+      expect(value.store.getStage(value.input.jobId, 'publish')).toMatchObject({
+        outcome: 'failed',
+      });
+    } finally {
+      value.close();
+    }
+  });
+
+  it('preserves normal terminal failure when its final progress log fails', async () => {
+    const progress: Array<Record<string, unknown>> = [];
+    const value = await fixture({
+      failStage: 'preflight',
+      pipelineLogWriter: {
+        write: (entry) => {
+          progress.push(entry);
+          if (entry.stage === 'preflight' && entry.outcome === 'failed') {
+            throw new Error('progress sink unavailable');
+          }
+        },
+      },
+    });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'failed',
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'failed',
+        terminalAt: expect.any(String),
+      });
+      expect(value.store.getStage(value.input.jobId, 'preflight')).toMatchObject({
+        outcome: 'failed',
+      });
     } finally {
       value.close();
     }
