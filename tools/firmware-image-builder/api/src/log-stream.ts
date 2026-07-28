@@ -323,14 +323,6 @@ export class DurableLogStream {
   replaySync(afterSeq: number, requestedLimits: ReplayLimits = {}): LogStreamEvent[] {
     this.#assertOpen();
     const limits = replayLimits(afterSeq, requestedLimits);
-    const discoveredIdentities = new Map<number, FileIdentity>();
-    for (const row of this.#sourceRows(Math.max(0, afterSeq), limits.eventLimit)) {
-      const source = sourceCoordinates(row);
-      if (this.#sourceGap(source.seq)) continue;
-      const identity = this.#discoverIdentity(source);
-      if (identity !== undefined) discoveredIdentities.set(source.seq, identity);
-    }
-
     const output: LogStreamEvent[] = [];
     let decodedBytes = 0;
     for (const row of this.#eventRows(afterSeq, limits.eventLimit, limits.maxMetadataBytes)) {
@@ -356,17 +348,27 @@ export class DurableLogStream {
       }
 
       const source = sourceCoordinates(row);
-      if (this.#sourceGap(source.seq)) continue;
-      const expectedIdentity = discoveredIdentities.get(source.seq) ?? this.#discoverIdentity(source);
-      if (expectedIdentity === undefined) continue;
+      const existingGap = this.#sourceGap(source.seq);
+      if (existingGap !== undefined) {
+        output.push({ seq, event: 'log-gap', data: JSON.parse(existingGap.payload_json) as Record<string, unknown> });
+        continue;
+      }
+      const expectedIdentity = this.#discoverIdentity(source);
+      if (expectedIdentity === undefined) {
+        const gap = this.#sourceGap(source.seq);
+        if (gap !== undefined) output.push({ seq, event: 'log-gap', data: JSON.parse(gap.payload_json) as Record<string, unknown> });
+        continue;
+      }
       const generationRow = this.#generationRow(source);
       if (generationRow === undefined || generationRow.path !== `logs/${source.stream}.${source.generation}`) {
-        this.#gap(source.seq, source.stream, source.generation, source.range, 'READ_RACE');
+        const gap = this.#gap(source.seq, source.stream, source.generation, source.range, 'READ_RACE');
+        output.push({ seq, event: 'log-gap', data: gap.data });
         continue;
       }
       const path = this.#generationPath(source.stream, source.generation, generationRow.path);
       if (path === null) {
-        this.#gap(source.seq, source.stream, source.generation, source.range, 'READ_RACE');
+        const gap = this.#gap(source.seq, source.stream, source.generation, source.range, 'READ_RACE');
+        output.push({ seq, event: 'log-gap', data: gap.data });
         continue;
       }
       if (source.range.length > limits.maxDecodedBytes - decodedBytes) {
@@ -394,7 +396,8 @@ export class DurableLogStream {
         bytes = readRegularRange(path, source.range.offset, source.range.length, expectedIdentity, this.#readSync);
       } catch (error) {
         if (isUnsafeAuthorityError(error)) throw error;
-        this.#gap(source.seq, source.stream, source.generation, source.range, 'READ_RACE');
+        const gap = this.#gap(source.seq, source.stream, source.generation, source.range, 'READ_RACE');
+        output.push({ seq, event: 'log-gap', data: gap.data });
         continue;
       }
       decodedBytes += bytes.byteLength;
@@ -519,13 +522,7 @@ export class DurableLogStream {
             ELSE 'stage' END AS public_event
         FROM job_events AS event
         WHERE event.job_id=? AND event.seq>?
-          AND NOT (event.stream IS NOT NULL AND EXISTS (
-            SELECT 1 FROM job_events AS gap
-            WHERE gap.job_id=event.job_id
-              AND gap.event_type='log-gap'
-              AND json_type(gap.payload_json, '$.sourceSeq') IN ('integer', 'real')
-              AND json_extract(gap.payload_json, '$.sourceSeq')=event.seq
-          ))
+          AND NOT (event.event_type='log-gap' AND COALESCE(json_type(event.payload_json, '$.sourceSeq'), '') IN ('integer', 'real'))
         ORDER BY event.seq
         LIMIT ?
       ), bounded AS (
@@ -561,14 +558,6 @@ export class DurableLogStream {
       maxMetadataBytes,
       this.#jobId,
     ) as Array<Record<string, unknown>>;
-  }
-
-  #sourceRows(fromSeq: number, limit: number): Array<Record<string, unknown>> {
-    return this.#db.prepare(`SELECT seq, event_type, payload_json, at, stream, file_generation, byte_offset, byte_length, partial
-      FROM job_events
-      WHERE job_id=? AND stream IS NOT NULL AND seq>=?
-      ORDER BY seq
-      LIMIT ?`).all(this.#jobId, fromSeq, limit) as Array<Record<string, unknown>>;
   }
 
   #generationRow(source: SourceCoordinates): { readonly path: string; readonly size_bytes: number } | undefined {

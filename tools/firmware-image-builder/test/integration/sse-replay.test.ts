@@ -326,9 +326,9 @@ describe('SSE durable replay', () => {
 
     expect(source.seq).toBe(0);
     expect(terminal).toBe(1);
-    expect(stream.replaySync(0).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal'], [2, 'log-gap']]);
-    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal'], [2, 'log-gap']]);
-    expect(stream.replaySync(1).map(({ seq, event }) => [seq, event])).toEqual([[2, 'log-gap']]);
+    expect(stream.replaySync(0).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal']]);
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[0, 'log-gap'], [1, 'terminal']]);
+    expect(stream.replaySync(1)).toEqual([]);
     expect(stream.replaySync(2)).toEqual([]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='job-sse' AND event_type='log-gap'").get()).toEqual({ count: 1 });
   });
@@ -368,9 +368,9 @@ describe('SSE durable replay', () => {
     stream.appendSync('runner', Buffer.from('raced\n'));
     stream.appendMetadataSync('terminal', { jobId: 'job-sse', state: 'failed', at: NOW });
 
-    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal']]);
-    expect(stream.replaySync(1).map(({ seq, event }) => [seq, event])).toEqual([[2, 'log-gap']]);
-    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal'], [2, 'log-gap']]);
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[0, 'log-gap'], [1, 'terminal']]);
+    expect(stream.replaySync(0).map(({ seq, event }) => [seq, event])).toEqual([[1, 'terminal']]);
+    expect(stream.replaySync(-1).map(({ seq, event }) => [seq, event])).toEqual([[0, 'log-gap'], [1, 'terminal']]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM job_events WHERE job_id='job-sse' AND event_type='log-gap'").get()).toEqual({ count: 1 });
   });
 });
