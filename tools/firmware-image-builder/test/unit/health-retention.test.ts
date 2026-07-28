@@ -167,6 +167,34 @@ describe('startup retention', () => {
     expect(RETENTION_DAYS).toEqual({ rows: 180, evidence: 180, logs: 180, worktrees: 7, caches: 30, quarantine: 180 });
   });
 
+  it('retains a recovery-owned terminal worktree until its cleanup blocker is cleared', async () => {
+    const paths = await retentionWorkspace();
+    const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
+    databases.push(db);
+    await writeFile(join(paths.worktreeRoot!, 'recovery-owned'), 'recovery-owned');
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, cleanup_blocker_code, cleanup_blocker_json, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, ?, ?, '{}', '{}')`)
+      .run('recovery-owned', 'request-recovery-owned', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD, 'CLEANUP_ADMISSION_BLOCKED', '{"owner":"recovery"}');
+
+    const records: RetentionPruneRecord[] = [];
+    const startup = () => createRetentionStartupHook({
+      paths,
+      db,
+      now: NOW,
+      freeBytes: 25 * 1024 ** 3,
+      recordPrune: async (record) => { records.push(record); },
+    })();
+
+    await expect(startup()).resolves.toEqual({ blockers: [] });
+    await expect(import('node:fs/promises').then(({ access }) => access(join(paths.worktreeRoot!, 'recovery-owned')))).resolves.toBeUndefined();
+    expect(records.some((record) => record.category === 'worktree' && record.relativePath.endsWith('/recovery-owned'))).toBe(false);
+
+    db.prepare('UPDATE jobs SET cleanup_blocker_code=NULL, cleanup_blocker_json=NULL WHERE job_id=?').run('recovery-owned');
+    records.length = 0;
+    await expect(startup()).resolves.toEqual({ blockers: [] });
+    await expect(import('node:fs/promises').then(({ access }) => access(join(paths.worktreeRoot!, 'recovery-owned')))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(records.some((record) => record.category === 'worktree' && record.relativePath.endsWith('/recovery-owned'))).toBe(true);
+  });
+
   it('evicts eligible caches below the 20 GiB floor', async () => {
     const paths = await retentionWorkspace();
     const records: RetentionPruneRecord[] = [];

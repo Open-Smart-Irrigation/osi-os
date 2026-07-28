@@ -268,9 +268,8 @@ async function addChildren(
 
 async function terminalWorktreeCandidates(options: RetentionOptions, roots: Map<string, OpenRoot>, now: string, result: Candidate[]): Promise<void> {
   if (!options.db) return;
-  const rows = options.db.prepare(`SELECT job_id FROM jobs
-    WHERE state IN ('succeeded', 'failed', 'cancelled', 'interrupted')
-      AND terminal_at IS NOT NULL AND terminal_at < ? ORDER BY job_id`).all(new Date(threshold(now, RETENTION_DAYS.worktrees)).toISOString()) as Array<{ job_id?: unknown }>;
+  const rows = options.db.prepare(`SELECT job_id FROM jobs WHERE ${ELIGIBLE_TERMINAL_ROW_SQL} ORDER BY job_id`)
+    .all(new Date(threshold(now, RETENTION_DAYS.worktrees)).toISOString()) as Array<{ job_id?: unknown }>;
   for (const row of rows) {
     if (!safeSegment(row.job_id)) continue;
     const path = options.paths.worktreeRoot === undefined
