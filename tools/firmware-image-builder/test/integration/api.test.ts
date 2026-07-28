@@ -35,7 +35,7 @@ function job(id: string) {
     containerCleanupOutcome: 'removed', cleanupBlockerCode: null, cleanupBlocker: null,
     terminalErrorCode: null, terminalError: null, terminalAt: now,
     artifactStagingPath: 'staging/job-1/image', artifactQuarantinePath: null, artifactQuarantineIntentPath: null,
-    artifactFinalDirectory: 'release/job-1', artifactFinalPath: 'release/job-1/image', artifactSha256: 'c'.repeat(64),
+    artifactFinalDirectory: `main/${sha}/rpi-5`, artifactFinalPath: `main/${sha}/rpi-5/image`, artifactSha256: 'c'.repeat(64),
     artifactSize: 123, artifactMtime: now, checksumPath: 'release/job-1/SHA256SUMS', checksumSha256: 'c'.repeat(64),
     manifestPath: 'release/job-1/manifest.json', manifestSha256: 'c'.repeat(64),
     verificationPath: 'release/job-1/verification.json', verificationSha256: 'c'.repeat(64),
@@ -50,7 +50,7 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
   const record = job('job-1');
   const stage = {
     jobId: 'job-1', stage: 'publish' as const, outcome: 'passed' as const,
-    startedAt: now, finishedAt: now, evidencePath: 'jobs/job-1/evidence/publish.json', evidenceSha256: 'd'.repeat(64),
+    startedAt: now, finishedAt: now, evidencePath: 'jobs/job-1/evidence/09-publish.json', evidenceSha256: 'd'.repeat(64),
     errorCode: null, error: null,
   };
   const result = {
@@ -81,7 +81,19 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
           }
         : (() => { throw new StoreNotFoundError('not found'); })(),
     },
-    readEvidence: async () => ({ stage: 'publish', artifactPath: '/private', credentials: { token: 'secret' }, result: 'ok' }),
+    readEvidence: async () => ({
+      schemaVersion: 1,
+      jobId: 'job-1',
+      stage: 'publish',
+      startedAt: now,
+      finishedAt: now,
+      outcome: 'passed',
+      operationId: null,
+      commands: [],
+      inputs: { pinnedSha: sha },
+      observations: { artifactSha256: 'c'.repeat(64) },
+      error: null,
+    }),
   } as ApiRouteDependencies;
   mutator?.(result);
   return result;
@@ -134,18 +146,25 @@ describe('read-only builder API routes', () => {
 
     const detail = await get(started.port, '/api/jobs/job-1');
     expect(detail.status).toBe(200);
-    expect(JSON.stringify(detail.body)).not.toMatch(/private|secret|staging|release\/job/);
+    expect(JSON.stringify(detail.body)).not.toMatch(/private|secret|staging|container-secret/);
     expect(detail.body).toMatchObject({
       id: 'job-1', state: 'succeeded', stage: 'publish', branch: 'main', pinnedSha: sha, targetId: 'rpi-5', outputRootId: 'release',
       queuePosition: null, cancelRequestedAt: null,
-      artifact: { sha256: 'c'.repeat(64), size: 123, mtime: now, publishState: 'published', publishedAt: now },
+      artifact: {
+        rootId: 'release', directory: `main/${sha}/rpi-5`, path: `main/${sha}/rpi-5/image`,
+        sha256: 'c'.repeat(64), size: 123, mtime: now, publishState: 'published', publishedAt: now,
+      },
       freshnessStatus: 'fresh', freshnessCheckedAt: now, newerSourceAvailable: false, error: null,
       source: expect.objectContaining({ branch: 'main', pinnedSha: sha }),
-      evidence: [expect.objectContaining({ stage: 'publish', outcome: 'passed', path: 'evidence/publish.json', evidenceSha256: 'd'.repeat(64) })],
+      evidence: [expect.objectContaining({ stage: 'publish', outcome: 'passed', path: 'evidence/09-publish.json', evidenceSha256: 'd'.repeat(64) })],
     });
 
     const evidence = await get(started.port, '/api/jobs/job-1/evidence/publish');
-    expect(evidence.body).toEqual({ stage: 'publish', result: 'ok' });
+    expect(evidence.body).toEqual({
+      schemaVersion: 1, jobId: 'job-1', stage: 'publish', startedAt: now, finishedAt: now,
+      outcome: 'passed', operationId: null, commands: [], inputs: { pinnedSha: sha },
+      observations: { artifactSha256: 'c'.repeat(64) }, error: null,
+    });
     const events = await get(started.port, '/api/jobs/job-1/events?after=0');
     expect(events.body).toEqual({ events: [{ seq: 2, event: 'terminal', state: 'succeeded', stage: 'publish', at: now, data: {} }], next: 2 });
     expect((await get(started.port, '/api/jobs/job-1/events?after=2')).body).toEqual({ events: [], next: 2 });
@@ -160,8 +179,41 @@ describe('read-only builder API routes', () => {
     expect((await get(started.port, '/api/jobs/missing')).status).toBe(404);
     expect((await get(started.port, '/api/jobs/job-1%252fsecret')).status).toBe(400);
     expect((await get(started.port, '/api/jobs/%252e%252e')).status).toBe(400);
+    expect((await get(started.port, '/api/jobs/missing/evidence/not-a-stage')).status).toBe(400);
     expect((await get(started.port, '/api/jobs/job-1/events/stream')).status).toBe(404);
     expect((await get(started.port, '/api/jobs/missing/events')).status).toBe(404);
+  });
+
+  it('preserves valid source subjects and keeps unknown freshness informational', async () => {
+    const informational = {
+      ...job('job-1'),
+      sourceSubject: '',
+      freshnessStatus: 'unknown' as const,
+      freshnessObservedSha: null,
+      freshnessErrorCode: 'FRESHNESS_UNKNOWN' as const,
+      freshnessError: { expectedSha: sha },
+    };
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        branches: async () => ({ fetchedAt: now, branches: [{ name: 'main', sha, commitTime: now, subject: 'line one\nline two' }] }),
+      });
+      Object.assign(value.store as object, {
+        getJob: (id: string) => id === 'job-1' ? informational : (() => { throw new StoreNotFoundError('not found'); })(),
+      });
+    }));
+    server = started.server;
+    expect((await get(started.port, '/api/branches')).body).toMatchObject({
+      branches: [{ name: 'main', subject: 'line one\nline two' }],
+    });
+    const response = await get(started.port, '/api/jobs/job-1');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      state: 'succeeded',
+      freshnessStatus: 'unknown',
+      error: null,
+      source: { subject: '' },
+      errors: { freshness: { code: 'FRESHNESS_UNKNOWN' } },
+    });
   });
 
   it('fails closed on malformed branch, job-page, and event-page data', async () => {
@@ -178,6 +230,29 @@ describe('read-only builder API routes', () => {
     }));
     server = invalidPage.server;
     expect((await get(invalidPage.port, '/api/jobs?limit=1')).status).toBe(500);
+    await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
+    server = undefined;
+
+    const stalledCursor = await start(dependencies((value) => {
+      Object.assign(value.store as object, { listJobs: async () => ({ jobs: [], nextCursor: 'same' }) });
+    }));
+    server = stalledCursor.server;
+    expect((await get(stalledCursor.port, '/api/jobs?cursor=same')).status).toBe(500);
+    await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
+    server = undefined;
+
+    const mismatchedEvidence = await start(dependencies((value) => {
+      const wrongStage = {
+        jobId: 'job-1', stage: 'build' as const, outcome: 'passed' as const,
+        startedAt: now, finishedAt: now, evidencePath: 'jobs/job-1/evidence/09-publish.json',
+        evidenceSha256: 'd'.repeat(64), errorCode: null, error: null,
+      };
+      Object.assign(value.store as object, {
+        getStage: (id: string, requestedStage: string) => id === 'job-1' && requestedStage === 'build' ? wrongStage : null,
+      });
+    }));
+    server = mismatchedEvidence.server;
+    expect((await get(mismatchedEvidence.port, '/api/jobs/job-1')).status).toBe(500);
     await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
     server = undefined;
 

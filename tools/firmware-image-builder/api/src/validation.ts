@@ -20,6 +20,7 @@ export const TEXT_LIMITS: Readonly<Record<'maxTextBytes' | 'maxPathBytes' | 'max
   maxManifestBytes: 65_536,
   maxArgvBytes: 65_536,
 });
+export const SOURCE_SUBJECT_MAX_BYTES = 64 * 1_024;
 
 const CANONICAL_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z$/;
 
@@ -33,6 +34,19 @@ export class SharedValidationError extends Error {
 export function boundedText(value: unknown, field: string, maxBytes = TEXT_LIMITS.maxTextBytes): string {
   if (typeof value !== 'string' || value.length === 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || Buffer.byteLength(value, 'utf8') > maxBytes) {
     throw new SharedValidationError(`${field} exceeds its bounded text limit`);
+  }
+  return value;
+}
+
+export function sourceMetadataSubject(value: unknown, field: string): string {
+  if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > SOURCE_SUBJECT_MAX_BYTES) {
+    throw new SharedValidationError(`${field} exceeds the source metadata limit`);
+  }
+  if ([...value].some((character) => {
+    const code = character.codePointAt(0)!;
+    return (code < 32 && code !== 9 && code !== 10 && code !== 13) || code === 127;
+  })) {
+    throw new SharedValidationError(`${field} contains an unsupported control character`);
   }
   return value;
 }

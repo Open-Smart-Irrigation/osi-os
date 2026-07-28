@@ -22,7 +22,7 @@ import {
   validateOriginUrl,
   type ValidatedOriginPolicy,
 } from '../../../config/origin-policy.js';
-import { canonicalInstant, normalizeJson } from '../validation.js';
+import { canonicalInstant, normalizeJson, sourceMetadataSubject } from '../validation.js';
 import {
   withStateRootSnapshot,
   type PathAuthorityDependencies,
@@ -259,9 +259,10 @@ function parseSingleSha(output: string): string {
 }
 
 function validateCommitMetadata(sha: string, commitTime: string, authorName: string, authorEmail: string, subject: string): void {
-  if (!SHA_PATTERN.test(sha) || bytes(commitTime) > 256 || bytes(authorName) > 4096 || bytes(authorEmail) > 4096 || bytes(subject) > MAX_FIELD_BYTES || hasControl(commitTime) || hasControl(authorName) || hasControl(authorEmail) || hasControl(subject, true) || Number.isNaN(Date.parse(commitTime))) {
+  if (!SHA_PATTERN.test(sha) || bytes(commitTime) > 256 || bytes(authorName) > 4096 || bytes(authorEmail) > 4096 || hasControl(commitTime) || hasControl(authorName) || hasControl(authorEmail) || Number.isNaN(Date.parse(commitTime))) {
     throw new SourceResolverError('SOURCE_NOT_COMMIT');
   }
+  try { sourceMetadataSubject(subject, 'source subject'); } catch { throw new SourceResolverError('SOURCE_NOT_COMMIT'); }
 }
 
 function canonicalCommitTime(value: string): string {
@@ -764,7 +765,8 @@ export class SourceResolver {
     validateBranch(metadata.branch);
     validateSha(metadata.sha);
     validateOriginUrl(metadata.originUrl);
-    if (bytes(metadata.author) === 0 || bytes(metadata.author) > 8192 || bytes(metadata.subject) > MAX_FIELD_BYTES || hasControl(metadata.commitTime) || hasControl(metadata.author) || hasControl(metadata.subject, true) || Number.isNaN(Date.parse(metadata.commitTime))) throw new SourceResolverError('SOURCE_NOT_COMMIT');
+    if (bytes(metadata.author) === 0 || bytes(metadata.author) > 8192 || hasControl(metadata.commitTime) || hasControl(metadata.author) || Number.isNaN(Date.parse(metadata.commitTime))) throw new SourceResolverError('SOURCE_NOT_COMMIT');
+    try { sourceMetadataSubject(metadata.subject, 'source subject'); } catch { throw new SourceResolverError('SOURCE_NOT_COMMIT'); }
     return immutable({
       branch: metadata.branch,
       sha: metadata.sha,

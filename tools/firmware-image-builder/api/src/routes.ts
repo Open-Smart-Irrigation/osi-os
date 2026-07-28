@@ -18,7 +18,9 @@ import {
   boundedText,
   canonicalAbsolutePath,
   canonicalInstant,
+  normalizeJson,
   optionalInstant,
+  sourceMetadataSubject,
   stableRelativePath,
 } from './validation.js';
 import {
@@ -36,7 +38,6 @@ const MAX_BRANCHES = 1_000;
 const MAX_CURSOR_BYTES = 512;
 const MAX_JOB_ID_BYTES = 128;
 const MAX_BRANCH_BYTES = 512;
-const MAX_SUBJECT_BYTES = 4_096;
 const MAX_CONFIG_ITEMS = 256;
 const JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
@@ -280,7 +281,11 @@ function evidencePath(stage: StoredStage): string | null {
   const filename = value.startsWith(directPrefix)
     ? value.slice(directPrefix.length)
     : value.startsWith(jobPrefix) ? value.slice(jobPrefix.length) : '';
-  if (!EVIDENCE_FILE_PATTERN.test(filename)) throw new Error('stage evidence path is outside the job evidence index');
+  const stageIndex = PIPELINE_STAGE_NAMES.indexOf(stage.stage);
+  const expectedFilename = `${String(stageIndex).padStart(2, '0')}-${stage.stage}.json`;
+  if (!EVIDENCE_FILE_PATTERN.test(filename) || filename !== expectedFilename) {
+    throw new Error('stage evidence path does not match the fixed stage index');
+  }
   return `${directPrefix}${filename}`;
 }
 
@@ -300,8 +305,7 @@ function stageDto(stage: StoredStage, expectedJobId: string): JsonRecord {
 function selectedJobError(job: JobRecord): JsonRecord | null {
   return publicError(job.terminalErrorCode, job.terminalError, job.terminalAt)
     ?? publicError(job.publishBlockerCode, job.publishBlocker)
-    ?? publicError(job.cleanupBlockerCode, job.cleanupBlocker)
-    ?? publicError(job.freshnessErrorCode, job.freshnessError);
+    ?? publicError(job.cleanupBlockerCode, job.cleanupBlocker);
 }
 
 async function detail(job: JobRecord, store: ApiJobStore): Promise<JsonRecord> {
@@ -312,13 +316,21 @@ async function detail(job: JobRecord, store: ApiJobStore): Promise<JsonRecord> {
   if (sourceRef !== `refs/remotes/origin/${branch}`) throw new Error('source ref does not match the stored origin branch');
   const stages = await Promise.all(PIPELINE_STAGE_NAMES.map(async (stage) => store.getStage(jobId, stage)));
   const artifactSha256 = nullableHash64(job.artifactSha256, 'artifact SHA');
-  const artifact = artifactSha256 === null ? null : {
-    sha256: artifactSha256,
-    size: safeInteger(job.artifactSize, 'artifact size'),
-    mtime: canonicalInstant(job.artifactMtime, 'artifact mtime'),
-    publishState: job.publishState === null ? null : identifier(job.publishState, 'publish state'),
-    publishedAt: nullableInstant(job.publishedAt, 'publishedAt'),
-  };
+  const artifact = artifactSha256 === null ? null : (() => {
+    const directory = stableRelativePath(job.artifactFinalDirectory, 'artifact final directory');
+    const path = stableRelativePath(job.artifactFinalPath, 'artifact final path');
+    if (!path.startsWith(`${directory}/`)) throw new Error('artifact final path is outside its release directory');
+    return {
+      rootId: identifier(job.rootId, 'artifact output root ID'),
+      directory,
+      path,
+      sha256: artifactSha256,
+      size: safeInteger(job.artifactSize, 'artifact size'),
+      mtime: canonicalInstant(job.artifactMtime, 'artifact mtime'),
+      publishState: job.publishState === null ? null : identifier(job.publishState, 'publish state'),
+      publishedAt: nullableInstant(job.publishedAt, 'publishedAt'),
+    };
+  })();
   const freshnessStatus = job.freshnessStatus === null ? 'unknown' : identifier(job.freshnessStatus, 'freshness status');
   if (!['fresh', 'advanced', 'unknown'].includes(freshnessStatus)) throw new Error('stored freshness status is invalid');
 
@@ -339,7 +351,7 @@ async function detail(job: JobRecord, store: ApiJobStore): Promise<JsonRecord> {
       pinnedSha: job.pinnedSha,
       commitTime: canonicalInstant(job.sourceCommitTime, 'source commit time'),
       author: text(job.sourceAuthor, 'source author', 1_024),
-      subject: text(job.sourceSubject, 'source subject', MAX_SUBJECT_BYTES),
+      subject: sourceMetadataSubject(job.sourceSubject, 'source subject'),
     },
     output: artifact,
     errors: {
@@ -452,18 +464,19 @@ function branchesDto(value: unknown): JsonRecord {
       name: branchName(item.name, `branch ${index} name`),
       sha: item.sha,
       commitTime: canonicalInstant(item.commitTime, `branch ${index} commit time`),
-      subject: text(item.subject, `branch ${index} subject`, MAX_SUBJECT_BYTES),
+      subject: sourceMetadataSubject(item.subject, `branch ${index} subject`),
     };
   });
   return { fetchedAt: canonicalInstant(input.fetchedAt, 'branches fetchedAt'), branches };
 }
 
-function jobPageDto(value: unknown, limit: number): JsonRecord {
+function jobPageDto(value: unknown, limit: number, currentCursor: string | null): JsonRecord {
   const page = record(value, 'job page');
   if (!Array.isArray(page.jobs) || page.jobs.length > limit) throw new Error('store returned an invalid job page');
   if (page.nextCursor !== null && (typeof page.nextCursor !== 'string'
     || Buffer.byteLength(page.nextCursor, 'utf8') > MAX_CURSOR_BYTES
-    || !OPAQUE_CURSOR_PATTERN.test(page.nextCursor))) {
+    || !OPAQUE_CURSOR_PATTERN.test(page.nextCursor)
+    || page.nextCursor === currentCursor)) {
     throw new Error('store returned an invalid opaque cursor');
   }
   return { jobs: page.jobs.map((job) => summary(job as JobRecord)), nextCursor: page.nextCursor };
@@ -485,25 +498,76 @@ function eventPageDto(page: EventPage, jobId: string, after: number): JsonRecord
   return { events, next: page.nextAfterSeq ?? events.at(-1)?.seq ?? after };
 }
 
-function publicEvidence(value: unknown): JsonRecord {
+function evidenceCommand(value: unknown, index: number): JsonRecord {
+  const command = record(value, `evidence command ${index}`);
+  const keys = Object.keys(command).sort();
+  const expected = ['argv', 'exitCode', 'finishedAt', 'outputLimit', 'signal', 'startedAt', 'timedOut'];
+  if (keys.length !== expected.length || keys.some((key, keyIndex) => key !== expected[keyIndex])) {
+    throw new Error(`evidence command ${index} has an invalid shape`);
+  }
+  if (!Array.isArray(command.argv) || command.argv.length === 0 || command.argv.length > MAX_CONFIG_ITEMS) {
+    throw new Error(`evidence command ${index} argv is invalid`);
+  }
+  const argv = command.argv.map((argument, argumentIndex) => text(argument, `evidence command ${index} argv ${argumentIndex}`, 65_536));
+  const exitCode = command.exitCode === null ? null : safeInteger(command.exitCode, `evidence command ${index} exit code`, -255);
+  const signal = command.signal === null ? null : identifier(command.signal, `evidence command ${index} signal`);
+  if (typeof command.timedOut !== 'boolean' || typeof command.outputLimit !== 'boolean') {
+    throw new Error(`evidence command ${index} flags are invalid`);
+  }
+  return {
+    argv,
+    startedAt: canonicalInstant(command.startedAt, `evidence command ${index} startedAt`),
+    finishedAt: canonicalInstant(command.finishedAt, `evidence command ${index} finishedAt`),
+    exitCode,
+    signal,
+    timedOut: command.timedOut,
+    outputLimit: command.outputLimit,
+  };
+}
+
+function evidenceObject(value: unknown, field: string): Readonly<Record<string, unknown>> {
+  const normalized = normalizeJson(value, field);
+  if (normalized === null || typeof normalized !== 'object' || Array.isArray(normalized)) {
+    throw new Error(`${field} is not an object`);
+  }
+  return normalized as Readonly<Record<string, unknown>>;
+}
+
+function publicEvidence(value: unknown, expectedJobId: string, expectedStage: PipelineStageName): JsonRecord {
   const input = record(value, 'evidence response');
-  const output: JsonRecord = {};
-  for (const key of ['stage', 'result', 'outcome', 'state', 'code', 'targetId'] as const) {
-    const item = input[key];
-    if (item !== undefined) output[key] = identifier(item, `evidence ${key}`);
+  const requiredKeys = ['commands', 'error', 'finishedAt', 'inputs', 'jobId', 'observations', 'operationId', 'outcome', 'schemaVersion', 'stage', 'startedAt'];
+  if (Object.keys(input).length !== requiredKeys.length || Object.keys(input).some((key) => !requiredKeys.includes(key))) {
+    throw new Error('evidence response has an invalid top-level shape');
   }
-  for (const key of ['at', 'startedAt', 'finishedAt', 'mtime'] as const) {
-    const item = input[key];
-    if (item !== undefined && item !== null) output[key] = canonicalInstant(item, `evidence ${key}`);
+  if (input.schemaVersion !== 1 || storedJobId(input.jobId) !== expectedJobId || storedStage(input.stage, 'evidence stage') !== expectedStage) {
+    throw new Error('evidence response identity is invalid');
   }
-  if (typeof input.sha256 === 'string' && HASH64_PATTERN.test(input.sha256)) output.sha256 = input.sha256;
-  if (input.size !== undefined) output.size = safeInteger(input.size, 'evidence size');
-  if (input.pinnedSha !== undefined) {
-    if (typeof input.pinnedSha !== 'string' || !HASH40_PATTERN.test(input.pinnedSha)) throw new Error('evidence pinned SHA is invalid');
-    output.pinnedSha = input.pinnedSha;
+  if (!Array.isArray(input.commands) || input.commands.length > MAX_CONFIG_ITEMS) throw new Error('evidence commands are invalid');
+  const operationId = input.operationId === null ? null : identifier(input.operationId, 'evidence operation ID');
+  const outcome = identifier(input.outcome, 'evidence outcome');
+  if (!['passed', 'failed'].includes(outcome)) throw new Error('evidence outcome is invalid');
+  let error: JsonRecord | null = null;
+  if (input.error !== null) {
+    const source = record(input.error, 'evidence error');
+    const selected = publicError(source.code, source.details);
+    if (selected === null || source.stage !== expectedStage || typeof source.retryable !== 'boolean') {
+      throw new Error('evidence error is invalid');
+    }
+    error = { ...selected, stage: expectedStage, retryable: source.retryable };
   }
-  if (input.branch !== undefined) output.branch = branchName(input.branch, 'evidence branch');
-  return output;
+  return {
+    schemaVersion: 1,
+    jobId: expectedJobId,
+    stage: expectedStage,
+    startedAt: canonicalInstant(input.startedAt, 'evidence startedAt'),
+    finishedAt: canonicalInstant(input.finishedAt, 'evidence finishedAt'),
+    outcome,
+    operationId,
+    commands: input.commands.map(evidenceCommand),
+    inputs: evidenceObject(input.inputs, 'evidence inputs'),
+    observations: evidenceObject(input.observations, 'evidence observations'),
+    error,
+  };
 }
 
 function getJob(store: ApiJobStore, id: string): JobRecord {
@@ -534,17 +598,19 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
     }
     if (context.path === '/api/jobs') {
       const limit = parseLimit(context.query.get('limit'));
-      const page = await dependencies.store.listJobs({ cursor: parseCursor(context.query.get('cursor')), limit });
-      return jsonResponse(200, jobPageDto(page, limit));
+      const cursor = parseCursor(context.query.get('cursor'));
+      const page = await dependencies.store.listJobs({ cursor, limit });
+      return jsonResponse(200, jobPageDto(page, limit, cursor));
     }
 
     const evidenceMatch = context.path.match(/^\/api\/jobs\/([^/]+)\/evidence\/([^/]+)$/u);
     if (evidenceMatch) {
-      const jobRecord = getJob(dependencies.store, validateJobId(evidenceMatch[1]!));
+      const jobId = validateJobId(evidenceMatch[1]!);
       const stage = validateStage(evidenceMatch[2]!);
+      const jobRecord = getJob(dependencies.store, jobId);
       const indexedStage = dependencies.store.getStage(jobRecord.jobId, stage);
       if (indexedStage === null || indexedStage.evidenceSha256 === null) notFound();
-      return jsonResponse(200, publicEvidence(await dependencies.readEvidence(jobRecord, stage)));
+      return jsonResponse(200, publicEvidence(await dependencies.readEvidence(jobRecord, stage), jobId, stage));
     }
     const eventsMatch = context.path.match(/^\/api\/jobs\/([^/]+)\/events$/u);
     if (eventsMatch) {
