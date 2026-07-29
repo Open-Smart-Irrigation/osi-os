@@ -111,7 +111,10 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
       operations: ['activate-target'],
     }],
     health: () => ({ activeJobId: 'job-1' }),
-    branches: async () => ({ fetchedAt: now, branches: [{ name: 'main', sha, commitTime: now, subject: 'subject' }] }),
+    branches: {
+      get: async () => ({ fetchedAt: now, branches: [{ name: 'main', sha, commitTime: now, subject: 'subject' }] }),
+      refresh: async () => ({ fetchedAt: now, branches: [{ name: 'main', sha, commitTime: now, subject: 'subject' }] }),
+    },
     store: {
       listJobs: async ({ cursor, limit }: { cursor: string | null; limit: number }) => ({ jobs: [record], nextCursor: cursor === null && limit === 1 ? 'next-page' : null }),
       getJob: (id: string) => id === 'job-1' ? record : (() => { throw new StoreNotFoundError('not found'); })(),
@@ -160,6 +163,21 @@ async function get(port: number, path: string): Promise<{ status: number; body: 
     });
     requestValue.on('error', reject);
     requestValue.end();
+  });
+}
+
+async function post(port: number, path: string, body: string, headers: Record<string, string> = {}): Promise<{ status: number; body: unknown }> {
+  return new Promise((resolve, reject) => {
+    const requestValue = request({
+      hostname: '127.0.0.1', port, path, method: 'POST',
+      headers: { origin: `http://127.0.0.1:${port}`, 'content-type': 'application/json', ...headers },
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer) => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode ?? 0, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }));
+    });
+    requestValue.on('error', reject);
+    requestValue.end(body);
   });
 }
 
@@ -212,6 +230,116 @@ describe('read-only builder API routes', () => {
     const events = await get(started.port, '/api/jobs/job-1/events?after=0');
     expect(events.body).toEqual({ events: [{ seq: 2, event: 'terminal', state: 'succeeded', stage: 'publish', at: now, data: {} }], next: 2 });
     expect((await get(started.port, '/api/jobs/job-1/events?after=2')).body).toEqual({ events: [], next: 2 });
+  });
+
+  it('uses get for reads and refresh for the exact empty-object refresh request', async () => {
+    let gets = 0;
+    let refreshes = 0;
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        branches: {
+          get: async () => {
+            gets += 1;
+            return { fetchedAt: now, branches: [{ name: 'main', sha, commitTime: now, subject: 'subject' }] };
+          },
+          refresh: async () => {
+            refreshes += 1;
+            return { fetchedAt: now, branches: [{ name: 'main', sha, commitTime: now, subject: 'subject' }] };
+          },
+        },
+      });
+    }));
+    server = started.server;
+
+    const read = await get(started.port, '/api/branches');
+    const refreshed = await post(started.port, '/api/branches/refresh', '{}');
+
+    expect(read).toEqual({ status: 200, body: { fetchedAt: now, branches: [{ name: 'main', sha, commitTime: now, subject: 'subject' }] } });
+    expect(refreshed).toEqual(read);
+    expect(gets).toBe(1);
+    expect(refreshes).toBe(1);
+  });
+
+  it.each(['null', '[]', '{"extra":true}', '{"__proto__":null}'])('rejects non-exact refresh body %s', async (body) => {
+    const refresh = vi.fn(async () => ({ fetchedAt: now, branches: [] }));
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { branches: { get: async () => ({ fetchedAt: now, branches: [] }), refresh } });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/branches/refresh', body);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing refresh body without calling refresh', async () => {
+    const refresh = vi.fn(async () => ({ fetchedAt: now, branches: [] }));
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { branches: { get: async () => ({ fetchedAt: now, branches: [] }), refresh } });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/branches/refresh', '');
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('maps refresh fetch and validation failures to GIT_FETCH_FAILED', async () => {
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        branches: {
+          get: async () => ({ fetchedAt: now, branches: [] }),
+          refresh: async () => { throw new Error('remote unavailable'); },
+        },
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/branches/refresh', '{}');
+
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({ error: { code: 'GIT_FETCH_FAILED' } });
+  });
+
+  it.each([
+    ['sparse', () => new Array(1)],
+    ['accessor-backed', () => {
+      const branches: unknown[] = [];
+      Object.defineProperty(branches, '0', {
+        enumerable: true,
+        configurable: true,
+        get: () => ({ name: 'main', sha, commitTime: now, subject: 'subject' }),
+      });
+      return branches;
+    }],
+  ])('rejects %s branch arrays from a malicious cache dependency', async (_description, makeBranches) => {
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        branches: {
+          get: async () => ({ fetchedAt: now, branches: makeBranches() }),
+          refresh: async () => ({ fetchedAt: now, branches: [] }),
+        },
+      });
+    }));
+    server = started.server;
+
+    const response = await get(started.port, '/api/branches');
+
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({ error: { code: 'GIT_FETCH_FAILED' } });
+  });
+
+  it('isolates branch routes by method', async () => {
+    const started = await start();
+    server = started.server;
+
+    expect((await get(started.port, '/api/branches/refresh')).status).toBe(404);
+    expect((await post(started.port, '/api/branches', '{}')).status).toBe(404);
+    expect((await post(started.port, '/api/branches/refresh', '{}', { origin: 'https://evil.example' })).status).toBe(403);
   });
 
   it('passes the exact stored evidence index to the indexed reader', async () => {
@@ -1210,7 +1338,10 @@ describe('read-only builder API routes', () => {
     };
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
-        branches: async () => ({ fetchedAt: now, branches: [{ name: 'main', sha, commitTime: now, subject: 'line one\nline two' }] }),
+        branches: {
+          get: async () => ({ fetchedAt: now, branches: [{ name: 'main', sha, commitTime: now, subject: 'line one\nline two' }] }),
+          refresh: async () => ({ fetchedAt: now, branches: [{ name: 'main', sha, commitTime: now, subject: 'line one\nline two' }] }),
+        },
       });
       Object.assign(value.store as object, {
         getJob: (id: string) => id === 'job-1' ? informational : (() => { throw new StoreNotFoundError('not found'); })(),
@@ -1233,7 +1364,10 @@ describe('read-only builder API routes', () => {
 
   it('fails closed on malformed branch, job-page, and event-page data', async () => {
     const invalidBranches = await start(dependencies((value) => {
-      Object.assign(value as object, { branches: async () => ({ fetchedAt: now, branches: Array.from({ length: 1001 }, (_, index) => ({ name: `branch-${index}`, sha, commitTime: now, subject: 'subject' })) }) });
+      Object.assign(value as object, { branches: {
+        get: async () => ({ fetchedAt: now, branches: Array.from({ length: 1001 }, (_, index) => ({ name: `branch-${index}`, sha, commitTime: now, subject: 'subject' })) }),
+        refresh: async () => ({ fetchedAt: now, branches: [] }),
+      } });
     }));
     server = invalidBranches.server;
     expect((await get(invalidBranches.port, '/api/branches')).status).toBe(503);

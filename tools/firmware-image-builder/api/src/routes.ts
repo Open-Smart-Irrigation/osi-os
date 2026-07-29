@@ -130,8 +130,9 @@ export interface ApiTargetConfig {
   readonly operations: readonly string[];
 }
 
-export interface BranchResolver {
-  readonly listBranches: () => unknown | Promise<unknown>;
+export interface BranchSnapshotCache {
+  readonly get: () => unknown | Promise<unknown>;
+  readonly refresh: () => unknown | Promise<unknown>;
 }
 
 export interface ApiRouteDependencies {
@@ -139,13 +140,19 @@ export interface ApiRouteDependencies {
   readonly config: BuilderConfig;
   readonly targets: readonly ApiTargetConfig[];
   readonly health: () => Pick<HealthSnapshot, 'activeJobId'> | HealthSnapshot | Promise<Pick<HealthSnapshot, 'activeJobId'> | HealthSnapshot>;
-  readonly branches: BranchResolver['listBranches'];
+  readonly branches: BranchSnapshotCache;
   readonly store: ApiJobStore;
   readonly evidenceReader: IndexedEvidenceReader;
 }
 
 function badRequest(message: string): never {
   throw new HttpTransportError({ code: 'INVALID_REQUEST', status: 400, details: { field: message } });
+}
+
+function requireExactEmptyObject(value: unknown): void {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || Reflect.ownKeys(value).length !== 0) {
+    badRequest('request body');
+  }
 }
 
 function notFound(): never {
@@ -155,6 +162,12 @@ function notFound(): never {
 function record(value: unknown, field: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${field} is not an object`);
   return value as Record<string, unknown>;
+}
+
+function ownDataProperty(value: Record<string, unknown>, key: string, field: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined || !('value' in descriptor)) throw new Error(`${field} is not an own data property`);
+  return descriptor.value;
 }
 
 function text(value: unknown, field: string, maxBytes: number): string {
@@ -510,18 +523,30 @@ function configDto(config: BuilderConfig, targets: readonly ApiTargetConfig[]): 
 
 function branchesDto(value: unknown): JsonRecord {
   const input = record(value, 'branch resolver result');
-  if (!Array.isArray(input.branches) || input.branches.length > MAX_BRANCHES) throw new Error('branch resolver returned invalid data');
-  const branches = input.branches.map((branch, index) => {
+  const inputBranches = ownDataProperty(input, 'branches', 'branch resolver branches');
+  if (!Array.isArray(inputBranches) || inputBranches.length > MAX_BRANCHES) throw new Error('branch resolver returned invalid data');
+  const branches: JsonRecord[] = [];
+  for (let index = 0; index < inputBranches.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(inputBranches, index);
+    if (descriptor === undefined || !('value' in descriptor)) throw new Error(`branch ${index} is not an own data property`);
+    const branch = descriptor.value;
     const item = record(branch, `branch ${index}`);
-    if (typeof item.sha !== 'string' || !HASH40_PATTERN.test(item.sha)) throw new Error('branch resolver returned an invalid SHA');
-    return {
-      name: branchName(item.name, `branch ${index} name`),
-      sha: item.sha,
-      commitTime: canonicalInstant(item.commitTime, `branch ${index} commit time`),
-      subject: sourceMetadataSubject(item.subject, `branch ${index} subject`),
-    };
-  });
-  return { fetchedAt: canonicalInstant(input.fetchedAt, 'branches fetchedAt'), branches };
+    const name = ownDataProperty(item, 'name', `branch ${index} name`);
+    const sha = ownDataProperty(item, 'sha', `branch ${index} SHA`);
+    const commitTime = ownDataProperty(item, 'commitTime', `branch ${index} commit time`);
+    const subject = ownDataProperty(item, 'subject', `branch ${index} subject`);
+    if (typeof sha !== 'string' || !HASH40_PATTERN.test(sha)) throw new Error('branch resolver returned an invalid SHA');
+    branches.push({
+      name: branchName(name, `branch ${index} name`),
+      sha,
+      commitTime: canonicalInstant(commitTime, `branch ${index} commit time`),
+      subject: sourceMetadataSubject(subject, `branch ${index} subject`),
+    });
+  }
+  return {
+    fetchedAt: canonicalInstant(ownDataProperty(input, 'fetchedAt', 'branches fetchedAt'), 'branches fetchedAt'),
+    branches,
+  };
 }
 
 function jobPageDto(value: unknown, limit: number, currentCursor: string | null): JsonRecord {
@@ -842,6 +867,14 @@ function getJob(store: ApiJobStore, id: string): JobRecord {
 
 export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRouteHandler {
   return async (context: ApiRouteContext): Promise<HttpResponse | null> => {
+    if (context.method === 'POST' && context.path === '/api/branches/refresh') {
+      requireExactEmptyObject(context.body);
+      try {
+        return jsonResponse(200, branchesDto(await dependencies.branches.refresh()));
+      } catch {
+        throw new HttpTransportError({ code: 'GIT_FETCH_FAILED', status: 503, retryable: true });
+      }
+    }
     if (context.method !== 'GET') return null;
 
     if (context.path === '/api/health') {
@@ -852,7 +885,7 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
     if (context.path === '/api/config') return jsonResponse(200, configDto(dependencies.config, dependencies.targets));
     if (context.path === '/api/branches') {
       try {
-        return jsonResponse(200, branchesDto(await dependencies.branches()));
+        return jsonResponse(200, branchesDto(await dependencies.branches.get()));
       } catch {
         throw new HttpTransportError({ code: 'GIT_FETCH_FAILED', status: 503, retryable: true });
       }
