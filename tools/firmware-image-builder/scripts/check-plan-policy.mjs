@@ -14,6 +14,7 @@ const DEFAULT_SOURCE_ROOTS = Object.freeze([
   'publisher',
   'runner/src',
   'scripts',
+  'shared',
   'ui/src',
 ]);
 const SOURCE_EXTENSIONS = new Set(['.c', '.js', '.json', '.mjs', '.sh', '.ts', '.tsx']);

@@ -13,7 +13,7 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import {
   basename,
   dirname,
@@ -39,6 +39,15 @@ import {
   INSTALLED_BUILDER_LOCK_NAME,
 } from '../domain/installed-layout.js';
 import { loadManifest } from '../manifest/validate.js';
+import {
+  withEffectiveHomeAuthority,
+  type EffectiveHomeAuthority,
+  type EffectiveHomeResolverOptions,
+} from '../shared/effective-home.mjs';
+import {
+  holdDirectoryAuthority,
+  type HeldDirectoryAuthority,
+} from '../shared/held-directory-authority.mjs';
 import {
   runVersionedInstaller,
   type InstallerFileSystem,
@@ -91,6 +100,12 @@ interface PreparedPublisher {
   readonly selfTest: VersionedInstallerDependencies['publisher'];
 }
 
+export interface ProductionInstallOptions {
+  readonly withEffectiveHomeAuthority?: typeof withEffectiveHomeAuthority;
+  readonly effectiveHomeOptions?: EffectiveHomeResolverOptions;
+  readonly probePrerequisites?: typeof runNativePrerequisiteProbes;
+}
+
 function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -104,12 +119,6 @@ function boundedError(error: unknown): string {
   const available = MAX_ERROR_BYTES - Buffer.byteLength(prefix, 'utf8') - 1;
   const detail = Buffer.from(singleLine, 'utf8').subarray(0, available).toString('utf8');
   return `${prefix}${detail}\n`;
-}
-
-function requiredHome(env: NodeJS.ProcessEnv = process.env): string {
-  const candidate = env.HOME && env.HOME.length > 0 ? env.HOME : homedir();
-  if (!candidate.startsWith('/') || candidate.includes('\0')) throw new Error('installer HOME is invalid');
-  return resolve(candidate);
 }
 
 function contained(root: string, path: string): boolean {
@@ -455,6 +464,7 @@ async function prepareBuilder(
   repositoryRoot: string,
   packageVersion: string,
   scratchRoot: string,
+  effectiveHome: string,
 ): Promise<Readonly<{
   readonly source: VersionedInstallerDependencies['builderSource'];
   readonly buildAndValidateImage: VersionedInstallerDependencies['buildAndValidateImage'];
@@ -471,7 +481,7 @@ async function prepareBuilder(
   const buildMetadataPath = join(scratchRoot, 'builder-build-metadata.json');
   await streamingCommand(DOCKER, buildxLoadArguments(tag, buildMetadataPath), {
     cwd: packageRoot,
-    env: Object.freeze({ ...FIXED_ENV, HOME: requiredHome() }),
+    env: Object.freeze({ ...FIXED_ENV, HOME: effectiveHome }),
     timeout: 2 * 60 * 60 * 1_000,
   });
   const buildMetadata = await readFile(buildMetadataPath);
@@ -598,90 +608,202 @@ export async function acquireInstallLock(
   };
 }
 
-export async function installProductionVersion(): Promise<Readonly<{
+type ProductionInstallResult = Readonly<{
   readonly available: boolean;
   readonly packageVersion?: string;
   readonly reference?: string;
   readonly code?: string;
   readonly detail?: string;
-}>> {
+}>;
+
+async function withProductionInstallAuthorities<T>(
+  parentPath: string,
+  installPath: string,
+  ownerUid: number,
+  callback: (
+    parentAuthority: HeldDirectoryAuthority,
+    installAuthority: HeldDirectoryAuthority,
+  ) => Promise<T>,
+): Promise<T> {
+  const authorities: HeldDirectoryAuthority[] = [];
+  try {
+    authorities.push(await holdDirectoryAuthority(parentPath, {
+      ownerUid,
+      allowMissing: true,
+      finalAccess: 'write',
+    }));
+    authorities.push(await holdDirectoryAuthority(installPath, {
+      ownerUid,
+      allowMissing: true,
+      finalAccess: 'write',
+    }));
+  } catch (error) {
+    const closeResults = await Promise.allSettled(
+      [...authorities].reverse().map((held) => held.close()),
+    );
+    const closeErrors = closeResults
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result) => result.reason);
+    if (closeErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...closeErrors],
+        'production install authority acquisition and close both failed',
+      );
+    }
+    throw error;
+  }
+  const [parentAuthority, installAuthority] = authorities;
+  if (parentAuthority === undefined || installAuthority === undefined) {
+    throw new Error('production install authorities are incomplete');
+  }
+  let outcome:
+    | Readonly<{ ok: true; value: T }>
+    | Readonly<{ ok: false; error: unknown }>;
+  try {
+    outcome = Object.freeze({
+      ok: true,
+      value: await callback(parentAuthority, installAuthority),
+    });
+  } catch (error) {
+    outcome = Object.freeze({ ok: false, error });
+  }
+
+  let authorityError: unknown;
+  for (const held of authorities) {
+    try {
+      await held.revalidate();
+    } catch (error) {
+      authorityError ??= error;
+    }
+  }
+  const closeResults = await Promise.allSettled(
+    [...authorities].reverse().map((held) => held.close()),
+  );
+  for (const closeResult of closeResults) {
+    if (closeResult.status === 'rejected') authorityError ??= closeResult.reason;
+  }
+  if (authorityError !== undefined) throw authorityError;
+  if (!outcome.ok) throw outcome.error;
+  return outcome.value;
+}
+
+async function installProductionVersionWithHome(
+  options: ProductionInstallOptions,
+  authority: EffectiveHomeAuthority,
+): Promise<ProductionInstallResult> {
   const packageRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
   const repositoryRoot = resolve(packageRoot, '..', '..');
-  const home = requiredHome();
-  const packageJson = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8')) as Record<string, unknown>;
-  if (typeof packageJson.version !== 'string') throw new Error('package version is missing');
-  const packageVersion = packageJson.version;
-  const installRoot = join(home, '.local', 'lib', 'osi-image-builder');
-  const selectionPath = join(installRoot, 'selected.json');
-  const prerequisite = await runNativePrerequisiteProbes({ scratchParent: home });
-  if (!prerequisite.available) return prerequisite;
+  const home = authority.path;
+  const installParent = join(home, '.local', 'lib');
+  const installRoot = join(installParent, 'osi-image-builder');
+  return withProductionInstallAuthorities(
+    installParent,
+    installRoot,
+    authority.ownerUid,
+    async (installParentAuthority, installAuthority) => {
+      const packageJson = JSON.parse(
+        await readFile(join(packageRoot, 'package.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      if (typeof packageJson.version !== 'string') throw new Error('package version is missing');
+      const packageVersion = packageJson.version;
+      const prerequisite = await (options.probePrerequisites ?? runNativePrerequisiteProbes)({
+        scratchParent: authority.executionPath,
+      });
+      await installAuthority.revalidate();
+      if (!prerequisite.available) return prerequisite;
 
-  const scratchRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-install-'));
-  let releaseLock: (() => Promise<void>) | undefined;
-  try {
-    const manifest = loadManifest(join(packageRoot, 'manifest', 'targets.json'));
-    const [publisher, fsHelper] = await Promise.all([
-      preparePublisher(packageRoot, scratchRoot, packageVersion),
-      prepareInstallerFsHelper(packageRoot, scratchRoot),
-    ]);
-    const builder = await prepareBuilder(
-      packageRoot,
-      repositoryRoot,
-      packageVersion,
-      scratchRoot,
-    );
-    const [api, runner, cleanupWorker, runtimeArtifacts, executionDefinition] = await Promise.all([
-      bundleEntrypoint(join(packageRoot, 'api', 'src', 'cli.ts')),
-      bundleEntrypoint(join(packageRoot, 'runner', 'src', 'cli.ts')),
-      bundleEntrypoint(join(packageRoot, 'cleanup-worker', 'src', 'cli.ts')),
-      collectRuntimeArtifacts(packageRoot),
-      readFile(join(packageRoot, 'builder', 'execution-definition.json'), 'utf8'),
-    ]);
-    const executionDefinitionSha256 = sha256(executionDefinition);
-    const fs = nodeInstallerFileSystem(fsHelper);
-    releaseLock = await acquireInstallLock(
-      fsHelper,
-      join(dirname(installRoot), INSTALL_LOCK_NAME),
-    );
-    await fs.remove(join(installRoot, `.tmp-${packageVersion}`));
-    await fs.remove(`${selectionPath}.tmp`);
-    const dependencies: VersionedInstallerDependencies = {
-      fs,
-      probePrerequisites: async (): Promise<NativePrerequisiteResult> => prerequisite,
-      buildAndValidateImage: builder.buildAndValidateImage,
-      inspectAsServiceUser: builder.inspectAsServiceUser,
-      validateProductionImage: builder.validateProductionImage,
-      builderSource: builder.source,
-      publisher: publisher.selfTest,
-      artifacts: {
-        api,
-        runner,
-        cleanupWorker,
-        publisher: publisher.bytes,
-        executionDefinition,
-        ui: await readFile(join(packageRoot, 'dist', 'index.html'), 'utf8'),
-      },
-      additionalArtifacts: runtimeArtifacts,
-      publisherSha256: publisher.sha256,
-      executionDefinitionSha256,
-      manifestSha256: manifest.sha256,
-    };
-    const result = await runVersionedInstaller({
-      packageVersion,
-      installRoot,
-      selectionPath,
-      dependencies,
-    });
-    if (!result.available) return result;
-    return Object.freeze({
-      available: true,
-      packageVersion: result.packageVersion,
-      reference: result.reference,
-    });
-  } finally {
-    if (releaseLock !== undefined) await releaseLock().catch(() => undefined);
-    await rm(scratchRoot, { recursive: true, force: true });
-  }
+      const scratchRoot = await mkdtemp(join(tmpdir(), 'osi-image-builder-install-'));
+      let releaseLock: (() => Promise<void>) | undefined;
+      try {
+        const manifest = loadManifest(join(packageRoot, 'manifest', 'targets.json'));
+        const [publisher, fsHelper] = await Promise.all([
+          preparePublisher(packageRoot, scratchRoot, packageVersion),
+          prepareInstallerFsHelper(packageRoot, scratchRoot),
+        ]);
+        const builder = await prepareBuilder(
+          packageRoot,
+          repositoryRoot,
+          packageVersion,
+          scratchRoot,
+          home,
+        );
+        const [api, runner, cleanupWorker, runtimeArtifacts, executionDefinition] = await Promise.all([
+          bundleEntrypoint(join(packageRoot, 'api', 'src', 'cli.ts')),
+          bundleEntrypoint(join(packageRoot, 'runner', 'src', 'cli.ts')),
+          bundleEntrypoint(join(packageRoot, 'cleanup-worker', 'src', 'cli.ts')),
+          collectRuntimeArtifacts(packageRoot),
+          readFile(join(packageRoot, 'builder', 'execution-definition.json'), 'utf8'),
+        ]);
+        const executionDefinitionSha256 = sha256(executionDefinition);
+        const fs = nodeInstallerFileSystem(fsHelper);
+        await installParentAuthority.revalidate();
+        await installAuthority.revalidate();
+        await installParentAuthority.ensure();
+        const installParentExecutionRoot = installParentAuthority.executionPath;
+        if (installParentExecutionRoot === undefined) {
+          throw new Error('held production installation parent is unavailable');
+        }
+        releaseLock = await acquireInstallLock(
+          fsHelper,
+          join(installParentExecutionRoot, INSTALL_LOCK_NAME),
+        );
+        await installAuthority.ensure();
+        const installExecutionRoot = installAuthority.executionPath;
+        if (installExecutionRoot === undefined) {
+          throw new Error('held production installation root is unavailable');
+        }
+        const selectionPath = join(installExecutionRoot, 'selected.json');
+        await fs.remove(join(installExecutionRoot, `.tmp-${packageVersion}`));
+        await fs.remove(`${selectionPath}.tmp`);
+        const dependencies: VersionedInstallerDependencies = {
+          fs,
+          probePrerequisites: async (): Promise<NativePrerequisiteResult> => prerequisite,
+          buildAndValidateImage: builder.buildAndValidateImage,
+          inspectAsServiceUser: builder.inspectAsServiceUser,
+          validateProductionImage: builder.validateProductionImage,
+          builderSource: builder.source,
+          publisher: publisher.selfTest,
+          artifacts: {
+            api,
+            runner,
+            cleanupWorker,
+            publisher: publisher.bytes,
+            executionDefinition,
+            ui: await readFile(join(packageRoot, 'dist', 'index.html'), 'utf8'),
+          },
+          additionalArtifacts: runtimeArtifacts,
+          publisherSha256: publisher.sha256,
+          executionDefinitionSha256,
+          manifestSha256: manifest.sha256,
+        };
+        const result = await runVersionedInstaller({
+          packageVersion,
+          installRoot: installExecutionRoot,
+          selectionPath,
+          dependencies,
+        });
+        await installAuthority.revalidate();
+        if (!result.available) return result;
+        return Object.freeze({
+          available: true,
+          packageVersion: result.packageVersion,
+          reference: result.reference,
+        });
+      } finally {
+        if (releaseLock !== undefined) await releaseLock().catch(() => undefined);
+        await rm(scratchRoot, { recursive: true, force: true });
+      }
+    },
+  );
+}
+
+export async function installProductionVersion(
+  options: ProductionInstallOptions = {},
+): Promise<ProductionInstallResult> {
+  return (options.withEffectiveHomeAuthority ?? withEffectiveHomeAuthority)(
+    options.effectiveHomeOptions,
+    async (authority) => installProductionVersionWithHome(options, authority),
+  );
 }
 
 export async function runInstallerCoreCli(

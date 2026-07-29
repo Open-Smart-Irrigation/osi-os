@@ -3,18 +3,22 @@ import { access, lstat, mkdir, open, readFile, readlink, realpath, rmdir, statfs
 import { constants as fsConstants } from 'node:fs';
 import type { BigIntStats, Stats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import {
-  DEFAULT_BUILDER_LOCK_FILE,
-  DEFAULT_MAX_QUEUE_LENGTH,
   DEFAULT_REMOTE,
-  isAbsolutePath,
-  MIN_DISK_FREE_BYTES,
   resolveConfigDirectories,
   type ConfigDirectories,
 } from './defaults.js';
+import {
+  ConfigDocumentValidationError,
+  MIN_DISK_FREE_BYTES,
+  ROOT_ID_PATTERN,
+  validateApprovedOutputRoots as validateApprovedOutputRootDocuments,
+  validateConfigDocument,
+  validateDiskFreeMinimumBytes,
+} from './config-document.mjs';
 import {
   EFFECTIVE_ORIGIN_CONFIG_COMMANDS,
   parseNulValues,
@@ -23,8 +27,6 @@ import {
   type ValidatedOriginPolicy,
 } from './origin-policy.js';
 
-const ROOT_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-const BUILDER_VERSION_PATTERN = /^(?:v?\d+\.\d+\.\d+|\d{4}\.\d{2}\.\d{2}(?:\.\d+)?)$/;
 const TRUSTED_GIT_EXECUTABLE = '/usr/bin/git';
 const GIT_PROBE_TIMEOUT_MS = 5_000;
 const GIT_PROBE_MAX_BUFFER_BYTES = 64 * 1024;
@@ -92,8 +94,8 @@ export interface ConfigFile {
   readonly repositoryPath: string;
   readonly approvedOutputRoots: readonly ApprovedOutputRootInput[];
   readonly builderLockPath: string;
-  readonly maxQueueLength?: number;
-  readonly diskFreeMinimumBytes?: number;
+  readonly maxQueueLength: number;
+  readonly diskFreeMinimumBytes: number;
 }
 
 export interface ApprovedOutputRootInput {
@@ -507,9 +509,21 @@ const defaultGitOriginProbe: GitOriginProbe = {
   },
 };
 
+function mapConfigDocumentValidation<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    if (error instanceof ConfigDocumentValidationError) {
+      throw new ConfigValidationError(error.code, error.message, error.field);
+    }
+    throw error;
+  }
+}
+
 async function readConfigFile(configPath: string): Promise<ConfigFile> {
   try {
-    return parseConfigFile(JSON.parse(await readFile(configPath, 'utf8')) as unknown);
+    const raw = JSON.parse(await readFile(configPath, 'utf8')) as unknown;
+    return mapConfigDocumentValidation(() => validateConfigDocument(raw));
   } catch (error) {
     if (error instanceof ConfigValidationError) throw error;
     throw new ConfigValidationError(
@@ -523,7 +537,7 @@ export async function loadConfig(options: ConfigLoadOptions = {}): Promise<Loade
   const directories = resolveConfigDirectories(options.env);
   const configPath = options.configPath ?? join(directories.configRoot, 'config.json');
   const file = await readConfigFile(configPath);
-  const repositoryPath = validateRepositoryPath(file.repositoryPath);
+  const repositoryPath = file.repositoryPath;
   let originPolicy: ValidatedOriginPolicy;
   try {
     const inspectedPolicy = await (options.git ?? defaultGitOriginProbe).getOriginPolicy(repositoryPath, DEFAULT_REMOTE);
@@ -540,9 +554,9 @@ export async function loadConfig(options: ConfigLoadOptions = {}): Promise<Loade
     );
   }
   validateOrigin(originPolicy.url);
-  const maxQueueLength = validateMaxQueueLength(file.maxQueueLength ?? DEFAULT_MAX_QUEUE_LENGTH);
-  const diskFreeMinimumBytes = validateDiskThreshold(file.diskFreeMinimumBytes ?? MIN_DISK_FREE_BYTES);
-  const builderLockPath = validateBuilderLockPath(file.builderLockPath);
+  const maxQueueLength = file.maxQueueLength;
+  const diskFreeMinimumBytes = file.diskFreeMinimumBytes;
+  const builderLockPath = file.builderLockPath;
   const approvedOutputRoots = await validateApprovedRoots(file.approvedOutputRoots, {
     rootFs: options.rootFs,
     minimumFreeBytes: diskFreeMinimumBytes,
@@ -578,10 +592,9 @@ export async function loadCleanupConfig(
   const directories = resolveConfigDirectories(options.env);
   const configPath = options.configPath ?? join(directories.configRoot, 'config.json');
   const file = await readConfigFile(configPath);
-  const repositoryPath = validateRepositoryPath(file.repositoryPath);
-  validateMaxQueueLength(file.maxQueueLength ?? DEFAULT_MAX_QUEUE_LENGTH);
-  const diskFreeMinimumBytes = validateDiskThreshold(file.diskFreeMinimumBytes ?? MIN_DISK_FREE_BYTES);
-  const builderLockPath = validateBuilderLockPath(file.builderLockPath);
+  const repositoryPath = file.repositoryPath;
+  const diskFreeMinimumBytes = file.diskFreeMinimumBytes;
+  const builderLockPath = file.builderLockPath;
   const approvedOutputRoots = await validateCleanupApprovedRoots(file.approvedOutputRoots, {
     rootFs: options.rootFs,
     minimumFreeBytes: diskFreeMinimumBytes,
@@ -744,13 +757,9 @@ async function validateApprovedRootsWithWriteScope(
   writeScope: 'root' | 'work-root',
   enforceDiskFloor: boolean,
 ): Promise<readonly ApprovedOutputRoot[]> {
-  if (!Array.isArray(roots) || roots.length === 0) {
-    throw new ConfigValidationError('OUTPUT_ROOTS_INVALID', 'At least one approved output root is required.');
-  }
-
-  const seen = new Set<string>();
+  const validatedRoots = mapConfigDocumentValidation(() => validateApprovedOutputRootDocuments(roots));
   const minimumFreeBytes = enforceDiskFloor
-    ? validateDiskThreshold(options.minimumFreeBytes ?? MIN_DISK_FREE_BYTES)
+    ? mapConfigDocumentValidation(() => validateDiskFreeMinimumBytes(options.minimumFreeBytes ?? MIN_DISK_FREE_BYTES))
     : null;
   const rootFs: RootFileSystem = {
     lstat: lstat as RootFileSystem['lstat'],
@@ -761,21 +770,7 @@ async function validateApprovedRootsWithWriteScope(
   };
   const result: ApprovedOutputRoot[] = [];
 
-  for (const root of roots) {
-    if (!root || typeof root !== 'object' || typeof root.id !== 'string' || typeof root.label !== 'string' || typeof root.path !== 'string') {
-      throw new ConfigValidationError('OUTPUT_ROOTS_INVALID', 'Approved output root entries require id, label, and path.');
-    }
-    if (!ROOT_ID_PATTERN.test(root.id)) {
-      throw new ConfigValidationError('OUTPUT_ROOT_ID_INVALID', `Invalid approved output root ID: ${root.id}`, 'approvedOutputRoots');
-    }
-    if (seen.has(root.id)) {
-      throw new ConfigValidationError('OUTPUT_ROOT_ID_DUPLICATE', `Duplicate approved output root ID: ${root.id}`, 'approvedOutputRoots');
-    }
-    seen.add(root.id);
-    if (!isAbsolutePath(root.path)) {
-      throw new ConfigValidationError('OUTPUT_ROOT_PATH_NOT_ABSOLUTE', `Approved output root must be absolute: ${root.path}`, root.id);
-    }
-
+  for (const root of validatedRoots) {
     let rootStats: RootStats;
     try {
       rootStats = await rootFs.lstat(root.path);
@@ -887,60 +882,12 @@ export function resolveApprovedRoot(
   return root;
 }
 
-function parseConfigFile(raw: unknown): ConfigFile {
-  if (!raw || typeof raw !== 'object') {
-    throw new ConfigValidationError('CONFIG_FILE_INVALID', 'Configuration must be a JSON object.');
-  }
-  const value = raw as Record<string, unknown>;
-  if (typeof value.repositoryPath !== 'string' || !Array.isArray(value.approvedOutputRoots) || typeof value.builderLockPath !== 'string') {
-    throw new ConfigValidationError('CONFIG_FILE_INVALID', 'Configuration requires repositoryPath, approvedOutputRoots, and builderLockPath.');
-  }
-  const allowedKeys = new Set(['repositoryPath', 'approvedOutputRoots', 'builderLockPath', 'maxQueueLength', 'diskFreeMinimumBytes']);
-  const unknownKey = Object.keys(value).find((key) => !allowedKeys.has(key));
-  if (unknownKey) {
-    throw new ConfigValidationError('CONFIG_FILE_INVALID', `Unknown configuration key: ${unknownKey}`);
-  }
-  return value as unknown as ConfigFile;
-}
-
-function validateRepositoryPath(value: string): string {
-  if (!isAbsolute(value)) {
-    throw new ConfigValidationError('REPOSITORY_PATH_NOT_ABSOLUTE', `Repository path must be absolute: ${value}`, 'repositoryPath');
-  }
-  return resolve(value);
-}
-
 export function validateOrigin(value: unknown): void {
   try {
     validateOriginUrl(value);
   } catch {
     throw new ConfigValidationError('ORIGIN_NOT_SSH', 'The configured origin must use SSH syntax.', 'origin');
   }
-}
-
-function validateMaxQueueLength(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > DEFAULT_MAX_QUEUE_LENGTH) {
-    throw new ConfigValidationError('MAX_QUEUE_INVALID', `maxQueueLength must be an integer from 1 to ${DEFAULT_MAX_QUEUE_LENGTH}.`, 'maxQueueLength');
-  }
-  return value;
-}
-
-function validateDiskThreshold(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < MIN_DISK_FREE_BYTES) {
-    throw new ConfigValidationError('DISK_THRESHOLD_INVALID', `diskFreeMinimumBytes must be at least ${MIN_DISK_FREE_BYTES}.`, 'diskFreeMinimumBytes');
-  }
-  return value;
-}
-
-function validateBuilderLockPath(value: string): string {
-  if (!isAbsolute(value) || value.endsWith('/') || value.split('/').at(-1) !== DEFAULT_BUILDER_LOCK_FILE) {
-    throw new ConfigValidationError('BUILDER_LOCK_PATH_INVALID', 'builderLockPath must be an absolute builder.lock.json path.', 'builderLockPath');
-  }
-  const version = value.split('/').at(-2);
-  if (!version || !BUILDER_VERSION_PATTERN.test(version)) {
-    throw new ConfigValidationError('BUILDER_LOCK_PATH_INVALID', 'builderLockPath must include a versioned installation directory.', 'builderLockPath');
-  }
-  return resolve(value);
 }
 
 export type { ConfigDirectories };

@@ -15,6 +15,7 @@ import {
   withApprovedRootSnapshot,
   type RootStats,
 } from '../../config/load.js';
+import { validateConfigDocument } from '../../config/config-document.mjs';
 import { CANONICAL_FETCH_REFSPEC, type ValidatedOriginPolicy } from '../../config/origin-policy.js';
 
 const temporaryDirectories: string[] = [];
@@ -203,6 +204,107 @@ describe('builder configuration', () => {
     expect(loaded.redacted).not.toHaveProperty('originUrl');
   });
 
+  it('applies shared document defaults and preserves valid custom numeric values', async () => {
+    const workspace = await createWorkspace();
+    const {
+      maxQueueLength: _defaultQueue,
+      diskFreeMinimumBytes: _defaultDisk,
+      ...defaults
+    } = configFor(workspace);
+    expect(validateConfigDocument(defaults)).toMatchObject({
+      repositoryPath: resolve(workspace.repositoryPath),
+      maxQueueLength: 50,
+      diskFreeMinimumBytes: 20 * 1024 ** 3,
+    });
+    expect(validateConfigDocument({
+      ...defaults,
+      repositoryPath: `${workspace.directory}/nested/../osi-os`,
+    }).repositoryPath).toBe(resolve(workspace.repositoryPath));
+    await writeConfig(workspace, defaults);
+
+    const defaulted = await loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      git: sshOrigin,
+      rootFs: { statfs: ampleDisk },
+    });
+    expect(defaulted.config.maxQueueLength).toBe(50);
+    expect(defaulted.config.diskFreeMinimumBytes).toBe(20 * 1024 ** 3);
+
+    const customDocument = configFor(workspace, {
+      maxQueueLength: 7,
+      diskFreeMinimumBytes: 25 * 1024 ** 3,
+    });
+    expect(validateConfigDocument(customDocument)).toMatchObject({
+      maxQueueLength: 7,
+      diskFreeMinimumBytes: 25 * 1024 ** 3,
+    });
+    await writeConfig(workspace, customDocument);
+    const custom = await loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      git: sshOrigin,
+      rootFs: { statfs: ampleDisk },
+    });
+    expect(custom.config.maxQueueLength).toBe(7);
+    expect(custom.config.diskFreeMinimumBytes).toBe(25 * 1024 ** 3);
+  });
+
+  it.each([
+    ['mixed-case root ID', { approvedOutputRoots: [{ id: 'Bad.ID', label: 'images', path: 'output' }] }, 'OUTPUT_ROOT_ID_INVALID'],
+    ['zero queue length', { maxQueueLength: 0 }, 'MAX_QUEUE_INVALID'],
+    ['too-small disk threshold', { diskFreeMinimumBytes: 20 * 1024 ** 3 - 1 }, 'DISK_THRESHOLD_INVALID'],
+    ['malformed lock filename', { builderLockPath: '/opt/osi-image-builder/2026.07.22.1/not-builder.lock.json' }, 'BUILDER_LOCK_PATH_INVALID'],
+    ['duplicate root ID', { approvedOutputRoots: [{ id: 'images', label: 'one', path: 'output' }, { id: 'images', label: 'two', path: 'output' }] }, 'OUTPUT_ROOT_ID_DUPLICATE'],
+    ['extra root field', { approvedOutputRoots: [{ id: 'images', label: 'images', path: 'output', extra: true }] }, 'OUTPUT_ROOTS_INVALID'],
+    ['non-normalized root path', { approvedOutputRoots: [{ id: 'images', label: 'images', path: 'non-normalized-output' }] }, 'OUTPUT_ROOT_PATH_NOT_ABSOLUTE'],
+    ['empty root label', { approvedOutputRoots: [{ id: 'images', label: '', path: 'output' }] }, 'OUTPUT_ROOTS_INVALID'],
+    ['oversized root label', { approvedOutputRoots: [{ id: 'images', label: 'é'.repeat(65), path: 'output' }] }, 'OUTPUT_ROOTS_INVALID'],
+    ['control-character root label', { approvedOutputRoots: [{ id: 'images', label: 'images\nother', path: 'output' }] }, 'OUTPUT_ROOTS_INVALID'],
+  ])('enforces shared document parity for %s', async (_name, override, code) => {
+    const workspace = await createWorkspace();
+    const approvedOutputRoots = 'approvedOutputRoots' in override
+      ? override.approvedOutputRoots.map((root) => ({
+        ...root,
+        path: root.path === 'output'
+          ? workspace.outputRoot
+          : root.path === 'non-normalized-output'
+            ? `${workspace.outputRoot}/../images`
+            : root.path,
+      }))
+      : undefined;
+    const document = configFor(workspace, {
+      ...override,
+      ...(approvedOutputRoots === undefined ? {} : { approvedOutputRoots }),
+    });
+    expect(() => validateConfigDocument(document)).toThrowError(
+      expect.objectContaining({ code }),
+    );
+    await writeConfig(workspace, document);
+
+    const options = {
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      git: sshOrigin,
+      rootFs: { statfs: ampleDisk },
+    };
+    await expect(loadConfig(options)).rejects.toMatchObject({ code });
+    await expect(loadCleanupConfig({
+      env: options.env,
+      rootFs: options.rootFs,
+    })).rejects.toMatchObject({ code });
+  });
+
+  it('applies an elevated valid disk threshold at the root filesystem stage', async () => {
+    const workspace = await createWorkspace();
+    await writeConfig(workspace, configFor(workspace, {
+      diskFreeMinimumBytes: 31 * 1024 ** 3,
+    }));
+
+    await expect(loadConfig({
+      env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
+      git: sshOrigin,
+      rootFs: { statfs: ampleDisk },
+    })).rejects.toMatchObject({ code: 'PREFLIGHT_DISK_SPACE' });
+  });
+
   it('rejects unsafe configuration without creating state or quarantine files', async () => {
     const workspace = await createWorkspace();
     await writeConfig(workspace, configFor(workspace));
@@ -255,15 +357,20 @@ describe('builder configuration', () => {
     })).rejects.toMatchObject({ code });
   });
 
-  it('rejects unknown configuration keys instead of silently applying defaults', async () => {
+  it('rejects unknown and missing top-level configuration keys', async () => {
     const workspace = await createWorkspace();
     await writeConfig(workspace, configFor(workspace, { maxQueuLength: 50 }));
 
-    await expect(loadConfig({
+    const options = {
       env: { XDG_CONFIG_HOME: workspace.configHome, XDG_STATE_HOME: workspace.stateHome },
       git: sshOrigin,
       rootFs: { statfs: ampleDisk },
-    })).rejects.toMatchObject({ code: 'CONFIG_FILE_INVALID' });
+    };
+    await expect(loadConfig(options)).rejects.toMatchObject({ code: 'CONFIG_FILE_INVALID' });
+
+    const { builderLockPath: _missingLock, ...missingRequiredKey } = configFor(workspace);
+    await writeConfig(workspace, missingRequiredKey);
+    await expect(loadConfig(options)).rejects.toMatchObject({ code: 'CONFIG_FILE_INVALID' });
   });
 
   it.each([

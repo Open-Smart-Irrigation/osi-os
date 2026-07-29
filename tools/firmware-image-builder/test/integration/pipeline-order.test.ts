@@ -372,8 +372,9 @@ async function fixture(options: {
   readonly throwArtifactOwnershipWrite?: boolean;
   readonly distinctPublisherIdentities?: boolean;
   readonly pipelineLogWriter?: PipelineLogWriter;
+  readonly directoryParent?: string;
 } = {}): Promise<Fixture> {
-  const directory = await mkdtemp(join(tmpdir(), 'osi-pipeline-order-'));
+  const directory = await mkdtemp(join(options.directoryParent ?? tmpdir(), 'osi-pipeline-order-'));
   temporaryDirectories.push(directory);
   const repository = join(directory, 'repository');
   const images = join(directory, 'images');
@@ -2406,7 +2407,7 @@ describe('trusted pipeline integration', () => {
   });
 
   it('guards the concrete production publisher composition after opening ownership state', async () => {
-    const value = await fixture();
+    const value = await fixture({ directoryParent: process.cwd() });
     const configHome = join(value.directory, 'config');
     const packageDirectory = join(value.directory, 'installed', LOCK.packageVersion);
     const stateHome = join(value.directory, 'state-home');

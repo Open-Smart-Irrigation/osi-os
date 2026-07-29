@@ -27,6 +27,7 @@ describe('configuration CLI', () => {
       approvedOutputRoot: '/canonical/images',
       repositoryPath: '/canonical/repo',
       configPath: '/home/test/.config/osi-image-builder/config.json',
+      authorityPath: '/home/test/.local/lib/osi-image-builder/configured-authorities.json',
       versionRoot: '/home/test/.local/lib/osi-image-builder/0.1.0',
     }));
     const stdout: string[] = [];
@@ -52,6 +53,7 @@ describe('configuration CLI', () => {
         approvedOutputRoot: '/canonical/images',
         repositoryPath: '/canonical/repo',
         configPath: '/home/test/.config/osi-image-builder/config.json',
+        authorityPath: '/home/test/.local/lib/osi-image-builder/configured-authorities.json',
         versionRoot: '/home/test/.local/lib/osi-image-builder/0.1.0',
       })}\n`,
     ]);

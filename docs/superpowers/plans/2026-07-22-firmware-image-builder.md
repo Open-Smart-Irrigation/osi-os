@@ -212,7 +212,7 @@ Run: `cd tools/firmware-image-builder && npm exec vitest run -- test/unit/config
 
 Expected: PASS with invalid configuration producing typed errors and no mutation.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add tools/firmware-image-builder/config tools/firmware-image-builder/test/unit/config.test.ts
@@ -1210,17 +1210,17 @@ git commit -m "feat: generate validated versioned builder installations"
 - Modify: `tools/firmware-image-builder/package.json`
 - Modify: `tools/firmware-image-builder/README.md`
 
-- [ ] **Step 1: Write the failing tests.** Test deterministic prerequisite adapters for Node >=22, npm, Git SSH origin, Docker, user systemd, sqlite3, GCC/libc/make, Linux `renameat2`, generated installed lock/image, approved root, and free disk. Each missing prerequisite must return a typed unavailable result and prove zero state/output mutation. Test the guarded commands `accept:pi5`, `accept:pi4`, and `accept:all`: absence of any prerequisite, approval variable, pinned SHA, target, or generated installed lock must produce nonzero exit. Before the final task replaces the guard, each acceptance command must return nonzero `REAL_ACCEPTANCE_NOT_IMPLEMENTED` after validating its guards; tests must assert that result. Test final verification rejects unless both immutable `rpi-5` and `rpi-2` release directories contain matching manifest, generated lock/image digest, checksum, and verification evidence.
+- [x] **Step 1: Write the failing tests.** Test deterministic prerequisite adapters for Node >=22, npm, Git SSH origin, Docker, user systemd, sqlite3, GCC/libc/make, Linux `renameat2`, generated installed lock/image, approved root, and free disk. Each missing prerequisite must return a typed unavailable result and prove zero state/output mutation. Test the guarded commands `accept:pi5`, `accept:pi4`, and `accept:all`: absence of any prerequisite, approval variable, pinned SHA, target, or generated installed lock must produce nonzero exit. Before the final task replaces the guard, each acceptance command must return nonzero `REAL_ACCEPTANCE_NOT_IMPLEMENTED` after validating its guards; tests must assert that result. Test final verification rejects unless both immutable `rpi-5` and `rpi-2` release directories contain matching manifest, generated lock/image digest, checksum, and verification evidence.
 
-- [ ] **Step 2: Run the failing tests.**
+- [x] **Step 2: Run the failing tests.**
 
 Run: `cd tools/firmware-image-builder && npm run test:workstation`
 
 Expected: FAIL because `test:workstation`, the three deterministic tests, and the guarded acceptance commands do not exist.
 
-- [ ] **Step 3: Implement the deterministic gate.** Configure `npm run test:workstation` to execute all three files, exactly: `test/integration/workstation.test.ts`, `test/integration/release-acceptance.test.ts`, and `test/integration/final-verification.test.ts`. `run-workstation-test.mjs` must return zero in test mode with typed unavailable results and no mutation. `accept-real-target.mjs` must validate Node, Docker, SSH origin, user systemd, generated production lock/image, approved root, native publisher, and `renameat2`; it must exit nonzero before mutation when any is missing, and otherwise exit nonzero with `REAL_ACCEPTANCE_NOT_IMPLEMENTED` until Task 35 replaces the implementation. Require `OSI_IMAGE_BUILDER_REAL=1`, `OSI_IMAGE_BUILDER_APPROVED_ROOT_ID`, a pinned full SHA, and one target. This task defines deterministic tests and guards only; it does not claim real-image acceptance.
+- [x] **Step 3: Implement the deterministic gate.** Configure `npm run test:workstation` to execute all three files, exactly: `test/integration/workstation.test.ts`, `test/integration/release-acceptance.test.ts`, and `test/integration/final-verification.test.ts`. `run-workstation-test.mjs` must return zero in test mode with typed unavailable results and no mutation. `accept-real-target.mjs` must validate Node, Docker, SSH origin, user systemd, generated production lock/image, approved root, native publisher, and `renameat2`; it must exit nonzero before mutation when any is missing, and otherwise exit nonzero with `REAL_ACCEPTANCE_NOT_IMPLEMENTED` until Task 35 replaces the implementation. The installer-owned authority record supplies the resolved config and state roots, including custom XDG locations. The guard holds output and state descriptors and requires both filesystems to meet the validated configured free-space floor. Require `OSI_IMAGE_BUILDER_REAL=1`, `OSI_IMAGE_BUILDER_APPROVED_ROOT_ID`, and a pinned full SHA; `accept:pi5` and `accept:pi4` require one exact target, while `accept:all` validates both target IDs without treating `all` as a firmware target. This task defines deterministic tests and guards only; it does not claim real-image acceptance.
 
-- [ ] **Step 4: Run the identical command.**
+- [x] **Step 4: Run the identical command.**
 
 Run: `cd tools/firmware-image-builder && npm run test:workstation`
 

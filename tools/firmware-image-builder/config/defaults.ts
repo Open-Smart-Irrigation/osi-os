@@ -1,10 +1,13 @@
 import { homedir } from 'node:os';
-import { isAbsolute, resolve } from 'node:path';
+import { resolve } from 'node:path';
+
+export {
+  DEFAULT_BUILDER_LOCK_FILE,
+  DEFAULT_MAX_QUEUE_LENGTH,
+  MIN_DISK_FREE_BYTES,
+} from './config-document.mjs';
 
 export const DEFAULT_REMOTE = 'origin' as const;
-export const DEFAULT_MAX_QUEUE_LENGTH = 50;
-export const MIN_DISK_FREE_BYTES = 20 * 1024 ** 3;
-export const DEFAULT_BUILDER_LOCK_FILE = 'builder.lock.json' as const;
 
 export interface ConfigDirectories {
   readonly configRoot: string;
@@ -24,8 +27,4 @@ export function resolveConfigDirectories(env: NodeJS.ProcessEnv = process.env): 
     configRoot: resolve(configHome, 'osi-image-builder'),
     stateRoot: resolve(stateHome, 'osi-image-builder'),
   };
-}
-
-export function isAbsolutePath(value: unknown): value is string {
-  return typeof value === 'string' && isAbsolute(value);
 }

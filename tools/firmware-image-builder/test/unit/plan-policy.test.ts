@@ -36,6 +36,7 @@ describe('builder plan policy', () => {
       'publisher',
       'runner/src',
       'scripts',
+      'shared',
       'ui/src',
     ];
 
