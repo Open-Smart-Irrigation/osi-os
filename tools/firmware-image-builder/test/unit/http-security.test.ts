@@ -133,13 +133,21 @@ describe('loopback HTTP security boundary', () => {
 
   it('aborts the stream when the client disconnects', async () => {
     let observedSignal: AbortSignal | undefined;
+    let iteratorClosed = false;
     let resolveAbort: (() => void) | undefined;
+    let resolveClose: (() => void) | undefined;
     const aborted = new Promise<void>((resolve) => { resolveAbort = resolve; });
+    const closed = new Promise<void>((resolve) => { resolveClose = resolve; });
     const { server, port } = await start(() => eventStreamResponse(200, async function* (signal) {
       observedSignal = signal;
-      signal.addEventListener('abort', () => resolveAbort?.(), { once: true });
-      yield ': connected\n\n';
-      await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
+      try {
+        signal.addEventListener('abort', () => resolveAbort?.(), { once: true });
+        yield ': connected\n\n';
+        await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
+      } finally {
+        iteratorClosed = true;
+        resolveClose?.();
+      }
     }));
     try {
       await new Promise<void>((resolve, reject) => {
@@ -153,6 +161,25 @@ describe('loopback HTTP security boundary', () => {
         req.end();
       });
       await aborted;
+      await closed;
+      expect(observedSignal?.aborted).toBe(true);
+      expect(iteratorClosed).toBe(true);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('aborts the request signal when the stream factory throws before headers', async () => {
+    const failure = new Error('stream setup failed');
+    let observedSignal: AbortSignal | undefined;
+    const { server, port } = await start(() => eventStreamResponse(200, (signal) => {
+      observedSignal = signal;
+      throw failure;
+    }));
+    try {
+      const response = await call(port, { path: '/api/jobs/job-1/events/stream' });
+      expect(response.status).toBe(500);
+      expect(response.json).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
       expect(observedSignal?.aborted).toBe(true);
     } finally {
       await stop(server);

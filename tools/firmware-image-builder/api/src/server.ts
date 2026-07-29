@@ -327,49 +327,92 @@ async function sendEventStream(
 ): Promise<void> {
   if (result.status !== 200) throw new Error('event stream responses must use status 200');
   const controller = new AbortController();
+  let failure: unknown;
   const abort = (): void => controller.abort();
+  const onResponseError = (error: Error): void => {
+    failure ??= error;
+    controller.abort();
+  };
   request.once('aborted', abort);
   response.once('close', abort);
-  let iterable: AsyncIterable<string>;
+  response.on('error', onResponseError);
+  let iterator: AsyncIterator<string> | undefined;
   try {
-    iterable = result.eventStream(controller.signal);
+    const iterable = result.eventStream(controller.signal);
     if (iterable === null
       || typeof iterable !== 'object'
       || typeof iterable[Symbol.asyncIterator] !== 'function') {
       throw new Error('event stream route did not return an async iterable');
     }
-  } catch (error) {
-    request.off('aborted', abort);
-    response.off('close', abort);
-    throw error;
-  }
-  const shouldKeepAlive = response.shouldKeepAlive;
-  response.writeHead(200, {
-    ...(corsOrigin === undefined ? {} : {
-      'access-control-allow-origin': corsOrigin,
-      vary: 'Origin',
-    }),
-    'content-type': 'text/event-stream; charset=utf-8',
-    'cache-control': 'no-store',
-    [REQUEST_ID_HEADER]: id,
-    connection: shouldKeepAlive ? 'keep-alive' : 'close',
-    'x-content-type-options': 'nosniff',
-    'referrer-policy': 'no-referrer',
-    'x-frame-options': 'DENY',
-  });
-  response.flushHeaders();
-  try {
-    for await (const frame of iterable) {
-      if (!await writeEventStreamFrame(response, frame, controller.signal)) break;
+    iterator = iterable[Symbol.asyncIterator]();
+    if (iterator === null || typeof iterator !== 'object' || typeof iterator.next !== 'function') {
+      throw new Error('event stream route returned an invalid async iterator');
     }
-    if (!response.destroyed && !response.writableEnded) response.end();
-  } catch {
-    if (!response.destroyed) response.destroy();
+    const shouldKeepAlive = response.shouldKeepAlive;
+    response.writeHead(200, {
+      ...(corsOrigin === undefined ? {} : {
+        'access-control-allow-origin': corsOrigin,
+        vary: 'Origin',
+      }),
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-store',
+      [REQUEST_ID_HEADER]: id,
+      connection: shouldKeepAlive ? 'keep-alive' : 'close',
+      'x-content-type-options': 'nosniff',
+      'referrer-policy': 'no-referrer',
+      'x-frame-options': 'DENY',
+    });
+    response.flushHeaders();
+    while (!controller.signal.aborted) {
+      const next = await nextEventStreamValue(iterator, controller.signal);
+      if (next === null || next.done) break;
+      if (!await writeEventStreamFrame(response, next.value, controller.signal)) break;
+    }
+    if (failure === undefined && !response.destroyed && !response.writableEnded) response.end();
+  } catch (error) {
+    failure = error;
   } finally {
     controller.abort();
+    if (iterator?.return !== undefined) {
+      try { await iterator.return(); } catch (error) { failure ??= error; }
+    }
     request.off('aborted', abort);
     response.off('close', abort);
+    response.off('error', onResponseError);
   }
+  if (failure === undefined) return;
+  if (response.headersSent || response.destroyed) {
+    if (!response.destroyed) response.destroy();
+    return;
+  }
+  throw failure;
+}
+
+function nextEventStreamValue(
+  iterator: AsyncIterator<string>,
+  signal: AbortSignal,
+): Promise<IteratorResult<string> | null> {
+  if (signal.aborted) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (value: IteratorResult<string> | null, error?: unknown): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      if (error === undefined) resolve(value);
+      else reject(error);
+    };
+    const onAbort = (): void => finish(null);
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) {
+      finish(null);
+      return;
+    }
+    Promise.resolve(iterator.next()).then(
+      (value) => finish(value),
+      (error: unknown) => finish(null, error),
+    );
+  });
 }
 
 function errorStatus(error: unknown): number {
