@@ -128,6 +128,22 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
         checks: [{ id: 'source-sha', status: 'passed', details: { expectedSha: preflightRequest.expectedSha, observedSha: preflightRequest.expectedSha, remote: 'origin' } }],
       }),
     },
+    enqueue: {
+      accept: async (
+        enqueueRequest: { branch: string; expectedSha: string; targetId: string; outputRootId: string },
+        requestId: string,
+      ) => ({
+        jobId: 'job-queued',
+        requestId,
+        state: 'queued',
+        queuePosition: 0,
+        branch: enqueueRequest.branch,
+        expectedSha: enqueueRequest.expectedSha,
+        pinnedSha: enqueueRequest.expectedSha,
+        targetId: enqueueRequest.targetId,
+        rootId: enqueueRequest.outputRootId,
+      }),
+    },
     store: {
       listJobs: async ({ cursor, limit }: { cursor: string | null; limit: number }) => ({ jobs: [record], nextCursor: cursor === null && limit === 1 ? 'next-page' : null }),
       getJob: (id: string) => id === 'job-1' ? record : (() => { throw new StoreNotFoundError('not found'); })(),
@@ -469,6 +485,158 @@ describe('read-only builder API routes', () => {
     server = started.server;
 
     const response = await post(started.port, '/api/preflight', JSON.stringify({
+      branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release',
+    }));
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+  });
+
+  it('accepts an exact build request and returns only the bound queued job projection', async () => {
+    let observedRequestId = '';
+    const accept = vi.fn(async (
+      enqueueRequest: { branch: string; expectedSha: string; targetId: string; outputRootId: string; preflightId?: string },
+      requestId: string,
+    ) => {
+      observedRequestId = requestId;
+      return {
+        jobId: '20260728T100000Z-01J4D5YQG7M9R2C6N8P0S1T3V',
+        requestId,
+        state: 'queued',
+        queuePosition: 2,
+        branch: enqueueRequest.branch,
+        expectedSha: enqueueRequest.expectedSha,
+        pinnedSha: enqueueRequest.expectedSha,
+        targetId: enqueueRequest.targetId,
+        rootId: enqueueRequest.outputRootId,
+        artifactStagingPath: '/private/staging',
+        sourceAuthor: 'private author',
+      };
+    });
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { enqueue: { accept } });
+    }));
+    server = started.server;
+    const requestBody = {
+      branch: 'main',
+      expectedSha: sha,
+      targetId: 'rpi-5',
+      outputRootId: 'release',
+      preflightId: 'pf_safe_01',
+    };
+
+    const response = await post(started.port, '/api/jobs', JSON.stringify(requestBody));
+
+    expect(accept).toHaveBeenCalledWith(requestBody, observedRequestId);
+    expect(observedRequestId).toMatch(/^req_[a-z0-9]+_[0-9a-f]{32}$/u);
+    expect(response).toEqual({
+      status: 202,
+      body: {
+        job: {
+          id: '20260728T100000Z-01J4D5YQG7M9R2C6N8P0S1T3V',
+          state: 'queued',
+          queuePosition: 2,
+          branch: 'main',
+          targetId: 'rpi-5',
+          outputRootId: 'release',
+        },
+      },
+    });
+    expect(JSON.stringify(response.body)).not.toMatch(/private|author|staging/u);
+  });
+
+  it('allows trusted automation to enqueue without a preflight token', async () => {
+    const accept = vi.fn(async (
+      enqueueRequest: { branch: string; expectedSha: string; targetId: string; outputRootId: string },
+      requestId: string,
+    ) => ({
+      jobId: 'job-automation',
+      requestId,
+      state: 'queued',
+      queuePosition: 0,
+      branch: enqueueRequest.branch,
+      expectedSha: enqueueRequest.expectedSha,
+      pinnedSha: enqueueRequest.expectedSha,
+      targetId: enqueueRequest.targetId,
+      rootId: enqueueRequest.outputRootId,
+    }));
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { enqueue: { accept } });
+    }));
+    server = started.server;
+    const requestBody = { branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release' };
+
+    const response = await post(started.port, '/api/jobs', JSON.stringify(requestBody));
+
+    expect(response.status).toBe(202);
+    expect(accept.mock.calls[0]?.[0]).toEqual(requestBody);
+  });
+
+  it.each([
+    ['null', 'null'],
+    ['array', '[]'],
+    ['missing field', JSON.stringify({ branch: 'main', expectedSha: sha, targetId: 'rpi-5' })],
+    ['extra field', JSON.stringify({ branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release', extra: true })],
+    ['invalid preflight ID', JSON.stringify({ branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release', preflightId: '../pf' })],
+    ['invalid branch', JSON.stringify({ branch: '../main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release' })],
+    ['invalid SHA', JSON.stringify({ branch: 'main', expectedSha: sha.toUpperCase(), targetId: 'rpi-5', outputRootId: 'release' })],
+    ['unknown target', JSON.stringify({ branch: 'main', expectedSha: sha, targetId: 'rpi-9', outputRootId: 'release' })],
+    ['unknown root', JSON.stringify({ branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'private' })],
+  ])('rejects %s enqueue input before acceptance', async (_description, body) => {
+    const accept = vi.fn();
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { enqueue: { accept } });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs', body);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    expect(accept).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 without a job projection when the branch moved during acceptance', async () => {
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        enqueue: {
+          accept: async () => {
+            throw new PreflightError('BRANCH_MOVED', { expectedSha: sha, observedSha: 'b'.repeat(40) });
+          },
+        },
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs', JSON.stringify({
+      branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release',
+    }));
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      error: { code: 'BRANCH_MOVED', details: { expectedSha: sha, observedSha: 'b'.repeat(40) } },
+    });
+    expect(JSON.stringify(response.body)).not.toContain('"job"');
+  });
+
+  it('fails closed when the accepted job is not queued or bound to the request', async () => {
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        enqueue: {
+          accept: async () => ({
+            jobId: 'job-invalid',
+            state: 'succeeded',
+            queuePosition: null,
+            branch: 'other',
+            targetId: 'rpi-5',
+            rootId: 'release',
+          }),
+        },
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs', JSON.stringify({
       branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release',
     }));
 

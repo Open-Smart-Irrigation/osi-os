@@ -157,6 +157,14 @@ export interface ApiPreflightService {
   readonly run: (request: PreflightRequest) => unknown | Promise<unknown>;
 }
 
+export interface ApiEnqueueRequest extends PreflightRequest {
+  readonly preflightId?: string;
+}
+
+export interface ApiEnqueueService {
+  readonly accept: (request: ApiEnqueueRequest, requestId: string) => unknown | Promise<unknown>;
+}
+
 export interface ApiRouteDependencies {
   readonly version: string;
   readonly config: BuilderConfig;
@@ -164,6 +172,7 @@ export interface ApiRouteDependencies {
   readonly health: () => Pick<HealthSnapshot, 'activeJobId'> | HealthSnapshot | Promise<Pick<HealthSnapshot, 'activeJobId'> | HealthSnapshot>;
   readonly branches: BranchSnapshotCache;
   readonly preflight: ApiPreflightService;
+  readonly enqueue: ApiEnqueueService;
   readonly store: ApiJobStore;
   readonly evidenceReader: IndexedEvidenceReader;
 }
@@ -590,25 +599,55 @@ function branchesDto(value: unknown): JsonRecord {
   };
 }
 
+function sourceSelectionRequest(
+  input: Record<string, unknown>,
+  dependencies: ApiRouteDependencies,
+  field: string,
+): PreflightRequest {
+  const branch = branchName(ownDataProperty(input, 'branch', `${field} branch`), `${field} branch`);
+  const expectedSha = ownDataProperty(input, 'expectedSha', `${field} expected SHA`);
+  const targetId = ownDataProperty(input, 'targetId', `${field} target ID`);
+  const outputRootId = ownDataProperty(input, 'outputRootId', `${field} output root ID`);
+  if (typeof expectedSha !== 'string' || !HASH40_PATTERN.test(expectedSha)) throw new Error(`${field} expected SHA is invalid`);
+  if (typeof targetId !== 'string'
+    || !(TARGET_IDS as readonly string[]).includes(targetId)
+    || !dependencies.targets.some((target) => target.id === targetId)) {
+    throw new Error(`${field} target ID is invalid`);
+  }
+  const rootId = identifier(outputRootId, `${field} output root ID`);
+  if (!dependencies.config.approvedOutputRoots.some((root) => root.id === rootId)) {
+    throw new Error(`${field} output root ID is invalid`);
+  }
+  return Object.freeze({ branch, expectedSha, targetId, outputRootId: rootId }) as PreflightRequest;
+}
+
 function preflightRequest(value: unknown, dependencies: ApiRouteDependencies): PreflightRequest {
   try {
     const input = record(value, 'preflight request');
     exactOwnStringKeys(input, ['branch', 'expectedSha', 'targetId', 'outputRootId'], 'preflight request');
-    const branch = branchName(ownDataProperty(input, 'branch', 'preflight branch'), 'preflight branch');
-    const expectedSha = ownDataProperty(input, 'expectedSha', 'preflight expected SHA');
-    const targetId = ownDataProperty(input, 'targetId', 'preflight target ID');
-    const outputRootId = ownDataProperty(input, 'outputRootId', 'preflight output root ID');
-    if (typeof expectedSha !== 'string' || !HASH40_PATTERN.test(expectedSha)) throw new Error('preflight expected SHA is invalid');
-    if (typeof targetId !== 'string'
-      || !(TARGET_IDS as readonly string[]).includes(targetId)
-      || !dependencies.targets.some((target) => target.id === targetId)) {
-      throw new Error('preflight target ID is invalid');
+    return sourceSelectionRequest(input, dependencies, 'preflight');
+  } catch {
+    badRequest('request body');
+  }
+}
+
+function enqueueRequest(value: unknown, dependencies: ApiRouteDependencies): ApiEnqueueRequest {
+  try {
+    const input = record(value, 'enqueue request');
+    const preflight = optionalOwnDataProperty(input, 'preflightId', 'enqueue preflight ID');
+    exactOwnStringKeys(
+      input,
+      preflight.present
+        ? ['branch', 'expectedSha', 'targetId', 'outputRootId', 'preflightId']
+        : ['branch', 'expectedSha', 'targetId', 'outputRootId'],
+      'enqueue request',
+    );
+    const selection = sourceSelectionRequest(input, dependencies, 'enqueue');
+    if (!preflight.present) return selection;
+    if (typeof preflight.value !== 'string' || !PREFLIGHT_ID_PATTERN.test(preflight.value)) {
+      throw new Error('enqueue preflight ID is invalid');
     }
-    const rootId = identifier(outputRootId, 'preflight output root ID');
-    if (!dependencies.config.approvedOutputRoots.some((root) => root.id === rootId)) {
-      throw new Error('preflight output root ID is invalid');
-    }
-    return Object.freeze({ branch, expectedSha, targetId, outputRootId: rootId }) as PreflightRequest;
+    return Object.freeze({ ...selection, preflightId: preflight.value });
   } catch {
     badRequest('request body');
   }
@@ -714,6 +753,36 @@ function preflightDto(value: unknown, request: PreflightRequest): JsonRecord {
     observedSha,
     expiresAt,
     checks: publicPreflightChecks(ownDataProperty(input, 'checks', 'preflight checks')),
+  };
+}
+
+function enqueueJobDto(value: unknown, request: ApiEnqueueRequest, requestId: string): JsonRecord {
+  const input = record(value, 'accepted job');
+  const jobId = storedJobId(ownDataProperty(input, 'jobId', 'accepted job ID'));
+  const state = ownDataProperty(input, 'state', 'accepted job state');
+  const queuePosition = ownDataProperty(input, 'queuePosition', 'accepted job queue position');
+  const branch = ownDataProperty(input, 'branch', 'accepted job branch');
+  const targetId = ownDataProperty(input, 'targetId', 'accepted job target ID');
+  const rootId = ownDataProperty(input, 'rootId', 'accepted job output root ID');
+  const expectedSha = ownDataProperty(input, 'expectedSha', 'accepted job expected SHA');
+  const pinnedSha = ownDataProperty(input, 'pinnedSha', 'accepted job pinned SHA');
+  const storedRequestId = ownDataProperty(input, 'requestId', 'accepted job request ID');
+  if (state !== 'queued'
+    || branch !== request.branch
+    || targetId !== request.targetId
+    || rootId !== request.outputRootId
+    || expectedSha !== request.expectedSha
+    || pinnedSha !== request.expectedSha
+    || storedRequestId !== requestId) {
+    throw new Error('accepted job is not bound to its request');
+  }
+  return {
+    id: jobId,
+    state: 'queued',
+    queuePosition: safeInteger(queuePosition, 'accepted job queue position'),
+    branch: request.branch,
+    targetId: request.targetId,
+    outputRootId: request.outputRootId,
   };
 }
 
@@ -1035,6 +1104,12 @@ function getJob(store: ApiJobStore, id: string): JobRecord {
 
 export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRouteHandler {
   return async (context: ApiRouteContext): Promise<HttpResponse | null> => {
+    if (context.method === 'POST' && context.path === '/api/jobs') {
+      const request = enqueueRequest(context.body, dependencies);
+      return jsonResponse(202, {
+        job: enqueueJobDto(await dependencies.enqueue.accept(request, context.requestId), request, context.requestId),
+      });
+    }
     if (context.method === 'POST' && context.path === '/api/preflight') {
       const request = preflightRequest(context.body, dependencies);
       return jsonResponse(200, preflightDto(await dependencies.preflight.run(request), request));
