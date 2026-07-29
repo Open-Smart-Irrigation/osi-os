@@ -15,6 +15,7 @@ import {
   type EventPage,
   type EventRecord,
   type JobRecord,
+  type PublishBlockerRecheckRecord,
   type RecoveryJobRecord,
   type StoredStage,
 } from './store.js';
@@ -37,6 +38,11 @@ import {
   type PreflightRequest,
 } from './preflight.js';
 import type { ApiCancellationService } from './cancellation.js';
+import {
+  PublishBlockerRecheckError,
+  type PublishBlockerRecheckService,
+} from './publish-blocker-recheck.js';
+import type { OwnershipConflictKind } from './ownership.js';
 import {
   HttpTransportError,
   type ApiRouteContext,
@@ -157,7 +163,7 @@ export interface JobPage {
   readonly nextCursor: string | null;
 }
 
-export interface ApiJobStore extends Pick<BuilderStore, 'getJob' | 'getRecoveryJob' | 'getStage' | 'listEvents' | 'getTerminalEvent'> {
+export interface ApiJobStore extends Pick<BuilderStore, 'getJob' | 'getRecoveryJob' | 'getStage' | 'listEvents' | 'getTerminalEvent' | 'getPublishStartEvent' | 'getPublishBlockerRecheck'> {
   readonly listJobs: (options: { readonly cursor: string | null; readonly limit: number }) => JobPage | Promise<JobPage>;
 }
 
@@ -239,6 +245,7 @@ export interface ApiRouteDependencies {
   readonly now: () => string;
   readonly cancellation: ApiCancellationService;
   readonly recovery: ApiRecoveryService;
+  readonly publishBlockerRecheck: Pick<PublishBlockerRecheckService, 'recheck'>;
   readonly eventStream: ApiEventStreamService;
   readonly store: ApiJobStore;
   readonly evidenceReader: IndexedEvidenceReader;
@@ -1622,6 +1629,566 @@ function recoverySnapshotKey(job: RecoveryJobRecord): string {
   }, 'recovery snapshot', true);
 }
 
+const PUBLISH_BLOCKER_RECHECK_CONFLICT_KINDS = new Set<OwnershipConflictKind>([
+  'stale-predecessor', 'stale-runner-owner', 'stale-lease', 'fenced', 'admission-mismatch',
+  'token-mismatch', 'generation-mismatch', 'identity-mismatch', 'illegal-predecessor', 'cas-lost', 'queue-full',
+]);
+
+type DecodedPublishBlockerRecheckResult =
+  | Readonly<{ readonly kind: 'cleared-absent' | 'marked-published' | 'retained-blocker'; readonly jobId: string; readonly eventSeq: number }>
+  | Readonly<{ readonly kind: 'conflict'; readonly jobId: string; readonly conflictKind: OwnershipConflictKind }>;
+
+function strictPlainRecord(value: unknown, field: string): Record<string, unknown> {
+  const input = record(value, field);
+  const prototype = Object.getPrototypeOf(input);
+  if (prototype !== Object.prototype && prototype !== null) throw new Error(`${field} is not a plain object`);
+  return input;
+}
+
+function exactKeySet(value: Record<string, unknown>, expected: readonly string[], field: string): void {
+  exactOwnStringKeys(value, expected, field);
+  for (const key of expected) ownDataProperty(value, key, `${field}.${key}`);
+}
+
+function decodePublishBlockerRecheckResult(value: unknown, expectedJobId: string): DecodedPublishBlockerRecheckResult {
+  const input = strictPlainRecord(value, 'publish blocker recheck result');
+  const kind = ownDataProperty(input, 'kind', 'publish blocker recheck result kind');
+  const jobId = ownDataProperty(input, 'jobId', 'publish blocker recheck result job ID');
+  if (typeof kind !== 'string' || jobId !== expectedJobId) throw new Error('publish blocker recheck result identity is invalid');
+  if (kind === 'cleared-absent' || kind === 'marked-published' || kind === 'retained-blocker') {
+    exactKeySet(input, ['kind', 'jobId', 'eventSeq'], 'publish blocker recheck result');
+    return { kind, jobId, eventSeq: safeInteger(ownDataProperty(input, 'eventSeq', 'publish blocker recheck event sequence'), 'publish blocker recheck event sequence') };
+  }
+  if (kind !== 'conflict') throw new Error('publish blocker recheck result kind is invalid');
+  exactKeySet(input, ['kind', 'jobId', 'conflict'], 'publish blocker recheck result');
+  const conflict = strictPlainRecord(ownDataProperty(input, 'conflict', 'publish blocker recheck conflict'), 'publish blocker recheck conflict');
+  const conflictKeys = Reflect.ownKeys(conflict);
+  if (!(
+    (conflictKeys.length === 2 && conflictKeys.every((key) => key === 'kind' || key === 'message'))
+    || (conflictKeys.length === 3 && conflictKeys.every((key) => key === 'kind' || key === 'message' || key === 'rollbackCause'))
+  )) throw new Error('publish blocker recheck conflict shape is invalid');
+  const conflictKind = ownDataProperty(conflict, 'kind', 'publish blocker recheck conflict kind');
+  const message = ownDataProperty(conflict, 'message', 'publish blocker recheck conflict message');
+  if (typeof conflictKind !== 'string' || !PUBLISH_BLOCKER_RECHECK_CONFLICT_KINDS.has(conflictKind as OwnershipConflictKind)) {
+    throw new Error('publish blocker recheck conflict kind is invalid');
+  }
+  text(message, 'publish blocker recheck conflict message', 1_024);
+  if (conflictKeys.length === 3) ownDataProperty(conflict, 'rollbackCause', 'publish blocker recheck rollback cause');
+  return { kind: 'conflict', jobId, conflictKind: conflictKind as OwnershipConflictKind };
+}
+
+function auditNullablePath(value: unknown, field: string): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string') throw new Error(`${field} is invalid`);
+  return stableRelativePath(value, field);
+}
+
+function auditNullableInstant(value: unknown, field: string): string | null {
+  if (value === null) return null;
+  return canonicalInstant(value, field);
+}
+
+type DecodedPublishBlockerPublisherProof = Readonly<{
+  readonly destination: 'absent' | 'candidate' | 'mismatched' | 'unknown';
+  readonly staging: 'absent' | 'present' | 'unknown';
+  readonly mutationCount: 0;
+}>;
+
+type DecodedPublishBlockerRecheckProof =
+  | Readonly<{
+      readonly kind: 'destination-absent';
+      readonly observedAt: string;
+      readonly publisher: DecodedPublishBlockerPublisherProof;
+      readonly finalDirectory: string;
+      readonly finalPath: string;
+    }>
+  | Readonly<{
+      readonly kind: 'destination-matches';
+      readonly observedAt: string;
+      readonly publisher: DecodedPublishBlockerPublisherProof;
+      readonly finalDirectory: string;
+      readonly finalPath: string;
+      readonly staging: Readonly<{ readonly path: string; readonly state: 'absent' }>;
+      readonly artifact: Readonly<{ readonly sha256: string; readonly size: number; readonly mtime: string }>;
+      readonly checksum: Readonly<{ readonly path: string; readonly sha256: string }>;
+      readonly manifest: Readonly<{ readonly path: string; readonly sha256: string }>;
+      readonly verification: Readonly<{ readonly path: string; readonly sha256: string }>;
+    }>
+  | Readonly<{
+      readonly kind: 'retained-blocker';
+      readonly observedAt: string;
+      readonly reason: 'destination-mismatched' | 'staging-present' | 'unsafe-path' | 'incomplete-evidence' | 'publisher-unavailable';
+      readonly publisher: DecodedPublishBlockerPublisherProof;
+    }>;
+
+function requiredHash64(value: unknown, field: string): string {
+  const hash = nullableHash64(value, field);
+  if (hash === null) throw new Error(`${field} is missing`);
+  return hash;
+}
+
+function decodePublishBlockerPublisherProof(value: unknown, field: string): DecodedPublishBlockerPublisherProof {
+  const input = strictPlainRecord(value, field);
+  exactKeySet(input, ['destination', 'staging', 'mutationCount'], field);
+  const destination = ownDataProperty(input, 'destination', `${field}.destination`);
+  const staging = ownDataProperty(input, 'staging', `${field}.staging`);
+  const mutationCount = ownDataProperty(input, 'mutationCount', `${field}.mutationCount`);
+  if ((destination !== 'absent' && destination !== 'candidate' && destination !== 'mismatched' && destination !== 'unknown')
+    || (staging !== 'absent' && staging !== 'present' && staging !== 'unknown')
+    || mutationCount !== 0) throw new Error(`${field} is invalid`);
+  return { destination, staging, mutationCount };
+}
+
+function decodePublishBlockerRecheckProof(value: unknown, field: string): DecodedPublishBlockerRecheckProof {
+  const input = strictPlainRecord(value, field);
+  const kind = ownDataProperty(input, 'kind', `${field}.kind`);
+  if (kind === 'destination-absent') {
+    exactKeySet(input, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath'], field);
+    return {
+      kind,
+      observedAt: canonicalInstant(ownDataProperty(input, 'observedAt', `${field}.observedAt`), `${field}.observedAt`),
+      publisher: decodePublishBlockerPublisherProof(ownDataProperty(input, 'publisher', `${field}.publisher`), `${field}.publisher`),
+      finalDirectory: stableRelativePath(ownDataProperty(input, 'finalDirectory', `${field}.finalDirectory`), `${field}.finalDirectory`),
+      finalPath: stableRelativePath(ownDataProperty(input, 'finalPath', `${field}.finalPath`), `${field}.finalPath`),
+    };
+  }
+  if (kind === 'retained-blocker') {
+    exactKeySet(input, ['kind', 'observedAt', 'reason', 'publisher'], field);
+    const reason = ownDataProperty(input, 'reason', `${field}.reason`);
+    if (reason !== 'destination-mismatched' && reason !== 'staging-present' && reason !== 'unsafe-path'
+      && reason !== 'incomplete-evidence' && reason !== 'publisher-unavailable') throw new Error(`${field}.reason is invalid`);
+    return {
+      kind,
+      observedAt: canonicalInstant(ownDataProperty(input, 'observedAt', `${field}.observedAt`), `${field}.observedAt`),
+      reason,
+      publisher: decodePublishBlockerPublisherProof(ownDataProperty(input, 'publisher', `${field}.publisher`), `${field}.publisher`),
+    };
+  }
+  if (kind !== 'destination-matches') throw new Error(`${field}.kind is invalid`);
+  exactKeySet(input, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath', 'staging', 'artifact', 'checksum', 'manifest', 'verification'], field);
+  const staging = strictPlainRecord(ownDataProperty(input, 'staging', `${field}.staging`), `${field}.staging`);
+  exactKeySet(staging, ['path', 'state'], `${field}.staging`);
+  if (ownDataProperty(staging, 'state', `${field}.staging.state`) !== 'absent') throw new Error(`${field}.staging.state is invalid`);
+  const artifact = strictPlainRecord(ownDataProperty(input, 'artifact', `${field}.artifact`), `${field}.artifact`);
+  exactKeySet(artifact, ['sha256', 'size', 'mtime'], `${field}.artifact`);
+  const size = safeInteger(ownDataProperty(artifact, 'size', `${field}.artifact.size`), `${field}.artifact.size`);
+  const checksum = strictPlainRecord(ownDataProperty(input, 'checksum', `${field}.checksum`), `${field}.checksum`);
+  const manifest = strictPlainRecord(ownDataProperty(input, 'manifest', `${field}.manifest`), `${field}.manifest`);
+  const verification = strictPlainRecord(ownDataProperty(input, 'verification', `${field}.verification`), `${field}.verification`);
+  for (const [sidecar, name] of [[checksum, 'checksum'], [manifest, 'manifest'], [verification, 'verification']] as const) {
+    exactKeySet(sidecar, ['path', 'sha256'], `${field}.${name}`);
+  }
+  return {
+    kind,
+    observedAt: canonicalInstant(ownDataProperty(input, 'observedAt', `${field}.observedAt`), `${field}.observedAt`),
+    publisher: decodePublishBlockerPublisherProof(ownDataProperty(input, 'publisher', `${field}.publisher`), `${field}.publisher`),
+    finalDirectory: stableRelativePath(ownDataProperty(input, 'finalDirectory', `${field}.finalDirectory`), `${field}.finalDirectory`),
+    finalPath: stableRelativePath(ownDataProperty(input, 'finalPath', `${field}.finalPath`), `${field}.finalPath`),
+    staging: {
+      path: stableRelativePath(ownDataProperty(staging, 'path', `${field}.staging.path`), `${field}.staging.path`),
+      state: 'absent',
+    },
+    artifact: {
+      sha256: requiredHash64(ownDataProperty(artifact, 'sha256', `${field}.artifact.sha256`), `${field}.artifact.sha256`),
+      size,
+      mtime: canonicalInstant(ownDataProperty(artifact, 'mtime', `${field}.artifact.mtime`), `${field}.artifact.mtime`),
+    },
+    checksum: {
+      path: stableRelativePath(ownDataProperty(checksum, 'path', `${field}.checksum.path`), `${field}.checksum.path`),
+      sha256: requiredHash64(ownDataProperty(checksum, 'sha256', `${field}.checksum.sha256`), `${field}.checksum.sha256`),
+    },
+    manifest: {
+      path: stableRelativePath(ownDataProperty(manifest, 'path', `${field}.manifest.path`), `${field}.manifest.path`),
+      sha256: requiredHash64(ownDataProperty(manifest, 'sha256', `${field}.manifest.sha256`), `${field}.manifest.sha256`),
+    },
+    verification: {
+      path: stableRelativePath(ownDataProperty(verification, 'path', `${field}.verification.path`), `${field}.verification.path`),
+      sha256: requiredHash64(ownDataProperty(verification, 'sha256', `${field}.verification.sha256`), `${field}.verification.sha256`),
+    },
+  };
+}
+
+type PublishBlockerRecheckPredecessor = Readonly<{
+  readonly terminal: EventRecord;
+  readonly publishStart: EventRecord;
+  readonly publishStartedAt: string;
+  readonly finalDirectory: string;
+  readonly finalPath: string;
+}>;
+
+function validatePublishBlockerBinding(job: JobRecord): Readonly<{ readonly stagingPath: string; readonly finalDirectory: string; readonly finalPath: string }> {
+  if (job.state !== 'failed' || job.queueState !== 'complete' || job.queuePosition !== null || job.currentStage !== 'publish'
+    || job.publishState !== 'blocked' || job.publishStartedAt !== null || job.publishedAt !== null
+    || job.publishBlockerCode !== 'UNVERIFIED_FINAL_PATH_BLOCKER' || job.publishBlocker === null
+    || job.terminalErrorCode !== 'UNVERIFIED_FINAL_PATH_BLOCKER' || job.terminalAt === null
+    || job.artifactFinalDirectory !== null || job.artifactFinalPath !== null) {
+    throw new Error('publish blocker job predecessor is not an exact failed terminal');
+  }
+  const blocker = strictPlainRecord(job.publishBlocker, 'publish blocker evidence');
+  if (ownDataProperty(blocker, 'code', 'publish blocker code') !== 'UNVERIFIED_FINAL_PATH_BLOCKER') throw new Error('publish blocker code is invalid');
+  const binding = strictPlainRecord(ownDataProperty(blocker, 'binding', 'publish blocker binding'), 'publish blocker binding');
+  const required = ['jobId', 'rootId', 'rootPath', 'rootDevice', 'rootInode', 'branch', 'branchSlug', 'pinnedSha', 'targetId', 'stagingDirectory', 'stagingPath', 'finalDirectory', 'finalPath', 'artifactSha256', 'artifactSize'] as const;
+  for (const key of required) ownDataProperty(binding, key, `publish blocker binding ${key}`);
+  canonicalAbsolutePath(ownDataProperty(binding, 'rootPath', 'publish blocker binding root path'), 'publish blocker binding root path');
+  safeInteger(ownDataProperty(binding, 'rootDevice', 'publish blocker binding root device'), 'publish blocker binding root device');
+  safeInteger(ownDataProperty(binding, 'rootInode', 'publish blocker binding root inode'), 'publish blocker binding root inode');
+  const branch = branchName(job.branch, 'publish blocker branch');
+  const branchSlug = encodeBranchSlug(branch);
+  const expectedStagingDirectory = `staging/${job.jobId}`;
+  const expectedFinalDirectory = `${branchSlug}/${job.pinnedSha}/${job.targetId}`;
+  const stagingPath = stableRelativePath(ownDataProperty(binding, 'stagingPath', 'publish blocker binding staging path'), 'publish blocker binding staging path');
+  const finalDirectory = stableRelativePath(ownDataProperty(binding, 'finalDirectory', 'publish blocker binding final directory'), 'publish blocker binding final directory');
+  const finalPath = stableRelativePath(ownDataProperty(binding, 'finalPath', 'publish blocker binding final path'), 'publish blocker binding final path');
+  const stagingDirectory = stableRelativePath(ownDataProperty(binding, 'stagingDirectory', 'publish blocker binding staging directory'), 'publish blocker binding staging directory');
+  if (ownDataProperty(binding, 'jobId', 'publish blocker binding job ID') !== job.jobId
+    || ownDataProperty(binding, 'rootId', 'publish blocker binding root ID') !== job.rootId
+    || ownDataProperty(binding, 'branch', 'publish blocker binding branch') !== branch
+    || ownDataProperty(binding, 'branchSlug', 'publish blocker binding branch slug') !== branchSlug
+    || ownDataProperty(binding, 'pinnedSha', 'publish blocker binding pinned SHA') !== job.pinnedSha
+    || ownDataProperty(binding, 'targetId', 'publish blocker binding target ID') !== job.targetId
+    || stagingDirectory !== expectedStagingDirectory || !stagingPath.startsWith(`${stagingDirectory}/`)
+    || stagingPath.slice(stagingDirectory.length + 1).includes('/') || finalDirectory !== expectedFinalDirectory
+    || !finalPath.startsWith(`${finalDirectory}/`) || finalPath.slice(finalDirectory.length + 1).includes('/')
+    || finalPath.slice(finalDirectory.length + 1) !== stagingPath.slice(stagingDirectory.length + 1)
+    || ownDataProperty(binding, 'artifactSha256', 'publish blocker binding artifact SHA') !== job.artifactSha256
+    || ownDataProperty(binding, 'artifactSize', 'publish blocker binding artifact size') !== job.artifactSize) {
+    throw new Error('publish blocker binding is not bound to the failed job');
+  }
+  if (job.artifactStagingPath !== null && job.artifactStagingPath !== stagingPath) throw new Error('publish blocker staging path is not bound');
+  if (job.artifactQuarantinePath !== null || job.artifactQuarantineIntentPath !== null) throw new Error('publish blocker quarantine state is not clear');
+  for (const [value, field] of [[job.artifactSha256, 'publish blocker artifact SHA'], [job.checksumSha256, 'publish blocker checksum SHA'], [job.manifestSha256, 'publish blocker manifest SHA'], [job.verificationSha256, 'publish blocker verification SHA']] as const) {
+    if (nullableHash64(value, field) === null) throw new Error(`${field} is missing`);
+  }
+  if (!Number.isSafeInteger(job.artifactSize) || Number(job.artifactSize) < 0 || job.artifactMtime === null) throw new Error('publish blocker artifact identity is incomplete');
+  canonicalInstant(job.artifactMtime, 'publish blocker artifact mtime');
+  return { stagingPath, finalDirectory, finalPath };
+}
+
+function validatePublishBlockerRecheckPredecessor(
+  job: JobRecord,
+  terminal: EventRecord,
+  publishStart: EventRecord,
+): PublishBlockerRecheckPredecessor {
+  const binding = validatePublishBlockerBinding(job);
+  if (job.terminalAt === null || terminal.at !== job.terminalAt) throw new Error('publish blocker terminal event is not exact');
+  const publishStartedAt = validatePublishBlockerRecheckEvents(
+    job.jobId,
+    terminal,
+    publishStart,
+    binding.finalDirectory,
+    binding.finalPath,
+  );
+  return { terminal, publishStart, publishStartedAt, finalDirectory: binding.finalDirectory, finalPath: binding.finalPath };
+}
+
+function validatePublishBlockerRecheckEvents(
+  jobId: string,
+  terminal: EventRecord,
+  publishStart: EventRecord,
+  expectedFinalDirectory: string,
+  expectedFinalPath: string,
+): string {
+  if (terminal.jobId !== jobId || terminal.eventType !== 'terminal' || terminal.state !== 'failed' || terminal.stage !== 'publish'
+    || terminal.seq < 0) throw new Error('publish blocker terminal event is not exact');
+  const terminalPayload = strictPlainRecord(terminal.payload, 'publish blocker terminal event payload');
+  exactKeySet(terminalPayload, ['state', 'errorCode'], 'publish blocker terminal event payload');
+  if (ownDataProperty(terminalPayload, 'state', 'publish blocker terminal event state') !== 'failed'
+    || ownDataProperty(terminalPayload, 'errorCode', 'publish blocker terminal event error code') !== 'UNVERIFIED_FINAL_PATH_BLOCKER') throw new Error('publish blocker terminal event payload is invalid');
+  const publishPayload = strictPlainRecord(publishStart.payload, 'publish start event payload');
+  if (publishStart.jobId !== jobId || publishStart.seq < 0 || publishStart.seq >= terminal.seq
+    || publishStart.eventType !== 'publish' || publishStart.state !== 'publishing' || publishStart.stage !== 'publish') throw new Error('publish start event identity is invalid');
+  exactKeySet(publishPayload, ['state', 'publishStartedAt', 'finalDirectory', 'finalPath'], 'publish start event payload');
+  if (ownDataProperty(publishPayload, 'state', 'publish start event state') !== 'publishing') throw new Error('publish start event state is invalid');
+  const publishStartedAt = canonicalInstant(ownDataProperty(publishPayload, 'publishStartedAt', 'publish start event publishStartedAt'), 'publish start event publishStartedAt');
+  const finalDirectory = stableRelativePath(ownDataProperty(publishPayload, 'finalDirectory', 'publish start event final directory'), 'publish start event final directory');
+  const finalPath = stableRelativePath(ownDataProperty(publishPayload, 'finalPath', 'publish start event final path'), 'publish start event final path');
+  if (publishStartedAt > publishStart.at || publishStart.at > terminal.at || finalDirectory !== expectedFinalDirectory || finalPath !== expectedFinalPath) {
+    throw new Error('publish blocker event chronology or identity is invalid');
+  }
+  return publishStartedAt;
+}
+
+function capturePublishBlockerRecheckPredecessor(store: ApiJobStore, job: JobRecord): PublishBlockerRecheckPredecessor {
+  const events = readPublishBlockerRecheckEvents(store, job.jobId);
+  return validatePublishBlockerRecheckPredecessor(job, events.terminal, events.publishStart);
+}
+
+function readPublishBlockerRecheckEvents(
+  store: ApiJobStore,
+  jobId: string,
+): Readonly<{ readonly terminal: EventRecord; readonly publishStart: EventRecord }> {
+  let terminal: EventRecord | null;
+  try { terminal = store.getTerminalEvent(jobId); } catch (error) {
+    if (error instanceof StoreNotFoundError) throw new Error('publish blocker terminal event job is missing');
+    throw error;
+  }
+  if (terminal === null) throw new Error('publish blocker terminal event is missing');
+  const decodedTerminal = decodePublishBlockerRecheckEvent(terminal, 'publish blocker terminal event');
+  const publishStart = store.getPublishStartEvent(jobId, decodedTerminal.seq);
+  if (publishStart === null) throw new Error('publish blocker publish start event is missing');
+  const decodedPublishStart = decodePublishBlockerRecheckEvent(publishStart, 'publish blocker publish start event');
+  return { terminal: decodedTerminal, publishStart: decodedPublishStart };
+}
+
+function decodePublishBlockerRecheckAudit(value: unknown, expectedJobId: string, expectedEventSeq: number): PublishBlockerRecheckRecord {
+  const input = strictPlainRecord(value, 'publish blocker recheck audit');
+  exactKeySet(input, [
+    'jobId', 'attempt', 'eventSeq', 'resolution', 'observedAt', 'committedAt', 'priorPublishState', 'priorBlockerCode',
+    'priorBlocker', 'artifactStagingPath', 'artifactQuarantinePath', 'artifactSha256', 'artifactSize', 'artifactMtime',
+    'checksumPath', 'checksumSha256', 'manifestPath', 'manifestSha256', 'verificationPath', 'verificationSha256',
+    'finalDirectory', 'finalPath', 'publishedAt', 'proof',
+  ], 'publish blocker recheck audit');
+  const jobId = storedJobId(ownDataProperty(input, 'jobId', 'publish blocker recheck audit job ID'));
+  const attempt = safeInteger(ownDataProperty(input, 'attempt', 'publish blocker recheck audit attempt'), 'publish blocker recheck audit attempt', 1);
+  const eventSeq = safeInteger(ownDataProperty(input, 'eventSeq', 'publish blocker recheck audit event sequence'), 'publish blocker recheck audit event sequence');
+  if (jobId !== expectedJobId || eventSeq !== expectedEventSeq) throw new Error('publish blocker recheck audit identity is invalid');
+  const resolution = ownDataProperty(input, 'resolution', 'publish blocker recheck audit resolution');
+  if (resolution !== 'cleared_absent' && resolution !== 'marked_published' && resolution !== 'retained_blocker') throw new Error('publish blocker recheck audit resolution is invalid');
+  const observedAt = canonicalInstant(ownDataProperty(input, 'observedAt', 'publish blocker recheck audit observedAt'), 'publish blocker recheck audit observedAt');
+  const committedAt = canonicalInstant(ownDataProperty(input, 'committedAt', 'publish blocker recheck audit committedAt'), 'publish blocker recheck audit committedAt');
+  if (observedAt > committedAt) throw new Error('publish blocker recheck audit chronology is invalid');
+  if (ownDataProperty(input, 'priorPublishState', 'publish blocker recheck prior publish state') !== 'blocked') throw new Error('publish blocker recheck prior publish state is invalid');
+  if (ownDataProperty(input, 'priorBlockerCode', 'publish blocker recheck prior blocker code') !== 'UNVERIFIED_FINAL_PATH_BLOCKER') throw new Error('publish blocker recheck prior blocker code is invalid');
+  const priorBlocker = strictPlainRecord(ownDataProperty(input, 'priorBlocker', 'publish blocker recheck prior blocker'), 'publish blocker recheck prior blocker');
+  const artifactSha256 = nullableHash64(ownDataProperty(input, 'artifactSha256', 'publish blocker recheck artifact SHA'), 'publish blocker recheck artifact SHA');
+  const checksumSha256 = nullableHash64(ownDataProperty(input, 'checksumSha256', 'publish blocker recheck checksum SHA'), 'publish blocker recheck checksum SHA');
+  const manifestSha256 = nullableHash64(ownDataProperty(input, 'manifestSha256', 'publish blocker recheck manifest SHA'), 'publish blocker recheck manifest SHA');
+  const verificationSha256 = nullableHash64(ownDataProperty(input, 'verificationSha256', 'publish blocker recheck verification SHA'), 'publish blocker recheck verification SHA');
+  if (artifactSha256 === null || checksumSha256 === null || manifestSha256 === null || verificationSha256 === null) throw new Error('publish blocker recheck audit hashes are incomplete');
+  const artifactSize = safeInteger(ownDataProperty(input, 'artifactSize', 'publish blocker recheck artifact size'), 'publish blocker recheck artifact size');
+  const artifactMtime = canonicalInstant(ownDataProperty(input, 'artifactMtime', 'publish blocker recheck artifact mtime'), 'publish blocker recheck artifact mtime');
+  const proof = decodePublishBlockerRecheckProof(
+    ownDataProperty(input, 'proof', 'publish blocker recheck proof'),
+    'publish blocker recheck proof',
+  );
+  return {
+    jobId, attempt, eventSeq, resolution, observedAt, committedAt,
+    priorPublishState: 'blocked', priorBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER', priorBlocker: priorBlocker as PublishBlockerRecheckRecord['priorBlocker'],
+    artifactStagingPath: auditNullablePath(ownDataProperty(input, 'artifactStagingPath', 'publish blocker recheck staging path'), 'publish blocker recheck staging path'),
+    artifactQuarantinePath: auditNullablePath(ownDataProperty(input, 'artifactQuarantinePath', 'publish blocker recheck quarantine path'), 'publish blocker recheck quarantine path'),
+    artifactSha256, artifactSize, artifactMtime,
+    checksumPath: auditNullablePath(ownDataProperty(input, 'checksumPath', 'publish blocker recheck checksum path'), 'publish blocker recheck checksum path') ?? (() => { throw new Error('publish blocker recheck checksum path is missing'); })(),
+    checksumSha256,
+    manifestPath: auditNullablePath(ownDataProperty(input, 'manifestPath', 'publish blocker recheck manifest path'), 'publish blocker recheck manifest path') ?? (() => { throw new Error('publish blocker recheck manifest path is missing'); })(),
+    manifestSha256,
+    verificationPath: auditNullablePath(ownDataProperty(input, 'verificationPath', 'publish blocker recheck verification path'), 'publish blocker recheck verification path') ?? (() => { throw new Error('publish blocker recheck verification path is missing'); })(),
+    verificationSha256,
+    finalDirectory: auditNullablePath(ownDataProperty(input, 'finalDirectory', 'publish blocker recheck final directory'), 'publish blocker recheck final directory'),
+    finalPath: auditNullablePath(ownDataProperty(input, 'finalPath', 'publish blocker recheck final path'), 'publish blocker recheck final path'),
+    publishedAt: auditNullableInstant(ownDataProperty(input, 'publishedAt', 'publish blocker recheck publishedAt'), 'publish blocker recheck publishedAt'),
+    proof: proof as PublishBlockerRecheckRecord['proof'],
+  };
+}
+
+function snapshotJob(job: JobRecord): string {
+  return encodeJson(job, 'publish blocker recheck job snapshot', true);
+}
+
+function snapshotPublishBlockerEvent(event: EventRecord, field: string): string {
+  return encodeJson(event, field, true);
+}
+
+function terminalSnapshot(job: JobRecord): string {
+  return encodeJson({
+    jobId: job.jobId, state: job.state, terminalAt: job.terminalAt,
+    terminalErrorCode: job.terminalErrorCode, terminalError: job.terminalError,
+  }, 'publish blocker recheck terminal snapshot', true);
+}
+
+function artifactSnapshot(job: JobRecord): string {
+  return encodeJson({
+    artifactStagingPath: job.artifactStagingPath, artifactQuarantinePath: job.artifactQuarantinePath,
+    artifactQuarantineIntentPath: job.artifactQuarantineIntentPath, artifactFinalDirectory: job.artifactFinalDirectory,
+    artifactFinalPath: job.artifactFinalPath, artifactSha256: job.artifactSha256, artifactSize: job.artifactSize,
+    artifactMtime: job.artifactMtime, checksumPath: job.checksumPath, checksumSha256: job.checksumSha256,
+    manifestPath: job.manifestPath, manifestSha256: job.manifestSha256, verificationPath: job.verificationPath,
+    verificationSha256: job.verificationSha256, publishStartedAt: job.publishStartedAt, publishedAt: job.publishedAt,
+  }, 'publish blocker recheck artifact snapshot', true);
+}
+
+function resolutionForResult(kind: DecodedPublishBlockerRecheckResult['kind']): 'cleared_absent' | 'marked_published' | 'retained_blocker' {
+  if (kind === 'cleared-absent') return 'cleared_absent';
+  if (kind === 'marked-published') return 'marked_published';
+  if (kind === 'retained-blocker') return 'retained_blocker';
+  throw new Error('publish blocker recheck conflict has no resolution');
+}
+
+function validatePublishBlockerRecheckAudit(
+  audit: PublishBlockerRecheckRecord,
+  before: JobRecord,
+  result: Extract<DecodedPublishBlockerRecheckResult, { readonly kind: 'cleared-absent' | 'marked-published' | 'retained-blocker' }>,
+  terminalAt: string,
+): void {
+  if (audit.observedAt < terminalAt) throw new Error('publish blocker recheck audit predates the durable terminal');
+  if (audit.resolution !== resolutionForResult(result.kind)
+    || encodeJson(audit.priorBlocker, 'publish blocker recheck prior blocker', true) !== encodeJson(before.publishBlocker, 'publish blocker recheck current blocker', true)
+    || audit.artifactStagingPath !== before.artifactStagingPath
+    || audit.artifactQuarantinePath !== before.artifactQuarantinePath
+    || audit.artifactSha256 !== before.artifactSha256 || audit.artifactSize !== before.artifactSize || audit.artifactMtime !== before.artifactMtime
+    || audit.checksumPath !== before.checksumPath || audit.checksumSha256 !== before.checksumSha256
+    || audit.manifestPath !== before.manifestPath || audit.manifestSha256 !== before.manifestSha256
+    || audit.verificationPath !== before.verificationPath || audit.verificationSha256 !== before.verificationSha256
+  ) throw new Error('publish blocker recheck audit is not bound to the failed predecessor');
+  const proof = strictPlainRecord(audit.proof, 'publish blocker recheck proof');
+  const proofObservedAt = canonicalInstant(ownDataProperty(proof, 'observedAt', 'publish blocker recheck proof observedAt'), 'publish blocker recheck proof observedAt');
+  if (proofObservedAt !== audit.observedAt) throw new Error('publish blocker recheck proof time is not bound to the audit');
+  const blocker = strictPlainRecord(before.publishBlocker, 'publish blocker recheck blocker');
+  const binding = strictPlainRecord(ownDataProperty(blocker, 'binding', 'publish blocker recheck blocker binding'), 'publish blocker recheck blocker binding');
+  const boundFinalDirectory = ownDataProperty(binding, 'finalDirectory', 'publish blocker recheck bound final directory');
+  const boundFinalPath = ownDataProperty(binding, 'finalPath', 'publish blocker recheck bound final path');
+  if (typeof boundFinalDirectory !== 'string' || typeof boundFinalPath !== 'string') throw new Error('publish blocker recheck blocker paths are invalid');
+  const publisher = strictPlainRecord(ownDataProperty(proof, 'publisher', 'publish blocker recheck publisher proof'), 'publish blocker recheck publisher proof');
+  exactKeySet(publisher, ['destination', 'staging', 'mutationCount'], 'publish blocker recheck publisher proof');
+  if (ownDataProperty(publisher, 'mutationCount', 'publish blocker recheck publisher mutation count') !== 0) throw new Error('publish blocker recheck publisher proof reports mutation');
+  if (result.kind === 'cleared-absent') {
+    exactKeySet(proof, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath'], 'publish blocker recheck absent proof');
+    if (proof.kind !== 'destination-absent'
+      || publisher.destination !== 'absent' || publisher.staging !== 'absent'
+      || proof.finalDirectory !== boundFinalDirectory || proof.finalPath !== boundFinalPath
+      || audit.artifactStagingPath !== null
+      || audit.finalDirectory !== null || audit.finalPath !== null || audit.publishedAt !== null) throw new Error('cleared publish blocker recheck audit is incoherent');
+  } else if (result.kind === 'retained-blocker') {
+    exactKeySet(proof, ['kind', 'observedAt', 'reason', 'publisher'], 'publish blocker recheck retained proof');
+    const reason = ownDataProperty(proof, 'reason', 'publish blocker recheck retained reason');
+    const coherent = (reason === 'destination-mismatched' && publisher.destination === 'mismatched' && publisher.staging !== 'unknown')
+      || (reason === 'staging-present' && publisher.staging === 'present')
+      || (reason === 'incomplete-evidence' && publisher.destination === 'candidate' && publisher.staging === 'absent')
+      || ((reason === 'unsafe-path' || reason === 'publisher-unavailable') && publisher.destination === 'unknown' && publisher.staging === 'unknown');
+    if (proof.kind !== 'retained-blocker' || !coherent || audit.finalDirectory !== null || audit.finalPath !== null || audit.publishedAt !== null) throw new Error('retained publish blocker recheck audit is incoherent');
+  } else {
+    exactKeySet(proof, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath', 'staging', 'artifact', 'checksum', 'manifest', 'verification'], 'publish blocker recheck marked proof');
+    if (proof.kind !== 'destination-matches' || publisher.destination !== 'candidate' || publisher.staging !== 'absent'
+      || proof.finalDirectory !== boundFinalDirectory || proof.finalPath !== boundFinalPath
+      || audit.finalDirectory !== proof.finalDirectory || audit.finalPath !== proof.finalPath
+      || audit.artifactStagingPath !== null
+      || audit.finalDirectory === null || audit.finalPath === null || audit.publishedAt === null || audit.publishedAt !== audit.committedAt) throw new Error('marked publish blocker recheck audit is incoherent');
+    const artifact = strictPlainRecord(ownDataProperty(proof, 'artifact', 'publish blocker recheck artifact proof'), 'publish blocker recheck artifact proof');
+    if (ownDataProperty(artifact, 'sha256', 'publish blocker recheck artifact proof SHA') !== audit.artifactSha256
+      || ownDataProperty(artifact, 'size', 'publish blocker recheck artifact proof size') !== audit.artifactSize
+      || ownDataProperty(artifact, 'mtime', 'publish blocker recheck artifact proof mtime') !== audit.artifactMtime) throw new Error('marked publish blocker recheck artifact proof is not bound');
+    const staging = strictPlainRecord(ownDataProperty(proof, 'staging', 'publish blocker recheck staging proof'), 'publish blocker recheck staging proof');
+    if (ownDataProperty(staging, 'path', 'publish blocker recheck staging proof path') !== `staging/${before.jobId}` || ownDataProperty(staging, 'state', 'publish blocker recheck staging proof state') !== 'absent') throw new Error('marked publish blocker recheck staging proof is invalid');
+    for (const [key, expectedPath, expectedSha] of [
+      ['checksum', `${audit.finalDirectory}/sha256sums`, audit.checksumSha256],
+      ['manifest', `${audit.finalDirectory}/build-manifest.json`, audit.manifestSha256],
+      ['verification', `${audit.finalDirectory}/verification.json`, audit.verificationSha256],
+    ] as const) {
+      const sidecar = strictPlainRecord(ownDataProperty(proof, key, `publish blocker recheck ${key} proof`), `publish blocker recheck ${key} proof`);
+      if (ownDataProperty(sidecar, 'path', `publish blocker recheck ${key} path`) !== expectedPath || ownDataProperty(sidecar, 'sha256', `publish blocker recheck ${key} SHA`) !== expectedSha) throw new Error(`publish blocker recheck ${key} proof is not bound`);
+    }
+  }
+}
+
+function validatePublishBlockerRecheckEvent(
+  event: EventRecord,
+  audit: PublishBlockerRecheckRecord,
+  expectedJobId: string,
+): void {
+  if (event.jobId !== expectedJobId || event.seq !== audit.eventSeq || event.eventType !== 'recovery' || event.state !== 'failed' || event.stage !== 'publish' || event.at !== audit.committedAt) {
+    throw new Error('publish blocker recheck recovery event is not exact');
+  }
+  const payload = strictPlainRecord(event.payload, 'publish blocker recheck recovery event payload');
+  exactKeySet(payload, ['kind', 'resolution', 'attempt', 'proof'], 'publish blocker recheck recovery event payload');
+  const eventProof = decodePublishBlockerRecheckProof(
+    ownDataProperty(payload, 'proof', 'publish blocker recheck event proof'),
+    'publish blocker recheck event proof',
+  );
+  if (ownDataProperty(payload, 'kind', 'publish blocker recheck event kind') !== 'publish-blocker-recheck'
+    || ownDataProperty(payload, 'resolution', 'publish blocker recheck event resolution') !== audit.resolution
+    || ownDataProperty(payload, 'attempt', 'publish blocker recheck event attempt') !== audit.attempt
+    || encodeJson(eventProof, 'publish blocker recheck event proof', true) !== encodeJson(audit.proof, 'publish blocker recheck audit proof', true)) throw new Error('publish blocker recheck recovery event payload is not bound to the audit');
+}
+
+function decodePublishBlockerRecheckEvent(value: unknown, field: string): EventRecord {
+  const input = strictPlainRecord(value, field);
+  exactKeySet(input, ['jobId', 'seq', 'eventType', 'state', 'stage', 'payload', 'at'], field);
+  const state = ownDataProperty(input, 'state', `${field}.state`);
+  const stage = ownDataProperty(input, 'stage', `${field}.stage`);
+  if (state !== null && typeof state !== 'string') throw new Error(`${field}.state is invalid`);
+  if (stage !== null && typeof stage !== 'string') throw new Error(`${field}.stage is invalid`);
+  return {
+    jobId: storedJobId(ownDataProperty(input, 'jobId', `${field}.jobId`)),
+    seq: safeInteger(ownDataProperty(input, 'seq', `${field}.seq`), `${field}.seq`),
+    eventType: identifier(ownDataProperty(input, 'eventType', `${field}.eventType`), `${field}.eventType`) as EventRecord['eventType'],
+    state: state as EventRecord['state'],
+    stage: stage as EventRecord['stage'],
+    payload: strictPlainRecord(ownDataProperty(input, 'payload', `${field}.payload`), `${field}.payload`) as EventRecord['payload'],
+    at: canonicalInstant(ownDataProperty(input, 'at', `${field}.at`), `${field}.at`),
+  };
+}
+
+function publishBlockerRecheckProvenance(
+  store: ApiJobStore,
+  jobId: string,
+  eventSeq: number,
+): Readonly<{ readonly audit: PublishBlockerRecheckRecord; readonly event: EventRecord }> {
+  const auditValue = store.getPublishBlockerRecheck(jobId, eventSeq);
+  if (auditValue === null) throw new Error('publish blocker recheck audit is missing');
+  const audit = decodePublishBlockerRecheckAudit(auditValue, jobId, eventSeq);
+  let page: EventPage;
+  try {
+    page = store.listEvents(jobId, { afterSeq: eventSeq - 1, limit: 1 });
+  } catch (error) {
+    if (error instanceof StoreNotFoundError) throw new Error('publish blocker recheck event job is missing');
+    throw error;
+  }
+  if (page.events.length !== 1) throw new Error('publish blocker recheck recovery event is missing');
+  const event = decodePublishBlockerRecheckEvent(page.events[0], 'publish blocker recheck recovery event');
+  validatePublishBlockerRecheckEvent(event, audit, jobId);
+  return { audit, event };
+}
+
+function validatePublishBlockerRecheckPostState(
+  before: JobRecord,
+  after: JobRecord,
+  audit: PublishBlockerRecheckRecord,
+  result: Extract<DecodedPublishBlockerRecheckResult, { readonly kind: 'cleared-absent' | 'marked-published' | 'retained-blocker' }>,
+  predecessor: PublishBlockerRecheckPredecessor,
+): void {
+  if (terminalSnapshot(after) !== terminalSnapshot(before)) throw new Error('publish blocker recheck terminal identity changed');
+  if (result.kind === 'retained-blocker') {
+    if (after.state !== 'failed' || after.publishState !== 'blocked' || after.publishBlockerCode !== 'UNVERIFIED_FINAL_PATH_BLOCKER'
+      || encodeJson(after.publishBlocker, 'publish blocker recheck post blocker', true) !== encodeJson(before.publishBlocker, 'publish blocker recheck pre blocker', true)
+      || artifactSnapshot(after) !== artifactSnapshot(before)) throw new Error('retained publish blocker recheck post-state is invalid');
+    return;
+  }
+  if (result.kind === 'cleared-absent') {
+    if (after.state !== 'failed' || after.publishState !== null || after.publishBlockerCode !== null || after.publishBlocker !== null
+      || after.artifactStagingPath !== null || after.artifactQuarantinePath !== null || after.artifactQuarantineIntentPath !== null
+      || after.artifactFinalDirectory !== null || after.artifactFinalPath !== null || after.artifactSha256 !== null || after.artifactSize !== null || after.artifactMtime !== null
+      || after.checksumPath !== null || after.checksumSha256 !== null || after.manifestPath !== null || after.manifestSha256 !== null
+      || after.verificationPath !== null || after.verificationSha256 !== null || after.publishStartedAt !== null || after.publishedAt !== null) throw new Error('cleared publish blocker recheck post-state is invalid');
+    return;
+  }
+  const proof = strictPlainRecord(audit.proof, 'publish blocker recheck marked proof');
+  const sidecar = (key: string): Record<string, unknown> => strictPlainRecord(ownDataProperty(proof, key, `publish blocker recheck ${key} proof`), `publish blocker recheck ${key} proof`);
+  if (after.state !== 'failed' || after.publishState !== 'published' || after.publishBlockerCode !== null || after.publishBlocker !== null
+    || after.artifactStagingPath !== null || after.artifactQuarantinePath !== null || after.artifactQuarantineIntentPath !== null
+    || after.artifactFinalDirectory !== audit.finalDirectory || after.artifactFinalPath !== audit.finalPath || after.publishedAt !== audit.publishedAt
+    || after.publishStartedAt !== predecessor.publishStartedAt
+    || after.artifactSha256 !== audit.artifactSha256 || after.artifactSize !== audit.artifactSize || after.artifactMtime !== audit.artifactMtime
+    || after.checksumPath !== sidecar('checksum').path || after.checksumSha256 !== sidecar('checksum').sha256
+    || after.manifestPath !== sidecar('manifest').path || after.manifestSha256 !== sidecar('manifest').sha256
+    || after.verificationPath !== sidecar('verification').path || after.verificationSha256 !== sidecar('verification').sha256) throw new Error('marked publish blocker recheck post-state is invalid');
+}
+
+function safeOwnershipConflictKind(error: unknown): OwnershipConflictKind | null {
+  if (error === null || typeof error !== 'object' || Array.isArray(error)) return null;
+  const input = error as Record<string, unknown>;
+  const kind = Object.getOwnPropertyDescriptor(input, 'kind');
+  const message = Object.getOwnPropertyDescriptor(input, 'message');
+  if (kind === undefined || !('value' in kind) || message === undefined || !('value' in message)
+    || typeof kind.value !== 'string' || !PUBLISH_BLOCKER_RECHECK_CONFLICT_KINDS.has(kind.value as OwnershipConflictKind)) return null;
+  try { text(message.value, 'publish blocker recheck conflict message', 1_024); } catch { return null; }
+  return kind.value as OwnershipConflictKind;
+}
+
+function throwPublishBlockerRecheckConflict(kind: OwnershipConflictKind): never {
+  if (kind === 'stale-predecessor') throw new HttpTransportError({ code: 'PUBLISH_BLOCKER_RECHECK_NOT_ELIGIBLE', status: 409 });
+  if (kind === 'fenced') throw new HttpTransportError({ code: 'CLEANUP_IN_PROGRESS', status: 409, retryable: true });
+  throw new HttpTransportError({ code: 'PUBLISH_BLOCKER_RECHECK_CONFLICT', status: 409, retryable: true });
+}
+
 export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRouteHandler {
   return async (context: ApiRouteContext): Promise<HttpResponse | null> => {
     const recoveryMatch = context.method === 'POST'
@@ -1687,6 +2254,70 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
         recovery: 'cleanup_pending',
         cleanupLeaseId: result.admissionId,
       });
+    }
+    const publishBlockerRecheckMatch = context.method === 'POST'
+      ? context.path.match(/^\/api\/jobs\/([^/]+)\/publish-blocker\/recheck$/u)
+      : null;
+    if (publishBlockerRecheckMatch) {
+      requireExactEmptyObject(context.body);
+      const jobId = validateJobId(publishBlockerRecheckMatch[1]!);
+      const before = getJob(dependencies.store, jobId);
+      const eligiblePredecessor = before.state === 'failed'
+        && before.publishState === 'blocked'
+        && before.publishBlockerCode === 'UNVERIFIED_FINAL_PATH_BLOCKER'
+        ? capturePublishBlockerRecheckPredecessor(dependencies.store, before)
+        : null;
+      const beforeTerminalSnapshot = eligiblePredecessor === null
+        ? null
+        : snapshotPublishBlockerEvent(eligiblePredecessor.terminal, 'publish blocker recheck terminal snapshot');
+      const beforePublishStartSnapshot = eligiblePredecessor === null
+        ? null
+        : snapshotPublishBlockerEvent(eligiblePredecessor.publishStart, 'publish blocker recheck publish start snapshot');
+      let rawResult: unknown;
+      try {
+        rawResult = await dependencies.publishBlockerRecheck.recheck({ jobId });
+      } catch (error) {
+        if (error instanceof PublishBlockerRecheckError && error.code === 'NOT_ELIGIBLE') {
+          throw new HttpTransportError({ code: 'PUBLISH_BLOCKER_RECHECK_NOT_ELIGIBLE', status: 409 });
+        }
+        const conflictKind = safeOwnershipConflictKind(error);
+        if (conflictKind !== null) throwPublishBlockerRecheckConflict(conflictKind);
+        throw new Error('publish blocker recheck service failed');
+      }
+      let result: DecodedPublishBlockerRecheckResult;
+      try {
+        result = decodePublishBlockerRecheckResult(rawResult, jobId);
+      } catch {
+        throw new Error('publish blocker recheck service returned malformed data');
+      }
+      if (result.kind === 'conflict') throwPublishBlockerRecheckConflict(result.conflictKind);
+      if (eligiblePredecessor === null) throw new Error('publish blocker recheck succeeded without an eligible predecessor');
+
+      const provenance = publishBlockerRecheckProvenance(dependencies.store, jobId, result.eventSeq);
+      validatePublishBlockerRecheckAudit(provenance.audit, before, result, eligiblePredecessor.terminal.at);
+      const after = getJob(dependencies.store, jobId);
+      validatePublishBlockerRecheckPostState(before, after, provenance.audit, result, eligiblePredecessor);
+
+      const body = await detail(after, dependencies.store);
+      const finalJob = getJob(dependencies.store, jobId);
+      const finalProvenance = publishBlockerRecheckProvenance(dependencies.store, jobId, result.eventSeq);
+      const finalEvents = readPublishBlockerRecheckEvents(dependencies.store, jobId);
+      const finalPublishStartedAt = validatePublishBlockerRecheckEvents(
+        jobId,
+        finalEvents.terminal,
+        finalEvents.publishStart,
+        eligiblePredecessor.finalDirectory,
+        eligiblePredecessor.finalPath,
+      );
+      if (
+        snapshotJob(finalJob) !== snapshotJob(after)
+        || encodeJson(finalProvenance.audit, 'publish blocker recheck final audit snapshot', true) !== encodeJson(provenance.audit, 'publish blocker recheck audit snapshot', true)
+        || encodeJson(finalProvenance.event, 'publish blocker recheck final event snapshot', true) !== encodeJson(provenance.event, 'publish blocker recheck event snapshot', true)
+        || snapshotPublishBlockerEvent(finalEvents.terminal, 'publish blocker recheck final terminal snapshot') !== beforeTerminalSnapshot
+        || snapshotPublishBlockerEvent(finalEvents.publishStart, 'publish blocker recheck final publish start snapshot') !== beforePublishStartSnapshot
+        || finalPublishStartedAt !== eligiblePredecessor.publishStartedAt
+      ) throw new Error('publish blocker recheck changed while constructing its response');
+      return jsonResponse(200, body);
     }
     const cancellationMatch = context.method === 'POST'
       ? context.path.match(/^\/api\/jobs\/([^/]+)\/cancel$/u)

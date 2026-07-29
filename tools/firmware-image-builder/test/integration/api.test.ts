@@ -6,6 +6,8 @@ import { createApiRouteHandler, type ApiRouteDependencies } from '../../api/src/
 import { StoreNotFoundError } from '../../api/src/store.js';
 import type { EvidenceIndex } from '../../api/src/evidence-reader.js';
 import { PreflightError } from '../../api/src/preflight.js';
+import { PublishBlockerRecheckError } from '../../api/src/publish-blocker-recheck.js';
+import type { JobRecord } from '../../api/src/store.js';
 
 const sha = 'a'.repeat(40);
 const now = '2026-07-28T10:00:00.000Z';
@@ -100,6 +102,120 @@ function job(id: string) {
   } as const;
 }
 
+function blockedJob(id = 'job-1') {
+  const finalDirectory = `main/${sha}/rpi-5`;
+  const finalPath = `${finalDirectory}/image`;
+  return {
+    ...job(id),
+    state: 'failed' as const,
+    queueState: 'complete',
+    queuePosition: null,
+    currentStage: 'publish' as const,
+    terminalErrorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' as const,
+    terminalError: { code: 'UNVERIFIED_FINAL_PATH_BLOCKER' },
+    terminalAt: now,
+    artifactStagingPath: null,
+    artifactQuarantinePath: null,
+    artifactFinalDirectory: null,
+    artifactFinalPath: null,
+    checksumPath: `staging/${id}/sha256sums`,
+    manifestPath: `staging/${id}/build-manifest.json`,
+    verificationPath: `staging/${id}/verification.json`,
+    publishState: 'blocked' as const,
+    publishStartedAt: null,
+    publishedAt: null,
+    publishBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' as const,
+    publishBlocker: {
+      code: 'UNVERIFIED_FINAL_PATH_BLOCKER',
+      diagnosis: 'Native publication did not produce a verified final destination.',
+      binding: {
+        jobId: id,
+        rootId: 'release',
+        rootPath: '/srv/images',
+        rootDevice: 11,
+        rootInode: 22,
+        branch: 'main',
+        branchSlug: 'main',
+        pinnedSha: sha,
+        targetId: 'rpi-5',
+        stagingDirectory: `staging/${id}`,
+        stagingPath: `staging/${id}/image`,
+        finalDirectory,
+        finalPath,
+        artifactSha256: 'c'.repeat(64),
+        artifactSize: 123,
+      },
+      response: {
+        available: true,
+        published: true,
+        quarantined: false,
+        selfTest: false,
+        mutationCount: 3,
+        renameResult: 'RENAMED',
+        publisherVersion: 'test-publisher',
+        publisherSourceSha256: 'd'.repeat(64),
+        sourceRelativePath: `.osi-image-builder/staging/${id}`,
+        destinationRelativePath: finalDirectory,
+      },
+      recheck: null,
+      quarantine: null,
+      nativeFailures: [{ phase: 'verify-final', message: 'final publication proof does not match the persisted artifact' }],
+      staging: 'absent',
+    },
+  };
+}
+
+function recheckProof(resolution: 'cleared_absent' | 'marked_published' | 'retained_blocker') {
+  const finalDirectory = `main/${sha}/rpi-5`;
+  const finalPath = `${finalDirectory}/image`;
+  if (resolution === 'cleared_absent') {
+    return {
+      kind: 'destination-absent', observedAt: now,
+      publisher: { destination: 'absent', staging: 'absent', mutationCount: 0 },
+      finalDirectory, finalPath,
+    };
+  }
+  if (resolution === 'retained_blocker') {
+    return {
+      kind: 'retained-blocker', observedAt: now, reason: 'destination-mismatched',
+      publisher: { destination: 'mismatched', staging: 'absent', mutationCount: 0 },
+    };
+  }
+  return {
+    kind: 'destination-matches', observedAt: now,
+    publisher: { destination: 'candidate', staging: 'absent', mutationCount: 0 },
+    finalDirectory, finalPath,
+    staging: { path: 'staging/job-1', state: 'absent' },
+    artifact: { sha256: 'c'.repeat(64), size: 123, mtime: now },
+    checksum: { path: `${finalDirectory}/sha256sums`, sha256: 'c'.repeat(64) },
+    manifest: { path: `${finalDirectory}/build-manifest.json`, sha256: 'c'.repeat(64) },
+    verification: { path: `${finalDirectory}/verification.json`, sha256: 'c'.repeat(64) },
+  };
+}
+
+function recheckAudit(
+  blocked: Omit<ReturnType<typeof blockedJob>, 'artifactStagingPath'> & { artifactStagingPath: string | null },
+  resolution: 'cleared_absent' | 'marked_published' | 'retained_blocker',
+) {
+  const proof = recheckProof(resolution);
+  return {
+    jobId: blocked.jobId, attempt: 1, eventSeq: 12, resolution,
+    observedAt: now, committedAt: later,
+    priorPublishState: 'blocked', priorBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER',
+    priorBlocker: blocked.publishBlocker,
+    artifactStagingPath: blocked.artifactStagingPath,
+    artifactQuarantinePath: blocked.artifactQuarantinePath,
+    artifactSha256: blocked.artifactSha256, artifactSize: blocked.artifactSize, artifactMtime: blocked.artifactMtime,
+    checksumPath: blocked.checksumPath, checksumSha256: blocked.checksumSha256,
+    manifestPath: blocked.manifestPath, manifestSha256: blocked.manifestSha256,
+    verificationPath: blocked.verificationPath, verificationSha256: blocked.verificationSha256,
+    finalDirectory: resolution === 'marked_published' ? `main/${sha}/rpi-5` : null,
+    finalPath: resolution === 'marked_published' ? `main/${sha}/rpi-5/image` : null,
+    publishedAt: resolution === 'marked_published' ? later : null,
+    proof,
+  };
+}
+
 function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): ApiRouteDependencies {
   const record = job('job-1');
   const stage = {
@@ -168,6 +284,13 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
         jobId: requestValue.jobId,
       }),
     },
+    publishBlockerRecheck: {
+      recheck: async (requestValue: { jobId: string }) => ({
+        kind: 'conflict',
+        jobId: requestValue.jobId,
+        conflict: { kind: 'stale-predecessor', message: 'not configured' },
+      }),
+    },
     eventStream: {
       open: async function* (jobId: string, afterSeq: number) {
         yield `id: ${afterSeq + 1}\nevent: terminal\ndata: ${JSON.stringify({ jobId, state: 'succeeded' })}\n\n`;
@@ -176,6 +299,7 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
     store: {
       listJobs: async ({ cursor, limit }: { cursor: string | null; limit: number }) => ({ jobs: [record], nextCursor: cursor === null && limit === 1 ? 'next-page' : null }),
       getJob: (id: string) => id === 'job-1' ? record : (() => { throw new StoreNotFoundError('not found'); })(),
+      getPublishBlockerRecheck: () => null,
       getRecoveryJob: (id: string) => id === 'job-1' ? {
         ...record,
         cleanupFenceGeneration: null,
@@ -186,6 +310,7 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
         cleanupLeaseBlocker: null,
       } : (() => { throw new StoreNotFoundError('not found'); })(),
       getStage: (id: string, requestedStage: typeof stage.stage) => id === 'job-1' && requestedStage === 'publish' ? stage : null,
+      getPublishStartEvent: () => null,
       getTerminalEvent: (id: string) => id === 'job-1' ? {
         jobId: id,
         seq: 3,
@@ -835,6 +960,500 @@ describe('read-only builder API routes', () => {
 
     expect(response.status).toBe(404);
     expect(requestCancellation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['cleared_absent', 'cleared-absent'],
+    ['marked_published', 'marked-published'],
+    ['retained_blocker', 'retained-blocker'],
+  ] as const)('rechecks a publish blocker only after durable %s provenance', async (resolution, resultKind) => {
+    const blocked = blockedJob();
+    const audit = recheckAudit(blocked, resolution);
+    const proof = recheckProof(resolution);
+    const postJob = resolution === 'cleared_absent'
+      ? {
+        ...blocked,
+        artifactStagingPath: null, artifactQuarantinePath: null, artifactQuarantineIntentPath: null,
+        artifactFinalDirectory: null, artifactFinalPath: null, artifactSha256: null, artifactSize: null, artifactMtime: null,
+        checksumPath: null, checksumSha256: null, manifestPath: null, manifestSha256: null,
+        verificationPath: null, verificationSha256: null, publishState: null, publishStartedAt: null, publishedAt: null,
+        publishBlockerCode: null, publishBlocker: null,
+      }
+      : resolution === 'marked_published'
+        ? {
+          ...blocked,
+          artifactStagingPath: null, artifactQuarantinePath: null, artifactQuarantineIntentPath: null,
+          artifactFinalDirectory: `main/${sha}/rpi-5`, artifactFinalPath: `main/${sha}/rpi-5/image`,
+          checksumPath: `main/${sha}/rpi-5/sha256sums`, manifestPath: `main/${sha}/rpi-5/build-manifest.json`,
+          verificationPath: `main/${sha}/rpi-5/verification.json`, publishState: 'published' as const,
+          publishStartedAt: now, publishedAt: later, publishBlockerCode: null, publishBlocker: null,
+        }
+        : blocked;
+    let current: JobRecord = blocked as JobRecord;
+    const recheck = vi.fn(async () => {
+      current = postJob as JobRecord;
+      return { kind: resultKind, jobId: 'job-1', eventSeq: 12 };
+    });
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck } });
+      Object.assign(value.store as object, {
+        getJob: vi.fn(() => current),
+        getPublishBlockerRecheck: (jobId: string, eventSeq: number) => jobId === 'job-1' && eventSeq === 12 ? audit : null,
+        getTerminalEvent: (jobId: string) => jobId === 'job-1' ? {
+          jobId, seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const,
+          payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now,
+        } : null,
+        getPublishStartEvent: (jobId: string, terminalSeq: number) => jobId === 'job-1' && terminalSeq === 10 ? {
+          jobId, seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const,
+          payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now,
+        } : null,
+        listEvents: (jobId: string, options?: { afterSeq?: number; limit?: number }) => ({
+          events: options?.afterSeq === 11 && jobId === 'job-1' ? [{
+            jobId, seq: 12, eventType: 'recovery' as const, state: 'failed' as const, stage: 'publish' as const,
+            payload: { kind: 'publish-blocker-recheck', resolution, attempt: 1, proof }, at: later,
+          }] : [], nextAfterSeq: null,
+        }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ id: 'job-1', state: 'failed' });
+    expect(JSON.stringify(response.body)).not.toMatch(/srv\/images|verify-final|persisted artifact/u);
+    expect(recheck).toHaveBeenCalledTimes(1);
+    expect(recheck).toHaveBeenCalledWith({ jobId: 'job-1' });
+  });
+
+  it.each(['null', '[]', '{"extra":true}', ''])('requires an exact empty recheck body: %s', async (body) => {
+    const recheck = vi.fn();
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck } });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', body);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    expect(recheck).not.toHaveBeenCalled();
+  });
+
+  it('maps publish blocker recheck eligibility and conflicts to stable 409 responses', async () => {
+    const cases = [
+      ['not eligible', { kind: 'conflict', jobId: 'job-1', conflict: { kind: 'stale-predecessor', message: 'secret /private' } }, 'PUBLISH_BLOCKER_RECHECK_NOT_ELIGIBLE'],
+      ['fenced', { kind: 'conflict', jobId: 'job-1', conflict: { kind: 'fenced', message: 'secret /private' } }, 'CLEANUP_IN_PROGRESS'],
+      ['conflict', { kind: 'conflict', jobId: 'job-1', conflict: { kind: 'cas-lost', message: 'secret /private' } }, 'PUBLISH_BLOCKER_RECHECK_CONFLICT'],
+    ] as const;
+    for (const [_name, result, code] of cases) {
+      const started = await start(dependencies((value) => {
+        Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => result } });
+      }));
+      server = started.server;
+      const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+      expect(response.status).toBe(409);
+      expect(response.body).toMatchObject({ error: { code } });
+      expect(JSON.stringify(response.body)).not.toMatch(/secret|private/);
+      await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
+      server = undefined;
+    }
+  });
+
+  it('fails closed on a malformed service result without leaking evidence', async () => {
+    const result = { kind: 'marked-published', jobId: 'job-1', eventSeq: -1 } as const;
+    const blocked = blockedJob();
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => result } });
+      Object.assign(value.store as object, {
+        getJob: () => blocked,
+        getPublishBlockerRecheck: () => null,
+        getTerminalEvent: () => ({ jobId: 'job-1', seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const, payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now }),
+        getPublishStartEvent: () => ({ jobId: 'job-1', seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const, payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now }),
+        listEvents: () => ({ events: [], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+    expect(JSON.stringify(response.body)).not.toMatch(/private|secret|staging/);
+  });
+
+  it('does not invoke recheck for an unknown job', async () => {
+    const recheck = vi.fn();
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck } });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/missing/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(404);
+    expect(recheck).not.toHaveBeenCalled();
+  });
+
+  it('snapshots durable publish provenance before service execution and rereads it before success', async () => {
+    const blocked = blockedJob();
+    const audit = recheckAudit(blocked, 'cleared_absent');
+    const proof = recheckProof('cleared_absent');
+    const postJob = {
+      ...blocked,
+      artifactStagingPath: null, artifactQuarantinePath: null, artifactQuarantineIntentPath: null,
+      artifactFinalDirectory: null, artifactFinalPath: null, artifactSha256: null, artifactSize: null, artifactMtime: null,
+      checksumPath: null, checksumSha256: null, manifestPath: null, manifestSha256: null,
+      verificationPath: null, verificationSha256: null, publishState: null, publishStartedAt: null, publishedAt: null,
+      publishBlockerCode: null, publishBlocker: null,
+    };
+    const order: string[] = [];
+    let current: JobRecord = blocked as JobRecord;
+    const terminal = {
+      jobId: 'job-1', seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const,
+      payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now,
+    };
+    const publishStart = {
+      jobId: 'job-1', seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const,
+      payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now,
+    };
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        publishBlockerRecheck: { recheck: async () => {
+          order.push('service');
+          expect(order).toEqual(['terminal', 'publish-start', 'service']);
+          current = postJob as JobRecord;
+          return { kind: 'cleared-absent', jobId: 'job-1', eventSeq: 12 };
+        } },
+      });
+      Object.assign(value.store as object, {
+        getJob: vi.fn(() => current),
+        getPublishBlockerRecheck: () => audit,
+        getTerminalEvent: () => { order.push('terminal'); return terminal; },
+        getPublishStartEvent: () => { order.push('publish-start'); return publishStart; },
+        listEvents: () => ({ events: [{
+          jobId: 'job-1', seq: 12, eventType: 'recovery' as const, state: 'failed' as const, stage: 'publish' as const,
+          payload: { kind: 'publish-blocker-recheck', resolution: 'cleared_absent', attempt: 1, proof }, at: later,
+        }], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(200);
+    expect(order).toEqual(['terminal', 'publish-start', 'service', 'terminal', 'publish-start']);
+  });
+
+  it('rejects a valid recheck whose durable recovery event payload is wrong', async () => {
+    const blocked = blockedJob();
+    const audit = recheckAudit(blocked, 'cleared_absent');
+    const proof = recheckProof('cleared_absent');
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => ({ kind: 'cleared-absent', jobId: 'job-1', eventSeq: 12 }) } });
+      Object.assign(value.store as object, {
+        getJob: () => blocked,
+        getPublishBlockerRecheck: () => audit,
+        getTerminalEvent: () => ({ jobId: 'job-1', seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const, payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now }),
+        getPublishStartEvent: () => ({ jobId: 'job-1', seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const, payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now }),
+        listEvents: () => ({ events: [{ jobId: 'job-1', seq: 12, eventType: 'recovery' as const, state: 'failed' as const, stage: 'publish' as const, payload: { kind: 'publish-blocker-recheck', resolution: 'retained_blocker', attempt: 1, proof }, at: later }], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+  });
+
+  it('rejects audit evidence observed before the durable terminal', async () => {
+    const blocked = blockedJob();
+    const audit = recheckAudit(blocked, 'cleared_absent');
+    const early = '2026-07-28T09:59:59.000Z';
+    audit.observedAt = early;
+    (audit.proof as { observedAt: string }).observedAt = early;
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => ({ kind: 'cleared-absent', jobId: 'job-1', eventSeq: 12 }) } });
+      Object.assign(value.store as object, {
+        getJob: () => blocked,
+        getPublishBlockerRecheck: () => audit,
+        getTerminalEvent: () => ({ jobId: 'job-1', seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const, payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now }),
+        getPublishStartEvent: () => ({ jobId: 'job-1', seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const, payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now }),
+        listEvents: () => ({ events: [{ jobId: 'job-1', seq: 12, eventType: 'recovery' as const, state: 'failed' as const, stage: 'publish' as const, payload: { kind: 'publish-blocker-recheck', resolution: 'cleared_absent', attempt: 1, proof: audit.proof }, at: later }], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+  });
+
+  it.each(['cleared_absent', 'marked_published'] as const)('rejects a successful %s audit that retains staging', async (resolution) => {
+    const blocked = { ...blockedJob(), artifactStagingPath: 'staging/job-1/image' };
+    const audit = recheckAudit(blocked, resolution);
+    const proof = recheckProof(resolution);
+    const postJob = resolution === 'cleared_absent'
+      ? {
+        ...blocked, artifactStagingPath: null, artifactQuarantinePath: null, artifactQuarantineIntentPath: null,
+        artifactFinalDirectory: null, artifactFinalPath: null, artifactSha256: null, artifactSize: null, artifactMtime: null,
+        checksumPath: null, checksumSha256: null, manifestPath: null, manifestSha256: null,
+        verificationPath: null, verificationSha256: null, publishState: null, publishStartedAt: null, publishedAt: null,
+        publishBlockerCode: null, publishBlocker: null,
+      }
+      : {
+        ...blocked, artifactStagingPath: null, artifactQuarantinePath: null, artifactQuarantineIntentPath: null,
+        artifactFinalDirectory: `main/${sha}/rpi-5`, artifactFinalPath: `main/${sha}/rpi-5/image`,
+        checksumPath: `main/${sha}/rpi-5/sha256sums`, manifestPath: `main/${sha}/rpi-5/build-manifest.json`, verificationPath: `main/${sha}/rpi-5/verification.json`,
+        publishState: 'published' as const, publishStartedAt: now, publishedAt: later, publishBlockerCode: null, publishBlocker: null,
+      };
+    let current: JobRecord = blocked as JobRecord;
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => {
+        current = postJob as JobRecord;
+        return { kind: resolution === 'cleared_absent' ? 'cleared-absent' : 'marked-published', jobId: 'job-1', eventSeq: 12 };
+      } } });
+      Object.assign(value.store as object, {
+        getJob: () => current,
+        getPublishBlockerRecheck: () => audit,
+        getTerminalEvent: () => ({ jobId: 'job-1', seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const, payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now }),
+        getPublishStartEvent: () => ({ jobId: 'job-1', seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const, payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now }),
+        listEvents: () => ({ events: [{ jobId: 'job-1', seq: 12, eventType: 'recovery' as const, state: 'failed' as const, stage: 'publish' as const, payload: { kind: 'publish-blocker-recheck', resolution, attempt: 1, proof }, at: later }], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+  });
+
+  it('rejects a valid recheck with a wrong post-state', async () => {
+    const blocked = blockedJob();
+    const audit = recheckAudit(blocked, 'cleared_absent');
+    const proof = recheckProof('cleared_absent');
+    let current: JobRecord = blocked as JobRecord;
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => {
+        current = { ...blocked, publishState: 'blocked' as const } as JobRecord;
+        return { kind: 'cleared-absent', jobId: 'job-1', eventSeq: 12 };
+      } } });
+      Object.assign(value.store as object, {
+        getJob: () => current,
+        getPublishBlockerRecheck: () => audit,
+        getTerminalEvent: () => ({ jobId: 'job-1', seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const, payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now }),
+        getPublishStartEvent: () => ({ jobId: 'job-1', seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const, payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now }),
+        listEvents: () => ({ events: [{ jobId: 'job-1', seq: 12, eventType: 'recovery' as const, state: 'failed' as const, stage: 'publish' as const, payload: { kind: 'publish-blocker-recheck', resolution: 'cleared_absent', attempt: 1, proof }, at: later }], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+  });
+
+  it('rejects marked-published when ownership does not restore the durable publish start time', async () => {
+    const blocked = blockedJob();
+    const audit = recheckAudit(blocked, 'marked_published');
+    const proof = recheckProof('marked_published');
+    let current: JobRecord = blocked as JobRecord;
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => {
+        current = {
+          ...blocked, artifactStagingPath: null, artifactQuarantinePath: null, artifactQuarantineIntentPath: null,
+          artifactFinalDirectory: `main/${sha}/rpi-5`, artifactFinalPath: `main/${sha}/rpi-5/image`,
+          checksumPath: `main/${sha}/rpi-5/sha256sums`, manifestPath: `main/${sha}/rpi-5/build-manifest.json`, verificationPath: `main/${sha}/rpi-5/verification.json`,
+          publishState: 'published' as const, publishedAt: later, publishBlockerCode: null, publishBlocker: null,
+          publishStartedAt: later,
+        } as JobRecord;
+        return { kind: 'marked-published', jobId: 'job-1', eventSeq: 12 };
+      } } });
+      Object.assign(value.store as object, {
+        getJob: () => current,
+        getPublishBlockerRecheck: () => audit,
+        getTerminalEvent: () => ({ jobId: 'job-1', seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const, payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now }),
+        getPublishStartEvent: () => ({ jobId: 'job-1', seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const, payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now }),
+        listEvents: () => ({ events: [{ jobId: 'job-1', seq: 12, eventType: 'recovery' as const, state: 'failed' as const, stage: 'publish' as const, payload: { kind: 'publish-blocker-recheck', resolution: 'marked_published', attempt: 1, proof }, at: later }], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+  });
+
+  it.each(['terminal', 'publish-start'] as const)('rejects a valid %s sequence snapshot race', async (mutation) => {
+    const blocked = blockedJob();
+    const audit = recheckAudit(blocked, 'cleared_absent');
+    const proof = recheckProof('cleared_absent');
+    const postJob = {
+      ...blocked, artifactStagingPath: null, artifactQuarantinePath: null, artifactQuarantineIntentPath: null,
+      artifactFinalDirectory: null, artifactFinalPath: null, artifactSha256: null, artifactSize: null, artifactMtime: null,
+      checksumPath: null, checksumSha256: null, manifestPath: null, manifestSha256: null,
+      verificationPath: null, verificationSha256: null, publishState: null, publishStartedAt: null, publishedAt: null,
+      publishBlockerCode: null, publishBlocker: null,
+    };
+    let current: JobRecord = blocked as JobRecord;
+    let reread = false;
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => {
+        current = postJob as JobRecord;
+        reread = true;
+        return { kind: 'cleared-absent', jobId: 'job-1', eventSeq: 12 };
+      } } });
+      Object.assign(value.store as object, {
+        getJob: () => current,
+        getPublishBlockerRecheck: () => audit,
+        getTerminalEvent: () => ({
+          jobId: 'job-1', seq: reread && mutation === 'terminal' ? 11 : 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const,
+          payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now,
+        }),
+        getPublishStartEvent: () => ({
+          jobId: 'job-1', seq: reread && mutation === 'publish-start' ? 8 : 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const,
+          payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now,
+        }),
+        listEvents: () => ({ events: [{ jobId: 'job-1', seq: 12, eventType: 'recovery' as const, state: 'failed' as const, stage: 'publish' as const, payload: { kind: 'publish-blocker-recheck', resolution: 'cleared_absent', attempt: 1, proof }, at: later }], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(500);
+    await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
+    server = undefined;
+  });
+
+  it('rejects a valid final job snapshot race', async () => {
+    const blocked = blockedJob();
+    const audit = recheckAudit(blocked, 'cleared_absent');
+    const proof = recheckProof('cleared_absent');
+    const postJob = {
+      ...blocked, artifactStagingPath: null, artifactQuarantinePath: null, artifactQuarantineIntentPath: null,
+      artifactFinalDirectory: null, artifactFinalPath: null, artifactSha256: null, artifactSize: null, artifactMtime: null,
+      checksumPath: null, checksumSha256: null, manifestPath: null, manifestSha256: null,
+      verificationPath: null, verificationSha256: null, publishState: null, publishStartedAt: null, publishedAt: null,
+      publishBlockerCode: null, publishBlocker: null,
+    };
+    let jobReads = 0;
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => ({ kind: 'cleared-absent', jobId: 'job-1', eventSeq: 12 }) } });
+      Object.assign(value.store as object, {
+        getJob: () => {
+          jobReads += 1;
+          return jobReads === 1 ? blocked : jobReads === 2 ? postJob : { ...postJob, freshnessCheckedAt: later };
+        },
+        getPublishBlockerRecheck: () => audit,
+        getTerminalEvent: () => ({ jobId: 'job-1', seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const, payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now }),
+        getPublishStartEvent: () => ({ jobId: 'job-1', seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const, payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now }),
+        listEvents: () => ({ events: [{ jobId: 'job-1', seq: 12, eventType: 'recovery' as const, state: 'failed' as const, stage: 'publish' as const, payload: { kind: 'publish-blocker-recheck', resolution: 'cleared_absent', attempt: 1, proof }, at: later }], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(500);
+  });
+
+  it('rejects a valid final audit snapshot race', async () => {
+    const blocked = blockedJob();
+    const audit = recheckAudit(blocked, 'cleared_absent');
+    const finalAudit = { ...audit, priorBlocker: { ...(audit.priorBlocker as Record<string, unknown>), diagnosis: 'changed after response construction' } };
+    const proof = recheckProof('cleared_absent');
+    let auditReads = 0;
+    const postJob = {
+      ...blocked, artifactStagingPath: null, artifactQuarantinePath: null, artifactQuarantineIntentPath: null,
+      artifactFinalDirectory: null, artifactFinalPath: null, artifactSha256: null, artifactSize: null, artifactMtime: null,
+      checksumPath: null, checksumSha256: null, manifestPath: null, manifestSha256: null,
+      verificationPath: null, verificationSha256: null, publishState: null, publishStartedAt: null, publishedAt: null,
+      publishBlockerCode: null, publishBlocker: null,
+    };
+    let current: JobRecord = blocked as JobRecord;
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => { current = postJob as JobRecord; return { kind: 'cleared-absent', jobId: 'job-1', eventSeq: 12 }; } } });
+      Object.assign(value.store as object, {
+        getJob: () => current,
+        getPublishBlockerRecheck: () => { auditReads += 1; return auditReads === 1 ? audit : finalAudit; },
+        getTerminalEvent: () => ({ jobId: 'job-1', seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const, payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now }),
+        getPublishStartEvent: () => ({ jobId: 'job-1', seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const, payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now }),
+        listEvents: () => ({ events: [{ jobId: 'job-1', seq: 12, eventType: 'recovery' as const, state: 'failed' as const, stage: 'publish' as const, payload: { kind: 'publish-blocker-recheck', resolution: 'cleared_absent', attempt: 1, proof }, at: later }], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(500);
+  });
+
+  it('rejects accessor-backed nested proof fields before reading them', async () => {
+    const blocked = blockedJob();
+    const audit = recheckAudit(blocked, 'cleared_absent');
+    let proofGetterCalls = 0;
+    Object.defineProperty(audit.proof, 'publisher', { get: () => { proofGetterCalls += 1; return recheckProof('cleared_absent').publisher; } });
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => ({ kind: 'cleared-absent', jobId: 'job-1', eventSeq: 12 }) } });
+      Object.assign(value.store as object, {
+        getJob: () => blocked,
+        getPublishBlockerRecheck: () => audit,
+        getTerminalEvent: () => ({ jobId: 'job-1', seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const, payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now }),
+        getPublishStartEvent: () => ({ jobId: 'job-1', seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const, payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now }),
+        listEvents: () => ({ events: [{ jobId: 'job-1', seq: 12, eventType: 'recovery' as const, state: 'failed' as const, stage: 'publish' as const, payload: { kind: 'publish-blocker-recheck', resolution: 'cleared_absent', attempt: 1, proof: recheckProof('cleared_absent') }, at: later }], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+    expect(response.status).toBe(500);
+    expect(proofGetterCalls).toBe(0);
+  });
+
+  it('rejects accessor-backed nested fields in the duplicate recovery proof before reading them', async () => {
+    const blocked = blockedJob();
+    const audit = recheckAudit(blocked, 'cleared_absent');
+    const eventProof = recheckProof('cleared_absent');
+    let proofGetterCalls = 0;
+    Object.defineProperty(eventProof, 'publisher', { get: () => { proofGetterCalls += 1; return recheckProof('cleared_absent').publisher; } });
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => ({ kind: 'cleared-absent', jobId: 'job-1', eventSeq: 12 }) } });
+      Object.assign(value.store as object, {
+        getJob: () => blocked,
+        getPublishBlockerRecheck: () => audit,
+        getTerminalEvent: () => ({ jobId: 'job-1', seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const, payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now }),
+        getPublishStartEvent: () => ({ jobId: 'job-1', seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const, payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now }),
+        listEvents: () => ({ events: [{ jobId: 'job-1', seq: 12, eventType: 'recovery' as const, state: 'failed' as const, stage: 'publish' as const, payload: { kind: 'publish-blocker-recheck', resolution: 'cleared_absent', attempt: 1, proof: eventProof }, at: later }], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(500);
+    expect(proofGetterCalls).toBe(0);
+  });
+
+  it('maps thrown not-eligible and unexpected service errors without leaking details', async () => {
+    const cases = [
+      [new PublishBlockerRecheckError('NOT_ELIGIBLE', 'secret /private'), 409, 'PUBLISH_BLOCKER_RECHECK_NOT_ELIGIBLE'],
+      [new Error('secret /private'), 500, 'INTERNAL_ERROR'],
+    ] as const;
+    for (const [error, status, code] of cases) {
+      const started = await start(dependencies((value) => Object.assign(value as object, { publishBlockerRecheck: { recheck: async () => { throw error; } } })));
+      server = started.server;
+      const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+      expect(response.status).toBe(status);
+      expect(response.body).toMatchObject({ error: { code } });
+      expect(JSON.stringify(response.body)).not.toMatch(/secret|private/);
+      await new Promise<void>((resolve, reject) => server!.close((closeError) => closeError ? reject(closeError) : resolve()));
+      server = undefined;
+    }
   });
 
   it.each([

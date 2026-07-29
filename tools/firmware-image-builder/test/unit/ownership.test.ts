@@ -3278,6 +3278,33 @@ function recheckCommand(jobId: string, resolution: 'clear-absent' | 'mark-publis
 }
 
 describe('publish blocker recheck ownership transaction', () => {
+  it('selects the earliest durable publish start with a synthetic cutoff', async () => {
+    const target = await blockedPublishFixture('recheck-store-accessor');
+    const terminal = target.store.getTerminalEvent('recheck-store-accessor');
+    if (terminal === null) throw new Error('fixture terminal event is missing');
+    target.db.prepare(`INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at)
+      VALUES (?, ?, 'publish', 'publishing', 'publish', ?, ?)`).run(
+      'recheck-store-accessor', terminal.seq + 1,
+      JSON.stringify({ state: 'publishing', publishStartedAt: NOW, finalDirectory: `main/${SHA40}/rpi-5`, finalPath: `main/${SHA40}/rpi-5/image` }),
+      LATER,
+    );
+    const cutoff = terminal.seq + 2;
+    const selected = target.store.getPublishStartEvent('recheck-store-accessor', cutoff);
+    const expected = target.store.listEvents('recheck-store-accessor').events
+      .filter((event) => event.seq < cutoff && event.eventType === 'publish' && event.payload.state === 'publishing')
+      .sort((left, right) => left.seq - right.seq)[0];
+    expect(selected).toEqual(expected);
+    expect(selected).toMatchObject({
+      jobId: 'recheck-store-accessor', eventType: 'publish', state: 'publishing', stage: 'publish',
+      payload: {
+        state: 'publishing', publishStartedAt: NOW,
+        finalDirectory: `main/${SHA40}/rpi-5`, finalPath: `main/${SHA40}/rpi-5/image`,
+      },
+    });
+    expect(() => target.store.getPublishStartEvent('bad id', terminal.seq)).toThrow(StoreValidationError);
+    expect(() => target.store.getPublishStartEvent('recheck-store-accessor', -1)).toThrow(StoreValidationError);
+  });
+
   it('clears an absent destination while preserving terminal and publish-stage evidence', async () => {
     const target = await blockedPublishFixture('recheck-absent');
     const beforeJob = target.store.getJob('recheck-absent'); const beforeStage = target.store.getStage('recheck-absent', 'publish'); const beforeEvents = target.store.listEvents('recheck-absent').events.length;

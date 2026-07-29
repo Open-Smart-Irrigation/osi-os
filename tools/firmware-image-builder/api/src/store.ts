@@ -815,6 +815,20 @@ export class BuilderStore {
     return this.#mapJob(row);
   }
 
+  getPublishStartEvent(jobId: string, terminalSeq: number): EventRecord | null {
+    if (typeof jobId !== 'string' || !JOB_ID.test(jobId)) throw new StoreValidationError('publish start event job ID is invalid');
+    if (!Number.isSafeInteger(terminalSeq) || terminalSeq < 0) throw new StoreValidationError('publish start event terminal sequence is invalid');
+    this.#requireJob(jobId);
+    const row = this.#db.prepare(`SELECT job_id, seq, event_type, state, stage, payload_json, at,
+        stream, file_generation, byte_offset, byte_length, partial
+      FROM job_events
+      WHERE job_id = ? AND seq < ? AND event_type = 'publish'
+        AND json_extract(payload_json, '$.state') = 'publishing'
+      ORDER BY seq ASC
+      LIMIT 1`).get(jobId, terminalSeq) as DbRow | undefined;
+    return row === undefined ? null : this.#mapEvent(row);
+  }
+
   getPublishBlockerRecheck(jobId: string, eventSeq: number): PublishBlockerRecheckRecord | null {
     if (typeof jobId !== 'string' || !JOB_ID.test(jobId)) throw new StoreValidationError('publish blocker recheck job ID is invalid');
     if (!Number.isSafeInteger(eventSeq) || eventSeq < 0) throw new StoreValidationError('publish blocker recheck event sequence is invalid');
