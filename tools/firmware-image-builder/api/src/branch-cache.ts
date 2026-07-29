@@ -37,7 +37,11 @@ function copyBranchList(value: unknown): Readonly<BranchList> {
   const fetchedAt = canonicalInstant(input.fetchedAt, 'branch list fetchedAt');
   if (!Array.isArray(input.branches) || input.branches.length > MAX_BRANCHES) invalid('branch list branches');
 
-  const branches: RemoteBranch[] = input.branches.map((value, index) => {
+  const branches: RemoteBranch[] = [];
+  for (let index = 0; index < input.branches.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(input.branches, index);
+    if (descriptor === undefined || !('value' in descriptor)) invalid(`branch list branches[${index}]`);
+    const value = descriptor.value;
     if (value === null || typeof value !== 'object' || Array.isArray(value)) invalid(`branch list branches[${index}]`);
     const inputBranch = value as {
       readonly name?: unknown;
@@ -49,8 +53,8 @@ function copyBranchList(value: unknown): Readonly<BranchList> {
     if (typeof inputBranch.sha !== 'string' || !SHA_PATTERN.test(inputBranch.sha)) invalid(`branch list branches[${index}].sha`);
     const commitTime = canonicalInstant(inputBranch.commitTime, `branch list branches[${index}].commitTime`);
     const subject = sourceMetadataSubject(inputBranch.subject, `branch list branches[${index}].subject`);
-    return Object.freeze({ name, sha: inputBranch.sha, commitTime, subject });
-  });
+    branches.push(Object.freeze({ name, sha: inputBranch.sha, commitTime, subject }));
+  }
 
   branches.sort((first, second) => first.name < second.name ? -1 : first.name > second.name ? 1 : 0);
   for (let index = 1; index < branches.length; index += 1) {
@@ -115,13 +119,15 @@ export class BranchCache {
   }
 
   #fetch(): Promise<Readonly<BranchList>> {
-    const flight = (async () => {
-      const result = copyBranchList(await this.#source.listBranches());
-      const completedAt = this.#observeClock();
-      this.#snapshot = result;
-      this.#completedAt = completedAt;
-      return result;
-    })();
+    const flight = Promise.resolve()
+      .then(() => this.#source.listBranches())
+      .then((value) => {
+        const result = copyBranchList(value);
+        const completedAt = this.#observeClock();
+        this.#snapshot = result;
+        this.#completedAt = completedAt;
+        return result;
+      });
     this.#inFlight = flight;
     void flight.then(
       () => { if (this.#inFlight === flight) this.#inFlight = null; },

@@ -148,6 +148,33 @@ describe('BranchCache', () => {
     expect(Object.isFrozen(firstSnapshot)).toBe(true);
   });
 
+  it('shares the in-flight fetch with synchronously reentrant get and refresh calls', async () => {
+    let cache!: BranchCache;
+    let calls = 0;
+    let reentrantGet: Promise<Readonly<BranchList>> | undefined;
+    let reentrantRefresh: Promise<Readonly<BranchList>> | undefined;
+    const source: BranchCacheSource = {
+      listBranches: () => {
+        calls += 1;
+        if (calls === 1) {
+          reentrantGet = cache.get();
+          reentrantRefresh = cache.refresh();
+        }
+        return Promise.resolve(list(branch('main')));
+      },
+    };
+    cache = new BranchCache(source, { clock: () => 1_000 });
+
+    const first = cache.get();
+    const snapshot = await first;
+
+    expect(calls).toBe(1);
+    expect(reentrantGet).toBe(first);
+    expect(reentrantRefresh).toBe(first);
+    expect(await reentrantGet).toBe(snapshot);
+    expect(await reentrantRefresh).toBe(snapshot);
+  });
+
   it('retains the last successful snapshot and preserves the original fetch error', async () => {
     let now = 1_000;
     const failure = new TypedFetchError('remote unavailable');
@@ -199,6 +226,29 @@ describe('BranchCache', () => {
     const mutableBranch = snapshot.branches[0] as unknown as { name: string };
     expect(() => mutableBranches.push(branch('other'))).toThrow(TypeError);
     expect(() => { mutableBranch.name = 'changed'; }).toThrow(TypeError);
+  });
+
+  it.each([
+    ['a hole', () => new Array<ReturnType<typeof branch>>(1)],
+    ['an accessor', () => {
+      const branches = [] as ReturnType<typeof branch>[];
+      Object.defineProperty(branches, '0', {
+        configurable: true,
+        enumerable: true,
+        get: () => branch('main'),
+      });
+      return branches;
+    }],
+  ])('rejects branch arrays with %s', async (_description, makeBranches) => {
+    const malformed = {
+      fetchedAt: FETCHED_AT,
+      branches: makeBranches(),
+    } as unknown as BranchList;
+    const source = sourceFor(malformed);
+    const cache = new BranchCache(source, { clock: () => 1_000 });
+
+    await expect(cache.get()).rejects.toThrow();
+    expect(cache.peek()).toEqual({ snapshot: null, stale: false });
   });
 
   it.each([
