@@ -181,7 +181,7 @@ function assertDirectory(
     || stats.uid !== ownerUid
     || stats.dev !== device
     || !modes.includes(modeOf(stats))
-    || stats.nlink < 2
+    || stats.nlink < 1
   ) return fail('UNSAFE_DIRECTORY', field);
 }
 

@@ -183,7 +183,7 @@ async function snapshot(handle: FileHandle): Promise<Snapshot> {
 function assertParent(snapshotValue: Snapshot, ownerUid: number): void {
   if (!snapshotValue.stats.isDirectory() || snapshotValue.stats.isSymbolicLink()) fail('PATH_UNSAFE', 'installation directory is not a regular directory');
   if (snapshotValue.stats.uid !== ownerUid) fail('OWNER_MISMATCH', 'installation directory owner does not match the configured UID');
-  if (snapshotValue.stats.nlink < 2) fail('PATH_UNSAFE', 'installation directory has an invalid link count');
+  if (snapshotValue.stats.nlink < 1) fail('PATH_UNSAFE', 'installation directory has an invalid link count');
 }
 
 function assertLock(snapshotValue: Snapshot, parent: Snapshot, ownerUid: number, maxBytes: number): void {

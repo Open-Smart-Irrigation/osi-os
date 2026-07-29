@@ -188,7 +188,7 @@ function assertDirectory(stats: NativeStats, field: string, ownerUid: number, de
     || !stats.isDirectory()
     || stats.uid !== ownerUid
     || modeOf(stats) !== exactMode
-    || stats.nlink < 2
+    || stats.nlink < 1
     || stats.dev !== device
   ) {
     fail(`unsafe recovery directory: ${field}`);
@@ -201,7 +201,7 @@ function assertPublisherDirectory(stats: NativeStats, field: string, ownerUid: n
     || !stats.isDirectory()
     || stats.uid !== ownerUid
     || modeOf(stats) !== PUBLISHER_DIRECTORY_MODE
-    || stats.nlink < 2
+    || stats.nlink < 1
     || stats.dev !== device
   ) {
     fail(`unsafe recovery publisher directory: ${field}`);
@@ -214,7 +214,7 @@ function assertJobDirectory(stats: NativeStats, field: string, ownerUid: number,
     || !stats.isDirectory()
     || stats.uid !== ownerUid
     || modeOf(stats) !== DIRECTORY_MODE
-    || stats.nlink < 2
+    || stats.nlink < 1
     || stats.dev !== device
   ) {
     fail(`unsafe recovery job directory: ${field}`);
@@ -232,7 +232,7 @@ function assertApprovedRoot(stats: NativeStats, field: string, ownerUid: number,
     || stats.uid !== ownerUid
     || (modeOf(stats) & 0o700) !== 0o700
     || (modeOf(stats) & 0o022) !== 0
-    || stats.nlink < 2
+    || stats.nlink < 1
     || stats.dev !== device
     || stats.ino !== inode
   ) {

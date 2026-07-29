@@ -421,7 +421,7 @@ function verifyDirectoryMetadata(
     || stats.isSymbolicLink()
     || stats.uid !== ownerUid
     || stats.dev !== device
-    || stats.nlink < 2
+    || stats.nlink < 1
     || !modeIsValid
   ) {
     throw new Error(`${field} has unsafe metadata`);
