@@ -221,9 +221,10 @@ describe('versioned builder database migrations', () => {
       { version: 14, filename: '014_retention_prunes.sql' },
       { version: 15, filename: '015_retention_prune_target_identity.sql' },
       { version: 16, filename: '016_log_gap_source_seq_unique.sql' },
+      { version: 17, filename: '017_publish_blocker_recheck.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
-      .toEqual(['cleanup_credential_reservations', 'cleanup_leases', 'cleanup_stop_authorization_heads', 'cleanup_stop_authorization_outcomes', 'cleanup_stop_authorizations', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'queue_dispatch_claims', 'queue_entries', 'retention_prune_intents', 'retention_prunes', 'retention_purge_authorizations', 'schema_migrations', 'sqlite_sequence']);
+      .toEqual(['cleanup_credential_reservations', 'cleanup_leases', 'cleanup_stop_authorization_heads', 'cleanup_stop_authorization_outcomes', 'cleanup_stop_authorizations', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'publish_blocker_rechecks', 'queue_dispatch_claims', 'queue_entries', 'retention_prune_intents', 'retention_prunes', 'retention_purge_authorizations', 'schema_migrations', 'sqlite_sequence']);
     expectColumns(db, 'jobs', [
       'job_id', 'request_id', 'request_json', 'source_remote', 'source_ref', 'source_branch', 'branch', 'expected_sha', 'pinned_sha',
       'target_id', 'root_id', 'target_manifest_sha256', 'source_commit_time', 'source_author', 'source_subject',
@@ -340,6 +341,7 @@ describe('versioned builder database migrations', () => {
     ]);
     expect(normalizeForeignKeys('job_log_generations')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('legacy_blocked_publish_evidence')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
+    expect(normalizeForeignKeys('publish_blocker_rechecks')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('job_events').sort((a, b) => `${a.table}${a.from}`.localeCompare(`${b.table}${b.from}`))).toEqual([
       { table: 'job_log_generations', from: 'file_generation', to: 'generation', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
       { table: 'job_log_generations', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
@@ -361,6 +363,7 @@ describe('versioned builder database migrations', () => {
       'job_operations_committed_delete_guard', 'job_operations_committed_update_guard', 'job_operations_manifest_label_guard',
       'job_operations_manifest_label_guard_update', 'jobs_cleanup_generation_guard', 'jobs_container_guard',
       'legacy_blocked_publish_evidence_delete_guard', 'legacy_blocked_publish_evidence_update_guard',
+      'publish_blocker_rechecks_delete_guard', 'publish_blocker_rechecks_update_guard',
       'jobs_container_guard_update', 'jobs_fence_guard', 'jobs_fence_guard_update', 'jobs_cleanup_blocker_guard',
       'jobs_cleanup_blocker_guard_update', 'jobs_freshness_evidence_pair_guard',
       'jobs_freshness_evidence_pair_guard_update', 'jobs_freshness_guard', 'jobs_freshness_guard_update',
@@ -515,7 +518,7 @@ describe('versioned builder database migrations', () => {
     const second = openBuilderDatabase(path);
     expect(second.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name").all())
       .toEqual(schema);
-    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 16 });
+    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 17 });
     second.close();
   });
 
@@ -592,6 +595,96 @@ describe('versioned builder database migrations', () => {
       }>;
     expect(represented.map((row) => row.storage_class)).toEqual(['real', 'real']);
     expect(represented[0]!.source_seq).not.toBe(represented[1]!.source_seq);
+    db.close();
+  });
+
+  it('preserves failed artifact evidence when an absent final-path blocker is rechecked', async () => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    insertValidJob(db, 'rechecked-absent', 'building');
+    const artifact = stagingEvidence();
+    db.prepare(`UPDATE jobs SET
+      state='failed', queue_state='complete', terminal_at=?, terminal_error_code='PUBLISH_FAILED',
+      terminal_error_json='{"reason":"publish recovery failed"}',
+      artifact_staging_path=NULL, artifact_sha256=?, artifact_size=?, artifact_mtime=?,
+      checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?,
+      verification_path=?, verification_sha256=?,
+      publish_state='blocked', publish_blocker_code='UNVERIFIED_FINAL_PATH_BLOCKER',
+      publish_blocker_json='{"staging":"absent"}', updated_at=?
+      WHERE job_id=?`).run(
+      '2026-07-28T00:01:00.000Z',
+      artifact.artifact_sha256, artifact.artifact_size, artifact.artifact_mtime,
+      artifact.checksum_path, artifact.checksum_sha256,
+      artifact.manifest_path, artifact.manifest_sha256,
+      artifact.verification_path, artifact.verification_sha256,
+      '2026-07-28T00:01:00.000Z',
+      'rechecked-absent',
+    );
+
+    db.exec('BEGIN IMMEDIATE');
+    db.prepare(`INSERT INTO publish_blocker_rechecks (
+      job_id, attempt, resolution, observed_at, committed_at,
+      prior_publish_state, prior_blocker_code, prior_blocker_json,
+      artifact_staging_path, artifact_sha256, artifact_size, artifact_mtime,
+      checksum_path, checksum_sha256, manifest_path, manifest_sha256,
+      verification_path, verification_sha256, final_directory, final_path,
+      published_at, proof_json
+    )
+    SELECT
+      job_id, 1, 'cleared_absent', '2026-07-28T00:02:00.000Z',
+      '2026-07-28T00:02:00.000Z', publish_state, publish_blocker_code,
+      publish_blocker_json, artifact_staging_path, artifact_sha256,
+      artifact_size, artifact_mtime, checksum_path, checksum_sha256,
+      manifest_path, manifest_sha256, verification_path, verification_sha256,
+      NULL, NULL, NULL, '{"destination":"absent","staging":"absent","mutationCount":0}'
+    FROM jobs WHERE job_id='rechecked-absent'`).run();
+    db.prepare(`UPDATE jobs SET
+      artifact_staging_path=NULL, artifact_quarantine_path=NULL,
+      artifact_quarantine_intent_path=NULL, artifact_final_directory=NULL,
+      artifact_final_path=NULL, artifact_sha256=NULL, artifact_size=NULL,
+      artifact_mtime=NULL, checksum_path=NULL, checksum_sha256=NULL,
+      manifest_path=NULL, manifest_sha256=NULL, verification_path=NULL,
+      verification_sha256=NULL, publish_state=NULL, publish_started_at=NULL,
+      published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL,
+      updated_at='2026-07-28T00:02:00.000Z'
+      WHERE job_id='rechecked-absent'`).run();
+    db.exec('COMMIT');
+
+    expect(db.prepare(`SELECT
+      state, terminal_error_code, publish_state, artifact_staging_path,
+      artifact_final_directory, artifact_final_path, publish_started_at, published_at,
+      publish_blocker_code, publish_blocker_json, artifact_sha256
+      FROM jobs WHERE job_id='rechecked-absent'`).get()).toEqual({
+      state: 'failed',
+      terminal_error_code: 'PUBLISH_FAILED',
+      publish_state: null,
+      artifact_staging_path: null,
+      artifact_final_directory: null,
+      artifact_final_path: null,
+      publish_started_at: null,
+      published_at: null,
+      publish_blocker_code: null,
+      publish_blocker_json: null,
+      artifact_sha256: null,
+    });
+    expect(db.prepare(`SELECT
+      resolution, prior_publish_state, prior_blocker_code, artifact_sha256,
+      artifact_size, checksum_sha256, manifest_sha256, verification_sha256,
+      final_path, published_at
+      FROM publish_blocker_rechecks WHERE job_id='rechecked-absent'`).get()).toEqual({
+      resolution: 'cleared_absent',
+      prior_publish_state: 'blocked',
+      prior_blocker_code: 'UNVERIFIED_FINAL_PATH_BLOCKER',
+      artifact_sha256: HASH64,
+      artifact_size: 100,
+      checksum_sha256: HASH64,
+      manifest_sha256: HASH64,
+      verification_sha256: HASH64,
+      final_path: null,
+      published_at: null,
+    });
+    check(db, "UPDATE publish_blocker_rechecks SET resolution='retained_blocker'", /immutable/u);
+    check(db, "DELETE FROM publish_blocker_rechecks WHERE job_id='rechecked-absent'", /immutable/u);
     db.close();
   });
 
@@ -718,7 +811,7 @@ describe('versioned builder database migrations', () => {
     physicalOrderDb.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(1, '001_initial.sql', MIGRATION_REGISTRY[0].sha256, 'x');
     physicalOrderDb.close();
     const accepted = openBuilderDatabase(physicalOrderPath);
-    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 16 });
+    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 17 });
     accepted.close();
   });
 
@@ -1061,7 +1154,7 @@ describe('versioned builder database migrations', () => {
     fresh.close();
 
     const reopened = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
-    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 16 });
+    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 17 });
     expect(reopened.prepare('SELECT COUNT(*) AS count FROM legacy_blocked_publish_evidence').get()).toEqual({ count: 2 });
     expect(reopened.prepare("SELECT terminal_error_json FROM jobs WHERE job_id='legacy-terminal'").get())
       .toEqual({ terminal_error_json: terminalSentinel });
