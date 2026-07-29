@@ -589,6 +589,79 @@ function isSensitiveObservationKey(key: string): boolean {
     : normalized.includes(part));
 }
 
+interface ObservationProjectionBudget {
+  nodes: number;
+  edges: number;
+}
+
+function matchingJsonContainerEnd(value: string, start: number, limit: number): number | null {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < limit; index += 1) {
+    const character = value[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+    } else if (character === '{' || character === '[') {
+      stack.push(character);
+    } else if (character === '}' || character === ']') {
+      const opening = stack.pop();
+      if ((character === '}' && opening !== '{') || (character === ']' && opening !== '[')) return null;
+      if (stack.length === 0) return index + 1;
+    }
+  }
+  return null;
+}
+
+function hasSensitiveJsonKey(value: unknown, field: string, depth: number, budget: ObservationProjectionBudget): boolean {
+  budget.nodes += 1;
+  if (budget.nodes > JSON_LIMITS.maxNodes || depth > JSON_LIMITS.maxDepth) return true;
+  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') return false;
+  if (Array.isArray(value)) {
+    if (value.length > JSON_LIMITS.maxArrayElements) return true;
+    for (let index = 0; index < value.length; index += 1) {
+      budget.edges += 1;
+      if (budget.edges > JSON_LIMITS.maxEdges || hasSensitiveJsonKey(value[index], `${field}[${index}]`, depth + 1, budget)) return true;
+    }
+    return false;
+  }
+  if (typeof value !== 'object') return true;
+  const input = value as Record<string, unknown>;
+  const keys = Object.keys(input);
+  if (keys.length > JSON_LIMITS.maxKeys) return true;
+  for (const key of keys) {
+    if (isSensitiveObservationKey(key)) return true;
+    budget.edges += 1;
+    if (budget.edges > JSON_LIMITS.maxEdges || hasSensitiveJsonKey(input[key], `${field}.${key}`, depth + 1, budget)) return true;
+  }
+  return false;
+}
+
+function hasStructuredJsonCredential(value: string): boolean {
+  const limit = Math.min(value.length, JSON_LIMITS.maxEncodedBytes);
+  for (let start = 0; start < limit; start += 1) {
+    if (value[start] !== '{' && value[start] !== '[') continue;
+    const end = matchingJsonContainerEnd(value, start, limit);
+    if (end === null) continue;
+    const candidate = value.slice(start, end);
+    if (Buffer.byteLength(candidate, 'utf8') > JSON_LIMITS.maxEncodedBytes) continue;
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      if (hasSensitiveJsonKey(parsed, 'public text JSON', 0, { nodes: 0, edges: 0 })) return true;
+      start = end - 1;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
 function hasCredentialUrl(value: string): boolean {
   for (const match of value.matchAll(URL_PATTERN)) {
     try {
@@ -613,6 +686,7 @@ function hasCommonStringRedaction(value: string): boolean {
   return CONTROL_PATTERN.test(value)
     || PRIVATE_KEY_PATTERN.test(value)
     || QUOTED_CREDENTIAL_PATTERN.test(value)
+    || hasStructuredJsonCredential(value)
     || AUTHORIZATION_HEADER_PATTERN.test(value)
     || hasBareAuthorizationToken(value)
     || hasCredentialUrl(value)
@@ -630,11 +704,6 @@ function redactPublicText(value: string): string {
 
 function redactObservationString(value: string): string {
   return redactPublicText(value);
-}
-
-interface ObservationProjectionBudget {
-  nodes: number;
-  edges: number;
 }
 
 function projectPublicObservation(value: unknown, field: string, depth: number, budget: ObservationProjectionBudget): unknown {

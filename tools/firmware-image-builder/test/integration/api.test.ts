@@ -846,17 +846,20 @@ describe('read-only builder API routes', () => {
     });
   });
 
-  it('redacts quoted JSON credentials across observations, argv, diagnosis, and recovery', async () => {
-    const quotedCredentials = [
-      '{"password":"json-password-secret"}',
-      '{ "password" : "json-spaced-password-secret" }',
-      '{\n  "password"\t:\t"json-whitespace-password-secret"\n}',
+  it('redacts bounded structured JSON credentials across all public text surfaces', async () => {
+    const structuredCredentials = [
+      '{"pass\\u0077ord":"escaped-secret"}',
+      '{"nested":[{"password":123456},{"password":null},{"password":{"nested":"object-secret"}},{"password":[1,2,3]}]}',
+      'prefix [{"safe":true},{"api\\u004bey":["array-secret"]}] suffix',
     ];
+    const malformedCredential = 'malformed {"password":"lexical-secret"';
+    const benignJson = '{"status":"ok","nested":[{"count":2},null]}';
+    const redactedCredentials = [...structuredCredentials, malformedCredential];
     const routeDependencies = dependencies();
     useEvidence(routeDependencies, {
       ...stageEvidence('publish', 'failed'),
       commands: [{
-        argv: ['/usr/bin/node', ...quotedCredentials],
+        argv: ['/usr/bin/node', ...redactedCredentials, benignJson],
         startedAt: now,
         finishedAt: later,
         exitCode: 1,
@@ -864,11 +867,11 @@ describe('read-only builder API routes', () => {
         timedOut: false,
         outputLimit: false,
       }],
-      observations: { records: quotedCredentials },
+      observations: { records: [...redactedCredentials, benignJson] },
       error: {
         ...stageEvidence('publish', 'failed').error!,
-        diagnosis: `failed with ${quotedCredentials[0]}`,
-        recovery: `retry with ${quotedCredentials[1]}`,
+        diagnosis: `failed with ${structuredCredentials[0]}`,
+        recovery: `retry with ${structuredCredentials[1]}`,
       },
     }, 'publish', 'failed');
     const started = await start(routeDependencies); server = started.server;
@@ -876,13 +879,13 @@ describe('read-only builder API routes', () => {
     const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({
-      commands: [{ argv: ['/usr/bin/node', ...Array(quotedCredentials.length).fill('[redacted]')] }],
-      observations: { records: Array(quotedCredentials.length).fill('[redacted]') },
+      commands: [{ argv: ['/usr/bin/node', ...Array(redactedCredentials.length).fill('[redacted]'), benignJson] }],
+      observations: { records: [...Array(redactedCredentials.length).fill('[redacted]'), benignJson] },
       error: { diagnosis: '[redacted]', recovery: '[redacted]' },
     });
     const encoded = JSON.stringify(response.body);
-    for (const credential of quotedCredentials) expect(encoded).not.toContain(credential);
-    for (const secret of ['json-password-secret', 'json-spaced-password-secret', 'json-whitespace-password-secret']) {
+    for (const credential of redactedCredentials) expect(encoded).not.toContain(credential);
+    for (const secret of ['escaped-secret', 'object-secret', 'array-secret', 'lexical-secret']) {
       expect(encoded).not.toContain(secret);
     }
   });
