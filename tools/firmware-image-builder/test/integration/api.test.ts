@@ -1,9 +1,10 @@
 import { request } from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PIPELINE_STAGE_NAMES, type PipelineStageName } from '../../domain/types.js';
 import { createHttpServer, type ApiRouteContext } from '../../api/src/server.js';
 import { createApiRouteHandler, type ApiRouteDependencies } from '../../api/src/routes.js';
 import { StoreNotFoundError } from '../../api/src/store.js';
+import type { EvidenceIndex } from '../../api/src/evidence-reader.js';
 
 const sha = 'a'.repeat(40);
 const now = '2026-07-28T10:00:00.000Z';
@@ -48,7 +49,7 @@ function useEvidence(
       evidenceSha256: 'd'.repeat(64), errorCode: outcome === 'failed' ? 'BUILD_FAILED' : null, error: null,
     } : null,
   });
-  Object.assign(dependencies as object, { readEvidence: async () => evidence });
+  Object.assign(dependencies as object, { evidenceReader: { read: async () => evidence } });
 }
 
 function job(id: string) {
@@ -124,7 +125,7 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
           }
         : (() => { throw new StoreNotFoundError('not found'); })(),
     },
-    readEvidence: async () => ({
+    evidenceReader: { read: async () => ({
       schemaVersion: 1,
       jobId: 'job-1',
       stage: 'publish',
@@ -136,7 +137,7 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
       inputs: { targetId: 'rpi-5', rootId: 'release', branch: 'main', pinnedSha: sha },
       observations: { artifactSha256: 'c'.repeat(64) },
       error: null,
-    }),
+    }) },
   } as ApiRouteDependencies;
   mutator?.(result);
   return result;
@@ -211,6 +212,82 @@ describe('read-only builder API routes', () => {
     const events = await get(started.port, '/api/jobs/job-1/events?after=0');
     expect(events.body).toEqual({ events: [{ seq: 2, event: 'terminal', state: 'succeeded', stage: 'publish', at: now, data: {} }], next: 2 });
     expect((await get(started.port, '/api/jobs/job-1/events?after=2')).body).toEqual({ events: [], next: 2 });
+  });
+
+  it('passes the exact stored evidence index to the indexed reader', async () => {
+    const reader = vi.fn(async (_index: EvidenceIndex) => stageEvidence());
+    const routeDependencies = dependencies((value) => {
+      Object.assign(value as object, { evidenceReader: { read: reader } });
+    });
+    const started = await start(routeDependencies); server = started.server;
+
+    expect((await get(started.port, '/api/jobs/job-1/evidence/publish')).status).toBe(200);
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(reader).toHaveBeenCalledWith({
+      jobId: 'job-1', stage: 'publish', path: 'jobs/job-1/evidence/09-publish.json', sha256: 'd'.repeat(64),
+    });
+    expect(Object.keys(reader.mock.calls[0]![0]!)).toEqual(['jobId', 'stage', 'path', 'sha256']);
+  });
+
+  it('returns not found and never reads indexed evidence with a null path or hash', async () => {
+    for (const field of ['evidencePath', 'evidenceSha256'] as const) {
+      const reader = vi.fn(async () => stageEvidence());
+      const routeDependencies = dependencies((value) => {
+        const stored = {
+          jobId: 'job-1', stage: 'publish' as const, outcome: 'passed' as const,
+          startedAt: now, finishedAt: now, evidencePath: 'jobs/job-1/evidence/09-publish.json', evidenceSha256: 'd'.repeat(64),
+          errorCode: null, error: null,
+          [field]: null,
+        };
+        Object.assign(value.store as object, { getStage: () => stored });
+        Object.assign(value as object, { evidenceReader: { read: reader } });
+      });
+      const started = await start(routeDependencies); server = started.server;
+
+      expect((await get(started.port, '/api/jobs/job-1/evidence/publish')).status).toBe(404);
+      expect(reader).not.toHaveBeenCalled();
+      await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
+      server = undefined;
+    }
+  });
+
+  it('never reads evidence when the indexed row has mismatched identity', async () => {
+    const reader = vi.fn(async () => stageEvidence());
+    const routeDependencies = dependencies((value) => {
+      Object.assign(value.store as object, {
+        getStage: () => ({
+          jobId: 'job-1', stage: 'build' as const, outcome: 'passed' as const,
+          startedAt: now, finishedAt: now, evidencePath: 'jobs/job-1/evidence/07-build.json', evidenceSha256: 'd'.repeat(64),
+          errorCode: null, error: null,
+        }),
+      });
+      Object.assign(value as object, { evidenceReader: { read: reader } });
+    });
+    const started = await start(routeDependencies); server = started.server;
+
+    expect((await get(started.port, '/api/jobs/job-1/evidence/publish')).status).toBe(500);
+    expect(reader).not.toHaveBeenCalled();
+  });
+
+  it('returns a stable redacted 500 when the indexed reader fails', async () => {
+    const reader = vi.fn(async () => {
+      throw new Error('private path /srv/secret token=do-not-leak');
+    });
+    const routeDependencies = dependencies((value) => {
+      Object.assign(value as object, { evidenceReader: { read: reader } });
+    });
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({
+      error: {
+        code: 'INTERNAL_ERROR', message: 'The request could not be completed.', stage: null,
+        details: {}, retryable: true, requestId: expect.stringMatching(/^req_/u),
+      },
+    });
+    expect(JSON.stringify(response.body)).not.toContain('do-not-leak');
+    expect(JSON.stringify(response.body)).not.toContain('/srv/secret');
   });
 
   it('serves complete validated production failure evidence', async () => {

@@ -26,6 +26,7 @@ import {
   sourceMetadataSubject,
   stableRelativePath,
 } from './validation.js';
+import type { IndexedEvidenceReader } from './evidence-reader.js';
 import { decodeStoredStageEvidence, type EvidenceCommand } from '../../runner/src/evidence.js';
 import { validateRemoteBranchName } from './git/source-resolver.js';
 import {
@@ -116,10 +117,6 @@ export interface ApiJobStore extends Pick<BuilderStore, 'getJob' | 'getStage' | 
   readonly listJobs: (options: { readonly cursor: string | null; readonly limit: number }) => JobPage | Promise<JobPage>;
 }
 
-export interface EvidenceReader {
-  readonly read: (job: JobRecord, stage: PipelineStageName) => unknown | Promise<unknown>;
-}
-
 export interface ApiTargetConfig {
   readonly id: string;
   readonly label: string;
@@ -145,7 +142,7 @@ export interface ApiRouteDependencies {
   readonly health: () => Pick<HealthSnapshot, 'activeJobId'> | HealthSnapshot | Promise<Pick<HealthSnapshot, 'activeJobId'> | HealthSnapshot>;
   readonly branches: BranchResolver['listBranches'];
   readonly store: ApiJobStore;
-  readonly readEvidence: EvidenceReader['read'];
+  readonly evidenceReader: IndexedEvidenceReader;
 }
 
 function badRequest(message: string): never {
@@ -746,9 +743,15 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
       const stage = validateStage(evidenceMatch[2]!);
       const jobRecord = getJob(dependencies.store, jobId);
       const indexedStage = dependencies.store.getStage(jobRecord.jobId, stage);
-      if (indexedStage === null || indexedStage.evidenceSha256 === null) notFound();
+      if (indexedStage === null || indexedStage.evidencePath === null || indexedStage.evidenceSha256 === null) notFound();
       stageDto(indexedStage, jobId, stage);
-      return jsonResponse(200, publicEvidence(await dependencies.readEvidence(jobRecord, stage), jobRecord, jobId, stage, dependencies));
+      const evidenceIndex = {
+        jobId: indexedStage.jobId,
+        stage: indexedStage.stage,
+        path: indexedStage.evidencePath,
+        sha256: indexedStage.evidenceSha256,
+      };
+      return jsonResponse(200, publicEvidence(await dependencies.evidenceReader.read(evidenceIndex), jobRecord, jobId, stage, dependencies));
     }
     const eventsMatch = context.path.match(/^\/api\/jobs\/([^/]+)\/events$/u);
     if (eventsMatch) {
