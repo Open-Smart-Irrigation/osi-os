@@ -154,7 +154,7 @@ export interface JobPage {
   readonly nextCursor: string | null;
 }
 
-export interface ApiJobStore extends Pick<BuilderStore, 'getJob' | 'getStage' | 'listEvents'> {
+export interface ApiJobStore extends Pick<BuilderStore, 'getJob' | 'getStage' | 'listEvents' | 'getTerminalEvent'> {
   readonly listJobs: (options: { readonly cursor: string | null; readonly limit: number }) => JobPage | Promise<JobPage>;
 }
 
@@ -1260,21 +1260,87 @@ function decodeCancellationResult(value: unknown, expectedJobId: string): Decode
   return { kind: 'request-not-accepted', state, requestPersisted: null, evidenceJson };
 }
 
-function cancellationJobMatchesResult(job: JobRecord, result: DecodedCancellationResult): void {
+function latePublishingChronologyMatches(job: JobRecord, cancelRequestedAt: string): boolean {
+  const publishStartedAt = nullableInstant(job.publishStartedAt, 'late cancellation publish start time');
+  return publishStartedAt !== null && cancelRequestedAt > publishStartedAt;
+}
+
+function runnerTerminalMatchesStore(job: JobRecord, store: ApiJobStore, state: string): boolean {
+  if (
+    state === 'interrupted'
+    || job.queueState !== 'complete'
+    || job.queuePosition !== null
+    || typeof job.runnerUnit !== 'string'
+    || !RUNNER_UNIT_PATTERN.test(job.runnerUnit)
+    || nullableInstant(job.dispatchedAt, 'post-cancellation dispatch time') === null
+  ) return false;
+  const terminalAt = nullableInstant(job.terminalAt, 'post-cancellation terminal time');
+  const event = store.getTerminalEvent(job.jobId);
+  if (
+    terminalAt === null
+    || event === null
+    || event.jobId !== job.jobId
+    || event.eventType !== 'terminal'
+    || event.state !== state
+    || event.at !== terminalAt
+  ) return false;
+  const payload = record(event.payload, 'post-cancellation terminal event');
+  if (state === 'cancelled') {
+    exactOwnStringKeys(payload, ['state', 'errorCode', 'cleanupEventSeq'], 'runner cancellation terminal event');
+    return ownDataProperty(payload, 'state', 'runner cancellation terminal state') === 'cancelled'
+      && ownDataProperty(payload, 'errorCode', 'runner cancellation terminal error code') === 'CANCELLED'
+      && safeInteger(
+        ownDataProperty(payload, 'cleanupEventSeq', 'runner cancellation cleanup event sequence'),
+        'runner cancellation cleanup event sequence',
+      ) >= 0
+      && job.terminalErrorCode === 'CANCELLED'
+      && job.terminalError !== null;
+  }
+  exactOwnStringKeys(payload, ['state', 'errorCode'], 'runner terminal event');
+  const eventErrorCode = ownDataProperty(payload, 'errorCode', 'runner terminal error code');
+  return ownDataProperty(payload, 'state', 'runner terminal state') === state
+    && (state === 'succeeded'
+      ? eventErrorCode === null && job.terminalErrorCode === null && job.terminalError === null
+      : typeof eventErrorCode === 'string'
+        && eventErrorCode === job.terminalErrorCode
+        && job.terminalError !== null);
+}
+
+function cancellationJobMatchesResult(
+  job: JobRecord,
+  result: DecodedCancellationResult,
+  store: ApiJobStore,
+): void {
   const state = identifier(job.state, 'post-cancellation job state');
   const cancelRequestedAt = nullableInstant(job.cancelRequestedAt, 'post-cancellation request time');
   const matchingState = state === result.state;
   const matches = result.kind === 'queued-cancelled'
-    ? matchingState && cancelRequestedAt !== null
+    ? matchingState
+      && cancelRequestedAt !== null
+      && job.cancelReason === 'operator'
+      && job.queueState === 'cancelled'
+      && job.queuePosition === null
+      && job.currentStage === null
+      && job.dispatchedAt === null
+      && job.runnerUnit === null
+      && job.terminalErrorCode === 'CANCELLED'
+      && job.terminalError !== null
+      && nullableInstant(job.terminalAt, 'queued cancellation terminal time') === cancelRequestedAt
     : result.kind === 'late-publishing'
-      ? matchingState && cancelRequestedAt !== null
+      ? matchingState
+        && cancelRequestedAt !== null
+        && job.cancelReason === 'operator'
+        && latePublishingChronologyMatches(job, cancelRequestedAt)
       : result.kind === 'coordination-pending'
         ? matchingState
           && cancelRequestedAt !== null
           && nullableInstant(job.cancellationClockHighWaterAt, 'post-cancellation clock high-water time') === result.cancellationClockHighWaterAt
           && nullableInstant(job.cancellationCooperativeDeadlineAt, 'post-cancellation cooperative deadline') === result.cooperativeDeadlineAt
         : result.kind === 'runner-terminal'
-          ? matchingState && cancelRequestedAt !== null
+          ? matchingState
+            && cancelRequestedAt !== null
+            && job.cancelReason === 'operator'
+            && runnerTerminalMatchesStore(job, store, state)
           : result.kind === 'recovery-blocked'
             ? matchingState
               && (result.requestPersisted !== true || cancelRequestedAt !== null)
@@ -1302,7 +1368,7 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
         jobId,
       );
       const updatedJob = getJob(dependencies.store, jobId);
-      cancellationJobMatchesResult(updatedJob, result);
+      cancellationJobMatchesResult(updatedJob, result, dependencies.store);
       if (result.kind === 'already-terminal') {
         throw new HttpTransportError({ code: 'CANCELLATION_TERMINAL', status: 409 });
       }

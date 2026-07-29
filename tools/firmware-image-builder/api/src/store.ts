@@ -707,6 +707,20 @@ export class BuilderStore {
     return { events, nextAfterSeq: hasMore ? events.at(-1)?.seq ?? null : null };
   }
 
+  getTerminalEvent(jobId: string): EventRecord | null {
+    this.#requireJob(jobId);
+    const rows = this.#db.prepare(
+      `SELECT job_id, seq, event_type, state, stage, payload_json, at,
+              stream, file_generation, byte_offset, byte_length, partial
+       FROM job_events
+       WHERE job_id = ? AND event_type = 'terminal'
+       ORDER BY seq DESC
+       LIMIT 2`,
+    ).all(jobId) as unknown as DbRow[];
+    if (rows.length > 1) throw new StoreDataError('job contains multiple terminal events');
+    return rows.length === 0 ? null : this.#mapEvent(rows[0]!);
+  }
+
   getCancellationProtocolEvents(jobId: string): readonly EventRecord[] {
     this.#requireJob(jobId);
     const rows = this.#db.prepare(

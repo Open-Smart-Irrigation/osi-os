@@ -166,6 +166,15 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
       listJobs: async ({ cursor, limit }: { cursor: string | null; limit: number }) => ({ jobs: [record], nextCursor: cursor === null && limit === 1 ? 'next-page' : null }),
       getJob: (id: string) => id === 'job-1' ? record : (() => { throw new StoreNotFoundError('not found'); })(),
       getStage: (id: string, requestedStage: typeof stage.stage) => id === 'job-1' && requestedStage === 'publish' ? stage : null,
+      getTerminalEvent: (id: string) => id === 'job-1' ? {
+        jobId: id,
+        seq: 3,
+        eventType: 'terminal' as const,
+        state: 'succeeded' as const,
+        stage: 'publish' as const,
+        payload: { state: 'succeeded', errorCode: null },
+        at: now,
+      } : null,
       listEvents: (id: string, options?: { afterSeq?: number; limit?: number }) => id === 'job-1'
         ? (options?.afterSeq ?? -1) >= 2
           ? { events: [], nextAfterSeq: null }
@@ -704,6 +713,8 @@ describe('read-only builder API routes', () => {
       queuePosition: null,
       cancelRequestedAt: now,
       cancelReason: 'operator',
+      dispatchedAt: null,
+      runnerUnit: null,
       terminalErrorCode: 'CANCELLED' as const,
       terminalError: { reason: 'operator' },
       terminalAt: now,
@@ -849,6 +860,179 @@ describe('read-only builder API routes', () => {
 
     expect(response.status).toBe(500);
     expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+  });
+
+  it('rejects a queued-cancelled result backed by a runner-owned terminal record', async () => {
+    const runnerCancelled = {
+      ...job('job-1'),
+      state: 'cancelled' as const,
+      queueState: 'complete',
+      queuePosition: null,
+      cancelRequestedAt: now,
+      cancelReason: 'operator',
+      terminalErrorCode: 'CANCELLED' as const,
+      terminalError: { reason: 'cancelled' },
+      terminalAt: now,
+    };
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        cancellation: {
+          requestCancellation: async () => ({
+            kind: 'queued-cancelled',
+            jobId: 'job-1',
+            state: 'cancelled',
+            requestPersisted: true,
+          }),
+        },
+      });
+      Object.assign(value.store as object, { getJob: () => runnerCancelled });
+    }));
+    server = started.server;
+
+    expect((await post(started.port, '/api/jobs/job-1/cancel', '{}')).status).toBe(500);
+  });
+
+  it('rejects late-publishing without durable late chronology', async () => {
+    const publishing = {
+      ...job('job-1'),
+      state: 'publishing' as const,
+      cancelRequestedAt: now,
+      cancelReason: 'operator',
+      publishStartedAt: now,
+      terminalAt: null,
+      terminalErrorCode: null,
+      terminalError: null,
+    };
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        cancellation: {
+          requestCancellation: async () => ({
+            kind: 'late-publishing',
+            jobId: 'job-1',
+            state: 'publishing',
+            late: true,
+            requestPersisted: true,
+          }),
+        },
+      });
+      Object.assign(value.store as object, { getJob: () => publishing });
+    }));
+    server = started.server;
+
+    expect((await post(started.port, '/api/jobs/job-1/cancel', '{}')).status).toBe(500);
+  });
+
+  it('accepts late-publishing only after the durable publish start', async () => {
+    const publishing = {
+      ...job('job-1'),
+      state: 'publishing' as const,
+      cancelRequestedAt: later,
+      cancelReason: 'operator',
+      publishStartedAt: now,
+      terminalAt: null,
+      terminalErrorCode: null,
+      terminalError: null,
+    };
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        now: () => later,
+        cancellation: {
+          requestCancellation: async () => ({
+            kind: 'late-publishing',
+            jobId: 'job-1',
+            state: 'publishing',
+            late: true,
+            requestPersisted: true,
+          }),
+        },
+      });
+      Object.assign(value.store as object, { getJob: () => publishing });
+    }));
+    server = started.server;
+
+    expect((await post(started.port, '/api/jobs/job-1/cancel', '{}')).status).toBe(200);
+  });
+
+  it('accepts runner-terminal only with the exact durable runner terminal event', async () => {
+    const runnerCancelled = {
+      ...job('job-1'),
+      state: 'cancelled' as const,
+      queueState: 'complete',
+      queuePosition: null,
+      cancelRequestedAt: now,
+      cancelReason: 'operator',
+      terminalErrorCode: 'CANCELLED' as const,
+      terminalError: { reason: 'cancelled' },
+      terminalAt: now,
+    };
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        cancellation: {
+          requestCancellation: async () => ({
+            kind: 'runner-terminal',
+            jobId: 'job-1',
+            state: 'cancelled',
+            runnerOwned: true,
+          }),
+        },
+      });
+      Object.assign(value.store as object, {
+        getJob: () => runnerCancelled,
+        getTerminalEvent: () => ({
+          jobId: 'job-1',
+          seq: 4,
+          eventType: 'terminal',
+          state: 'cancelled',
+          stage: 'publish',
+          payload: { state: 'cancelled', errorCode: 'CANCELLED', cleanupEventSeq: 3 },
+          at: now,
+        }),
+      });
+    }));
+    server = started.server;
+
+    expect((await post(started.port, '/api/jobs/job-1/cancel', '{}')).status).toBe(200);
+  });
+
+  it('rejects an API recovery terminal reported as runner-owned', async () => {
+    const recovered = {
+      ...job('job-1'),
+      state: 'interrupted' as const,
+      queueState: 'complete',
+      queuePosition: null,
+      cancelRequestedAt: now,
+      cancelReason: 'operator',
+      terminalErrorCode: 'RUNNER_DISAPPEARED' as const,
+      terminalError: { reason: 'recovered' },
+      terminalAt: later,
+    };
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        cancellation: {
+          requestCancellation: async () => ({
+            kind: 'runner-terminal',
+            jobId: 'job-1',
+            state: 'interrupted',
+            runnerOwned: true,
+          }),
+        },
+      });
+      Object.assign(value.store as object, {
+        getJob: () => recovered,
+        getTerminalEvent: () => ({
+          jobId: 'job-1',
+          seq: 4,
+          eventType: 'terminal',
+          state: 'interrupted',
+          stage: 'publish',
+          payload: { state: 'interrupted', errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'recovered' } },
+          at: later,
+        }),
+      });
+    }));
+    server = started.server;
+
+    expect((await post(started.port, '/api/jobs/job-1/cancel', '{}')).status).toBe(500);
   });
 
   it('passes the exact stored evidence index to the indexed reader', async () => {

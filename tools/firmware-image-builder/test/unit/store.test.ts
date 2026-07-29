@@ -212,6 +212,22 @@ describe('OwnershipStore persistence coverage', () => {
     const { ownership, store } = await openFixture(); acquireAndLease(ownership); ownership.runnerWrite(stageCommand('job-1', 'starting', 'preflight', 'preflight', 'running'));
     expect(ownership.runnerWrite({ ...runnerBase(), kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: LATER, errorCode: 'BUILD_FAILED', error: { reason: 'test' } }).ok).toBe(true);
     expect(store.getJob('job-1')).toMatchObject({ state: 'failed', terminalErrorCode: 'BUILD_FAILED', terminalAt: LATER });
+    expect(store.getTerminalEvent('job-1')).toMatchObject({
+      eventType: 'terminal',
+      state: 'failed',
+      payload: { state: 'failed', errorCode: 'BUILD_FAILED' },
+      at: LATER,
+    });
+  });
+
+  it('fails closed when a job contains more than one terminal event', async () => {
+    const { ownership, store, db } = await openFixture(); acquireAndLease(ownership); ownership.runnerWrite(stageCommand('job-1', 'starting', 'preflight', 'preflight', 'running'));
+    ownership.runnerWrite({ ...runnerBase(), kind: 'normal-terminal', expectedState: 'preflight', state: 'failed', terminalAt: LATER, errorCode: 'BUILD_FAILED', error: { reason: 'test' } });
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at) SELECT 'job-1', MAX(seq) + 1, 'terminal', 'failed', 'preflight', ?, ? FROM job_events WHERE job_id='job-1'").run(
+      JSON.stringify({ state: 'failed', errorCode: 'BUILD_FAILED' }),
+      LATER,
+    );
+    expect(() => store.getTerminalEvent('job-1')).toThrow(StoreDataError);
   });
 
   it('persists freshness request and API result idempotently', async () => {
