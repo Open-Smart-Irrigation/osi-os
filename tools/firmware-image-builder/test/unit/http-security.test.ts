@@ -1,7 +1,7 @@
 import { once } from 'node:events';
 import { connect } from 'node:net';
 import { request } from 'node:http';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createHttpServer,
   eventStreamResponse,
@@ -181,6 +181,44 @@ describe('loopback HTTP security boundary', () => {
       expect(response.status).toBe(500);
       expect(response.json).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
       expect(observedSignal?.aborted).toBe(true);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('does not await an uncooperative iterator return after disconnect', async () => {
+    let observedSignal: AbortSignal | undefined;
+    const close = vi.fn(() => new Promise<IteratorResult<string>>(() => undefined));
+    let nextCall = 0;
+    const { server, port } = await start(() => eventStreamResponse(200, (signal) => {
+      observedSignal = signal;
+      const iterator: AsyncIterableIterator<string> = {
+        [Symbol.asyncIterator]() { return iterator; },
+        next: async () => {
+          nextCall += 1;
+          if (nextCall === 1) return { done: false as const, value: ': connected\n\n' };
+          return new Promise<IteratorResult<string>>(() => undefined);
+        },
+        return: close,
+      };
+      return iterator;
+    }));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const req = request({ host: '127.0.0.1', port, path: '/api/jobs/job-1/events/stream' }, (res) => {
+          res.once('data', () => {
+            res.destroy();
+            resolve();
+          });
+        });
+        req.on('error', reject);
+        req.end();
+      });
+      for (let attempt = 0; attempt < 10 && close.mock.calls.length === 0; attempt += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      expect(observedSignal?.aborted).toBe(true);
+      expect(close).toHaveBeenCalledTimes(1);
     } finally {
       await stop(server);
     }

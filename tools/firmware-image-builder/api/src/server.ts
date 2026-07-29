@@ -374,7 +374,11 @@ async function sendEventStream(
   } finally {
     controller.abort();
     if (iterator?.return !== undefined) {
-      try { await iterator.return(); } catch (error) { failure ??= error; }
+      try {
+        void Promise.resolve(iterator.return()).catch(() => undefined);
+      } catch (error) {
+        failure ??= error;
+      }
     }
     request.off('aborted', abort);
     response.off('close', abort);
