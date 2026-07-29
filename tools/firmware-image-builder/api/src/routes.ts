@@ -30,6 +30,11 @@ import type { EvidenceIndex, IndexedEvidenceReader } from './evidence-reader.js'
 import { decodeStoredStageEvidence, type EvidenceCommand } from '../../runner/src/evidence.js';
 import { validateRemoteBranchName } from './git/source-resolver.js';
 import {
+  PREFLIGHT_CHECK_IDS,
+  PREFLIGHT_TTL_MS,
+  type PreflightRequest,
+} from './preflight.js';
+import {
   HttpTransportError,
   type ApiRouteContext,
   type ApiRouteHandler,
@@ -50,6 +55,7 @@ const RUNNER_UNIT_PATTERN = /^osi-image-builder-runner@[A-Za-z0-9][A-Za-z0-9._-]
 const OPAQUE_CURSOR_PATTERN = /^[A-Za-z0-9_-]{1,512}$/u;
 const HASH40_PATTERN = /^[0-9a-f]{40}$/u;
 const HASH64_PATTERN = /^[0-9a-f]{64}$/u;
+const PREFLIGHT_ID_PATTERN = /^pf_[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
 const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
 const PRIVATE_KEY_PATTERN = /(?:-----BEGIN [^-\r\n]*PRIVATE KEY-----|----+\s*BEGIN [^\r\n]*PRIVATE KEY\s*----+|(?:^|\r?\n)\s*PuTTY-User-Key-File-\d+\s*:|(?:^|\r?\n)\s*(?:SSH|RSA|EC|DSA)\s+PRIVATE KEY\s*[:=-])/imu;
 const SENSITIVE_OBSERVATION_KEY_PARTS = Object.freeze([
@@ -100,6 +106,18 @@ const PUBLIC_EVENT_KEYS = new Set([
   'stream',
   'truncated',
 ]);
+const PREFLIGHT_CHECK_SET = new Set<string>(PREFLIGHT_CHECK_IDS);
+const PUBLIC_PREFLIGHT_BOOLEAN_KEYS = new Set([
+  'available', 'canonical', 'exists', 'isGitWorktree', 'parentWritable', 'runnerActive', 'writable',
+]);
+const PUBLIC_PREFLIGHT_INTEGER_KEYS = new Set([
+  'availableBytes', 'device', 'freeBytes', 'inode', 'minimumBytes', 'mountId',
+  'outputMountId', 'requiredBytes', 'stagingMountId',
+]);
+const PUBLIC_PREFLIGHT_HASH40_KEYS = new Set(['expectedSha', 'observedSha']);
+const PUBLIC_PREFLIGHT_HASH64_KEYS = new Set([
+  'baseImageDigest', 'dockerfileSha256', 'executionDefinitionSha256', 'imageDigest', 'manifestSha256',
+]);
 
 type JsonRecord = Record<string, unknown>;
 type ConfigSymbol =
@@ -135,12 +153,17 @@ export interface BranchSnapshotCache {
   readonly refresh: () => unknown | Promise<unknown>;
 }
 
+export interface ApiPreflightService {
+  readonly run: (request: PreflightRequest) => unknown | Promise<unknown>;
+}
+
 export interface ApiRouteDependencies {
   readonly version: string;
   readonly config: BuilderConfig;
   readonly targets: readonly ApiTargetConfig[];
   readonly health: () => Pick<HealthSnapshot, 'activeJobId'> | HealthSnapshot | Promise<Pick<HealthSnapshot, 'activeJobId'> | HealthSnapshot>;
   readonly branches: BranchSnapshotCache;
+  readonly preflight: ApiPreflightService;
   readonly store: ApiJobStore;
   readonly evidenceReader: IndexedEvidenceReader;
 }
@@ -168,6 +191,24 @@ function ownDataProperty(value: Record<string, unknown>, key: string, field: str
   const descriptor = Object.getOwnPropertyDescriptor(value, key);
   if (descriptor === undefined || !('value' in descriptor)) throw new Error(`${field} is not an own data property`);
   return descriptor.value;
+}
+
+function optionalOwnDataProperty(
+  value: Record<string, unknown>,
+  key: string,
+  field: string,
+): Readonly<{ readonly present: boolean; readonly value: unknown }> {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined) return { present: false, value: undefined };
+  if (!('value' in descriptor)) throw new Error(`${field} is not an own data property`);
+  return { present: true, value: descriptor.value };
+}
+
+function exactOwnStringKeys(value: Record<string, unknown>, expected: readonly string[], field: string): void {
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== expected.length || keys.some((key) => typeof key !== 'string' || !expected.includes(key))) {
+    throw new Error(`${field} does not contain the exact expected fields`);
+  }
 }
 
 function text(value: unknown, field: string, maxBytes: number): string {
@@ -549,6 +590,133 @@ function branchesDto(value: unknown): JsonRecord {
   };
 }
 
+function preflightRequest(value: unknown, dependencies: ApiRouteDependencies): PreflightRequest {
+  try {
+    const input = record(value, 'preflight request');
+    exactOwnStringKeys(input, ['branch', 'expectedSha', 'targetId', 'outputRootId'], 'preflight request');
+    const branch = branchName(ownDataProperty(input, 'branch', 'preflight branch'), 'preflight branch');
+    const expectedSha = ownDataProperty(input, 'expectedSha', 'preflight expected SHA');
+    const targetId = ownDataProperty(input, 'targetId', 'preflight target ID');
+    const outputRootId = ownDataProperty(input, 'outputRootId', 'preflight output root ID');
+    if (typeof expectedSha !== 'string' || !HASH40_PATTERN.test(expectedSha)) throw new Error('preflight expected SHA is invalid');
+    if (typeof targetId !== 'string'
+      || !(TARGET_IDS as readonly string[]).includes(targetId)
+      || !dependencies.targets.some((target) => target.id === targetId)) {
+      throw new Error('preflight target ID is invalid');
+    }
+    const rootId = identifier(outputRootId, 'preflight output root ID');
+    if (!dependencies.config.approvedOutputRoots.some((root) => root.id === rootId)) {
+      throw new Error('preflight output root ID is invalid');
+    }
+    return Object.freeze({ branch, expectedSha, targetId, outputRootId: rootId }) as PreflightRequest;
+  } catch {
+    badRequest('request body');
+  }
+}
+
+function publicPreflightDetails(value: unknown): JsonRecord {
+  const input = record(value, 'preflight check details');
+  const output: JsonRecord = {};
+  for (const key of PUBLIC_PREFLIGHT_BOOLEAN_KEYS) {
+    const item = optionalOwnDataProperty(input, key, `preflight check detail ${key}`);
+    if (item.present) {
+      if (typeof item.value !== 'boolean') throw new Error(`preflight check detail ${key} is invalid`);
+      output[key] = item.value;
+    }
+  }
+  for (const key of PUBLIC_PREFLIGHT_INTEGER_KEYS) {
+    const item = optionalOwnDataProperty(input, key, `preflight check detail ${key}`);
+    if (item.present) output[key] = safeInteger(item.value, `preflight check detail ${key}`);
+  }
+  for (const key of PUBLIC_PREFLIGHT_HASH40_KEYS) {
+    const item = optionalOwnDataProperty(input, key, `preflight check detail ${key}`);
+    if (item.present) {
+      if (typeof item.value !== 'string' || !HASH40_PATTERN.test(item.value)) throw new Error(`preflight check detail ${key} is invalid`);
+      output[key] = item.value;
+    }
+  }
+  for (const key of PUBLIC_PREFLIGHT_HASH64_KEYS) {
+    const item = optionalOwnDataProperty(input, key, `preflight check detail ${key}`);
+    if (item.present) {
+      if (typeof item.value !== 'string' || !HASH64_PATTERN.test(item.value)) throw new Error(`preflight check detail ${key} is invalid`);
+      output[key] = item.value;
+    }
+  }
+  const targetId = optionalOwnDataProperty(input, 'targetId', 'preflight check detail targetId');
+  if (targetId.present) {
+    if (typeof targetId.value !== 'string' || !(TARGET_IDS as readonly string[]).includes(targetId.value)) {
+      throw new Error('preflight check detail targetId is invalid');
+    }
+    output.targetId = targetId.value;
+  }
+  const remote = optionalOwnDataProperty(input, 'remote', 'preflight check detail remote');
+  if (remote.present) {
+    if (remote.value !== 'origin') throw new Error('preflight check detail remote is invalid');
+    output.remote = 'origin';
+  }
+  return output;
+}
+
+function publicPreflightChecks(value: unknown): readonly JsonRecord[] {
+  if (!Array.isArray(value) || value.length > PREFLIGHT_CHECK_IDS.length) {
+    throw new Error('preflight checks are invalid');
+  }
+  const seen = new Set<string>();
+  const checks: JsonRecord[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (descriptor === undefined || !('value' in descriptor)) throw new Error(`preflight check ${index} is invalid`);
+    const input = record(descriptor.value, `preflight check ${index}`);
+    const id = ownDataProperty(input, 'id', `preflight check ${index} ID`);
+    const status = ownDataProperty(input, 'status', `preflight check ${index} status`);
+    const details = ownDataProperty(input, 'details', `preflight check ${index} details`);
+    if (typeof id !== 'string' || !PREFLIGHT_CHECK_SET.has(id) || seen.has(id)) {
+      throw new Error(`preflight check ${index} ID is invalid`);
+    }
+    if (status !== 'passed' && status !== 'failed') throw new Error(`preflight check ${index} status is invalid`);
+    seen.add(id);
+    const projected: JsonRecord = { id, status, details: publicPreflightDetails(details) };
+    const errorCode = optionalOwnDataProperty(input, 'errorCode', `preflight check ${index} error code`);
+    if (status === 'failed') {
+      if (!errorCode.present || typeof errorCode.value !== 'string' || !ERROR_CODE_SET.has(errorCode.value)) {
+        throw new Error(`preflight check ${index} error code is invalid`);
+      }
+      projected.errorCode = errorCode.value;
+    } else if (errorCode.present) {
+      throw new Error(`preflight check ${index} passed with an error code`);
+    }
+    checks.push(projected);
+  }
+  return checks;
+}
+
+function preflightDto(value: unknown, request: PreflightRequest): JsonRecord {
+  const input = record(value, 'preflight result');
+  const preflightId = ownDataProperty(input, 'preflightId', 'preflight ID');
+  const branch = ownDataProperty(input, 'branch', 'preflight branch');
+  const expectedSha = ownDataProperty(input, 'expectedSha', 'preflight expected SHA');
+  const observedSha = ownDataProperty(input, 'observedSha', 'preflight observed SHA');
+  const target = record(ownDataProperty(input, 'target', 'preflight target'), 'preflight target');
+  const outputRoot = record(ownDataProperty(input, 'outputRoot', 'preflight output root'), 'preflight output root');
+  const createdAt = canonicalInstant(ownDataProperty(input, 'createdAt', 'preflight creation time'), 'preflight creation time');
+  const expiresAt = canonicalInstant(ownDataProperty(input, 'expiresAt', 'preflight expiry time'), 'preflight expiry time');
+  if (typeof preflightId !== 'string' || !PREFLIGHT_ID_PATTERN.test(preflightId)) throw new Error('preflight ID is invalid');
+  if (branch !== request.branch || expectedSha !== request.expectedSha || observedSha !== request.expectedSha
+    || ownDataProperty(target, 'id', 'preflight target ID') !== request.targetId
+    || ownDataProperty(outputRoot, 'id', 'preflight output root ID') !== request.outputRootId) {
+    throw new Error('preflight result identity does not match its request');
+  }
+  if (Date.parse(expiresAt) - Date.parse(createdAt) !== PREFLIGHT_TTL_MS) {
+    throw new Error('preflight expiry is invalid');
+  }
+  return {
+    preflightId,
+    observedSha,
+    expiresAt,
+    checks: publicPreflightChecks(ownDataProperty(input, 'checks', 'preflight checks')),
+  };
+}
+
 function jobPageDto(value: unknown, limit: number, currentCursor: string | null): JsonRecord {
   const page = record(value, 'job page');
   if (!Array.isArray(page.jobs) || page.jobs.length > limit) throw new Error('store returned an invalid job page');
@@ -867,6 +1035,10 @@ function getJob(store: ApiJobStore, id: string): JobRecord {
 
 export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRouteHandler {
   return async (context: ApiRouteContext): Promise<HttpResponse | null> => {
+    if (context.method === 'POST' && context.path === '/api/preflight') {
+      const request = preflightRequest(context.body, dependencies);
+      return jsonResponse(200, preflightDto(await dependencies.preflight.run(request), request));
+    }
     if (context.method === 'POST' && context.path === '/api/branches/refresh') {
       requireExactEmptyObject(context.body);
       try {

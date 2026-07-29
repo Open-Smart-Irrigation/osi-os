@@ -272,7 +272,13 @@ function sendJson(response: ServerResponse, status: number, body: unknown, id: s
 function errorStatus(error: unknown): number {
   if (error instanceof HttpTransportError
     && Number.isInteger(error.status) && error.status >= 200 && error.status <= 599) return error.status;
-  if (error instanceof BuilderError && error.code === 'BRANCH_MOVED') return 409;
+  if (error instanceof BuilderError) {
+    if (['INVALID_BRANCH', 'INVALID_SHA', 'PREFLIGHT_INVALID_TARGET', 'PREFLIGHT_INVALID_OUTPUT_ROOT'].includes(error.code)) {
+      return 400;
+    }
+    if (error.code === 'BRANCH_MOVED' || error.code === 'OUTPUT_COLLISION') return 409;
+    if (error.retryable) return 503;
+  }
   return 500;
 }
 

@@ -5,6 +5,7 @@ import { createHttpServer, type ApiRouteContext } from '../../api/src/server.js'
 import { createApiRouteHandler, type ApiRouteDependencies } from '../../api/src/routes.js';
 import { StoreNotFoundError } from '../../api/src/store.js';
 import type { EvidenceIndex } from '../../api/src/evidence-reader.js';
+import { PreflightError } from '../../api/src/preflight.js';
 
 const sha = 'a'.repeat(40);
 const now = '2026-07-28T10:00:00.000Z';
@@ -114,6 +115,18 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
     branches: {
       get: async () => ({ fetchedAt: now, branches: [{ name: 'main', sha, commitTime: now, subject: 'subject' }] }),
       refresh: async () => ({ fetchedAt: now, branches: [{ name: 'main', sha, commitTime: now, subject: 'subject' }] }),
+    },
+    preflight: {
+      run: async (preflightRequest: { branch: string; expectedSha: string; targetId: string; outputRootId: string }) => ({
+        preflightId: 'pf_test_01',
+        ...preflightRequest,
+        observedSha: preflightRequest.expectedSha,
+        target: { id: preflightRequest.targetId },
+        outputRoot: { id: preflightRequest.outputRootId },
+        createdAt: now,
+        expiresAt: '2026-07-28T10:10:00.000Z',
+        checks: [{ id: 'source-sha', status: 'passed', details: { expectedSha: preflightRequest.expectedSha, observedSha: preflightRequest.expectedSha, remote: 'origin' } }],
+      }),
     },
     store: {
       listJobs: async ({ cursor, limit }: { cursor: string | null; limit: number }) => ({ jobs: [record], nextCursor: cursor === null && limit === 1 ? 'next-page' : null }),
@@ -340,6 +353,127 @@ describe('read-only builder API routes', () => {
     expect((await get(started.port, '/api/branches/refresh')).status).toBe(404);
     expect((await post(started.port, '/api/branches', '{}')).status).toBe(404);
     expect((await post(started.port, '/api/branches/refresh', '{}', { origin: 'https://evil.example' })).status).toBe(403);
+  });
+
+  it('runs preflight with an exact request and projects only safe result fields', async () => {
+    const run = vi.fn(async (preflightRequest: { branch: string; expectedSha: string; targetId: string; outputRootId: string }) => ({
+      preflightId: 'pf_safe_01',
+      ...preflightRequest,
+      observedSha: preflightRequest.expectedSha,
+      source: { author: 'private author', subject: 'private subject', originUrl: 'ssh://secret@example.test/repository' },
+      target: { id: preflightRequest.targetId, privatePath: '/private/target' },
+      outputRoot: { id: preflightRequest.outputRootId, path: '/private/output' },
+      createdAt: now,
+      expiresAt: '2026-07-28T10:10:00.000Z',
+      checks: [
+        {
+          id: 'source-sha',
+          status: 'passed',
+          details: {
+            expectedSha: preflightRequest.expectedSha,
+            observedSha: preflightRequest.expectedSha,
+            remote: 'origin',
+            path: '/private/repository',
+            version: 'secret-version',
+          },
+        },
+        {
+          id: 'disk-output',
+          status: 'passed',
+          details: { freeBytes: 1_000_000, minimumBytes: 500_000, path: '/private/output' },
+        },
+      ],
+    }));
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { preflight: { run } });
+    }));
+    server = started.server;
+    const requestBody = { branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release' };
+
+    const response = await post(started.port, '/api/preflight', JSON.stringify(requestBody));
+
+    expect(run).toHaveBeenCalledWith(requestBody);
+    expect(response).toEqual({
+      status: 200,
+      body: {
+        preflightId: 'pf_safe_01',
+        observedSha: sha,
+        expiresAt: '2026-07-28T10:10:00.000Z',
+        checks: [
+          { id: 'source-sha', status: 'passed', details: { expectedSha: sha, observedSha: sha, remote: 'origin' } },
+          { id: 'disk-output', status: 'passed', details: { freeBytes: 1_000_000, minimumBytes: 500_000 } },
+        ],
+      },
+    });
+    expect(JSON.stringify(response.body)).not.toMatch(/private|secret|version|author|subject|originUrl/u);
+  });
+
+  it.each([
+    ['null', 'null'],
+    ['array', '[]'],
+    ['missing field', JSON.stringify({ branch: 'main', expectedSha: sha, targetId: 'rpi-5' })],
+    ['extra field', JSON.stringify({ branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release', extra: true })],
+    ['invalid branch', JSON.stringify({ branch: '../main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release' })],
+    ['invalid SHA', JSON.stringify({ branch: 'main', expectedSha: sha.toUpperCase(), targetId: 'rpi-5', outputRootId: 'release' })],
+    ['unknown target', JSON.stringify({ branch: 'main', expectedSha: sha, targetId: 'rpi-9', outputRootId: 'release' })],
+    ['unknown root', JSON.stringify({ branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'private-path' })],
+  ])('rejects %s preflight input before invoking the service', async (_description, body) => {
+    const run = vi.fn();
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { preflight: { run } });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/preflight', body);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['branch movement', new PreflightError('BRANCH_MOVED', { expectedSha: sha, observedSha: 'b'.repeat(40) }), 409],
+    ['retryable prerequisite', new PreflightError('SOURCE_UNAVAILABLE', {}), 503],
+  ])('maps %s preflight failure to a stable status', async (_description, failure, status) => {
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { preflight: { run: async () => { throw failure; } } });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/preflight', JSON.stringify({
+      branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release',
+    }));
+
+    expect(response.status).toBe(status);
+    expect(response.body).toMatchObject({ error: { code: failure.code, stage: 'preflight' } });
+  });
+
+  it('fails closed when preflight service output is not bound to the request', async () => {
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        preflight: {
+          run: async () => ({
+            preflightId: 'pf_bad_01',
+            branch: 'other',
+            expectedSha: sha,
+            observedSha: sha,
+            target: { id: 'rpi-5' },
+            outputRoot: { id: 'release' },
+            createdAt: now,
+            expiresAt: '2026-07-28T10:10:00.000Z',
+            checks: [],
+          }),
+        },
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/preflight', JSON.stringify({
+      branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release',
+    }));
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
   });
 
   it('passes the exact stored evidence index to the indexed reader', async () => {
