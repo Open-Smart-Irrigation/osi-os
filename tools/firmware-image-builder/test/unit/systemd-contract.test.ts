@@ -91,6 +91,7 @@ describe('user systemd unit contracts', () => {
     expect(exec[0]).toContain('osi-image-builder-api');
     expect(environment).toContain('OSI_IMAGE_BUILDER_BIND_ADDRESS=127.0.0.1');
     expect(environment).toContain('OSI_IMAGE_BUILDER_HOST=127.0.0.1');
+    expect(value(unit, 'Service', 'UMask')).toBe('0077');
     expect(installValues(unit)).toContain('default.target');
   });
 

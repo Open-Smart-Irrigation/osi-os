@@ -1801,6 +1801,14 @@ quarantined artifact.
 - The API source resolver is the only component allowed to invoke SSH for the
   configured `origin`. The runner has no SSH/network Git path and cannot
   access cloud APIs, `osicloud.ch`, or production services.
+- The service UID is the local trust boundary. Its state root is owned by that
+  UID with mode `0700`; code already running as the same UID can modify the
+  SQLite database, evidence, and build inputs, so hostile same-UID code is
+  outside this tool's threat model. The API still serializes legitimate
+  instances with an atomic PID/start-time lifecycle lock. The freshness
+  listener binds a private mode-`0600` socket through the held state-root
+  descriptor and hard-links that inode to `api.sock`, which keeps Node's
+  automatic listener cleanup away from the public pathname.
 - Run the tool-owned direct Docker execution definition pinned by image digest;
   do not trust branch Compose or branch Dockerfile instructions at job time.
   Require exactly one worktree bind mount, no Docker socket, no
