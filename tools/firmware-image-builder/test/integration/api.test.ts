@@ -300,6 +300,71 @@ describe('read-only builder API routes', () => {
     }
   });
 
+  it('shares URL, absolute-path, and authorization classification across observations and argv', async () => {
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence(),
+      commands: [{
+        argv: [
+          '/usr/bin/node',
+          'https://:secret@example.test/repository.git',
+          '//opt/osi-builder/image.img',
+          '///data/db/farming.db',
+          'https://example.test//opt/osi-builder/image.img',
+          'https://example.test///data/db/farming.db',
+          'Basic verification passed',
+          'Bearer checks passed',
+          'Basic dXNlcjpwYXNz',
+          'Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature',
+          'Authorization: opaque-value',
+        ],
+        startedAt: now,
+        finishedAt: later,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        outputLimit: false,
+      }],
+      observations: {
+        neutralUrl: 'https://:secret@example.test/repository.git',
+        repeatedAbsolutePaths: ['//opt/osi-builder/image.img', '///data/db/farming.db'],
+        safeUrls: ['https://example.test//opt/osi-builder/image.img', 'https://example.test///data/db/farming.db'],
+        ordinaryAuthWords: ['Basic verification passed', 'Bearer checks passed'],
+        neutralAuthValues: ['Basic dXNlcjpwYXNz', 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature'],
+        neutralHeaderText: 'Authorization: opaque-value',
+      },
+    }, 'publish', 'passed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      observations: {
+        neutralUrl: '[redacted]',
+        repeatedAbsolutePaths: ['[redacted]', '[redacted]'],
+        safeUrls: ['https://example.test//opt/osi-builder/image.img', 'https://example.test///data/db/farming.db'],
+        ordinaryAuthWords: ['Basic verification passed', 'Bearer checks passed'],
+        neutralAuthValues: ['[redacted]', '[redacted]'],
+        neutralHeaderText: '[redacted]',
+      },
+      commands: [{
+        argv: [
+          '/usr/bin/node',
+          '[redacted]',
+          '[redacted]',
+          '[redacted]',
+          'https://example.test//opt/osi-builder/image.img',
+          'https://example.test///data/db/farming.db',
+          'Basic verification passed',
+          'Bearer checks passed',
+          '[redacted]',
+          '[redacted]',
+          '[redacted]',
+        ],
+      }],
+    });
+  });
+
   it.each([
     ['target ID mismatch', { targetId: 'rpi-2' }],
     ['root ID mismatch', { rootId: 'archive' }],

@@ -57,17 +57,15 @@ const SENSITIVE_OBSERVATION_KEY_PARTS = Object.freeze([
   'sshauthsock', 'gitsshcommand', 'sshpath', 'apikey', 'sshkey', 'identityfile', 'clientsecret',
 ]);
 const CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[\s;,?&"'{}])(?:[a-z0-9_.-]*(?:token|password|passwd|secret|credential|authorization|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret)[a-z0-9_.-]*)\s*(?:=|:)\s*[^\s;,?&]+/iu;
-const AUTHORIZATION_HEADER_PATTERN = /\b(?:authorization)\s*[:=]\s*\S+|\b(?:bearer|basic)\s+\S+/iu;
-const URL_USERINFO_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^@\s]+@[^/\s]+(?:[/?#][^\s]*)?/iu;
+const AUTHORIZATION_HEADER_PATTERN = /\b(?:authorization)\s*[:=]\s*\S+/iu;
+const BARE_AUTHORIZATION_PATTERN = /\b(?:bearer|basic)\s+([A-Za-z0-9._~+/=-]+)/giu;
 const URL_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^\s]*/giu;
-const ABSOLUTE_POSIX_PATH_PATTERN = /(?:^|[^a-z0-9._~\/-])\/(?!\/)[^\s/]+(?:\/[^\s/]+)*/iu;
+const ABSOLUTE_POSIX_PATH_PATTERN = /(?:^|[^a-z0-9._~\/-])\/+[^\s/]+(?:\/[^\s/]+)*/iu;
 const PUBLIC_EVIDENCE_EXECUTABLES = new Set([
   '/usr/bin/git', '/usr/bin/docker', '/usr/bin/node', '/usr/bin/npm', '/usr/bin/sqlite3', '/usr/bin/systemctl',
   '/usr/bin/make', '/usr/bin/gcc', '/usr/bin/llvm-config', '/usr/bin/rustc', '/bin/sh',
 ]);
-const COMMAND_ABSOLUTE_PATH_PATTERN = /(?:^|[^a-z0-9._~\/-])\/(?!\/)(?:[^\s/]+(?:\/[^\s/]*)*)/iu;
 const COMMAND_HOME_PATH_PATTERN = /(?:^|[^a-z0-9._-])(?:~(?:[a-z0-9._-]+)?|\$\{?home\}?)(?:\/|$)/iu;
-const COMMAND_CREDENTIAL_URL_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^/\s@]+@/iu;
 const COMMAND_CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[\s;,?&"'{}])(?:--?)?[a-z0-9_.-]*(?:token|password|passwd|secret|credential|authorization|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret)[a-z0-9_.-]*\s*(?:=|:)\s*[^\s;,?&]+/iu;
 const JOB_STATE_SET = new Set<string>(JOB_STATES);
 const STAGE_SET = new Set<string>(PIPELINE_STAGE_NAMES);
@@ -563,17 +561,40 @@ function isSensitiveObservationKey(key: string): boolean {
   return SENSITIVE_OBSERVATION_KEY_PARTS.some((part) => normalized.includes(part));
 }
 
+function hasCredentialUrl(value: string): boolean {
+  for (const match of value.matchAll(URL_PATTERN)) {
+    try {
+      if (new URL(match[0]).password !== '') return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
+function hasBareAuthorizationToken(value: string): boolean {
+  for (const match of value.matchAll(BARE_AUTHORIZATION_PATTERN)) {
+    if (/[A-Z0-9._~+/=-]/u.test(match[1])) return true;
+  }
+  return false;
+}
+
 function hasAbsolutePosixPath(value: string): boolean {
   return ABSOLUTE_POSIX_PATH_PATTERN.test(value.replace(URL_PATTERN, ''));
 }
 
-function redactObservationString(value: string): string {
+function hasCommonStringRedaction(value: string): boolean {
   return CONTROL_PATTERN.test(value)
     || PRIVATE_KEY_PATTERN.test(value)
-    || URL_USERINFO_PATTERN.test(value)
     || AUTHORIZATION_HEADER_PATTERN.test(value)
+    || hasBareAuthorizationToken(value)
+    || hasCredentialUrl(value)
     || hasAbsolutePosixPath(value)
-    || /file:\/\//iu.test(value)
+    || /file:\/\//iu.test(value);
+}
+
+function redactObservationString(value: string): string {
+  return hasCommonStringRedaction(value)
     || /~\/\.ssh(?:\/|$)/iu.test(value)
     || CREDENTIAL_ASSIGNMENT_PATTERN.test(value)
     ? '[redacted]'
@@ -617,14 +638,9 @@ function publicObservations(value: unknown): unknown {
 }
 
 function redactCommandArgument(value: string): string {
-  return CONTROL_PATTERN.test(value)
-    || PRIVATE_KEY_PATTERN.test(value)
-    || AUTHORIZATION_HEADER_PATTERN.test(value)
-    || COMMAND_CREDENTIAL_URL_PATTERN.test(value)
+  return hasCommonStringRedaction(value)
     || COMMAND_CREDENTIAL_ASSIGNMENT_PATTERN.test(value)
-    || /file:\/\//iu.test(value)
     || COMMAND_HOME_PATH_PATTERN.test(value)
-    || COMMAND_ABSOLUTE_PATH_PATTERN.test(value)
     ? '[redacted]'
     : value;
 }
