@@ -36,6 +36,103 @@ function requestFor(userId, username, params = {}) {
   };
 }
 
+function seedReusedUsername(db) {
+  db.exec(`
+    UPDATE users SET username = 'res1-renamed' WHERE id = 2;
+    INSERT INTO users (
+      username, password_hash, created_at, user_uuid, role, sync_version
+    ) VALUES (
+      'res1', 'h', '2026-07-29', 'u-reused-name', 'researcher', 1
+    );
+    INSERT INTO user_zone_assignments (
+      assignment_uuid, user_uuid, zone_uuid, created_at
+    ) VALUES (
+      'g-reused-name', 'u-reused-name', 'z-1', '2026-07-29'
+    );
+  `);
+}
+
+test('immutable token subject prevents /api/me from following a reused username', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  seedReusedUsername(db);
+  try {
+    const authResult = await executeFunction(loadNode('api-me-auth'), {
+      msg: requestFor(2, 'res1'),
+      env: ENV,
+      db,
+    });
+    assert.equal(authResult.result.authUserId, 2);
+    assert.equal(authResult.result.authUsername, 'res1');
+
+    const response = await executeFunction(loadNode('api-me-fn'), {
+      msg: authResult.result,
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result && response.result.statusCode, 403);
+  } finally {
+    db.close();
+  }
+});
+
+test('immutable token subject blocks username reuse across scoped shared reads', async () => {
+  const cases = [
+    ['zone environment', 'zone-env-fn', { zone_id: '1' }],
+    ['dendrometer recommendations', 'dendro-zone-rec-fn', { zone_id: '1' }],
+    ['device history', 'dendro-daily-fn', { deveui: 'DENDRO1' }],
+    ['today liters', 'strega-today-liters-fn', { deveui: 'VALVE1' }],
+  ];
+  for (const [label, nodeId, params] of cases) {
+    scopeHelper._resetForTests();
+    const db = seedScopedDb();
+    seedReusedUsername(db);
+    try {
+      const response = await executeFunction(loadNode(nodeId), {
+        msg: requestFor(2, 'res1', params),
+        env: ENV,
+        db,
+      });
+      assert.equal(
+        responseMessage(response.result).statusCode,
+        403,
+        `${label} must reject a stale subject/name pair`
+      );
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test('immutable token subject blocks username reuse in sensor export and history', async () => {
+  for (const [label, nodeId, msg] of [
+    ['sensor export', 'fn_build_sensor_sql_params', requestFor(2, 'res1')],
+    [
+      'history',
+      'history-api-router-fn',
+      historyRequest(2, 'res1', 'GET', '/api/history/zones/1/cards', { zoneId: '1' }),
+    ],
+  ]) {
+    scopeHelper._resetForTests();
+    const db = seedScopedDb();
+    seedReusedUsername(db);
+    try {
+      const response = await executeFunction(loadNode(nodeId), {
+        msg,
+        env: ENV,
+        db,
+      });
+      assert.equal(
+        responseMessage(response.result).statusCode,
+        403,
+        `${label} must reject a stale subject/name pair`
+      );
+    } finally {
+      db.close();
+    }
+  }
+});
+
 test('F2: a researcher can read a granted zone environment summary', async () => {
   const node = loadNode('zone-env-fn');
   const db = seedScopedDb();

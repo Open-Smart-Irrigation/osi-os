@@ -49,8 +49,8 @@ async function getOwnedZoneContext(q, auth, zoneId) {
 async function scopeCheckForRoute(db, scope, principal, route) {
   if (!principal || !principal.scoped || !route) return;
   const user = await db.get(
-    'SELECT user_uuid, disabled_at FROM users WHERE username = ?',
-    [principal.username]
+    'SELECT user_uuid, disabled_at FROM users WHERE id = ? AND username = ?',
+    [principal.userId, principal.username]
   );
   if (!user || user.disabled_at) HR.httpError(403, 'forbidden');
   if (route.kind === 'zone') {
@@ -140,7 +140,7 @@ source = replaceOnce(
   await scopeCheckForRoute(
     db,
     scope,
-    { username: auth.username, scoped: scopedOn },
+    { userId: auth.userId, username: auth.username, scoped: scopedOn },
     scopeRouteForRequest(requestMethod, requestPath, msg.req && msg.req.params)
   );
   phaseStartedAt = Date.now();

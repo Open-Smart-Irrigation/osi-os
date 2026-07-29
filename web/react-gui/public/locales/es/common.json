@@ -4,6 +4,9 @@
   "delete": "Eliminar",
   "na": "N/D",
   "retry": "Reintentar",
+  "scope": {
+    "loadError": "No se pudieron cargar los permisos."
+  },
   "analysis": {
     "title": "Análisis de datos",
     "axis": {

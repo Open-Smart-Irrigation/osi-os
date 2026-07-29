@@ -74,10 +74,15 @@ if (scopedOn) {
     node.error('${label}: scope module unavailable: ' + scopeLoad.error, msg);
     throw error;
   }
-  const scopeUser = await ${dbName}.get(${userLookup.sql}, [${userLookup.param}]);
+  const scopeUser = await ${dbName}.get(${userLookup.sql}, [${userLookup.params}]);
+  if (!scopeUser || !scopeUser.user_uuid) {
+    const error = new Error('forbidden');
+    error.statusCode = 403;
+    throw error;
+  }
   await scopeLoad.value.assertDeviceAccess(
     ${dbName},
-    scopeUser && scopeUser.user_uuid,
+    scopeUser.user_uuid,
     ${deveuiExpression},
     { scopedMode: true }
   );
@@ -87,8 +92,8 @@ if (scopedOn) {
 const historyAssertion = deviceAssertion({
   dbName: 'db',
   userLookup: {
-    sql: "'SELECT user_uuid FROM users WHERE username = ?'",
-    param: 'auth.username',
+    sql: "'SELECT user_uuid FROM users WHERE id = ? AND username = ?'",
+    params: 'auth.userId, auth.username',
   },
   deveuiExpression: 'deveui',
   label: 'device-history',
@@ -97,8 +102,8 @@ const historyAssertion = deviceAssertion({
 const inlineAssertion = deviceAssertion({
   dbName: '_db',
   userLookup: {
-    sql: "'SELECT user_uuid FROM users WHERE username = ?'",
-    param: 'auth.username',
+    sql: "'SELECT user_uuid FROM users WHERE id = ? AND username = ?'",
+    params: 'auth.userId, auth.username',
   },
   deveuiExpression: 'deveui',
   label: 'device-read',
@@ -107,8 +112,8 @@ const inlineAssertion = deviceAssertion({
 const weatherAssignmentAssertion = deviceAssertion({
   dbName: 'db',
   userLookup: {
-    sql: "'SELECT user_uuid FROM users WHERE id = ?'",
-    param: 'auth.userId',
+    sql: "'SELECT user_uuid FROM users WHERE id = ? AND username = ?'",
+    params: 'auth.userId, auth.username',
   },
   deveuiExpression: 'deveui',
   label: 'weather-zone-assignments',
@@ -181,12 +186,17 @@ ${bearerHelpers}
         throw error;
       }
       const user = await db.get(
-        'SELECT user_uuid FROM users WHERE username = ?',
-        [auth.username]
+        'SELECT user_uuid FROM users WHERE id = ? AND username = ?',
+        [auth.userId, auth.username]
       );
+      if (!user || !user.user_uuid) {
+        const error = new Error('forbidden');
+        error.statusCode = 403;
+        throw error;
+      }
       await scopeLoad.value.assertDeviceAccess(
         db,
-        user && user.user_uuid,
+        user.user_uuid,
         deveui,
         { scopedMode: true }
       );
@@ -264,12 +274,17 @@ if (scopedOn) {
   const db = new osiDb.Database('/data/db/farming.db');
   try {
     const user = await db.get(
-      'SELECT user_uuid FROM users WHERE username = ?',
-      [auth.username]
+      'SELECT user_uuid FROM users WHERE id = ? AND username = ?',
+      [auth.userId, auth.username]
     );
+    if (!user || !user.user_uuid) {
+      const error = new Error('forbidden');
+      error.statusCode = 403;
+      throw error;
+    }
     const scope = await scopeLoad.value.resolveScope(
       db,
-      user && user.user_uuid,
+      user.user_uuid,
       { scopedMode: true }
     );
     if (scope.disabled) {

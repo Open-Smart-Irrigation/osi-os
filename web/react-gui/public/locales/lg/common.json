@@ -4,6 +4,9 @@
   "delete": "Sazaamu",
   "na": "Tebaawo",
   "retry": "Gezaako nate",
+  "scope": {
+    "loadError": "Permissions could not be loaded."
+  },
   "analysis": {
     "title": "Okwekenneenya kwa data",
     "axis": {

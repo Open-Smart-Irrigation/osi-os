@@ -286,6 +286,70 @@ replaceOnce(
   '  msg._gatewayMigrationPreviousGatewayDeviceEuis = mergedInstallation.previousGatewayDeviceEuis;'
 );
 
+const forceSync = find('Run Force Sync');
+addOsiLib(forceSync);
+replaceOnce(
+  forceSync,
+  `  const migration = await runGatewayMigrationPreflight(_db, q, run, setSyncState, identity, 'force-sync');
+  const edgeBuildVersion`,
+  `  const migration = await runGatewayMigrationPreflight(_db, q, run, setSyncState, identity, 'force-sync');
+  const installationLoad = osiLib.require('installation');
+  if (!installationLoad.ok) throw new Error('Installation identity helper is unavailable');
+  const installation = installationLoad.value;
+  let installationRows = await q('SELECT installation_uuid, current_gateway_device_eui, previous_gateway_device_euis_json, recovery_state, recovery_operation_uuid FROM installation_identity WHERE singleton_id=1');
+  if (installationRows.length === 0) {
+    const createdInstallationUuid = installation.newInstallationUuid();
+    const createdAt = new Date().toISOString();
+    await run(
+      "INSERT OR IGNORE INTO installation_identity(singleton_id, installation_uuid, current_gateway_device_eui, previous_gateway_device_euis_json, recovery_state, created_at, updated_at) VALUES(1, ?, ?, '[]', 'ACTIVE', ?, ?)",
+      [createdInstallationUuid, identity.deviceEui, createdAt, createdAt]
+    );
+    installationRows = await q('SELECT installation_uuid, current_gateway_device_eui, previous_gateway_device_euis_json, recovery_state, recovery_operation_uuid FROM installation_identity WHERE singleton_id=1');
+  }
+  if (installationRows.length !== 1) throw new Error('Installation identity is missing');
+  const installationUuid = installation.normalizeInstallationUuid(installationRows[0].installation_uuid);
+  if (!installationUuid) throw new Error('Installation identity is invalid');
+  let storedPreviousGatewayDeviceEuis = [];
+  try {
+    storedPreviousGatewayDeviceEuis = JSON.parse(installationRows[0].previous_gateway_device_euis_json || '[]');
+  } catch (error) {
+    node.warn('Force sync installation EUI history is invalid: ' + String(error && error.message ? error.message : error));
+    throw new Error('Installation gateway history is invalid');
+  }
+  const mergedInstallation = installation.mergeGatewayHistory(
+    installationRows[0].current_gateway_device_eui,
+    storedPreviousGatewayDeviceEuis.concat(migration.previousGatewayDeviceEuis),
+    identity.deviceEui
+  );
+  await run(
+    'UPDATE installation_identity SET current_gateway_device_eui=?, previous_gateway_device_euis_json=?, updated_at=? WHERE singleton_id=1',
+    [mergedInstallation.currentGatewayDeviceEui, JSON.stringify(mergedInstallation.previousGatewayDeviceEuis), new Date().toISOString()]
+  );
+  const edgeBuildVersion`
+);
+replaceOnce(
+  forceSync,
+  "  const syncCapabilities = ['linked_auth_sync_v1', 'force_edge_sync_v1', 'zone_desired_state_v1', 'irrigation_config_desired_state_v1', 'device_desired_state_v1', 'weather_station_zones_desired_state_v1'];",
+  "  const syncCapabilities = ['linked_auth_sync_v1', 'force_edge_sync_v1', 'zone_desired_state_v1', 'irrigation_config_desired_state_v1', 'device_desired_state_v1', 'weather_station_zones_desired_state_v1', 'installation_recovery_v1'];"
+);
+replaceOnce(
+  forceSync,
+  `  const bootstrapGatewayIdentity = {
+    previousGatewayDeviceEuis: migration.previousGatewayDeviceEuis,
+    edgeBuildVersion,`,
+  `  const bootstrapGatewayIdentity = {
+    previousGatewayDeviceEuis: mergedInstallation.previousGatewayDeviceEuis,
+    installationUuid,
+    recoveryState: installationRows[0].recovery_state,
+    recoveryOperationUuid: installationRows[0].recovery_operation_uuid || null,
+    edgeBuildVersion,`
+);
+replaceOnce(
+  forceSync,
+  '  summary.gatewayIdentity.previousGatewayDeviceEuis = migration.previousGatewayDeviceEuis;',
+  '  summary.gatewayIdentity.previousGatewayDeviceEuis = mergedInstallation.previousGatewayDeviceEuis;'
+);
+
 const syncState = find('Build Sync State');
 replaceOnce(
   syncState,

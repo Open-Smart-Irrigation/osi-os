@@ -414,6 +414,159 @@ test('deduplicatePendingCommand replays an exact command-ID match without re-val
   );
 });
 
+test('deduplicatePendingCommand terminalizes an elapsed physical action before dispatch', async () => {
+  const db = new TestDb();
+  const now = '2026-07-29T10:00:00.000Z';
+  const envelope = {
+    commandId: 720,
+    commandType: 'SET_STREGA_TIMED_ACTION',
+    expiresAt: now,
+    payload: {
+      effect_key:
+        'action:' + DEVICE_EUI +
+        ':timed_action:11111111-1111-4111-8111-111111111111',
+      deviceEui: DEVICE_EUI,
+      expires_at: now,
+    },
+  };
+
+  const result = await ledger.deduplicatePendingCommand(db, envelope, {
+    gateway_device_eui: GATEWAY_EUI,
+    command_type_recognized: true,
+    now,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.ack.result, 'EXPIRED');
+  assert.equal(result.ack.reason, 'effect_expired');
+  assert.equal(result.ack.duplicate, false);
+  assert.equal(
+    (await db.get('SELECT result FROM applied_commands WHERE command_id=?', ['720'])).result,
+    'EXPIRED'
+  );
+  assert.deepEqual(
+    JSON.parse((await db.get(
+      'SELECT payload_json FROM command_ack_outbox WHERE command_id=?',
+      ['720']
+    )).payload_json),
+    result.ack
+  );
+
+  const replay = await ledger.deduplicatePendingCommand(db, envelope, {
+    gateway_device_eui: GATEWAY_EUI,
+    command_type_recognized: true,
+    now,
+  });
+  assert.deepEqual(replay, { handled: true, ack: result.ack });
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['720'])).n,
+    1,
+    'replay replaces the undelivered outbox row without dispatching the effect'
+  );
+});
+
+test('deduplicatePendingCommand rejects malformed physical-action expiry without dispatch', async () => {
+  const db = new TestDb();
+  const result = await ledger.deduplicatePendingCommand(
+    db,
+    {
+      commandId: 721,
+      commandType: 'SET_STREGA_PARTIAL_OPENING',
+      expiresAt: 'not-an-instant',
+      payload: {
+        effect_key:
+          'action:' + DEVICE_EUI +
+          ':partial_opening:22222222-2222-4222-8222-222222222222',
+        deviceEui: DEVICE_EUI,
+        expires_at: 'not-an-instant',
+      },
+    },
+    {
+      gateway_device_eui: GATEWAY_EUI,
+      command_type_recognized: true,
+      now: '2026-07-29T10:00:00.000Z',
+    }
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+  assert.equal(result.ack.reason, 'invalid_expires_at');
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['721'])).n,
+    1
+  );
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['721'])).n,
+    1
+  );
+});
+
+test('deduplicatePendingCommand keeps a future physical action eligible for dispatch', async () => {
+  const db = new TestDb();
+  const result = await ledger.deduplicatePendingCommand(
+    db,
+    {
+      commandId: 722,
+      commandType: 'SET_STREGA_FLUSHING',
+      expiresAt: '2026-07-29T10:00:00.001Z',
+      payload: {
+        effect_key:
+          'action:' + DEVICE_EUI +
+          ':flushing:33333333-3333-4333-8333-333333333333',
+        deviceEui: DEVICE_EUI,
+        expires_at: '2026-07-29T10:00:00.001Z',
+      },
+    },
+    {
+      gateway_device_eui: GATEWAY_EUI,
+      command_type_recognized: true,
+      now: '2026-07-29T10:00:00.000Z',
+    }
+  );
+
+  assert.deepEqual(result, { handled: false });
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
+});
+
+test('deduplicatePendingCommand rolls back expiry ledger state when ACK persistence fails', async () => {
+  const db = new TestDb();
+  db.native.exec(`
+    CREATE TRIGGER fail_elapsed_command_ack
+    BEFORE INSERT ON command_ack_outbox
+    BEGIN
+      SELECT RAISE(ABORT, 'simulated ACK persistence failure');
+    END;
+  `);
+
+  await assert.rejects(
+    ledger.deduplicatePendingCommand(
+      db,
+      {
+        commandId: 723,
+        commandType: 'SET_STREGA_TIMED_ACTION',
+        expiresAt: '2026-07-29T09:59:59.999Z',
+        payload: {
+          effect_key:
+            'action:' + DEVICE_EUI +
+            ':timed_action:44444444-4444-4444-8444-444444444444',
+          deviceEui: DEVICE_EUI,
+          expires_at: '2026-07-29T09:59:59.999Z',
+        },
+      },
+      {
+        gateway_device_eui: GATEWAY_EUI,
+        command_type_recognized: true,
+        now: '2026-07-29T10:00:00.000Z',
+      }
+    ),
+    /simulated ACK persistence failure/
+  );
+
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
+});
+
 test('deduplicatePendingCommand finds a non-journal duplicate by effect key + command type', async () => {
   const db = new TestDb();
   insertAppliedCommand(db, {

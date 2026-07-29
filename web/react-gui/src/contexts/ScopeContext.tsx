@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { fetchScopeProfile } from '../services/api';
 import type { ScopeProfile } from '../services/api';
 import { useAuth } from './AuthContext';
@@ -12,48 +19,64 @@ interface ScopeValue {
   isZoneVisible: (zoneUuid: string) => boolean;
   isPlotVisible: (plotUuid: string) => boolean;
   profile: ScopeProfile | null;
+  error: string | null;
+  retry: () => void;
 }
 
-const UNSCOPED_SCOPE: ScopeValue = {
+const CLOSED_SCOPE: ScopeValue = {
   loading: false,
   isScoped: false,
-  role: 'admin',
-  canWrite: true,
-  isAdmin: true,
-  isZoneVisible: () => true,
-  isPlotVisible: () => true,
+  role: 'viewer',
+  canWrite: false,
+  isAdmin: false,
+  isZoneVisible: () => false,
+  isPlotVisible: () => false,
   profile: null,
+  error: null,
+  retry: () => {},
 };
 
-// The default preserves flag-off behavior for isolated component consumers.
-// The application root always supplies ScopeProvider.
-const ScopeContext = createContext<ScopeValue>(UNSCOPED_SCOPE);
+const ScopeContext = createContext<ScopeValue>(CLOSED_SCOPE);
 
 export function ScopeProvider({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
   const [profile, setProfile] = useState<ScopeProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [requestVersion, setRequestVersion] = useState(0);
+
+  const retry = useCallback(() => {
+    setProfile(null);
+    setError(null);
+    setLoading(true);
+    setRequestVersion((current) => current + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     if (!token) {
       setProfile(null);
+      setError(null);
       setLoading(false);
       return;
     }
 
+    setProfile(null);
+    setError(null);
     setLoading(true);
     const loadProfile = async () => fetchScopeProfile();
     loadProfile()
       .then((nextProfile) => {
         if (!cancelled) {
           setProfile(nextProfile);
+          setError(null);
           setLoading(false);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setProfile(null);
+          setError('scope_profile_unavailable');
           setLoading(false);
         }
       });
@@ -61,11 +84,12 @@ export function ScopeProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [requestVersion, token]);
 
   const value = useMemo<ScopeValue>(() => {
+    const resolved = profile !== null && !loading && error === null;
     const isScoped = Boolean(profile?.features?.scoped_access);
-    const role = profile?.role ?? 'admin';
+    const role = profile?.role ?? 'viewer';
     const zoneUuids = profile?.zone_uuids ?? null;
     const plotUuids = profile?.plot_uuids ?? null;
 
@@ -73,15 +97,17 @@ export function ScopeProvider({ children }: { children: React.ReactNode }) {
       loading,
       isScoped,
       role,
-      canWrite: role !== 'viewer',
-      isAdmin: role === 'admin',
+      canWrite: resolved && role !== 'viewer',
+      isAdmin: resolved && role === 'admin',
       isZoneVisible: (zoneUuid) =>
-        !isScoped || zoneUuids === null || zoneUuids.includes(zoneUuid),
+        resolved && (!isScoped || zoneUuids === null || zoneUuids.includes(zoneUuid)),
       isPlotVisible: (plotUuid) =>
-        !isScoped || plotUuids === null || plotUuids.includes(plotUuid),
+        resolved && (!isScoped || plotUuids === null || plotUuids.includes(plotUuid)),
       profile,
+      error,
+      retry,
     };
-  }, [loading, profile]);
+  }, [error, loading, profile, retry]);
 
   return <ScopeContext.Provider value={value}>{children}</ScopeContext.Provider>;
 }

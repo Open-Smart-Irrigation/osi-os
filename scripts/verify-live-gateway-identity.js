@@ -309,7 +309,7 @@ const expectedNodeLibs = {
   'sync-bootstrap-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   'sync-outbox-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
   'sync-pending-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
-  'sync-force-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiCloudHttp', module: 'osi-cloud-http' }],
+  'sync-force-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiCloudHttp', module: 'osi-cloud-http' }, { var: 'osiLib', module: 'osi-lib' }],
   'command-ack-build-batch': [{ var: 'osiDb', module: 'osi-db-helper' }],
   'sync-state-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }],
   'al-link-build-req': [{ var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],

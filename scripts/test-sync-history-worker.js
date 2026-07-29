@@ -276,4 +276,115 @@ for (const helperPath of helperPaths) {
   runHelperAssertions(require(helperPath), helperPath);
 }
 
-console.log('OK sync history worker helper');
+const canonicalFlows = JSON.parse(fs.readFileSync(path.resolve(
+  __dirname,
+  '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'
+), 'utf8'));
+const historyBuildSource = canonicalFlows.find((node) => node.id === 'sync-history-build').func;
+const historyMarkSource = canonicalFlows.find((node) => node.id === 'sync-history-mark').func;
+
+async function applyDirtyAck(dirtyRowKeys) {
+  const submittedHistoryKey = 'VALVE_ACTUATION|NEW_EUI|exp-1';
+  const completed = [];
+  const database = {
+    all(sql, params, callback) {
+      if (sql.includes('FROM sync_history_cursors')) {
+        callback(null, [{ state: 'tail', last_acked_id: null }]);
+        return;
+      }
+      callback(null, []);
+    },
+    run(sql, params, callback) {
+      if (sql.includes("UPDATE sync_history_dirty_keys SET status='done'")) {
+        completed.push(params[1]);
+      }
+      callback(null);
+    },
+    close(callback) {
+      callback();
+    }
+  };
+  const flowState = new Map();
+  const flow = {
+    get(key) {
+      return flowState.get(key);
+    },
+    set(key, value) {
+      flowState.set(key, value);
+    }
+  };
+  const helper = {
+    serverConfirmsDurable: () => true,
+    cursorPatchFromResponse: () => ({
+      last_acked_id: '1',
+      last_error: null,
+      retry_count: 0
+    }),
+    shouldApplyDurableAck: () => true,
+    isCursorComplete: () => false
+  };
+  const execute = new Function(
+    'osiLib',
+    'osiDb',
+    'flow',
+    'env',
+    'node',
+    'msg',
+    historyMarkSource
+  );
+  await execute(
+    { require: () => ({ ok: true, value: helper }) },
+    { Database: function Database() { return database; } },
+    flow,
+    { get: () => '' },
+    { error() {}, warn() {} },
+    {
+      statusCode: 200,
+      _historyBatch: {
+        tableName: 'valve_actuation_expectations',
+        batchId: 'batch-1',
+        phase: 'correction',
+        dirtyKeys: dirtyRowKeys,
+        dirtyRowKeysByHistoryKey: {
+          [submittedHistoryKey]: dirtyRowKeys
+        },
+        segmentKeys: []
+      },
+      payload: {
+        phase: 'correction',
+        durableMirrorConfirmed: true,
+        ackedThroughId: 1,
+        results: [{ historyKey: submittedHistoryKey, status: 'APPLIED' }]
+      }
+    }
+  );
+  return completed;
+}
+
+(async () => {
+  assert.match(
+    historyBuildSource,
+    /dirtyRowKeysByHistoryKey/,
+    'history build must retain submitted-key to durable-row-key metadata'
+  );
+  assert.deepStrictEqual(
+    await applyDirtyAck(['VALVE_ACTUATION|OLD_EUI|exp-1']),
+    ['VALVE_ACTUATION|OLD_EUI|exp-1'],
+    'an ACK for the submitted key must complete the stored old-EUI dirty key'
+  );
+  assert.deepStrictEqual(
+    await applyDirtyAck([
+      'VALVE_ACTUATION|OLD_EUI_A|exp-1',
+      'VALVE_ACTUATION|OLD_EUI_B|exp-1'
+    ]),
+    [
+      'VALVE_ACTUATION|OLD_EUI_A|exp-1',
+      'VALVE_ACTUATION|OLD_EUI_B|exp-1'
+    ],
+    'one submitted key must complete every represented durable dirty row'
+  );
+  console.log('OK sync history worker helper');
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

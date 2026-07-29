@@ -14,12 +14,12 @@
       "reason": "sync outbox eviction index guard (1.A5)"
     },
     "prune-sync-outbox": {
-      "max_chars": 4298,
-      "reason": "outbox pruning overhaul with eviction-index awareness (1.A5)"
+      "max_chars": 4400,
+      "reason": "Outbox pruning overhaul with eviction-index awareness (1.A5); desired-state aggregates for irrigation calibration, weather-station zones, users, and user assignments are protected from cap eviction (+102)."
     },
     "history-api-router-fn": {
-      "max_chars": 63225,
-      "reason": "history API card-data source field passthrough (1.A6, +150); Field Journal Task 12: fieldJournalUxEnabled feature flag, visible touched-node catches, rejecting DB-close wrapper (+312); AgroLink Phase A exposes scoped_access (+75); AgroLink Phase B zone/gateway/workspace scope enforcement (+2596)"
+      "max_chars": 65556,
+      "reason": "History API card-data source passthrough, journal bootstrap guards, and AgroLink scoped reads; portable history adds scoped all-zone CSV export (+2281), and immutable token subjects resolve history scope by user id plus username (+50)."
     },
     "sync-pending-split": {
       "max_chars": 3083,
@@ -32,6 +32,18 @@
     "scoped-access-command-apply-fn": {
       "max_chars": 2503,
       "reason": "AgroLink Task 7: fail-closed scoped-access command dispatch through the transactional helper."
+    },
+    "zone-command-apply-fn": {
+      "max_chars": 2453,
+      "reason": "Versioned zone desired-state applier validates the protected envelope, dispatches through the zone-command helper, invalidates scope after apply, and emits the durable terminal ACK."
+    },
+    "irrigation-config-command-apply-fn": {
+      "max_chars": 2569,
+      "reason": "Versioned schedule and irrigation-calibration applier validates protected command shape, fails closed on helper or DB errors, and emits the durable terminal ACK."
+    },
+    "device-command-apply-fn": {
+      "max_chars": 2957,
+      "reason": "Versioned device and weather-station-zone applier validates protected command shape, dispatches through the device-command helper, invalidates scope after apply, and emits the durable terminal ACK."
     },
     "cmd-type-registry": {
       "max_chars": 5696,
@@ -66,8 +78,8 @@
       "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix; issue #5 chameleon_enabled added to trg_sync_devices_outbox_au WHEN clause + payload; issue #16 (+420) boot rewrites of trg_dp_device_data_outbox_ai + trg_dp_chameleon_readings_outbox_ai regain the seed's WHEN-clause gateway-EUI resolvability guard (trigger-body parity adjudication, Pattern A)"
     },
     "sync-bootstrap-build": {
-      "max_chars": 34126,
-      "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); Field Journal Task 12 plus final review: fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper in normal bootstrap (+4078); PR #141 hardening: object-only outbox payload parser and rollback propagation (+139); live identity restart sentinel (Option C Slice 1), including caught-error source marking and preservation (+1311)"
+      "max_chars": 37111,
+      "reason": "Reviewed bootstrap baseline plus zone, irrigation-config, device, and weather-station desired-state capability and row advertisements (+502); stable installation identity creates, validates, and merges gateway history into the bootstrap envelope (+2483); live identity restart sentinel (Option C Slice 1)."
     },
     "sync-outbox-build": {
       "max_chars": 18056,
@@ -82,20 +94,20 @@
       "reason": "sync stop-loss delivery consumer: fail-closed HTTP status/result validation, per-event terminal classification, duplicate/malformed/unrequested-result rejection, and bounded protocol errors (Plan 3 Tasks 1-2)"
     },
     "sync-force-build": {
-      "max_chars": 52929,
-      "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); retryable backoff: same cooldown-exclusion SELECT clause + retry_count/last_retryable_failure_at UPDATE as sync-outbox-mark (+280, Task J); Field Journal Tasks 11-12 plus final review: preserve trusted envelopes, fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper, and exposeEmptyCatches over main's Task J catches (+4936); PR #141 hardening: object-only outbox payload parser, rollback propagation, and strict delivery mapping (+100); live identity restart sentinel (Option C Slice 1), including marked gateway-identity errors (+1200)"
+      "max_chars": 55915,
+      "reason": "Reviewed force-sync baseline plus zone, irrigation-config, device, and weather-station desired-state capability and row advertisements (+502); force-sync now matches bootstrap installation identity creation, validation, gateway-history merge, and envelope fields (+2484); live identity restart sentinel (Option C Slice 1)."
     },
     "command-ack-build-batch": {
       "max_chars": 4687,
       "reason": "live identity restart sentinel (Option C Slice 1); sync-failclosed-20260719: groups local command_ack_outbox rows by parsed commandId, collapses byte-identical canonical duplicates into one outgoing ACK with _localAckCorrelation, and withholds delivery with a token-free warning on conflicting rows (+1028)"
     },
     "sync-state-build": {
-      "max_chars": 10119,
-      "reason": "live identity restart sentinel (Option C Slice 1)"
+      "max_chars": 11208,
+      "reason": "live identity restart sentinel (Option C Slice 1); installation recovery status exposes the validated installation UUID, gateway history, recovery operation, and timestamps (+1089)."
     },
     "al-link-build-req": {
-      "max_chars": 4142,
-      "reason": "live identity restart sentinel (Option C Slice 1)"
+      "max_chars": 6785,
+      "reason": "live identity restart sentinel (Option C Slice 1) plus desired-state capability advertisements (+132); account link creates or validates installation identity, merges gateway history, and sends installationUuid (+2511)."
     },
     "al-link-restart-node-red": {
       "max_chars": 2288,
@@ -106,12 +118,12 @@
       "reason": "live identity restart sentinel (Option C Slice 1), including bounded deterministic msg._msgid request key and fail-closed two-output publication (+1773)"
     },
     "put-chameleon-enabled-auth-fn": {
-      "max_chars": 5611,
-      "reason": "issue #5: UPDATE bumps sync_version so the enable toggle reaches the cloud; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+      "max_chars": 6321,
+      "reason": "Chameleon enable write bumps sync_version; protected device desired-state parity returns that version, orders the not-found path before close, and makes touched catches visible (+710)."
     },
     "dendro-ref-tree-fn": {
-      "max_chars": 1491,
-      "reason": "issue #15: UPDATE bumps sync_version so a reference-tree toggle after the first delivered DEVICE event does not hit equal_version_payload_conflict, matching the put-chameleon-enabled-auth-fn / dendro_enabled / temp_enabled / rain_gauge_enabled / flow_meter_enabled precedent"
+      "max_chars": 1759,
+      "reason": "Reference-tree writes bump sync_version; protected device desired-state parity returns the resulting version and makes DB-close failure visible (+268)."
     },
     "lsn50-zone-agg-fn": {
       "max_chars": 2633,
@@ -130,8 +142,8 @@
       "reason": "Device API auth/status repair plus AgroLink Phase B /api/me auth-source registration (+17)."
     },
     "dendro-raw-fn": {
-      "max_chars": 6219,
-      "reason": "AgroLink Phase B: scoped raw dendrometer reads and visible touched-node catches (+874)."
+      "max_chars": 6365,
+      "reason": "AgroLink Phase B scoped raw dendrometer reads; immutable token subjects resolve the scope user by id plus username and reject a missing subject before device authorization (+146)."
     },
     "auth-register-func": {
       "max_chars": 895,
@@ -142,24 +154,24 @@
       "reason": "AgroLink Phase A keeps concurrent login credentials on msg._authwork instead of shared flow context (+54)."
     },
     "auth-db-query": {
-      "max_chars": 1332,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 1541,
+      "reason": "Authentication lookup includes the singleton installation UUID for verifier-v2 validation and surfaces DB-close failures (+209)."
     },
     "auth-process-result": {
-      "max_chars": 6044,
-      "reason": "AgroLink Phase A consumes msg._authwork, rejects disabled scoped-mode users before issuing tokens, and exposes touched-node fallback failures (+810)."
+      "max_chars": 6417,
+      "reason": "AgroLink Phase A token processing plus installation-bound offline verifier-v2 subject construction through the guarded installation helper (+373)."
     },
     "auth-db-insert": {
       "max_chars": 2281,
       "reason": "AgroLink Phase A uses one conditional admin-bootstrap INSERT and its own change count, preventing a same-username race loser from reporting success (+1167)."
     },
     "api-me-auth": {
-      "max_chars": 3530,
-      "reason": "AgroLink Phase B closes the /api/me auth-ratchet gap with tagged fail-closed token variants (+454)."
+      "max_chars": 3564,
+      "reason": "AgroLink fail-closed /api/me token decoder now preserves both immutable userId and username for the downstream subject check (+34)."
     },
     "api-me-fn": {
-      "max_chars": 1745,
-      "reason": "AgroLink Phase A resolves the current user and effective zone/plot scope through osi-scope-helper."
+      "max_chars": 1876,
+      "reason": "AgroLink current-user scope resolver validates the immutable numeric subject and requires a matching user id plus username before resolving scope (+131)."
     },
     "auth-insert-complete": {
       "max_chars": 66,
@@ -390,8 +402,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "fn_build_sensor_sql_params": {
-      "max_chars": 5238,
-      "reason": "AgroLink Phase B: scoped sensor CSV export with conditional auth and weather exception (+3890)."
+      "max_chars": 5379,
+      "reason": "AgroLink Phase B scoped sensor CSV export; immutable token subjects resolve the scope user by id plus username and fail 403 before scope resolution when absent (+141)."
     },
     "fn_rows_to_csv_sensordata": {
       "max_chars": 882,
@@ -430,8 +442,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "dendro-history-fn": {
-      "max_chars": 5698,
-      "reason": "AgroLink Phase B: scoped dendrometer history with union access and visible catches (+978)."
+      "max_chars": 5844,
+      "reason": "AgroLink Phase B scoped dendrometer history; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+146)."
     },
     "dendro-history-format": {
       "max_chars": 520,
@@ -446,32 +458,32 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "put-dendro-auth-fn": {
-      "max_chars": 3954,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+      "max_chars": 4244,
+      "reason": "Dendrometer enable writes now return the bumped device sync_version for protected desired-state parity and surface touched auth-secret catches (+290)."
     },
     "put-dendro-format": {
-      "max_chars": 88,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 225,
+      "reason": "Dendrometer enable response includes the persisted sync_version returned by the update (+137)."
     },
     "put-temp-auth-fn": {
-      "max_chars": 3938,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+      "max_chars": 4228,
+      "reason": "Temperature enable writes now return the bumped device sync_version for protected desired-state parity and surface touched auth-secret catches (+290)."
     },
     "put-temp-format": {
-      "max_chars": 84,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 221,
+      "reason": "Temperature enable response includes the persisted sync_version returned by the update (+137)."
     },
     "sensor-history-fn": {
-      "max_chars": 5846,
-      "reason": "AgroLink Phase B: scoped sensor history with union access and visible catches (+978)."
+      "max_chars": 5992,
+      "reason": "AgroLink Phase B scoped sensor history; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+146)."
     },
     "sensor-history-format": {
       "max_chars": 161,
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "rain-history-fn": {
-      "max_chars": 5855,
-      "reason": "AgroLink Phase B: scoped rain history with shared-weather access and visible catches (+972)."
+      "max_chars": 6001,
+      "reason": "AgroLink Phase B scoped rain history; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+146)."
     },
     "sys-reboot-fn": {
       "max_chars": 3117,
@@ -506,8 +518,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "al-link-handle-auth": {
-      "max_chars": 4513,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 5308,
+      "reason": "Account-link response handling requires verifier v2, validates the returned installation UUID against local state, and preserves it for finalization (+795)."
     },
     "al-link-success": {
       "max_chars": 312,
@@ -534,12 +546,12 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "dendro-daily-fn": {
-      "max_chars": 6161,
-      "reason": "AgroLink Phase B: scoped daily dendrometer reads and visible catches (+777)."
+      "max_chars": 6307,
+      "reason": "AgroLink Phase B scoped daily dendrometer reads; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+146)."
     },
     "dendro-zone-rec-fn": {
-      "max_chars": 5400,
-      "reason": "AgroLink Phase B: owned-plus-granted recommendation reads with 404 scope denials (+783)."
+      "max_chars": 5541,
+      "reason": "AgroLink Phase B scoped zone recommendations; immutable token subjects resolve the scope user by id plus username and fail 403 before zone authorization when absent (+141)."
     },
     "dendro-tz-fn": {
       "max_chars": 1249,
@@ -586,28 +598,28 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "sync-history-build": {
-      "max_chars": 5913,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 10458,
+      "reason": "Durable multi-table history batching adds shadow/backfill/tail cursors, dirty repair batches, and segment metadata (+4087); dirty ACK correlation maps each submitted history key back to every original dirty row key (+458)."
     },
     "sync-history-http": {
       "max_chars": 907,
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "sync-history-mark": {
-      "max_chars": 5387,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 9742,
+      "reason": "Durable history ACK handling adds confirmation gates, retry backoff, cursor transitions, repair completion, and segment recomputation (+3949); ACK results now complete all original dirty row keys correlated to an accepted submitted history key (+406)."
     },
     "sync-history-manifest-build": {
-      "max_chars": 3431,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3504,
+      "reason": "Durable history manifests include tombstone_count in the selected segment state and outgoing comparison payload (+73)."
     },
     "sync-history-manifest-http": {
       "max_chars": 800,
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "sync-history-manifest-mark": {
-      "max_chars": 685,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3036,
+      "reason": "Durable manifest ACK handling loads the history helper, expands repair-requested segments into dirty keys, records repair counts, and fails visibly with DB cleanup (+2351)."
     },
     "sync-pending-http": {
       "max_chars": 861,
@@ -742,24 +754,24 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "zone-env-fn": {
-      "max_chars": 40085,
-      "reason": "AgroLink Phase B: owned-plus-granted environment-summary reads with 404 scope denials (+854)."
+      "max_chars": 40226,
+      "reason": "AgroLink Phase B scoped environment summary; immutable token subjects resolve the scope user by id plus username and fail 403 before zone authorization when absent (+141)."
     },
     "put-rain-gauge-auth-fn": {
-      "max_chars": 3986,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+      "max_chars": 4274,
+      "reason": "Rain-gauge enable writes now return the bumped device sync_version for protected desired-state parity and surface touched auth-secret catches (+288)."
     },
     "put-rain-gauge-resp-fn": {
-      "max_chars": 96,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 233,
+      "reason": "Rain-gauge enable response includes the persisted sync_version returned by the update (+137)."
     },
     "put-flow-meter-auth-fn": {
-      "max_chars": 3986,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+      "max_chars": 4274,
+      "reason": "Flow-meter enable writes now return the bumped device sync_version for protected desired-state parity and surface touched auth-secret catches (+288)."
     },
     "put-flow-meter-resp-fn": {
-      "max_chars": 96,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 233,
+      "reason": "Flow-meter enable response includes the persisted sync_version returned by the update (+137)."
     },
     "s2120-process-fn": {
       "max_chars": 7628,
@@ -774,8 +786,8 @@
       "reason": "AgroLink Phase B: shared-weather zone-assignment reads and visible catches (+927)."
     },
     "s2120-zones-put-auth-fn": {
-      "max_chars": 5138,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+      "max_chars": 5321,
+      "reason": "Weather-station zone writes validate unique owned zones, use the versioned device-command helper, return sync_version, and expose touched close and auth failures (+183)."
     },
     "al-link-store-mqtt": {
       "max_chars": 2715,
@@ -786,8 +798,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "al-link-finalize": {
-      "max_chars": 3076,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3713,
+      "reason": "Account-link finalization requires installation-bound verifier v2, persists installation_uuid with link state, and surfaces DB-close failure (+637)."
     },
     "al-link-clear-state": {
       "max_chars": 662,
@@ -862,8 +874,8 @@
       "reason": "AgroLink Phase C fresh device authorization before queue flush, with granted access and viewer rejection."
     },
     "strega-today-liters-fn": {
-      "max_chars": 4528,
-      "reason": "AgroLink Phase B: conditional scoped auth and device access for today-liters (+3034)."
+      "max_chars": 4669,
+      "reason": "AgroLink Phase B scoped today-liters read; immutable token subjects resolve the scope user by id plus username and fail 403 before device authorization when absent (+141)."
     },
     "a8267d5391e7bad0": {
       "max_chars": 1050,
@@ -902,8 +914,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "bf93cd55db0eb57f": {
-      "max_chars": 3486,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4075,
+      "reason": "Chameleon depth save returns the resulting device sync_version for protected desired-state parity and surfaces rollback and close failures (+589)."
     },
     "get-actuations-auth": {
       "max_chars": 4256,
@@ -918,8 +930,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "zone-calibration-fn": {
-      "max_chars": 6247,
-      "reason": "Inherited f50950b1 baseline plus AgroLink Phase C delegated zone-owner filtering after fresh scope authorization (+60)."
+      "max_chars": 7191,
+      "reason": "Scoped zone-calibration save now version-upserts desired-state fields, returns sync_version, clears deletion and apply markers, and surfaces auth and close failures (+944)."
     },
     "lorain-process-fn": {
       "max_chars": 7105,
@@ -934,8 +946,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "analysis-api-router-fn": {
-      "max_chars": 8196,
-      "reason": "AgroLink Phase B resolves enabled-account zone scope once and passes it to catalog, series, and per-user view reads."
+      "max_chars": 8616,
+      "reason": "AgroLink scoped analysis reads plus portable DELETE /api/analysis/views/:id handling through the shared history helper (+420)."
     },
     "record-error-fn": {
       "max_chars": 1035,
@@ -1071,7 +1083,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1220288,
-    "reason": "Reviewed absolute ceiling through AgroLink Task 7, including the transactional scoped-access command stage and six command registrations (+4663 over the prior ceiling). Earlier owners remain recorded in git history and per-node reasons."
+    "max_total": 1259807,
+    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211)."
   }
 }

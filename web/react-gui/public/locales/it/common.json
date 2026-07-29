@@ -4,6 +4,9 @@
   "delete": "Elimina",
   "na": "N/D",
   "retry": "Riprova",
+  "scope": {
+    "loadError": "Non è stato possibile caricare le autorizzazioni."
+  },
   "analysis": {
     "title": "Analisi dei dati",
     "axis": {

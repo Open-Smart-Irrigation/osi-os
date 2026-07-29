@@ -17,7 +17,7 @@ const nodeContracts = {
     type: 'function',
     preimageHash: '30fd59f6f57519113752b7fb9728d086e10d51eabd9dbcc740cd1222d27bad49',
     postimageHash: 'c1bfd92a13a8021757c390d15b764277522eae604a21e2985f2f1c9378985663',
-    activatedPostimageHash: 'a08a6b3bb80c907e603c1b746f3314acb8c8e0f504bd59bfe6521091199b1b9b',
+    activatedPostimageHash: 'f0eaab5f3912160e91487e189ee3d5a1a4aec83472102e5cd196df411c18bc15',
   },
   'sync-outbox-build': {
     name: 'Build Edge Event Batch',
@@ -31,7 +31,7 @@ const nodeContracts = {
     type: 'function',
     preimageHash: 'b17b2801f706adebd6832f053133c12e4535e6e4a51240c7e641e98c60811a45',
     postimageHash: 'fb682aaef9ebf3f851f0f8c7ef6ee1602e2e7fe5281eaa2f7bf51576c919ec0c',
-    activatedPostimageHash: 'af899e4f76182dfdf7d97b0420d0e7124ec571aaaa2a9d49d961cf6c1b519cbc',
+    activatedPostimageHash: '5e3653ed8bcf1a11c0df29f0771053af1b673d03ca474532befb815a97d08eac',
   },
   'write-strega-expectation': {
     name: 'Write STREGA Expectation',

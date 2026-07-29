@@ -99,6 +99,50 @@ const physicalActionEffects = {
   SET_STREGA_FLUSHING: 'flushing',
 };
 
+function physicalActionExpiry(envelope, type, runtime) {
+  if (!physicalActionEffects[type]) return null;
+  const payload = envelope.payload && typeof envelope.payload === 'object' &&
+    !Array.isArray(envelope.payload)
+    ? envelope.payload
+    : {};
+  const supplied = [
+    envelope.expiresAt,
+    envelope.expires_at,
+    payload.expiresAt,
+    payload.expires_at,
+  ].filter(function(value) {
+    return value != null && String(value).trim() !== '';
+  });
+  const parsed = supplied.map(function(value) {
+    const text = String(value).trim();
+    return { text, millis: Date.parse(text) };
+  });
+  if (parsed.length === 0 ||
+      parsed.some(function(value) { return !Number.isFinite(value.millis); }) ||
+      parsed.some(function(value) { return value.millis !== parsed[0].millis; })) {
+    return {
+      terminal: true,
+      result: 'REJECTED_PERMANENT',
+      reason: 'invalid_expires_at',
+      expiresAt: null,
+    };
+  }
+  const runtimeNow = runtime && runtime.now;
+  const nowMillis = runtimeNow == null
+    ? Date.now()
+    : Date.parse(runtimeNow instanceof Date ? runtimeNow.toISOString() : String(runtimeNow));
+  if (!Number.isFinite(nowMillis)) {
+    throw commandError('invalid_runtime_clock', 'Command ledger runtime clock is invalid');
+  }
+  return {
+    terminal: parsed[0].millis <= nowMillis,
+    result: 'EXPIRED',
+    reason: 'effect_expired',
+    expiresAt: new Date(parsed[0].millis).toISOString(),
+    now: new Date(nowMillis).toISOString(),
+  };
+}
+
 function replayStatus(result) {
   if (result === 'APPLIED') return 'ACKED';
   if (result === 'FAILED_RETRYABLE') return 'FAILED_RETRYABLE';
@@ -355,6 +399,67 @@ async function validEffectBinding(envelope, opts) {
   return validNonJournalEffectBinding(envelope, opts);
 }
 
+async function persistPreDispatchTerminalAck(
+  tx,
+  envelope,
+  runtime,
+  type,
+  disposition
+) {
+  const commandId = queueCommandId(envelope);
+  const payload = envelope.payload && typeof envelope.payload === 'object' &&
+    !Array.isArray(envelope.payload)
+    ? envelope.payload
+    : {};
+  const effectKey = String(
+    payload.effect_key || payload.effectKey || envelope.effectKey || ''
+  ).trim() || null;
+  const gateway = String(runtime.gateway_device_eui || '').trim().toUpperCase();
+  const appliedAt = disposition.now || new Date().toISOString();
+  const ack = {
+    commandId: commandId.ack,
+    commandType: type,
+    effectKey,
+    status: replayStatus(disposition.result),
+    result: disposition.result,
+    appliedAt,
+    appliedSyncVersion: null,
+    duplicate: false,
+    reason: disposition.reason,
+    detail: disposition.reason,
+  };
+  await tx.run(
+    'INSERT INTO applied_commands (' +
+      'command_id,effect_key,device_eui,command_type,result,applied_at,' +
+      'result_detail,originator,expires_at' +
+    ') VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(command_id) DO NOTHING',
+    [
+      commandId.stored,
+      effectKey,
+      gateway || 'UNKNOWN',
+      type,
+      disposition.result,
+      appliedAt,
+      JSON.stringify(ack),
+      'edge',
+      disposition.expiresAt,
+    ]
+  );
+  const hooks = runtime.lifecycle_hooks;
+  if (hooks && typeof hooks.afterCommandLedger === 'function') {
+    await hooks.afterCommandLedger(ack);
+  }
+  await tx.run(
+    'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+    [commandId.stored]
+  );
+  await tx.run(
+    'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+    [commandId.stored, JSON.stringify(ack), appliedAt]
+  );
+  return ack;
+}
+
 async function deduplicatePendingCommand(db, envelope, runtime) {
   envelope = object(envelope, 'Pending command envelope');
   const deliveryId = deliveryCommandId(envelope);
@@ -368,6 +473,13 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
       return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, true) };
     }
     const type = commandType(envelope);
+    const expiry = physicalActionExpiry(envelope, type, opts);
+    if (expiry && expiry.terminal) {
+      return {
+        handled: true,
+        ack: await persistPreDispatchTerminalAck(tx, envelope, opts, type, expiry),
+      };
+    }
     const journalType = isJournalCommandType(type);
     const zoneType = isZoneCommandType(type);
     const irrigationConfigType = isIrrigationConfigCommandType(type);

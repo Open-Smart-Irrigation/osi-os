@@ -11,8 +11,13 @@ const { DatabaseSync } = require('node:sqlite');
 const ROOT = path.resolve(__dirname, '..');
 const PROFILES = ['bcm2712', 'bcm2709'];
 const GATEWAY_EUI = '0016C001F11715E2';
+const INSTALLATION_UUID = '50000000-0000-4000-8000-000000000001';
 const CATALOG_HASH = 'a'.repeat(64);
 const HISTORY_AUTH_SECRET = 'fixture-history-auth-secret';
+const INSTALLATION_HELPER = require(path.join(
+  ROOT,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper'
+));
 const EXPECTED_CAPABILITIES = [
   'linked_auth_sync_v1',
   'force_edge_sync_v1',
@@ -20,6 +25,7 @@ const EXPECTED_CAPABILITIES = [
   'irrigation_config_desired_state_v1',
   'device_desired_state_v1',
   'weather_station_zones_desired_state_v1',
+  'installation_recovery_v1',
   'field_journal_v1',
 ];
 const JOURNAL_FIELDS = [
@@ -111,6 +117,24 @@ class JournalFixtureDb {
     this.catalogQueryError = settings.catalogQueryError || null;
     this.userQueryError = settings.userQueryError || null;
     this.closeError = settings.closeError || null;
+    this.native.exec(
+      'CREATE TABLE installation_identity(' +
+      'singleton_id INTEGER PRIMARY KEY, installation_uuid TEXT, ' +
+      'current_gateway_device_eui TEXT, previous_gateway_device_euis_json TEXT, ' +
+      'recovery_state TEXT, recovery_operation_uuid TEXT, updated_at TEXT)'
+    );
+    this.native.prepare(
+      'INSERT INTO installation_identity(' +
+      'singleton_id, installation_uuid, current_gateway_device_eui, ' +
+      'previous_gateway_device_euis_json, recovery_state, updated_at' +
+      ') VALUES (1, ?, ?, ?, ?, ?)'
+    ).run(
+      INSTALLATION_UUID,
+      GATEWAY_EUI,
+      '[]',
+      'ACTIVE',
+      '2026-07-12T08:00:00.000Z'
+    );
     if (settings.tables !== false) {
       const tableSql = {
         journal_catalog_state: 'CREATE TABLE journal_catalog_state(id INTEGER PRIMARY KEY, catalog_version, catalog_hash TEXT)',
@@ -223,7 +247,7 @@ class JournalFixtureDb {
         }];
       } else if (/journal_catalog_state/.test(sql) && !/sqlite_master/.test(sql) && this.catalogQueryError) {
         throw this.catalogQueryError;
-      } else if (/sqlite_master|journal_/.test(sql)) {
+      } else if (/sqlite_master|journal_|installation_identity/.test(sql)) {
         rows = this.native.prepare(sql).all(...(params || []));
       } else {
         rows = [];
@@ -315,9 +339,35 @@ function identityGlobal(options) {
 async function runNormalBootstrap(node, options) {
   const db = new JournalFixtureDb(options);
   const context = runtime(db, options);
+  const osiLib = {
+    require(name) {
+      return name === 'installation'
+        ? { ok: true, value: INSTALLATION_HELPER }
+        : { ok: false, error: `unsupported fixture helper: ${name}` };
+    },
+  };
   try {
-    const execute = new Function('msg', 'flow', 'global', 'env', 'node', 'crypto', 'osiDb', node.func);
-    const result = await execute({}, context.flow, identityGlobal(options), context.env, context.node, crypto, context.osiDb);
+    const execute = new Function(
+      'msg',
+      'flow',
+      'global',
+      'env',
+      'node',
+      'crypto',
+      'osiDb',
+      'osiLib',
+      node.func
+    );
+    const result = await execute(
+      {},
+      context.flow,
+      identityGlobal(options),
+      context.env,
+      context.node,
+      crypto,
+      context.osiDb,
+      osiLib
+    );
     return { payload: result && result.payload, syncState: context.flow.get('sync_state') || {}, warnings: context.warnings, errors: context.errors };
   } finally {
     db.destroy();
@@ -343,9 +393,16 @@ async function runForcedBootstrap(node, options) {
       throw new Error('Unexpected fixture request: ' + request.method + ' ' + request.url);
     },
   };
+  const osiLib = {
+    require(name) {
+      return name === 'installation'
+        ? { ok: true, value: INSTALLATION_HELPER }
+        : { ok: false, error: `unsupported fixture helper: ${name}` };
+    },
+  };
   try {
     const execute = new Function(
-      'msg', 'flow', 'global', 'env', 'node', 'crypto', 'osiDb', 'osiCloudHttp',
+      'msg', 'flow', 'global', 'env', 'node', 'crypto', 'osiDb', 'osiCloudHttp', 'osiLib',
       node.func
     );
     await execute({
@@ -353,7 +410,7 @@ async function runForcedBootstrap(node, options) {
       _forceSyncUserId: 1,
       _forceSyncUsername: 'fixture-user',
     }, context.flow, identityGlobal(options), context.env, context.node,
-    crypto, context.osiDb, osiCloudHttp);
+    crypto, context.osiDb, osiCloudHttp, osiLib);
     return { payload: bootstrapPayload, syncState: context.flow.get('sync_state') || {}, warnings: context.warnings, errors: context.errors };
   } finally {
     db.destroy();
@@ -418,8 +475,12 @@ async function runHistoryCloseRoute(node, options) {
   }
 }
 
-function assertReadyAdvertisement(payload) {
-  assert.ok(payload, 'core bootstrap payload must be produced');
+function assertReadyAdvertisement(payload, diagnostics) {
+  assert.ok(
+    payload,
+    'core bootstrap payload must be produced; diagnostics=' +
+      JSON.stringify(diagnostics || {})
+  );
   assert.deepEqual(payload.gatewayIdentity.syncCapabilities, EXPECTED_CAPABILITIES);
   assert.equal(payload.gatewayIdentity.journal_catalog_version, 7);
   assert.equal(payload.gatewayIdentity.journal_catalog_hash, CATALOG_HASH);
@@ -433,6 +494,9 @@ function assertReadyAdvertisement(payload) {
     hash_scope: RESOURCE_HASH_SCOPE,
   });
   assert.deepEqual(payload.gatewayIdentity.previousGatewayDeviceEuis, []);
+  assert.equal(payload.gatewayIdentity.installationUuid, INSTALLATION_UUID);
+  assert.equal(payload.gatewayIdentity.recoveryState, 'ACTIVE');
+  assert.equal(payload.gatewayIdentity.recoveryOperationUuid, null);
   assert.equal(payload.gatewayIdentity.edgeBuildVersion, '2026.07-test');
 }
 
@@ -453,7 +517,12 @@ for (const profile of PROFILES) {
 
   test(profile + ' normal bootstrap advertises the ready journal catalog and exact manifest', async () => {
     assert.equal(normal && normal.name, 'Build Cloud Bootstrap');
-    assertReadyAdvertisement((await runNormalBootstrap(normal)).payload);
+    const result = await runNormalBootstrap(normal);
+    assertReadyAdvertisement(result.payload, {
+      warnings: result.warnings,
+      errors: result.errors,
+      syncState: result.syncState,
+    });
   });
 
   test(profile + ' forced bootstrap advertises the same ready journal contract', async () => {

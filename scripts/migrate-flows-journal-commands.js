@@ -139,17 +139,17 @@ const dedupeSource = `return (async () => {
     cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});
   } catch (parseError) {
     node.error('Pending command parse failed closed: ' + String(parseError && parseError.message ? parseError.message : parseError), msg);
-    return [null, null];
+    return null;
   }
   const envelope = cmd._pendingCommandEnvelope;
   if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
     node.error('Pending command has no protected delivery envelope', msg);
-    return [null, null];
+    return null;
   }
   const commandType = String(envelope.commandType || '').trim().toUpperCase();
   if (!commandType) {
     node.error('Pending command has no protected delivery command type', msg);
-    return [null, null];
+    return null;
   }
   const journalType = /(?:^|_)JOURNAL(?:_|$)/.test(commandType);
   const dbLoad = osiLib.require('osi-db-helper');
@@ -160,7 +160,7 @@ const dedupeSource = `return (async () => {
       .map(function(load) { return load.error; })
       .join('; ');
     node.error('Command helpers unavailable: ' + detail, msg);
-    return [null, null];
+    return null;
   }
   const osiDb = dbLoad.value;
   const osiCommandLedger = commandLedgerLoad.value;
@@ -177,21 +177,16 @@ const dedupeSource = `return (async () => {
       node.warn('Journal dedupe hooks unavailable: ' + String(journalLoad.error || 'unknown loader error'));
     }
   }
-  const gatewayEui = runtime.gateway_device_eui;
   const db = new osiDb.Database('/data/db/farming.db');
   const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));
   try {
     const result = await osiCommandLedger.deduplicatePendingCommand(db, envelope, runtime);
-    if (!result.handled) return [msg, null];
-    node.status({ fill: 'blue', shape: 'ring', text: 'duplicate command ' + String(result.ack.commandId) });
-    return [null, {
-      topic: 'devices/' + gatewayEui + '/command_ack',
-      payload: JSON.stringify(result.ack),
-      qos: 1
-    }];
+    if (!result.handled) return msg;
+    node.status({ fill: 'blue', shape: 'ring', text: 'terminal/replayed command ' + String(result.ack.commandId) });
+    return null;
   } catch (error) {
     node.error('Command dedupe failed closed: ' + String(error && error.message ? error.message : error), msg);
-    return [null, null];
+    return null;
   } finally {
     try {
       await close();
@@ -473,7 +468,7 @@ const PRIOR_CURRENT_COMMAND_SURFACES = Object.freeze({
   'command-ack-queue-rest': Object.freeze({ func: queueAckSource, libs: osiLibOnly }),
 });
 const expectedCommandShapeHashes = {
-  'command-dedupe-dispatch': 'cac813cf50ef6a3527e5e205ceb4330d4cf18cca15c79c89a86c4f63d867c609',
+  'command-dedupe-dispatch': 'e31f40f714b31ec6bad434d36f130f2e28107db4d9f1df717cd95c0bd07c5c92',
   'journal-command-apply-fn': '18e8af185bc218be8edfad11b1d7ef8a299c4509639151c6ab536b540744d967',
   'command-ack-queue-rest': '28368a33749674b0bc1036143c42f98dea5ea10535c437735175e83cc670650e',
 };
@@ -629,7 +624,8 @@ function migrate(buffer) {
   const dedupe = byId.get('command-dedupe-dispatch');
   dedupe.func = dedupeSource;
   dedupe.libs = osiLibOnly;
-  dedupe.wires = [['journal-command-apply-fn'], ['9d5e3035c3d069c4']];
+  dedupe.outputs = 1;
+  dedupe.wires = [['journal-command-apply-fn']];
 
   const queue = byId.get('command-ack-queue-rest');
   queue.func = queueAckSource;

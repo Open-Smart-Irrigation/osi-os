@@ -239,12 +239,13 @@ if (!dedupe || !requireOsiLibContract(
     'Command helpers unavailable:'
 ) || JSON.stringify(dedupe.wires) !== JSON.stringify([
     ['journal-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
 ]) || !/deduplicatePendingCommand/.test(dedupe.func || '') ||
+    dedupe.outputs !== 1 ||
+    /command_ack/.test(dedupe.func || '') ||
     !/const journalType = \/\(\?:\^\|_\)JOURNAL\(\?:_\|\$\)\//.test(dedupe.func || '') ||
     !/if \(journalType\) \{[\s\S]*osiLib\.require\('osi-journal'\)/.test(dedupe.func || '') ||
     !/node\.error/.test(dedupe.func || '') || /dispatching command/.test(dedupe.func || '')) {
-    failures.push('journal commands: dedupe must delegate exact replay via the shared command ledger, fail closed, and bypass ACK reclassification');
+    failures.push('journal commands: dedupe must persist terminal results, fail closed, and expose only normal effect dispatch');
 }
 if (!journalApply || !requireOsiLibContract(
     journalApply,
@@ -285,7 +286,7 @@ async function runJournalHelperFailureMatrix() {
             label: 'journal helper failure: dedupe',
             helpers: ['osi-db-helper', 'osi-command-ledger'],
             errorPrefix: 'Command helpers unavailable: ',
-            expected: [null, null],
+            expected: null,
         },
         {
             node: journalApply,

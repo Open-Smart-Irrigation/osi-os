@@ -32,9 +32,14 @@ includes('Process Result', 'installation_uuid');
 includes('Build Cloud Bootstrap', 'installationUuid');
 includes('Build Cloud Bootstrap', 'INSERT OR IGNORE INTO installation_identity');
 includes('Build Cloud Bootstrap', 'recoveryOperationUuid');
+includes('Run Force Sync', 'installation_recovery_v1');
+includes('Run Force Sync', 'installationUuid');
+includes('Run Force Sync', 'INSERT OR IGNORE INTO installation_identity');
+includes('Run Force Sync', 'recoveryOperationUuid');
 includes('Build Sync State', 'recoveryState');
 
 assert.equal(node('Build server auth request').libs.some((lib) => lib.var === 'osiLib'), true);
 assert.equal(node('Process Result').libs.some((lib) => lib.var === 'osiLib'), true);
+assert.equal(node('Run Force Sync').libs.some((lib) => lib.var === 'osiLib'), true);
 
 console.log('OK installation recovery flow contract');

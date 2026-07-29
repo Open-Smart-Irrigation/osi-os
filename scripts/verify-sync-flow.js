@@ -1664,6 +1664,17 @@ expectOrderedIncludesById('command-dedupe-dispatch', [
 ], 'classifies the protected command type before mandatory and optional helper loading');
 expectIncludesById('command-dedupe-dispatch', 'Command helpers unavailable:', 'keeps DB and ledger mandatory for every protected command');
 expectIncludesById('command-dedupe-dispatch', 'Journal dedupe hooks unavailable:', 'surfaces unavailable optional journal replay hooks');
+expectIncludesById('command-dedupe-dispatch', 'if (!result.handled) return msg;', 'passes only non-terminal commands to effect dispatch');
+expectExcludesById('command-dedupe-dispatch', 'command_ack', 'keeps terminal and replay ACKs in the durable REST outbox');
+const commandDedupeNode = findNodeById('command-dedupe-dispatch');
+if (!commandDedupeNode ||
+    commandDedupeNode.outputs !== 1 ||
+    JSON.stringify(commandDedupeNode.wires) !==
+      JSON.stringify([['journal-command-apply-fn']])) {
+  fail('command-dedupe-dispatch must expose only the normal effect output');
+} else {
+  console.log('OK command-dedupe-dispatch exposes only the normal effect output');
+}
 expectOrderedIncludesById('journal-command-apply-fn', [
   'const envelope = cmd._pendingCommandEnvelope;',
   "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
@@ -1727,6 +1738,9 @@ expectIncludesById('zone-calibration-fn', 'sync_version=excluded.sync_version, d
 expectIncludesById('zone-calibration-fn', '[zoneId, measuredFlowRateLpm, measurementMethod, now, now, now, nextCalibrationSyncVersion, null]', 'binds local calibration write parameters');
 expectExcludesById('zone-calibration-fn', 'UPDATE irrigation_zones SET sync_version', 'parent-zone version mutation from local calibration writes');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1', 'looks up exact command IDs before payload validation');
+expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'physicalActionExpiry', 'checks physical-action expiry before effect dispatch');
+expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'parsed[0].millis <= nowMillis', 'treats equality at the expiry boundary as terminal');
+expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'persistPreDispatchTerminalAck', 'persists pre-dispatch expiry decisions through the command ledger');
 expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'result_detail', 'reconstructs ACK facts from canonical replay-ledger detail');
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'db.transaction(async function(tx) {', 'applies scoped-access mutations and terminal ACK persistence in one transaction');
 expectFileIncludes('osi-scoped-access-commands/index.js', scopedAccessCommandsSource, 'base_version_conflict', 'rejects stale scoped-access commands with a terminal conflict');
@@ -1883,7 +1897,6 @@ expectWireById('sync-force-build', 'reject-indefinite-open', 'routes force-sync 
 expectWireById('reject-indefinite-open', 'command-dedupe-dispatch', 'routes guarded cloud commands through the replay ledger');
 expectWireById('reject-indefinite-open', 'command-ack-queue-rest', 'routes permanent rejection ACKs around the command deduper and into the durable ACK queue');
 expectWireById('command-dedupe-dispatch', 'journal-command-apply-fn', 'routes non-duplicates through the journal-aware command applier');
-expectWireById('command-dedupe-dispatch', '9d5e3035c3d069c4', 'publishes already-persisted exact replay ACKs without reclassification');
 expectWireById('journal-command-apply-fn', '934bf2bc19a8ce22', 'preserves the legacy output while routing non-journal commands onward');
 expectWireById('journal-command-apply-fn', 'scoped-access-command-apply-fn', 'routes non-journal commands through scoped-access handling');
 expectWireById('scoped-access-command-apply-fn', 'zone-command-apply-fn', 'routes non-access commands through protected zone handling');

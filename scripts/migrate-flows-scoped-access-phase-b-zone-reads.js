@@ -20,9 +20,14 @@ if (scopedOn) {
     throw error;
   }
   const user = await _db.get(
-    'SELECT user_uuid FROM users WHERE username = ?',
-    [auth.username]
+    'SELECT user_uuid FROM users WHERE id = ? AND username = ?',
+    [auth.userId, auth.username]
   );
+  if (!user || !user.user_uuid) {
+    const error = new Error('forbidden');
+    error.statusCode = 403;
+    throw error;
+  }
   const zoneUuid = await scopeLoad.value.resolveZoneUuidById(_db, zoneId);
   if (!zoneUuid) {
     const error = new Error('zone not found');
@@ -31,7 +36,7 @@ if (scopedOn) {
   }
   await scopeLoad.value.assertZoneAccess(
     _db,
-    user && user.user_uuid,
+    user.user_uuid,
     zoneUuid,
     { scopedMode: true }
   );

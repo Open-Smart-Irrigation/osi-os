@@ -70,6 +70,51 @@ const TAB_ID = 'device-api-tab';
 const HTTP500_ID = 'device-api-http500';
 const CATCH_ID = 'device-api-catch';
 const RESPONSE_ID = 'device-response';
+const SCOPED_DEVICE_CONFIG_ROUTER_ID = 'scoped-device-config-guard';
+const CONDITIONAL_SCOPED_AUTH_ROUTERS = new Map([
+  ['scoped-weather-zone-assign-router', {
+    method: 'PUT',
+    url: '/api/devices/:deveui/zone-assignments',
+    httpNodeId: 's2120-zones-put-http',
+    legacyAuthNodeId: 's2120-zones-put-auth-fn',
+  }],
+  ['scoped-device-delete-router', {
+    method: 'DELETE',
+    url: '/api/devices/:deveui',
+    httpNodeId: 'delete-device-http',
+    legacyAuthNodeId: 'delete-device-auth',
+  }],
+  ['scoped-device-claim-router', {
+    method: 'POST',
+    url: '/api/devices',
+    httpNodeId: 'post-devices-http',
+    legacyAuthNodeId: 'post-devices-auth',
+  }],
+  ['scoped-device-unassign-router', {
+    method: 'DELETE',
+    url: '/api/irrigation-zones/:id/devices/:deveui',
+    httpNodeId: 'unassign-device-http',
+    legacyAuthNodeId: 'unassign-device-auth',
+  }],
+  ['scoped-device-assign-router', {
+    method: 'PUT',
+    url: '/api/irrigation-zones/:id/devices/:deveui',
+    httpNodeId: 'assign-device-http',
+    legacyAuthNodeId: 'assign-device-auth',
+  }],
+  ['scoped-zone-delete-router', {
+    method: 'DELETE',
+    url: '/api/irrigation-zones/:id',
+    httpNodeId: 'delete-zone-http',
+    legacyAuthNodeId: 'delete-zone-auth',
+  }],
+  ['scoped-zone-create-router', {
+    method: 'POST',
+    url: '/api/irrigation-zones',
+    httpNodeId: 'post-zone-http',
+    legacyAuthNodeId: 'post-zone-auth',
+  }],
+]);
 const BASE_SHA = 'f50950b1767a1aa6302ef2553d68a4e379b5b142';
 
 const PROFILES = [
@@ -176,6 +221,130 @@ function outputsOf(node) {
   return [];
 }
 
+function outputsOfForRoute(node, route) {
+  if (!node || node.id !== SCOPED_DEVICE_CONFIG_ROUTER_ID) return outputsOf(node);
+  const match = String(node.func || '').match(/const routeTable = (\[[^;]+\]);/);
+  if (!match) return [];
+  let routeTable;
+  try {
+    routeTable = JSON.parse(match[1]);
+  } catch (_error) {
+    return [];
+  }
+  const prefix = '/api/devices/:deveui';
+  const suffix = route.url.startsWith(prefix) ? route.url.slice(prefix.length) : null;
+  const selected = routeTable.find((entry) =>
+    entry
+    && entry.method === route.method
+    && entry.suffix === suffix
+    && Number.isSafeInteger(entry.index)
+  );
+  if (!selected || !Array.isArray(node.wires?.[selected.index])) return [];
+  return node.wires[selected.index].filter(Boolean);
+}
+
+function allIndexesOf(source, needle) {
+  const indexes = [];
+  let offset = -1;
+  while ((offset = source.indexOf(needle, offset + 1)) >= 0) indexes.push(offset);
+  return indexes;
+}
+
+function checkConditionalScopedAuthRouter(node, route) {
+  const contract = node && CONDITIONAL_SCOPED_AUTH_ROUTERS.get(node.id);
+  if (!contract) return null;
+
+  const label = route.method + ' ' + route.url;
+  const failures = [];
+  if (route.method !== contract.method ||
+      route.url !== contract.url ||
+      route.httpNodeId !== contract.httpNodeId ||
+      route.authNodeId !== contract.legacyAuthNodeId) {
+    failures.push(
+      'route ' + label + ': conditional scoped router ' + node.id +
+      ' does not match its exact reviewed route/auth contract'
+    );
+  }
+
+  const expectedWires = [[contract.legacyAuthNodeId], [RESPONSE_ID]];
+  if (Number(node.outputs) !== 2 ||
+      JSON.stringify(node.wires || []) !== JSON.stringify(expectedWires)) {
+    failures.push(
+      'route ' + label + ': conditional scoped router ' + node.id +
+      ' must wire flag-off output to ' + contract.legacyAuthNodeId +
+      ' and authenticated response output to ' + RESPONSE_ID
+    );
+  }
+
+  const source = String(node.func || '');
+  const flagOffMarker =
+    "if (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') return [msg, null];";
+  const flagOffIndexes = allIndexesOf(source, flagOffMarker);
+  const verifyIndexes = allIndexesOf(source, 'scope.verifyBearer(');
+  const dbOpenIndexes = allIndexesOf(source, 'new osiDb.Database(');
+  const mutationIndexes = allIndexesOf(source, 'await run(');
+  const responseReturnIndexes = allIndexesOf(source, 'return [null, msg];');
+
+  if (flagOffIndexes.length !== 1) {
+    failures.push(
+      'route ' + label + ': conditional scoped router ' + node.id +
+      ' must contain exactly one reviewed flag-off return to legacy auth'
+    );
+  }
+  if (verifyIndexes.length !== 1) {
+    failures.push(
+      'route ' + label + ': conditional scoped router ' + node.id +
+      ' must contain exactly one inline scope.verifyBearer call'
+    );
+  }
+  if (dbOpenIndexes.length !== 1) {
+    failures.push(
+      'route ' + label + ': conditional scoped router ' + node.id +
+      ' must contain exactly one reviewed database open'
+    );
+  }
+  if (responseReturnIndexes.length === 0) {
+    failures.push(
+      'route ' + label + ': conditional scoped router ' + node.id +
+      ' has no bounded response-output return'
+    );
+  }
+
+  if (flagOffIndexes.length === 1 && verifyIndexes.length === 1 &&
+      flagOffIndexes[0] >= verifyIndexes[0]) {
+    failures.push(
+      'route ' + label + ': conditional scoped router ' + node.id +
+      ' must route flag-off requests to legacy auth before inline scoped auth'
+    );
+  }
+  if (verifyIndexes.length === 1 && dbOpenIndexes.length === 1 &&
+      verifyIndexes[0] >= dbOpenIndexes[0]) {
+    failures.push(
+      'route ' + label + ': conditional scoped router ' + node.id +
+      ' opens the database before inline scope.verifyBearer'
+    );
+  }
+  if (verifyIndexes.length === 1 &&
+      mutationIndexes.some((index) => index <= verifyIndexes[0])) {
+    failures.push(
+      'route ' + label + ': conditional scoped router ' + node.id +
+      ' executes a domain mutation before inline scope.verifyBearer'
+    );
+  }
+  if (verifyIndexes.length === 1 &&
+      responseReturnIndexes.some((index) => index <= verifyIndexes[0])) {
+    failures.push(
+      'route ' + label + ': conditional scoped router ' + node.id +
+      ' can return on its response output before inline scope.verifyBearer'
+    );
+  }
+
+  return {
+    failures,
+    legacyOutputs: failures.length === 0 ? [contract.legacyAuthNodeId] : [],
+  };
+}
+
 function findHttpInNodes(flows) {
   return flows.filter((n) => n.z === TAB_ID && n.type === 'http in');
 }
@@ -274,7 +443,15 @@ function checkAuthEntry(route, byId) {
       failures.push('route ' + label + ': reaches undeclared auth source ' + id + ' before declared ' + route.authNodeId);
       continue;
     }
-    const next = outputsOf(node);
+    const conditionalRouter = checkConditionalScopedAuthRouter(node, route);
+    if (conditionalRouter) {
+      failures.push(...conditionalRouter.failures);
+      for (const nextId of conditionalRouter.legacyOutputs) {
+        queue.push({ id: nextId, path: [...path, id] });
+      }
+      continue;
+    }
+    const next = outputsOfForRoute(node, route);
     if (next.length === 0) { failures.push('route ' + label + ': dangling branch ends at ' + id + ' without reaching auth'); continue; }
     for (const n of next) queue.push({ id: n, path: [...path, id] });
   }
@@ -822,6 +999,64 @@ for (const rel of PROFILES) {
       const bypassFailures = checkAuthEntry(route, cloneById2);
       assert.ok(bypassFailures.length > 0, 'expected the redirected link hop to fail');
       httpNode.wires = originalWires;
+    });
+
+    await t.test('mutation: removing inline auth from any reviewed conditional scoped router fails closed', () => {
+      for (const [routerId, contract] of CONDITIONAL_SCOPED_AUTH_ROUTERS) {
+        const clone = cloneFlows(flows);
+        const cloneById = indexById(clone);
+        const router = cloneById.get(routerId);
+        const route = fixture.routes.find((entry) =>
+          entry.method === contract.method &&
+          entry.url === contract.url &&
+          entry.httpNodeId === contract.httpNodeId &&
+          entry.authNodeId === contract.legacyAuthNodeId
+        );
+        assert.ok(route, routerId + ': reviewed route is missing from fixture');
+        assert.ok(router, routerId + ': reviewed conditional scoped router is missing');
+        router.func = router.func.replace('scope.verifyBearer(', 'scope.verifyBearerRemoved(');
+        const failures = checkAuthEntry(route, cloneById);
+        assert.ok(
+          failures.some((failure) =>
+            failure.includes(routerId) &&
+            failure.includes('exactly one inline scope.verifyBearer call')
+          ),
+          routerId + ': removing inline auth did not fail closed:\n' + failures.join('\n')
+        );
+      }
+    });
+
+    await t.test('mutation: moving inline auth after database open in any reviewed conditional scoped router fails closed', () => {
+      for (const [routerId, contract] of CONDITIONAL_SCOPED_AUTH_ROUTERS) {
+        const clone = cloneFlows(flows);
+        const cloneById = indexById(clone);
+        const router = cloneById.get(routerId);
+        const route = fixture.routes.find((entry) =>
+          entry.method === contract.method &&
+          entry.url === contract.url &&
+          entry.httpNodeId === contract.httpNodeId &&
+          entry.authNodeId === contract.legacyAuthNodeId
+        );
+        assert.ok(route, routerId + ': reviewed route is missing from fixture');
+        assert.ok(router, routerId + ': reviewed conditional scoped router is missing');
+        router.func = router.func.replace('scope.verifyBearer(', 'scope.verifyBearerMoved(');
+        const dbOpenIndex = router.func.indexOf('new osiDb.Database(');
+        assert.ok(dbOpenIndex >= 0, routerId + ': reviewed database open is missing');
+        const dbOpenLineEnd = router.func.indexOf('\n', dbOpenIndex);
+        assert.ok(dbOpenLineEnd >= 0, routerId + ': database open line has no terminator');
+        router.func =
+          router.func.slice(0, dbOpenLineEnd + 1) +
+          'scope.verifyBearer(\n' +
+          router.func.slice(dbOpenLineEnd + 1);
+        const failures = checkAuthEntry(route, cloneById);
+        assert.ok(
+          failures.some((failure) =>
+            failure.includes(routerId) &&
+            failure.includes('opens the database before inline scope.verifyBearer')
+          ),
+          routerId + ': reordered inline auth did not fail closed:\n' + failures.join('\n')
+        );
+      }
     });
 
     await t.test('mutation: detaching the catch response breaks the chain', () => {

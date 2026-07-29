@@ -31,7 +31,8 @@ verifier = verifier.replace(
 );
 target.func = verifier + String.raw`
 const auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);
-msg.username = auth.username;
+msg.authUserId = auth.userId;
+msg.authUsername = auth.username;
 return msg;`;
 const output = JSON.stringify(flows, null, 2) + '\n';
 for (const flowPath of flowPaths) fs.writeFileSync(flowPath, output);

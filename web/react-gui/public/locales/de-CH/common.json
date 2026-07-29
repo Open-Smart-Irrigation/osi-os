@@ -4,6 +4,9 @@
   "delete": "Löschen",
   "na": "N/A",
   "retry": "Erneut versuchen",
+  "scope": {
+    "loadError": "Berechtigungen konnten nicht geladen werden."
+  },
   "analysis": {
     "title": "Datenanalyse",
     "axis": {

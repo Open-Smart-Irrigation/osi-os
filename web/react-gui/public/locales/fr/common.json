@@ -4,6 +4,9 @@
   "delete": "Supprimer",
   "na": "N/A",
   "retry": "Réessayer",
+  "scope": {
+    "loadError": "Les autorisations n’ont pas pu être chargées."
+  },
   "analysis": {
     "title": "Analyse des données",
     "axis": {

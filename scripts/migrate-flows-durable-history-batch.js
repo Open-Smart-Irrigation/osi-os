@@ -63,6 +63,16 @@ function phaseForDirty(table, changeKind) {
 function makeBatch(rows, phase, cursor, target, dirtyKeys) {
   const batchId = Date.now().toString(36) + '-' + tableName;
   const prepared = rows.map((row) => helper.prepareRow(tableName, target.gatewayEui, row));
+  const dirtyRowKeysByHistoryKey = {};
+  prepared.forEach((row, index) => {
+    const dirtyRowKey = dirtyKeys && dirtyKeys[index];
+    if (!dirtyRowKey) return;
+    const submittedHistoryKey = String(row.historyKey || '');
+    if (!dirtyRowKeysByHistoryKey[submittedHistoryKey]) {
+      dirtyRowKeysByHistoryKey[submittedHistoryKey] = [];
+    }
+    dirtyRowKeysByHistoryKey[submittedHistoryKey].push(String(dirtyRowKey));
+  });
   const segmentKeys = [];
   for (const row of rows) {
     try {
@@ -83,6 +93,7 @@ function makeBatch(rows, phase, cursor, target, dirtyKeys) {
     phase,
     rowCount: prepared.length,
     dirtyKeys: dirtyKeys || [],
+    dirtyRowKeysByHistoryKey,
     segmentKeys,
     snapshotHighId: cursor.snapshot_high_id,
     snapshotHighKey: cursor.snapshot_high_key,
@@ -335,13 +346,21 @@ try {
   const accepted = new Set((response.results || [])
     .filter((result) => ['APPLIED', 'UPDATED', 'DUPLICATE', 'QUARANTINED'].includes(result && result.status))
     .map((result) => String(result.historyKey || '')));
-  for (const dirtyKey of batch.dirtyKeys || []) {
-    if (accepted.has(String(dirtyKey))) {
-      await run(
-        "UPDATE sync_history_dirty_keys SET status='done', last_error=NULL, next_attempt_at=NULL WHERE peer_node='cloud' AND table_name=? AND row_key=?",
-        [tableName, dirtyKey]
-      );
+  const completedDirtyRows = new Set();
+  for (const [submittedHistoryKey, dirtyRowKeys] of Object.entries(batch.dirtyRowKeysByHistoryKey || {})) {
+    if (!accepted.has(String(submittedHistoryKey))) continue;
+    for (const dirtyRowKey of dirtyRowKeys || []) {
+      completedDirtyRows.add(String(dirtyRowKey));
     }
+  }
+  for (const dirtyKey of batch.dirtyKeys || []) {
+    if (accepted.has(String(dirtyKey))) completedDirtyRows.add(String(dirtyKey));
+  }
+  for (const dirtyRowKey of completedDirtyRows) {
+    await run(
+      "UPDATE sync_history_dirty_keys SET status='done', last_error=NULL, next_attempt_at=NULL WHERE peer_node='cloud' AND table_name=? AND row_key=?",
+      [tableName, dirtyRowKey]
+    );
   }
   await recomputeSegments(batch.segmentKeys || []);
   const effective = Object.assign({}, cursor, {

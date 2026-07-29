@@ -547,12 +547,11 @@ test('shipped command nodes let recognized REBOOT traverse toward legacy dispatc
   const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
   assert.deepEqual(dedupe.requested, ['osi-db-helper', 'osi-command-ledger']);
   assert.deepEqual(dedupe.errors, []);
-  assert.equal(dedupe.result[0], msg);
-  assert.equal(dedupe.result[1], null);
+  assert.equal(dedupe.result, msg);
   assert.equal(Object.prototype.hasOwnProperty.call(ledgerRuntime, 'extraEffectBindingValidator'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(ledgerRuntime, 'extraSubmittedIntentHash'), false);
 
-  const apply = await runShippedCommandNode('journal-command-apply-fn', dedupe.result[0], helpers);
+  const apply = await runShippedCommandNode('journal-command-apply-fn', dedupe.result, helpers);
   assert.deepEqual(apply.requested, []);
   assert.deepEqual(apply.errors, []);
   assert.equal(apply.result[0], msg);
@@ -579,7 +578,7 @@ for (const unavailableHelper of ['osi-db-helper', 'osi-command-ledger']) {
 
     const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
     assert.deepEqual(dedupe.requested, ['osi-db-helper', 'osi-command-ledger']);
-    assert.deepEqual(dedupe.result, [null, null]);
+    assert.equal(dedupe.result, null);
     assert.equal(dedupe.errors.length, 1);
     assert.equal(dedupe.errors[0].errorMsg, msg);
     assert.match(dedupe.errors[0].message, /helper.*unavailable/i);
@@ -607,12 +606,11 @@ test('shipped journal command path fails closed after optional dedupe hooks are 
 
   const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
   assert.deepEqual(dedupe.requested, ['osi-db-helper', 'osi-command-ledger', 'osi-journal']);
-  assert.equal(dedupe.result[0], msg);
-  assert.equal(dedupe.result[1], null);
+  assert.equal(dedupe.result, msg);
   assert.equal(Object.prototype.hasOwnProperty.call(ledgerRuntime, 'extraEffectBindingValidator'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(ledgerRuntime, 'extraSubmittedIntentHash'), false);
 
-  const apply = await runShippedCommandNode('journal-command-apply-fn', dedupe.result[0], helpers);
+  const apply = await runShippedCommandNode('journal-command-apply-fn', dedupe.result, helpers);
   assert.deepEqual(apply.requested, ['osi-db-helper', 'osi-journal']);
   assert.deepEqual(apply.result, [null, null]);
   assert.equal(apply.errors.length, 1);
@@ -652,9 +650,7 @@ test('shipped dedupe preserves exact journal command-ID replay without journal h
   assert.deepEqual(dedupe.requested, ['osi-db-helper', 'osi-command-ledger', 'osi-journal']);
   assert.equal(Object.prototype.hasOwnProperty.call(ledgerRuntime, 'extraEffectBindingValidator'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(ledgerRuntime, 'extraSubmittedIntentHash'), false);
-  assert.equal(dedupe.result[0], null);
-  assert.equal(dedupe.result[1].topic, `devices/${GATEWAY_EUI}/command_ack`);
-  assert.equal(dedupe.result[1].payload, JSON.stringify(replayAck));
+  assert.equal(dedupe.result, null);
   assert.deepEqual(events, [
     ['db-open', '/data/db/farming.db'],
     ['db-close'],
@@ -687,8 +683,7 @@ test('shipped dedupe preserves exact non-journal replay without requesting journ
 
   const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
   assert.deepEqual(dedupe.requested, ['osi-db-helper', 'osi-command-ledger']);
-  assert.equal(dedupe.result[0], null);
-  assert.equal(dedupe.result[1].payload, JSON.stringify(replayAck));
+  assert.equal(dedupe.result, null);
 });
 
 test('shipped dedupe injects both journal hooks only when protected type is journal-shaped', async () => {
@@ -715,7 +710,7 @@ test('shipped dedupe injects both journal hooks only when protected type is jour
   };
 
   const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
-  assert.equal(dedupe.result[0], msg);
+  assert.equal(dedupe.result, msg);
   assert.equal(ledgerRuntime.extraEffectBindingValidator, validJournalEffectBinding);
   assert.equal(ledgerRuntime.extraSubmittedIntentHash, submittedIntentHash);
 });
@@ -737,7 +732,7 @@ test('shipped command nodes trust protected type over spoofed flattened type in 
   );
   assert.deepEqual(rebootDedupe.requested, ['osi-db-helper', 'osi-command-ledger']);
   const rebootApply = await runShippedCommandNode(
-    'journal-command-apply-fn', rebootDedupe.result[0], nonJournalHelpers
+    'journal-command-apply-fn', rebootDedupe.result, nonJournalHelpers
   );
   assert.deepEqual(rebootApply.requested, []);
   assert.equal(rebootApply.result[0], protectedReboot);
@@ -759,7 +754,7 @@ test('shipped command nodes trust protected type over spoofed flattened type in 
   );
   assert.deepEqual(journalDedupe.requested, ['osi-db-helper', 'osi-command-ledger', 'osi-journal']);
   const journalApply = await runShippedCommandNode(
-    'journal-command-apply-fn', journalDedupe.result[0], journalHelpers
+    'journal-command-apply-fn', journalDedupe.result, journalHelpers
   );
   assert.deepEqual(journalApply.result, [null, null]);
   assert.equal(journalApply.errors.length, 1);
@@ -770,7 +765,8 @@ test('shipped command nodes reject an empty protected type before loading helper
   for (const nodeId of ['command-dedupe-dispatch', 'journal-command-apply-fn']) {
     const result = await runShippedCommandNode(nodeId, msg, {});
     assert.deepEqual(result.requested, []);
-    assert.deepEqual(result.result, [null, null]);
+    if (nodeId === 'command-dedupe-dispatch') assert.equal(result.result, null);
+    else assert.deepEqual(result.result, [null, null]);
     assert.equal(result.errors.length, 1);
     assert.match(result.errors[0].message, /protected delivery command type/);
   }
@@ -790,8 +786,8 @@ test('shipped unknown JOURNAL-shaped command cannot reach legacy dispatch withou
   };
 
   const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
-  assert.equal(dedupe.result[0], msg);
-  const apply = await runShippedCommandNode('journal-command-apply-fn', dedupe.result[0], helpers);
+  assert.equal(dedupe.result, msg);
+  const apply = await runShippedCommandNode('journal-command-apply-fn', dedupe.result, helpers);
   assert.deepEqual(apply.result, [null, null]);
   assert.equal(apply.errors.length, 1);
 });

@@ -4,6 +4,9 @@
   "delete": "Delete",
   "na": "N/A",
   "retry": "Retry",
+  "scope": {
+    "loadError": "Permissions could not be loaded."
+  },
   "analysis": {
     "title": "Data analysis",
     "axis": {
