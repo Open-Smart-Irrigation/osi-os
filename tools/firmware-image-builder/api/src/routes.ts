@@ -26,7 +26,7 @@ import {
   sourceMetadataSubject,
   stableRelativePath,
 } from './validation.js';
-import type { IndexedEvidenceReader } from './evidence-reader.js';
+import type { EvidenceIndex, IndexedEvidenceReader } from './evidence-reader.js';
 import { decodeStoredStageEvidence, type EvidenceCommand } from '../../runner/src/evidence.js';
 import { validateRemoteBranchName } from './git/source-resolver.js';
 import {
@@ -50,7 +50,6 @@ const RUNNER_UNIT_PATTERN = /^osi-image-builder-runner@[A-Za-z0-9][A-Za-z0-9._-]
 const OPAQUE_CURSOR_PATTERN = /^[A-Za-z0-9_-]{1,512}$/u;
 const HASH40_PATTERN = /^[0-9a-f]{40}$/u;
 const HASH64_PATTERN = /^[0-9a-f]{64}$/u;
-const EVIDENCE_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}\.json$/u;
 const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
 const PRIVATE_KEY_PATTERN = /(?:-----BEGIN [^-\r\n]*PRIVATE KEY-----|----+\s*BEGIN [^\r\n]*PRIVATE KEY\s*----+|(?:^|\r?\n)\s*PuTTY-User-Key-File-\d+\s*:|(?:^|\r?\n)\s*(?:SSH|RSA|EC|DSA)\s+PRIVATE KEY\s*[:=-])/imu;
 const QUOTED_CREDENTIAL_PATTERN = /(["'])\s*[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*\1\s*:\s*(["'])[\s\S]*?\2/iu;
@@ -293,20 +292,47 @@ function summary(job: JobRecord): JsonRecord {
   };
 }
 
+function canonicalStageEvidencePath(jobId: string, stage: PipelineStageName, value: unknown): string {
+  if (typeof value !== 'string') throw new Error('stage evidence path is invalid');
+  const path = stableRelativePath(value, 'stage evidence path');
+  const expectedPath = `jobs/${jobId}/evidence/${String(PIPELINE_STAGE_NAMES.indexOf(stage)).padStart(2, '0')}-${stage}.json`;
+  if (path !== expectedPath) throw new Error('stage evidence path does not match the fixed stage index');
+  return path;
+}
+
 function evidencePath(stage: StoredStage): string | null {
   if (stage.evidencePath === null) return null;
-  const value = stableRelativePath(stage.evidencePath, 'stage evidence path');
-  const directPrefix = 'evidence/';
-  const jobPrefix = `jobs/${storedJobId(stage.jobId)}/evidence/`;
-  const filename = value.startsWith(directPrefix)
-    ? value.slice(directPrefix.length)
-    : value.startsWith(jobPrefix) ? value.slice(jobPrefix.length) : '';
-  const stageIndex = PIPELINE_STAGE_NAMES.indexOf(stage.stage);
-  const expectedFilename = `${String(stageIndex).padStart(2, '0')}-${stage.stage}.json`;
-  if (!EVIDENCE_FILE_PATTERN.test(filename) || filename !== expectedFilename) {
-    throw new Error('stage evidence path does not match the fixed stage index');
+  const jobId = storedJobId(stage.jobId);
+  const stageName = storedStage(stage.stage, 'stage name');
+  if (stageName === null) throw new Error('stage name is invalid');
+  const value = canonicalStageEvidencePath(jobId, stageName, stage.evidencePath);
+  return `evidence/${value.slice(`jobs/${jobId}/evidence/`.length)}`;
+}
+
+function indexedEvidenceIndex(value: unknown, expectedJobId: string, expectedStage: PipelineStageName): EvidenceIndex | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new Error('stored stage is not a plain object');
   }
-  return `${directPrefix}${filename}`;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Reflect.ownKeys(descriptors).some((key) => typeof key !== 'string')) throw new Error('stored stage has a symbol property');
+  const fields = ['jobId', 'stage', 'evidencePath', 'evidenceSha256'] as const;
+  for (const field of fields) {
+    const descriptor = descriptors[field];
+    if (descriptor === undefined || !('value' in descriptor)) throw new Error(`stored stage ${field} is not a data property`);
+  }
+
+  const jobId = storedJobId(descriptors.jobId.value);
+  const stage = storedStage(descriptors.stage.value, 'stage name');
+  if (stage === null || jobId !== expectedJobId || stage !== expectedStage) throw new Error('stage identity does not match the requested evidence');
+  const evidencePath = descriptors.evidencePath.value;
+  const evidenceSha256 = descriptors.evidenceSha256.value;
+  if (evidencePath !== null && typeof evidencePath !== 'string') throw new Error('stage evidence path is invalid');
+  if (evidenceSha256 !== null && typeof evidenceSha256 !== 'string') throw new Error('stage evidence SHA is invalid');
+  if (evidencePath === null || evidenceSha256 === null) return null;
+  const path = canonicalStageEvidencePath(jobId, stage, evidencePath);
+  const sha256 = nullableHash64(evidenceSha256, 'stage evidence SHA');
+  if (sha256 === null) throw new Error('stage evidence SHA is invalid');
+  return Object.freeze({ jobId, stage, path, sha256 });
 }
 
 function stageDto(stage: StoredStage, expectedJobId: string, expectedStage: PipelineStageName): JsonRecord {
@@ -753,14 +779,9 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
       const stage = validateStage(evidenceMatch[2]!);
       const jobRecord = getJob(dependencies.store, jobId);
       const indexedStage = dependencies.store.getStage(jobRecord.jobId, stage);
-      if (indexedStage === null || indexedStage.evidencePath === null || indexedStage.evidenceSha256 === null) notFound();
-      stageDto(indexedStage, jobId, stage);
-      const evidenceIndex = {
-        jobId: indexedStage.jobId,
-        stage: indexedStage.stage,
-        path: indexedStage.evidencePath,
-        sha256: indexedStage.evidenceSha256,
-      };
+      if (indexedStage === null) notFound();
+      const evidenceIndex = indexedEvidenceIndex(indexedStage, jobId, stage);
+      if (evidenceIndex === null) notFound();
       return jsonResponse(200, publicEvidence(await dependencies.evidenceReader.read(evidenceIndex), jobRecord, jobId, stage, dependencies));
     }
     const eventsMatch = context.path.match(/^\/api\/jobs\/([^/]+)\/events$/u);

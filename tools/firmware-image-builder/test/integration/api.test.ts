@@ -215,7 +215,11 @@ describe('read-only builder API routes', () => {
   });
 
   it('passes the exact stored evidence index to the indexed reader', async () => {
-    const reader = vi.fn(async (_index: EvidenceIndex) => stageEvidence());
+    const reader = vi.fn(async (index: EvidenceIndex) => {
+      expect(Object.isFrozen(index)).toBe(true);
+      expect(index.path).toBe('jobs/job-1/evidence/09-publish.json');
+      return stageEvidence();
+    });
     const routeDependencies = dependencies((value) => {
       Object.assign(value as object, { evidenceReader: { read: reader } });
     });
@@ -227,6 +231,51 @@ describe('read-only builder API routes', () => {
       jobId: 'job-1', stage: 'publish', path: 'jobs/job-1/evidence/09-publish.json', sha256: 'd'.repeat(64),
     });
     expect(Object.keys(reader.mock.calls[0]![0]!)).toEqual(['jobId', 'stage', 'path', 'sha256']);
+  });
+
+  it('rejects a display-short stored evidence path before invoking the reader', async () => {
+    const reader = vi.fn(async () => stageEvidence());
+    const routeDependencies = dependencies((value) => {
+      Object.assign(value.store as object, {
+        getStage: () => ({
+          jobId: 'job-1', stage: 'publish' as const, outcome: 'passed' as const,
+          startedAt: now, finishedAt: now, evidencePath: 'evidence/09-publish.json', evidenceSha256: 'd'.repeat(64),
+          errorCode: null, error: null,
+        }),
+      });
+      Object.assign(value as object, { evidenceReader: { read: reader } });
+    });
+    const started = await start(routeDependencies); server = started.server;
+
+    expect((await get(started.port, '/api/jobs/job-1/evidence/publish')).status).toBe(500);
+    expect(reader).not.toHaveBeenCalled();
+  });
+
+  it('rejects accessor-backed indexed stage fields without invoking the reader', async () => {
+    const reader = vi.fn(async () => stageEvidence());
+    let getterCalls = 0;
+    let changingJobId = 'job-1';
+    let changingStage = 'publish';
+    let changingEvidencePath = 'jobs/job-1/evidence/09-publish.json';
+    let changingEvidenceSha256 = 'd'.repeat(64);
+    const routeDependencies = dependencies((value) => {
+      const stored = {
+        outcome: 'passed' as const, startedAt: now, finishedAt: now, errorCode: null, error: null,
+      };
+      Object.defineProperties(stored, {
+        jobId: { get: () => { getterCalls += 1; const result = changingJobId; changingJobId = 'job-2'; return result; }, enumerable: true },
+        stage: { get: () => { getterCalls += 1; const result = changingStage; changingStage = 'build'; return result; }, enumerable: true },
+        evidencePath: { get: () => { getterCalls += 1; const result = changingEvidencePath; changingEvidencePath = 'evidence/07-build.json'; return result; }, enumerable: true },
+        evidenceSha256: { get: () => { getterCalls += 1; const result = changingEvidenceSha256; changingEvidenceSha256 = 'e'.repeat(64); return result; }, enumerable: true },
+      });
+      Object.assign(value.store as object, { getStage: () => stored });
+      Object.assign(value as object, { evidenceReader: { read: reader } });
+    });
+    const started = await start(routeDependencies); server = started.server;
+
+    expect((await get(started.port, '/api/jobs/job-1/evidence/publish')).status).toBe(500);
+    expect(getterCalls).toBe(0);
+    expect(reader).not.toHaveBeenCalled();
   });
 
   it('returns not found and never reads indexed evidence with a null path or hash', async () => {
