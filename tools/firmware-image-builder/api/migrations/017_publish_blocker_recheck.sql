@@ -82,6 +82,8 @@ WHEN NOT EXISTS (
         AND json_extract(NEW.proof_json, '$.kind') = 'destination-matches'
         AND json_extract(NEW.proof_json, '$.publisher.destination') = 'candidate'
         AND json_extract(NEW.proof_json, '$.publisher.staging') = 'absent'
+        AND json_extract(NEW.proof_json, '$.staging.path') = 'staging/' || NEW.job_id
+        AND json_extract(NEW.proof_json, '$.staging.state') = 'absent'
         AND json_extract(NEW.proof_json, '$.finalDirectory') = NEW.final_directory
         AND json_extract(NEW.proof_json, '$.finalPath') = NEW.final_path
         AND NEW.final_directory

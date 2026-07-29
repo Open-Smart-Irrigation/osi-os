@@ -3261,6 +3261,7 @@ function destinationMatchesProof(jobId: string, observedAt = AFTER): Extract<Pub
     kind: 'destination-matches', observedAt,
     publisher: { destination: 'candidate', staging: 'absent', mutationCount: 0 },
     finalDirectory: `main/${SHA40}/rpi-5`, finalPath: `main/${SHA40}/rpi-5/image`,
+    staging: { path: `staging/${jobId}`, state: 'absent' },
     artifact: { sha256: SHA64, size: 10, mtime: NOW },
     checksum: { path: `main/${SHA40}/rpi-5/sha256sums`, sha256: checksumHash() },
     manifest: { path: `main/${SHA40}/rpi-5/build-manifest.json`, sha256: manifestHash(jobId) },
@@ -3307,15 +3308,25 @@ describe('publish blocker recheck ownership transaction', () => {
   it('rejects malformed, mismatched, future, fenced, and stale proofs before changing ownership', async () => {
     const cases: Array<readonly [string, (proof: PublishBlockerRecheckProof) => PublishBlockerRecheckProof]> = [
       ['wrong final path', (proof) => ({ ...proof, finalPath: 'release/other/image' })],
-      ['wrong artifact hash', (proof) => ({ ...destinationMatchesProof('recheck-mismatch'), artifact: { ...destinationMatchesProof('recheck-mismatch').artifact, sha256: SHA64_B } })],
-      ['wrong sidecar path', (proof) => ({ ...destinationMatchesProof('recheck-mismatch'), checksum: { ...destinationMatchesProof('recheck-mismatch').checksum, path: 'release/recheck-mismatch/wrong' } })],
+      ['wrong artifact hash', (proof) => {
+        const matching = proof as Extract<PublishBlockerRecheckProof, { kind: 'destination-matches' }>;
+        return { ...matching, artifact: { ...matching.artifact, sha256: SHA64_B } };
+      }],
+      ['wrong sidecar path', (proof) => {
+        const matching = proof as Extract<PublishBlockerRecheckProof, { kind: 'destination-matches' }>;
+        return { ...matching, checksum: { ...matching.checksum, path: 'release/recheck-mismatch/wrong' } };
+      }],
+      ['wrong staging observation', (proof) => ({
+        ...(proof as Extract<PublishBlockerRecheckProof, { kind: 'destination-matches' }>),
+        staging: { path: 'staging/other', state: 'absent' },
+      })],
       ['future observation', (proof) => ({ ...proof, observedAt: AFTER, }),],
     ];
-    for (const [name, mutate] of cases.slice(0, 3)) {
+    for (const [name, mutate] of cases.slice(0, 4)) {
       const target = await blockedPublishFixture(`recheck-${name.replaceAll(' ', '-')}`); const before = target.store.listEvents(`recheck-${name.replaceAll(' ', '-')}`).events.length;
       const proof = name === 'wrong final path' ? destinationAbsentProof(`recheck-${name.replaceAll(' ', '-')}`) : destinationMatchesProof(`recheck-${name.replaceAll(' ', '-')}`);
       const resolution = name === 'wrong final path' ? 'clear-absent' : 'mark-published';
-      if (name === 'wrong final path' || name === 'wrong sidecar path') expect(() => target.ownership.apiWrite(recheckCommand(`recheck-${name.replaceAll(' ', '-')}`, resolution, mutate(proof)))).toThrow(OwnershipValidationError);
+      if (name === 'wrong final path' || name === 'wrong sidecar path' || name === 'wrong staging observation') expect(() => target.ownership.apiWrite(recheckCommand(`recheck-${name.replaceAll(' ', '-')}`, resolution, mutate(proof)))).toThrow(OwnershipValidationError);
       else expect(target.ownership.apiWrite(recheckCommand(`recheck-${name.replaceAll(' ', '-')}`, resolution, mutate(proof)))).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
       expect(target.store.listEvents(`recheck-${name.replaceAll(' ', '-')}`).events).toHaveLength(before);
     }

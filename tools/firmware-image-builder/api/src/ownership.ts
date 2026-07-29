@@ -327,6 +327,7 @@ export type PublishBlockerRecheckProof =
       readonly publisher: Readonly<{ readonly destination: 'candidate'; readonly staging: 'absent'; readonly mutationCount: 0 }>;
       readonly finalDirectory: string;
       readonly finalPath: string;
+      readonly staging: Readonly<{ readonly path: string; readonly state: 'absent' }>;
       readonly artifact: Readonly<{ readonly sha256: string; readonly size: number; readonly mtime: string }>;
       readonly checksum: PublishBlockerRecheckFile;
       readonly manifest: PublishBlockerRecheckFile;
@@ -808,7 +809,7 @@ function validateApiCommand(command: ApiWriteCommand): void {
     case 'publish-blocker-recheck':
       preparedCommon(value, 'API'); preparedEnum(value.expectedState, ['failed'], 'publish blocker recheck expectedState'); preparedEnum(value.expectedPublishState, ['blocked'], 'publish blocker recheck expectedPublishState');
       if (value.expectedBlockerCode !== 'UNVERIFIED_FINAL_PATH_BLOCKER') throw new OwnershipValidationError('publish blocker recheck blocker code is fixed');
-      preparedEnum(value.resolution, ['clear-absent', 'mark-published', 'retain-blocker'], 'publish blocker recheck resolution'); shapePublishBlockerRecheckProof(value.proof, value.at as string);
+      preparedEnum(value.resolution, ['clear-absent', 'mark-published', 'retain-blocker'], 'publish blocker recheck resolution'); shapePublishBlockerRecheckProof(value.proof, value.at as string, value.jobId as string);
       const proofKind = (value.proof as { readonly kind?: unknown }).kind;
       if ((value.resolution === 'clear-absent' && proofKind !== 'destination-absent') || (value.resolution === 'mark-published' && proofKind !== 'destination-matches') || (value.resolution === 'retain-blocker' && proofKind !== 'retained-blocker')) throw new OwnershipValidationError('publish blocker recheck resolution does not match proof');
       return;
@@ -873,7 +874,7 @@ function exactShapeKeys(value: PreparedRecord, expected: readonly string[], fiel
   if (actual.length !== keys.length || actual.some((key, index) => key !== keys[index])) throw new OwnershipValidationError(`${field} contains unexpected fields`);
 }
 
-function shapePublishBlockerRecheckProof(value: unknown, at: string): void {
+function shapePublishBlockerRecheckProof(value: unknown, at: string, jobId: string): void {
   const proof = shapeRecord(value, 'publish blocker recheck proof');
   preparedInstant(proof.observedAt, 'publish blocker recheck observedAt');
   shapeChronology([['publish blocker recheck observedAt', proof.observedAt], ['publish blocker recheck command.at', at]], 'publish blocker recheck');
@@ -890,7 +891,7 @@ function shapePublishBlockerRecheckProof(value: unknown, at: string): void {
     return;
   }
   if (proof.kind === 'destination-matches') {
-    exactShapeKeys(proof, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath', 'artifact', 'checksum', 'manifest', 'verification'], 'destination-matches proof');
+    exactShapeKeys(proof, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath', 'staging', 'artifact', 'checksum', 'manifest', 'verification'], 'destination-matches proof');
     const publisher = shapeRecord(proof.publisher, 'destination-matches publisher');
     exactShapeKeys(publisher, ['destination', 'staging', 'mutationCount'], 'destination-matches publisher');
     shapeLiteral(publisher.destination, 'candidate', 'destination-matches publisher destination');
@@ -898,6 +899,11 @@ function shapePublishBlockerRecheckProof(value: unknown, at: string): void {
     if (publisher.mutationCount !== 0) throw new OwnershipValidationError('destination-matches publisher mutationCount must be zero');
     preparedPath(proof.finalDirectory, 'destination-matches final directory'); preparedPath(proof.finalPath, 'destination-matches final path');
     if (!String(proof.finalPath).startsWith(`${String(proof.finalDirectory)}/`)) throw new OwnershipValidationError('destination-matches final path is outside its directory');
+    const staging = shapeRecord(proof.staging, 'destination-matches staging');
+    exactShapeKeys(staging, ['path', 'state'], 'destination-matches staging');
+    preparedPath(staging.path, 'destination-matches staging path');
+    shapeLiteral(staging.state, 'absent', 'destination-matches staging state');
+    if (staging.path !== `staging/${jobId}`) throw new OwnershipValidationError('destination-matches staging path does not match the job');
     const artifact = shapeRecord(proof.artifact, 'destination-matches artifact');
     exactShapeKeys(artifact, ['sha256', 'size', 'mtime'], 'destination-matches artifact');
     preparedHash(artifact.sha256, 'destination-matches artifact SHA');

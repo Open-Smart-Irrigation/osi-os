@@ -738,6 +738,7 @@ describe('versioned builder database migrations', () => {
         publisher: { destination: 'candidate', staging: 'absent', mutationCount: 0 },
         finalDirectory: 'releases/main/rpi-5',
         finalPath: 'releases/main/rpi-5/image.img.gz',
+        staging: { path: 'staging/rechecked-marked_published', state: 'absent' },
         artifact: {
           sha256: HASH64,
           size: 100,
@@ -884,8 +885,13 @@ describe('versioned builder database migrations', () => {
         observedAt: '2026-07-28T00:03:00.000Z',
         publisher: { destination: 'absent', staging: 'absent', mutationCount: 0 },
       }, finalDirectory, finalPath, '2026-07-28T00:03:00.000Z');
-      const wrongDirectory = 'releases/other/rpi-5';
       rejectSecondAudit(3, {
+        ...proof,
+        observedAt: '2026-07-28T00:03:00.000Z',
+        staging: { path: 'staging/other', state: 'absent' },
+      }, finalDirectory, finalPath, '2026-07-28T00:03:00.000Z');
+      const wrongDirectory = 'releases/other/rpi-5';
+      rejectSecondAudit(4, {
         ...proof,
         observedAt: '2026-07-28T00:03:00.000Z',
         finalDirectory: wrongDirectory,
