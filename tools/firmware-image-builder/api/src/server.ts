@@ -7,6 +7,7 @@ import {
   type PipelineStageName,
 } from '../../domain/types.js';
 import { parseJson, JSON_LIMITS, type JsonValue } from './validation.js';
+import type { StaticUiAsset, StaticUiService } from './static-ui.js';
 
 const LOOPBACK_HOST = '127.0.0.1';
 const API_PREFIX = '/api/';
@@ -62,6 +63,7 @@ export interface HttpServerOptions {
   readonly origin: string;
   readonly routeHandler: ApiRouteHandler;
   readonly maxBodyBytes?: number;
+  readonly staticUi?: Pick<StaticUiService, 'resolve'>;
 }
 
 export class HttpTransportError extends Error {
@@ -242,6 +244,11 @@ interface SendJsonOptions {
   readonly preflight?: boolean;
 }
 
+interface SendStaticOptions {
+  readonly suppressBody?: boolean;
+  readonly corsOrigin?: string;
+}
+
 function sendJson(response: ServerResponse, status: number, body: unknown, id: string, options: SendJsonOptions = {}): void {
   if (response.destroyed || response.writableEnded) return;
   const validStatus = responseStatus(status);
@@ -282,6 +289,33 @@ function sendJson(response: ServerResponse, status: number, body: unknown, id: s
     'x-frame-options': 'DENY',
   });
   if (!response.destroyed && !response.writableEnded) response.end(options.suppressBody === true ? undefined : payload);
+}
+
+function sendStatic(response: ServerResponse, asset: StaticUiAsset, id: string, options: SendStaticOptions = {}): void {
+  if (response.destroyed || response.writableEnded) return;
+  if (
+    asset.status !== 200
+    || !Buffer.isBuffer(asset.bytes)
+    || typeof asset.contentType !== 'string'
+    || !SAFE_HEADER_VALUE.test(asset.contentType)
+    || (asset.cacheControl !== 'no-store' && asset.cacheControl !== 'public, max-age=31536000, immutable')
+  ) throw new HttpTransportError({ code: 'INTERNAL_ERROR', status: 500, retryable: true });
+  const corsHeaders = options.corsOrigin === undefined ? {} : {
+    'access-control-allow-origin': options.corsOrigin,
+    vary: 'Origin',
+  };
+  response.writeHead(200, {
+    ...corsHeaders,
+    'content-type': asset.contentType,
+    'content-length': String(asset.bytes.byteLength),
+    'cache-control': asset.cacheControl,
+    [REQUEST_ID_HEADER]: id,
+    'x-content-type-options': 'nosniff',
+    'content-security-policy': "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    'referrer-policy': 'no-referrer',
+    'x-frame-options': 'DENY',
+  });
+  response.end(options.suppressBody === true ? undefined : asset.bytes);
 }
 
 function writeEventStreamFrame(
@@ -498,11 +532,16 @@ function parseRequestUrl(request: IncomingMessage): { readonly pathname: string;
   } catch {
     fail('INVALID_PATH', 400);
   }
-  if (hasUnsafeTargetCharacter(pathname) || pathname.includes('?') || pathname.split('/').some((segment) => segment === '.' || segment === '..')) {
+  if (
+    hasUnsafeTargetCharacter(pathname)
+    || pathname.includes('?')
+    || pathname.includes('%')
+    || pathname.startsWith('//')
+    || (pathname !== '/' && pathname.split('/').some((segment, index) => index > 0 && (segment === '' || segment === '.' || segment === '..')))
+  ) {
     fail('INVALID_PATH', 400);
   }
-  if (!pathname.startsWith(API_PREFIX)
-    || pathname === '/api/v1' || pathname.startsWith(CLOUD_PREFIX)) {
+  if (pathname === '/api/v1' || pathname.startsWith(CLOUD_PREFIX)) {
     fail('NOT_FOUND', 404);
   }
   return { pathname, query: new URLSearchParams(rawQuery) };
@@ -562,7 +601,7 @@ export function createHttpServer(options: HttpServerOptions): Server {
       }
       const body = isMutation(method) ? await readBody(request, limit) : null;
       bodyReadSettled = true;
-      const result = await options.routeHandler({
+      const routeContext = {
         request,
         requestId: id,
         method,
@@ -570,8 +609,23 @@ export function createHttpServer(options: HttpServerOptions): Server {
         query: parsedUrl.query,
         headers: request.headers,
         body,
-      });
-      if (result === null || result === undefined) fail('NOT_FOUND', 404);
+      } satisfies ApiRouteContext;
+      const apiRequest = parsedUrl.pathname.startsWith(API_PREFIX);
+      const result = apiRequest ? await options.routeHandler(routeContext) : null;
+      if (result === null || result === undefined) {
+        if (!apiRequest && (method === 'GET' || method === 'HEAD') && options.staticUi !== undefined) {
+          const asset = await options.staticUi.resolve(parsedUrl.pathname);
+          if (asset !== null) {
+            const origin = actualOrigin(request);
+            sendStatic(response, asset, id, {
+              suppressBody: method === 'HEAD',
+              corsOrigin: request.headers.origin === origin ? origin : undefined,
+            });
+            return;
+          }
+        }
+        fail('NOT_FOUND', 404);
+      }
       const status = responseStatus(result.status);
       const origin = actualOrigin(request);
       if ('eventStream' in result) {
