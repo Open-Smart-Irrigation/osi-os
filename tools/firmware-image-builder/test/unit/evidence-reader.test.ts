@@ -1,14 +1,19 @@
 import { createHash } from 'node:crypto';
+import { execFile as execFileCallback } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
 import { chmod, link, mkdir, mkdtemp, open, readlink, rename, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadConfig, type PathAuthorityDependencies, type StateRootAuthority } from '../../config/load.js';
 import { PIPELINE_STAGE_NAMES, type PipelineStageName } from '../../domain/types.js';
 import { createIndexedEvidenceReader, EvidenceReadError, type EvidenceIndex } from '../../api/src/evidence-reader.js';
+
+const execFile = promisify(execFileCallback);
+const O_CLOEXEC = (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC ?? 0;
 
 const temporaryDirectories: string[] = [];
 const JOB_ID = 'job-reader-1';
@@ -76,6 +81,127 @@ describe('indexed evidence reader', () => {
     const prepared = await prepareEvidence(fixture.statePath);
 
     await expect(createIndexedEvidenceReader({ stateRoot: fixture.stateRoot }).read(prepared.index)).resolves.toEqual({ ok: true });
+  });
+
+  it('rejects an accessor-shaped index without invoking the accessor', async () => {
+    const fixture = await authorityFixture();
+    const prepared = await prepareEvidence(fixture.statePath);
+    let reads = 0;
+    const accessorIndex = Object.defineProperties({}, {
+      jobId: { get: () => { reads += 1; return prepared.index.jobId; }, enumerable: true },
+      stage: { value: prepared.index.stage, enumerable: true },
+      path: { value: prepared.index.path, enumerable: true },
+      sha256: { value: prepared.index.sha256, enumerable: true },
+    }) as EvidenceIndex;
+
+    await expectCode(createIndexedEvidenceReader({ stateRoot: fixture.stateRoot }).read(accessorIndex), 'INDEX_INVALID');
+    expect(reads).toBe(0);
+  });
+
+  it('captures the index before asynchronous work can mutate it', async () => {
+    let mutableIndex: EvidenceIndex;
+    const fixture = await authorityFixture({
+      beforeRead: async () => {
+        mutableIndex = {
+          ...mutableIndex,
+          jobId: 'mutated-job',
+          stage: 'verify',
+          path: 'mutated-path',
+          sha256: 'a'.repeat(64),
+        };
+      },
+    });
+    const prepared = await prepareEvidence(fixture.statePath);
+    mutableIndex = { ...prepared.index };
+
+    await expect(createIndexedEvidenceReader({ stateRoot: fixture.stateRoot }).read(mutableIndex)).resolves.toEqual({ ok: true });
+    expect(mutableIndex.sha256).toBe('a'.repeat(64));
+  });
+
+  it('rejects extra, symbol-bearing, and non-plain index shapes', async () => {
+    const fixture = await authorityFixture();
+    const prepared = await prepareEvidence(fixture.statePath);
+    const symbol = Symbol('extra');
+    const invalidIndexes = [
+      { ...prepared.index, extra: true },
+      { ...prepared.index, [symbol]: true },
+      Object.assign(Object.create({ inherited: true }), prepared.index),
+    ] as EvidenceIndex[];
+
+    for (const index of invalidIndexes) await expectCode(createIndexedEvidenceReader({ stateRoot: fixture.stateRoot }).read(index), 'INDEX_INVALID');
+  });
+
+  it('rejects an injected ordinary and bigint metadata mismatch', async () => {
+    const fixture = await authorityFixture({
+      statBigInt: async (handle) => {
+        const stats = await handle.stat({ bigint: true });
+        return { ...stats, size: stats.size + 1n };
+      },
+    });
+    const prepared = await prepareEvidence(fixture.statePath);
+
+    await expectCode(createIndexedEvidenceReader({ stateRoot: fixture.stateRoot }).read(prepared.index), 'RACE_DETECTED');
+  });
+
+  it('rejects a FIFO final entry without blocking', async () => {
+    const fixture = await authorityFixture();
+    const prepared = await prepareEvidence(fixture.statePath);
+    await rm(prepared.filePath);
+    await execFile('/usr/bin/mkfifo', [prepared.filePath]);
+    await chmod(prepared.filePath, 0o600);
+
+    const timeout = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('FIFO read blocked')), 500).unref();
+    });
+    await expect(Promise.race([
+      createIndexedEvidenceReader({ stateRoot: fixture.stateRoot }).read(prepared.index),
+      timeout,
+    ])).rejects.toMatchObject({ name: 'EvidenceReadError', code: 'FILE_UNSAFE' });
+  });
+
+  it('rejects a held ancestor with an injected mount mismatch', async () => {
+    const fixture = await authorityFixture({
+      mountId: async (handle) => (await readlink(`/proc/self/fd/${handle.fd}`)).endsWith('/jobs') ? 22 : 11,
+    });
+    const prepared = await prepareEvidence(fixture.statePath);
+
+    await expectCode(createIndexedEvidenceReader({ stateRoot: fixture.stateRoot }).read(prepared.index), 'RACE_DETECTED');
+  });
+
+  it('rejects a readable descriptor with an injected mount mismatch', async () => {
+    let finalFileMountChecks = 0;
+    const fixture = await authorityFixture({
+      mountId: async (handle) => {
+        const path = await readlink(`/proc/self/fd/${handle.fd}`);
+        if (!path.endsWith('/01-source.json')) return 11;
+        finalFileMountChecks += 1;
+        return finalFileMountChecks === 1 ? 11 : 22;
+      },
+    });
+    const prepared = await prepareEvidence(fixture.statePath);
+
+    await expectCode(createIndexedEvidenceReader({ stateRoot: fixture.stateRoot }).read(prepared.index), 'RACE_DETECTED');
+  });
+
+  it('proves the beforeRead descriptor and its proc reopen identify the same file', async () => {
+    let probed = false;
+    const fixture = await authorityFixture({
+      beforeRead: async (handle) => {
+        const reopened = await open(`/proc/self/fd/${handle.fd}`, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | O_CLOEXEC);
+        try {
+          const [held, duplicate] = await Promise.all([handle.stat(), reopened.stat()]);
+          expect(duplicate.dev).toBe(held.dev);
+          expect(duplicate.ino).toBe(held.ino);
+          probed = true;
+        } finally {
+          await reopened.close();
+        }
+      },
+    });
+    const prepared = await prepareEvidence(fixture.statePath);
+
+    await expect(createIndexedEvidenceReader({ stateRoot: fixture.stateRoot }).read(prepared.index)).resolves.toEqual({ ok: true });
+    expect(probed).toBe(true);
   });
 
   const invalidIndexes: ReadonlyArray<readonly [string, (index: EvidenceIndex) => EvidenceIndex, EvidenceReadError['code']]> = [
