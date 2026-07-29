@@ -1179,6 +1179,105 @@ describe('read-only builder API routes', () => {
   });
 
   it.each([
+    ['active job', later],
+    ['already interrupted job', now],
+  ])('returns a hand-back only when its exact recovery event is durable for an %s', async (_description, terminalAt) => {
+    const admissionId = 'cln_0123456789abcdefghjkmnpqrs';
+    const handedBack = {
+      ...job('job-1'),
+      state: 'interrupted' as const,
+      queueState: 'complete',
+      queuePosition: null,
+      terminalAt,
+      terminalErrorCode: 'RUNNER_DISAPPEARED' as const,
+      terminalError: { reason: 'cleanup completed' },
+      cleanupFenceGeneration: null,
+      cleanupAdmissionId: null,
+      cleanupBlockerCode: null,
+      cleanupBlocker: null,
+      cleanupLeaseStatus: null,
+      cleanupLeaseExpiresAt: null,
+      cleanupLeaseBlockerCode: null,
+      cleanupLeaseBlocker: null,
+    };
+    const recoveryEvent = {
+      jobId: 'job-1',
+      seq: 5,
+      eventType: 'recovery' as const,
+      state: 'interrupted' as const,
+      stage: 'publish' as const,
+      payload: { admissionId, state: 'interrupted' },
+      at: later,
+    };
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        recovery: {
+          recover: async () => ({ kind: 'handed-back', jobId: 'job-1', admissionId, recoveryEventSeq: 5 }),
+        },
+      });
+      Object.assign(value.store as object, {
+        getJob: () => handedBack,
+        getRecoveryJob: () => handedBack,
+        listEvents: (_id: string, options?: { afterSeq?: number }) => options?.afterSeq === 4
+          ? { events: [recoveryEvent], nextAfterSeq: null }
+          : { events: [], nextAfterSeq: null },
+      });
+    }));
+    server = started.server;
+
+    expect(await post(started.port, '/api/jobs/job-1/recover', '{}')).toMatchObject({
+      status: 200,
+      body: { id: 'job-1', state: 'interrupted' },
+    });
+  });
+
+  it.each([
+    ['extra result field', { kind: 'handed-back', jobId: 'job-1', admissionId: 'cln_0123456789abcdefghjkmnpqrs', recoveryEventSeq: 5, extra: true }, { admissionId: 'cln_0123456789abcdefghjkmnpqrs', state: 'interrupted' }, later],
+    ['wrong admission', { kind: 'handed-back', jobId: 'job-1', admissionId: 'cln_0123456789abcdefghjkmnpqrs', recoveryEventSeq: 5 }, { admissionId: 'cln_0aaaaaaaaaaaaaaaaaaaaaaaaa', state: 'interrupted' }, later],
+    ['wrong event sequence', { kind: 'handed-back', jobId: 'job-1', admissionId: 'cln_0123456789abcdefghjkmnpqrs', recoveryEventSeq: 6 }, { admissionId: 'cln_0123456789abcdefghjkmnpqrs', state: 'interrupted' }, later],
+    ['stale event time', { kind: 'handed-back', jobId: 'job-1', admissionId: 'cln_0123456789abcdefghjkmnpqrs', recoveryEventSeq: 5 }, { admissionId: 'cln_0123456789abcdefghjkmnpqrs', state: 'interrupted' }, '2026-07-28T09:59:59.000Z'],
+    ['malformed event payload', { kind: 'handed-back', jobId: 'job-1', admissionId: 'cln_0123456789abcdefghjkmnpqrs', recoveryEventSeq: 5 }, { admissionId: 'cln_0123456789abcdefghjkmnpqrs' }, later],
+  ])('fails closed on hand-back provenance: %s', async (_description, result, payload, eventAt) => {
+    const handedBack = {
+      ...job('job-1'),
+      state: 'interrupted' as const,
+      queueState: 'complete',
+      queuePosition: null,
+      terminalAt: later,
+      terminalErrorCode: 'RUNNER_DISAPPEARED' as const,
+      terminalError: { reason: 'cleanup completed' },
+      cleanupFenceGeneration: null,
+      cleanupAdmissionId: null,
+      cleanupBlockerCode: null,
+      cleanupBlocker: null,
+      cleanupLeaseStatus: null,
+      cleanupLeaseExpiresAt: null,
+      cleanupLeaseBlockerCode: null,
+      cleanupLeaseBlocker: null,
+    };
+    const recoveryEvent = {
+      jobId: 'job-1',
+      seq: 5,
+      eventType: 'recovery' as const,
+      state: 'interrupted' as const,
+      stage: 'publish' as const,
+      payload,
+      at: eventAt,
+    };
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { recovery: { recover: async () => result } });
+      Object.assign(value.store as object, {
+        getJob: () => handedBack,
+        getRecoveryJob: () => handedBack,
+        listEvents: () => ({ events: [recoveryEvent], nextAfterSeq: null }),
+      });
+    }));
+    server = started.server;
+
+    expect((await post(started.port, '/api/jobs/job-1/recover', '{}')).status).toBe(500);
+  });
+
+  it.each([
     ['not eligible', { kind: 'not-eligible', jobId: 'job-1' }, 'RECOVERY_NOT_ELIGIBLE'],
     ['cleanup in progress', { kind: 'cleanup-in-progress', jobId: 'job-1', admissionId: 'cln_0123456789abcdefghjkmnpqrs', generation: 2 }, 'CLEANUP_IN_PROGRESS'],
     ['retry blocker', { kind: 'retry-blocked', jobId: 'job-1', admissionId: 'cln_0123456789abcdefghjkmnpqrs', generation: 2, blockerCode: 'QUARANTINE_PENDING' }, 'CLEANUP_RETRY_BLOCKED'],

@@ -221,6 +221,10 @@ describe('OwnershipStore persistence coverage', () => {
       cleanupBlockerCode: 'QUARANTINE_PENDING',
       cleanupLeaseBlockerCode: 'QUARANTINE_PENDING',
     });
+
+    db.prepare(`UPDATE jobs SET cleanup_blocker_json='{"code":"QUARANTINE_PENDING","different":true}'
+      WHERE job_id='job-1'`).run();
+    expect(() => store.getRecoveryJob('job-1')).toThrow('cleanup job and lease blocker evidence disagree');
   });
 
   it.each([

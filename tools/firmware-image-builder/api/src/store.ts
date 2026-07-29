@@ -733,6 +733,16 @@ export class BuilderStore {
     ) {
       throw new StoreDataError('cleanup lease status and blocker evidence disagree');
     }
+    if (
+      cleanupLeaseStatus === 'failed' || cleanupLeaseStatus === 'blocking'
+        ? cleanupBlockerCode !== cleanupLeaseBlockerCode
+          || cleanupBlocker === null
+          || cleanupLeaseBlocker === null
+          || assertJsonObject(cleanupBlocker, 'cleanup blocker') !== assertJsonObject(cleanupLeaseBlocker, 'cleanup lease blocker')
+        : false
+    ) {
+      throw new StoreDataError('cleanup job and lease blocker evidence disagree');
+    }
     return {
       jobId: asString(row, 'job_id'),
       state: persistedEnum(row, 'state', JOB_STATES, false)! as JobState,
