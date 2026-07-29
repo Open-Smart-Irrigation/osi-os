@@ -34,6 +34,7 @@ import {
   PREFLIGHT_TTL_MS,
   type PreflightRequest,
 } from './preflight.js';
+import type { ApiCancellationService } from './cancellation.js';
 import {
   HttpTransportError,
   type ApiRouteContext,
@@ -118,6 +119,20 @@ const PUBLIC_PREFLIGHT_HASH40_KEYS = new Set(['expectedSha', 'observedSha']);
 const PUBLIC_PREFLIGHT_HASH64_KEYS = new Set([
   'baseImageDigest', 'dockerfileSha256', 'executionDefinitionSha256', 'imageDigest', 'manifestSha256',
 ]);
+const CANCELLATION_RESULT_KINDS = new Set([
+  'already-terminal',
+  'coordination-pending',
+  'late-publishing',
+  'queued-cancelled',
+  'recovery-blocked',
+  'request-not-accepted',
+  'runner-terminal',
+]);
+const CANCELLATION_ACTIVE_STATES = new Set([
+  'starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup',
+  'feeds', 'config', 'building', 'verifying', 'cancel_requested',
+]);
+const CANCELLATION_TERMINAL_STATES = new Set(['succeeded', 'failed', 'cancelled', 'interrupted']);
 
 type JsonRecord = Record<string, unknown>;
 type ConfigSymbol =
@@ -187,6 +202,8 @@ export interface ApiRouteDependencies {
   readonly branches: BranchSnapshotCache;
   readonly preflight: ApiPreflightService;
   readonly enqueue: ApiEnqueueService;
+  readonly now: () => string;
+  readonly cancellation: ApiCancellationService;
   readonly store: ApiJobStore;
   readonly evidenceReader: IndexedEvidenceReader;
 }
@@ -1122,8 +1139,58 @@ function getJob(store: ApiJobStore, id: string): JobRecord {
   }
 }
 
+function cancellationResultKind(value: unknown, expectedJobId: string): string {
+  const input = record(value, 'cancellation result');
+  const kind = ownDataProperty(input, 'kind', 'cancellation result kind');
+  const jobId = ownDataProperty(input, 'jobId', 'cancellation result job ID');
+  if (typeof kind !== 'string' || !CANCELLATION_RESULT_KINDS.has(kind) || jobId !== expectedJobId) {
+    throw new Error('cancellation result is invalid');
+  }
+  return kind;
+}
+
+function cancellationJobMatchesResult(job: JobRecord, kind: string): void {
+  const state = identifier(job.state, 'post-cancellation job state');
+  const cancelRequestedAt = nullableInstant(job.cancelRequestedAt, 'post-cancellation request time');
+  const matches = kind === 'queued-cancelled'
+    ? state === 'cancelled' && cancelRequestedAt !== null
+    : kind === 'late-publishing'
+      ? state === 'publishing' && cancelRequestedAt !== null
+      : kind === 'coordination-pending'
+        ? CANCELLATION_ACTIVE_STATES.has(state) && cancelRequestedAt !== null
+        : kind === 'runner-terminal'
+          ? CANCELLATION_TERMINAL_STATES.has(state)
+          : false;
+  if (!matches) throw new Error('post-cancellation job does not match the cancellation result');
+}
+
 export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRouteHandler {
   return async (context: ApiRouteContext): Promise<HttpResponse | null> => {
+    const cancellationMatch = context.method === 'POST'
+      ? context.path.match(/^\/api\/jobs\/([^/]+)\/cancel$/u)
+      : null;
+    if (cancellationMatch) {
+      requireExactEmptyObject(context.body);
+      const jobId = validateJobId(cancellationMatch[1]!);
+      getJob(dependencies.store, jobId);
+      const at = canonicalInstant(dependencies.now(), 'cancellation request time');
+      const kind = cancellationResultKind(
+        await dependencies.cancellation.requestCancellation({ jobId, reason: 'operator', at }),
+        jobId,
+      );
+      if (kind === 'already-terminal') {
+        throw new HttpTransportError({ code: 'CANCELLATION_TERMINAL', status: 409 });
+      }
+      if (kind === 'request-not-accepted') {
+        throw new HttpTransportError({ code: 'CANCELLATION_NOT_ACCEPTED', status: 409, retryable: true });
+      }
+      if (kind === 'recovery-blocked') {
+        throw new HttpTransportError({ code: 'RUNNER_DISAPPEARED', status: 409, retryable: true });
+      }
+      const updatedJob = getJob(dependencies.store, jobId);
+      cancellationJobMatchesResult(updatedJob, kind);
+      return jsonResponse(200, await detail(updatedJob, dependencies.store));
+    }
     if (context.method === 'POST' && context.path === '/api/jobs') {
       const request = enqueueRequest(context.body, dependencies);
       return jsonResponse(202, {

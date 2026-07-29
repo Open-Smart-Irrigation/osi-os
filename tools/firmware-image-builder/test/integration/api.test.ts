@@ -153,6 +153,15 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
         rootId: enqueueRequest.outputRootId,
       }),
     },
+    now: () => now,
+    cancellation: {
+      requestCancellation: async (requestValue: { jobId: string }) => ({
+        kind: 'already-terminal',
+        jobId: requestValue.jobId,
+        state: 'succeeded',
+        requestPersisted: false,
+      }),
+    },
     store: {
       listJobs: async ({ cursor, limit }: { cursor: string | null; limit: number }) => ({ jobs: [record], nextCursor: cursor === null && limit === 1 ? 'next-page' : null }),
       getJob: (id: string) => id === 'job-1' ? record : (() => { throw new StoreNotFoundError('not found'); })(),
@@ -681,6 +690,115 @@ describe('read-only builder API routes', () => {
     const response = await post(started.port, '/api/jobs', JSON.stringify({
       branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release',
     }));
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+  });
+
+  it('cancels a queued job with operator reason and returns the updated job detail', async () => {
+    const cancelled = {
+      ...job('job-1'),
+      state: 'cancelled' as const,
+      currentStage: null,
+      queueState: 'cancelled',
+      queuePosition: null,
+      cancelRequestedAt: now,
+      cancelReason: 'operator',
+      terminalErrorCode: 'CANCELLED' as const,
+      terminalError: { reason: 'operator' },
+      terminalAt: now,
+    };
+    const requestCancellation = vi.fn(async () => ({
+      kind: 'queued-cancelled',
+      jobId: 'job-1',
+      state: 'cancelled',
+      requestPersisted: true,
+    }));
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        now: () => now,
+        cancellation: { requestCancellation },
+      });
+      Object.assign(value.store as object, {
+        getJob: (id: string) => id === 'job-1' ? cancelled : (() => { throw new StoreNotFoundError('not found'); })(),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/cancel', '{}');
+
+    expect(requestCancellation).toHaveBeenCalledWith({ jobId: 'job-1', reason: 'operator', at: now });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      id: 'job-1',
+      state: 'cancelled',
+      queuePosition: null,
+      cancelRequestedAt: now,
+      error: { code: 'CANCELLED' },
+    });
+  });
+
+  it.each(['null', '[]', '{"extra":true}', ''])('rejects non-empty-object cancel body %s', async (body) => {
+    const requestCancellation = vi.fn();
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { cancellation: { requestCancellation } });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/cancel', body);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    expect(requestCancellation).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 for a terminal cancellation result', async () => {
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        cancellation: {
+          requestCancellation: async () => ({
+            kind: 'already-terminal',
+            jobId: 'job-1',
+            state: 'succeeded',
+            requestPersisted: false,
+          }),
+        },
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/cancel', '{}');
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({ error: { code: 'CANCELLATION_TERMINAL' } });
+  });
+
+  it('does not invoke cancellation for an unknown job', async () => {
+    const requestCancellation = vi.fn();
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { cancellation: { requestCancellation } });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/missing/cancel', '{}');
+
+    expect(response.status).toBe(404);
+    expect(requestCancellation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['unknown kind', { kind: 'unknown', jobId: 'job-1' }],
+    ['wrong job', { kind: 'queued-cancelled', jobId: 'job-other', state: 'cancelled', requestPersisted: true }],
+    ['uncommitted success', { kind: 'queued-cancelled', jobId: 'job-1', state: 'cancelled', requestPersisted: true }],
+  ])('fails closed on cancellation result with %s', async (_description, result) => {
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        cancellation: { requestCancellation: async () => result },
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/cancel', '{}');
 
     expect(response.status).toBe(500);
     expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
