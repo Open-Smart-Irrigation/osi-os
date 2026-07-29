@@ -53,7 +53,7 @@ export interface FinalDestinationVerifier {
 }
 
 export type PublishBlockerRecheckResult =
-  | Readonly<{ readonly kind: 'cleared-absent' | 'marked-published' | 'retained-blocker'; readonly jobId: string }>
+  | Readonly<{ readonly kind: 'cleared-absent' | 'marked-published' | 'retained-blocker'; readonly jobId: string; readonly eventSeq: number }>
   | Readonly<{
       readonly kind: 'conflict';
       readonly jobId: string;
@@ -258,7 +258,10 @@ function ownershipResult(
   if (result.kind !== 'committed') {
     throw new PublishBlockerRecheckError('OWNERSHIP_NOT_COMMITTED', 'publish blocker recheck was not durably committed');
   }
-  return { kind, jobId };
+  if (!Number.isSafeInteger(result.eventSeq) || result.eventSeq < 0) {
+    throw new PublishBlockerRecheckError('OWNERSHIP_NOT_COMMITTED', 'publish blocker recheck committed event sequence is invalid');
+  }
+  return { kind, jobId, eventSeq: result.eventSeq };
 }
 
 export function createPublishBlockerRecheckService(options: PublishBlockerRecheckServiceOptions): PublishBlockerRecheckService {

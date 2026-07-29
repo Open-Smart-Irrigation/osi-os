@@ -141,6 +141,7 @@ describe('publish blocker recheck service', () => {
     await expect(target.service.recheck({ jobId: JOB_ID })).resolves.toEqual({
       kind: 'cleared-absent',
       jobId: JOB_ID,
+      eventSeq: 12,
     });
     expect(target.recheck).toHaveBeenCalledTimes(1);
     expect(target.recheck).toHaveBeenCalledWith({
@@ -172,6 +173,7 @@ describe('publish blocker recheck service', () => {
     await expect(target.service.recheck({ jobId: JOB_ID })).resolves.toEqual({
       kind: 'marked-published',
       jobId: JOB_ID,
+      eventSeq: 12,
     });
     expect(target.verify).toHaveBeenCalledTimes(1);
     expect(target.verify).toHaveBeenCalledWith(expect.objectContaining({
@@ -198,7 +200,7 @@ describe('publish blocker recheck service', () => {
       clockTimes: [AT, VERIFIER_AT, COMMAND_AT],
     });
 
-    await expect(target.service.recheck({ jobId: JOB_ID })).resolves.toMatchObject({ kind: 'marked-published' });
+    await expect(target.service.recheck({ jobId: JOB_ID })).resolves.toMatchObject({ kind: 'marked-published', eventSeq: 12 });
     expect(target.apiWrite).toHaveBeenCalledWith(expect.objectContaining({
       at: COMMAND_AT,
       proof: expect.objectContaining({
@@ -217,6 +219,7 @@ describe('publish blocker recheck service', () => {
     await expect(target.service.recheck({ jobId: JOB_ID })).resolves.toEqual({
       kind: 'retained-blocker',
       jobId: JOB_ID,
+      eventSeq: 12,
     });
     expect(target.verify).not.toHaveBeenCalled();
     expect(target.apiWrite).toHaveBeenCalledWith(expect.objectContaining({
@@ -231,6 +234,7 @@ describe('publish blocker recheck service', () => {
     await expect(target.service.recheck({ jobId: JOB_ID })).resolves.toEqual({
       kind: 'retained-blocker',
       jobId: JOB_ID,
+      eventSeq: 12,
     });
     expect(target.recheck).toHaveBeenCalledTimes(1);
     expect(target.verify).not.toHaveBeenCalled();
@@ -254,6 +258,7 @@ describe('publish blocker recheck service', () => {
     await expect(target.service.recheck({ jobId: JOB_ID })).resolves.toEqual({
       kind: 'retained-blocker',
       jobId: JOB_ID,
+      eventSeq: 12,
     });
     expect(target.apiWrite).toHaveBeenCalledWith(expect.objectContaining({
       resolution: 'retain-blocker',
@@ -273,6 +278,7 @@ describe('publish blocker recheck service', () => {
     await expect(target.service.recheck({ jobId: JOB_ID })).resolves.toEqual({
       kind: 'retained-blocker',
       jobId: JOB_ID,
+      eventSeq: 12,
     });
     expect(target.apiWrite).toHaveBeenCalledWith(expect.objectContaining({
       resolution: 'retain-blocker',
@@ -327,5 +333,16 @@ describe('publish blocker recheck service', () => {
       conflict: { kind: 'cas-lost', message: 'predecessor changed' },
     });
     expect(target.recheck).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['negative', -1],
+    ['unsafe', Number.MAX_SAFE_INTEGER + 1],
+  ] as const)('fails closed when ownership reports a malformed committed event sequence (%s)', async (_description, eventSeq) => {
+    const target = fixture({ ownershipResult: { ok: true, kind: 'committed', eventSeq, value: undefined } });
+
+    await expect(target.service.recheck({ jobId: JOB_ID })).rejects.toMatchObject({
+      code: 'OWNERSHIP_NOT_COMMITTED',
+    });
   });
 });

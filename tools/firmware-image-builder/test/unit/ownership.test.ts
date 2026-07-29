@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
-import { BuilderStore, type JsonObject } from '../../api/src/store.js';
+import { BuilderStore, StoreValidationError, type JsonObject } from '../../api/src/store.js';
 import { encodeJson, normalizeJson } from '../../api/src/validation.js';
 import {
   PIPELINE_STAGE_NAMES,
@@ -3281,7 +3281,8 @@ describe('publish blocker recheck ownership transaction', () => {
   it('clears an absent destination while preserving terminal and publish-stage evidence', async () => {
     const target = await blockedPublishFixture('recheck-absent');
     const beforeJob = target.store.getJob('recheck-absent'); const beforeStage = target.store.getStage('recheck-absent', 'publish'); const beforeEvents = target.store.listEvents('recheck-absent').events.length;
-    expect(target.ownership.apiWrite(recheckCommand('recheck-absent', 'clear-absent', destinationAbsentProof('recheck-absent')))).toMatchObject({ ok: true, kind: 'committed' });
+    const committed = target.ownership.apiWrite(recheckCommand('recheck-absent', 'clear-absent', destinationAbsentProof('recheck-absent')));
+    expect(committed).toMatchObject({ ok: true, kind: 'committed' });
     expect(target.store.getJob('recheck-absent')).toMatchObject({ state: 'failed', terminalAt: beforeJob.terminalAt, terminalErrorCode: beforeJob.terminalErrorCode, publishState: null, artifactStagingPath: null, artifactSha256: null, checksumPath: null, manifestPath: null, verificationPath: null, publishStartedAt: null, publishedAt: null, publishBlockerCode: null, publishBlocker: null });
     expect(target.store.getStage('recheck-absent', 'publish')).toEqual(beforeStage);
     const audit = target.db.prepare('SELECT job_id, attempt, event_seq, resolution, observed_at, committed_at, prior_publish_state, prior_blocker_code, artifact_quarantine_path, artifact_sha256, final_path, published_at FROM publish_blocker_rechecks WHERE job_id=?').get('recheck-absent') as Record<string, unknown>;
@@ -3289,20 +3290,62 @@ describe('publish blocker recheck ownership transaction', () => {
     const events = target.store.listEvents('recheck-absent').events;
     expect(events).toHaveLength(beforeEvents + 1); expect(events.at(-1)?.eventType).toBe('recovery'); expect(events.at(-1)?.payload).toMatchObject({ kind: 'publish-blocker-recheck', resolution: 'cleared_absent', attempt: 1, proof: destinationAbsentProof('recheck-absent') });
     expect(audit.event_seq).toBe(events.at(-1)?.seq);
+    const auditEventSeq = eventSeq(committed);
+    expect(target.store.getPublishBlockerRecheck('recheck-absent', auditEventSeq)).toMatchObject({
+      jobId: 'recheck-absent', attempt: 1, eventSeq: auditEventSeq, resolution: 'cleared_absent',
+      observedAt: AFTER, committedAt: AFTER, priorPublishState: 'blocked', priorBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER',
+      proof: destinationAbsentProof('recheck-absent'),
+    });
+    expect(target.store.getPublishBlockerRecheck('recheck-absent', auditEventSeq + 1)).toBeNull();
+    expect(() => target.store.getPublishBlockerRecheck('invalid job id', auditEventSeq)).toThrow(StoreValidationError);
+    expect(() => target.store.getPublishBlockerRecheck('recheck-absent', -1)).toThrow(StoreValidationError);
     expect(events.filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
   });
 
   it('records retained attempts and marks a matching destination published without succeeding the failed job', async () => {
     const target = await blockedPublishFixture('recheck-match');
     const beforeJob = target.store.getJob('recheck-match'); const beforeStage = target.store.getStage('recheck-match', 'publish');
-    expect(target.ownership.apiWrite(recheckCommand('recheck-match', 'retain-blocker', retainedBlockerProof()))).toMatchObject({ ok: true, kind: 'committed' });
+    const retained = target.ownership.apiWrite(recheckCommand('recheck-match', 'retain-blocker', retainedBlockerProof()));
+    expect(retained).toMatchObject({ ok: true, kind: 'committed' });
     expect(target.store.getJob('recheck-match')).toMatchObject({ state: 'failed', publishState: 'blocked', publishBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER', artifactStagingPath: beforeJob.artifactStagingPath });
-    expect(target.ownership.apiWrite(recheckCommand('recheck-match', 'mark-published', destinationMatchesProof('recheck-match')))).toMatchObject({ ok: true, kind: 'committed' });
+    const marked = target.ownership.apiWrite(recheckCommand('recheck-match', 'mark-published', destinationMatchesProof('recheck-match')));
+    expect(marked).toMatchObject({ ok: true, kind: 'committed' });
     expect(target.store.getJob('recheck-match')).toMatchObject({ state: 'failed', publishState: 'published', terminalAt: beforeJob.terminalAt, terminalErrorCode: beforeJob.terminalErrorCode, artifactStagingPath: null, artifactFinalDirectory: `main/${SHA40}/rpi-5`, artifactFinalPath: `main/${SHA40}/rpi-5/image`, checksumPath: `main/${SHA40}/rpi-5/sha256sums`, manifestPath: `main/${SHA40}/rpi-5/build-manifest.json`, verificationPath: `main/${SHA40}/rpi-5/verification.json`, publishStartedAt: NOW, publishedAt: AFTER, publishBlockerCode: null, publishBlocker: null });
     expect(target.store.getStage('recheck-match', 'publish')).toEqual(beforeStage);
     const auditRows = target.db.prepare('SELECT attempt, resolution, event_seq, final_directory, final_path, published_at FROM publish_blocker_rechecks WHERE job_id=? ORDER BY attempt').all('recheck-match') as Array<Record<string, unknown>>;
     expect(auditRows).toHaveLength(2); expect(auditRows[0]).toMatchObject({ attempt: 1, resolution: 'retained_blocker', final_directory: null, final_path: null, published_at: null }); expect(auditRows[1]).toMatchObject({ attempt: 2, resolution: 'marked_published', final_directory: `main/${SHA40}/rpi-5`, final_path: `main/${SHA40}/rpi-5/image`, published_at: AFTER });
     expect(auditRows[1]!.event_seq).toBeGreaterThan(auditRows[0]!.event_seq as number);
+    const retainedEventSeq = eventSeq(retained);
+    const markedEventSeq = eventSeq(marked);
+    expect(target.store.getPublishBlockerRecheck('recheck-match', retainedEventSeq)).toMatchObject({
+      jobId: 'recheck-match', attempt: 1, eventSeq: retainedEventSeq, resolution: 'retained_blocker',
+      priorPublishState: 'blocked', priorBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER', proof: retainedBlockerProof(),
+      priorBlocker: { binding: {
+        jobId: 'recheck-match', rootId: 'release', branch: 'main', branchSlug: 'main', pinnedSha: SHA40, targetId: 'rpi-5',
+        stagingDirectory: 'staging/recheck-match', stagingPath: 'staging/recheck-match/image',
+        finalDirectory: `main/${SHA40}/rpi-5`, finalPath: `main/${SHA40}/rpi-5/image`, artifactSha256: SHA64, artifactSize: 10,
+      } },
+    });
+    expect(target.store.getPublishBlockerRecheck('recheck-match', markedEventSeq)).toMatchObject({
+      jobId: 'recheck-match', attempt: 2, eventSeq: markedEventSeq, resolution: 'marked_published',
+      finalDirectory: `main/${SHA40}/rpi-5`, finalPath: `main/${SHA40}/rpi-5/image`, publishedAt: AFTER,
+      proof: destinationMatchesProof('recheck-match'),
+    });
+    expect(target.store.getPublishBlockerRecheck('recheck-match', markedEventSeq + 1)).toBeNull();
+  });
+
+  it('retains and reads back a valid blocker with the prior staging file still present', async () => {
+    const jobId = 'recheck-retained-staging';
+    const target = await blockedPublishFixture(jobId);
+    target.db.prepare('UPDATE jobs SET artifact_staging_path=? WHERE job_id=?').run(`staging/${jobId}/image`, jobId);
+    const proof = retainedBlockerProof('staging-present');
+    const committed = target.ownership.apiWrite(recheckCommand(jobId, 'retain-blocker', proof));
+    expect(committed).toMatchObject({ ok: true, kind: 'committed' });
+    const record = target.store.getPublishBlockerRecheck(jobId, eventSeq(committed));
+    expect(record).toMatchObject({
+      jobId, resolution: 'retained_blocker', artifactStagingPath: `staging/${jobId}/image`, proof,
+      priorBlocker: { binding: { jobId, stagingPath: `staging/${jobId}/image`, finalPath: `main/${SHA40}/rpi-5/image` } },
+    });
   });
 
   it('rejects malformed, mismatched, future, fenced, and stale proofs before changing ownership', async () => {

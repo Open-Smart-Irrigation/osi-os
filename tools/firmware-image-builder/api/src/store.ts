@@ -30,6 +30,7 @@ import {
   type OfflineFeedPreparation,
   type RecursiveSourcePreparation,
 } from './git/source-resolver.js';
+import { encodeBranchSlug } from '../../domain/paths.js';
 
 export { JSON_LIMITS } from './validation.js';
 export type { JsonObject, JsonPrimitive, JsonValue } from './validation.js';
@@ -49,6 +50,7 @@ export const CANCELLATION_PROTOCOL_EVENT_QUERY = `
 type PublishState = 'not_started' | 'staged' | 'publishing' | 'published' | 'quarantined' | 'blocked';
 type StageOutcome = 'running' | 'passed' | 'failed' | 'cancelled' | 'interrupted';
 type LifecyclePhase = 'not_created' | 'created' | 'started' | 'stopped' | 'removed';
+const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 
 const HASH40 = /^[0-9a-f]{40}$/;
 const HASH64 = /^[0-9a-f]{64}$/;
@@ -333,6 +335,35 @@ export interface JobRecord extends SourceIdentityBase {
   readonly freshnessErrorEvidenceSha256: string | null;
 }
 
+export type PublishBlockerRecheckResolution = 'cleared_absent' | 'marked_published' | 'retained_blocker';
+
+export interface PublishBlockerRecheckRecord {
+  readonly jobId: string;
+  readonly attempt: number;
+  readonly eventSeq: number;
+  readonly resolution: PublishBlockerRecheckResolution;
+  readonly observedAt: string;
+  readonly committedAt: string;
+  readonly priorPublishState: 'blocked';
+  readonly priorBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER';
+  readonly priorBlocker: JsonObject;
+  readonly artifactStagingPath: string | null;
+  readonly artifactQuarantinePath: string | null;
+  readonly artifactSha256: string;
+  readonly artifactSize: number;
+  readonly artifactMtime: string;
+  readonly checksumPath: string;
+  readonly checksumSha256: string;
+  readonly manifestPath: string;
+  readonly manifestSha256: string;
+  readonly verificationPath: string;
+  readonly verificationSha256: string;
+  readonly finalDirectory: string | null;
+  readonly finalPath: string | null;
+  readonly publishedAt: string | null;
+  readonly proof: JsonObject;
+}
+
 export interface CancellationJobRecord {
   readonly jobId: string;
   readonly state: JobState;
@@ -580,6 +611,7 @@ function nullableGroup(row: DbRow, keys: readonly string[], context: string): vo
 }
 
 function requiredInteger(row: DbRow, key: string, context = key): number {
+  if (row[key] === null || row[key] === undefined) throw new StoreDataError(`${context} is unexpectedly null`);
   const value = Number(row[key]);
   if (!Number.isSafeInteger(value) || value < 0) throw new StoreDataError(`${context} is invalid`, { cause: new SharedValidationError(`${context} must be a non-negative safe integer`) });
   return value;
@@ -612,6 +644,162 @@ function readHash(row: DbRow, key: string, pattern: RegExp): string | null {
   return value;
 }
 
+function requiredHash(row: DbRow, key: string, pattern: RegExp): string {
+  const value = readHash(row, key, pattern);
+  if (value === null) throw new StoreDataError(`SQLite column ${key} is unexpectedly null`);
+  return value;
+}
+
+function requiredRelativePath(row: DbRow, key: string): string {
+  const value = persistedRelativePath(row, key);
+  if (value === null) throw new StoreDataError(`SQLite column ${key} is unexpectedly null`);
+  return value;
+}
+
+function proofObject(value: unknown, field: string): JsonObject {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new StoreDataError(`${field} is not a JSON object`);
+  return value as JsonObject;
+}
+
+function proofText(value: unknown, field: string): string {
+  if (typeof value !== 'string') throw new StoreDataError(`${field} is not text`);
+  try { return boundedText(value, field); }
+  catch (error) { if (error instanceof SharedValidationError) throw new StoreDataError(error.message, { cause: error }); throw error; }
+}
+
+function proofPath(value: unknown, field: string): string {
+  try { return stableRelativePath(value, field); }
+  catch (error) { if (error instanceof SharedValidationError) throw new StoreDataError(error.message, { cause: error }); throw error; }
+}
+
+function proofHash(value: unknown, field: string): string {
+  const result = proofText(value, field);
+  if (!HASH64.test(result)) throw new StoreDataError(`${field} contains an invalid hash`);
+  return result;
+}
+
+function proofSize(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new StoreDataError(`${field} is invalid`);
+  return value;
+}
+
+function proofInstant(value: unknown, field: string): string {
+  if (typeof value !== 'string') throw new StoreDataError(`${field} is not an instant`);
+  return canonicalInstant(value, field);
+}
+
+interface ValidatedPublishBlockerBinding {
+  readonly priorBlocker: JsonObject;
+  readonly stagingPath: string;
+  readonly finalDirectory: string;
+  readonly finalPath: string;
+}
+
+function validatePublishBlockerBinding(
+  row: DbRow,
+  jobId: string,
+  artifactSha256: string,
+  artifactSize: number,
+): ValidatedPublishBlockerBinding {
+  const priorBlocker = parseJsonObject(nullableString(row, 'prior_blocker_json'), 'prior_blocker_json');
+  if (priorBlocker === null) throw new StoreDataError('publish blocker recheck prior blocker is unexpectedly null');
+  const binding = proofObject(priorBlocker.binding, 'prior_blocker_json.binding');
+  const rootId = asString(row, 'job_root_id');
+  const branch = asString(row, 'job_branch');
+  const pinnedSha = readHash(row, 'job_pinned_sha', HASH40);
+  const targetId = persistedEnum(row, 'job_target_id', TARGET_IDS, false);
+  if (pinnedSha === null || targetId === null) throw new StoreDataError('publish blocker recheck joined job identity is incomplete');
+  const branchSlug = encodeBranchSlug(branch);
+  const expectedStagingDirectory = `staging/${jobId}`;
+  const expectedFinalDirectory = `${branchSlug}/${pinnedSha}/${targetId}`;
+  const bindingJobId = proofText(binding.jobId, 'prior_blocker_json.binding.jobId');
+  const bindingRootId = proofText(binding.rootId, 'prior_blocker_json.binding.rootId');
+  const bindingBranch = proofText(binding.branch, 'prior_blocker_json.binding.branch');
+  const bindingBranchSlug = proofPath(binding.branchSlug, 'prior_blocker_json.binding.branchSlug');
+  const bindingPinnedSha = proofText(binding.pinnedSha, 'prior_blocker_json.binding.pinnedSha');
+  if (!HASH40.test(bindingPinnedSha)) throw new StoreDataError('prior_blocker_json.binding.pinnedSha contains an invalid hash');
+  const bindingTargetId = proofText(binding.targetId, 'prior_blocker_json.binding.targetId');
+  const stagingDirectory = proofPath(binding.stagingDirectory, 'prior_blocker_json.binding.stagingDirectory');
+  const stagingPath = proofPath(binding.stagingPath, 'prior_blocker_json.binding.stagingPath');
+  const finalDirectory = proofPath(binding.finalDirectory, 'prior_blocker_json.binding.finalDirectory');
+  const finalPath = proofPath(binding.finalPath, 'prior_blocker_json.binding.finalPath');
+  const bindingArtifactSha256 = proofHash(binding.artifactSha256, 'prior_blocker_json.binding.artifactSha256');
+  const bindingArtifactSize = proofSize(binding.artifactSize, 'prior_blocker_json.binding.artifactSize');
+  const stagingRemainder = stagingPath.startsWith(`${stagingDirectory}/`) ? stagingPath.slice(stagingDirectory.length + 1) : null;
+  const finalRemainder = finalPath.startsWith(`${finalDirectory}/`) ? finalPath.slice(finalDirectory.length + 1) : null;
+  if (
+    bindingJobId !== jobId
+    || bindingRootId !== rootId
+    || bindingBranch !== branch
+    || bindingBranchSlug !== branchSlug
+    || bindingPinnedSha !== pinnedSha
+    || bindingTargetId !== targetId
+    || stagingDirectory !== expectedStagingDirectory
+    || stagingRemainder === null
+    || stagingRemainder.length === 0
+    || stagingRemainder.includes('/')
+    || finalDirectory !== expectedFinalDirectory
+    || finalRemainder === null
+    || finalRemainder.length === 0
+    || finalRemainder.includes('/')
+    || finalRemainder !== stagingRemainder
+    || bindingArtifactSha256 !== artifactSha256
+    || bindingArtifactSize !== artifactSize
+  ) throw new StoreDataError('publish blocker recheck prior blocker binding is not exact');
+  return { priorBlocker, stagingPath, finalDirectory, finalPath };
+}
+
+function validatePublishBlockerRecheckProof(
+  row: DbRow,
+  resolution: PublishBlockerRecheckResolution,
+  jobId: string,
+  binding: ValidatedPublishBlockerBinding,
+  observedAt: string,
+  finalDirectory: string | null,
+  finalPath: string | null,
+  publishedAt: string | null,
+  artifactSha256: string,
+  artifactSize: number,
+  artifactMtime: string,
+  checksumSha256: string,
+  manifestSha256: string,
+  verificationSha256: string,
+): JsonObject {
+  const proof = parseJsonObject(nullableString(row, 'proof_json'), 'proof_json');
+  if (proof === null) throw new StoreDataError('publish blocker recheck proof is unexpectedly null');
+  if (proofInstant(proof.observedAt, 'proof.observedAt') !== observedAt) throw new StoreDataError('publish blocker recheck proof time is not bound to observed_at');
+  const publisher = proofObject(proof.publisher, 'proof.publisher');
+  if (publisher.mutationCount !== 0) throw new StoreDataError('publish blocker recheck publisher mutation count is not zero');
+  if (typeof publisher.mutationCount !== 'number' || !Number.isSafeInteger(publisher.mutationCount)) throw new StoreDataError('publish blocker recheck publisher mutation count is invalid');
+
+  if (resolution === 'cleared_absent') {
+    if (proof.kind !== 'destination-absent' || publisher.destination !== 'absent' || publisher.staging !== 'absent') throw new StoreDataError('cleared publish blocker recheck proof is incoherent');
+    if (proofPath(proof.finalDirectory, 'proof.finalDirectory') !== binding.finalDirectory || proofPath(proof.finalPath, 'proof.finalPath') !== binding.finalPath) throw new StoreDataError('cleared publish blocker recheck proof path is not bound');
+  } else if (resolution === 'marked_published') {
+    if (proof.kind !== 'destination-matches' || publisher.destination !== 'candidate' || publisher.staging !== 'absent') throw new StoreDataError('marked publish blocker recheck proof is incoherent');
+    if (finalDirectory === null || finalPath === null || publishedAt === null) throw new StoreDataError('marked publish blocker recheck final evidence is incomplete');
+    if (finalDirectory !== binding.finalDirectory || finalPath !== binding.finalPath) throw new StoreDataError('marked publish blocker recheck final path is not bound');
+    if (proofPath(proof.finalDirectory, 'proof.finalDirectory') !== finalDirectory || proofPath(proof.finalPath, 'proof.finalPath') !== finalPath) throw new StoreDataError('marked publish blocker recheck proof path is not bound');
+    const staging = proofObject(proof.staging, 'proof.staging');
+    if (proofPath(staging.path, 'proof.staging.path') !== `staging/${jobId}` || staging.state !== 'absent') throw new StoreDataError('marked publish blocker recheck staging proof is incoherent');
+    const artifact = proofObject(proof.artifact, 'proof.artifact');
+    if (proofHash(artifact.sha256, 'proof.artifact.sha256') !== artifactSha256 || proofSize(artifact.size, 'proof.artifact.size') !== artifactSize || proofInstant(artifact.mtime, 'proof.artifact.mtime') !== artifactMtime) throw new StoreDataError('marked publish blocker recheck artifact proof is not bound');
+    for (const [key, expectedPath, hash] of [['checksum', `${finalDirectory}/sha256sums`, checksumSha256], ['manifest', `${finalDirectory}/build-manifest.json`, manifestSha256], ['verification', `${finalDirectory}/verification.json`, verificationSha256] as const]) {
+      const sidecar = proofObject(proof[key], `proof.${key}`);
+      if (proofPath(sidecar.path, `proof.${key}.path`) !== expectedPath || proofHash(sidecar.sha256, `proof.${key}.sha256`) !== hash) throw new StoreDataError(`marked publish blocker recheck ${key} proof is not bound`);
+    }
+  } else {
+    if (proof.kind !== 'retained-blocker') throw new StoreDataError('retained publish blocker recheck proof is incoherent');
+    const reason = proofText(proof.reason, 'proof.reason');
+    const coherent = (reason === 'destination-mismatched' && publisher.destination === 'mismatched')
+      || (reason === 'staging-present' && publisher.staging === 'present')
+      || (reason === 'incomplete-evidence' && publisher.destination === 'candidate' && publisher.staging === 'absent')
+      || ((reason === 'unsafe-path' || reason === 'publisher-unavailable') && publisher.destination === 'unknown' && publisher.staging === 'unknown');
+    if (!coherent || finalDirectory !== null || finalPath !== null || publishedAt !== null) throw new StoreDataError('retained publish blocker recheck evidence is incoherent');
+  }
+  return proof;
+}
+
 export class BuilderStore {
   readonly #db: DatabaseSync;
 
@@ -625,6 +813,62 @@ export class BuilderStore {
     const row = this.#db.prepare('SELECT * FROM jobs WHERE job_id = ?').get(jobId) as DbRow | undefined;
     if (!row) throw new StoreNotFoundError(`job not found: ${jobId}`);
     return this.#mapJob(row);
+  }
+
+  getPublishBlockerRecheck(jobId: string, eventSeq: number): PublishBlockerRecheckRecord | null {
+    if (typeof jobId !== 'string' || !JOB_ID.test(jobId)) throw new StoreValidationError('publish blocker recheck job ID is invalid');
+    if (!Number.isSafeInteger(eventSeq) || eventSeq < 0) throw new StoreValidationError('publish blocker recheck event sequence is invalid');
+    const row = this.#db.prepare(`SELECT
+      audit.job_id, audit.attempt, audit.event_seq, audit.resolution, audit.observed_at, audit.committed_at,
+      audit.prior_publish_state, audit.prior_blocker_code, audit.prior_blocker_json,
+      audit.artifact_staging_path, audit.artifact_quarantine_path, audit.artifact_sha256, audit.artifact_size, audit.artifact_mtime,
+      audit.checksum_path, audit.checksum_sha256, audit.manifest_path, audit.manifest_sha256,
+      audit.verification_path, audit.verification_sha256, audit.final_directory, audit.final_path, audit.published_at, audit.proof_json,
+      job.root_id AS job_root_id, job.branch AS job_branch, job.pinned_sha AS job_pinned_sha, job.target_id AS job_target_id
+      FROM publish_blocker_rechecks AS audit
+      JOIN jobs AS job ON job.job_id = audit.job_id
+      WHERE audit.job_id = ? AND audit.event_seq = ?`).get(jobId, eventSeq) as DbRow | undefined;
+    if (!row) return null;
+    if (asString(row, 'job_id') !== jobId) throw new StoreDataError('publish blocker recheck job identity is corrupt');
+    const attempt = requiredInteger(row, 'attempt');
+    if (attempt <= 0) throw new StoreDataError('publish blocker recheck attempt is invalid');
+    const storedEventSeq = requiredInteger(row, 'event_seq');
+    if (storedEventSeq !== eventSeq || storedEventSeq < 0) throw new StoreDataError('publish blocker recheck event sequence is corrupt');
+    const resolution = persistedEnum(row, 'resolution', ['cleared_absent', 'marked_published', 'retained_blocker'], false)! as PublishBlockerRecheckResolution;
+    const observedAt = canonicalInstant(asString(row, 'observed_at'), 'publish blocker recheck observed_at');
+    const committedAt = canonicalInstant(asString(row, 'committed_at'), 'publish blocker recheck committed_at');
+    if (observedAt > committedAt) throw new StoreDataError('publish blocker recheck chronology is invalid');
+    if (persistedEnum(row, 'prior_publish_state', ['blocked'], false) !== 'blocked') throw new StoreDataError('publish blocker recheck prior publish state is invalid');
+    if (persistedEnum(row, 'prior_blocker_code', ['UNVERIFIED_FINAL_PATH_BLOCKER'], false) !== 'UNVERIFIED_FINAL_PATH_BLOCKER') throw new StoreDataError('publish blocker recheck prior blocker code is invalid');
+    const artifactStagingPath = persistedRelativePath(row, 'artifact_staging_path');
+    const artifactQuarantinePath = persistedRelativePath(row, 'artifact_quarantine_path');
+    const artifactSha256 = requiredHash(row, 'artifact_sha256', HASH64);
+    const artifactSize = requiredInteger(row, 'artifact_size');
+    const artifactMtime = canonicalInstant(asString(row, 'artifact_mtime'), 'publish blocker recheck artifact_mtime');
+    const checksumPath = requiredRelativePath(row, 'checksum_path');
+    const checksumSha256 = requiredHash(row, 'checksum_sha256', HASH64);
+    const manifestPath = requiredRelativePath(row, 'manifest_path');
+    const manifestSha256 = requiredHash(row, 'manifest_sha256', HASH64);
+    const verificationPath = requiredRelativePath(row, 'verification_path');
+    const verificationSha256 = requiredHash(row, 'verification_sha256', HASH64);
+    const finalDirectory = persistedRelativePath(row, 'final_directory');
+    const finalPath = persistedRelativePath(row, 'final_path');
+    const publishedAt = nullableInstant(row, 'published_at');
+    if ((finalDirectory === null) !== (finalPath === null)) throw new StoreDataError('publish blocker recheck final path group is incomplete');
+    if (resolution === 'marked_published' ? publishedAt === null || finalDirectory === null : publishedAt !== null || finalDirectory !== null) throw new StoreDataError('publish blocker recheck resolution evidence is incoherent');
+    if (resolution !== 'retained_blocker' && artifactStagingPath !== null) throw new StoreDataError('publish blocker recheck staging path is unexpectedly present');
+    const binding = validatePublishBlockerBinding(row, jobId, artifactSha256, artifactSize);
+    if (resolution === 'retained_blocker' && artifactStagingPath !== null && artifactStagingPath !== binding.stagingPath) throw new StoreDataError('retained publish blocker recheck staging path is not bound');
+    if (resolution === 'marked_published' && publishedAt !== committedAt) throw new StoreDataError('marked publish blocker recheck published_at is not committed_at');
+    const proof = validatePublishBlockerRecheckProof(row, resolution, jobId, binding, observedAt, finalDirectory, finalPath, publishedAt, artifactSha256, artifactSize, artifactMtime, checksumSha256, manifestSha256, verificationSha256);
+    const priorBlocker = binding.priorBlocker;
+    return {
+      jobId, attempt, eventSeq: storedEventSeq, resolution, observedAt, committedAt,
+      priorPublishState: 'blocked', priorBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER', priorBlocker,
+      artifactStagingPath, artifactQuarantinePath, artifactSha256, artifactSize, artifactMtime,
+      checksumPath, checksumSha256, manifestPath, manifestSha256, verificationPath, verificationSha256,
+      finalDirectory, finalPath, publishedAt, proof,
+    };
   }
 
   getCancellationJob(jobId: string): CancellationJobRecord {
