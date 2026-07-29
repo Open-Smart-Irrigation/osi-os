@@ -299,7 +299,7 @@ describe('cleanup hand-back recovery', () => {
       await recovery.openAdmissions();
       const result = await recovery.handBackCompleted({ jobId: JOB_ID, admissionId: ADMISSION_ID, at: NOW });
 
-      expect(result).toMatchObject({ jobId: JOB_ID, admissionId: ADMISSION_ID, handedBack: true, started: false, state: 'interrupted' });
+      expect(result).toMatchObject({ jobId: JOB_ID, admissionId: ADMISSION_ID, handedBack: true, started: false, state: 'interrupted', recoveryEventSeq: 1 });
       expect(value.systemd.start).not.toHaveBeenCalled();
       expect(value.ownership.apiWrite).toHaveBeenCalledWith(expect.objectContaining({
         kind: 'hand-back',

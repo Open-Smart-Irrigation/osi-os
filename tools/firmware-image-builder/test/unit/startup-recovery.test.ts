@@ -308,6 +308,7 @@ describe('cleanup lease startup classification', () => {
       jobId: 'job-a',
       admissionId: 'cln_00000000000000000000000000',
       state: 'interrupted' as const,
+      recoveryEventSeq: 1,
       handedBack: true,
       started: false as const,
     }));

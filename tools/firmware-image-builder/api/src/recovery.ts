@@ -265,6 +265,7 @@ export interface CleanupHandBackResult {
   readonly jobId: string;
   readonly admissionId: string;
   readonly state: 'interrupted' | 'already-interrupted';
+  readonly recoveryEventSeq: number;
   readonly handedBack: boolean;
   readonly started: false;
 }
@@ -508,6 +509,12 @@ function parseCredential(bytes: Uint8Array): { readonly admissionId: string; rea
 
 function ownershipCommandResult(result: OwnershipResult): void {
   if (!result.ok) throw new RecoveryBoundaryError(`cleanup admission CAS rejected: ${result.conflict.kind}: ${result.conflict.message}`);
+}
+
+function committedOwnershipEventSeq(result: OwnershipResult, operation: string): number {
+  if (!result.ok) throw new RecoveryBoundaryError(`cleanup admission CAS rejected: ${result.conflict.kind}: ${result.conflict.message}`);
+  if (result.kind !== 'committed') throw new RecoveryBoundaryError(`${operation} did not append a durable event`);
+  return result.eventSeq;
 }
 
 function closeErrorMessage(error: unknown): string {
@@ -1204,7 +1211,17 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
       const jobState = requiredRowString(job, 'state');
       if (status === 'handed_back') {
         if (jobState !== 'interrupted') throw new RecoveryBoundaryError('handed-back cleanup admission has a non-terminal job state');
-        return { jobId: input.jobId, admissionId: input.admissionId, state: 'already-interrupted', handedBack: false, started: false };
+        const event = options.db.prepare("SELECT seq, payload_json FROM job_events WHERE job_id=? AND event_type='recovery' ORDER BY seq DESC LIMIT 1").get(input.jobId) as Record<string, unknown> | undefined;
+        if (event === undefined) throw new RecoveryBoundaryError('handed-back cleanup recovery event is missing');
+        const payload = parseJsonRecord(event.payload_json, 'cleanup hand-back recovery event');
+        const recoveryEventSeq = Number(event.seq);
+        if (
+          !Number.isSafeInteger(recoveryEventSeq)
+          || recoveryEventSeq < 0
+          || payload.admissionId !== input.admissionId
+          || payload.state !== 'interrupted'
+        ) throw new RecoveryBoundaryError('handed-back cleanup recovery event does not match the admission');
+        return { jobId: input.jobId, admissionId: input.admissionId, state: 'already-interrupted', recoveryEventSeq, handedBack: false, started: false };
       }
       if (status !== 'completed') throw new RecoveryBoundaryError('cleanup admission is not completed');
       const dependencies = options.handBack;
@@ -1351,7 +1368,7 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
         container: { kind: 'absent', globalLabelResult: 'no-match', observedAt: globalContainerObservedAt },
         blocker: 'none',
       };
-      ownershipCommandResult(options.ownership.apiWrite({
+      const recoveryEventSeq = committedOwnershipEventSeq(options.ownership.apiWrite({
         kind: 'hand-back',
         jobId: input.jobId,
         admissionId: input.admissionId,
@@ -1361,8 +1378,8 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
         fenceTokenHash,
         at: handBackAt,
         proof,
-      }));
-      return { jobId: input.jobId, admissionId: input.admissionId, state: HAND_BACK_ACTIVE_STATES.has(jobState) ? 'interrupted' : 'already-interrupted', handedBack: true, started: false };
+      }), 'cleanup hand-back');
+      return { jobId: input.jobId, admissionId: input.admissionId, state: HAND_BACK_ACTIVE_STATES.has(jobState) ? 'interrupted' : 'already-interrupted', recoveryEventSeq, handedBack: true, started: false };
     });
   }
 
