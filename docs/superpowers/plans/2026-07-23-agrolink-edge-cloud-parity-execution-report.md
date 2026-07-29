@@ -1068,3 +1068,71 @@ Remaining risks and deliberate deferrals:
 Heavyweight checks began with 12,806-14,499 MiB available and stayed above the
 4,096 MiB guard. No process was terminated. Final anti-slop, diff, status,
 push, and exact remote-head checks follow this evidence freeze.
+
+### Post-program independent review remediation — 2026-07-29
+
+The user requested fresh reviews from different roles after the parity program
+closed. Independent security and authority, sync-integrity, and UI/API
+compatibility reviewers examined the edge and cloud changes. A separate
+integrated pass then reviewed journal scope and recovery behavior. Findings
+were reproduced before changes and addressed in edge implementation commit
+`de9a53dff2b94af9967f3407e20ee9d54421114e` and server implementation commit
+`f0ed99d53978ed1d73dde2d4b0fdb4dd756e96c8`.
+
+The remediation makes elapsed physical commands terminal before either server
+protocol leases or returns them, and the edge now records an atomic terminal
+ledger result plus durable ACK before any effect node can run. Edge
+authorization binds both the immutable user ID and username, so a renamed
+account cannot inherit a different account that later reuses its old name.
+History delivery retains a submitted-key-to-stored-key multimap across gateway
+EUI replacement, completing every represented durable dirty row only after the
+server accepts the submitted key.
+
+Cloud journal access now matches edge owner-plus-grant visibility without an
+administrator bypass. Plot-bound creates derive canonical ownership from the
+resolved plots; plot groups require one visible owner; foreign UUID collisions
+fail before command creation; updates preserve canonical owner and original
+author; voids attribute the actual actor separately. Desired-state
+normalization overlays only pending and acknowledged values. Terminal
+proposals remain available for reconciliation notices without replacing
+canonical device or journal state.
+
+The edge scope context denies access while loading, after lookup failure, and
+outside its provider. Only an explicit successful flag-off response enables
+the legacy wildcard profile. A visible retry banner can recover without
+granting authority during the transition. Force sync now carries the same
+installation identity and gateway-history envelope as bootstrap.
+
+Recovery endpoints re-check current gateway-admin authority. State transitions
+lock the installation before the operation, enforce the active operation UUID,
+bind completion to the stored prepare receipt, and persist the authenticated
+reconciliation receipt and proof-key ID. The local/test verifier uses a
+dedicated property-gated HMAC key. Bundle upload is size-checked before stream
+access, staged in owner-only temporary files, encrypted as a stream, cleaned
+up in `finally`, and configured with multipart limits matching the service cap.
+Rollback clears the prior prepare receipt so it cannot be replayed.
+
+Fresh verification evidence:
+
+| Surface | Result |
+|---|---|
+| Server backend | Fresh Gradle test run produced 248 XML suites and 1,335 tests with zero failures, errors, or skips; `./gradlew build` passed |
+| Server command, journal, and recovery focus | Command service and PostgreSQL expiry tests passed; 37 journal tests passed; recovery service, controller, migration, concurrency, multipart, receipt, and temporary-file tests passed |
+| Server main frontend | Source runner passed 45 tests; Vitest passed 351 tests; production build passed |
+| Terra Intelligence frontend | Vitest passed 111 tests; production build passed |
+| Edge sync and flow gates | `verify-sync-flow.js`, outbox roundtrip, wiring, function parse, bare-require scan, silent-catch ratchet, size ratchet, stray-DDL check, and live-identity verification passed |
+| Edge schema gates | Migration manifest, seed replay, runtime schema parity, bundled database consistency, boot-DDL interpolation, trigger-body parity, and profile parity passed |
+| Edge focused safety | Command safety and expiry, immutable auth subject, 28 scoped-read cases, history worker, 63 journal command cases, and installation recovery contract passed |
+| Edge GUI | Typecheck passed; TSX runner passed 94 tests; Vitest passed 1,671 tests; production build passed |
+| Repository hygiene | Both implementation diffs passed `git diff --check`; the server frozen architecture baseline remained unchanged |
+
+During the first full server rerun, available memory crossed below the
+4,096 MiB start threshold while swap output rose. The Gradle process completed
+successfully before the requested graceful termination reached it. No new
+heavy process was started until memory recovered; a bounded confirmation run
+and build then passed. No unrelated process was killed.
+
+The deliberate external boundary remains unchanged: there is no approved
+production recovery-key provider or credential lifecycle, and the mutating
+restore verbs remain disabled. No production host, `osicloud.ch`, live
+gateway, real recovery upload, SMB share, or Agroscope system was accessed.
