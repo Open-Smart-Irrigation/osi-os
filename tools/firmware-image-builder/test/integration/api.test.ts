@@ -891,6 +891,124 @@ describe('read-only builder API routes', () => {
     }
   });
 
+  it('redacts credential-like object fragments with either quote style across all public text surfaces', async () => {
+    const quotedCredentials = [
+      "{'password':'single-$secret'}",
+      '{"password":"double-secret"}',
+      "{ 'password' : \"mixed-secret\" }",
+    ];
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence('publish', 'failed'),
+      commands: [{
+        argv: ['/usr/bin/node', ...quotedCredentials],
+        startedAt: now,
+        finishedAt: later,
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+        outputLimit: false,
+      }],
+      observations: {
+        quotedValues: quotedCredentials,
+        author: 'build author',
+        authority: 'build authority',
+        authorizationStatus: 'verified',
+      },
+      error: {
+        ...stageEvidence('publish', 'failed').error!,
+        diagnosis: `failed with ${quotedCredentials[0]}`,
+        recovery: `retry with ${quotedCredentials[1]}`,
+      },
+    }, 'publish', 'failed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      commands: [{ argv: ['/usr/bin/node', ...Array(quotedCredentials.length).fill('[redacted]')] }],
+      observations: {
+        quotedValues: Array(quotedCredentials.length).fill('[redacted]'),
+        author: 'build author',
+        authority: 'build authority',
+        authorizationStatus: 'verified',
+      },
+      error: { diagnosis: '[redacted]', recovery: '[redacted]' },
+    });
+    const encoded = JSON.stringify(response.body);
+    for (const credential of quotedCredentials) expect(encoded).not.toContain(credential);
+    for (const secret of ['single-$secret', 'double-secret', 'mixed-secret']) expect(encoded).not.toContain(secret);
+  });
+
+  it('redacts authorization credentials before alphabetic text after ampersand or pipe delimiters', async () => {
+    const delimiterCredentials = ['Basic dXNlcjpwYXNz&', 'Bearer alphabetic|', 'Basic alphabetic#'];
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence('publish', 'failed'),
+      commands: [{
+        argv: ['/usr/bin/node', ...delimiterCredentials],
+        startedAt: now,
+        finishedAt: later,
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+        outputLimit: false,
+      }],
+      observations: { authValues: delimiterCredentials },
+      error: {
+        ...stageEvidence('publish', 'failed').error!,
+        diagnosis: `failed with ${delimiterCredentials[0]}`,
+        recovery: `retry with ${delimiterCredentials[1]}`,
+      },
+    }, 'publish', 'failed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      commands: [{ argv: ['/usr/bin/node', ...Array(delimiterCredentials.length).fill('[redacted]')] }],
+      observations: { authValues: Array(delimiterCredentials.length).fill('[redacted]') },
+      error: { diagnosis: '[redacted]', recovery: '[redacted]' },
+    });
+    const encoded = JSON.stringify(response.body);
+    for (const credential of delimiterCredentials) expect(encoded).not.toContain(credential);
+    expect(encoded).not.toContain('dXNlcjpwYXNz');
+    expect(encoded).not.toContain('alphabetic');
+  });
+
+  it('recovers from an unmatched quote before a credential-like object fragment', async () => {
+    const malformedCredential = 'prefix "unterminated {"password":123456';
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence('publish', 'failed'),
+      commands: [{
+        argv: ['/usr/bin/node', malformedCredential],
+        startedAt: now,
+        finishedAt: later,
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+        outputLimit: false,
+      }],
+      observations: { malformedValue: malformedCredential },
+      error: {
+        ...stageEvidence('publish', 'failed').error!,
+        diagnosis: `failed with ${malformedCredential}`,
+        recovery: `retry with ${malformedCredential}`,
+      },
+    }, 'publish', 'failed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      commands: [{ argv: ['/usr/bin/node', '[redacted]'] }],
+      observations: { malformedValue: '[redacted]' },
+      error: { diagnosis: '[redacted]', recovery: '[redacted]' },
+    });
+    expect(JSON.stringify(response.body)).not.toContain('123456');
+  });
+
   it('classifies credentials in surrounding text while preserving benign auth prose and status keys', async () => {
     const routeDependencies = dependencies();
     useEvidence(routeDependencies, {
@@ -940,17 +1058,26 @@ describe('read-only builder API routes', () => {
   });
 
   it('keeps unmatched JSON openers within the public-text scan budget', async () => {
+    const emptyEvidence = stageEvidence();
+    const emptyObservationEvidence = {
+      ...emptyEvidence,
+      observations: { unmatchedOpeners: '' },
+    };
+    const unmatchedOpeners = '{'.repeat(65_536 - Buffer.byteLength(JSON.stringify(emptyObservationEvidence), 'utf8'));
+    const evidence = {
+      ...emptyEvidence,
+      observations: { unmatchedOpeners },
+    };
+    expect(Buffer.byteLength(JSON.stringify(evidence), 'utf8')).toBe(65_536);
     const routeDependencies = dependencies();
-    useEvidence(routeDependencies, {
-      ...stageEvidence(),
-      observations: { unmatchedOpeners: '{'.repeat(65_536) },
-    }, 'publish', 'passed');
+    useEvidence(routeDependencies, evidence, 'publish', 'passed');
     const started = await start(routeDependencies); server = started.server;
 
     const scanStartedAt = performance.now();
     const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
     const elapsedMs = performance.now() - scanStartedAt;
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ observations: { unmatchedOpeners } });
     expect(elapsedMs).toBeLessThan(500);
   });
 

@@ -598,11 +598,11 @@ interface PublicTextScanState {
   scannedBytes: number;
 }
 
-function decodeJsonString(value: string, start: number): { readonly end: number; readonly decoded: string } | null {
+function decodeQuotedString(value: string, start: number, quote: '"' | "'"): { readonly end: number; readonly decoded: string } | null {
   const decoded: string[] = [];
   for (let index = start + 1; index < value.length; index += 1) {
     const character = value[index];
-    if (character === '"') return { end: index + 1, decoded: decoded.join('') };
+    if (character === quote) return { end: index + 1, decoded: decoded.join('') };
     if (character !== '\\') {
       decoded.push(character);
       continue;
@@ -625,17 +625,21 @@ function decodeJsonString(value: string, start: number): { readonly end: number;
 }
 
 function hasSensitiveJsonKeyToken(value: string, state: PublicTextScanState): boolean {
-  state.scannedBytes += value.length;
-  if (state.scannedBytes > JSON_LIMITS.maxEncodedBytes * 2) return true;
-  for (let index = 0; index < value.length; index += 1) {
-    if (value[index] !== '"') continue;
-    const stringToken = decodeJsonString(value, index);
-    if (stringToken === null) return false;
-    let afterToken = stringToken.end;
-    while (/\s/u.test(value[afterToken] ?? '')) afterToken += 1;
-    if (value[afterToken] === ':' && isSensitiveObservationKey(stringToken.decoded)) return true;
-    if (stringToken.decoded.includes('"') && hasSensitiveJsonKeyToken(stringToken.decoded, state)) return true;
-    index = stringToken.end - 1;
+  const pending = [value];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    state.scannedBytes += current.length;
+    if (state.scannedBytes > JSON_LIMITS.maxEncodedBytes * 2) return true;
+    for (let index = 0; index < current.length; index += 1) {
+      const quote = current[index];
+      if (quote !== '"' && quote !== "'") continue;
+      const stringToken = decodeQuotedString(current, index, quote);
+      if (stringToken === null) continue;
+      let afterToken = stringToken.end;
+      while (/\s/u.test(current[afterToken] ?? '')) afterToken += 1;
+      if (current[afterToken] === ':' && isSensitiveObservationKey(stringToken.decoded)) return true;
+      if (stringToken.decoded.includes('"') || stringToken.decoded.includes("'")) pending.push(stringToken.decoded);
+    }
   }
   return false;
 }
@@ -673,13 +677,11 @@ function hasAuthorizationToken(value: string): boolean {
     const token = value.slice(tokenStart, tokenEnd);
     let nextIndex = tokenEnd;
     while (/\s/u.test(value[nextIndex] ?? '')) nextIndex += 1;
-    const next = value[nextIndex] ?? '';
     let nextWordEnd = nextIndex;
     while (/[A-Za-z]/u.test(value[nextWordEnd] ?? '')) nextWordEnd += 1;
     const nextWord = value.slice(nextIndex, nextWordEnd);
-    const credentialLike = /[$0-9._~+\/=:-]/u.test(token) || /^(?:secret|token|password|credential)$/iu.test(token);
     const benignProse = /^(?:verification|checks)$/iu.test(token) && /^(?:passed|successfully)$/iu.test(nextWord);
-    if (!benignProse && (credentialLike || next === '' || /[{}[\](),;:!?"']/u.test(next) || /[A-Za-z0-9]/u.test(next))) return true;
+    if (!benignProse) return true;
   }
   return false;
 }
