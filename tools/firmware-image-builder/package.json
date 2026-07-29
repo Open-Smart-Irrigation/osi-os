@@ -7,6 +7,10 @@
     "node": ">=22.5.0"
   },
   "scripts": {
+    "build": "node scripts/require-node22.mjs && vite build --config ui/vite.config.ts",
+    "dev": "node scripts/require-node22.mjs && vite --config ui/vite.config.ts",
+    "typecheck": "node scripts/require-node22.mjs && tsc --noEmit",
+    "typecheck:ui": "node scripts/require-node22.mjs && tsc --noEmit -p ui/tsconfig.json",
     "test:unit": "node scripts/require-node22.mjs && vitest run test/unit ui/src/__tests__",
     "test:integration": "node scripts/require-node22.mjs && vitest run --config vitest.config.ts test/integration",
     "test:browser": "node scripts/require-node22.mjs && playwright test --config playwright.config.ts"

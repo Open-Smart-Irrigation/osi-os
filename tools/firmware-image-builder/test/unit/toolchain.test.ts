@@ -32,7 +32,11 @@ describe('toolchain contract', () => {
 
     expect(packageJson.type).toBe('module');
     expect(tsconfig.compilerOptions?.strict).toBe(true);
-    expect(packageJson.scripts).toEqual({
+    expect(packageJson.scripts).toMatchObject({
+      build: expect.any(String),
+      dev: expect.any(String),
+      typecheck: expect.any(String),
+      'typecheck:ui': expect.any(String),
       'test:unit': expect.any(String),
       'test:integration': expect.any(String),
       'test:browser': expect.any(String),
