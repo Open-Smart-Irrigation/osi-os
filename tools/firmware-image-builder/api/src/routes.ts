@@ -161,8 +161,22 @@ export interface ApiEnqueueRequest extends PreflightRequest {
   readonly preflightId?: string;
 }
 
+export interface PersistedEnqueueAcceptance {
+  readonly kind: 'persisted-queued-job';
+  readonly secondOriginFetch: 'verified';
+  readonly persistence: 'atomic-source-job-queue';
+  readonly job: unknown;
+}
+
 export interface ApiEnqueueService {
-  readonly accept: (request: ApiEnqueueRequest, requestId: string) => unknown | Promise<unknown>;
+  /**
+   * Re-fetches origin, rejects branch movement before mutation, then atomically
+   * persists the pinned source, job, and FIFO queue row before returning.
+   */
+  readonly acceptAfterRefetchAndPersist: (
+    request: ApiEnqueueRequest,
+    requestId: string,
+  ) => PersistedEnqueueAcceptance | Promise<PersistedEnqueueAcceptance>;
 }
 
 export interface ApiRouteDependencies {
@@ -757,7 +771,13 @@ function preflightDto(value: unknown, request: PreflightRequest): JsonRecord {
 }
 
 function enqueueJobDto(value: unknown, request: ApiEnqueueRequest, requestId: string): JsonRecord {
-  const input = record(value, 'accepted job');
+  const acceptance = record(value, 'enqueue acceptance');
+  if (ownDataProperty(acceptance, 'kind', 'enqueue acceptance kind') !== 'persisted-queued-job'
+    || ownDataProperty(acceptance, 'secondOriginFetch', 'enqueue acceptance source proof') !== 'verified'
+    || ownDataProperty(acceptance, 'persistence', 'enqueue acceptance persistence proof') !== 'atomic-source-job-queue') {
+    throw new Error('enqueue acceptance proof is invalid');
+  }
+  const input = record(ownDataProperty(acceptance, 'job', 'enqueue accepted job'), 'accepted job');
   const jobId = storedJobId(ownDataProperty(input, 'jobId', 'accepted job ID'));
   const state = ownDataProperty(input, 'state', 'accepted job state');
   const queuePosition = ownDataProperty(input, 'queuePosition', 'accepted job queue position');
@@ -1107,7 +1127,11 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
     if (context.method === 'POST' && context.path === '/api/jobs') {
       const request = enqueueRequest(context.body, dependencies);
       return jsonResponse(202, {
-        job: enqueueJobDto(await dependencies.enqueue.accept(request, context.requestId), request, context.requestId),
+        job: enqueueJobDto(
+          await dependencies.enqueue.acceptAfterRefetchAndPersist(request, context.requestId),
+          request,
+          context.requestId,
+        ),
       });
     }
     if (context.method === 'POST' && context.path === '/api/preflight') {

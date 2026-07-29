@@ -11,6 +11,15 @@ const sha = 'a'.repeat(40);
 const now = '2026-07-28T10:00:00.000Z';
 const later = '2026-07-28T10:00:01.000Z';
 
+function persistedAcceptance(job: Record<string, unknown>) {
+  return {
+    kind: 'persisted-queued-job' as const,
+    secondOriginFetch: 'verified' as const,
+    persistence: 'atomic-source-job-queue' as const,
+    job,
+  };
+}
+
 function stageEvidence(stage: PipelineStageName = 'publish', outcome: 'passed' | 'failed' = 'passed') {
   const index = PIPELINE_STAGE_NAMES.indexOf(stage);
   return {
@@ -129,10 +138,10 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
       }),
     },
     enqueue: {
-      accept: async (
+      acceptAfterRefetchAndPersist: async (
         enqueueRequest: { branch: string; expectedSha: string; targetId: string; outputRootId: string },
         requestId: string,
-      ) => ({
+      ) => persistedAcceptance({
         jobId: 'job-queued',
         requestId,
         state: 'queued',
@@ -499,7 +508,7 @@ describe('read-only builder API routes', () => {
       requestId: string,
     ) => {
       observedRequestId = requestId;
-      return {
+      return persistedAcceptance({
         jobId: '20260728T100000Z-01J4D5YQG7M9R2C6N8P0S1T3V',
         requestId,
         state: 'queued',
@@ -511,10 +520,10 @@ describe('read-only builder API routes', () => {
         rootId: enqueueRequest.outputRootId,
         artifactStagingPath: '/private/staging',
         sourceAuthor: 'private author',
-      };
+      });
     });
     const started = await start(dependencies((value) => {
-      Object.assign(value as object, { enqueue: { accept } });
+      Object.assign(value as object, { enqueue: { acceptAfterRefetchAndPersist: accept } });
     }));
     server = started.server;
     const requestBody = {
@@ -549,7 +558,7 @@ describe('read-only builder API routes', () => {
     const accept = vi.fn(async (
       enqueueRequest: { branch: string; expectedSha: string; targetId: string; outputRootId: string },
       requestId: string,
-    ) => ({
+    ) => persistedAcceptance({
       jobId: 'job-automation',
       requestId,
       state: 'queued',
@@ -561,7 +570,7 @@ describe('read-only builder API routes', () => {
       rootId: enqueueRequest.outputRootId,
     }));
     const started = await start(dependencies((value) => {
-      Object.assign(value as object, { enqueue: { accept } });
+      Object.assign(value as object, { enqueue: { acceptAfterRefetchAndPersist: accept } });
     }));
     server = started.server;
     const requestBody = { branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release' };
@@ -585,7 +594,7 @@ describe('read-only builder API routes', () => {
   ])('rejects %s enqueue input before acceptance', async (_description, body) => {
     const accept = vi.fn();
     const started = await start(dependencies((value) => {
-      Object.assign(value as object, { enqueue: { accept } });
+      Object.assign(value as object, { enqueue: { acceptAfterRefetchAndPersist: accept } });
     }));
     server = started.server;
 
@@ -600,7 +609,7 @@ describe('read-only builder API routes', () => {
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
         enqueue: {
-          accept: async () => {
+          acceptAfterRefetchAndPersist: async () => {
             throw new PreflightError('BRANCH_MOVED', { expectedSha: sha, observedSha: 'b'.repeat(40) });
           },
         },
@@ -623,13 +632,46 @@ describe('read-only builder API routes', () => {
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
         enqueue: {
-          accept: async () => ({
+          acceptAfterRefetchAndPersist: async () => persistedAcceptance({
             jobId: 'job-invalid',
             state: 'succeeded',
             queuePosition: null,
             branch: 'other',
             targetId: 'rpi-5',
             rootId: 'release',
+          }),
+        },
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs', JSON.stringify({
+      branch: 'main', expectedSha: sha, targetId: 'rpi-5', outputRootId: 'release',
+    }));
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+  });
+
+  it('rejects a queued job without second-fetch and atomic-persistence proof', async () => {
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        enqueue: {
+          acceptAfterRefetchAndPersist: async () => ({
+            kind: 'persisted-queued-job',
+            secondOriginFetch: 'skipped',
+            persistence: 'job-only',
+            job: {
+              jobId: 'job-unproven',
+              requestId: 'unbound',
+              state: 'queued',
+              queuePosition: 0,
+              branch: 'main',
+              expectedSha: sha,
+              pinnedSha: sha,
+              targetId: 'rpi-5',
+              rootId: 'release',
+            },
           }),
         },
       });
