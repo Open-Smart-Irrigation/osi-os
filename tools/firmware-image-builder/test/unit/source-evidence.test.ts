@@ -14,6 +14,12 @@ import {
 } from '../../runner/src/evidence.js';
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
+const APPROVED_POSIX_SIGNALS = [
+  'SIGABRT', 'SIGALRM', 'SIGBUS', 'SIGCHLD', 'SIGCONT', 'SIGFPE', 'SIGHUP', 'SIGILL', 'SIGINT', 'SIGIO',
+  'SIGIOT', 'SIGKILL', 'SIGPIPE', 'SIGPOLL', 'SIGPROF', 'SIGPWR', 'SIGQUIT', 'SIGSEGV', 'SIGSTKFLT',
+  'SIGSTOP', 'SIGSYS', 'SIGTERM', 'SIGTRAP', 'SIGTSTP', 'SIGTTIN', 'SIGTTOU', 'SIGURG', 'SIGUSR1', 'SIGUSR2',
+  'SIGVTALRM', 'SIGWINCH', 'SIGXCPU', 'SIGXFSZ',
+] as const;
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -189,6 +195,37 @@ describe('stage evidence', () => {
       ...passedInput('job-reversed-command'),
       commands: [{ ...command(), startedAt: '2026-07-26T10:00:02.000Z' }],
     })).toThrowError();
+  });
+
+  it.each([
+    ['inputs', null],
+    ['inputs', []],
+    ['inputs', 'scalar'],
+    ['observations', null],
+    ['observations', []],
+    ['observations', 'scalar'],
+  ] as const)('requires %s to be a non-null JSON object when it is %j', (field, value) => {
+    const malformed = { schemaVersion: 1, ...passedInput('job-invalid-json-shape') } as Record<string, unknown>;
+    malformed[field] = value;
+
+    expect(() => decodeStoredStageEvidence(malformed)).toThrowError();
+  });
+
+  it('rejects arbitrary command signals and accepts approved POSIX signals', () => {
+    expect(() => decodeStoredStageEvidence({
+      schemaVersion: 1,
+      ...passedInput('job-invalid-signal'),
+      commands: [{ ...command(), signal: 'SIG_NOT_APPROVED' }],
+    })).toThrowError();
+
+    for (const signal of APPROVED_POSIX_SIGNALS) {
+      const decoded = decodeStoredStageEvidence({
+        schemaVersion: 1,
+        ...passedInput(`job-${signal}`),
+        commands: [{ ...command(), signal }],
+      });
+      expect(decoded.commands[0]!.signal).toBe(signal);
+    }
   });
 
   it('requires passed evidence to have no error and failed evidence to have an error', () => {

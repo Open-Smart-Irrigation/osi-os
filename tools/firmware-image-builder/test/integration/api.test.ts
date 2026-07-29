@@ -322,6 +322,32 @@ describe('read-only builder API routes', () => {
     });
   });
 
+  it('rejects public failure evidence whose request ID does not belong to the owning job', async () => {
+    const base = stageEvidence('build', 'failed');
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...base,
+      error: { ...base.error!, requestId: 'credential-request-id' },
+    }, 'build', 'failed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/build');
+    expect(response.status).toBe(500);
+    expect(JSON.stringify(response.body)).not.toContain('credential-request-id');
+  });
+
+  it('emits the persisted owning job request ID for valid public failure evidence', async () => {
+    const base = stageEvidence('build', 'failed');
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, base, 'build', 'failed');
+    const started = await start(routeDependencies); server = started.server;
+
+    expect(await get(started.port, '/api/jobs/job-1/evidence/build')).toMatchObject({
+      status: 200,
+      body: { error: { requestId: 'request-1' } },
+    });
+  });
+
   it('accepts public evidence inputs bound to the configured production job identity', async () => {
     const routeDependencies = dependencies();
     useEvidence(routeDependencies, stageEvidence(), 'publish', 'passed');
@@ -769,6 +795,47 @@ describe('read-only builder API routes', () => {
         safeRelativePaths: ['logs/build/output.txt', './release/image.img', '../cache/image.img'],
       },
     });
+  });
+
+  it('redacts quoted JSON credentials across observations, argv, diagnosis, and recovery', async () => {
+    const quotedCredentials = [
+      '{"password":"json-password-secret"}',
+      '{ "password" : "json-spaced-password-secret" }',
+      '{\n  "password"\t:\t"json-whitespace-password-secret"\n}',
+    ];
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence('publish', 'failed'),
+      commands: [{
+        argv: ['/usr/bin/node', ...quotedCredentials],
+        startedAt: now,
+        finishedAt: later,
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+        outputLimit: false,
+      }],
+      observations: { records: quotedCredentials },
+      error: {
+        ...stageEvidence('publish', 'failed').error!,
+        diagnosis: `failed with ${quotedCredentials[0]}`,
+        recovery: `retry with ${quotedCredentials[1]}`,
+      },
+    }, 'publish', 'failed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      commands: [{ argv: ['/usr/bin/node', ...Array(quotedCredentials.length).fill('[redacted]')] }],
+      observations: { records: Array(quotedCredentials.length).fill('[redacted]') },
+      error: { diagnosis: '[redacted]', recovery: '[redacted]' },
+    });
+    const encoded = JSON.stringify(response.body);
+    for (const credential of quotedCredentials) expect(encoded).not.toContain(credential);
+    for (const secret of ['json-password-secret', 'json-spaced-password-secret', 'json-whitespace-password-secret']) {
+      expect(encoded).not.toContain(secret);
+    }
   });
 
   it('preserves safe production multiline text while redacting other controls', async () => {

@@ -53,6 +53,7 @@ const HASH64_PATTERN = /^[0-9a-f]{64}$/u;
 const EVIDENCE_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}\.json$/u;
 const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
 const PRIVATE_KEY_PATTERN = /(?:-----BEGIN [^-\r\n]*PRIVATE KEY-----|----+\s*BEGIN [^\r\n]*PRIVATE KEY\s*----+|(?:^|\r?\n)\s*PuTTY-User-Key-File-\d+\s*:|(?:^|\r?\n)\s*(?:SSH|RSA|EC|DSA)\s+PRIVATE KEY\s*[:=-])/imu;
+const QUOTED_CREDENTIAL_PATTERN = /(["'])\s*[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*\1\s*:\s*(["'])[\s\S]*?\2/iu;
 const SENSITIVE_OBSERVATION_KEY_PARTS = Object.freeze([
   'token', 'password', 'passwd', 'secret', 'credential', 'privatekey', 'authorization', 'cookie',
   'sshauthsock', 'gitsshcommand', 'sshpath', 'apikey', 'sshkey', 'identityfile', 'clientsecret',
@@ -585,6 +586,7 @@ function hasAbsolutePosixPath(value: string): boolean {
 function hasCommonStringRedaction(value: string): boolean {
   return CONTROL_PATTERN.test(value)
     || PRIVATE_KEY_PATTERN.test(value)
+    || QUOTED_CREDENTIAL_PATTERN.test(value)
     || AUTHORIZATION_HEADER_PATTERN.test(value)
     || hasBareAuthorizationToken(value)
     || hasCredentialUrl(value)
@@ -666,8 +668,13 @@ function redactCommandArguments(argv: readonly string[]): readonly string[] {
 
 function publicEvidenceCommands(commands: readonly EvidenceCommand[]): readonly EvidenceCommand[] {
   return commands.map((command) => ({
-    ...command,
     argv: redactCommandArguments(command.argv),
+    startedAt: command.startedAt,
+    finishedAt: command.finishedAt,
+    exitCode: command.exitCode,
+    signal: command.signal,
+    timedOut: command.timedOut,
+    outputLimit: command.outputLimit,
   }));
 }
 
@@ -676,12 +683,15 @@ function publicEvidence(value: unknown, job: JobRecord, expectedJobId: string, e
   if (evidence.jobId !== expectedJobId || evidence.stage !== expectedStage) {
     throw new Error('evidence response identity is invalid');
   }
+  if (evidence.error !== null && evidence.error.requestId !== job.requestId) {
+    throw new Error('evidence error request ID does not match the owning job');
+  }
   const error = evidence.error === null ? null : {
     code: evidence.error.code,
     details: publicDetails(evidence.error.details),
     stage: evidence.error.stage,
     retryable: evidence.error.retryable,
-    requestId: evidence.error.requestId,
+    requestId: job.requestId,
     diagnosis: redactPublicText(evidence.error.diagnosis),
     recovery: redactPublicText(evidence.error.recovery),
     ...(evidence.error.evidencePath === undefined ? {} : { evidencePath: evidence.error.evidencePath }),

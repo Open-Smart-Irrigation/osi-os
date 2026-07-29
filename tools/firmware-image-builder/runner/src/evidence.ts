@@ -23,6 +23,12 @@ const DIR_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O
 const FILE_FLAGS = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW;
 const READ_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
 const COMMAND_KEYS = Object.freeze(['argv', 'exitCode', 'finishedAt', 'outputLimit', 'signal', 'startedAt', 'timedOut']);
+const APPROVED_POSIX_SIGNALS: ReadonlySet<string> = new Set([
+  'SIGABRT', 'SIGALRM', 'SIGBUS', 'SIGCHLD', 'SIGCONT', 'SIGFPE', 'SIGHUP', 'SIGILL', 'SIGINT', 'SIGIO',
+  'SIGIOT', 'SIGKILL', 'SIGPIPE', 'SIGPOLL', 'SIGPROF', 'SIGPWR', 'SIGQUIT', 'SIGSEGV', 'SIGSTKFLT',
+  'SIGSTOP', 'SIGSYS', 'SIGTERM', 'SIGTRAP', 'SIGTSTP', 'SIGTTIN', 'SIGTTOU', 'SIGURG', 'SIGUSR1', 'SIGUSR2',
+  'SIGVTALRM', 'SIGWINCH', 'SIGXCPU', 'SIGXFSZ',
+]);
 const ERROR_REQUIRED_KEYS = Object.freeze(['code', 'details', 'diagnosis', 'recovery', 'requestId', 'retryable', 'stage']);
 const ERROR_OPTIONAL_KEYS = Object.freeze(['evidencePath', 'operationId']);
 const STORED_EVIDENCE_KEYS = Object.freeze([
@@ -160,7 +166,7 @@ function validateCommand(input: EvidenceCommand, index: number): EvidenceCommand
     || normalized.argv.length === 0
     || normalized.argv.some((value) => typeof value !== 'string' || value.length === 0)
     || (normalized.exitCode !== null && !Number.isSafeInteger(normalized.exitCode))
-    || (normalized.signal !== null && typeof normalized.signal !== 'string')
+    || (normalized.signal !== null && (typeof normalized.signal !== 'string' || !APPROVED_POSIX_SIGNALS.has(normalized.signal)))
     || typeof normalized.timedOut !== 'boolean'
     || typeof normalized.outputLimit !== 'boolean') {
     return invalid(`commands[${index}] is invalid`);
@@ -289,8 +295,16 @@ function validateInput(input: StageEvidenceInput): StageEvidence {
   let inputs: Record<string, unknown>;
   let observations: Record<string, unknown>;
   try {
-    inputs = normalizeJson(input.inputs, 'evidence.inputs') as Record<string, unknown>;
-    observations = normalizeJson(input.observations, 'evidence.observations') as Record<string, unknown>;
+    const normalizedInputs = normalizeJson(input.inputs, 'evidence.inputs');
+    const normalizedObservations = normalizeJson(input.observations, 'evidence.observations');
+    if (normalizedInputs === null || typeof normalizedInputs !== 'object' || Array.isArray(normalizedInputs)) {
+      return invalid('evidence.inputs must be a non-null JSON object');
+    }
+    if (normalizedObservations === null || typeof normalizedObservations !== 'object' || Array.isArray(normalizedObservations)) {
+      return invalid('evidence.observations must be a non-null JSON object');
+    }
+    inputs = normalizedInputs as Record<string, unknown>;
+    observations = normalizedObservations as Record<string, unknown>;
     encodeJson(inputs, 'evidence.inputs', true);
     encodeJson(observations, 'evidence.observations', true);
   } catch (validationError) {
