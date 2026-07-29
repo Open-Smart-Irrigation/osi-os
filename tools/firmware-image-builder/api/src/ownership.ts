@@ -15,8 +15,9 @@ import {
   TRUSTED_OPERATION_IDS,
   type TrustedOperationId,
 } from '../../domain/types.js';
+import { encodeBranchSlug } from '../../domain/paths.js';
 import { encodeOfflineFeedPreparation, encodeSourcePreparation, type ArtifactInput, type CreateJobInput, type FreshnessInput, type JsonObject, type JsonValue, type OperationInput } from './store.js';
-import { TEXT_LIMITS, boundedText, canonicalInstant as sharedCanonicalInstant, encodeJson, normalizeCommand, normalizeJson, requireChronology as sharedRequireChronology, SharedValidationError } from './validation.js';
+import { TEXT_LIMITS, boundedText, canonicalInstant as sharedCanonicalInstant, encodeJson, normalizeCommand, normalizeJson, parseJson, requireChronology as sharedRequireChronology, SharedValidationError } from './validation.js';
 
 const HASH64 = /^[0-9a-f]{64}$/;
 const STOP_AUTHORIZATION_ATTEMPT_ID = /^sta_[a-f0-9]{32}$/;
@@ -304,6 +305,40 @@ export type OperationCleanupProof =
 
 export type HandBackProof = Readonly<{ readonly runner: Readonly<{ readonly unit: string; readonly owner: string | null; readonly leaseExpiresAt: string | null; readonly inactiveAt: string; readonly observedAt: string }>; readonly container: NullContainerProof; readonly blocker: 'none' }>;
 
+export type PublishBlockerPublisherEvidence = Readonly<{
+  readonly destination: 'absent' | 'candidate' | 'mismatched' | 'unknown';
+  readonly staging: 'absent' | 'present' | 'unknown';
+  readonly mutationCount: 0;
+}>;
+
+type PublishBlockerRecheckFile = Readonly<{ readonly path: string; readonly sha256: string }>;
+
+export type PublishBlockerRecheckProof =
+  | Readonly<{
+      readonly kind: 'destination-absent';
+      readonly observedAt: string;
+      readonly publisher: Readonly<{ readonly destination: 'absent'; readonly staging: 'absent'; readonly mutationCount: 0 }>;
+      readonly finalDirectory: string;
+      readonly finalPath: string;
+    }>
+  | Readonly<{
+      readonly kind: 'destination-matches';
+      readonly observedAt: string;
+      readonly publisher: Readonly<{ readonly destination: 'candidate'; readonly staging: 'absent'; readonly mutationCount: 0 }>;
+      readonly finalDirectory: string;
+      readonly finalPath: string;
+      readonly artifact: Readonly<{ readonly sha256: string; readonly size: number; readonly mtime: string }>;
+      readonly checksum: PublishBlockerRecheckFile;
+      readonly manifest: PublishBlockerRecheckFile;
+      readonly verification: PublishBlockerRecheckFile;
+    }>
+  | Readonly<{
+      readonly kind: 'retained-blocker';
+      readonly observedAt: string;
+      readonly reason: 'destination-mismatched' | 'staging-present' | 'unsafe-path' | 'incomplete-evidence' | 'publisher-unavailable';
+      readonly publisher: PublishBlockerPublisherEvidence;
+    }>;
+
 type CommonRunner = Readonly<{ jobId: string; owner: string; runnerUnit: string; leaseExpiresAt: string; at: string }>;
 export type DispatchClaimPhase = 'pre-start' | 'start-attempted';
 
@@ -329,6 +364,7 @@ export type ApiWriteCommand =
   | Readonly<{ kind: 'runner-recovery-blocker'; jobId: string; expectedState: ActiveRecoveryState; runnerUnit: string; observedOwner: string | null; observedLeaseExpiresAt: string | null; blocker: JsonObject; blockerCode?: BuilderErrorCode; dispatchClaimOwner?: string; expectedClaimExpiresAt?: string; at: string }>
   | Readonly<{ kind: 'direct-interrupt'; jobId: string; expectedState: ActiveRecoveryState; at: string; proof: DirectInterruptionProof; errorCode: BuilderErrorCode; error: JsonObject; dispatchClaimOwner?: string; expectedClaimExpiresAt?: string; expectedStartAttemptedAt?: string; expectedUnitInactiveAt?: string }>
   | Readonly<{ kind: 'publish-recovery'; jobId: string; expectedState: 'publishing'; at: string; state: 'succeeded' | 'failed'; evidence: PublishRecoveryEvidence; errorCode?: BuilderErrorCode; error?: JsonObject }>
+  | Readonly<{ kind: 'publish-blocker-recheck'; jobId: string; expectedState: 'failed'; expectedPublishState: 'blocked'; expectedBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER'; resolution: 'clear-absent' | 'mark-published' | 'retain-blocker'; proof: PublishBlockerRecheckProof; at: string }>
   | Readonly<{ kind: 'cleanup-credential-reserve'; jobId: string; admissionId: string; owner: string; credentialRelativePath: string; createdAt: string; expiresAt: string; at: string }>
   | Readonly<{ kind: 'cleanup-credential-abort'; jobId: string; admissionId: string; owner: string; credentialRelativePath: string; createdAt: string; expiresAt: string; at: string }>
   | (CleanupAdmissionPredecessor & Readonly<{ kind: 'cleanup-admission-stop-authorize'; jobId: string; owner: string; previousOwner: string; previousExpiresAt: string; authorizationOwner: string; attemptId: string; authorizationAt: string; authorizationExpiresAt: string; explicitRetry?: boolean; expectedAuthorizationAttemptId?: string | null; at: string }>)
@@ -769,6 +805,13 @@ function validateApiCommand(command: ApiWriteCommand): void {
       if ((value.expectedStartAttemptedAt === undefined) !== (value.expectedUnitInactiveAt === undefined)) throw new OwnershipValidationError('direct interruption expected timestamps are incomplete');
       return;
     case 'publish-recovery': preparedCommon(value, 'API'); preparedEnum(value.expectedState, ['publishing'], 'publish recovery expectedState'); preparedEnum(value.state, ['succeeded', 'failed'], 'publish recovery state'); shapePublishEvidence(value.evidence, value.at as string); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'publish recovery errorCode'); preparedJsonObject(value.error, 'publish recovery error', true); return;
+    case 'publish-blocker-recheck':
+      preparedCommon(value, 'API'); preparedEnum(value.expectedState, ['failed'], 'publish blocker recheck expectedState'); preparedEnum(value.expectedPublishState, ['blocked'], 'publish blocker recheck expectedPublishState');
+      if (value.expectedBlockerCode !== 'UNVERIFIED_FINAL_PATH_BLOCKER') throw new OwnershipValidationError('publish blocker recheck blocker code is fixed');
+      preparedEnum(value.resolution, ['clear-absent', 'mark-published', 'retain-blocker'], 'publish blocker recheck resolution'); shapePublishBlockerRecheckProof(value.proof, value.at as string);
+      const proofKind = (value.proof as { readonly kind?: unknown }).kind;
+      if ((value.resolution === 'clear-absent' && proofKind !== 'destination-absent') || (value.resolution === 'mark-published' && proofKind !== 'destination-matches') || (value.resolution === 'retain-blocker' && proofKind !== 'retained-blocker')) throw new OwnershipValidationError('publish blocker recheck resolution does not match proof');
+      return;
     case 'cleanup-credential-reserve': validateCleanupCredentialReservation(value, 'cleanup credential reservation'); return;
     case 'cleanup-credential-abort': validateCleanupCredentialReservation(value, 'cleanup credential abort'); return;
     case 'cleanup-admission-stop-authorize': validateCleanupAdmissionStopAuthorization(value); return;
@@ -822,6 +865,65 @@ function validateOperationInput(input: unknown): void {
 
 function shapeRecord(value: unknown, field: string): PreparedRecord {
   return preparedObject(value, field);
+}
+
+function exactShapeKeys(value: PreparedRecord, expected: readonly string[], field: string): void {
+  const actual = Object.keys(value).sort();
+  const keys = [...expected].sort();
+  if (actual.length !== keys.length || actual.some((key, index) => key !== keys[index])) throw new OwnershipValidationError(`${field} contains unexpected fields`);
+}
+
+function shapePublishBlockerRecheckProof(value: unknown, at: string): void {
+  const proof = shapeRecord(value, 'publish blocker recheck proof');
+  preparedInstant(proof.observedAt, 'publish blocker recheck observedAt');
+  shapeChronology([['publish blocker recheck observedAt', proof.observedAt], ['publish blocker recheck command.at', at]], 'publish blocker recheck');
+  preparedEnum(proof.kind, ['destination-absent', 'destination-matches', 'retained-blocker'], 'publish blocker recheck kind');
+  if (proof.kind === 'destination-absent') {
+    exactShapeKeys(proof, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath'], 'destination-absent proof');
+    const publisher = shapeRecord(proof.publisher, 'destination-absent publisher');
+    exactShapeKeys(publisher, ['destination', 'staging', 'mutationCount'], 'destination-absent publisher');
+    shapeLiteral(publisher.destination, 'absent', 'destination-absent publisher destination');
+    shapeLiteral(publisher.staging, 'absent', 'destination-absent publisher staging');
+    if (publisher.mutationCount !== 0) throw new OwnershipValidationError('destination-absent publisher mutationCount must be zero');
+    preparedPath(proof.finalDirectory, 'destination-absent final directory'); preparedPath(proof.finalPath, 'destination-absent final path');
+    if (!String(proof.finalPath).startsWith(`${String(proof.finalDirectory)}/`)) throw new OwnershipValidationError('destination-absent final path is outside its directory');
+    return;
+  }
+  if (proof.kind === 'destination-matches') {
+    exactShapeKeys(proof, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath', 'artifact', 'checksum', 'manifest', 'verification'], 'destination-matches proof');
+    const publisher = shapeRecord(proof.publisher, 'destination-matches publisher');
+    exactShapeKeys(publisher, ['destination', 'staging', 'mutationCount'], 'destination-matches publisher');
+    shapeLiteral(publisher.destination, 'candidate', 'destination-matches publisher destination');
+    shapeLiteral(publisher.staging, 'absent', 'destination-matches publisher staging');
+    if (publisher.mutationCount !== 0) throw new OwnershipValidationError('destination-matches publisher mutationCount must be zero');
+    preparedPath(proof.finalDirectory, 'destination-matches final directory'); preparedPath(proof.finalPath, 'destination-matches final path');
+    if (!String(proof.finalPath).startsWith(`${String(proof.finalDirectory)}/`)) throw new OwnershipValidationError('destination-matches final path is outside its directory');
+    const artifact = shapeRecord(proof.artifact, 'destination-matches artifact');
+    exactShapeKeys(artifact, ['sha256', 'size', 'mtime'], 'destination-matches artifact');
+    preparedHash(artifact.sha256, 'destination-matches artifact SHA');
+    if (!Number.isSafeInteger(artifact.size) || Number(artifact.size) < 0) throw new OwnershipValidationError('destination-matches artifact size is invalid');
+    preparedInstant(artifact.mtime, 'destination-matches artifact mtime');
+    for (const [name, expected] of [['checksum', 'sha256sums'], ['manifest', 'build-manifest.json'], ['verification', 'verification.json']] as const) {
+      const sidecar = shapeRecord(proof[name], `destination-matches ${name}`);
+      exactShapeKeys(sidecar, ['path', 'sha256'], `destination-matches ${name}`);
+      preparedPath(sidecar.path, `destination-matches ${name} path`); preparedHash(sidecar.sha256, `destination-matches ${name} SHA`);
+      if (sidecar.path !== `${String(proof.finalDirectory)}/${expected}`) throw new OwnershipValidationError(`destination-matches ${name} path is not the final sidecar path`);
+    }
+    return;
+  }
+  exactShapeKeys(proof, ['kind', 'observedAt', 'reason', 'publisher'], 'retained-blocker proof');
+  preparedEnum(proof.reason, ['destination-mismatched', 'staging-present', 'unsafe-path', 'incomplete-evidence', 'publisher-unavailable'], 'retained-blocker reason');
+  const publisher = shapeRecord(proof.publisher, 'retained-blocker publisher');
+  exactShapeKeys(publisher, ['destination', 'staging', 'mutationCount'], 'retained-blocker publisher');
+  preparedEnum(publisher.destination, ['absent', 'candidate', 'mismatched', 'unknown'], 'retained-blocker publisher destination');
+  preparedEnum(publisher.staging, ['absent', 'present', 'unknown'], 'retained-blocker publisher staging');
+  if (publisher.mutationCount !== 0) throw new OwnershipValidationError('retained-blocker publisher mutationCount must be zero');
+  const coherent = (proof.reason === 'destination-mismatched' && publisher.destination === 'mismatched')
+    || (proof.reason === 'staging-present' && publisher.staging === 'present')
+    || (proof.reason === 'incomplete-evidence' && publisher.destination === 'candidate' && publisher.staging === 'absent')
+    || ((proof.reason === 'unsafe-path' || proof.reason === 'publisher-unavailable')
+      && publisher.destination === 'unknown' && publisher.staging === 'unknown');
+  if (!coherent) throw new OwnershipValidationError('retained-blocker reason does not match publisher evidence');
 }
 
 function shapeLiteral(value: unknown, expected: string | boolean | null, field: string): void {
@@ -2146,7 +2248,7 @@ export class OwnershipStore {
   apiWrite(command: ApiWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as ApiWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['enqueue', 'dispatch', 'dispatch-reclaim', 'dispatch-renew', 'dispatch-start', 'dispatch-proof-observation', 'dispatch-release', 'request-cancellation', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'cleanup-credential-reserve', 'cleanup-credential-abort', 'cleanup-admission-stop-authorize', 'cleanup-admission-stop-complete', 'cleanup-admission-stop-failed', 'cleanup-admission-unexpected-exit', 'cleanup-admission', 'cleanup-admission-rotate', 'cleanup-admission-retry', 'hand-back'].includes(prepared.kind)) {
+    if (!['enqueue', 'dispatch', 'dispatch-reclaim', 'dispatch-renew', 'dispatch-start', 'dispatch-proof-observation', 'dispatch-release', 'request-cancellation', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'publish-blocker-recheck', 'cleanup-credential-reserve', 'cleanup-credential-abort', 'cleanup-admission-stop-authorize', 'cleanup-admission-stop-complete', 'cleanup-admission-stop-failed', 'cleanup-admission-unexpected-exit', 'cleanup-admission', 'cleanup-admission-rotate', 'cleanup-admission-retry', 'hand-back'].includes(prepared.kind)) {
       throw new OwnershipViolationError('api', prepared.kind);
     }
     validateApiCommand(prepared);
@@ -2172,6 +2274,7 @@ export class OwnershipStore {
       case 'runner-recovery-blocker': return this.#transaction(() => this.#runnerRecoveryBlocker(prepared));
       case 'direct-interrupt': return this.#transaction(() => this.#directInterrupt(prepared));
       case 'publish-recovery': return this.#transaction(() => this.#publishRecovery(prepared));
+      case 'publish-blocker-recheck': return this.#transaction(() => this.#publishBlockerRecheck(prepared));
       case 'cleanup-credential-reserve': return this.#transaction(() => this.#cleanupCredentialReserve(prepared));
       case 'cleanup-credential-abort': return this.#transaction(() => this.#cleanupCredentialAbort(prepared));
       case 'cleanup-admission-stop-authorize': return this.#transaction(() => this.#cleanupAdmissionStopAuthorize(prepared));
@@ -3088,6 +3191,137 @@ export class OwnershipStore {
       if (Number(released.changes) !== 1) conflict('cas-lost', 'direct interruption dispatch claim release lost');
     }
     this.#event(command.jobId, 'terminal', { state: 'interrupted', errorCode: command.errorCode, error: command.error }, command.at);
+  }
+
+  #publishBlockerRecheck(command: Extract<ApiWriteCommand, { kind: 'publish-blocker-recheck' }>): void {
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [['publish blocker recheck time', command.at]]);
+    if (row.state !== command.expectedState || row.publish_state !== command.expectedPublishState || row.publish_blocker_code !== command.expectedBlockerCode) conflict('stale-predecessor', 'publish blocker recheck predecessor changed');
+    if (row.cleanup_fence_generation !== null || row.cleanup_admission_id !== null) conflict('fenced', 'publish blocker recheck is fenced for cleanup');
+    const artifactFields: Array<readonly [string, string | number | null]> = [
+      ['artifact SHA-256', row.artifact_sha256], ['artifact size', row.artifact_size], ['artifact mtime', row.artifact_mtime],
+      ['checksum path', row.checksum_path], ['checksum SHA-256', row.checksum_sha256], ['manifest path', row.manifest_path],
+      ['manifest SHA-256', row.manifest_sha256], ['verification path', row.verification_path], ['verification SHA-256', row.verification_sha256],
+    ];
+    if (artifactFields.some(([, value]) => value === null || value === undefined)) conflict('identity-mismatch', 'publish blocker recheck requires complete artifact metadata');
+
+    const proof = command.proof;
+    const blocker = this.#publishBlockerBinding(row, proof.observedAt);
+    if (proof.kind === 'destination-absent' || proof.kind === 'destination-matches') {
+      if (proof.finalDirectory !== blocker.directory || proof.finalPath !== blocker.path) conflict('identity-mismatch', 'publish blocker recheck final path does not match the durable blocker binding');
+      if (row.artifact_staging_path !== null) conflict('identity-mismatch', 'publish blocker recheck destination proof retains staging');
+    }
+    if (proof.kind === 'destination-matches') {
+      if (proof.artifact.sha256 !== row.artifact_sha256 || proof.artifact.size !== Number(row.artifact_size) || proof.artifact.mtime !== row.artifact_mtime) conflict('identity-mismatch', 'publish blocker recheck artifact proof does not match the job');
+      if (proof.checksum.sha256 !== row.checksum_sha256 || proof.manifest.sha256 !== row.manifest_sha256 || proof.verification.sha256 !== row.verification_sha256) conflict('identity-mismatch', 'publish blocker recheck sidecar hashes do not match the job');
+      if (proof.checksum.path !== finalSidecarPath(proof.finalDirectory, 'sha256sums') || proof.manifest.path !== finalSidecarPath(proof.finalDirectory, 'build-manifest.json') || proof.verification.path !== finalSidecarPath(proof.finalDirectory, 'verification.json')) conflict('identity-mismatch', 'publish blocker recheck sidecar paths are not final paths');
+    }
+    const attemptRow = this.#db.prepare('SELECT COALESCE(MAX(attempt), 0) AS attempt FROM publish_blocker_rechecks WHERE job_id=?').get(command.jobId) as Row;
+    const attempt = Number(attemptRow.attempt) + 1;
+    if (!Number.isSafeInteger(attempt) || attempt <= 0) throw new OwnershipValidationError('publish blocker recheck attempt is invalid');
+    const resolution = command.resolution === 'clear-absent' ? 'cleared_absent' : command.resolution === 'mark-published' ? 'marked_published' : 'retained_blocker';
+    const eventSeq = this.#event(command.jobId, 'recovery', { kind: 'publish-blocker-recheck', resolution, attempt, proof }, command.at);
+    const p = proof.kind === 'destination-matches' ? proof : null;
+    this.#db.prepare(`INSERT INTO publish_blocker_rechecks (
+      job_id, attempt, event_seq, resolution, observed_at, committed_at,
+      prior_publish_state, prior_blocker_code, prior_blocker_json,
+      artifact_staging_path, artifact_quarantine_path, artifact_sha256, artifact_size, artifact_mtime,
+      checksum_path, checksum_sha256, manifest_path, manifest_sha256,
+      verification_path, verification_sha256, final_directory, final_path,
+      published_at, proof_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      command.jobId, attempt, eventSeq, resolution, proof.observedAt, command.at,
+      row.publish_state, row.publish_blocker_code, row.publish_blocker_json,
+      row.artifact_staging_path, row.artifact_quarantine_path, row.artifact_sha256, row.artifact_size, row.artifact_mtime,
+      row.checksum_path, row.checksum_sha256, row.manifest_path, row.manifest_sha256,
+      row.verification_path, row.verification_sha256, p?.finalDirectory ?? null, p?.finalPath ?? null,
+      command.resolution === 'mark-published' ? command.at : null, proofJson(proof, 'publish blocker recheck proof'),
+    );
+    const where = `WHERE job_id=? AND state='failed' AND publish_state='blocked' AND publish_blocker_code='UNVERIFIED_FINAL_PATH_BLOCKER'
+      AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL
+      AND artifact_staging_path IS ? AND artifact_quarantine_path IS ? AND artifact_sha256=? AND artifact_size=? AND artifact_mtime=?
+      AND checksum_path=? AND checksum_sha256=? AND manifest_path=? AND manifest_sha256=? AND verification_path=? AND verification_sha256=?
+      AND publish_blocker_json=?`;
+    const result = command.resolution === 'clear-absent'
+      ? this.#db.prepare(`UPDATE jobs SET artifact_staging_path=NULL, artifact_quarantine_path=NULL, artifact_quarantine_intent_path=NULL,
+          artifact_final_directory=NULL, artifact_final_path=NULL, artifact_sha256=NULL, artifact_size=NULL, artifact_mtime=NULL,
+          checksum_path=NULL, checksum_sha256=NULL, manifest_path=NULL, manifest_sha256=NULL, verification_path=NULL, verification_sha256=NULL,
+          publish_state=NULL, publish_started_at=NULL, published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? ${where}`)
+        .run(command.at, command.jobId, row.artifact_staging_path, row.artifact_quarantine_path, row.artifact_sha256, row.artifact_size, row.artifact_mtime, row.checksum_path, row.checksum_sha256, row.manifest_path, row.manifest_sha256, row.verification_path, row.verification_sha256, row.publish_blocker_json)
+      : command.resolution === 'mark-published'
+        ? this.#db.prepare(`UPDATE jobs SET artifact_staging_path=NULL, artifact_quarantine_path=NULL, artifact_quarantine_intent_path=NULL,
+            artifact_final_directory=?, artifact_final_path=?, checksum_path=?, manifest_path=?, verification_path=?, publish_state='published',
+            publish_started_at=?, published_at=?, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? ${where}`)
+          .run(p!.finalDirectory, p!.finalPath, p!.checksum.path, p!.manifest.path, p!.verification.path, blocker.publishStartedAt, command.at, command.at, command.jobId, row.artifact_staging_path, row.artifact_quarantine_path, row.artifact_sha256, row.artifact_size, row.artifact_mtime, row.checksum_path, row.checksum_sha256, row.manifest_path, row.manifest_sha256, row.verification_path, row.verification_sha256, row.publish_blocker_json)
+        : this.#db.prepare(`UPDATE jobs SET updated_at=? ${where}`).run(command.at, command.jobId, row.artifact_staging_path, row.artifact_quarantine_path, row.artifact_sha256, row.artifact_size, row.artifact_mtime, row.checksum_path, row.checksum_sha256, row.manifest_path, row.manifest_sha256, row.verification_path, row.verification_sha256, row.publish_blocker_json);
+    if (Number(result.changes) !== 1) conflict('cas-lost', 'publish blocker recheck predecessor changed during CAS');
+  }
+
+  #publishBlockerBinding(row: Row, observedAt: string): { readonly directory: string; readonly path: string; readonly publishStartedAt: string } {
+    const jobId = String(row.job_id);
+    const terminal = this.#db.prepare(`SELECT seq, payload_json, at FROM job_events
+      WHERE job_id=? AND event_type='terminal' AND state='failed'
+      ORDER BY seq DESC LIMIT 1`).get(jobId) as Row | undefined;
+    if (!terminal || terminal.at !== row.terminal_at) conflict('identity-mismatch', 'publish blocker terminal evidence is unavailable');
+    const terminalAt = instant(String(terminal.at), 'publish blocker terminal time');
+    if (terminalAt > observedAt) throw new OwnershipValidationError('publish blocker recheck observedAt predates the blocker terminal');
+    let terminalPayload: JsonObject;
+    let blockerPayload: JsonObject;
+    try {
+      terminalPayload = parseJson(String(terminal.payload_json), 'publish blocker terminal event', true) as JsonObject;
+      blockerPayload = parseJson(String(row.publish_blocker_json), 'publish blocker evidence', true) as JsonObject;
+    } catch (error) {
+      throw new OwnershipTransactionError('publish blocker durable evidence is corrupt', { cause: error });
+    }
+    if (terminalPayload.errorCode !== 'UNVERIFIED_FINAL_PATH_BLOCKER') conflict('identity-mismatch', 'terminal event does not establish the current publish blocker');
+    const publishing = this.#db.prepare(`SELECT payload_json, at FROM job_events
+      WHERE job_id=? AND seq < ? AND event_type='publish'
+        AND json_extract(payload_json, '$.state')='publishing'
+      ORDER BY seq ASC LIMIT 1`).get(jobId, terminal.seq) as Row | undefined;
+    if (!publishing) conflict('identity-mismatch', 'publish blocker has no durable publish start event');
+    let publishingPayload: JsonObject;
+    try {
+      publishingPayload = parseJson(String(publishing.payload_json), 'publish start event', true) as JsonObject;
+    } catch (error) {
+      throw new OwnershipTransactionError('publish start event is corrupt', { cause: error });
+    }
+    if (typeof publishingPayload.publishStartedAt !== 'string') conflict('identity-mismatch', 'publish start event omitted its effective timestamp');
+    const publishStartedAt = instant(publishingPayload.publishStartedAt, 'durable publish started time');
+    const publishEventAt = instant(String(publishing.at), 'durable publish start event time');
+    if (publishStartedAt > publishEventAt || publishEventAt > terminalAt) conflict('identity-mismatch', 'publish blocker event chronology is invalid');
+
+    const value = blockerPayload.binding;
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) conflict('identity-mismatch', 'publish blocker binding is missing');
+    const binding = value as Record<string, unknown>;
+    const expectedDirectory = `${encodeBranchSlug(String(row.branch))}/${String(row.pinned_sha)}/${String(row.target_id)}`;
+    const directory = binding.finalDirectory;
+    const path = binding.finalPath;
+    const stagingDirectory = `staging/${jobId}`;
+    if (
+      binding.jobId !== jobId
+      || binding.rootId !== row.root_id
+      || binding.branch !== row.branch
+      || binding.branchSlug !== encodeBranchSlug(String(row.branch))
+      || binding.pinnedSha !== row.pinned_sha
+      || binding.targetId !== row.target_id
+      || binding.stagingDirectory !== stagingDirectory
+      || typeof binding.stagingPath !== 'string'
+      || !binding.stagingPath.startsWith(`${stagingDirectory}/`)
+      || binding.stagingPath.slice(stagingDirectory.length + 1).includes('/')
+      || directory !== expectedDirectory
+      || typeof path !== 'string'
+      || publishingPayload.finalDirectory !== directory
+      || publishingPayload.finalPath !== path
+      || !path.startsWith(`${expectedDirectory}/`)
+      || path.slice(expectedDirectory.length + 1).includes('/')
+      || path.slice(expectedDirectory.length + 1) !== binding.stagingPath.slice(stagingDirectory.length + 1)
+      || binding.artifactSha256 !== row.artifact_sha256
+      || binding.artifactSize !== row.artifact_size
+    ) conflict('identity-mismatch', 'publish blocker binding does not match the failed job');
+    confinedPath(directory, 'publish blocker final directory');
+    confinedPath(path, 'publish blocker final path');
+    return { directory, path, publishStartedAt };
   }
 
   #publishRecovery(command: Extract<ApiWriteCommand, { kind: 'publish-recovery' }>): void {
@@ -4023,7 +4257,12 @@ export class OwnershipStore {
       command.at,
     );
     if (Number(update.changes) !== 1) conflict('cas-lost', 'publish stage start CAS lost');
-    this.#event(command.jobId, 'publish', { state: 'publishing' }, command.at);
+    this.#event(command.jobId, 'publish', {
+      state: 'publishing',
+      publishStartedAt: command.publishStartedAt,
+      finalDirectory: command.finalDirectory,
+      finalPath: command.finalPath,
+    }, command.at);
     this.#event(command.jobId, 'stage', { stage: 'publish', outcome: 'running' }, command.at);
   }
 

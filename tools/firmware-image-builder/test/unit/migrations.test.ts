@@ -341,7 +341,11 @@ describe('versioned builder database migrations', () => {
     ]);
     expect(normalizeForeignKeys('job_log_generations')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
     expect(normalizeForeignKeys('legacy_blocked_publish_evidence')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
-    expect(normalizeForeignKeys('publish_blocker_rechecks')).toEqual([{ table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' }]);
+    expect(normalizeForeignKeys('publish_blocker_rechecks')).toEqual([
+      { table: 'job_events', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
+      { table: 'job_events', from: 'event_seq', to: 'seq', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
+      { table: 'jobs', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
+    ]);
     expect(normalizeForeignKeys('job_events').sort((a, b) => `${a.table}${a.from}`.localeCompare(`${b.table}${b.from}`))).toEqual([
       { table: 'job_log_generations', from: 'file_generation', to: 'generation', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
       { table: 'job_log_generations', from: 'job_id', to: 'job_id', on_delete: 'RESTRICT', on_update: 'RESTRICT' },
@@ -363,7 +367,7 @@ describe('versioned builder database migrations', () => {
       'job_operations_committed_delete_guard', 'job_operations_committed_update_guard', 'job_operations_manifest_label_guard',
       'job_operations_manifest_label_guard_update', 'jobs_cleanup_generation_guard', 'jobs_container_guard',
       'legacy_blocked_publish_evidence_delete_guard', 'legacy_blocked_publish_evidence_update_guard',
-      'publish_blocker_rechecks_delete_guard', 'publish_blocker_rechecks_update_guard',
+      'publish_blocker_rechecks_delete_guard', 'publish_blocker_rechecks_insert_guard', 'publish_blocker_rechecks_update_guard',
       'jobs_container_guard_update', 'jobs_fence_guard', 'jobs_fence_guard_update', 'jobs_cleanup_blocker_guard',
       'jobs_cleanup_blocker_guard_update', 'jobs_freshness_evidence_pair_guard',
       'jobs_freshness_evidence_pair_guard_update', 'jobs_freshness_guard', 'jobs_freshness_guard_update',
@@ -610,7 +614,7 @@ describe('versioned builder database migrations', () => {
       checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?,
       verification_path=?, verification_sha256=?,
       publish_state='blocked', publish_blocker_code='UNVERIFIED_FINAL_PATH_BLOCKER',
-      publish_blocker_json='{"staging":"absent"}', updated_at=?
+      publish_blocker_json='{"binding":{"finalDirectory":"releases/main/rpi-5","finalPath":"releases/main/rpi-5/image.img.gz"},"staging":"absent"}', updated_at=?
       WHERE job_id=?`).run(
       '2026-07-28T00:01:00.000Z',
       artifact.artifact_sha256, artifact.artifact_size, artifact.artifact_mtime,
@@ -622,22 +626,56 @@ describe('versioned builder database migrations', () => {
     );
 
     db.exec('BEGIN IMMEDIATE');
-    db.prepare(`INSERT INTO publish_blocker_rechecks (
-      job_id, attempt, resolution, observed_at, committed_at,
+    const proof = JSON.stringify({
+      kind: 'destination-absent',
+      observedAt: '2026-07-28T00:02:00.000Z',
+      publisher: { destination: 'absent', staging: 'absent', mutationCount: 0 },
+      finalDirectory: 'releases/main/rpi-5',
+      finalPath: 'releases/main/rpi-5/image.img.gz',
+    });
+    const insertAudit = db.prepare(`INSERT INTO publish_blocker_rechecks (
+      job_id, attempt, event_seq, resolution, observed_at, committed_at,
       prior_publish_state, prior_blocker_code, prior_blocker_json,
-      artifact_staging_path, artifact_sha256, artifact_size, artifact_mtime,
+      artifact_staging_path, artifact_quarantine_path,
+      artifact_sha256, artifact_size, artifact_mtime,
       checksum_path, checksum_sha256, manifest_path, manifest_sha256,
       verification_path, verification_sha256, final_directory, final_path,
       published_at, proof_json
     )
     SELECT
-      job_id, 1, 'cleared_absent', '2026-07-28T00:02:00.000Z',
+      job_id, 1, ?, 'cleared_absent', '2026-07-28T00:02:00.000Z',
       '2026-07-28T00:02:00.000Z', publish_state, publish_blocker_code,
-      publish_blocker_json, artifact_staging_path, artifact_sha256,
-      artifact_size, artifact_mtime, checksum_path, checksum_sha256,
+      publish_blocker_json, artifact_staging_path, artifact_quarantine_path,
+      artifact_sha256, artifact_size, artifact_mtime, checksum_path, checksum_sha256,
       manifest_path, manifest_sha256, verification_path, verification_sha256,
-      NULL, NULL, NULL, '{"destination":"absent","staging":"absent","mutationCount":0}'
-    FROM jobs WHERE job_id='rechecked-absent'`).run();
+      NULL, NULL, NULL, ?
+    FROM jobs WHERE job_id='rechecked-absent'`);
+    const contradictoryProof = JSON.stringify({
+      ...JSON.parse(proof),
+      publisher: { destination: 'candidate', staging: 'absent', mutationCount: 0 },
+    });
+    db.prepare(`INSERT INTO job_events (
+      job_id, seq, event_type, state, stage, payload_json, at
+    ) VALUES (
+      'rechecked-absent', 0, 'recovery', 'failed', NULL, ?, '2026-07-28T00:02:00.000Z'
+    )`).run(JSON.stringify({
+      kind: 'publish-blocker-recheck',
+      resolution: 'cleared_absent',
+      attempt: 1,
+      proof: JSON.parse(contradictoryProof),
+    }));
+    expect(() => insertAudit.run(0, contradictoryProof)).toThrow(/publish blocker recheck evidence is not bound/u);
+    db.prepare(`INSERT INTO job_events (
+      job_id, seq, event_type, state, stage, payload_json, at
+    ) VALUES (
+      'rechecked-absent', 1, 'recovery', 'failed', NULL, ?, '2026-07-28T00:02:00.000Z'
+    )`).run(JSON.stringify({
+      kind: 'publish-blocker-recheck',
+      resolution: 'cleared_absent',
+      attempt: 1,
+      proof: JSON.parse(proof),
+    }));
+    insertAudit.run(1, proof);
     db.prepare(`UPDATE jobs SET
       artifact_staging_path=NULL, artifact_quarantine_path=NULL,
       artifact_quarantine_intent_path=NULL, artifact_final_directory=NULL,
@@ -686,6 +724,261 @@ describe('versioned builder database migrations', () => {
     check(db, "UPDATE publish_blocker_rechecks SET resolution='retained_blocker'", /immutable/u);
     check(db, "DELETE FROM publish_blocker_rechecks WHERE job_id='rechecked-absent'", /immutable/u);
     db.close();
+  });
+
+  it.each([
+    {
+      resolution: 'marked_published',
+      finalDirectory: 'releases/main/rpi-5',
+      finalPath: 'releases/main/rpi-5/image.img.gz',
+      publishedAt: '2026-07-28T00:02:00.000Z',
+      proof: {
+        kind: 'destination-matches',
+        observedAt: '2026-07-28T00:02:00.000Z',
+        publisher: { destination: 'candidate', staging: 'absent', mutationCount: 0 },
+        finalDirectory: 'releases/main/rpi-5',
+        finalPath: 'releases/main/rpi-5/image.img.gz',
+        artifact: {
+          sha256: HASH64,
+          size: 100,
+          mtime: '2026-07-23T00:00:00.000Z',
+        },
+        checksum: { path: 'releases/main/rpi-5/sha256sums', sha256: HASH64 },
+        manifest: { path: 'releases/main/rpi-5/build-manifest.json', sha256: HASH64 },
+        verification: { path: 'releases/main/rpi-5/verification.json', sha256: HASH64 },
+      },
+    },
+    {
+      resolution: 'retained_blocker',
+      finalDirectory: null,
+      finalPath: null,
+      publishedAt: null,
+      proof: {
+        kind: 'retained-blocker',
+        observedAt: '2026-07-28T00:02:00.000Z',
+        reason: 'destination-mismatched',
+        publisher: { destination: 'mismatched', staging: 'absent', mutationCount: 0 },
+      },
+    },
+  ])('accepts $resolution only when it is bound to the blocked job and durable event', async ({
+    resolution,
+    finalDirectory,
+    finalPath,
+    publishedAt,
+    proof,
+  }) => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    const jobId = `rechecked-${resolution}`;
+    insertValidJob(db, jobId, 'building');
+    const artifact = stagingEvidence();
+    db.prepare(`UPDATE jobs SET
+      state='failed', queue_state='complete', terminal_at=?,
+      terminal_error_code='PUBLISH_FAILED', terminal_error_json='{"reason":"publish recovery failed"}',
+      artifact_staging_path=NULL, artifact_sha256=?, artifact_size=?, artifact_mtime=?,
+      checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?,
+      verification_path=?, verification_sha256=?,
+      publish_state='blocked', publish_blocker_code='UNVERIFIED_FINAL_PATH_BLOCKER',
+      publish_blocker_json='{"binding":{"finalDirectory":"releases/main/rpi-5","finalPath":"releases/main/rpi-5/image.img.gz"},"destination":"unknown"}', updated_at=?
+      WHERE job_id=?`).run(
+      '2026-07-28T00:01:00.000Z',
+      artifact.artifact_sha256, artifact.artifact_size, artifact.artifact_mtime,
+      artifact.checksum_path, artifact.checksum_sha256,
+      artifact.manifest_path, artifact.manifest_sha256,
+      artifact.verification_path, artifact.verification_sha256,
+      '2026-07-28T00:01:00.000Z',
+      jobId,
+    );
+    const proofJson = JSON.stringify(proof);
+    db.prepare(`INSERT INTO job_events (
+      job_id, seq, event_type, state, stage, payload_json, at
+    ) VALUES (?, 0, 'recovery', 'failed', NULL, ?, '2026-07-28T00:02:00.000Z')`).run(
+      jobId,
+      JSON.stringify({ kind: 'publish-blocker-recheck', resolution, attempt: 1, proof }),
+    );
+    db.prepare(`INSERT INTO publish_blocker_rechecks (
+      job_id, attempt, event_seq, resolution, observed_at, committed_at,
+      prior_publish_state, prior_blocker_code, prior_blocker_json,
+      artifact_staging_path, artifact_quarantine_path,
+      artifact_sha256, artifact_size, artifact_mtime,
+      checksum_path, checksum_sha256, manifest_path, manifest_sha256,
+      verification_path, verification_sha256, final_directory, final_path,
+      published_at, proof_json
+    )
+    SELECT
+      job_id, 1, 0, ?, '2026-07-28T00:02:00.000Z',
+      '2026-07-28T00:02:00.000Z', publish_state, publish_blocker_code,
+      publish_blocker_json, artifact_staging_path, artifact_quarantine_path,
+      artifact_sha256, artifact_size, artifact_mtime, checksum_path, checksum_sha256,
+      manifest_path, manifest_sha256, verification_path, verification_sha256,
+      ?, ?, ?, ?
+    FROM jobs WHERE job_id=?`).run(
+      resolution,
+      finalDirectory,
+      finalPath,
+      publishedAt,
+      proofJson,
+      jobId,
+    );
+
+    expect(db.prepare(`SELECT resolution, event_seq, final_directory, final_path, published_at, proof_json
+      FROM publish_blocker_rechecks WHERE job_id=?`).get(jobId)).toEqual({
+      resolution,
+      event_seq: 0,
+      final_directory: finalDirectory,
+      final_path: finalPath,
+      published_at: publishedAt,
+      proof_json: proofJson,
+    });
+    const rejectSecondAudit = (
+      seq: number,
+      rejectedProof: Record<string, unknown>,
+      rejectedFinalDirectory: string | null,
+      rejectedFinalPath: string | null,
+      rejectedPublishedAt: string | null,
+    ): void => {
+      db.prepare(`INSERT INTO job_events (
+        job_id, seq, event_type, state, stage, payload_json, at
+      ) VALUES (?, ?, 'recovery', 'failed', NULL, ?, '2026-07-28T00:03:00.000Z')`).run(
+        jobId,
+        seq,
+        JSON.stringify({ kind: 'publish-blocker-recheck', resolution, attempt: 2, proof: rejectedProof }),
+      );
+      expect(() => db.prepare(`INSERT INTO publish_blocker_rechecks (
+        job_id, attempt, event_seq, resolution, observed_at, committed_at,
+        prior_publish_state, prior_blocker_code, prior_blocker_json,
+        artifact_staging_path, artifact_quarantine_path,
+        artifact_sha256, artifact_size, artifact_mtime,
+        checksum_path, checksum_sha256, manifest_path, manifest_sha256,
+        verification_path, verification_sha256, final_directory, final_path,
+        published_at, proof_json
+      )
+      SELECT
+        job_id, 2, ?, ?, '2026-07-28T00:03:00.000Z',
+        '2026-07-28T00:03:00.000Z', publish_state, publish_blocker_code,
+        publish_blocker_json, artifact_staging_path, artifact_quarantine_path,
+        artifact_sha256, artifact_size, artifact_mtime, checksum_path, checksum_sha256,
+        manifest_path, manifest_sha256, verification_path, verification_sha256,
+        ?, ?, ?, ?
+      FROM jobs WHERE job_id=?`).run(
+        seq,
+        resolution,
+        rejectedFinalDirectory,
+        rejectedFinalPath,
+        rejectedPublishedAt,
+        JSON.stringify(rejectedProof),
+        jobId,
+      ))
+        .toThrow(/publish blocker recheck evidence is not bound/u);
+    };
+    if (resolution === 'marked_published') {
+      rejectSecondAudit(1, {
+        kind: 'destination-matches',
+        observedAt: '2026-07-28T00:03:00.000Z',
+        publisher: { destination: 'candidate', staging: 'absent', mutationCount: 0 },
+        finalDirectory,
+        finalPath,
+      }, finalDirectory, finalPath, '2026-07-28T00:03:00.000Z');
+      rejectSecondAudit(2, {
+        ...proof,
+        observedAt: '2026-07-28T00:03:00.000Z',
+        publisher: { destination: 'absent', staging: 'absent', mutationCount: 0 },
+      }, finalDirectory, finalPath, '2026-07-28T00:03:00.000Z');
+      const wrongDirectory = 'releases/other/rpi-5';
+      rejectSecondAudit(3, {
+        ...proof,
+        observedAt: '2026-07-28T00:03:00.000Z',
+        finalDirectory: wrongDirectory,
+        finalPath: `${wrongDirectory}/image.img.gz`,
+        checksum: { path: `${wrongDirectory}/sha256sums`, sha256: HASH64 },
+        manifest: { path: `${wrongDirectory}/build-manifest.json`, sha256: HASH64 },
+        verification: { path: `${wrongDirectory}/verification.json`, sha256: HASH64 },
+      }, wrongDirectory, `${wrongDirectory}/image.img.gz`, '2026-07-28T00:03:00.000Z');
+    } else {
+      rejectSecondAudit(1, {
+        ...proof,
+        observedAt: '2026-07-28T00:03:00.000Z',
+        publisher: { destination: 'absent', staging: 'absent', mutationCount: 0 },
+      }, null, null, null);
+    }
+    db.close();
+  });
+
+  it('rejects a queued job self-asserting publish blocker recheck evidence', async () => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    const jobId = 'queued-self-asserted-recheck';
+    insertValidJob(db, jobId, 'queued');
+    const artifact = stagingEvidence();
+    db.prepare(`UPDATE jobs SET
+      artifact_staging_path=NULL, artifact_sha256=?, artifact_size=?, artifact_mtime=?,
+      checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?,
+      verification_path=?, verification_sha256=?,
+      publish_state='blocked', publish_blocker_code='UNVERIFIED_FINAL_PATH_BLOCKER',
+      publish_blocker_json='{"binding":{"finalDirectory":"releases/main/rpi-5","finalPath":"releases/main/rpi-5/image.img.gz"},"destination":"unknown"}'
+      WHERE job_id=?`).run(
+      artifact.artifact_sha256, artifact.artifact_size, artifact.artifact_mtime,
+      artifact.checksum_path, artifact.checksum_sha256,
+      artifact.manifest_path, artifact.manifest_sha256,
+      artifact.verification_path, artifact.verification_sha256,
+      jobId,
+    );
+    const proof = {
+      kind: 'destination-absent',
+      observedAt: '2026-07-28T00:02:00.000Z',
+      publisher: { destination: 'absent', staging: 'absent', mutationCount: 0 },
+      finalDirectory: 'releases/main/rpi-5',
+      finalPath: 'releases/main/rpi-5/image.img.gz',
+    };
+    db.prepare(`INSERT INTO job_events (
+      job_id, seq, event_type, state, stage, payload_json, at
+    ) VALUES (?, 0, 'recovery', 'queued', NULL, ?, '2026-07-28T00:02:00.000Z')`).run(
+      jobId,
+      JSON.stringify({ kind: 'publish-blocker-recheck', resolution: 'cleared_absent', attempt: 1, proof }),
+    );
+
+    expect(() => db.prepare(`INSERT INTO publish_blocker_rechecks (
+      job_id, attempt, event_seq, resolution, observed_at, committed_at,
+      prior_publish_state, prior_blocker_code, prior_blocker_json,
+      artifact_staging_path, artifact_quarantine_path,
+      artifact_sha256, artifact_size, artifact_mtime,
+      checksum_path, checksum_sha256, manifest_path, manifest_sha256,
+      verification_path, verification_sha256, final_directory, final_path,
+      published_at, proof_json
+    )
+    SELECT
+      job_id, 1, 0, 'cleared_absent', '2026-07-28T00:02:00.000Z',
+      '2026-07-28T00:02:00.000Z', publish_state, publish_blocker_code,
+      publish_blocker_json, artifact_staging_path, artifact_quarantine_path,
+      artifact_sha256, artifact_size, artifact_mtime, checksum_path, checksum_sha256,
+      manifest_path, manifest_sha256, verification_path, verification_sha256,
+      NULL, NULL, NULL, ?
+    FROM jobs WHERE job_id=?`).run(JSON.stringify(proof), jobId))
+      .toThrow(/publish blocker recheck evidence is not bound/u);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM publish_blocker_rechecks WHERE job_id=?').get(jobId))
+      .toEqual({ count: 0 });
+    db.close();
+  });
+
+  it('upgrades an exact v16 database additively and preserves existing jobs', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    for (const migration of MIGRATION_REGISTRY.slice(0, 16)) {
+      historical.exec(await readFile(join(repoMigrationDir, migration.filename), 'utf8'));
+      historical.prepare('INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)')
+        .run(migration.version, migration.filename, migration.sha256, '2026-07-28T00:00:00.000Z');
+    }
+    insertValidJob(historical, 'preserved-v16-job', 'building');
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare('SELECT version, filename FROM schema_migrations WHERE version=17').get())
+      .toEqual({ version: 17, filename: '017_publish_blocker_recheck.sql' });
+    expect(upgraded.prepare("SELECT job_id, state FROM jobs WHERE job_id='preserved-v16-job'").get())
+      .toEqual({ job_id: 'preserved-v16-job', state: 'building' });
+    expect(upgraded.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='publish_blocker_rechecks'").get())
+      .toEqual({ name: 'publish_blocker_rechecks' });
+    upgraded.close();
   });
 
   it('fails the source-gap migration atomically for preexisting numeric-equivalent duplicates', async () => {

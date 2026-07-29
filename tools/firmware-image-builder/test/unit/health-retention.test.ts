@@ -891,7 +891,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, terminal_error_code, terminal_error_json, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'failed', 'complete', ?, ?, ?, 'PUBLISH_FAILED', '{"reason":"publish recovery failed"}', '{}', '{}')`)
       .run('purgeable', 'request-purgeable', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
     await mkdir(join(paths.stateRoot, 'jobs', 'purgeable', 'nested'), { recursive: true });
     await writeFile(join(paths.stateRoot, 'jobs', 'purgeable', 'nested', 'state.json'), '{}');
@@ -899,12 +899,60 @@ describe('startup retention', () => {
     db.prepare('INSERT INTO job_stages (job_id, stage) VALUES (?, ?)').run('purgeable', 'build');
     db.prepare('INSERT INTO job_operations (job_id, operation_id, argv_hash, argv_json, started_at) VALUES (?, ?, ?, ?, ?)')
       .run('purgeable', 'build-image', 'c'.repeat(64), '[]', OLD);
-    db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, 0, 'terminal', 'succeeded', '{}', ?)").run('purgeable', OLD);
+    db.prepare(`UPDATE jobs SET
+      artifact_staging_path=NULL, artifact_sha256=?, artifact_size=100, artifact_mtime=?,
+      checksum_path='staging/SHA256SUMS', checksum_sha256=?,
+      manifest_path='staging/build-manifest.json', manifest_sha256=?,
+      verification_path='staging/verification.json', verification_sha256=?,
+      publish_state='blocked', publish_blocker_code='UNVERIFIED_FINAL_PATH_BLOCKER',
+      publish_blocker_json='{"binding":{"finalDirectory":"releases/main/rpi-5","finalPath":"releases/main/rpi-5/image.img.gz"},"destination":"unknown"}'
+      WHERE job_id='purgeable'`).run('d'.repeat(64), OLD, 'd'.repeat(64), 'd'.repeat(64), 'd'.repeat(64));
+    const recheckProof = {
+      kind: 'destination-absent',
+      observedAt: OLD,
+      publisher: { destination: 'absent', staging: 'absent', mutationCount: 0 },
+      finalDirectory: 'releases/main/rpi-5',
+      finalPath: 'releases/main/rpi-5/image.img.gz',
+    };
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, 0, 'recovery', 'failed', ?, ?)")
+      .run('purgeable', JSON.stringify({
+        kind: 'publish-blocker-recheck',
+        resolution: 'cleared_absent',
+        attempt: 1,
+        proof: recheckProof,
+      }), OLD);
+    db.prepare(`INSERT INTO publish_blocker_rechecks (
+      job_id, attempt, event_seq, resolution, observed_at, committed_at,
+      prior_publish_state, prior_blocker_code, prior_blocker_json,
+      artifact_staging_path, artifact_quarantine_path,
+      artifact_sha256, artifact_size, artifact_mtime,
+      checksum_path, checksum_sha256, manifest_path, manifest_sha256,
+      verification_path, verification_sha256, final_directory, final_path,
+      published_at, proof_json
+    )
+    SELECT
+      job_id, 1, 0, 'cleared_absent', ?, ?, publish_state, publish_blocker_code,
+      publish_blocker_json, artifact_staging_path, artifact_quarantine_path,
+      artifact_sha256, artifact_size, artifact_mtime, checksum_path, checksum_sha256,
+      manifest_path, manifest_sha256, verification_path, verification_sha256,
+      NULL, NULL, NULL, ?
+    FROM jobs WHERE job_id='purgeable'`).run(OLD, OLD, JSON.stringify(recheckProof));
+    db.prepare(`UPDATE jobs SET
+      artifact_staging_path=NULL, artifact_quarantine_path=NULL,
+      artifact_quarantine_intent_path=NULL, artifact_final_directory=NULL,
+      artifact_final_path=NULL, artifact_sha256=NULL, artifact_size=NULL,
+      artifact_mtime=NULL, checksum_path=NULL, checksum_sha256=NULL,
+      manifest_path=NULL, manifest_sha256=NULL, verification_path=NULL,
+      verification_sha256=NULL, publish_state=NULL, publish_started_at=NULL,
+      published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL
+      WHERE job_id='purgeable'`).run();
+    db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, 1, 'terminal', 'failed', '{}', ?)")
+      .run('purgeable', OLD);
 
     await expect(createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })()).resolves.toEqual({ blockers: [] });
 
     expect(db.prepare('SELECT job_id FROM jobs WHERE job_id=?').get('purgeable')).toBeUndefined();
-    for (const table of ['queue_entries', 'job_stages', 'job_operations', 'job_events']) {
+    for (const table of ['queue_entries', 'job_stages', 'job_operations', 'job_events', 'publish_blocker_rechecks']) {
       expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE job_id=?`).get('purgeable')).toEqual({ count: 0 });
     }
     await expect(import('node:fs/promises').then(({ access }) => access(join(paths.stateRoot, 'jobs', 'purgeable')))).rejects.toMatchObject({ code: 'ENOENT' });

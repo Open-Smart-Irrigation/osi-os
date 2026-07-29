@@ -16,7 +16,7 @@ import {
 import {
   OwnershipStore, OwnershipTransactionError, OwnershipValidationError, OwnershipViolationError,
   type ApiWriteCommand, type CleanupPostcondition, type CleanupSnapshot, type CleanupWriteCommand, type DirectInterruptionProof, type DirectLogProof, type StagingCleanupProof,
-  type OwnershipResult, type PublishRecoveryEvidence, type RunnerWriteCommand,
+  type OwnershipResult, type PublishBlockerRecheckProof, type PublishRecoveryEvidence, type RunnerWriteCommand,
 } from '../../api/src/ownership.js';
 import { SharedValidationError } from '../../api/src/validation.js';
 
@@ -3201,5 +3201,163 @@ describe('Task 7 recovery proof chronology', () => {
     let delayedBegins = 0; const guardedDelayed = new OwnershipStore(delayed.db, { now: () => NOW, beforeBegin: () => { delayedBegins += 1; } });
     const result = guardedDelayed.cleanupWrite({ kind: 'complete', jobId: 'null-cleanup-delayed', admissionId: admission.admissionId, owner: admission.owner, unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: delayedSnapshot, postcondition: postcondition(delayedSnapshot), exactContainerId: null, containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: AFTER });
     expect(result.ok).toBe(true); expect(delayedBegins).toBe(1);
+  });
+});
+
+async function blockedPublishFixture(jobId: string): Promise<Awaited<ReturnType<typeof fixture>>> {
+  const target = await fixture(jobId);
+  toVerifying(target.ownership, jobId);
+  target.ownership.runnerWrite({
+    ...runnerBase(jobId),
+    kind: 'publish-stage-start',
+    expectedState: 'verifying',
+    startedAt: NOW,
+    finalDirectory: `main/${SHA40}/rpi-5`,
+    finalPath: `main/${SHA40}/rpi-5/image`,
+    publishStartedAt: NOW,
+  });
+  seedLogs(target.path, jobId);
+  const binding = {
+    jobId,
+    rootId: 'release',
+    rootPath: '/release',
+    rootDevice: 1,
+    rootInode: 2,
+    branch: 'main',
+    branchSlug: 'main',
+    pinnedSha: SHA40,
+    targetId: 'rpi-5',
+    stagingDirectory: `staging/${jobId}`,
+    stagingPath: `staging/${jobId}/image`,
+    finalDirectory: `main/${SHA40}/rpi-5`,
+    finalPath: `main/${SHA40}/rpi-5/image`,
+    artifactSha256: SHA64,
+    artifactSize: 10,
+  };
+  const result = target.ownership.runnerWrite({
+    ...runnerBase(jobId),
+    kind: 'publish-failure-terminal',
+    expectedState: 'publishing',
+    startedAt: NOW,
+    finishedAt: LATER,
+    evidencePath: 'evidence/09-publish.json',
+    evidenceSha256: SHA64,
+    blockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER',
+    blocker: { code: 'UNVERIFIED_FINAL_PATH_BLOCKER', binding, staging: 'absent' },
+    staging: 'absent',
+    terminalAt: LATER,
+    error: { code: 'UNVERIFIED_FINAL_PATH_BLOCKER', diagnosis: 'destination was not verified' },
+  });
+  if (!result.ok) throw new Error(`failed to seed blocked publish job ${jobId}`);
+  return target;
+}
+
+function destinationAbsentProof(jobId: string, observedAt = AFTER): Extract<PublishBlockerRecheckProof, { kind: 'destination-absent' }> {
+  return { kind: 'destination-absent', observedAt, publisher: { destination: 'absent', staging: 'absent', mutationCount: 0 }, finalDirectory: `main/${SHA40}/rpi-5`, finalPath: `main/${SHA40}/rpi-5/image` };
+}
+
+function destinationMatchesProof(jobId: string, observedAt = AFTER): Extract<PublishBlockerRecheckProof, { kind: 'destination-matches' }> {
+  return {
+    kind: 'destination-matches', observedAt,
+    publisher: { destination: 'candidate', staging: 'absent', mutationCount: 0 },
+    finalDirectory: `main/${SHA40}/rpi-5`, finalPath: `main/${SHA40}/rpi-5/image`,
+    artifact: { sha256: SHA64, size: 10, mtime: NOW },
+    checksum: { path: `main/${SHA40}/rpi-5/sha256sums`, sha256: checksumHash() },
+    manifest: { path: `main/${SHA40}/rpi-5/build-manifest.json`, sha256: manifestHash(jobId) },
+    verification: { path: `main/${SHA40}/rpi-5/verification.json`, sha256: verificationHash(jobId) },
+  };
+}
+
+function retainedBlockerProof(reason: 'destination-mismatched' | 'staging-present' | 'unsafe-path' | 'incomplete-evidence' | 'publisher-unavailable' = 'destination-mismatched', observedAt = AFTER): Extract<PublishBlockerRecheckProof, { kind: 'retained-blocker' }> {
+  return { kind: 'retained-blocker', observedAt, reason, publisher: { destination: 'mismatched', staging: 'present', mutationCount: 0 } };
+}
+
+function recheckCommand(jobId: string, resolution: 'clear-absent' | 'mark-published' | 'retain-blocker', proof: PublishBlockerRecheckProof, at = AFTER): Extract<ApiWriteCommand, { kind: 'publish-blocker-recheck' }> {
+  return { kind: 'publish-blocker-recheck', jobId, expectedState: 'failed', expectedPublishState: 'blocked', expectedBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER', resolution, proof, at };
+}
+
+describe('publish blocker recheck ownership transaction', () => {
+  it('clears an absent destination while preserving terminal and publish-stage evidence', async () => {
+    const target = await blockedPublishFixture('recheck-absent');
+    const beforeJob = target.store.getJob('recheck-absent'); const beforeStage = target.store.getStage('recheck-absent', 'publish'); const beforeEvents = target.store.listEvents('recheck-absent').events.length;
+    expect(target.ownership.apiWrite(recheckCommand('recheck-absent', 'clear-absent', destinationAbsentProof('recheck-absent')))).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.store.getJob('recheck-absent')).toMatchObject({ state: 'failed', terminalAt: beforeJob.terminalAt, terminalErrorCode: beforeJob.terminalErrorCode, publishState: null, artifactStagingPath: null, artifactSha256: null, checksumPath: null, manifestPath: null, verificationPath: null, publishStartedAt: null, publishedAt: null, publishBlockerCode: null, publishBlocker: null });
+    expect(target.store.getStage('recheck-absent', 'publish')).toEqual(beforeStage);
+    const audit = target.db.prepare('SELECT job_id, attempt, event_seq, resolution, observed_at, committed_at, prior_publish_state, prior_blocker_code, artifact_quarantine_path, artifact_sha256, final_path, published_at FROM publish_blocker_rechecks WHERE job_id=?').get('recheck-absent') as Record<string, unknown>;
+    expect(audit).toMatchObject({ job_id: 'recheck-absent', attempt: 1, resolution: 'cleared_absent', observed_at: AFTER, committed_at: AFTER, prior_publish_state: 'blocked', prior_blocker_code: 'UNVERIFIED_FINAL_PATH_BLOCKER', artifact_quarantine_path: null, artifact_sha256: SHA64, final_path: null, published_at: null });
+    const events = target.store.listEvents('recheck-absent').events;
+    expect(events).toHaveLength(beforeEvents + 1); expect(events.at(-1)?.eventType).toBe('recovery'); expect(events.at(-1)?.payload).toMatchObject({ kind: 'publish-blocker-recheck', resolution: 'cleared_absent', attempt: 1, proof: destinationAbsentProof('recheck-absent') });
+    expect(audit.event_seq).toBe(events.at(-1)?.seq);
+    expect(events.filter(({ eventType }) => eventType === 'terminal')).toHaveLength(1);
+  });
+
+  it('records retained attempts and marks a matching destination published without succeeding the failed job', async () => {
+    const target = await blockedPublishFixture('recheck-match');
+    const beforeJob = target.store.getJob('recheck-match'); const beforeStage = target.store.getStage('recheck-match', 'publish');
+    expect(target.ownership.apiWrite(recheckCommand('recheck-match', 'retain-blocker', retainedBlockerProof()))).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.store.getJob('recheck-match')).toMatchObject({ state: 'failed', publishState: 'blocked', publishBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER', artifactStagingPath: beforeJob.artifactStagingPath });
+    expect(target.ownership.apiWrite(recheckCommand('recheck-match', 'mark-published', destinationMatchesProof('recheck-match')))).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.store.getJob('recheck-match')).toMatchObject({ state: 'failed', publishState: 'published', terminalAt: beforeJob.terminalAt, terminalErrorCode: beforeJob.terminalErrorCode, artifactStagingPath: null, artifactFinalDirectory: `main/${SHA40}/rpi-5`, artifactFinalPath: `main/${SHA40}/rpi-5/image`, checksumPath: `main/${SHA40}/rpi-5/sha256sums`, manifestPath: `main/${SHA40}/rpi-5/build-manifest.json`, verificationPath: `main/${SHA40}/rpi-5/verification.json`, publishStartedAt: NOW, publishedAt: AFTER, publishBlockerCode: null, publishBlocker: null });
+    expect(target.store.getStage('recheck-match', 'publish')).toEqual(beforeStage);
+    const auditRows = target.db.prepare('SELECT attempt, resolution, event_seq, final_directory, final_path, published_at FROM publish_blocker_rechecks WHERE job_id=? ORDER BY attempt').all('recheck-match') as Array<Record<string, unknown>>;
+    expect(auditRows).toHaveLength(2); expect(auditRows[0]).toMatchObject({ attempt: 1, resolution: 'retained_blocker', final_directory: null, final_path: null, published_at: null }); expect(auditRows[1]).toMatchObject({ attempt: 2, resolution: 'marked_published', final_directory: `main/${SHA40}/rpi-5`, final_path: `main/${SHA40}/rpi-5/image`, published_at: AFTER });
+    expect(auditRows[1]!.event_seq).toBeGreaterThan(auditRows[0]!.event_seq as number);
+  });
+
+  it('rejects malformed, mismatched, future, fenced, and stale proofs before changing ownership', async () => {
+    const cases: Array<readonly [string, (proof: PublishBlockerRecheckProof) => PublishBlockerRecheckProof]> = [
+      ['wrong final path', (proof) => ({ ...proof, finalPath: 'release/other/image' })],
+      ['wrong artifact hash', (proof) => ({ ...destinationMatchesProof('recheck-mismatch'), artifact: { ...destinationMatchesProof('recheck-mismatch').artifact, sha256: SHA64_B } })],
+      ['wrong sidecar path', (proof) => ({ ...destinationMatchesProof('recheck-mismatch'), checksum: { ...destinationMatchesProof('recheck-mismatch').checksum, path: 'release/recheck-mismatch/wrong' } })],
+      ['future observation', (proof) => ({ ...proof, observedAt: AFTER, }),],
+    ];
+    for (const [name, mutate] of cases.slice(0, 3)) {
+      const target = await blockedPublishFixture(`recheck-${name.replaceAll(' ', '-')}`); const before = target.store.listEvents(`recheck-${name.replaceAll(' ', '-')}`).events.length;
+      const proof = name === 'wrong final path' ? destinationAbsentProof(`recheck-${name.replaceAll(' ', '-')}`) : destinationMatchesProof(`recheck-${name.replaceAll(' ', '-')}`);
+      const resolution = name === 'wrong final path' ? 'clear-absent' : 'mark-published';
+      if (name === 'wrong final path' || name === 'wrong sidecar path') expect(() => target.ownership.apiWrite(recheckCommand(`recheck-${name.replaceAll(' ', '-')}`, resolution, mutate(proof)))).toThrow(OwnershipValidationError);
+      else expect(target.ownership.apiWrite(recheckCommand(`recheck-${name.replaceAll(' ', '-')}`, resolution, mutate(proof)))).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+      expect(target.store.listEvents(`recheck-${name.replaceAll(' ', '-')}`).events).toHaveLength(before);
+    }
+    const future = await blockedPublishFixture('recheck-future');
+    expect(() => future.ownership.apiWrite(recheckCommand('recheck-future', 'retain-blocker', retainedBlockerProof('destination-mismatched', AFTER), RECOVERY))).toThrow(OwnershipValidationError);
+    expect(() => future.ownership.apiWrite(recheckCommand('recheck-future', 'retain-blocker', {
+      ...retainedBlockerProof(),
+      publisher: { destination: 'absent', staging: 'absent', mutationCount: 0 },
+    }, AFTER))).toThrow(OwnershipValidationError);
+    const admissionId = 'cln_0123456789abcdefghjkmnpqrs';
+    future.db.prepare(`INSERT INTO cleanup_leases (
+      admission_id, job_id, unit_name, owner, expires_at, status,
+      credential_relative_path, credential_sha256, fence_generation,
+      fence_token_hash, proof_json, admitted_at
+    ) VALUES (?, 'recheck-future', ?, 'cleanup-a', ?, 'admitted', ?, ?, 1, ?, '{}', ?)`).run(
+      admissionId,
+      `osi-image-builder-cleanup@${admissionId}.service`,
+      AFTER,
+      `recovery/cleanup-credentials/${admissionId}.token`,
+      SHA64,
+      SHA64_B,
+      RECOVERY,
+    );
+    future.db.prepare(`UPDATE jobs SET
+      cleanup_generation=1, cleanup_fence_generation=1,
+      cleanup_fence_token_hash=?, cleanup_admission_id=?
+      WHERE job_id='recheck-future'`).run(SHA64_B, admissionId);
+    expect(future.ownership.apiWrite(recheckCommand('recheck-future', 'retain-blocker', retainedBlockerProof(), AFTER))).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
+    expect(future.ownership.apiWrite(recheckCommand('recheck-future', 'retain-blocker', retainedBlockerProof(), AFTER))).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
+  });
+
+  it('enforces API ownership, chronology, and rollback, and rejects a second CAS after clearing', async () => {
+    const target = await blockedPublishFixture('recheck-cas');
+    expect(() => target.ownership.runnerWrite(recheckCommand('recheck-cas', 'retain-blocker', retainedBlockerProof()) as never)).toThrow(OwnershipViolationError);
+    expect(() => target.ownership.apiWrite(recheckCommand('recheck-cas', 'clear-absent', destinationAbsentProof('recheck-cas', BEFORE), AFTER))).toThrow(OwnershipValidationError);
+    expect(() => target.ownership.apiWrite(recheckCommand('recheck-cas', 'retain-blocker', retainedBlockerProof('destination-mismatched', BEFORE), AFTER))).toThrow(OwnershipValidationError);
+    const recoveryEventsBeforeRollback = target.store.listEvents('recheck-cas').events.filter(({ eventType }) => eventType === 'recovery').length;
+    const rollback = new OwnershipStore(target.db, { now: () => NOW, failBeforeCommit: () => { throw new Error('rollback'); } });
+    expect(() => rollback.apiWrite(recheckCommand('recheck-cas', 'retain-blocker', retainedBlockerProof()))).toThrow(OwnershipTransactionError);
+    expect(target.db.prepare("SELECT COUNT(*) AS count FROM publish_blocker_rechecks WHERE job_id='recheck-cas'").get()).toEqual({ count: 0 });
+    expect(target.store.listEvents('recheck-cas').events.filter(({ eventType }) => eventType === 'recovery')).toHaveLength(recoveryEventsBeforeRollback);
+    expect(target.ownership.apiWrite(recheckCommand('recheck-cas', 'clear-absent', destinationAbsentProof('recheck-cas')))).toMatchObject({ ok: true });
+    expect(target.ownership.apiWrite(recheckCommand('recheck-cas', 'clear-absent', destinationAbsentProof('recheck-cas')))).toMatchObject({ ok: false, conflict: { kind: 'stale-predecessor' } });
   });
 });

@@ -685,6 +685,7 @@ async function pruneTerminalRows(options: RetentionOptionsWithRoots, now: string
         options.db.prepare('DELETE FROM cleanup_credential_reservations WHERE job_id=?').run(jobId);
         options.db.prepare('DELETE FROM cleanup_leases WHERE job_id=?').run(jobId);
         options.db.prepare('DELETE FROM legacy_blocked_publish_evidence WHERE job_id=?').run(jobId);
+        options.db.prepare('DELETE FROM publish_blocker_rechecks WHERE job_id=?').run(jobId);
         options.db.prepare('DELETE FROM job_events WHERE job_id=?').run(jobId);
         options.db.prepare('DELETE FROM job_log_generations WHERE job_id=?').run(jobId);
         options.db.prepare('DELETE FROM job_stages WHERE job_id=?').run(jobId);
