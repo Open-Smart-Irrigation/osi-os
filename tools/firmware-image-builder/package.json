@@ -13,7 +13,12 @@
     "typecheck:ui": "node scripts/require-node22.mjs && tsc --noEmit -p ui/tsconfig.json",
     "test:unit": "node scripts/require-node22.mjs && vitest run test/unit ui/src/__tests__",
     "test:integration": "node scripts/require-node22.mjs && vitest run --config vitest.config.ts test/integration",
-    "test:browser": "node scripts/require-node22.mjs && playwright test --config playwright.config.ts"
+    "test:browser": "node scripts/require-node22.mjs && playwright test --config playwright.config.ts",
+    "check:manifest": "node scripts/require-node22.mjs && vitest run test/unit/manifest.test.ts",
+    "check:migrations": "node scripts/require-node22.mjs && vitest run test/unit/migrations.test.ts",
+    "check:policy": "node scripts/require-node22.mjs && node scripts/check-plan-policy.mjs",
+    "check:publisher": "make -C publisher test && make -C publisher clean",
+    "check": "node scripts/require-node22.mjs && npm run typecheck && npm run check:manifest && npm run check:migrations && npm run check:policy && npm run check:publisher && npm run test:unit && npm run test:integration && npm run build && npm run test:browser"
   },
   "dependencies": {
     "jsonc-parser": "3.3.1",

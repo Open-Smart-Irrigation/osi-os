@@ -26,8 +26,8 @@ function rawInspection(): Record<string, unknown> {
     Name: '/osi-image-builder-integration-job-attempt-1',
     Image: IMAGE_ID,
     Config: { Image: `registry.example/builder@sha256:${DIGEST}`, User: '1000:1000', WorkingDir: '/workdir', Env: ['HOME=/workdir/.builder-home', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'CARGO_BUILD_JOBS=2', 'TZ=UTC', 'SOURCE_DATE_EPOCH=1784887200'], Labels: { 'org.osi.image-builder.job-id': 'integration-job', 'org.osi.image-builder.manifest-sha': MANIFEST } },
-    HostConfig: { NetworkMode: 'bridge', CapDrop: ['ALL'], CapAdd: null, Privileged: false, Devices: null, SecurityOpt: ['no-new-privileges:true'], ReadonlyRootfs: false, PidsLimit: 4096, Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 4096 }] },
-    Mounts: [{ Type: 'bind', Source: '/tmp/worktree', Destination: '/workdir', RW: true }],
+    HostConfig: { NetworkMode: 'none', CapDrop: ['ALL'], CapAdd: null, Privileged: false, Devices: null, SecurityOpt: ['no-new-privileges:true'], ReadonlyRootfs: true, PidsLimit: 4096, Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 4096 }] },
+    Mounts: [{ Type: 'bind', Source: '/tmp/worktree', Destination: '/workdir', RW: false }],
     Created: '2026-07-24T10:00:03.000000000Z',
     State: { Status: 'exited', Running: false, StartedAt: '2026-07-24T10:00:03.000000000Z', FinishedAt: '2026-07-24T10:00:04.000000000Z', ExitCode: 0 },
   };
@@ -58,12 +58,63 @@ function fakeDocker(): DockerCommandExecutor & { readonly calls: readonly (reado
   return { calls, run: vi.fn(async (argv: readonly string[], _options: CommandRunOptions) => { calls.push([...argv]); const response = responses[index++]; if (!response) throw new Error(`missing fake response for ${argv.join(' ')}`); return { argv: [...argv], exitCode: response.exitCode ?? 0, signal: response.signal ?? null, stdout: response.stdout ?? '', stderr: response.stderr ?? '', timedOut: response.timedOut ?? false, startedAt: response.startedAt ?? NOW, finishedAt: response.finishedAt ?? NOW }; }) };
 }
 
+function sourcePreparation() {
+  return {
+    schemaVersion: 1,
+    sourceSha: SHA40,
+    gitmodulesBlobSha: 'd'.repeat(40),
+    preparedAt: NOW,
+    components: [
+      { path: 'feeds/chirpstack-openwrt-feed', mode: '040000', type: 'tree', objectId: 'e'.repeat(40), provenanceUrl: 'https://github.com/chirpstack/chirpstack-openwrt-feed.git' },
+      { path: 'openwrt', mode: '040000', type: 'tree', objectId: 'f'.repeat(40), provenanceUrl: 'https://github.com/openwrt/openwrt.git' },
+    ],
+  };
+}
+
+function offlineFeedPreparation() {
+  const recursiveSubmoduleStatusSha256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+  return {
+    schemaVersion: 1,
+    boundary: 'api-prepared-pinned-feeds-v1',
+    networkPolicy: 'runner-offline',
+    jobId: 'integration-job',
+    sourceSha: SHA40,
+    preparedAt: NOW,
+    feeds: [
+      { name: 'packages', location: 'https://git.openwrt.org/feed/packages.git', commit: 'd8cd30f4e281d6853b3de134c4f147a807583e43', detached: true, clean: true, recursiveSubmodulesPrepared: true, recursiveSubmodules: [], recursiveSubmoduleStatusSha256, treeSha256: '1'.repeat(64) },
+      { name: 'luci', location: 'https://git.openwrt.org/project/luci.git', commit: '2ac26e56cc55102cb10e7b0867c2b78e0f6d5fd8', detached: true, clean: true, recursiveSubmodulesPrepared: true, recursiveSubmodules: [], recursiveSubmoduleStatusSha256, treeSha256: '2'.repeat(64) },
+      { name: 'routing', location: 'https://git.openwrt.org/feed/routing.git', commit: '3'.repeat(40), detached: true, clean: true, recursiveSubmodulesPrepared: true, recursiveSubmodules: [], recursiveSubmoduleStatusSha256, treeSha256: '3'.repeat(64) },
+    ],
+  };
+}
+
 async function openRealStores(): Promise<{ readonly store: BuilderStore; readonly ownership: OwnershipStore; readonly db: ReturnType<typeof openBuilderDatabase>; readonly path: string }> {
   const directory = await mkdtemp(join(tmpdir(), 'osi-image-builder-docker-real-store-'));
   tempPaths.push(directory);
   const path = join(directory, 'builder.sqlite');
   const db = openBuilderDatabase(path);
-  db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, queue_position, created_at, updated_at) VALUES ('integration-job', 'integration-request', ?, 'git@example.com:osi-os.git', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'release', ?, ?, 'Phil', 'integration', ?, 'queued', 'queued', 0, ?, ?)`).run(JSON.stringify({ branch: 'main' }), SHA40, SHA40, MANIFEST, NOW, NOW, NOW, NOW);
+  db.prepare(`INSERT INTO jobs (
+    job_id, request_id, request_json, source_remote, source_ref, source_branch, branch,
+    expected_sha, pinned_sha, source_preparation_json, offline_feed_preparation_json,
+    target_id, root_id, target_manifest_sha256, source_commit_time, source_author,
+    source_subject, accepted_at, state, queue_state, queue_position, created_at, updated_at
+  ) VALUES (
+    'integration-job', 'integration-request', ?, 'git@example.com:osi-os.git',
+    'refs/remotes/origin/main', 'main', 'main', ?, ?, ?, ?,
+    'rpi-5', 'release', ?, ?, 'Phil', 'integration', ?,
+    'queued', 'queued', 0, ?, ?
+  )`).run(
+    JSON.stringify({ branch: 'main' }),
+    SHA40,
+    SHA40,
+    JSON.stringify(sourcePreparation()),
+    JSON.stringify(offlineFeedPreparation()),
+    MANIFEST,
+    NOW,
+    NOW,
+    NOW,
+    NOW,
+  );
   db.prepare("INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES ('integration-job', 0, ?)").run(NOW);
   db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at) VALUES ('integration-job', 0, 'enqueue', 'queued', NULL, ?, ?)").run(JSON.stringify({ requestId: 'integration-request' }), NOW);
   const store = new BuilderStore(db);
