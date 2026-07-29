@@ -790,7 +790,54 @@ describe('read-only builder API routes', () => {
     ['unknown kind', { kind: 'unknown', jobId: 'job-1' }],
     ['wrong job', { kind: 'queued-cancelled', jobId: 'job-other', state: 'cancelled', requestPersisted: true }],
     ['uncommitted success', { kind: 'queued-cancelled', jobId: 'job-1', state: 'cancelled', requestPersisted: true }],
+    ['missing terminal state', { kind: 'already-terminal', jobId: 'job-1', requestPersisted: false }],
+    ['wrong terminal persistence', { kind: 'already-terminal', jobId: 'job-1', state: 'succeeded', requestPersisted: true }],
+    ['missing late marker', { kind: 'late-publishing', jobId: 'job-1', state: 'publishing', requestPersisted: true }],
+    ['wrong runner ownership', { kind: 'runner-terminal', jobId: 'job-1', state: 'succeeded', runnerOwned: false }],
+    ['missing recovery evidence', { kind: 'recovery-blocked', jobId: 'job-1', state: 'building', blockerCode: 'RUNNER_DISAPPEARED', requestPersisted: true }],
+    ['wrong recovery blocker', { kind: 'recovery-blocked', jobId: 'job-1', state: 'building', blockerCode: 'OTHER', requestPersisted: true, evidence: {} }],
+    ['missing coordination deadline', { kind: 'coordination-pending', jobId: 'job-1', state: 'building', requestPersisted: true, cancellationClockHighWaterAt: now }],
+    ['missing rejection evidence', { kind: 'request-not-accepted', jobId: 'job-1', state: 'succeeded' }],
   ])('fails closed on cancellation result with %s', async (_description, result) => {
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        cancellation: { requestCancellation: async () => result },
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/cancel', '{}');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+  });
+
+  it('rejects accessor-backed cancellation result fields', async () => {
+    const result = {
+      kind: 'already-terminal',
+      jobId: 'job-1',
+      requestPersisted: false,
+      get state() { return 'succeeded'; },
+    };
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        cancellation: { requestCancellation: async () => result },
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/cancel', '{}');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+  });
+
+  it.each([
+    ['runner terminal without a persisted request', { kind: 'runner-terminal', jobId: 'job-1', state: 'succeeded', runnerOwned: true }],
+    ['terminal state mismatch', { kind: 'already-terminal', jobId: 'job-1', state: 'failed', requestPersisted: false }],
+    ['rejection state mismatch', { kind: 'request-not-accepted', jobId: 'job-1', state: 'building', evidence: {} }],
+    ['recovery without a durable blocker', { kind: 'recovery-blocked', jobId: 'job-1', state: 'building', blockerCode: 'RUNNER_DISAPPEARED', requestPersisted: true, evidence: {} }],
+  ])('fails closed on cancellation result/store mismatch: %s', async (_description, result) => {
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
         cancellation: { requestCancellation: async () => result },

@@ -135,6 +135,15 @@ const CANCELLATION_ACTIVE_STATES = new Set([
 const CANCELLATION_TERMINAL_STATES = new Set(['succeeded', 'failed', 'cancelled', 'interrupted']);
 
 type JsonRecord = Record<string, unknown>;
+type DecodedCancellationResult = Readonly<{
+  kind: 'already-terminal' | 'coordination-pending' | 'late-publishing' | 'queued-cancelled'
+    | 'recovery-blocked' | 'request-not-accepted' | 'runner-terminal';
+  state: string;
+  requestPersisted: boolean | null;
+  evidenceJson?: string;
+  cancellationClockHighWaterAt?: string;
+  cooperativeDeadlineAt?: string;
+}>;
 type ConfigSymbol =
   | Readonly<{ readonly name: string; readonly type: 'bool'; readonly value: boolean }>
   | Readonly<{ readonly name: string; readonly type: 'string'; readonly value: string }>
@@ -1139,28 +1148,142 @@ function getJob(store: ApiJobStore, id: string): JobRecord {
   }
 }
 
-function cancellationResultKind(value: unknown, expectedJobId: string): string {
+function cancellationResultState(
+  input: Record<string, unknown>,
+  allowedStates: ReadonlySet<string>,
+): string {
+  const state = ownDataProperty(input, 'state', 'cancellation result state');
+  if (typeof state !== 'string' || !allowedStates.has(state)) {
+    throw new Error('cancellation result state is invalid');
+  }
+  return state;
+}
+
+function cancellationResultLiteral(
+  input: Record<string, unknown>,
+  key: string,
+  expected: unknown,
+): void {
+  if (ownDataProperty(input, key, `cancellation result ${key}`) !== expected) {
+    throw new Error(`cancellation result ${key} is invalid`);
+  }
+}
+
+function decodeCancellationResult(value: unknown, expectedJobId: string): DecodedCancellationResult {
   const input = record(value, 'cancellation result');
+  const prototype = Object.getPrototypeOf(input);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error('cancellation result is not a plain object');
+  }
   const kind = ownDataProperty(input, 'kind', 'cancellation result kind');
   const jobId = ownDataProperty(input, 'jobId', 'cancellation result job ID');
   if (typeof kind !== 'string' || !CANCELLATION_RESULT_KINDS.has(kind) || jobId !== expectedJobId) {
     throw new Error('cancellation result is invalid');
   }
-  return kind;
+  if (kind === 'queued-cancelled') {
+    exactOwnStringKeys(input, ['kind', 'jobId', 'state', 'requestPersisted'], 'cancellation result');
+    const state = cancellationResultState(input, new Set(['cancelled']));
+    cancellationResultLiteral(input, 'requestPersisted', true);
+    return { kind, state, requestPersisted: true };
+  }
+  if (kind === 'late-publishing') {
+    exactOwnStringKeys(input, ['kind', 'jobId', 'state', 'late', 'requestPersisted'], 'cancellation result');
+    const state = cancellationResultState(input, new Set(['publishing']));
+    cancellationResultLiteral(input, 'late', true);
+    cancellationResultLiteral(input, 'requestPersisted', true);
+    return { kind, state, requestPersisted: true };
+  }
+  if (kind === 'runner-terminal') {
+    exactOwnStringKeys(input, ['kind', 'jobId', 'state', 'runnerOwned'], 'cancellation result');
+    const state = cancellationResultState(input, CANCELLATION_TERMINAL_STATES);
+    cancellationResultLiteral(input, 'runnerOwned', true);
+    return { kind, state, requestPersisted: true };
+  }
+  if (kind === 'already-terminal') {
+    exactOwnStringKeys(input, ['kind', 'jobId', 'state', 'requestPersisted'], 'cancellation result');
+    const state = cancellationResultState(input, CANCELLATION_TERMINAL_STATES);
+    cancellationResultLiteral(input, 'requestPersisted', false);
+    return { kind, state, requestPersisted: false };
+  }
+  if (kind === 'recovery-blocked') {
+    exactOwnStringKeys(
+      input,
+      ['kind', 'jobId', 'state', 'blockerCode', 'evidence', 'requestPersisted'],
+      'cancellation result',
+    );
+    const state = cancellationResultState(input, CANCELLATION_ACTIVE_STATES);
+    cancellationResultLiteral(input, 'blockerCode', 'RUNNER_DISAPPEARED');
+    const requestPersisted = ownDataProperty(
+      input,
+      'requestPersisted',
+      'cancellation result requestPersisted',
+    );
+    if (typeof requestPersisted !== 'boolean') {
+      throw new Error('cancellation result requestPersisted is invalid');
+    }
+    const evidenceJson = encodeJson(
+      ownDataProperty(input, 'evidence', 'cancellation result evidence'),
+      'cancellation result evidence',
+      true,
+    );
+    return { kind, state, requestPersisted, evidenceJson };
+  }
+  if (kind === 'coordination-pending') {
+    exactOwnStringKeys(
+      input,
+      ['kind', 'jobId', 'state', 'requestPersisted', 'cancellationClockHighWaterAt', 'cooperativeDeadlineAt'],
+      'cancellation result',
+    );
+    const state = cancellationResultState(input, CANCELLATION_ACTIVE_STATES);
+    cancellationResultLiteral(input, 'requestPersisted', true);
+    return {
+      kind,
+      state,
+      requestPersisted: true,
+      cancellationClockHighWaterAt: canonicalInstant(
+        ownDataProperty(input, 'cancellationClockHighWaterAt', 'cancellation result clock high-water time'),
+        'cancellation result clock high-water time',
+      ),
+      cooperativeDeadlineAt: canonicalInstant(
+        ownDataProperty(input, 'cooperativeDeadlineAt', 'cancellation result cooperative deadline'),
+        'cancellation result cooperative deadline',
+      ),
+    };
+  }
+  exactOwnStringKeys(input, ['kind', 'jobId', 'state', 'evidence'], 'cancellation result');
+  const state = cancellationResultState(input, JOB_STATE_SET);
+  const evidenceJson = encodeJson(
+    ownDataProperty(input, 'evidence', 'cancellation result evidence'),
+    'cancellation result evidence',
+    true,
+  );
+  return { kind: 'request-not-accepted', state, requestPersisted: null, evidenceJson };
 }
 
-function cancellationJobMatchesResult(job: JobRecord, kind: string): void {
+function cancellationJobMatchesResult(job: JobRecord, result: DecodedCancellationResult): void {
   const state = identifier(job.state, 'post-cancellation job state');
   const cancelRequestedAt = nullableInstant(job.cancelRequestedAt, 'post-cancellation request time');
-  const matches = kind === 'queued-cancelled'
-    ? state === 'cancelled' && cancelRequestedAt !== null
-    : kind === 'late-publishing'
-      ? state === 'publishing' && cancelRequestedAt !== null
-      : kind === 'coordination-pending'
-        ? CANCELLATION_ACTIVE_STATES.has(state) && cancelRequestedAt !== null
-        : kind === 'runner-terminal'
-          ? CANCELLATION_TERMINAL_STATES.has(state)
-          : false;
+  const matchingState = state === result.state;
+  const matches = result.kind === 'queued-cancelled'
+    ? matchingState && cancelRequestedAt !== null
+    : result.kind === 'late-publishing'
+      ? matchingState && cancelRequestedAt !== null
+      : result.kind === 'coordination-pending'
+        ? matchingState
+          && cancelRequestedAt !== null
+          && nullableInstant(job.cancellationClockHighWaterAt, 'post-cancellation clock high-water time') === result.cancellationClockHighWaterAt
+          && nullableInstant(job.cancellationCooperativeDeadlineAt, 'post-cancellation cooperative deadline') === result.cooperativeDeadlineAt
+        : result.kind === 'runner-terminal'
+          ? matchingState && cancelRequestedAt !== null
+          : result.kind === 'recovery-blocked'
+            ? matchingState
+              && (result.requestPersisted !== true || cancelRequestedAt !== null)
+              && job.cleanupBlockerCode === 'RUNNER_DISAPPEARED'
+              && job.cleanupBlocker !== null
+              && encodeJson(job.cleanupBlocker, 'post-cancellation recovery blocker', true) === result.evidenceJson
+            : result.kind === 'already-terminal' || result.kind === 'request-not-accepted'
+              ? matchingState
+              : false;
   if (!matches) throw new Error('post-cancellation job does not match the cancellation result');
 }
 
@@ -1174,21 +1297,21 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
       const jobId = validateJobId(cancellationMatch[1]!);
       getJob(dependencies.store, jobId);
       const at = canonicalInstant(dependencies.now(), 'cancellation request time');
-      const kind = cancellationResultKind(
+      const result = decodeCancellationResult(
         await dependencies.cancellation.requestCancellation({ jobId, reason: 'operator', at }),
         jobId,
       );
-      if (kind === 'already-terminal') {
+      const updatedJob = getJob(dependencies.store, jobId);
+      cancellationJobMatchesResult(updatedJob, result);
+      if (result.kind === 'already-terminal') {
         throw new HttpTransportError({ code: 'CANCELLATION_TERMINAL', status: 409 });
       }
-      if (kind === 'request-not-accepted') {
+      if (result.kind === 'request-not-accepted') {
         throw new HttpTransportError({ code: 'CANCELLATION_NOT_ACCEPTED', status: 409, retryable: true });
       }
-      if (kind === 'recovery-blocked') {
+      if (result.kind === 'recovery-blocked') {
         throw new HttpTransportError({ code: 'RUNNER_DISAPPEARED', status: 409, retryable: true });
       }
-      const updatedJob = getJob(dependencies.store, jobId);
-      cancellationJobMatchesResult(updatedJob, kind);
       return jsonResponse(200, await detail(updatedJob, dependencies.store));
     }
     if (context.method === 'POST' && context.path === '/api/jobs') {
