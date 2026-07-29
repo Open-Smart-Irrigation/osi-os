@@ -1,4 +1,5 @@
 import {
+  ADMISSION_ID_PATTERN,
   BUILDER_ERROR_CODES,
   JOB_STATES,
   PIPELINE_STAGE_NAMES,
@@ -14,6 +15,7 @@ import {
   type EventPage,
   type EventRecord,
   type JobRecord,
+  type RecoveryJobRecord,
   type StoredStage,
 } from './store.js';
 import {
@@ -155,7 +157,7 @@ export interface JobPage {
   readonly nextCursor: string | null;
 }
 
-export interface ApiJobStore extends Pick<BuilderStore, 'getJob' | 'getStage' | 'listEvents' | 'getTerminalEvent'> {
+export interface ApiJobStore extends Pick<BuilderStore, 'getJob' | 'getRecoveryJob' | 'getStage' | 'listEvents' | 'getTerminalEvent'> {
   readonly listJobs: (options: { readonly cursor: string | null; readonly limit: number }) => JobPage | Promise<JobPage>;
 }
 
@@ -208,6 +210,23 @@ export interface ApiEventStreamService {
   readonly open: (jobId: string, afterSeq: number, signal: AbortSignal) => AsyncIterable<string>;
 }
 
+export interface ApiRecoveryRequest {
+  readonly jobId: string;
+  readonly retry: boolean;
+  readonly at: string;
+}
+
+export type ApiRecoveryResult =
+  | Readonly<{ readonly kind: 'recovered'; readonly jobId: string; readonly terminalAt: string }>
+  | Readonly<{ readonly kind: 'cleanup-pending'; readonly jobId: string; readonly admissionId: string; readonly generation: number }>
+  | Readonly<{ readonly kind: 'cleanup-in-progress'; readonly jobId: string; readonly admissionId: string; readonly generation: number }>
+  | Readonly<{ readonly kind: 'retry-blocked'; readonly jobId: string; readonly admissionId: string; readonly generation: number; readonly blockerCode: string }>
+  | Readonly<{ readonly kind: 'not-eligible'; readonly jobId: string }>;
+
+export interface ApiRecoveryService {
+  readonly recover: (request: ApiRecoveryRequest) => ApiRecoveryResult | Promise<ApiRecoveryResult>;
+}
+
 export interface ApiRouteDependencies {
   readonly version: string;
   readonly config: BuilderConfig;
@@ -218,6 +237,7 @@ export interface ApiRouteDependencies {
   readonly enqueue: ApiEnqueueService;
   readonly now: () => string;
   readonly cancellation: ApiCancellationService;
+  readonly recovery: ApiRecoveryService;
   readonly eventStream: ApiEventStreamService;
   readonly store: ApiJobStore;
   readonly evidenceReader: IndexedEvidenceReader;
@@ -1365,8 +1385,177 @@ function cancellationJobMatchesResult(
   if (!matches) throw new Error('post-cancellation job does not match the cancellation result');
 }
 
+function recoveryRetry(value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) badRequest('request body');
+  const input = value as Record<string, unknown>;
+  const keys = Reflect.ownKeys(input);
+  if (keys.length === 0) return false;
+  const descriptor = Object.getOwnPropertyDescriptor(input, 'retry');
+  if (keys.length !== 1 || keys[0] !== 'retry' || descriptor === undefined || !('value' in descriptor) || descriptor.value !== true) {
+    badRequest('retry');
+  }
+  return true;
+}
+
+function recoveryAdmission(value: unknown, field: string): string {
+  const admissionId = text(value, field, 128);
+  if (!ADMISSION_ID_PATTERN.test(admissionId)) throw new Error(`${field} is invalid`);
+  return admissionId;
+}
+
+function decodeRecoveryResult(value: unknown, expectedJobId: string): ApiRecoveryResult {
+  const input = record(value, 'recovery result');
+  const kind = ownDataProperty(input, 'kind', 'recovery result kind');
+  const jobId = validateJobId(text(
+    ownDataProperty(input, 'jobId', 'recovery result job ID'),
+    'recovery result job ID',
+    MAX_JOB_ID_BYTES,
+  ));
+  if (jobId !== expectedJobId) throw new Error('recovery result job does not match the request');
+  if (kind === 'not-eligible') {
+    exactOwnStringKeys(input, ['kind', 'jobId'], 'recovery result');
+    return { kind, jobId };
+  }
+  if (kind === 'recovered') {
+    exactOwnStringKeys(input, ['kind', 'jobId', 'terminalAt'], 'recovery result');
+    return {
+      kind,
+      jobId,
+      terminalAt: canonicalInstant(
+        ownDataProperty(input, 'terminalAt', 'recovery terminal time'),
+        'recovery terminal time',
+      ),
+    };
+  }
+  if (kind === 'cleanup-pending' || kind === 'cleanup-in-progress') {
+    exactOwnStringKeys(input, ['kind', 'jobId', 'admissionId', 'generation'], 'recovery result');
+    return {
+      kind,
+      jobId,
+      admissionId: recoveryAdmission(
+        ownDataProperty(input, 'admissionId', 'recovery admission ID'),
+        'recovery admission ID',
+      ),
+      generation: safeInteger(
+        ownDataProperty(input, 'generation', 'recovery fence generation'),
+        'recovery fence generation',
+        1,
+      ),
+    };
+  }
+  if (kind === 'retry-blocked') {
+    exactOwnStringKeys(input, ['kind', 'jobId', 'admissionId', 'generation', 'blockerCode'], 'recovery result');
+    const blockerCode = identifier(
+      ownDataProperty(input, 'blockerCode', 'recovery blocker code'),
+      'recovery blocker code',
+    );
+    if (!ERROR_CODE_SET.has(blockerCode)) throw new Error('recovery blocker code is invalid');
+    return {
+      kind,
+      jobId,
+      admissionId: recoveryAdmission(
+        ownDataProperty(input, 'admissionId', 'recovery admission ID'),
+        'recovery admission ID',
+      ),
+      generation: safeInteger(
+        ownDataProperty(input, 'generation', 'recovery fence generation'),
+        'recovery fence generation',
+        1,
+      ),
+      blockerCode,
+    };
+  }
+  throw new Error('recovery result kind is invalid');
+}
+
+function recoveryFenceMatches(
+  job: RecoveryJobRecord,
+  result: Extract<ApiRecoveryResult, { readonly admissionId: string }>,
+): boolean {
+  return job.jobId === result.jobId
+    && job.cleanupAdmissionId === result.admissionId
+    && job.cleanupFenceGeneration === result.generation;
+}
+
+function recoveredJobMatches(
+  job: RecoveryJobRecord,
+  result: Extract<ApiRecoveryResult, { readonly kind: 'recovered' }>,
+  store: ApiJobStore,
+): boolean {
+  if (
+    job.jobId !== result.jobId
+    || job.state !== 'interrupted'
+    || job.queueState !== 'complete'
+    || job.queuePosition !== null
+    || job.terminalAt !== result.terminalAt
+    || (job.terminalErrorCode !== 'RUNNER_DISAPPEARED' && job.terminalErrorCode !== 'SERVICE_START_FAILED')
+    || job.terminalError === null
+    || job.cleanupFenceGeneration !== null
+    || job.cleanupAdmissionId !== null
+    || job.cleanupBlockerCode !== null
+    || job.cleanupBlocker !== null
+  ) return false;
+  const terminal = store.getTerminalEvent(job.jobId);
+  if (
+    terminal === null
+    || terminal.jobId !== job.jobId
+    || terminal.eventType !== 'terminal'
+    || terminal.state !== 'interrupted'
+    || terminal.at !== result.terminalAt
+  ) return false;
+  const payload = record(terminal.payload, 'recovery terminal event');
+  exactOwnStringKeys(payload, ['state', 'errorCode', 'error'], 'recovery terminal event');
+  return ownDataProperty(payload, 'state', 'recovery terminal state') === 'interrupted'
+    && ownDataProperty(payload, 'errorCode', 'recovery terminal error code') === job.terminalErrorCode
+    && encodeJson(
+      ownDataProperty(payload, 'error', 'recovery terminal error'),
+      'recovery terminal error',
+      true,
+    ) === encodeJson(job.terminalError, 'durable recovery terminal error', true);
+}
+
 export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRouteHandler {
   return async (context: ApiRouteContext): Promise<HttpResponse | null> => {
+    const recoveryMatch = context.method === 'POST'
+      ? context.path.match(/^\/api\/jobs\/([^/]+)\/recover$/u)
+      : null;
+    if (recoveryMatch) {
+      const retry = recoveryRetry(context.body);
+      const jobId = validateJobId(recoveryMatch[1]!);
+      getJob(dependencies.store, jobId);
+      const at = canonicalInstant(dependencies.now(), 'recovery request time');
+      const result = decodeRecoveryResult(
+        await dependencies.recovery.recover({ jobId, retry, at }),
+        jobId,
+      );
+      if (result.kind === 'not-eligible') {
+        throw new HttpTransportError({ code: 'RECOVERY_NOT_ELIGIBLE', status: 409 });
+      }
+      const status = dependencies.store.getRecoveryJob(jobId);
+      if (result.kind === 'recovered') {
+        if (!recoveredJobMatches(status, result, dependencies.store)) {
+          throw new Error('post-recovery job does not match direct recovery result');
+        }
+        return jsonResponse(200, await detail(getJob(dependencies.store, jobId), dependencies.store));
+      }
+      if (!recoveryFenceMatches(status, result)) {
+        throw new Error('post-recovery fence does not match recovery result');
+      }
+      if (result.kind === 'cleanup-in-progress') {
+        throw new HttpTransportError({ code: 'CLEANUP_IN_PROGRESS', status: 409, retryable: true });
+      }
+      if (result.kind === 'retry-blocked') {
+        if (status.cleanupBlockerCode !== result.blockerCode || status.cleanupBlocker === null) {
+          throw new Error('post-recovery blocker does not match recovery result');
+        }
+        throw new HttpTransportError({ code: 'CLEANUP_RETRY_BLOCKED', status: 409, retryable: true });
+      }
+      return jsonResponse(202, {
+        job: await detail(getJob(dependencies.store, jobId), dependencies.store),
+        recovery: 'cleanup_pending',
+        cleanupLeaseId: result.admissionId,
+      });
+    }
     const cancellationMatch = context.method === 'POST'
       ? context.path.match(/^\/api\/jobs\/([^/]+)\/cancel$/u)
       : null;

@@ -156,6 +156,36 @@ describe('OwnershipStore persistence coverage', () => {
     expect(store.getSourceIdentity('job-1')).toMatchObject({ sourceRemote: 'git@example.com:osi-os.git', sourceBranch: 'main', expectedSha: SHA40, pinnedSha: SHA40 });
   });
 
+  it('reads the bounded recovery status independently from the public job record', async () => {
+    const { store } = await openFixture();
+    expect(store.getRecoveryJob('job-1')).toEqual({
+      jobId: 'job-1',
+      state: 'queued',
+      queueState: 'queued',
+      queuePosition: 0,
+      terminalAt: null,
+      terminalErrorCode: null,
+      terminalError: null,
+      cleanupFenceGeneration: null,
+      cleanupAdmissionId: null,
+      cleanupBlockerCode: null,
+      cleanupBlocker: null,
+    });
+  });
+
+  it.each([
+    ['incomplete cleanup fence', "UPDATE jobs SET cleanup_fence_generation=1, cleanup_admission_id=NULL WHERE job_id='job-1'", 'cleanup recovery fence is incomplete'],
+    ['invalid cleanup fence generation', "UPDATE jobs SET cleanup_fence_generation=0, cleanup_admission_id='cln_0123456789abcdefghjkmnpqrs' WHERE job_id='job-1'", 'cleanup recovery fence generation is invalid'],
+    ['incomplete cleanup blocker', "UPDATE jobs SET cleanup_blocker_code='RUNNER_DISAPPEARED', cleanup_blocker_json=NULL WHERE job_id='job-1'", 'cleanup blocker evidence is incomplete'],
+  ])('fails closed on %s in the recovery status read model', async (_description, sql, message) => {
+    const { store, db } = await openFixture();
+    db.exec('PRAGMA ignore_check_constraints=ON');
+    db.exec('DROP TRIGGER jobs_fence_guard_update');
+    db.exec('DROP TRIGGER jobs_cleanup_blocker_guard_update');
+    db.prepare(sql).run();
+    expect(() => store.getRecoveryJob('job-1')).toThrow(message);
+  });
+
   it('acquires and renews the exact runner lease', async () => {
     const { ownership, store } = await openFixture(); ownership.apiWrite(dispatchCommand()); ownership.apiWrite(dispatchStartCommand());
     expect(ownership.runnerWrite({ kind: 'acquire-lease', jobId: 'job-1', runnerUnit: runnerBase().runnerUnit, owner: 'runner-a', expiresAt: '2026-07-23T10:02:00.000Z', at: NOW }).ok).toBe(true);

@@ -162,6 +162,12 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
         requestPersisted: false,
       }),
     },
+    recovery: {
+      recover: async (requestValue: { jobId: string }) => ({
+        kind: 'not-eligible',
+        jobId: requestValue.jobId,
+      }),
+    },
     eventStream: {
       open: async function* (jobId: string, afterSeq: number) {
         yield `id: ${afterSeq + 1}\nevent: terminal\ndata: ${JSON.stringify({ jobId, state: 'succeeded' })}\n\n`;
@@ -170,6 +176,11 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
     store: {
       listJobs: async ({ cursor, limit }: { cursor: string | null; limit: number }) => ({ jobs: [record], nextCursor: cursor === null && limit === 1 ? 'next-page' : null }),
       getJob: (id: string) => id === 'job-1' ? record : (() => { throw new StoreNotFoundError('not found'); })(),
+      getRecoveryJob: (id: string) => id === 'job-1' ? {
+        ...record,
+        cleanupFenceGeneration: null,
+        cleanupAdmissionId: null,
+      } : (() => { throw new StoreNotFoundError('not found'); })(),
       getStage: (id: string, requestedStage: typeof stage.stage) => id === 'job-1' && requestedStage === 'publish' ? stage : null,
       getTerminalEvent: (id: string) => id === 'job-1' ? {
         jobId: id,
@@ -1058,6 +1069,152 @@ describe('read-only builder API routes', () => {
     server = started.server;
 
     expect((await post(started.port, '/api/jobs/job-1/cancel', '{}')).status).toBe(500);
+  });
+
+  it('returns the durably re-read interrupted job after direct recovery', async () => {
+    const recovered = {
+      ...job('job-1'),
+      state: 'interrupted' as const,
+      queueState: 'complete',
+      queuePosition: null,
+      terminalErrorCode: 'RUNNER_DISAPPEARED' as const,
+      terminalError: { reason: 'direct recovery completed' },
+      terminalAt: later,
+      cleanupFenceGeneration: null,
+      cleanupAdmissionId: null,
+      cleanupBlockerCode: null,
+      cleanupBlocker: null,
+    };
+    const recover = vi.fn(async () => ({
+      kind: 'recovered' as const,
+      jobId: 'job-1',
+      terminalAt: later,
+    }));
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { recovery: { recover } });
+      Object.assign(value.store as object, {
+        getJob: () => recovered,
+        getRecoveryJob: () => recovered,
+        getTerminalEvent: () => ({
+          jobId: 'job-1',
+          seq: 4,
+          eventType: 'terminal',
+          state: 'interrupted',
+          stage: 'publish',
+          payload: { state: 'interrupted', errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'direct recovery completed' } },
+          at: later,
+        }),
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/recover', '{}');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ id: 'job-1', state: 'interrupted' });
+    expect(recover).toHaveBeenCalledWith({ jobId: 'job-1', retry: false, at: now });
+  });
+
+  it('returns cleanup admission evidence only after the durable fence matches', async () => {
+    const admissionId = 'cln_0123456789abcdefghjkmnpqrs';
+    const pending = {
+      ...job('job-1'),
+      state: 'building' as const,
+      queueState: 'dispatched',
+      currentStage: 'build' as const,
+      terminalErrorCode: null,
+      terminalError: null,
+      terminalAt: null,
+      cleanupFenceGeneration: 3,
+      cleanupAdmissionId: admissionId,
+      cleanupBlockerCode: null,
+      cleanupBlocker: null,
+    };
+    const recover = vi.fn(async () => ({
+      kind: 'cleanup-pending' as const,
+      jobId: 'job-1',
+      admissionId,
+      generation: 3,
+    }));
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { recovery: { recover } });
+      Object.assign(value.store as object, {
+        getJob: () => pending,
+        getRecoveryJob: () => pending,
+      });
+    }));
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/recover', '{"retry":true}');
+    expect(response.status).toBe(202);
+    expect(response.body).toMatchObject({
+      job: { id: 'job-1', state: 'building' },
+      recovery: 'cleanup_pending',
+      cleanupLeaseId: admissionId,
+    });
+    expect(recover).toHaveBeenCalledWith({ jobId: 'job-1', retry: true, at: now });
+  });
+
+  it.each([
+    ['not eligible', { kind: 'not-eligible', jobId: 'job-1' }, 'RECOVERY_NOT_ELIGIBLE'],
+    ['cleanup in progress', { kind: 'cleanup-in-progress', jobId: 'job-1', admissionId: 'cln_0123456789abcdefghjkmnpqrs', generation: 2 }, 'CLEANUP_IN_PROGRESS'],
+    ['retry blocker', { kind: 'retry-blocked', jobId: 'job-1', admissionId: 'cln_0123456789abcdefghjkmnpqrs', generation: 2, blockerCode: 'QUARANTINE_PENDING' }, 'CLEANUP_RETRY_BLOCKED'],
+  ])('maps %s recovery outcomes to stable conflicts', async (_description, result, code) => {
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { recovery: { recover: async () => result } });
+      if ('generation' in result && 'admissionId' in result) {
+        Object.assign(value.store as object, {
+          getRecoveryJob: () => ({
+            ...job('job-1'),
+            cleanupFenceGeneration: result.generation,
+            cleanupAdmissionId: result.admissionId,
+            cleanupBlockerCode: 'blockerCode' in result ? result.blockerCode : null,
+            cleanupBlocker: 'blockerCode' in result ? { code: result.blockerCode } : null,
+          }),
+        });
+      }
+    }));
+    server = started.server;
+
+    expect(await post(started.port, '/api/jobs/job-1/recover', '{}')).toMatchObject({
+      status: 409,
+      body: { error: { code } },
+    });
+  });
+
+  it.each([
+    ['retry false', '{"retry":false}'],
+    ['unknown field', '{"retry":true,"force":true}'],
+    ['non-object', '[]'],
+  ])('rejects invalid recovery body: %s', async (_description, body) => {
+    const recover = vi.fn();
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { recovery: { recover } });
+    }));
+    server = started.server;
+
+    expect((await post(started.port, '/api/jobs/job-1/recover', body)).status).toBe(400);
+    expect(recover).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['extra result field', { kind: 'not-eligible', jobId: 'job-1', secret: 'leak' }],
+    ['wrong job', { kind: 'recovered', jobId: 'job-other', terminalAt: later }],
+    ['uncommitted direct recovery', { kind: 'recovered', jobId: 'job-1', terminalAt: later }],
+    ['uncommitted cleanup fence', { kind: 'cleanup-pending', jobId: 'job-1', admissionId: 'cln_0123456789abcdefghjkmnpqrs', generation: 3 }],
+  ])('fails closed for recovery result/store mismatch: %s', async (_description, result) => {
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { recovery: { recover: async () => result } });
+      Object.assign(value.store as object, {
+        getRecoveryJob: () => ({
+          ...job('job-1'),
+          cleanupFenceGeneration: null,
+          cleanupAdmissionId: null,
+        }),
+      });
+    }));
+    server = started.server;
+
+    expect((await post(started.port, '/api/jobs/job-1/recover', '{}')).status).toBe(500);
   });
 
   it('passes the exact stored evidence index to the indexed reader', async () => {

@@ -358,6 +358,20 @@ export interface CancellationJobRecord {
   readonly cleanupBlocker: JsonObject | null;
 }
 
+export interface RecoveryJobRecord {
+  readonly jobId: string;
+  readonly state: JobState;
+  readonly queueState: string;
+  readonly queuePosition: number | null;
+  readonly terminalAt: string | null;
+  readonly terminalErrorCode: BuilderErrorCode | null;
+  readonly terminalError: JsonObject | null;
+  readonly cleanupFenceGeneration: number | null;
+  readonly cleanupAdmissionId: string | null;
+  readonly cleanupBlockerCode: BuilderErrorCode | null;
+  readonly cleanupBlocker: JsonObject | null;
+}
+
 export interface QueueClaim {
   readonly jobId: string;
   readonly fifoSeq: number;
@@ -648,6 +662,42 @@ export class BuilderStore {
       cancellationStopAuthorizedLeaseExpiresAt: nullableInstant(row, 'cancellation_stop_authorized_lease_expires_at'),
       cleanupFenceGeneration: nullableNumber(row, 'cleanup_fence_generation'),
       cleanupAdmissionId: nullableString(row, 'cleanup_admission_id'),
+      cleanupBlockerCode,
+      cleanupBlocker,
+    };
+  }
+
+  getRecoveryJob(jobId: string): RecoveryJobRecord {
+    const row = this.#db.prepare(`SELECT
+      job_id, state, queue_state, queue_position,
+      terminal_at, terminal_error_code, terminal_error_json,
+      cleanup_fence_generation, cleanup_admission_id,
+      cleanup_blocker_code, cleanup_blocker_json
+      FROM jobs WHERE job_id = ?`).get(jobId) as DbRow | undefined;
+    if (!row) throw new StoreNotFoundError(`job not found: ${jobId}`);
+    const cleanupFenceGeneration = nullableNumber(row, 'cleanup_fence_generation');
+    const cleanupAdmissionId = nullableString(row, 'cleanup_admission_id');
+    if ((cleanupFenceGeneration === null) !== (cleanupAdmissionId === null)) {
+      throw new StoreDataError('cleanup recovery fence is incomplete');
+    }
+    if (cleanupFenceGeneration !== null && (!Number.isSafeInteger(cleanupFenceGeneration) || cleanupFenceGeneration <= 0)) {
+      throw new StoreDataError('cleanup recovery fence generation is invalid');
+    }
+    const cleanupBlockerCode = persistedEnum(row, 'cleanup_blocker_code', BUILDER_ERROR_CODES) as BuilderErrorCode | null;
+    const cleanupBlocker = parseJsonObject(nullableString(row, 'cleanup_blocker_json'), 'cleanup_blocker_json');
+    if ((cleanupBlockerCode === null) !== (cleanupBlocker === null)) {
+      throw new StoreDataError('cleanup blocker evidence is incomplete');
+    }
+    return {
+      jobId: asString(row, 'job_id'),
+      state: persistedEnum(row, 'state', JOB_STATES, false)! as JobState,
+      queueState: persistedEnum(row, 'queue_state', QUEUE_STATES, false)!,
+      queuePosition: queuePosition(row),
+      terminalAt: nullableInstant(row, 'terminal_at'),
+      terminalErrorCode: persistedEnum(row, 'terminal_error_code', BUILDER_ERROR_CODES) as BuilderErrorCode | null,
+      terminalError: parseJsonObject(nullableString(row, 'terminal_error_json'), 'terminal_error_json'),
+      cleanupFenceGeneration,
+      cleanupAdmissionId,
       cleanupBlockerCode,
       cleanupBlocker,
     };
