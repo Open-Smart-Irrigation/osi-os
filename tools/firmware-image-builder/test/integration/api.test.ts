@@ -300,6 +300,64 @@ describe('read-only builder API routes', () => {
     }
   });
 
+  it('redacts split-form sensitive argv values without carrying state across commands', async () => {
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence(),
+      commands: [
+        {
+          argv: [
+            '/usr/bin/node',
+            '--passphrase', 'passphrase-secret',
+            '--oauth-token', 'oauth-secret',
+            '--session-key', 'session-secret',
+            '--password', 'password-secret',
+            '--access-key-id', 'access-key-secret',
+            '--safe-flag', 'safe-value',
+            '--password',
+          ],
+          startedAt: now,
+          finishedAt: later,
+          exitCode: 1,
+          signal: null,
+          timedOut: false,
+          outputLimit: false,
+        },
+        {
+          argv: ['/usr/bin/node', '--safe-flag', 'safe-value'],
+          startedAt: now,
+          finishedAt: later,
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          outputLimit: false,
+        },
+      ],
+    }, 'publish', 'failed');
+    const started = await start(routeDependencies); server = started.server;
+
+    expect(await get(started.port, '/api/jobs/job-1/evidence/publish')).toMatchObject({
+      status: 200,
+      body: {
+        commands: [
+          {
+            argv: [
+              '/usr/bin/node',
+              '--passphrase', '[redacted]',
+              '--oauth-token', '[redacted]',
+              '--session-key', '[redacted]',
+              '--password', '[redacted]',
+              '--access-key-id', '[redacted]',
+              '--safe-flag', 'safe-value',
+              '--password',
+            ],
+          },
+          { argv: ['/usr/bin/node', '--safe-flag', 'safe-value'] },
+        ],
+      },
+    });
+  });
+
   it('shares URL, absolute-path, and authorization classification across observations and argv', async () => {
     const routeDependencies = dependencies();
     useEvidence(routeDependencies, {
@@ -329,7 +387,7 @@ describe('read-only builder API routes', () => {
         neutralUrl: 'https://:secret@example.test/repository.git',
         repeatedAbsolutePaths: ['//opt/osi-builder/image.img', '///data/db/farming.db'],
         safeUrls: ['https://example.test//opt/osi-builder/image.img', 'https://example.test///data/db/farming.db'],
-        ordinaryAuthWords: ['Basic verification passed', 'Bearer checks passed'],
+        ordinaryAuthWords: ['Basic verification passed.', 'Bearer checks passed successfully'],
         neutralAuthValues: ['Basic dXNlcjpwYXNz', 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature'],
         neutralHeaderText: 'Authorization: opaque-value',
       },
@@ -343,7 +401,7 @@ describe('read-only builder API routes', () => {
         neutralUrl: '[redacted]',
         repeatedAbsolutePaths: ['[redacted]', '[redacted]'],
         safeUrls: ['https://example.test//opt/osi-builder/image.img', 'https://example.test///data/db/farming.db'],
-        ordinaryAuthWords: ['Basic verification passed', 'Bearer checks passed'],
+        ordinaryAuthWords: ['Basic verification passed.', 'Bearer checks passed successfully'],
         neutralAuthValues: ['[redacted]', '[redacted]'],
         neutralHeaderText: '[redacted]',
       },
@@ -366,7 +424,7 @@ describe('read-only builder API routes', () => {
   });
 
   it('redacts lowercase auth credentials, URL userinfo, expanded sensitive keys, assignments, and errors', async () => {
-    const lowercaseCredentials = ['Basic lowercasevalue', 'Bearer secret', 'Bearer verylonglowercasetokenvalue'];
+    const lowercaseCredentials = ['basic lowercasevalue', 'bearer secret', 'bearer verylonglowercasetokenvalue'];
     const userinfoUrls = [
       'https://build-user@example.test/repository.git',
       'https://%62uild-user@example.test/repository.git',
@@ -379,6 +437,7 @@ describe('read-only builder API routes', () => {
       'accessKeyId=access-key-id-secret',
       'access-key: access-key-secret',
       'session_key=session-key-secret',
+      'failed (password=secret)',
     ];
     const routeDependencies = dependencies();
     useEvidence(routeDependencies, {
@@ -413,12 +472,12 @@ describe('read-only builder API routes', () => {
           sessionKey: 'session-key-value',
           sessionKeyId: 'session-key-id-value',
         },
-        ordinaryAuthProse: ['Basic verification passed', 'Bearer checks passed'],
+        ordinaryAuthProse: ['Basic verification passed.', 'Bearer checks passed successfully'],
       },
       error: {
         ...stageEvidence('publish', 'failed').error!,
-        diagnosis: 'failed with password=error-secret',
-        recovery: 'retry at /srv/private and use Bearer errorsecret',
+        diagnosis: 'failed (password=error-secret)',
+        recovery: 'retry (password=recovery-secret)',
       },
     }, 'publish', 'failed');
     const started = await start(routeDependencies); server = started.server;
@@ -438,7 +497,7 @@ describe('read-only builder API routes', () => {
         safeUrl: 'https://example.test/repository.git',
         sensitiveAssignments: Array(sensitiveAssignments.length).fill('[redacted]'),
         sensitiveKeys: {},
-        ordinaryAuthProse: ['Basic verification passed', 'Bearer checks passed'],
+        ordinaryAuthProse: ['Basic verification passed.', 'Bearer checks passed successfully'],
       },
       error: {
         diagnosis: '[redacted]',
@@ -452,7 +511,7 @@ describe('read-only builder API routes', () => {
       ...sensitiveAssignments,
       'passphrase-value', 'auth-header-value', 'auth-token-value', 'oauth-value',
       'access-key-id-value', 'access-key-value', 'session-key-value', 'session-key-id-value',
-      'error-secret', '/srv/private', 'errorsecret',
+      'error-secret', 'recovery-secret', '/srv/private', 'errorsecret',
     ]) expect(encoded).not.toContain(forbidden);
   });
 

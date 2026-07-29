@@ -57,9 +57,9 @@ const SENSITIVE_OBSERVATION_KEY_PARTS = Object.freeze([
   'sshauthsock', 'gitsshcommand', 'sshpath', 'apikey', 'sshkey', 'identityfile', 'clientsecret',
   'passphrase', 'auth', 'oauth', 'accesskey', 'sessionkey',
 ]);
-const CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[\s;,?&"'{}])(?:[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*)\s*(?:=|:)\s*[^\s;,?&]+/iu;
+const CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[^a-z0-9_])(?:[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*)\s*(?:=|:)\s*[^\s;,?&]+/iu;
 const AUTHORIZATION_HEADER_PATTERN = /\b(?:authorization)\s*[:=]\s*\S+/iu;
-const BARE_AUTHORIZATION_PATTERN = /\b(?:bearer|basic)\s+([A-Za-z0-9._~+/=-]+)/giu;
+const COMPLETE_BARE_AUTHORIZATION_PATTERN = /^(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+$/iu;
 const URL_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^\s]*/giu;
 const ABSOLUTE_POSIX_PATH_PATTERN = /(?:^|[^a-z0-9._~\/-])\/+[^\s/]+(?:\/[^\s/]+)*/iu;
 const PUBLIC_EVIDENCE_EXECUTABLES = new Set([
@@ -67,7 +67,8 @@ const PUBLIC_EVIDENCE_EXECUTABLES = new Set([
   '/usr/bin/make', '/usr/bin/gcc', '/usr/bin/llvm-config', '/usr/bin/rustc', '/bin/sh',
 ]);
 const COMMAND_HOME_PATH_PATTERN = /(?:^|[^a-z0-9._-])(?:~(?:[a-z0-9._-]+)?|\$\{?home\}?)(?:\/|$)/iu;
-const COMMAND_CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[\s;,?&"'{}])(?:--?)?[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*\s*(?:=|:)\s*[^\s;,?&]+/iu;
+const COMMAND_CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[^a-z0-9_])(?:--?)?[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*\s*(?:=|:)\s*[^\s;,?&]+/iu;
+const SENSITIVE_COMMAND_OPTION_PATTERN = /^--?[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*$/iu;
 const JOB_STATE_SET = new Set<string>(JOB_STATES);
 const STAGE_SET = new Set<string>(PIPELINE_STAGE_NAMES);
 const ERROR_CODE_SET = new Set<string>(BUILDER_ERROR_CODES);
@@ -577,11 +578,7 @@ function hasCredentialUrl(value: string): boolean {
 }
 
 function hasBareAuthorizationToken(value: string): boolean {
-  if (value === 'Basic verification passed' || value === 'Bearer checks passed') return false;
-  for (const match of value.matchAll(BARE_AUTHORIZATION_PATTERN)) {
-    if (match[1] !== undefined) return true;
-  }
-  return false;
+  return COMPLETE_BARE_AUTHORIZATION_PATTERN.test(value);
 }
 
 function hasAbsolutePosixPath(value: string): boolean {
@@ -655,12 +652,25 @@ function redactCommandArgument(value: string): string {
       : value;
 }
 
+function redactCommandArguments(argv: readonly string[]): readonly string[] {
+  let redactNext = false;
+  return argv.map((argument, index) => {
+    if (index === 0) return PUBLIC_EVIDENCE_EXECUTABLES.has(argument) ? argument : '[redacted]';
+    if (redactNext) {
+      redactNext = false;
+      return '[redacted]';
+    }
+    const redacted = redactCommandArgument(argument);
+    if (redacted !== argument) return redacted;
+    if (SENSITIVE_COMMAND_OPTION_PATTERN.test(argument)) redactNext = true;
+    return argument;
+  });
+}
+
 function publicEvidenceCommands(commands: readonly EvidenceCommand[]): readonly EvidenceCommand[] {
   return commands.map((command) => ({
     ...command,
-    argv: command.argv.map((argument, index) => index === 0
-      ? PUBLIC_EVIDENCE_EXECUTABLES.has(argument) ? argument : '[redacted]'
-      : redactCommandArgument(argument)),
+    argv: redactCommandArguments(command.argv),
   }));
 }
 
