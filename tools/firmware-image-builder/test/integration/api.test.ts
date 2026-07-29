@@ -851,10 +851,11 @@ describe('read-only builder API routes', () => {
       '{"pass\\u0077ord":"escaped-secret"}',
       '{"nested":[{"password":123456},{"password":null},{"password":{"nested":"object-secret"}},{"password":[1,2,3]}]}',
       'prefix [{"safe":true},{"api\\u004bey":["array-secret"]}] suffix',
+      'malformed {"password":123456',
+      '{"message":"{\\"password\\":123456}"}',
     ];
-    const malformedCredential = 'malformed {"password":"lexical-secret"';
     const benignJson = '{"status":"ok","nested":[{"count":2},null]}';
-    const redactedCredentials = [...structuredCredentials, malformedCredential];
+    const redactedCredentials = structuredCredentials;
     const routeDependencies = dependencies();
     useEvidence(routeDependencies, {
       ...stageEvidence('publish', 'failed'),
@@ -885,9 +886,72 @@ describe('read-only builder API routes', () => {
     });
     const encoded = JSON.stringify(response.body);
     for (const credential of redactedCredentials) expect(encoded).not.toContain(credential);
-    for (const secret of ['escaped-secret', 'object-secret', 'array-secret', 'lexical-secret']) {
+    for (const secret of ['escaped-secret', 'object-secret', 'array-secret', '123456']) {
       expect(encoded).not.toContain(secret);
     }
+  });
+
+  it('classifies credentials in surrounding text while preserving benign auth prose and status keys', async () => {
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence('publish', 'failed'),
+      commands: [{
+        argv: ['/usr/bin/node', 'prefix\tBearer\nabc$def, suffix', 'prefix Basic dXNlcjpwYXNz suffix', '{"message":"Bearer abc$def"}', 'Basic verification passed.'],
+        startedAt: now,
+        finishedAt: later,
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+        outputLimit: false,
+      }],
+      observations: {
+        neutralText: 'prefix\tBearer\nabc$def, suffix',
+        neutralAuthText: 'prefix Basic dXNlcjpwYXNz suffix',
+        benignText: ['Basic verification passed.', 'Bearer checks passed successfully'],
+        author: 'build author',
+        authority: 'build authority',
+        authorizationStatus: 'verified',
+        authHeader: 'Bearer header-secret',
+        authToken: 'token-secret',
+        oauth: 'oauth-secret',
+      },
+      error: {
+        ...stageEvidence('publish', 'failed').error!,
+        diagnosis: 'request failed: Basic abc$def.',
+        recovery: 'retry with {"message":"Bearer abc$def"}',
+      },
+    }, 'publish', 'failed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      commands: [{ argv: ['/usr/bin/node', '[redacted]', '[redacted]', '[redacted]', 'Basic verification passed.'] }],
+      observations: {
+        neutralText: '[redacted]',
+        neutralAuthText: '[redacted]',
+        benignText: ['Basic verification passed.', 'Bearer checks passed successfully'],
+        author: 'build author',
+        authority: 'build authority',
+        authorizationStatus: 'verified',
+      },
+      error: { diagnosis: '[redacted]', recovery: '[redacted]' },
+    });
+  });
+
+  it('keeps unmatched JSON openers within the public-text scan budget', async () => {
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence(),
+      observations: { unmatchedOpeners: '{'.repeat(65_536) },
+    }, 'publish', 'passed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const scanStartedAt = performance.now();
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    const elapsedMs = performance.now() - scanStartedAt;
+    expect(response.status).toBe(500);
+    expect(elapsedMs).toBeLessThan(500);
   });
 
   it('preserves safe production multiline text while redacting other controls', async () => {

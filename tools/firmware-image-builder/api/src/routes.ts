@@ -52,15 +52,15 @@ const HASH40_PATTERN = /^[0-9a-f]{40}$/u;
 const HASH64_PATTERN = /^[0-9a-f]{64}$/u;
 const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
 const PRIVATE_KEY_PATTERN = /(?:-----BEGIN [^-\r\n]*PRIVATE KEY-----|----+\s*BEGIN [^\r\n]*PRIVATE KEY\s*----+|(?:^|\r?\n)\s*PuTTY-User-Key-File-\d+\s*:|(?:^|\r?\n)\s*(?:SSH|RSA|EC|DSA)\s+PRIVATE KEY\s*[:=-])/imu;
-const QUOTED_CREDENTIAL_PATTERN = /(["'])\s*[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*\1\s*:\s*(["'])[\s\S]*?\2/iu;
 const SENSITIVE_OBSERVATION_KEY_PARTS = Object.freeze([
-  'token', 'password', 'passwd', 'secret', 'credential', 'privatekey', 'authorization', 'cookie',
+  'token', 'password', 'passwd', 'secret', 'credential', 'privatekey', 'cookie',
   'sshauthsock', 'gitsshcommand', 'sshpath', 'apikey', 'sshkey', 'identityfile', 'clientsecret',
-  'passphrase', 'auth', 'oauth', 'accesskey', 'sessionkey',
+  'passphrase', 'accesskey', 'sessionkey',
 ]);
-const CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[^a-z0-9_])(?:[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*)\s*(?:=|:)\s*[^\s;,?&]+/iu;
+const ASSIGNMENT_KEY_PATTERN = /(?:^|[^a-z0-9_])(-{0,2}[a-z0-9_.-]+)\s*(?:=|:)/giu;
 const AUTHORIZATION_HEADER_PATTERN = /\b(?:authorization)\s*[:=]\s*\S+/iu;
-const COMPLETE_BARE_AUTHORIZATION_PATTERN = /^(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+$/iu;
+const AUTH_SCHEME_PATTERN = /\b(?:bearer|basic)\b/giu;
+const AUTH_TOKEN_CHAR_PATTERN = /[A-Za-z0-9._~+/$=-]/u;
 const URL_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^\s]*/giu;
 const ABSOLUTE_POSIX_PATH_PATTERN = /(?:^|[^a-z0-9._~\/-])\/+[^\s/]+(?:\/[^\s/]+)*/iu;
 const PUBLIC_EVIDENCE_EXECUTABLES = new Set([
@@ -68,8 +68,7 @@ const PUBLIC_EVIDENCE_EXECUTABLES = new Set([
   '/usr/bin/make', '/usr/bin/gcc', '/usr/bin/llvm-config', '/usr/bin/rustc', '/bin/sh',
 ]);
 const COMMAND_HOME_PATH_PATTERN = /(?:^|[^a-z0-9._-])(?:~(?:[a-z0-9._-]+)?|\$\{?home\}?)(?:\/|$)/iu;
-const COMMAND_CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[^a-z0-9_])(?:--?)?[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*\s*(?:=|:)\s*[^\s;,?&]+/iu;
-const SENSITIVE_COMMAND_OPTION_PATTERN = /^--?[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*$/iu;
+const COMMAND_OPTION_PATTERN = /^--?[a-z0-9_.-]+$/iu;
 const JOB_STATE_SET = new Set<string>(JOB_STATES);
 const STAGE_SET = new Set<string>(PIPELINE_STAGE_NAMES);
 const ERROR_CODE_SET = new Set<string>(BUILDER_ERROR_CODES);
@@ -584,9 +583,10 @@ function normalizedObservationKey(key: string): string {
 
 function isSensitiveObservationKey(key: string): boolean {
   const normalized = normalizedObservationKey(key);
-  return SENSITIVE_OBSERVATION_KEY_PARTS.some((part) => part === 'auth'
-    ? normalized.startsWith(part)
-    : normalized.includes(part));
+  if (SENSITIVE_OBSERVATION_KEY_PARTS.some((part) => normalized.includes(part))) return true;
+  if (normalized === 'auth' || normalized === 'authorization' || normalized === 'oauth') return true;
+  return /^(?:auth|authorization)(?:header|token|key|secret|credential|password|passwd|cookie|passphrase)$/u.test(normalized)
+    || /^oauth(?:token|key|secret|credential|password|passwd|cookie|passphrase)$/u.test(normalized);
 }
 
 interface ObservationProjectionBudget {
@@ -594,70 +594,59 @@ interface ObservationProjectionBudget {
   edges: number;
 }
 
-function matchingJsonContainerEnd(value: string, start: number, limit: number): number | null {
-  const stack: string[] = [];
-  let inString = false;
-  let escaped = false;
-  for (let index = start; index < limit; index += 1) {
+interface PublicTextScanState {
+  scannedBytes: number;
+}
+
+function decodeJsonString(value: string, start: number): { readonly end: number; readonly decoded: string } | null {
+  const decoded: string[] = [];
+  for (let index = start + 1; index < value.length; index += 1) {
     const character = value[index];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (character === '\\') escaped = true;
-      else if (character === '"') inString = false;
+    if (character === '"') return { end: index + 1, decoded: decoded.join('') };
+    if (character !== '\\') {
+      decoded.push(character);
       continue;
     }
-    if (character === '"') {
-      inString = true;
-    } else if (character === '{' || character === '[') {
-      stack.push(character);
-    } else if (character === '}' || character === ']') {
-      const opening = stack.pop();
-      if ((character === '}' && opening !== '{') || (character === ']' && opening !== '[')) return null;
-      if (stack.length === 0) return index + 1;
+    const escaped = value[index + 1];
+    if (escaped === undefined) return null;
+    if (escaped === 'u') {
+      const code = value.slice(index + 2, index + 6);
+      if (/^[0-9a-f]{4}$/iu.test(code)) {
+        decoded.push(String.fromCharCode(Number.parseInt(code, 16)));
+        index += 5;
+        continue;
+      }
     }
+    const decodedEscape: Record<string, string> = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
+    decoded.push(decodedEscape[escaped] ?? escaped);
+    index += 1;
   }
   return null;
 }
 
-function hasSensitiveJsonKey(value: unknown, field: string, depth: number, budget: ObservationProjectionBudget): boolean {
-  budget.nodes += 1;
-  if (budget.nodes > JSON_LIMITS.maxNodes || depth > JSON_LIMITS.maxDepth) return true;
-  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') return false;
-  if (Array.isArray(value)) {
-    if (value.length > JSON_LIMITS.maxArrayElements) return true;
-    for (let index = 0; index < value.length; index += 1) {
-      budget.edges += 1;
-      if (budget.edges > JSON_LIMITS.maxEdges || hasSensitiveJsonKey(value[index], `${field}[${index}]`, depth + 1, budget)) return true;
-    }
-    return false;
-  }
-  if (typeof value !== 'object') return true;
-  const input = value as Record<string, unknown>;
-  const keys = Object.keys(input);
-  if (keys.length > JSON_LIMITS.maxKeys) return true;
-  for (const key of keys) {
-    if (isSensitiveObservationKey(key)) return true;
-    budget.edges += 1;
-    if (budget.edges > JSON_LIMITS.maxEdges || hasSensitiveJsonKey(input[key], `${field}.${key}`, depth + 1, budget)) return true;
+function hasSensitiveJsonKeyToken(value: string, state: PublicTextScanState): boolean {
+  state.scannedBytes += value.length;
+  if (state.scannedBytes > JSON_LIMITS.maxEncodedBytes * 2) return true;
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== '"') continue;
+    const stringToken = decodeJsonString(value, index);
+    if (stringToken === null) return false;
+    let afterToken = stringToken.end;
+    while (/\s/u.test(value[afterToken] ?? '')) afterToken += 1;
+    if (value[afterToken] === ':' && isSensitiveObservationKey(stringToken.decoded)) return true;
+    if (stringToken.decoded.includes('"') && hasSensitiveJsonKeyToken(stringToken.decoded, state)) return true;
+    index = stringToken.end - 1;
   }
   return false;
 }
 
 function hasStructuredJsonCredential(value: string): boolean {
-  const limit = Math.min(value.length, JSON_LIMITS.maxEncodedBytes);
-  for (let start = 0; start < limit; start += 1) {
-    if (value[start] !== '{' && value[start] !== '[') continue;
-    const end = matchingJsonContainerEnd(value, start, limit);
-    if (end === null) continue;
-    const candidate = value.slice(start, end);
-    if (Buffer.byteLength(candidate, 'utf8') > JSON_LIMITS.maxEncodedBytes) continue;
-    try {
-      const parsed: unknown = JSON.parse(candidate);
-      if (hasSensitiveJsonKey(parsed, 'public text JSON', 0, { nodes: 0, edges: 0 })) return true;
-      start = end - 1;
-    } catch {
-      continue;
-    }
+  return hasSensitiveJsonKeyToken(value, { scannedBytes: 0 });
+}
+
+function hasCredentialAssignment(value: string): boolean {
+  for (const match of value.matchAll(ASSIGNMENT_KEY_PATTERN)) {
+    if (isSensitiveObservationKey(match[1])) return true;
   }
   return false;
 }
@@ -674,8 +663,25 @@ function hasCredentialUrl(value: string): boolean {
   return false;
 }
 
-function hasBareAuthorizationToken(value: string): boolean {
-  return COMPLETE_BARE_AUTHORIZATION_PATTERN.test(value);
+function hasAuthorizationToken(value: string): boolean {
+  for (const match of value.matchAll(AUTH_SCHEME_PATTERN)) {
+    let tokenStart = (match.index ?? 0) + match[0].length;
+    while (/\s/u.test(value[tokenStart] ?? '')) tokenStart += 1;
+    let tokenEnd = tokenStart;
+    while (AUTH_TOKEN_CHAR_PATTERN.test(value[tokenEnd] ?? '')) tokenEnd += 1;
+    if (tokenEnd === tokenStart) continue;
+    const token = value.slice(tokenStart, tokenEnd);
+    let nextIndex = tokenEnd;
+    while (/\s/u.test(value[nextIndex] ?? '')) nextIndex += 1;
+    const next = value[nextIndex] ?? '';
+    let nextWordEnd = nextIndex;
+    while (/[A-Za-z]/u.test(value[nextWordEnd] ?? '')) nextWordEnd += 1;
+    const nextWord = value.slice(nextIndex, nextWordEnd);
+    const credentialLike = /[$0-9._~+\/=:-]/u.test(token) || /^(?:secret|token|password|credential)$/iu.test(token);
+    const benignProse = /^(?:verification|checks)$/iu.test(token) && /^(?:passed|successfully)$/iu.test(nextWord);
+    if (!benignProse && (credentialLike || next === '' || /[{}[\](),;:!?"']/u.test(next) || /[A-Za-z0-9]/u.test(next))) return true;
+  }
+  return false;
 }
 
 function hasAbsolutePosixPath(value: string): boolean {
@@ -685,10 +691,9 @@ function hasAbsolutePosixPath(value: string): boolean {
 function hasCommonStringRedaction(value: string): boolean {
   return CONTROL_PATTERN.test(value)
     || PRIVATE_KEY_PATTERN.test(value)
-    || QUOTED_CREDENTIAL_PATTERN.test(value)
     || hasStructuredJsonCredential(value)
     || AUTHORIZATION_HEADER_PATTERN.test(value)
-    || hasBareAuthorizationToken(value)
+    || hasAuthorizationToken(value)
     || hasCredentialUrl(value)
     || hasAbsolutePosixPath(value)
     || /file:\/\//iu.test(value);
@@ -697,7 +702,7 @@ function hasCommonStringRedaction(value: string): boolean {
 function redactPublicText(value: string): string {
   return hasCommonStringRedaction(value)
     || /~\/\.ssh(?:\/|$)/iu.test(value)
-    || CREDENTIAL_ASSIGNMENT_PATTERN.test(value)
+    || hasCredentialAssignment(value)
     ? '[redacted]'
     : value;
 }
@@ -741,9 +746,13 @@ function redactCommandArgument(value: string): string {
   const redacted = redactPublicText(value);
   return redacted !== value
     ? redacted
-    : COMMAND_CREDENTIAL_ASSIGNMENT_PATTERN.test(value) || COMMAND_HOME_PATH_PATTERN.test(value)
+    : hasCredentialAssignment(value) || COMMAND_HOME_PATH_PATTERN.test(value)
       ? '[redacted]'
       : value;
+}
+
+function isSensitiveCommandOption(value: string): boolean {
+  return COMMAND_OPTION_PATTERN.test(value) && isSensitiveObservationKey(value.replace(/^-+/, ''));
 }
 
 function redactCommandArguments(argv: readonly string[]): readonly string[] {
@@ -756,7 +765,7 @@ function redactCommandArguments(argv: readonly string[]): readonly string[] {
     }
     const redacted = redactCommandArgument(argument);
     if (redacted !== argument) return redacted;
-    if (SENSITIVE_COMMAND_OPTION_PATTERN.test(argument)) redactNext = true;
+    if (isSensitiveCommandOption(argument)) redactNext = true;
     return argument;
   });
 }
