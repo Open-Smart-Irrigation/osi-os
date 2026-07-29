@@ -97,6 +97,7 @@ describe('user systemd unit contracts', () => {
 
   it('keeps runner instances independent from the API and default.target', async () => {
     const { text, unit } = await readUnit('osi-image-builder-runner@.service');
+    const exec = execWords(unit);
 
     expect(text).not.toMatch(/(?:Requires|Requisite|Wants|BindsTo|PartOf|After|Before)=.*osi-image-builder\.service/u);
     expect(text).not.toMatch(/PartOf=/u);
@@ -106,6 +107,7 @@ describe('user systemd unit contracts', () => {
     expect(value(unit, 'Service', 'KillSignal')).toBe('SIGUSR1');
     expect(value(unit, 'Service', 'Restart')).toBe('no');
     expect(values(unit, 'Service', 'ExecStart')).toHaveLength(1);
+    expect(exec.slice(1)).toEqual(['%i']);
     expect(credentialDirectives(unit)).toEqual([]);
   });
 

@@ -2304,6 +2304,49 @@ describe('trusted pipeline integration', () => {
     }
   });
 
+  it('renews the runner lease while production composition is pending', async () => {
+    const value = await fixture();
+    vi.useFakeTimers();
+    let releaseComposition!: () => void;
+    let compositionStarted!: () => void;
+    const compositionGate = new Promise<void>((resolve) => {
+      releaseComposition = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      compositionStarted = resolve;
+    });
+    const writeSpy = vi.spyOn(value.ownership, 'runnerWrite');
+    try {
+      const at = value.clock.now();
+      const resultPromise = runGuardedComposition({
+        args: {
+          jobId: value.input.jobId,
+          runnerUnit: value.input.runnerUnit,
+          owner: value.input.owner,
+          leaseExpiresAt: new Date(Date.parse(at) + 60_000).toISOString(),
+        },
+        clock: value.input.clock,
+        store: value.store,
+        ownership: value.ownership,
+        evidenceWriter: value.input.evidenceWriter,
+        compose: async () => {
+          compositionStarted();
+          await compositionGate;
+          throw new Error('delayed composition failed');
+        },
+      });
+      await started;
+      await vi.advanceTimersByTimeAsync(20_000);
+      releaseComposition();
+
+      await expect(resultPromise).resolves.toMatchObject({ state: 'failed' });
+      expect(writeSpy.mock.calls.map(([command]) => command.kind)).toContain('renew-lease');
+    } finally {
+      vi.useRealTimers();
+      value.close();
+    }
+  });
+
   it('persists an explicit recovery blocker when composition ownership is foreign', async () => {
     const value = await fixture();
     try {
@@ -2407,13 +2450,8 @@ describe('trusted pipeline integration', () => {
         claimExpiresAt,
         at: new Date().toISOString(),
       }).ok).toBe(true);
-      const runnerLeaseExpiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
-
       await expect(runRunner([
-        '--job-id', value.input.jobId,
-        '--runner-unit', value.input.runnerUnit,
-        '--owner', value.input.owner,
-        '--lease-expires-at', runnerLeaseExpiresAt,
+        value.input.jobId,
       ])).resolves.toMatchObject({
         state: 'failed',
       });

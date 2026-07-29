@@ -128,7 +128,6 @@ import {
   type RootfsNodeResolutionResult,
 } from './verification.js';
 
-const RUNNER_UNIT = /^osi-image-builder-runner@[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.service$/u;
 const SAFE_OWNER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const SAFE_JOB = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const PROC_FD = '/proc/self/fd';
@@ -252,6 +251,11 @@ export interface RunnerArguments {
   readonly leaseExpiresAt: string;
 }
 
+export interface RunnerLaunchArguments {
+  readonly jobId: string;
+  readonly runnerUnit: string;
+}
+
 interface ProductionComposition {
   readonly input: PipelineInput;
   close(): Promise<void>;
@@ -263,7 +267,7 @@ export interface GuardedCompositionInput {
   readonly store: BuilderStore;
   readonly ownership: OwnershipStore;
   readonly evidenceWriter: PipelineEvidenceWriter;
-  readonly compose: (lease: PipelineLease) => Promise<ProductionComposition>;
+  readonly compose: () => Promise<ProductionComposition>;
 }
 
 interface PublicationFileSet {
@@ -1702,6 +1706,99 @@ async function terminalizeCompositionFailure(
   }
 }
 
+type CompositionOutcome =
+  | Readonly<{ readonly kind: 'success'; readonly composition: ProductionComposition }>
+  | Readonly<{ readonly kind: 'error'; readonly error: unknown }>;
+
+type GuardedCompositionOutcome =
+  | Readonly<{ readonly kind: 'success'; readonly composition: ProductionComposition; readonly lease: PipelineLease }>
+  | Readonly<{ readonly kind: 'error'; readonly error: unknown; readonly lease: PipelineLease }>
+  | Readonly<{ readonly kind: 'ownership-lost'; readonly reason: string }>;
+
+function renewCompositionLease(
+  input: GuardedCompositionInput,
+  lease: PipelineLease,
+): PipelineLease | string {
+  const at = input.clock.now();
+  const atMs = Date.parse(at);
+  const currentExpiryMs = Date.parse(lease.expiresAt);
+  if (!Number.isFinite(atMs) || !Number.isFinite(currentExpiryMs)) {
+    return 'runner composition lease chronology is invalid';
+  }
+  const expiresAt = new Date(Math.max(
+    atMs + LEASE_DURATION_MS,
+    currentExpiryMs + 1_000,
+  )).toISOString();
+  try {
+    const renewed = input.ownership.runnerWrite({
+      kind: 'renew-lease',
+      jobId: input.args.jobId,
+      runnerUnit: lease.runnerUnit,
+      owner: lease.owner,
+      expectedExpiresAt: lease.expiresAt,
+      expiresAt,
+      at,
+    });
+    if (!renewed.ok) {
+      return `runner composition lease renewal lost ownership: ${renewed.conflict.kind}`;
+    }
+  } catch (error) {
+    return `runner composition lease renewal failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+  }
+  return Object.freeze({
+    owner: lease.owner,
+    runnerUnit: lease.runnerUnit,
+    expiresAt,
+  });
+}
+
+async function composeWithLeaseHeartbeat(
+  input: GuardedCompositionInput,
+  initialLease: PipelineLease,
+): Promise<GuardedCompositionOutcome> {
+  const pending = Promise.resolve()
+    .then(input.compose)
+    .then(
+      (composition): CompositionOutcome => ({ kind: 'success', composition }),
+      (error: unknown): CompositionOutcome => ({ kind: 'error', error }),
+    );
+  const interval = Math.max(1_000, Math.floor(LEASE_DURATION_MS / 3));
+  let lease = initialLease;
+  while (true) {
+    let timer: NodeJS.Timeout | undefined;
+    const result = await Promise.race([
+      pending,
+      new Promise<Readonly<{ readonly kind: 'heartbeat' }>>((resolve) => {
+        timer = setTimeout(() => resolve({ kind: 'heartbeat' }), interval);
+        timer.unref();
+      }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+    if (result.kind === 'success') return { ...result, lease };
+    if (result.kind === 'error') return { ...result, lease };
+    const renewed = renewCompositionLease(input, lease);
+    if (typeof renewed !== 'string') {
+      lease = renewed;
+      continue;
+    }
+
+    const settled = await pending;
+    let reason = renewed;
+    if (settled.kind === 'success') {
+      try {
+        await settled.composition.close();
+      } catch (error) {
+        reason += `; composition close failed after lease loss: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+      }
+    }
+    return { kind: 'ownership-lost', reason };
+  }
+}
+
 export async function runGuardedComposition(
   input: GuardedCompositionInput,
 ): Promise<PipelineResult> {
@@ -1747,12 +1844,15 @@ export async function runGuardedComposition(
     );
   }
 
-  let composition: ProductionComposition;
-  try {
-    composition = await input.compose(lease);
-  } catch (error) {
-    return terminalizeCompositionFailure(input, lease, error);
+  const composed = await composeWithLeaseHeartbeat(input, lease);
+  if (composed.kind === 'ownership-lost') {
+    return persistCompositionRecoveryBlocker(input, composed.reason);
   }
+  lease = composed.lease;
+  if (composed.kind === 'error') {
+    return terminalizeCompositionFailure(input, lease, composed.error);
+  }
+  const composition = composed.composition;
   try {
     let pipeline;
     try {
@@ -2514,61 +2614,37 @@ async function createProductionComposition(
   }
 }
 
-export function parseRunnerArguments(argv: readonly string[]): RunnerArguments {
-  const allowed = new Set([
-    'job-id',
-    'runner-unit',
-    'owner',
-    'lease-expires-at',
-  ]);
-  const values = new Map<string, string>();
-  for (let index = 0; index < argv.length; index += 1) {
-    const key = argv[index];
-    const value = argv[index + 1];
-    if (!key?.startsWith('--') || value === undefined || value.startsWith('--')) {
-      throw new Error('runner arguments must be --key value pairs');
-    }
-    const name = key.slice(2);
-    if (!allowed.has(name)) throw new Error(`unknown runner argument: --${name}`);
-    if (values.has(name)) throw new Error(`duplicate runner argument: --${name}`);
-    values.set(name, value);
-    index += 1;
-  }
-  const required = (key: string): string => {
-    const value = values.get(key);
-    if (value === undefined || value.length === 0) {
-      throw new Error(`runner argument --${key} is required`);
-    }
-    return value;
-  };
-  const jobId = required('job-id');
-  const runnerUnit = required('runner-unit');
-  const owner = required('owner');
-  const leaseExpiresAt = required('lease-expires-at');
+export function parseRunnerArguments(argv: readonly string[]): RunnerLaunchArguments {
+  if (argv.length !== 1) throw new Error('runner requires exactly one job ID');
+  const jobId = argv[0];
   if (!SAFE_JOB.test(jobId)) throw new Error('runner job ID is invalid');
-  if (
-    !RUNNER_UNIT.test(runnerUnit)
-    || runnerUnit !== `osi-image-builder-runner@${jobId}.service`
-  ) {
-    throw new Error('runner unit does not match the job ID');
-  }
+  const runnerUnit = `osi-image-builder-runner@${jobId}.service`;
+  return Object.freeze({ jobId, runnerUnit });
+}
+
+function createLocalRunnerArguments(
+  launch: RunnerLaunchArguments,
+  at: string,
+): RunnerArguments {
+  const owner = `runner-${randomUUID()}`;
   if (!SAFE_OWNER.test(owner)) throw new Error('runner owner is invalid');
-  if (
-    new Date(leaseExpiresAt).toISOString() !== leaseExpiresAt
-  ) {
-    throw new Error('runner lease expiry is not canonical');
+  const acceptedAt = Date.parse(at);
+  if (!Number.isFinite(acceptedAt) || new Date(acceptedAt).toISOString() !== at) {
+    throw new Error('runner lease start is not canonical');
   }
-  return Object.freeze({ jobId, runnerUnit, owner, leaseExpiresAt });
+  const leaseExpiresAt = new Date(acceptedAt + LEASE_DURATION_MS).toISOString();
+  return Object.freeze({ ...launch, owner, leaseExpiresAt });
 }
 
 export async function runRunner(argv: readonly string[]): Promise<PipelineResult> {
-  const args = parseRunnerArguments(argv);
+  const launch = parseRunnerArguments(argv);
   const state = await loadStateRootAuthority();
   const database = openBuilderDatabase(join(state.stateRoot, 'jobs.sqlite'));
   const store = new BuilderStore(database);
   const ownership = new OwnershipStore(database);
   const clock: PipelineClock = { now: () => new Date().toISOString() };
   try {
+    const args = createLocalRunnerArguments(launch, clock.now());
     return await runGuardedComposition({
       args,
       clock,

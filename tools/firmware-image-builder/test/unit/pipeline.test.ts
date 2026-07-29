@@ -250,14 +250,19 @@ describe('production runner composition', () => {
     }
   });
 
-  it('accepts only the exact systemd runner argument contract', () => {
-    expect(() => parseRunnerArguments([
-      '--job-id', JOB_ID,
-      '--runner-unit', `osi-image-builder-runner@${JOB_ID}.service`,
-      '--owner', 'runner',
-      '--lease-expires-at', '2026-07-26T12:00:00.000Z',
-      '--bootstrap', '/tmp/untrusted.mjs',
-    ])).toThrow(/unknown runner argument/i);
+  it('derives the runner contract from exactly one systemd job ID', () => {
+    expect(parseRunnerArguments([JOB_ID])).toEqual({
+      jobId: JOB_ID,
+      runnerUnit: `osi-image-builder-runner@${JOB_ID}.service`,
+    });
+  });
+
+  it('rejects malformed, missing, and extra runner arguments', () => {
+    expect(() => parseRunnerArguments([])).toThrow(/exactly one job ID/i);
+    expect(() => parseRunnerArguments(['bad job id'])).toThrow(/invalid/i);
+    expect(() => parseRunnerArguments([JOB_ID, 'untrusted-owner'])).toThrow(/exactly one job ID/i);
+    expect(() => parseRunnerArguments(['--job-id', JOB_ID])).toThrow(/exactly one job ID/i);
+    expect(() => parseRunnerArguments(['--job-id'])).toThrow(/invalid/i);
   });
 
   it('executes a held target-setup definition in the profile that produced it', () => {
