@@ -370,6 +370,10 @@ export interface RecoveryJobRecord {
   readonly cleanupAdmissionId: string | null;
   readonly cleanupBlockerCode: BuilderErrorCode | null;
   readonly cleanupBlocker: JsonObject | null;
+  readonly cleanupLeaseStatus: 'admitted' | 'claimed' | 'completed' | 'handed_back' | 'failed' | 'blocking' | 'expired' | null;
+  readonly cleanupLeaseExpiresAt: string | null;
+  readonly cleanupLeaseBlockerCode: BuilderErrorCode | null;
+  readonly cleanupLeaseBlocker: JsonObject | null;
 }
 
 export interface QueueClaim {
@@ -669,11 +673,20 @@ export class BuilderStore {
 
   getRecoveryJob(jobId: string): RecoveryJobRecord {
     const row = this.#db.prepare(`SELECT
-      job_id, state, queue_state, queue_position,
-      terminal_at, terminal_error_code, terminal_error_json,
-      cleanup_fence_generation, cleanup_admission_id,
-      cleanup_blocker_code, cleanup_blocker_json
-      FROM jobs WHERE job_id = ?`).get(jobId) as DbRow | undefined;
+      job.job_id, job.state, job.queue_state, job.queue_position,
+      job.terminal_at, job.terminal_error_code, job.terminal_error_json,
+      job.cleanup_fence_generation, job.cleanup_admission_id,
+      job.cleanup_blocker_code, job.cleanup_blocker_json,
+      lease.status AS cleanup_lease_status,
+      lease.expires_at AS cleanup_lease_expires_at,
+      lease.fence_generation AS cleanup_lease_fence_generation,
+      lease.blocker_code AS cleanup_lease_blocker_code,
+      lease.blocker_json AS cleanup_lease_blocker_json
+      FROM jobs AS job
+      LEFT JOIN cleanup_leases AS lease
+        ON lease.job_id = job.job_id
+       AND lease.admission_id = job.cleanup_admission_id
+      WHERE job.job_id = ?`).get(jobId) as DbRow | undefined;
     if (!row) throw new StoreNotFoundError(`job not found: ${jobId}`);
     const cleanupFenceGeneration = nullableNumber(row, 'cleanup_fence_generation');
     const cleanupAdmissionId = nullableString(row, 'cleanup_admission_id');
@@ -683,10 +696,42 @@ export class BuilderStore {
     if (cleanupFenceGeneration !== null && (!Number.isSafeInteger(cleanupFenceGeneration) || cleanupFenceGeneration <= 0)) {
       throw new StoreDataError('cleanup recovery fence generation is invalid');
     }
+    const cleanupLeaseStatus = persistedEnum(
+      row,
+      'cleanup_lease_status',
+      ['admitted', 'claimed', 'completed', 'handed_back', 'failed', 'blocking', 'expired'],
+    ) as RecoveryJobRecord['cleanupLeaseStatus'];
+    const cleanupLeaseExpiresAt = nullableInstant(row, 'cleanup_lease_expires_at');
+    const cleanupLeaseFenceGeneration = nullableNumber(row, 'cleanup_lease_fence_generation');
+    if (cleanupFenceGeneration === null) {
+      if (cleanupLeaseStatus !== null || cleanupLeaseExpiresAt !== null || cleanupLeaseFenceGeneration !== null) {
+        throw new StoreDataError('unfenced recovery row unexpectedly joined a cleanup lease');
+      }
+    } else if (
+      cleanupLeaseStatus === null
+      || cleanupLeaseExpiresAt === null
+      || cleanupLeaseFenceGeneration !== cleanupFenceGeneration
+      || cleanupLeaseStatus === 'handed_back'
+      || cleanupLeaseStatus === 'expired'
+    ) {
+      throw new StoreDataError('cleanup recovery lease does not match its active fence');
+    }
     const cleanupBlockerCode = persistedEnum(row, 'cleanup_blocker_code', BUILDER_ERROR_CODES) as BuilderErrorCode | null;
     const cleanupBlocker = parseJsonObject(nullableString(row, 'cleanup_blocker_json'), 'cleanup_blocker_json');
     if ((cleanupBlockerCode === null) !== (cleanupBlocker === null)) {
       throw new StoreDataError('cleanup blocker evidence is incomplete');
+    }
+    const cleanupLeaseBlockerCode = persistedEnum(row, 'cleanup_lease_blocker_code', BUILDER_ERROR_CODES) as BuilderErrorCode | null;
+    const cleanupLeaseBlocker = parseJsonObject(nullableString(row, 'cleanup_lease_blocker_json'), 'cleanup_lease_blocker_json');
+    if ((cleanupLeaseBlockerCode === null) !== (cleanupLeaseBlocker === null)) {
+      throw new StoreDataError('cleanup lease blocker evidence is incomplete');
+    }
+    if (
+      cleanupLeaseStatus === 'failed' || cleanupLeaseStatus === 'blocking'
+        ? cleanupLeaseBlockerCode === null
+        : cleanupLeaseBlockerCode !== null
+    ) {
+      throw new StoreDataError('cleanup lease status and blocker evidence disagree');
     }
     return {
       jobId: asString(row, 'job_id'),
@@ -700,6 +745,10 @@ export class BuilderStore {
       cleanupAdmissionId,
       cleanupBlockerCode,
       cleanupBlocker,
+      cleanupLeaseStatus,
+      cleanupLeaseExpiresAt,
+      cleanupLeaseBlockerCode,
+      cleanupLeaseBlocker,
     };
   }
 

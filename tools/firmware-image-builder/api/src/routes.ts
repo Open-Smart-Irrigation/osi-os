@@ -217,7 +217,8 @@ export interface ApiRecoveryRequest {
 }
 
 export type ApiRecoveryResult =
-  | Readonly<{ readonly kind: 'recovered'; readonly jobId: string; readonly terminalAt: string }>
+  | Readonly<{ readonly kind: 'direct-recovered'; readonly jobId: string; readonly terminalAt: string; readonly terminalEventSeq: number }>
+  | Readonly<{ readonly kind: 'handed-back'; readonly jobId: string; readonly admissionId: string; readonly recoveryEventSeq: number }>
   | Readonly<{ readonly kind: 'cleanup-pending'; readonly jobId: string; readonly admissionId: string; readonly generation: number }>
   | Readonly<{ readonly kind: 'cleanup-in-progress'; readonly jobId: string; readonly admissionId: string; readonly generation: number }>
   | Readonly<{ readonly kind: 'retry-blocked'; readonly jobId: string; readonly admissionId: string; readonly generation: number; readonly blockerCode: string }>
@@ -501,13 +502,26 @@ async function detail(job: JobRecord, store: ApiJobStore): Promise<JsonRecord> {
   }));
   const artifactSha256 = nullableHash64(job.artifactSha256, 'artifact SHA');
   const artifact = artifactSha256 === null ? null : (() => {
-    const directory = stableRelativePath(job.artifactFinalDirectory, 'artifact final directory');
-    const path = stableRelativePath(job.artifactFinalPath, 'artifact final path');
+    const publishState = job.publishState === null ? null : identifier(job.publishState, 'publish state');
+    const hasFinalDirectory = job.artifactFinalDirectory !== null;
+    const hasFinalPath = job.artifactFinalPath !== null;
+    if (hasFinalDirectory !== hasFinalPath) throw new Error('artifact final destination is incomplete');
+    const directory = hasFinalDirectory
+      ? stableRelativePath(job.artifactFinalDirectory, 'artifact final directory')
+      : null;
+    const path = hasFinalPath
+      ? stableRelativePath(job.artifactFinalPath, 'artifact final path')
+      : null;
     const targetId = identifier(job.targetId, 'artifact target ID');
     if (!(TARGET_IDS as readonly string[]).includes(targetId)) throw new Error('artifact target ID is invalid');
-    const expectedDirectory = `${encodeBranchSlug(branch)}/${job.pinnedSha}/${targetId}`;
-    if (directory !== expectedDirectory) throw new Error('artifact final directory is not the deterministic release directory');
-    if (!path.startsWith(`${directory}/`)) throw new Error('artifact final path is outside its release directory');
+    if (directory !== null && path !== null) {
+      const expectedDirectory = `${encodeBranchSlug(branch)}/${job.pinnedSha}/${targetId}`;
+      if (directory !== expectedDirectory) throw new Error('artifact final directory is not the deterministic release directory');
+      if (!path.startsWith(`${directory}/`)) throw new Error('artifact final path is outside its release directory');
+    }
+    if ((publishState === 'publishing' || publishState === 'published') !== (directory !== null)) {
+      throw new Error('artifact final destination does not match its publish state');
+    }
     return {
       rootId: identifier(job.rootId, 'artifact output root ID'),
       directory,
@@ -515,7 +529,7 @@ async function detail(job: JobRecord, store: ApiJobStore): Promise<JsonRecord> {
       sha256: artifactSha256,
       size: safeInteger(job.artifactSize, 'artifact size'),
       mtime: canonicalInstant(job.artifactMtime, 'artifact mtime'),
-      publishState: job.publishState === null ? null : identifier(job.publishState, 'publish state'),
+      publishState,
       publishedAt: nullableInstant(job.publishedAt, 'publishedAt'),
     };
   })();
@@ -1406,24 +1420,39 @@ function recoveryAdmission(value: unknown, field: string): string {
 function decodeRecoveryResult(value: unknown, expectedJobId: string): ApiRecoveryResult {
   const input = record(value, 'recovery result');
   const kind = ownDataProperty(input, 'kind', 'recovery result kind');
-  const jobId = validateJobId(text(
-    ownDataProperty(input, 'jobId', 'recovery result job ID'),
-    'recovery result job ID',
-    MAX_JOB_ID_BYTES,
-  ));
+  const jobId = storedJobId(ownDataProperty(input, 'jobId', 'recovery result job ID'));
   if (jobId !== expectedJobId) throw new Error('recovery result job does not match the request');
   if (kind === 'not-eligible') {
     exactOwnStringKeys(input, ['kind', 'jobId'], 'recovery result');
     return { kind, jobId };
   }
-  if (kind === 'recovered') {
-    exactOwnStringKeys(input, ['kind', 'jobId', 'terminalAt'], 'recovery result');
+  if (kind === 'direct-recovered') {
+    exactOwnStringKeys(input, ['kind', 'jobId', 'terminalAt', 'terminalEventSeq'], 'recovery result');
     return {
       kind,
       jobId,
       terminalAt: canonicalInstant(
         ownDataProperty(input, 'terminalAt', 'recovery terminal time'),
         'recovery terminal time',
+      ),
+      terminalEventSeq: safeInteger(
+        ownDataProperty(input, 'terminalEventSeq', 'recovery terminal event sequence'),
+        'recovery terminal event sequence',
+      ),
+    };
+  }
+  if (kind === 'handed-back') {
+    exactOwnStringKeys(input, ['kind', 'jobId', 'admissionId', 'recoveryEventSeq'], 'recovery result');
+    return {
+      kind,
+      jobId,
+      admissionId: recoveryAdmission(
+        ownDataProperty(input, 'admissionId', 'recovery admission ID'),
+        'recovery admission ID',
+      ),
+      recoveryEventSeq: safeInteger(
+        ownDataProperty(input, 'recoveryEventSeq', 'recovery hand-back event sequence'),
+        'recovery hand-back event sequence',
       ),
     };
   }
@@ -1470,17 +1499,31 @@ function decodeRecoveryResult(value: unknown, expectedJobId: string): ApiRecover
 
 function recoveryFenceMatches(
   job: RecoveryJobRecord,
-  result: Extract<ApiRecoveryResult, { readonly admissionId: string }>,
+  result: Extract<ApiRecoveryResult, { readonly generation: number }>,
+  at: string,
 ): boolean {
-  return job.jobId === result.jobId
+  const base = job.jobId === result.jobId
     && job.cleanupAdmissionId === result.admissionId
     && job.cleanupFenceGeneration === result.generation;
+  if (!base || job.cleanupLeaseExpiresAt === null) return false;
+  if (result.kind === 'retry-blocked') {
+    return (job.cleanupLeaseStatus === 'failed' || job.cleanupLeaseStatus === 'blocking')
+      && job.cleanupBlockerCode === result.blockerCode
+      && job.cleanupBlocker !== null
+      && job.cleanupLeaseBlockerCode === result.blockerCode
+      && job.cleanupLeaseBlocker !== null;
+  }
+  return (job.cleanupLeaseStatus === 'admitted' || job.cleanupLeaseStatus === 'claimed')
+    && job.cleanupLeaseExpiresAt > at
+    && job.cleanupLeaseBlockerCode === null
+    && job.cleanupLeaseBlocker === null;
 }
 
-function recoveredJobMatches(
+function directRecoveredJobMatches(
   job: RecoveryJobRecord,
-  result: Extract<ApiRecoveryResult, { readonly kind: 'recovered' }>,
+  result: Extract<ApiRecoveryResult, { readonly kind: 'direct-recovered' }>,
   store: ApiJobStore,
+  requestAt: string,
 ): boolean {
   if (
     job.jobId !== result.jobId
@@ -1494,11 +1537,14 @@ function recoveredJobMatches(
     || job.cleanupAdmissionId !== null
     || job.cleanupBlockerCode !== null
     || job.cleanupBlocker !== null
+    || job.cleanupLeaseStatus !== null
+    || result.terminalAt < requestAt
   ) return false;
   const terminal = store.getTerminalEvent(job.jobId);
   if (
     terminal === null
     || terminal.jobId !== job.jobId
+    || terminal.seq !== result.terminalEventSeq
     || terminal.eventType !== 'terminal'
     || terminal.state !== 'interrupted'
     || terminal.at !== result.terminalAt
@@ -1512,6 +1558,68 @@ function recoveredJobMatches(
       'recovery terminal error',
       true,
     ) === encodeJson(job.terminalError, 'durable recovery terminal error', true);
+}
+
+function recoveryEventAt(
+  store: ApiJobStore,
+  jobId: string,
+  seq: number,
+): EventRecord | null {
+  const page = store.listEvents(jobId, { afterSeq: seq - 1, limit: 1 });
+  return page.events.length === 1 && page.events[0]!.seq === seq ? page.events[0]! : null;
+}
+
+function handedBackJobMatches(
+  job: RecoveryJobRecord,
+  result: Extract<ApiRecoveryResult, { readonly kind: 'handed-back' }>,
+  store: ApiJobStore,
+  requestAt: string,
+): boolean {
+  if (
+    job.jobId !== result.jobId
+    || job.state !== 'interrupted'
+    || job.queueState !== 'complete'
+    || job.queuePosition !== null
+    || job.terminalAt === null
+    || job.terminalErrorCode !== 'RUNNER_DISAPPEARED'
+    || job.terminalError === null
+    || job.cleanupFenceGeneration !== null
+    || job.cleanupAdmissionId !== null
+    || job.cleanupBlockerCode !== null
+    || job.cleanupBlocker !== null
+    || job.cleanupLeaseStatus !== null
+  ) return false;
+  const event = recoveryEventAt(store, job.jobId, result.recoveryEventSeq);
+  if (
+    event === null
+    || event.eventType !== 'recovery'
+    || event.state !== 'interrupted'
+    || event.at < requestAt
+  ) return false;
+  const payload = record(event.payload, 'recovery hand-back event');
+  exactOwnStringKeys(payload, ['admissionId', 'state'], 'recovery hand-back event');
+  return ownDataProperty(payload, 'admissionId', 'recovery hand-back admission') === result.admissionId
+    && ownDataProperty(payload, 'state', 'recovery hand-back state') === 'interrupted';
+}
+
+function recoverySnapshotKey(job: RecoveryJobRecord): string {
+  return encodeJson({
+    jobId: job.jobId,
+    state: job.state,
+    queueState: job.queueState,
+    queuePosition: job.queuePosition,
+    terminalAt: job.terminalAt,
+    terminalErrorCode: job.terminalErrorCode,
+    terminalError: job.terminalError,
+    cleanupFenceGeneration: job.cleanupFenceGeneration,
+    cleanupAdmissionId: job.cleanupAdmissionId,
+    cleanupBlockerCode: job.cleanupBlockerCode,
+    cleanupBlocker: job.cleanupBlocker,
+    cleanupLeaseStatus: job.cleanupLeaseStatus,
+    cleanupLeaseExpiresAt: job.cleanupLeaseExpiresAt,
+    cleanupLeaseBlockerCode: job.cleanupLeaseBlockerCode,
+    cleanupLeaseBlocker: job.cleanupLeaseBlocker,
+  }, 'recovery snapshot', true);
 }
 
 export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRouteHandler {
@@ -1532,26 +1640,50 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
         throw new HttpTransportError({ code: 'RECOVERY_NOT_ELIGIBLE', status: 409 });
       }
       const status = dependencies.store.getRecoveryJob(jobId);
-      if (result.kind === 'recovered') {
-        if (!recoveredJobMatches(status, result, dependencies.store)) {
+      if (result.kind === 'direct-recovered') {
+        if (!directRecoveredJobMatches(status, result, dependencies.store, at)) {
           throw new Error('post-recovery job does not match direct recovery result');
         }
-        return jsonResponse(200, await detail(getJob(dependencies.store, jobId), dependencies.store));
+        const publicJob = getJob(dependencies.store, jobId);
+        const body = await detail(publicJob, dependencies.store);
+        if (
+          publicJob.state !== status.state
+          || publicJob.terminalAt !== status.terminalAt
+          || recoverySnapshotKey(dependencies.store.getRecoveryJob(jobId)) !== recoverySnapshotKey(status)
+        ) throw new Error('direct recovery changed while constructing its response');
+        return jsonResponse(200, body);
       }
-      if (!recoveryFenceMatches(status, result)) {
+      if (result.kind === 'handed-back') {
+        if (!handedBackJobMatches(status, result, dependencies.store, at)) {
+          throw new Error('post-recovery job does not match cleanup hand-back result');
+        }
+        const publicJob = getJob(dependencies.store, jobId);
+        const body = await detail(publicJob, dependencies.store);
+        if (
+          publicJob.state !== status.state
+          || publicJob.terminalAt !== status.terminalAt
+          || recoverySnapshotKey(dependencies.store.getRecoveryJob(jobId)) !== recoverySnapshotKey(status)
+        ) throw new Error('cleanup hand-back changed while constructing its response');
+        return jsonResponse(200, body);
+      }
+      if (!recoveryFenceMatches(status, result, at)) {
         throw new Error('post-recovery fence does not match recovery result');
       }
       if (result.kind === 'cleanup-in-progress') {
         throw new HttpTransportError({ code: 'CLEANUP_IN_PROGRESS', status: 409, retryable: true });
       }
       if (result.kind === 'retry-blocked') {
-        if (status.cleanupBlockerCode !== result.blockerCode || status.cleanupBlocker === null) {
-          throw new Error('post-recovery blocker does not match recovery result');
-        }
         throw new HttpTransportError({ code: 'CLEANUP_RETRY_BLOCKED', status: 409, retryable: true });
       }
+      const publicJob = getJob(dependencies.store, jobId);
+      const jobBody = await detail(publicJob, dependencies.store);
+      if (
+        publicJob.state !== status.state
+        || publicJob.terminalAt !== status.terminalAt
+        || recoverySnapshotKey(dependencies.store.getRecoveryJob(jobId)) !== recoverySnapshotKey(status)
+      ) throw new Error('cleanup admission changed while constructing its response');
       return jsonResponse(202, {
-        job: await detail(getJob(dependencies.store, jobId), dependencies.store),
+        job: jobBody,
         recovery: 'cleanup_pending',
         cleanupLeaseId: result.admissionId,
       });

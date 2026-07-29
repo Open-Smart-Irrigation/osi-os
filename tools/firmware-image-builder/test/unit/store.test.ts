@@ -10,6 +10,7 @@ import type { JobState, PipelineStageName } from '../../domain/types.js';
 
 const SHA40 = 'a'.repeat(40);
 const SHA64 = 'c'.repeat(64);
+const ADMISSION_ID = `cln_0${'a'.repeat(25)}`;
 const NOW = '2026-07-23T10:00:00.000Z';
 const LATER = '2026-07-23T10:01:00.000Z';
 const SOURCE_PREPARATION = Object.freeze({
@@ -170,6 +171,55 @@ describe('OwnershipStore persistence coverage', () => {
       cleanupAdmissionId: null,
       cleanupBlockerCode: null,
       cleanupBlocker: null,
+      cleanupLeaseStatus: null,
+      cleanupLeaseExpiresAt: null,
+      cleanupLeaseBlockerCode: null,
+      cleanupLeaseBlocker: null,
+    });
+  });
+
+  it('joins the exact active cleanup lease and its blocker evidence', async () => {
+    const { store, db } = await openFixture();
+    db.prepare(`INSERT INTO cleanup_leases (
+      admission_id, job_id, unit_name, owner, expires_at, status,
+      credential_relative_path, credential_sha256, fence_generation,
+      fence_token_hash, proof_json, admitted_at
+    ) VALUES (?, 'job-1', ?, 'api-recovery', ?, 'admitted', ?, ?, 1, ?, '{}', ?)`).run(
+      ADMISSION_ID,
+      `osi-image-builder-cleanup@${ADMISSION_ID}.service`,
+      '2026-07-23T10:05:00.000Z',
+      `recovery/cleanup-credentials/${ADMISSION_ID}.token`,
+      SHA64,
+      'd'.repeat(64),
+      NOW,
+    );
+    db.prepare(`UPDATE jobs SET
+      cleanup_generation=1, cleanup_fence_generation=1,
+      cleanup_fence_token_hash=?, cleanup_admission_id=?
+      WHERE job_id='job-1'`).run('d'.repeat(64), ADMISSION_ID);
+
+    expect(store.getRecoveryJob('job-1')).toMatchObject({
+      cleanupFenceGeneration: 1,
+      cleanupAdmissionId: ADMISSION_ID,
+      cleanupLeaseStatus: 'admitted',
+      cleanupLeaseExpiresAt: '2026-07-23T10:05:00.000Z',
+      cleanupLeaseBlockerCode: null,
+      cleanupLeaseBlocker: null,
+    });
+
+    db.prepare(`UPDATE cleanup_leases SET
+      status='blocking', blocker_code='QUARANTINE_PENDING',
+      blocker_json='{"code":"QUARANTINE_PENDING"}'
+      WHERE admission_id=?`).run(ADMISSION_ID);
+    db.prepare(`UPDATE jobs SET
+      cleanup_blocker_code='QUARANTINE_PENDING',
+      cleanup_blocker_json='{"code":"QUARANTINE_PENDING"}'
+      WHERE job_id='job-1'`).run();
+
+    expect(store.getRecoveryJob('job-1')).toMatchObject({
+      cleanupLeaseStatus: 'blocking',
+      cleanupBlockerCode: 'QUARANTINE_PENDING',
+      cleanupLeaseBlockerCode: 'QUARANTINE_PENDING',
     });
   });
 

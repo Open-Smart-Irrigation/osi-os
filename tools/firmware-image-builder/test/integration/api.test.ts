@@ -180,6 +180,10 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
         ...record,
         cleanupFenceGeneration: null,
         cleanupAdmissionId: null,
+        cleanupLeaseStatus: null,
+        cleanupLeaseExpiresAt: null,
+        cleanupLeaseBlockerCode: null,
+        cleanupLeaseBlocker: null,
       } : (() => { throw new StoreNotFoundError('not found'); })(),
       getStage: (id: string, requestedStage: typeof stage.stage) => id === 'job-1' && requestedStage === 'publish' ? stage : null,
       getTerminalEvent: (id: string) => id === 'job-1' ? {
@@ -1084,11 +1088,16 @@ describe('read-only builder API routes', () => {
       cleanupAdmissionId: null,
       cleanupBlockerCode: null,
       cleanupBlocker: null,
+      cleanupLeaseStatus: null,
+      cleanupLeaseExpiresAt: null,
+      cleanupLeaseBlockerCode: null,
+      cleanupLeaseBlocker: null,
     };
     const recover = vi.fn(async () => ({
-      kind: 'recovered' as const,
+      kind: 'direct-recovered' as const,
       jobId: 'job-1',
       terminalAt: later,
+      terminalEventSeq: 4,
     }));
     const started = await start(dependencies((value) => {
       Object.assign(value as object, { recovery: { recover } });
@@ -1118,12 +1127,21 @@ describe('read-only builder API routes', () => {
     const admissionId = 'cln_0123456789abcdefghjkmnpqrs';
     const pending = {
       ...job('job-1'),
-      state: 'building' as const,
+      state: 'verifying' as const,
       queueState: 'dispatched',
-      currentStage: 'build' as const,
+      currentStage: 'verify' as const,
       terminalErrorCode: null,
       terminalError: null,
       terminalAt: null,
+      artifactStagingPath: 'staging/job-1/image',
+      artifactFinalDirectory: null,
+      artifactFinalPath: null,
+      checksumPath: 'staging/job-1/SHA256SUMS',
+      manifestPath: 'staging/job-1/manifest.json',
+      verificationPath: 'staging/job-1/verification.json',
+      publishState: 'staged' as const,
+      publishStartedAt: null,
+      publishedAt: null,
       cleanupFenceGeneration: 3,
       cleanupAdmissionId: admissionId,
       cleanupBlockerCode: null,
@@ -1139,7 +1157,13 @@ describe('read-only builder API routes', () => {
       Object.assign(value as object, { recovery: { recover } });
       Object.assign(value.store as object, {
         getJob: () => pending,
-        getRecoveryJob: () => pending,
+        getRecoveryJob: () => ({
+          ...pending,
+          cleanupLeaseStatus: 'admitted',
+          cleanupLeaseExpiresAt: '2026-07-28T10:05:00.000Z',
+          cleanupLeaseBlockerCode: null,
+          cleanupLeaseBlocker: null,
+        }),
       });
     }));
     server = started.server;
@@ -1147,7 +1171,7 @@ describe('read-only builder API routes', () => {
     const response = await post(started.port, '/api/jobs/job-1/recover', '{"retry":true}');
     expect(response.status).toBe(202);
     expect(response.body).toMatchObject({
-      job: { id: 'job-1', state: 'building' },
+      job: { id: 'job-1', state: 'verifying' },
       recovery: 'cleanup_pending',
       cleanupLeaseId: admissionId,
     });
@@ -1162,13 +1186,17 @@ describe('read-only builder API routes', () => {
     const started = await start(dependencies((value) => {
       Object.assign(value as object, { recovery: { recover: async () => result } });
       if ('generation' in result && 'admissionId' in result) {
-        Object.assign(value.store as object, {
+      Object.assign(value.store as object, {
           getRecoveryJob: () => ({
             ...job('job-1'),
             cleanupFenceGeneration: result.generation,
             cleanupAdmissionId: result.admissionId,
             cleanupBlockerCode: 'blockerCode' in result ? result.blockerCode : null,
             cleanupBlocker: 'blockerCode' in result ? { code: result.blockerCode } : null,
+            cleanupLeaseStatus: 'blockerCode' in result ? 'blocking' : 'claimed',
+            cleanupLeaseExpiresAt: '2026-07-28T10:05:00.000Z',
+            cleanupLeaseBlockerCode: 'blockerCode' in result ? result.blockerCode : null,
+            cleanupLeaseBlocker: 'blockerCode' in result ? { code: result.blockerCode } : null,
           }),
         });
       }
@@ -1198,8 +1226,9 @@ describe('read-only builder API routes', () => {
 
   it.each([
     ['extra result field', { kind: 'not-eligible', jobId: 'job-1', secret: 'leak' }],
-    ['wrong job', { kind: 'recovered', jobId: 'job-other', terminalAt: later }],
-    ['uncommitted direct recovery', { kind: 'recovered', jobId: 'job-1', terminalAt: later }],
+    ['wrong job', { kind: 'direct-recovered', jobId: 'job-other', terminalAt: later, terminalEventSeq: 4 }],
+    ['invalid internal job', { kind: 'direct-recovered', jobId: '../job', terminalAt: later, terminalEventSeq: 4 }],
+    ['uncommitted direct recovery', { kind: 'direct-recovered', jobId: 'job-1', terminalAt: later, terminalEventSeq: 4 }],
     ['uncommitted cleanup fence', { kind: 'cleanup-pending', jobId: 'job-1', admissionId: 'cln_0123456789abcdefghjkmnpqrs', generation: 3 }],
   ])('fails closed for recovery result/store mismatch: %s', async (_description, result) => {
     const started = await start(dependencies((value) => {
@@ -1209,7 +1238,52 @@ describe('read-only builder API routes', () => {
           ...job('job-1'),
           cleanupFenceGeneration: null,
           cleanupAdmissionId: null,
+          cleanupLeaseStatus: null,
+          cleanupLeaseExpiresAt: null,
+          cleanupLeaseBlockerCode: null,
+          cleanupLeaseBlocker: null,
         }),
+      });
+    }));
+    server = started.server;
+
+    expect((await post(started.port, '/api/jobs/job-1/recover', '{}')).status).toBe(500);
+  });
+
+  it('fails closed when cleanup hand-back races the cleanup-pending response', async () => {
+    const admissionId = 'cln_0123456789abcdefghjkmnpqrs';
+    let reads = 0;
+    const pending = {
+      ...job('job-1'),
+      state: 'verifying' as const,
+      queueState: 'dispatched',
+      terminalAt: null,
+      terminalErrorCode: null,
+      terminalError: null,
+      cleanupFenceGeneration: 3,
+      cleanupAdmissionId: admissionId,
+      cleanupLeaseStatus: 'admitted',
+      cleanupLeaseExpiresAt: '2026-07-28T10:05:00.000Z',
+      cleanupLeaseBlockerCode: null,
+      cleanupLeaseBlocker: null,
+    };
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        recovery: {
+          recover: async () => ({ kind: 'cleanup-pending', jobId: 'job-1', admissionId, generation: 3 }),
+        },
+      });
+      Object.assign(value.store as object, {
+        getJob: () => pending,
+        getRecoveryJob: () => reads++ === 0 ? pending : {
+          ...pending,
+          state: 'interrupted',
+          queueState: 'complete',
+          cleanupFenceGeneration: null,
+          cleanupAdmissionId: null,
+          cleanupLeaseStatus: null,
+          cleanupLeaseExpiresAt: null,
+        },
       });
     }));
     server = started.server;
