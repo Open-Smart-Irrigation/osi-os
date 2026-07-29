@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../config/load.js';
 import { GitCommand } from '../../api/src/git/git-command.js';
 import { SourceResolver } from '../../api/src/git/source-resolver.js';
+import { createProductionEnqueueService } from '../../api/src/enqueue.js';
 import { OwnershipStore } from '../../api/src/ownership.js';
 import { PreflightService, TRUSTED_PREFLIGHT_EXECUTABLES } from '../../api/src/preflight.js';
 import { BuilderStore } from '../../api/src/store.js';
@@ -471,6 +472,7 @@ describe('feed configuration integration boundary', () => {
         sourceResolver: {
           resolveAtAcceptance: async () => sourceMetadata,
           prepareOfflineFeeds: (sha, stateRoot, acceptedJobId) => resolver.prepareOfflineFeeds(sha, stateRoot, acceptedJobId),
+          discardOfflineFeeds: (stateRoot, acceptedJobId) => resolver.discardOfflineFeeds(stateRoot, acceptedJobId),
         },
         manifest: {
           inspect: (value, targetId) => ({
@@ -523,43 +525,29 @@ describe('feed configuration integration boundary', () => {
     });
     const request = { branch: 'main', expectedSha: sourceSha, targetId: 'rpi-2' as const, outputRootId: 'images' };
     const checked = await preflight.run(request);
-    const accepted = await preflight.accept(checked.preflightId, request, jobId);
-    expect(accepted.offlineFeedPreparation.feeds.find(({ name }) => name === 'luci')?.recursiveSubmodules).toEqual([
-      { path: 'deps/nested', commit: nestedCommit },
-    ]);
     const database = openBuilderDatabase(join(loaded.stateRoot, 'jobs.sqlite'));
     const store = new BuilderStore(database);
-    const ownership = new OwnershipStore(database);
-    expect(ownership.apiWrite({
-      kind: 'enqueue',
-      input: {
-        jobId,
-        requestId: 'req-feed-integration',
-        request: {
-          branch: accepted.branch,
-          expectedSha: accepted.expectedSha,
-          targetId: accepted.target.id,
-          outputRootId: accepted.outputRoot.id,
-        },
-        sourceRemote: accepted.source.remote,
-        sourceRef: accepted.source.ref,
-        sourceBranch: accepted.source.branch,
-        branch: accepted.branch,
-        expectedSha: accepted.expectedSha,
-        pinnedSha: accepted.source.sha,
-        sourcePreparation: accepted.source.sourcePreparation,
-        offlineFeedPreparation: accepted.offlineFeedPreparation,
-        targetId: accepted.target.id,
-        rootId: accepted.outputRoot.id,
-        targetManifestSha256: loadedManifest.sha256,
-        sourceCommitTime: accepted.source.commitTime,
-        sourceAuthor: accepted.source.author,
-        sourceSubject: accepted.source.subject,
-        acceptedAt: '2026-07-26T10:00:00.000Z',
-      },
-    })).toMatchObject({ ok: true });
+    const enqueue = createProductionEnqueueService({
+      manifest: loadedManifest,
+      preflight,
+      ownership: new OwnershipStore(database, { maxQueueLength: loaded.config.maxQueueLength }),
+      store,
+      idFactory: () => jobId,
+      now: () => new Date('2026-07-26T10:00:00.000Z'),
+    });
+    await expect(enqueue.acceptAfterRefetchAndPersist(
+      { ...request, preflightId: checked.preflightId },
+      'req-feed-integration',
+    )).resolves.toMatchObject({
+      kind: 'persisted-queued-job',
+      secondOriginFetch: 'verified',
+      persistence: 'atomic-source-job-queue',
+      job: { jobId, state: 'queued', queuePosition: 0 },
+    });
     const persistedSource = store.getSourceIdentity(jobId);
-    expect(persistedSource.offlineFeedPreparation).toEqual(accepted.offlineFeedPreparation);
+    expect(persistedSource.offlineFeedPreparation.feeds.find(({ name }) => name === 'luci')?.recursiveSubmodules).toEqual([
+      { path: 'deps/nested', commit: nestedCommit },
+    ]);
 
     expect(await lstat(join(workspace, 'openwrt/feeds/packages')).catch(() => null)).toBeNull();
     const executor = createCommandExecutor();
@@ -651,7 +639,7 @@ describe('feed configuration integration boundary', () => {
       startedAt: '2026-07-26T10:00:00.000Z',
       finishedAt: '2026-07-26T10:01:00.000Z',
       outcome: 'passed',
-      operationId: null,
+      operationId: 'activate-target',
       commands: [],
       inputs: {},
       observations: targetSetupObservations,
@@ -691,7 +679,7 @@ describe('feed configuration integration boundary', () => {
       startedAt: '2026-07-26T10:02:00.000Z',
       finishedAt: '2026-07-26T10:03:00.000Z',
       outcome: 'passed',
-      operationId: null,
+      operationId: 'resolve-config',
       commands: [],
       inputs: {},
       observations: configObservations,

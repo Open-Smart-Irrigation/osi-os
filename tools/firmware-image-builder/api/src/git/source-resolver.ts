@@ -7,6 +7,8 @@ import {
   open,
   readdir,
   readlink,
+  rm,
+  rmdir,
 } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { join, posix } from 'node:path';
@@ -356,6 +358,20 @@ function safePathSegment(value: string): string {
     || /[\0-\x1f\x7f]/u.test(value)
   ) throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
   return value;
+}
+
+function ownedErrorCode(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+  const descriptor = Object.getOwnPropertyDescriptor(error, 'code');
+  return descriptor !== undefined
+    && 'value' in descriptor
+    && typeof descriptor.value === 'string'
+    ? descriptor.value
+    : null;
+}
+
+function isMissingPath(error: unknown): boolean {
+  return ownedErrorCode(error) === 'ENOENT';
 }
 
 async function assertHeldDirectory(directory: HeldDirectory, dependencies: PathAuthorityDependencies): Promise<void> {
@@ -833,6 +849,7 @@ export class SourceResolver {
       throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
     }
     const jobId = jobIdInput;
+    let preparedRootCreated = false;
     let feeds: readonly PinnedFeed[];
     try {
       feeds = parsePinnedFeeds((await this.#run(['show', `${sourceSha}:feeds.conf.default`])).stdout);
@@ -856,6 +873,7 @@ export class SourceResolver {
           const job = await createHeldDirectory(jobs, jobId, dependencies, false);
           handles.push(job.handle);
           const preparedRoot = await createHeldDirectory(job, 'prepared-feeds', dependencies, true);
+          preparedRootCreated = true;
           handles.push(preparedRoot.handle);
           const prepared: ApiPreparedFeed[] = [];
 
@@ -957,11 +975,101 @@ export class SourceResolver {
         }
       });
     } catch (error) {
+      if (preparedRootCreated) {
+        try {
+          await this.discardOfflineFeeds(stateRoot, jobId);
+        } catch {
+          throw new SourceResolverError('SOURCE_PREPARATION_FAILED', {
+            sourceSha,
+            jobId,
+            cleanup: 'failed',
+          });
+        }
+      }
       if (error instanceof SourceResolverError) throw error;
       throw new SourceResolverError('SOURCE_PREPARATION_FAILED', {
         sourceSha,
         jobId,
         cause: error instanceof Error ? error.message.slice(0, 512) : 'unknown preparation failure',
+      });
+    }
+  }
+
+  async discardOfflineFeeds(
+    stateRoot: StateRootAuthority,
+    jobIdInput: unknown,
+  ): Promise<void> {
+    if (typeof jobIdInput !== 'string' || !SAFE_JOB_ID.test(jobIdInput)) {
+      throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+    }
+    const jobId = jobIdInput;
+    try {
+      await withStateRootSnapshot(stateRoot, async ({ snapshot, dependencies }) => {
+        const handles: FileHandle[] = [];
+        try {
+          const rootChain = await openAbsoluteDirectoryChain(snapshot.path, dependencies);
+          handles.push(...rootChain.handles);
+          const root = rootChain.directory;
+          const rootStats = await root.handle.stat();
+          if (!rootStats.isDirectory() || rootStats.dev !== snapshot.device || rootStats.ino !== snapshot.inode) {
+            throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+          }
+          let jobs: HeldDirectory;
+          try {
+            jobs = await openHeldDirectory(root, 'jobs', dependencies);
+          } catch (error) {
+            if (isMissingPath(error)) return;
+            throw error;
+          }
+          handles.push(jobs.handle);
+          let job: HeldDirectory;
+          try {
+            job = await openHeldDirectory(jobs, jobId, dependencies);
+          } catch (error) {
+            if (isMissingPath(error)) return;
+            throw error;
+          }
+          handles.push(job.handle);
+          await assertHeldChain(job, dependencies);
+          let preparedRoot: HeldDirectory;
+          try {
+            preparedRoot = await openHeldDirectory(job, 'prepared-feeds', dependencies);
+          } catch (error) {
+            if (isMissingPath(error)) return;
+            throw error;
+          }
+          handles.push(preparedRoot.handle);
+          await assertHeldChain(preparedRoot, dependencies);
+          await dependencies.beforeDirectoryAccess?.(job.handle);
+          await assertHeldChain(preparedRoot, dependencies);
+          await rm(descriptorPath(job.handle, 'prepared-feeds'), { recursive: true, force: false });
+          try {
+            await lstat(descriptorPath(job.handle, 'prepared-feeds'));
+            throw new SourceResolverError('SOURCE_PREPARATION_FAILED');
+          } catch (error) {
+            if (!isMissingPath(error)) throw error;
+          }
+          await dependencies.beforeDirectorySync?.(job.handle);
+          await job.handle.sync();
+          if ((await readdir(descriptorPath(job.handle))).length === 0) {
+            try {
+              await rmdir(descriptorPath(jobs.handle, jobId));
+              await dependencies.beforeDirectorySync?.(jobs.handle);
+              await jobs.handle.sync();
+            } catch (error) {
+              const code = ownedErrorCode(error);
+              if (code !== 'ENOTEMPTY' && code !== 'EEXIST') throw error;
+            }
+          }
+        } finally {
+          for (const handle of handles.reverse()) await handle.close().catch(() => undefined);
+        }
+      });
+    } catch (error) {
+      if (error instanceof SourceResolverError) throw error;
+      throw new SourceResolverError('SOURCE_PREPARATION_FAILED', {
+        jobId,
+        cleanup: 'failed',
       });
     }
   }

@@ -189,6 +189,7 @@ export interface PreflightClockCapability { readonly now: () => Date; }
 export interface PreflightSourceCapability {
   readonly resolveAtAcceptance: (branch: unknown, expectedSha: unknown) => Promise<Readonly<GitResolutionMetadata>>;
   readonly prepareOfflineFeeds: (sourceSha: string, stateRoot: StateRootAuthority, jobId: string) => Promise<OfflineFeedPreparation>;
+  readonly discardOfflineFeeds: (stateRoot: StateRootAuthority, jobId: string) => Promise<void>;
 }
 
 export interface PreflightCapabilities {
@@ -229,6 +230,7 @@ export interface PreflightResult {
 
 export interface AcceptedPreflightResult extends PreflightResult {
   readonly jobId: string;
+  readonly checkedAt: string;
   readonly offlineFeedPreparation: OfflineFeedPreparation;
 }
 
@@ -320,6 +322,7 @@ export class PreflightService {
     }
     const preparedAt = this.#validNow();
     if (preparedAt.getTime() >= Date.parse(previous.expiresAt)) {
+      await this.#discardOfflineFeeds(jobId);
       throw this.#error(
         'PREFLIGHT_EXPIRED',
         {
@@ -336,8 +339,14 @@ export class PreflightService {
       createdAt: previous.createdAt,
       expiresAt: previous.expiresAt,
       jobId,
+      checkedAt: preparedAt.toISOString(),
       offlineFeedPreparation,
     });
+  }
+
+  async discardAcceptedJob(jobId: string): Promise<void> {
+    if (!JOB_ID.test(jobId)) throw this.#error('SOURCE_UNAVAILABLE', { reason: 'invalid job ID' });
+    await this.#discardOfflineFeeds(jobId);
   }
 
   #validNow(): Date {
@@ -352,6 +361,20 @@ export class PreflightService {
 
   #error(code: BuilderErrorCode, details: PreflightDetails, checks: readonly PreflightCheckRecord[] = []): PreflightError {
     return new PreflightError(code, details, checks, this.#requestId);
+  }
+
+  async #discardOfflineFeeds(jobId: string): Promise<void> {
+    try {
+      await this.#capabilities.sourceResolver.discardOfflineFeeds(
+        this.#loadedConfig.pathAuthorities.stateRoot,
+        jobId,
+      );
+    } catch {
+      throw this.#error('SOURCE_UNAVAILABLE', {
+        reason: 'offline feed cleanup failed',
+        jobId,
+      });
+    }
   }
 
   async #evaluate(request: PreflightRequest, preflightId: string): Promise<PreflightResult> {

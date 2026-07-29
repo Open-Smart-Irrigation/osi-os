@@ -585,7 +585,8 @@ function validateCreateJobInput(input: unknown): void {
   preparedOptionalHash(value.preflightSha, 'enqueue preflightSha', true); preparedOptionalInstant(value.preflightCheckedAt, 'enqueue preflightCheckedAt'); preparedOptionalInstant(value.preflightExpiresAt, 'enqueue preflightExpiresAt');
   const preflightFields = [value.preflightSha, value.preflightCheckedAt, value.preflightExpiresAt].filter((field) => field !== undefined && field !== null);
   if (preflightFields.length !== 0 && preflightFields.length !== 3) throw new OwnershipValidationError('enqueue preflight evidence is incomplete');
-  requireChronology([['source commit time', String(value.sourceCommitTime)], ['accepted time', String(value.acceptedAt)], ['preflight checked time', value.preflightCheckedAt as string | null | undefined], ['preflight expiry', value.preflightExpiresAt as string | null | undefined]]);
+  requireChronology([['source commit time', String(value.sourceCommitTime)], ['preflight checked time', value.preflightCheckedAt as string | null | undefined], ['accepted time', String(value.acceptedAt)], ['preflight expiry', value.preflightExpiresAt as string | null | undefined]]);
+  if (preflightFields.length === 3 && String(value.preflightExpiresAt) <= String(value.acceptedAt)) throw new OwnershipValidationError('enqueue preflight must remain unexpired at acceptance');
 }
 
 function validateFreshnessInputShape(value: PreparedRecord): void {
@@ -2225,11 +2226,18 @@ function trustedSqliteError(error: unknown): TrustedSqliteError | null {
   return { code, message: messageDescriptor.value.toLowerCase(), errcode };
 }
 
-export interface OwnershipStoreOptions { readonly now?: () => string; readonly failBeforeCommit?: () => void; readonly beforeBegin?: () => void; readonly beforeEvent?: () => void }
+export interface OwnershipStoreOptions {
+  readonly now?: () => string;
+  readonly maxQueueLength?: number;
+  readonly failBeforeCommit?: () => void;
+  readonly beforeBegin?: () => void;
+  readonly beforeEvent?: () => void;
+}
 
 export class OwnershipStore {
   readonly #db: DbFacade;
   readonly #now: () => string;
+  readonly #maxQueueLength: number;
   readonly #failBeforeCommit?: () => void;
   readonly #beforeBegin?: () => void;
   readonly #beforeEvent?: () => void;
@@ -2239,6 +2247,15 @@ export class OwnershipStore {
   constructor(db: DatabaseSync, options: OwnershipStoreOptions = {}) {
     this.#db = dbFacade(db);
     this.#now = options.now ?? (() => new Date().toISOString());
+    if (
+      options.maxQueueLength !== undefined
+      && (!Number.isSafeInteger(options.maxQueueLength)
+        || options.maxQueueLength < 1
+        || options.maxQueueLength > MAX_QUEUE_LENGTH)
+    ) {
+      throw new TypeError(`maxQueueLength must be a safe integer from 1 through ${MAX_QUEUE_LENGTH}`);
+    }
+    this.#maxQueueLength = options.maxQueueLength ?? MAX_QUEUE_LENGTH;
     this.#failBeforeCommit = options.failBeforeCommit;
     this.#beforeBegin = options.beforeBegin;
     this.#beforeEvent = options.beforeEvent;
@@ -2428,9 +2445,15 @@ export class OwnershipStore {
     const checked = input.preflightCheckedAt ?? null;
     const expires = input.preflightExpiresAt ?? null;
     if ((preflight === null) !== (checked === null) || (preflight === null) !== (expires === null)) throw new OwnershipValidationError('preflight evidence is incomplete');
-    if (preflight !== null) { hash40(preflight, 'preflight SHA'); instant(checked!, 'preflight checked time'); instant(expires!, 'preflight expiry'); requireChronology([['accepted time', input.acceptedAt], ['preflight checked time', checked], ['preflight expiry', expires]]); }
+    if (preflight !== null) {
+      hash40(preflight, 'preflight SHA');
+      instant(checked!, 'preflight checked time');
+      instant(expires!, 'preflight expiry');
+      requireChronology([['source commit time', input.sourceCommitTime], ['preflight checked time', checked], ['accepted time', input.acceptedAt], ['preflight expiry', expires]]);
+      if (expires! <= input.acceptedAt) throw new OwnershipValidationError('preflight must remain unexpired at acceptance');
+    }
     const queued = Number((this.#db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE queue_state='queued'").get() as Row).count);
-    if (queued >= MAX_QUEUE_LENGTH) conflict('queue-full', `queue is limited to ${MAX_QUEUE_LENGTH} jobs`);
+    if (queued >= this.#maxQueueLength) conflict('queue-full', `queue is limited to ${this.#maxQueueLength} jobs`);
     const fifo = Number((this.#db.prepare('SELECT COALESCE(MAX(fifo_seq) + 1, 0) AS next FROM queue_entries').get() as Row).next);
     const position = Number((this.#db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE queue_state='queued'").get() as Row).count);
     this.#db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json,

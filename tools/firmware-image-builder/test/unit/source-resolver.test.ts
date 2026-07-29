@@ -590,12 +590,17 @@ describe('API-owned source resolver', () => {
     const preparedPath = join(loaded.stateRoot, 'jobs/job-source-producer/prepared-feeds');
     expect(await lstat(preparedPath).catch(() => null)).toBeNull();
 
-    const preparation = await new SourceResolver({
+    const sourceResolver = new SourceResolver({
       repositoryPath: repository,
       git: new GitCommand({ sshAuthSock: null }),
       feedGit,
       now: () => '2026-07-26T20:00:00.000Z',
-    }).prepareOfflineFeeds(sourceSha, loaded.pathAuthorities.stateRoot, 'job-source-producer');
+    });
+    const preparation = await sourceResolver.prepareOfflineFeeds(
+      sourceSha,
+      loaded.pathAuthorities.stateRoot,
+      'job-source-producer',
+    );
 
     expect(preparation).toMatchObject({
       schemaVersion: 1,
@@ -620,6 +625,14 @@ describe('API-owned source resolver', () => {
     await expect(git(join(preparedPath, 'packages'), ['symbolic-ref', '--quiet', 'HEAD'])).rejects.toThrow();
     expect(preparation.feeds.every((feed) => /^[0-9a-f]{64}$/u.test(feed.treeSha256))).toBe(true);
     expect(Object.isFrozen(preparation)).toBe(true);
+    await expect(sourceResolver.prepareOfflineFeeds(
+      sourceSha,
+      loaded.pathAuthorities.stateRoot,
+      'job-source-producer',
+    )).rejects.toMatchObject({ code: 'SOURCE_PREPARATION_FAILED' });
+    expect(await readFile(join(preparedPath, 'packages/README'), 'utf8')).toBe('packages\n');
+    await sourceResolver.discardOfflineFeeds(loaded.pathAuthorities.stateRoot, 'job-source-producer');
+    expect(await lstat(join(loaded.stateRoot, 'jobs/job-source-producer')).catch(() => null)).toBeNull();
   });
 
   it('prepares the actual repository vendored-tree layout before runner handoff', async () => {

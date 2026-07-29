@@ -14,7 +14,7 @@ import {
   type PipelineStageName,
 } from '../../domain/types.js';
 import {
-  OwnershipStore, OwnershipTransactionError, OwnershipValidationError, OwnershipViolationError,
+  MAX_QUEUE_LENGTH, OwnershipStore, OwnershipTransactionError, OwnershipValidationError, OwnershipViolationError,
   type ApiWriteCommand, type CleanupPostcondition, type CleanupSnapshot, type CleanupWriteCommand, type DirectInterruptionProof, type DirectLogProof, type StagingCleanupProof,
   type OwnershipResult, type PublishBlockerRecheckProof, type PublishRecoveryEvidence, type RunnerWriteCommand,
 } from '../../api/src/ownership.js';
@@ -868,6 +868,68 @@ describe('actor-owned compare-and-set writes', () => {
     const events = store.listEvents('queue-48').events.length;
     expect(ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'queue-overflow', requestId: 'queue-overflow', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('queue-overflow'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'queue', acceptedAt: NOW } })).toMatchObject({ ok: false, conflict: { kind: 'queue-full' } });
     expect(store.listEvents('queue-48').events).toHaveLength(events); expect(() => store.getJob('queue-overflow')).toThrow();
+  });
+
+  it('validates and applies a lower configured queue bound atomically', async () => {
+    const target = await fixture('configured-queue-limit');
+    expect(() => new OwnershipStore(target.db, { maxQueueLength: 0 })).toThrow(TypeError);
+    expect(() => new OwnershipStore(target.db, { maxQueueLength: MAX_QUEUE_LENGTH + 1 })).toThrow(TypeError);
+    const configured = new OwnershipStore(target.db, { now: () => NOW, maxQueueLength: 1 });
+    expect(configured.apiWrite({
+      kind: 'enqueue',
+      input: {
+        jobId: 'configured-overflow',
+        requestId: 'configured-overflow',
+        request: { branch: 'main' },
+        sourceRemote: 'git@example.com:osi-os.git',
+        sourceRef: 'refs/remotes/origin/main',
+        sourceBranch: 'main',
+        branch: 'main',
+        expectedSha: SHA40,
+        pinnedSha: SHA40,
+        sourcePreparation: SOURCE_PREPARATION,
+        offlineFeedPreparation: offlineFeedPreparation('configured-overflow'),
+        targetId: 'rpi-5',
+        rootId: 'release',
+        targetManifestSha256: SHA64,
+        sourceCommitTime: NOW,
+        sourceAuthor: 'Phil',
+        sourceSubject: 'configured queue',
+        acceptedAt: NOW,
+      },
+    })).toMatchObject({ ok: false, conflict: { kind: 'queue-full' } });
+    expect(() => target.store.getJob('configured-overflow')).toThrow();
+  });
+
+  it('rejects a preflight that expires at the acceptance instant', async () => {
+    const target = await fixture('preflight-expiry-boundary');
+    expect(() => target.ownership.apiWrite({
+      kind: 'enqueue',
+      input: {
+        jobId: 'expired-at-acceptance',
+        requestId: 'expired-at-acceptance',
+        request: { branch: 'main' },
+        sourceRemote: 'origin',
+        sourceRef: 'refs/remotes/origin/main',
+        sourceBranch: 'main',
+        branch: 'main',
+        expectedSha: SHA40,
+        pinnedSha: SHA40,
+        sourcePreparation: SOURCE_PREPARATION,
+        offlineFeedPreparation: offlineFeedPreparation('expired-at-acceptance'),
+        targetId: 'rpi-5',
+        rootId: 'release',
+        targetManifestSha256: SHA64,
+        sourceCommitTime: BEFORE,
+        sourceAuthor: 'Phil',
+        sourceSubject: 'expired preflight',
+        preflightSha: SHA40,
+        preflightCheckedAt: NOW,
+        preflightExpiresAt: LATER,
+        acceptedAt: LATER,
+      },
+    })).toThrow(OwnershipValidationError);
+    expect(() => target.store.getJob('expired-at-acceptance')).toThrow();
   });
 
   it('records an API-owned freshness result atomically and makes retries deterministic', async () => {

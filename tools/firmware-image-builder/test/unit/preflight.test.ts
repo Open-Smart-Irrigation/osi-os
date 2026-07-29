@@ -49,6 +49,7 @@ function sourceCapability(
 ): PreflightCapabilities['sourceResolver'] {
   return {
     resolveAtAcceptance,
+    discardOfflineFeeds: async () => undefined,
     prepareOfflineFeeds: async (sourceSha, _stateRoot, jobId) => ({
       schemaVersion: 1,
       boundary: 'api-prepared-pinned-feeds-v1',
@@ -113,6 +114,7 @@ describe('typed preflight checks', () => {
     const caps = capabilities({
       sourceResolver: {
         resolveAtAcceptance: async () => validSource(),
+        discardOfflineFeeds: async () => undefined,
         prepareOfflineFeeds: async (...args: unknown[]) => {
           preparationCalls.push(args);
           return prepared;
@@ -246,7 +248,11 @@ describe('typed preflight checks', () => {
     const first = await preflight.run(request);
     const initial = { ...caps.calls };
     now = new Date('2026-07-23T12:09:59.999Z');
-    await expect(preflight.accept(first.preflightId, request, 'job-accept-valid')).resolves.toBeDefined();
+    await expect(preflight.accept(first.preflightId, request, 'job-accept-valid')).resolves.toMatchObject({
+      createdAt: fixedNow,
+      checkedAt: '2026-07-23T12:09:59.999Z',
+      expiresAt: '2026-07-23T12:10:00.000Z',
+    });
     for (const name of ['sourceResolver', 'repository', 'manifest', 'lock', 'worktree', 'root', 'staging', 'release']) expect(caps.calls[name]).toBeGreaterThan(initial[name] ?? 0);
     const afterValid = { ...caps.calls };
     await expect(preflight.accept(first.preflightId, { ...request, targetId: 'rpi-2' }, 'job-accept-valid')).rejects.toMatchObject({ code: 'PREFLIGHT_REQUEST_MISMATCH' });
@@ -268,10 +274,12 @@ describe('typed preflight checks', () => {
 
   it('rejects a token that expires while offline feeds are being prepared', async () => {
     let now = new Date(fixedNow);
+    const discarded: string[] = [];
     const caps = capabilities({
       clock: { now: () => new Date(now) },
       sourceResolver: {
         resolveAtAcceptance: async () => validSource(),
+        discardOfflineFeeds: async (_stateRoot, jobId) => { discarded.push(jobId); },
         prepareOfflineFeeds: async (sourceSha, _stateRoot, jobId) => {
           now = new Date('2026-07-23T12:10:00.000Z');
           return {
@@ -299,6 +307,7 @@ describe('typed preflight checks', () => {
         checkedAt: '2026-07-23T12:10:00.000Z',
       },
     });
+    expect(discarded).toEqual(['job-offline-preparation-expired']);
   });
 
   it('bounds IDs and cache, preserves the original on duplicate, and prunes at expiry', async () => {
