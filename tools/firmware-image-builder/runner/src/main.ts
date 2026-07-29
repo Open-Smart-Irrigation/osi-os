@@ -6,6 +6,7 @@ import {
   mkdir,
   open,
   rename,
+  rm,
 } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import {
@@ -17,9 +18,14 @@ import {
 import {
   OwnershipStore,
   type LogCleanupProof,
+  type ObservedJsonEvidence,
   type StagingCleanupProof,
   type RunnerWriteCommand,
 } from '../../api/src/ownership.js';
+import type {
+  PublishingRecoveryArtifactObservation,
+  PublishingRecoveryLogProof,
+} from '../../api/src/publishing-recovery.js';
 import {
   createReadOnlyPreflightDefaults,
   TRUSTED_PREFLIGHT_EXECUTABLES,
@@ -33,6 +39,7 @@ import {
   type StoredOperation,
 } from '../../api/src/store.js';
 import {
+  canonicalInstant,
   encodeJson,
   normalizeJson,
   stableRelativePath,
@@ -48,6 +55,8 @@ import {
   type StateRootAuthority,
 } from '../../config/load.js';
 import { validateBuilderLock, type BuilderLock } from '../../domain/builder-lock.js';
+import { createInstalledLockReader } from '../../domain/installed-lock.js';
+import { installedMigrationsDirectory } from '../../domain/installed-layout.js';
 import { encodeBranchSlug } from '../../domain/paths.js';
 import type {
   BuilderErrorContract,
@@ -75,7 +84,10 @@ import {
   createRunnerCancellation,
   type RecoveredRunnerCancellationEvidence,
 } from './cancellation.js';
-import { createEvidenceWriter } from './evidence.js';
+import {
+  createEvidenceWriter,
+  type EvidencePublication,
+} from './evidence.js';
 import { createApiFreshnessSocketClient } from './freshness.js';
 import {
   createByteBoundedTextCapture,
@@ -97,6 +109,7 @@ import {
   type PipelineCancellation,
   type PipelineResult,
   type PreparedPublication,
+  type PublicationBinding,
   type PublicationFilesPrepareInput,
   type StageActionContext,
   type TargetSetupStageResult,
@@ -106,6 +119,7 @@ import {
   setupSourceWorktree,
   type SourceSetupResult,
 } from './source.js';
+import { createTerminalVerification } from './terminal-verification.js';
 import {
   classifyTargetSetupOperationResult,
   createLockedTargetSetupOperations,
@@ -1451,7 +1465,7 @@ function createPublicationFiles(
       return withApprovedRootSnapshot(
         loaded.pathAuthorities.approvedRoots,
         input.binding.rootId,
-        async ({ snapshot }) => {
+        async ({ snapshot, dependencies }) => {
           if (
             snapshot.path !== input.binding.rootPath
             || snapshot.device !== input.binding.rootDevice
@@ -1473,18 +1487,26 @@ function createPublicationFiles(
               false,
             );
             const running = await readHeldFile(final.directory, 'verification.json');
-            if (running.sha256 !== input.artifact.verificationSha256) {
+            const terminalSha256 = sha256(input.verificationManifestBytes);
+            const alreadyTerminal = (
+              running.sha256 === terminalSha256
+              && running.bytes.toString('utf8') === input.verificationManifestBytes
+            );
+            if (!alreadyTerminal && running.sha256 !== input.artifact.verificationSha256) {
               throw new Error('published verification input differs from staged authority');
             }
-            await writeHeldFile(
-              final.directory,
-              temporaryName,
-              input.verificationManifestBytes,
-            );
-            await rename(
-              fdPath(final.directory, temporaryName),
-              fdPath(final.directory, 'verification.json'),
-            );
+            if (!alreadyTerminal) {
+              await writeHeldFile(
+                final.directory,
+                temporaryName,
+                input.verificationManifestBytes,
+              );
+              await rename(
+                fdPath(final.directory, temporaryName),
+                fdPath(final.directory, 'verification.json'),
+              );
+            }
+            await dependencies.beforeDirectorySync?.(final.directory);
             await final.directory.sync();
             const [image, checksum, manifest, verification] = await Promise.all([
               readHeldFile(final.directory, basename(input.binding.finalPath)),
@@ -1497,7 +1519,7 @@ function createPublicationFiles(
               || image.size !== input.binding.artifactSize
               || checksum.sha256 !== input.artifact.checksumSha256
               || manifest.sha256 !== input.artifact.manifestSha256
-              || verification.sha256 !== sha256(input.verificationManifestBytes)
+              || verification.sha256 !== terminalSha256
               || verification.bytes.toString('utf8') !== input.verificationManifestBytes
             ) {
               throw new Error('terminal publication files failed held revalidation');
@@ -1516,12 +1538,429 @@ function createPublicationFiles(
               staging: 'absent',
             });
           } finally {
+            if (final !== null) {
+              await rm(fdPath(final.directory, temporaryName), { force: true })
+                .catch(() => undefined);
+            }
             if (final !== null) await closeHandles(final.handles);
             await root.close();
           }
         },
       );
     },
+  });
+}
+
+function recoveryJsonObject(bytes: Buffer, field: string): JsonObject {
+  const text = bytes.toString('utf8');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${field} is not JSON`, { cause: error });
+  }
+  const canonical = encodeJson(parsed, field, true);
+  if (text !== canonical) throw new Error(`${field} is not canonical JSON`);
+  return normalizeJson(parsed, field) as JsonObject;
+}
+
+function recoveryStageEvidence(bytes: string, field: string): JsonObject {
+  if (!bytes.endsWith('\n')) throw new Error(`${field} must end with one newline`);
+  const content = bytes.slice(0, -1);
+  if (content.endsWith('\n')) throw new Error(`${field} has more than one trailing newline`);
+  const parsed = recoveryJsonObject(Buffer.from(content, 'utf8'), field);
+  if (`${encodeJson(parsed, field, true)}\n` !== bytes) {
+    throw new Error(`${field} is not canonical JSON`);
+  }
+  return parsed;
+}
+
+function sameRecoveryJson(left: unknown, right: unknown, field: string): boolean {
+  return encodeJson(left, field, true) === encodeJson(right, field, true);
+}
+
+function recoveredEvidenceKeys(value: JsonObject, field: string): void {
+  if (Object.keys(value).sort().join('\0') !== field) {
+    throw new Error('stored recovery evidence has an invalid shape');
+  }
+}
+
+function adoptRecoveredEvidence(input: Readonly<{
+  readonly job: JobRecord;
+  readonly stageStartedAt: string;
+  readonly at: string;
+  readonly expectedObservations: Readonly<Record<string, unknown>>;
+  readonly publication: EvidencePublication;
+}>): EvidencePublication {
+  const stage = recoveryStageEvidence(input.publication.bytes, 'stored publish evidence');
+  recoveredEvidenceKeys(
+    stage,
+    'commands\0error\0finishedAt\0inputs\0jobId\0observations\0operationId\0outcome\0schemaVersion\0stage\0startedAt',
+  );
+  if (
+    stage.schemaVersion !== 1
+    || stage.jobId !== input.job.jobId
+    || stage.stage !== 'publish'
+    || stage.startedAt !== input.stageStartedAt
+    || stage.outcome !== 'passed'
+    || stage.operationId !== null
+    || !Array.isArray(stage.commands)
+    || stage.commands.length !== 0
+    || stage.error !== null
+  ) {
+    throw new Error('stored publish evidence does not bind the recovered job');
+  }
+  const finishedAt = canonicalInstant(stage.finishedAt, 'stored publish evidence finishedAt');
+  canonicalInstant(input.stageStartedAt, 'publish stage start');
+  const recoveryAt = canonicalInstant(input.at, 'recovery time');
+  if (finishedAt < input.stageStartedAt || finishedAt > recoveryAt) {
+    throw new Error('stored publish evidence chronology is invalid');
+  }
+  if (stage.inputs === null || typeof stage.inputs !== 'object' || Array.isArray(stage.inputs)) {
+    throw new Error('stored publish evidence inputs are invalid');
+  }
+  const expectedInputs = {
+    targetId: input.job.targetId,
+    rootId: input.job.rootId,
+    branch: input.job.branch,
+    pinnedSha: input.job.pinnedSha,
+  };
+  if (!sameRecoveryJson(stage.inputs, expectedInputs, 'stored publish evidence inputs')) {
+    throw new Error('stored publish evidence inputs do not bind the recovered job');
+  }
+  if (stage.observations === null || typeof stage.observations !== 'object' || Array.isArray(stage.observations)) {
+    throw new Error('stored publish evidence observations are invalid');
+  }
+  const observations = stage.observations as JsonObject;
+  recoveredEvidenceKeys(observations, 'checksum\0final\0logs\0manifest\0staging\0verification');
+  const expected = input.expectedObservations as JsonObject;
+  for (const field of ['checksum', 'final', 'manifest', 'staging', 'verification'] as const) {
+    if (!sameRecoveryJson(observations[field], expected[field], `stored publish evidence ${field}`)) {
+      throw new Error(`stored publish evidence ${field} does not bind the recovered artifact`);
+    }
+  }
+  const logs = observations.logs;
+  if (
+    logs === null
+    || typeof logs !== 'object'
+    || Array.isArray(logs)
+    || Object.keys(logs).sort().join('\0') !== 'docker\0noGap\0runner\0verifiedAt'
+    || (logs as JsonObject).runner !== 'sealed'
+    || (logs as JsonObject).docker !== 'sealed'
+    || (logs as JsonObject).noGap !== true
+  ) {
+    throw new Error('stored publish evidence logs are incomplete');
+  }
+  const verifiedAt = canonicalInstant((logs as JsonObject).verifiedAt, 'stored log verification time');
+  if (verifiedAt < input.stageStartedAt || verifiedAt > recoveryAt) {
+    throw new Error('stored publish evidence logs do not bind the recovery interval');
+  }
+  return input.publication;
+}
+
+function recoveryArtifact(job: JobRecord): ArtifactInput {
+  if (
+    job.artifactStagingPath === null
+    || job.artifactSha256 === null
+    || job.artifactSize === null
+    || job.artifactMtime === null
+    || job.checksumPath === null
+    || job.checksumSha256 === null
+    || job.manifestPath === null
+    || job.manifestSha256 === null
+    || job.verificationPath === null
+    || job.verificationSha256 === null
+  ) {
+    throw new Error('publishing recovery artifact identity is incomplete');
+  }
+  return Object.freeze({
+    stagingPath: job.artifactStagingPath,
+    artifactSha256: job.artifactSha256,
+    artifactSize: job.artifactSize,
+    artifactMtime: job.artifactMtime,
+    checksumPath: job.checksumPath,
+    checksumSha256: job.checksumSha256,
+    manifestPath: job.manifestPath,
+    manifestSha256: job.manifestSha256,
+    verificationPath: job.verificationPath,
+    verificationSha256: job.verificationSha256,
+  });
+}
+
+async function inspectRecoveredPublication(
+  loaded: LoadedConfig,
+  job: JobRecord,
+  artifact: ArtifactInput,
+): Promise<Readonly<{
+  readonly binding: PublicationBinding;
+  readonly observed: PublishingRecoveryArtifactObservation;
+}>> {
+  if (
+    job.state !== 'publishing'
+    || job.publishState !== 'publishing'
+    || job.artifactFinalDirectory === null
+    || job.artifactFinalPath === null
+  ) {
+    throw new Error('publishing recovery job binding is incomplete');
+  }
+  const branchSlug = encodeBranchSlug(job.branch);
+  const finalDirectory = `${branchSlug}/${job.pinnedSha}/${job.targetId}`;
+  const artifactName = basename(artifact.stagingPath);
+  const finalPath = `${finalDirectory}/${artifactName}`;
+  if (
+    job.artifactFinalDirectory !== finalDirectory
+    || job.artifactFinalPath !== finalPath
+    || artifact.stagingPath !== `staging/${job.jobId}/${artifactName}`
+    || artifact.checksumPath !== `staging/${job.jobId}/sha256sums`
+    || artifact.manifestPath !== `staging/${job.jobId}/build-manifest.json`
+    || artifact.verificationPath !== `staging/${job.jobId}/verification.json`
+  ) {
+    throw new Error('publishing recovery paths do not match the durable binding');
+  }
+  const configuredRoot = loaded.config.approvedOutputRoots.find(
+    (root) => root.id === job.rootId,
+  );
+  if (configuredRoot === undefined) throw new Error('publishing recovery root is unknown');
+  return withApprovedRootSnapshot(
+    loaded.pathAuthorities.approvedRoots,
+    job.rootId,
+    async ({ snapshot }) => {
+      if (snapshot.path !== configuredRoot.path) {
+        throw new Error('publishing recovery root authority changed');
+      }
+      const binding: PublicationBinding = Object.freeze({
+        jobId: job.jobId,
+        rootId: job.rootId,
+        rootPath: snapshot.path,
+        rootDevice: snapshot.device,
+        rootInode: snapshot.inode,
+        branch: job.branch,
+        branchSlug,
+        pinnedSha: job.pinnedSha,
+        targetId: job.targetId,
+        stagingDirectory: `staging/${job.jobId}`,
+        stagingPath: artifact.stagingPath,
+        finalDirectory,
+        finalPath,
+        artifactSha256: artifact.artifactSha256,
+        artifactSize: artifact.artifactSize,
+      });
+      const root = await open(snapshot.path, DIRECTORY_FLAGS);
+      let final: DirectoryChain | null = null;
+      let stagingParent: DirectoryChain | null = null;
+      try {
+        stagingParent = await openDirectoryChain(
+          root,
+          ['.osi-image-builder', 'staging'],
+          false,
+        );
+        try {
+          await lstat(fdPath(stagingParent.directory, safeSegment(job.jobId, 'job ID')));
+          throw new Error('staging remains after recovered publication');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+        final = await openDirectoryChain(
+          root,
+          [branchSlug, job.pinnedSha, job.targetId],
+          false,
+        );
+        const [image, checksum, manifest, verification] = await Promise.all([
+          readHeldFile(final.directory, artifactName),
+          readHeldFile(final.directory, 'sha256sums'),
+          readHeldFile(final.directory, 'build-manifest.json'),
+          readHeldFile(final.directory, 'verification.json'),
+        ]);
+        const checksumBytes = checksum.bytes.toString('utf8');
+        if (
+          image.sha256 !== artifact.artifactSha256
+          || image.size !== artifact.artifactSize
+          || image.mtime !== artifact.artifactMtime
+          || checksum.sha256 !== artifact.checksumSha256
+          || checksumBytes !== `${artifact.artifactSha256}  ${artifactName}\n`
+          || manifest.sha256 !== artifact.manifestSha256
+        ) {
+          throw new Error('recovered final publication differs from persisted artifact identity');
+        }
+        const manifestContent = recoveryJsonObject(manifest.bytes, 'recovered build manifest');
+        const verificationContent = recoveryJsonObject(
+          verification.bytes,
+          'recovered verification manifest',
+        );
+        for (const [content, field] of [
+          [manifestContent, 'build manifest'],
+          [verificationContent, 'verification manifest'],
+        ] as const) {
+          if (
+            content.jobId !== job.jobId
+            || content.branch !== job.branch
+            || content.pinnedSha !== job.pinnedSha
+            || content.targetId !== job.targetId
+            || content.artifactSha256 !== artifact.artifactSha256
+          ) {
+            throw new Error(`recovered ${field} does not bind the publishing job`);
+          }
+        }
+        return Object.freeze({
+          binding,
+          observed: Object.freeze({
+            final: Object.freeze({
+              present: true,
+              path: finalPath,
+              held: true,
+              size: image.size,
+              sha256: image.sha256,
+            }),
+            checksum: Object.freeze({
+              present: true,
+              path: `${finalDirectory}/sha256sums`,
+              contents: checksumBytes,
+              sha256: checksum.sha256,
+            }),
+            manifest: Object.freeze({
+              present: true,
+              path: `${finalDirectory}/build-manifest.json`,
+              bytes: manifest.bytes.toString('utf8'),
+              content: manifestContent,
+              sha256: manifest.sha256,
+            }),
+            verification: Object.freeze({
+              present: true,
+              path: `${finalDirectory}/verification.json`,
+              bytes: verification.bytes.toString('utf8'),
+              content: verificationContent,
+              sha256: verification.sha256,
+            }),
+            staging: Object.freeze({
+              state: 'absent' as const,
+              path: null,
+              sha256: null,
+              size: null,
+              held: false,
+            }),
+            quarantine: Object.freeze({
+              state: 'absent' as const,
+              path: null,
+              held: false,
+              artifactPath: null,
+              artifactSize: null,
+              artifactSha256: null,
+            }),
+          }),
+        });
+      } finally {
+        if (final !== null) await closeHandles(final.handles);
+        if (stagingParent !== null) await closeHandles(stagingParent.handles);
+        await root.close();
+      }
+    },
+  );
+}
+
+export async function completeRecoveredPublication(input: Readonly<{
+  readonly loaded: LoadedConfig;
+  readonly job: JobRecord;
+  readonly stageStartedAt: string;
+  readonly at: string;
+  readonly logs: PublishingRecoveryLogProof;
+}>): Promise<Readonly<{
+  readonly observed: PublishingRecoveryArtifactObservation;
+  readonly stageEvidence: ObservedJsonEvidence;
+}>> {
+  const artifact = recoveryArtifact(input.job);
+  const inspected = await inspectRecoveredPublication(input.loaded, input.job, artifact);
+  const terminal = createTerminalVerification(
+    input.job.jobId,
+    inspected.observed.verification.content!,
+  );
+  const terminalSha256 = sha256(terminal.bytes);
+  if (
+    inspected.observed.verification.sha256 !== artifact.verificationSha256
+    && (
+      inspected.observed.verification.sha256 !== terminalSha256
+      || inspected.observed.verification.bytes !== terminal.bytes
+    )
+  ) {
+    throw new Error('recovered verification differs from staged and terminal authority');
+  }
+  const terminalVerification = Object.freeze({
+    ...inspected.observed.verification,
+    bytes: terminal.bytes,
+    content: terminal.manifest,
+    sha256: terminalSha256,
+  });
+  const stageObservations = Object.freeze({
+    checksum: inspected.observed.checksum,
+    final: Object.freeze({ verificationSha256: terminalSha256 }),
+    logs: input.logs,
+    manifest: inspected.observed.manifest,
+    staging: inspected.observed.staging,
+    verification: terminalVerification,
+  });
+  const evidenceWriter = createEvidenceWriter({
+    stateRoot: input.loaded.pathAuthorities.stateRoot,
+  });
+  const evidenceInput = {
+    jobId: input.job.jobId,
+    stage: 'publish',
+    startedAt: input.stageStartedAt,
+    finishedAt: input.at,
+    outcome: 'passed',
+    operationId: null,
+    commands: [],
+    inputs: {
+      targetId: input.job.targetId,
+      rootId: input.job.rootId,
+      branch: input.job.branch,
+      pinnedSha: input.job.pinnedSha,
+    },
+    observations: stageObservations,
+    error: null,
+  } as const;
+  const preparedEvidence = evidenceWriter.prepare(evidenceInput);
+  const existingEvidence = await evidenceWriter.read(preparedEvidence.path);
+  const evidence = existingEvidence === null
+    ? null
+    : adoptRecoveredEvidence({
+      job: input.job,
+      stageStartedAt: input.stageStartedAt,
+      at: input.at,
+      expectedObservations: stageObservations,
+      publication: existingEvidence,
+    });
+  const evidenceIdentity = evidence ?? preparedEvidence;
+  await createPublicationFiles(input.loaded, () => {
+    throw new Error('publishing recovery has no workspace authority');
+  }).finalizeVerification({
+    binding: inspected.binding,
+    artifact,
+    verificationManifest: terminal.manifest,
+    verificationManifestBytes: terminal.bytes,
+    publishEvidencePath: evidenceIdentity.path,
+    publishEvidenceSha256: evidenceIdentity.sha256,
+  });
+  const publishedEvidence = evidence ?? await evidenceWriter.write(evidenceInput);
+  if (publishedEvidence.path !== evidenceIdentity.path || publishedEvidence.sha256 !== evidenceIdentity.sha256) {
+    throw new Error('published recovery evidence differs from its adopted identity');
+  }
+  const completed = await inspectRecoveredPublication(input.loaded, input.job, {
+    ...artifact,
+    verificationSha256: terminalSha256,
+  });
+  if (
+    completed.observed.verification.sha256 !== terminalSha256
+    || completed.observed.verification.bytes !== terminal.bytes
+  ) {
+    throw new Error('recovered terminal verification failed final revalidation');
+  }
+  return Object.freeze({
+    observed: completed.observed,
+    stageEvidence: Object.freeze({
+      present: true,
+      path: publishedEvidence.path,
+      bytes: publishedEvidence.bytes,
+      sha256: publishedEvidence.sha256,
+    }),
   });
 }
 
@@ -1877,6 +2316,10 @@ async function createProductionComposition(
   ownership: OwnershipStore,
 ): Promise<ProductionComposition> {
   const packageDirectory = dirname(loaded.config.builderLockPath);
+  const installedLockReader = createInstalledLockReader();
+  const readInstalledLock = async (): Promise<Buffer> => (
+    await installedLockReader.read(packageDirectory)
+  ).bytes;
   const manifestPath = join(packageDirectory, 'manifest', 'targets.json');
   const publisherPath = join(packageDirectory, 'bin', 'osi-image-publish');
   let workspaceHandle: FileHandle | null = null;
@@ -1888,7 +2331,7 @@ async function createProductionComposition(
   try {
     heldPublisher = await holdInstalledPublisher(publisherPath);
     const [lockBytes, manifestBytes] = await Promise.all([
-      readStableFile(loaded.config.builderLockPath),
+      readInstalledLock(),
       readStableFile(manifestPath),
     ]);
     const lock = parseInstalledLock(loaded.config.builderLockPath, lockBytes);
@@ -1934,7 +2377,13 @@ async function createProductionComposition(
       jobId: args.jobId,
       clock: { now: () => new Date().toISOString() },
     });
-    const preflight = createReadOnlyPreflightDefaults();
+    const preflightDefaults = createReadOnlyPreflightDefaults();
+    const preflight = Object.freeze({
+      ...preflightDefaults,
+      lock: Object.freeze({
+        read: async () => (await installedLockReader.read(packageDirectory)).text,
+      }),
+    });
     const attempts = new Map<TrustedOperationId, number>();
     const completedExecutions = new Map<TrustedOperationId, PipelineOperationExecution>();
     let source: SourceSetupResult | null = null;
@@ -2327,7 +2776,7 @@ async function createProductionComposition(
           const [worktreeSpace, outputSpace, heldLock] = await Promise.all([
             preflight.fileSystem.statfs(worktree.path),
             preflight.fileSystem.statfs(rootInspection.path),
-            preflight.lock.read(loaded.config.builderLockPath),
+            preflight.lock.read(),
           ]);
           const selection = preflight.manifest.inspect(manifest, selected.id);
           if (
@@ -2579,7 +3028,7 @@ async function createProductionComposition(
         approvedRoot,
         authoritativeFiles: {
           builderLockPath: loaded.config.builderLockPath,
-          readBuilderLock: () => readStableFile(loaded.config.builderLockPath),
+          readBuilderLock: readInstalledLock,
           targetManifestPath: manifestPath,
           readTargetManifest: () => readStableFile(manifestPath),
         },
@@ -2639,7 +3088,13 @@ function createLocalRunnerArguments(
 export async function runRunner(argv: readonly string[]): Promise<PipelineResult> {
   const launch = parseRunnerArguments(argv);
   const state = await loadStateRootAuthority();
-  const database = openBuilderDatabase(join(state.stateRoot, 'jobs.sqlite'));
+  const loaded = await loadConfig();
+  if (loaded.stateRoot !== state.stateRoot) {
+    throw new Error('configured state root differs from guarded runner state');
+  }
+  const database = openBuilderDatabase(join(state.stateRoot, 'jobs.sqlite'), {
+    migrationsDirectory: installedMigrationsDirectory(loaded.config.builderLockPath),
+  });
   const store = new BuilderStore(database);
   const ownership = new OwnershipStore(database);
   const clock: PipelineClock = { now: () => new Date().toISOString() };
@@ -2653,19 +3108,13 @@ export async function runRunner(argv: readonly string[]): Promise<PipelineResult
       evidenceWriter: createEvidenceWriter({
         stateRoot: state.authority,
       }),
-      compose: async () => {
-        const loaded = await loadConfig();
-        if (loaded.stateRoot !== state.stateRoot) {
-          throw new Error('configured state root differs from guarded runner state');
-        }
-        return createProductionComposition(
-          args,
-          loaded,
-          database,
-          store,
-          ownership,
-        );
-      },
+      compose: async () => createProductionComposition(
+        args,
+        loaded,
+        database,
+        store,
+        ownership,
+      ),
     });
   } finally {
     store.close();

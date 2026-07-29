@@ -229,7 +229,7 @@ export type CancellationEvidence = Readonly<{
 export type CleanupSnapshot = Readonly<{
   readonly runner: Readonly<{ readonly unit: string; readonly owner: string | null; readonly leaseExpiresAt: string | null; readonly inactiveAt: string; readonly observedAt: string }>;
   readonly state: ActiveRecoveryState | 'interrupted';
-  readonly container: NullContainerProof | Readonly<{ readonly kind: 'present'; readonly id: string; readonly name: string; readonly imageDigest: string; readonly labels: JsonObject; readonly globalLabelResult: 'single-exact-match'; readonly observedAt: string }>;
+  readonly container: NullContainerProof | Readonly<{ readonly kind: 'present'; readonly id: string; readonly name: string; readonly imageDigest: string; readonly labels: JsonObject; readonly globalLabelResult: 'single-exact-match' | 'no-match'; readonly observedAt: string }>;
   readonly staging: CleanupStagingSnapshot;
   readonly logs: LogCleanupSnapshot;
   readonly blocker: 'none' | 'container' | 'staging-or-log';
@@ -292,7 +292,7 @@ export type PublishRecoveryEvidence = Readonly<{
     readonly checksum: Readonly<{ readonly present: boolean; readonly path: string; readonly contents: string | null; readonly sha256: string | null }>;
     readonly manifest: Readonly<{ readonly present: boolean; readonly path: string; readonly bytes: string | null; readonly content: JsonObject | null; readonly sha256: string | null }>;
     readonly verification: Readonly<{ readonly present: boolean; readonly path: string; readonly bytes: string | null; readonly content: JsonObject | null; readonly sha256: string | null }>;
-    readonly staging: Readonly<{ readonly state: 'present' | 'absent'; readonly path: string | null; readonly sha256: string | null }>;
+    readonly staging: Readonly<{ readonly state: 'present' | 'absent'; readonly path: string | null; readonly sha256: string | null; readonly size: number | null; readonly held: boolean }>;
     readonly quarantine?: Readonly<{ readonly state: 'present' | 'absent'; readonly path: string | null; readonly held: boolean; readonly artifactPath: string | null; readonly artifactSize: number | null; readonly artifactSha256: string | null }>;
     readonly logs: Readonly<{ readonly runner: 'sealed'; readonly docker: 'sealed'; readonly verifiedAt: string; readonly noGap: true }>;
   }>;
@@ -1099,7 +1099,7 @@ function shapeCleanupSnapshot(value: unknown, field: string, at: string): void {
   const snapshot = shapeRecord(value, field); const runner = shapeRecord(snapshot.runner, `${field}.runner`); preparedString(runner.unit, `${field}.runner.unit`, TEXT_LIMITS.maxIdentifierBytes); shapeNullableString(runner.owner, `${field}.runner.owner`); shapeNullableString(runner.leaseExpiresAt, `${field}.runner.leaseExpiresAt`); if ((runner.owner == null) !== (runner.leaseExpiresAt == null)) throw new OwnershipValidationError(`${field}.runner owner/lease pair is incomplete`); preparedInstant(runner.inactiveAt, `${field}.runner.inactiveAt`); preparedInstant(runner.observedAt, `${field}.runner.observedAt`); preparedEnum(snapshot.state, ['starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup', 'feeds', 'config', 'building', 'verifying', 'publishing', 'cancel_requested', 'interrupted'], `${field}.state`); preparedEnum(snapshot.blocker, ['none', 'container', 'staging-or-log'], `${field}.blocker`); shapeCleanupStagingSnapshot(snapshot.staging, `${field}.staging`, at);
   const container = shapeRecord(snapshot.container, `${field}.container`);
   if (container.kind === 'absent') shapeNullContainer(snapshot.container, `${field}.container`, at as string);
-  else { shapeLiteral(container.kind, 'present', `${field}.container.kind`); preparedString(container.id, `${field}.container.id`, TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, `${field}.container.name`, TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, `${field}.container.imageDigest`); preparedJsonObject(container.labels, `${field}.container.labels`); shapeLiteral(container.globalLabelResult, 'single-exact-match', `${field}.container.globalLabelResult`); preparedInstant(container.observedAt, `${field}.container.observedAt`); shapeChronology([[`${field}.container.observedAt`, container.observedAt], [`${field}.command.at`, at]], field); }
+  else { shapeLiteral(container.kind, 'present', `${field}.container.kind`); preparedString(container.id, `${field}.container.id`, TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, `${field}.container.name`, TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, `${field}.container.imageDigest`); preparedJsonObject(container.labels, `${field}.container.labels`); preparedEnum(container.globalLabelResult, ['single-exact-match', 'no-match'], `${field}.container.globalLabelResult`); preparedInstant(container.observedAt, `${field}.container.observedAt`); shapeChronology([[`${field}.container.observedAt`, container.observedAt], [`${field}.command.at`, at]], field); }
   shapeRecord(snapshot.logs, `${field}.logs`); shapeChronology([[`${field}.runner.inactiveAt`, runner.inactiveAt], [`${field}.runner.observedAt`, runner.observedAt], [`${field}.at`, at]], field); shapeLogs(snapshot.logs, `${field}.logs`, true, at as string);
 }
 
@@ -1465,7 +1465,10 @@ function validateCleanupSnapshot(db: DbFacade, snapshot: CleanupSnapshot, job: R
     if (job.container_label_job_id !== job.job_id || job.container_label_manifest_sha !== job.target_manifest_sha256) throw new OwnershipValidationError('persisted container labels are not exact');
     const snapshotLabels = labels(snapshot.container.labels, String(job.job_id), String(job.target_manifest_sha256));
     if (job.container_labels_json !== snapshotLabels) throw new OwnershipConflictError('identity-mismatch', 'cleanup snapshot labels do not match persisted labels');
-    if (snapshot.container.globalLabelResult !== 'single-exact-match') throw new OwnershipValidationError('present cleanup snapshot lacks a single exact label match');
+    if (
+      snapshot.container.globalLabelResult !== 'single-exact-match'
+      && snapshot.container.globalLabelResult !== 'no-match'
+    ) throw new OwnershipValidationError('present cleanup snapshot has invalid global label evidence');
   } else {
     validateNullContainerProof(snapshot.container, at);
     if (job.container_id !== null || job.container_name !== null || job.container_image_digest !== null || job.container_label_job_id !== null || job.container_label_manifest_sha !== null || job.container_labels_json !== null) throw new OwnershipConflictError('identity-mismatch', 'null cleanup snapshot conflicts with persisted container identity');
@@ -1906,6 +1909,74 @@ function finalSidecarPath(directory: string, name: 'sha256sums' | 'build-manifes
   return `${directory}/${name}`;
 }
 
+function validateRecoveredPublishBlocker(
+  errorCode: BuilderErrorCode,
+  error: JsonObject,
+  job: Row,
+): void {
+  if (errorCode !== 'UNVERIFIED_FINAL_PATH_BLOCKER' && errorCode !== 'QUARANTINE_PENDING') return;
+  const value = shapeRecord(error, 'publish recovery blocker');
+  preparedString(value.reason, 'publish recovery blocker reason', TEXT_LIMITS.maxTextBytes);
+  shapeLiteral(value.code, errorCode, 'publish recovery blocker code');
+  if (errorCode === 'QUARANTINE_PENDING') {
+    exactShapeKeys(value, ['code', 'reason', 'quarantineIntent'], 'publish recovery quarantine blocker');
+    const intent = shapeRecord(value.quarantineIntent, 'publish recovery quarantine intent');
+    exactShapeKeys(intent, ['sourcePath', 'destinationPath', 'outcome', 'mutationCount'], 'publish recovery quarantine intent');
+    preparedPath(intent.sourcePath, 'publish recovery quarantine source');
+    preparedPath(intent.destinationPath, 'publish recovery quarantine destination');
+    preparedEnum(intent.outcome, ['quarantined', 'failed'], 'publish recovery quarantine outcome');
+    if (!Number.isSafeInteger(intent.mutationCount) || Number(intent.mutationCount) < 0) {
+      throw new OwnershipValidationError('publish recovery quarantine mutationCount is invalid');
+    }
+    const stagingPath = String(job.artifact_staging_path);
+    const sourcePath = stagingPath.slice(0, stagingPath.lastIndexOf('/'));
+    const destinationPath = `.osi-image-builder/quarantine/${String(job.job_id)}`;
+    if (intent.sourcePath !== sourcePath || intent.destinationPath !== destinationPath) {
+      throw new OwnershipConflictError('identity-mismatch', 'publish recovery quarantine intent does not match the job');
+    }
+    return;
+  }
+
+  exactShapeKeys(value, ['code', 'reason', 'binding'], 'publish recovery final-path blocker');
+  const binding = shapeRecord(value.binding, 'publish recovery final-path binding');
+  const keys = [
+    'jobId', 'rootId', 'branch', 'branchSlug', 'pinnedSha', 'targetId',
+    'stagingDirectory', 'stagingPath', 'finalDirectory', 'finalPath',
+    'artifactSha256', 'artifactSize',
+  ] as const;
+  exactShapeKeys(binding, keys, 'publish recovery final-path binding');
+  for (const field of [
+    'jobId', 'rootId', 'branch', 'branchSlug', 'pinnedSha', 'targetId',
+    'stagingDirectory', 'stagingPath', 'finalDirectory', 'finalPath',
+  ] as const) {
+    preparedString(binding[field], `publish recovery binding ${field}`, TEXT_LIMITS.maxPathBytes);
+  }
+  preparedHash(binding.artifactSha256, 'publish recovery binding artifact SHA');
+  if (!Number.isSafeInteger(binding.artifactSize) || Number(binding.artifactSize) < 0) {
+    throw new OwnershipValidationError('publish recovery binding artifact size is invalid');
+  }
+  const stagingPath = String(job.artifact_staging_path);
+  const stagingDirectory = stagingPath.slice(0, stagingPath.lastIndexOf('/'));
+  if (
+    binding.jobId !== job.job_id
+    || binding.rootId !== job.root_id
+    || binding.branch !== job.branch
+    || binding.branchSlug !== encodeBranchSlug(String(job.branch))
+    || binding.pinnedSha !== job.pinned_sha
+    || binding.targetId !== job.target_id
+    || binding.stagingDirectory !== stagingDirectory
+    || binding.stagingPath !== stagingPath
+    || binding.finalDirectory !== job.artifact_final_directory
+    || binding.finalPath !== job.artifact_final_path
+    || binding.artifactSha256 !== job.artifact_sha256
+    || binding.artifactSize !== job.artifact_size
+    || String(binding.finalPath).slice(String(binding.finalDirectory).length + 1)
+      !== stagingPath.slice(stagingDirectory.length + 1)
+  ) {
+    throw new OwnershipConflictError('identity-mismatch', 'publish recovery final-path binding does not match the job');
+  }
+}
+
 function stagingPath(value: string, field: string): void {
   confinedPath(value, field);
   if (!value.startsWith('staging/')) throw new OwnershipValidationError(`${field} is outside the approved staging root`);
@@ -2081,24 +2152,40 @@ function validatePublishEvidence(db: DbFacade, evidence: PublishRecoveryEvidence
     );
   }
   const staging = evidence.observed.staging;
-  if (terminalState === 'succeeded' && (staging.state !== 'absent' || staging.path !== null || staging.sha256 !== null || !final.present || !checksum.present || !manifestEvidence.path.startsWith(`${evidence.final.directory}/`) || !verificationEvidence.path.startsWith(`${evidence.final.directory}/`))) throw new OwnershipConflictError('identity-mismatch', 'successful recovery requires final held sidecars and absent staging');
+  if (terminalState === 'succeeded' && (staging.state !== 'absent' || staging.path !== null || staging.sha256 !== null || staging.size !== null || staging.held || !final.present || !checksum.present || !manifestEvidence.path.startsWith(`${evidence.final.directory}/`) || !verificationEvidence.path.startsWith(`${evidence.final.directory}/`))) throw new OwnershipConflictError('identity-mismatch', 'successful recovery requires final held sidecars and absent staging');
   const quarantine = evidence.observed.quarantine;
   if (terminalState === 'failed' && staging.state === 'present') {
-    if (staging.path !== artifact.stagingPath || staging.sha256 !== artifact.artifactSha256 || (quarantine !== undefined && quarantine.state !== 'absent')) throw new OwnershipConflictError('identity-mismatch', 'failed recovery staging evidence is inconsistent');
+    if (staging.path !== artifact.stagingPath || staging.sha256 !== artifact.artifactSha256 || staging.size !== artifact.artifactSize || !staging.held || (quarantine !== undefined && quarantine.state !== 'absent')) throw new OwnershipConflictError('identity-mismatch', 'failed recovery staging evidence is inconsistent');
   } else if (terminalState === 'failed') {
     const intendedPath = job.artifact_quarantine_intent_path;
+    const expectedQuarantinePath = `.osi-image-builder/quarantine/${String(job.job_id)}`;
     const artifactName = artifact.stagingPath.split('/').at(-1);
+    const quarantinePresent = quarantine?.state === 'present';
     if (
       staging.path !== null
       || staging.sha256 !== null
-      || intendedPath === null
-      || quarantine?.state !== 'present'
-      || quarantine.path !== intendedPath
-      || !quarantine.held
-      || quarantine.artifactPath !== `${intendedPath}/${artifactName}`
-      || quarantine.artifactSize !== artifact.artifactSize
-      || quarantine.artifactSha256 !== artifact.artifactSha256
+      || staging.size !== null
+      || staging.held
+      || (intendedPath !== null && intendedPath !== expectedQuarantinePath)
     ) throw new OwnershipConflictError('identity-mismatch', 'failed recovery does not prove the exact quarantine destination');
+    if (quarantinePresent) {
+      if (
+        quarantine.path !== expectedQuarantinePath
+        || !quarantine.held
+        || quarantine.artifactPath !== `${expectedQuarantinePath}/${artifactName}`
+        || quarantine.artifactSize !== artifact.artifactSize
+        || quarantine.artifactSha256 !== artifact.artifactSha256
+      ) throw new OwnershipConflictError('identity-mismatch', 'failed recovery does not prove the exact quarantine destination');
+    } else if (
+      quarantine?.state !== 'absent'
+      || quarantine.path !== null
+      || quarantine.held
+      || quarantine.artifactPath !== null
+      || quarantine.artifactSize !== null
+      || quarantine.artifactSha256 !== null
+    ) {
+      throw new OwnershipConflictError('identity-mismatch', 'failed recovery absent quarantine evidence is inconsistent');
+    }
   }
   if (evidence.observed.logs.runner !== 'sealed' || evidence.observed.logs.docker !== 'sealed' || !evidence.observed.logs.noGap) throw new OwnershipValidationError('publish recovery log evidence is incomplete');
   validatePersistedLogEvidence(db, String(job.job_id), at);
@@ -3359,6 +3446,9 @@ export class OwnershipStore {
     validatePublishEvidence(this.#db, command.evidence, row, command.at, command.state);
     if (command.state === 'succeeded' && command.evidence.final.publishedAt !== null) throw new OwnershipValidationError('publishing recovery cannot claim a prior published timestamp');
     if (command.state === 'failed' && (!command.errorCode || !command.error)) throw new OwnershipValidationError('failed publish recovery requires error evidence');
+    if (command.state === 'failed') {
+      validateRecoveredPublishBlocker(command.errorCode!, command.error!, row);
+    }
     const errorJson = command.state === 'failed' ? json(command.error, 'publish recovery error', true) : null;
     const a = command.evidence.artifact; const f = command.evidence.final;
     this.#event(command.jobId, 'recovery', { kind: 'publish-recovery', state: command.state, evidence: command.evidence }, command.at);
@@ -3377,14 +3467,18 @@ export class OwnershipStore {
     );
     if (Number(stage.changes) !== 1) conflict('stale-predecessor', 'publishing recovery stage predecessor changed');
     const quarantined = command.state === 'failed'
-      && command.evidence.observed.staging.state === 'absent';
+      && command.evidence.observed.staging.state === 'absent'
+      && command.evidence.observed.quarantine?.state === 'present';
+    const quarantineIntentPath = `.osi-image-builder/quarantine/${command.jobId}`;
     const quarantinePath = quarantined
       ? command.evidence.observed.quarantine?.path ?? null
       : null;
     const blockerJson = command.state === 'failed'
       ? json({
           ...command.error!,
-          staging: quarantined ? 'quarantined' : 'present',
+          staging: quarantined
+            ? 'quarantined'
+            : command.evidence.observed.staging.state,
           ...(quarantined
             ? {
                 quarantine: {
@@ -3413,11 +3507,12 @@ export class OwnershipStore {
           artifact_quarantine_intent_path=NULL, publish_started_at=NULL, published_at=NULL, publish_blocker_code=?, publish_blocker_json=?, terminal_at=?, terminal_error_code=?, terminal_error_json=?, updated_at=?
         WHERE job_id=? AND state='publishing' AND publish_state='publishing' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND runner_lease_expires_at < ?
           AND artifact_staging_path=? AND artifact_final_directory=? AND artifact_final_path=? AND artifact_sha256=? AND artifact_size=? AND artifact_mtime=? AND checksum_path=? AND checksum_sha256=? AND manifest_path=? AND manifest_sha256=? AND verification_path=? AND verification_sha256=?
-          AND artifact_quarantine_path IS NULL AND (?=0 OR artifact_quarantine_intent_path=?)
+          AND artifact_quarantine_path IS NULL
+          AND (artifact_quarantine_intent_path IS NULL OR artifact_quarantine_intent_path=?)
           AND container_id IS NULL AND container_label_job_id IS NULL AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL`).run(
-        quarantined ? null : a.stagingPath,
+        command.evidence.observed.staging.state === 'present' ? a.stagingPath : null,
         quarantinePath,
-        'PUBLISH_RECOVERY_FAILED',
+        command.errorCode ?? 'PUBLISH_RECOVERY_FAILED',
         blockerJson,
         command.at,
         command.errorCode ?? null,
@@ -3440,8 +3535,7 @@ export class OwnershipStore {
         a.manifestSha256,
         a.verificationPath,
         a.verificationSha256,
-        quarantined ? 1 : 0,
-        quarantinePath,
+        quarantineIntentPath,
       );
     if (Number(result.changes) !== 1) conflict('stale-predecessor', 'publishing recovery lost its recovery preconditions');
     this.#event(command.jobId, 'stage', {

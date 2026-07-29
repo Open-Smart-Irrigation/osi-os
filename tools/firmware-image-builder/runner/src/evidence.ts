@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import { link, lstat, mkdir, open, readdir, unlink } from 'node:fs/promises';
+import type { BigIntStats, Stats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { boundedText, canonicalInstant, encodeJson, normalizeJson, stableRelativePath, SharedValidationError } from '../../api/src/validation.js';
+import { boundedText, canonicalInstant, encodeJson, JSON_LIMITS, normalizeJson, stableRelativePath, SharedValidationError } from '../../api/src/validation.js';
 import { withStateRootSnapshot, type PathAuthorityDependencies, type StateRootAuthority } from '../../config/load.js';
 import {
   BUILDER_ERROR_CODES,
@@ -18,10 +19,15 @@ import {
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const MAX_CAPTURED_COMMANDS = 256;
+const MAX_FRAMED_EVIDENCE_BYTES = JSON_LIMITS.maxEncodedBytes + 1;
 const PROC_FD = '/proc/self/fd';
-const DIR_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW;
-const FILE_FLAGS = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW;
-const READ_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
+const O_CLOEXEC = (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC ?? 0;
+const O_PATH = (fsConstants as typeof fsConstants & { readonly O_PATH?: number }).O_PATH ?? 0x200000;
+const DIR_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW | O_CLOEXEC;
+const FILE_FLAGS = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW | O_CLOEXEC;
+const READ_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK | O_CLOEXEC;
+const INSPECTION_FLAGS = O_PATH | fsConstants.O_NOFOLLOW | O_CLOEXEC;
+const REOPEN_READ_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | O_CLOEXEC;
 const COMMAND_KEYS = Object.freeze(['argv', 'exitCode', 'finishedAt', 'outputLimit', 'signal', 'startedAt', 'timedOut']);
 const APPROVED_POSIX_SIGNALS: ReadonlySet<string> = new Set([
   'SIGABRT', 'SIGALRM', 'SIGBUS', 'SIGCHLD', 'SIGCONT', 'SIGFPE', 'SIGHUP', 'SIGILL', 'SIGINT', 'SIGIO',
@@ -129,6 +135,11 @@ interface FileBinding {
   readonly handle: FileHandle;
   readonly device: number;
   readonly inode: number;
+}
+
+interface FileSnapshot {
+  readonly stats: Stats;
+  readonly precise: BigIntStats;
 }
 
 function invalid(message: string, cause?: unknown): never {
@@ -348,6 +359,10 @@ function procChild(parent: FileHandle, basename: string): string {
   return join(PROC_FD, String(parent.fd), basename);
 }
 
+async function closeHandles(handles: readonly FileHandle[]): Promise<void> {
+  for (const handle of [...handles].reverse()) await handle.close().catch(() => undefined);
+}
+
 async function bindDirectory(handle: FileHandle, parent: FileHandle | null, basename: string | null): Promise<DirectoryBinding> {
   const stats = await handle.stat();
   if (!stats.isDirectory()) throw new EvidenceBindingError('evidence ancestor is not a directory');
@@ -380,6 +395,111 @@ async function validateBindings(bindings: readonly DirectoryBinding[], rootPath:
     if (error instanceof EvidenceBindingError) throw error;
     throw new EvidenceBindingError('evidence ancestor could not be revalidated', { cause: error });
   }
+}
+
+async function snapshotFile(handle: FileHandle, dependencies: PathAuthorityDependencies): Promise<FileSnapshot> {
+  const stats = await dependencies.stat(handle);
+  const precise = await dependencies.statBigInt(handle);
+  if (BigInt(stats.dev) !== precise.dev
+    || BigInt(stats.ino) !== precise.ino
+    || BigInt(stats.mode) !== precise.mode
+    || BigInt(stats.nlink) !== precise.nlink
+    || BigInt(stats.uid) !== precise.uid
+    || BigInt(stats.gid) !== precise.gid
+    || BigInt(stats.size) !== precise.size) {
+    throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence changed while being inspected');
+  }
+  return Object.freeze({ stats, precise });
+}
+
+function sameStableFile(left: FileSnapshot, right: FileSnapshot): boolean {
+  return left.precise.dev === right.precise.dev
+    && left.precise.ino === right.precise.ino
+    && left.precise.mode === right.precise.mode
+    && left.precise.nlink === right.precise.nlink
+    && left.precise.uid === right.precise.uid
+    && left.precise.gid === right.precise.gid
+    && left.precise.size === right.precise.size
+    && left.precise.mtimeNs === right.precise.mtimeNs
+    && left.precise.ctimeNs === right.precise.ctimeNs;
+}
+
+function sameFileIdentity(left: FileSnapshot, right: FileSnapshot): boolean {
+  return left.precise.dev === right.precise.dev && left.precise.ino === right.precise.ino;
+}
+
+function assertReadableEvidenceFile(
+  snapshot: FileSnapshot,
+  ownerUid: number,
+  device: number,
+  requireSingleLink: boolean,
+): void {
+  const { stats } = snapshot;
+  if (!stats.isFile() || stats.isSymbolicLink()
+    || stats.dev !== device
+    || stats.uid !== ownerUid
+    || (stats.mode & 0o7777) !== 0o600
+    || stats.nlink < 1
+    || (requireSingleLink && stats.nlink !== 1)) {
+    throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence identity is unsafe');
+  }
+  if (!Number.isSafeInteger(stats.size) || stats.size < 1 || stats.size > MAX_FRAMED_EVIDENCE_BYTES) {
+    throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence size is unsafe');
+  }
+}
+
+async function assertMountIdentity(
+  handle: FileHandle,
+  expectedMountId: number,
+  dependencies: PathAuthorityDependencies,
+): Promise<void> {
+  if (await dependencies.mountId(handle) !== expectedMountId) {
+    throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence crossed its trusted mount');
+  }
+}
+
+async function validateReadBindings(
+  bindings: readonly DirectoryBinding[],
+  rootPath: string,
+  device: number,
+  ownerUid: number,
+  mountId: number,
+  dependencies: PathAuthorityDependencies,
+): Promise<void> {
+  await validateBindings(bindings, rootPath, dependencies);
+  for (const binding of bindings) {
+    const held = await dependencies.stat(binding.handle);
+    if (!held.isDirectory()
+      || held.isSymbolicLink()
+      || held.dev !== device
+      || held.uid !== ownerUid
+      || (held.mode & 0o7777) !== 0o700) {
+      throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence ancestor identity is unsafe');
+    }
+    await assertMountIdentity(binding.handle, mountId, dependencies);
+  }
+}
+
+async function readBoundedFile(
+  handle: FileHandle,
+  size: number,
+  dependencies: PathAuthorityDependencies,
+): Promise<Buffer> {
+  await dependencies.beforeRead(handle);
+  const bytes = Buffer.alloc(size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const result = await handle.read(bytes, offset, bytes.length - offset, offset);
+    if (result.bytesRead <= 0 || result.bytesRead > bytes.length - offset) {
+      throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence changed while being read');
+    }
+    offset += result.bytesRead;
+  }
+  const extra = Buffer.alloc(1);
+  if ((await handle.read(extra, 0, 1, size)).bytesRead !== 0) {
+    throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence changed while being read');
+  }
+  return bytes;
 }
 
 async function openDirectory(parent: FileHandle, basename: string, create: boolean): Promise<FileHandle> {
@@ -732,7 +852,7 @@ export class EvidenceWriter {
     return this.#publish(path, Buffer.from(input.contents));
   }
 
-  async write(input: StageEvidenceInput): Promise<EvidencePublication> {
+  prepare(input: StageEvidenceInput): EvidencePublication {
     let evidence: StageEvidence;
     try {
       evidence = validateInput(input);
@@ -749,7 +869,159 @@ export class EvidenceWriter {
       throw new EvidenceError('EVIDENCE_INVALID', 'stage evidence is not canonical JSON', { cause: error });
     }
     const contents = Buffer.from(`${encoded}\n`, 'utf8');
-    return this.#publish(path, contents);
+    return Object.freeze({
+      path,
+      sha256: createHash('sha256').update(contents).digest('hex'),
+      bytes: contents.toString('utf8'),
+    });
+  }
+
+  async write(input: StageEvidenceInput): Promise<EvidencePublication> {
+    const prepared = this.prepare(input);
+    return this.#publish(prepared.path, Buffer.from(prepared.bytes, 'utf8'));
+  }
+
+  async read(path: string): Promise<EvidencePublication | null> {
+    if (process.platform !== 'linux') {
+      throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence reading requires Linux descriptor support');
+    }
+    const relativePath = stableRelativePath(path, 'evidence path');
+    const parts = relativePath.split('/');
+    const basename = parts.pop();
+    if (basename === undefined || parts.length === 0) {
+      throw new EvidenceError('EVIDENCE_PATH_INVALID', 'evidence path is incomplete');
+    }
+    return withStateRootSnapshot(this.#stateRoot, async ({ snapshot, dependencies }) => {
+      const handles: FileHandle[] = [];
+      const bindings: DirectoryBinding[] = [];
+      let current: FileHandle | undefined;
+      try {
+        current = await open(snapshot.path, DIR_FLAGS);
+        handles.push(current);
+        bindings.push(await bindDirectory(current, null, null));
+        if (bindings[0]!.device !== snapshot.device || bindings[0]!.inode !== snapshot.inode) {
+          throw new EvidenceBindingError('state root identity changed');
+        }
+        for (const part of parts) {
+          let next: FileHandle;
+          try {
+            next = await openDirectory(current, part, false);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+            throw error;
+          }
+          handles.push(next);
+          bindings.push(await bindDirectory(next, current, part));
+          current = next;
+        }
+        const rootStats = await handles[0]!.stat();
+        const ownerUid = typeof process.geteuid === 'function' ? process.geteuid() : -1;
+        if (ownerUid < 0 || rootStats.uid !== ownerUid) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence state root has an unsafe owner');
+        }
+        const mountId = await dependencies.mountId(handles[0]!);
+        if (!Number.isSafeInteger(mountId) || mountId < 0) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence mount identity is invalid');
+        }
+        await validateReadBindings(bindings, snapshot.path, snapshot.device, ownerUid, mountId, dependencies);
+        const parentStats = await current.stat();
+
+        let inspection: FileHandle;
+        try {
+          inspection = await open(procChild(current, basename), INSPECTION_FLAGS);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+          throw error;
+        }
+        handles.push(inspection);
+        await assertMountIdentity(inspection, mountId, dependencies);
+        const before = await snapshotFile(inspection, dependencies);
+        assertReadableEvidenceFile(before, ownerUid, snapshot.device, false);
+
+        let readable: FileHandle;
+        try {
+          readable = await open(`${PROC_FD}/${String(inspection.fd)}`, REOPEN_READ_FLAGS);
+        } catch (error) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence could not be reopened safely', { cause: error });
+        }
+        handles.push(readable);
+        await assertMountIdentity(readable, mountId, dependencies);
+        const reopened = await snapshotFile(readable, dependencies);
+        assertReadableEvidenceFile(reopened, ownerUid, snapshot.device, false);
+        if (!sameStableFile(before, reopened)) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence changed while being reopened');
+        }
+
+        let named: FileHandle;
+        try {
+          named = await open(procChild(current, basename), INSPECTION_FLAGS);
+        } catch (error) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence pathname changed while being opened', { cause: error });
+        }
+        handles.push(named);
+        await assertMountIdentity(named, mountId, dependencies);
+        const namedBefore = await snapshotFile(named, dependencies);
+        assertReadableEvidenceFile(namedBefore, ownerUid, snapshot.device, false);
+        if (!sameStableFile(before, namedBefore)) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence pathname changed while being inspected');
+        }
+
+        const bytes = await readBoundedFile(readable, before.stats.size, dependencies);
+        const afterRead = await snapshotFile(readable, dependencies);
+        assertReadableEvidenceFile(afterRead, ownerUid, snapshot.device, false);
+        if (!sameStableFile(before, afterRead)) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence changed while being read');
+        }
+
+        await reconcileTemporaryLinks(current, basename, readable, bytes);
+        if (before.stats.nlink > 1) await syncDirectory(current, dependencies);
+        const afterReconciliation = await snapshotFile(readable, dependencies);
+        assertReadableEvidenceFile(afterReconciliation, ownerUid, snapshot.device, true);
+        if (!sameFileIdentity(before, afterReconciliation)
+          || before.precise.mode !== afterReconciliation.precise.mode
+          || before.precise.uid !== afterReconciliation.precise.uid
+          || before.precise.gid !== afterReconciliation.precise.gid
+          || before.precise.size !== afterReconciliation.precise.size
+          || before.precise.mtimeNs !== afterReconciliation.precise.mtimeNs) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence identity is unsafe');
+        }
+        if (!(await readHandleExact(readable, bytes))) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence changed after temporary-link reconciliation');
+        }
+        const finalSnapshot = await snapshotFile(readable, dependencies);
+        assertReadableEvidenceFile(finalSnapshot, ownerUid, snapshot.device, true);
+        if (!sameStableFile(afterReconciliation, finalSnapshot)) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence changed during final verification');
+        }
+        await assertNoTemporaryEntries(current, basename);
+
+        let finalNamed: FileHandle;
+        try {
+          finalNamed = await open(procChild(current, basename), INSPECTION_FLAGS);
+        } catch (error) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence pathname changed during final verification', { cause: error });
+        }
+        handles.push(finalNamed);
+        await assertMountIdentity(finalNamed, mountId, dependencies);
+        const finalNamedSnapshot = await snapshotFile(finalNamed, dependencies);
+        assertReadableEvidenceFile(finalNamedSnapshot, ownerUid, snapshot.device, true);
+        if (!sameStableFile(finalSnapshot, finalNamedSnapshot)) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence pathname changed during final verification');
+        }
+        await validateReadBindings(bindings, snapshot.path, snapshot.device, ownerUid, mountId, dependencies);
+        const finalParentStats = await current.stat();
+        if (finalParentStats.dev !== parentStats.dev || finalParentStats.ino !== parentStats.ino) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence parent changed during final verification');
+        }
+        return Object.freeze({
+          path: relativePath,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+          bytes: bytes.toString('utf8'),
+        });
+      } finally {
+        await closeHandles(handles);
+      }
+    });
   }
 }
 

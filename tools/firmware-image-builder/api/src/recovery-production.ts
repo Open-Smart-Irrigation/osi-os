@@ -18,6 +18,8 @@ import {
   type RecoveryCleanupEvidenceReader,
   type RecoveryLogVerificationInput,
   type RecoveryLogVerifier,
+  type RecoveryPresentStagingProof,
+  type RecoveryStagingPostcondition,
   type RecoveryStagingVerificationInput,
   type RecoveryStagingVerifier,
 } from './recovery.js';
@@ -644,7 +646,7 @@ function validateContainer(value: unknown, field: string): CleanupPostcondition[
   return fail(`${field}.kind is invalid`);
 }
 
-function validateStaging(value: unknown, jobId: string, field: string): CleanupPostcondition['staging'] {
+function validateStaging(value: unknown, jobId: string, field: string): RecoveryStagingPostcondition {
   const initial = record(value, field);
   const sourcePath = `staging/${jobId}`;
   if (initial.kind === 'absent') {
@@ -663,6 +665,23 @@ function validateStaging(value: unknown, jobId: string, field: string): CleanupP
     const sha256 = staging.sha256 === null ? null : hash(staging.sha256, `${field}.sha256`);
     return { kind: 'quarantined', sourcePath, destinationPath, sourceAbsent: true, destinationPresent: true, sha256, size, verifiedAt: instant(staging.verifiedAt, `${field}.verifiedAt`) };
   }
+  if (initial.kind === 'present') {
+    const staging = exactKeys(initial, ['kind', 'sourcePath', 'sourcePresent', 'destinationPath', 'destinationAbsent', 'sha256', 'size', 'verifiedAt'], field);
+    const destinationPath = `quarantine/${jobId}`;
+    if (staging.sourcePath !== sourcePath || staging.destinationPath !== destinationPath) return fail(`${field} present path is invalid`);
+    boolean(staging.sourcePresent, true, `${field}.sourcePresent`);
+    boolean(staging.destinationAbsent, true, `${field}.destinationAbsent`);
+    return {
+      kind: 'present',
+      sourcePath,
+      sourcePresent: true,
+      destinationPath,
+      destinationAbsent: true,
+      sha256: hash(staging.sha256, `${field}.sha256`),
+      size: number(staging.size, `${field}.size`),
+      verifiedAt: instant(staging.verifiedAt, `${field}.verifiedAt`),
+    };
+  }
   return fail(`${field}.kind is invalid`);
 }
 
@@ -674,11 +693,13 @@ function validatePostcondition(value: unknown, jobId: string, field: string): Cl
   const logs = exactKeys(postcondition.logs, ['runner', 'docker', 'verifiedAt'], `${field}.logs`);
   if (!['absent', 'sealed'].includes(String(logs.runner)) || !['absent', 'sealed'].includes(String(logs.docker))) return fail(`${field}.logs state is invalid`);
   if (postcondition.blocker !== 'none') return fail(`${field}.blocker is invalid`);
+  const staging = validateStaging(postcondition.staging, jobId, `${field}.staging`);
+  if (staging.kind === 'present') return fail(`${field}.staging cannot retain a present source`);
   return {
     runner: validateRunner(postcondition.runner, `${field}.runner`),
     state: state as CleanupPostcondition['state'],
     container: validateContainer(postcondition.container, `${field}.container`),
-    staging: validateStaging(postcondition.staging, jobId, `${field}.staging`),
+    staging,
     logs: { runner: logs.runner as 'absent' | 'sealed', docker: logs.docker as 'absent' | 'sealed', verifiedAt: instant(logs.verifiedAt, `${field}.logs.verifiedAt`) },
     blocker: 'none',
   };
@@ -1092,14 +1113,15 @@ async function inspectStaging(
   approvedRootRegistry: ApprovedRootRegistry,
   ownerUid: number,
   input: RecoveryStagingVerificationInput,
-): Promise<true> {
+): Promise<true | RecoveryPresentStagingProof> {
   const jobId = safeJobId(input.jobId);
   safeAdmissionId(input.admissionId);
   const rootId = safeSegment(input.rootId, 'approved root ID');
   const expected = validateStaging(input.postcondition, jobId, 'cleanup staging postcondition');
   const persistedArtifactPath = input.artifactStagingPath;
   if (persistedArtifactPath !== null) stagingFileName(persistedArtifactPath, jobId, 'persisted staging artifact path');
-  const trackedArtifact = expected.kind === 'quarantined' && persistedArtifactPath !== null;
+  const trackedArtifact = (expected.kind === 'quarantined' || expected.kind === 'present')
+    && persistedArtifactPath !== null;
   let artifactName: string | null = null;
   let checksumName: string | null = null;
   let manifestName: string | null = null;
@@ -1147,6 +1169,8 @@ async function inspectStaging(
       hash(input.manifestSha256, 'persisted manifest sidecar SHA-256');
       hash(input.verificationSha256, 'persisted verification sidecar SHA-256');
     }
+  } else if (expected.kind === 'present') {
+    return fail('physical-present staging requires complete tracked artifact identity');
   } else if (!identityIsNull) {
     return fail('physical-present staging must have null artifact identity');
   }
@@ -1161,6 +1185,15 @@ async function inspectStaging(
   if (expected.kind === 'quarantined') {
     if (trackedArtifact && (expected.sha256 !== input.artifactSha256 || expected.size !== input.artifactSize)) return fail('cleanup quarantine evidence does not match the persisted artifact identity');
     if (!trackedArtifact && (expected.sha256 !== null || expected.size !== null)) return fail('physical-present quarantine evidence contains artifact identity');
+  } else if (
+    expected.kind === 'present'
+    && (
+      expected.sha256 !== input.artifactSha256
+      || expected.size !== input.artifactSize
+      || input.publishState !== 'publishing'
+    )
+  ) {
+    return fail('recovery staging-present evidence does not match the persisted publishing artifact');
   }
   try {
     return await withApprovedRootSnapshot(approvedRootRegistry, rootId, async ({ snapshot, dependencies }) => withDirectory(
@@ -1198,10 +1231,14 @@ async function inspectStaging(
           }
           if (expected.kind === 'absent') {
             if (source !== null || destination !== null) return fail('cleanup staging absence does not match physical source and destination state');
-          } else if (source !== null || destination === null) {
+          } else if (expected.kind === 'quarantined' && (source !== null || destination === null)) {
             return fail('cleanup quarantine does not match physical source and destination state');
+          } else if (expected.kind === 'present' && (source === null || destination !== null)) {
+            return fail('recovery staging-present proof does not match physical source and destination state');
           }
-          if (expected.kind === 'quarantined' && trackedArtifact) {
+          if (trackedArtifact) {
+            const directory = expected.kind === 'present' ? source! : destination!;
+            const directoryName = expected.kind === 'present' ? 'staging' : 'quarantine';
             const files = [
               { name: artifactName!, sha256: input.artifactSha256!, size: input.artifactSize!, maxBytes: null },
               { name: checksumName!, sha256: input.checksumSha256!, size: null, maxBytes: TEXT_LIMITS.maxChecksumBytes },
@@ -1210,8 +1247,8 @@ async function inspectStaging(
             ] as const;
             const openedIdentities = new Set<string>();
             for (const tracked of files) {
-              const field = `quarantine/${jobId}/${tracked.name}`;
-              const file = await openFileChild(destination!, tracked.name, field, ownerUid, snapshot.device, assertRegularArtifact);
+              const field = `${directoryName}/${jobId}/${tracked.name}`;
+              const file = await openFileChild(directory, tracked.name, field, ownerUid, snapshot.device, assertRegularArtifact);
               try {
                 const fileStats = await descriptorStat(file, field);
                 assertRegularArtifact(fileStats, field, ownerUid, snapshot.device);
@@ -1230,7 +1267,7 @@ async function inspectStaging(
                 }
                 trackedFiles.push({
                   path: `.osi-image-builder/${field}`,
-                  parts: ['.osi-image-builder', 'quarantine', jobId, tracked.name],
+                  parts: ['.osi-image-builder', directoryName, jobId, tracked.name],
                   handle: file,
                   stats: fileStats,
                   kind: 'file',
@@ -1241,20 +1278,23 @@ async function inspectStaging(
               }
             }
           }
-          await revalidateManagedJob(root, builder, stagingParent, 'staging', jobId, null, ownerUid, snapshot.device);
+          await revalidateManagedJob(root, builder, stagingParent, 'staging', jobId, expected.kind === 'present' ? source : null, ownerUid, snapshot.device);
           await revalidateManagedJob(root, builder, quarantineParent, 'quarantine', jobId, expected.kind === 'quarantined' ? destination : null, ownerUid, snapshot.device);
           if (trackedFiles.length > 0) {
-            if (builder === null || quarantineParent === null || destination === null) return fail('tracked quarantine descriptor chain is incomplete');
+            const parent = expected.kind === 'present' ? stagingParent : quarantineParent;
+            const directory = expected.kind === 'present' ? source : destination;
+            const directoryName = expected.kind === 'present' ? 'staging' : 'quarantine';
+            if (builder === null || parent === null || directory === null) return fail('tracked staging descriptor chain is incomplete');
             const builderStats = await descriptorStat(builder, '.osi-image-builder held');
-            const quarantineStats = await descriptorStat(quarantineParent, '.osi-image-builder/quarantine held');
-            const destinationStats = await descriptorStat(destination, `quarantine/${jobId} held`);
+            const parentStats = await descriptorStat(parent, `.osi-image-builder/${directoryName} held`);
+            const directoryStats = await descriptorStat(directory, `${directoryName}/${jobId} held`);
             assertPublisherDirectory(builderStats, '.osi-image-builder held', ownerUid, snapshot.device);
-            assertPublisherDirectory(quarantineStats, '.osi-image-builder/quarantine held', ownerUid, snapshot.device);
-            assertJobDirectory(destinationStats, `quarantine/${jobId} held`, ownerUid, snapshot.device);
+            assertPublisherDirectory(parentStats, `.osi-image-builder/${directoryName} held`, ownerUid, snapshot.device);
+            assertJobDirectory(directoryStats, `${directoryName}/${jobId} held`, ownerUid, snapshot.device);
             const descriptors = new Map<string, HeldDescriptor>([
               ['.osi-image-builder', { path: '.osi-image-builder', parts: ['.osi-image-builder'], handle: builder, stats: builderStats, kind: 'directory', directoryMode: PUBLISHER_DIRECTORY_MODE }],
-              ['.osi-image-builder/quarantine', { path: '.osi-image-builder/quarantine', parts: ['.osi-image-builder', 'quarantine'], handle: quarantineParent, stats: quarantineStats, kind: 'directory', directoryMode: PUBLISHER_DIRECTORY_MODE }],
-              ['.osi-image-builder/quarantine/' + jobId, { path: `.osi-image-builder/quarantine/${jobId}`, parts: ['.osi-image-builder', 'quarantine', jobId], handle: destination, stats: destinationStats, kind: 'directory', directoryMode: DIRECTORY_MODE }],
+              [`.osi-image-builder/${directoryName}`, { path: `.osi-image-builder/${directoryName}`, parts: ['.osi-image-builder', directoryName], handle: parent, stats: parentStats, kind: 'directory', directoryMode: PUBLISHER_DIRECTORY_MODE }],
+              [`.osi-image-builder/${directoryName}/${jobId}`, { path: `.osi-image-builder/${directoryName}/${jobId}`, parts: ['.osi-image-builder', directoryName, jobId], handle: directory, stats: directoryStats, kind: 'directory', directoryMode: DIRECTORY_MODE }],
             ]);
             for (const tracked of trackedFiles) {
               descriptors.set(tracked.path, tracked);
@@ -1270,6 +1310,16 @@ async function inspectStaging(
               || current.inode !== snapshot.inode
             ) return fail('approved output root authority changed during staging verification');
           });
+          if (expected.kind === 'present') {
+            return Object.freeze({
+              kind: 'present' as const,
+              path: input.artifactStagingPath!,
+              held: true as const,
+              size: input.artifactSize!,
+              sha256: input.artifactSha256!,
+              verifiedAt: expected.verifiedAt,
+            });
+          }
           return true as const;
         } finally {
           await closeHandles([...trackedFiles.map((tracked) => tracked.handle), source, destination, stagingParent, quarantineParent, builder]);

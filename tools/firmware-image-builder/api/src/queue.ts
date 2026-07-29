@@ -15,6 +15,7 @@ import type {
   StartupBootstrapOptions,
   StartupCoordinator,
   StartupPhaseResult,
+  StartupResult,
 } from './startup-order.js';
 
 const ACTIVE_STATES = new Set<ActiveRecoveryState>([
@@ -902,8 +903,40 @@ export function createStartupBootstrap(options: StartupBootstrapOptions): Startu
     }
     return coordinatorPromise;
   };
+  const reconcile = async (): Promise<StartupResult> => {
+    internal.beginStartupReconciliation();
+    const services = [
+      options.services.cleanupAdmissions,
+      options.services.liveRunnerClassification,
+      options.services.stalePublishingRecovery,
+      options.services.nonPublishingInterruption,
+    ] as const;
+    const reconciliationBlockers: QueueBlocker[] = [];
+    for (const service of services) {
+      const result = await service();
+      if (!result || !Array.isArray(result.blockers)) {
+        throw new TypeError('reconciliation phase returned an invalid result');
+      }
+      reconciliationBlockers.push(...result.blockers);
+    }
+    if (reconciliationBlockers.length > 0) {
+      internal.completeStartupReconciliation(reconciliationBlockers);
+      return Object.freeze({
+        dispatched: false,
+        blockers: Object.freeze(reconciliationBlockers),
+      });
+    }
+    internal.completeStartupReconciliation([]);
+    const dispatchResult = queueDispatchPhase(await internal.dispatchNext());
+    return Object.freeze({
+      dispatched: dispatchResult.blockers.length === 0,
+      blockers: Object.freeze([...dispatchResult.blockers]),
+    });
+  };
   return Object.freeze({
     start: async () => (await coordinator()).start(),
+    reconcile,
+    dispatch: async () => queueDispatchPhase(await internal.dispatchNext()),
     events: () => coordinatorInstance?.events() ?? [],
   });
 }

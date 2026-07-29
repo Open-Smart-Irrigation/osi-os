@@ -59,6 +59,8 @@ export interface StartupBootstrapOptions {
 
 export interface StartupBootstrap {
   readonly start: () => Promise<StartupResult>;
+  readonly reconcile: () => Promise<StartupResult>;
+  readonly dispatch: () => Promise<StartupPhaseResult>;
   readonly events: () => readonly StartupPhaseEvent[];
 }
 

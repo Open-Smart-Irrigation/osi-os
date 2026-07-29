@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -2417,6 +2417,7 @@ describe('trusted pipeline integration', () => {
         mkdir(join(configHome, 'osi-image-builder'), { recursive: true }),
         mkdir(join(packageDirectory, 'manifest'), { recursive: true }),
         mkdir(join(packageDirectory, 'bin'), { recursive: true }),
+        mkdir(join(packageDirectory, 'api', 'migrations'), { recursive: true }),
       ]);
       await Promise.all([
         writeFile(
@@ -2426,6 +2427,11 @@ describe('trusted pipeline integration', () => {
         writeFile(
           join(packageDirectory, 'manifest', 'targets.json'),
           await readFile(new URL('../../manifest/targets.json', import.meta.url)),
+        ),
+        cp(
+          new URL('../../api/migrations', import.meta.url),
+          join(packageDirectory, 'api', 'migrations'),
+          { recursive: true },
         ),
       ]);
       await execFile('/usr/bin/git', ['init', '-q', value.directory + '/repository']);

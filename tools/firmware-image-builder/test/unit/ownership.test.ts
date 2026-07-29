@@ -486,8 +486,24 @@ function recoveryEvidence(jobId: string, terminalState: 'succeeded' | 'failed' =
   stage: { startedAt: NOW, finishedAt: RECOVERY, evidencePath: `jobs/${jobId}/evidence/09-publish.json`, evidenceSha256: stageEvidence.sha256 },
   artifact: { stagingPath: 'staging/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/sums', checksumSha256: checksumHash(), manifestPath: 'staging/manifest', manifestSha256, verificationPath: 'staging/verify', verificationSha256: stagedVerificationSha256 },
   final: { directory: `release/${jobId}`, path: `release/${jobId}/image`, publishStartedAt: NOW, publishedAt: null },
-  observed: { stageEvidence: { present: true, path: `jobs/${jobId}/evidence/09-publish.json`, bytes: stageEvidence.bytes, sha256: stageEvidence.sha256 }, final: success ? { present: true, path: `release/${jobId}/image`, held: true, size: 10, sha256: SHA64 } : { present: false, path: `release/${jobId}/image`, held: false, size: null, sha256: null }, checksum: { present: true, path: success ? `release/${jobId}/sha256sums` : 'staging/sums', contents: CHECKSUM_CONTENT, sha256: checksumHash() }, manifest: { present: true, path: success ? `release/${jobId}/build-manifest.json` : 'staging/manifest', bytes: canonicalJson(manifestContent), content: manifestContent, sha256: manifestSha256 }, verification: { present: true, path: success ? `release/${jobId}/verification.json` : 'staging/verify', bytes: success ? terminal.bytes : canonicalJson(stagedVerificationContent), content: success ? terminal.content : stagedVerificationContent, sha256: success ? terminal.sha256 : stagedVerificationSha256 }, staging: success ? { state: 'absent', path: null, sha256: null } : { state: 'present', path: 'staging/image', sha256: SHA64 }, logs: { runner: 'sealed', docker: 'sealed', verifiedAt: RECOVERY, noGap: true } },
+  observed: { stageEvidence: { present: true, path: `jobs/${jobId}/evidence/09-publish.json`, bytes: stageEvidence.bytes, sha256: stageEvidence.sha256 }, final: success ? { present: true, path: `release/${jobId}/image`, held: true, size: 10, sha256: SHA64 } : { present: false, path: `release/${jobId}/image`, held: false, size: null, sha256: null }, checksum: { present: true, path: success ? `release/${jobId}/sha256sums` : 'staging/sums', contents: CHECKSUM_CONTENT, sha256: checksumHash() }, manifest: { present: true, path: success ? `release/${jobId}/build-manifest.json` : 'staging/manifest', bytes: canonicalJson(manifestContent), content: manifestContent, sha256: manifestSha256 }, verification: { present: true, path: success ? `release/${jobId}/verification.json` : 'staging/verify', bytes: success ? terminal.bytes : canonicalJson(stagedVerificationContent), content: success ? terminal.content : stagedVerificationContent, sha256: success ? terminal.sha256 : stagedVerificationSha256 }, staging: success ? { state: 'absent', path: null, sha256: null, size: null, held: false } : { state: 'present', path: 'staging/image', sha256: SHA64, size: 10, held: true }, logs: { runner: 'sealed', docker: 'sealed', verifiedAt: RECOVERY, noGap: true } },
   }; }
+function recoveredBlockerBinding(jobId: string): JsonObject {
+  return {
+    jobId,
+    rootId: 'release',
+    branch: 'main',
+    branchSlug: 'main',
+    pinnedSha: SHA40,
+    targetId: 'rpi-5',
+    stagingDirectory: 'staging',
+    stagingPath: 'staging/image',
+    finalDirectory: `release/${jobId}`,
+    finalPath: `release/${jobId}/image`,
+    artifactSha256: SHA64,
+    artifactSize: 10,
+  };
+}
 function validPublishTerminal(jobId: string): Extract<RunnerWriteCommand, { kind: 'publish-terminal' }> {
   const terminal = terminalVerification(jobId);
   const stageEvidence = publishStageEvidence(jobId, terminal.sha256);
@@ -2113,6 +2129,75 @@ describe('actor-owned compare-and-set writes', () => {
     expect(ownership.apiWrite({ kind: 'hand-back', jobId: 'job-1', admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, at: RECOVERY, proof: { runner: stagedSnapshot().runner, container: absent(RECOVERY), blocker: 'none' } })).toMatchObject({ ok: false });
   });
 
+  it('clears retained container identity after a global no-match proves it is already absent', async () => {
+    const jobId = 'cleanup-retained-container-absent';
+    const target = await fixture(jobId);
+    dispatchAndStart(target.ownership, jobId);
+    expect(target.ownership.runnerWrite(lease(ACTIVE, jobId)).ok).toBe(true);
+    expect(target.ownership.runnerWrite(container(jobId)).ok).toBe(true);
+    const retained = snapshot('present', jobId);
+    if (retained.container.kind !== 'present') throw new Error('fixture container is absent');
+    const admittedSnapshot: CleanupSnapshot = {
+      ...retained,
+      container: {
+        ...retained.container,
+        globalLabelResult: 'no-match',
+      },
+    };
+    const admission = cleanupAdmission(admittedSnapshot, jobId);
+
+    expect(target.ownership.apiWrite(admission)).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.ownership.cleanupWrite({
+      kind: 'claim-lease',
+      jobId,
+      admissionId: admission.admissionId,
+      owner: admission.owner,
+      unitName: admission.unitName,
+      fenceGeneration: 1,
+      fenceTokenHash: SHA64_B,
+      snapshot: admittedSnapshot,
+      at: RECOVERY,
+    })).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.ownership.cleanupWrite({
+      kind: 'complete',
+      jobId,
+      admissionId: admission.admissionId,
+      owner: admission.owner,
+      unitName: admission.unitName,
+      fenceGeneration: 1,
+      fenceTokenHash: SHA64_B,
+      snapshot: admittedSnapshot,
+      postcondition: {
+        ...postcondition(admittedSnapshot),
+        container: {
+          kind: 'already-absent',
+          id: retained.container.id,
+          name: retained.container.name,
+          imageDigest: retained.container.imageDigest,
+          labels: retained.container.labels,
+          exactIdAbsent: true,
+          dockerAction: 'none',
+          globalLabelResult: 'no-match',
+          observedAt: AFTER,
+        },
+        blocker: 'none',
+      },
+      exactContainerId: retained.container.id,
+      containerAbsent: true,
+      evidencePath: `jobs/${jobId}/evidence/cleanup/result.json`,
+      evidenceSha256: SHA64,
+      at: AFTER,
+    })).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.store.getJob(jobId)).toMatchObject({
+      containerId: null,
+      containerName: null,
+      containerImageDigest: null,
+    });
+    expect(target.db.prepare(
+      'SELECT status FROM cleanup_leases WHERE job_id=?',
+    ).get(jobId)).toEqual({ status: 'completed' });
+  });
+
   it('rejects a cleanup owner mismatch without changing the lease or event stream', async () => {
     const setup = await claimedCleanup('cleanup-owner-mismatch'); const before = setup.store.listEvents('cleanup-owner-mismatch').events.length;
     const command: CleanupWriteCommand = { kind: 'renew-lease', jobId: 'cleanup-owner-mismatch', admissionId: setup.admission.admissionId, owner: 'cleanup-b', unitName: setup.admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, expectedExpiresAt: EXPIRY, expiresAt: '2026-07-23T10:05:00.000Z', snapshot: setup.snapshot, at: RECOVERY };
@@ -2648,6 +2733,59 @@ describe('actor-owned compare-and-set writes', () => {
     expect(failed.store.getJob('job-3')).toMatchObject({ state: 'failed', artifactStagingPath: 'staging/image', publishState: 'blocked' });
   });
 
+  it('validates the complete recovered final-path blocker binding before persistence', async () => {
+    const validJobId = 'recovered-blocker-binding';
+    const valid = await fixture(validJobId);
+    toPublishing(valid.ownership, validJobId);
+    seedLogs(valid.path, validJobId);
+    expect(valid.ownership.apiWrite({
+      kind: 'publish-recovery',
+      jobId: validJobId,
+      expectedState: 'publishing',
+      at: RECOVERY,
+      state: 'failed',
+      evidence: recoveryEvidence(validJobId, 'failed'),
+      errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER',
+      error: {
+        code: 'UNVERIFIED_FINAL_PATH_BLOCKER',
+        reason: 'mismatched final',
+        binding: recoveredBlockerBinding(validJobId),
+      },
+    }).ok).toBe(true);
+    expect(valid.store.getJob(validJobId).publishBlocker).toMatchObject({
+      binding: recoveredBlockerBinding(validJobId),
+    });
+
+    const invalidJobId = 'recovered-blocker-binding-tampered';
+    const invalid = await fixture(invalidJobId);
+    toPublishing(invalid.ownership, invalidJobId);
+    seedLogs(invalid.path, invalidJobId);
+    expect(invalid.ownership.apiWrite({
+      kind: 'publish-recovery',
+      jobId: invalidJobId,
+      expectedState: 'publishing',
+      at: RECOVERY,
+      state: 'failed',
+      evidence: recoveryEvidence(invalidJobId, 'failed'),
+      errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER',
+      error: {
+        code: 'UNVERIFIED_FINAL_PATH_BLOCKER',
+        reason: 'mismatched final',
+        binding: {
+          ...recoveredBlockerBinding(invalidJobId),
+          finalPath: `release/${validJobId}/image`,
+        },
+      },
+    })).toMatchObject({
+      ok: false,
+      conflict: { kind: 'identity-mismatch' },
+    });
+    expect(invalid.store.getJob(invalidJobId)).toMatchObject({
+      state: 'publishing',
+      publishState: 'publishing',
+    });
+  });
+
   it('rejects successful recovery while published verification still says publish running', async () => {
     const jobId = 'recovery-running-verification';
     const target = await fixture(jobId);
@@ -2697,24 +2835,18 @@ describe('actor-owned compare-and-set writes', () => {
     });
   });
 
-  it('recovers an exact quarantine rename after a crash before the terminal write', async () => {
+  it('binds an exact startup-recovery quarantine when no runner intent was persisted', async () => {
     const jobId = 'quarantine-crash-recovery';
     const target = await fixture(jobId);
     toPublishing(target.ownership, jobId);
     seedLogs(target.path, jobId);
     const quarantinePath = `.osi-image-builder/quarantine/${jobId}`;
-    expect(target.ownership.runnerWrite({
-      ...runnerBase(jobId),
-      kind: 'publish-quarantine-intent',
-      expectedState: 'publishing',
-      quarantinePath,
-    }).ok).toBe(true);
     const base = recoveryEvidence(jobId, 'failed');
     const evidence: PublishRecoveryEvidence = {
       ...base,
       observed: {
         ...base.observed,
-        staging: { state: 'absent', path: null, sha256: null },
+        staging: { state: 'absent', path: null, sha256: null, size: null, held: false },
         quarantine: {
           state: 'present',
           path: quarantinePath,
@@ -2742,6 +2874,74 @@ describe('actor-owned compare-and-set writes', () => {
       artifactStagingPath: null,
       artifactQuarantinePath: quarantinePath,
       artifactQuarantineIntentPath: null,
+    });
+  });
+
+  it('persists quarantine-pending and physically absent recovery outcomes exactly', async () => {
+    const pending = await fixture('quarantine-pending-recovery');
+    toPublishing(pending.ownership, 'quarantine-pending-recovery');
+    seedLogs(pending.path, 'quarantine-pending-recovery');
+    expect(pending.ownership.apiWrite({
+      kind: 'publish-recovery',
+      jobId: 'quarantine-pending-recovery',
+      expectedState: 'publishing',
+      at: RECOVERY,
+      state: 'failed',
+      evidence: recoveryEvidence('quarantine-pending-recovery', 'failed'),
+      errorCode: 'QUARANTINE_PENDING',
+      error: {
+        code: 'QUARANTINE_PENDING',
+        reason: 'native quarantine did not complete',
+        quarantineIntent: {
+          sourcePath: 'staging',
+          destinationPath: '.osi-image-builder/quarantine/quarantine-pending-recovery',
+          outcome: 'failed',
+          mutationCount: 0,
+        },
+      },
+    }).ok).toBe(true);
+    expect(pending.store.getJob('quarantine-pending-recovery')).toMatchObject({
+      state: 'failed',
+      publishState: 'blocked',
+      publishBlockerCode: 'QUARANTINE_PENDING',
+      artifactStagingPath: 'staging/image',
+      artifactQuarantinePath: null,
+    });
+
+    const absent = await fixture('publish-paths-absent-recovery');
+    toPublishing(absent.ownership, 'publish-paths-absent-recovery');
+    seedLogs(absent.path, 'publish-paths-absent-recovery');
+    const base = recoveryEvidence('publish-paths-absent-recovery', 'failed');
+    expect(absent.ownership.apiWrite({
+      kind: 'publish-recovery',
+      jobId: 'publish-paths-absent-recovery',
+      expectedState: 'publishing',
+      at: RECOVERY,
+      state: 'failed',
+      evidence: {
+        ...base,
+        observed: {
+          ...base.observed,
+          staging: { state: 'absent', path: null, sha256: null, size: null, held: false },
+          quarantine: {
+            state: 'absent',
+            path: null,
+            held: false,
+            artifactPath: null,
+            artifactSize: null,
+            artifactSha256: null,
+          },
+        },
+      },
+      errorCode: 'PUBLISH_RECOVERY_FAILED',
+      error: { reason: 'final and staging are absent' },
+    }).ok).toBe(true);
+    expect(absent.store.getJob('publish-paths-absent-recovery')).toMatchObject({
+      state: 'failed',
+      publishState: 'blocked',
+      publishBlockerCode: 'PUBLISH_RECOVERY_FAILED',
+      artifactStagingPath: null,
+      artifactQuarantinePath: null,
     });
   });
 
@@ -2800,7 +3000,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('rejects publish recovery staging and sealed-log observation mismatches', async () => {
     const stagingCase = await fixture('staging-mismatch'); toPublishing(stagingCase.ownership, 'staging-mismatch'); seedLogs(stagingCase.path, 'staging-mismatch');
     const evidence = recoveryEvidence('staging-mismatch');
-    expect(stagingCase.ownership.apiWrite({ kind: 'publish-recovery', jobId: 'staging-mismatch', expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence: { ...evidence, observed: { ...evidence.observed, staging: { state: 'present', path: 'staging/image', sha256: SHA64 } } } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(stagingCase.ownership.apiWrite({ kind: 'publish-recovery', jobId: 'staging-mismatch', expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence: { ...evidence, observed: { ...evidence.observed, staging: { state: 'present', path: 'staging/image', sha256: SHA64, size: 10, held: true } } } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
     const logCase = await fixture('log-mismatch'); toPublishing(logCase.ownership, 'log-mismatch'); seedLogs(logCase.path, 'log-mismatch');
     const logEvidence = recoveryEvidence('log-mismatch');
     expect(() => logCase.ownership.apiWrite({ kind: 'publish-recovery', jobId: 'log-mismatch', expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence: { ...logEvidence, observed: { ...logEvidence.observed, logs: { runner: 'sealed', docker: 'sealed', noGap: false } } as never } })).toThrow(OwnershipValidationError);

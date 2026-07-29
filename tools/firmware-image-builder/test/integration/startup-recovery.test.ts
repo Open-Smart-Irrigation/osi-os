@@ -156,7 +156,7 @@ function publishRecoveryEvidence(jobId: string): PublishRecoveryEvidence {
       checksum: { present: true, path: 'staging/sums', contents: checksumContents, sha256: checksumSha256 },
       manifest: { present: true, path: 'staging/manifest', bytes: canonical(manifest), content: manifest, sha256: manifestSha256 },
       verification: { present: true, path: 'staging/verify', bytes: canonical(manifest), content: manifest, sha256: manifestSha256 },
-      staging: { state: 'present', path: 'staging/image', sha256: SHA64 },
+      staging: { state: 'present', path: 'staging/image', sha256: SHA64, size: 10, held: true },
       logs: { runner: 'sealed', docker: 'sealed', verifiedAt: PUBLISH_RECOVERY, noGap: true },
     },
   };

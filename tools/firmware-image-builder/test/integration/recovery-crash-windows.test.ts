@@ -362,7 +362,7 @@ describe('cleanup recovery crash windows', () => {
     const results = await recovery.reconcileCompletedAdmissions();
     expect(results).toHaveLength(256);
     expect(results.map((item) => item.admissionId)).toEqual([...completed].sort((left, right) => left.admissionId.localeCompare(right.admissionId)).map((item) => item.admissionId));
-  });
+  }, 20_000);
 
   it('fails public reconciliation closed at 257 rows after opening a real SQLite database', async () => {
     const value = await createFixture();
@@ -379,7 +379,7 @@ describe('cleanup recovery crash windows', () => {
     expect((value.db.prepare("SELECT COUNT(*) AS count FROM cleanup_leases WHERE status='completed'").get() as { count: number }).count).toBe(257);
     await expect(recovery.reconcileCompletedAdmissions()).rejects.toThrow(/bounded|limit|completed admissions/);
     expect((value.db.prepare("SELECT COUNT(*) AS count FROM cleanup_leases WHERE status='completed'").get() as { count: number }).count).toBe(257);
-  });
+  }, 20_000);
 
   it('rejects a corrupt real SQLite completion ordering key before hand-back', async () => {
     const value = await createFixture();

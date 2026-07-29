@@ -1,9 +1,13 @@
-import { mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { chmod, link, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { JSON_LIMITS } from '../../api/src/validation.js';
 import { loadConfig, type PathAuthorityDependencies, type StateRootAuthority } from '../../config/load.js';
 import { PIPELINE_STAGE_NAMES, type PipelineStageName, type TrustedOperationId } from '../../domain/types.js';
 import {
@@ -14,6 +18,7 @@ import {
 } from '../../runner/src/evidence.js';
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
+const execFileAsync = promisify(execFile);
 const APPROVED_POSIX_SIGNALS = [
   'SIGABRT', 'SIGALRM', 'SIGBUS', 'SIGCHLD', 'SIGCONT', 'SIGFPE', 'SIGHUP', 'SIGILL', 'SIGINT', 'SIGIO',
   'SIGIOT', 'SIGKILL', 'SIGPIPE', 'SIGPOLL', 'SIGPROF', 'SIGPWR', 'SIGQUIT', 'SIGSEGV', 'SIGSTKFLT',
@@ -263,6 +268,107 @@ describe('stage evidence', () => {
       observations: { targetOutputAbsent: true },
       error: null,
     });
+  });
+
+  it('reads existing evidence only with its exact private single-link metadata', async () => {
+    const authority = await authorityFixture();
+    const writer = createEvidenceWriter({ stateRoot: authority.stateRoot });
+    const published = await writer.write(passedInput('job-read-existing'));
+    const path = join(authority.statePath, published.path);
+
+    await expect(writer.read(published.path)).resolves.toEqual(published);
+    const temporaryLink = join(
+      authority.statePath,
+      'jobs/job-read-existing/evidence/.01-source.json.00000000-0000-4000-8000-000000000000.tmp',
+    );
+    await link(path, temporaryLink);
+    await expect(writer.read(published.path)).resolves.toEqual(published);
+    await expect(readFile(temporaryLink)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const hardLink = join(authority.statePath, 'evidence-hard-link.json');
+    await link(path, hardLink);
+    await expect(writer.read(published.path)).rejects.toThrow(/identity is unsafe/);
+    await unlink(hardLink);
+    await chmod(path, 0o644);
+    await expect(writer.read(published.path)).rejects.toThrow(/identity is unsafe/);
+    await chmod(path, 0o600);
+    const evidenceDirectory = join(authority.statePath, 'jobs/job-read-existing/evidence');
+    await chmod(evidenceDirectory, 0o755);
+    await expect(writer.read(published.path)).rejects.toThrow(/ancestor identity is unsafe/);
+  });
+
+  it('rejects evidence traversal that crosses the state-root mount', async () => {
+    const authority = await authorityFixture({
+      mountId: async (handle) => {
+        const target = await readlink(`/proc/self/fd/${String(handle.fd)}`);
+        return target.includes('/jobs/') || target.endsWith('/jobs') ? 2 : 1;
+      },
+    });
+    const writer = createEvidenceWriter({ stateRoot: authority.stateRoot });
+    const published = await writer.write(passedInput('job-read-mounted'));
+
+    await expect(writer.read(published.path)).rejects.toThrow(/trusted mount/);
+  });
+
+  it('reads back the largest newline-framed evidence accepted by prepare', async () => {
+    const authority = await authorityFixture();
+    const writer = createEvidenceWriter({ stateRoot: authority.stateRoot });
+    const inputFor = (length: number): StageEvidenceInput => ({
+      ...passedInput('job-read-largest'),
+      observations: { payload: 'x'.repeat(length) },
+    });
+    let accepted: number = 0;
+    let rejected: number = JSON_LIMITS.maxEncodedBytes;
+    while (accepted + 1 < rejected) {
+      const candidate = Math.floor((accepted + rejected) / 2);
+      try {
+        writer.prepare(inputFor(candidate));
+        accepted = candidate;
+      } catch {
+        rejected = candidate;
+      }
+    }
+    const prepared = writer.prepare(inputFor(accepted));
+    expect(Buffer.byteLength(prepared.bytes)).toBe(JSON_LIMITS.maxEncodedBytes + 1);
+
+    const published = await writer.write(inputFor(accepted));
+    await expect(writer.read(published.path)).resolves.toEqual(published);
+  });
+
+  it('rejects oversized and special evidence files without an unbounded or blocking read', async () => {
+    const authority = await authorityFixture();
+    const writer = createEvidenceWriter({ stateRoot: authority.stateRoot });
+    const published = await writer.write(passedInput('job-read-bounds'));
+    const path = join(authority.statePath, published.path);
+
+    await unlink(path);
+    await writeFile(path, Buffer.alloc(JSON_LIMITS.maxEncodedBytes + 2, 0x20), { mode: 0o600 });
+    await expect(writer.read(published.path)).rejects.toThrow(/size is unsafe/);
+
+    await unlink(path);
+    await execFileAsync('/usr/bin/mkfifo', ['-m', '600', path]);
+    await expect(Promise.race([
+      writer.read(published.path),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('evidence FIFO read blocked')), 1_000)),
+    ])).rejects.toThrow(/identity is unsafe/);
+  });
+
+  it('prepares exact canonical evidence without publishing it', async () => {
+    const fileSystem = new MemoryEvidenceFileSystem();
+    const authority = await authorityFixture();
+    const writer = createEvidenceWriter({ stateRoot: authority.stateRoot, fileSystem });
+
+    const prepared = writer.prepare(passedInput());
+
+    expect(prepared.path).toBe('jobs/job-1/evidence/01-source.json');
+    expect(prepared.sha256).toBe(createHash('sha256').update(prepared.bytes).digest('hex'));
+    expect(JSON.parse(prepared.bytes)).toMatchObject({
+      schemaVersion: 1,
+      jobId: 'job-1',
+      stage: 'source',
+      outcome: 'passed',
+    });
+    expect(fileSystem.files.size).toBe(0);
   });
 
   it.each(PIPELINE_STAGE_NAMES)('publishes passed %s stage-summary evidence without an operation identity', async (stage) => {

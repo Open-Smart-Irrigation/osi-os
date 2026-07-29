@@ -72,7 +72,7 @@ function rootError(root: string, error: unknown): never {
 }
 
 function assertDirectory(stats: Stats, field: string): void {
-  if (stats.isSymbolicLink() || !stats.isDirectory() || stats.nlink < 2) {
+  if (stats.isSymbolicLink() || !stats.isDirectory() || stats.nlink < 1) {
     throw new StaticUiError('STATIC_UI_ROOT_UNSAFE', `${field} is not a safe directory`);
   }
 }
@@ -156,7 +156,7 @@ async function readAsset(rootFd: number, segments: readonly string[]): Promise<B
         throw new StaticUiError('STATIC_UI_PATH_UNSAFE', 'static UI directory cannot be opened no-follow', { cause: error });
       }
       const stats = await next.stat();
-      if (!stats.isDirectory() || stats.isSymbolicLink() || stats.nlink < 2) {
+      if (!stats.isDirectory() || stats.isSymbolicLink() || stats.nlink < 1) {
         await next.close();
         throw new StaticUiError('STATIC_UI_PATH_UNSAFE', 'static UI path traverses an unsafe directory');
       }

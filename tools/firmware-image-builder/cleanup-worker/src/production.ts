@@ -15,6 +15,8 @@ import {
   type RootFileSystem,
 } from '../../config/load.js';
 import { validateBuilderLock } from '../../domain/builder-lock.js';
+import { createInstalledLockReader } from '../../domain/installed-lock.js';
+import { installedMigrationsDirectory } from '../../domain/installed-layout.js';
 import {
   createCleanupWorker,
   CLEANUP_ADMISSION_ID_PATTERN,
@@ -38,7 +40,10 @@ import {
   type RecoveryFileHandle,
 } from '../../api/src/recovery.js';
 import { OwnershipStore } from '../../api/src/ownership.js';
-import { openBuilderDatabase } from '../../api/src/store-schema.js';
+import {
+  openBuilderDatabase,
+  type OpenBuilderDatabaseOptions,
+} from '../../api/src/store-schema.js';
 import { encodeJson, canonicalInstant, type JsonObject } from '../../api/src/validation.js';
 import { createCommandExecutor, type CommandExecutor, type CommandResult } from '../../runner/src/command-executor.js';
 import { holdInstalledPublisher, validateInstalledPublisherAuthority } from '../../runner/src/main.js';
@@ -55,7 +60,6 @@ const DEFAULT_OWNER = 'cleanup-worker';
 const DIRECTORY_MODE = 0o700;
 const PUBLISHER_DIRECTORY_MODE = 0o750;
 const EVIDENCE_MODE = 0o600;
-const MAX_BUILDER_LOCK_BYTES = 16 * 1024;
 const MAX_LOG_BYTES = 256 * 1024 * 1024;
 const MAX_TOTAL_LOG_BYTES = 512 * 1024 * 1024;
 const MAX_LOG_GENERATIONS = 128;
@@ -105,7 +109,10 @@ export interface CleanupProductionDependencies {
   readonly loadStateRoot?: (options: { readonly env?: NodeJS.ProcessEnv }) => Promise<LoadedStateRoot>;
   readonly loadConfiguration?: (options: { readonly env?: NodeJS.ProcessEnv }) => Promise<LoadedCleanupConfig>;
   readonly configurationRootFs?: Partial<RootFileSystem>;
-  readonly openDatabase?: (path: string) => DatabaseSync;
+  readonly openDatabase?: (
+    path: string,
+    options?: OpenBuilderDatabaseOptions,
+  ) => DatabaseSync;
   readonly commandExecutor?: CommandExecutor;
   readonly publisherAuthority?: CleanupPublisherAuthority;
   readonly publisherClientFactory?: typeof createPublisherClient;
@@ -1098,29 +1105,10 @@ function createEvidenceWriter(stateRoot: string, ownerUid: number, fileSystem: R
 async function defaultPublisherAuthority(loaded: LoadedCleanupConfig, executor: CommandExecutor, ownerUid: number): Promise<CleanupPublisherAuthority & { readonly heldClose: () => Promise<void> }> {
   const lockPath = loaded.config.builderLockPath;
   const installedVersion = basename(dirname(lockPath));
-  const lockParent = await open(dirname(lockPath), DIRECTORY_FLAGS);
-  let lockHandle: FileHandle | null = null;
-  let lockBytes: Buffer;
-  try {
-    const parentStats = await lockParent.stat();
-    if (!parentStats.isDirectory() || parentStats.isSymbolicLink() || parentStats.uid !== ownerUid || parentStats.nlink < 2) throw new Error('builder lock installation directory is unsafe');
-    const lockName = basename(lockPath);
-    lockHandle = await openSafeReadableCandidate(
-      descriptorChild(lockParent, lockName, 'QUARANTINE_PENDING'),
-      'builder lock',
-      (stats) => {
-        if (!stats.isFile() || stats.isSymbolicLink() || stats.uid !== ownerUid || stats.nlink !== 1 || (stats.mode & 0o7777) !== EVIDENCE_MODE || stats.dev !== parentStats.dev) throw new Error('builder lock is not a safe regular file');
-      },
-    );
-    lockBytes = await readBoundedFileHandle(lockHandle, MAX_BUILDER_LOCK_BYTES, 'builder lock', (stats) => {
-      if (!stats.isFile() || stats.isSymbolicLink() || stats.uid !== ownerUid || stats.nlink !== 1 || (stats.mode & 0o7777) !== EVIDENCE_MODE || stats.dev !== parentStats.dev) throw new Error('builder lock is not a safe regular file');
-    });
-  } finally {
-    await lockHandle?.close().catch(() => undefined);
-    await lockParent.close();
-  }
+  const installedLock = await createInstalledLockReader({ ownerUid }).read(dirname(lockPath));
+  if (installedLock.identity.lockPath !== lockPath) throw new Error('builder lock path differs from the selected installation');
   let parsed: unknown;
-  try { parsed = JSON.parse(lockBytes.toString('utf8')) as unknown; } catch (error) { throw new Error('builder lock JSON is malformed', { cause: error }); }
+  try { parsed = JSON.parse(installedLock.text) as unknown; } catch (error) { throw new Error('builder lock JSON is malformed', { cause: error }); }
   const lock = validateBuilderLock(parsed, installedVersion);
   if (!lock.ok) throw new Error(`builder lock is invalid: ${lock.reason}`);
   const held = await holdInstalledPublisher(join(dirname(lockPath), 'bin', 'osi-image-publish'));
@@ -1156,9 +1144,11 @@ export async function createCleanupProduction(options: CleanupProductionDependen
   let db: DatabaseSync | null = null;
   let authorityClose: (() => Promise<void>) | undefined;
   try {
-    db = openDatabase(join(state.stateRoot, 'jobs.sqlite'));
     const loaded = await loadConfiguration({ env });
     if (loaded.stateRoot !== state.stateRoot) throw new Error('configured state root differs from guarded cleanup state');
+    db = openDatabase(join(state.stateRoot, 'jobs.sqlite'), {
+      migrationsDirectory: installedMigrationsDirectory(loaded.config.builderLockPath),
+    });
     const executor = options.commandExecutor ?? createCommandExecutor();
     const timeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     const systemdEnv = options.systemdEnvironment ?? (() => deriveSystemdBusEnvironment({ uid: ownerUid }));

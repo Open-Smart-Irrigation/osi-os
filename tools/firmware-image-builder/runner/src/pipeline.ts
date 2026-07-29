@@ -59,6 +59,7 @@ import type {
 } from './cancellation.js';
 import { CancellationBlockedError } from './cancellation.js';
 import { DockerCancellationRequestedError } from './docker-executor.js';
+import { createTerminalVerification } from './terminal-verification.js';
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SHA40 = /^[0-9a-f]{40}$/u;
@@ -1729,54 +1730,7 @@ export function createPipeline(input: PipelineInput): {
     if (verificationManifest === null) {
       throw new Error('staged verification manifest is unavailable');
     }
-    const observations = verificationManifest.observations;
-    if (observations === null || typeof observations !== 'object' || Array.isArray(observations)) {
-      throw new Error('staged verification observations are invalid');
-    }
-    const stageEvidence = (observations as JsonObject).stageEvidence;
-    if (!Array.isArray(stageEvidence) || stageEvidence.length !== PIPELINE_STAGE_NAMES.length) {
-      throw new Error('staged verification stage aggregation is invalid');
-    }
-    const terminalStages = stageEvidence.map((entry, index) => {
-      if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
-        throw new Error('staged verification stage record is invalid');
-      }
-      const record = entry as JsonObject;
-      if (
-        record.stage !== PIPELINE_STAGE_NAMES[index]
-        || record.path !== `${String(index).padStart(2, '0')}-${PIPELINE_STAGE_NAMES[index]}.json`
-      ) {
-        throw new Error('staged verification stage record is out of order');
-      }
-      if (index === PIPELINE_STAGE_NAMES.length - 1) {
-        if (record.outcome !== 'running') {
-          throw new Error('staged verification predicts a terminal publication outcome');
-        }
-        return {
-          stage: 'publish',
-          path: '09-publish.json',
-          outcome: 'passed',
-        };
-      }
-      if (record.outcome !== 'passed') {
-        throw new Error('staged verification contains a non-passed prerequisite');
-      }
-      return record;
-    });
-    const manifest = canonicalObject({
-      ...verificationManifest,
-      observations: {
-        ...(observations as JsonObject),
-        stageEvidence: terminalStages,
-        publishEvidence: {
-          path: `jobs/${input.jobId}/evidence/09-publish.json`,
-        },
-      },
-    }, 'terminal verification manifest');
-    return {
-      manifest,
-      bytes: encodeJson(manifest, 'terminal verification manifest', true),
-    };
+    return createTerminalVerification(input.jobId, verificationManifest);
   };
 
   const createBinding = (job: JobRecord): PublicationBinding => {

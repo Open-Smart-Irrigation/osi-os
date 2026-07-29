@@ -137,6 +137,28 @@ export interface RecoveryCleanupEvidenceReader {
   readonly read: (input: Readonly<{ jobId: string; admissionId: string; path: string; sha256: string }>) => Promise<RecoveryCleanupEvidence>;
 }
 
+export type RecoveryStagingPostcondition =
+  | CleanupPostcondition['staging']
+  | Readonly<{
+      readonly kind: 'present';
+      readonly sourcePath: string;
+      readonly sourcePresent: true;
+      readonly destinationPath: string;
+      readonly destinationAbsent: true;
+      readonly sha256: string;
+      readonly size: number;
+      readonly verifiedAt: string;
+    }>;
+
+export type RecoveryPresentStagingProof = Readonly<{
+  readonly kind: 'present';
+  readonly path: string;
+  readonly held: true;
+  readonly size: number;
+  readonly sha256: string;
+  readonly verifiedAt: string;
+}>;
+
 export interface RecoveryStagingVerificationInput {
   readonly jobId: string;
   readonly admissionId: string;
@@ -152,11 +174,11 @@ export interface RecoveryStagingVerificationInput {
   readonly manifestSha256: string | null;
   readonly verificationPath: string | null;
   readonly verificationSha256: string | null;
-  readonly postcondition: CleanupPostcondition['staging'];
+  readonly postcondition: RecoveryStagingPostcondition;
 }
 
 export interface RecoveryStagingVerifier {
-  readonly verify: (input: RecoveryStagingVerificationInput) => Promise<true>;
+  readonly verify: (input: RecoveryStagingVerificationInput) => Promise<true | RecoveryPresentStagingProof>;
 }
 
 export interface RecoveryPersistedLogGeneration {

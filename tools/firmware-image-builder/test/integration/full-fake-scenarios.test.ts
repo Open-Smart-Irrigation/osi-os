@@ -494,7 +494,7 @@ function publishEvidence(value: Pick<Fixture, 'jobId' | 'targetId'>): PublishRec
       checksum: { present: true, path: `release/${jobId}/sha256sums`, contents: checksumContents, sha256: checksumSha256 },
       manifest: { present: true, path: `release/${jobId}/build-manifest.json`, bytes: canonical(manifest), content: manifest, sha256: manifestSha256 },
       verification: { present: true, path: `release/${jobId}/verification.json`, bytes: verification.bytes, content: verification.content, sha256: verification.sha256 },
-      staging: { state: 'absent', path: null, sha256: null },
+      staging: { state: 'absent', path: null, sha256: null, size: null, held: false },
       logs: { runner: 'sealed', docker: 'sealed', verifiedAt: RECOVERY, noGap: true },
     },
   };

@@ -13,7 +13,7 @@ import { ConfigAuthorityError, loadConfig, type LoadedConfig } from '../../confi
 import { ADMISSION_ID_PATTERN } from '../../domain/types.js';
 import { encodeJson } from '../../api/src/validation.js';
 import type { CleanupPostcondition } from '../../api/src/ownership.js';
-import type { RecoveryLogVerificationInput } from '../../api/src/recovery.js';
+import type { RecoveryLogVerificationInput, RecoveryStagingPostcondition } from '../../api/src/recovery.js';
 import { RecoveryBoundaryError, RecoveryInfrastructureError } from '../../api/src/recovery.js';
 import { classifyRecoveryAuthorityError, classifyRecoveryFileSystemError, createRecoveryPhysicalVerification } from '../../api/src/recovery-production.js';
 
@@ -138,6 +138,19 @@ function quarantinedPostcondition(sha256: string | null = null, size: number | n
   };
 }
 
+function presentPostcondition(sha256: string, size: number): RecoveryStagingPostcondition {
+  return {
+    kind: 'present',
+    sourcePath: `staging/${JOB_ID}`,
+    sourcePresent: true,
+    destinationPath: `quarantine/${JOB_ID}`,
+    destinationAbsent: true,
+    sha256,
+    size,
+    verifiedAt: NOW,
+  };
+}
+
 function createFactory(loaded: LoadedConfig) {
   return createRecoveryPhysicalVerification({
     stateRootAuthority: loaded.pathAuthorities.stateRoot,
@@ -209,7 +222,7 @@ async function physicalReadWithTimeout<T>(operation: Promise<T>): Promise<T> {
   }
 }
 
-function stagingInput(staging: CleanupPostcondition['staging'], overrides: Partial<{
+function stagingInput(staging: RecoveryStagingPostcondition, overrides: Partial<{
   readonly rootId: string;
   readonly publishState: string | null;
   readonly artifactStagingPath: string | null;
@@ -792,6 +805,32 @@ describe('production recovery physical verification', () => {
 
       await writeFile(join(destination, 'image.img.gz'), Buffer.from('tampered\n'), { mode: 0o600 });
       await expect(physical.staging.verify(stagingInput(quarantinedPostcondition(tracked.artifactSha256, artifact.byteLength), tracked))).rejects.toThrow(/hash|size/);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('returns held physical identity for an exact tracked staging artifact', async () => {
+    const value = await fixture();
+    try {
+      const artifact = Buffer.from('tracked staging artifact bytes\n', 'utf8');
+      const tracked = trackedIdentity(artifact);
+      const output = await setupOutput(value.loaded);
+      const source = join(output, '.osi-image-builder', 'staging', JOB_ID);
+      await mkdir(source, { mode: 0o700 });
+      await writeTrackedFiles(source, artifact);
+
+      await expect(createFactory(value.loaded).staging.verify(stagingInput(
+        presentPostcondition(tracked.artifactSha256, tracked.artifactSize),
+        { publishState: 'publishing', ...tracked },
+      ))).resolves.toEqual({
+        kind: 'present',
+        path: tracked.artifactStagingPath,
+        held: true,
+        size: tracked.artifactSize,
+        sha256: tracked.artifactSha256,
+        verifiedAt: NOW,
+      });
     } finally {
       await rm(value.base, { recursive: true, force: true });
     }
