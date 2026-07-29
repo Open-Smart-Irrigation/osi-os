@@ -55,8 +55,9 @@ const PRIVATE_KEY_PATTERN = /(?:-----BEGIN [^-\r\n]*PRIVATE KEY-----|----+\s*BEG
 const SENSITIVE_OBSERVATION_KEY_PARTS = Object.freeze([
   'token', 'password', 'passwd', 'secret', 'credential', 'privatekey', 'authorization', 'cookie',
   'sshauthsock', 'gitsshcommand', 'sshpath', 'apikey', 'sshkey', 'identityfile', 'clientsecret',
+  'passphrase', 'auth', 'oauth', 'accesskey', 'sessionkey',
 ]);
-const CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[\s;,?&"'{}])(?:[a-z0-9_.-]*(?:token|password|passwd|secret|credential|authorization|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret)[a-z0-9_.-]*)\s*(?:=|:)\s*[^\s;,?&]+/iu;
+const CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[\s;,?&"'{}])(?:[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*)\s*(?:=|:)\s*[^\s;,?&]+/iu;
 const AUTHORIZATION_HEADER_PATTERN = /\b(?:authorization)\s*[:=]\s*\S+/iu;
 const BARE_AUTHORIZATION_PATTERN = /\b(?:bearer|basic)\s+([A-Za-z0-9._~+/=-]+)/giu;
 const URL_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^\s]*/giu;
@@ -66,7 +67,7 @@ const PUBLIC_EVIDENCE_EXECUTABLES = new Set([
   '/usr/bin/make', '/usr/bin/gcc', '/usr/bin/llvm-config', '/usr/bin/rustc', '/bin/sh',
 ]);
 const COMMAND_HOME_PATH_PATTERN = /(?:^|[^a-z0-9._-])(?:~(?:[a-z0-9._-]+)?|\$\{?home\}?)(?:\/|$)/iu;
-const COMMAND_CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[\s;,?&"'{}])(?:--?)?[a-z0-9_.-]*(?:token|password|passwd|secret|credential|authorization|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret)[a-z0-9_.-]*\s*(?:=|:)\s*[^\s;,?&]+/iu;
+const COMMAND_CREDENTIAL_ASSIGNMENT_PATTERN = /(?:^|[\s;,?&"'{}])(?:--?)?[a-z0-9_.-]*(?:token|password|passwd|secret|credential|cookie|private[_-]?key|ssh[_-]?auth[_-]?sock|git[_-]?ssh[_-]?command|ssh[_-]?path|api[_-]?key|ssh[_-]?key|identity[_-]?file|client[_-]?secret|passphrase|auth[a-z0-9_.-]*|oauth[a-z0-9_.-]*|access[_-]?key[a-z0-9_.-]*|session[_-]?key[a-z0-9_.-]*)[a-z0-9_.-]*\s*(?:=|:)\s*[^\s;,?&]+/iu;
 const JOB_STATE_SET = new Set<string>(JOB_STATES);
 const STAGE_SET = new Set<string>(PIPELINE_STAGE_NAMES);
 const ERROR_CODE_SET = new Set<string>(BUILDER_ERROR_CODES);
@@ -558,13 +559,16 @@ function normalizedObservationKey(key: string): string {
 
 function isSensitiveObservationKey(key: string): boolean {
   const normalized = normalizedObservationKey(key);
-  return SENSITIVE_OBSERVATION_KEY_PARTS.some((part) => normalized.includes(part));
+  return SENSITIVE_OBSERVATION_KEY_PARTS.some((part) => part === 'auth'
+    ? normalized.startsWith(part)
+    : normalized.includes(part));
 }
 
 function hasCredentialUrl(value: string): boolean {
   for (const match of value.matchAll(URL_PATTERN)) {
     try {
-      if (new URL(match[0]).password !== '') return true;
+      const url = new URL(match[0]);
+      if (url.username !== '' || url.password !== '') return true;
     } catch {
       continue;
     }
@@ -573,8 +577,9 @@ function hasCredentialUrl(value: string): boolean {
 }
 
 function hasBareAuthorizationToken(value: string): boolean {
+  if (value === 'Basic verification passed' || value === 'Bearer checks passed') return false;
   for (const match of value.matchAll(BARE_AUTHORIZATION_PATTERN)) {
-    if (/[A-Z0-9._~+/=-]/u.test(match[1])) return true;
+    if (match[1] !== undefined) return true;
   }
   return false;
 }
@@ -593,12 +598,16 @@ function hasCommonStringRedaction(value: string): boolean {
     || /file:\/\//iu.test(value);
 }
 
-function redactObservationString(value: string): string {
+function redactPublicText(value: string): string {
   return hasCommonStringRedaction(value)
     || /~\/\.ssh(?:\/|$)/iu.test(value)
     || CREDENTIAL_ASSIGNMENT_PATTERN.test(value)
     ? '[redacted]'
     : value;
+}
+
+function redactObservationString(value: string): string {
+  return redactPublicText(value);
 }
 
 interface ObservationProjectionBudget {
@@ -638,11 +647,12 @@ function publicObservations(value: unknown): unknown {
 }
 
 function redactCommandArgument(value: string): string {
-  return hasCommonStringRedaction(value)
-    || COMMAND_CREDENTIAL_ASSIGNMENT_PATTERN.test(value)
-    || COMMAND_HOME_PATH_PATTERN.test(value)
-    ? '[redacted]'
-    : value;
+  const redacted = redactPublicText(value);
+  return redacted !== value
+    ? redacted
+    : COMMAND_CREDENTIAL_ASSIGNMENT_PATTERN.test(value) || COMMAND_HOME_PATH_PATTERN.test(value)
+      ? '[redacted]'
+      : value;
 }
 
 function publicEvidenceCommands(commands: readonly EvidenceCommand[]): readonly EvidenceCommand[] {
@@ -665,8 +675,8 @@ function publicEvidence(value: unknown, job: JobRecord, expectedJobId: string, e
     stage: evidence.error.stage,
     retryable: evidence.error.retryable,
     requestId: evidence.error.requestId,
-    diagnosis: evidence.error.diagnosis,
-    recovery: evidence.error.recovery,
+    diagnosis: redactPublicText(evidence.error.diagnosis),
+    recovery: redactPublicText(evidence.error.recovery),
     ...(evidence.error.evidencePath === undefined ? {} : { evidencePath: evidence.error.evidencePath }),
     ...(evidence.error.operationId === undefined ? {} : { operationId: evidence.error.operationId }),
   };

@@ -365,6 +365,97 @@ describe('read-only builder API routes', () => {
     });
   });
 
+  it('redacts lowercase auth credentials, URL userinfo, expanded sensitive keys, assignments, and errors', async () => {
+    const lowercaseCredentials = ['Basic lowercasevalue', 'Bearer secret', 'Bearer verylonglowercasetokenvalue'];
+    const userinfoUrls = [
+      'https://build-user@example.test/repository.git',
+      'https://%62uild-user@example.test/repository.git',
+      'https://:build-password@example.test/repository.git',
+    ];
+    const sensitiveAssignments = [
+      'passphrase=passphrase-secret',
+      'authHeader: auth-header-secret',
+      'oauth_token=oauth-secret',
+      'accessKeyId=access-key-id-secret',
+      'access-key: access-key-secret',
+      'session_key=session-key-secret',
+    ];
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence('publish', 'failed'),
+      commands: [{
+        argv: [
+          '/usr/bin/node',
+          ...lowercaseCredentials,
+          ...userinfoUrls,
+          'https://example.test/repository.git',
+          ...sensitiveAssignments,
+        ],
+        startedAt: now,
+        finishedAt: later,
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+        outputLimit: false,
+      }],
+      observations: {
+        lowercaseValues: lowercaseCredentials,
+        userinfoValues: userinfoUrls,
+        safeUrl: 'https://example.test/repository.git',
+        sensitiveAssignments,
+        sensitiveKeys: {
+          passphrase: 'passphrase-value',
+          authHeader: 'auth-header-value',
+          authToken: 'auth-token-value',
+          oauth: 'oauth-value',
+          accessKeyId: 'access-key-id-value',
+          accessKey: 'access-key-value',
+          sessionKey: 'session-key-value',
+          sessionKeyId: 'session-key-id-value',
+        },
+        ordinaryAuthProse: ['Basic verification passed', 'Bearer checks passed'],
+      },
+      error: {
+        ...stageEvidence('publish', 'failed').error!,
+        diagnosis: 'failed with password=error-secret',
+        recovery: 'retry at /srv/private and use Bearer errorsecret',
+      },
+    }, 'publish', 'failed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      commands: [{ argv: [
+        '/usr/bin/node',
+        ...Array(lowercaseCredentials.length + userinfoUrls.length).fill('[redacted]'),
+        'https://example.test/repository.git',
+        ...Array(sensitiveAssignments.length).fill('[redacted]'),
+      ] }],
+      observations: {
+        lowercaseValues: Array(lowercaseCredentials.length).fill('[redacted]'),
+        userinfoValues: Array(userinfoUrls.length).fill('[redacted]'),
+        safeUrl: 'https://example.test/repository.git',
+        sensitiveAssignments: Array(sensitiveAssignments.length).fill('[redacted]'),
+        sensitiveKeys: {},
+        ordinaryAuthProse: ['Basic verification passed', 'Bearer checks passed'],
+      },
+      error: {
+        diagnosis: '[redacted]',
+        recovery: '[redacted]',
+      },
+    });
+    const encoded = JSON.stringify(response.body);
+    for (const forbidden of [
+      ...lowercaseCredentials,
+      ...userinfoUrls,
+      ...sensitiveAssignments,
+      'passphrase-value', 'auth-header-value', 'auth-token-value', 'oauth-value',
+      'access-key-id-value', 'access-key-value', 'session-key-value', 'session-key-id-value',
+      'error-secret', '/srv/private', 'errorsecret',
+    ]) expect(encoded).not.toContain(forbidden);
+  });
+
   it.each([
     ['target ID mismatch', { targetId: 'rpi-2' }],
     ['root ID mismatch', { rootId: 'archive' }],
