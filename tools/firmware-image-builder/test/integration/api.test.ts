@@ -162,6 +162,11 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
         requestPersisted: false,
       }),
     },
+    eventStream: {
+      open: async function* (jobId: string, afterSeq: number) {
+        yield `id: ${afterSeq + 1}\nevent: terminal\ndata: ${JSON.stringify({ jobId, state: 'succeeded' })}\n\n`;
+      },
+    },
     store: {
       listJobs: async ({ cursor, limit }: { cursor: string | null; limit: number }) => ({ jobs: [record], nextCursor: cursor === null && limit === 1 ? 'next-page' : null }),
       getJob: (id: string) => id === 'job-1' ? record : (() => { throw new StoreNotFoundError('not found'); })(),
@@ -234,6 +239,26 @@ async function post(port: number, path: string, body: string, headers: Record<st
     });
     requestValue.on('error', reject);
     requestValue.end(body);
+  });
+}
+
+async function getText(port: number, path: string): Promise<{
+  status: number;
+  headers: Record<string, string | string[] | undefined>;
+  body: string;
+}> {
+  return new Promise((resolve, reject) => {
+    const requestValue = request({ hostname: '127.0.0.1', port, path, method: 'GET' }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer) => chunks.push(chunk));
+      response.on('end', () => resolve({
+        status: response.statusCode ?? 0,
+        headers: response.headers,
+        body: Buffer.concat(chunks).toString('utf8'),
+      }));
+    });
+    requestValue.on('error', reject);
+    requestValue.end();
   });
 }
 
@@ -2016,8 +2041,34 @@ describe('read-only builder API routes', () => {
     expect((await get(started.port, '/api/jobs/job-1%252fsecret')).status).toBe(400);
     expect((await get(started.port, '/api/jobs/%252e%252e')).status).toBe(400);
     expect((await get(started.port, '/api/jobs/missing/evidence/not-a-stage')).status).toBe(400);
-    expect((await get(started.port, '/api/jobs/job-1/events/stream')).status).toBe(404);
+    expect((await get(started.port, '/api/jobs/job-1/events/stream?after=-2')).status).toBe(400);
+    expect((await get(started.port, '/api/jobs/missing/events/stream')).status).toBe(404);
     expect((await get(started.port, '/api/jobs/missing/events')).status).toBe(404);
+  });
+
+  it('streams job events from the durable after cursor with a request abort signal', async () => {
+    const open = vi.fn((jobId: string, afterSeq: number, signal: AbortSignal) => (async function* () {
+      expect(signal.aborted).toBe(false);
+      yield `id: ${afterSeq + 1}\nevent: stage\ndata: ${JSON.stringify({ jobId, state: 'building' })}\n\n`;
+      yield `id: ${afterSeq + 2}\nevent: terminal\ndata: ${JSON.stringify({ jobId, state: 'succeeded' })}\n\n`;
+    })());
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, { eventStream: { open } });
+    }));
+    server = started.server;
+
+    const response = await getText(started.port, '/api/jobs/job-1/events/stream?after=41');
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toBe('text/event-stream; charset=utf-8');
+    expect(response.body).toBe(
+      'id: 42\nevent: stage\ndata: {"jobId":"job-1","state":"building"}\n\n'
+      + 'id: 43\nevent: terminal\ndata: {"jobId":"job-1","state":"succeeded"}\n\n',
+    );
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(open.mock.calls[0]![0]).toBe('job-1');
+    expect(open.mock.calls[0]![1]).toBe(41);
+    expect(open.mock.calls[0]![2]).toBeInstanceOf(AbortSignal);
   });
 
   it('preserves valid source subjects and keeps unknown freshness informational', async () => {

@@ -4,6 +4,7 @@ import { request } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import {
   createHttpServer,
+  eventStreamResponse,
   jsonResponse,
   type ApiRouteHandler,
   type ApiRouteContext,
@@ -55,7 +56,11 @@ async function call(port: number, options: {
     if (options.body !== undefined) req.end(options.body);
     else req.end();
   });
-  return { ...response, json: response.body.length === 0 ? null : JSON.parse(response.body) as unknown };
+  const contentType = response.headers['content-type'];
+  const json = typeof contentType === 'string' && contentType.startsWith('application/json')
+    ? response.body.length === 0 ? null : JSON.parse(response.body) as unknown
+    : null;
+  return { ...response, json };
 }
 
 async function stop(server: ReturnType<typeof createHttpServer>) {
@@ -103,6 +108,57 @@ async function rawWithoutHalfClose(port: number, input: string): Promise<{ reado
 }
 
 describe('loopback HTTP security boundary', () => {
+  it('streams bounded SSE frames without JSON serialization', async () => {
+    const { server, port } = await start(() => eventStreamResponse(200, async function* (signal) {
+      expect(signal.aborted).toBe(false);
+      yield 'id: 4\nevent: stage\ndata: {"state":"building"}\n\n';
+      yield ': keepalive\n\n';
+      yield 'id: 5\nevent: terminal\ndata: {"state":"succeeded"}\n\n';
+    }));
+    try {
+      const response = await call(port, { path: '/api/jobs/job-1/events/stream?after=3' });
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toBe('text/event-stream; charset=utf-8');
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.headers['x-content-type-options']).toBe('nosniff');
+      expect(response.body).toBe(
+        'id: 4\nevent: stage\ndata: {"state":"building"}\n\n'
+        + ': keepalive\n\n'
+        + 'id: 5\nevent: terminal\ndata: {"state":"succeeded"}\n\n',
+      );
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('aborts the stream when the client disconnects', async () => {
+    let observedSignal: AbortSignal | undefined;
+    let resolveAbort: (() => void) | undefined;
+    const aborted = new Promise<void>((resolve) => { resolveAbort = resolve; });
+    const { server, port } = await start(() => eventStreamResponse(200, async function* (signal) {
+      observedSignal = signal;
+      signal.addEventListener('abort', () => resolveAbort?.(), { once: true });
+      yield ': connected\n\n';
+      await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
+    }));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const req = request({ host: '127.0.0.1', port, path: '/api/jobs/job-1/events/stream' }, (res) => {
+          res.once('data', () => {
+            res.destroy();
+            resolve();
+          });
+        });
+        req.on('error', reject);
+        req.end();
+      });
+      await aborted;
+      expect(observedSignal?.aborted).toBe(true);
+    } finally {
+      await stop(server);
+    }
+  });
+
   it('binds loopback-only and dispatches a request with a request ID', async () => {
     let seen: ApiRouteContext | undefined;
     const { server, port } = await start((context) => {

@@ -40,6 +40,7 @@ import {
   type ApiRouteContext,
   type ApiRouteHandler,
   type HttpResponse,
+  eventStreamResponse,
   jsonResponse,
 } from './server.js';
 
@@ -203,6 +204,10 @@ export interface ApiEnqueueService {
   ) => PersistedEnqueueAcceptance | Promise<PersistedEnqueueAcceptance>;
 }
 
+export interface ApiEventStreamService {
+  readonly open: (jobId: string, afterSeq: number, signal: AbortSignal) => AsyncIterable<string>;
+}
+
 export interface ApiRouteDependencies {
   readonly version: string;
   readonly config: BuilderConfig;
@@ -213,6 +218,7 @@ export interface ApiRouteDependencies {
   readonly enqueue: ApiEnqueueService;
   readonly now: () => string;
   readonly cancellation: ApiCancellationService;
+  readonly eventStream: ApiEventStreamService;
   readonly store: ApiJobStore;
   readonly evidenceReader: IndexedEvidenceReader;
 }
@@ -324,6 +330,12 @@ function parseAfter(value: string | null): number {
   const after = Number(value);
   if (!Number.isSafeInteger(after)) badRequest('after');
   return after;
+}
+
+function exactQueryValue(query: Readonly<URLSearchParams>, key: string): string | null {
+  const keys = [...query.keys()];
+  if (keys.some((candidate) => candidate !== key) || query.getAll(key).length > 1) badRequest('query');
+  return query.get(key);
 }
 
 function branchName(value: unknown, field: string): string {
@@ -1424,6 +1436,16 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
       return jsonResponse(200, jobPageDto(page, limit, cursor));
     }
 
+    const eventStreamMatch = context.path.match(/^\/api\/jobs\/([^/]+)\/events\/stream$/u);
+    if (eventStreamMatch) {
+      const jobId = validateJobId(eventStreamMatch[1]!);
+      getJob(dependencies.store, jobId);
+      const after = parseAfter(exactQueryValue(context.query, 'after'));
+      return eventStreamResponse(
+        200,
+        (signal) => dependencies.eventStream.open(jobId, after, signal),
+      );
+    }
     const evidenceMatch = context.path.match(/^\/api\/jobs\/([^/]+)\/evidence\/([^/]+)$/u);
     if (evidenceMatch) {
       const jobId = validateJobId(evidenceMatch[1]!);

@@ -18,6 +18,7 @@ const HEADERS_TIMEOUT_MS = 10_000;
 const SOCKET_TIMEOUT_MS = 30_000;
 const KEEP_ALIVE_TIMEOUT_MS = 5_000;
 const BODY_DRAIN_TIMEOUT_MS = 5_000;
+const MAX_EVENT_STREAM_FRAME_BYTES = 64 * 1024;
 const HASH40 = /^[0-9a-f]{40}$/u;
 const HASH64 = /^[0-9a-f]{64}$/u;
 const TARGET_ID = /^rpi-[25]$/u;
@@ -32,11 +33,18 @@ const OPERATION_SET = new Set<string>(TRUSTED_OPERATION_IDS);
 
 type SafeDetails = Readonly<Record<string, string | number | boolean | null>>;
 
-export interface HttpResponse {
+export interface JsonHttpResponse {
   readonly status: number;
   readonly body?: unknown;
   readonly headers?: Readonly<Record<string, string>>;
 }
+
+export interface EventStreamHttpResponse {
+  readonly status: number;
+  readonly eventStream: (signal: AbortSignal) => AsyncIterable<string>;
+}
+
+export type HttpResponse = JsonHttpResponse | EventStreamHttpResponse;
 
 export interface ApiRouteContext {
   readonly request: IncomingMessage;
@@ -79,6 +87,13 @@ export class HttpTransportError extends Error {
 
 export function jsonResponse(status: number, body: unknown, headers: Readonly<Record<string, string>> = {}): HttpResponse {
   return { status, body, headers };
+}
+
+export function eventStreamResponse(
+  status: number,
+  eventStream: (signal: AbortSignal) => AsyncIterable<string>,
+): HttpResponse {
+  return { status, eventStream };
 }
 
 function requestId(): string {
@@ -269,6 +284,94 @@ function sendJson(response: ServerResponse, status: number, body: unknown, id: s
   if (!response.destroyed && !response.writableEnded) response.end(options.suppressBody === true ? undefined : payload);
 }
 
+function writeEventStreamFrame(
+  response: ServerResponse,
+  frame: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (response.destroyed || response.writableEnded || signal.aborted) return Promise.resolve(false);
+  if (typeof frame !== 'string'
+    || frame.length === 0
+    || !frame.endsWith('\n\n')
+    || frame.includes('\r')
+    || Buffer.byteLength(frame, 'utf8') > MAX_EVENT_STREAM_FRAME_BYTES) {
+    throw new Error('event stream frame is invalid');
+  }
+  if (response.write(frame)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (writable: boolean): void => {
+      if (settled) return;
+      settled = true;
+      response.off('drain', onDrain);
+      response.off('close', onClose);
+      signal.removeEventListener('abort', onAbort);
+      resolve(writable);
+    };
+    const onDrain = (): void => finish(true);
+    const onClose = (): void => finish(false);
+    const onAbort = (): void => finish(false);
+    response.once('drain', onDrain);
+    response.once('close', onClose);
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) finish(false);
+  });
+}
+
+async function sendEventStream(
+  request: IncomingMessage,
+  response: ServerResponse,
+  result: EventStreamHttpResponse,
+  id: string,
+  corsOrigin?: string,
+): Promise<void> {
+  if (result.status !== 200) throw new Error('event stream responses must use status 200');
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  request.once('aborted', abort);
+  response.once('close', abort);
+  let iterable: AsyncIterable<string>;
+  try {
+    iterable = result.eventStream(controller.signal);
+    if (iterable === null
+      || typeof iterable !== 'object'
+      || typeof iterable[Symbol.asyncIterator] !== 'function') {
+      throw new Error('event stream route did not return an async iterable');
+    }
+  } catch (error) {
+    request.off('aborted', abort);
+    response.off('close', abort);
+    throw error;
+  }
+  const shouldKeepAlive = response.shouldKeepAlive;
+  response.writeHead(200, {
+    ...(corsOrigin === undefined ? {} : {
+      'access-control-allow-origin': corsOrigin,
+      vary: 'Origin',
+    }),
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-store',
+    [REQUEST_ID_HEADER]: id,
+    connection: shouldKeepAlive ? 'keep-alive' : 'close',
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'x-frame-options': 'DENY',
+  });
+  response.flushHeaders();
+  try {
+    for await (const frame of iterable) {
+      if (!await writeEventStreamFrame(response, frame, controller.signal)) break;
+    }
+    if (!response.destroyed && !response.writableEnded) response.end();
+  } catch {
+    if (!response.destroyed) response.destroy();
+  } finally {
+    controller.abort();
+    request.off('aborted', abort);
+    response.off('close', abort);
+  }
+}
+
 function errorStatus(error: unknown): number {
   if (error instanceof HttpTransportError
     && Number.isInteger(error.status) && error.status >= 200 && error.status <= 599) return error.status;
@@ -424,6 +527,17 @@ export function createHttpServer(options: HttpServerOptions): Server {
       if (result === null || result === undefined) fail('NOT_FOUND', 404);
       const status = responseStatus(result.status);
       const origin = actualOrigin(request);
+      if ('eventStream' in result) {
+        if (method !== 'GET') fail('METHOD_NOT_ALLOWED', 405);
+        await sendEventStream(
+          request,
+          response,
+          result,
+          id,
+          request.headers.origin === origin ? origin : undefined,
+        );
+        return;
+      }
       sendJson(response, status, result.body ?? null, id, {
         routeHeaders: result.headers,
         suppressBody: method === 'HEAD',
