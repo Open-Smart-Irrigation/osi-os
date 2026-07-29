@@ -1009,6 +1009,39 @@ describe('read-only builder API routes', () => {
     expect(JSON.stringify(response.body)).not.toContain('123456');
   });
 
+  it('redacts malformed escaped credential keys across every public text surface', async () => {
+    const malformedCredential = String.raw`malformed {\"password\":123`;
+    const routeDependencies = dependencies();
+    useEvidence(routeDependencies, {
+      ...stageEvidence('publish', 'failed'),
+      commands: [{
+        argv: ['/usr/bin/node', malformedCredential],
+        startedAt: now,
+        finishedAt: later,
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+        outputLimit: false,
+      }],
+      observations: { malformedEscapedValue: malformedCredential },
+      error: {
+        ...stageEvidence('publish', 'failed').error!,
+        diagnosis: `failed with ${malformedCredential}`,
+        recovery: `retry with ${malformedCredential}`,
+      },
+    }, 'publish', 'failed');
+    const started = await start(routeDependencies); server = started.server;
+
+    const response = await get(started.port, '/api/jobs/job-1/evidence/publish');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      commands: [{ argv: ['/usr/bin/node', '[redacted]'] }],
+      observations: { malformedEscapedValue: '[redacted]' },
+      error: { diagnosis: '[redacted]', recovery: '[redacted]' },
+    });
+    expect(JSON.stringify(response.body)).not.toContain('password');
+  });
+
   it('classifies credentials in surrounding text while preserving benign auth prose and status keys', async () => {
     const routeDependencies = dependencies();
     useEvidence(routeDependencies, {
@@ -1057,13 +1090,16 @@ describe('read-only builder API routes', () => {
     });
   });
 
-  it('keeps unmatched JSON openers within the public-text scan budget', async () => {
+  it('keeps escape-heavy input linear at the exact evidence byte limit', async () => {
     const emptyEvidence = stageEvidence();
-    const emptyObservationEvidence = {
+    const escapedQuotes = String.raw`\"`.repeat(15_000);
+    const escapedEvidence = {
       ...emptyEvidence,
-      observations: { unmatchedOpeners: '' },
+      observations: { unmatchedOpeners: escapedQuotes },
     };
-    const unmatchedOpeners = '{'.repeat(65_536 - Buffer.byteLength(JSON.stringify(emptyObservationEvidence), 'utf8'));
+    const remainingBytes = 65_536 - Buffer.byteLength(JSON.stringify(escapedEvidence), 'utf8');
+    expect(remainingBytes).toBeGreaterThan(0);
+    const unmatchedOpeners = escapedQuotes + '{'.repeat(remainingBytes);
     const evidence = {
       ...emptyEvidence,
       observations: { unmatchedOpeners },
