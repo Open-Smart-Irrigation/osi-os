@@ -156,13 +156,46 @@ test('W1: revocation immediately stops enqueue before physical effect', async ()
       env: ENV,
       db,
     });
-    assert.equal(response.result, null);
+    assert.equal(response.result, null, 'a revoked grant must never reach the downlink builder');
     assert.equal(
       db.prepare(
-        "SELECT COUNT(*) AS count FROM applied_commands WHERE command_id='manual-scope-test'"
-      ).get().count,
-      0
+        "SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='manual-scope-test'"
+      ).get().n,
+      0,
+      'no actuation expectation row may be written for a revoked grant'
     );
+    // R4: a revoked grant is now a terminal REJECTED_PERMANENT ack (reason scope_denied),
+    // not a silently-dropped command left non-terminal for the cloud to keep redelivering.
+    const applied = db.prepare(
+      "SELECT result, result_detail FROM applied_commands WHERE command_id='manual-scope-test'"
+    ).get();
+    assert.ok(applied, 'a revoked grant must still produce a terminal rejection the cloud can observe');
+    assert.equal(applied.result, 'REJECTED_PERMANENT');
+    assert.equal(JSON.parse(applied.result_detail).reason, 'scope_denied');
+  } finally {
+    db.close();
+  }
+});
+
+test('R4: a role-denied actor (real zone access, non-mutating role) also gets a terminal ack', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    // u-view1 (role 'viewer') is genuinely granted to z-1 (g-2), VALVE1's zone --
+    // assertFreshDeviceAccess succeeds; canMutate is what denies this, a different throw
+    // site than the revoked-grant case above, and both must queue the same kind of ack.
+    const response = await executeFunction(loadNode('write-strega-expectation'), {
+      msg: expectationMessage('u-view1'),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result, null, 'a role-denied actor must never reach the downlink builder');
+    const applied = db.prepare(
+      "SELECT result, result_detail FROM applied_commands WHERE command_id='manual-scope-test'"
+    ).get();
+    assert.ok(applied, 'a role-denied actor must still produce a terminal rejection, not a silent drop');
+    assert.equal(applied.result, 'REJECTED_PERMANENT');
+    assert.equal(JSON.parse(applied.result_detail).reason, 'scope_denied');
   } finally {
     db.close();
   }
