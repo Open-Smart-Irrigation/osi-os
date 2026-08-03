@@ -43,6 +43,7 @@ function hasLib(node, varName, moduleName) {
 const OSI_DB_BINDING = { variable: 'osiDb', module: 'osi-db-helper' };
 const OSI_JOURNAL_BINDING = { variable: 'osiJournal', module: 'osi-journal' };
 const OSI_COMMAND_LEDGER_BINDING = { variable: 'osiCommandLedger', module: 'osi-command-ledger' };
+const OSI_ZONE_COMMAND_BINDING = { variable: 'osiZoneCommands', module: 'zone-commands' };
 
 function requireOsiLibContract(node, expectedBindings, label, unavailableErrorPrefix = 'Journal helpers unavailable:') {
     if (!node || typeof node.func !== 'string') return false;
@@ -201,6 +202,7 @@ const forceSyncBuilder = byId['sync-force-build'];
 const pendingGuard = byId['reject-indefinite-open'];
 const dedupe = byId['command-dedupe-dispatch'];
 const journalApply = byId['journal-command-apply-fn'];
+const terraZoneConfigApply = byId['terra-zone-config-command-apply-fn'];
 const ackQueue = byId['command-ack-queue-rest'];
 for (const commandType of journalCommandTypes) {
     if (!commandRegistry || !new RegExp('\\b' + commandType + '\\s*:').test(commandRegistry.func || '')) {
@@ -209,13 +211,21 @@ for (const commandType of journalCommandTypes) {
 }
 if (!pendingReplay || !/_pendingCommandEnvelope/.test(pendingReplay.func || '') ||
     !/payload:\s*rawPayload/.test(pendingReplay.func || '') ||
+    !/eventUuid:\s*cmd\.eventUuid/.test(pendingReplay.func || '') ||
+    !/aggregateType:\s*cmd\.aggregateType/.test(pendingReplay.func || '') ||
+    !/aggregateKey:\s*cmd\.aggregateKey/.test(pendingReplay.func || '') ||
+    !/appliedSyncVersion:\s*cmd\.appliedSyncVersion/.test(pendingReplay.func || '') ||
     /cmd\.command_type\s*\|\|\s*rawPayload\.command_type/.test(pendingReplay.func || '')) {
-    failures.push('journal commands: pending replay must retain a protected delivery envelope and raw payload');
+    failures.push('journal commands: pending replay must retain the complete protected delivery envelope and raw payload');
 }
 if (!forceSyncBuilder || !/_pendingCommandEnvelope/.test(forceSyncBuilder.func || '') ||
     !/payload:\s*rawPayload/.test(forceSyncBuilder.func || '') ||
+    !/eventUuid:\s*cmd\.eventUuid/.test(forceSyncBuilder.func || '') ||
+    !/aggregateType:\s*cmd\.aggregateType/.test(forceSyncBuilder.func || '') ||
+    !/aggregateKey:\s*cmd\.aggregateKey/.test(forceSyncBuilder.func || '') ||
+    !/appliedSyncVersion:\s*cmd\.appliedSyncVersion/.test(forceSyncBuilder.func || '') ||
     /cmd\.command_type\s*\|\|\s*rawPayload\.command_type/.test(forceSyncBuilder.func || '')) {
-    failures.push('journal commands: force-sync producer must retain a protected delivery envelope and raw payload');
+    failures.push('journal commands: force-sync producer must retain the complete protected delivery envelope and raw payload');
 }
 if (!pendingGuard || !/\(\?:\^\|_\)JOURNAL\(\?:_\|\$\)/.test(pendingGuard.func || '')) {
     failures.push('journal commands: guard must pass unknown JOURNAL subtypes to durable rejection');
@@ -245,10 +255,23 @@ if (!journalApply || !requireOsiLibContract(
     [OSI_DB_BINDING, OSI_JOURNAL_BINDING],
     'journal commands: applier'
 ) || JSON.stringify(journalApply.wires) !== JSON.stringify([
-    ['934bf2bc19a8ce22'],
+    ['terra-zone-config-command-apply-fn'],
     ['9d5e3035c3d069c4'],
 ]) || !/applyJournalCommand/.test(journalApply.func || '') || !/\.close\s*\(/.test(journalApply.func || '')) {
     failures.push('journal commands: journal applier must delegate, close DB, and separate fallback from durable ACK');
+}
+if (!terraZoneConfigApply || !requireOsiLibContract(
+    terraZoneConfigApply,
+    [OSI_DB_BINDING, OSI_ZONE_COMMAND_BINDING],
+    'Terra zone config: applier',
+    'Terra zone-config command helpers unavailable:'
+) || JSON.stringify(terraZoneConfigApply.wires) !== JSON.stringify([
+    ['934bf2bc19a8ce22'],
+    ['9d5e3035c3d069c4'],
+]) || !/applyZoneCommand/.test(terraZoneConfigApply.func || '') ||
+    !/command_type_recognized:\s*msg\._commandTypeRecognized === true/.test(terraZoneConfigApply.func || '') ||
+    !/\.close\s*\(/.test(terraZoneConfigApply.func || '')) {
+    failures.push('Terra zone config: applier must delegate with registry proof, close DB, and separate fallback from durable ACK');
 }
 if (!ackQueue || !requireOsiLibContract(
     ackQueue,
@@ -276,6 +299,14 @@ async function runJournalHelperFailureMatrix() {
             expected: [null, null],
         },
         {
+            node: terraZoneConfigApply,
+            label: 'Terra helper failure: apply',
+            helpers: ['osi-db-helper', 'zone-commands'],
+            commandType: 'UPSERT_ZONE_CONFIG',
+            errorPrefix: 'Terra zone-config command helpers unavailable: ',
+            expected: [null, null],
+        },
+        {
             node: ackQueue,
             label: 'journal helper failure: ACK queue',
             helpers: ['osi-db-helper', 'osi-command-ledger'],
@@ -298,7 +329,7 @@ async function runJournalHelperFailureMatrix() {
             payload: {
                 _pendingCommandEnvelope: {
                     commandId: 'helper-failure-test',
-                    commandType: 'UPSERT_JOURNAL_ENTRY',
+                    commandType: testCase.commandType || 'UPSERT_JOURNAL_ENTRY',
                     payload: {},
                 },
             },
@@ -357,8 +388,8 @@ async function runJournalHelperFailureMatrix() {
         }
     }
 
-    if (!failures.some((failure) => failure.startsWith('journal helper failure:'))) {
-        console.log('OK  journal helper failure paths return exact fail-closed outputs');
+    if (!failures.some((failure) => failure.toLowerCase().includes('helper failure:'))) {
+        console.log('OK  command helper failure paths return exact fail-closed outputs');
     }
 }
 

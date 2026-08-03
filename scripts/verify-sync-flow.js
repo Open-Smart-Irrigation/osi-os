@@ -16,6 +16,8 @@ const journalCommandsPath = path.join(nodeRedRoot, 'osi-journal', 'commands.js')
 const journalCommandsSource = fs.readFileSync(journalCommandsPath, 'utf8');
 const commandLedgerPath = path.join(nodeRedRoot, 'osi-command-ledger', 'index.js');
 const commandLedgerSource = fs.readFileSync(commandLedgerPath, 'utf8');
+const zoneCommandsPath = path.join(nodeRedRoot, 'osi-zone-commands', 'index.js');
+const zoneCommandsSource = fs.readFileSync(zoneCommandsPath, 'utf8');
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
 const chirpstackInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'chirpstack', 'chirpstack', 'files', 'chirpstack.init');
@@ -1623,8 +1625,32 @@ expectOrderedIncludesById('journal-command-apply-fn', [
   "const dbLoad = osiLib.require('osi-db-helper');",
   "const journalLoad = osiLib.require('osi-journal');",
 ], 'passes non-journal commands toward legacy dispatch before loading journal helpers');
+expectOrderedIncludesById('terra-zone-config-command-apply-fn', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "if (commandType !== 'UPSERT_ZONE_CONFIG') return [msg, null];",
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const zoneLoad = osiLib.require('zone-commands');",
+  'applyZoneCommand(db, envelope, {',
+], 'passes protected Terra zone-config commands through the transactional helper');
+expectIncludesById(
+  'terra-zone-config-command-apply-fn',
+  'Terra zone-config command helpers unavailable:',
+  'fails closed when Terra zone-config helpers are unavailable'
+);
+expectIncludesById(
+  'terra-zone-config-command-apply-fn',
+  '.close(',
+  'closes the Terra zone-config command database handle'
+);
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1', 'looks up exact command IDs before payload validation');
 expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'result_detail', 'reconstructs ACK facts from canonical replay-ledger detail');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'db.transaction(async function(tx) {', 'atomically applies Terra zone config and terminal command state');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'target version must be greater than base', 'accepts monotonic skipped targets and rejects non-increasing targets');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'outer and payload target versions differ', 'binds outer and payload target versions');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'owner_user_uuid', 'binds protected config mutation to the existing zone owner');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'UPDATE irrigation_zones SET ', 'writes canonical Terra selection state');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'INSERT INTO applied_commands', 'persists the Terra terminal result');
+expectFileIncludes('osi-zone-commands/index.js', zoneCommandsSource, 'INSERT INTO command_ack_outbox', 'persists the Terra ACK in the same transaction');
 expectIncludes('Queue REST Command ACK', 'osiCommandLedger.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing via the shared command ledger');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'ON CONFLICT(command_id) DO NOTHING', 'never rewrites an existing terminal command result');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs in the shared transaction helper');
@@ -1634,6 +1660,18 @@ expectIncludes('Build Command ACK Batch', '/command-acks', 'posts queued command
 expectIncludes('Build Command ACK Batch', "'X-OSI-Sync-Protocol': '2'", 'opts REST command ACKs into sync protocol v2');
 expectIncludes('Mark Command ACKs Delivered', 'UPDATE command_ack_outbox SET delivered_at', 'marks REST command ACK rows delivered only after a successful response');
 expectIncludesById('sync-pending-split', "commandType === 'WORK_REQUEST_STATUS'", 'routes WORK_REQUEST_STATUS before the actuator replay guard');
+expectOrderedIncludesById('sync-pending-split', [
+  'eventUuid: cmd.eventUuid,',
+  'aggregateType: cmd.aggregateType,',
+  'aggregateKey: cmd.aggregateKey,',
+  'appliedSyncVersion: cmd.appliedSyncVersion,',
+], 'retains trusted Terra ACK and target context in pending-command envelopes');
+expectOrderedIncludesById('sync-force-build', [
+  'eventUuid: cmd.eventUuid,',
+  'aggregateType: cmd.aggregateType,',
+  'aggregateKey: cmd.aggregateKey,',
+  'appliedSyncVersion: cmd.appliedSyncVersion,',
+], 'retains trusted Terra ACK and target context in force-sync envelopes');
 expectCondition(
   findNodeById('sync-pending-split')?.outputs === 2,
   'sync-pending-split has separate normal/status outputs',
@@ -1741,8 +1779,10 @@ expectWireById('sync-force-build', 'reject-indefinite-open', 'routes force-sync 
 expectWireById('reject-indefinite-open', 'command-dedupe-dispatch', 'routes guarded cloud commands through the replay ledger');
 expectWireById('command-dedupe-dispatch', 'journal-command-apply-fn', 'routes non-duplicates through the journal-aware command applier');
 expectWireById('command-dedupe-dispatch', '9d5e3035c3d069c4', 'publishes already-persisted exact replay ACKs without reclassification');
-expectWireById('journal-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-journal commands to the existing router');
+expectWireById('journal-command-apply-fn', 'terra-zone-config-command-apply-fn', 'routes recognized non-journal commands through the protected Terra zone-config applier');
 expectWireById('journal-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted journal ACKs');
+expectWireById('terra-zone-config-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-Terra commands to the existing router');
+expectWireById('terra-zone-config-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted Terra zone-config ACKs');
 expectWireById('c8628cffe45f64f7', 'command-ack-queue-rest', 'routes STREGA command ACKs through the durable ACK queue');
 expectWireById('cs-reg-cloud-ack-fn', 'command-ack-queue-rest', 'routes special command ACKs through the durable ACK queue');
 expectWireById('lsn50-mode-ack-link-in', 'command-ack-queue-rest', 'routes LSN50 command ACKs through the durable ACK queue');

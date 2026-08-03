@@ -32,6 +32,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'osi-db-helper',
     'osi-journal',
     'uc512-normalize',
+    'zone-commands',
     'zone-env',
   ]);
   assert.equal(osiLib.NAME_TO_PATH['history-sync'], 'osi-history-sync-helper');
@@ -44,6 +45,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['history-router'], 'osi-history-router');
   assert.equal(osiLib.NAME_TO_PATH['osi-db-helper'], 'osi-db-helper');
   assert.equal(osiLib.NAME_TO_PATH['osi-command-ledger'], 'osi-command-ledger');
+  assert.equal(osiLib.NAME_TO_PATH['zone-commands'], 'osi-zone-commands');
   assert.equal(osiLib.NAME_TO_PATH['osi-journal'], 'osi-journal');
 });
 
@@ -67,10 +69,11 @@ test('load success returns the module and caches it', () => {
   assert.equal(second.value.marker, 'v1');
 });
 
-test('journal flow helpers load from OSI_LIB_BASE and cache successful modules', () => {
+test('command flow helpers load from OSI_LIB_BASE and cache successful modules', () => {
   for (const [name, directory] of [
     ['osi-db-helper', 'osi-db-helper'],
     ['osi-command-ledger', 'osi-command-ledger'],
+    ['zone-commands', 'osi-zone-commands'],
   ]) {
     const helperDirectory = path.join(FIXTURE_BASE, directory);
     const helperPath = path.join(helperDirectory, 'index.js');
