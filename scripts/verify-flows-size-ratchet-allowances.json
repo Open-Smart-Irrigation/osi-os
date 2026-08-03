@@ -344,11 +344,19 @@
     "zone-calibration-fn": {
       "delta": 60,
       "reason": "Wave 3 scoped-access port (AgroLink 1839ac8e, feat(api): admin account + grant management endpoints (W8), scoped zone config (W7)): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 6187 -> HEAD 6247 = +60. Same scoped-owner substitution as dendro-location-fn/zone-config-fn, applied at the owned-zone lookup."
+    },
+    "put-strega-timed-auth-fn": {
+      "delta": 2692,
+      "reason": "origin/main -> HEAD delta 2692. Wave 3 scoped-access port, commit X2 (adapted from AgroLink 0913a6902, \"fix(actuation): close the GUI STREGA advanced chain's scope gap\"): the GUI STREGA advanced chain (put-strega-timed-auth-fn -> put-strega-advanced-lookup -> put-strega-advanced-authorize-fn -> To Actuator) did bearer auth only, so a TIMED_ACTION OPEN physical command reached write-strega-expectation with no actor and was rejected while the HTTP response had already reported success. put-strega-timed-auth-fn now runs a fresh assertFreshDeviceAccess+canMutate check and sets msg.actor_user_uuid; put-strega-advanced-authorize-fn copies it onto every actuatorMsg it builds. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length)."
+    },
+    "put-strega-advanced-authorize-fn": {
+      "delta": 630,
+      "reason": "origin/main -> HEAD delta 630. Wave 3 scoped-access port, commit X2 (adapted from AgroLink 0913a6902, \"fix(actuation): close the GUI STREGA advanced chain's scope gap\"): the GUI STREGA advanced chain (put-strega-timed-auth-fn -> put-strega-advanced-lookup -> put-strega-advanced-authorize-fn -> To Actuator) did bearer auth only, so a TIMED_ACTION OPEN physical command reached write-strega-expectation with no actor and was rejected while the HTTP response had already reported success. put-strega-timed-auth-fn now runs a fresh assertFreshDeviceAccess+canMutate check and sets msg.actor_user_uuid; put-strega-advanced-authorize-fn copies it onto every actuatorMsg it builds. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length)."
     }
   },
   "total_allowance": {
-    "delta": 223779,
-    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit X1, AgroLink 37dc1a0b2) 1296753 chars = 223779. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
+    "delta": 227101,
+    "reason": "Wave 3 scoped-access port onto origin/main 69098949 (branch port/wave3-edge-scope), in progress. Re-measured directly in the port worktree with verify-flows-size-ratchet totalChars over both maintained flows.json profiles, which are byte-identical: committed baseline 1,072,974 chars -> HEAD (after commit X2, AgroLink 0913a6902) 1300075 chars = 227101. Dual provenance. Inherited half: 107,574 is the Field Journal port allowance (port/wave3-edge-journal). New half: the remainder is this scope port so far, itemized in node_allowances/new_node_ceilings for every node this port has touched, added, or that auto-merged cleanly as a consequence."
   },
   "new_node_ceilings": {
     "sdi12-identify-action-fn": {
