@@ -271,6 +271,42 @@ test('W2: disable-all updates only researcher scope and rejects viewers', async 
   }
 });
 
+test('E8: disable-all scopes an admin to owned-plus-granted zones like every other write surface', async () => {
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO irrigation_schedules (
+      irrigation_zone_id, trigger_metric, threshold_kpa,
+      duration_minutes, enabled, created_at, updated_at
+    ) VALUES
+      (1, 'SWT_1', 20, 10, 1, '2026-01-01', '2026-01-01'),
+      (2, 'SWT_1', 20, 10, 1, '2026-01-01', '2026-01-01');
+  `);
+  try {
+    // admin1 (id 1) owns zone 2 ('z-2') but has no grant to zone 1 ('z-1', owned by
+    // res1). Before the fix, admin was exempt from the zone filter entirely and this
+    // disabled both zones -- an admin-only fleet-wide bypass every other scoped write
+    // surface (zone list, valve actuation) does not have.
+    const admin = await executeFunction(loadNode('settings-disable-schedules-fn'), {
+      msg: scopedRequest(1, 'admin1', 'POST', '/api/irrigation-zones/schedules/disable-all'),
+      env: ENV,
+      db,
+    });
+    assert.equal(admin.result.statusCode, 200);
+    assert.equal(
+      db.prepare('SELECT enabled FROM irrigation_schedules WHERE irrigation_zone_id=1').get().enabled,
+      1,
+      'a zone the admin neither owns nor is granted must not be touched'
+    );
+    assert.equal(
+      db.prepare('SELECT enabled FROM irrigation_schedules WHERE irrigation_zone_id=2').get().enabled,
+      0,
+      "the admin's own zone must still be disabled"
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test('W2: scheduler query counts enabled scope holders and disables an empty zone', async () => {
   const queryNode = loadNode('a0a61f4b7dca1c2e');
   assert.match(queryNode.func, /enabled_scope_holders/);
