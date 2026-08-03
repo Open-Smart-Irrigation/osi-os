@@ -112,9 +112,6 @@ function validate(envelope, runtime) {
   }
   const runtimeGateway = eui(runtime.gateway_device_eui, 'runtime gateway EUI');
   const payloadGateway = eui(payload.gatewayDeviceEui, 'payload.gatewayDeviceEui');
-  if (runtimeGateway !== payloadGateway) {
-    throw commandError('gateway_mismatch', 'command gateway differs from runtime');
-  }
 
   const base = version(payload.baseSyncVersion, 'payload.baseSyncVersion');
   const target = version(payload.syncVersion, 'payload.syncVersion');
@@ -141,6 +138,7 @@ function validate(envelope, runtime) {
     aggregateKey,
     zoneUuid,
     gateway: runtimeGateway,
+    payloadGateway,
     ownerUserUuid: uuid(payload.ownerUserUuid, 'payload.ownerUserUuid'),
     base,
     target,
@@ -288,6 +286,14 @@ async function applyOnce(db, envelope, runtime) {
       };
     }
     const currentVersion = Number(current.sync_version);
+    if (command.payloadGateway !== command.gateway) {
+      return {
+        handled: true,
+        ack: await persist(tx, command, nack(
+          'gateway_mismatch', 'command gateway differs from runtime', currentVersion
+        )),
+      };
+    }
     if (String(current.gateway_device_eui || '').trim().toUpperCase() !== command.gateway) {
       return {
         handled: true,

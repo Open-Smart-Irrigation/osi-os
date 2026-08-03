@@ -342,6 +342,14 @@ test('terminally rejects owner and gateway binding conflicts without changing Te
       command: envelope(4407, 42, 44),
       reasonCode: 'gateway_mismatch',
     },
+    {
+      name: 'payload gateway',
+      prepare() {},
+      command: envelope(4410, 42, 44, {
+        gatewayDeviceEui: '20BB20BB20BB20BE',
+      }),
+      reasonCode: 'gateway_mismatch',
+    },
   ];
   for (const entry of cases) {
     await t.test(entry.name, async () => {
