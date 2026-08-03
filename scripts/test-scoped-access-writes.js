@@ -1003,6 +1003,35 @@ test('W8: zone and plot grants invalidate into the next resolved scope', async (
   }
 });
 
+test('E7: a missing zone_uuid on a grant POST is a 400, not a stringified-undefined 404', async () => {
+  const db = seedScopedDb();
+  try {
+    // Before the fix, `String(isZoneGrant ? body.zone_uuid : body.plot_uuid || '')`
+    // parsed as `isZoneGrant ? body.zone_uuid : (body.plot_uuid || '')`: a missing
+    // body.zone_uuid on a zone grant became the literal string 'undefined', which then
+    // failed the resource lookup and was misreported as "User or resource not found" (404)
+    // instead of a validation error.
+    const missingZoneUuid = await adminApi(
+      db, 1, 'admin1', 'POST', '/api/grants/zone', {}, { user_uuid: 'u-view1' }
+    );
+    assert.equal(missingZoneUuid.result.statusCode, 400);
+
+    const missingPlotUuid = await adminApi(
+      db, 1, 'admin1', 'POST', '/api/grants/plot', {}, { user_uuid: 'u-view1' }
+    );
+    assert.equal(missingPlotUuid.result.statusCode, 400);
+
+    // A genuinely nonexistent resource (uuid supplied, but no such row) must still 404.
+    const nonexistentZone = await adminApi(
+      db, 1, 'admin1', 'POST', '/api/grants/zone', {},
+      { user_uuid: 'u-view1', zone_uuid: 'z-does-not-exist' }
+    );
+    assert.equal(nonexistentZone.result.statusCode, 404);
+  } finally {
+    db.close();
+  }
+});
+
 test('W8: every account and grant endpoint rejects non-admins', async () => {
   const db = seedScopedDb();
   const endpoints = [

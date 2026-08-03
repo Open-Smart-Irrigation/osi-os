@@ -1054,8 +1054,8 @@
       "reason": "AgroLink Phase C fresh zone authorization, viewer rejection, delegated owner context, actor attribution, and verifier-safe route metadata for zone configuration writes. AgroLink review E6: replaced the actorScope.role==='viewer' denylist with an explicit scope.canMutate() allowlist so an unrecognized/corrupted role fails closed instead of being treated as write-capable (+5)."
     },
     "scoped-admin-account-router": {
-      "max_chars": 9517,
-      "reason": "AgroLink Phase C admin-only account lifecycle and zone/plot grant management API with last-admin guards and scope invalidation."
+      "max_chars": 10117,
+      "reason": "AgroLink Phase C admin-only account lifecycle and zone/plot grant management API with last-admin guards and scope invalidation. AgroLink review E7: fixed operator-precedence bug where a missing zone_uuid on a grant POST became the literal string 'undefined' instead of '' (only the plot_uuid branch was wrapped by the `|| ''` fallback), and now returns 400 for a missing uuid instead of conflating it with the 404 'not found' case (+600)."
     },
     "sync-force-admin-write-guard": {
       "max_chars": 1787,
@@ -1083,7 +1083,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1262954,
-    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105)."
+    "max_total": 1263554,
+    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105); AgroLink review E7 fixes the grant-POST operator-precedence/400-vs-404 bug in scoped-admin-account-router (+600)."
   }
 }
