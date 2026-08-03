@@ -433,6 +433,110 @@ test('R1: a cloud command with actor_user_uuid only in the payload crosses Route
   }
 });
 
+// R2: the irrigation scheduler dispatches OPEN_FOR_DURATION with no actor at all (it is not
+// a user action). Without an exemption, E3 silently drops every automated irrigation
+// decision once scoped access is on -- warn, no ack, no expectation, no downlink.
+test('R2: a genuine scheduler dispatch (real message-level marker) actuates under scope with no actor', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const decision = await executeFunction(loadNode('5f0d2b7e9b9b1b3a'), {
+      msg: {
+        zone: {
+          zone_id: 1,
+          user_id: 2,
+          trigger_metric: 'SWT_1',
+          threshold_kpa: 20,
+          duration_minutes: 10,
+          valve_deveui: 'VALVE1',
+          scheduling_mode: 'local',
+          enabled_scope_holders: 1,
+        },
+        payload: [{ mean_kpa: 25, n_points: 5 }],
+      },
+      env: ENV,
+      db,
+    });
+    const actuatorMsg = decision.result[0];
+    assert.ok(actuatorMsg, 'the scheduler must dispatch an actuator command for this decision');
+    assert.equal(
+      actuatorMsg._systemActuation,
+      true,
+      'the scheduler must set the message-level system-actuation marker immediately before dispatch'
+    );
+
+    const written = await executeFunction(loadNode('write-strega-expectation'), {
+      msg: actuatorMsg,
+      env: ENV,
+      db,
+    });
+    assert.ok(written.result, 'a genuine scheduler dispatch must actuate even with no actor, under scope');
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE device_eui='VALVE1'"
+      ).get().n,
+      1
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('R2: a payload/body-embedded system-actuation claim is never honored, only the true message-level flag', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    // Every one of these is exactly what an HTTP request body or a cloud command payload
+    // could set -- none of them is msg._systemActuation itself, which only the scheduler's
+    // own wire ever sets, immediately before dispatch (Route Command always builds a fresh
+    // msg from the wire payload; GUI paths are bearer-authenticated and never copy arbitrary
+    // client-supplied msg properties onto the outgoing msg).
+    const msg = {
+      payload: {
+        _systemActuation: true,
+        type: 'actuator_command',
+        device: { devEui: 'VALVE1', zone_id: 1 },
+        data: { action: 'OPEN_FOR_DURATION', duration_minutes: 10, _systemActuation: true },
+      },
+      body: { _systemActuation: true },
+      req: { body: { _systemActuation: true } },
+      _stregaExpectationCommand: {
+        command_type: 'VALVE_COMMAND',
+        action: 'OPEN_FOR_DURATION',
+        device_eui: 'VALVE1',
+        zone_id: 1,
+        duration_minutes: 10,
+        command_id: 'r2-smuggle-attempt',
+        _systemActuation: true,
+      },
+    };
+    const response = await executeFunction(loadNode('write-strega-expectation'), {
+      msg,
+      env: ENV,
+      db,
+    });
+    assert.equal(
+      response.result,
+      null,
+      'a payload/body-embedded marker must never exempt the actor requirement'
+    );
+    const applied = db.prepare(
+      "SELECT result, result_detail FROM applied_commands WHERE command_id='r2-smuggle-attempt'"
+    ).get();
+    assert.ok(applied, 'a terminal rejection must still be recorded');
+    assert.equal(applied.result, 'REJECTED_PERMANENT');
+    assert.equal(JSON.parse(applied.result_detail).reason, 'scope_actor_required');
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='r2-smuggle-attempt'"
+      ).get().n,
+      0
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test('W2: schedule mutation allows grants, hides foreign zones, and rejects viewers', async () => {
   const db = seedScopedDb();
   try {
