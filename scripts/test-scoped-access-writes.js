@@ -354,6 +354,85 @@ test('R3: flag-off keeps the legacy invalid-duration pass-through behavior', asy
   }
 });
 
+// R1 (Critical): the cloud embeds the acting user in the command payload
+// (cmd.actor_user_uuid), but Route Command built brand-new msg.payload/_stregaExpectationCommand
+// shapes for VALVE_COMMAND/OPEN_FOR_DURATION/CLOSE without ever copying it onto the message
+// itself, so write-strega-expectation's scope gate never saw it -- every scoped
+// cloud-dispatched physical command was rejected scope_actor_required, authorized or not.
+// This exercises the real two-node pipeline: Route Command's output feeds directly into
+// write-strega-expectation (see test-flows-wiring.js C5 / Route Command wires).
+test('R1: a cloud command with actor_user_uuid only in the payload crosses Route Command intact and enforces scope', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  db.exec(`
+    INSERT INTO user_zone_assignments (
+      assignment_uuid, user_uuid, zone_uuid, assigned_by_user_uuid, created_at
+    ) VALUES ('g-r1-admin', 'u-admin', 'z-1', 'u-admin', '2026-01-01');
+  `);
+  function cloudCommandMsg(actorUuid, commandId) {
+    return {
+      payload: {
+        commandType: 'VALVE_COMMAND',
+        action: 'OPEN_FOR_DURATION',
+        deviceEui: 'VALVE1',
+        duration_minutes: 10,
+        commandId,
+        actor_user_uuid: actorUuid,
+      },
+    };
+  }
+  async function routeThenWrite(actorUuid, commandId) {
+    const routed = await executeFunction(loadNode('934bf2bc19a8ce22'), {
+      msg: cloudCommandMsg(actorUuid, commandId),
+      env: ENV,
+      db,
+    });
+    const routedMsg = routed.result[0];
+    assert.ok(routedMsg, 'Route Command must route a VALVE_COMMAND to output 0');
+    assert.equal(
+      routedMsg._actorUserUuid,
+      actorUuid,
+      'Route Command must copy the payload actor onto the message itself'
+    );
+    return executeFunction(loadNode('write-strega-expectation'), {
+      msg: routedMsg,
+      env: ENV,
+      db,
+    });
+  }
+  try {
+    // Granted researcher (owns VALVE1's zone directly): actuates.
+    const granted = await routeThenWrite('u-res1', 'r1-granted');
+    assert.ok(granted.result, 'a granted researcher must actuate');
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='r1-granted'").get().n,
+      1
+    );
+
+    // Revoked claimer: admin was granted z-1 above, then the grant is revoked -- a fresh
+    // scope check (not a stale cache) must deny the very next command.
+    scopeHelper._resetForTests();
+    db.prepare("UPDATE user_zone_assignments SET deleted_at='2026-07-01' WHERE assignment_uuid='g-r1-admin'").run();
+    const revoked = await routeThenWrite('u-admin', 'r1-revoked');
+    assert.equal(revoked.result, null, 'a revoked claimer must not actuate');
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='r1-revoked'").get().n,
+      0
+    );
+
+    // Viewer with real zone access (g-2: u-view1 -> z-1): denied by role, not by zone access.
+    scopeHelper._resetForTests();
+    const viewer = await routeThenWrite('u-view1', 'r1-viewer');
+    assert.equal(viewer.result, null, 'a viewer must not actuate even with real zone access');
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='r1-viewer'").get().n,
+      0
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test('W2: schedule mutation allows grants, hides foreign zones, and rejects viewers', async () => {
   const db = seedScopedDb();
   try {

@@ -54,8 +54,8 @@
       "reason": "1.C expanded COMMAND_TYPES_FALLBACK; sync-failclosed-20260719 adds durable permanent rejection; PR #149 routes terminal rejection ACKs directly to the durable queue; AgroLink Task 7 adds the six scoped user and assignment commands (+720)."
     },
     "write-strega-expectation": {
-      "max_chars": 15494,
-      "reason": "AgroLink Phase C reasserts fresh device scope at enqueue, fails closed, and records user originators; Task 7 adds the six scoped command fallback registrations (+720). AgroLink review E3 (Critical): PHYSICAL commands now require an actor when scoped -- an actor-less cloud command used to skip the scope check entirely and actuate anyway -- and the existing fresh-scope check now also denies non-mutating roles (canMutate), not just revoked grants (+1859). AgroLink review R3 (post-E3-review, Important): the scope/actor gate now runs ahead of duration parsing (it only needs deviceEui + commandType) and an invalid/missing duration now fails closed under scope instead of the legacy pass-through -- the old ordering let an actor-less, duration-less cloud VALVE_COMMAND (a real shape) return early and skip E3 entirely (+1602)."
+      "max_chars": 15905,
+      "reason": "AgroLink Phase C reasserts fresh device scope at enqueue, fails closed, and records user originators; Task 7 adds the six scoped command fallback registrations (+720). AgroLink review E3 (Critical): PHYSICAL commands now require an actor when scoped -- an actor-less cloud command used to skip the scope check entirely and actuate anyway -- and the existing fresh-scope check now also denies non-mutating roles (canMutate), not just revoked grants (+1859). AgroLink review R3 (post-E3-review, Important): the scope/actor gate now runs ahead of duration parsing (it only needs deviceEui + commandType) and an invalid/missing duration now fails closed under scope instead of the legacy pass-through -- the old ordering let an actor-less, duration-less cloud VALVE_COMMAND (a real shape) return early and skip E3 entirely (+1602). AgroLink review R1 (Critical, post-E3-review): actorUuid also reads raw.actor_user_uuid/raw.actorUserUuid as defense in depth alongside Route Command's message-level copy (+411)."
     },
     "9b3afb405207302e": {
       "max_chars": 3315,
@@ -422,8 +422,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "934bf2bc19a8ce22": {
-      "max_chars": 22347,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 23053,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason. AgroLink review R1 (Critical, post-E3-review): copies cmd.actor_user_uuid onto msg._actorUserUuid once at the top of the function, before any command-type branch, so a scoped gateway's cloud-dispatched physical command actually carries its actor across the cloud->edge boundary into write-strega-expectation's scope gate (+706)."
     },
     "4f4a765f36cee6f3": {
       "max_chars": 17943,
@@ -1083,7 +1083,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1267517,
-    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105); AgroLink review E7 fixes the grant-POST operator-precedence/400-vs-404 bug in scoped-admin-account-router (+600); AgroLink review E8 removes the admin zone-filter exemption in settings-disable-schedules-fn (+502); AgroLink review E3 (Critical) requires an actor on scoped PHYSICAL commands in write-strega-expectation (+1859); AgroLink review R3 (post-E3-review) moves the scope gate ahead of duration parsing and fails closed on invalid duration under scope (+1602)."
+    "max_total": 1268634,
+    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105); AgroLink review E7 fixes the grant-POST operator-precedence/400-vs-404 bug in scoped-admin-account-router (+600); AgroLink review E8 removes the admin zone-filter exemption in settings-disable-schedules-fn (+502); AgroLink review E3 (Critical) requires an actor on scoped PHYSICAL commands in write-strega-expectation (+1859); AgroLink review R3 (post-E3-review) moves the scope gate ahead of duration parsing and fails closed on invalid duration under scope (+1602); AgroLink review R1 (Critical, post-E3-review) propagates cmd.actor_user_uuid through Route Command (+706) plus write-strega-expectation's payload-field fallback (+411)."
   }
 }
