@@ -110,6 +110,39 @@ function resolveDefaultServerSource(root = REPO_ROOT) {
   return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
 }
 
+// The subset of fallbackServerSourceCandidates that actually names this worktree
+// (osi-os/.worktrees/<name> paired against osi-server/.worktrees/<name>). Kept separate
+// from the plain sibling-checkout candidates so callers can tell "found the branch this
+// worktree pairs with" apart from "fell back to whatever branch the generic sibling
+// checkout happens to be on right now" -- the latter is a silent wrong-branch comparison
+// risk, not an equally-good match.
+function worktreeMatchedServerSourceCandidates(root = REPO_ROOT) {
+  const worktreeName = path.basename(root);
+  return uniquePaths([
+    path.resolve(root, '..', '..', '..', '..', 'osi-server', '.worktrees', worktreeName, SERVER_RELATIVE_SOURCE),
+    path.resolve(root, '..', '..', '..', 'osi-server', '.worktrees', worktreeName, SERVER_RELATIVE_SOURCE),
+  ]);
+}
+
+// Resolves the server source the same way resolveDefaultServerSource does, but also
+// reports whether the result came from a worktree-name match (true), a generic
+// sibling-checkout fallback (false), or is not applicable because OSI_SERVER_EDGE_SYNC_SERVICE
+// pinned it explicitly (null -- the env var always wins and provenance doesn't apply).
+// Pure and side-effect-free (matches resolveDefaultServerSource's existing contract, and
+// the "reaches a sibling repo from a nested worktree" test that calls it directly) so the
+// loud CLI-only fail-and-exit behavior lives in main(), not here.
+function resolveServerSourceWithProvenance(root = REPO_ROOT) {
+  if (process.env.OSI_SERVER_EDGE_SYNC_SERVICE) {
+    return { source: resolveDefaultServerSource(root), matchedWorktree: null };
+  }
+  const matched = worktreeMatchedServerSourceCandidates(root)
+    .find((candidate) => fs.existsSync(candidate));
+  if (matched) {
+    return { source: matched, matchedWorktree: true };
+  }
+  return { source: resolveDefaultServerSource(root), matchedWorktree: false };
+}
+
 function skipWhitespace(source, index) {
   while (index < source.length && /\s/.test(source[index])) index++;
   return index;
@@ -1431,9 +1464,31 @@ function checkSyncOpParity(options = {}) {
 }
 
 function main() {
-  const serverSource = process.argv[2]
-    ? (path.isAbsolute(process.argv[2]) ? process.argv[2] : path.resolve(process.cwd(), process.argv[2]))
-    : resolveDefaultServerSource(REPO_ROOT);
+  let serverSource;
+  if (process.argv[2]) {
+    serverSource = path.isAbsolute(process.argv[2])
+      ? process.argv[2]
+      : path.resolve(process.cwd(), process.argv[2]);
+  } else {
+    // AgroLink review E9: OSI_SERVER_EDGE_SYNC_SERVICE always wins (handled inside
+    // resolveServerSourceWithProvenance). Absent that, a worktree-name match is the
+    // only fallback CI/agents can trust to be comparing against the *paired* server
+    // branch; a generic sibling-checkout match compares against whatever branch that
+    // checkout's working tree currently happens to be on, which can silently pass or
+    // fail against the wrong branch with no indication anything was uncertain.
+    const resolution = resolveServerSourceWithProvenance(REPO_ROOT);
+    if (resolution.matchedWorktree === false) {
+      console.error(
+        `verify-sync-op-parity: no osi-server worktree named "${path.basename(REPO_ROOT)}" was found; ` +
+        `falling back to the sibling checkout's CURRENT branch at ${resolution.source}. ` +
+        'This is not a trustworthy branch pairing. Set OSI_SERVER_EDGE_SYNC_SERVICE to an ' +
+        'explicit EdgeSyncService.java path, or pass one as a CLI argument, to pin the ' +
+        'comparison branch explicitly.'
+      );
+      process.exit(1);
+    }
+    serverSource = resolution.source;
+  }
   const result = checkSyncOpParity({ serverSource });
   console.log(result.message);
   if (!result.ok) {
@@ -1462,4 +1517,6 @@ module.exports = {
   extractSqlOps,
   payloadHasTopLevelContractVersion,
   resolveDefaultServerSource,
+  worktreeMatchedServerSourceCandidates,
+  resolveServerSourceWithProvenance,
 };

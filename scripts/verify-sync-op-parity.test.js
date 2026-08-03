@@ -12,6 +12,8 @@ const {
   extractFlowOps,
   extractServerOps,
   resolveDefaultServerSource,
+  worktreeMatchedServerSourceCandidates,
+  resolveServerSourceWithProvenance,
 } = require('./verify-sync-op-parity');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -471,6 +473,88 @@ test('default server lookup reaches a sibling repo from a nested worktree', () =
       process.env.OSI_SERVER_EDGE_SYNC_SERVICE = previous;
     }
   }
+});
+
+test('resolveServerSourceWithProvenance reports a generic-fallback (non-worktree-matched) sibling honestly', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-sibling-'));
+  const nestedRoot = path.join(tmp, 'osi-os', '.claude', 'worktrees', 'feature');
+  const siblingSource = path.join(tmp, 'osi-server', SERVER_RELATIVE_SOURCE);
+  fs.mkdirSync(nestedRoot, { recursive: true });
+  fs.mkdirSync(path.dirname(siblingSource), { recursive: true });
+  fs.writeFileSync(siblingSource, 'class EdgeSyncService {}\n');
+  const previous = process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+  delete process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+  try {
+    const resolution = resolveServerSourceWithProvenance(nestedRoot);
+    assert.equal(resolution.matchedWorktree, false);
+    assert.equal(resolution.source, siblingSource);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+    } else {
+      process.env.OSI_SERVER_EDGE_SYNC_SERVICE = previous;
+    }
+  }
+});
+
+test('resolveServerSourceWithProvenance reports true for a worktree-name match', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-worktree-'));
+  const nestedRoot = path.join(tmp, 'osi-os', '.worktrees', 'feature');
+  const matchedSource = path.join(tmp, 'osi-server', '.worktrees', 'feature', SERVER_RELATIVE_SOURCE);
+  fs.mkdirSync(nestedRoot, { recursive: true });
+  fs.mkdirSync(path.dirname(matchedSource), { recursive: true });
+  fs.writeFileSync(matchedSource, 'class EdgeSyncService {}\n');
+  const previous = process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+  delete process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+  try {
+    const resolution = resolveServerSourceWithProvenance(nestedRoot);
+    assert.equal(resolution.matchedWorktree, true);
+    assert.equal(resolution.source, matchedSource);
+    assert.ok(worktreeMatchedServerSourceCandidates(nestedRoot).includes(matchedSource));
+  } finally {
+    if (previous === undefined) {
+      delete process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+    } else {
+      process.env.OSI_SERVER_EDGE_SYNC_SERVICE = previous;
+    }
+  }
+});
+
+test('resolveServerSourceWithProvenance defers entirely to OSI_SERVER_EDGE_SYNC_SERVICE (provenance null)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-env-'));
+  const pinned = path.join(tmp, 'EdgeSyncService.java');
+  fs.writeFileSync(pinned, 'class EdgeSyncService {}\n');
+  const previous = process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+  process.env.OSI_SERVER_EDGE_SYNC_SERVICE = pinned;
+  try {
+    const resolution = resolveServerSourceWithProvenance(ROOT);
+    assert.equal(resolution.matchedWorktree, null);
+    assert.equal(resolution.source, pinned);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+    } else {
+      process.env.OSI_SERVER_EDGE_SYNC_SERVICE = previous;
+    }
+  }
+});
+
+test('CLI exits non-zero and names the fallback when no worktree match exists and the env var is unset', () => {
+  // AgroLink review E9: env var always wins; absent that, a worktree-name mismatch must
+  // be loud, not a silent wrong-branch comparison. This worktree's own directory name
+  // does not match any osi-server worktree (the paired cloud work lives in
+  // osi-server/.worktrees/agrolink per the task brief), so running the real CLI here
+  // without the env var genuinely exercises the no-match branch end to end.
+  const env = Object.assign({}, process.env);
+  delete env.OSI_SERVER_EDGE_SYNC_SERVICE;
+  const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts/verify-sync-op-parity.js')], {
+    cwd: ROOT,
+    env,
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stdout}\n${result.stderr}`, /no osi-server worktree named/);
+  assert.match(`${result.stdout}\n${result.stderr}`, /OSI_SERVER_EDGE_SYNC_SERVICE/);
 });
 
 test('parity accepts active journal and scoped-access operations', () => {
