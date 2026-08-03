@@ -89,6 +89,20 @@ function facadeDb(db) {
       if (callback) callback();
       return Promise.resolve();
     },
+    async transaction(fn) {
+      // Matches the production osiDb.Database facade's promise-based
+      // db.transaction(async (tx) => {...}) used by osi-command-ledger,
+      // osi-device-commands, and the STREGA cancel/dedupe paths.
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const result = await fn(this);
+        db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
   };
 }
 
@@ -97,6 +111,7 @@ function moduleByName(name) {
     scope: 'osi-scope-helper',
     journal: 'osi-journal',
     'osi-db-helper': 'osi-db-helper',
+    'osi-command-ledger': 'osi-command-ledger',
   }[name] || `osi-${name}`;
   const modulePath = path.join(NODE_RED_MODULES, directory, 'index.js');
   if (!fs.existsSync(modulePath)) return null;

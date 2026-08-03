@@ -54,8 +54,8 @@
       "reason": "1.C expanded COMMAND_TYPES_FALLBACK; sync-failclosed-20260719 adds durable permanent rejection; PR #149 routes terminal rejection ACKs directly to the durable queue; AgroLink Task 7 adds the six scoped user and assignment commands (+720)."
     },
     "write-strega-expectation": {
-      "max_chars": 12033,
-      "reason": "AgroLink Phase C reasserts fresh device scope at enqueue, fails closed, and records user originators; Task 7 adds the six scoped command fallback registrations (+720)."
+      "max_chars": 13892,
+      "reason": "AgroLink Phase C reasserts fresh device scope at enqueue, fails closed, and records user originators; Task 7 adds the six scoped command fallback registrations (+720). AgroLink review E3 (Critical): PHYSICAL commands now require an actor when scoped -- an actor-less cloud command used to skip the scope check entirely and actuate anyway -- and the existing fresh-scope check now also denies non-mutating roles (canMutate), not just revoked grants (+1859)."
     },
     "9b3afb405207302e": {
       "max_chars": 3315,
@@ -1083,7 +1083,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1264056,
-    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105); AgroLink review E7 fixes the grant-POST operator-precedence/400-vs-404 bug in scoped-admin-account-router (+600); AgroLink review E8 removes the admin zone-filter exemption in settings-disable-schedules-fn (+502)."
+    "max_total": 1265915,
+    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105); AgroLink review E7 fixes the grant-POST operator-precedence/400-vs-404 bug in scoped-admin-account-router (+600); AgroLink review E8 removes the admin zone-filter exemption in settings-disable-schedules-fn (+502); AgroLink review E3 (Critical) requires an actor on scoped PHYSICAL commands in write-strega-expectation (+1859)."
   }
 }

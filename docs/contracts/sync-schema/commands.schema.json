@@ -72,6 +72,7 @@
         "owner_user_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
         "author_principal_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
         "author_label": {"type": ["string", "null"], "maxLength": 120},
+        "actor_user_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
         "duplicate_guard_ack_entry_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
         "command_type": {
             "type": "string",

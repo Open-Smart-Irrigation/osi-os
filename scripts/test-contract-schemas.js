@@ -2614,6 +2614,40 @@ expectValid(
     eventsSchema
 );
 
+// AgroLink review E3: scoped gateways embed actor_user_uuid on physical device
+// commands so the edge can enforce scope on cloud-originated actuation, not just
+// GUI-originated actuation. Must validate with it present, and remain valid without
+// it (unscoped gateways / other command types never set it).
+const openForDurationWithActor = {
+    command_id: UUID,
+    command_type: 'OPEN_FOR_DURATION',
+    device_eui: '0123456789ABCDEF',
+    duration_seconds: 600,
+    actor_user_uuid: '44444444-4444-4444-8444-444444444444',
+};
+expectValid(
+    'OPEN_FOR_DURATION with an embedded actor_user_uuid for scoped-gateway enforcement',
+    cmdSchema,
+    openForDurationWithActor,
+    cmdSchema
+);
+expectValid(
+    'OPEN_FOR_DURATION remains valid without actor_user_uuid (unscoped gateways)',
+    cmdSchema,
+    (() => {
+        const { actor_user_uuid, ...withoutActor } = openForDurationWithActor;
+        return withoutActor;
+    })(),
+    cmdSchema
+);
+expectInvalid(
+    'OPEN_FOR_DURATION rejects a malformed actor_user_uuid',
+    cmdSchema,
+    { ...openForDurationWithActor, actor_user_uuid: 'not-a-uuid' },
+    /actor_user_uuid/,
+    cmdSchema
+);
+
 const effectKeyDoc = fs.readFileSync(path.join(SCHEMA_DIR, 'effect-keys.md'), 'utf8');
 for (const format of [
     'journal_entry:{entry_uuid}:{base_sync_version}',
