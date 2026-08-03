@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
+const { executeFunction, loadNode, makeAuthHeader } = require('./lib/scoped-access-harness');
 
 const REPO = path.resolve(__dirname, '..');
 const ORDERED_MIGRATIONS = path.join(
@@ -233,6 +234,69 @@ test('local calibration update emits the next version', () => {
         last_applied_at: null,
       }
     );
+  } finally {
+    db.close();
+  }
+});
+
+test('GUI-path first-ever calibration save (Save Zone Irrigation Calibration) emits v1, not silently on the second edit', async () => {
+  const db = seededDatabase();
+  try {
+    applyMigration(db, ADDITIVE_MIGRATION);
+    applyMigration(db, DATA_MIGRATION);
+    db.exec('DELETE FROM sync_outbox');
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS n FROM zone_irrigation_calibration').get().n,
+      0,
+      'no calibration row must exist yet for this to be a genuine first save'
+    );
+
+    const zoneRow = db.prepare(
+      'SELECT id, user_id FROM irrigation_zones WHERE zone_uuid = ?'
+    ).get(ZONE_UUID);
+    const secret = 'zone-calibration-fn-test-secret';
+    const auth = makeAuthHeader({
+      userId: zoneRow.user_id,
+      username: 'grower',
+      secret,
+    });
+    const node = loadNode('zone-calibration-fn');
+    const msg = {
+      req: {
+        headers: { authorization: auth },
+        params: { id: String(zoneRow.id) },
+        body: { measuredFlowRateLpm: 9.5, measurementMethod: 'Bucket test' },
+      },
+    };
+
+    const { result, errors } = await executeFunction(node, {
+      msg,
+      env: { AUTH_TOKEN_SECRET: secret },
+      db,
+    });
+
+    assert.deepEqual(errors, []);
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.payload.sync_version, 1);
+
+    const row = db.prepare(
+      'SELECT sync_version FROM zone_irrigation_calibration WHERE zone_id = ?'
+    ).get(zoneRow.id);
+    assert.equal(
+      row.sync_version,
+      1,
+      'the AFTER INSERT defaults trigger must bump 0 -> 1 on the very first save'
+    );
+
+    const events = calibrationEvents(db);
+    assert.equal(
+      events.length,
+      1,
+      'the first-ever GUI save must publish exactly one outbox event, not zero'
+    );
+    assert.equal(events[0].aggregate_key, ZONE_UUID);
+    assert.equal(events[0].sync_version, 1);
+    assert.deepEqual(JSON.parse(events[0].payload_json).measured_flow_rate_lpm, 9.5);
   } finally {
     db.close();
   }

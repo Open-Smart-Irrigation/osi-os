@@ -930,8 +930,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "zone-calibration-fn": {
-      "max_chars": 7191,
-      "reason": "Scoped zone-calibration save now version-upserts desired-state fields, returns sync_version, clears deletion and apply markers, and surfaces auth and close failures (+944)."
+      "max_chars": 7989,
+      "reason": "AgroLink review E2: first-ever calibration insert now stores sync_version=0 (not 1) so the AFTER INSERT defaults trigger's own UPDATE fires the UPDATE-only outbox trigger, publishing the initial mirror instead of silently healing on the next edit; response reports the post-trigger version (+798)."
     },
     "lorain-process-fn": {
       "max_chars": 7105,
@@ -1083,7 +1083,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1259807,
-    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211)."
+    "max_total": 1260605,
+    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798)."
   }
 }
