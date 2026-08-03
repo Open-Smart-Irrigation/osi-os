@@ -201,6 +201,49 @@ test('R4: a role-denied actor (real zone access, non-mutating role) also gets a 
   }
 });
 
+test('X1: a transient scope-helper infra error is not treated as a scope decision', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    // assertFreshDeviceAccess/canMutate throw httpError(status, ...) for a real deny
+    // (.statusCode set). A plain Error with no .statusCode -- e.g. SQLITE_BUSY on the
+    // scope SELECTs -- must be rethrown to the generic outer catch, not queued as an
+    // irreversible REJECTED_PERMANENT for a legitimate command.
+    const fakeScope = {
+      async assertFreshDeviceAccess() {
+        throw new Error('SQLITE_BUSY: database is locked');
+      },
+      canMutate() {
+        return true;
+      },
+    };
+    const response = await executeFunction(loadNode('write-strega-expectation'), {
+      msg: expectationMessage(),
+      env: ENV,
+      db,
+      osiLibModules: { scope: fakeScope },
+    });
+    assert.equal(response.result, null, 'must not actuate while the scope decision is unresolved');
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS n FROM applied_commands WHERE command_id='manual-scope-test'"
+      ).get().n,
+      0,
+      'a transient infra error must never become a terminal ack -- the command must stay retryable'
+    );
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id='manual-scope-test'"
+      ).get().n,
+      0
+    );
+    assert.equal(response.errors.length, 1, 'the failure must surface through the generic error path, not be swallowed');
+    assert.match(response.errors[0], /SQLITE_BUSY/);
+  } finally {
+    db.close();
+  }
+});
+
 // E3 (Critical): PHYSICAL device commands must require an actor once scoped access is on.
 // Before this fix, `if (scopedOn && actorUuid)` skipped the scope check entirely when
 // actorUuid was absent -- exactly the shape of a cloud-dispatched command that never
