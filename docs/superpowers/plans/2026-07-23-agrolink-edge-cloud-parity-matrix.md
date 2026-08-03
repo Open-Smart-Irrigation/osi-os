@@ -64,6 +64,45 @@ come from the fetched integration heads, not the earlier planning audit.
 | Installation recovery | `partial` | This is an explained external-boundary deferral, not an unidentified parity gap. Both sides bind a stable `installation_uuid` across EUI replacement. The server supports verifier-v2 links, envelope-encrypted local/test bundles, in-memory SQLite preview, fresh gateway-admin authorization, row-locked recovery transitions, durable prepare and reconciliation receipt binding, property-gated local HMAC verification, bounded streaming temporary files, audit, short-lived bound download tokens, interruption, receipt-gated completion, and rollback. The edge adapter validates a temporary download and emits the exact `prepare-database-restore` invocation without granting mutation authority. Production key custody requires a provider decision, and the stop-loss restore verbs remain deliberately reverted. | Task 10 |
 | Optimistic zone edits | `parity` | Selected-gateway create, aggregate update, location, and delete use durable desired state. Pending creates remain visible, stale versions conflict, and canonical mirrors settle applied operations. | Tasks 4 and 8 |
 
+## Scoped-access physical-command decisions (review remediation, 2026-08)
+
+Recorded alongside the post-launch scope-enforcement remediation on
+`write-strega-expectation`, Route Command, the irrigation scheduler, and
+`settings-disable-schedules-fn` (`OSI_SCOPED_ACCESS=1` requires an actor on
+every PHYSICAL device command, propagated across the cloud/edge boundary).
+These are deliberate boundaries the fixes preserved, not gaps left open:
+
+- **Non-timed actuations intentionally pass unchecked under scope.**
+  `write-strega-expectation`'s scope/actor gate only applies to the timed-open
+  branch (`entry.actuator && entry.requires_duration`: `OPEN_FOR_DURATION`,
+  `SET_STREGA_TIMED_ACTION` open, `VALVE_COMMAND` open,
+  `UC512_OPEN_FOR_DURATION`). `CLOSE`, the STREGA magnet/partial-opening/
+  flushing configuration commands, and a `SET_STREGA_TIMED_ACTION` close all
+  return early from this node with no scope check. This is intentional, not
+  an oversight: close is the fail-safe direction — a device closing itself is
+  not the actuation an actor requirement exists to prevent — and an
+  indefinite/bare `OPEN` is already rejected upstream by
+  `reject-indefinite-open` for every gateway regardless of scope, so there is
+  no unchecked path to an indefinite open.
+- **Zoneless non-weather devices are denied actuation, on both edge and
+  cloud.** `osi-scope-helper.assertFreshDeviceAccess` requires a linked,
+  scoped-visible zone for every device type except the two weather types
+  (`SENSECAP_S2120`, `AQUASCOPE_LORAIN`), which are shared by convention. A
+  STREGA valve, LSN50, Kiwi, or Clover device with no `irrigation_zone_id`
+  therefore fails closed (404, device not found) under scope on the edge.
+  The cloud is being aligned to the same fail-closed rule in parallel, so
+  this is a matched boundary decision, not a divergence to reconcile later.
+- **"Disable all schedules" no longer means fleet-wide for a scoped admin.**
+  Before this remediation, an admin's `settings-disable-schedules-fn` call
+  was exempt from zone filtering and disabled every enabled schedule on the
+  gateway, admin-owned or not. It now scopes admins to their own
+  owned-plus-granted zones, matching every other scoped write surface (zone
+  list, device/valve configuration, actuator control). **This is not an
+  emergency stop for schedules on zones the admin does not own or hold a
+  grant to** on a gateway shared with other researchers or admins — an admin
+  who needs that reach now needs an explicit grant to each such zone, the
+  same as any other scoped write.
+
 ## Deliberate product split
 
 | Surface | Status | Reason |
