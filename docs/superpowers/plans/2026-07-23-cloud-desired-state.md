@@ -921,4 +921,4 @@ Update
 `docs/superpowers/plans/2026-07-23-agrolink-edge-cloud-parity-execution-report.md`
 with the server SHA, transition evidence, memory samples, and any repaired
 baseline defect. Run the anti-slop checker, commit, and push
-`design-sync/agrolink`.
+`AgroLink`.

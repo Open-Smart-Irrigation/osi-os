@@ -1,7 +1,7 @@
 # Plan — Journal Slice A: Detail-level as a global per-user setting
 
 **Spec:** [2026-07-20-journal-capture-streamlining-design.md](../specs/2026-07-20-journal-capture-streamlining-design.md) (D1, §7; effective-template guard §4)
-**Branch:** `design-sync/agrolink` (agrolink worktree)
+**Branch:** `AgroLink` (agrolink worktree)
 **Risk:** low · **Migration:** none
 
 ## Goal

@@ -1,7 +1,7 @@
 # Plan — Journal Slice BC: Activity-scoped Quick + reading rescoping + plot-static context
 
 **Spec:** [2026-07-20-journal-capture-streamlining-design.md](../specs/2026-07-20-journal-capture-streamlining-design.md) (D2, D4, D3, R1, R6; field resolution §4)
-**Branch:** `design-sync/agrolink` · **Risk:** medium-high · **Migrations:** `0023__journal_catalog_v3.sql` (catalog v3) + `0024__journal_plot_context.sql`
+**Branch:** `AgroLink` · **Risk:** medium-high · **Migrations:** `0023__journal_catalog_v3.sql` (catalog v3) + `0024__journal_plot_context.sql`
 
 Merged B+C per **R1**: activity-scoping alone (B) leaves the layout-forced Required fields on every entry; only the plot-context move (C) removes them. Ship together so the first kaba100 re-test shows the wall genuinely gone.
 

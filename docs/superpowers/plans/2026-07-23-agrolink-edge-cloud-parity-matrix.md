@@ -5,7 +5,7 @@ come from the fetched integration heads, not the earlier planning audit.
 
 **Launch heads (2026-07-23):**
 
-- OSI OS `design-sync/agrolink`: `6a4271b0d502cab0bdcdba76b1eb0353e49fcce9`
+- OSI OS `AgroLink`: `6a4271b0d502cab0bdcdba76b1eb0353e49fcce9`
 - OSI OS `origin/main` and merge base: `b31825becbb8abcef86cfad9dc756cd2e351f135`
 - OSI Server `AgroLink`: `3179df875204ac2c9d38e6d9c96cb2beaa15a1b4`
 - OSI Server `origin/main` and merge base:
@@ -104,7 +104,7 @@ come from the fetched integration heads, not the earlier planning audit.
 
 ## Launch-head route inventory
 
-Regenerated from design-sync/agrolink head `38afecc3` on 2026-07-30. The edge
+Regenerated from AgroLink head `38afecc3` on 2026-07-30. The edge
 subsections below (Edge HTTP, Edge GUI) were re-derived directly from this
 head and replace the launch-head snapshot above; the Server subsections
 (Server controllers, Server GUI) were not reverified in this pass and remain
@@ -335,7 +335,7 @@ The server router exposes 13 paths:
 
 ## Operation and schema inventory
 
-Regenerated from design-sync/agrolink head `38afecc3` on 2026-07-30, counted
+Regenerated from AgroLink head `38afecc3` on 2026-07-30, counted
 directly from `docs/contracts/sync-schema/events.schema.json`,
 `commands.schema.json`, and `resources.schema.json`. The prior appendix here
 disagreed with the "Contract and catalog baseline" narrative above (28 events

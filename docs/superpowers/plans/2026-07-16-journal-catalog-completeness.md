@@ -3,7 +3,7 @@
 **Date:** 2026-07-16
 **Status:** findings recorded; remediation needs one decision (label sourcing) before it can be task-decomposed
 **Scope:** OSI OS edge catalog data (`journal_vocab`, `journal_templates`, `journal_layouts`, `journal_products`)
-**Trigger:** independent review of the Slice 2 autonomous run (`design-sync/agrolink`, commits `f651b0ec..6c6fc453`)
+**Trigger:** independent review of the Slice 2 autonomous run (`AgroLink`, commits `f651b0ec..6c6fc453`)
 
 The Slice 2 GUI is being built correctly against the Slice 1 contract. These findings are
 about the **catalog data Slice 1 seeded**, which the GUI cannot fix and which the Slice 2

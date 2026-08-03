@@ -1,7 +1,7 @@
 # Plan — Journal capture-streamlining follow-ups (W1/W2/W3)
 
 **Date:** 2026-07-21
-**Branch:** design-sync/agrolink (worktree /home/phil/Repos/osi-os-agrolink)
+**Branch:** AgroLink (worktree /home/phil/Repos/osi-os-agrolink)
 **Owner decisions (all confirmed by the maintainer):**
 - **W1** Full-mode irrigation required fields → **relax to essentials via the requiredness-rule change** (keep amount + unit + treated-area required; make measurement-source, denominator, block/bed/row, cover type optional-but-shown). Confirmed the maintainer wants the small GUI rule change, not the narrower catalog-only subset.
 - **W2** Desktop capture modal → **widen for desktop**.
@@ -138,7 +138,7 @@ Keep the modal responsive/scroll behavior intact (`my-8 max-h-[calc(100vh-4rem)]
    - **W1:** capture an **Irrigation** entry in **Full** mode on an open_field plot; confirm it saves with only amount + amount kind + treated area, leaving measurement source / denominator / block-bed-row / cover type blank (previously blocked).
    - **W3:** the crop step lists the 16 vegetables; selecting one (e.g. Carrot) seeds/records correctly and the read-only crop banner shows the label.
    - **W2:** the desktop capture modal is visibly wider and multi-field sections render in columns.
-4. Commit path-scoped (catalog core + generator + migration `0029` + CHECKSUMS + regenerated bundled DBs/seed + edge tests + W2 GUI + GUI tests; **exclude** build artifacts and the pre-existing dirty feed assets/common/settings), push to `design-sync/agrolink`.
+4. Commit path-scoped (catalog core + generator + migration `0029` + CHECKSUMS + regenerated bundled DBs/seed + edge tests + W2 GUI + GUI tests; **exclude** build artifacts and the pre-existing dirty feed assets/common/settings), push to `AgroLink`.
 
 ---
 

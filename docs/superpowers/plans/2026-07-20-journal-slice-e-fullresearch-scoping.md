@@ -1,7 +1,7 @@
 # Plan — Journal Slice E: Full/Research per-activity field scoping + progressive disclosure
 
 **Spec:** [2026-07-20-journal-capture-streamlining-design.md](../specs/2026-07-20-journal-capture-streamlining-design.md) (D14, R5; §4-B)
-**Branch:** `design-sync/agrolink` · **Risk:** medium · **Migration:** `0027__journal_catalog_v5.sql` (catalog v5) — LOCKED in spec §8.1
+**Branch:** `AgroLink` · **Risk:** medium · **Migration:** `0027__journal_catalog_v5.sql` (catalog v5) — LOCKED in spec §8.1
 
 Per **R5**, this is **not** GUI-only. `full_record`'s `operation` section is a flat ~20-field list today (confirmed in `journal-catalog-core.js`); `activity_requirements` governs *requiredness*, not *visibility*. So Full/Research must gain per-activity **visibility** scoping, then the visible fields are grouped into collapsible sections.
 

@@ -16,7 +16,7 @@ model, with per-installation cloud authorization and administration.
 
 | Repository | Branch/worktree | Base |
 |---|---|---|
-| OSI OS integration | `design-sync/agrolink` in `.worktrees/agrolink-parity-orchestrator-prep` | `6a4271b0d502cab0bdcdba76b1eb0353e49fcce9` |
+| OSI OS integration | `AgroLink` in `.worktrees/agrolink-parity-orchestrator-prep` | `6a4271b0d502cab0bdcdba76b1eb0353e49fcce9` |
 | OSI OS preparation source | `docs/agrolink-parity-orchestrator-prep` | `5fc265bb` |
 | OSI OS `origin/main` | audited merge base | `b31825becbb8abcef86cfad9dc756cd2e351f135` |
 | OSI Server | `AgroLink` in `.worktrees/agrolink` | `3179df875204ac2c9d38e6d9c96cb2beaa15a1b4` |
@@ -108,8 +108,8 @@ The anti-slop checker passed on all three governing files, `git diff --check`
 passed, and a separate full-diff review found no remaining executable
 references to the source migration numbers or conflicting authority rules.
 Commit `459cf73f010a390c10b6dbb707de891f0179775e` was pushed to
-`design-sync/agrolink`; `git ls-remote --exit-code origin
-refs/heads/design-sync/agrolink` returned the same SHA.
+`AgroLink`; `git ls-remote --exit-code origin
+refs/heads/AgroLink` returned the same SHA.
 
 ### Task 2 cross-repository contract gate
 
@@ -132,7 +132,7 @@ accepted event into `EdgeSyncService.SyncEventRecord`, and parses and
 serializes every golden ACK through the server request and response DTOs.
 
 Edge CI now runs the canonical contract and schema-fixture gates. Server CI
-checks out `osi-os` at `design-sync/agrolink`, runs the mutation test, and
+checks out `osi-os` at `AgroLink`, runs the mutation test, and
 rejects a missing, empty, or byte-different vendor. The server guidance records
 that this temporary integration ref must switch to `osi-os/main` when the
 branch merges.
@@ -213,7 +213,7 @@ Task 3 verification:
 | Flow parse, bare-require, size, silent-catch, MQTT, and helper-registration gates | exit 0 |
 
 Commits `1f6f0933` (schema), `d5882543` (scope helper), and `4eb05522`
-(auth, API, durable flag, and tests) were pushed to `design-sync/agrolink`.
+(auth, API, durable flag, and tests) were pushed to `AgroLink`.
 The remote branch resolved to the same Phase A head.
 
 ### Task 4 cloud desired state
@@ -259,7 +259,7 @@ Task 4 verification:
 Server commits `7c009da` through
 `b86473e88a173f68ef04c39f9265a2837887cfc0` were pushed to `AgroLink`.
 Governing design and plan commits `412267fe`, `722fd160`, and `ce19950b`
-were pushed to `design-sync/agrolink`.
+were pushed to `AgroLink`.
 
 ### Task 5 journal parity
 
@@ -398,7 +398,7 @@ Task 6 verification:
 
 Phase B is edge commit `31fd939d`. Phase C spans `b279d932` through
 `f712efb9`. Phase D spans `19d68c12` through `b4b6c1a8`. All commits were
-pushed to `design-sync/agrolink`.
+pushed to `AgroLink`.
 
 The final GUI gate started with 12,575 MiB available,
 `pswpin 730460840`, and `pswpout 897557888`, above the 4,096 MiB threshold.
@@ -465,7 +465,7 @@ Task 7 verification:
 Server commits `e8268566`, `89fd0ad0`, `7e4d013e`, `f07d0879`,
 `c55375e7`, and `5ca86425` were pushed to `AgroLink`. Edge commits
 `b4cb078c`, `0303e68e`, `95c6f5c8`, and `0f17892f` were pushed to
-`design-sync/agrolink`. Remote branch lookups returned the exact local heads
+`AgroLink`. Remote branch lookups returned the exact local heads
 after each push.
 
 Task 7 heavyweight samples recorded between 11,552 MiB and 12,128 MiB
@@ -895,7 +895,7 @@ all seven databases passed. No test was weakened.
 Edge planning commit `0803eccbb3c72e603becd6f0526b2ac7cb91b765`
 and implementation commit
 `7e30e6a49f493887f6058a568b648d15d7cb20b2` were pushed to
-`design-sync/agrolink`. Server commits
+`AgroLink`. Server commits
 `ad997b889ec70ef39e9e1fad9854ee58855cb7da`,
 `5339120b5f4a7ca3e6366d1734a4deffac2be252`, and
 `9cecd0af52db4ddaf4819e010a89847f0bbbcfee` were pushed to `AgroLink`.
@@ -967,7 +967,7 @@ Edge design and implementation commits
 `0c742a524847d461622481de45f41c5f3201bdf3`,
 `77d3c52a03dff0c1db431b27f693597d8f70aff0`, and
 `45e2a57e98688eab62f20e2e3127a49dea7cbf15` were pushed to
-`design-sync/agrolink`. Server commits
+`AgroLink`. Server commits
 `5b4eff4f57347baed50790f28d94faaefaaea5b9`,
 `fe19713262f359001c75c35dcf069b97132885d1`, and
 `adba3c660618d130a75a06889e23f866881933d2` were pushed to

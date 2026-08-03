@@ -1,6 +1,6 @@
 # Plan — Copy-an-entry + capture-form polish (GUI-only) — REVISED per Fable review
 
-**Date:** 2026-07-23 · **Branch:** design-sync/agrolink · **Base:** 14b61270
+**Date:** 2026-07-23 · **Branch:** AgroLink · **Base:** 14b61270
 Session wrap-up. All `web/react-gui`-only — no catalog version, no migration, no edge change (uses existing `journalApi.createEntry` + `deriveFieldStates` + `resolveOccurrence`). Fable plan-review verdict was REVISE; all 7 revisions are folded in below.
 
 ## A — Copy-an-entry (final-only, non-cycle activities)

@@ -1,7 +1,7 @@
 # Field Journal Slice 2 — Phases 5–6 — MERGE-READINESS
 
 **Date:** 2026-07-19
-**Branch:** `design-sync/agrolink` (the kept AgroLink line — **off mainline by design**; do NOT merge to `main`)
+**Branch:** `AgroLink` (the kept AgroLink line — **off mainline by design**; do NOT merge to `main`)
 **Final HEAD:** `e651ee2b`
 **Range reviewed:** `c9eb4e3a..e651ee2b` (18 commits — Tasks 27–34 + review fixes + merges + one CI gate fix)
 **Verdict:** ✅ **MERGE-READY** for this branch. Not pushed, not merged, no live gateway touched — a new explicit instruction is required to deploy.

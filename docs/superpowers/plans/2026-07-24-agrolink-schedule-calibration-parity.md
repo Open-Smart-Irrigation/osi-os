@@ -26,7 +26,7 @@ TypeScript, Vitest, and Gradle.
 - REST pending commands are the only cloud-to-edge path.
 - Use the isolated edge worktree
   `/home/phil/Repos/osi-os/.worktrees/agrolink-parity-orchestrator-prep` on
-  `design-sync/agrolink`.
+  `AgroLink`.
 - Use the isolated server worktree
   `/home/phil/Repos/osi-server/.worktrees/agrolink` on `AgroLink`.
 - Do not touch `/home/phil/Repos/osi-os-agrolink`.
@@ -196,8 +196,8 @@ Stage only Task 1 files and commit:
 git commit -m "feat(sync): version irrigation calibration"
 ```
 
-Push `design-sync/agrolink` and compare `git rev-parse HEAD` with
-`git ls-remote origin refs/heads/design-sync/agrolink`.
+Push `AgroLink` and compare `git rev-parse HEAD` with
+`git ls-remote origin refs/heads/AgroLink`.
 
 ## Task 2: Specify and implement protected irrigation-config commands
 

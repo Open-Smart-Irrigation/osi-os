@@ -24,7 +24,7 @@ Repo-specific gotchas for re-syncs. Read before touching the config or previews.
 
 ## Product bug found during sync (branding branch) — FIXED 2026-07-13
 
-- **DashboardHeader clipped its own dropdown menus**: the AgroLink branding commit had `overflow-hidden` on `<header>` to crop the Balken image; the Add/Account `HeaderMenu` dropdowns are absolutely positioned inside the header and were clipped at its bottom edge in the branded app itself. Fixed on `design-sync/agrolink` by moving `overflow-hidden` onto a wrapper div around the Balken `<img>` (see the comment at the site in `DashboardHeader.tsx`). If the branding branch is rebased/recreated, make sure this fix rides along — the preview's `AddMenuOpen` story is the regression test (it goes blank-clipped if it comes back).
+- **DashboardHeader clipped its own dropdown menus**: the AgroLink branding commit had `overflow-hidden` on `<header>` to crop the Balken image; the Add/Account `HeaderMenu` dropdowns are absolutely positioned inside the header and were clipped at its bottom edge in the branded app itself. Fixed on `AgroLink` by moving `overflow-hidden` onto a wrapper div around the Balken `<img>` (see the comment at the site in `DashboardHeader.tsx`). If the branding branch is rebased/recreated, make sure this fix rides along — the preview's `AddMenuOpen` story is the regression test (it goes blank-clipped if it comes back).
 
 ## Preview authoring patterns (wave learnings, 2026-07-13)
 

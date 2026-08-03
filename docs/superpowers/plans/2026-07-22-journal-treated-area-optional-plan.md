@@ -1,7 +1,7 @@
 # Plan — `treated_area` optional everywhere + prefilled from plot area (catalog v8)
 
 **Date:** 2026-07-22
-**Branch:** design-sync/agrolink (worktree /home/phil/Repos/osi-os-agrolink)
+**Branch:** AgroLink (worktree /home/phil/Repos/osi-os-agrolink)
 **Maintainer decision (confirmed):** make `attr.treated_area` **optional for ALL activities** (including the dosing ones — fertilization/fertigation/plant-protection/seeding/planting), keep it **visible** where relevant, and **default its value from the plot's own area (`journal_plots.area_m2`)** so a routine full-plot entry shows it prefilled and editable. Rationale: selecting a plot that already has an area means you treat the full plot, so re-entering (or being gated on) the area is friction.
 
 Follows the shipped W1/W2/W3 (`e5734796`) and the drift repair (`270db104`). `treated_area` was only relaxed for irrigation there indirectly; this makes it uniformly optional.

@@ -1,7 +1,7 @@
 # Plan — Journal Slice F: Agronomy adds (BBCH growth stage · weather-at-application · tank-mix)
 
 **Spec:** [2026-07-20-journal-capture-streamlining-design.md](../specs/2026-07-20-journal-capture-streamlining-design.md) (R8; Fable F-AG-1/2/3)
-**Branch:** `design-sync/agrolink` · **Risk:** medium · **Migration:** `0028__journal_catalog_v6.sql` (catalog v6) — LOCKED in spec §8.1 (slot is **after E's `0027`**, not after D; D took `0026`, E took `0027`)
+**Branch:** `AgroLink` · **Risk:** medium · **Migration:** `0028__journal_catalog_v6.sql` (catalog v6) — LOCKED in spec §8.1 (slot is **after E's `0027`**, not after D; D took `0026`, E took `0027`)
 
 Three independent, additive agronomy gaps the Fable review surfaced and the owner chose to fold in now (not defer). Each is its own testable unit; ship together as Slice F, deploy + kaba100 re-test once.
 

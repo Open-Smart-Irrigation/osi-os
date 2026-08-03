@@ -1,7 +1,7 @@
 # Plan — Detailed activity vocabulary for the farmer path (catalog v9)
 
 **Date:** 2026-07-22
-**Branch:** design-sync/agrolink (worktree /home/phil/Repos/osi-os-agrolink)
+**Branch:** AgroLink (worktree /home/phil/Repos/osi-os-agrolink)
 **Base:** 677eb137 · **Target:** catalog **v9** / migration **0031__journal_catalog_v9.sql**
 
 ## Problem (maintainer-reported, Fable-confirmed)

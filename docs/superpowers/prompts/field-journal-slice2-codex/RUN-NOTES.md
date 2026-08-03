@@ -1,11 +1,11 @@
 # Field Journal Slice 2 run notes
 
-Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `design-sync/agrolink`.
+Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `AgroLink`.
 
 ## 2026-07-15T00:00:00+02:00 - Orchestrator initialization
 
 - Worktree: `/home/phil/Repos/osi-os-agrolink`
-- Branch: `design-sync/agrolink`
+- Branch: `AgroLink`
 - Starting commit: `d5c5b73d23ff679a288d872fe523145f69d11745`
 - The branch and its remote tracking ref matched at startup. The worktree was clean.
 - Track A is Phase 0. Track B starts with Phase 1. The tracks may run concurrently until the Phase 3 convergence gate.

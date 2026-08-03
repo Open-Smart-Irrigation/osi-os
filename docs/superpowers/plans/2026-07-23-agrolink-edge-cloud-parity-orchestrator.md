@@ -48,7 +48,7 @@ must not execute the network plan or add drive schema, helpers, flows, or
 imports.
 
 The same ownership rule applies to every program sharing
-`design-sync/agrolink`, including journal follow-ups and i18n work. Direct
+`AgroLink`, including journal follow-ups and i18n work. Direct
 commits are serialized at shared files. A parity worker must obtain a recorded
 handoff before editing a file owned by another active program.
 
@@ -78,7 +78,7 @@ handoff before editing a file owned by another active program.
 
 | Repository | Integration branch | Starting rule | Integration rule |
 |---|---|---|---|
-| `osi-os` | `design-sync/agrolink` | The maintainer first transfers current `main` changes into this branch | Commit and push reviewed slices directly; no PR |
+| `osi-os` | `AgroLink` | The maintainer first transfers current `main` changes into this branch | Commit and push reviewed slices directly; no PR |
 | `osi-server` | `AgroLink` | Create from current `main` after fetching and verifying the base | Commit and push reviewed slices directly; no PR |
 
 Use isolated worktrees for every implementation slice. Never execute a slice in
@@ -118,7 +118,7 @@ execution report records the other repository's branch and commit SHA.
 | Desired state | Durable overlay with explicit pending/applied/conflict/rejected/expired states |
 | Device baseline | KIWI, TEKTELIC CLOVER, DRAGINO LSN50, SENSECAP S2120, AQUASCOPE LORAIN, and STREGA |
 | UC512 | Retain schema compatibility; hide it from the supported parity catalog |
-| Branch delivery | Direct commit and push to `design-sync/agrolink` and `AgroLink`; no PR |
+| Branch delivery | Direct commit and push to each repository's `AgroLink` branch; no PR |
 
 One earlier history question was interrupted: whether the new history-batch
 transport may replace the legacy durable path after convergence. The autonomous
@@ -289,7 +289,7 @@ These conditions are resolved before autonomous Task 0 starts:
 
 - Land this orchestrator file, the reviewed scoped Phase A-E documentation set,
   the final network-drive boundary documents, the matrix, the execution report,
-  and the executor prompt on `design-sync/agrolink`.
+  and the executor prompt on `AgroLink`.
 - Start from a clean integration worktree. The audited AgroLink worktree
   contains generated GUI and locale changes; preserve them outside parity
   commits.
@@ -309,7 +309,7 @@ cd backend
 Expected: Testcontainers selects `1.21.4`, starts PostgreSQL 16, applies Flyway,
 and the test exits zero. A working Docker CLI alone does not clear this gate.
 
-- Record every active program sharing `design-sync/agrolink`, its worktree, and
+- Record every active program sharing `AgroLink`, its worktree, and
   its owned files. The network planning program has released ownership. Keep
   the old dirty GUI/locale worktree quarantined.
 
@@ -320,7 +320,7 @@ and the test exits zero. A working Docker CLI alone does not clear this gate.
 - Create: `docs/superpowers/plans/2026-07-23-agrolink-edge-cloud-parity-matrix.md`
 - Create: `docs/superpowers/plans/2026-07-23-agrolink-edge-cloud-parity-execution-report.md`
 
-- [ ] Confirm `design-sync/agrolink` is zero commits behind current
+- [ ] Confirm `AgroLink` is zero commits behind current
       `origin/main`, or record the maintainer-approved reason for an intentional
       divergence. At this review it is zero behind.
 - [ ] Run `git status --short --branch` in both repositories. Do not start from
@@ -334,7 +334,7 @@ and the test exits zero. A working Docker CLI alone does not clear this gate.
       `ls database/migrations/ordered/`; choose no migration number from an old
       plan.
 - [ ] Verify this plan and the reviewed Phase A-E documentation set are tracked
-      on `design-sync/agrolink`.
+      on `AgroLink`.
 - [ ] Recheck the active-program ownership ledger. Confirm no other program owns
       the same migration manifest, seed, bundled DBs, scope helper, flow nodes,
       locale files, or generated GUI bundle.
@@ -389,7 +389,7 @@ git add docs/superpowers/plans/2026-07-23-agrolink-edge-cloud-parity-matrix.md \
   docs/superpowers/plans/2026-07-23-agrolink-edge-cloud-parity-execution-report.md
 git diff --cached --check
 git commit -m "docs: record AgroLink parity baseline"
-git push origin design-sync/agrolink
+git push origin AgroLink
 ```
 
 ## 10. Task 1: Refresh the scoped governing documents
@@ -448,7 +448,7 @@ tasks already delivered by the sync stop-loss work and keep the scope below.
 - [ ] Run the complete server backend test suite after the launch-prerequisite
       Testcontainers smoke test passes.
 - [ ] Commit edge and server changes separately and record both SHAs.
-- [ ] Push `design-sync/agrolink` and `AgroLink`.
+- [ ] Push each repository's `AgroLink` branch.
 
 ## 12. Task 3: Repair and integrate scoped-access Phase A
 
@@ -459,7 +459,7 @@ provisioning, fresh role checks, and first-assignment-only UUID emission.
 
 **Required corrections:**
 
-- Rebase the code onto the verified `design-sync/agrolink` head.
+- Rebase the code onto the verified `AgroLink` head.
 - Renumber both migrations to the next contiguous free versions.
 - Preserve the accepted durable per-user `sync_version` schema and versioned
   `USER_UPSERTED` trigger emission from `101d1f2f`.

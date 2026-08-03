@@ -12,7 +12,7 @@ task in numbered order, then retry the blocker before final verification.
 
 ## Verified handoff
 
-- OSI OS integration branch: `design-sync/agrolink`.
+- OSI OS integration branch: `AgroLink`.
 - OSI Server integration branch: `AgroLink`.
 - OSI Server contains Testcontainers compatibility commit
   `bee9435cf17b14ce582db61cc4bc9f1215657b8b`.
@@ -127,7 +127,7 @@ until the definition of done is met.
 
 Commit and push reviewed slices directly:
 
-- OSI OS: `design-sync/agrolink`
+- OSI OS: `AgroLink`
 - OSI Server: `AgroLink`
 
 No pull request is required. Use explicit file lists, keep paired commits in

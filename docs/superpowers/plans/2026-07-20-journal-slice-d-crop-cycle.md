@@ -1,7 +1,7 @@
 # Plan — Journal Slice D: Crop-cycle lifecycle
 
 **Spec:** [2026-07-20-journal-capture-streamlining-design.md](../specs/2026-07-20-journal-capture-streamlining-design.md) (D5–D13; §5.1, §6; R2, R3, R4, R7)
-**Branch:** `design-sync/agrolink` · **Risk:** high · **Migrations:** `0025__journal_crop_cycles.sql` (schema) + `0026__journal_catalog_v4.sql` (catalog v4: crop additions + `attr.variety`). Slots/versions are LOCKED in spec §8.1 — do not renumber.
+**Branch:** `AgroLink` · **Risk:** high · **Migrations:** `0025__journal_crop_cycles.sql` (schema) + `0026__journal_catalog_v4.sql` (catalog v4: crop additions + `attr.variety`). Slots/versions are LOCKED in spec §8.1 — do not renumber.
 
 > Largest slice — split into **D-1 (schema + vocab)**, **D-2 (edge lifecycle + resolution)**, **D-3 (GUI)**. Each sub-slice is independently testable; deploy + kaba100 re-test after D-2 and again after D-3. Follow osi-schema-change-control for the migration and osi-live-ops-runbook for deploy.
 

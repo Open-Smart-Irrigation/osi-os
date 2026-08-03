@@ -8,7 +8,7 @@ should be woken only by completion or a recorded hard stop.
 ## MISSION
 
 Implement **Field Journal Slice 2 in full** (Phase 0 through Phase 6) on the branch
-`design-sync/agrolink`, working from the two committed plans, until every phase is
+`AgroLink`, working from the two committed plans, until every phase is
 **green and merge-ready**. Run autonomously overnight: loop review → implement →
 verify until done, do not idle, do not wait for human input on decisions the plans
 already answer.
@@ -69,7 +69,7 @@ questions.
 
 ## CONSTRAINTS (hard)
 
-- Branch `design-sync/agrolink` only. Frequent commits per the plans' commit steps. Do **not** force-push, rebase shared history, or delete branches.
+- Branch `AgroLink` only. Frequent commits per the plans' commit steps. Do **not** force-push, rebase shared history, or delete branches.
 - **Never hand-edit `flows.json`.** These phases do not require it. If a phase appears to need a `flows.json` change, HARD STOP and record it — it is out of scope.
 - Any `conf/` edit is mirrored byte-identical to both profiles (`bcm2712` and `bcm2709`); run profile parity before committing.
 - **No live-gateway work.** kaba100 runs pre-journal firmware; do not deploy, SSH a Pi, or hit a live `/api/journal/*`. Verify only via the mocked-response unit tests and the `osi-journal` `node:test` harness.
