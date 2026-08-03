@@ -59,8 +59,8 @@ come from the fetched integration heads, not the earlier planning audit.
 | Analysis and recommendations | `parity` | Both deployments expose scoped channel discovery, series reads, and owner-scoped saved-view create, update, list, and delete. Missing measurements remain absent or null. Analysis views remain presentation-local and do not enter farm sync. | Task 8 |
 | Portable display settings | `parity` | Both deployments use the same browser keys for language, theme, SWT unit, dashboard refresh, and display-only module visibility. Cloud settings issue no API mutations; hiding scheduling UI does not deactivate edge schedules. | Task 8 |
 | Support request submission and status | `parity` | Edge submissions remain locally durable and deliver through `WORK_REQUEST_SUBMITTED`. Authenticated cloud accounts submit the same portable fields directly into the existing intake and operator queue after linked-gateway validation, then list only their own direct requests. Cloud submission emits no farm sync event or edge command and does not claim to collect Pi diagnostics. | Task 8 |
-| Account scope and per-gateway grants | `parity` | Edge owner-plus-grant enforcement and server per-gateway membership authorization pass for reads, writes, and effects; mirrors retain local user and assignment UUIDs | Tasks 3, 6, and 7 |
-| Cloud access administration | `parity` | Cloud desired state queues six versioned commands; edge applies or rejects them transactionally; ACK plus mirror convergence drives pending, conflict, and rejection UI | Tasks 4 and 7 |
+| Account scope and per-gateway grants | `parity` | Edge owner-plus-grant enforcement and server per-gateway membership authorization pass for reads, writes, and effects; mirrors retain local user and assignment UUIDs. Caveat: the edge admin GUI has no grant-list route and shows only grants created during the current page session, so an administrator must trust the cloud mirror to audit the full current grant state after a reload (execution report Task 6 and Task 7 sections). | Tasks 3, 6, and 7 |
+| Cloud access administration | `parity` | Cloud desired state queues six versioned commands; edge applies or rejects them transactionally; ACK plus mirror convergence drives pending, conflict, and rejection UI. Caveat: the same edge grant-list gap applies here — the edge side of this workflow cannot enumerate current grants locally and depends on the cloud `/gateway-access` mirror. | Tasks 4 and 7 |
 | Installation recovery | `partial` | This is an explained external-boundary deferral, not an unidentified parity gap. Both sides bind a stable `installation_uuid` across EUI replacement. The server supports verifier-v2 links, envelope-encrypted local/test bundles, in-memory SQLite preview, fresh gateway-admin authorization, row-locked recovery transitions, durable prepare and reconciliation receipt binding, property-gated local HMAC verification, bounded streaming temporary files, audit, short-lived bound download tokens, interruption, receipt-gated completion, and rollback. The edge adapter validates a temporary download and emits the exact `prepare-database-restore` invocation without granting mutation authority. Production key custody requires a provider decision, and the stop-loss restore verbs remain deliberately reverted. | Task 10 |
 | Optimistic zone edits | `parity` | Selected-gateway create, aggregate update, location, and delete use durable desired state. Pending creates remain visible, stale versions conflict, and canonical mirrors settle applied operations. | Tasks 4 and 8 |
 
@@ -104,47 +104,132 @@ come from the fetched integration heads, not the earlier planning audit.
 
 ## Launch-head route inventory
 
+Regenerated from design-sync/agrolink head `38afecc3` on 2026-07-30. The edge
+subsections below (Edge HTTP, Edge GUI) were re-derived directly from this
+head and replace the launch-head snapshot above; the Server subsections
+(Server controllers, Server GUI) were not reverified in this pass and remain
+pinned to the OSI Server launch head `3179df875204ac2c9d38e6d9c96cb2beaa15a1b4`
+recorded at the top of this document — recomputing them needs an OSI Server
+checkout at a named current head, which is outside this fix.
+
 ### Edge HTTP
 
-The canonical bcm2712 flow contains 118 `http in` nodes. The bcm2709 copy is
-byte-identical under `node scripts/verify-profile-parity.js`.
+The canonical bcm2712 flow contains 130 `http in` nodes
+(`grep -c '"type": "http in"' conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json`).
+The bcm2709 copy is byte-identical under `node scripts/verify-profile-parity.js`.
+Twelve routes joined the inventory since the recorded launch head (118 nodes):
+the two `/api/analysis/views/:id` and `/api/grants/*` grant-management routes,
+`GET /api/history/export.csv`, and the `/api/me` and `/api/users*` scoped-user
+administration routes.
 
 ```text
-OPTIONS /api/*
 DELETE /api/account-link
-OPTIONS /api/account-link
-POST /api/account-link
+DELETE /api/analysis/views/:id
+DELETE /api/devices/:deveui
+DELETE /api/grants/plot/:assignmentUuid
+DELETE /api/grants/zone/:assignmentUuid
+DELETE /api/history/workspaces/:id
+DELETE /api/irrigation-zones/:id
+DELETE /api/irrigation-zones/:id/devices/:deveui
 GET /api/account-link/status
 GET /api/analysis/channels
-POST /api/analysis/series
 GET /api/analysis/views
-POST /api/analysis/views
 GET /api/catalog
 GET /api/dendrometer/:deveui/daily
 GET /api/dendrometer/:deveui/readings
-OPTIONS /api/dendrometer/*
 GET /api/devices
+GET /api/devices/:deveui/dendro-history
+GET /api/devices/:deveui/rain-history
+GET /api/devices/:deveui/sensor-history
+GET /api/devices/:deveui/zone-assignments
+GET /api/gateway/location
+GET /api/gateways/:gatewayEui/location
+GET /api/history/export.csv
+GET /api/history/gateways/:gatewayEui/cards
+GET /api/history/gateways/:gatewayEui/cards/:cardId/advanced
+GET /api/history/gateways/:gatewayEui/cards/:cardId/data
+GET /api/history/workspaces
+GET /api/history/zones/:zoneId/cards
+GET /api/history/zones/:zoneId/cards/:cardId/advanced
+GET /api/history/zones/:zoneId/cards/:cardId/data
+GET /api/history/zones/:zoneId/export.csv
+GET /api/improvement-requests
+GET /api/improvement-requests/diagnostics-preview
+GET /api/irrigation-zones
+GET /api/irrigation-zones/:zone_id/environment-summary
+GET /api/irrigation-zones/:zone_id/recommendations
+GET /api/irrigation/recent-actuations
+GET /api/journal/catalog
+GET /api/journal/entries
+GET /api/journal/export.adapt.json
+GET /api/journal/export.csv
+GET /api/journal/export.json
+GET /api/journal/export.package
+GET /api/journal/plot-groups
+GET /api/journal/plots
+GET /api/me
+GET /api/sync/state
+GET /api/system/features
+GET /api/system/stats
+GET /api/users
+GET /api/v1/devices/:deveui/today-liters
+GET /download-fieldtest
+GET /download-sensordata
+GET /download/database
+OPTIONS /api/*
+OPTIONS /api/account-link
+OPTIONS /api/dendrometer/*
+OPTIONS /api/devices/:deveui/reference-tree
+OPTIONS /api/irrigation-zones/:zone_id/config
+OPTIONS /api/irrigation-zones/:zone_id/environment-summary
+OPTIONS /api/irrigation-zones/:zone_id/location
+OPTIONS /api/irrigation-zones/:zone_id/recommendations
+OPTIONS /api/system/*
+OPTIONS /auth/*
+POST /api/account-link
+POST /api/analysis/series
+POST /api/analysis/views
 POST /api/devices
-DELETE /api/devices/:deveui
+POST /api/devices/:deveui/chameleon/refresh-calibration
+POST /api/devices/:deveui/dendro-baseline/reset
+POST /api/devices/:deveui/kiwi/temperature-humidity/enable
+POST /api/grants/plot
+POST /api/grants/zone
+POST /api/history/gateways/:gatewayEui/cards/:cardId/opened
+POST /api/history/rollups/run
+POST /api/history/workspaces
+POST /api/history/zones/:zoneId/cards/:cardId/opened
+POST /api/improvement-requests
+POST /api/irrigation-zones
+POST /api/irrigation-zones/:id/calibration
+POST /api/irrigation-zones/schedules/disable-all
+POST /api/journal/custom-vocab
+POST /api/journal/entries
+POST /api/journal/entries/:uuid/void
+POST /api/journal/plot-groups
+POST /api/journal/plots
+POST /api/sync/force
+POST /api/system/fan
+POST /api/system/reboot
+POST /api/users
+POST /api/users/:uuid/password-reset
+POST /api/v1/valves/:deveui/cancel
+POST /api/valve/:deveui
+POST /api/valve/:deveui/cancel
+POST /auth/login
+POST /auth/register
 PUT /api/devices/:deveui/chameleon
 PUT /api/devices/:deveui/chameleon/depth
-POST /api/devices/:deveui/chameleon/refresh-calibration
 PUT /api/devices/:deveui/dendro
-POST /api/devices/:deveui/dendro-baseline/reset
 PUT /api/devices/:deveui/dendro-config
-GET /api/devices/:deveui/dendro-history
 PUT /api/devices/:deveui/flow-meter
 PUT /api/devices/:deveui/kiwi/interval
-POST /api/devices/:deveui/kiwi/temperature-humidity/enable
 PUT /api/devices/:deveui/lsn50/5v-warmup
 PUT /api/devices/:deveui/lsn50/interrupt-mode
 PUT /api/devices/:deveui/lsn50/interval
 PUT /api/devices/:deveui/lsn50/mode
 PUT /api/devices/:deveui/rain-gauge
-GET /api/devices/:deveui/rain-history
-OPTIONS /api/devices/:deveui/reference-tree
 PUT /api/devices/:deveui/reference-tree
-GET /api/devices/:deveui/sensor-history
 PUT /api/devices/:deveui/soil-moisture-depths
 PUT /api/devices/:deveui/strega/flushing
 PUT /api/devices/:deveui/strega/interval
@@ -153,86 +238,28 @@ PUT /api/devices/:deveui/strega/model
 PUT /api/devices/:deveui/strega/partial-opening
 PUT /api/devices/:deveui/strega/timed-action
 PUT /api/devices/:deveui/temp
-GET /api/devices/:deveui/zone-assignments
 PUT /api/devices/:deveui/zone-assignments
-GET /api/gateway/location
-GET /api/gateways/:gatewayEui/location
-GET /api/history/gateways/:gatewayEui/cards
-GET /api/history/gateways/:gatewayEui/cards/:cardId/advanced
-GET /api/history/gateways/:gatewayEui/cards/:cardId/data
-POST /api/history/gateways/:gatewayEui/cards/:cardId/opened
 PUT /api/history/gateways/:gatewayEui/cards/:cardId/preferences
-POST /api/history/rollups/run
-GET /api/history/workspaces
-POST /api/history/workspaces
-DELETE /api/history/workspaces/:id
 PUT /api/history/workspaces/:id
-GET /api/history/zones/:zoneId/cards
-GET /api/history/zones/:zoneId/cards/:cardId/advanced
-GET /api/history/zones/:zoneId/cards/:cardId/data
-POST /api/history/zones/:zoneId/cards/:cardId/opened
 PUT /api/history/zones/:zoneId/cards/:cardId/preferences
-GET /api/history/zones/:zoneId/export.csv
-GET /api/improvement-requests
-POST /api/improvement-requests
-GET /api/improvement-requests/diagnostics-preview
-GET /api/irrigation-zones
-POST /api/irrigation-zones
-DELETE /api/irrigation-zones/:id
-POST /api/irrigation-zones/:id/calibration
-DELETE /api/irrigation-zones/:id/devices/:deveui
 PUT /api/irrigation-zones/:id/devices/:deveui
 PUT /api/irrigation-zones/:id/schedule
-OPTIONS /api/irrigation-zones/:zone_id/config
 PUT /api/irrigation-zones/:zone_id/config
-GET /api/irrigation-zones/:zone_id/environment-summary
-OPTIONS /api/irrigation-zones/:zone_id/environment-summary
-OPTIONS /api/irrigation-zones/:zone_id/location
 PUT /api/irrigation-zones/:zone_id/location
-GET /api/irrigation-zones/:zone_id/recommendations
-OPTIONS /api/irrigation-zones/:zone_id/recommendations
 PUT /api/irrigation-zones/:zone_id/timezone
-POST /api/irrigation-zones/schedules/disable-all
-GET /api/irrigation/recent-actuations
-GET /api/journal/catalog
-POST /api/journal/custom-vocab
 PUT /api/journal/custom-vocab/:uuid
-GET /api/journal/entries
-POST /api/journal/entries
 PUT /api/journal/entries/:uuid
-POST /api/journal/entries/:uuid/void
-GET /api/journal/export.adapt.json
-GET /api/journal/export.csv
-GET /api/journal/export.json
-GET /api/journal/export.package
-GET /api/journal/plot-groups
-POST /api/journal/plot-groups
 PUT /api/journal/plot-groups/:uuid
-GET /api/journal/plots
-POST /api/journal/plots
 PUT /api/journal/plots/:uuid
-POST /api/sync/force
-GET /api/sync/state
-OPTIONS /api/system/*
-POST /api/system/fan
-GET /api/system/features
-POST /api/system/reboot
-GET /api/system/stats
-GET /api/v1/devices/:deveui/today-liters
-POST /api/v1/valves/:deveui/cancel
-POST /api/valve/:deveui
-POST /api/valve/:deveui/cancel
-OPTIONS /auth/*
-POST /auth/login
-POST /auth/register
-GET /download-fieldtest
-GET /download-sensordata
-GET /download/database
+PUT /api/users/:uuid/disabled
+PUT /api/users/:uuid/role
 ```
 
 ### Edge GUI
 
-The edge router exposes 14 paths:
+The edge router (`web/react-gui/src/App.tsx`) exposes 16 paths, two more than
+the launch-head snapshot: `/admin/users` and `/admin/grants` back the scoped
+access administration UI added in Tasks 6 and 7.
 
 ```text
 /login
@@ -241,6 +268,8 @@ The edge router exposes 14 paths:
 /account-link
 /support-requests
 /settings
+/admin/users
+/admin/grants
 /history
 /analysis
 /history/zones/:zoneId
@@ -306,9 +335,17 @@ The server router exposes 13 paths:
 
 ## Operation and schema inventory
 
+Regenerated from design-sync/agrolink head `38afecc3` on 2026-07-30, counted
+directly from `docs/contracts/sync-schema/events.schema.json`,
+`commands.schema.json`, and `resources.schema.json`. The prior appendix here
+disagreed with the "Contract and catalog baseline" narrative above (28 events
+against a stated 30, 46 commands against a stated 45+4); the narrative counts
+were correct and current, and this appendix is now aligned to them.
+
 ### Event operations
 
-The governed schema contains 28 operations:
+The governed schema (`events.schema.json`, `properties.op.enum`) contains 30
+operations, matching the narrative baseline above:
 
 ```text
 CHAMELEON_READING_APPENDED
@@ -332,10 +369,12 @@ USER_PLOT_ASSIGNMENT_UPSERTED
 USER_UPSERTED
 USER_ZONE_ASSIGNMENT_DELETED
 USER_ZONE_ASSIGNMENT_UPSERTED
+WEATHER_STATION_ZONES_REPLACED
 WORK_REQUEST_SUBMITTED
 ZONE_CONFIG_UPSERTED
 ZONE_DELETED
 ZONE_ENVIRONMENT_APPENDED
+ZONE_IRRIGATION_CALIBRATION_UPSERTED
 ZONE_LOCATION_UPSERTED
 ZONE_RECOMMENDATION_UPSERTED
 ZONE_UPSERTED
@@ -343,13 +382,20 @@ ZONE_UPSERTED
 
 No event operation is deferred. The five journal operations are emitted by
 edge modules, the five scoped-access operations by migration-owned triggers,
-and the other 18 by flows or seed-owned modules. All 28 match the server
-operation mirror. The runtime flow emits 17 because journal, scoped access,
-and `WORK_REQUEST_SUBMITTED` are module or seed owned.
+and the other 20 by flows or seed-owned modules — two more than the prior
+appendix counted: `ZONE_IRRIGATION_CALIBRATION_UPSERTED` and
+`WEATHER_STATION_ZONES_REPLACED` landed with the Task 8b/8c zone-calibration
+and S2120 multi-zone work and were never added here. The runtime flow itself
+still emits only 17 operations
+(`node scripts/verify-sync-op-parity.js`, `flows:bcm2712 (17)`), because
+journal, scoped access, and `WORK_REQUEST_SUBMITTED` remain module or seed
+owned.
 
 ### Command operations
 
-The governed schema contains 46 command types:
+The governed schema (`commands.schema.json`, `properties.command_type.enum`)
+contains 49 command types, matching the narrative's "45 registry commands and
+four separately routed protected commands":
 
 ```text
 OPEN_FOR_DURATION
@@ -384,8 +430,11 @@ UPSERT_ZONE_LOCATION
 ASSIGN_DEVICE_TO_ZONE
 UPSERT_DEVICE_FLAGS
 UPSERT_DEVICE_SOIL_DEPTHS
+UPSERT_DEVICE
 UPDATE_SCHEDULE
 UPSERT_SCHEDULE
+UPSERT_ZONE_IRRIGATION_CALIBRATION
+REPLACE_WEATHER_STATION_ZONES
 WORK_REQUEST_STATUS
 UPSERT_JOURNAL_ENTRY
 VOID_JOURNAL_ENTRY
@@ -401,17 +450,30 @@ DELETE_USER_PLOT_ASSIGNMENT
 ```
 
 No command type is deferred. `UC512_OPEN_FOR_DURATION` stays schema-compatible
-but is excluded from the supported catalog.
+but is excluded from the supported catalog. Three commands joined since the
+recorded launch head — `UPSERT_DEVICE`, `UPSERT_ZONE_IRRIGATION_CALIBRATION`,
+and `REPLACE_WEATHER_STATION_ZONES` — carrying the protected device,
+irrigation-calibration, and S2120 zone-set desired-state resources added in
+Tasks 8b and 8c.
 
 ### Resource schemas
 
-The resource file contains 24 domain definitions after excluding UUID,
-timestamp, and EUI primitives:
+The resource file (`resources.schema.json`, top-level `definitions`) contains
+31 domain definitions after excluding the `Uuid`, `NullableUuid`,
+`CanonicalUuid`, `NullableCanonicalUuid`, `CanonicalUtcTimestamp`,
+`NullableCanonicalUtcTimestamp`, `Eui64`, and `NullableEui64` primitives:
 
 ```text
 Zone
+ZoneDesiredStateUser
+ZoneDesiredState
+ZoneDeleteState
 Device
+DeviceDesiredState
+WeatherStationZonesDesiredState
 Schedule
+IrrigationScheduleDesiredState
+IrrigationCalibrationDesiredState
 ScopedUser
 ScopedUserCommand
 UserZoneAssignment
@@ -434,6 +496,12 @@ JournalPlotGroup
 JournalPlotGroupAggregate
 JournalPlotGroupCommand
 ```
+
+Seven definitions joined since the recorded launch head, all protected
+desired-state resources for the zone, device, weather-station, schedule, and
+calibration command paths: `ZoneDesiredStateUser`, `ZoneDesiredState`,
+`ZoneDeleteState`, `DeviceDesiredState`, `WeatherStationZonesDesiredState`,
+`IrrigationScheduleDesiredState`, and `IrrigationCalibrationDesiredState`.
 
 ### Capabilities
 

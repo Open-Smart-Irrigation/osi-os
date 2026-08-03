@@ -413,6 +413,16 @@ to its local `user_uuid`, role, and enabled state. Global cloud roles do not
 grant farm access, and one cloud user may be an administrator on one gateway
 and a viewer on another.
 
+The orchestrator's Task 7 checklist required resolving or explicitly
+deduplicating the accepted no-op `USER_UPSERTED` double-emission before
+enabling scoped producers. Phase A's `trg_dp_users_outbox_uuid_au` trigger in
+`database/migrations/ordered/0033__scoped_access_schema.sql` (lines 177-182)
+closes this: its `WHEN NEW.user_uuid IS NOT NULL AND NEW.user_uuid != '' AND
+(OLD.user_uuid IS NULL OR OLD.user_uuid = '')` clause fires the UUID arm only
+on first assignment, so the sibling `AFTER INSERT` trigger that fills
+`user_uuid` cannot also produce a same-version rewrite that would otherwise
+double-emit `USER_UPSERTED` at an equal version.
+
 Cloud access changes use six versioned pending commands. They remain desired
 state until the edge applies them. The edge helper validates gateway and
 effect-key bindings, protects the last enabled administrator, applies the
@@ -1064,6 +1074,11 @@ Remaining risks and deliberate deferrals:
 - Production cloud, `osicloud.ch`, live gateways, live database restore,
   external bundle upload, SMB shares, and Agroscope IT systems were not tested
   or accessed.
+- The edge grant-management GUI still has no grant-list route (Task 6 and
+  Task 7 above). It shows only the zone and plot grants created during the
+  current page session, not the full current grant state, so an
+  administrator cannot audit existing grants from the edge after a page
+  reload and must trust the cloud `/gateway-access` mirror instead.
 
 Heavyweight checks began with 12,806-14,499 MiB available and stayed above the
 4,096 MiB guard. No process was terminated. Final anti-slop, diff, status,
