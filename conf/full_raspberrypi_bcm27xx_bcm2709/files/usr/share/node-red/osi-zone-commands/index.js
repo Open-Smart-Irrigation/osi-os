@@ -125,10 +125,9 @@ function validate(envelope, runtime) {
   if (target <= base) {
     throw commandError('malformed_command', 'target version must be greater than base');
   }
-  const effectKey = 'zone:' + zoneUuid + ':' + base;
-  if (envelope.effectKey != null && String(envelope.effectKey).trim() !== effectKey) {
-    throw commandError('malformed_command', 'effectKey binding is invalid');
-  }
+  const effectKey = envelope.effectKey == null
+    ? null
+    : text(envelope.effectKey, 'effectKey', 255);
 
   const cropType = text(payload.cropType, 'payload.cropType', 128);
   const variety = payload.variety === null
@@ -181,11 +180,37 @@ function buildAck(command, terminal, appliedAt) {
     gatewayDeviceEui: command.gateway,
     appliedAt,
     resourceUuid: command.zoneUuid,
-    payloadHash: hash(command.payload),
+    payloadHash: terminal.result === 'APPLIED' ? terminal.payloadHash : null,
   };
   if (terminal.reason) value.reason = terminal.reason;
   if (terminal.reasonCode) value.reasonCode = terminal.reasonCode;
   return value;
+}
+
+async function appliedAggregateHash(tx, command) {
+  const row = await tx.get(
+    "SELECT payload_json FROM sync_outbox WHERE aggregate_type='ZONE' " +
+      'AND aggregate_key=? AND sync_version=? ORDER BY rowid DESC LIMIT 1',
+    [command.zoneUuid, command.target]
+  );
+  if (!row || typeof row.payload_json !== 'string') {
+    throw commandError(
+      'missing_sync_event',
+      'applied zone mutation did not emit its canonical sync event'
+    );
+  }
+  let payload;
+  try {
+    payload = JSON.parse(row.payload_json);
+  } catch (cause) {
+    const error = commandError(
+      'invalid_sync_event',
+      'applied zone mutation emitted invalid canonical JSON'
+    );
+    error.cause = cause;
+    throw error;
+  }
+  return hash(object(payload, 'Canonical zone aggregate'));
 }
 
 async function queueAck(tx, value, createdAt) {
@@ -313,6 +338,7 @@ async function applyOnce(db, envelope, runtime) {
       ack: await persist(tx, command, {
         result: 'APPLIED',
         appliedSyncVersion: command.target,
+        payloadHash: await appliedAggregateHash(tx, command),
       }),
     };
   });

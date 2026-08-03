@@ -3,6 +3,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -21,6 +22,22 @@ const SEED = fs.readFileSync(
 const GATEWAY_EUI = '10AA10AA10AA10AD';
 const OWNER_UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ZONE_UUID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+function canonicalHash(value) {
+  function canonical(item) {
+    if (Array.isArray(item)) return item.map(canonical);
+    if (item && typeof item === 'object') {
+      return Object.keys(item).sort().reduce(function(result, key) {
+        result[key] = canonical(item[key]);
+        return result;
+      }, {});
+    }
+    return item;
+  }
+  return crypto.createHash('sha256')
+    .update(JSON.stringify(canonical(value)))
+    .digest('hex');
+}
 
 function loadCommands() {
   assert.ok(
@@ -177,7 +194,9 @@ test('applies target 44 with an explicit null cultivar and commits state, mirror
     ).get(ZONE_UUID);
     assert.equal(mirror.op, 'ZONE_CONFIG_UPSERTED');
     assert.equal(mirror.sync_version, 44);
-    assert.equal(JSON.parse(mirror.payload_json).variety, null);
+    const mirrorPayload = JSON.parse(mirror.payload_json);
+    assert.equal(mirrorPayload.variety, null);
+    assert.equal(result.ack.payloadHash, canonicalHash(mirrorPayload));
 
     const terminal = db.raw.prepare(
       'SELECT result,result_detail FROM applied_commands WHERE command_id=?'
@@ -193,6 +212,44 @@ test('applies target 44 with an explicit null cultivar and commits state, mirror
   } finally {
     db.raw.close();
   }
+});
+
+test('preserves an originator-provided effect key without inventing one when absent', async (t) => {
+  const commands = loadCommands();
+  await t.test('provided', async () => {
+    if (typeof commands._resetForTests === 'function') commands._resetForTests();
+    const db = database();
+    try {
+      const command = envelope(4408, 42, 44);
+      command.effectKey = 'terra-selection:' + ZONE_UUID + ':42:44';
+      const result = await apply(commands, db, command);
+      assert.equal(result.ack.effectKey, command.effectKey);
+      assert.equal(
+        db.raw.prepare(
+          'SELECT effect_key FROM applied_commands WHERE command_id=?'
+        ).get('4408').effect_key,
+        command.effectKey
+      );
+    } finally {
+      db.raw.close();
+    }
+  });
+  await t.test('absent', async () => {
+    if (typeof commands._resetForTests === 'function') commands._resetForTests();
+    const db = database();
+    try {
+      const result = await apply(commands, db, envelope(4409, 42, 44));
+      assert.equal(result.ack.effectKey, null);
+      assert.equal(
+        db.raw.prepare(
+          'SELECT effect_key FROM applied_commands WHERE command_id=?'
+        ).get('4409').effect_key,
+        null
+      );
+    } finally {
+      db.raw.close();
+    }
+  });
 });
 
 test('replays the exact persisted ACK without a second state change or mirror event', async () => {
@@ -295,6 +352,7 @@ test('terminally rejects owner and gateway binding conflicts without changing Te
         const result = await apply(commands, db, entry.command);
         assert.equal(result.ack.result, 'NACKED');
         assert.equal(result.ack.reasonCode, entry.reasonCode);
+        assert.equal(result.ack.payloadHash, null);
         const zone = db.raw.prepare(
           'SELECT crop_type,variety,phenological_stage,sync_version ' +
           'FROM irrigation_zones WHERE zone_uuid=?'
@@ -337,6 +395,7 @@ test('rejects a late lower target after target 44 without rewinding state or emi
     assert.equal(late.ack.result, 'NACKED');
     assert.equal(late.ack.reasonCode, 'base_version_conflict');
     assert.equal(late.ack.appliedSyncVersion, 44);
+    assert.equal(late.ack.payloadHash, null);
     assert.equal(
       db.raw.prepare(
         'SELECT sync_version FROM irrigation_zones WHERE zone_uuid=?'
