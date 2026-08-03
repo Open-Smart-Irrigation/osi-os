@@ -164,6 +164,17 @@ function invalidateScope(userUuid) {
   else cache.clear();
 }
 
+// Mutation-capable roles per the users.role CHECK constraint (migration 0033:
+// role IN ('admin','researcher','viewer')). This is an ALLOWLIST, not a
+// viewer-denylist: a corrupted or unrecognized role string (which SQLite's own
+// CHECK should already prevent, but a caller must not assume) fails closed to
+// read-only instead of silently behaving as a writer.
+const MUTATION_CAPABLE_ROLES = new Set(['admin', 'researcher']);
+
+function canMutate(role) {
+  return MUTATION_CAPABLE_ROLES.has(role);
+}
+
 function scopeAllows(scope, kind, uuid) {
   if (scope.wildcard) return true;
   if (scope.disabled) return false;
@@ -365,6 +376,7 @@ module.exports = {
   assertAuthenticatedRole,
   authorizeAdminRead,
   assertFreshRole,
+  canMutate,
   buildDisableUserGuardedSql,
   buildDeroleUserGuardedSql,
   buildDeriveUserGuardedSql,

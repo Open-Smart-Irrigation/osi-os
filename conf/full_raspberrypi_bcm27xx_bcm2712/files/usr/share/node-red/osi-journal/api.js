@@ -653,7 +653,7 @@ async function assertJournalWriteRole(db, principal) {
     actor.role,
     { scopedMode: true }
   );
-  if (fresh.role === 'viewer') throw apiError(403, 'forbidden', 'Viewers cannot modify journal data');
+  if (!scopeHelper.canMutate(fresh.role)) throw apiError(403, 'forbidden', 'Viewers cannot modify journal data');
   return principal;
 }
 

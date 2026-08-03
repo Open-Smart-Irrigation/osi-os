@@ -442,3 +442,13 @@ test('buildDeroleUserGuardedSql protects the last enabled admin', () => {
   assert.match(sql, /^UPDATE users SET role = \?/);
   assert.match(sql, /COUNT\(\*\).*role='admin'/);
 });
+
+test('canMutate is an allowlist: only admin/researcher, everything else (including a corrupted role) fails closed', () => {
+  assert.equal(scope.canMutate('admin'), true);
+  assert.equal(scope.canMutate('researcher'), true);
+  assert.equal(scope.canMutate('viewer'), false);
+  assert.equal(scope.canMutate('gibberish'), false);
+  assert.equal(scope.canMutate(''), false);
+  assert.equal(scope.canMutate(null), false);
+  assert.equal(scope.canMutate(undefined), false);
+});
