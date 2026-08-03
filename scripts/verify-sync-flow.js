@@ -1732,7 +1732,13 @@ expectIncludesById('device-command-apply-fn', '.close(', 'closes the protected d
 expectIncludesById('d7e5c762c820aa16', 'nextScheduleSyncVersion = Number(zone.schedule_sync_version', 'increments the schedule aggregate version for local writes');
 expectIncludesById('d7e5c762c820aa16', 'sync_version = ${nextScheduleSyncVersion}', 'persists the independent schedule aggregate version');
 expectExcludesById('d7e5c762c820aa16', 'UPDATE irrigation_zones SET sync_version', 'parent-zone version mutation from local schedule writes');
-expectIncludesById('zone-calibration-fn', 'COALESCE(zic.sync_version, 0) AS calibration_sync_version', 'loads the calibration aggregate version for local writes');
+// AgroLink review E2 (2026-08): the COALESCE was removed so a genuinely missing
+// calibration row (NULL) can be told apart from an existing row already at version 0 --
+// the first-ever insert now stores sync_version=0 and lets the AFTER INSERT defaults
+// trigger's own UPDATE bump it to 1 (which is what the UPDATE-only outbox trigger
+// listens for), instead of inserting version 1 directly and publishing no event at all.
+expectIncludesById('zone-calibration-fn', 'zic.sync_version AS calibration_sync_version', 'loads the calibration aggregate version for local writes');
+expectIncludesById('zone-calibration-fn', 'hasExistingCalibrationRow', 'distinguishes a missing calibration row from one already at version 0');
 expectIncludesById('zone-calibration-fn', 'nextCalibrationSyncVersion', 'increments the independent calibration aggregate version');
 expectIncludesById('zone-calibration-fn', 'sync_version=excluded.sync_version, deleted_at=NULL, last_applied_at=NULL', 'persists local calibration desired state without marking it cloud-applied');
 expectIncludesById('zone-calibration-fn', '[zoneId, measuredFlowRateLpm, measurementMethod, now, now, now, nextCalibrationSyncVersion, null]', 'binds local calibration write parameters');
