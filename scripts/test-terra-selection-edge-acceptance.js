@@ -22,6 +22,11 @@ const SEED = fs.readFileSync(
 const GATEWAY_EUI = '10AA10AA10AA10AD';
 const OWNER_UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ZONE_UUID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const FIXED_NOW = '2026-08-03T20:00:00.000Z';
+const FIXTURE_PATH = path.join(
+  REPO,
+  'scripts/fixtures/terra-edge-selection/edge-selection-v1.json'
+);
 
 function canonicalHash(value) {
   function canonical(item) {
@@ -163,6 +168,185 @@ function runtime() {
 async function apply(commands, db, command) {
   return commands.applyZoneCommand(db.facade, command, runtime());
 }
+
+function withFixedClock(iso, work) {
+  const RealDate = global.Date;
+  const epoch = RealDate.parse(iso);
+  global.Date = class FixedDate extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [epoch]));
+    }
+
+    static now() {
+      return epoch;
+    }
+  };
+  return Promise.resolve()
+    .then(work)
+    .finally(() => {
+      global.Date = RealDate;
+    });
+}
+
+function deterministicFixtureTransport(raw) {
+  raw.exec(`
+    CREATE TRIGGER fixture_stable_zone_outbox_ai
+    AFTER INSERT ON sync_outbox
+    FOR EACH ROW
+    WHEN NEW.aggregate_type = 'ZONE'
+    BEGIN
+      UPDATE sync_outbox
+         SET event_uuid = CASE NEW.sync_version
+               WHEN 44 THEN '44000000000040008000000000000044'
+               WHEN 45 THEN '45000000000040008000000000000045'
+               WHEN 46 THEN '46000000000040008000000000000046'
+               ELSE NEW.event_uuid
+             END,
+             occurred_at = CASE NEW.sync_version
+               WHEN 44 THEN '2026-08-03T20:00:44.000Z'
+               WHEN 45 THEN '2026-08-03T20:00:45.000Z'
+               WHEN 46 THEN '2026-08-03T20:00:46.000Z'
+               ELSE NEW.occurred_at
+             END
+       WHERE rowid = NEW.rowid;
+    END;
+  `);
+}
+
+function edgeEvent(row) {
+  return {
+    eventUuid: row.event_uuid,
+    aggregateType: row.aggregate_type,
+    aggregateKey: row.aggregate_key,
+    op: row.op,
+    syncVersion: row.sync_version,
+    occurredAt: row.occurred_at,
+    payload: JSON.parse(row.payload_json),
+  };
+}
+
+async function generateContractFixture() {
+  const commands = loadCommands();
+  if (typeof commands._resetForTests === 'function') commands._resetForTests();
+  const db = database();
+  try {
+    deterministicFixtureTransport(db.raw);
+    db.raw.prepare(
+      'UPDATE users SET cloud_user_id=NULL WHERE user_uuid=?'
+    ).run(OWNER_UUID);
+
+    const applied = await withFixedClock(FIXED_NOW, () =>
+      apply(commands, db, envelope(91044001, 42, 44))
+    );
+    const late = await withFixedClock(FIXED_NOW, () =>
+      apply(commands, db, envelope(91043001, 42, 43))
+    );
+
+    db.raw.prepare(`
+      UPDATE irrigation_zones
+         SET latitude=47.25,
+             longitude=8.55,
+             sync_version=45,
+             updated_at='2026-08-03T20:00:45.000Z'
+       WHERE zone_uuid=?
+    `).run(ZONE_UUID);
+    db.raw.prepare(`
+      UPDATE irrigation_zones
+         SET name='North Field',
+             sync_version=46,
+             updated_at='2026-08-03T20:00:46.000Z'
+       WHERE zone_uuid=?
+    `).run(ZONE_UUID);
+
+    const rows = db.raw.prepare(`
+      SELECT event_uuid,aggregate_type,aggregate_key,op,payload_json,
+             sync_version,occurred_at
+        FROM sync_outbox
+       WHERE aggregate_type='ZONE' AND aggregate_key=?
+       ORDER BY sync_version
+    `).all(ZONE_UUID);
+    assert.equal(rows.length, 3);
+    return {
+      contractVersion: 1,
+      sourceNode: 'terra-edge-selection-v1',
+      gatewayDeviceEui: GATEWAY_EUI,
+      zoneUuid: ZONE_UUID,
+      selection: {
+        cropType: 'maize',
+        variety: null,
+        phenologicalStage: 'development',
+      },
+      events: rows.map(edgeEvent),
+      commandAck: applied.ack,
+      lateCommandAck: late.ack,
+    };
+  } finally {
+    db.raw.close();
+  }
+}
+
+function fixtureBytes(value) {
+  return Buffer.from(JSON.stringify(value, null, 2) + '\n', 'utf8');
+}
+
+function fixtureHash(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+function writeFixture(outputPath, bytes) {
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, bytes);
+  const hashPath = outputPath.replace(/\.json$/, '.sha256');
+  fs.writeFileSync(
+    hashPath,
+    fixtureHash(bytes) + '  ' + path.basename(outputPath) + '\n',
+    'utf8'
+  );
+}
+
+test('generates the deterministic paired server fixture from real edge state, events, and ACKs', async () => {
+  const first = await generateContractFixture();
+  const second = await generateContractFixture();
+  const bytes = fixtureBytes(first);
+  const outputPath = process.env.TERRA_EDGE_FIXTURE_OUT || FIXTURE_PATH;
+  if (process.env.TERRA_EDGE_FIXTURE_OUT) {
+    writeFixture(outputPath, bytes);
+  }
+
+  assert.deepEqual(second, first);
+  assert.equal(first.contractVersion, 1);
+  assert.equal(first.gatewayDeviceEui, GATEWAY_EUI);
+  assert.equal(first.zoneUuid, ZONE_UUID);
+  assert.deepEqual(first.selection, {
+    cropType: 'maize',
+    variety: null,
+    phenologicalStage: 'development',
+  });
+  assert.deepEqual(
+    first.events.map((event) => event.op),
+    ['ZONE_CONFIG_UPSERTED', 'ZONE_LOCATION_UPSERTED', 'ZONE_UPSERTED']
+  );
+  assert.deepEqual(
+    first.events.map((event) => event.syncVersion),
+    [44, 45, 46]
+  );
+  for (const event of first.events) {
+    assert.equal(event.payload.variety, null);
+    assert.equal(event.payload.crop_type, 'maize');
+    assert.equal(event.payload.phenological_stage, 'development');
+  }
+  assert.equal(first.commandAck.result, 'APPLIED');
+  assert.equal(first.commandAck.appliedSyncVersion, 44);
+  assert.equal(first.lateCommandAck.result, 'NACKED');
+  assert.equal(first.lateCommandAck.reasonCode, 'base_version_conflict');
+  assert.notDeepEqual(first.events[0], first.commandAck);
+  assert.ok(fs.existsSync(outputPath), 'paired fixture is missing: ' + outputPath);
+  assert.deepEqual(fs.readFileSync(outputPath), bytes);
+  assert.equal(
+    fs.readFileSync(outputPath.replace(/\.json$/, '.sha256'), 'utf8'),
+    fixtureHash(bytes) + '  ' + path.basename(outputPath) + '\n'
+  );
+});
 
 test('applies target 44 with an explicit null cultivar and commits state, mirror event, ledger, and ACK together', async () => {
   const commands = loadCommands();
