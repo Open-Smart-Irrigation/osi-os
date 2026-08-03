@@ -543,6 +543,18 @@ its own comment.
   `cancel-valve-http-in` in `flows.json`, tab `device-api-tab`). Reserve this for
   genuine operator cancel intent, not as test cleanup.
 
+### Scoped-access cache after a direct SQLite edit
+
+`osi-scope-helper`'s scope resolution (owned/granted zones and plots, role,
+disabled state) is cached in-process for up to 30 seconds (`CACHE_TTL_MS`).
+After hand-editing `users`, `user_zone_assignments`, or `user_plot_assignments`
+directly via `sqlite3` on a live Pi (a role fixup, a manual grant, disabling an
+account), the running Node-RED process can keep serving the *pre-edit* scope
+decision — including a stale **allow** — for up to 30 seconds. Restart Node-RED
+(`/etc/init.d/node-red restart`) or wait out the cache window before treating a
+scope-change verification as conclusive; a `curl` that still shows the old
+access immediately after the edit is not necessarily a failed repair.
+
 ---
 
 ## SSH access pattern
@@ -575,6 +587,9 @@ in runbooks, docs, or scripts.
 - Sending a bare `CLOSE` to a STREGA valve "to be safe" — it is not part of the
   supported command set; use a short `OPEN_FOR_DURATION` or the cancel endpoint.
 - Resetting a password or token to get unblocked instead of asking the operator.
+- Verifying a scoped-access change (role fixup, grant, disable) against a live Pi
+  immediately after a direct SQLite edit without restarting Node-RED or waiting out
+  the 30-second scope cache — a lingering stale **allow** can look like a failed repair.
 - Treating a loaded SSH key or working `ssh` check against `osicloud.ch` as
   permission to proceed there.
 - Hand-editing `schema_object_fingerprints` instead of using
