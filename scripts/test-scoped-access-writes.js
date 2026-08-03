@@ -168,6 +168,94 @@ test('W1: revocation immediately stops enqueue before physical effect', async ()
   }
 });
 
+// E3 (Critical): PHYSICAL device commands must require an actor once scoped access is on.
+// Before this fix, `if (scopedOn && actorUuid)` skipped the scope check entirely when
+// actorUuid was absent -- exactly the shape of a cloud-dispatched command that never
+// carried one -- so a revoked user could still actuate a valve via the cloud path.
+test('E3: a scoped physical command without an actor is rejected fail-closed and never actuates', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('write-strega-expectation'), {
+      msg: expectationMessage(null),
+      env: ENV,
+      db,
+    });
+    assert.equal(
+      response.result,
+      null,
+      'an actor-less physical command must never reach the downlink builder wired to this node\'s single output'
+    );
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='manual-scope-test'"
+      ).get().n,
+      0,
+      'no actuation expectation row may be written -- the command must never actuate'
+    );
+    const applied = db.prepare(
+      "SELECT result, result_detail FROM applied_commands WHERE command_id='manual-scope-test'"
+    ).get();
+    assert.ok(applied, 'a terminal rejection must still be recorded so a replay is recognized');
+    assert.equal(applied.result, 'REJECTED_PERMANENT');
+    assert.equal(JSON.parse(applied.result_detail).reason, 'scope_actor_required');
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id='manual-scope-test'"
+      ).get().n,
+      1,
+      'the rejection must be queued for delivery back to the cloud, not silently dropped'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('E3: a scoped actor with view-only zone access cannot actuate a valve', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    // u-view1 (role 'viewer') is genuinely granted to z-1 (g-2), the zone VALVE1 lives
+    // in -- assertFreshDeviceAccess alone would have let this actor through. Before this
+    // fix there was no role check at all on this path, only the device/zone-access check.
+    const response = await executeFunction(loadNode('write-strega-expectation'), {
+      msg: expectationMessage('u-view1'),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result, null, 'a viewer must never actuate a valve, even with real zone access');
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='manual-scope-test'"
+      ).get().n,
+      0
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('E3: flag-off preserves the legacy no-actor-required behavior', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('write-strega-expectation'), {
+      msg: expectationMessage(null),
+      env: { ...ENV, OSI_SCOPED_ACCESS: '0' },
+      db,
+    });
+    assert.ok(response.result, 'flag-off must still accept a physical command with no actor at all');
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='manual-scope-test'"
+      ).get().n,
+      1
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test('W2: schedule mutation allows grants, hides foreign zones, and rejects viewers', async () => {
   const db = seedScopedDb();
   try {
