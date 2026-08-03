@@ -7,8 +7,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
+const { executeFunction, loadNode, makeAuthHeader } = require('./lib/scoped-access-harness');
 
 const REPO = path.resolve(__dirname, '..');
+const WEATHER_COMMANDS_PATH = path.join(
+  REPO,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-commands/weather.js'
+);
 const MIGRATIONS = path.join(REPO, 'database/migrations/ordered');
 const PRE_MIGRATIONS = fs.readdirSync(MIGRATIONS)
   .filter((name) => /^\d{4}__.*\.sql$/.test(name))
@@ -172,6 +177,141 @@ test('one state version update publishes only the final replacement set', () => 
     assert.deepEqual(
       JSON.parse(emitted[0].payload_json).zone_uuids,
       [ZONE_B]
+    );
+  } finally {
+    db.close();
+  }
+});
+
+// Promise-style facade over the same node:sqlite handle, matching the interface
+// osi-device-commands/weather.js expects (db.get/all/run + db.transaction(fn)).
+// Mirrors the fixture already proven against this module in weather.test.js.
+class PromiseDbView {
+  constructor(native) {
+    this.native = native;
+  }
+  get(sql, params) {
+    return Promise.resolve(this.native.prepare(sql).get(...(params || [])));
+  }
+  all(sql, params) {
+    return Promise.resolve(this.native.prepare(sql).all(...(params || [])));
+  }
+  run(sql, params) {
+    return Promise.resolve(this.native.prepare(sql).run(...(params || [])));
+  }
+  async transaction(fn) {
+    this.native.exec('BEGIN IMMEDIATE');
+    try {
+      const result = await fn(this);
+      this.native.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.native.exec('ROLLBACK');
+      throw error;
+    }
+  }
+}
+
+test('GUI-path scoped weather zone edit (Scoped Weather Zone Assignments) emits the event and survives a later cloud replace at the stale base version', async () => {
+  const db = database();
+  try {
+    apply(db, ADDITIVE);
+    apply(db, BACKFILL);
+    // 0039 unconditionally seeds a version-1 state row for every existing S2120 at
+    // migration time. Remove it here to reproduce the realistic case this bug actually
+    // hits: an S2120 claimed *after* 0039 already ran gets no state row until something
+    // writes weather_station_zones for it -- which is exactly the GUI-path edit below.
+    db.prepare('DELETE FROM weather_station_zone_state WHERE deveui=?').run(DEVICE);
+    db.exec('DELETE FROM sync_outbox');
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS n FROM weather_station_zone_state WHERE deveui=?').get(DEVICE).n,
+      0,
+      'no assignment-state row must exist yet for this to be a genuine first GUI edit'
+    );
+
+    const zoneARow = db.prepare('SELECT id FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_A);
+    const userRow = db.prepare('SELECT id FROM users WHERE user_uuid=?').get(USER);
+    const secret = 'weather-zone-router-test-secret';
+    const auth = makeAuthHeader({ userId: userRow.id, username: 'grower', secret });
+    const node = loadNode('scoped-weather-zone-assign-router');
+    const msg = {
+      req: {
+        headers: { authorization: auth },
+        params: { deveui: DEVICE },
+      },
+      payload: { zone_ids: [zoneARow.id] },
+    };
+
+    const { result, errors } = await executeFunction(node, {
+      msg,
+      env: { OSI_SCOPED_ACCESS: '1', AUTH_TOKEN_SECRET: secret },
+      db,
+    });
+
+    assert.deepEqual(errors, []);
+    const response = result[1];
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.payload.zone_ids, [zoneARow.id]);
+
+    const stateRow = db.prepare(
+      'SELECT sync_version FROM weather_station_zone_state WHERE deveui=?'
+    ).get(DEVICE);
+    assert.equal(stateRow.sync_version, 1, 'the first GUI edit must version the assignment-state row to 1');
+
+    const emitted = events(db);
+    assert.equal(emitted.length, 1, 'the GUI-path edit must publish exactly one outbox event, not zero');
+    assert.equal(emitted[0].sync_version, 1);
+    assert.deepEqual(JSON.parse(emitted[0].payload_json).zone_uuids, [ZONE_A]);
+
+    // A cloud REPLACE_WEATHER_STATION_ZONES arriving at the pre-edit base version (0) must be
+    // rejected as a conflict, not silently applied and discard the local GUI edit.
+    const weatherCommands = require(WEATHER_COMMANDS_PATH);
+    const promiseDb = new PromiseDbView(db);
+    const staleCommand = await weatherCommands.applyWeatherStationZonesCommand(
+      promiseDb,
+      {
+        commandId: 9001,
+        commandType: 'REPLACE_WEATHER_STATION_ZONES',
+        payload: {
+          command_id: '55555555-5555-4555-8555-555555555555',
+          command_type: 'REPLACE_WEATHER_STATION_ZONES',
+          effect_key: `weather_station_zones:${DEVICE}:0`,
+          device_eui: DEVICE,
+          gateway_device_eui: GATEWAY,
+          base_sync_version: 0,
+          target_sync_version: 1,
+          weather_station_zones: {
+            contract_version: 1,
+            device_eui: DEVICE,
+            gateway_device_eui: GATEWAY,
+            zone_uuids: [ZONE_B],
+            sync_version: 1,
+            last_applied_at: null,
+          },
+        },
+      },
+      { command_type_recognized: true, gateway_device_eui: GATEWAY }
+    );
+
+    assert.equal(staleCommand.handled, true);
+    assert.equal(staleCommand.ack.result, 'CONFLICT');
+
+    const afterConflictRows = db.prepare(
+      'SELECT iz.zone_uuid AS zone_uuid FROM weather_station_zones wsz ' +
+      'JOIN irrigation_zones iz ON iz.id=wsz.zone_id WHERE wsz.deveui=?'
+    ).all(DEVICE);
+    assert.deepEqual(
+      afterConflictRows.map((row) => row.zone_uuid),
+      [ZONE_A],
+      'the local GUI edit must survive: the stale cloud replace must not have silently overwritten it'
+    );
+    const finalState = db.prepare(
+      'SELECT sync_version FROM weather_station_zone_state WHERE deveui=?'
+    ).get(DEVICE);
+    assert.equal(
+      finalState.sync_version,
+      1,
+      'version must still reflect the local edit, not the rejected cloud attempt'
     );
   } finally {
     db.close();

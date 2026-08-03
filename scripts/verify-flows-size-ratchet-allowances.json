@@ -1042,8 +1042,8 @@
       "reason": "AgroLink Phase C fresh-checks device scope before unlinking a device."
     },
     "scoped-weather-zone-assign-router": {
-      "max_chars": 4377,
-      "reason": "AgroLink Phase C atomically replaces shared-weather zone assignments after fresh device and target-zone checks."
+      "max_chars": 5972,
+      "reason": "AgroLink Phase C atomically replaces shared-weather zone assignments after fresh device and target-zone checks. AgroLink review E1: the router's own transaction now also upserts weather_station_zone_state (insert at sync_version=0 on first assignment so the AI trigger bumps it to 1, else increment) so a scoped GUI edit actually publishes WEATHER_STATION_ZONES_REPLACED instead of leaving the cloud mirror stale and vulnerable to a later stale-base-version cloud replace silently discarding the edit (+1595)."
     },
     "scoped-device-config-guard": {
       "max_chars": 4244,
@@ -1083,7 +1083,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1260605,
-    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798)."
+    "max_total": 1262200,
+    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595)."
   }
 }
