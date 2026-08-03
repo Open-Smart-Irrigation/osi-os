@@ -18,20 +18,27 @@ const {
 
 const ROOT = path.resolve(__dirname, '..');
 const SERVER_RELATIVE_SOURCE = path.join('backend', 'src', 'main', 'java', 'org', 'osi', 'server', 'sync', 'EdgeSyncService.java');
-const SERVER_SOURCE_CANDIDATES = [
-  process.env.OSI_SERVER_EDGE_SYNC_SERVICE
-    ? (path.isAbsolute(process.env.OSI_SERVER_EDGE_SYNC_SERVICE)
-      ? process.env.OSI_SERVER_EDGE_SYNC_SERVICE
-      : path.resolve(ROOT, process.env.OSI_SERVER_EDGE_SYNC_SERVICE))
-    : null,
-  path.resolve(ROOT, '..', '..', '..', '..', 'osi-server', '.worktrees', path.basename(ROOT), SERVER_RELATIVE_SOURCE),
-  path.resolve(ROOT, '..', '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
-  path.resolve(ROOT, '..', '..', '..', 'osi-server', '.worktrees', path.basename(ROOT), SERVER_RELATIVE_SOURCE),
-  path.resolve(ROOT, '..', 'osi-server', SERVER_RELATIVE_SOURCE),
-  path.resolve(ROOT, '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
-].filter(Boolean);
-const SERVER_SOURCE = SERVER_SOURCE_CANDIDATES.find((candidate) => fs.existsSync(candidate)) ||
-  SERVER_SOURCE_CANDIDATES[0];
+
+// AgroLink review R5 (post-E9-review): this module-level constant duplicated the exact
+// pre-E9 silent-fallback logic (env var, then worktree-name match, then a generic sibling
+// checkout on whatever branch it currently happens to be on) independently of the CLI's own
+// resolveDefaultServerSource/main() -- E9 fixed the CLI's loud-failure behavior but this file
+// kept its own copy of the unsafe fallback, so the whole suite could still silently compare
+// against the wrong server branch (this reproduced a real false red: "parity check accepts
+// seed SQL trigger ops as a canonical subset" failed against a stale sibling checkout missing
+// WEATHER_STATION_ZONES_REPLACED). Reuse the same provenance-aware resolver E9 introduced
+// instead of a second copy of the candidate list, and fail loudly at module load -- before
+// any test runs -- exactly like the CLI does, when no explicit source is pinned and no
+// worktree name matches.
+const serverSourceResolution = resolveServerSourceWithProvenance(ROOT);
+if (serverSourceResolution.matchedWorktree === false) {
+  throw new Error(
+    `verify-sync-op-parity.test.js: no osi-server worktree named "${path.basename(ROOT)}" was found; ` +
+    `refusing to silently compare against the sibling checkout's CURRENT branch at ${serverSourceResolution.source}. ` +
+    'Set OSI_SERVER_EDGE_SYNC_SERVICE to an explicit EdgeSyncService.java path to pin the comparison branch explicitly.'
+  );
+}
+const SERVER_SOURCE = serverSourceResolution.source;
 
 function copyFixtureTree() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-parity-'));
