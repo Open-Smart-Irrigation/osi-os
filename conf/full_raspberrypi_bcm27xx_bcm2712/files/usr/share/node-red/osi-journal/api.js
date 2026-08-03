@@ -500,12 +500,21 @@ async function buildEntryWhere(db, rawFilters, principal, includeCursor) {
     ? [principal.gateway_device_eui]
     : [principal.owner_user_uuid, principal.user_id, principal.gateway_device_eui];
   if (readScope) {
+    // Entries created via the zone-only (no-plot) path (lifecycle.js resolvePlotContext,
+    // plotUuid == null) persist with a NULL plot_uuid. A `plot_uuid IN (...)` filter alone
+    // never matches NULL, so even the entry's own author/owner could not see it once
+    // scoped access was on -- mirror the cloud's JournalQueryService semantics
+    // (owner_user_uuid = ? OR plot_uuid IN (...)) with an explicit owner OR-branch.
     const plotUuids = [...readScope.plotUuids];
     if (!plotUuids.length) {
-      clauses.push('1=0');
+      clauses.push('e.owner_user_uuid=?');
+      params.push(principal.owner_user_uuid);
     } else {
-      clauses.push('e.plot_uuid IN (' + plotUuids.map(function() { return '?'; }).join(',') + ')');
-      params.push(...plotUuids);
+      clauses.push(
+        '(e.owner_user_uuid=? OR e.plot_uuid IN (' +
+          plotUuids.map(function() { return '?'; }).join(',') + '))'
+      );
+      params.push(principal.owner_user_uuid, ...plotUuids);
     }
   }
   if (filters.status !== 'all') {

@@ -644,6 +644,49 @@ test('scoped journal reads use owned-plus-granted plots while flag-off stays own
   );
 });
 
+test('E5: scoped journal entry list surfaces the owner\'s plot-less entries, not just plot_uuid IN (...)', async () => {
+  const db = new TestDb('scoped-plotless-entry');
+  seedIdentity(db);
+  const plotlessEntryUuid = '22120000-0000-4000-8000-000000000001';
+  const owner = principal();
+  // Zone-only (no-plot) entry creation persists plot_uuid=NULL (lifecycle.js
+  // resolvePlotContext, plotUuid==null, no zone_uuid override -- see the "zone-only
+  // entry provisioning" tests below for the auto-provisioning path this is NOT).
+  await journal.saveEntry(
+    db,
+    entryInput(plotlessEntryUuid, null, '2026-07-13T08:00:00', { season_crop: 'barley' }),
+    owner,
+    { mode: 'create' }
+  );
+  assert.equal(
+    db.prepare('SELECT plot_uuid FROM journal_entries WHERE entry_uuid=?').get(plotlessEntryUuid)
+      .plot_uuid,
+    null,
+    'test setup: the entry must genuinely persist with a NULL plot_uuid'
+  );
+
+  const scoped = Object.assign({}, owner, { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OWNER_UUID);
+  // The owner has no plot grants at all here -- before the fix, a bare
+  // `plot_uuid IN (...)` filter (or its `1=0` empty-set fallback) never matches NULL,
+  // so even the entry's own author/owner could not see it once scoped access was on.
+  const entries = (await journal.listEntries(db, { status: 'final' }, scoped)).entries;
+  assert.deepEqual(entries.map((entry) => entry.entry_uuid), [plotlessEntryUuid]);
+
+  // A foreign user, even with a real plot grant elsewhere, must not see it.
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+    scope: scopeHelper,
+    scoped: true,
+  });
+  scopeHelper.invalidateScope(OTHER_OWNER_UUID);
+  const foreignEntries = (await journal.listEntries(db, { status: 'final' }, other)).entries;
+  assert.deepEqual(foreignEntries.map((entry) => entry.entry_uuid), []);
+});
+
 test('scoped journal writes allow plot grantees, preserve ownership, and revoke immediately', async () => {
   const db = new TestDb('scoped-resource-writes');
   seedIdentity(db);
