@@ -1120,3 +1120,152 @@ test('W10: local irrigation config writes version only their own aggregate', () 
     'local calibration upsert preserves the existing valve binding'
   );
 });
+
+// E6: every mutation gate used a `role === 'viewer'` DENYLIST. A role value that is
+// neither 'viewer' nor a recognized writer (a corrupted column, a hand-edited row, a
+// future role SQLite's own CHECK should have rejected but a caller must not assume)
+// fell through as write-capable. The fix is an ALLOWLIST (scope.canMutate). Simulate a
+// corrupted role by bypassing the users.role CHECK the same way a direct SQLite edit on
+// a live Pi could, and prove every gate now fails closed while reads remain unaffected.
+function corruptRole(db, userUuid, role) {
+  db.exec('PRAGMA ignore_check_constraints = ON;');
+  db.prepare('UPDATE users SET role = ? WHERE user_uuid = ?').run(role, userUuid);
+  db.exec('PRAGMA ignore_check_constraints = OFF;');
+  assert.equal(
+    db.prepare('SELECT role FROM users WHERE user_uuid = ?').get(userUuid).role,
+    role,
+    'test setup: the corrupted role must actually be persisted'
+  );
+}
+
+test('E6: an unrecognized role fails closed on every mutation gate while reads stay scope-governed', async () => {
+  const db = seedScopedDb();
+  corruptRole(db, 'u-res1', 'gibberish');
+  try {
+    // Reads are ungated by role entirely -- they must behave exactly per zone/plot scope,
+    // not be denied just because the role column is corrupted.
+    scopeHelper._resetForTests();
+    const devicesResponse = await executeFunction(loadNode('get-devices-query'), {
+      msg: { payload: [{ id: 2 }], authUserId: 2 },
+      env: ENV,
+      db,
+    });
+    const devices = db.prepare(devicesResponse.result[0].topic).all();
+    assert.deepEqual(devices.map((row) => row.deveui).sort(), ['DENDRO1', 'DENDRO2', 'VALVE1', 'WX1']);
+
+    scopeHelper._resetForTests();
+    const schedule = await executeFunction(loadNode('70fcbea336401bd1'), {
+      msg: scopedRequest(
+        2, 'res1', 'PUT', '/api/irrigation-zones/2/schedule', { id: '2' },
+        { trigger_metric: 'SWT_1', threshold_kpa: 20 }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(schedule.result[1].statusCode, 403, 'schedule mutation');
+
+    scopeHelper._resetForTests();
+    const disableAll = await executeFunction(loadNode('settings-disable-schedules-fn'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/irrigation-zones/schedules/disable-all'),
+      env: ENV,
+      db,
+    });
+    assert.equal(disableAll.result.statusCode, 403, 'disable-all schedules');
+
+    scopeHelper._resetForTests();
+    const zoneCreate = await executeFunction(loadNode('scoped-zone-create-router'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/irrigation-zones', {}, { name: 'Blocked zone' }),
+      env: Object.assign({}, ENV, { DEVICE_EUI: 'A84041ABCDEF0002' }),
+      db,
+    });
+    assert.equal(zoneCreate.result[1].statusCode, 403, 'zone create');
+
+    scopeHelper._resetForTests();
+    const zoneDelete = await executeFunction(loadNode('scoped-zone-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/irrigation-zones/1', { id: '1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(zoneDelete.result[1].statusCode, 403, 'zone delete');
+
+    scopeHelper._resetForTests();
+    const deviceClaim = await executeFunction(loadNode('scoped-device-claim-router'), {
+      msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
+        deveui: 'NEWROLE1', name: 'Blocked sensor', type_id: 'DRAGINO_LSN50',
+      }),
+      env: ENV,
+      db,
+    });
+    assert.equal(deviceClaim.result[1].statusCode, 403, 'device claim');
+
+    scopeHelper._resetForTests();
+    const deviceAssign = await executeFunction(loadNode('scoped-device-assign-router'), {
+      msg: scopedRequest(2, 'res1', 'PUT', '/api/irrigation-zones/2/devices/DENDRO1', { id: '2', deveui: 'DENDRO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(deviceAssign.result[1].statusCode, 403, 'device assign');
+
+    scopeHelper._resetForTests();
+    const deviceUnassign = await executeFunction(loadNode('scoped-device-unassign-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/irrigation-zones/1/devices/DENDRO1', { id: '1', deveui: 'DENDRO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(deviceUnassign.result[1].statusCode, 403, 'device unassign');
+
+    scopeHelper._resetForTests();
+    const deviceDelete = await executeFunction(loadNode('scoped-device-delete-router'), {
+      msg: scopedRequest(2, 'res1', 'DELETE', '/api/devices/DENDRO1', { deveui: 'DENDRO1' }),
+      env: ENV,
+      db,
+    });
+    assert.equal(deviceDelete.result[1].statusCode, 403, 'device delete');
+
+    scopeHelper._resetForTests();
+    const weatherZones = await executeFunction(loadNode('scoped-weather-zone-assign-router'), {
+      msg: scopedRequest(2, 'res1', 'PUT', '/api/devices/WX1/zone-assignments', { deveui: 'WX1' }, { zone_ids: [1] }),
+      env: ENV,
+      db,
+    });
+    assert.equal(weatherZones.result[1].statusCode, 403, 'weather zone assignment');
+
+    for (const [method, suffix] of DEVICE_CONFIG_ROUTES) {
+      scopeHelper._resetForTests();
+      const response = await executeFunction(loadNode('scoped-device-config-guard'), {
+        msg: scopedRequest(2, 'res1', method, `/api/devices/DENDRO1${suffix}`, { deveui: 'DENDRO1' }),
+        env: ENV,
+        db,
+      });
+      assert.equal(response.result.at(-1).statusCode, 403, `device-config ${method} ${suffix}`);
+    }
+
+    for (const [method, path, params] of ZONE_CONFIG_ROUTES) {
+      scopeHelper._resetForTests();
+      const response = await executeFunction(loadNode('scoped-zone-config-guard'), {
+        msg: scopedRequest(2, 'res1', method, path, params),
+        env: ENV,
+        db,
+      });
+      assert.equal(response.result.at(-1).statusCode, 403, `zone-config ${method} ${path}`);
+    }
+
+    scopeHelper._resetForTests();
+    const cancelValve = await executeFunction(loadNode('cancel-strega-actuation-fn'), {
+      msg: {
+        req: {
+          headers: {
+            authorization: makeAuthHeader({ userId: 2, username: 'res1', secret: AUTH_SECRET }),
+          },
+          params: { deveui: 'VALVE1' },
+        },
+        payload: {},
+      },
+      env: ENV,
+      db,
+    });
+    assert.equal(cancelValve.result.statusCode, 403, 'cancel STREGA actuation');
+  } finally {
+    db.close();
+  }
+});
