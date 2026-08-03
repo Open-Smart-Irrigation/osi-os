@@ -244,6 +244,155 @@ test('X1: a transient scope-helper infra error is not treated as a scope decisio
   }
 });
 
+// X2: the GUI STREGA advanced chain (put-strega-timed-auth-fn -> put-strega-advanced-lookup
+// -> put-strega-advanced-authorize-fn -> "To Actuator") did bearer auth only for TIMED_ACTION
+// OPEN, a real PHYSICAL command per write-strega-expectation's isTimedOpen gate. Under scope
+// it reached write-strega-expectation with no actor and was rejected there while this
+// chain's own HTTP response (a separate wire) already reported success.
+function stregaTimedRequest(userId, username, deveui, body) {
+  return {
+    req: {
+      headers: {
+        authorization: makeAuthHeader({ userId, username, secret: AUTH_SECRET }),
+      },
+      params: { deveui },
+    },
+    payload: body,
+  };
+}
+
+const STREGA_TIMED_OPEN_BODY = { action: 'open', unit: 'minutes', amount: 5 };
+
+// Runs the real three-node chain: auth+parse -> the sqlite lookup (executed directly against
+// the fixture db, mirroring what the `sqlite` node type would do with msg.topic) ->
+// authorize+fanout. Returns either an HTTP-denial msg or the constructed actuatorMsg.
+async function runStregaTimedChain(db, userId, username, body, env = ENV) {
+  const authResult = await executeFunction(loadNode('put-strega-timed-auth-fn'), {
+    msg: stregaTimedRequest(userId, username, 'VALVE1', body),
+    env,
+    db,
+  });
+  if (authResult.result[1]) {
+    return { denied: authResult.result[1], actuatorMsg: null };
+  }
+  const routedMsg = authResult.result[0];
+  assert.ok(routedMsg, 'put-strega-timed-auth-fn must route to the lookup on success');
+  routedMsg.payload = db.prepare(routedMsg.topic).all();
+  const authorizeResult = await executeFunction(loadNode('put-strega-advanced-authorize-fn'), {
+    msg: routedMsg,
+    env,
+    db,
+  });
+  if (authorizeResult.result[3]) {
+    return { denied: authorizeResult.result[3], actuatorMsg: null };
+  }
+  return { denied: null, actuatorMsg: authorizeResult.result[1] };
+}
+
+test('X2: a granted researcher actuates a timed STREGA action with the actor propagated', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const { denied, actuatorMsg } = await runStregaTimedChain(db, 2, 'res1', STREGA_TIMED_OPEN_BODY);
+    assert.equal(denied, null, 'a granted researcher must not be denied');
+    assert.ok(actuatorMsg, 'a granted researcher must receive a constructed actuator command');
+    assert.equal(actuatorMsg.actor_user_uuid, 'u-res1');
+    assert.equal(actuatorMsg._actorUserUuid, 'u-res1');
+
+    const written = await executeFunction(loadNode('write-strega-expectation'), {
+      msg: actuatorMsg,
+      env: ENV,
+      db,
+    });
+    assert.ok(written.result, 'the actor must actually cross into write-strega-expectation and actuate');
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE device_eui='VALVE1'").get().n,
+      1
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('X2: a revoked claimer is HTTP-denied with no actuator message', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  // Reassign z-1 away from res1 (VALVE1's own devices.user_id stays 2=res1, so the legacy
+  // ownership SQL in put-strega-timed-auth-fn still finds the row) and revoke res1's grant
+  // to it too (seedScopedDb grants res1 both ownership and an explicit g-1 grant) -- a fresh
+  // scope check must still deny it, mirroring the "W1: revocation immediately stops enqueue"
+  // pattern used for the primary path.
+  db.exec(`
+    UPDATE irrigation_zones SET user_id = 1 WHERE id = 1;
+    UPDATE user_zone_assignments SET deleted_at = '2026-07-01' WHERE assignment_uuid = 'g-1';
+  `);
+  try {
+    const { denied, actuatorMsg } = await runStregaTimedChain(db, 2, 'res1', STREGA_TIMED_OPEN_BODY);
+    assert.equal(actuatorMsg, null, 'a revoked claimer must never receive a constructed actuator command');
+    assert.ok(denied, 'a revoked claimer must be denied on the HTTP response');
+    assert.equal(denied.statusCode, 404);
+  } finally {
+    db.close();
+  }
+});
+
+test('X2: a viewer-role owner is HTTP-denied with no actuator message', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  // res1 still owns VALVE1's zone directly (assertFreshDeviceAccess passes); canMutate is
+  // what denies this -- a different throw site than the revoked-grant case above.
+  db.exec("UPDATE users SET role = 'viewer' WHERE user_uuid = 'u-res1';");
+  try {
+    const { denied, actuatorMsg } = await runStregaTimedChain(db, 2, 'res1', STREGA_TIMED_OPEN_BODY);
+    assert.equal(actuatorMsg, null, 'a viewer must never receive a constructed actuator command');
+    assert.ok(denied, 'a viewer must be denied on the HTTP response');
+    assert.equal(denied.statusCode, 403);
+  } finally {
+    db.close();
+  }
+});
+
+test('X2: flag-off preserves the legacy bearer-only behavior', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const { denied, actuatorMsg } = await runStregaTimedChain(
+      db, 2, 'res1', STREGA_TIMED_OPEN_BODY, { ...ENV, OSI_SCOPED_ACCESS: '0' }
+    );
+    assert.equal(denied, null, 'flag-off must not deny the device owner');
+    assert.ok(actuatorMsg, 'flag-off must still build the actuator command');
+    assert.equal(actuatorMsg.actor_user_uuid, null, 'flag-off never runs the scope block at all, so no actor is set');
+  } finally {
+    db.close();
+  }
+});
+
+test('X2: the actor comes only from the verified bearer identity, never from the request body', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    // A spoofed body cannot claim to be a different, more-privileged actor, and cannot
+    // smuggle in the R2 system-actuation marker either -- the same invariant proven for the
+    // primary path (E3/R2) must hold here too.
+    const spoofedBody = Object.assign({}, STREGA_TIMED_OPEN_BODY, {
+      actor_user_uuid: 'u-admin',
+      _actorUserUuid: 'u-admin',
+      _systemActuation: true,
+    });
+    const { denied, actuatorMsg } = await runStregaTimedChain(db, 2, 'res1', spoofedBody);
+    assert.equal(denied, null);
+    assert.ok(actuatorMsg);
+    assert.equal(
+      actuatorMsg.actor_user_uuid,
+      'u-res1',
+      'the actor must be the bearer-verified identity (res1), never the body-claimed one (admin)'
+    );
+    assert.equal(actuatorMsg._systemActuation, undefined, 'a body-embedded marker must never survive onto the actuator message');
+  } finally {
+    db.close();
+  }
+});
+
 // E3 (Critical): PHYSICAL device commands must require an actor once scoped access is on.
 // Before this fix, `if (scopedOn && actorUuid)` skipped the scope check entirely when
 // actorUuid was absent -- exactly the shape of a cloud-dispatched command that never

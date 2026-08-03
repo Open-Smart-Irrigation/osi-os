@@ -722,8 +722,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-strega-timed-auth-fn": {
-      "max_chars": 5505,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
+      "max_chars": 8195,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2). AgroLink review X2 (post-R-wave-review): TIMED_ACTION OPEN is a PHYSICAL command reachable through this chain; gives it the same fresh device scope + canMutate + actor-propagation treatment the primary manual valve path (83bb4a452dd9ae37) already has, fail-closed 403/404 on the HTTP response (+2690)."
     },
     "put-strega-magnet-auth-fn": {
       "max_chars": 4544,
@@ -738,8 +738,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-strega-advanced-authorize-fn": {
-      "max_chars": 4071,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4701,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason. AgroLink review X2 (post-R-wave-review): copies msg.actor_user_uuid onto every constructed actuatorMsg (actor_user_uuid + _actorUserUuid) so the fanout carries the bearer-verified actor forward; inert for the non-actuator config branches (MAGNET_MODE/PARTIAL_OPENING/FLUSHING), load-bearing for TIMED_ACTION (+630)."
     },
     "put-strega-advanced-format": {
       "max_chars": 1788,
@@ -1083,7 +1083,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1272097,
-    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105); AgroLink review E7 fixes the grant-POST operator-precedence/400-vs-404 bug in scoped-admin-account-router (+600); AgroLink review E8 removes the admin zone-filter exemption in settings-disable-schedules-fn (+502); AgroLink review E3 (Critical) requires an actor on scoped PHYSICAL commands in write-strega-expectation (+1859); AgroLink review R3 (post-E3-review) moves the scope gate ahead of duration parsing and fails closed on invalid duration under scope (+1602); AgroLink review R1 (Critical, post-E3-review) propagates cmd.actor_user_uuid through Route Command (+706) plus write-strega-expectation's payload-field fallback (+411); AgroLink review R2 (post-E3-review) adds the scheduler's message-level system-actuation marker and its edge-side exemption (+1041 write-strega-expectation, +48 scheduler); AgroLink review R4 (post-E3-review) queues a terminal scope_denied ack when an actor is present but denied (+1682); AgroLink review X1 (post-R4-review) rethrows non-statusCode scope-helper errors instead of acking them as denials (+692)."
+    "max_total": 1275417,
+    "reason": "Exact reviewed total after versioned zone (+2453), zone capability (+75), irrigation-config (+4367), protected-device (+6083), weather-zone (+539), portable history (+2701), durable history (+10460), installation identity (+8093), and protected outbox aggregate (+102) commits; current remediation adds immutable-subject checks (+1509), dirty-key ACK correlation (+864), and force-sync installation parity (+2484), offset by command-dedupe simplification (-211); AgroLink review E2 adds the first-insert trigger-chain fix in zone-calibration-fn (+798); AgroLink review E1 adds the weather_station_zone_state mirror upsert in scoped-weather-zone-assign-router (+1595); AgroLink review E4 adds the disabled-account deny-before-query guard in get-devices-query (+649); AgroLink review E6 replaces the actorScope.role==='viewer' denylist with scope.canMutate() across 13 mutation gates (+105); AgroLink review E7 fixes the grant-POST operator-precedence/400-vs-404 bug in scoped-admin-account-router (+600); AgroLink review E8 removes the admin zone-filter exemption in settings-disable-schedules-fn (+502); AgroLink review E3 (Critical) requires an actor on scoped PHYSICAL commands in write-strega-expectation (+1859); AgroLink review R3 (post-E3-review) moves the scope gate ahead of duration parsing and fails closed on invalid duration under scope (+1602); AgroLink review R1 (Critical, post-E3-review) propagates cmd.actor_user_uuid through Route Command (+706) plus write-strega-expectation's payload-field fallback (+411); AgroLink review R2 (post-E3-review) adds the scheduler's message-level system-actuation marker and its edge-side exemption (+1041 write-strega-expectation, +48 scheduler); AgroLink review R4 (post-E3-review) queues a terminal scope_denied ack when an actor is present but denied (+1682); AgroLink review X1 (post-R4-review) rethrows non-statusCode scope-helper errors instead of acking them as denials (+692); AgroLink review X2 (post-R-wave-review) closes the GUI STREGA advanced chain's actuation gap: scope+actor gate in put-strega-timed-auth-fn (+2690) and actor propagation onto every actuatorMsg in put-strega-advanced-authorize-fn (+630)."
   }
 }
