@@ -246,6 +246,36 @@ test('F1: admin has no scope bypass and flag-off behavior remains owner-only', a
   }
 });
 
+test('E4: a disabled account is denied before the weather-device OR-branch can be reached', async () => {
+  const db = seedScopedDb();
+  try {
+    // Before the fix, the weather-device OR-branch
+    // ("d.type_id IN ('SENSECAP_S2120','AQUASCOPE_LORAIN')") was unconditional: only the
+    // zone-membership half of the predicate collapsed to '0' for a disabled account, so a
+    // disabled account with an unexpired token could still list every weather station.
+    db.prepare(
+      "UPDATE users SET disabled_at = '2026-01-01T00:00:00.000Z' WHERE user_uuid = 'u-res1'"
+    ).run();
+    scopeHelper._resetForTests();
+
+    const response = await executeFunction(loadNode('get-devices-query'), {
+      msg: { payload: [{ id: 2 }], authUserId: 2 },
+      env: ENV,
+      db,
+    });
+
+    assert.equal(response.result[0], null, 'a disabled account must not reach the success output');
+    const errorOutput = response.result[1];
+    assert.ok(errorOutput, 'a disabled account must be rejected, not silently served an empty-looking list');
+    assert.equal(errorOutput.statusCode, 403);
+  } finally {
+    db.close();
+    // u-res1 is reused by other tests in this file against fresh databases; leaving its
+    // disabled state cached here would leak into them.
+    scopeHelper._resetForTests();
+  }
+});
+
 test('F3: device reads allow grants and shared weather, and hide foreign devices', async () => {
   const grantedDb = seedScopedDb();
   try {
