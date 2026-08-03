@@ -256,6 +256,104 @@ test('E3: flag-off preserves the legacy no-actor-required behavior', async () =>
   }
 });
 
+// R3: the pre-existing missing_or_invalid_expectation_duration branch used to `return msg`
+// (pass through to the downlink builder) *before* the scope/actor gate ever ran, so an
+// actor-less, duration-less command -- exactly the shape of a real cloud VALVE_COMMAND,
+// which carries no duration at all -- skipped E3 entirely instead of being caught by it.
+function noDurationExpectationMessage(actorUuid) {
+  return {
+    actor_user_uuid: actorUuid,
+    _actorUserUuid: actorUuid,
+    _stregaExpectationCommand: {
+      command_type: 'VALVE_COMMAND',
+      action: 'OPEN_FOR_DURATION',
+      device_eui: 'VALVE1',
+      zone_id: 1,
+      command_id: actorUuid ? 'r3-no-duration-with-actor' : 'r3-no-duration-no-actor',
+      // deliberately no duration_seconds / duration_minutes anywhere in this object.
+    },
+    payload: {
+      type: 'actuator_command',
+      device: { devEui: 'VALVE1', zone_id: 1 },
+      data: { action: 'OPEN_FOR_DURATION' },
+    },
+  };
+}
+
+test('R3: an actor-less, duration-less command is rejected by the actor gate, not passed through', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('write-strega-expectation'), {
+      msg: noDurationExpectationMessage(null),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result, null, 'must never reach the downlink builder');
+    const applied = db.prepare(
+      "SELECT result, result_detail FROM applied_commands WHERE command_id='r3-no-duration-no-actor'"
+    ).get();
+    assert.ok(applied, 'a terminal rejection must be recorded');
+    assert.equal(applied.result, 'REJECTED_PERMANENT');
+    assert.equal(
+      JSON.parse(applied.result_detail).reason,
+      'scope_actor_required',
+      'the actor gate must be the one that catches this, proving it now runs before duration parsing'
+    );
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='r3-no-duration-no-actor'"
+      ).get().n,
+      0
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('R3: an authorized actor with an invalid/missing duration is rejected under scope, not passed through', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('write-strega-expectation'), {
+      msg: noDurationExpectationMessage('u-res1'),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result, null, 'must never reach the downlink builder');
+    const applied = db.prepare(
+      "SELECT result, result_detail FROM applied_commands WHERE command_id='r3-no-duration-with-actor'"
+    ).get();
+    assert.ok(applied, 'a terminal rejection must be recorded even though the actor was authorized');
+    assert.equal(applied.result, 'REJECTED_PERMANENT');
+    assert.equal(JSON.parse(applied.result_detail).reason, 'missing_or_invalid_expectation_duration');
+  } finally {
+    db.close();
+  }
+});
+
+test('R3: flag-off keeps the legacy invalid-duration pass-through behavior', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    const response = await executeFunction(loadNode('write-strega-expectation'), {
+      msg: noDurationExpectationMessage(null),
+      env: { ...ENV, OSI_SCOPED_ACCESS: '0' },
+      db,
+    });
+    assert.ok(response.result, 'flag-off must preserve the legacy pass-through for a malformed duration');
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS n FROM applied_commands WHERE command_id='r3-no-duration-no-actor'"
+      ).get().n,
+      0,
+      'flag-off never wrote an ack for this branch before and still must not'
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test('W2: schedule mutation allows grants, hides foreign zones, and rejects viewers', async () => {
   const db = seedScopedDb();
   try {
