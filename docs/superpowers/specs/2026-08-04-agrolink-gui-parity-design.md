@@ -40,6 +40,7 @@ versioned-command and sync layer; this program adds no new sync surface.
 | D3 | Gateway context, not gateway chrome: one linked gateway means no selector anywhere; multiple linked gateways are switched on the Settings page | Maintainer decision 2026-08-04. Scoped accounts overwhelmingly see one farm; a header switcher would be dead weight |
 | D4 | Capability-gated rendering | A page renders only what the selected gateway's capability handshake advertises; older gateways get an explicit "not available on this gateway" state, never a broken page |
 | D5 | Fail-closed scope UX ported from edge | The cloud pages adopt the edge `ScopeContext` pattern (deny-while-loading, closed scope on profile-fetch failure) mapped to the cloud's 403-on-dormant convention |
+| D6 | The cloud login screen keeps its current design (Swiss-cross badge, commit `5280da76`) and is excluded from visual parity | Maintainer decision 2026-08-04: the compact badge reads better than the edge login's letterhead treatment. The edge login stays as it is |
 
 ## The design core: `ui-core`
 
