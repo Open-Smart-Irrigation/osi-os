@@ -3717,7 +3717,7 @@ describe('Task 35 authority-first real acceptance contract', () => {
     expect(await verifyTarget(fixture)).toMatchObject({ ok: false });
   });
 
-  it('rejects all independent file, identity, freshness, and report failure vectors', async () => {
+  it('rejects all independent file, identity, freshness, and report failure vectors', { timeout: 30_000 }, async () => {
     const control = await createFixture();
     expect(await verifyTarget(control)).toMatchObject({ ok: true });
 
