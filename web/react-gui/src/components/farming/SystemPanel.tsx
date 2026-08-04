@@ -218,7 +218,7 @@ export const SystemPanel: React.FC = () => {
             <button
               onClick={handleReboot}
               disabled={rebooting}
-              className="bg-[var(--error-bg)] hover:bg-red-700 text-[var(--error-text)] font-bold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 flex items-center gap-2"
+              className="bg-[var(--error-bg)] hover:opacity-90 text-[var(--error-text)] font-bold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 flex items-center gap-2"
             >
               {rebooting && <span className="animate-spin h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full" />}
               Yes, Reboot
