@@ -1,0 +1,100 @@
+/* ui-core design tokens — canonical in osi-os (web/react-gui/src/ui-core),
+   byte-mirrored to osi-server (frontend/src/ui-core). Edit ONLY on the
+   osi-os AgroLink branch, then re-vendor; verify-ui-core-vendor gates CI. */
+
+/* Light, high-contrast theme for field readability */
+:root {
+  --bg: #F4F6F8;
+  --surface: #E8EDF2;
+  --card: #FFFFFF;
+  --text: #0F172A;
+  --text-secondary: #334155;
+  --text-tertiary: #64748B;
+  --text-disabled: #94A3B8;
+  --border: #CBD5E1;
+  --focus: #2563EB;
+  --primary: #2563EB;
+  --primary-hover: #1D4ED8;
+  --secondary-bg: #E2E8F0;
+  --header-bg: #FFFFFF;
+  --header-text: #040404;
+  --header-subtext: #475569;
+  --brand-red: #E30613;
+  /* liquid-glass material (AgroLink iOS-26-style chrome) */
+  --glass-hi: rgba(255, 255, 255, 0.60);
+  --glass-lo: rgba(255, 255, 255, 0.20);
+  --glass-mid: rgba(255, 255, 255, 0.40);
+  --glass-edge: rgba(255, 255, 255, 0.80);
+  --glass-edge-dim: rgba(4, 4, 4, 0.10);
+  --glass-spec: rgba(255, 255, 255, 0.90);
+  --glass-sweep: rgba(255, 255, 255, 0.75);
+  --chrome-hi: rgba(255, 255, 255, 0.66);
+  --chrome-lo: rgba(255, 255, 255, 0.46);
+  --success-bg: #DCFCE7;
+  --success-text: #14532D;
+  --success-border: #16A34A;
+  --warn-bg: #FEF3C7;
+  --warn-text: #92400E;
+  --warn-border: #F59E0B;
+  /* error pair follows the success/warn convention (wash bg + dark text) so
+     bare text-[var(--error-text)] reads on light surfaces; the old
+     #DC2626/#FFFFFF pair rendered white-on-white in ~30 files. */
+  --error-bg: #FEE2E2;
+  --error-text: #7F1D1D;
+  --danger-fg: #DC2626;
+  --soil-wet: #3B82F6;
+  --soil-wet-bg: #DBEAFE;
+  --soil-moist: #22C55E;
+  --soil-moist-bg: #DCFCE7;
+  --soil-dry: #EF4444;
+  --soil-dry-bg: #FEE2E2;
+  --toggle-on: #16A34A;
+  --toggle-off: #CBD5E1;
+  --overlay: #334155;
+}
+
+html[data-theme='dark'] {
+  --bg: #101413;
+  --surface: #171D1B;
+  --card: #202623;
+  --text: #F4F7F5;
+  --text-secondary: #C3CCC7;
+  --text-tertiary: #91A09A;
+  --text-disabled: #65736D;
+  --border: #3A4540;
+  --focus: #2DD4BF;
+  --primary: #2DD4BF;
+  --primary-hover: #14B8A6;
+  --secondary-bg: #26322E;
+  --header-bg: #171D1B;
+  --header-text: #F4F7F5;
+  --header-subtext: #C3CCC7;
+  --brand-red: #E30613;
+  --glass-hi: rgba(70, 82, 77, 0.55);
+  --glass-lo: rgba(38, 46, 43, 0.25);
+  --glass-mid: rgba(52, 62, 58, 0.40);
+  --glass-edge: rgba(255, 255, 255, 0.16);
+  --glass-edge-dim: rgba(0, 0, 0, 0.35);
+  --glass-spec: rgba(255, 255, 255, 0.22);
+  --glass-sweep: rgba(255, 255, 255, 0.20);
+  --chrome-hi: rgba(23, 29, 27, 0.72);
+  --chrome-lo: rgba(23, 29, 27, 0.52);
+  --success-bg: #123326;
+  --success-text: #BBF7D0;
+  --success-border: #22C55E;
+  --warn-bg: #3A2B0B;
+  --warn-text: #FDE68A;
+  --warn-border: #F59E0B;
+  --error-bg: #7F1D1D;
+  --error-text: #FEE2E2;
+  --danger-fg: #F87171;
+  --soil-wet: #60A5FA;
+  --soil-wet-bg: #172B48;
+  --soil-moist: #4ADE80;
+  --soil-moist-bg: #173827;
+  --soil-dry: #F87171;
+  --soil-dry-bg: #3B1717;
+  --toggle-on: #22C55E;
+  --toggle-off: #4B5A54;
+  --overlay: #050807;
+}
