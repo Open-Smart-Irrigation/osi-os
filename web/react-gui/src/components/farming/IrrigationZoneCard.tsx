@@ -240,7 +240,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           {canWrite && <button
             onClick={() => setShowDeleteConfirm(true)}
             disabled={isDeleting}
-            className="touch-target bg-[var(--error-bg)] hover:bg-red-700 disabled:bg-[var(--border)] text-[var(--error-text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
+            className="touch-target bg-[var(--error-bg)] hover:opacity-90 disabled:bg-[var(--border)] text-[var(--error-text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
           >
             {t('zone.deleteZone')}
           </button>}
