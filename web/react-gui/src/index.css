@@ -1,89 +1,35 @@
 @import "tailwindcss";
+@import "./ui-core/tokens.css";
+@import "./ui-core/primitives.css";
 @config "../tailwind.config.js";
 
-/* Light, high-contrast theme for field readability */
+/* Edge-only palette: this branch's header keeps its own blue brand identity
+   (AppHeader/DashboardHeader and the sensor-monitor drawers all read these
+   directly), which diverges from ui-core's canonical white/glass header —
+   so these three stay local rather than coming from tokens.css. */
 :root {
-  --bg: #F4F6F8;
-  --surface: #E8EDF2;
-  --card: #FFFFFF;
-  --text: #0F172A;
-  --text-secondary: #334155;
-  --text-tertiary: #64748B;
-  --text-disabled: #94A3B8;
-  --border: #CBD5E1;
-  /* ui-core primitives (Button/FormField) read these; added with ui-core's own values
-     so the vendored slice matches upstream while still using this branch's palette. */
-  --field-border: #78899F;
-  --on-primary: #FFFFFF;
-  --focus: #2563EB;
-  --primary: #2563EB;
-  --primary-hover: #1D4ED8;
-  --secondary-bg: #E2E8F0;
   --header-bg: #1E3A8A;
   --header-text: #FFFFFF;
   --header-subtext: #E0E7FF;
-  --success-bg: #DCFCE7;
-  --success-text: #14532D;
-  --success-border: #16A34A;
+  /* Not yet in ui-core/tokens.css on this branch; added with ui-core's own
+     values so the vendored primitives (Button/FormField) resolve correctly.
+     Remove once tokens.css gains matching definitions. */
+  --field-border: #78899F;
+  --on-primary: #FFFFFF;
   --info-bg: #DBEAFE;
   --info-text: #1E40AF;
   --info-border: #3B82F6;
-  --warn-bg: #FEF3C7;
-  --warn-text: #92400E;
-  --warn-border: #F59E0B;
-  --error-bg: #DC2626;
-  --error-text: #FFFFFF;
-  --danger-fg: #DC2626;
-  --soil-wet: #3B82F6;
-  --soil-wet-bg: #DBEAFE;
-  --soil-moist: #22C55E;
-  --soil-moist-bg: #DCFCE7;
-  --soil-dry: #EF4444;
-  --soil-dry-bg: #FEE2E2;
-  --toggle-on: #16A34A;
-  --toggle-off: #CBD5E1;
-  --overlay: #334155;
 }
 
 html[data-theme='dark'] {
-  --bg: #101413;
-  --surface: #171D1B;
-  --card: #202623;
-  --text: #F4F7F5;
-  --text-secondary: #C3CCC7;
-  --text-tertiary: #91A09A;
-  --text-disabled: #65736D;
-  --border: #3A4540;
-  --field-border: #66766F;
-  --on-primary: #04100E;
-  --focus: #2DD4BF;
-  --primary: #2DD4BF;
-  --primary-hover: #14B8A6;
-  --secondary-bg: #26322E;
   --header-bg: #0B302C;
   --header-text: #F8FFFC;
   --header-subtext: #B7E4DA;
-  --success-bg: #123326;
-  --success-text: #BBF7D0;
-  --success-border: #22C55E;
+  --field-border: #66766F;
+  --on-primary: #04100E;
   --info-bg: #172B48;
   --info-text: #BFDBFE;
   --info-border: #60A5FA;
-  --warn-bg: #3A2B0B;
-  --warn-text: #FDE68A;
-  --warn-border: #F59E0B;
-  --error-bg: #7F1D1D;
-  --error-text: #FEE2E2;
-  --danger-fg: #F87171;
-  --soil-wet: #60A5FA;
-  --soil-wet-bg: #172B48;
-  --soil-moist: #4ADE80;
-  --soil-moist-bg: #173827;
-  --soil-dry: #F87171;
-  --soil-dry-bg: #3B1717;
-  --toggle-on: #22C55E;
-  --toggle-off: #4B5A54;
-  --overlay: #050807;
 }
 
 /* Custom base styles */
