@@ -429,6 +429,8 @@ approved-root ID, not an arbitrary path.
     recovery/
       cleanup-credentials/
         <admission-id>.token
+      dependency-egress/
+        <operation-id>-<attempt>.proxy-credential
     workspace/
       source/                 # detached worktree, job-owned
     runtime.json              # diagnostic service/container hints only
@@ -991,16 +993,51 @@ docker create --name <validated-container-name>
   --env HOME=/workdir/.builder-home --env PATH=<image-path>
   --env CARGO_BUILD_JOBS=2 --env TZ=UTC
   --env SOURCE_DATE_EPOCH=<persisted-commit-time>
-  --network=bridge --cap-drop=ALL --security-opt=no-new-privileges
+  --network=<job-owned-internal-network> --cap-drop=ALL --security-opt=no-new-privileges
   --pids-limit=4096 --ulimit nofile=1024:4096
   <imageRepository>@<imageDigest> <trusted-operation-argv>
 ```
 
-For `verify-image`, the runner uses `--network=none`, a read-only worktree
-bind, and `--read-only` for the container root filesystem. For a mutating
-operation, it omits `--read-only` and keeps the worktree bind writable. The
-runner derives both modes only from the hashed installed execution definition;
-branch content cannot request or relax them.
+For `verify-image` and the other offline operations, the runner uses
+`--network=none`. Only `frontend-install` and `build-image` receive dependency
+egress. Their exact DNS host allowlists and ports 80/443 are part of the hashed,
+tool-owned execution definition; a branch cannot add a host. Each attempt gets
+a Docker network created with `--internal` and a random credential stored under
+the job's mode-0700 recovery directory. That credential is mounted read-only
+only into the attempt's builder and proxy containers. It is absent from Docker
+environment and command inspection.
+
+The runner starts the proxy from the same digest-pinned builder image on the
+internal network, where it binds only to the fixed `osi-egress-proxy` alias. It
+then attaches a bridge interface for upstream connections and proves that the
+proxy does not listen on the bridge address. The builder is attached only to
+the internal network and receives an empty `NO_PROXY` value. Authenticated
+readiness must return 204, an unauthenticated request must return 407, and a
+bridge-address request must fail before the runner starts branch code.
+
+The proxy accepts only an exact allowlisted authority. For CONNECT, the TLS
+ClientHello SNI must equal that authority before DNS resolution or upstream
+connection. The proxy authenticates the selected endpoint's certificate for
+that SNI before relaying branch bytes. A port-80 request is resolved and then
+upgraded locally to the same HTTPS authority without an HTTP upstream
+connection. One DNS lookup is used per connection; every answer is classified
+with Node's IP parser and `net.BlockList`, and any loopback, IPv4-compatible or
+mapped IPv6, RFC1918, link-local, multicast, documentation, or otherwise
+reserved answer rejects the request. The proxy connects to the selected
+validated address rather than resolving the hostname again. This prevents an
+allowlisted alias, SNI mismatch, or mixed DNS response from tunnelling to a LAN
+or production endpoint.
+
+Before branch execution, the runner inspects the network's `Internal` flag and
+exact endpoint set, plus the proxy ID, name, image ID and digest, command, user,
+labels, credential mount, environment, capabilities, security options, limits,
+and internal and bridge endpoints. It persists those identities before start.
+Normal cleanup removes and attests the builder, proxy, internal network, and
+credential in that order. Startup, cancellation, and cleanup-worker recovery
+also query the exact job and role labels, validate every discovered object,
+remove partial setup or cleanup results, repeat the label query until it proves
+`no-match`, and delete every exact credential identity. Unknown or changed
+objects block cleanup and branch execution.
 
 For each operation, the runner immediately inspects the created object and validates the exact
 container ID and name, image ID and immutable digest, both labels, one and

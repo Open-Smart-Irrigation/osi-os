@@ -19,6 +19,7 @@ import {
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { createRecoveryFileSystem } from '../../api/src/recovery.js';
 import { createCleanupWorker, type CleanupDockerContainer } from '../../cleanup-worker/src/main.js';
+import { createTestBuilderIdentity } from '../helpers/builder-identity.js';
 
 const NOW = '2026-07-28T12:00:00.000Z';
 const AFTER = '2026-07-28T12:10:00.000Z';
@@ -67,16 +68,26 @@ function offlineFeedPreparation(jobId: string) {
 }
 
 function seedJob(db: ReturnType<typeof openBuilderDatabase>, jobId: string, state: 'building' | 'interrupted'): CleanupSnapshot {
+  const identity = createTestBuilderIdentity(MANIFEST_SHA);
+  const values = [
+    jobId, `request-${jobId}`, JSON.stringify({ branch: 'main' }), 'git@example.com:osi-os.git',
+    'refs/remotes/origin/main', 'main', 'main', 'd'.repeat(40), 'd'.repeat(40), JSON.stringify(sourcePreparation()),
+    JSON.stringify(offlineFeedPreparation(jobId)), 'rpi-5', 'release', MANIFEST_SHA, 'admitted', identity.packageVersion,
+    identity.packageRoot, identity.lockSha256, identity.executionDefinitionSha256, identity.targetManifestSha256,
+    identity.runnerSha256, identity.cleanupWorkerSha256, identity.dependencyEgressProxySha256,
+    identity.imageReference, identity.imageId, identity.imageDigest,
+    NOW, 'test', 'integration', NOW, 'building', 'dispatched', null, NOW, NOW,
+  ];
   db.prepare(`INSERT INTO jobs (
     job_id, request_id, request_json, source_remote, source_ref, source_branch, branch,
     expected_sha, pinned_sha, source_preparation_json, offline_feed_preparation_json, target_id, root_id, target_manifest_sha256,
+    builder_identity_status, builder_package_version, builder_package_root, builder_lock_sha256,
+    builder_execution_definition_sha256, builder_target_manifest_sha256, builder_runner_sha256,
+    builder_cleanup_worker_sha256, builder_dependency_egress_proxy_sha256,
+    builder_image_reference, builder_image_id, builder_image_digest,
     source_commit_time, source_author, source_subject, accepted_at, state, queue_state,
     queue_position, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'building', 'dispatched', NULL, ?, ?)`).run(
-    jobId, `request-${jobId}`, JSON.stringify({ branch: 'main' }), 'git@example.com:osi-os.git',
-    'refs/remotes/origin/main', 'main', 'main', 'd'.repeat(40), 'd'.repeat(40), JSON.stringify(sourcePreparation()), JSON.stringify(offlineFeedPreparation(jobId)), 'rpi-5',
-    'release', MANIFEST_SHA, NOW, 'test', 'integration', NOW, NOW, NOW,
-  );
+  ) VALUES (${values.map(() => '?').join(', ')})`).run(...values);
   if (state === 'interrupted') db.prepare("UPDATE jobs SET state='interrupted', queue_state='complete', terminal_at=?, terminal_error_code='RUNNER_DISAPPEARED', terminal_error_json=? WHERE job_id=?").run(NOW, JSON.stringify({ reason: 'test' }), jobId);
   db.prepare('UPDATE jobs SET dispatched_at=?, runner_unit=?, runner_lease_owner=?, runner_lease_expires_at=?, runner_started_at=? WHERE job_id=?').run(
     NOW, `osi-image-builder-runner@${jobId}.service`, 'runner-owner', RUNNER_EXPIRES, NOW, jobId,
@@ -123,6 +134,7 @@ function removedPostcondition(jobId: string, snapshot: CleanupSnapshot): Cleanup
     },
     staging: absentStaging(jobId),
     logs: { runner: 'absent', docker: 'absent', verifiedAt: NOW },
+    egress: { persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' },
     blocker: 'none',
   };
 }
@@ -194,6 +206,7 @@ async function runReplacementWorker(
         return { path: `jobs/${value.jobId}/evidence/cleanup/${value.admission.admissionId}.complete.json`, sha256: EVIDENCE_SHA };
       }),
     },
+    dependencyEgress: { cleanup: vi.fn(async () => ({ persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' as const })) },
   });
   await expect(worker.run([value.admission.admissionId])).resolves.toMatchObject({ status: 'completed', admissionId: value.admission.admissionId });
   if (postcondition === undefined) throw new Error('replacement worker did not write completion postcondition');
@@ -337,6 +350,7 @@ async function crashWorker(value: Awaited<ReturnType<typeof createFixture>>, pha
     logSealer: { seal: vi.fn(async ({ at }: { at: string }) => ({ runner: 'absent' as const, docker: 'absent' as const, verifiedAt: at, contiguous: true as const })) },
     quarantine: { quarantine: vi.fn(async () => ({ kind: 'absent' as const, path: null, sourcePath: `staging/${value.jobId}`, sourceAbsent: true as const, verifiedAt: NOW })) },
     evidenceWriter: { write: vi.fn(async () => ({ path: `jobs/${value.jobId}/evidence/cleanup/cleanup.json`, sha256: EVIDENCE_SHA })) },
+    dependencyEgress: { cleanup: vi.fn(async () => ({ persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' as const })) },
   });
   let failure: unknown;
   try { await worker.run([value.admission.admissionId]); }

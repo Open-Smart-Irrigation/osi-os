@@ -186,6 +186,7 @@ describe('Git command boundary', () => {
       GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0',
       GIT_NO_REPLACE_OBJECTS: '1', GIT_ALLOW_PROTOCOL: 'ssh',
       GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null',
+      GIT_SSH_COMMAND: '/usr/bin/ssh -F /dev/null -oBatchMode=yes -oIdentitiesOnly=no',
     }));
 
     await command.run(['status'], { allowedProtocols: 'https' });
@@ -558,13 +559,17 @@ describe('API-owned source resolver', () => {
       [locations.luci, luci],
       [locations.routing, routing],
     ]);
+    const feedGitCalls: string[][] = [];
     const feedGit = new GitCommand({
       sshAuthSock: null,
       async execFile(_executable, argv, options) {
+        feedGitCalls.push([...argv]);
         const environment = options.env as Readonly<Record<string, string>>;
         expect(environment.GIT_ALLOW_PROTOCOL).toBe('https');
         expect(environment.GIT_CONFIG_VALUE_1).toBe('false');
-        const executed = argv.map((value) => urlMap.get(value) ?? value);
+        const executed = argv[0] === 'remote' && argv[1] === 'add'
+          ? [...argv]
+          : argv.map((value) => urlMap.get(value) ?? value);
         try {
           const result = await execFile('/usr/bin/git', executed, {
             cwd: options.cwd as string | undefined,
@@ -572,14 +577,6 @@ describe('API-owned source resolver', () => {
             timeout: options.timeout as number | undefined,
             maxBuffer: 128 * 1024,
           });
-          if (argv[0] === 'clone') {
-            const destination = argv.at(-1)!;
-            const logicalUrl = argv.at(-2)!;
-            await execFile('/usr/bin/git', ['remote', 'set-url', 'origin', logicalUrl], {
-              cwd: join(options.cwd as string, destination),
-              env: gitEnvironment,
-            });
-          }
           return { exitCode: 0, signal: null, stdout: result.stdout, stderr: result.stderr };
         } catch (error) {
           const failure = error as { stdout?: string; stderr?: string; code?: number; signal?: string };
@@ -624,6 +621,17 @@ describe('API-owned source resolver', () => {
     expect((await git(join(preparedPath, 'packages'), ['rev-parse', 'HEAD'])).trim()).toBe(packagesSha);
     await expect(git(join(preparedPath, 'packages'), ['symbolic-ref', '--quiet', 'HEAD'])).rejects.toThrow();
     expect(preparation.feeds.every((feed) => /^[0-9a-f]{64}$/u.test(feed.treeSha256))).toBe(true);
+    expect(feedGitCalls.some((argv) => argv[0] === 'clone')).toBe(false);
+    expect(feedGitCalls.filter((argv) => argv[0] === 'fetch')).toEqual([
+      ['fetch', '--quiet', '--depth=1', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head', '--no-auto-maintenance', locations.packages, packagesSha],
+      ['fetch', '--quiet', '--depth=1', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head', '--no-auto-maintenance', locations.luci, luciSha],
+      ['fetch', '--quiet', '--depth=1', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head', '--no-auto-maintenance', locations.routing, routingSha],
+    ]);
+    expect(feedGitCalls.filter((argv) => argv[0] === 'submodule' && argv[1] === 'update')).toEqual([
+      ['submodule', 'update', '--quiet', '--init', '--recursive', '--force', '--depth=1', '--no-recommend-shallow', '--filter=blob:none'],
+      ['submodule', 'update', '--quiet', '--init', '--recursive', '--force', '--depth=1', '--no-recommend-shallow', '--filter=blob:none'],
+      ['submodule', 'update', '--quiet', '--init', '--recursive', '--force', '--depth=1', '--no-recommend-shallow', '--filter=blob:none'],
+    ]);
     expect(Object.isFrozen(preparation)).toBe(true);
     await expect(sourceResolver.prepareOfflineFeeds(
       sourceSha,

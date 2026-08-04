@@ -6,9 +6,30 @@ const SEED = Object.freeze({
   seed: 'osi-builder-browser-v1',
   jobs: ['job-pi5-success', 'job-pi4-interrupted'],
 });
+const SCENARIO_COOKIE = 'osi-builder-fixture-scenario';
+const RETRY_TEST = 'retries failed event history bootstrap and re-establishes the live stream';
+const RETRY_SSE_TEXT = 'Retry fixture SSE event sequence 4';
 
-test.beforeEach(async ({ page, request }) => {
-  const reset = await request.post('/test/reset');
+function scenarioId(testInfo: Readonly<{ project: Readonly<{ name: string }>; testId: string; retry: number; repeatEachIndex: number }>): string {
+  return `${testInfo.project.name}-${testInfo.testId}-${testInfo.retry}-${testInfo.repeatEachIndex}`.replaceAll(/[^A-Za-z0-9._-]/gu, '-');
+}
+
+test.beforeEach(async ({ page }, testInfo) => {
+  const scenario = scenarioId(testInfo);
+  await page.context().addCookies([{
+    name: SCENARIO_COOKIE,
+    value: scenario,
+    domain: '127.0.0.1',
+    path: '/',
+    httpOnly: true,
+    sameSite: 'Strict',
+  }]);
+  const reset = await page.request.post('/test/reset', {
+    data: {
+      eventHistoryFailures: testInfo.title === RETRY_TEST ? 1 : 0,
+      emitSseEvent: testInfo.title === RETRY_TEST,
+    },
+  });
   expect(reset.ok()).toBe(true);
   expect(await reset.json()).toEqual(SEED);
   await page.goto('/');
@@ -60,4 +81,55 @@ test('serves a deterministic operational console without overflow or control ove
     caret: 'hide',
     fullPage: true,
   });
+});
+
+test(RETRY_TEST, async ({ page, request }, testInfo) => {
+  const diagnosticsPath = `/test/diagnostics?scenario=${encodeURIComponent(scenarioId(testInfo))}`;
+  await expect(page.getByText('Building immutable rpi-5 image')).toBeVisible();
+  await expect(page.getByText('Connection live')).toBeVisible();
+  await expect(page.getByText('EVENT_HISTORY_TEMPORARILY_UNAVAILABLE')).not.toBeVisible();
+  await expect(page.getByText(RETRY_SSE_TEXT)).toHaveCount(1);
+  await expect.poll(async () => {
+    const response = await request.get(diagnosticsPath);
+    expect(response.ok()).toBe(true);
+    return response.json();
+  }).toMatchObject({
+    eventHistoryRequests: 2,
+    eventHistoryFailures: 1,
+    sseStreamsOpened: 1,
+    sseStreamsClosed: 0,
+    sseEventsEmitted: 1,
+    activeSseStreams: 1,
+    maxConcurrentSseStreams: 1,
+  });
+
+  await page.goto('about:blank');
+  await expect.poll(async () => {
+    const response = await request.get(diagnosticsPath);
+    expect(response.ok()).toBe(true);
+    return response.json();
+  }).toMatchObject({
+    eventHistoryRequests: 2,
+    eventHistoryFailures: 1,
+    sseStreamsOpened: 1,
+    sseStreamsClosed: 1,
+    sseEventsEmitted: 1,
+    activeSseStreams: 0,
+    maxConcurrentSseStreams: 1,
+  });
+});
+
+test('displays that publication may complete after a late cancellation request', async ({ page }) => {
+  const prepare = await page.request.post('/test/prepare-late-cancellation');
+  expect(prepare.ok()).toBe(true);
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Request cancellation; publication may complete for job-pi4-interrupted' })).toBeVisible();
+  await page.getByRole('button', { name: 'View job job-pi4-interrupted' }).click();
+  await expect(page.getByRole('heading', { name: 'design-sync/agrolink' })).toBeVisible();
+  page.once('dialog', (dialog) => {
+    expect(dialog.message()).toBe('Request cancellation? If publication has started, publication may complete.');
+    void dialog.accept();
+  });
+  await page.getByRole('button', { name: 'Request cancellation; publication may complete for job-pi4-interrupted' }).click();
+  await expect(page.getByText('Cancellation was recorded after publication started. Publication may complete.')).toBeVisible();
 });

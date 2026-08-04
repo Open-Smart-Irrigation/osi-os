@@ -464,7 +464,16 @@ async function inspectHeldChild(
   return { status: 'directory', device: stats.dev, inode: stats.ino, mountId: snapshot.mountId, writable };
 }
 
-export async function withHeldParentUnderRoot<T>(registry: ApprovedRootRegistry, rootId: string, relativeParent: string, callback: (parent: HeldParentCapability) => Promise<T>): Promise<T> {
+type AuthoritySnapshotContext = Readonly<{
+  snapshot: Readonly<{ path: string; device: number; inode: number }>;
+  dependencies: PathAuthorityDependencies;
+}>;
+
+async function withHeldParentUnderAuthority<T>(
+  withSnapshot: (callback: (context: AuthoritySnapshotContext) => Promise<void>) => Promise<void>,
+  relativeParent: string,
+  callback: (parent: HeldParentCapability) => Promise<T>,
+): Promise<T> {
   const components = relativeParent.length === 0 ? [] : scanRelative(relativeParent, 'relative parent');
   const scope = new OperationScope();
   let closeDependencies = directDependencies;
@@ -472,7 +481,7 @@ export async function withHeldParentUnderRoot<T>(registry: ApprovedRootRegistry,
   let hasPrimary = false;
   let result: T;
   try {
-    await withApprovedRootSnapshot(registry, rootId, async ({ snapshot, dependencies }) => {
+    await withSnapshot(async ({ snapshot, dependencies }) => {
       closeDependencies = dependencies;
       let root: FileHandle;
       try { root = await open(snapshot.path, requiredFlags(fsConstants.O_RDONLY | fsConstants.O_DIRECTORY)); } catch (error) { return reject('INVALID_PATH', 'approved root could not be opened no-follow', error); }
@@ -513,6 +522,22 @@ export async function withHeldParentUnderRoot<T>(registry: ApprovedRootRegistry,
   return await closeAll(scope.handles, closeDependencies, primary, hasPrimary, result!, operationErrors.filter((error) => error !== primary));
 }
 
+export async function withHeldParentUnderRoot<T>(registry: ApprovedRootRegistry, rootId: string, relativeParent: string, callback: (parent: HeldParentCapability) => Promise<T>): Promise<T> {
+  return withHeldParentUnderAuthority(
+    (snapshotCallback) => withApprovedRootSnapshot(registry, rootId, snapshotCallback),
+    relativeParent,
+    callback,
+  );
+}
+
+export async function withHeldParentUnderStateRoot<T>(stateRoot: StateRootAuthority, relativeParent: string, callback: (parent: HeldParentCapability) => Promise<T>): Promise<T> {
+  return withHeldParentUnderAuthority(
+    (snapshotCallback) => withStateRootSnapshot(stateRoot, snapshotCallback),
+    relativeParent,
+    callback,
+  );
+}
+
 export async function inspectReleasePathUnderRoot(
   registry: ApprovedRootRegistry,
   rootId: string,
@@ -535,4 +560,9 @@ export async function inspectReleasePathUnderRoot(
 export async function withNoFollowFileUnderRoot<T>(registry: ApprovedRootRegistry, rootId: string, relative: string, callback: (reader: ReadCapability) => Promise<T>): Promise<T> {
   const components = scanRelative(relative, 'relative file');
   return withHeldParentUnderRoot(registry, rootId, components.slice(0, -1).join('/'), (parent) => parent.openRead(components.at(-1)!, callback));
+}
+
+export async function withNoFollowFileUnderStateRoot<T>(stateRoot: StateRootAuthority, relative: string, callback: (reader: ReadCapability) => Promise<T>): Promise<T> {
+  const components = scanRelative(relative, 'relative file');
+  return withHeldParentUnderStateRoot(stateRoot, components.slice(0, -1).join('/'), (parent) => parent.openRead(components.at(-1)!, callback));
 }

@@ -6,8 +6,8 @@ export const JSON_LIMITS = Object.freeze({
   maxDepth: 16,
   maxKeys: 256,
   maxArrayElements: 256,
-  maxNodes: 512,
-  maxEdges: 1_024,
+  maxNodes: 1_024,
+  maxEdges: 1_023,
   maxEncodedBytes: 65_536,
   maxCommandBytes: 65_536,
 });
@@ -168,7 +168,7 @@ function normalizeCommandInternal(value: unknown, field: string, seen: WeakSet<o
     return value;
   }
   if (typeof value === 'string') {
-    return boundedText(value, field, TEXT_LIMITS.maxTextBytes);
+    return value.length === 0 ? value : boundedText(value, field, TEXT_LIMITS.maxTextBytes);
   }
   if (typeof value !== 'object') throw new SharedValidationError(`${field} contains a non-command value`);
   if (seen.has(value)) throw new SharedValidationError(`${field} contains a cyclic reference`);

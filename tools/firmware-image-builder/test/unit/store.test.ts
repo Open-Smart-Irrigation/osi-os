@@ -7,9 +7,11 @@ import { BuilderStore, EVENT_PAGE_MAX_LIMIT, JSON_LIMITS, StoreConflictError, St
 import { encodeJson, normalizeJson } from '../../api/src/validation.js';
 import { OwnershipStore, OwnershipTransactionError, OwnershipValidationError, type ApiWriteCommand, type RunnerWriteCommand } from '../../api/src/ownership.js';
 import type { JobState, PipelineStageName } from '../../domain/types.js';
+import { TEST_BUILDER_IDENTITY } from '../helpers/builder-identity.js';
 
 const SHA40 = 'a'.repeat(40);
 const SHA64 = 'c'.repeat(64);
+const BUILDER_IDENTITY = Object.freeze({ ...TEST_BUILDER_IDENTITY, targetManifestSha256: SHA64 });
 const ADMISSION_ID = `cln_0${'a'.repeat(25)}`;
 const NOW = '2026-07-23T10:00:00.000Z';
 const LATER = '2026-07-23T10:01:00.000Z';
@@ -56,11 +58,24 @@ const openStores: BuilderStore[] = [];
 const openDatabases: Array<ReturnType<typeof openBuilderDatabase>> = [];
 
 function seedReadFixture(db: ReturnType<typeof openBuilderDatabase>): void {
+  const values = [
+    'job-1', 'request-1', JSON.stringify({ branch: 'main', target: 'rpi-5' }), 'git@example.com:osi-os.git',
+    'refs/remotes/origin/main', 'main', 'main', SHA40, SHA40, JSON.stringify(SOURCE_PREPARATION),
+    JSON.stringify(offlineFeedPreparation('job-1')), 'rpi-5', 'release', SHA64, 'admitted',
+    BUILDER_IDENTITY.packageVersion, BUILDER_IDENTITY.packageRoot, BUILDER_IDENTITY.lockSha256,
+    BUILDER_IDENTITY.executionDefinitionSha256, BUILDER_IDENTITY.targetManifestSha256,
+    BUILDER_IDENTITY.runnerSha256, BUILDER_IDENTITY.cleanupWorkerSha256,
+    BUILDER_IDENTITY.dependencyEgressProxySha256, BUILDER_IDENTITY.imageReference,
+    BUILDER_IDENTITY.imageId, BUILDER_IDENTITY.imageDigest, NOW, 'Phil', 'build', NOW,
+    'queued', 'queued', 0, NOW, NOW,
+  ];
   db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json, offline_feed_preparation_json,
-    target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, queue_position, created_at, updated_at)
-    VALUES ('job-1', 'request-1', ?, 'git@example.com:osi-os.git', 'refs/remotes/origin/main', 'main', 'main', ?, ?, ?, ?, 'rpi-5', 'release', ?, ?, 'Phil', 'build', ?, 'queued', 'queued', 0, ?, ?)`).run(
-    JSON.stringify({ branch: 'main', target: 'rpi-5' }), SHA40, SHA40, JSON.stringify(SOURCE_PREPARATION), JSON.stringify(offlineFeedPreparation('job-1')), SHA64, NOW, NOW, NOW, NOW,
-  );
+    target_id, root_id, target_manifest_sha256, builder_identity_status, builder_package_version, builder_package_root,
+    builder_lock_sha256, builder_execution_definition_sha256, builder_target_manifest_sha256, builder_runner_sha256,
+    builder_cleanup_worker_sha256, builder_dependency_egress_proxy_sha256,
+    builder_image_reference, builder_image_id, builder_image_digest,
+    source_commit_time, source_author, source_subject, accepted_at, state, queue_state, queue_position, created_at, updated_at)
+    VALUES (${values.map(() => '?').join(', ')})`).run(...values);
   db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (\'job-1\', 0, ?)').run(NOW);
   db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at) VALUES ('job-1', 0, 'enqueue', 'queued', NULL, ?, ?)").run(JSON.stringify({ requestId: 'request-1' }), NOW);
 }
@@ -121,21 +136,21 @@ function advanceToVerifying(ownership: OwnershipStore): void {
 describe('OwnershipStore persistence coverage', () => {
   it('enqueues through the API actor with queue position and event', async () => {
     const { ownership, store } = await openFixture();
-    const input = { jobId: 'job-2', requestId: 'request-2', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'build', acceptedAt: NOW };
+    const input = { jobId: 'job-2', requestId: 'request-2', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'build', acceptedAt: NOW };
     expect(ownership.apiWrite({ kind: 'enqueue', input }).ok).toBe(true);
     expect(store.getQueuePosition('job-2')).toBe(1); expect(store.listEvents('job-2').events[0].eventType).toBe('enqueue');
   });
 
   it('keeps dispatch FIFO when a later job requests dispatch first', async () => {
     const { ownership, store } = await openFixture();
-    const input = { jobId: 'job-2', requestId: 'request-2', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'build', acceptedAt: NOW };
+    const input = { jobId: 'job-2', requestId: 'request-2', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'build', acceptedAt: NOW };
     ownership.apiWrite({ kind: 'enqueue', input }); expect(ownership.apiWrite(dispatchCommand('job-2'))).toMatchObject({ ok: false });
     expect(ownership.apiWrite(dispatchCommand()).ok).toBe(true); expect(store.getQueuePosition('job-2')).toBe(0); expect(store.getJob('job-2').queuePosition).toBe(0);
   });
 
   it('re-sequences persisted queue positions after cancellation and dispatch', async () => {
     const { ownership, store, db, path } = await openFixture();
-    for (const jobId of ['job-2', 'job-3']) ownership.apiWrite({ kind: 'enqueue', input: { jobId, requestId: `request-${jobId}`, request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation(jobId), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'build', acceptedAt: NOW } });
+    for (const jobId of ['job-2', 'job-3']) ownership.apiWrite({ kind: 'enqueue', input: { jobId, requestId: `request-${jobId}`, request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation(jobId), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'build', acceptedAt: NOW } });
     expect(ownership.apiWrite({ kind: 'request-cancellation', jobId: 'job-2', reason: 'operator', at: NOW }).ok).toBe(true);
     expect(store.getJob('job-3').queuePosition).toBe(1); expect(store.getQueuePosition('job-3')).toBe(1);
     expect(ownership.apiWrite(dispatchCommand()).ok).toBe(true);
@@ -265,6 +280,71 @@ describe('OwnershipStore persistence coverage', () => {
     expect(ownership.runnerWrite(begin).ok).toBe(true);
     const result = { ...runnerBase(), kind: 'operation-complete' as const, expectedState: 'starting' as const, operationId: 'activate-target' as const, attempt: 1, input: { operationId: 'activate-target' as const, attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'not_created' as const, containerMount: null, containerEnvironment: null, containerSecurity: null, inspection: null, exitCode: 1, signal: null, outcome: 'failed' as const, evidencePath: 'evidence/op.json', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED' as const, error: { reason: 'create failed' } } };
     expect(ownership.runnerWrite(result).ok).toBe(true); expect(store.getOperation('job-1', 'activate-target', 1)).toMatchObject({ lifecyclePhase: 'not_created', containerId: null, outcome: 'failed' });
+  });
+
+  it('reads historical accepted operation rows as failed without exposing accepted runtime state', async () => {
+    const { db, store } = await openFixture();
+    db.prepare(`INSERT INTO job_operations (
+      job_id, operation_id, attempt, argv_hash, argv_json, started_at, finished_at,
+      container_id, container_name, container_image_digest, container_label_job_id,
+      container_label_manifest_sha, container_mount_json, container_env_json,
+      container_security_json, inspection_json, timed_out, lifecycle_phase, exit_code,
+      outcome, accepted_disposition, evidence_path, evidence_sha256
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(
+        'job-1', 'activate-target', 2, SHA64, JSON.stringify(['node', 'activate-target']), NOW, LATER,
+        'container-legacy', 'osi-legacy', SHA64, 'job-1', SHA64,
+        '{}', '{}', '{}', '{}', 0, 'started', 2, 'accepted',
+        'expected-rootfs-already-present', 'evidence/legacy.json', SHA64,
+      );
+    expect(store.getOperation('job-1', 'activate-target', 2)).toMatchObject({
+      outcome: 'failed',
+      errorCode: 'BUILD_FAILED',
+      error: { code: 'BUILD_FAILED', message: 'historical accepted operation normalized to failed' },
+    });
+  });
+
+  it('rejects legacy accepted operation results at the runner ownership boundary', async () => {
+    const { ownership } = await openFixture();
+    acquireAndLease(ownership);
+    ownership.runnerWrite({
+      ...runnerBase(),
+      kind: 'operation-begin',
+      expectedState: 'starting',
+      operationId: 'activate-target',
+      attempt: 1,
+      argvHash: SHA64,
+      argv: ['node', 'activate-target'],
+      startedAt: NOW,
+    });
+
+    expect(() => ownership.runnerWrite({
+      ...runnerBase(),
+      kind: 'operation-complete',
+      expectedState: 'starting',
+      operationId: 'activate-target',
+      attempt: 1,
+      input: {
+        operationId: 'activate-target',
+        attempt: 1,
+        argvHash: SHA64,
+        argv: ['node', 'activate-target'],
+        startedAt: NOW,
+        finishedAt: LATER,
+        timedOut: false,
+        lifecyclePhase: 'not_created',
+        containerMount: null,
+        containerEnvironment: null,
+        containerSecurity: null,
+        inspection: null,
+        exitCode: 2,
+        signal: null,
+        outcome: 'accepted',
+        acceptedDisposition: 'expected-rootfs-already-present',
+        evidencePath: 'evidence/legacy.json',
+        evidenceSha256: SHA64,
+      },
+    } as never)).toThrow(/accepted|outcome|disposition|invalid/iu);
   });
 
   it('keeps completed operation retries immutable', async () => {
@@ -418,7 +498,7 @@ describe('OwnershipStore persistence coverage', () => {
   });
 
   it('accepts complete preflight fields and rejects partial evidence', async () => {
-    const { ownership, db } = await openFixture(); const base = { jobId: 'preflight', requestId: 'preflight', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('preflight'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'preflight', acceptedAt: NOW };
+    const { ownership, db } = await openFixture(); const base = { jobId: 'preflight', requestId: 'preflight', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('preflight'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'preflight', acceptedAt: NOW };
     expect(ownership.apiWrite({ kind: 'enqueue', input: { ...base, preflightSha: SHA40, preflightCheckedAt: NOW, preflightExpiresAt: LATER } }).ok).toBe(true); expect((db.prepare('SELECT preflight_sha AS sha FROM jobs WHERE job_id=?').get('preflight') as { sha: string }).sha).toBe(SHA40);
     expect(() => ownership.apiWrite({ kind: 'enqueue', input: { ...base, jobId: 'partial', requestId: 'partial', preflightCheckedAt: NOW } })).toThrow();
   });
@@ -474,6 +554,7 @@ describe('BuilderStore read surface', () => {
       targetId: 'rpi-5' as const,
       rootId: 'release',
       targetManifestSha256: SHA64,
+      builderIdentity: BUILDER_IDENTITY,
       sourceCommitTime: NOW,
       sourceAuthor: 'Phil',
       sourceSubject: 'prepared',
@@ -551,7 +632,7 @@ describe('Task 7 persisted publish and path coherence', () => {
   it('rejects each incoherent publish state and blocker form as StoreDataError', async () => {
     const corrupt = async (updates: string, values: Array<string | number | null> = []) => {
       const f = await openFixture(); f.db.exec('PRAGMA ignore_check_constraints=ON');
-      for (const trigger of ['jobs_publish_guard', 'jobs_publish_null_guard_update', 'jobs_publish_pairs_guard_update']) { try { f.db.exec(`DROP TRIGGER ${trigger}`); } catch { /* fixture version may omit a trigger */ } }
+      for (const trigger of ['jobs_publish_guard', 'jobs_publish_null_guard_update', 'jobs_publish_pairs_guard_update', 'jobs_release_seal_status_guard_update']) { try { f.db.exec(`DROP TRIGGER ${trigger}`); } catch { /* fixture version may omit a trigger */ } }
       f.db.prepare(`UPDATE jobs SET ${updates} WHERE job_id='job-1'`).run(...values); return f.store;
     };
     const complete = [SHA64, 1, NOW, 'staging/sums', SHA64, 'staging/manifest', SHA64, 'staging/verify', SHA64];

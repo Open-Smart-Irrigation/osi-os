@@ -20,6 +20,7 @@ const ARTIFACT_PATHS: Readonly<Record<InstallerArtifactName, string>> = {
   cleanupWorker: 'bin/osi-image-builder-cleanup',
   publisher: 'bin/osi-image-publish',
   executionDefinition: 'execution-definition.json',
+  dependencyEgressProxy: 'operations/osi-dependency-egress-proxy.cjs',
   ui: 'ui/index.html',
 };
 
@@ -111,7 +112,7 @@ export interface InstallerFileSystem {
   readonly remove: (path: string) => Promise<void>;
 }
 
-export type InstallerArtifactName = 'api' | 'runner' | 'cleanupWorker' | 'publisher' | 'executionDefinition' | 'ui';
+export type InstallerArtifactName = 'api' | 'runner' | 'cleanupWorker' | 'publisher' | 'executionDefinition' | 'dependencyEgressProxy' | 'ui';
 
 export interface VersionedInstallerDependencies extends InstallerSelectionDependencies {
   readonly fs: InstallerFileSystem;
@@ -336,6 +337,10 @@ function hashText(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function hashArtifact(value: string | Uint8Array): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
 function relativeArtifactPath(name: InstallerArtifactName): string { return ARTIFACT_PATHS[name]; }
 
 function artifactEntries(
@@ -389,12 +394,17 @@ export async function runVersionedInstaller(input: VersionedInstallerInput): Pro
   if (builtReference.digest === '0'.repeat(64)) fail('BUILDER_IMAGE_DIGEST_INVALID', 'built image digest is empty');
 
   const productionInspection = await dependencies.validateProductionImage(builtReference.reference);
+  const dependencyEgressProxy = dependencies.artifacts.dependencyEgressProxy;
+  if (typeof dependencyEgressProxy !== 'string' && !(dependencyEgressProxy instanceof Uint8Array)) {
+    fail('INSTALL_FAILED', 'artifact dependencyEgressProxy is missing');
+  }
   const lock = createProductionBuilderLock({
     packageVersion: input.packageVersion,
     imageRepository: builtReference.repository,
     imageDigest: builtReference.digest,
     ...dependencies.builderSource,
     executionDefinitionSha256: dependencies.executionDefinitionSha256,
+    dependencyEgressProxySha256: hashArtifact(dependencyEgressProxy),
     validationEvidenceSha256: productionInspection.validationEvidenceSha256 ?? built.validationEvidenceSha256 ?? '',
     publisherSha256: dependencies.publisherSha256,
     imageId: built.imageId?.slice('sha256:'.length),

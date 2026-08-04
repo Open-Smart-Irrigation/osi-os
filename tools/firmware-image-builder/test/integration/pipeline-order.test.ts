@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
-import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, cp, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -8,9 +8,11 @@ import { Worker } from 'node:worker_threads';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { READ_ONLY_OPERATION_IDS } from '../../builder/validate-builder.js';
 import {
   OwnershipStore,
   type CleanupSnapshot,
+  type DependencyEgressCleanupProof,
   type OwnershipResult,
   type RunnerWriteCommand,
 } from '../../api/src/ownership.js';
@@ -31,6 +33,12 @@ import {
   type TrustedOperationId,
 } from '../../domain/types.js';
 import { encodeBranchSlug } from '../../domain/paths.js';
+import type { BuilderIdentity } from '../../domain/builder-identity.js';
+import {
+  DEPENDENCY_EGRESS_CREDENTIAL_PATH,
+  DEPENDENCY_EGRESS_PROXY_PATH,
+  dependencyEgressNames,
+} from '../../domain/dependency-egress-identity.js';
 import { loadManifest } from '../../manifest/validate.js';
 import type { TargetManifest } from '../../manifest/schema.js';
 import {
@@ -45,9 +53,13 @@ import {
 import { quarantineCancellationStaging, runGuardedComposition, runRunner } from '../../runner/src/main.js';
 import { CancellationBlockedError, createRunnerCancellation } from '../../runner/src/cancellation.js';
 import { createEvidenceWriter } from '../../runner/src/evidence.js';
-import { createOperationDefinition, hashOperationDefinition } from '../../runner/src/operation-registry.js';
 import {
-  classifyTargetSetupOperationResult,
+  createOperationDefinition,
+  hashOperationDefinition,
+  type OperationDefinition,
+} from '../../runner/src/operation-registry.js';
+import { createTestBuilderIdentity } from '../helpers/builder-identity.js';
+import {
   createTargetSetupConfigObservations,
   createTargetSetupSourceObservations,
 } from '../../runner/src/target-setup.js';
@@ -57,6 +69,7 @@ import {
   DockerCancellationRequestedError,
   type DockerCommandExecutor,
 } from '../../runner/src/docker-executor.js';
+import { operationNetworkPolicy } from '../../runner/src/network-policy.js';
 import type { PublisherClient, PublisherResponse } from '../../publisher/client.js';
 
 const SHA40 = 'a'.repeat(40);
@@ -65,11 +78,6 @@ const HASH_B = 'c'.repeat(64);
 const HASH_C = 'd'.repeat(64);
 const HASH_D = 'e'.repeat(64);
 const ACCEPTED = '2026-07-26T08:00:00.000Z';
-const ROOTFS_ALREADY_PRESENT_STDERR = [
-  'No series file found',
-  'make: *** [Makefile:60: switch-env] Error 1',
-  '',
-].join('\n');
 
 function ownershipWorkerWrite(
   path: string,
@@ -85,13 +93,13 @@ function ownershipWorkerWrite(
       import { parentPort, workerData } from 'node:worker_threads';
       const { openBuilderDatabase } = await import(workerData.schemaUrl);
       const { OwnershipStore } = await import(workerData.ownershipUrl);
-      const barrier = new Int32Array(workerData.barrier);
-      Atomics.add(barrier, 0, 1);
-      Atomics.notify(barrier, 0);
-      while (Atomics.load(barrier, 1) === 0) Atomics.wait(barrier, 1, 0);
-      if (workerData.delayMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, workerData.delayMs);
       const db = openBuilderDatabase(workerData.path, { busyTimeoutMs: 2_000 });
       try {
+        const barrier = new Int32Array(workerData.barrier);
+        Atomics.add(barrier, 0, 1);
+        Atomics.notify(barrier, 0);
+        while (Atomics.load(barrier, 1) === 0) Atomics.wait(barrier, 1, 0);
+        if (workerData.delayMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, workerData.delayMs);
         const ownership = new OwnershipStore(db);
         parentPort.postMessage(ownership[workerData.actor + 'Write'](workerData.command));
       } finally {
@@ -131,42 +139,6 @@ async function synchronizedOwnershipRace(
   return Promise.all(results);
 }
 
-function rootfsAlreadyPresentStdout(environment: string): string {
-  return [
-    'Cleaning patch state',
-    'cd openwrt && quilt pop -af || true',
-    'Restoring clean source tree',
-    'cd openwrt && git checkout -- . || true',
-    'cd openwrt && git clean -fd || true',
-    'rm -rf openwrt/.pc',
-    'Switching configuration',
-    'rm -f conf/files conf/patches conf/.config',
-    `ln -s ${environment}/files conf/files`,
-    `ln -s ${environment}/patches conf/patches`,
-    `ln -s ${environment}/.config conf/.config`,
-    'Recreating openwrt symlinks',
-    'rm -f openwrt/.config openwrt/files openwrt/patches',
-    'ln -s ../conf/.config openwrt/.config',
-    'ln -s ../conf/files openwrt/files',
-    'ln -s ../conf/patches openwrt/patches',
-    'Initializing quilt',
-    'mkdir -p openwrt/.pc',
-    'echo "patches" > openwrt/.pc/.quilt_patches',
-    'cd openwrt && quilt upgrade || true',
-    'Converting meta-data to version 2',
-    'Applying patches',
-    'cd openwrt && quilt push -a || [ $? -eq 2 ]',
-    'Applying patch patches/boot-config.patch',
-    'patching file target/linux/bcm27xx/image/config.txt',
-    '',
-    'Applying patch patches/image-with-padded-rootfs.patch',
-    'patching file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
-    'Hunk #1 FAILED at 24.',
-    '1 out of 1 hunk FAILED -- rejects in file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
-    'Patch patches/image-with-padded-rootfs.patch can be reverse-applied',
-    '',
-  ].join('\n');
-}
 const execFile = promisify(execFileCallback);
 const SOURCE_PREPARATION = Object.freeze({
   schemaVersion: 1 as const,
@@ -215,6 +187,7 @@ const LOCK = Object.freeze({
   }),
   nodeVersion: '22.14.0',
   executionDefinitionSha256: '5'.repeat(64),
+  dependencyEgressProxySha256: '7'.repeat(64),
   validationEvidenceSha256: '6'.repeat(64),
   publisherSha256: HASH_C,
   installable: true,
@@ -244,6 +217,149 @@ class AdvancingClock {
 
 function hash(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+type DependencyOperationId = 'frontend-install' | 'build-image';
+
+function dependencyEgressFixture(
+  stateRoot: string,
+  jobId: string,
+  manifestSha256: string,
+  operationId: DependencyOperationId,
+  attempt: number,
+  builder: BuilderIdentity,
+  uid: number,
+  gid: number,
+): Readonly<{
+  readonly egress: JsonObject;
+  readonly networkName: string;
+  readonly proof: DependencyEgressCleanupProof;
+}> {
+  const suffix = `${operationId}:${attempt}`;
+  const resourceId = (role: string): string => hash(`${jobId}:${suffix}:${role}`);
+  const credentialSha256 = resourceId('credential');
+  const credentialHostPath = join(
+    stateRoot,
+    'jobs',
+    jobId,
+    'recovery',
+    'dependency-egress',
+    `${operationId}-${String(attempt)}.proxy-credential`,
+  );
+  const tlsHostDirectory = credentialHostPath.slice(0, -'.proxy-credential'.length) + '.proxy-tls';
+  const names = dependencyEgressNames({ jobId, operationId, attempt });
+  const labels = (role: 'network' | 'proxy'): JsonObject => ({
+    'org.osi.image-builder.egress-job-id': jobId,
+    'org.osi.image-builder.egress-manifest-sha': manifestSha256,
+    'org.osi.image-builder.egress-operation-id': operationId,
+    'org.osi.image-builder.egress-attempt': String(attempt),
+    'org.osi.image-builder.egress-credential-sha': credentialSha256,
+    'org.osi.image-builder.egress-role': role,
+  });
+  const metadata = (mode: number, inode: number, includeFileFields: boolean): JsonObject => ({
+    mode,
+    uid,
+    gid,
+    device: 1,
+    inode,
+    ...(includeFileFields
+      ? { sha256: resourceId(`tls:${String(inode)}`), bytes: 1024, links: 1 }
+      : {}),
+  });
+  const allowedHosts = [...operationNetworkPolicy(operationId).allowedHosts];
+  const leafCertificates = Object.fromEntries(allowedHosts.map((host, index) => {
+    const leafName = host.replaceAll('.', '_');
+    return [host, {
+      certificateHostPath: `${tlsHostDirectory}/${leafName}.pem`,
+      keyHostPath: `${tlsHostDirectory}/${leafName}.key`,
+      certificateMetadata: metadata(0o444, 4 + index * 2, true),
+      keyMetadata: metadata(0o400, 5 + index * 2, true),
+    }];
+  }));
+  const egress = {
+    network: {
+      id: resourceId('network'),
+      name: names.networkName,
+      internal: true,
+      labels: labels('network'),
+      proxyEndpointId: resourceId('internal-endpoint'),
+      proxyAddress: '172.28.0.2',
+    },
+    proxy: {
+      id: resourceId('proxy'),
+      name: names.proxyName,
+      imageReference: builder.imageReference,
+      imageId: builder.imageId,
+      imageDigest: builder.imageDigest,
+      user: `${uid}:${gid}`,
+      labels: labels('proxy'),
+      command: ['node', DEPENDENCY_EGRESS_PROXY_PATH],
+      internalEndpointId: resourceId('internal-endpoint'),
+      internalAddress: '172.28.0.2',
+      bridgeNetworkId: resourceId('bridge-network'),
+      bridgeEndpointId: resourceId('bridge-endpoint'),
+      bridgeAddress: '172.17.0.8',
+    },
+    credential: {
+      hostPath: credentialHostPath,
+      containerPath: DEPENDENCY_EGRESS_CREDENTIAL_PATH,
+      sha256: credentialSha256,
+    },
+    tls: {
+      hostDirectory: tlsHostDirectory,
+      directoryMetadata: metadata(0o700, 2, false),
+      caCertificateHostPath: `${tlsHostDirectory}/ca.pem`,
+      caCertificateMetadata: metadata(0o444, 3, true),
+      leafCertificates,
+    },
+    readiness: {
+      authenticated: true,
+      unauthenticatedStatus: 407,
+      authenticatedStatus: 204,
+      bridgeEndpointDenied: true,
+    },
+    allowedHosts,
+    networkName: names.networkName,
+    proxyName: names.proxyName,
+  };
+  return Object.freeze({
+    egress,
+    networkName: names.networkName,
+    proof: {
+      proxy: { id: egress.proxy.id, absent: true as const },
+      network: { id: egress.network.id, absent: true as const },
+      tls: { hostDirectory: tlsHostDirectory, absent: true as const },
+      credential: { hostPath: credentialHostPath, sha256: credentialSha256, absent: true as const },
+      globalLabelResult: 'no-match' as const,
+    },
+  });
+}
+
+function operationSecurityFixture(
+  operationId: TrustedOperationId,
+  definition: OperationDefinition,
+  uid: number,
+  gid: number,
+  dependencyEgress: ReturnType<typeof dependencyEgressFixture> | null,
+): JsonObject {
+  return {
+    capDrop: ['ALL'],
+    capAdd: [],
+    devices: [],
+    sockets: [],
+    privileged: false,
+    noNewPrivileges: true,
+    readonlyRootfs: (READ_ONLY_OPERATION_IDS as readonly string[]).includes(operationId),
+    pidsLimit: 4096,
+    nanoCpus: 8_000_000_000,
+    memoryBytes: 17_179_869_184,
+    memorySwapBytes: 17_179_869_184,
+    ulimit: 'nofile=1024:4096',
+    user: `${uid}:${gid}`,
+    workdir: definition.workingDirectory,
+    network: dependencyEgress?.networkName ?? 'none',
+    ...(dependencyEgress === null ? {} : { egress: dependencyEgress.egress }),
+  };
 }
 
 function admitPreparationCleanup(value: Fixture): void {
@@ -344,6 +460,7 @@ interface Fixture {
 
 async function fixture(options: {
   readonly failOperation?: TrustedOperationId;
+  readonly oversizedOperationObservation?: TrustedOperationId;
   readonly failStage?: 'preflight' | 'feeds' | 'config';
   readonly throwOperation?: TrustedOperationId;
   readonly cancelOperation?: TrustedOperationId;
@@ -357,7 +474,6 @@ async function fixture(options: {
   readonly operationHook?: (operationId: TrustedOperationId, clock: AdvancingClock) => void;
   readonly rejectOwnershipWrite?: RunnerWriteCommand['kind'];
   readonly rejectOwnershipWhen?: (command: RunnerWriteCommand) => boolean;
-  readonly expectedPatchAlreadyPresent?: boolean;
   readonly publicationBindingMismatch?: boolean;
   readonly workspaceFailureAt?: Readonly<{
     stage: PipelineStageName;
@@ -368,11 +484,13 @@ async function fixture(options: {
   readonly requirePreparationIntentBeforePrepare?: boolean;
   readonly throwPublicationPrepare?: boolean;
   readonly throwPublicationReopen?: boolean;
+  readonly throwFinalizeVerification?: boolean;
   readonly publicationPrepareHook?: () => void;
   readonly throwArtifactOwnershipWrite?: boolean;
   readonly distinctPublisherIdentities?: boolean;
   readonly pipelineLogWriter?: PipelineLogWriter;
   readonly directoryParent?: string;
+  readonly installAdmittedPackage?: boolean;
 } = {}): Promise<Fixture> {
   const directory = await mkdtemp(join(options.directoryParent ?? tmpdir(), 'osi-pipeline-order-'));
   temporaryDirectories.push(directory);
@@ -411,7 +529,10 @@ async function fixture(options: {
   });
   const statePath = loaded.stateRoot;
   const database = openBuilderDatabase(join(statePath, 'jobs.sqlite'));
-  const ownership = new OwnershipStore(database, { now: () => ACCEPTED });
+  const ownership = new OwnershipStore(database, {
+    now: () => ACCEPTED,
+    stateRoot: loaded.stateRoot,
+  });
   const store = new BuilderStore(database);
   const manifestPath = new URL('../../manifest/targets.json', import.meta.url);
   const manifest = loadManifest(manifestPath.pathname);
@@ -449,35 +570,79 @@ async function fixture(options: {
   };
   database.exec('BEGIN IMMEDIATE');
   try {
+    let identity: BuilderIdentity = Object.freeze({
+      ...createTestBuilderIdentity(manifest.sha256),
+      packageVersion: LOCK.packageVersion,
+      packageRoot: dirname(lockPath),
+      lockSha256: hash(canonical(LOCK)),
+      executionDefinitionSha256: LOCK.executionDefinitionSha256,
+      dependencyEgressProxySha256: LOCK.dependencyEgressProxySha256,
+      imageReference: `${LOCK.imageRepository}@sha256:${LOCK.imageDigest}`,
+      imageDigest: LOCK.imageDigest,
+    });
+    if (options.installAdmittedPackage === true) {
+      const packageRoot = dirname(lockPath);
+      const executionDefinition = Buffer.from('{"schemaVersion":1}\n');
+      const runner = Buffer.from('#!/bin/sh\nexit 0\n');
+      const cleanupWorker = Buffer.from('#!/bin/sh\nexit 0\n');
+      const dependencyEgressProxy = await readFile(new URL('../../builder/operations/osi-dependency-egress-proxy.cjs', import.meta.url));
+      const imageId = '7'.repeat(64);
+      const admittedLock = {
+        ...LOCK,
+        executionDefinitionSha256: createHash('sha256').update(executionDefinition).digest('hex'),
+        dependencyEgressProxySha256: createHash('sha256').update(dependencyEgressProxy).digest('hex'),
+        imageId,
+      };
+      const lockBytes = Buffer.from(canonical(admittedLock));
+      await Promise.all([
+        mkdir(join(packageRoot, 'bin'), { recursive: true }),
+        mkdir(join(packageRoot, 'manifest'), { recursive: true }),
+        mkdir(join(packageRoot, 'operations'), { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(lockPath, lockBytes),
+        writeFile(join(packageRoot, 'execution-definition.json'), executionDefinition),
+        writeFile(join(packageRoot, 'bin', 'osi-image-builder-runner'), runner, { mode: 0o555 }),
+        writeFile(join(packageRoot, 'bin', 'osi-image-builder-cleanup'), cleanupWorker, { mode: 0o555 }),
+        writeFile(join(packageRoot, 'manifest', 'targets.json'), await readFile(manifestPath)),
+        writeFile(join(packageRoot, 'operations', 'osi-dependency-egress-proxy.cjs'), dependencyEgressProxy, { mode: 0o444 }),
+      ]);
+      identity = Object.freeze({
+        packageVersion: admittedLock.packageVersion,
+        packageRoot,
+        lockSha256: createHash('sha256').update(lockBytes).digest('hex'),
+        executionDefinitionSha256: admittedLock.executionDefinitionSha256,
+        targetManifestSha256: manifest.sha256,
+        runnerSha256: createHash('sha256').update(runner).digest('hex'),
+        cleanupWorkerSha256: createHash('sha256').update(cleanupWorker).digest('hex'),
+        dependencyEgressProxySha256: admittedLock.dependencyEgressProxySha256,
+        imageReference: `${admittedLock.imageRepository}@sha256:${admittedLock.imageDigest}`,
+        imageId: `sha256:${imageId}`,
+        imageDigest: admittedLock.imageDigest,
+      });
+    }
+    const values = [
+      jobId, 'request-pipeline-order', canonical(request), 'git@github.com:Open-Smart-Irrigation/osi-os.git',
+      'refs/remotes/origin/design/agrolink', 'design/agrolink', 'design/agrolink', SHA40, SHA40,
+      canonical(SOURCE_PREPARATION), canonical(offlineFeedPreparation), 'rpi-5', 'release', manifest.sha256,
+      'admitted', identity.packageVersion, identity.packageRoot, identity.lockSha256,
+      identity.executionDefinitionSha256, identity.targetManifestSha256, identity.runnerSha256,
+      identity.cleanupWorkerSha256, identity.dependencyEgressProxySha256,
+      identity.imageReference, identity.imageId, identity.imageDigest,
+      ACCEPTED, 'Builder <builder@example.test>', 'Pipeline fixture', ACCEPTED, 'queued', 'queued', 0,
+      ACCEPTED, ACCEPTED,
+    ];
     database.prepare(`INSERT INTO jobs (
       job_id, request_id, request_json, source_remote, source_ref,
       source_branch, branch, expected_sha, pinned_sha, source_preparation_json,
       offline_feed_preparation_json, target_id, root_id, target_manifest_sha256,
+      builder_identity_status, builder_package_version, builder_package_root, builder_lock_sha256,
+      builder_execution_definition_sha256, builder_target_manifest_sha256, builder_runner_sha256,
+      builder_cleanup_worker_sha256, builder_dependency_egress_proxy_sha256,
+      builder_image_reference, builder_image_id, builder_image_digest,
       source_commit_time, source_author, source_subject, accepted_at, state,
       queue_state, queue_position, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued',
-      'queued', 0, ?, ?)`).run(
-      jobId,
-      'request-pipeline-order',
-      canonical(request),
-      'git@github.com:Open-Smart-Irrigation/osi-os.git',
-      'refs/remotes/origin/design/agrolink',
-      'design/agrolink',
-      'design/agrolink',
-      SHA40,
-      SHA40,
-      canonical(SOURCE_PREPARATION),
-      canonical(offlineFeedPreparation),
-      'rpi-5',
-      'release',
-      manifest.sha256,
-      ACCEPTED,
-      'Builder <builder@example.test>',
-      'Pipeline fixture',
-      ACCEPTED,
-      ACCEPTED,
-      ACCEPTED,
-    );
+    ) VALUES (${values.map(() => '?').join(', ')})`).run(...values);
     database.prepare(
       'INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, 0, ?)',
     ).run(jobId, ACCEPTED);
@@ -493,6 +658,8 @@ async function fixture(options: {
     database.exec('ROLLBACK');
     throw error;
   }
+  const admittedBuilder = store.getJob(jobId).builderIdentity;
+  if (admittedBuilder === null) throw new Error('pipeline fixture lost its admitted builder identity');
   expect(ownership.apiWrite({
     kind: 'dispatch',
     jobId,
@@ -539,7 +706,7 @@ async function fixture(options: {
         : 'no nested error';
       throw new Error(`${command.kind} threw: ${cause}`, { cause: error });
     }
-    if (!result.ok) throw new Error(`operation ownership failed: ${result.conflict.kind}`);
+    if (!result.ok) throw new Error(`operation ownership failed: ${result.conflict.kind}: ${result.conflict.message}`);
   };
 
   const operations = {
@@ -594,11 +761,21 @@ async function fixture(options: {
         readOnly: false,
       };
       const environment = { SOURCE_DATE_EPOCH: '1785052800' };
-      const security = {
-        capDrop: ['ALL'],
-        noNewPrivileges: true,
-        user: '1000:1000',
-      };
+      const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
+      const gid = typeof process.getgid === 'function' ? process.getgid() : 1000;
+      const dependencyEgress = operationId === 'frontend-install' || operationId === 'build-image'
+        ? dependencyEgressFixture(
+            statePath,
+            jobId,
+            manifest.sha256,
+            operationId,
+            attempt,
+            admittedBuilder,
+            uid,
+            gid,
+          )
+        : null;
+      const security = operationSecurityFixture(operationId, definition, uid, gid, dependencyEgress);
       const createdAt = clock.now();
       write({
         kind: 'container',
@@ -621,35 +798,12 @@ async function fixture(options: {
       });
       const startedContainerAt = clock.now();
       const stoppedAt = clock.now();
-      const expectedPatch = options.expectedPatchAlreadyPresent === true
-        && operationId === 'activate-target';
       const failed = options.failOperation === operationId;
-      const acceptedDisposition = expectedPatch
-        ? classifyTargetSetupOperationResult(
-            'activate-target',
-            definition,
-            {
-              argv: definition.argv,
-              startedAt,
-              finishedAt: startedAt,
-              exitCode: 2,
-              signal: null,
-              timedOut: false,
-              stdout: rootfsAlreadyPresentStdout(context.target.environment),
-              stderr: ROOTFS_ALREADY_PRESENT_STDERR,
-            },
-            context.job.requestId,
-          ).disposition
-        : null;
-      const operationOutcome = acceptedDisposition === 'expected-rootfs-already-present'
-        ? 'accepted' as const
-        : failed
-          ? 'failed' as const
-          : 'passed' as const;
+      const operationOutcome = failed ? 'failed' as const : 'passed' as const;
       const inspection = {
         running: false,
         status: 'exited',
-        exitCode: expectedPatch ? 2 : failed ? 1 : 0,
+        exitCode: failed ? 1 : 0,
       };
       write({
         kind: 'container',
@@ -680,9 +834,6 @@ async function fixture(options: {
         operationId,
         attempt,
         outcome: operationOutcome,
-        ...(expectedPatch
-          ? { acceptedDisposition: 'expected-rootfs-already-present' }
-          : {}),
       });
       await writeFile(evidenceAbsolutePath, evidenceBytes);
       const operationInput: OperationInput = {
@@ -703,12 +854,9 @@ async function fixture(options: {
         inspection,
         timedOut: false,
         lifecyclePhase: 'stopped',
-        exitCode: expectedPatch ? 2 : failed ? 1 : 0,
+        exitCode: failed ? 1 : 0,
         signal: null,
         outcome: operationOutcome,
-        ...(expectedPatch
-          ? { acceptedDisposition: 'expected-rootfs-already-present' as const }
-          : {}),
         evidencePath: evidenceRelativePath,
         evidenceSha256: hash(evidenceBytes),
         ...(failed
@@ -757,6 +905,7 @@ async function fixture(options: {
             docker: 'absent',
             verifiedAt: cleanupAt,
           },
+          ...(dependencyEgress === null ? {} : { egress: dependencyEgress.proof }),
         },
       });
       return Object.freeze({
@@ -767,7 +916,7 @@ async function fixture(options: {
           argv: definition.argv,
           startedAt,
           finishedAt,
-          exitCode: expectedPatch ? 2 : failed ? 1 : 0,
+          exitCode: failed ? 1 : 0,
           signal: null,
           timedOut: false,
           outputLimit: false,
@@ -775,11 +924,12 @@ async function fixture(options: {
         observations: Object.freeze({
           evidencePath: evidenceRelativePath,
           evidenceSha256: hash(evidenceBytes),
-          acceptedDisposition,
-          stdout: expectedPatch
-            ? rootfsAlreadyPresentStdout(context.target.environment)
+          lifecyclePhase: 'stopped',
+          containerId,
+          stdout: options.oversizedOperationObservation === operationId
+            ? 'x'.repeat(65_537)
             : '',
-          stderr: expectedPatch ? ROOTFS_ALREADY_PRESENT_STDERR : '',
+          stderr: '',
         }),
         ...(failed
           ? {
@@ -922,6 +1072,9 @@ async function fixture(options: {
       staging: 'absent' as const,
     }),
     finalizeVerification: async (value: Parameters<PipelineInput['services']['publicationFiles']['finalizeVerification']>[0]) => {
+      if (options.throwFinalizeVerification === true) {
+        throw new Error('injected publication sealing failure');
+      }
       finalizedVerification.push(value.verificationManifest);
       return {
         verified: true as const,
@@ -1076,20 +1229,7 @@ async function fixture(options: {
       operations,
       targetSetup: {
         setup: async (context) => {
-          const definition = createOperationDefinition('activate-target', {
-            environment: context.target.environment,
-          });
-          const activation = options.expectedPatchAlreadyPresent === true
-            ? await context.runTargetSetupOperation('activate-target', definition)
-            : await context.runOperation('activate-target');
-          const disposition = options.expectedPatchAlreadyPresent === true
-            ? classifyTargetSetupOperationResult('activate-target', definition, {
-                ...activation.command,
-                signal: activation.command.signal as NodeJS.Signals | null,
-                stdout: String(activation.observations.stdout ?? ''),
-                stderr: String(activation.observations.stderr ?? ''),
-              }).disposition
-            : 'passed';
+          const activation = await context.runOperation('activate-target');
           if (options.verifyProducedTargetEvidence === true) {
             await Promise.all(manifest.manifest.targets.map((candidate) => (
               evidenceWriter.writeTargetSetupSourceConfig({
@@ -1102,12 +1242,7 @@ async function fixture(options: {
           const executions = [activation];
           return {
             executions,
-            observations: disposition === 'expected-rootfs-already-present'
-              ? {
-                  ...sourceObservations,
-                  patchDecision: 'already-present',
-                }
-              : sourceObservations,
+            observations: sourceObservations,
           };
         },
         feeds: async (context) => {
@@ -2108,6 +2243,8 @@ describe('trusted pipeline integration', () => {
               signals: { on: () => undefined, off: () => undefined },
             });
             const imageReference = `registry.example.test/osi/builder@sha256:${HASH_C}`;
+            const worktreePath = join(value.directory, 'repository');
+            const worktreeIdentity = await lstat(worktreePath, { bigint: true });
             const commandExecutor: DockerCommandExecutor = {
               run: vi.fn(async (argv) => {
                 dockerActions.push(argv[1] ?? '');
@@ -2137,11 +2274,18 @@ describe('trusted pipeline integration', () => {
               commandExecutor,
               dockerPath: '/usr/bin/docker',
               imageReference,
+              imageId: `sha256:${HASH_A}`,
               imageDigest: HASH_C,
               jobId: value.input.jobId,
               manifestSha256: value.input.manifest.sha256,
               attempt: 1,
-              worktreePath: '/tmp/osi-operation-race-worktree',
+              worktreePath,
+              dependencyEgressCredentialDirectory: '/tmp/osi-image-builder-test-credentials',
+              workspaceIdentity: {
+                device: Number(worktreeIdentity.dev),
+                inode: Number(worktreeIdentity.ino),
+              },
+              activeTargetEnvironment: value.input.target.environment,
               uid: 1000,
               gid: 1000,
               operationId: 'verify-image',
@@ -2407,7 +2551,7 @@ describe('trusted pipeline integration', () => {
   });
 
   it('guards the concrete production publisher composition after opening ownership state', async () => {
-    const value = await fixture({ directoryParent: process.cwd() });
+    const value = await fixture({ directoryParent: process.cwd(), installAdmittedPackage: true });
     const configHome = join(value.directory, 'config');
     const packageDirectory = join(value.directory, 'installed', LOCK.packageVersion);
     const stateHome = join(value.directory, 'state-home');
@@ -2446,6 +2590,8 @@ describe('trusted pipeline integration', () => {
       ]);
       process.env.XDG_CONFIG_HOME = configHome;
       process.env.XDG_STATE_HOME = stateHome;
+      await chmod(packageDirectory, 0o555);
+      await chmod(join(packageDirectory, 'operations'), 0o555);
 
       const claimExpiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
       expect(value.ownership.apiWrite({
@@ -2459,7 +2605,9 @@ describe('trusted pipeline integration', () => {
       }).ok).toBe(true);
       await expect(runRunner([
         value.input.jobId,
-      ])).resolves.toMatchObject({
+      ], {
+        currentExecutablePath: join(packageDirectory, 'bin', 'osi-image-builder-runner'),
+      })).resolves.toMatchObject({
         state: 'failed',
       });
       expect(value.store.getJob(value.input.jobId)).toMatchObject({
@@ -2477,6 +2625,8 @@ describe('trusted pipeline integration', () => {
       else process.env.XDG_CONFIG_HOME = priorConfigHome;
       if (priorStateHome === undefined) delete process.env.XDG_STATE_HOME;
       else process.env.XDG_STATE_HOME = priorStateHome;
+      await chmod(packageDirectory, 0o755).catch(() => undefined);
+      await chmod(join(packageDirectory, 'operations'), 0o755).catch(() => undefined);
       value.close();
     }
   });
@@ -2828,6 +2978,7 @@ describe('trusted pipeline integration', () => {
       expect(value.store.getJob(value.input.jobId)).toMatchObject({
         state: 'succeeded',
         publishState: 'published',
+        releaseSealStatus: 'sealed',
         artifactStagingPath: null,
         artifactFinalPath: `${encodeBranchSlug('design/agrolink')}/${SHA40}/rpi-5/factory.img.gz`,
       });
@@ -2857,6 +3008,105 @@ describe('trusted pipeline integration', () => {
       value.close();
     }
   });
+
+  it('persists production-faithful security snapshots for dependency and offline operations', async () => {
+    const value = await fixture();
+    const getuid = vi.spyOn(process, 'getuid').mockReturnValue(1234);
+    const getgid = vi.spyOn(process, 'getgid').mockReturnValue(2345);
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'succeeded',
+        blockerCode: null,
+      });
+      const security = (operationId: TrustedOperationId): JsonObject => {
+        const snapshot = value.store.getOperation(value.input.jobId, operationId, 1)?.containerSecurity;
+        if (snapshot === null || snapshot === undefined) throw new Error(`${operationId} security snapshot is absent`);
+        return snapshot;
+      };
+      expect(security('frontend-install')).toMatchObject({
+        readonlyRootfs: false,
+        user: '1234:2345',
+        workdir: '/workdir/web/react-gui',
+        network: 'osi-image-builder-egress-5ea2416b7ea3e2af',
+        egress: {
+          network: { name: 'osi-image-builder-egress-5ea2416b7ea3e2af' },
+          proxy: { user: '1234:2345' },
+          tls: { directoryMetadata: { uid: 1234, gid: 2345 } },
+        },
+      });
+      expect(security('build-image')).toMatchObject({
+        readonlyRootfs: false,
+        user: '1234:2345',
+        workdir: '/workdir',
+        network: 'osi-image-builder-egress-6ecd8acb6df4fc96',
+        egress: {
+          network: { name: 'osi-image-builder-egress-6ecd8acb6df4fc96' },
+          proxy: { user: '1234:2345' },
+          tls: { directoryMetadata: { uid: 1234, gid: 2345 } },
+        },
+      });
+      expect(security('frontend-test')).toMatchObject({
+        readonlyRootfs: false,
+        user: '1234:2345',
+        workdir: '/workdir/web/react-gui',
+        network: 'none',
+      });
+      expect(security('frontend-test')).not.toHaveProperty('egress');
+      expect(security('verify-image')).toMatchObject({
+        readonlyRootfs: true,
+        user: '1234:2345',
+        workdir: '/workdir',
+        network: 'none',
+      });
+      expect(security('verify-image')).not.toHaveProperty('egress');
+    } finally {
+      getuid.mockRestore();
+      getgid.mockRestore();
+      value.close();
+    }
+  });
+
+  it.each([
+    ['release-gates', 'verify-profile-parity'],
+    ['frontend', 'frontend-install'],
+    ['build', 'build-image'],
+  ] as const)(
+    'keeps %s stage evidence bounded when a successful operation has oversized output',
+    async (stage, operationId) => {
+      const value = await fixture({ oversizedOperationObservation: operationId });
+      try {
+        await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+          state: 'succeeded',
+          blockerCode: null,
+        });
+        const row = value.store.getStage(value.input.jobId, stage);
+        const evidence = JSON.parse(await readFile(
+          join(value.statePath, row!.evidencePath!),
+          'utf8',
+        )) as {
+          observations: {
+            operations: Array<Record<string, unknown>>;
+          };
+        };
+        expect(Buffer.byteLength(JSON.stringify(evidence), 'utf8')).toBeLessThanOrEqual(65_536);
+        const operation = evidence.observations.operations.find(
+          (candidate) => candidate.operationId === operationId,
+        );
+        expect(operation).toMatchObject({
+          operationId,
+          outcome: 'passed',
+          evidencePath: expect.any(String),
+          evidenceSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+          lifecyclePhase: 'stopped',
+          containerId: expect.any(String),
+        });
+        expect(operation).not.toHaveProperty('stdout');
+        expect(operation).not.toHaveProperty('stderr');
+      } finally {
+        value.close();
+      }
+    },
+  );
 
   it('publishes distinct stage 04 and 06 profile evidence before production verification joins it', async () => {
     const value = await fixture({ verifyProducedTargetEvidence: true });
@@ -2933,6 +3183,7 @@ describe('trusted pipeline integration', () => {
         nodeVersion: LOCK.nodeVersion,
         executionDefinitionSha256: LOCK.executionDefinitionSha256,
         validationEvidenceSha256: LOCK.validationEvidenceSha256,
+        dependencyEgressProxySha256: LOCK.dependencyEgressProxySha256,
         builderLockSha256: hash(canonical(LOCK)),
         canonicalImageRef: `${LOCK.imageRepository}@sha256:${LOCK.imageDigest}`,
         targetManifestSha256: value.input.manifest.sha256,
@@ -3080,32 +3331,6 @@ describe('trusted pipeline integration', () => {
         state: 'succeeded',
       });
       expect(value.input.services.publisher.publish).toHaveBeenCalledOnce();
-    } finally {
-      value.close();
-    }
-  });
-
-  it('lets Task15 classify only the exact expected nonzero quilt result', async () => {
-    const value = await fixture({ expectedPatchAlreadyPresent: true });
-    try {
-      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
-        state: 'succeeded',
-      });
-      expect(value.store.getOperation(
-        value.input.jobId,
-        'activate-target',
-        1,
-      )).toMatchObject({
-        outcome: 'accepted',
-        acceptedDisposition: 'expected-rootfs-already-present',
-        exitCode: 2,
-      });
-      const stage = value.store.getStage(value.input.jobId, 'target-setup')!;
-      const evidence = JSON.parse(await readFile(
-        join(value.statePath, stage.evidencePath!),
-        'utf8',
-      )) as { observations: Record<string, unknown> };
-      expect(evidence.observations.patchDecision).toBe('already-present');
     } finally {
       value.close();
     }
@@ -3564,6 +3789,7 @@ describe('trusted pipeline integration', () => {
       expect(value.store.getJob(value.input.jobId)).toMatchObject({
         state: 'publishing',
         publishState: 'publishing',
+        releaseSealStatus: 'in_progress',
         artifactStagingPath: `staging/${value.input.jobId}/factory.img.gz`,
         artifactQuarantinePath: null,
         artifactQuarantineIntentPath: `.osi-image-builder/quarantine/${value.input.jobId}`,
@@ -3629,6 +3855,33 @@ describe('trusted pipeline integration', () => {
       });
       expect(value.store.listEvents(value.input.jobId, { limit: 500 }).events
         .filter(({ eventType }) => eventType === 'terminal')).toHaveLength(0);
+    } finally {
+      value.close();
+    }
+  });
+
+  it('keeps publish evidence absent and the durable stage running when release sealing needs recovery', async () => {
+    const value = await fixture({ throwFinalizeVerification: true });
+    try {
+      await expect(createPipeline(value.input).run()).resolves.toMatchObject({
+        state: 'recovery-required',
+        blockerCode: 'PUBLISH_RECOVERY_FAILED',
+      });
+      expect(value.store.getJob(value.input.jobId)).toMatchObject({
+        state: 'publishing',
+        publishState: 'publishing',
+        releaseSealStatus: 'in_progress',
+        terminalAt: null,
+      });
+      expect(value.store.getStage(value.input.jobId, 'publish')).toMatchObject({
+        outcome: 'running',
+        evidencePath: null,
+        evidenceSha256: null,
+      });
+      await expect(access(join(
+        value.statePath,
+        `jobs/${value.input.jobId}/evidence/09-publish.json`,
+      ))).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       value.close();
     }

@@ -12,6 +12,7 @@ export interface OperationDefinition {
 
 const ENVIRONMENT = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 export const INTERNAL_OPERATION_TOOL_PATH = '/opt/osi-image-builder/operations/osi-image-builder-tool.js';
+export const INTERNAL_EXECUTION_GUARD_PATH = '/opt/osi-image-builder/operations/osi-image-builder-exec-guard.js';
 
 function validateContext(context: OperationArgvContext): void {
   if (context === null || typeof context !== 'object' || JSON.stringify(Object.keys(context).sort()) !== JSON.stringify(['environment'])) throw new Error('operation context contains unexpected caller-controlled fields');
@@ -23,9 +24,9 @@ type OperationFactory = (context: OperationArgvContext) => readonly string[];
 const FRONTEND_OPERATION_IDS = new Set<TrustedOperationId>(['frontend-install', 'frontend-test', 'frontend-typecheck', 'frontend-build']);
 
 const factories: Readonly<Record<TrustedOperationId, OperationFactory>> = Object.freeze({
-  'activate-target': (context) => ['make', 'switch-env', `ENV=${context.environment}`],
+  'activate-target': (context) => ['node', INTERNAL_OPERATION_TOOL_PATH, 'activate-target', context.environment],
   'copy-feed-config': () => ['node', INTERNAL_OPERATION_TOOL_PATH, 'copy-feed-config'],
-  'update-feeds': () => ['openwrt/scripts/feeds', 'update', '-a'],
+  'update-feeds': () => ['node', INTERNAL_OPERATION_TOOL_PATH, 'update-feeds'],
   'install-feeds': () => ['openwrt/scripts/feeds', 'install', '-a'],
   'resolve-config': () => ['make', '-C', 'openwrt', 'defconfig'],
   'build-image': () => ['make', '-C', 'openwrt', '-j4'],

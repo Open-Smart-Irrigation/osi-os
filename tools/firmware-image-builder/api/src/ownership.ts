@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
+import { join } from 'node:path';
 import {
   ACTIVE_RECOVERY_STATES,
   ADMISSION_ID_PATTERN,
@@ -8,6 +9,7 @@ import {
   BUILDER_ERROR_CODES,
   JOB_STATES,
   PIPELINE_STAGE_NAMES,
+  isDependencyEgressOperationId,
   type ActiveRecoveryState,
   type BuilderErrorCode,
   type JobState,
@@ -16,8 +18,18 @@ import {
   type TrustedOperationId,
 } from '../../domain/types.js';
 import { encodeBranchSlug } from '../../domain/paths.js';
+import { parseBuilderIdentity } from '../../domain/builder-identity.js';
+import {
+  DEPENDENCY_EGRESS_OPERATION_HOSTS,
+  EGRESS_ATTEMPT_LABEL,
+  EGRESS_JOB_LABEL,
+  EGRESS_MANIFEST_LABEL,
+  EGRESS_OPERATION_LABEL,
+  parseDependencyEgressNetwork,
+  type DependencyEgressCleanupPostcondition,
+} from '../../domain/dependency-egress-identity.js';
 import { encodeOfflineFeedPreparation, encodeSourcePreparation, type ArtifactInput, type CreateJobInput, type FreshnessInput, type JsonObject, type JsonValue, type OperationInput } from './store.js';
-import { TEXT_LIMITS, boundedText, canonicalInstant as sharedCanonicalInstant, encodeJson, normalizeCommand, normalizeJson, parseJson, requireChronology as sharedRequireChronology, SharedValidationError } from './validation.js';
+import { TEXT_LIMITS, boundedText, canonicalAbsolutePath, canonicalInstant as sharedCanonicalInstant, encodeJson, normalizeCommand, normalizeJson, parseJson, requireChronology as sharedRequireChronology, SharedValidationError } from './validation.js';
 
 const HASH64 = /^[0-9a-f]{64}$/;
 const STOP_AUTHORIZATION_ATTEMPT_ID = /^sta_[a-f0-9]{32}$/;
@@ -56,6 +68,40 @@ const STAGE_STATE: Readonly<Record<PipelineStageName, JobState>> = Object.freeze
 
 type Row = Record<string, string | number | null>;
 type JsonInput = JsonObject | null | undefined;
+const JOB_CONTAINER_IDENTITY_COLUMNS = Object.freeze([
+  'container_id', 'container_name', 'container_image_digest', 'container_label_job_id', 'container_label_manifest_sha',
+  'container_labels_json', 'container_mount_json', 'container_env_json', 'container_security_json', 'container_inspection_json',
+  'container_created_at', 'container_started_at', 'container_stopped_at', 'container_removed_at', 'container_cleanup_outcome',
+] as const);
+const JOB_CONTAINER_IDENTITY_NULL_SQL = JOB_CONTAINER_IDENTITY_COLUMNS.map((column) => `${column} IS NULL`).join(' AND ');
+
+function jobContainerIdentityIsNull(row: Row): boolean {
+  return JOB_CONTAINER_IDENTITY_COLUMNS.every((column) => row[column] === null || row[column] === undefined);
+}
+
+function jobContainerIdentity(row: Row): JsonObject {
+  return Object.fromEntries(JOB_CONTAINER_IDENTITY_COLUMNS.map((column) => [column, row[column] ?? null]));
+}
+
+function jobContainerIdentityMatches(row: Row, value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const identity = value as Record<string, unknown>;
+  return Object.keys(identity).length === JOB_CONTAINER_IDENTITY_COLUMNS.length
+    && JOB_CONTAINER_IDENTITY_COLUMNS.every((column) => Object.hasOwn(identity, column) && identity[column] === (row[column] ?? null));
+}
+
+function persistedDependencyEgress(row: Row): boolean {
+  if (row.container_security_json === null || row.container_security_json === undefined) return false;
+  const security = shapeRecord(parseJson(String(row.container_security_json), 'persisted container security', true), 'persisted container security');
+  return Object.hasOwn(security, 'egress');
+}
+
+function trustedContainerUser(): string {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
+  const gid = typeof process.getgid === 'function' ? process.getgid() : 1000;
+  if (!Number.isSafeInteger(uid) || uid < 0 || uid > 65535 || !Number.isSafeInteger(gid) || gid < 0 || gid > 65535) throw new OwnershipValidationError('trusted container user is unavailable');
+  return `${uid}:${gid}`;
+}
 
 type DbStatement = Readonly<{
   readonly run: (...parameters: any[]) => any;
@@ -272,6 +318,7 @@ export type CleanupPostcondition = Readonly<{
   readonly container: CleanupPostContainer;
   readonly staging: CleanupStagingPostcondition;
   readonly logs: LogCleanupProof;
+  readonly egress: DependencyEgressCleanupPostcondition;
   readonly blocker: 'none';
 }>;
 
@@ -298,10 +345,20 @@ export type PublishRecoveryEvidence = Readonly<{
   }>;
 }>;
 
+export type DependencyEgressCleanupProof = Readonly<{
+  readonly proxy: Readonly<{ readonly id: string; readonly absent: true }>;
+  readonly network: Readonly<{ readonly id: string; readonly absent: true }>;
+  readonly tls: Readonly<{ readonly hostDirectory: string; readonly absent: true }>;
+  readonly credential: Readonly<{ readonly hostPath: string; readonly sha256: string; readonly absent: true }>;
+  readonly globalLabelResult: 'no-match';
+}>;
+
+type OperationCleanupEgress = Readonly<{ readonly egress?: DependencyEgressCleanupProof }>;
+
 export type OperationCleanupProof =
-  | Readonly<{ readonly kind: 'null-identity'; readonly container: NullContainerProof; readonly logs: LogCleanupProof }>
-  | Readonly<{ readonly kind: 'container-absent'; readonly id: string; readonly name: string; readonly imageDigest: string; readonly labels: JsonObject; readonly stoppedAt: string; readonly observedAt: string; readonly globalLabelResult: 'no-match'; readonly logs: LogCleanupProof }>
-  | Readonly<{ readonly kind: 'container-removed'; readonly id: string; readonly name: string; readonly imageDigest: string; readonly labels: JsonObject; readonly stoppedAt: string; readonly removedAt: string; readonly observedAt: string; readonly globalLabelResult: 'no-match'; readonly logs: LogCleanupProof }>;
+  | (Readonly<{ readonly kind: 'null-identity'; readonly container: NullContainerProof; readonly logs: LogCleanupProof }> & OperationCleanupEgress)
+  | (Readonly<{ readonly kind: 'container-absent'; readonly id: string; readonly name: string; readonly imageDigest: string; readonly labels: JsonObject; readonly stoppedAt: string; readonly observedAt: string; readonly globalLabelResult: 'no-match'; readonly logs: LogCleanupProof }> & OperationCleanupEgress)
+  | (Readonly<{ readonly kind: 'container-removed'; readonly id: string; readonly name: string; readonly imageDigest: string; readonly labels: JsonObject; readonly stoppedAt: string; readonly removedAt: string; readonly observedAt: string; readonly globalLabelResult: 'no-match'; readonly logs: LogCleanupProof }> & OperationCleanupEgress);
 
 export type HandBackProof = Readonly<{ readonly runner: Readonly<{ readonly unit: string; readonly owner: string | null; readonly leaseExpiresAt: string | null; readonly inactiveAt: string; readonly observedAt: string }>; readonly container: NullContainerProof; readonly blocker: 'none' }>;
 
@@ -323,6 +380,7 @@ export type PublishBlockerRecheckProof =
     }>
   | Readonly<{
       readonly kind: 'destination-matches';
+      readonly sealStatus: 'in_progress' | 'sealed';
       readonly observedAt: string;
       readonly publisher: Readonly<{ readonly destination: 'candidate'; readonly staging: 'absent'; readonly mutationCount: 0 }>;
       readonly finalDirectory: string;
@@ -352,14 +410,16 @@ export type ApiWriteCommand =
   | Readonly<{ kind: 'dispatch-proof-observation'; jobId: string; claimOwner: string; unitInactiveAt: string; at: string }>
   | Readonly<{ kind: 'dispatch-release'; jobId: string; claimOwner: string; expectedPhase?: DispatchClaimPhase; at: string }>
   | Readonly<{ kind: 'request-cancellation'; jobId: string; reason: string; at: string; cooperativeDeadlineAt?: string; error?: JsonInput }>
+  | Readonly<{ kind: 'record-cancellation-coordination-failure'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; phase: 'scheduler' | 'coordinator'; failure: Readonly<{ kind: 'scheduler-rejected' | 'coordinator-rejected' }>; at: string }>
   | Readonly<{ kind: 'initialize-cancellation-coordination'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; cooperativeDeadlineAt: string; at: string }>
-  | Readonly<{ kind: 'observe-cancellation-clock'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; expectedHighWaterAt: string; observedAt: string; at: string }>
+  | Readonly<{ kind: 'observe-cancellation-clock'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; expectedHighWaterAt: string; expectedEscalationOwner?: string; expectedEscalationLeaseExpiresAt?: string; expectedStopIntentAt?: string; observedAt: string; at: string }>
   | Readonly<{ kind: 'record-cancellation-signal'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; runnerUnit: string; observedOwner: string; observedLeaseExpiresAt: string; observation: JsonObject; at: string }>
   | Readonly<{ kind: 'claim-cancellation-escalation'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; cooperativeDeadlineAt: string; runnerUnit: string; observedOwner: string; observedLeaseExpiresAt: string; escalationOwner: string; escalationLeaseExpiresAt: string; stopIntentAt: string; graceDeadlineAt: string; at: string }>
+  | Readonly<{ kind: 'takeover-cancellation-escalation'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; cooperativeDeadlineAt: string; runnerUnit: string; observedOwner: string; observedLeaseExpiresAt: string; previousEscalationOwner: string; previousEscalationLeaseExpiresAt: string; stopIntentAt: string; escalationOwner: string; escalationLeaseExpiresAt: string; graceDeadlineAt: string; at: string }>
   | Readonly<{ kind: 'authorize-cancellation-stop'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; runnerUnit: string; observedOwner: string; observedLeaseExpiresAt: string; escalationOwner: string; stopIntentAt: string; expectedHighWaterAt: string; authorizedAt: string; at: string }>
   | Readonly<{ kind: 'record-cancellation-stop'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; runnerUnit: string; observedOwner: string; observedLeaseExpiresAt: string; escalationOwner: string; stopIntentAt: string; observation: JsonObject; at: string }>
-  | Readonly<{ kind: 'record-cancellation-inspection'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; runnerUnit: string; observedOwner: string; observedLeaseExpiresAt: string; stopIntentAt: string; observation: JsonObject; at: string }>
-  | Readonly<{ kind: 'cancellation-recovery-blocker'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; observedRunnerUnit: string | null; observedOwner: string | null; observedLeaseExpiresAt: string | null; blocker: JsonObject; at: string }>
+  | Readonly<{ kind: 'record-cancellation-inspection'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; runnerUnit: string; observedOwner: string; observedLeaseExpiresAt: string; escalationOwner: string; escalationLeaseExpiresAt: string; stopIntentAt: string; observation: JsonObject; at: string }>
+  | Readonly<{ kind: 'cancellation-recovery-blocker'; jobId: string; expectedState: ActiveRecoveryState; cancelRequestedAt: string; observedRunnerUnit: string | null; observedOwner: string | null; observedLeaseExpiresAt: string | null; expectedEscalationOwner?: string; expectedEscalationLeaseExpiresAt?: string; expectedStopIntentAt?: string; blocker: JsonObject; at: string }>
   | Readonly<{ kind: 'freshness-request'; jobId: string; at: string }>
   | Readonly<{ kind: 'freshness-result'; jobId: string; input: FreshnessInput; at: string }>
   | Readonly<{ kind: 'runner-recovery-blocker'; jobId: string; expectedState: ActiveRecoveryState; runnerUnit: string; observedOwner: string | null; observedLeaseExpiresAt: string | null; blocker: JsonObject; blockerCode?: BuilderErrorCode; dispatchClaimOwner?: string; expectedClaimExpiresAt?: string; at: string }>
@@ -582,6 +642,7 @@ function validateCreateJobInput(input: unknown): void {
   sourcePreparationJson(value.sourcePreparation, value.pinnedSha);
   offlineFeedPreparationJson(value.offlineFeedPreparation, value.jobId, value.pinnedSha);
   preparedHash(value.targetManifestSha256, 'enqueue targetManifestSha256'); preparedInstant(value.sourceCommitTime, 'enqueue sourceCommitTime'); preparedInstant(value.acceptedAt, 'enqueue acceptedAt');
+  try { parseBuilderIdentity(value.builderIdentity); } catch (error) { throw new OwnershipValidationError('enqueue builder identity is invalid', { cause: error }); }
   preparedOptionalHash(value.preflightSha, 'enqueue preflightSha', true); preparedOptionalInstant(value.preflightCheckedAt, 'enqueue preflightCheckedAt'); preparedOptionalInstant(value.preflightExpiresAt, 'enqueue preflightExpiresAt');
   const preflightFields = [value.preflightSha, value.preflightCheckedAt, value.preflightExpiresAt].filter((field) => field !== undefined && field !== null);
   if (preflightFields.length !== 0 && preflightFields.length !== 3) throw new OwnershipValidationError('enqueue preflight evidence is incomplete');
@@ -767,22 +828,52 @@ function validateApiCommand(command: ApiWriteCommand): void {
     case 'dispatch-release':
       preparedCommon(value, 'API'); preparedString(value.claimOwner, 'dispatch release claim owner'); preparedOptionalEnum(value.expectedPhase, ['pre-start', 'start-attempted'], 'dispatch release phase'); return;
     case 'request-cancellation': preparedCommon(value, 'API'); preparedString(value.reason, 'cancellation reason'); preparedOptionalInstant(value.cooperativeDeadlineAt, 'cooperative cancellation deadline'); preparedJsonObject(value.error, 'cancellation error', true); return;
+    case 'record-cancellation-coordination-failure': {
+      preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation coordination failure state'); preparedInstant(value.cancelRequestedAt, 'cancellation coordination failure request time'); preparedEnum(value.phase, ['scheduler', 'coordinator'], 'cancellation coordination failure phase'); preparedJsonObject(value.failure, 'cancellation coordination failure');
+      const failure = value.failure as PreparedRecord;
+      exactShapeKeys(failure, ['kind'], 'cancellation coordination failure');
+      preparedEnum(failure.kind, ['scheduler-rejected', 'coordinator-rejected'], 'cancellation coordination failure kind');
+      if (failure.kind !== `${String(value.phase)}-rejected`) throw new OwnershipValidationError('cancellation coordination failure phase does not match failure kind');
+      return;
+    }
     case 'initialize-cancellation-coordination':
       preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation coordination state'); preparedInstant(value.cancelRequestedAt, 'cancellation coordination request time'); preparedInstant(value.cooperativeDeadlineAt, 'cooperative cancellation deadline'); return;
-    case 'observe-cancellation-clock':
-      preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation clock state'); preparedInstant(value.cancelRequestedAt, 'cancellation clock request time'); preparedInstant(value.expectedHighWaterAt, 'cancellation clock expected high-water'); preparedInstant(value.observedAt, 'cancellation clock observation'); return;
+    case 'observe-cancellation-clock': {
+      preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation clock state'); preparedInstant(value.cancelRequestedAt, 'cancellation clock request time'); preparedInstant(value.expectedHighWaterAt, 'cancellation clock expected high-water'); preparedInstant(value.observedAt, 'cancellation clock observation');
+      const escalationFence = [value.expectedEscalationOwner, value.expectedEscalationLeaseExpiresAt, value.expectedStopIntentAt];
+      const escalationFenceFields = escalationFence.filter((field) => field !== undefined).length;
+      if (escalationFenceFields !== 0 && escalationFenceFields !== escalationFence.length) throw new OwnershipValidationError('cancellation clock escalation fence is incomplete');
+      if (escalationFenceFields !== 0) {
+        preparedString(value.expectedEscalationOwner, 'cancellation clock escalation owner', TEXT_LIMITS.maxIdentifierBytes);
+        preparedInstant(value.expectedEscalationLeaseExpiresAt, 'cancellation clock escalation lease expiry');
+        preparedInstant(value.expectedStopIntentAt, 'cancellation clock stop intent');
+      }
+      return;
+    }
     case 'record-cancellation-signal':
       preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation signal state'); preparedInstant(value.cancelRequestedAt, 'cancellation signal request time'); runnerUnit(preparedString(value.jobId, 'cancellation signal jobId'), preparedString(value.runnerUnit, 'cancellation signal unit')); preparedString(value.observedOwner, 'cancellation signal runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.observedLeaseExpiresAt, 'cancellation signal runner lease expiry'); preparedJsonObject(value.observation, 'cancellation signal observation'); return;
     case 'claim-cancellation-escalation':
       preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation escalation state'); preparedInstant(value.cancelRequestedAt, 'cancellation escalation request time'); preparedInstant(value.cooperativeDeadlineAt, 'cancellation cooperative deadline'); runnerUnit(preparedString(value.jobId, 'cancellation escalation jobId'), preparedString(value.runnerUnit, 'cancellation escalation unit')); preparedString(value.observedOwner, 'cancellation escalation runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.observedLeaseExpiresAt, 'cancellation escalation runner lease expiry'); preparedString(value.escalationOwner, 'cancellation escalation owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.escalationLeaseExpiresAt, 'cancellation escalation lease expiry'); preparedInstant(value.stopIntentAt, 'cancellation stop intent time'); preparedInstant(value.graceDeadlineAt, 'cancellation grace deadline'); return;
+    case 'takeover-cancellation-escalation':
+      preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation escalation takeover state'); preparedInstant(value.cancelRequestedAt, 'cancellation escalation takeover request time'); preparedInstant(value.cooperativeDeadlineAt, 'cancellation escalation takeover cooperative deadline'); runnerUnit(preparedString(value.jobId, 'cancellation escalation takeover jobId'), preparedString(value.runnerUnit, 'cancellation escalation takeover unit')); preparedString(value.observedOwner, 'cancellation escalation takeover runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.observedLeaseExpiresAt, 'cancellation escalation takeover runner lease expiry'); preparedString(value.previousEscalationOwner, 'previous cancellation escalation owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.previousEscalationLeaseExpiresAt, 'previous cancellation escalation lease expiry'); preparedInstant(value.stopIntentAt, 'cancellation escalation takeover stop intent'); preparedString(value.escalationOwner, 'replacement cancellation escalation owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.escalationLeaseExpiresAt, 'replacement cancellation escalation lease expiry'); preparedInstant(value.graceDeadlineAt, 'replacement cancellation grace deadline'); return;
     case 'authorize-cancellation-stop':
       preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation stop authorization state'); preparedInstant(value.cancelRequestedAt, 'cancellation stop authorization request time'); runnerUnit(preparedString(value.jobId, 'cancellation stop authorization jobId'), preparedString(value.runnerUnit, 'cancellation stop authorization unit')); preparedString(value.observedOwner, 'cancellation stop authorization runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.observedLeaseExpiresAt, 'cancellation stop authorization runner lease expiry'); preparedString(value.escalationOwner, 'cancellation stop authorization escalation owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.stopIntentAt, 'cancellation stop authorization intent time'); preparedInstant(value.expectedHighWaterAt, 'cancellation stop authorization high-water'); preparedInstant(value.authorizedAt, 'cancellation stop authorization time'); return;
     case 'record-cancellation-stop':
       preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation stop state'); preparedInstant(value.cancelRequestedAt, 'cancellation stop request time'); runnerUnit(preparedString(value.jobId, 'cancellation stop jobId'), preparedString(value.runnerUnit, 'cancellation stop unit')); preparedString(value.observedOwner, 'cancellation stop runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.observedLeaseExpiresAt, 'cancellation stop runner lease expiry'); preparedString(value.escalationOwner, 'cancellation stop escalation owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.stopIntentAt, 'cancellation stop intent time'); preparedJsonObject(value.observation, 'cancellation stop observation'); return;
     case 'record-cancellation-inspection':
-      preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation inspection state'); preparedInstant(value.cancelRequestedAt, 'cancellation inspection request time'); runnerUnit(preparedString(value.jobId, 'cancellation inspection jobId'), preparedString(value.runnerUnit, 'cancellation inspection unit')); preparedString(value.observedOwner, 'cancellation inspection runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.observedLeaseExpiresAt, 'cancellation inspection runner lease expiry'); preparedInstant(value.stopIntentAt, 'cancellation inspection stop intent time'); preparedJsonObject(value.observation, 'cancellation inspection observation'); return;
-    case 'cancellation-recovery-blocker':
-      preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation recovery blocker state'); preparedInstant(value.cancelRequestedAt, 'cancellation recovery blocker request time'); shapeNullableString(value.observedRunnerUnit, 'cancellation recovery blocker raw unit'); shapeNullableString(value.observedOwner, 'cancellation recovery blocker raw owner'); shapeNullableString(value.observedLeaseExpiresAt, 'cancellation recovery blocker raw lease'); preparedJsonObject(value.blocker, 'cancellation recovery blocker'); return;
+      preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation inspection state'); preparedInstant(value.cancelRequestedAt, 'cancellation inspection request time'); runnerUnit(preparedString(value.jobId, 'cancellation inspection jobId'), preparedString(value.runnerUnit, 'cancellation inspection unit')); preparedString(value.observedOwner, 'cancellation inspection runner owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.observedLeaseExpiresAt, 'cancellation inspection runner lease expiry'); preparedString(value.escalationOwner, 'cancellation inspection escalation owner', TEXT_LIMITS.maxIdentifierBytes); preparedInstant(value.escalationLeaseExpiresAt, 'cancellation inspection escalation lease expiry'); preparedInstant(value.stopIntentAt, 'cancellation inspection stop intent time'); preparedJsonObject(value.observation, 'cancellation inspection observation'); return;
+    case 'cancellation-recovery-blocker': {
+      preparedCommon(value, 'API'); preparedEnum(value.expectedState, [...ACTIVE_STATES], 'cancellation recovery blocker state'); preparedInstant(value.cancelRequestedAt, 'cancellation recovery blocker request time'); shapeNullableString(value.observedRunnerUnit, 'cancellation recovery blocker raw unit'); shapeNullableString(value.observedOwner, 'cancellation recovery blocker raw owner'); shapeNullableString(value.observedLeaseExpiresAt, 'cancellation recovery blocker raw lease'); preparedJsonObject(value.blocker, 'cancellation recovery blocker');
+      const escalationFence = [value.expectedEscalationOwner, value.expectedEscalationLeaseExpiresAt, value.expectedStopIntentAt];
+      const escalationFenceFields = escalationFence.filter((field) => field !== undefined).length;
+      if (escalationFenceFields !== 0 && escalationFenceFields !== escalationFence.length) throw new OwnershipValidationError('cancellation recovery blocker escalation fence is incomplete');
+      if (escalationFenceFields !== 0) {
+        preparedString(value.expectedEscalationOwner, 'cancellation recovery blocker escalation owner', TEXT_LIMITS.maxIdentifierBytes);
+        preparedInstant(value.expectedEscalationLeaseExpiresAt, 'cancellation recovery blocker escalation lease expiry');
+        preparedInstant(value.expectedStopIntentAt, 'cancellation recovery blocker stop intent');
+      }
+      return;
+    }
     case 'freshness-request': preparedCommon(value, 'API'); return;
     case 'freshness-result':
       preparedCommon(value, 'API'); validateFreshnessInputShape(preparedObject(value.input, 'freshness input')); return;
@@ -834,8 +925,7 @@ function validateOperationInput(input: unknown): void {
   const value = preparedObject(input, 'operation input'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation input operationId');
   if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) <= 0) throw new OwnershipValidationError('operation input attempt is invalid');
   preparedHash(value.argvHash, 'operation input argv hash'); preparedPath(value.evidencePath, 'operation input evidence path'); preparedHash(value.evidenceSha256, 'operation input evidence SHA'); preparedInstant(value.startedAt, 'operation input startedAt'); preparedOptionalInstant(value.finishedAt, 'operation input finishedAt');
-  preparedEnum(value.lifecyclePhase, [...COMMAND_LIFECYCLES], 'operation input lifecycle'); preparedEnum(value.outcome, ['passed', 'failed', 'accepted'], 'operation input outcome');
-  preparedOptionalEnum(value.acceptedDisposition, ['expected-rootfs-already-present'], 'operation input accepted disposition');
+  preparedEnum(value.lifecyclePhase, [...COMMAND_LIFECYCLES], 'operation input lifecycle'); preparedEnum(value.outcome, ['passed', 'failed'], 'operation input outcome');
   preparedJsonArray(value.argv, 'operation input argv');
   if (typeof value.timedOut !== 'boolean') throw new OwnershipValidationError('operation input timedOut is invalid');
   preparedOptionalHash(value.containerImageDigest, 'operation input container image digest'); if (value.containerId !== undefined && value.containerId !== null) preparedString(value.containerId, 'operation input container id', TEXT_LIMITS.maxIdentifierBytes); if (value.containerName !== undefined && value.containerName !== null) preparedString(value.containerName, 'operation input container name', TEXT_LIMITS.maxIdentifierBytes); if (value.containerLabelJobId !== undefined && value.containerLabelJobId !== null) preparedString(value.containerLabelJobId, 'operation input container job label', TEXT_LIMITS.maxIdentifierBytes); preparedOptionalHash(value.containerLabelManifestSha, 'operation input container manifest label');
@@ -845,21 +935,6 @@ function validateOperationInput(input: unknown): void {
   if (value.lifecyclePhase === 'not_created' && hasContainer) throw new OwnershipValidationError('pre-container operation result contains container evidence');
   if (value.lifecyclePhase !== 'not_created' && containerFields.some((field) => value[field] === undefined || value[field] === null)) throw new OwnershipValidationError('container operation result is incomplete');
   if (value.outcome === 'passed' && (value.errorCode !== undefined && value.errorCode !== null || value.error !== undefined && value.error !== null)) throw new OwnershipValidationError('passed operation contains error evidence');
-  if (
-    value.outcome === 'accepted'
-    && (
-      value.operationId !== 'activate-target'
-      || value.acceptedDisposition !== 'expected-rootfs-already-present'
-      || value.exitCode !== 2
-      || value.signal !== undefined && value.signal !== null
-      || value.timedOut !== false
-      || value.errorCode !== undefined && value.errorCode !== null
-      || value.error !== undefined && value.error !== null
-    )
-  ) {
-    throw new OwnershipValidationError('accepted operation evidence is incoherent');
-  }
-  if (value.outcome !== 'accepted' && value.acceptedDisposition !== undefined && value.acceptedDisposition !== null) throw new OwnershipValidationError('operation accepted disposition has no accepted outcome');
   if (value.outcome === 'failed' && (value.errorCode === undefined || value.errorCode === null || value.error === undefined || value.error === null)) throw new OwnershipValidationError('failed operation is missing error evidence');
   if (value.exitCode !== undefined && value.exitCode !== null && (!Number.isSafeInteger(value.exitCode) || Number(value.exitCode) < 0)) throw new OwnershipValidationError('operation exit code is invalid');
   if (value.exitCode !== undefined && value.exitCode !== null && value.signal !== undefined && value.signal !== null) throw new OwnershipValidationError('operation exit and signal evidence are mutually exclusive');
@@ -892,7 +967,8 @@ function shapePublishBlockerRecheckProof(value: unknown, at: string, jobId: stri
     return;
   }
   if (proof.kind === 'destination-matches') {
-    exactShapeKeys(proof, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath', 'staging', 'artifact', 'checksum', 'manifest', 'verification'], 'destination-matches proof');
+    exactShapeKeys(proof, ['kind', 'sealStatus', 'observedAt', 'publisher', 'finalDirectory', 'finalPath', 'staging', 'artifact', 'checksum', 'manifest', 'verification'], 'destination-matches proof');
+    preparedEnum(proof.sealStatus, ['in_progress', 'sealed'], 'destination-matches seal status');
     const publisher = shapeRecord(proof.publisher, 'destination-matches publisher');
     exactShapeKeys(publisher, ['destination', 'staging', 'mutationCount'], 'destination-matches publisher');
     shapeLiteral(publisher.destination, 'candidate', 'destination-matches publisher destination');
@@ -955,8 +1031,9 @@ function shapeNullContainer(value: unknown, field: string, at: string): void {
   shapeLiteral(proof.kind, 'absent', `${field}.kind`); shapeLiteral(proof.globalLabelResult, 'no-match', `${field}.globalLabelResult`); preparedInstant(proof.observedAt, `${field}.observedAt`); shapeChronology([[`${field}.observedAt`, proof.observedAt], [`${field}.command.at`, at]], field);
 }
 
-function shapeLogs(value: unknown, field: string, allowUnsealed: boolean, at: string): void {
+function shapeLogs(value: unknown, field: string, allowUnsealed: boolean, at: string, exact = false): void {
   const proof = shapeRecord(value, field);
+  if (exact) exactShapeKeys(proof, ['runner', 'docker', 'verifiedAt'], field);
   const states = allowUnsealed ? ['absent', 'sealed', 'unsealed'] : ['absent', 'sealed'];
   preparedEnum(proof.runner, states, `${field}.runner`); preparedEnum(proof.docker, states, `${field}.docker`); preparedInstant(proof.verifiedAt, `${field}.verifiedAt`); shapeChronology([[`${field}.verifiedAt`, proof.verifiedAt], [`${field}.command.at`, at]], field);
 }
@@ -1095,20 +1172,57 @@ function shapeCancellationEvidence(value: unknown, at: string): void {
   shapeChronology([['cancellation evidence runner observation', evidence.runnerObservedAt], ['cancellation evidence command.at', at]], 'cancellation evidence');
 }
 
-function shapeCleanupSnapshot(value: unknown, field: string, at: string): void {
-  const snapshot = shapeRecord(value, field); const runner = shapeRecord(snapshot.runner, `${field}.runner`); preparedString(runner.unit, `${field}.runner.unit`, TEXT_LIMITS.maxIdentifierBytes); shapeNullableString(runner.owner, `${field}.runner.owner`); shapeNullableString(runner.leaseExpiresAt, `${field}.runner.leaseExpiresAt`); if ((runner.owner == null) !== (runner.leaseExpiresAt == null)) throw new OwnershipValidationError(`${field}.runner owner/lease pair is incomplete`); preparedInstant(runner.inactiveAt, `${field}.runner.inactiveAt`); preparedInstant(runner.observedAt, `${field}.runner.observedAt`); preparedEnum(snapshot.state, ['starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup', 'feeds', 'config', 'building', 'verifying', 'publishing', 'cancel_requested', 'interrupted'], `${field}.state`); preparedEnum(snapshot.blocker, ['none', 'container', 'staging-or-log'], `${field}.blocker`); shapeCleanupStagingSnapshot(snapshot.staging, `${field}.staging`, at);
+function shapeCleanupSnapshot(value: unknown, field: string, at: string, persisted = false): void {
+  const snapshot = shapeRecord(value, field);
+  exactShapeKeys(snapshot, ['runner', 'state', 'container', 'staging', 'logs', 'blocker'], field);
+  const runner = shapeRecord(snapshot.runner, `${field}.runner`);
+  exactShapeKeys(runner, ['unit', 'owner', 'leaseExpiresAt', 'inactiveAt', 'observedAt'], `${field}.runner`);
+  preparedString(runner.unit, `${field}.runner.unit`, TEXT_LIMITS.maxIdentifierBytes); shapeNullableString(runner.owner, `${field}.runner.owner`); shapeNullableString(runner.leaseExpiresAt, `${field}.runner.leaseExpiresAt`); if ((runner.owner == null) !== (runner.leaseExpiresAt == null)) throw new OwnershipValidationError(`${field}.runner owner/lease pair is incomplete`); preparedInstant(runner.inactiveAt, `${field}.runner.inactiveAt`); preparedInstant(runner.observedAt, `${field}.runner.observedAt`); preparedEnum(snapshot.state, ['starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup', 'feeds', 'config', 'building', 'verifying', 'publishing', 'cancel_requested', 'interrupted'], `${field}.state`); preparedEnum(snapshot.blocker, ['none', 'container', 'staging-or-log'], `${field}.blocker`); shapeCleanupStagingSnapshot(snapshot.staging, `${field}.staging`, at);
   const container = shapeRecord(snapshot.container, `${field}.container`);
-  if (container.kind === 'absent') shapeNullContainer(snapshot.container, `${field}.container`, at as string);
-  else { shapeLiteral(container.kind, 'present', `${field}.container.kind`); preparedString(container.id, `${field}.container.id`, TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, `${field}.container.name`, TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, `${field}.container.imageDigest`); preparedJsonObject(container.labels, `${field}.container.labels`); preparedEnum(container.globalLabelResult, ['single-exact-match', 'no-match'], `${field}.container.globalLabelResult`); preparedInstant(container.observedAt, `${field}.container.observedAt`); shapeChronology([[`${field}.container.observedAt`, container.observedAt], [`${field}.command.at`, at]], field); }
-  shapeRecord(snapshot.logs, `${field}.logs`); shapeChronology([[`${field}.runner.inactiveAt`, runner.inactiveAt], [`${field}.runner.observedAt`, runner.observedAt], [`${field}.at`, at]], field); shapeLogs(snapshot.logs, `${field}.logs`, true, at as string);
+  if (container.kind === 'absent') { exactShapeKeys(container, ['kind', 'globalLabelResult', 'observedAt'], `${field}.container`); shapeNullContainer(snapshot.container, `${field}.container`, at as string); }
+  else { exactShapeKeys(container, ['kind', 'id', 'name', 'imageDigest', 'labels', 'globalLabelResult', 'observedAt'], `${field}.container`); shapeLiteral(container.kind, 'present', `${field}.container.kind`); preparedString(container.id, `${field}.container.id`, TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, `${field}.container.name`, TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, `${field}.container.imageDigest`); preparedJsonObject(container.labels, `${field}.container.labels`); preparedEnum(container.globalLabelResult, ['single-exact-match', 'no-match'], `${field}.container.globalLabelResult`); preparedInstant(container.observedAt, `${field}.container.observedAt`); shapeChronology([[`${field}.container.observedAt`, container.observedAt], [`${field}.command.at`, at]], field); }
+  const logs = shapeRecord(snapshot.logs, `${field}.logs`);
+  exactShapeKeys(logs, persisted ? ['runner', 'docker', 'verifiedAt', 'generationIdentity'] : ['runner', 'docker', 'verifiedAt'], `${field}.logs`);
+  shapeChronology([[`${field}.runner.inactiveAt`, runner.inactiveAt], [`${field}.runner.observedAt`, runner.observedAt], [`${field}.at`, at]], field);
+  shapeLogs(snapshot.logs, `${field}.logs`, true, at as string, !persisted);
+  if (persisted) shapeCleanupLogGenerationIdentity(logs.generationIdentity, `${field}.logs.generationIdentity`, logs.verifiedAt as string);
+}
+
+function shapeCleanupLogGenerationIdentity(value: unknown, field: string, verifiedAt: string): void {
+  const identity = shapeRecord(value, field);
+  exactShapeKeys(identity, ['runner', 'docker'], field);
+  for (const stream of ['runner', 'docker'] as const) {
+    if (!Array.isArray(identity[stream])) throw new OwnershipValidationError(`${field}.${stream} is required`);
+    for (const [index, item] of (identity[stream] as unknown[]).entries()) {
+      const generation = shapeRecord(item, `${field}.${stream}[${index}]`);
+      exactShapeKeys(generation, ['generation', 'path', 'startedAt'], `${field}.${stream}[${index}]`);
+      if (!Number.isSafeInteger(generation.generation) || Number(generation.generation) < 0) throw new OwnershipValidationError(`${field}.${stream}[${index}].generation is invalid`);
+      preparedPath(generation.path, `${field}.${stream}[${index}].path`);
+      preparedInstant(generation.startedAt, `${field}.${stream}[${index}].startedAt`);
+      shapeChronology([
+        [`${field}.${stream}[${index}].startedAt`, generation.startedAt],
+        [`${field}.verifiedAt`, verifiedAt],
+      ], `${field}.${stream}[${index}]`);
+    }
+  }
+}
+
+export function parsePersistedCleanupSnapshot(value: unknown, field: string, at: string): CleanupSnapshot {
+  shapeCleanupSnapshot(value, field, at, true);
+  const snapshot = value as PersistedCleanupSnapshot;
+  const { generationIdentity: _generationIdentity, ...logs } = snapshot.logs;
+  return { ...snapshot, logs } as CleanupSnapshot;
 }
 
 function shapeCleanupStagingSnapshot(value: unknown, field: string, at: string): void {
   const staging = shapeRecord(value, field);
   if (staging.kind !== 'physical-present') {
+    if (staging.kind === 'absent') exactShapeKeys(staging, ['kind', 'path'], field);
+    else if (staging.kind === 'present') exactShapeKeys(staging, ['kind', 'path', 'sha256', 'size'], field);
     shapeStaging(value, field, true, false);
     return;
   }
+  exactShapeKeys(staging, ['kind', 'path', 'sha256', 'size', 'observedAt'], field);
   preparedPath(staging.path, `${field}.path`);
   const path = staging.path as string;
   if (!path.startsWith('staging/')) throw new OwnershipValidationError(`${field}.path is not a staging path`);
@@ -1120,13 +1234,114 @@ function shapeCleanupStagingSnapshot(value: unknown, field: string, at: string):
 
 function shapeCleanupPostcondition(value: unknown, at: string): void {
   const post = shapeRecord(value, 'cleanup postcondition');
-  const runner = shapeRecord(post.runner, 'cleanup postcondition runner'); preparedString(runner.unit, 'cleanup postcondition runner unit', TEXT_LIMITS.maxIdentifierBytes); shapeNullableString(runner.owner, 'cleanup postcondition runner owner'); shapeNullableString(runner.leaseExpiresAt, 'cleanup postcondition runner leaseExpiresAt'); if ((runner.owner == null) !== (runner.leaseExpiresAt == null)) throw new OwnershipValidationError('cleanup postcondition runner owner/lease pair is incomplete'); preparedInstant(runner.inactiveAt, 'cleanup postcondition runner inactiveAt'); preparedInstant(runner.observedAt, 'cleanup postcondition runner observedAt'); preparedEnum(post.state, ['starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup', 'feeds', 'config', 'building', 'verifying', 'publishing', 'cancel_requested', 'interrupted'], 'cleanup postcondition state');
+  exactShapeKeys(post, ['runner', 'state', 'container', 'staging', 'logs', 'egress', 'blocker'], 'cleanup postcondition');
+  const runner = shapeRecord(post.runner, 'cleanup postcondition runner'); exactShapeKeys(runner, ['unit', 'owner', 'leaseExpiresAt', 'inactiveAt', 'observedAt'], 'cleanup postcondition runner'); preparedString(runner.unit, 'cleanup postcondition runner unit', TEXT_LIMITS.maxIdentifierBytes); shapeNullableString(runner.owner, 'cleanup postcondition runner owner'); shapeNullableString(runner.leaseExpiresAt, 'cleanup postcondition runner leaseExpiresAt'); if ((runner.owner == null) !== (runner.leaseExpiresAt == null)) throw new OwnershipValidationError('cleanup postcondition runner owner/lease pair is incomplete'); preparedInstant(runner.inactiveAt, 'cleanup postcondition runner inactiveAt'); preparedInstant(runner.observedAt, 'cleanup postcondition runner observedAt'); preparedEnum(post.state, ['starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup', 'feeds', 'config', 'building', 'verifying', 'publishing', 'cancel_requested', 'interrupted'], 'cleanup postcondition state');
   const container = shapeRecord(post.container, 'cleanup postcondition container');
-  if (container.kind === 'removed') { preparedString(container.id, 'cleanup postcondition container id', TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, 'cleanup postcondition container name', TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, 'cleanup postcondition image digest'); preparedJsonObject(container.labels, 'cleanup postcondition labels'); shapeLiteral(container.exactIdAbsent, true, 'cleanup postcondition exactIdAbsent'); shapeLiteral(container.globalLabelResult, 'no-match', 'cleanup postcondition globalLabelResult'); preparedInstant(container.stoppedAt, 'cleanup postcondition stoppedAt'); preparedInstant(container.removedAt, 'cleanup postcondition removedAt'); preparedInstant(container.observedAt, 'cleanup postcondition observedAt'); }
-  else if (container.kind === 'already-absent') { preparedString(container.id, 'cleanup postcondition container id', TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, 'cleanup postcondition container name', TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, 'cleanup postcondition image digest'); preparedJsonObject(container.labels, 'cleanup postcondition labels'); shapeLiteral(container.exactIdAbsent, true, 'cleanup postcondition exactIdAbsent'); shapeLiteral(container.dockerAction, 'none', 'cleanup postcondition dockerAction'); shapeLiteral(container.globalLabelResult, 'no-match', 'cleanup postcondition globalLabelResult'); preparedInstant(container.observedAt, 'cleanup postcondition observedAt'); }
-  else if (container.kind === 'null-identity') { shapeLiteral(container.dockerAction, 'none', 'cleanup postcondition dockerAction'); shapeLiteral(container.globalLabelResult, 'no-match', 'cleanup postcondition globalLabelResult'); preparedInstant(container.observedAt, 'cleanup postcondition observedAt'); }
+  if (container.kind === 'removed') { exactShapeKeys(container, ['kind', 'id', 'name', 'imageDigest', 'labels', 'exactIdAbsent', 'globalLabelResult', 'stoppedAt', 'removedAt', 'observedAt'], 'cleanup postcondition removed container'); preparedString(container.id, 'cleanup postcondition container id', TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, 'cleanup postcondition container name', TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, 'cleanup postcondition image digest'); preparedJsonObject(container.labels, 'cleanup postcondition labels'); shapeLiteral(container.exactIdAbsent, true, 'cleanup postcondition exactIdAbsent'); shapeLiteral(container.globalLabelResult, 'no-match', 'cleanup postcondition globalLabelResult'); preparedInstant(container.stoppedAt, 'cleanup postcondition stoppedAt'); preparedInstant(container.removedAt, 'cleanup postcondition removedAt'); preparedInstant(container.observedAt, 'cleanup postcondition observedAt'); }
+  else if (container.kind === 'already-absent') { exactShapeKeys(container, ['kind', 'id', 'name', 'imageDigest', 'labels', 'exactIdAbsent', 'dockerAction', 'globalLabelResult', 'observedAt'], 'cleanup postcondition already-absent container'); preparedString(container.id, 'cleanup postcondition container id', TEXT_LIMITS.maxIdentifierBytes); preparedString(container.name, 'cleanup postcondition container name', TEXT_LIMITS.maxIdentifierBytes); preparedHash(container.imageDigest, 'cleanup postcondition image digest'); preparedJsonObject(container.labels, 'cleanup postcondition labels'); shapeLiteral(container.exactIdAbsent, true, 'cleanup postcondition exactIdAbsent'); shapeLiteral(container.dockerAction, 'none', 'cleanup postcondition dockerAction'); shapeLiteral(container.globalLabelResult, 'no-match', 'cleanup postcondition globalLabelResult'); preparedInstant(container.observedAt, 'cleanup postcondition observedAt'); }
+  else if (container.kind === 'null-identity') { exactShapeKeys(container, ['kind', 'dockerAction', 'globalLabelResult', 'observedAt'], 'cleanup postcondition null container'); shapeLiteral(container.dockerAction, 'none', 'cleanup postcondition dockerAction'); shapeLiteral(container.globalLabelResult, 'no-match', 'cleanup postcondition globalLabelResult'); preparedInstant(container.observedAt, 'cleanup postcondition observedAt'); }
   else throw new OwnershipValidationError('cleanup postcondition container kind is invalid');
-  shapeCleanupStagingPostcondition(post.staging, at); shapeLogs(post.logs, 'cleanup postcondition logs', false, at as string); shapeLiteral(post.blocker, 'none', 'cleanup postcondition blocker'); const logs = shapeRecord(post.logs, 'cleanup postcondition logs'); const staging = shapeRecord(post.staging, 'cleanup postcondition staging'); shapeChronology([['cleanup runner inactiveAt', runner.inactiveAt], ['cleanup runner observedAt', runner.observedAt], ['cleanup at', at]], 'cleanup postcondition'); if (container.kind === 'removed') shapeChronology([['cleanup stoppedAt', container.stoppedAt], ['cleanup removedAt', container.removedAt], ['cleanup observedAt', container.observedAt], ['cleanup at', at]], 'cleanup container'); else shapeChronology([['cleanup container observedAt', container.observedAt], ['cleanup at', at]], 'cleanup container');
+  shapeCleanupStagingPostcondition(post.staging, at); shapeLogs(post.logs, 'cleanup postcondition logs', false, at as string, true); shapeCleanupEgressPostcondition(post.egress); shapeLiteral(post.blocker, 'none', 'cleanup postcondition blocker'); const logs = shapeRecord(post.logs, 'cleanup postcondition logs'); const staging = shapeRecord(post.staging, 'cleanup postcondition staging'); shapeChronology([['cleanup runner inactiveAt', runner.inactiveAt], ['cleanup runner observedAt', runner.observedAt], ['cleanup at', at]], 'cleanup postcondition'); if (container.kind === 'removed') shapeChronology([['cleanup stoppedAt', container.stoppedAt], ['cleanup removedAt', container.removedAt], ['cleanup observedAt', container.observedAt], ['cleanup at', at]], 'cleanup container'); else shapeChronology([['cleanup container observedAt', container.observedAt], ['cleanup at', at]], 'cleanup container');
+}
+
+function shapeCleanupDockerAbsence(value: unknown, field: string, nullableProxy: boolean, globalAttestation: boolean): void {
+  const proof = shapeRecord(value, field);
+  exactShapeKeys(proof, globalAttestation ? ['proxy', 'network', 'globalLabelResult'] : ['proxy', 'network'], field);
+  if (globalAttestation) shapeLiteral(proof.globalLabelResult, 'no-match', `${field}.globalLabelResult`);
+  if (proof.proxy === null) {
+    if (!nullableProxy) throw new OwnershipValidationError(`${field}.proxy is required`);
+  } else {
+    const proxy = shapeRecord(proof.proxy, `${field}.proxy`);
+    exactShapeKeys(proxy, ['id', 'absent'], `${field}.proxy`);
+    if (!HASH64.test(preparedString(proxy.id, `${field}.proxy.id`, 64))) throw new OwnershipValidationError(`${field}.proxy.id is invalid`);
+    shapeLiteral(proxy.absent, true, `${field}.proxy.absent`);
+  }
+  const network = shapeRecord(proof.network, `${field}.network`);
+  exactShapeKeys(network, ['id', 'absent'], `${field}.network`);
+  if (!HASH64.test(preparedString(network.id, `${field}.network.id`, 64))) throw new OwnershipValidationError(`${field}.network.id is invalid`);
+  shapeLiteral(network.absent, true, `${field}.network.absent`);
+}
+
+function shapeCleanupEgressOperation(value: unknown, field: string): void {
+  preparedEnum(value, Object.keys(DEPENDENCY_EGRESS_OPERATION_HOSTS), field);
+}
+
+function shapeCleanupEgressAttempt(value: unknown, field: string): void {
+  if (!Number.isSafeInteger(value) || Number(value) <= 0) throw new OwnershipValidationError(`${field} must be a positive safe integer`);
+}
+
+function shapeCleanupEgressCredential(value: unknown, field: string): void {
+  const credential = shapeRecord(value, field);
+  exactShapeKeys(credential, ['kind', 'operationId', 'attempt', 'hostPath', 'expectedSha256', 'observedSha256', 'tls', 'absent'], field);
+  preparedEnum(credential.kind, ['normal', 'credential-only', 'tls-only'], `${field}.kind`);
+  shapeCleanupEgressOperation(credential.operationId, `${field}.operationId`);
+  shapeCleanupEgressAttempt(credential.attempt, `${field}.attempt`);
+  const hostPath = preparedString(credential.hostPath, `${field}.hostPath`, TEXT_LIMITS.maxPathBytes);
+  if (!hostPath.startsWith('/') || hostPath.includes('\\') || hostPath.includes('\0')) throw new OwnershipValidationError(`${field}.hostPath is not an absolute path`);
+  if (credential.expectedSha256 !== null) preparedHash(credential.expectedSha256, `${field}.expectedSha256`);
+  if (credential.observedSha256 !== null) preparedHash(credential.observedSha256, `${field}.observedSha256`);
+  if (credential.kind === 'tls-only') {
+    shapeLiteral(credential.observedSha256, null, `${field}.observedSha256`);
+  } else {
+    if (credential.expectedSha256 === null) throw new OwnershipValidationError(`${field}.expectedSha256 is required for a credential remnant`);
+    if (credential.kind === 'normal' && credential.observedSha256 === null) throw new OwnershipValidationError(`${field}.normal proof must include an observed credential hash`);
+    if (credential.observedSha256 !== null && credential.observedSha256 !== credential.expectedSha256) throw new OwnershipValidationError(`${field}.observedSha256 does not match expectedSha256`);
+  }
+  const tls = shapeRecord(credential.tls, `${field}.tls`);
+  exactShapeKeys(tls, ['hostDirectory', 'absent'], `${field}.tls`);
+  const tlsPath = preparedString(tls.hostDirectory, `${field}.tls.hostDirectory`, TEXT_LIMITS.maxPathBytes);
+  if (!tlsPath.startsWith('/') || tlsPath.includes('\\') || tlsPath.includes('\0')) throw new OwnershipValidationError(`${field}.tls.hostDirectory is not an absolute path`);
+  shapeLiteral(tls.absent, true, `${field}.tls.absent`);
+  shapeLiteral(credential.absent, true, `${field}.absent`);
+}
+
+function shapeCleanupRecoveryDocker(value: unknown, field: string, persisted: boolean): void {
+  const proof = shapeRecord(value, field);
+  exactShapeKeys(proof, persisted
+    ? ['operationId', 'attempt', 'proxy', 'network', 'tls', 'credential', 'globalLabelResult']
+    : ['operationId', 'attempt', 'proxy', 'network', 'tls', 'credential'], field);
+  shapeCleanupEgressOperation(proof.operationId, `${field}.operationId`);
+  shapeCleanupEgressAttempt(proof.attempt, `${field}.attempt`);
+  if (proof.proxy === null) {
+    if (persisted) throw new OwnershipValidationError(`${field}.proxy is required for persisted cleanup`);
+  } else {
+    const proxy = shapeRecord(proof.proxy, `${field}.proxy`);
+    exactShapeKeys(proxy, ['id', 'absent'], `${field}.proxy`);
+    preparedHash(proxy.id, `${field}.proxy.id`);
+    shapeLiteral(proxy.absent, true, `${field}.proxy.absent`);
+  }
+  const network = shapeRecord(proof.network, `${field}.network`);
+  exactShapeKeys(network, ['id', 'absent'], `${field}.network`);
+  preparedHash(network.id, `${field}.network.id`);
+  shapeLiteral(network.absent, true, `${field}.network.absent`);
+  const tls = shapeRecord(proof.tls, `${field}.tls`);
+  exactShapeKeys(tls, ['hostDirectory', 'absent'], `${field}.tls`);
+  preparedString(tls.hostDirectory, `${field}.tls.hostDirectory`, TEXT_LIMITS.maxPathBytes);
+  shapeLiteral(tls.absent, true, `${field}.tls.absent`);
+  const credential = shapeRecord(proof.credential, `${field}.credential`);
+  exactShapeKeys(credential, ['hostPath', 'sha256'], `${field}.credential`);
+  preparedString(credential.hostPath, `${field}.credential.hostPath`, TEXT_LIMITS.maxPathBytes);
+  preparedHash(credential.sha256, `${field}.credential.sha256`);
+  if (persisted) shapeLiteral(proof.globalLabelResult, 'no-match', `${field}.globalLabelResult`);
+}
+
+function shapeCleanupEgressPostcondition(value: unknown): void {
+  preparedJsonObject(value, 'cleanup postcondition egress');
+  const egress = shapeRecord(value, 'cleanup postcondition egress');
+  exactShapeKeys(egress, ['persistedDocker', 'discoveredDocker', 'credentials', 'globalLabelResult'], 'cleanup postcondition egress');
+  shapeLiteral(egress.globalLabelResult, 'no-match', 'cleanup postcondition egress globalLabelResult');
+  if (egress.persistedDocker !== null) shapeCleanupRecoveryDocker(egress.persistedDocker, 'cleanup postcondition persisted Docker', true);
+  if (!Array.isArray(egress.discoveredDocker) || egress.discoveredDocker.length > 128) throw new OwnershipValidationError('cleanup postcondition discovered Docker must be a bounded array');
+  for (const [index, proof] of egress.discoveredDocker.entries()) shapeCleanupRecoveryDocker(proof, `cleanup postcondition discovered Docker[${index}]`, false);
+  if (!Array.isArray(egress.credentials) || egress.credentials.length > 128) throw new OwnershipValidationError('cleanup postcondition credentials must be a bounded array');
+  const paths = new Set<string>();
+  for (const [index, value] of egress.credentials.entries()) {
+    shapeCleanupEgressCredential(value, `cleanup postcondition credential[${index}]`);
+    const credential = shapeRecord(value, `cleanup postcondition credential[${index}]`);
+    const hostPath = String(credential.hostPath);
+    if (paths.has(hostPath)) throw new OwnershipValidationError('cleanup postcondition credential path is duplicated');
+    paths.add(hostPath);
+  }
 }
 
 function shapeCleanupStagingPostcondition(value: unknown, at: string): void {
@@ -1135,8 +1350,10 @@ function shapeCleanupStagingPostcondition(value: unknown, at: string): void {
   shapeLiteral(staging.sourceAbsent, true, 'cleanup postcondition staging sourceAbsent');
   preparedInstant(staging.verifiedAt, 'cleanup postcondition staging verifiedAt');
   if (staging.kind === 'absent') {
+    exactShapeKeys(staging, ['kind', 'path', 'sourcePath', 'sourceAbsent', 'verifiedAt'], 'cleanup postcondition absent staging');
     shapeLiteral(staging.path, null, 'cleanup postcondition staging path');
   } else if (staging.kind === 'quarantined') {
+    exactShapeKeys(staging, ['kind', 'sourcePath', 'destinationPath', 'sourceAbsent', 'destinationPresent', 'sha256', 'size', 'verifiedAt'], 'cleanup postcondition quarantined staging');
     preparedPath(staging.destinationPath, 'cleanup postcondition staging destinationPath');
     shapeLiteral(staging.destinationPresent, true, 'cleanup postcondition staging destinationPresent');
     shapeNullableHash(staging.sha256, 'cleanup postcondition staging sha256');
@@ -1147,10 +1364,31 @@ function shapeCleanupStagingPostcondition(value: unknown, at: string): void {
   shapeChronology([['cleanup staging verifiedAt', staging.verifiedAt], ['cleanup at', at]], 'cleanup postcondition staging');
 }
 
-function shapeOperationCleanupProof(value: unknown, at: string): void {
+function shapeOperationCleanupProof(value: unknown, at: string, jobId: string, operationId: string, attempt: number): void {
   const proof = shapeRecord(value, 'operation cleanup proof'); preparedEnum(proof.kind, ['null-identity', 'container-absent', 'container-removed'], 'operation cleanup kind');
-  if (proof.kind === 'null-identity') { shapeNullContainer(proof.container, 'operation cleanup container', at as string); shapeLogs(proof.logs, 'operation cleanup logs', false, at as string); return; }
-  preparedString(proof.id, 'operation cleanup container id', TEXT_LIMITS.maxIdentifierBytes); preparedString(proof.name, 'operation cleanup container name', TEXT_LIMITS.maxIdentifierBytes); preparedHash(proof.imageDigest, 'operation cleanup image digest'); preparedJsonObject(proof.labels, 'operation cleanup labels'); preparedInstant(proof.stoppedAt, 'operation cleanup stoppedAt'); if (proof.kind === 'container-removed') preparedInstant(proof.removedAt, 'operation cleanup removedAt'); preparedInstant(proof.observedAt, 'operation cleanup observedAt'); shapeLiteral(proof.globalLabelResult, 'no-match', 'operation cleanup globalLabelResult'); shapeChronology(proof.kind === 'container-removed' ? [['operation cleanup stoppedAt', proof.stoppedAt], ['operation cleanup removedAt', proof.removedAt], ['operation cleanup observedAt', proof.observedAt], ['operation cleanup at', at]] : [['operation cleanup stoppedAt', proof.stoppedAt], ['operation cleanup observedAt', proof.observedAt], ['operation cleanup at', at]], 'operation cleanup'); shapeLogs(proof.logs, 'operation cleanup logs', false, at as string);
+  const hasEgress = proof.egress !== undefined;
+  if (proof.kind === 'null-identity') exactShapeKeys(proof, ['kind', 'container', 'logs', ...(hasEgress ? ['egress'] : [])], 'null-identity operation cleanup proof');
+  else exactShapeKeys(proof, ['kind', 'id', 'name', 'imageDigest', 'labels', 'stoppedAt', ...(proof.kind === 'container-removed' ? ['removedAt'] : []), 'observedAt', 'globalLabelResult', 'logs', ...(hasEgress ? ['egress'] : [])], `${String(proof.kind)} operation cleanup proof`);
+  if (proof.egress !== undefined) {
+    if (!isDependencyEgressOperationId(operationId)) throw new OwnershipValidationError('operation cleanup egress proof is not allowed for this operation');
+    const egress = shapeRecord(proof.egress, 'operation cleanup egress proof');
+    exactShapeKeys(egress, ['proxy', 'network', 'tls', 'credential', 'globalLabelResult'], 'operation cleanup egress proof');
+    const proxy = shapeRecord(egress.proxy, 'operation cleanup egress proxy');
+    const network = shapeRecord(egress.network, 'operation cleanup egress network');
+    const tls = shapeRecord(egress.tls, 'operation cleanup egress TLS');
+    const credential = shapeRecord(egress.credential, 'operation cleanup egress credential');
+    exactShapeKeys(proxy, ['id', 'absent'], 'operation cleanup egress proxy');
+    exactShapeKeys(network, ['id', 'absent'], 'operation cleanup egress network');
+    exactShapeKeys(tls, ['hostDirectory', 'absent'], 'operation cleanup egress TLS');
+    exactShapeKeys(credential, ['hostPath', 'sha256', 'absent'], 'operation cleanup egress credential');
+    preparedString(proxy.id, 'operation cleanup egress proxy id', TEXT_LIMITS.maxIdentifierBytes); shapeLiteral(proxy.absent, true, 'operation cleanup egress proxy absent');
+    preparedString(network.id, 'operation cleanup egress network id', TEXT_LIMITS.maxIdentifierBytes); shapeLiteral(network.absent, true, 'operation cleanup egress network absent');
+    operationCleanupTlsDirectory(tls.hostDirectory, jobId, operationId, attempt); shapeLiteral(tls.absent, true, 'operation cleanup egress TLS absent');
+    operationCleanupCredentialPath(credential.hostPath, jobId, operationId, attempt); preparedHash(credential.sha256, 'operation cleanup egress credential hash'); shapeLiteral(credential.absent, true, 'operation cleanup egress credential absent');
+    shapeLiteral(egress.globalLabelResult, 'no-match', 'operation cleanup egress global label result');
+  }
+  if (proof.kind === 'null-identity') { shapeNullContainer(proof.container, 'operation cleanup container', at as string); const container = shapeRecord(proof.container, 'operation cleanup container'); exactShapeKeys(container, ['kind', 'globalLabelResult', 'observedAt'], 'operation cleanup container'); shapeLogs(proof.logs, 'operation cleanup logs', false, at as string, true); return; }
+  preparedString(proof.id, 'operation cleanup container id', TEXT_LIMITS.maxIdentifierBytes); preparedString(proof.name, 'operation cleanup container name', TEXT_LIMITS.maxIdentifierBytes); preparedHash(proof.imageDigest, 'operation cleanup image digest'); preparedJsonObject(proof.labels, 'operation cleanup labels'); const labelsValue = shapeRecord(proof.labels, 'operation cleanup labels'); exactShapeKeys(labelsValue, ['org.osi.image-builder.job-id', 'org.osi.image-builder.manifest-sha'], 'operation cleanup labels'); preparedInstant(proof.stoppedAt, 'operation cleanup stoppedAt'); if (proof.kind === 'container-removed') preparedInstant(proof.removedAt, 'operation cleanup removedAt'); preparedInstant(proof.observedAt, 'operation cleanup observedAt'); shapeLiteral(proof.globalLabelResult, 'no-match', 'operation cleanup globalLabelResult'); shapeChronology(proof.kind === 'container-removed' ? [['operation cleanup stoppedAt', proof.stoppedAt], ['operation cleanup removedAt', proof.removedAt], ['operation cleanup observedAt', proof.observedAt], ['operation cleanup at', at]] : [['operation cleanup stoppedAt', proof.stoppedAt], ['operation cleanup observedAt', proof.observedAt], ['operation cleanup at', at]], 'operation cleanup'); shapeLogs(proof.logs, 'operation cleanup logs', false, at as string, true);
 }
 
 function shapeHandBackProof(value: unknown, at: string): void {
@@ -1294,7 +1532,7 @@ function validateRunnerCommand(command: RunnerWriteCommand): void {
     case 'normal-terminal': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'terminal expectedState'); preparedEnum(value.state, ['succeeded', 'failed'], 'terminal state'); preparedInstant(value.terminalAt, 'terminal time'); shapeChronology([['terminal time', value.terminalAt], ['terminal command.at', value.at]], 'terminal'); preparedOptionalEnum(value.errorCode, BUILDER_ERROR_CODES, 'terminal errorCode'); preparedJsonObject(value.error, 'terminal error', true); return;
     case 'operation-begin': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'operation expectedState'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation id'); if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) <= 0) throw new OwnershipValidationError('operation attempt is invalid'); preparedHash(value.argvHash, 'operation argv hash'); preparedJsonArray(value.argv, 'operation argv'); preparedInstant(value.startedAt, 'operation startedAt'); shapeChronology([['operation startedAt', value.startedAt], ['operation command.at', value.at]], 'operation begin'); return;
     case 'operation-complete': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'operation complete expectedState'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation complete operation id'); if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) <= 0) throw new OwnershipValidationError('operation complete attempt is invalid'); validateOperationInput(value.input); { const input = preparedObject(value.input, 'operation input'); shapeChronology([['operation startedAt', input.startedAt], ['operation finishedAt', input.finishedAt], ['operation command.at', value.at]], 'operation complete'); } return;
-    case 'operation-cleanup': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'operation cleanup expectedState'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation cleanup operation id'); if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) <= 0) throw new OwnershipValidationError('operation cleanup attempt is invalid'); shapeOperationCleanupProof(value.proof, value.at as string); return;
+    case 'operation-cleanup': preparedRunnerCommon(value); preparedEnum(value.expectedState, JOB_STATES, 'operation cleanup expectedState'); preparedEnum(value.operationId, TRUSTED_OPERATION_IDS, 'operation cleanup operation id'); if (typeof value.attempt !== 'number' || !Number.isSafeInteger(value.attempt) || value.attempt <= 0) throw new OwnershipValidationError('operation cleanup attempt is invalid'); shapeOperationCleanupProof(value.proof, value.at as string, value.jobId as string, value.operationId as string, value.attempt); return;
     default: throw new OwnershipValidationError('runner command kind is invalid');
   }
 }
@@ -1510,12 +1748,13 @@ function persistCleanupSnapshot(db: DbFacade, jobId: string, snapshot: CleanupSn
   return proofJson({ ...snapshot, logs: { ...snapshot.logs, generationIdentity } }, 'cleanup snapshot');
 }
 
-function decodeCleanupAdmission(proofJsonValue: string): PersistedCleanupSnapshot {
+function decodeCleanupAdmission(proofJsonValue: string, admittedAt: string): PersistedCleanupSnapshot {
   try {
     const parsed = JSON.parse(proofJsonValue) as unknown;
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('snapshot is not an object');
     const bounded = boundedJson(parsed, 'cleanup admission snapshot');
     if (bounded === null || Array.isArray(bounded) || typeof bounded !== 'object' || !('logs' in bounded) || bounded.logs === null || typeof bounded.logs !== 'object' || Array.isArray(bounded.logs) || !('generationIdentity' in bounded.logs)) throw new Error('snapshot generation identity is missing');
+    shapeCleanupSnapshot(parsed, 'cleanup admission snapshot', admittedAt, true);
     return parsed as PersistedCleanupSnapshot;
   } catch (error) {
     throw new OwnershipTransactionError('cleanup admission snapshot is corrupt', { cause: error });
@@ -1523,9 +1762,9 @@ function decodeCleanupAdmission(proofJsonValue: string): PersistedCleanupSnapsho
 }
 
 function cleanupAdmissionSnapshot(db: DbFacade, jobId: string, admissionId: string): { readonly raw: string; readonly snapshot: PersistedCleanupSnapshot } {
-  const row = db.prepare('SELECT proof_json FROM cleanup_leases WHERE admission_id=? AND job_id=?').get(admissionId, jobId) as Row | undefined;
-  if (!row || typeof row.proof_json !== 'string') throw new OwnershipConflictError('admission-mismatch', 'cleanup admission does not exist');
-  return { raw: row.proof_json, snapshot: decodeCleanupAdmission(row.proof_json) };
+  const row = db.prepare('SELECT proof_json, admitted_at FROM cleanup_leases WHERE admission_id=? AND job_id=?').get(admissionId, jobId) as Row | undefined;
+  if (!row || typeof row.proof_json !== 'string' || typeof row.admitted_at !== 'string') throw new OwnershipConflictError('admission-mismatch', 'cleanup admission does not exist');
+  return { raw: row.proof_json, snapshot: decodeCleanupAdmission(row.proof_json, row.admitted_at) };
 }
 
 function assertPersistedLogIdentity(db: DbFacade, jobId: string, expected: PersistedLogCleanupSnapshot['generationIdentity']): void {
@@ -1716,7 +1955,7 @@ function reconcileCancellationLogs(db: DbFacade, jobId: string, claimed: Cancell
   }
 }
 
-function validateCleanupPostcondition(db: DbFacade, post: CleanupPostcondition, admission: CleanupSnapshot, job: Row, at: string): string {
+function validateCleanupPostcondition(db: DbFacade, post: CleanupPostcondition, admission: CleanupSnapshot, job: Row, at: string, stateRoot: string | null): string {
   if (post.state !== admission.state || post.runner.unit !== admission.runner.unit || post.runner.owner !== admission.runner.owner || post.runner.leaseExpiresAt !== admission.runner.leaseExpiresAt) throw new OwnershipConflictError('identity-mismatch', 'cleanup postcondition does not match its admission');
   instant(post.runner.inactiveAt, 'cleanup postcondition inactive time'); instant(post.runner.observedAt, 'cleanup postcondition observation time');
   requireChronology([['cleanup postcondition inactive time', post.runner.inactiveAt], ['cleanup postcondition observation time', post.runner.observedAt]]);
@@ -1736,10 +1975,11 @@ function validateCleanupPostcondition(db: DbFacade, post: CleanupPostcondition, 
   } else if (post.container.kind === 'null-identity') {
     if (post.container.dockerAction !== 'none' || post.container.globalLabelResult !== 'no-match') throw new OwnershipValidationError('null-container cleanup postcondition is not a no-Docker proof');
     validateNullContainerProof({ kind: 'absent', globalLabelResult: post.container.globalLabelResult, observedAt: post.container.observedAt }, at);
-    if (job.container_id !== null || job.container_name !== null || job.container_image_digest !== null || job.container_label_job_id !== null || job.container_label_manifest_sha !== null || job.container_labels_json !== null) throw new OwnershipConflictError('identity-mismatch', 'null cleanup postcondition claims absence while identity remains');
+    if (!jobContainerIdentityIsNull(job)) throw new OwnershipConflictError('identity-mismatch', 'null cleanup postcondition claims absence while identity remains');
   } else {
     throw new OwnershipValidationError('cleanup postcondition container kind is invalid');
   }
+  validateCleanupEgressPostcondition(db, post.egress, job, stateRoot);
   reconcileCleanupLogs(db, String(job.job_id), post.logs, at);
   const preparationIntent = job.publish_state === 'not_started' && job.artifact_staging_path !== null;
   if (admission.staging.kind === 'present') {
@@ -1771,15 +2011,236 @@ function validateCleanupStagingPostcondition(proof: CleanupStagingPostcondition,
   if (proof.size !== null && (!Number.isSafeInteger(proof.size) || proof.size < 0)) throw new OwnershipValidationError('cleanup staging size is invalid');
 }
 
+function cleanupEgressExpectedPaths(stateRoot: string | null, jobId: string, operationId: string, attempt: number): Readonly<{ readonly credentialHostPath: string; readonly tlsHostDirectory: string }> {
+  if (stateRoot === null) conflict('identity-mismatch', 'cleanup dependency egress state-root authority is unavailable');
+  const base = join(stateRoot, 'jobs', jobId, 'recovery', 'dependency-egress');
+  return Object.freeze({
+    credentialHostPath: join(base, `${operationId}-${String(attempt)}.proxy-credential`),
+    tlsHostDirectory: join(base, `${operationId}-${String(attempt)}.proxy-tls`),
+  });
+}
+
+function cleanupEgressOperationKey(operationId: string, attempt: number): string {
+  return `${operationId}:${String(attempt)}`;
+}
+
+function cleanupEgressCredentialProofs(
+  post: DependencyEgressCleanupPostcondition,
+  stateRoot: string | null,
+  jobId: string,
+): Map<string, Readonly<{ readonly hostPath: string; readonly expectedSha256: string }>> {
+  const proofs = new Map<string, Readonly<{ readonly hostPath: string; readonly expectedSha256: string }>>();
+  const operationKeys = new Set<string>();
+  for (const credential of post.credentials) {
+    if (!isDependencyEgressOperationId(credential.operationId) || !Number.isSafeInteger(credential.attempt) || credential.attempt <= 0) {
+      throw new OwnershipValidationError('cleanup dependency egress credential identity is invalid');
+    }
+    const expected = cleanupEgressExpectedPaths(stateRoot, jobId, credential.operationId, credential.attempt);
+    let hostPath: string;
+    try { hostPath = canonicalAbsolutePath(credential.hostPath, 'cleanup dependency egress credential path'); }
+    catch (error) { throw new OwnershipValidationError('cleanup dependency egress credential path is invalid', { cause: error }); }
+    let tlsHostDirectory: string;
+    try { tlsHostDirectory = canonicalAbsolutePath(credential.tls.hostDirectory, 'cleanup dependency egress TLS directory'); }
+    catch (error) { throw new OwnershipValidationError('cleanup dependency egress TLS directory is invalid', { cause: error }); }
+    if (hostPath !== expected.credentialHostPath || tlsHostDirectory !== expected.tlsHostDirectory || credential.absent !== true) {
+      throw new OwnershipConflictError('identity-mismatch', 'cleanup dependency egress credential absence is not bound to the configured state root');
+    }
+    const key = cleanupEgressOperationKey(credential.operationId, credential.attempt);
+    if (operationKeys.has(key)) conflict('identity-mismatch', 'cleanup dependency egress credential absence is duplicated');
+    operationKeys.add(key);
+    const expectedSha256 = credential.expectedSha256 === null ? null : credential.expectedSha256;
+    const observedSha256 = credential.observedSha256 === null ? null : credential.observedSha256;
+    if (expectedSha256 !== null && !HASH64.test(expectedSha256)) throw new OwnershipValidationError('cleanup dependency egress expected credential SHA-256 is invalid');
+    if (observedSha256 !== null && (!HASH64.test(observedSha256) || expectedSha256 !== observedSha256)) throw new OwnershipValidationError('cleanup dependency egress observed credential SHA-256 is not bound to the expected hash');
+    if (credential.kind === 'tls-only') {
+      if (observedSha256 !== null) throw new OwnershipValidationError('cleanup TLS-only dependency egress proof invents a credential observation');
+      if (expectedSha256 !== null) proofs.set(key, Object.freeze({ hostPath, expectedSha256 }));
+      continue;
+    }
+    if (expectedSha256 === null) throw new OwnershipValidationError('cleanup dependency egress credential proof has no expected SHA-256');
+    if (credential.kind === 'normal' && observedSha256 === null) throw new OwnershipValidationError('cleanup normal dependency egress proof has no observed credential hash');
+    proofs.set(key, Object.freeze({ hostPath, expectedSha256 }));
+  }
+  return proofs;
+}
+
+function validateCleanupEgressDockerProof(
+  proof: DependencyEgressCleanupPostcondition['discoveredDocker'][number] | NonNullable<DependencyEgressCleanupPostcondition['persistedDocker']>,
+  credentials: ReadonlyMap<string, Readonly<{ readonly hostPath: string; readonly expectedSha256: string }>>,
+  stateRoot: string | null,
+  jobId: string,
+  field: string,
+  persisted: boolean,
+): void {
+  if (!isDependencyEgressOperationId(proof.operationId) || !Number.isSafeInteger(proof.attempt) || proof.attempt <= 0) {
+    throw new OwnershipValidationError(`${field} operation identity is invalid`);
+  }
+  const expected = cleanupEgressExpectedPaths(stateRoot, jobId, proof.operationId, proof.attempt);
+  const globalLabelResult = 'globalLabelResult' in proof ? proof.globalLabelResult : undefined;
+  let hostPath: string;
+  let tlsHostDirectory: string;
+  try {
+    hostPath = canonicalAbsolutePath(proof.credential.hostPath, `${field}.credential.hostPath`);
+    tlsHostDirectory = canonicalAbsolutePath(proof.tls.hostDirectory, `${field}.tls.hostDirectory`);
+  } catch (error) {
+    throw new OwnershipValidationError(`${field} path identity is invalid`, { cause: error });
+  }
+  if (
+    hostPath !== expected.credentialHostPath
+    || tlsHostDirectory !== expected.tlsHostDirectory
+    || !HASH64.test(proof.credential.sha256)
+    || proof.tls.absent !== true
+    || proof.network.absent !== true
+    || proof.proxy !== null && proof.proxy.absent !== true
+    || globalLabelResult !== undefined && globalLabelResult !== 'no-match'
+  ) throw new OwnershipConflictError('identity-mismatch', `${field} is not an exact state-root-bound absence proof`);
+  if (persisted && proof.proxy === null) conflict('identity-mismatch', `${field} is missing the persisted proxy absence proof`);
+  if (proof.proxy !== null && !HASH64.test(proof.proxy.id)) throw new OwnershipValidationError(`${field}.proxy.id is invalid`);
+  if (!HASH64.test(proof.network.id)) throw new OwnershipValidationError(`${field}.network.id is invalid`);
+  const credential = credentials.get(cleanupEgressOperationKey(proof.operationId, proof.attempt));
+  if (credential === undefined || credential.hostPath !== hostPath || credential.expectedSha256 !== proof.credential.sha256) {
+    throw new OwnershipConflictError('identity-mismatch', `${field} has no matching credential absence proof`);
+  }
+}
+
+const UNFINISHED_OPERATION_NULL_COLUMNS = Object.freeze([
+  'finished_at', 'container_id', 'container_name', 'container_image_digest', 'container_label_job_id',
+  'container_label_manifest_sha', 'container_mount_json', 'container_env_json', 'container_security_json',
+  'inspection_json', 'exit_code', 'signal', 'outcome', 'evidence_path', 'evidence_sha256', 'error_code', 'error_json',
+] as const);
+
+function cleanupOperation(db: DbFacade, jobId: string, operationId: string, attempt: number): Row | undefined {
+  return db.prepare(`SELECT started_at, finished_at, container_id, container_name, container_image_digest,
+    container_label_job_id, container_label_manifest_sha, container_mount_json, container_env_json,
+    container_security_json, inspection_json, timed_out, lifecycle_phase, exit_code, signal, outcome,
+    evidence_path, evidence_sha256, error_code, error_json
+    FROM job_operations WHERE job_id=? AND operation_id=? AND attempt=?`).get(jobId, operationId, attempt) as Row | undefined;
+}
+
+function validateUnfinishedCleanupEgressOperation(
+  db: DbFacade,
+  row: Row,
+  operationId: string,
+  attempt: number,
+  allowPersistedContainer: boolean,
+): Row {
+  const jobId = String(row.job_id);
+  const operation = cleanupOperation(db, jobId, operationId, attempt);
+  const unfinishedCount = db.prepare('SELECT COUNT(*) AS count FROM job_operations WHERE job_id=? AND outcome IS NULL').get(jobId) as Row;
+  if (
+    operation === undefined
+    || Number(unfinishedCount.count) !== 1
+    || operation.lifecycle_phase !== 'not_created'
+    || Number(operation.timed_out) !== 0
+    || UNFINISHED_OPERATION_NULL_COLUMNS.some((column) => operation[column] !== null)
+  ) conflict('identity-mismatch', 'cleanup unpersisted dependency egress proof has no unique unfinished operation');
+  if (!allowPersistedContainer && !jobContainerIdentityIsNull(row)) {
+    conflict('identity-mismatch', 'cleanup unpersisted dependency egress proof conflicts with active container identity');
+  }
+  if (allowPersistedContainer) {
+    if (row.container_created_at === null || operation.started_at === null || String(operation.started_at) > String(row.container_created_at)) {
+      conflict('identity-mismatch', 'cleanup unfinished dependency egress operation does not precede the persisted container');
+    }
+  }
+  return operation;
+}
+
+function validateCleanupEgressPostcondition(
+  db: DbFacade,
+  post: DependencyEgressCleanupPostcondition,
+  row: Row,
+  stateRoot: string | null,
+): void {
+  const jobId = String(row.job_id);
+  const credentials = cleanupEgressCredentialProofs(post, stateRoot, jobId);
+  const dockerKeys = new Set<string>();
+  const boundCredentialKeys = new Set<string>();
+  const proxyIds = new Set<string>();
+  const networkIds = new Set<string>();
+  if (post.persistedDocker !== null) {
+    validateCleanupEgressDockerProof(post.persistedDocker, credentials, stateRoot, jobId, 'cleanup persisted dependency egress', true);
+    const key = cleanupEgressOperationKey(post.persistedDocker.operationId, post.persistedDocker.attempt);
+    dockerKeys.add(key);
+    boundCredentialKeys.add(key);
+    networkIds.add(post.persistedDocker.network.id);
+    proxyIds.add(post.persistedDocker.proxy.id);
+    const security = row.container_security_json === null
+      ? null
+      : shapeRecord(parseJson(String(row.container_security_json), 'persisted container security', true), 'persisted container security');
+    if (security === null || !Object.hasOwn(security, 'egress')) conflict('identity-mismatch', 'cleanup persisted dependency egress proof has no durable row identity');
+    let persisted: ReturnType<typeof parseDependencyEgressNetwork>;
+    try { persisted = parseDependencyEgressNetwork(security.egress); }
+    catch (error) { throw new OwnershipValidationError('cleanup persisted dependency egress identity is invalid', { cause: error }); }
+    const builder = operationCleanupBuilderIdentity(row);
+    const labels = persisted.network.labels;
+    const attempt = Number(labels[EGRESS_ATTEMPT_LABEL]);
+    if (
+      labels[EGRESS_JOB_LABEL] !== jobId
+      || labels[EGRESS_MANIFEST_LABEL] !== String(row.target_manifest_sha256)
+      || labels[EGRESS_OPERATION_LABEL] !== post.persistedDocker.operationId
+      || attempt !== post.persistedDocker.attempt
+      || persisted.proxy.imageReference !== builder.imageReference
+      || persisted.proxy.imageId !== builder.imageId
+      || persisted.proxy.imageDigest !== builder.imageDigest
+      || persisted.proxy.user !== trustedContainerUser()
+      || row.container_image_digest !== builder.imageDigest
+      || row.container_label_job_id !== jobId
+      || row.container_label_manifest_sha !== String(row.target_manifest_sha256)
+      || post.persistedDocker.proxy.id !== persisted.proxy.id
+      || post.persistedDocker.network.id !== persisted.network.id
+      || post.persistedDocker.tls.hostDirectory !== persisted.tls.hostDirectory
+      || post.persistedDocker.credential.hostPath !== persisted.credential.hostPath
+      || post.persistedDocker.credential.sha256 !== persisted.credential.sha256
+    ) conflict('identity-mismatch', 'cleanup persisted dependency egress proof does not match the durable lifecycle identity');
+    if (security.user !== trustedContainerUser()) conflict('identity-mismatch', 'cleanup persisted dependency egress user is not the admitted container user');
+    const operation = cleanupOperation(db, jobId, post.persistedDocker.operationId, post.persistedDocker.attempt);
+    if (operation === undefined) conflict('identity-mismatch', 'cleanup persisted dependency egress proof has no operation lifecycle');
+    if (operation.outcome === null) {
+      validateUnfinishedCleanupEgressOperation(db, row, post.persistedDocker.operationId, post.persistedDocker.attempt, true);
+    } else if (
+      operation.lifecycle_phase === 'not_created'
+      || operation.container_id !== row.container_id
+      || operation.container_name !== row.container_name
+      || operation.container_image_digest !== row.container_image_digest
+      || operation.container_label_job_id !== row.container_label_job_id
+      || operation.container_label_manifest_sha !== row.container_label_manifest_sha
+      || operation.container_security_json !== row.container_security_json
+    ) conflict('identity-mismatch', 'cleanup persisted dependency egress proof does not match the operation lifecycle');
+  } else if (row.container_security_json !== null) {
+    const security = shapeRecord(parseJson(String(row.container_security_json), 'persisted container security', true), 'persisted container security');
+    if (Object.hasOwn(security, 'egress')) conflict('identity-mismatch', 'cleanup completion omits the durable dependency egress absence proof');
+  }
+  for (const [index, proof] of post.discoveredDocker.entries()) {
+    const key = cleanupEgressOperationKey(proof.operationId, proof.attempt);
+    if (dockerKeys.has(key)) conflict('identity-mismatch', `cleanup discovered dependency egress proof ${index} is duplicated`);
+    dockerKeys.add(key);
+    boundCredentialKeys.add(key);
+    validateCleanupEgressDockerProof(proof, credentials, stateRoot, jobId, `cleanup discovered dependency egress[${index}]`, false);
+    validateUnfinishedCleanupEgressOperation(db, row, proof.operationId, proof.attempt, false);
+    if (networkIds.has(proof.network.id)) conflict('identity-mismatch', `cleanup discovered dependency egress network ${index} is duplicated`);
+    networkIds.add(proof.network.id);
+    if (proof.proxy !== null) {
+      if (proxyIds.has(proof.proxy.id)) conflict('identity-mismatch', `cleanup discovered dependency egress proxy ${index} is duplicated`);
+      proxyIds.add(proof.proxy.id);
+    }
+  }
+  for (const proof of post.credentials) {
+    const key = cleanupEgressOperationKey(proof.operationId, proof.attempt);
+    if (boundCredentialKeys.has(key)) continue;
+    validateUnfinishedCleanupEgressOperation(db, row, proof.operationId, proof.attempt, false);
+  }
+}
+
 function validateCancellationProof(proof: CancellationProof, job: Row, at: string): void {
   string(proof.runnerUnit, 'cancellation runner unit'); if (proof.unitInactiveAt !== null) instant(proof.unitInactiveAt, 'runner inactive time');
   if (proof.runnerUnit !== job.runner_unit) throw new OwnershipConflictError('stale-runner-owner', 'cancellation proof runner unit does not match the job');
   if (proof.unitInactiveAt !== null && proof.unitInactiveAt > at) throw new OwnershipValidationError('cancellation unit inactivity is from the future');
   if (proof.kind === 'pre-container') {
     validateNullContainerProof(proof.container, at);
-    if (job.container_id !== null || job.container_name !== null || job.container_image_digest !== null || job.container_label_job_id !== null || job.container_label_manifest_sha !== null) throw new OwnershipConflictError('identity-mismatch', 'pre-container cancellation has persisted container identity');
+    if (!jobContainerIdentityIsNull(job)) throw new OwnershipConflictError('identity-mismatch', 'pre-container cancellation has persisted container identity');
   } else if (proof.kind === 'container') {
     const container = proof.container;
+    if (persistedDependencyEgress(job)) throw new OwnershipConflictError('identity-mismatch', 'container cancellation has persisted dependency egress identity');
     if (job.container_id !== container.id || job.container_name !== container.name || job.container_image_digest !== container.imageDigest) throw new OwnershipConflictError('identity-mismatch', 'cancellation container does not match the job');
     const proofLabels = labels(container.labels, String(job.job_id), String(job.target_manifest_sha256));
     if (job.container_labels_json !== proofLabels) throw new OwnershipConflictError('identity-mismatch', 'cancellation labels do not match persisted labels');
@@ -1803,11 +2264,12 @@ function validateCancellationEvidence(evidence: CancellationEvidence, job: Row, 
   if (evidence.logs.verifiedAt > at || evidence.staging.kind === 'quarantined' && evidence.staging.verifiedAt > at) throw new OwnershipValidationError('cancellation evidence cleanup proof is from the future');
   if (evidence.kind === 'pre-container') {
     validateNullContainerProof(evidence.container as Extract<CancellationEvidence['container'], { readonly kind: 'absent' }>, at);
-    if (job.container_id !== null || job.container_name !== null || job.container_image_digest !== null || job.container_label_job_id !== null || job.container_label_manifest_sha !== null || job.container_labels_json !== null) throw new OwnershipConflictError('identity-mismatch', 'pre-container cancellation evidence has persisted container identity');
+    if (!jobContainerIdentityIsNull(job)) throw new OwnershipConflictError('identity-mismatch', 'pre-container cancellation evidence has persisted container identity');
     return;
   }
   const container = evidence.container;
   if (container.kind !== 'stopped') throw new OwnershipValidationError('cancellation evidence container is not stopped');
+  if (persistedDependencyEgress(job)) throw new OwnershipConflictError('identity-mismatch', 'container cancellation evidence has persisted dependency egress identity');
   hash(container.imageDigest, 'cancellation evidence image digest');
   const persistedLabels = labels(container.labels, String(job.job_id), String(job.target_manifest_sha256));
   if (job.container_id !== container.id || job.container_name !== container.name || job.container_image_digest !== container.imageDigest || job.container_labels_json !== persistedLabels) throw new OwnershipConflictError('identity-mismatch', 'cancellation evidence container identity does not match the job');
@@ -2202,6 +2664,218 @@ function confinedPath(value: string, field: string): void {
   if (value.length === 0 || value.startsWith('/') || value.includes('\0') || value.includes('\\') || parts.some((part) => part.length === 0 || part === '.' || part === '..')) throw new OwnershipValidationError(`${field} is not a confined relative path`);
 }
 
+function operationCleanupCredentialPath(value: unknown, jobId: string, operationId: string, attempt: number): void {
+  let path: string;
+  try {
+    path = canonicalAbsolutePath(value, 'operation cleanup egress credential path');
+  } catch (error) {
+    if (error instanceof SharedValidationError) throw new OwnershipValidationError(error.message, { cause: error });
+    throw error;
+  }
+  const suffix = `/jobs/${jobId}/recovery/dependency-egress/${operationId}-${String(attempt)}.proxy-credential`;
+  if (path.length <= suffix.length || !path.endsWith(suffix)) throw new OwnershipValidationError('operation cleanup egress credential path is not bound to the operation');
+}
+
+function operationCleanupTlsDirectory(value: unknown, jobId: string, operationId: string, attempt: number): void {
+  let path: string;
+  try {
+    path = canonicalAbsolutePath(value, 'operation cleanup egress TLS directory');
+  } catch (error) {
+    if (error instanceof SharedValidationError) throw new OwnershipValidationError(error.message, { cause: error });
+    throw error;
+  }
+  const suffix = `/jobs/${jobId}/recovery/dependency-egress/${operationId}-${String(attempt)}.proxy-tls`;
+  if (path.length <= suffix.length || !path.endsWith(suffix)) throw new OwnershipValidationError('operation cleanup egress TLS directory is not bound to the operation');
+}
+
+function operationCleanupExpectedEgressPaths(stateRoot: string | null, jobId: string, operationId: string, attempt: number): Readonly<{ readonly credentialHostPath: string; readonly tlsHostDirectory: string }> {
+  if (stateRoot === null) conflict('identity-mismatch', 'operation cleanup dependency egress state-root authority is unavailable');
+  const base = join(stateRoot, 'jobs', jobId, 'recovery', 'dependency-egress');
+  return Object.freeze({
+    credentialHostPath: join(base, `${operationId}-${String(attempt)}.proxy-credential`),
+    tlsHostDirectory: join(base, `${operationId}-${String(attempt)}.proxy-tls`),
+  });
+}
+
+function validateOperationCleanupEgressProofPaths(
+  stateRoot: string | null,
+  proof: OperationCleanupProof,
+  jobId: string,
+  operationId: string,
+  attempt: number,
+): void {
+  if (!isDependencyEgressOperationId(operationId) || proof.kind === 'null-identity') return;
+  if (proof.egress === undefined) conflict('identity-mismatch', 'created dependency operation cleanup is missing egress proof');
+  const expected = operationCleanupExpectedEgressPaths(stateRoot, jobId, operationId, attempt);
+  if (proof.egress.credential.hostPath !== expected.credentialHostPath || proof.egress.tls.hostDirectory !== expected.tlsHostDirectory) {
+    conflict('identity-mismatch', 'operation cleanup egress proof is outside the configured state root');
+  }
+}
+
+function operationCleanupBuilderIdentity(row: Row): ReturnType<typeof parseBuilderIdentity> {
+  if (row.builder_identity_status !== 'admitted') conflict('identity-mismatch', 'operation cleanup requires an admitted builder identity');
+  let identity: ReturnType<typeof parseBuilderIdentity>;
+  try {
+    identity = parseBuilderIdentity({
+      packageVersion: row.builder_package_version,
+      packageRoot: row.builder_package_root,
+      lockSha256: row.builder_lock_sha256,
+      executionDefinitionSha256: row.builder_execution_definition_sha256,
+      targetManifestSha256: row.builder_target_manifest_sha256,
+      runnerSha256: row.builder_runner_sha256,
+      cleanupWorkerSha256: row.builder_cleanup_worker_sha256,
+      dependencyEgressProxySha256: row.builder_dependency_egress_proxy_sha256,
+      imageReference: row.builder_image_reference,
+      imageId: row.builder_image_id,
+      imageDigest: row.builder_image_digest,
+    });
+  } catch (error) {
+    throw new OwnershipValidationError('operation cleanup admitted builder identity is invalid', { cause: error });
+  }
+  if (identity.targetManifestSha256 !== String(row.target_manifest_sha256)) conflict('identity-mismatch', 'operation cleanup builder identity does not bind the job manifest');
+  return identity;
+}
+
+function validateOperationCleanupBuilderBinding(
+  row: Row,
+  operation: Row,
+  proof: OperationCleanupProof,
+  jobId: string,
+  builderIdentity: ReturnType<typeof parseBuilderIdentity>,
+): void {
+  if (proof.kind === 'null-identity') {
+    if (
+      operation.container_id !== null
+      || operation.container_name !== null
+      || operation.container_image_digest !== null
+      || operation.container_label_job_id !== null
+      || operation.container_label_manifest_sha !== null
+    ) conflict('identity-mismatch', 'null operation cleanup proof conflicts with persisted operation container identity');
+    return;
+  }
+  if (proof.imageDigest !== builderIdentity.imageDigest) conflict('identity-mismatch', 'operation cleanup proof image digest does not match the admitted builder');
+  if (
+    operation.container_id !== proof.id
+    || operation.container_name !== proof.name
+    || operation.container_image_digest !== builderIdentity.imageDigest
+    || operation.container_label_job_id !== jobId
+    || operation.container_label_manifest_sha !== String(row.target_manifest_sha256)
+  ) conflict('identity-mismatch', 'operation cleanup operation container identity does not match the admitted builder');
+  if (row.container_image_digest !== null && row.container_image_digest !== builderIdentity.imageDigest) conflict('identity-mismatch', 'operation cleanup job container digest does not match the admitted builder');
+}
+
+function bindOperationCleanupEgress(
+  row: Row,
+  proof: OperationCleanupProof,
+  operationId: string,
+  attempt: number,
+  lifecyclePhase: string,
+  builderIdentity: ReturnType<typeof parseBuilderIdentity>,
+  stateRoot: string | null,
+): void {
+  const dependencyOperation = isDependencyEgressOperationId(operationId);
+  if (dependencyOperation && stateRoot === null) conflict('identity-mismatch', 'operation cleanup dependency egress state-root authority is unavailable');
+  let security: PreparedRecord | null = null;
+  if (row.container_security_json !== null) {
+    try {
+      security = shapeRecord(parseJson(String(row.container_security_json), 'persisted container security', true), 'persisted container security');
+    } catch (error) {
+      if (error instanceof SharedValidationError) throw new OwnershipValidationError(error.message, { cause: error });
+      throw error;
+    }
+  }
+  const persistedValue = security?.egress;
+  const proofValue = proof.egress;
+  if (lifecyclePhase === 'not_created') {
+    if (proof.kind !== 'null-identity' || persistedValue !== undefined || proofValue !== undefined) {
+      conflict('identity-mismatch', 'pre-container cleanup must have no persisted dependency egress identity or proof');
+    }
+    return;
+  }
+  if (proof.kind === 'null-identity') conflict('identity-mismatch', 'container cleanup requires a container proof');
+  if (security === null || typeof security.user !== 'string' || security.user !== trustedContainerUser()) conflict('identity-mismatch', 'operation cleanup container user does not match the trusted runner user');
+  const containerUser = security.user;
+  if (!dependencyOperation) {
+    if (persistedValue !== undefined || proofValue !== undefined) throw new OwnershipValidationError('dependency egress identity is not allowed for this operation');
+    return;
+  }
+  if (persistedValue === undefined && proofValue === undefined) {
+    conflict('identity-mismatch', 'created dependency operation is missing persisted dependency egress identity and cleanup proof');
+  }
+  if (persistedValue === undefined) {
+    conflict('identity-mismatch', 'operation cleanup egress proof has no persisted dependency egress identity');
+  }
+  if (proofValue === undefined) {
+    conflict('identity-mismatch', 'operation cleanup egress proof is missing persisted dependency egress identity');
+  }
+  let persisted: ReturnType<typeof parseDependencyEgressNetwork>;
+  try {
+    persisted = parseDependencyEgressNetwork(persistedValue);
+  } catch (error) {
+    throw new OwnershipValidationError('persisted dependency egress identity is invalid', { cause: error });
+  }
+  const expectedJobId = String(row.job_id);
+  const expectedManifestSha = String(row.target_manifest_sha256);
+  const expectedAttempt = String(attempt);
+  const expectedPaths = operationCleanupExpectedEgressPaths(stateRoot, expectedJobId, operationId, attempt);
+  if (
+    persisted.network.labels[EGRESS_JOB_LABEL] !== expectedJobId
+    || persisted.proxy.labels[EGRESS_JOB_LABEL] !== expectedJobId
+    || persisted.network.labels[EGRESS_MANIFEST_LABEL] !== expectedManifestSha
+    || persisted.proxy.labels[EGRESS_MANIFEST_LABEL] !== expectedManifestSha
+    || persisted.network.labels[EGRESS_OPERATION_LABEL] !== operationId
+    || persisted.proxy.labels[EGRESS_OPERATION_LABEL] !== operationId
+    || persisted.network.labels[EGRESS_ATTEMPT_LABEL] !== expectedAttempt
+    || persisted.proxy.labels[EGRESS_ATTEMPT_LABEL] !== expectedAttempt
+    || persisted.proxy.imageReference !== builderIdentity.imageReference
+    || persisted.proxy.imageId !== builderIdentity.imageId
+    || persisted.proxy.imageDigest !== builderIdentity.imageDigest
+    || persisted.proxy.user !== containerUser
+    || persisted.credential.hostPath !== expectedPaths.credentialHostPath
+    || persisted.tls.hostDirectory !== expectedPaths.tlsHostDirectory
+    || proofValue.credential.hostPath !== expectedPaths.credentialHostPath
+    || proofValue.tls.hostDirectory !== expectedPaths.tlsHostDirectory
+  ) {
+    conflict('identity-mismatch', 'persisted dependency egress identity does not bind the admitted operation lifecycle');
+  }
+  if (
+    proofValue.proxy.id !== persisted.proxy.id
+    || proofValue.network.id !== persisted.network.id
+    || proofValue.tls.hostDirectory !== persisted.tls.hostDirectory
+    || proofValue.credential.hostPath !== persisted.credential.hostPath
+    || proofValue.credential.sha256 !== persisted.credential.sha256
+  ) {
+    conflict('identity-mismatch', 'operation cleanup egress proof does not match persisted dependency egress identity');
+  }
+}
+
+function operationCleanupReplay(db: DbFacade, jobId: string, operationId: string, attempt: number, proof: OperationCleanupProof, stateRoot: string | null): boolean {
+  const expectedProof = proofJson(proof, 'operation cleanup replay proof');
+  const events = db.prepare("SELECT payload_json, at FROM job_events WHERE job_id=? AND event_type='cleanup' ORDER BY seq ASC").all(jobId) as Row[];
+  let matching = 0;
+  for (const event of events) {
+    const payload = shapeRecord(parseJson(String(event.payload_json), 'operation cleanup event payload', true), 'operation cleanup event payload');
+    if (payload.kind !== 'operation-cleanup') continue;
+    exactShapeKeys(payload, ['kind', 'operationId', 'attempt', 'proof'], 'operation cleanup replay marker');
+    preparedEnum(payload.operationId, TRUSTED_OPERATION_IDS, 'operation cleanup replay marker operationId');
+    if (typeof payload.attempt !== 'number' || !Number.isSafeInteger(payload.attempt) || payload.attempt <= 0) conflict('identity-mismatch', 'operation cleanup replay marker attempt is not a strict number');
+    const markerOperationId = String(payload.operationId) as TrustedOperationId;
+    const markerAttempt = payload.attempt;
+    if (typeof event.at !== 'string') throw new OwnershipValidationError('operation cleanup replay marker event time is invalid');
+    try {
+      shapeOperationCleanupProof(payload.proof, event.at, jobId, markerOperationId, markerAttempt);
+      validateOperationCleanupEgressProofPaths(stateRoot, payload.proof as OperationCleanupProof, jobId, markerOperationId, markerAttempt);
+    }
+    catch (error) { throw new OwnershipValidationError('operation cleanup replay marker proof is invalid', { cause: error }); }
+    if (markerOperationId !== operationId || markerAttempt !== attempt) continue;
+    const existingProof = proofJson(payload.proof as object, 'persisted operation cleanup replay proof');
+    if (existingProof !== expectedProof) conflict('identity-mismatch', 'operation cleanup replay proof changed');
+    matching += 1;
+    if (matching > 1) conflict('identity-mismatch', 'operation cleanup replay marker is duplicated');
+  }
+  return matching === 1;
+}
+
 function runnerUnit(jobId: string, unit: string): void {
   if (unit !== `osi-image-builder-runner@${jobId}.service`) throw new OwnershipValidationError('runner unit does not match job');
 }
@@ -2315,6 +2989,7 @@ function trustedSqliteError(error: unknown): TrustedSqliteError | null {
 
 export interface OwnershipStoreOptions {
   readonly now?: () => string;
+  readonly stateRoot?: string;
   readonly maxQueueLength?: number;
   readonly failBeforeCommit?: () => void;
   readonly beforeBegin?: () => void;
@@ -2324,6 +2999,7 @@ export interface OwnershipStoreOptions {
 export class OwnershipStore {
   readonly #db: DbFacade;
   readonly #now: () => string;
+  readonly #stateRoot: string | null;
   readonly #maxQueueLength: number;
   readonly #failBeforeCommit?: () => void;
   readonly #beforeBegin?: () => void;
@@ -2334,6 +3010,16 @@ export class OwnershipStore {
   constructor(db: DatabaseSync, options: OwnershipStoreOptions = {}) {
     this.#db = dbFacade(db);
     this.#now = options.now ?? (() => new Date().toISOString());
+    if (options.stateRoot === undefined) {
+      this.#stateRoot = null;
+    } else {
+      try {
+        this.#stateRoot = canonicalAbsolutePath(options.stateRoot, 'configured state root');
+      } catch (error) {
+        if (error instanceof SharedValidationError) throw new OwnershipValidationError(error.message, { cause: error });
+        throw error;
+      }
+    }
     if (
       options.maxQueueLength !== undefined
       && (!Number.isSafeInteger(options.maxQueueLength)
@@ -2358,7 +3044,7 @@ export class OwnershipStore {
   apiWrite(command: ApiWriteCommand): OwnershipResult {
     const prepared = prepareCommand(command) as ApiWriteCommand;
     if (typeof prepared.kind !== 'string') throw new OwnershipValidationError('actor command kind is required');
-    if (!['enqueue', 'dispatch', 'dispatch-reclaim', 'dispatch-renew', 'dispatch-start', 'dispatch-proof-observation', 'dispatch-release', 'request-cancellation', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'publish-blocker-recheck', 'cleanup-credential-reserve', 'cleanup-credential-abort', 'cleanup-admission-stop-authorize', 'cleanup-admission-stop-complete', 'cleanup-admission-stop-failed', 'cleanup-admission-unexpected-exit', 'cleanup-admission', 'cleanup-admission-rotate', 'cleanup-admission-retry', 'hand-back'].includes(prepared.kind)) {
+    if (!['enqueue', 'dispatch', 'dispatch-reclaim', 'dispatch-renew', 'dispatch-start', 'dispatch-proof-observation', 'dispatch-release', 'request-cancellation', 'record-cancellation-coordination-failure', 'initialize-cancellation-coordination', 'observe-cancellation-clock', 'record-cancellation-signal', 'claim-cancellation-escalation', 'takeover-cancellation-escalation', 'authorize-cancellation-stop', 'record-cancellation-stop', 'record-cancellation-inspection', 'cancellation-recovery-blocker', 'freshness-request', 'freshness-result', 'runner-recovery-blocker', 'direct-interrupt', 'publish-recovery', 'publish-blocker-recheck', 'cleanup-credential-reserve', 'cleanup-credential-abort', 'cleanup-admission-stop-authorize', 'cleanup-admission-stop-complete', 'cleanup-admission-stop-failed', 'cleanup-admission-unexpected-exit', 'cleanup-admission', 'cleanup-admission-rotate', 'cleanup-admission-retry', 'hand-back'].includes(prepared.kind)) {
       throw new OwnershipViolationError('api', prepared.kind);
     }
     validateApiCommand(prepared);
@@ -2371,10 +3057,12 @@ export class OwnershipStore {
       case 'dispatch-proof-observation': return this.#transaction(() => this.#dispatchProofObservation(prepared));
       case 'dispatch-release': return this.#transaction(() => this.#dispatchRelease(prepared));
       case 'request-cancellation': return this.#transaction(() => this.#requestCancellation(prepared));
+      case 'record-cancellation-coordination-failure': return this.#transaction(() => this.#recordCancellationCoordinationFailure(prepared));
       case 'initialize-cancellation-coordination': return this.#transaction(() => this.#initializeCancellationCoordination(prepared));
       case 'observe-cancellation-clock': return this.#transaction(() => this.#observeCancellationClock(prepared));
       case 'record-cancellation-signal': return this.#transaction(() => this.#recordCancellationSignal(prepared));
       case 'claim-cancellation-escalation': return this.#transaction(() => this.#claimCancellationEscalation(prepared));
+      case 'takeover-cancellation-escalation': return this.#transaction(() => this.#takeoverCancellationEscalation(prepared));
       case 'authorize-cancellation-stop': return this.#transaction(() => this.#authorizeCancellationStop(prepared));
       case 'record-cancellation-stop': return this.#transaction(() => this.#recordCancellationStop(prepared));
       case 'record-cancellation-inspection': return this.#transaction(() => this.#recordCancellationInspection(prepared));
@@ -2518,6 +3206,12 @@ export class OwnershipStore {
     requireChronology([['source commit time', input.sourceCommitTime], ['accepted time', input.acceptedAt]]);
     for (const [value, field] of [[input.expectedSha, 'expected SHA'], [input.pinnedSha, 'pinned SHA']] as const) hash40(value, field);
     hash(input.targetManifestSha256, 'target manifest SHA-256');
+    let builderIdentity;
+    try { builderIdentity = parseBuilderIdentity(input.builderIdentity); }
+    catch (error) { throw new OwnershipValidationError('accepted builder identity is invalid', { cause: error }); }
+    if (builderIdentity.targetManifestSha256 !== input.targetManifestSha256) {
+      throw new OwnershipValidationError('accepted builder identity does not bind the target manifest');
+    }
     if (input.expectedSha !== input.pinnedSha || input.sourceBranch !== input.branch || input.sourceRef !== `refs/remotes/origin/${input.branch}`) {
       throw new OwnershipValidationError('accepted source identity is incoherent');
     }
@@ -2544,11 +3238,11 @@ export class OwnershipStore {
     const fifo = Number((this.#db.prepare('SELECT COALESCE(MAX(fifo_seq) + 1, 0) AS next FROM queue_entries').get() as Row).next);
     const position = Number((this.#db.prepare("SELECT COUNT(*) AS count FROM jobs WHERE queue_state='queued'").get() as Row).count);
     this.#db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json,
-      offline_feed_preparation_json, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, preflight_sha, preflight_checked_at,
+      offline_feed_preparation_json, target_id, root_id, target_manifest_sha256, builder_identity_status, builder_package_version, builder_package_root, builder_lock_sha256, builder_execution_definition_sha256, builder_target_manifest_sha256, builder_runner_sha256, builder_cleanup_worker_sha256, builder_dependency_egress_proxy_sha256, builder_image_reference, builder_image_id, builder_image_digest, source_commit_time, source_author, source_subject, preflight_sha, preflight_checked_at,
       preflight_expires_at, accepted_at, state, queue_state, queue_position, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', ?, ?, ?)`).run(
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', ?, ?, ?)`).run(
       input.jobId, input.requestId, request, input.sourceRemote, input.sourceRef, input.sourceBranch, input.branch, input.expectedSha, input.pinnedSha,
-      sourcePreparation, offlineFeedPreparation, input.targetId, input.rootId, input.targetManifestSha256, input.sourceCommitTime, input.sourceAuthor, input.sourceSubject,
+      sourcePreparation, offlineFeedPreparation, input.targetId, input.rootId, input.targetManifestSha256, builderIdentity.packageVersion, builderIdentity.packageRoot, builderIdentity.lockSha256, builderIdentity.executionDefinitionSha256, builderIdentity.targetManifestSha256, builderIdentity.runnerSha256, builderIdentity.cleanupWorkerSha256, builderIdentity.dependencyEgressProxySha256, builderIdentity.imageReference, builderIdentity.imageId, builderIdentity.imageDigest, input.sourceCommitTime, input.sourceAuthor, input.sourceSubject,
       preflight, checked, expires, input.acceptedAt, position, input.acceptedAt, input.acceptedAt,
     );
     this.#db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run(input.jobId, fifo, input.acceptedAt);
@@ -2560,11 +3254,35 @@ export class OwnershipStore {
     string(command.jobId, 'jobId'); runnerUnit(command.jobId, command.runnerUnit); instant(command.at, 'dispatch time');
     requirePersistedTimeline(this.#db, command.jobId, [['dispatch time', command.at]]);
     const job = this.#db.prepare(
-      'SELECT accepted_at, source_preparation_json, offline_feed_preparation_json FROM jobs WHERE job_id=?',
+      `SELECT accepted_at, source_preparation_json, offline_feed_preparation_json,
+              builder_identity_status, builder_package_root, builder_lock_sha256,
+              builder_execution_definition_sha256, builder_target_manifest_sha256,
+              builder_runner_sha256, builder_cleanup_worker_sha256,
+              builder_dependency_egress_proxy_sha256,
+              builder_package_version, builder_image_reference, builder_image_id, builder_image_digest
+       FROM jobs WHERE job_id=?`,
     ).get(command.jobId) as Row | undefined;
     if (!job) conflict('stale-predecessor', 'queued job does not exist');
     if (job.source_preparation_json === null || job.offline_feed_preparation_json === null) {
       conflict('stale-predecessor', 'queued job has no authoritative runnable source preparation');
+    }
+    try {
+      if (job.builder_identity_status !== 'admitted') throw new Error('builder identity is not admitted');
+      parseBuilderIdentity({
+        packageVersion: job.builder_package_version,
+        packageRoot: job.builder_package_root,
+        lockSha256: job.builder_lock_sha256,
+        executionDefinitionSha256: job.builder_execution_definition_sha256,
+        targetManifestSha256: job.builder_target_manifest_sha256,
+        runnerSha256: job.builder_runner_sha256,
+        cleanupWorkerSha256: job.builder_cleanup_worker_sha256,
+        dependencyEgressProxySha256: job.builder_dependency_egress_proxy_sha256,
+        imageReference: job.builder_image_reference,
+        imageId: job.builder_image_id,
+        imageDigest: job.builder_image_digest,
+      });
+    } catch {
+      conflict('stale-predecessor', 'queued job has no complete admitted builder identity');
     }
     requireChronology([['accepted time', String(job.accepted_at)], ['dispatch time', command.at]]);
     const existingClaim = this.#db.prepare('SELECT job_id FROM queue_dispatch_claims WHERE claim_id=1').get() as Row | undefined;
@@ -2727,6 +3445,43 @@ export class OwnershipStore {
     this.#event(command.jobId, 'cancellation_requested', { reason: command.reason }, command.at);
   }
 
+  #recordCancellationCoordinationFailure(command: Extract<ApiWriteCommand, { kind: 'record-cancellation-coordination-failure' }>): void {
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [['cancellation coordination failure time', command.at]]);
+    requireChronology([
+      ['cancellation request time', command.cancelRequestedAt],
+      ['cancellation coordination failure time', command.at],
+    ]);
+    if (
+      row.state !== command.expectedState
+      || row.cancel_requested_at !== command.cancelRequestedAt
+      || row.terminal_at !== null
+      || row.cleanup_fence_generation !== null
+      || row.cleanup_admission_id !== null
+    ) {
+      conflict('cas-lost', 'cancellation coordination failure predecessor changed during CAS');
+    }
+    const existing = this.#db.prepare(`SELECT 1 AS present FROM job_events
+      WHERE job_id=? AND event_type='recovery'
+        AND json_extract(payload_json, '$.kind')='cancellation-coordination-failed'
+        AND json_extract(payload_json, '$.cancelRequestedAt')=?
+        AND json_extract(payload_json, '$.phase')=?
+        AND json_extract(payload_json, '$.failure.kind')=?
+      LIMIT 1`).get(
+      command.jobId,
+      command.cancelRequestedAt,
+      command.phase,
+      command.failure.kind,
+    );
+    if (existing !== undefined) return;
+    this.#event(command.jobId, 'recovery', {
+      kind: 'cancellation-coordination-failed',
+      cancelRequestedAt: command.cancelRequestedAt,
+      phase: command.phase,
+      failure: command.failure,
+    }, command.at);
+  }
+
   #initializeCancellationCoordination(command: Extract<ApiWriteCommand, { kind: 'initialize-cancellation-coordination' }>): void {
     const row = this.#job(command.jobId);
     requirePersistedTimeline(this.#db, command.jobId, [['cancellation coordination time', command.at]]);
@@ -2787,11 +3542,26 @@ export class OwnershipStore {
     ) {
       conflict('cas-lost', 'cancellation clock high-water CAS lost');
     }
+    if (
+      command.expectedEscalationOwner !== undefined
+      && (
+        row.cancellation_escalation_owner !== command.expectedEscalationOwner
+        || row.cancellation_escalation_lease_expires_at !== command.expectedEscalationLeaseExpiresAt
+        || row.cancellation_stop_intent_at !== command.expectedStopIntentAt
+      )
+    ) {
+      conflict('identity-mismatch', 'cancellation clock escalation ownership is stale');
+    }
     if (command.observedAt === command.expectedHighWaterAt) return;
     const result = this.#db.prepare(`UPDATE jobs SET
       cancellation_clock_high_water_at=?, updated_at=?
       WHERE job_id=? AND state=? AND cancel_requested_at=?
         AND cancellation_clock_high_water_at=?
+        AND (? IS NULL OR (
+          cancellation_escalation_owner=?
+          AND cancellation_escalation_lease_expires_at=?
+          AND cancellation_stop_intent_at=?
+        ))
         AND terminal_at IS NULL AND cleanup_blocker_code IS NULL
         AND cleanup_blocker_json IS NULL AND cleanup_fence_generation IS NULL
         AND cleanup_admission_id IS NULL`).run(
@@ -2801,6 +3571,10 @@ export class OwnershipStore {
       command.expectedState,
       command.cancelRequestedAt,
       command.expectedHighWaterAt,
+      command.expectedEscalationOwner ?? null,
+      command.expectedEscalationOwner ?? null,
+      command.expectedEscalationLeaseExpiresAt ?? null,
+      command.expectedStopIntentAt ?? null,
     );
     if (Number(result.changes) !== 1) conflict('cas-lost', 'cancellation clock high-water CAS lost');
     this.#event(command.jobId, 'recovery', {
@@ -2892,6 +3666,79 @@ export class OwnershipStore {
     this.#event(command.jobId, 'recovery', {
       kind: 'cancellation-stop-intent',
       escalationOwner: command.escalationOwner,
+      graceDeadlineAt: command.graceDeadlineAt,
+    }, command.at);
+  }
+
+  #takeoverCancellationEscalation(command: Extract<ApiWriteCommand, { kind: 'takeover-cancellation-escalation' }>): void {
+    const row = this.#job(command.jobId);
+    requirePersistedTimeline(this.#db, command.jobId, [['cancellation escalation takeover time', command.at]]);
+    requireChronology([
+      ['cancellation request time', command.cancelRequestedAt],
+      ['cooperative cancellation deadline', command.cooperativeDeadlineAt],
+      ['cancellation stop intent time', command.stopIntentAt],
+      ['previous cancellation escalation lease expiry', command.previousEscalationLeaseExpiresAt],
+      ['cancellation escalation takeover time', command.at],
+      ['replacement cancellation escalation lease expiry', command.escalationLeaseExpiresAt],
+      ['replacement cancellation grace deadline', command.graceDeadlineAt],
+    ]);
+    if (command.escalationOwner === command.previousEscalationOwner) {
+      throw new OwnershipValidationError('cancellation escalation takeover requires a new owner');
+    }
+    if (command.escalationLeaseExpiresAt !== command.graceDeadlineAt) {
+      throw new OwnershipValidationError('replacement cancellation escalation lease must equal grace deadline');
+    }
+    if (command.observedLeaseExpiresAt <= command.at) {
+      conflict('stale-lease', 'runner lease expired before cancellation escalation takeover');
+    }
+    if (
+      (row.cancellation_stop_authorized_at === null) !== (row.cancellation_stop_authorized_lease_expires_at === null)
+      || (row.cancellation_stop_observation_json !== null && row.cancellation_stop_authorized_at === null)
+      || row.cancellation_grace_deadline_at !== command.previousEscalationLeaseExpiresAt
+    ) {
+      conflict('identity-mismatch', 'persisted cancellation escalation evidence is incomplete');
+    }
+    const result = this.#db.prepare(`UPDATE jobs SET
+      cancellation_escalation_owner=?, cancellation_escalation_lease_expires_at=?,
+      cancellation_grace_deadline_at=?, updated_at=?
+      WHERE job_id=? AND state=? AND cancel_requested_at=?
+        AND cancellation_cooperative_deadline_at=?
+        AND cancellation_clock_high_water_at=?
+        AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at>=?
+        AND runner_lease_expires_at>?
+        AND cancellation_escalation_owner=?
+        AND cancellation_escalation_lease_expires_at=?
+        AND cancellation_escalation_lease_expires_at<=?
+        AND cancellation_stop_intent_at=?
+        AND cancellation_grace_deadline_at=?
+        AND terminal_at IS NULL AND cleanup_blocker_code IS NULL
+        AND cleanup_blocker_json IS NULL AND cleanup_fence_generation IS NULL
+        AND cleanup_admission_id IS NULL`).run(
+      command.escalationOwner,
+      command.escalationLeaseExpiresAt,
+      command.graceDeadlineAt,
+      command.at,
+      command.jobId,
+      command.expectedState,
+      command.cancelRequestedAt,
+      command.cooperativeDeadlineAt,
+      command.at,
+      command.runnerUnit,
+      command.observedOwner,
+      command.observedLeaseExpiresAt,
+      command.at,
+      command.previousEscalationOwner,
+      command.previousEscalationLeaseExpiresAt,
+      command.at,
+      command.stopIntentAt,
+      command.previousEscalationLeaseExpiresAt,
+    );
+    if (Number(result.changes) !== 1) conflict('cas-lost', 'cancellation escalation takeover CAS lost');
+    this.#event(command.jobId, 'recovery', {
+      kind: 'cancellation-escalation-taken-over',
+      previousEscalationOwner: command.previousEscalationOwner,
+      escalationOwner: command.escalationOwner,
+      stopIntentAt: command.stopIntentAt,
       graceDeadlineAt: command.graceDeadlineAt,
     }, command.at);
   }
@@ -3012,6 +3859,13 @@ export class OwnershipStore {
   #recordCancellationInspection(command: Extract<ApiWriteCommand, { kind: 'record-cancellation-inspection' }>): void {
     const row = this.#job(command.jobId);
     requirePersistedTimeline(this.#db, command.jobId, [['cancellation inspection observation time', command.at]]);
+    if (
+      row.cancellation_escalation_owner !== command.escalationOwner
+      || row.cancellation_escalation_lease_expires_at !== command.escalationLeaseExpiresAt
+      || row.cancellation_stop_intent_at !== command.stopIntentAt
+    ) {
+      conflict('identity-mismatch', 'cancellation inspection escalation ownership is stale');
+    }
     const prior = row.cancellation_inspection_observations_json === null
       ? []
       : (() => {
@@ -3023,6 +3877,7 @@ export class OwnershipStore {
       cancellation_inspection_observations_json=?, updated_at=?
       WHERE job_id=? AND state=? AND cancel_requested_at=?
         AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=?
+        AND cancellation_escalation_owner=? AND cancellation_escalation_lease_expires_at=?
         AND cancellation_stop_intent_at=?
         AND terminal_at IS NULL AND cleanup_fence_generation IS NULL
         AND cleanup_admission_id IS NULL`).run(
@@ -3034,6 +3889,8 @@ export class OwnershipStore {
       command.runnerUnit,
       command.observedOwner,
       command.observedLeaseExpiresAt,
+      command.escalationOwner,
+      command.escalationLeaseExpiresAt,
       command.stopIntentAt,
     );
     if (Number(result.changes) !== 1) conflict('cas-lost', 'cancellation inspection observation CAS lost');
@@ -3049,6 +3906,11 @@ export class OwnershipStore {
       || row.cancel_requested_at !== command.cancelRequestedAt
       || row.runner_unit !== command.observedRunnerUnit
       || row.runner_lease_owner !== command.observedOwner
+      || (command.expectedEscalationOwner !== undefined && (
+        row.cancellation_escalation_owner !== command.expectedEscalationOwner
+        || row.cancellation_escalation_lease_expires_at !== command.expectedEscalationLeaseExpiresAt
+        || row.cancellation_stop_intent_at !== command.expectedStopIntentAt
+      ))
       || row.terminal_at !== null
       || row.cleanup_fence_generation !== null
       || row.cleanup_admission_id !== null
@@ -3363,13 +4225,13 @@ export class OwnershipStore {
       ? this.#db.prepare(`UPDATE jobs SET artifact_staging_path=NULL, artifact_quarantine_path=NULL, artifact_quarantine_intent_path=NULL,
           artifact_final_directory=NULL, artifact_final_path=NULL, artifact_sha256=NULL, artifact_size=NULL, artifact_mtime=NULL,
           checksum_path=NULL, checksum_sha256=NULL, manifest_path=NULL, manifest_sha256=NULL, verification_path=NULL, verification_sha256=NULL,
-          publish_state=NULL, publish_started_at=NULL, published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? ${where}`)
+          publish_state=NULL, release_seal_status=NULL, publish_started_at=NULL, published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? ${where}`)
         .run(command.at, command.jobId, row.artifact_staging_path, row.artifact_quarantine_path, row.artifact_sha256, row.artifact_size, row.artifact_mtime, row.checksum_path, row.checksum_sha256, row.manifest_path, row.manifest_sha256, row.verification_path, row.verification_sha256, row.publish_blocker_json)
       : command.resolution === 'mark-published'
         ? this.#db.prepare(`UPDATE jobs SET artifact_staging_path=NULL, artifact_quarantine_path=NULL, artifact_quarantine_intent_path=NULL,
-            artifact_final_directory=?, artifact_final_path=?, checksum_path=?, manifest_path=?, verification_path=?, publish_state='published',
+            artifact_final_directory=?, artifact_final_path=?, checksum_path=?, manifest_path=?, verification_path=?, publish_state='published', release_seal_status=?,
             publish_started_at=?, published_at=?, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? ${where}`)
-          .run(p!.finalDirectory, p!.finalPath, p!.checksum.path, p!.manifest.path, p!.verification.path, blocker.publishStartedAt, command.at, command.at, command.jobId, row.artifact_staging_path, row.artifact_quarantine_path, row.artifact_sha256, row.artifact_size, row.artifact_mtime, row.checksum_path, row.checksum_sha256, row.manifest_path, row.manifest_sha256, row.verification_path, row.verification_sha256, row.publish_blocker_json)
+          .run(p!.finalDirectory, p!.finalPath, p!.checksum.path, p!.manifest.path, p!.verification.path, p!.sealStatus === 'sealed' ? 'sealed' : 'legacy_mutable', blocker.publishStartedAt, command.at, command.at, command.jobId, row.artifact_staging_path, row.artifact_quarantine_path, row.artifact_sha256, row.artifact_size, row.artifact_mtime, row.checksum_path, row.checksum_sha256, row.manifest_path, row.manifest_sha256, row.verification_path, row.verification_sha256, row.publish_blocker_json)
         : this.#db.prepare(`UPDATE jobs SET updated_at=? ${where}`).run(command.at, command.jobId, row.artifact_staging_path, row.artifact_quarantine_path, row.artifact_sha256, row.artifact_size, row.artifact_mtime, row.checksum_path, row.checksum_sha256, row.manifest_path, row.manifest_sha256, row.verification_path, row.verification_sha256, row.publish_blocker_json);
     if (Number(result.changes) !== 1) conflict('cas-lost', 'publish blocker recheck predecessor changed during CAS');
   }
@@ -3498,12 +4360,12 @@ export class OwnershipStore {
       conflict('identity-mismatch', 'publish recovery omitted terminal verification identity');
     }
     const result = command.state === 'succeeded'
-      ? this.#db.prepare(`UPDATE jobs SET state='succeeded', queue_state='complete', queue_position=NULL, publish_state='published', artifact_staging_path=NULL,
+      ? this.#db.prepare(`UPDATE jobs SET state='succeeded', queue_state='complete', queue_position=NULL, publish_state='published', release_seal_status='sealed', artifact_staging_path=NULL,
           artifact_quarantine_intent_path=NULL, artifact_final_directory=?, artifact_final_path=?, publish_started_at=?, published_at=?, verification_sha256=?, terminal_at=?, terminal_error_code=NULL, terminal_error_json=NULL, runner_finished_at=?, updated_at=?
         WHERE job_id=? AND state='publishing' AND publish_state='publishing' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND runner_lease_expires_at < ?
           AND artifact_staging_path=? AND artifact_final_directory=? AND artifact_final_path=? AND artifact_sha256=? AND artifact_size=? AND artifact_mtime=? AND checksum_path=? AND checksum_sha256=? AND manifest_path=? AND manifest_sha256=? AND verification_path=? AND verification_sha256=?
           AND container_id IS NULL AND container_label_job_id IS NULL AND cleanup_fence_generation IS NULL AND cleanup_admission_id IS NULL`).run(f.directory, f.path, f.publishStartedAt, f.publishedAt ?? command.at, recoveredVerificationSha256, f.publishedAt ?? command.at, f.publishedAt ?? command.at, command.at, command.jobId, command.evidence.runner.unit, command.evidence.runner.owner, command.evidence.runner.leaseExpiresAt, command.at, a.stagingPath, f.directory, f.path, a.artifactSha256, a.artifactSize, a.artifactMtime, a.checksumPath, a.checksumSha256, a.manifestPath, a.manifestSha256, a.verificationPath, a.verificationSha256)
-      : this.#db.prepare(`UPDATE jobs SET state='failed', queue_state='complete', queue_position=NULL, publish_state='blocked', artifact_staging_path=?, artifact_quarantine_path=?, artifact_final_directory=NULL, artifact_final_path=NULL,
+      : this.#db.prepare(`UPDATE jobs SET state='failed', queue_state='complete', queue_position=NULL, publish_state='blocked', release_seal_status=NULL, artifact_staging_path=?, artifact_quarantine_path=?, artifact_final_directory=NULL, artifact_final_path=NULL,
           artifact_quarantine_intent_path=NULL, publish_started_at=NULL, published_at=NULL, publish_blocker_code=?, publish_blocker_json=?, terminal_at=?, terminal_error_code=?, terminal_error_json=?, updated_at=?
         WHERE job_id=? AND state='publishing' AND publish_state='publishing' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND runner_lease_expires_at < ?
           AND artifact_staging_path=? AND artifact_final_directory=? AND artifact_final_path=? AND artifact_sha256=? AND artifact_size=? AND artifact_mtime=? AND checksum_path=? AND checksum_sha256=? AND manifest_path=? AND manifest_sha256=? AND verification_path=? AND verification_sha256=?
@@ -3985,9 +4847,9 @@ export class OwnershipStore {
       ? 'artifact_sha256=NULL, artifact_size=NULL, artifact_mtime=NULL, checksum_path=NULL, checksum_sha256=NULL, manifest_path=NULL, manifest_sha256=NULL, verification_path=NULL, verification_sha256=NULL, '
       : '';
     const stagingUpdate = completionPostcondition.staging.kind === 'quarantined'
-      ? `artifact_staging_path=NULL, artifact_quarantine_path=?, publish_state='quarantined', ${preparationClear}publish_started_at=NULL, published_at=NULL, `
+      ? `artifact_staging_path=NULL, artifact_quarantine_path=?, publish_state='quarantined', release_seal_status=NULL, ${preparationClear}publish_started_at=NULL, published_at=NULL, `
       : preparationIntent
-        ? `artifact_staging_path=NULL, artifact_quarantine_path=NULL, publish_state=NULL, ${preparationClear}`
+        ? `artifact_staging_path=NULL, artifact_quarantine_path=NULL, publish_state=NULL, release_seal_status=NULL, ${preparationClear}`
         : '';
     const stagingParams = completionPostcondition.staging.kind === 'quarantined'
       ? [completionPostcondition.staging.destinationPath]
@@ -4041,8 +4903,8 @@ export class OwnershipStore {
     requireChronology([
       ['accepted time', String(row.accepted_at)],
       ['dispatch time', row.dispatched_at === null ? null : String(row.dispatched_at)],
-      ['dispatch start attempt', startAttemptedAt],
       ['dispatch unit inactive observation', unitInactiveAt],
+      ['dispatch start attempt', startAttemptedAt],
       ['runner start time', command.at],
     ]);
     const result = this.#db.prepare(`UPDATE jobs SET runner_lease_owner=?, runner_lease_expires_at=?, runner_started_at=?, updated_at=? WHERE job_id=? AND state='starting' AND runner_unit=?
@@ -4090,13 +4952,14 @@ export class OwnershipStore {
     validateCancellationEvidence(command.evidence, row, command.at);
     reconcileCancellationLogs(this.#db, command.jobId, command.evidence.logs, command.at);
     const evidenceJson = json(command.evidence, 'cancellation evidence', true);
+    const identity = jobContainerIdentity(row);
     const result = this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=NULL, cleanup_blocker_json=NULL,
       container_cleanup_outcome=CASE WHEN container_id IS NULL THEN NULL ELSE container_cleanup_outcome END,
       updated_at=? WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND cleanup_fence_generation IS NULL`).run(
       command.at, command.jobId, command.runnerUnit, command.owner, command.leaseExpiresAt,
     );
     if (Number(result.changes) !== 1) conflict('cas-lost', 'cancellation evidence CAS lost');
-    this.#event(command.jobId, 'cleanup', { kind: 'cancellation-evidence', evidence: JSON.parse(evidenceJson as string) as JsonObject }, command.at);
+    this.#event(command.jobId, 'cleanup', { kind: 'cancellation-evidence', evidence: JSON.parse(evidenceJson as string) as JsonObject, containerIdentity: identity }, command.at);
   }
 
   #cancellationBlocker(command: Extract<RunnerWriteCommand, { kind: 'cancellation-blocker' }>): void {
@@ -4120,6 +4983,8 @@ export class OwnershipStore {
     if (evidencePayload.kind !== 'cancellation-evidence') conflict('stale-predecessor', 'cancellation cleanup requires the durable evidence phase');
     const durableEvidence = evidencePayload.evidence as CancellationEvidence | undefined;
     if (durableEvidence === undefined) conflict('identity-mismatch', 'cancellation cleanup evidence payload is missing');
+    const durableIdentity = evidencePayload.containerIdentity;
+    if (!jobContainerIdentityMatches(row, durableIdentity)) conflict('identity-mismatch', 'cancellation cleanup identity tuple changed after evidence');
     validateCancellationEvidenceBinding(durableEvidence, command.proof);
     reconcileCancellationLogs(this.#db, command.jobId, command.proof.logs, command.at);
     const stagingProof = command.proof.staging;
@@ -4127,21 +4992,21 @@ export class OwnershipStore {
       if (row.artifact_staging_path !== null) conflict('identity-mismatch', 'cancellation staging absence does not match persisted staging');
     } else {
       if (row.artifact_staging_path !== stagingProof.sourcePath || row.publish_state === null || (row.artifact_sha256 !== null && row.artifact_sha256 !== stagingProof.sha256) || (row.artifact_size !== null && Number(row.artifact_size) !== stagingProof.size)) conflict('identity-mismatch', 'cancellation quarantine evidence does not match persisted staging');
-      const quarantine = this.#db.prepare(`UPDATE jobs SET publish_state='quarantined', artifact_staging_path=NULL, artifact_quarantine_path=?, publish_started_at=NULL, published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=?
+      const quarantine = this.#db.prepare(`UPDATE jobs SET publish_state='quarantined', release_seal_status=NULL, artifact_staging_path=NULL, artifact_quarantine_path=?, publish_started_at=NULL, published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=?
         WHERE job_id=? AND state='cancel_requested' AND artifact_staging_path=? AND artifact_quarantine_path IS NULL AND cleanup_fence_generation IS NULL`).run(stagingProof.destinationPath, command.at, command.jobId, stagingProof.sourcePath);
       if (Number(quarantine.changes) !== 1) conflict('identity-mismatch', 'cancellation quarantine CAS lost');
     }
     if (command.proof.kind === 'container') {
-      const c = command.proof.container;
+      const identityCas = JOB_CONTAINER_IDENTITY_COLUMNS.map((column) => `${column} IS ?`).join(' AND ');
       const clear = this.#db.prepare(`UPDATE jobs SET container_id=NULL, container_name=NULL, container_image_digest=NULL, container_label_job_id=NULL, container_label_manifest_sha=NULL,
         container_labels_json=NULL, container_mount_json=NULL, container_env_json=NULL, container_security_json=NULL, container_inspection_json=NULL, container_created_at=NULL,
         container_started_at=NULL, container_stopped_at=NULL, container_removed_at=NULL, container_cleanup_outcome=NULL, cleanup_blocker_code=NULL, cleanup_blocker_json=NULL, updated_at=?
-        WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND container_id=? AND container_name=? AND container_image_digest=? AND container_label_job_id=? AND container_label_manifest_sha=? AND cleanup_fence_generation IS NULL`).run(
-        command.at, command.jobId, command.runnerUnit, command.owner, command.leaseExpiresAt, c.id, c.name, c.imageDigest, command.jobId, row.target_manifest_sha256);
+        WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND ${identityCas} AND cleanup_fence_generation IS NULL`).run(
+        command.at, command.jobId, command.runnerUnit, command.owner, command.leaseExpiresAt, ...JOB_CONTAINER_IDENTITY_COLUMNS.map((column) => durableIdentity && typeof durableIdentity === 'object' && !Array.isArray(durableIdentity) && Object.hasOwn(durableIdentity, column) ? (durableIdentity as Record<string, unknown>)[column] : null));
       if (Number(clear.changes) !== 1) conflict('identity-mismatch', 'cancellation container cleanup CAS lost');
     } else {
       const clear = this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=NULL, cleanup_blocker_json=NULL, updated_at=?
-        WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND cleanup_fence_generation IS NULL`).run(
+        WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND ${JOB_CONTAINER_IDENTITY_NULL_SQL} AND cleanup_fence_generation IS NULL`).run(
         command.at, command.jobId, command.runnerUnit, command.owner, command.leaseExpiresAt,
       );
       if (Number(clear.changes) !== 1) conflict('cas-lost', 'cancellation pre-container cleanup CAS lost');
@@ -4162,11 +5027,11 @@ export class OwnershipStore {
     if (proof === undefined) conflict('identity-mismatch', 'cancellation cleanup proof is missing');
     reconcileCancellationLogs(this.#db, command.jobId, proof.logs, command.at);
     const row = this.#job(command.jobId);
-    if (row.container_id !== null || row.container_name !== null || row.container_image_digest !== null || row.container_label_job_id !== null || row.container_label_manifest_sha !== null || row.container_labels_json !== null || row.artifact_staging_path !== null) {
+    if (!jobContainerIdentityIsNull(row) || row.artifact_staging_path !== null) {
       conflict('identity-mismatch', 'cancellation cleanup did not clear all active identity');
     }
     const terminal = this.#db.prepare(`UPDATE jobs SET state='cancelled', queue_state='complete', queue_position=NULL, terminal_at=?, terminal_error_code='CANCELLED', terminal_error_json=?, runner_finished_at=?, cleanup_blocker_code=NULL, cleanup_blocker_json=NULL, updated_at=?
-      WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND container_id IS NULL AND container_name IS NULL AND container_image_digest IS NULL AND container_label_job_id IS NULL AND container_label_manifest_sha IS NULL AND container_labels_json IS NULL AND artifact_staging_path IS NULL AND cleanup_fence_generation IS NULL`).run(
+      WHERE job_id=? AND state='cancel_requested' AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND ${JOB_CONTAINER_IDENTITY_NULL_SQL} AND artifact_staging_path IS NULL AND cleanup_fence_generation IS NULL`).run(
       command.terminalAt, json({ reason: 'cancelled' }, 'cancellation terminal error', true), command.terminalAt, command.at, command.jobId, command.runnerUnit, command.owner, command.leaseExpiresAt);
     if (Number(terminal.changes) !== 1) conflict('cas-lost', 'cancellation terminal CAS lost');
     this.#event(command.jobId, 'terminal', { state: 'cancelled', errorCode: 'CANCELLED', cleanupEventSeq: command.cleanupEventSeq }, command.terminalAt);
@@ -4254,7 +5119,7 @@ export class OwnershipStore {
     ) {
       conflict('identity-mismatch', 'completed artifact differs from its preparation intent');
     }
-    const result = this.#db.prepare(`UPDATE jobs SET publish_state='staged', artifact_staging_path=?, artifact_quarantine_path=NULL, artifact_quarantine_intent_path=NULL, artifact_final_directory=NULL, artifact_final_path=NULL,
+    const result = this.#db.prepare(`UPDATE jobs SET publish_state='staged', release_seal_status=NULL, artifact_staging_path=?, artifact_quarantine_path=NULL, artifact_quarantine_intent_path=NULL, artifact_final_directory=NULL, artifact_final_path=NULL,
       artifact_sha256=?, artifact_size=?, artifact_mtime=?, checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=?,
       publish_started_at=NULL, published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=?
       AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL
@@ -4360,7 +5225,7 @@ export class OwnershipStore {
     );
     if (Number(stage.changes) !== 1) conflict('cas-lost', 'publish stage evidence CAS lost');
     const update = this.#db.prepare(`UPDATE jobs SET
-      state='publishing', current_stage='publish', publish_state='publishing',
+      state='publishing', current_stage='publish', publish_state='publishing', release_seal_status='in_progress',
       artifact_final_directory=?, artifact_final_path=?, publish_started_at=?,
       published_at=NULL, artifact_quarantine_intent_path=NULL,
       publish_blocker_code=NULL, publish_blocker_json=NULL,
@@ -4512,7 +5377,7 @@ export class OwnershipStore {
     if (Number(stage.changes) !== 1) conflict('cas-lost', 'publish stage completion CAS lost');
     const update = this.#db.prepare(`UPDATE jobs SET
       state='succeeded', queue_state='complete', queue_position=NULL,
-      publish_state='published', artifact_staging_path=NULL,
+      publish_state='published', release_seal_status='sealed', artifact_staging_path=NULL,
       artifact_quarantine_intent_path=NULL,
       artifact_final_directory=?, artifact_final_path=?, published_at=?,
       verification_sha256=?,
@@ -4621,7 +5486,7 @@ export class OwnershipStore {
     if (Number(stage.changes) !== 1) conflict('cas-lost', 'publish failure stage completion CAS lost');
     const update = this.#db.prepare(`UPDATE jobs SET
       state='failed', queue_state='complete', queue_position=NULL,
-      publish_state='blocked', artifact_staging_path=?, artifact_quarantine_path=?,
+      publish_state='blocked', release_seal_status=NULL, artifact_staging_path=?, artifact_quarantine_path=?,
       artifact_quarantine_intent_path=NULL,
       artifact_final_directory=NULL, artifact_final_path=NULL,
       publish_started_at=NULL, published_at=NULL,
@@ -4675,16 +5540,16 @@ export class OwnershipStore {
       if (!command.finalDirectory || !command.finalPath) throw new TypeError('publishing needs final paths');
       confinedPath(command.finalDirectory, 'publish final directory'); confinedPath(command.finalPath, 'publish final path');
       if (command.expectedState !== 'publishing' && !transition(command.expectedState, 'publishing')) conflict('illegal-predecessor', 'publish transition is not in the state matrix');
-      result = this.#db.prepare(`UPDATE jobs SET state='publishing', publish_state='publishing', artifact_final_directory=?, artifact_final_path=?, publish_started_at=COALESCE(publish_started_at, ?), published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(command.finalDirectory, command.finalPath, command.startedAt ?? now, now, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, now);
+      result = this.#db.prepare(`UPDATE jobs SET state='publishing', publish_state='publishing', release_seal_status='in_progress', artifact_final_directory=?, artifact_final_path=?, publish_started_at=COALESCE(publish_started_at, ?), published_at=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(command.finalDirectory, command.finalPath, command.startedAt ?? now, now, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, now);
     } else if (command.state === 'published') {
       if (!command.finalDirectory || !command.finalPath) throw new TypeError('published needs final paths');
       confinedPath(command.finalDirectory, 'published final directory'); confinedPath(command.finalPath, 'published final path');
-      result = this.#db.prepare(`UPDATE jobs SET publish_state='published', artifact_staging_path=NULL, artifact_final_directory=?, artifact_final_path=?, publish_started_at=COALESCE(publish_started_at, ?), published_at=?, artifact_quarantine_path=NULL, artifact_quarantine_intent_path=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(command.finalDirectory, command.finalPath, command.startedAt ?? now, command.publishedAt ?? now, now, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, now);
+      result = this.#db.prepare(`UPDATE jobs SET publish_state='published', release_seal_status='legacy_mutable', artifact_staging_path=NULL, artifact_final_directory=?, artifact_final_path=?, publish_started_at=COALESCE(publish_started_at, ?), published_at=?, artifact_quarantine_path=NULL, artifact_quarantine_intent_path=NULL, publish_blocker_code=NULL, publish_blocker_json=NULL, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL`).run(command.finalDirectory, command.finalPath, command.startedAt ?? now, command.publishedAt ?? now, now, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, now);
     } else if (command.state === 'staged') {
-      result = this.#db.prepare("UPDATE jobs SET publish_state='staged', updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL").run(now, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, now);
+      result = this.#db.prepare("UPDATE jobs SET publish_state='staged', release_seal_status=NULL, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL").run(now, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, now);
     } else {
       if (!command.blockerCode || !command.blocker) throw new TypeError('blocked publish needs blocker evidence');
-      result = this.#db.prepare("UPDATE jobs SET publish_state='blocked', artifact_final_directory=NULL, artifact_final_path=NULL, publish_started_at=NULL, published_at=NULL, publish_blocker_code=?, publish_blocker_json=?, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL").run(command.blockerCode, json(command.blocker, 'publish blocker', true), now, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, now);
+      result = this.#db.prepare("UPDATE jobs SET publish_state='blocked', release_seal_status=NULL, artifact_final_directory=NULL, artifact_final_path=NULL, publish_started_at=NULL, published_at=NULL, publish_blocker_code=?, publish_blocker_json=?, updated_at=? WHERE job_id=? AND state=? AND runner_lease_owner=? AND runner_unit=? AND runner_lease_expires_at=? AND runner_lease_expires_at > ? AND cleanup_fence_generation IS NULL").run(command.blockerCode, json(command.blocker, 'publish blocker', true), now, command.jobId, command.expectedState, command.owner, command.runnerUnit, command.leaseExpiresAt, now);
     }
     if (Number(result.changes) !== 1) conflict('cas-lost', 'publish CAS lost');
     this.#event(command.jobId, 'publish', { state: command.state }, now);
@@ -4751,7 +5616,7 @@ export class OwnershipStore {
     const leaseTimeline = this.#db.prepare('SELECT admitted_at, claim_at, renew_at, expires_at FROM cleanup_leases WHERE admission_id=? AND job_id=?').get(command.admissionId, command.jobId) as Row | undefined;
     if (!leaseTimeline) conflict('admission-mismatch', 'cleanup lease does not exist');
     requireChronology([['cleanup admitted time', String(leaseTimeline.admitted_at)], ['cleanup claim time', leaseTimeline.claim_at === null ? null : String(leaseTimeline.claim_at)], ['cleanup renew time', leaseTimeline.renew_at === null ? null : String(leaseTimeline.renew_at)], ['cleanup completion time', command.at]]);
-    validateCleanupPostcondition(this.#db, command.postcondition, admission.snapshot, row, command.at);
+    validateCleanupPostcondition(this.#db, command.postcondition, admission.snapshot, row, command.at, this.#stateRoot);
     const present = command.postcondition.container.kind === 'removed' || command.postcondition.container.kind === 'already-absent';
     if (present) {
       if (command.exactContainerId === null || command.postcondition.container.id !== command.exactContainerId) conflict('identity-mismatch', 'cleanup completion requires the exact admitted container');
@@ -4766,12 +5631,14 @@ export class OwnershipStore {
       const unsealed = this.#db.prepare("SELECT 1 FROM job_log_generations WHERE job_id=? AND sealed_at IS NULL LIMIT 1").get(command.jobId);
       if (unsealed) conflict('identity-mismatch', 'cleanup log blocker is not sealed in the database');
     }
+    const identityValues = JOB_CONTAINER_IDENTITY_COLUMNS.map((column) => row[column] ?? null);
     const result = present
       ? this.#db.prepare(`UPDATE jobs SET container_id=NULL, container_name=NULL, container_image_digest=NULL, container_label_job_id=NULL, container_label_manifest_sha=NULL,
           container_labels_json=NULL, container_mount_json=NULL, container_env_json=NULL, container_security_json=NULL, container_inspection_json=NULL, container_created_at=NULL,
-          container_started_at=NULL, container_stopped_at=NULL, container_removed_at=NULL, container_cleanup_outcome=NULL, updated_at=? WHERE job_id=? AND container_id=? AND cleanup_admission_id=?
-          AND cleanup_fence_generation=? AND cleanup_fence_token_hash=? AND EXISTS (SELECT 1 FROM cleanup_leases WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=? AND proof_json=? AND status='claimed' AND expires_at > ?)`).run(command.at, command.jobId, command.exactContainerId, command.admissionId, command.fenceGeneration, command.fenceTokenHash, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash, snapshotJson, command.at)
-      : this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=NULL, cleanup_blocker_json=NULL, updated_at=? WHERE job_id=? AND container_id IS NULL AND container_name IS NULL AND container_image_digest IS NULL AND container_labels_json IS NULL AND cleanup_admission_id=?
+          container_started_at=NULL, container_stopped_at=NULL, container_removed_at=NULL, container_cleanup_outcome=NULL, updated_at=? WHERE job_id=?
+          AND ${JOB_CONTAINER_IDENTITY_COLUMNS.map((column) => `${column} IS ?`).join(' AND ')} AND cleanup_admission_id=?
+          AND cleanup_fence_generation=? AND cleanup_fence_token_hash=? AND EXISTS (SELECT 1 FROM cleanup_leases WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=? AND proof_json=? AND status='claimed' AND expires_at > ?)`).run(command.at, command.jobId, ...identityValues, command.admissionId, command.fenceGeneration, command.fenceTokenHash, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash, snapshotJson, command.at)
+      : this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=NULL, cleanup_blocker_json=NULL, updated_at=? WHERE job_id=? AND ${JOB_CONTAINER_IDENTITY_NULL_SQL} AND cleanup_admission_id=?
           AND cleanup_fence_generation=? AND cleanup_fence_token_hash=? AND EXISTS (SELECT 1 FROM cleanup_leases WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=? AND proof_json=? AND status IN ('claimed','blocking') AND expires_at > ?)`).run(command.at, command.jobId, command.admissionId, command.fenceGeneration, command.fenceTokenHash, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash, snapshotJson, command.at);
     if (Number(result.changes) !== 1) conflict('identity-mismatch', 'cleanup completion identity or lease changed');
     const lease = this.#db.prepare(`UPDATE cleanup_leases SET status='completed', blocker_code=NULL, blocker_json=NULL, complete_at=?, completion_evidence_path=?, completion_evidence_sha256=? WHERE admission_id=? AND job_id=? AND owner=? AND unit_name=? AND fence_generation=? AND fence_token_hash=? AND proof_json=? AND status IN ('claimed','blocking') AND expires_at > ?`).run(command.at, command.evidencePath, command.evidenceSha256, command.admissionId, command.jobId, command.owner, command.unitName, command.fenceGeneration, command.fenceTokenHash, snapshotJson, command.at);
@@ -4816,7 +5683,7 @@ export class OwnershipStore {
     }
     const previous = this.#db.prepare("SELECT MAX(finished_at) AS finished_at FROM job_operations WHERE job_id=? AND finished_at IS NOT NULL").get(command.jobId) as Row;
     requireChronology([['accepted time', String(job.accepted_at)], ['prior operation finish time', previous.finished_at === null ? null : String(previous.finished_at)], ['operation start time', command.startedAt], ['operation write time', command.at]]);
-    if (job.container_id !== null || job.container_name !== null || job.container_image_digest !== null || job.container_labels_json !== null) conflict('identity-mismatch', 'next operation requires cleared active container identity');
+    if (!jobContainerIdentityIsNull(job)) conflict('identity-mismatch', 'next operation requires completely cleared container identity');
     if (!TRUSTED_OPERATION_IDS.includes(command.operationId) || !Number.isSafeInteger(command.attempt) || command.attempt <= 0) throw new OwnershipValidationError('operation identity is invalid');
     hash(command.argvHash, 'operation argv hash'); const argv = jsonValue(command.argv, 'operation argv', 'array');
     if (Buffer.byteLength(argv, 'utf8') > TEXT_LIMITS.maxArgvBytes) throw new OwnershipValidationError('operation argv exceeds the argv byte limit');
@@ -4835,7 +5702,7 @@ export class OwnershipStore {
     this.#runnerGuard(command, command.expectedState, priorOperation?.outcome !== null && priorOperation?.outcome !== undefined);
     const input = command.input;
     if (priorOperation?.outcome === null || priorOperation === undefined) requirePersistedTimeline(this.#db, command.jobId, [['operation completion command time', command.at], ['operation start time', input.startedAt], ['operation finish time', input.finishedAt]], true);
-    if (!['not_created', 'created', 'started', 'stopped', 'removed'].includes(input.lifecyclePhase) || !['passed', 'failed', 'accepted'].includes(input.outcome)) throw new OwnershipValidationError('operation result enum is invalid');
+    if (!['not_created', 'created', 'started', 'stopped', 'removed'].includes(input.lifecyclePhase) || !['passed', 'failed'].includes(input.outcome)) throw new OwnershipValidationError('operation result enum is invalid');
     const job = this.#job(command.jobId);
     if (input.operationId !== command.operationId || input.attempt !== command.attempt) conflict('identity-mismatch', 'operation completion identity does not match its command');
     if (!TRUSTED_OPERATION_IDS.includes(input.operationId) || !Number.isSafeInteger(input.attempt) || input.attempt <= 0) throw new OwnershipValidationError('operation identity is invalid');
@@ -4852,16 +5719,6 @@ export class OwnershipStore {
       input.finishedAt === undefined
       || input.finishedAt === null
       || (input.outcome === 'passed' && (input.exitCode !== 0 || input.timedOut))
-      || (
-        input.outcome === 'accepted'
-        && (
-          input.operationId !== 'activate-target'
-          || input.exitCode !== 2
-          || input.signal !== undefined && input.signal !== null
-          || input.timedOut
-          || input.acceptedDisposition !== 'expected-rootfs-already-present'
-        )
-      )
       || (input.outcome === 'failed' && !input.errorCode)
     ) throw new OwnershipValidationError('operation completion evidence is incomplete');
     if (input.lifecyclePhase === 'not_created') {
@@ -4893,7 +5750,6 @@ export class OwnershipStore {
         && (existing.exit_code === null ? null : Number(existing.exit_code)) === (input.exitCode ?? null)
         && existing.signal === (input.signal ?? null)
         && existing.outcome === input.outcome
-        && existing.accepted_disposition === (input.acceptedDisposition ?? null)
         && existing.evidence_path === input.evidencePath
         && existing.evidence_sha256 === input.evidenceSha256
         && existing.error_code === (input.errorCode ?? null)
@@ -4905,10 +5761,10 @@ export class OwnershipStore {
       return;
     }
     const result = this.#db.prepare(`UPDATE job_operations SET finished_at=?, container_id=?, container_name=?, container_image_digest=?, container_label_job_id=?, container_label_manifest_sha=?,
-      container_mount_json=?, container_env_json=?, container_security_json=?, inspection_json=?, timed_out=?, lifecycle_phase=?, exit_code=?, signal=?, outcome=?, accepted_disposition=?, evidence_path=?, evidence_sha256=?, error_code=?, error_json=?
+      container_mount_json=?, container_env_json=?, container_security_json=?, inspection_json=?, timed_out=?, lifecycle_phase=?, exit_code=?, signal=?, outcome=?, evidence_path=?, evidence_sha256=?, error_code=?, error_json=?
       WHERE job_id=? AND operation_id=? AND attempt=? AND outcome IS NULL AND argv_hash=? AND argv_json=? AND started_at=?`).run(
       input.finishedAt, input.containerId ?? null, input.containerName ?? null, input.containerImageDigest ?? null, input.containerLabelJobId ?? null, input.containerLabelManifestSha ?? null,
-      mount, environment, security, inspection, input.timedOut ? 1 : 0, input.lifecyclePhase, input.exitCode ?? null, input.signal ?? null, input.outcome, input.acceptedDisposition ?? null, input.evidencePath, input.evidenceSha256, input.errorCode ?? null, errorJson,
+      mount, environment, security, inspection, input.timedOut ? 1 : 0, input.lifecyclePhase, input.exitCode ?? null, input.signal ?? null, input.outcome, input.evidencePath, input.evidenceSha256, input.errorCode ?? null, errorJson,
       command.jobId, input.operationId, input.attempt, input.argvHash, argv, input.startedAt,
     );
     if (Number(result.changes) !== 1) conflict('cas-lost', 'operation completion CAS lost');
@@ -4917,21 +5773,29 @@ export class OwnershipStore {
       attempt: input.attempt,
       phase: 'complete',
       outcome: input.outcome,
-      ...(input.acceptedDisposition === undefined || input.acceptedDisposition === null
-        ? {}
-        : { acceptedDisposition: input.acceptedDisposition }),
     }, command.at);
   }
 
   #operationCleanup(command: Extract<RunnerWriteCommand, { kind: 'operation-cleanup' }>): void {
     this.#runnerGuard(command, command.expectedState);
     const row = this.#job(command.jobId);
-    const operation = this.#db.prepare('SELECT outcome, lifecycle_phase FROM job_operations WHERE job_id=? AND operation_id=? AND attempt=?').get(command.jobId, command.operationId, command.attempt) as Row | undefined;
+    const operation = this.#db.prepare(`SELECT operation_id, attempt, outcome, lifecycle_phase,
+      container_id, container_name, container_image_digest, container_label_job_id, container_label_manifest_sha
+      FROM job_operations WHERE job_id=? AND operation_id=? AND attempt=?`).get(command.jobId, command.operationId, command.attempt) as Row | undefined;
     if (!operation || operation.outcome === null) conflict('stale-predecessor', 'operation result must be committed before cleanup');
+    if (operation.operation_id !== command.operationId || typeof operation.attempt !== 'number' || !Number.isSafeInteger(operation.attempt) || operation.attempt !== command.attempt) conflict('identity-mismatch', 'operation cleanup command does not match the persisted operation identity');
+    const builderIdentity = operationCleanupBuilderIdentity(row);
+    validateOperationCleanupBuilderBinding(row, operation, command.proof, command.jobId, builderIdentity);
+    validateOperationCleanupEgressProofPaths(this.#stateRoot, command.proof, command.jobId, command.operationId, command.attempt);
+    if (operationCleanupReplay(this.#db, command.jobId, command.operationId, command.attempt, command.proof, this.#stateRoot)) {
+      if (!jobContainerIdentityIsNull(row)) conflict('identity-mismatch', 'operation cleanup replay marker requires cleared job container identity');
+      return;
+    }
     if (command.proof.kind === 'null-identity') {
       validateNullContainerProof(command.proof.container, command.at);
       validateCleanupProof(command.proof.logs, 'logs');
-      if (row.container_id !== null || row.container_name !== null || row.container_image_digest !== null || row.container_labels_json !== null) conflict('identity-mismatch', 'null operation cleanup conflicts with active identity');
+      if (operation.lifecycle_phase !== 'not_created') conflict('identity-mismatch', 'null operation cleanup requires a not_created lifecycle');
+      if (!jobContainerIdentityIsNull(row)) conflict('identity-mismatch', 'null operation cleanup conflicts with persisted container identity');
     } else {
       const proof = command.proof;
       if (operation.lifecycle_phase === 'not_created') conflict('identity-mismatch', 'container cleanup cannot follow a pre-container operation result');
@@ -4948,11 +5812,12 @@ export class OwnershipStore {
       ) throw new OwnershipValidationError('operation cleanup absence proof is incomplete');
       validateCleanupProof(proof.logs, 'logs');
     }
+    bindOperationCleanupEgress(row, command.proof, command.operationId, command.attempt, String(operation.lifecycle_phase), builderIdentity, this.#stateRoot);
     const result = command.proof.kind !== 'null-identity'
       ? this.#db.prepare(`UPDATE jobs SET container_id=NULL, container_name=NULL, container_image_digest=NULL, container_label_job_id=NULL, container_label_manifest_sha=NULL, container_labels_json=NULL,
           container_mount_json=NULL, container_env_json=NULL, container_security_json=NULL, container_inspection_json=NULL, container_created_at=NULL, container_started_at=NULL, container_stopped_at=NULL, container_removed_at=NULL, container_cleanup_outcome=NULL, updated_at=?
         WHERE job_id=? AND state=? AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND cleanup_fence_generation IS NULL AND container_id=? AND container_name=? AND container_image_digest=? AND container_labels_json=?`).run(command.at, command.jobId, command.expectedState, command.runnerUnit, command.owner, command.leaseExpiresAt, command.proof.id, command.proof.name, command.proof.imageDigest, labels(command.proof.labels, command.jobId, String(row.target_manifest_sha256)))
-      : this.#db.prepare(`UPDATE jobs SET updated_at=? WHERE job_id=? AND state=? AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND cleanup_fence_generation IS NULL AND container_id IS NULL AND container_name IS NULL AND container_image_digest IS NULL AND container_labels_json IS NULL`).run(command.at, command.jobId, command.expectedState, command.runnerUnit, command.owner, command.leaseExpiresAt);
+      : this.#db.prepare(`UPDATE jobs SET updated_at=? WHERE job_id=? AND state=? AND runner_unit=? AND runner_lease_owner=? AND runner_lease_expires_at=? AND cleanup_fence_generation IS NULL AND ${JOB_CONTAINER_IDENTITY_NULL_SQL}`).run(command.at, command.jobId, command.expectedState, command.runnerUnit, command.owner, command.leaseExpiresAt);
     if (Number(result.changes) !== 1) conflict('cas-lost', 'operation cleanup CAS lost');
     this.#event(command.jobId, 'cleanup', { kind: 'operation-cleanup', operationId: command.operationId, attempt: command.attempt, proof: command.proof }, command.at);
   }

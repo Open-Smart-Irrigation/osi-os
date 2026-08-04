@@ -16,6 +16,7 @@ export interface CommandRunOptions {
   readonly env: Readonly<Record<string, string>>;
   readonly timeoutMs?: number;
   readonly timeoutDisarmSignal?: AbortSignal;
+  readonly abortSignal?: AbortSignal;
   readonly maxCaptureBytes?: number;
   readonly onStdoutBytes?: (chunk: Buffer) => void;
   readonly onStderrBytes?: (chunk: Buffer) => void;
@@ -63,6 +64,9 @@ export function createCommandExecutor(): CommandExecutor {
       if (options.timeoutMs !== undefined && (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1)) {
         return Promise.reject(new CommandExecutionError('command timeout is invalid'));
       }
+      if (options.abortSignal?.aborted) {
+        return Promise.reject(options.abortSignal.reason);
+      }
       const startedAt = new Date().toISOString();
       const stdout: string[] = [];
       const stderr: string[] = [];
@@ -80,6 +84,9 @@ export function createCommandExecutor(): CommandExecutor {
         let observerError: unknown;
         let spawnError: NodeJS.ErrnoException | undefined;
         let observerKillTimer: NodeJS.Timeout | undefined;
+        let abortKillTimer: NodeJS.Timeout | undefined;
+        let aborted = false;
+        let abortReason: unknown;
         let timeout = options.timeoutMs === undefined ? undefined : setTimeout(() => {
           timedOut = true;
           child.kill('SIGKILL');
@@ -92,6 +99,15 @@ export function createCommandExecutor(): CommandExecutor {
         };
         if (options.timeoutDisarmSignal?.aborted === true) disarmTimeout();
         else options.timeoutDisarmSignal?.addEventListener('abort', disarmTimeout, { once: true });
+        const abortChild = (): void => {
+          if (settled || timedOut || aborted) return;
+          aborted = true;
+          abortReason = options.abortSignal?.reason;
+          child.kill('SIGTERM');
+          abortKillTimer = setTimeout(() => { if (!settled) child.kill('SIGKILL'); }, 1_000);
+        };
+        if (options.abortSignal?.aborted === true) abortChild();
+        else options.abortSignal?.addEventListener('abort', abortChild, { once: true });
         const failObserver = (error: unknown): void => {
           if (observerFailed) return;
           observerFailed = true;
@@ -127,11 +143,15 @@ export function createCommandExecutor(): CommandExecutor {
         child.once('close', (exitCode, signal) => {
           if (timeout) clearTimeout(timeout);
           options.timeoutDisarmSignal?.removeEventListener('abort', disarmTimeout);
+          options.abortSignal?.removeEventListener('abort', abortChild);
           if (observerKillTimer) clearTimeout(observerKillTimer);
+          if (abortKillTimer) clearTimeout(abortKillTimer);
           if (settled) return;
           settled = true;
           const result = { argv: [...argv], exitCode, signal, stdout: stdout.join(''), stderr: stderr.join(''), timedOut, startedAt, finishedAt: new Date().toISOString() };
-          if (observerFailed) {
+          if (aborted) {
+            reject(abortReason);
+          } else if (observerFailed) {
             reject(new CommandExecutionError(`command output observer failed: ${argv[0]}`, { result, cause: observerError }));
           } else if (spawnError) {
             reject(new CommandExecutionError(`command could not start: ${argv[0]}`, { code: spawnError.code, result, cause: spawnError }));

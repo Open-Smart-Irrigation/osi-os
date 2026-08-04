@@ -650,4 +650,283 @@ describe('loopback HTTP security boundary', () => {
     });
     await stop(server);
   });
+
+  it('keeps a bounded job admission request connected beyond the general socket timeout', async () => {
+    const server = createHttpServer({
+      origin: EPHEMERAL_ORIGIN,
+      routeHandler: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 75));
+        return jsonResponse(202, { accepted: true });
+      },
+    });
+    server.timeout = 25;
+    server.listen(0);
+    await once(server, 'listening');
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('server did not bind to a TCP port');
+    try {
+      const response = await call(address.port, {
+        method: 'POST',
+        path: '/api/jobs',
+        headers: {
+          origin: originFor(address.port),
+          'content-type': 'application/json',
+        },
+        body: '{}',
+      });
+      expect(response.status).toBe(202);
+      expect(response.json).toEqual({ accepted: true });
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('keeps the admission timeout until every pipelined job request on the socket completes', async () => {
+    let requestCount = 0;
+    let secondInitialTimeout: number | undefined;
+    let secondTimeoutAfterFirstResponse: number | undefined;
+    let releaseSecondRequest: (() => void) | undefined;
+    let observeFirstResponse: (() => void) | undefined;
+    const secondRequestStarted = new Promise<void>((resolve) => { releaseSecondRequest = resolve; });
+    const firstResponseObserved = new Promise<void>((resolve) => { observeFirstResponse = resolve; });
+    const server = createHttpServer({
+      origin: EPHEMERAL_ORIGIN,
+      routeHandler: async (context) => {
+        requestCount += 1;
+        if (requestCount === 1) {
+          await secondRequestStarted;
+        } else {
+          secondInitialTimeout = context.request.socket.timeout;
+          releaseSecondRequest?.();
+          await firstResponseObserved;
+          secondTimeoutAfterFirstResponse = context.request.socket.timeout;
+        }
+        return jsonResponse(202, { accepted: true });
+      },
+    });
+    server.listen(0);
+    await once(server, 'listening');
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('server did not bind to a TCP port');
+    const origin = originFor(address.port);
+    try {
+      const responseText = await new Promise<string>((resolve, reject) => {
+        const socket = connect(address.port, '127.0.0.1');
+        const chunks: Buffer[] = [];
+        let firstResponseSeen = false;
+        const timer = setTimeout(() => {
+          socket.destroy();
+          reject(new Error('pipelined job requests did not complete'));
+        }, 2_000);
+        socket.on('error', reject);
+        socket.on('data', (chunk: Buffer) => {
+          chunks.push(chunk);
+          if (!firstResponseSeen && Buffer.concat(chunks).includes('HTTP/1.1 202')) {
+            firstResponseSeen = true;
+            observeFirstResponse?.();
+          }
+        });
+        socket.on('close', () => {
+          clearTimeout(timer);
+          resolve(Buffer.concat(chunks).toString('utf8'));
+        });
+        socket.on('connect', () => {
+          const requestHeaders = (connection: 'keep-alive' | 'close') => [
+            'POST /api/jobs HTTP/1.1',
+            `Host: 127.0.0.1:${address.port}`,
+            `Origin: ${origin}`,
+            'Content-Type: application/json',
+            'Content-Length: 2',
+            `Connection: ${connection}`,
+            '',
+            '{}',
+          ].join('\r\n');
+          socket.write(`${requestHeaders('keep-alive')}${requestHeaders('close')}`);
+        });
+      });
+      expect(requestCount).toBe(2);
+      expect(responseText.match(/HTTP\/1\.1 202/g)).toHaveLength(2);
+      expect(secondInitialTimeout).toBeGreaterThan(0);
+      expect(secondTimeoutAfterFirstResponse).toBe(secondInitialTimeout);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('aborts publish-blocker recheck at an absolute deadline without changing the socket timeout', async () => {
+    let mutationCommitted = false;
+    let observedSocketTimeout: number | undefined;
+    const server = createHttpServer({
+      origin: EPHEMERAL_ORIGIN,
+      routeMutationDeadlineMs: 40,
+      routeHandler: async (context) => {
+        observedSocketTimeout = context.request.socket.timeout;
+        const signal = context.signal;
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+        signal.throwIfAborted();
+        mutationCommitted = true;
+        return jsonResponse(200, { completed: true });
+      },
+    });
+    server.timeout = 250;
+    server.listen(0);
+    await once(server, 'listening');
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('server did not bind to a TCP port');
+    try {
+      const startedAt = performance.now();
+      const response = await call(address.port, {
+        method: 'POST',
+        path: '/api/jobs/job-1/publish-blocker/recheck',
+        headers: {
+          origin: originFor(address.port),
+          'content-type': 'application/json',
+        },
+        body: '{}',
+      });
+      expect(performance.now() - startedAt).toBeLessThan(200);
+      expect(response.status).toBe(504);
+      expect(response.json).toMatchObject({
+        error: { code: 'REQUEST_DEADLINE_EXCEEDED', retryable: true },
+      });
+      expect(mutationCommitted).toBe(false);
+      expect(observedSocketTimeout).toBe(250);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('bounds a recheck inside a pipelined admission scope and restores adjacent route behavior', async () => {
+    let releaseAdmission: (() => void) | undefined;
+    const recheckAborted = new Promise<void>((resolve) => { releaseAdmission = resolve; });
+    let recheckSocketTimeout: number | undefined;
+    let adjacentSocketTimeout: number | undefined;
+    let adjacentSignalAborted: boolean | undefined;
+    const server = createHttpServer({
+      origin: EPHEMERAL_ORIGIN,
+      routeMutationDeadlineMs: 40,
+      routeHandler: async (context) => {
+        if (context.path === '/api/jobs') {
+          await recheckAborted;
+          return jsonResponse(202, { admitted: true });
+        }
+        if (context.path.endsWith('/publish-blocker/recheck')) {
+          recheckSocketTimeout = context.request.socket.timeout;
+          await new Promise<void>((_resolve, reject) => {
+            context.signal.addEventListener('abort', () => {
+              releaseAdmission?.();
+              reject(context.signal.reason);
+            }, { once: true });
+          });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        adjacentSocketTimeout = context.request.socket.timeout;
+        adjacentSignalAborted = context.signal.aborted;
+        return jsonResponse(200, { adjacent: true });
+      },
+    });
+    server.timeout = 250;
+    server.listen(0);
+    await once(server, 'listening');
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('server did not bind to a TCP port');
+    const origin = originFor(address.port);
+    try {
+      const startedAt = performance.now();
+      const responseText = await new Promise<string>((resolve, reject) => {
+        const socket = connect(address.port, '127.0.0.1');
+        const chunks: Buffer[] = [];
+        const timer = setTimeout(() => {
+          socket.destroy();
+          reject(new Error('mixed-scope pipelined requests did not complete'));
+        }, 1_000);
+        socket.on('error', reject);
+        socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+        socket.on('close', () => {
+          clearTimeout(timer);
+          resolve(Buffer.concat(chunks).toString('utf8'));
+        });
+        socket.on('connect', () => {
+          const requestText = (path: string, connection: 'keep-alive' | 'close') => [
+            `POST ${path} HTTP/1.1`,
+            `Host: 127.0.0.1:${address.port}`,
+            `Origin: ${origin}`,
+            'Content-Type: application/json',
+            'Content-Length: 2',
+            `Connection: ${connection}`,
+            '',
+            '{}',
+          ].join('\r\n');
+          socket.write([
+            requestText('/api/jobs', 'keep-alive'),
+            requestText('/api/jobs/job-1/publish-blocker/recheck', 'keep-alive'),
+            requestText('/api/jobs/job-1/publish-blocker/recheck-status', 'close'),
+          ].join(''));
+        });
+      });
+      expect(performance.now() - startedAt).toBeLessThan(250);
+      expect(responseText.match(/HTTP\/1\.1 202/g)).toHaveLength(1);
+      expect(responseText.match(/HTTP\/1\.1 504/g)).toHaveLength(1);
+      expect(responseText.match(/HTTP\/1\.1 200/g)).toHaveLength(1);
+      expect(recheckSocketTimeout).toBeGreaterThan(2 * 60 * 60 * 1_000);
+      expect(adjacentSocketTimeout).toBe(250);
+      expect(adjacentSignalAborted).toBe(false);
+    } finally {
+      await stop(server);
+    }
+  });
+
+  it('aborts an in-flight recheck when its HTTP client disconnects', async () => {
+    let mutationCommitted = false;
+    let handlerStarted: (() => void) | undefined;
+    let handlerAborted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { handlerStarted = resolve; });
+    const aborted = new Promise<void>((resolve) => { handlerAborted = resolve; });
+    const server = createHttpServer({
+      origin: EPHEMERAL_ORIGIN,
+      routeMutationDeadlineMs: 200,
+      routeHandler: async (context) => {
+        handlerStarted?.();
+        await new Promise<void>((_resolve, reject) => {
+          context.signal.addEventListener('abort', () => {
+            handlerAborted?.();
+            reject(context.signal.reason);
+          }, { once: true });
+        });
+        context.signal.throwIfAborted();
+        mutationCommitted = true;
+        return jsonResponse(200, { completed: true });
+      },
+    });
+    server.listen(0);
+    await once(server, 'listening');
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('server did not bind to a TCP port');
+    try {
+      const req = request({
+        host: '127.0.0.1',
+        port: address.port,
+        method: 'POST',
+        path: '/api/jobs/job-1/publish-blocker/recheck',
+        headers: {
+          origin: originFor(address.port),
+          'content-type': 'application/json',
+          'content-length': '2',
+        },
+      });
+      req.on('error', () => undefined);
+      req.end('{}');
+      await started;
+      req.destroy();
+      await Promise.race([
+        aborted,
+        new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('disconnect did not abort route')), 500)),
+      ]);
+      expect(mutationCommitted).toBe(false);
+    } finally {
+      await stop(server);
+    }
+  });
 });

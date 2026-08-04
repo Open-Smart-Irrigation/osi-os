@@ -12,6 +12,7 @@ import {
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { type CreateJobInput } from '../../api/src/store.js';
 import { createReadyQueueCoordinatorForTesting, type DirectInterruptionInput, type QueueCoordinatorOptions, type QueueSystemd } from '../../api/src/queue.js';
+import { TEST_BUILDER_IDENTITY } from '../helpers/builder-identity.js';
 
 const ACCEPTED = '2026-07-28T10:00:00.000Z';
 const DISPATCHED = '2026-07-28T10:00:01.000Z';
@@ -76,6 +77,7 @@ function input(jobId: string): CreateJobInput {
     targetId: 'rpi-5',
     rootId: 'release',
     targetManifestSha256: SHA64,
+    builderIdentity: TEST_BUILDER_IDENTITY,
     sourceCommitTime: ACCEPTED,
     sourceAuthor: 'queue integration',
     sourceSubject: 'queue integration',
@@ -136,6 +138,7 @@ function nullCleanupPostcondition(jobId: string): CleanupPostcondition {
     container: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt: WRITTEN },
     staging: { kind: 'absent', path: null, sourcePath: `staging/${jobId}`, sourceAbsent: true, verifiedAt: WRITTEN },
     logs: { runner: 'absent', docker: 'absent', verifiedAt: WRITTEN },
+    egress: { persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' },
     blocker: 'none',
   };
 }
@@ -158,6 +161,7 @@ function physicalCleanupPostcondition(jobId: string): CleanupPostcondition {
     container: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt: WRITTEN },
     staging: { kind: 'quarantined', sourcePath: `staging/${jobId}`, destinationPath: `quarantine/${jobId}`, sourceAbsent: true, destinationPresent: true, sha256: null, size: null, verifiedAt: WRITTEN },
     logs: { runner: 'absent', docker: 'absent', verifiedAt: WRITTEN },
+    egress: { persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' },
     blocker: 'none',
   };
 }
@@ -210,8 +214,16 @@ function seedQueueBlocker(db: ReturnType<typeof openBuilderDatabase>, kind: stri
     db.prepare("UPDATE jobs SET publish_state='blocked', publish_blocker_code='PUBLISH_FAILED', publish_blocker_json='{}' WHERE job_id=?").run('first');
   }
   else if (kind === 'publishing state') {
-    db.exec('DROP TRIGGER jobs_publish_guard');
-    db.prepare("UPDATE jobs SET publish_state='publishing' WHERE job_id=?").run('first');
+    db.prepare(`UPDATE jobs SET
+      artifact_staging_path='staging/first/image.gz',
+      artifact_final_directory='main/${SHA40}/rpi-5',
+      artifact_final_path='main/${SHA40}/rpi-5/image.gz',
+      artifact_sha256=?, artifact_size=1, artifact_mtime=?,
+      checksum_path='staging/first/image.gz.sha256', checksum_sha256=?,
+      manifest_path='staging/first/manifest.json', manifest_sha256=?,
+      verification_path='staging/first/verification.json', verification_sha256=?,
+      publish_state='publishing', publish_started_at=?, release_seal_status='in_progress'
+      WHERE job_id=?`).run(SHA64, WRITTEN, SHA64, SHA64, SHA64, WRITTEN, 'first');
   }
 }
 
@@ -715,26 +727,40 @@ describe('queue service-start recovery with real SQLite stores', () => {
   it('keeps every later dispatch checkpoint successful after runner handoff during systemd start', async () => {
     const target = await fixture(['first']);
     const state = systemdState();
+    let now = DISPATCHED;
+    let activeListInspections = 0;
     const systemd: QueueSystemd = {
       ...state.systemd,
+      inspect: async (unit) => ({
+        unit,
+        active: state.active.has(unit),
+        pending: state.pending.has(unit),
+        observedAt: state.active.has(unit) ? now : (now = OBSERVED),
+      }),
+      listActive: async () => {
+        activeListInspections += 1;
+        if (activeListInspections === 2) now = WRITTEN;
+        return [...new Set([...state.active, ...state.pending])];
+      },
       start: async (unit) => {
         state.starts.push(unit);
         state.active.add(unit);
+        now = LATER;
         expect(target.ownership.runnerWrite({
           kind: 'acquire-lease',
           jobId: 'first',
           runnerUnit: unit,
           owner: 'runner-a',
-          expiresAt: LATER,
-          at: WRITTEN,
+          expiresAt: FINAL,
+          at: LATER,
         }).ok).toBe(true);
         return { unit, argv: ['systemctl', '--user', 'start', unit], exitCode: 0, timedOut: false };
       },
     };
-    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd, safety: { inspect: async () => null }, clock: { now: () => WRITTEN } });
+    const coordinator = createQueueCoordinator({ db: target.db, ownership: target.ownership, systemd, safety: { inspect: async () => null }, clock: { now: () => now } });
 
     await expect(coordinator.dispatchNext()).resolves.toEqual({ kind: 'started', jobId: 'first', runnerUnit: 'osi-image-builder-runner@first.service' });
-    expect(target.db.prepare('SELECT runner_lease_owner, runner_lease_expires_at FROM jobs WHERE job_id=?').get('first')).toEqual({ runner_lease_owner: 'runner-a', runner_lease_expires_at: LATER });
+    expect(target.db.prepare('SELECT runner_lease_owner, runner_lease_expires_at FROM jobs WHERE job_id=?').get('first')).toEqual({ runner_lease_owner: 'runner-a', runner_lease_expires_at: FINAL });
     expect(target.db.prepare('SELECT 1 AS present FROM queue_dispatch_claims WHERE claim_id=1').get()).toBeUndefined();
   });
 

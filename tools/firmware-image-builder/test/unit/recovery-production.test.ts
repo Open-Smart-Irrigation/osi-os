@@ -1,21 +1,25 @@
 import { createHash } from 'node:crypto';
 import { execFile as nodeExecFile } from 'node:child_process';
-import { access, chmod, link, mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, utimes, writeFile, type FileHandle } from 'node:fs/promises';
+import { access, chmod, link, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, unlink, utimes, writeFile, type FileHandle } from 'node:fs/promises';
 import { createServer, type Server } from 'node:net';
 import { once } from 'node:events';
 import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ConfigAuthorityError, loadConfig, type LoadedConfig } from '../../config/load.js';
 import { ADMISSION_ID_PATTERN } from '../../domain/types.js';
 import { encodeJson } from '../../api/src/validation.js';
+import { openBuilderDatabase } from '../../api/src/store-schema.js';
+import { DurableLogStream } from '../../api/src/log-stream.js';
+import { createProductionCleanupSystemd, createProductionSystemdAdapter, recoveryLogObservation } from '../../api/src/production.js';
 import type { CleanupPostcondition } from '../../api/src/ownership.js';
 import type { RecoveryLogVerificationInput, RecoveryStagingPostcondition } from '../../api/src/recovery.js';
 import { RecoveryBoundaryError, RecoveryInfrastructureError } from '../../api/src/recovery.js';
 import { classifyRecoveryAuthorityError, classifyRecoveryFileSystemError, createRecoveryPhysicalVerification } from '../../api/src/recovery-production.js';
+import { createTestBuilderIdentity } from '../helpers/builder-identity.js';
 
 const JOB_ID = 'recovery-production-job';
 const ADMISSION_ID = 'cln_0123456789abcdefghjkmnpqrs';
@@ -53,7 +57,28 @@ function postcondition(staging: CleanupPostcondition['staging'] = {
     },
     staging,
     logs: { runner: 'absent', docker: 'absent', verifiedAt: NOW },
+    egress: { persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' },
     blocker: 'none',
+  };
+}
+
+function stateRootBoundEgress(stateRoot: string, options: Readonly<{ readonly credentialRoot?: string }> = {}): Record<string, unknown> {
+  const credentialRoot = options.credentialRoot ?? join(stateRoot, 'jobs', JOB_ID, 'recovery', 'dependency-egress');
+  const hostPath = join(credentialRoot, 'frontend-install-1.proxy-credential');
+  const tlsHostDirectory = join(credentialRoot, 'frontend-install-1.proxy-tls');
+  const docker = {
+    operationId: 'frontend-install',
+    attempt: 1,
+    proxy: { id: 'a'.repeat(64), absent: true },
+    network: { id: 'b'.repeat(64), absent: true },
+    tls: { hostDirectory: tlsHostDirectory, absent: true },
+    credential: { hostPath, sha256: 'c'.repeat(64) },
+  };
+  return {
+    persistedDocker: { ...docker, globalLabelResult: 'no-match' },
+    discoveredDocker: [],
+    credentials: [{ kind: 'normal', operationId: 'frontend-install', attempt: 1, hostPath, expectedSha256: 'c'.repeat(64), observedSha256: 'c'.repeat(64), tls: { hostDirectory: tlsHostDirectory, absent: true }, absent: true }],
+    globalLabelResult: 'no-match',
   };
 }
 
@@ -288,6 +313,127 @@ async function writeTrackedFiles(destination: string, artifact: Buffer): Promise
 }
 
 describe('production recovery physical verification', () => {
+  it('verifies logs written by DurableLogStream through the real recovery verifier', async () => {
+    const value = await fixture();
+    const database = openBuilderDatabase(join(value.base, 'builder.sqlite'));
+    const jobRoot = join(value.loaded.stateRoot, 'jobs', JOB_ID);
+    await mkdir(jobRoot, { recursive: true, mode: 0o700 });
+    const targetManifestSha256 = 'c'.repeat(64);
+    const identity = createTestBuilderIdentity(targetManifestSha256);
+    const values = [
+      JOB_ID, `${JOB_ID}-request`, '{}', 'ssh://example/repo', 'refs/remotes/origin/main', 'main', 'main',
+      'a'.repeat(40), 'a'.repeat(40), '{}', '{}', 'rpi-5', ROOT_ID, targetManifestSha256, 'admitted',
+      identity.packageVersion, identity.packageRoot, identity.lockSha256, identity.executionDefinitionSha256,
+      identity.targetManifestSha256, identity.runnerSha256, identity.cleanupWorkerSha256,
+      identity.dependencyEgressProxySha256, identity.imageReference,
+      identity.imageId, identity.imageDigest, NOW, 'test', 'logs', NOW, 'building', 'released', null, NOW, NOW,
+    ];
+    database.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json, offline_feed_preparation_json,
+      target_id, root_id, target_manifest_sha256, builder_identity_status, builder_package_version,
+      builder_package_root, builder_lock_sha256, builder_execution_definition_sha256, builder_target_manifest_sha256,
+      builder_runner_sha256, builder_cleanup_worker_sha256, builder_dependency_egress_proxy_sha256,
+      builder_image_reference, builder_image_id, builder_image_digest,
+      source_commit_time, source_author, source_subject, accepted_at, state, queue_state, queue_position, created_at, updated_at)
+      VALUES (${values.map(() => '?').join(', ')})`).run(...values);
+    const stream = new DurableLogStream({ db: database, root: jobRoot, jobId: JOB_ID, now: () => NOW });
+    stream.appendSync('runner', Buffer.from('runner output\n'));
+    stream.appendSync('docker', Buffer.from('docker output\n'));
+    stream.sealSync('runner');
+    stream.sealSync('docker');
+    stream.close();
+    try {
+      await expect(recoveryLogObservation(database, createFactory(value.loaded), JOB_ID, NOW)).resolves.toMatchObject({
+        snapshot: { runner: 'sealed', docker: 'sealed', verifiedAt: NOW },
+      });
+      expect((await stat(join(jobRoot, 'logs'))).mode & 0o777).toBe(0o700);
+      expect((await stat(join(jobRoot, 'logs', 'runner.0'))).mode & 0o777).toBe(0o600);
+      expect((await stat(join(jobRoot, 'logs', 'docker.0'))).mode & 0o777).toBe(0o600);
+    } finally {
+      database.close();
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('uses a collected admission-specific systemd sandbox exposing only the admitted package', async () => {
+    const run = vi.fn(async (argv: readonly string[]) => ({
+      argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW,
+    }));
+    const identity = createTestBuilderIdentity();
+    const systemd = createProductionSystemdAdapter({ run } as never, {
+      XDG_RUNTIME_DIR: '/run/user/1000',
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+    }, () => NOW, {
+      configRoot: '/home/builder/.config/osi-image-builder',
+      stateRoot: '/home/builder/.local/state/osi-image-builder',
+      repositoryPath: '/home/builder/Repos/osi-os',
+      approvedOutputRoots: ['/home/builder/sdcard images'],
+    });
+    const unit = `osi-image-builder-cleanup@${ADMISSION_ID}.service`;
+    await expect(systemd.startCleanup(unit, identity)).resolves.toMatchObject({
+      argv: expect.arrayContaining(['systemd-run', '--user', `--unit=${unit}`, '--collect', '--no-block']),
+    });
+    const argv = run.mock.calls[0]![0] as readonly string[];
+    expect(argv[0]).toBe('/usr/bin/systemd-run');
+    expect(argv).toContain('--expand-environment=no');
+    expect(argv).toContain('--service-type=exec');
+    expect(argv).toContain(`--property=BindReadOnlyPaths="${identity.packageRoot}" "/home/builder/.config/osi-image-builder" "/home/builder/sdcard images" "/run/user/1000"`);
+    expect(argv).toContain('--property=BindPaths="/home/builder/.local/state/osi-image-builder" "/home/builder/sdcard images/.osi-image-builder"');
+    expect(argv).toContain('--property=InaccessiblePaths="-/home/builder/Repos/osi-os"');
+    expect(argv).toContain('--property=ProtectHome=tmpfs');
+    expect(argv).toContain('--property=ProtectSystem=strict');
+    expect(argv).toContain('--property=NoExecPaths=/');
+    expect(argv).toContain(`--property=ExecPaths="${identity.packageRoot}/bin/osi-image-builder-cleanup" "${identity.packageRoot}/bin/osi-image-publish" "/usr/bin/env" "/usr/bin/node" "/usr/bin/systemctl" "/usr/bin/docker" "/usr/lib" "/usr/lib64"`);
+    expect(argv).not.toContain(expect.stringMatching(/selected|0\.1\.25/u));
+    expect(argv.slice(-3)).toEqual(['--', `${identity.packageRoot}/bin/osi-image-builder-cleanup`, ADMISSION_ID]);
+  });
+
+  it.each([
+    ['state root', '/home/builder/state$HOME'],
+    ['state root', '/home/builder/state%h'],
+    ['state root', '/home/builder/state:ro'],
+    ['state root', '/home/builder/state\\x20alias'],
+    ['state root', '/home/builder/state"alias'],
+    ['state root', "/home/builder/state'alias"],
+    ['state root', '/home/builder/state=alias'],
+    ['state root', '/home/builder/state;alias'],
+    ['state root', '/home/builder/state\talias'],
+    ['output root', '/home/builder/output%h'],
+  ] as const)('rejects a %s containing systemd property syntax: %s', async (field, unsafePath) => {
+    const run = vi.fn(async (argv: readonly string[]) => ({
+      argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW,
+    }));
+    const systemd = createProductionSystemdAdapter({ run } as never, {
+      XDG_RUNTIME_DIR: '/run/user/1000',
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+    }, () => NOW, {
+      configRoot: '/home/builder/.config/osi-image-builder',
+      stateRoot: field === 'state root' ? unsafePath : '/home/builder/.local/state/osi-image-builder',
+      repositoryPath: '/home/builder/Repos/osi-os',
+      approvedOutputRoots: [field === 'output root' ? unsafePath : '/home/builder/sdcard images'],
+    });
+
+    await expect(systemd.startCleanup(
+      `osi-image-builder-cleanup@${ADMISSION_ID}.service`,
+      createTestBuilderIdentity(),
+    )).rejects.toThrow(new RegExp(`cleanup systemd ${field} is invalid`, 'iu'));
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('routes recovery admission starts through the cleanup-specific systemd boundary', async () => {
+    const unit = `osi-image-builder-cleanup@${ADMISSION_ID}.service`;
+    const startCleanup = vi.fn(async () => ({
+      unit, argv: ['systemd-run', '--user', `--unit=${unit}`], exitCode: 0, timedOut: false, signal: null,
+    }));
+    const identity = createTestBuilderIdentity();
+    const recoverySystemd = createProductionCleanupSystemd({
+      startCleanup,
+      isActive: async () => false,
+      stop: async () => undefined,
+      inspectRecovery: async () => ({ unit, active: false, observedAt: NOW }),
+    }, async () => identity);
+    await recoverySystemd.start(unit);
+    expect(startCleanup).toHaveBeenCalledWith(unit, identity);
+  });
   it('classifies semantic and identity ConfigAuthorityError values as recovery boundaries', () => {
     const semantic = new ConfigAuthorityError('unknown approved root', undefined, 'OUTPUT_ROOT_ID_UNKNOWN');
     const identity = new ConfigAuthorityError('approved root identity changed');
@@ -358,6 +504,194 @@ describe('production recovery physical verification', () => {
       });
       await expect(readFile(join(value.loaded.stateRoot, file.path))).resolves.toBeTruthy();
       expect(file.sha256).toMatch(HASH64);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects legacy persisted Docker evidence without bound operation, TLS, and credential identity', async () => {
+    const value = await fixture();
+    try {
+      const condition = postcondition();
+      const withPersistedDocker = {
+        ...condition,
+        egress: {
+          ...condition.egress,
+          persistedDocker: {
+            proxy: { id: 'a'.repeat(64), absent: true },
+            network: { id: 'b'.repeat(64), absent: true },
+            globalLabelResult: 'no-match',
+          },
+        },
+      } as unknown as CleanupPostcondition;
+      const file = await writeCompletion(value.loaded, completionEnvelope(withPersistedDocker));
+      await expect(createFactory(value.loaded).evidence.read({
+        jobId: JOB_ID,
+        admissionId: ADMISSION_ID,
+        path: file.path,
+        sha256: file.sha256,
+      })).rejects.toThrow(/persistedDocker|egress/u);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('reads state-root-bound persisted, TLS, and credential absence evidence', async () => {
+    const value = await fixture();
+    try {
+      const condition = { ...postcondition(), egress: stateRootBoundEgress(value.loaded.stateRoot) } as unknown as CleanupPostcondition;
+      const file = await writeCompletion(value.loaded, completionEnvelope(condition));
+      await expect(createFactory(value.loaded).evidence.read({
+        jobId: JOB_ID,
+        admissionId: ADMISSION_ID,
+        path: file.path,
+        sha256: file.sha256,
+      })).resolves.toMatchObject({ postcondition: condition });
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('reads state-root-bound discovered Docker, TLS, and credential absence evidence', async () => {
+    const value = await fixture();
+    try {
+      const credentialRoot = join(value.loaded.stateRoot, 'jobs', JOB_ID, 'recovery', 'dependency-egress');
+      const hostPath = join(credentialRoot, 'frontend-install-1.proxy-credential');
+      const condition = {
+        ...postcondition(),
+        egress: {
+          persistedDocker: null,
+          discoveredDocker: [{
+            operationId: 'frontend-install',
+            attempt: 1,
+            proxy: null,
+            network: { id: 'a'.repeat(64), absent: true },
+            tls: { hostDirectory: join(credentialRoot, 'frontend-install-1.proxy-tls'), absent: true },
+            credential: { hostPath, sha256: 'b'.repeat(64) },
+          }],
+          credentials: [{ kind: 'normal', operationId: 'frontend-install', attempt: 1, hostPath, expectedSha256: 'b'.repeat(64), observedSha256: 'b'.repeat(64), tls: { hostDirectory: join(credentialRoot, 'frontend-install-1.proxy-tls'), absent: true }, absent: true }],
+          globalLabelResult: 'no-match',
+        },
+      } as unknown as CleanupPostcondition;
+      const file = await writeCompletion(value.loaded, completionEnvelope(condition));
+      await expect(createFactory(value.loaded).evidence.read({
+        jobId: JOB_ID,
+        admissionId: ADMISSION_ID,
+        path: file.path,
+        sha256: file.sha256,
+      })).resolves.toMatchObject({ postcondition: condition });
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('reads an exact TLS-only remnant without inventing a credential hash', async () => {
+    const value = await fixture();
+    try {
+      const credentialRoot = join(value.loaded.stateRoot, 'jobs', JOB_ID, 'recovery', 'dependency-egress');
+      const hostPath = join(credentialRoot, 'build-image-2.proxy-credential');
+      const hostDirectory = join(credentialRoot, 'build-image-2.proxy-tls');
+      const condition = {
+        ...postcondition(),
+        egress: {
+          persistedDocker: null,
+          discoveredDocker: [],
+          credentials: [{ kind: 'tls-only', operationId: 'build-image', attempt: 2, hostPath, expectedSha256: null, observedSha256: null, tls: { hostDirectory, absent: true }, absent: true }],
+          globalLabelResult: 'no-match',
+        },
+      } as unknown as CleanupPostcondition;
+      const file = await writeCompletion(value.loaded, completionEnvelope(condition));
+      await expect(createFactory(value.loaded).evidence.read({ jobId: JOB_ID, admissionId: ADMISSION_ID, path: file.path, sha256: file.sha256 })).resolves.toMatchObject({ postcondition: condition });
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects state-root escape in a Docker or credential absence proof', async () => {
+    const value = await fixture();
+    try {
+      const condition = {
+        ...postcondition(),
+        egress: stateRootBoundEgress(value.loaded.stateRoot, { credentialRoot: join(value.loaded.stateRoot, 'jobs', 'other-job', 'recovery', 'dependency-egress') }),
+      } as unknown as CleanupPostcondition;
+      const file = await writeCompletion(value.loaded, completionEnvelope(condition));
+      await expect(createFactory(value.loaded).evidence.read({
+        jobId: JOB_ID,
+        admissionId: ADMISSION_ID,
+        path: file.path,
+        sha256: file.sha256,
+      })).rejects.toThrow(/state root|egress|credential/u);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects nested global-label attestation on discovered Docker absence evidence', async () => {
+    const value = await fixture();
+    try {
+      const malformed = {
+        ...postcondition(),
+        egress: {
+          ...postcondition().egress,
+          discoveredDocker: [{
+            proxy: null,
+            network: { id: 'a'.repeat(64), absent: true },
+            globalLabelResult: 'no-match',
+          }],
+        },
+      };
+      const file = await writeCompletion(value.loaded, completionEnvelope(malformed as unknown as CleanupPostcondition));
+      await expect(createFactory(value.loaded).evidence.read({
+        jobId: JOB_ID,
+        admissionId: ADMISSION_ID,
+        path: file.path,
+        sha256: file.sha256,
+      })).rejects.toThrow(/discoveredDocker/u);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects duplicate discovered operation evidence before recovery hand-back', async () => {
+    const value = await fixture();
+    try {
+      const credentialRoot = join(value.loaded.stateRoot, 'jobs', JOB_ID, 'recovery', 'dependency-egress');
+      const hostPath = join(credentialRoot, 'frontend-install-1.proxy-credential');
+      const proof = {
+        operationId: 'frontend-install',
+        attempt: 1,
+        proxy: null,
+        network: { id: 'a'.repeat(64), absent: true },
+        tls: { hostDirectory: join(credentialRoot, 'frontend-install-1.proxy-tls'), absent: true },
+        credential: { hostPath, sha256: 'b'.repeat(64) },
+      };
+      const malformed = {
+        ...postcondition(),
+        egress: {
+          persistedDocker: null,
+          discoveredDocker: [proof, { ...proof, network: { id: 'c'.repeat(64), absent: true } }],
+          credentials: [{ kind: 'normal', operationId: 'frontend-install', attempt: 1, hostPath, expectedSha256: 'b'.repeat(64), observedSha256: 'b'.repeat(64), tls: { hostDirectory: join(credentialRoot, 'frontend-install-1.proxy-tls'), absent: true }, absent: true }],
+          globalLabelResult: 'no-match',
+        },
+      } as unknown as CleanupPostcondition;
+      const file = await writeCompletion(value.loaded, completionEnvelope(malformed));
+      await expect(createFactory(value.loaded).evidence.read({
+        jobId: JOB_ID,
+        admissionId: ADMISSION_ID,
+        path: file.path,
+        sha256: file.sha256,
+      })).rejects.toThrow(/duplicate|Docker absence/u);
+    } finally {
+      await rm(value.base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a completion envelope without exact dependency egress absence evidence', async () => {
+    const value = await fixture();
+    try {
+      const malformed = { ...postcondition(), egress: { globalLabelResult: 'no-match' } };
+      const file = await writeCompletion(value.loaded, completionEnvelope(malformed as CleanupPostcondition));
+      await expect(createFactory(value.loaded).evidence.read({ jobId: JOB_ID, admissionId: ADMISSION_ID, path: file.path, sha256: file.sha256 })).rejects.toThrow(/egress/u);
     } finally {
       await rm(value.base, { recursive: true, force: true });
     }

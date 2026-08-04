@@ -1721,7 +1721,14 @@ export function createCleanupAdmissionRecovery(options: CleanupAdmissionRecovery
     } else if (expected.previousBlockerCode !== retry.expectedBlockerCode || stableJson(expected.previousBlocker) !== stableJson(retry.expectedBlocker)) {
       throw new RecoveryBoundaryError('corrected cleanup retry blocker does not match persisted evidence');
     }
-    if (retry === null && credentialValid && expected.previousStatus === 'admitted' && oldUnexpired) {
+    if (
+      retry === null
+      && credentialValid
+      && expected.previousStatus === 'admitted'
+      && expected.previousOwner === input.owner
+      && old.expires_at === input.expiresAt
+      && oldUnexpired
+    ) {
       await ensurePredecessorStillMatches(input.jobId, expected);
       await stopStaleOnce(await observeActive());
       await start(oldUnit);

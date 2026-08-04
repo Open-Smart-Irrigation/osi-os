@@ -1,8 +1,13 @@
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TRUSTED_OPERATION_IDS } from '../../domain/types.js';
 import {
   DockerCancellationRequestedError,
   DockerLifecycleError,
+  createDockerContainerName,
   createDockerCancellationControls,
   createDockerExecutor,
   type DockerCommandExecutor,
@@ -11,14 +16,89 @@ import {
   type PersistedContainerIdentity,
 } from '../../runner/src/docker-executor.js';
 import { CancellationBlockedError } from '../../runner/src/cancellation.js';
-import { createOperationArgv, createOperationDefinition, assertOperationRegistryCoverage, INTERNAL_OPERATION_TOOL_PATH } from '../../runner/src/operation-registry.js';
+import { createOperationArgv, createOperationDefinition, assertOperationRegistryCoverage, INTERNAL_EXECUTION_GUARD_PATH, INTERNAL_OPERATION_TOOL_PATH } from '../../runner/src/operation-registry.js';
 import { CommandExecutionError, createCommandExecutor, type CommandResult, type CommandRunOptions } from '../../runner/src/command-executor.js';
 import type { JsonObject, OperationInput } from '../../api/src/store.js';
 import type { OperationCleanupProof, RunnerWriteCommand } from '../../api/src/ownership.js';
+import { encodeJson, normalizeCommand } from '../../api/src/validation.js';
+import { assertActiveTargetLinks } from '../../runner/src/target-setup.js';
+import {
+  DEPENDENCY_EGRESS_CREDENTIAL_PATH,
+  type DependencyEgressNetwork,
+} from '../../runner/src/dependency-egress-proxy.js';
+import { operationNetworkPolicy } from '../../runner/src/network-policy.js';
 
 const DIGEST = 'a'.repeat(64);
 const MANIFEST = 'b'.repeat(64);
 const NOW = '2026-07-24T10:00:00.000Z';
+const PI5_ENV = 'full_raspberrypi_bcm27xx_bcm2712';
+const EGRESS_CREDENTIAL = Object.freeze({
+  hostPath: '/tmp/credentials/build-image-1.proxy-credential',
+  containerPath: DEPENDENCY_EGRESS_CREDENTIAL_PATH,
+  sha256: 'd'.repeat(64),
+});
+const EGRESS_TLS_DIRECTORY_METADATA = Object.freeze({ mode: 0o700, uid: 1000, gid: 1000, device: 1, inode: 2 });
+const egressTlsFileMetadata = (mode: number, hash: string, inode: number) => Object.freeze({ ...EGRESS_TLS_DIRECTORY_METADATA, mode, inode, sha256: hash.repeat(64), bytes: 1024, links: 1 });
+const EGRESS_TLS = Object.freeze({
+  hostDirectory: '/tmp/credentials/build-image-1.proxy-tls',
+  directoryMetadata: EGRESS_TLS_DIRECTORY_METADATA,
+  caCertificateHostPath: '/tmp/credentials/build-image-1.proxy-tls/ca.pem',
+  caCertificateMetadata: egressTlsFileMetadata(0o444, '1', 3),
+  leafCertificates: Object.freeze(Object.fromEntries(operationNetworkPolicy('build-image').allowedHosts.map((host, index) => [host, Object.freeze({ certificateHostPath: `/tmp/credentials/build-image-1.proxy-tls/${host.replaceAll('.', '_')}.pem`, keyHostPath: `/tmp/credentials/build-image-1.proxy-tls/${host.replaceAll('.', '_')}.key`, certificateMetadata: egressTlsFileMetadata(0o444, '2', 4 + index * 2), keyMetadata: egressTlsFileMetadata(0o400, '3', 5 + index * 2) })]))),
+});
+const EGRESS_RESOURCES: DependencyEgressNetwork = Object.freeze({
+  network: Object.freeze({
+    id: '2'.repeat(64),
+    name: 'osi-image-builder-egress-caffb9743bde969d',
+    internal: true,
+    labels: Object.freeze({
+      'org.osi.image-builder.egress-job-id': 'job-1',
+      'org.osi.image-builder.egress-manifest-sha': MANIFEST,
+      'org.osi.image-builder.egress-operation-id': 'build-image',
+      'org.osi.image-builder.egress-attempt': '1',
+      'org.osi.image-builder.egress-credential-sha': 'd'.repeat(64),
+      'org.osi.image-builder.egress-role': 'network',
+    }),
+    proxyEndpointId: '3'.repeat(64),
+    proxyAddress: '172.28.0.2',
+  }),
+  proxy: Object.freeze({
+    id: '4'.repeat(64),
+    name: 'osi-image-builder-egress-proxy-caffb9743bde969d',
+    imageReference: `registry.example/builder@sha256:${DIGEST}`,
+    imageId: `sha256:${'e'.repeat(64)}`,
+    imageDigest: DIGEST,
+    user: '1000:1000',
+    labels: Object.freeze({
+      'org.osi.image-builder.egress-job-id': 'job-1',
+      'org.osi.image-builder.egress-manifest-sha': MANIFEST,
+      'org.osi.image-builder.egress-operation-id': 'build-image',
+      'org.osi.image-builder.egress-attempt': '1',
+      'org.osi.image-builder.egress-credential-sha': 'd'.repeat(64),
+      'org.osi.image-builder.egress-role': 'proxy',
+    }),
+    command: Object.freeze([
+      'node',
+      '/opt/osi-image-builder/operations/osi-dependency-egress-proxy.cjs',
+    ]),
+    internalEndpointId: '3'.repeat(64),
+    internalAddress: '172.28.0.2',
+    bridgeNetworkId: '5'.repeat(64),
+    bridgeEndpointId: '6'.repeat(64),
+    bridgeAddress: '172.17.0.8',
+  }),
+  credential: EGRESS_CREDENTIAL,
+  tls: EGRESS_TLS,
+  readiness: Object.freeze({
+    authenticated: true,
+    unauthenticatedStatus: 407,
+    authenticatedStatus: 204,
+    bridgeEndpointDenied: true,
+  }),
+  allowedHosts: operationNetworkPolicy('build-image').allowedHosts,
+  networkName: 'osi-image-builder-egress-caffb9743bde969d',
+  proxyName: 'osi-image-builder-egress-proxy-caffb9743bde969d',
+});
 
 function inspection(overrides: Partial<DockerInspection> = {}): DockerInspection {
   return {
@@ -40,6 +120,9 @@ function inspection(overrides: Partial<DockerInspection> = {}): DockerInspection
     devices: [],
     securityOpt: ['no-new-privileges:true'],
     pidsLimit: 4096,
+    nanoCpus: 8_000_000_000,
+    memoryBytes: 16 * 1024 * 1024 * 1024,
+    memorySwapBytes: 16 * 1024 * 1024 * 1024,
     ulimits: [{ name: 'nofile', soft: 1024, hard: 4096 }],
     environment: {
       HOME: '/workdir/.builder-home',
@@ -55,6 +138,20 @@ function inspection(overrides: Partial<DockerInspection> = {}): DockerInspection
     startedAt: null,
     finishedAt: null,
     exitCode: 0,
+    command: [
+      'node',
+      '/opt/osi-image-builder/operations/osi-image-builder-exec-guard.js',
+      '--workspace-dev=35',
+      '--workspace-ino=25383430',
+      '--active-target-environment=root',
+      '--operation-id=verify-image',
+      `--operation-environment=${PI5_ENV}`,
+      '--working-directory=/workdir',
+      '--',
+      'node',
+      INTERNAL_OPERATION_TOOL_PATH,
+      'verify-image',
+    ],
     ...overrides,
   };
 }
@@ -75,6 +172,7 @@ function realisticRawInspection(): Record<string, unknown> {
         'TZ=UTC',
         'SOURCE_DATE_EPOCH=1784887200',
       ],
+      Cmd: inspection().command,
       Labels: {
         'org.osi.image-builder.job-id': 'job-1',
         'org.osi.image-builder.manifest-sha': MANIFEST,
@@ -89,6 +187,9 @@ function realisticRawInspection(): Record<string, unknown> {
       SecurityOpt: ['no-new-privileges:true'],
       ReadonlyRootfs: true,
       PidsLimit: 4096,
+      NanoCpus: 8_000_000_000,
+      Memory: 16 * 1024 * 1024 * 1024,
+      MemorySwap: 16 * 1024 * 1024 * 1024,
       Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 4096 }],
     },
     Mounts: [{ Type: 'bind', Source: '/tmp/worktree', Destination: '/workdir', RW: false }],
@@ -118,6 +219,32 @@ function rawInspectionWithContract(
   return value;
 }
 
+function dependencyEgressRawInspection(state: 'created' | 'exited'): Record<string, unknown> {
+  const value = rawInspectionWithContract(state, 'bridge', false);
+  const host = value.HostConfig as Record<string, unknown>;
+  host.NetworkMode = EGRESS_RESOURCES.network.name;
+  const mounts = value.Mounts as Array<Record<string, unknown>>;
+  mounts.push(
+    { Type: 'bind', Source: EGRESS_CREDENTIAL.hostPath, Destination: EGRESS_CREDENTIAL.containerPath, RW: false },
+    { Type: 'bind', Source: EGRESS_TLS.caCertificateHostPath, Destination: '/run/osi-image-builder/ca.pem', RW: false },
+  );
+  const config = value.Config as Record<string, unknown>;
+  config.Env = [
+    ...(config.Env as string[]),
+    'HTTP_PROXY=http://osi-egress-proxy:3128',
+    'HTTPS_PROXY=http://osi-egress-proxy:3128',
+    'ALL_PROXY=http://osi-egress-proxy:3128',
+    'NO_PROXY=',
+    'http_proxy=http://osi-egress-proxy:3128',
+    'https_proxy=http://osi-egress-proxy:3128',
+    'all_proxy=http://osi-egress-proxy:3128',
+    'no_proxy=',
+    `OSI_EGRESS_PROXY_CREDENTIAL_FILE=${DEPENDENCY_EGRESS_CREDENTIAL_PATH}`,
+    'OSI_EGRESS_CA_CERT_FILE=/run/osi-image-builder/ca.pem',
+  ];
+  return value;
+}
+
 function options(executor: DockerCommandExecutor, overrides: Partial<DockerExecutorOptions> & { readonly ownership?: { readonly runnerWrite: DockerExecutorOptions['ownership']['runnerWrite']; readonly getJob?: () => ReturnType<typeof emptyIdentityForTest> } } = {}): DockerExecutorOptions {
   const { ownership: suppliedOwnership, store: suppliedStore, ...rest } = overrides;
   const activeIdentity = { ...emptyIdentityForTest() };
@@ -134,11 +261,15 @@ function options(executor: DockerCommandExecutor, overrides: Partial<DockerExecu
     commandExecutor: executor,
     dockerPath: '/usr/bin/docker',
     imageReference: `registry.example/builder@sha256:${DIGEST}`,
+    imageId: `sha256:${'e'.repeat(64)}`,
     imageDigest: DIGEST,
     jobId: 'job-1',
     manifestSha256: MANIFEST,
     attempt: 1,
     worktreePath: '/tmp/worktree',
+    dependencyEgressCredentialDirectory: '/tmp/credentials',
+    workspaceIdentity: { device: 35, inode: 25383430 },
+    activeTargetEnvironment: null,
     uid: 1000,
     gid: 1000,
     operationId: 'verify-image',
@@ -185,6 +316,26 @@ function options(executor: DockerCommandExecutor, overrides: Partial<DockerExecu
   return result;
 }
 
+it('rejects an inspected image ID that differs from the admitted identity before container discovery', async () => {
+  const docker = fakeDocker([
+    { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+    { stdout: JSON.stringify({
+      Id: `sha256:${'f'.repeat(64)}`,
+      RepoDigests: [`registry.example/builder@sha256:${DIGEST}`],
+      Architecture: 'amd64',
+      Os: 'linux',
+    }) },
+  ]);
+  const getJob = vi.fn(() => { throw new Error('store must not be read'); });
+
+  await expect(createDockerExecutor(options(docker, {
+    store: { getJob },
+  })).run()).rejects.toThrow(/image ID|admitted identity/iu);
+
+  expect(docker.calls.map((argv) => argv[1])).toEqual(['version', 'image']);
+  expect(getJob).not.toHaveBeenCalled();
+});
+
 function cancellationBudgetWhen(
   requested: () => boolean,
   monotonic: () => number = () => performance.now(),
@@ -201,7 +352,14 @@ function cancellationBudgetWhen(
   };
 }
 
-function fakeDocker(responses: ReadonlyArray<Error | Partial<CommandResult>>, trace?: string[]): DockerCommandExecutor & { calls: string[][]; runOptions: CommandRunOptions[] } {
+interface FakeDockerResponseFields {
+  readonly stdoutChunks?: readonly (Buffer | string)[];
+  readonly stderrChunks?: readonly (Buffer | string)[];
+}
+
+type FakeDockerResponse = Error | (Partial<CommandResult> & FakeDockerResponseFields);
+
+function fakeDocker(responses: ReadonlyArray<FakeDockerResponse>, trace?: string[]): DockerCommandExecutor & { calls: string[][]; runOptions: CommandRunOptions[] } {
   const calls: string[][] = [];
   const runOptions: CommandRunOptions[] = [];
   let index = 0;
@@ -215,7 +373,7 @@ function fakeDocker(responses: ReadonlyArray<Error | Partial<CommandResult>>, tr
       const response = responses[index++];
       if (!response) throw new Error(`missing fake response for ${argv.join(' ')}`);
       if (response instanceof Error) throw response;
-      return {
+      const result = {
         argv: [...argv],
         exitCode: response.exitCode === undefined ? 0 : response.exitCode,
         signal: response.signal === undefined ? null : response.signal,
@@ -225,11 +383,39 @@ function fakeDocker(responses: ReadonlyArray<Error | Partial<CommandResult>>, tr
         startedAt: response.startedAt ?? NOW,
         finishedAt: response.finishedAt ?? NOW,
       };
+      if (argv[1] === 'inspect' && typeof result.stdout === 'string' && result.stdout.length > 0) {
+        try {
+          const inspected = JSON.parse(result.stdout) as { readonly Config?: Record<string, unknown> };
+          if (inspected.Config !== undefined) {
+            const create = calls.find((call) => call[1] === 'create' && call.includes('registry.example/builder@sha256:' + DIGEST) && !call.includes('--network=bridge'));
+            const imageIndex = create?.findIndex((part) => part.startsWith('registry.example/builder@sha256:')) ?? -1;
+            if (create !== undefined && imageIndex >= 0) {
+              (inspected.Config as Record<string, unknown>).Cmd = create.slice(imageIndex + 1);
+              result.stdout = JSON.stringify(inspected);
+            }
+          }
+        } catch {
+          // Non-JSON Docker responses are handled by the executor.
+        }
+      }
+      const stdoutChunks = response.stdoutChunks ?? (response.stdout === undefined ? [] : [response.stdout]);
+      const stderrChunks = response.stderrChunks ?? (response.stderr === undefined ? [] : [response.stderr]);
+      for (const chunk of stdoutChunks) {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8');
+        try { options.onStdoutBytes?.(bytes); } catch (error) { throw new CommandExecutionError('fake Docker stdout observer failed', { result, cause: error }); }
+        try { options.onStdout?.(bytes.toString('utf8')); } catch (error) { throw new CommandExecutionError('fake Docker stdout observer failed', { result, cause: error }); }
+      }
+      for (const chunk of stderrChunks) {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8');
+        try { options.onStderrBytes?.(bytes); } catch (error) { throw new CommandExecutionError('fake Docker stderr observer failed', { result, cause: error }); }
+        try { options.onStderr?.(bytes.toString('utf8')); } catch (error) { throw new CommandExecutionError('fake Docker stderr observer failed', { result, cause: error }); }
+      }
+      return result;
     }),
   };
 }
 
-function successfulResponses(start: Partial<CommandResult> = {}): Array<Error | Partial<CommandResult>> {
+function successfulResponses(start: Partial<CommandResult> & FakeDockerResponseFields = {}): Array<FakeDockerResponse> {
   return [
     { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
     { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
@@ -255,7 +441,7 @@ describe('operation registry', () => {
     expect(() => createOperationArgv('unknown-operation' as 'verify-image', { environment: 'x' })).toThrow(/unknown operation/i);
   });
 
-  it.each(['copy-feed-config', 'verify-image', 'mirror-gui'] as const)('cannot derive %s helper argv from caller or worktree input', (operationId) => {
+  it.each(['copy-feed-config', 'update-feeds', 'verify-image', 'mirror-gui'] as const)('cannot derive %s helper argv from caller or worktree input', (operationId) => {
     const trusted = createOperationArgv(operationId, { environment: 'full_raspberrypi_bcm27xx_bcm2712' });
     expect(trusted).toEqual(['node', INTERNAL_OPERATION_TOOL_PATH, operationId]);
     expect(trusted.join(' ')).not.toContain('/workdir');
@@ -281,12 +467,101 @@ describe('DockerExecutor', () => {
     vi.restoreAllMocks();
   });
 
+  it('accepts the underscore job ID shape issued by the production API', async () => {
+    const jobId = `job_${'a'.repeat(32)}`;
+    const containerName = createDockerContainerName(jobId, 'verify-image', 1);
+    const created = realisticCreatedRawInspection();
+    const exited = realisticRawInspection();
+    for (const value of [created, exited]) {
+      value.Name = `/${containerName}`;
+      const config = value.Config as Record<string, unknown>;
+      const labels = config.Labels as Record<string, string>;
+      labels['org.osi.image-builder.job-id'] = jobId;
+    }
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { stdout: '' },
+      { stdout: `${'1'.repeat(64)}\n` },
+      { stdout: JSON.stringify(created) },
+      { stdout: 'build output\n' },
+      { stdout: JSON.stringify(exited) },
+      { stdout: '' },
+      { exitCode: 1, stderr: 'No such container: one\n' },
+      { stdout: '' },
+    ]);
+
+    await expect(createDockerExecutor(options(docker, { jobId, containerName })).run())
+      .resolves.toMatchObject({ available: true, outcome: 'passed' });
+    expect(docker.calls.some((call) => call.includes(`--name=${containerName}`))).toBe(true);
+    expect(docker.calls.some((call) => call.includes(`--label=org.osi.image-builder.job-id=${jobId}`)))
+      .toBe(true);
+  });
+
+  it.each([
+    `/proc/${String(process.pid)}/fd/29`,
+    `/proc/${String(process.pid)}/fd/29/source`,
+    '/proc/self/fd/29/source/openwrt',
+    '/proc/thread-self/fd/29/source',
+  ])('rejects runner-owned proc-fd path or descendant %s before Docker lifecycle mutation', async (procFdPath) => {
+    const docker = fakeDocker([]);
+
+    await expect(createDockerExecutor(options(docker, { worktreePath: procFdPath })).run())
+      .rejects.toThrow(/canonical host pathname|worktree path/i);
+    expect(docker.calls).toEqual([]);
+  });
+
+  it('runs the full Docker lifecycle with a normalized canonical worktree path containing spaces', async () => {
+    const worktreePath = '/tmp/OSI image builder/release..candidate';
+    const created = realisticCreatedRawInspection();
+    const exited = realisticRawInspection();
+    for (const value of [created, exited]) {
+      const mounts = value.Mounts as Array<Record<string, unknown>>;
+      mounts[0]!.Source = worktreePath;
+    }
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { stdout: '' },
+      { stdout: `${'1'.repeat(64)}\n` },
+      { stdout: JSON.stringify(created) },
+      { stdout: 'build output\n' },
+      { stdout: JSON.stringify(exited) },
+      { stdout: '' },
+      { exitCode: 1, stderr: 'No such container: one\n' },
+      { stdout: '' },
+    ]);
+
+    await expect(createDockerExecutor(options(docker, { worktreePath })).run())
+      .resolves.toMatchObject({ available: true, outcome: 'passed' });
+    expect(docker.calls.find((call) => call[1] === 'create')).toContain(
+      `--mount=type=bind,source=${worktreePath},destination=/workdir,readonly`,
+    );
+  });
+
+  it.each([
+    ['relative', 'tmp/worktree'],
+    ['NUL', '/tmp/work\0tree'],
+    ['mount delimiter', '/tmp/work,tree'],
+    ['duplicate slash', '/tmp//worktree'],
+    ['dot segment', '/tmp/./worktree'],
+    ['parent segment', '/tmp/child/../worktree'],
+    ['trailing slash', '/tmp/worktree/'],
+  ])('rejects %s worktree path before Docker lifecycle mutation', async (_name, worktreePath) => {
+    const docker = fakeDocker([]);
+
+    await expect(createDockerExecutor(options(docker, { worktreePath })).run())
+      .rejects.toThrow(/canonical host pathname|worktree path/i);
+    expect(docker.calls).toEqual([]);
+  });
+
   it('stops cooperatively when cancellation arrives during attached Docker execution and waits for the child', async () => {
     const calls: string[][] = [];
     const trace: string[] = [];
     let inspectCount = 0;
     let attachStarted = false;
     let stopIssued = false;
+    let removed = false;
     let releaseAttach: (() => void) | undefined;
     const commandExecutor: DockerCommandExecutor = {
       run: vi.fn(async (argv: readonly string[]) => {
@@ -297,6 +572,7 @@ describe('DockerExecutor', () => {
           case 'ps': return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
           case 'create': return { argv: [...argv], exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
           case 'inspect': {
+            if (removed) return { argv: [...argv], exitCode: 1, signal: null, stdout: '', stderr: 'No such container', timedOut: false, startedAt: NOW, finishedAt: NOW };
             const value = inspectCount++ === 0 ? realisticCreatedRawInspection() : realisticRawInspection();
             return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify(value), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
           }
@@ -309,6 +585,9 @@ describe('DockerExecutor', () => {
             stopIssued = true;
             trace.push('stop-resolved');
             releaseAttach?.();
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'rm':
+            removed = true;
             return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
           default: throw new Error(`unexpected Docker command ${argv.join(' ')}`);
         }
@@ -335,12 +614,197 @@ describe('DockerExecutor', () => {
     expect(stopIssued).toBe(true);
     expect(trace).toEqual(['cancellation-authorized', 'stop-resolved', 'attach-resolved']);
     expect(authorizeCancellation).toHaveBeenCalledOnce();
-    expect(calls.map((call) => call[1])).toEqual(['version', 'image', 'ps', 'create', 'inspect', 'start', 'stop', 'inspect']);
+    expect(calls.map((call) => call[1])).toEqual(['version', 'image', 'ps', 'create', 'inspect', 'start', 'stop', 'inspect', 'rm', 'inspect', 'ps']);
     expect(calls.find((call) => call[1] === 'stop')).toEqual(['/usr/bin/docker', 'stop', '--time=30', '1'.repeat(64)]);
-    expect(calls.some((call) => call[1] === 'kill' || call[1] === 'rm')).toBe(false);
+    expect(calls.some((call) => call[1] === 'kill')).toBe(false);
     expect(writes.map((command) => command.kind)).toContain('operation-complete');
+    expect(writes.map((command) => command.kind)).toContain('operation-cleanup');
+    expect(writes.findIndex((command) => command.kind === 'operation-complete'))
+      .toBeLessThan(writes.findIndex((command) => command.kind === 'operation-cleanup'));
     const complete = writes.find((command): command is Extract<RunnerWriteCommand, { kind: 'operation-complete' }> => command.kind === 'operation-complete');
     expect(complete?.input).toMatchObject({ outcome: 'failed', errorCode: 'CANCELLED' });
+  });
+
+  it('removes dependency egress before committing cooperative cancellation cleanup', async () => {
+    const calls: string[][] = [];
+    const trace: string[] = [];
+    const persistedIdentity = emptyIdentityForTest();
+    const writes: RunnerWriteCommand[] = [];
+    let createArgv: string[] = [];
+    let inspectCount = 0;
+    let attachStarted = false;
+    let removed = false;
+    let releaseAttach: (() => void) | undefined;
+    const result = (argv: readonly string[], fields: Partial<CommandResult> = {}): CommandResult => ({
+      argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false,
+      startedAt: NOW, finishedAt: NOW, ...fields,
+    });
+    const inspected = (state: 'created' | 'exited'): string => {
+      const value = dependencyEgressRawInspection(state);
+      const imageIndex = createArgv.findIndex((part) => part === `registry.example/builder@sha256:${DIGEST}`);
+      (value.Config as Record<string, unknown>).Cmd = createArgv.slice(imageIndex + 1);
+      return JSON.stringify(value);
+    };
+    const commandExecutor: DockerCommandExecutor = {
+      run: vi.fn(async (argv: readonly string[]) => {
+        calls.push([...argv]);
+        trace.push(`docker:${argv[1] ?? ''}`);
+        switch (argv[1]) {
+          case 'version': return result(argv, { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' });
+          case 'image': return result(argv, { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) });
+          case 'ps': return result(argv);
+          case 'create':
+            createArgv = [...argv];
+            return result(argv, { stdout: `${'1'.repeat(64)}\n` });
+          case 'inspect':
+            if (removed) return result(argv, { exitCode: 1, stderr: 'No such container' });
+            return result(argv, { stdout: inspected(inspectCount++ === 0 ? 'created' : 'exited') });
+          case 'start':
+            attachStarted = true;
+            await new Promise<void>((resolve) => { releaseAttach = resolve; });
+            return result(argv);
+          case 'stop':
+            releaseAttach?.();
+            return result(argv);
+          case 'rm':
+            removed = true;
+            return result(argv);
+          default: throw new Error(`unexpected Docker command ${argv.join(' ')}`);
+        }
+      }),
+    };
+    const ownership = {
+      runnerWrite: vi.fn((command: RunnerWriteCommand) => {
+        writes.push(command);
+        trace.push(`write:${command.kind}`);
+        persistContainerWriteForTest(persistedIdentity, command);
+        return { ok: true, kind: 'committed', eventSeq: writes.length };
+      }),
+    };
+    const lifecycle = {
+      recoverDocker: vi.fn(async () => ({ docker: [], credentials: [], globalLabelResult: 'no-match' as const })),
+      discoverCredentials: vi.fn(async () => []),
+      createCredential: vi.fn(async () => EGRESS_CREDENTIAL),
+      createNetwork: vi.fn(async () => EGRESS_RESOURCES),
+      destroyNetwork: vi.fn(async () => {
+        trace.push('egress:destroy-network');
+        return {
+          proxy: { id: EGRESS_RESOURCES.proxy.id, absent: true as const },
+          network: { id: EGRESS_RESOURCES.network.id, absent: true as const },
+          tls: { hostDirectory: EGRESS_RESOURCES.tls.hostDirectory, absent: true as const },
+          globalLabelResult: 'no-match' as const,
+        };
+      }),
+      destroyCredential: vi.fn(async () => {
+        trace.push('egress:destroy-credential');
+        return { kind: 'normal' as const, hostPath: EGRESS_CREDENTIAL.hostPath, expectedSha256: EGRESS_CREDENTIAL.sha256, observedSha256: EGRESS_CREDENTIAL.sha256, tls: { hostDirectory: EGRESS_RESOURCES.tls.hostDirectory, absent: true as const }, absent: true as const };
+      }),
+    };
+
+    await expect(createDockerExecutor(options(commandExecutor, {
+      operationId: 'build-image',
+      ownership,
+      store: { getJob: () => persistedIdentity },
+      dependencyEgressLifecycle: lifecycle,
+      cancellationBudget: cancellationBudgetWhen(() => attachStarted),
+    })).run()).rejects.toMatchObject({ recoveryRequired: false });
+
+    expect(calls.map((call) => call[1])).toEqual(['version', 'image', 'ps', 'create', 'inspect', 'start', 'stop', 'inspect', 'rm', 'inspect', 'ps']);
+    expect(trace.indexOf('write:operation-complete')).toBeLessThan(trace.indexOf('docker:rm'));
+    expect(trace.indexOf('docker:rm')).toBeLessThan(trace.indexOf('egress:destroy-network'));
+    expect(trace.indexOf('egress:destroy-network')).toBeLessThan(trace.indexOf('egress:destroy-credential'));
+    expect(trace.indexOf('egress:destroy-credential')).toBeLessThan(trace.indexOf('write:operation-cleanup'));
+    expect(writes.find((write) => write.kind === 'operation-cleanup')).toMatchObject({
+      proof: {
+        egress: {
+          proxy: { id: EGRESS_RESOURCES.proxy.id, absent: true },
+          network: { id: EGRESS_RESOURCES.network.id, absent: true },
+          credential: { hostPath: EGRESS_CREDENTIAL.hostPath, sha256: EGRESS_CREDENTIAL.sha256, absent: true },
+        },
+      },
+    });
+    expect(persistedIdentity).toEqual(emptyIdentityForTest());
+  });
+
+  it('does not remove dependency egress when cooperative cancellation cannot prove builder absence', async () => {
+    const persistedIdentity = emptyIdentityForTest();
+    const writes: RunnerWriteCommand[] = [];
+    let createArgv: string[] = [];
+    let inspectCount = 0;
+    let attachStarted = false;
+    let removed = false;
+    let releaseAttach: (() => void) | undefined;
+    const result = (argv: readonly string[], fields: Partial<CommandResult> = {}): CommandResult => ({
+      argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false,
+      startedAt: NOW, finishedAt: NOW, ...fields,
+    });
+    const commandExecutor: DockerCommandExecutor = {
+      run: vi.fn(async (argv: readonly string[]) => {
+        switch (argv[1]) {
+          case 'version': return result(argv, { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' });
+          case 'image': return result(argv, { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) });
+          case 'ps': return result(argv);
+          case 'create':
+            createArgv = [...argv];
+            return result(argv, { stdout: `${'1'.repeat(64)}\n` });
+          case 'inspect': {
+            const value = dependencyEgressRawInspection(removed ? 'exited' : inspectCount++ === 0 ? 'created' : 'exited');
+            const imageIndex = createArgv.findIndex((part) => part === `registry.example/builder@sha256:${DIGEST}`);
+            (value.Config as Record<string, unknown>).Cmd = createArgv.slice(imageIndex + 1);
+            return result(argv, { stdout: JSON.stringify(value) });
+          }
+          case 'start':
+            attachStarted = true;
+            await new Promise<void>((resolve) => { releaseAttach = resolve; });
+            return result(argv);
+          case 'stop':
+            releaseAttach?.();
+            return result(argv);
+          case 'rm':
+            removed = true;
+            return result(argv);
+          default: throw new Error(`unexpected Docker command ${argv.join(' ')}`);
+        }
+      }),
+    };
+    const ownership = {
+      runnerWrite: vi.fn((command: RunnerWriteCommand) => {
+        writes.push(command);
+        persistContainerWriteForTest(persistedIdentity, command);
+        return { ok: true, kind: 'committed', eventSeq: writes.length };
+      }),
+    };
+    const destroyNetwork = vi.fn(async () => ({
+      proxy: { id: EGRESS_RESOURCES.proxy.id, absent: true as const },
+      network: { id: EGRESS_RESOURCES.network.id, absent: true as const },
+      tls: { hostDirectory: EGRESS_RESOURCES.tls.hostDirectory, absent: true as const },
+      globalLabelResult: 'no-match' as const,
+    }));
+    const destroyCredential = vi.fn(async () => ({ kind: 'normal' as const, hostPath: EGRESS_CREDENTIAL.hostPath, expectedSha256: EGRESS_CREDENTIAL.sha256, observedSha256: EGRESS_CREDENTIAL.sha256, tls: { hostDirectory: EGRESS_RESOURCES.tls.hostDirectory, absent: true as const }, absent: true as const }));
+
+    await expect(createDockerExecutor(options(commandExecutor, {
+      operationId: 'build-image',
+      ownership,
+      store: { getJob: () => persistedIdentity },
+      dependencyEgressLifecycle: {
+        recoverDocker: vi.fn(async () => ({ docker: [], credentials: [], globalLabelResult: 'no-match' as const })),
+        discoverCredentials: vi.fn(async () => []),
+        createCredential: vi.fn(async () => EGRESS_CREDENTIAL),
+        createNetwork: vi.fn(async () => EGRESS_RESOURCES),
+        destroyNetwork,
+        destroyCredential,
+      },
+      cancellationBudget: cancellationBudgetWhen(() => attachStarted),
+    })).run()).rejects.toThrow(/did not prove exact container absence/i);
+
+    expect(destroyNetwork).not.toHaveBeenCalled();
+    expect(destroyCredential).not.toHaveBeenCalled();
+    expect(writes.some((write) => write.kind === 'operation-complete')).toBe(true);
+    expect(writes.some((write) => write.kind === 'operation-cleanup')).toBe(false);
+    expect(persistedIdentity).toMatchObject({
+      containerId: '1'.repeat(64),
+      containerSecurity: { egress: EGRESS_RESOURCES },
+    });
   });
 
   it('issues no Docker stop or remove when active-operation authorization is denied', async () => {
@@ -387,6 +851,7 @@ describe('DockerExecutor', () => {
     let attachStarted = false;
     let releaseAttach: (() => void) | undefined;
     let inspectCount = 0;
+    let removed = false;
     const commandExecutor: DockerCommandExecutor = {
       run: vi.fn(async (argv: readonly string[]) => {
         switch (argv[1]) {
@@ -394,7 +859,9 @@ describe('DockerExecutor', () => {
           case 'image': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
           case 'ps': return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
           case 'create': return { argv: [...argv], exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
-          case 'inspect': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify(inspectCount++ === 0 ? realisticCreatedRawInspection() : realisticRawInspection()), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'inspect': return removed
+            ? { argv: [...argv], exitCode: 1, signal: null, stdout: '', stderr: 'No such container', timedOut: false, startedAt: NOW, finishedAt: NOW }
+            : { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify(inspectCount++ === 0 ? realisticCreatedRawInspection() : realisticRawInspection()), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
           case 'start':
             attachStarted = true;
             monotonic = 120_000;
@@ -402,6 +869,9 @@ describe('DockerExecutor', () => {
             return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
           case 'stop':
             releaseAttach?.();
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'rm':
+            removed = true;
             return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
           default: throw new Error(`unexpected Docker command ${argv.join(' ')}`);
         }
@@ -501,6 +971,8 @@ describe('DockerExecutor', () => {
     expect(writes.filter((write) => write.kind === 'operation-complete')).toHaveLength(1);
     expect(persistCancellationBlocker).toHaveBeenCalledOnce();
     expect(vi.mocked(commandExecutor.run).mock.calls.some(([argv]) => argv[1] === 'kill')).toBe(false);
+    expect(vi.mocked(commandExecutor.run).mock.calls.some(([argv]) => argv[1] === 'rm')).toBe(false);
+    expect(writes.some((write) => write.kind === 'operation-cleanup')).toBe(false);
     startOptions?.onStdout?.('late child output');
     startOptions?.onStdoutBytes?.(Buffer.from([0xff]));
     expect(onStdout).not.toHaveBeenCalled();
@@ -843,6 +1315,9 @@ describe('DockerExecutor', () => {
     expect(create).toContain('--cap-drop=ALL');
     expect(create).toContain('--security-opt=no-new-privileges:true');
     expect(create).toContain('--pids-limit=4096');
+    expect(create).toContain('--cpus=8');
+    expect(create).toContain('--memory=16g');
+    expect(create).toContain('--memory-swap=16g');
     expect(create).toContain('--ulimit=nofile=1024:4096');
     const mountArg = create?.find((value) => value.startsWith('--mount='));
     expect(mountArg).toBe('--mount=type=bind,source=/tmp/worktree,destination=/workdir,readonly');
@@ -882,6 +1357,393 @@ describe('DockerExecutor', () => {
     expect(Date.parse(lifecycleCommands[1]!.occurredAt)).toBeGreaterThanOrEqual(Date.parse(lifecycleCommands[1]!.startedAt!));
     expect(Date.parse(lifecycleCommands[2]!.occurredAt)).toBeGreaterThanOrEqual(Date.parse(lifecycleCommands[2]!.stoppedAt!));
     expect(evidenceValue?.inspection).toEqual(expect.objectContaining({ imagePreflight: expect.objectContaining({ architecture: 'amd64', os: 'linux' }), container: expect.objectContaining({ rootImageId: `sha256:${'e'.repeat(64)}` }) }));
+  });
+
+  it('commits bounded output evidence when a successful Docker command emits more than the JSON limit', async () => {
+    const fullStdout = 'x'.repeat(70_000);
+    const fullStderr = 'y'.repeat(70_000);
+    const stdoutTail = Buffer.from(fullStdout).subarray(fullStdout.length - 16 * 1024).toString('utf8');
+    const stderrTail = Buffer.from(fullStderr).subarray(fullStderr.length - 16 * 1024).toString('utf8');
+    const responses = successfulResponses({
+      stdout: stdoutTail,
+      stderr: stderrTail,
+      stdoutChunks: [fullStdout],
+      stderrChunks: [fullStderr],
+    });
+    const docker = fakeDocker(responses);
+    let evidenceValue: JsonObject | undefined;
+    let encodedEvidence = '';
+    const writes: RunnerWriteCommand[] = [];
+    const durableStdout = vi.fn();
+    const durableStderr = vi.fn();
+    const ownership = {
+      runnerWrite: vi.fn((command: RunnerWriteCommand) => {
+        writes.push(command);
+        return { ok: true, kind: 'committed', eventSeq: writes.length };
+      }),
+    };
+
+    await expect(createDockerExecutor(options(docker, {
+      ownership,
+      evidence: async (value) => {
+        evidenceValue = value;
+        encodedEvidence = encodeJson(value, 'operation evidence', true);
+        return { path: 'evidence/operation-large-output.json', sha256: 'c'.repeat(64) };
+      },
+      onStdoutBytes: durableStdout,
+      onStderrBytes: durableStderr,
+    })).run()).resolves.toMatchObject({ outcome: 'passed' });
+
+    const command = evidenceValue?.command as Record<string, unknown>;
+    expect(Buffer.byteLength(encodedEvidence, 'utf8')).toBeLessThanOrEqual(65_536);
+    expect(encodedEvidence).not.toContain(fullStdout);
+    expect(encodedEvidence).not.toContain(fullStderr);
+    expect(command.stdout).toMatchObject({
+      bytes: Buffer.byteLength(fullStdout),
+      sha256: createHash('sha256').update(fullStdout).digest('hex'),
+      capturedBytes: Buffer.byteLength(stdoutTail),
+      capturedSha256: createHash('sha256').update(stdoutTail).digest('hex'),
+      captureLimitBytes: 16 * 1024,
+      complete: true,
+      truncated: true,
+    });
+    expect(command.stderr).toMatchObject({
+      bytes: Buffer.byteLength(fullStderr),
+      sha256: createHash('sha256').update(fullStderr).digest('hex'),
+      capturedBytes: Buffer.byteLength(stderrTail),
+      capturedSha256: createHash('sha256').update(stderrTail).digest('hex'),
+      captureLimitBytes: 16 * 1024,
+      complete: true,
+      truncated: true,
+    });
+    expect(durableStdout).toHaveBeenCalledWith(Buffer.from(fullStdout));
+    expect(durableStderr).toHaveBeenCalledWith(Buffer.from(fullStderr));
+    expect(writes.some((write) => write.kind === 'operation-complete')).toBe(true);
+    expect(writes.some((write) => write.kind === 'operation-cleanup')).toBe(true);
+  });
+
+  it('records complete empty output with stable empty hashes', async () => {
+    const docker = fakeDocker(successfulResponses({ stdout: '', stderr: '', stdoutChunks: [], stderrChunks: [] }));
+    let evidenceValue: JsonObject | undefined;
+
+    await expect(createDockerExecutor(options(docker, {
+      evidence: async (value) => {
+        evidenceValue = value;
+        encodeJson(value, 'operation evidence', true);
+        return { path: 'evidence/operation-empty-output.json', sha256: 'c'.repeat(64) };
+      },
+    })).run()).resolves.toMatchObject({ outcome: 'passed' });
+
+    const command = evidenceValue?.command as Record<string, unknown>;
+    expect(command.stdout).toEqual({
+      bytes: 0,
+      sha256: createHash('sha256').update('').digest('hex'),
+      capturedBytes: 0,
+      capturedSha256: createHash('sha256').update('').digest('hex'),
+      captureLimitBytes: 16 * 1024,
+      complete: true,
+      truncated: false,
+    });
+    expect(command.stderr).toEqual(command.stdout);
+  });
+
+  it('hashes exact streamed bytes when UTF-8 output arrives in split chunks', async () => {
+    const euro = Buffer.from('\u20ac', 'utf8');
+    const docker = fakeDocker(successfulResponses({
+      stdout: '\u20ac',
+      stdoutChunks: [euro.subarray(0, 1), euro.subarray(1, 2), euro.subarray(2)],
+      stderr: '',
+      stderrChunks: [],
+    }));
+    let evidenceValue: JsonObject | undefined;
+    const durableBytes: Buffer[] = [];
+
+    await expect(createDockerExecutor(options(docker, {
+      evidence: async (value) => {
+        evidenceValue = value;
+        encodeJson(value, 'operation evidence', true);
+        return { path: 'evidence/operation-split-utf8.json', sha256: 'c'.repeat(64) };
+      },
+      onStdoutBytes: (chunk) => { durableBytes.push(chunk); },
+    })).run()).resolves.toMatchObject({ outcome: 'passed' });
+
+    const command = evidenceValue?.command as Record<string, unknown>;
+    expect(command.stdout).toMatchObject({
+      bytes: euro.byteLength,
+      sha256: createHash('sha256').update(euro).digest('hex'),
+      capturedBytes: Buffer.byteLength('\u20ac'),
+      capturedSha256: createHash('sha256').update('\u20ac').digest('hex'),
+      complete: true,
+      truncated: false,
+    });
+    expect(Buffer.concat(durableBytes)).toEqual(euro);
+  });
+
+  it('marks output incomplete and truncated after the cancellation deadline cuts streaming off', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    let attachStarted = false;
+    let releaseAttach: (() => void) | undefined;
+    let inspectCount = 0;
+    const writes: RunnerWriteCommand[] = [];
+    let evidenceValue: JsonObject | undefined;
+    const commandExecutor: DockerCommandExecutor = {
+      run: vi.fn(async (argv: readonly string[], runOptions: CommandRunOptions) => {
+        switch (argv[1]) {
+          case 'version': return { argv: [...argv], exitCode: 0, signal: null, stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'image': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'ps': return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'create': return { argv: [...argv], exitCode: 0, signal: null, stdout: `${'1'.repeat(64)}\n`, stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'inspect': return { argv: [...argv], exitCode: 0, signal: null, stdout: JSON.stringify(inspectCount++ === 0 ? realisticCreatedRawInspection() : realisticRawInspection()), stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'start':
+            attachStarted = true;
+            runOptions.onStdoutBytes?.(Buffer.from('partial output'));
+            await new Promise<void>((resolve) => { releaseAttach = resolve; });
+            return { argv: [...argv], exitCode: 0, signal: null, stdout: 'partial output', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          case 'stop': return { argv: [...argv], exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, startedAt: NOW, finishedAt: NOW };
+          default: throw new Error(`unexpected Docker command ${argv.join(' ')}`);
+        }
+      }),
+    };
+    const run = createDockerExecutor(options(commandExecutor, {
+      cancellationBudget: () => ({ requested: attachStarted, deadline: attachStarted ? 30_000 : null, remainingMs: attachStarted ? 30_000 : null }),
+      monotonicNow: () => Date.now(),
+      ownership: { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true, kind: 'committed', eventSeq: writes.length }; }) },
+      evidence: async (value) => {
+        evidenceValue = value;
+        encodeJson(value, 'operation evidence', true);
+        return { path: 'evidence/operation-cutoff.json', sha256: 'c'.repeat(64) };
+      },
+    })).run();
+
+    await vi.advanceTimersByTimeAsync(30_100);
+    await Promise.resolve();
+    const command = evidenceValue?.command as Record<string, unknown>;
+    expect(command.stdout).toMatchObject({ complete: false, truncated: true, bytes: Buffer.byteLength('partial output') });
+    expect(command.stderr).toMatchObject({ complete: false, truncated: true });
+    releaseAttach?.();
+    await expect(run).rejects.toMatchObject({ code: 'DOCKER_CONTAINER_ORPHANED' });
+  });
+
+  it('marks output incomplete and truncated when a durable output observer fails', async () => {
+    const responses = successfulResponses({ stdout: 'partial output', stdoutChunks: ['partial output'] });
+    const docker = fakeDocker(responses);
+    let evidenceValue: JsonObject | undefined;
+    const durableObserver = vi.fn(() => { throw new Error('durable log unavailable'); });
+
+    await expect(createDockerExecutor(options(docker, {
+      onStdoutBytes: durableObserver,
+      evidence: async (value) => {
+        evidenceValue = value;
+        encodeJson(value, 'operation evidence', true);
+        return { path: 'evidence/operation-observer-failure.json', sha256: 'c'.repeat(64) };
+      },
+    })).run()).resolves.toMatchObject({ outcome: 'failed' });
+
+    expect(evidenceValue?.command).toMatchObject({
+      stdout: expect.objectContaining({ complete: false, truncated: true }),
+      stderr: expect.objectContaining({ complete: false, truncated: true }),
+    });
+    expect(durableObserver).toHaveBeenCalledOnce();
+  });
+
+  it('revalidates the worktree immediately before create and after created inspection before start', async () => {
+    const trace: string[] = [];
+    const docker = fakeDocker(successfulResponses(), trace);
+    const executorOptions = {
+      ...options(docker),
+      revalidateWorktreeBeforeCreate: async () => { trace.push('revalidate:before-create'); },
+      revalidateWorktreeBeforeStart: async () => { trace.push('revalidate:before-start'); },
+    } as DockerExecutorOptions & {
+      readonly revalidateWorktreeBeforeCreate: () => Promise<void>;
+      readonly revalidateWorktreeBeforeStart: () => Promise<void>;
+    };
+
+    await expect(createDockerExecutor(executorOptions).run()).resolves.toMatchObject({
+      available: true,
+      outcome: 'passed',
+    });
+    expect(trace).toEqual([
+      'docker:version',
+      'docker:image',
+      'docker:ps',
+      'revalidate:before-create',
+      'docker:create',
+      'docker:inspect',
+      'revalidate:before-start',
+      'docker:start',
+      'docker:inspect',
+      'docker:rm',
+      'docker:inspect',
+      'docker:ps',
+    ]);
+  });
+
+  it('does not expose the removed accepted-result classifier contract', async () => {
+    const source = await readFile(new URL('../../runner/src/docker-executor.ts', import.meta.url), 'utf8');
+    expect(source).not.toContain('classifyAcceptedResult');
+    expect(source).not.toContain('expected-rootfs-already-present');
+    expect(source).not.toMatch(/outcome[^\n]*accepted/u);
+  });
+
+  it.each([
+    ['before create', 'create'],
+    ['before start', 'start'],
+  ] as const)(
+    'rejects each mutated active target link at the %s Docker boundary',
+    async (_boundary, boundary) => {
+      const root = await mkdtemp(join(tmpdir(), 'osi-docker-link-boundary-'));
+      try {
+        await mkdir(join(root, 'conf'), { recursive: true });
+        await mkdir(join(root, 'openwrt'), { recursive: true });
+        const links = [
+          ['conf/.config', `${PI5_ENV}/.config`],
+          ['conf/files', `${PI5_ENV}/files`],
+          ['conf/patches', `${PI5_ENV}/patches`],
+          ['openwrt/.config', '../conf/.config'],
+          ['openwrt/files', '../conf/files'],
+          ['openwrt/patches', '../conf/patches'],
+        ] as const;
+        for (const [path, target] of links) {
+          await symlink(target, join(root, path));
+        }
+        const mutateAndAssert = async (path: string) => {
+          await unlink(join(root, path));
+          await writeFile(join(root, path), 'raced regular file\n');
+          await assertActiveTargetLinks(root, PI5_ENV);
+        };
+        for (const [path] of links) {
+          const docker = fakeDocker(successfulResponses());
+          const optionsForBoundary = options(docker, {
+            revalidateWorktreeBeforeCreate: async () => {
+              if (boundary === 'create') await mutateAndAssert(path);
+            },
+            revalidateWorktreeBeforeStart: async () => {
+              if (boundary === 'start') await mutateAndAssert(path);
+            },
+          });
+          await expect(createDockerExecutor(optionsForBoundary).run()).rejects.toThrow();
+          expect(docker.calls.some((call) => call[1] === (boundary === 'create' ? 'create' : 'start'))).toBe(false);
+          expect((await readFile(join(root, path), 'utf8'))).toBe('raced regular file\n');
+          await rm(join(root, path));
+          const [, target] = links.find(([candidate]) => candidate === path)!;
+          await symlink(target, join(root, path));
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('commits null-identity failure evidence when pre-create worktree revalidation fails', async () => {
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { stdout: '' },
+      { stdout: '' },
+    ]);
+    const writes: RunnerWriteCommand[] = [];
+    let evidenceValue: JsonObject | undefined;
+    const executorOptions = {
+      ...options(docker, {
+        ownership: {
+          runnerWrite: (command) => {
+            writes.push(command);
+            return { ok: true, kind: 'committed', eventSeq: writes.length };
+          },
+        },
+        evidence: async (value) => {
+          evidenceValue = value;
+          return { path: 'evidence/pre-create-revalidation.json', sha256: 'c'.repeat(64) };
+        },
+      }),
+      revalidateWorktreeBeforeCreate: async () => { throw new Error('workspace replaced before create'); },
+      revalidateWorktreeBeforeStart: async () => undefined,
+    } as DockerExecutorOptions & {
+      readonly revalidateWorktreeBeforeCreate: () => Promise<void>;
+      readonly revalidateWorktreeBeforeStart: () => Promise<void>;
+    };
+
+    await expect(createDockerExecutor(executorOptions).run()).rejects.toMatchObject({
+      code: 'DOCKER_EXECUTION_DEFINITION_MISMATCH',
+    });
+    expect(docker.calls.map((call) => call[1])).toEqual(['version', 'image', 'ps', 'ps']);
+    expect(writes.map((write) => write.kind)).toEqual([
+      'operation-begin',
+      'operation-complete',
+      'operation-cleanup',
+    ]);
+    expect(evidenceValue).toMatchObject({
+      lifecyclePhase: 'not_created',
+      outcome: 'failed',
+      error: { code: 'DOCKER_EXECUTION_DEFINITION_MISMATCH' },
+      cleanup: { kind: 'null-identity' },
+    });
+  });
+
+  it('removes the inspected container and commits failure evidence when pre-start worktree revalidation fails', async () => {
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { stdout: '' },
+      { stdout: `${'1'.repeat(64)}\n` },
+      { stdout: JSON.stringify(realisticCreatedRawInspection()) },
+      { stdout: '' },
+      { exitCode: 1, stderr: 'No such container: one\n' },
+      { stdout: '' },
+    ]);
+    const writes: RunnerWriteCommand[] = [];
+    let evidenceValue: JsonObject | undefined;
+    const executorOptions = {
+      ...options(docker, {
+        ownership: {
+          runnerWrite: (command) => {
+            writes.push(command);
+            return { ok: true, kind: 'committed', eventSeq: writes.length };
+          },
+        },
+        evidence: async (value) => {
+          evidenceValue = value;
+          return { path: 'evidence/pre-start-revalidation.json', sha256: 'c'.repeat(64) };
+        },
+      }),
+      revalidateWorktreeBeforeCreate: async () => undefined,
+      revalidateWorktreeBeforeStart: async () => { throw new Error('workspace replaced before start'); },
+    } as DockerExecutorOptions & {
+      readonly revalidateWorktreeBeforeCreate: () => Promise<void>;
+      readonly revalidateWorktreeBeforeStart: () => Promise<void>;
+    };
+
+    await expect(createDockerExecutor(executorOptions).run()).rejects.toMatchObject({
+      code: 'DOCKER_EXECUTION_DEFINITION_MISMATCH',
+    });
+    expect(docker.calls.map((call) => call[1])).toEqual([
+      'version',
+      'image',
+      'ps',
+      'create',
+      'inspect',
+      'rm',
+      'inspect',
+      'ps',
+    ]);
+    expect(docker.calls.some((call) => call[1] === 'start')).toBe(false);
+    expect(writes.map((write) => write.kind)).toEqual([
+      'operation-begin',
+      'operation-begin',
+      'operation-complete',
+      'operation-cleanup',
+    ]);
+    expect(evidenceValue).toMatchObject({
+      lifecyclePhase: 'not_created',
+      outcome: 'failed',
+      error: { code: 'DOCKER_EXECUTION_DEFINITION_MISMATCH' },
+      cleanup: {
+        kind: 'container-removed',
+        id: '1'.repeat(64),
+        exactIdAbsent: true,
+      },
+    });
   });
 
   it('recovers retained exact identity when rm completed before cleanup CAS', async () => {
@@ -954,6 +1816,95 @@ describe('DockerExecutor', () => {
       globalLabelResult: 'no-match',
     });
     expect(identity.containerId).toBeNull();
+  });
+
+  it('recovers and attests persisted proxy, network, and credential identities before crash cleanup CAS', async () => {
+    const trace: string[] = [];
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { exitCode: 1, stderr: 'No such container: retained\n' },
+      { stdout: '' },
+    ], trace);
+    const labels = {
+      'org.osi.image-builder.job-id': 'job-1',
+      'org.osi.image-builder.manifest-sha': MANIFEST,
+    };
+    const identity = {
+      ...emptyIdentityForTest(),
+      containerId: '1'.repeat(64),
+      containerName: 'osi-image-builder-job-1-attempt-1',
+      containerImageDigest: DIGEST,
+      containerLabelJobId: 'job-1',
+      containerLabelManifestSha: MANIFEST,
+      containerLabels: labels,
+      containerMount: {},
+      containerEnvironment: {},
+      containerSecurity: { egress: JSON.parse(JSON.stringify(EGRESS_RESOURCES)) as JsonObject },
+      containerInspection: {},
+      containerCreatedAt: NOW,
+      containerStoppedAt: NOW,
+    };
+    const operation = {
+      operationId: 'build-image' as const,
+      attempt: 1,
+      outcome: 'passed' as const,
+      finishedAt: NOW,
+      exitCode: 0,
+      containerId: identity.containerId,
+      containerName: identity.containerName,
+      containerImageDigest: DIGEST,
+      containerLabelJobId: 'job-1',
+      containerLabelManifestSha: MANIFEST,
+    };
+    const lifecycle = {
+      recoverDocker: vi.fn(),
+      discoverCredentials: vi.fn(),
+      createCredential: vi.fn(),
+      createNetwork: vi.fn(),
+      destroyNetwork: vi.fn(async (_input, resources: DependencyEgressNetwork) => {
+        trace.push('egress:destroy-network');
+        expect(resources).toEqual(EGRESS_RESOURCES);
+        return {
+          proxy: { id: resources.proxy.id, absent: true as const },
+          network: { id: resources.network.id, absent: true as const },
+          tls: { hostDirectory: resources.tls.hostDirectory, absent: true as const },
+          globalLabelResult: 'no-match' as const,
+        };
+      }),
+      destroyCredential: vi.fn(async () => {
+        trace.push('egress:destroy-credential');
+        return { kind: 'normal' as const, hostPath: EGRESS_CREDENTIAL.hostPath, expectedSha256: EGRESS_CREDENTIAL.sha256, observedSha256: EGRESS_CREDENTIAL.sha256, tls: { hostDirectory: EGRESS_RESOURCES.tls.hostDirectory, absent: true as const }, absent: true as const };
+      }),
+    };
+    const writes: RunnerWriteCommand[] = [];
+    const ownership = {
+      runnerWrite: vi.fn((command: RunnerWriteCommand) => {
+        writes.push(command);
+        trace.push(`write:${command.kind}`);
+        return { ok: true };
+      }),
+    };
+
+    await expect(createDockerExecutor(options(docker, {
+      operationId: 'build-image',
+      store: { getJob: () => identity, getOperation: () => operation as OperationInput },
+      ownership,
+      dependencyEgressLifecycle: lifecycle,
+    })).run()).resolves.toMatchObject({ available: true, outcome: 'passed' });
+
+    expect(lifecycle.createCredential).not.toHaveBeenCalled();
+    expect(lifecycle.createNetwork).not.toHaveBeenCalled();
+    expect(trace.indexOf('egress:destroy-network')).toBeLessThan(trace.indexOf('write:operation-cleanup'));
+    expect(trace.indexOf('egress:destroy-credential')).toBeLessThan(trace.indexOf('write:operation-cleanup'));
+    expect(writes.at(-1)).toMatchObject({
+      kind: 'operation-cleanup',
+      proof: { egress: {
+        proxy: { id: EGRESS_RESOURCES.proxy.id, absent: true },
+        network: { id: EGRESS_RESOURCES.network.id, absent: true },
+        credential: { hostPath: EGRESS_CREDENTIAL.hostPath, sha256: EGRESS_CREDENTIAL.sha256, absent: true },
+      } },
+    });
   });
 
   it('runs verify-image with an offline read-only worktree and container rootfs', async () => {
@@ -1070,6 +2021,282 @@ describe('DockerExecutor', () => {
     });
   });
 
+  it('admits dependency-fetching branch operations only through an internal proxy network', async () => {
+    const trace: string[] = [];
+    const buildImageRaw = (state: 'created' | 'exited'): Record<string, unknown> => {
+      const value = rawInspectionWithContract(state, 'none', false);
+      const host = value.HostConfig as Record<string, unknown>;
+      host.NetworkMode = EGRESS_RESOURCES.network.name;
+      (value.Mounts as Array<Record<string, unknown>>).push({
+        Type: 'bind',
+        Source: EGRESS_CREDENTIAL.hostPath,
+        Destination: EGRESS_CREDENTIAL.containerPath,
+        RW: false,
+      });
+      (value.Mounts as Array<Record<string, unknown>>).push({
+        Type: 'bind',
+        Source: EGRESS_TLS.caCertificateHostPath,
+        Destination: '/run/osi-image-builder/ca.pem',
+        RW: false,
+      });
+      const config = value.Config as Record<string, unknown>;
+      config.Env = [
+        ...(config.Env as string[]),
+        'HTTP_PROXY=http://osi-egress-proxy:3128',
+        'HTTPS_PROXY=http://osi-egress-proxy:3128',
+        'ALL_PROXY=http://osi-egress-proxy:3128',
+        'NO_PROXY=',
+        'http_proxy=http://osi-egress-proxy:3128',
+        'https_proxy=http://osi-egress-proxy:3128',
+        'all_proxy=http://osi-egress-proxy:3128',
+        'no_proxy=',
+        `OSI_EGRESS_PROXY_CREDENTIAL_FILE=${DEPENDENCY_EGRESS_CREDENTIAL_PATH}`,
+        'OSI_EGRESS_CA_CERT_FILE=/run/osi-image-builder/ca.pem',
+      ];
+      return value;
+    };
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { stdout: '' },
+      { stdout: `${'1'.repeat(64)}\n` },
+      { stdout: JSON.stringify(buildImageRaw('created')) },
+      { stdout: 'build output\n' },
+      { stdout: JSON.stringify(buildImageRaw('exited')) },
+      { stdout: '' },
+      { exitCode: 1, stderr: 'No such container: one\n' },
+      { stdout: '' },
+    ], trace);
+    const writes: RunnerWriteCommand[] = [];
+    const persistedIdentity = emptyIdentityForTest();
+    const ownership = {
+      runnerWrite: vi.fn((command: RunnerWriteCommand) => {
+        writes.push(command);
+        trace.push(`write:${command.kind}`);
+        const persisted = JSON.parse(JSON.stringify(normalizeCommand(command, 'runner write'))) as RunnerWriteCommand;
+        if (persisted.kind === 'container') Object.assign(persistedIdentity, {
+          containerId: persisted.containerId,
+          containerName: persisted.containerName,
+          containerImageDigest: persisted.imageDigest,
+          containerLabelJobId: persisted.labels['org.osi.image-builder.job-id'],
+          containerLabelManifestSha: persisted.labels['org.osi.image-builder.manifest-sha'],
+          containerLabels: persisted.labels,
+          containerMount: persisted.mount,
+          containerEnvironment: persisted.environment,
+          containerSecurity: persisted.security,
+          containerInspection: persisted.inspection,
+          containerCreatedAt: persisted.createdAt,
+          containerStartedAt: persisted.startedAt ?? null,
+          containerStoppedAt: persisted.stoppedAt ?? null,
+        });
+        return { ok: true };
+      }),
+    };
+    const lifecycle = {
+      recoverDocker: vi.fn(async () => {
+        trace.push('egress:recover-docker');
+        return { docker: [], credentials: [], globalLabelResult: 'no-match' as const };
+      }),
+      discoverCredentials: vi.fn(async () => {
+        trace.push('egress:discover-credentials');
+        return [];
+      }),
+      createCredential: vi.fn(async () => {
+        trace.push('egress:create-credential');
+        return EGRESS_CREDENTIAL;
+      }),
+      createNetwork: vi.fn(async () => {
+        trace.push('egress:create-network');
+        return EGRESS_RESOURCES;
+      }),
+      destroyNetwork: vi.fn(async () => {
+        trace.push('egress:destroy-network');
+        return {
+          proxy: { id: EGRESS_RESOURCES.proxy.id, absent: true as const },
+          network: { id: EGRESS_RESOURCES.network.id, absent: true as const },
+          tls: { hostDirectory: EGRESS_RESOURCES.tls.hostDirectory, absent: true as const },
+          globalLabelResult: 'no-match' as const,
+        };
+      }),
+      destroyCredential: vi.fn(async () => {
+        trace.push('egress:destroy-credential');
+        return { kind: 'normal' as const, hostPath: EGRESS_CREDENTIAL.hostPath, expectedSha256: EGRESS_CREDENTIAL.sha256, observedSha256: EGRESS_CREDENTIAL.sha256, tls: { hostDirectory: EGRESS_RESOURCES.tls.hostDirectory, absent: true as const }, absent: true as const };
+      }),
+    };
+
+    await expect(createDockerExecutor(options(docker, {
+      operationId: 'build-image',
+      ownership,
+      store: { getJob: () => persistedIdentity },
+      dependencyEgressLifecycle: lifecycle,
+    })).run()).resolves.toMatchObject({ available: true, outcome: 'passed' });
+
+    expect(lifecycle.createCredential).toHaveBeenCalledBefore(lifecycle.createNetwork);
+    expect(lifecycle.recoverDocker).toHaveBeenCalledBefore(lifecycle.createCredential);
+    expect(lifecycle.discoverCredentials).toHaveBeenCalledBefore(lifecycle.createCredential);
+    expect(lifecycle.createNetwork).toHaveBeenCalledWith(expect.objectContaining({
+      imageId: `sha256:${'e'.repeat(64)}`,
+      imageDigest: DIGEST,
+      operationId: 'build-image',
+      credential: EGRESS_CREDENTIAL,
+    }));
+    const builderCreate = docker.calls.find((argv) => argv[1] === 'create');
+    expect(builderCreate).toContain(`--network=${EGRESS_RESOURCES.network.name}`);
+    expect(builderCreate).toContain(`--mount=type=bind,source=${EGRESS_CREDENTIAL.hostPath},destination=${DEPENDENCY_EGRESS_CREDENTIAL_PATH},readonly`);
+    expect(builderCreate?.join(' ')).not.toContain(EGRESS_CREDENTIAL.sha256);
+    const created = writes.find((command): command is Extract<RunnerWriteCommand, { kind: 'container' }> => command.kind === 'container' && command.lifecycle === 'created');
+    expect(created?.security).toMatchObject({ egress: EGRESS_RESOURCES });
+    expect(created?.inspection).toMatchObject({ container: { mounts: [
+      { source: '/tmp/worktree', destination: '/workdir', readOnly: false },
+      { source: EGRESS_CREDENTIAL.hostPath, destination: DEPENDENCY_EGRESS_CREDENTIAL_PATH, readOnly: true },
+      { source: EGRESS_TLS.caCertificateHostPath, destination: '/run/osi-image-builder/ca.pem', readOnly: true },
+    ] } });
+    expect(trace.indexOf('egress:destroy-network')).toBeLessThan(trace.indexOf('write:operation-cleanup'));
+    expect(trace.indexOf('egress:destroy-credential')).toBeLessThan(trace.indexOf('write:operation-cleanup'));
+    const cleanup = writes.find((command): command is Extract<RunnerWriteCommand, { kind: 'operation-cleanup' }> => command.kind === 'operation-cleanup');
+    expect(cleanup?.proof).toMatchObject({
+      egress: {
+        proxy: { id: EGRESS_RESOURCES.proxy.id, absent: true },
+        network: { id: EGRESS_RESOURCES.network.id, absent: true },
+        credential: { hostPath: EGRESS_CREDENTIAL.hostPath, sha256: EGRESS_CREDENTIAL.sha256, absent: true },
+      },
+    });
+  });
+
+  it('rejects an unexpected persisted dependency egress leaf before destructive cleanup', async () => {
+    const docker = fakeDocker([
+      { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+      { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+      { stdout: '' },
+      { stdout: `${'1'.repeat(64)}\n` },
+      { stdout: JSON.stringify(dependencyEgressRawInspection('created')) },
+      { stdout: 'build output\n' },
+      { stdout: JSON.stringify(dependencyEgressRawInspection('exited')) },
+      { stdout: '' },
+      { exitCode: 1, stderr: 'No such container: one\n' },
+      { stdout: '' },
+    ]);
+    const writes: RunnerWriteCommand[] = [];
+    const persistedIdentity = emptyIdentityForTest();
+    const ownership = {
+      runnerWrite: vi.fn((command: RunnerWriteCommand) => {
+        writes.push(command);
+        const persisted = JSON.parse(JSON.stringify(normalizeCommand(command, 'runner write'))) as RunnerWriteCommand;
+        if (persisted.kind === 'container') {
+          const originalSecurity = JSON.parse(JSON.stringify(persisted.security)) as JsonObject;
+          const egress = originalSecurity.egress as JsonObject;
+          const tls = egress.tls as JsonObject;
+          const leaves = tls.leafCertificates as JsonObject;
+          const firstAllowedLeaf = leaves[operationNetworkPolicy('build-image').allowedHosts[0]!];
+          const security = {
+            ...originalSecurity,
+            egress: {
+              ...egress,
+              tls: { ...tls, leafCertificates: { ...leaves, 'evil.example': firstAllowedLeaf } },
+            },
+          } satisfies JsonObject;
+          Object.assign(persistedIdentity, {
+            containerId: persisted.containerId,
+            containerName: persisted.containerName,
+            containerImageDigest: persisted.imageDigest,
+            containerLabelJobId: persisted.labels['org.osi.image-builder.job-id'],
+            containerLabelManifestSha: persisted.labels['org.osi.image-builder.manifest-sha'],
+            containerLabels: persisted.labels,
+            containerMount: persisted.mount,
+            containerEnvironment: persisted.environment,
+            containerSecurity: security,
+            containerInspection: persisted.inspection,
+            containerCreatedAt: persisted.createdAt,
+            containerStartedAt: persisted.startedAt ?? null,
+            containerStoppedAt: persisted.stoppedAt ?? null,
+          });
+        }
+        return { ok: true };
+      }),
+    };
+    const destroyNetwork = vi.fn(async () => ({
+      proxy: { id: EGRESS_RESOURCES.proxy.id, absent: true as const },
+      network: { id: EGRESS_RESOURCES.network.id, absent: true as const },
+      tls: { hostDirectory: EGRESS_RESOURCES.tls.hostDirectory, absent: true as const },
+      globalLabelResult: 'no-match' as const,
+    }));
+    const lifecycle = {
+      recoverDocker: vi.fn(async () => ({ docker: [], credentials: [], globalLabelResult: 'no-match' as const })),
+      discoverCredentials: vi.fn(async () => []),
+      createCredential: vi.fn(async () => EGRESS_CREDENTIAL),
+      createNetwork: vi.fn(async () => EGRESS_RESOURCES),
+      destroyNetwork,
+      destroyCredential: vi.fn(async () => ({ kind: 'normal' as const, hostPath: EGRESS_CREDENTIAL.hostPath, expectedSha256: EGRESS_CREDENTIAL.sha256, observedSha256: EGRESS_CREDENTIAL.sha256, tls: { hostDirectory: EGRESS_RESOURCES.tls.hostDirectory, absent: true as const }, absent: true as const })),
+    };
+
+    await expect(createDockerExecutor(options(docker, {
+      operationId: 'build-image',
+      ownership,
+      store: { getJob: () => persistedIdentity },
+      dependencyEgressLifecycle: lifecycle,
+    })).run()).rejects.toBeInstanceOf(DockerLifecycleError);
+    expect(docker.calls.some((call) => call[1] === 'rm')).toBe(false);
+    expect(destroyNetwork).not.toHaveBeenCalled();
+    expect(writes.some((write) => write.kind === 'operation-cleanup')).toBe(false);
+  });
+
+  it('removes a discovered TLS-only remnant during dependency startup cleanup', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-docker-tls-only-startup-'));
+    try {
+      const hostDirectory = join(root, 'build-image-1.proxy-tls');
+      await mkdir(hostDirectory, { mode: 0o700 });
+      const docker = fakeDocker([
+        { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
+        { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
+        { stdout: '' },
+      ]);
+      const lifecycle = {
+        recoverDocker: vi.fn(async () => ({ docker: [], credentials: [], globalLabelResult: 'no-match' as const })),
+        discoverCredentials: vi.fn(async () => [{
+          kind: 'tls-only' as const,
+          operationId: 'build-image' as const,
+          attempt: 1,
+          credentialHostPath: join(root, 'build-image-1.proxy-credential'),
+          hostDirectory,
+        }]),
+        createCredential: vi.fn(async () => EGRESS_CREDENTIAL),
+        createNetwork: vi.fn(async () => EGRESS_RESOURCES),
+        destroyNetwork: vi.fn(async () => ({
+          proxy: { id: EGRESS_RESOURCES.proxy.id, absent: true as const },
+          network: { id: EGRESS_RESOURCES.network.id, absent: true as const },
+          tls: { hostDirectory, absent: true as const },
+          globalLabelResult: 'no-match' as const,
+        })),
+        destroyCredential: vi.fn(async () => ({
+          kind: 'credential-only' as const,
+          hostPath: EGRESS_CREDENTIAL.hostPath,
+          expectedSha256: EGRESS_CREDENTIAL.sha256,
+          observedSha256: null,
+          tls: { hostDirectory, absent: true as const },
+          absent: true as const,
+        })),
+      };
+      const authorizeContainerCreate = vi.fn(async () => {
+        throw new Error('stop after startup cleanup');
+      });
+
+      await expect(createDockerExecutor(options(docker, {
+        operationId: 'build-image',
+        dependencyEgressCredentialDirectory: root,
+        dependencyEgressLifecycle: lifecycle,
+        authorizeContainerCreate,
+      })).run()).rejects.toThrow('stop after startup cleanup');
+
+      expect(lifecycle.recoverDocker).toHaveBeenCalledBefore(lifecycle.discoverCredentials);
+      expect(lifecycle.discoverCredentials).toHaveBeenCalledWith(root);
+      expect(lifecycle.destroyCredential).not.toHaveBeenCalled();
+      expect(docker.calls.map((call) => call[1])).toEqual(['version', 'image', 'ps']);
+      await expect(readdir(root)).resolves.toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects every inspected security or identity mismatch before starting the container', async () => {
     const mismatches: Array<[string, Partial<DockerInspection>]> = [
       ['container ID', { id: '2'.repeat(64) }],
@@ -1086,6 +2313,9 @@ describe('DockerExecutor', () => {
       ['security', { privileged: true }],
       ['readonly rootfs', { readonlyRootfs: false }],
       ['pids', { pidsLimit: 1 }],
+      ['CPU limit', { nanoCpus: 1 }],
+      ['memory limit', { memoryBytes: 1 }],
+      ['swap limit', { memorySwapBytes: 1 }],
       ['ulimit', { ulimits: [{ name: 'nofile', soft: 1, hard: 1 }] }],
       ['running', { running: true }],
       ['environment', { environment: { INHERITED: '1' } }],
@@ -1175,31 +2405,92 @@ describe('DockerExecutor', () => {
     const ownership = { runnerWrite: vi.fn((command: { kind: string; containerId?: string }) => { if (command.kind === 'container') persistedId = command.containerId ?? null; return { ok: true, kind: 'committed', eventSeq: 1 }; }), getJob: vi.fn(() => ({ ...emptyIdentityForTest(), containerId: persistedId, containerName: persistedId ? 'osi-image-builder-job-1-attempt-1' : null, containerImageDigest: persistedId ? DIGEST : null, containerLabelJobId: persistedId ? 'job-1' : null, containerLabelManifestSha: persistedId ? MANIFEST : null, containerLabels: persistedId ? { 'org.osi.image-builder.job-id': 'job-1', 'org.osi.image-builder.manifest-sha': MANIFEST } : null, containerMount: persistedId ? {} : null, containerEnvironment: persistedId ? {} : null, containerSecurity: persistedId ? {} : null, containerInspection: persistedId ? {} : null, containerCreatedAt: persistedId ? NOW : null })) };
     await createDockerExecutor({ ...options(docker, { ownership }), operationArgv: injected.operationArgv } as DockerExecutorOptions).run();
     const create = docker.calls.find((call) => call[1] === 'create')!;
-    expect(create.slice(-4)).toEqual([`registry.example/builder@sha256:${DIGEST}`, 'node', INTERNAL_OPERATION_TOOL_PATH, 'verify-image']);
+    const imageIndex = create.indexOf(`registry.example/builder@sha256:${DIGEST}`);
+    expect(create.slice(imageIndex + 1)).toEqual([
+      'node',
+      '/opt/osi-image-builder/operations/osi-image-builder-exec-guard.js',
+      '--workspace-dev=35',
+      '--workspace-ino=25383430',
+      '--active-target-environment=root',
+      '--operation-id=verify-image',
+      `--operation-environment=${PI5_ENV}`,
+      '--working-directory=/workdir',
+      '--',
+      'node',
+      INTERNAL_OPERATION_TOOL_PATH,
+      'verify-image',
+    ]);
     expect(() => createOperationArgv('verify-image', { environment: '../branch' })).toThrow();
+  });
+
+  it('uses a fixed root-owned guard wrapper with the held workspace identity and active target', async () => {
+    const docker = fakeDocker(successfulResponses());
+    await createDockerExecutor(options(docker, {
+      activeTargetEnvironment: PI5_ENV,
+      operationId: 'verify-image',
+    })).run();
+    const create = docker.calls.find((call) => call[1] === 'create')!;
+    const imageIndex = create.indexOf(`registry.example/builder@sha256:${DIGEST}`);
+    expect(create.slice(imageIndex + 1)).toEqual([
+      'node',
+      '/opt/osi-image-builder/operations/osi-image-builder-exec-guard.js',
+      '--workspace-dev=35',
+      '--workspace-ino=25383430',
+      `--active-target-environment=${PI5_ENV}`,
+      '--operation-id=verify-image',
+      '--operation-environment=' + PI5_ENV,
+      '--working-directory=/workdir',
+      '--',
+      'node',
+      INTERNAL_OPERATION_TOOL_PATH,
+      'verify-image',
+    ]);
+    expect(create.some((part) => part.includes('proc/') || part === 'sh' || part === '/bin/sh')).toBe(false);
   });
 
   it('uses the registry frontend definition for create, inspection, security, and executed argv', async () => {
     const frontendRaw = (): Record<string, unknown> => {
       const value = realisticRawInspection();
       (value.Config as Record<string, unknown>).WorkingDir = '/workdir/web/react-gui';
+      (value.Config as Record<string, unknown>).Cmd = [
+        'node',
+        INTERNAL_EXECUTION_GUARD_PATH,
+        '--workspace-dev=35',
+        '--workspace-ino=25383430',
+        '--active-target-environment=root',
+        '--operation-id=frontend-test',
+        `--operation-environment=${PI5_ENV}`,
+        '--working-directory=/workdir/web/react-gui',
+        '--',
+        'npm',
+        'run',
+        'test:unit',
+      ];
       const host = value.HostConfig as Record<string, unknown>;
-      host.NetworkMode = 'bridge';
+      host.NetworkMode = 'none';
       host.ReadonlyRootfs = false;
       const mounts = value.Mounts as Array<Record<string, unknown>>;
       mounts[0]!.RW = true;
+      (value.Config as Record<string, unknown>).Env = [
+        'HOME=/workdir/.builder-home',
+        'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+        'CARGO_BUILD_JOBS=2',
+        'TZ=UTC',
+        'SOURCE_DATE_EPOCH=1784887200',
+      ];
       return value;
     };
     const frontendCreatedRaw = (): Record<string, unknown> => ({ ...frontendRaw(), State: { Status: 'created', Running: false, StartedAt: '0001-01-01T00:00:00.000000000Z', FinishedAt: '0001-01-01T00:00:00.000000000Z', ExitCode: 0 } });
     const docker = fakeDocker([
       { stdout: '{"Server":{"Os":"linux","Arch":"amd64"}}' },
       { stdout: JSON.stringify({ Id: `sha256:${'e'.repeat(64)}`, RepoDigests: [`registry.example/builder@sha256:${DIGEST}`], Architecture: 'amd64', Os: 'linux' }) },
-      { stdout: '' }, { stdout: `${'1'.repeat(64)}\n` }, { stdout: JSON.stringify(frontendCreatedRaw()) }, { stdout: '' }, { stdout: JSON.stringify(frontendRaw()) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' },
+      { stdout: '' },
+      { stdout: `${'1'.repeat(64)}\n` }, { stdout: JSON.stringify(frontendCreatedRaw()) }, { stdout: '' }, { stdout: JSON.stringify(frontendRaw()) }, { stdout: '' }, { exitCode: 1, stderr: 'No such container: one\n' }, { stdout: '' },
     ]);
     const writes: RunnerWriteCommand[] = [];
     const ownership = { runnerWrite: vi.fn((command: RunnerWriteCommand) => { writes.push(command); return { ok: true }; }) };
     await createDockerExecutor(options(docker, { operationId: 'frontend-test', ownership })).run();
-    const create = docker.calls.find((call) => call[1] === 'create')!;
+    const create = docker.calls.find((call) => call[1] === 'create' && call.includes(`registry.example/builder@sha256:${DIGEST}`) && !call.includes('--network=bridge'))!;
     expect(create).toContain('--workdir=/workdir/web/react-gui');
     expect(create.slice(-3)).toEqual(['npm', 'run', 'test:unit']);
     const container = writes.find((command): command is Extract<RunnerWriteCommand, { kind: 'container' }> => command.kind === 'container')!;
@@ -1375,6 +2666,59 @@ describe('DockerExecutor', () => {
       observation: { state: 'cancelled' },
     });
 
+    expect(docker.calls.map((call) => call[1])).toEqual(['version', 'image', 'ps']);
+    expect(writes).toEqual([]);
+  });
+
+  it('rechecks coordinator cancellation after async worktree revalidation before create', async () => {
+    const docker = fakeDocker(successfulResponses());
+    const writes: RunnerWriteCommand[] = [];
+    let cancellationRequested = false;
+    let cancellationCleanupCommitted = false;
+    const authorizeContainerCreate = vi.fn(async () => {
+      if (!cancellationRequested) return { authorized: true as const };
+      cancellationCleanupCommitted = true;
+      return {
+        authorized: false as const,
+        observation: {
+          requested: true as const,
+          handled: true as const,
+          state: 'cancelled' as const,
+          evidencePath: 'jobs/job-1/evidence/cancellation.json',
+          evidenceSha256: 'f'.repeat(64),
+        },
+      };
+    });
+    const revalidateWorktreeBeforeCreate = vi.fn(async () => {
+      await Promise.resolve();
+      cancellationRequested = true;
+    });
+
+    await expect(createDockerExecutor({
+      ...options(docker, {
+        ownership: {
+          runnerWrite: (command) => {
+            writes.push(command);
+            return { ok: true, kind: 'committed', eventSeq: 1 };
+          },
+        },
+      }),
+      authorizeContainerCreate,
+      revalidateWorktreeBeforeCreate,
+    } as DockerExecutorOptions).run()).rejects.toMatchObject({
+      code: 'CANCELLED',
+      observation: {
+        requested: true,
+        handled: true,
+        state: 'cancelled',
+        evidencePath: 'jobs/job-1/evidence/cancellation.json',
+        evidenceSha256: 'f'.repeat(64),
+      },
+    });
+
+    expect(authorizeContainerCreate).toHaveBeenCalledTimes(2);
+    expect(revalidateWorktreeBeforeCreate).toHaveBeenCalledOnce();
+    expect(cancellationCleanupCommitted).toBe(true);
     expect(docker.calls.map((call) => call[1])).toEqual(['version', 'image', 'ps']);
     expect(writes).toEqual([]);
   });
@@ -1833,4 +3177,32 @@ describe('DockerExecutor', () => {
 
 function emptyIdentityForTest(): PersistedContainerIdentity & { readonly sourceCommitTime: string } {
   return { sourceCommitTime: NOW, containerId: null, containerName: null, containerImageDigest: null, containerLabelJobId: null, containerLabelManifestSha: null, containerLabels: null, containerMount: null, containerEnvironment: null, containerSecurity: null, containerInspection: null, containerCreatedAt: null, containerStartedAt: null, containerStoppedAt: null, containerRemovedAt: null, containerCleanupOutcome: null };
+}
+
+function persistContainerWriteForTest(
+  identity: PersistedContainerIdentity,
+  command: RunnerWriteCommand,
+): void {
+  if (command.kind === 'container') {
+    Object.assign(identity, {
+      containerId: command.containerId,
+      containerName: command.containerName,
+      containerImageDigest: command.imageDigest,
+      containerLabelJobId: command.labels['org.osi.image-builder.job-id'],
+      containerLabelManifestSha: command.labels['org.osi.image-builder.manifest-sha'],
+      containerLabels: command.labels,
+      containerMount: command.mount,
+      containerEnvironment: command.environment,
+      containerSecurity: command.security,
+      containerInspection: command.inspection,
+      containerCreatedAt: command.createdAt ?? null,
+      containerStartedAt: command.startedAt ?? null,
+      containerStoppedAt: command.stoppedAt ?? null,
+      containerRemovedAt: command.removedAt ?? null,
+      containerCleanupOutcome: command.cleanupOutcome ?? null,
+    });
+  }
+  if (command.kind === 'operation-cleanup') {
+    Object.assign(identity, emptyIdentityForTest());
+  }
 }

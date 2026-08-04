@@ -147,8 +147,11 @@ type JsonRecord = Record<string, unknown>;
 type DecodedCancellationResult = Readonly<{
   kind: 'already-terminal' | 'coordination-pending' | 'late-publishing' | 'queued-cancelled'
     | 'recovery-blocked' | 'request-not-accepted' | 'runner-terminal';
+  jobId: string;
   state: string;
   requestPersisted: boolean | null;
+  late?: true;
+  runnerOwned?: true;
   evidenceJson?: string;
   cancellationClockHighWaterAt?: string;
   cooperativeDeadlineAt?: string;
@@ -243,7 +246,7 @@ export interface ApiRouteDependencies {
   readonly preflight: ApiPreflightService;
   readonly enqueue: ApiEnqueueService;
   readonly now: () => string;
-  readonly cancellation: ApiCancellationService;
+  readonly cancellation: Pick<ApiCancellationService, 'admitCancellation'>;
   readonly recovery: ApiRecoveryService;
   readonly publishBlockerRecheck: Pick<PublishBlockerRecheckService, 'recheck'>;
   readonly eventStream: ApiEventStreamService;
@@ -1237,26 +1240,26 @@ function decodeCancellationResult(value: unknown, expectedJobId: string): Decode
     exactOwnStringKeys(input, ['kind', 'jobId', 'state', 'requestPersisted'], 'cancellation result');
     const state = cancellationResultState(input, new Set(['cancelled']));
     cancellationResultLiteral(input, 'requestPersisted', true);
-    return { kind, state, requestPersisted: true };
+    return { kind, jobId, state, requestPersisted: true };
   }
   if (kind === 'late-publishing') {
     exactOwnStringKeys(input, ['kind', 'jobId', 'state', 'late', 'requestPersisted'], 'cancellation result');
     const state = cancellationResultState(input, new Set(['publishing']));
     cancellationResultLiteral(input, 'late', true);
     cancellationResultLiteral(input, 'requestPersisted', true);
-    return { kind, state, requestPersisted: true };
+    return { kind, jobId, state, late: true, requestPersisted: true };
   }
   if (kind === 'runner-terminal') {
     exactOwnStringKeys(input, ['kind', 'jobId', 'state', 'runnerOwned'], 'cancellation result');
     const state = cancellationResultState(input, CANCELLATION_TERMINAL_STATES);
     cancellationResultLiteral(input, 'runnerOwned', true);
-    return { kind, state, requestPersisted: true };
+    return { kind, jobId, state, runnerOwned: true, requestPersisted: true };
   }
   if (kind === 'already-terminal') {
     exactOwnStringKeys(input, ['kind', 'jobId', 'state', 'requestPersisted'], 'cancellation result');
     const state = cancellationResultState(input, CANCELLATION_TERMINAL_STATES);
     cancellationResultLiteral(input, 'requestPersisted', false);
-    return { kind, state, requestPersisted: false };
+    return { kind, jobId, state, requestPersisted: false };
   }
   if (kind === 'recovery-blocked') {
     exactOwnStringKeys(
@@ -1279,7 +1282,7 @@ function decodeCancellationResult(value: unknown, expectedJobId: string): Decode
       'cancellation result evidence',
       true,
     );
-    return { kind, state, requestPersisted, evidenceJson };
+    return { kind, jobId, state, requestPersisted, evidenceJson };
   }
   if (kind === 'coordination-pending') {
     exactOwnStringKeys(
@@ -1291,6 +1294,7 @@ function decodeCancellationResult(value: unknown, expectedJobId: string): Decode
     cancellationResultLiteral(input, 'requestPersisted', true);
     return {
       kind,
+      jobId,
       state,
       requestPersisted: true,
       cancellationClockHighWaterAt: canonicalInstant(
@@ -1310,7 +1314,7 @@ function decodeCancellationResult(value: unknown, expectedJobId: string): Decode
     'cancellation result evidence',
     true,
   );
-  return { kind: 'request-not-accepted', state, requestPersisted: null, evidenceJson };
+  return { kind: 'request-not-accepted', jobId, state, requestPersisted: null, evidenceJson };
 }
 
 function latePublishingChronologyMatches(job: JobRecord, cancelRequestedAt: string): boolean {
@@ -1713,6 +1717,7 @@ type DecodedPublishBlockerRecheckProof =
       readonly checksum: Readonly<{ readonly path: string; readonly sha256: string }>;
       readonly manifest: Readonly<{ readonly path: string; readonly sha256: string }>;
       readonly verification: Readonly<{ readonly path: string; readonly sha256: string }>;
+      readonly sealStatus: 'in_progress' | 'sealed';
     }>
   | Readonly<{
       readonly kind: 'retained-blocker';
@@ -1765,7 +1770,9 @@ function decodePublishBlockerRecheckProof(value: unknown, field: string): Decode
     };
   }
   if (kind !== 'destination-matches') throw new Error(`${field}.kind is invalid`);
-  exactKeySet(input, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath', 'staging', 'artifact', 'checksum', 'manifest', 'verification'], field);
+  exactKeySet(input, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath', 'staging', 'artifact', 'checksum', 'manifest', 'verification', 'sealStatus'], field);
+  const sealStatus = ownDataProperty(input, 'sealStatus', `${field}.sealStatus`);
+  if (sealStatus !== 'in_progress' && sealStatus !== 'sealed') throw new Error(`${field}.sealStatus is invalid`);
   const staging = strictPlainRecord(ownDataProperty(input, 'staging', `${field}.staging`), `${field}.staging`);
   exactKeySet(staging, ['path', 'state'], `${field}.staging`);
   if (ownDataProperty(staging, 'state', `${field}.staging.state`) !== 'absent') throw new Error(`${field}.staging.state is invalid`);
@@ -1805,6 +1812,7 @@ function decodePublishBlockerRecheckProof(value: unknown, field: string): Decode
       path: stableRelativePath(ownDataProperty(verification, 'path', `${field}.verification.path`), `${field}.verification.path`),
       sha256: requiredHash64(ownDataProperty(verification, 'sha256', `${field}.verification.sha256`), `${field}.verification.sha256`),
     },
+    sealStatus,
   };
 }
 
@@ -2003,6 +2011,7 @@ function artifactSnapshot(job: JobRecord): string {
     artifactMtime: job.artifactMtime, checksumPath: job.checksumPath, checksumSha256: job.checksumSha256,
     manifestPath: job.manifestPath, manifestSha256: job.manifestSha256, verificationPath: job.verificationPath,
     verificationSha256: job.verificationSha256, publishStartedAt: job.publishStartedAt, publishedAt: job.publishedAt,
+    releaseSealStatus: job.releaseSealStatus,
   }, 'publish blocker recheck artifact snapshot', true);
 }
 
@@ -2056,8 +2065,10 @@ function validatePublishBlockerRecheckAudit(
       || ((reason === 'unsafe-path' || reason === 'publisher-unavailable') && publisher.destination === 'unknown' && publisher.staging === 'unknown');
     if (proof.kind !== 'retained-blocker' || !coherent || audit.finalDirectory !== null || audit.finalPath !== null || audit.publishedAt !== null) throw new Error('retained publish blocker recheck audit is incoherent');
   } else {
-    exactKeySet(proof, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath', 'staging', 'artifact', 'checksum', 'manifest', 'verification'], 'publish blocker recheck marked proof');
+    exactKeySet(proof, ['kind', 'observedAt', 'publisher', 'finalDirectory', 'finalPath', 'staging', 'artifact', 'checksum', 'manifest', 'verification', 'sealStatus'], 'publish blocker recheck marked proof');
+    const sealStatus = ownDataProperty(proof, 'sealStatus', 'publish blocker recheck seal status');
     if (proof.kind !== 'destination-matches' || publisher.destination !== 'candidate' || publisher.staging !== 'absent'
+      || (sealStatus !== 'in_progress' && sealStatus !== 'sealed')
       || proof.finalDirectory !== boundFinalDirectory || proof.finalPath !== boundFinalPath
       || audit.finalDirectory !== proof.finalDirectory || audit.finalPath !== proof.finalPath
       || audit.artifactStagingPath !== null
@@ -2154,6 +2165,7 @@ function validatePublishBlockerRecheckPostState(
   }
   if (result.kind === 'cleared-absent') {
     if (after.state !== 'failed' || after.publishState !== null || after.publishBlockerCode !== null || after.publishBlocker !== null
+      || after.releaseSealStatus !== null
       || after.artifactStagingPath !== null || after.artifactQuarantinePath !== null || after.artifactQuarantineIntentPath !== null
       || after.artifactFinalDirectory !== null || after.artifactFinalPath !== null || after.artifactSha256 !== null || after.artifactSize !== null || after.artifactMtime !== null
       || after.checksumPath !== null || after.checksumSha256 !== null || after.manifestPath !== null || after.manifestSha256 !== null
@@ -2161,8 +2173,11 @@ function validatePublishBlockerRecheckPostState(
     return;
   }
   const proof = strictPlainRecord(audit.proof, 'publish blocker recheck marked proof');
+  const sealStatus = ownDataProperty(proof, 'sealStatus', 'publish blocker recheck marked proof seal status');
+  const expectedReleaseSealStatus = sealStatus === 'sealed' ? 'sealed' : 'legacy_mutable';
   const sidecar = (key: string): Record<string, unknown> => strictPlainRecord(ownDataProperty(proof, key, `publish blocker recheck ${key} proof`), `publish blocker recheck ${key} proof`);
   if (after.state !== 'failed' || after.publishState !== 'published' || after.publishBlockerCode !== null || after.publishBlocker !== null
+    || after.releaseSealStatus !== expectedReleaseSealStatus
     || after.artifactStagingPath !== null || after.artifactQuarantinePath !== null || after.artifactQuarantineIntentPath !== null
     || after.artifactFinalDirectory !== audit.finalDirectory || after.artifactFinalPath !== audit.finalPath || after.publishedAt !== audit.publishedAt
     || after.publishStartedAt !== predecessor.publishStartedAt
@@ -2275,8 +2290,9 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
         : snapshotPublishBlockerEvent(eligiblePredecessor.publishStart, 'publish blocker recheck publish start snapshot');
       let rawResult: unknown;
       try {
-        rawResult = await dependencies.publishBlockerRecheck.recheck({ jobId });
+        rawResult = await dependencies.publishBlockerRecheck.recheck({ jobId, signal: context.signal });
       } catch (error) {
+        context.signal.throwIfAborted();
         if (error instanceof PublishBlockerRecheckError && error.code === 'NOT_ELIGIBLE') {
           throw new HttpTransportError({ code: 'PUBLISH_BLOCKER_RECHECK_NOT_ELIGIBLE', status: 409 });
         }
@@ -2328,7 +2344,7 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
       getJob(dependencies.store, jobId);
       const at = canonicalInstant(dependencies.now(), 'cancellation request time');
       const result = decodeCancellationResult(
-        await dependencies.cancellation.requestCancellation({ jobId, reason: 'operator', at }),
+        await dependencies.cancellation.admitCancellation({ jobId, reason: 'operator', at }),
         jobId,
       );
       const updatedJob = getJob(dependencies.store, jobId);
@@ -2342,7 +2358,10 @@ export function createApiRouteHandler(dependencies: ApiRouteDependencies): ApiRo
       if (result.kind === 'recovery-blocked') {
         throw new HttpTransportError({ code: 'RUNNER_DISAPPEARED', status: 409, retryable: true });
       }
-      return jsonResponse(200, await detail(updatedJob, dependencies.store));
+      return jsonResponse(result.kind === 'coordination-pending' ? 202 : 200, {
+        ...(await detail(updatedJob, dependencies.store)),
+        cancellationResult: result,
+      });
     }
     if (context.method === 'POST' && context.path === '/api/jobs') {
       const request = enqueueRequest(context.body, dependencies);

@@ -28,6 +28,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { loadConfig, type PathAuthorityDependencies } from '../../config/load.js';
 import type { FreshnessInput, JobRecord } from '../../api/src/store.js';
 import { BuilderStore } from '../../api/src/store.js';
+import { TEST_BUILDER_IDENTITY } from '../helpers/builder-identity.js';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { OwnershipStore } from '../../api/src/ownership.js';
 import {
@@ -740,7 +741,11 @@ function withFreshness(
 describe('real rootfs verification contract', () => {
   it('joins resolved-only stage06 evidence to the strict verifier and actual locked loader', async () => {
     const fixture = await createRootfsFixture('rpi-5');
-    await writeFile(join(fixture.sourcePath, 'openwrt/.config'), configFor(fixture.target));
+    await symlink(
+      `${fixture.target.environment}/.config`,
+      join(fixture.sourcePath, 'conf/.config'),
+    );
+    await symlink('../conf/.config', join(fixture.sourcePath, 'openwrt/.config'));
     const rootfsNodeRed = join(fixture.rootfsPath, 'usr/share/node-red');
     const shippedNodeRed = join(
       process.cwd(),
@@ -1840,6 +1845,7 @@ describe('real rootfs verification contract', () => {
         targetId: 'rpi-5',
         rootId: 'images',
         targetManifestSha256: 'e'.repeat(64),
+        builderIdentity: { ...TEST_BUILDER_IDENTITY, targetManifestSha256: 'e'.repeat(64) },
         sourceCommitTime: '2026-07-26T09:59:00.000Z',
         sourceAuthor: 'Builder Test',
         sourceSubject: 'freshness protocol',

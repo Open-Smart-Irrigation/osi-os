@@ -52,7 +52,7 @@ export interface PublisherClientOptions {
 export interface PublisherClient {
   publish(request: PublisherRequest): Promise<PublisherResponse>;
   quarantine(request: Pick<PublisherRequest, 'rootId' | 'jobId'>): Promise<PublisherResponse>;
-  recheck(request: PublisherRequest): Promise<PublisherResponse>;
+  recheck(request: PublisherRequest, options?: Readonly<{ readonly signal?: AbortSignal }>): Promise<PublisherResponse>;
 }
 
 const ROOT_ID = /^[a-z0-9][a-z0-9-]*$/u;
@@ -194,8 +194,8 @@ export function createPublisherClient(options: PublisherClientOptions): Publishe
     roots.set(root.id, root);
   }
 
-  async function invoke(argv: readonly string[], operation: 'publish' | 'quarantine' | 'recheck', request: PublisherRequest | Pick<PublisherRequest, 'rootId' | 'jobId'>): Promise<PublisherResponse> {
-    const runOptions: CommandRunOptions = { env: FIXED_ENV, timeoutMs: options.timeoutMs ?? 30_000, maxCaptureBytes: 64 * 1024 };
+  async function invoke(argv: readonly string[], operation: 'publish' | 'quarantine' | 'recheck', request: PublisherRequest | Pick<PublisherRequest, 'rootId' | 'jobId'>, signal?: AbortSignal): Promise<PublisherResponse> {
+    const runOptions: CommandRunOptions = { env: FIXED_ENV, timeoutMs: options.timeoutMs ?? 30_000, maxCaptureBytes: 64 * 1024, abortSignal: signal };
     const result = await executor.run(argv, runOptions);
     return parseResponse(result, argv, operation, request, options.expectedVersion, options.expectedSourceSha256);
   }
@@ -214,11 +214,12 @@ export function createPublisherClient(options: PublisherClientOptions): Publishe
       validateRoot(root);
       return invoke([options.executable, 'quarantine', '--root', root.path, '--job-id', request.jobId], 'quarantine', request);
     },
-    recheck: async (request) => {
+    recheck: async (request, recheckOptions) => {
       const root = roots.get(request.rootId);
       if (root === undefined) throw new Error('approved root is unknown');
       validateRequest(request, root);
-      return invoke([options.executable, 'recheck', '--root', root.path, '--job-id', request.jobId, '--branch', request.branchSlug, '--sha', request.sourceSha, '--target', request.targetId], 'recheck', request);
+      recheckOptions?.signal?.throwIfAborted();
+      return invoke([options.executable, 'recheck', '--root', root.path, '--job-id', request.jobId, '--branch', request.branchSlug, '--sha', request.sourceSha, '--target', request.targetId], 'recheck', request, recheckOptions?.signal);
     },
   };
 }

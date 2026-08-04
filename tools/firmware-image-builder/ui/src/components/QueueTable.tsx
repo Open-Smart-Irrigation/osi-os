@@ -86,7 +86,15 @@ export function QueueTable(props: QueueTableProps) {
                 <td>
                   <div className="row-actions">
                     {!TERMINAL.has(job.state) && (
-                      <button className="icon-button" type="button" title="Cancel job" aria-label={`Cancel job ${job.id}`} onClick={() => props.onCancel(job.id)}>
+                      <button
+                        className="icon-button"
+                        type="button"
+                        title={job.state === 'publishing' ? 'Request cancellation; publication may complete' : 'Cancel job'}
+                        aria-label={job.state === 'publishing'
+                          ? `Request cancellation; publication may complete for ${job.id}`
+                          : `Cancel job ${job.id}`}
+                        onClick={() => props.onCancel(job.id)}
+                      >
                         <Ban size={16} aria-hidden="true" />
                       </button>
                     )}

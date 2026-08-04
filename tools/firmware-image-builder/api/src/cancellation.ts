@@ -69,6 +69,7 @@ export interface ApiCancellationSystemd {
 export interface ApiCancellationStore {
   readonly getJob: (jobId: string) => CancellationJobRecord;
   readonly getCancellationJob?: (jobId: string) => CancellationJobRecord;
+  readonly listPendingCancellations?: () => readonly CancellationJobRecord[];
 }
 
 export interface ApiCancellationOwnership {
@@ -76,7 +77,7 @@ export interface ApiCancellationOwnership {
 }
 
 export interface ApiCancellationOptions {
-  readonly store: ApiCancellationStore | Pick<BuilderStore, 'getJob' | 'getCancellationJob'>;
+  readonly store: ApiCancellationStore | Pick<BuilderStore, 'getJob' | 'getCancellationJob' | 'listPendingCancellations'>;
   readonly ownership: ApiCancellationOwnership;
   readonly systemd: ApiCancellationSystemd;
   readonly clock?: ApiCancellationClock;
@@ -103,7 +104,18 @@ export interface SystemdCancellationAdapterOptions {
 }
 
 export interface ApiCancellationService {
+  readonly admitCancellation: (request: ApiCancellationRequest) => Promise<ApiCancellationResult>;
   readonly requestCancellation: (request: ApiCancellationRequest) => Promise<ApiCancellationResult>;
+  readonly resumePending: () => Promise<ApiCancellationResumeReport>;
+}
+
+export interface ApiCancellationResumeReport {
+  readonly examined: number;
+  readonly resumed: number;
+  readonly failures: readonly Readonly<{
+    readonly jobId: string;
+    readonly kind: 'coordinator-rejected' | 'coordination-pending' | 'recovery-blocked' | 'request-not-accepted';
+  }>[];
 }
 
 export interface ApiCancellationServiceOptions {
@@ -116,6 +128,20 @@ export interface ApiCancellationServiceOptions {
   readonly commandExecutor?: Pick<CommandExecutor, 'run'>;
   readonly clock?: ApiCancellationClock;
   readonly coordinatorId?: string;
+  readonly schedule?: (work: () => void) => void;
+  readonly reportError?: (error: unknown) => void;
+}
+
+export class CancellationCoordinationAuditError extends Error {
+  readonly jobId: string;
+  readonly phase: 'scheduler' | 'coordinator';
+
+  constructor(jobId: string, phase: 'scheduler' | 'coordinator', cause: unknown) {
+    super(`${phase} cancellation coordination audit persistence failed`, { cause });
+    this.name = 'CancellationCoordinationAuditError';
+    this.jobId = jobId;
+    this.phase = phase;
+  }
 }
 
 const defaultClock: ApiCancellationClock = Object.freeze({
@@ -278,20 +304,118 @@ export function createApiCancellationService(options: ApiCancellationServiceOpti
     env,
     monotonicNow: options.clock?.monotonicNow,
   });
+  const cancellationOptions: ApiCancellationOptions = {
+    store: options.store,
+    ownership: options.ownership,
+    systemd,
+    clock: options.clock,
+    coordinatorId: options.coordinatorId,
+  };
+  const scheduled = new Set<string>();
+  const inFlight = new Map<string, Promise<ApiCancellationResult>>();
+  const schedule = options.schedule ?? ((work: () => void) => setImmediate(work));
+  const reportError = options.reportError ?? ((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`cancellation coordination failed: ${message.replace(/[\r\n\t]+/gu, ' ').slice(0, 512)}\n`);
+  });
+  const coordinate = (request: ApiCancellationRequest): Promise<ApiCancellationResult> => {
+    const existing = inFlight.get(request.jobId);
+    if (existing !== undefined) return existing;
+    let work: Promise<ApiCancellationResult>;
+    work = requestCancellation(cancellationOptions, request)
+      .catch((error: unknown) => {
+        recordCoordinationFailure(cancellationOptions, request, 'coordinator', reportError);
+        throw error;
+      })
+      .finally(() => {
+        if (inFlight.get(request.jobId) === work) inFlight.delete(request.jobId);
+      });
+    inFlight.set(request.jobId, work);
+    return work;
+  };
   return Object.freeze({
-    requestCancellation: (request: ApiCancellationRequest) => requestCancellation({
-      store: options.store,
-      ownership: options.ownership,
-      systemd,
-      clock: options.clock,
-      coordinatorId: options.coordinatorId,
-    }, request),
+    async admitCancellation(request: ApiCancellationRequest): Promise<ApiCancellationResult> {
+      const result = admitCancellation(cancellationOptions, request);
+      if (result.kind === 'coordination-pending' && !scheduled.has(request.jobId)) {
+        scheduled.add(request.jobId);
+        try {
+          schedule(() => {
+            void coordinate(request)
+              .catch(() => undefined)
+              .finally(() => scheduled.delete(request.jobId));
+          });
+        } catch {
+          try {
+            recordCoordinationFailure(cancellationOptions, request, 'scheduler', reportError);
+          } finally {
+            scheduled.delete(request.jobId);
+          }
+        }
+      }
+      return result;
+    },
+    requestCancellation: coordinate,
+    async resumePending(): Promise<ApiCancellationResumeReport> {
+      if (options.store.listPendingCancellations === undefined) throw new TypeError('cancellation store cannot enumerate pending cancellations');
+      const pending = options.store.listPendingCancellations();
+      let resumed = 0;
+      const failures: Array<ApiCancellationResumeReport['failures'][number]> = [];
+      for (const job of pending) {
+        if (job.cancelRequestedAt === null || job.cancelReason === null) {
+          failures.push({ jobId: job.jobId, kind: 'coordinator-rejected' });
+          continue;
+        }
+        try {
+          const outcome = await coordinate({
+            jobId: job.jobId,
+            reason: job.cancelReason,
+            at: currentAt(options.clock ?? defaultClock, job.cancelRequestedAt),
+          });
+          if (
+            outcome.kind === 'coordination-pending'
+            || outcome.kind === 'recovery-blocked'
+            || outcome.kind === 'request-not-accepted'
+          ) {
+            failures.push({ jobId: job.jobId, kind: outcome.kind });
+          } else {
+            resumed += 1;
+          }
+        } catch {
+          failures.push({ jobId: job.jobId, kind: 'coordinator-rejected' });
+        }
+      }
+      return Object.freeze({ examined: pending.length, resumed, failures: Object.freeze(failures) });
+    },
   });
 }
 
 function readCancellationJob(store: ApiCancellationOptions['store'], jobId: string): CancellationJobRecord {
   if (store.getCancellationJob !== undefined) return store.getCancellationJob(jobId);
   return (store as ApiCancellationStore).getJob(jobId);
+}
+
+function recordCoordinationFailure(
+  options: ApiCancellationOptions,
+  request: ApiCancellationRequest,
+  phase: 'scheduler' | 'coordinator',
+  reportError: (error: unknown) => void,
+): void {
+  try {
+    const job = readCancellationJob(options.store, request.jobId);
+    if (!ACTIVE_STATES.has(job.state) || job.cancelRequestedAt === null) return;
+    const result = options.ownership.apiWrite({
+      kind: 'record-cancellation-coordination-failure',
+      jobId: job.jobId,
+      expectedState: job.state as ActiveRecoveryState,
+      cancelRequestedAt: job.cancelRequestedAt,
+      phase,
+      failure: { kind: phase === 'scheduler' ? 'scheduler-rejected' : 'coordinator-rejected' },
+      at: currentAt(options.clock ?? defaultClock, job.cancelRequestedAt),
+    });
+    if (!result.ok) throw new Error('cancellation coordination audit ownership CAS failed');
+  } catch (cause) {
+    reportError(new CancellationCoordinationAuditError(request.jobId, phase, cause));
+  }
 }
 
 function isTerminal(job: CancellationJobRecord): job is CancellationJobRecord & { readonly state: Extract<JobState, 'succeeded' | 'failed' | 'cancelled' | 'interrupted'> } {
@@ -490,12 +614,35 @@ function outcomeForTerminal(jobId: string, job: CancellationJobRecord, requestPe
   return { kind: 'already-terminal', jobId, state: job.state as Extract<JobState, 'succeeded' | 'failed' | 'cancelled' | 'interrupted'>, requestPersisted: false };
 }
 
+type CancellationEscalationFence = Readonly<{
+  escalationOwner: string;
+  escalationLeaseExpiresAt: string;
+  stopIntentAt: string;
+}>;
+
+function matchesEscalationFence(job: CancellationJobRecord, fence: CancellationEscalationFence): boolean {
+  return job.cancellationEscalationOwner === fence.escalationOwner
+    && job.cancellationEscalationLeaseExpiresAt === fence.escalationLeaseExpiresAt
+    && job.cancellationStopIntentAt === fence.stopIntentAt;
+}
+
+function escalationContention(job: CancellationJobRecord, evidence: JsonObject): ApiCancellationResult {
+  if (
+    ACTIVE_STATES.has(job.state)
+    && job.cancelRequestedAt !== null
+    && job.cancellationClockHighWaterAt !== null
+    && job.cancellationCooperativeDeadlineAt !== null
+  ) return coordinationPending(job);
+  return { kind: 'request-not-accepted', jobId: job.jobId, state: job.state, evidence };
+}
+
 function durableBlocker(
   options: ApiCancellationOptions,
   job: CancellationJobRecord,
   requestPersisted: boolean,
   requestedAt: string,
   evidence: JsonObject,
+  escalationFence?: CancellationEscalationFence,
 ): ApiCancellationResult {
   let observed = job;
   const expectedState = job.state;
@@ -504,12 +651,15 @@ function durableBlocker(
   const expectedRunnerOwner = job.runnerLeaseOwner;
   let minimumLeaseExpiresAt = job.runnerLeaseExpiresAt;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (observed.cleanupBlockerCode === 'RUNNER_DISAPPEARED' && observed.cleanupBlocker !== null) {
-      return { kind: 'recovery-blocked', jobId: observed.jobId, state: observed.state as ActiveRecoveryState, blockerCode: 'RUNNER_DISAPPEARED', requestPersisted, evidence: observed.cleanupBlocker };
-    }
     if (!ACTIVE_STATES.has(observed.state) || observed.cancelRequestedAt === null) {
       if (isTerminal(observed)) return outcomeForTerminal(job.jobId, observed, requestPersisted);
       return { kind: 'request-not-accepted', jobId: observed.jobId, state: observed.state, evidence };
+    }
+    if (escalationFence !== undefined && !matchesEscalationFence(observed, escalationFence)) {
+      return escalationContention(observed, evidence);
+    }
+    if (observed.cleanupBlockerCode === 'RUNNER_DISAPPEARED' && observed.cleanupBlocker !== null) {
+      return { kind: 'recovery-blocked', jobId: observed.jobId, state: observed.state as ActiveRecoveryState, blockerCode: 'RUNNER_DISAPPEARED', requestPersisted, evidence: observed.cleanupBlocker };
     }
     const minimum = observed.cancellationClockHighWaterAt !== null
       && observed.cancellationClockHighWaterAt > observed.cancelRequestedAt
@@ -525,6 +675,9 @@ function durableBlocker(
         observedRunnerUnit: observed.runnerUnit,
         observedOwner: observed.runnerLeaseOwner,
         observedLeaseExpiresAt: observed.runnerLeaseExpiresAt,
+        expectedEscalationOwner: escalationFence?.escalationOwner,
+        expectedEscalationLeaseExpiresAt: escalationFence?.escalationLeaseExpiresAt,
+        expectedStopIntentAt: escalationFence?.stopIntentAt,
         blocker: evidence,
         at,
       });
@@ -532,10 +685,13 @@ function durableBlocker(
       // The durable re-read below is authoritative for conflicts and faults.
     }
     const latest = readCancellationJob(options.store, job.jobId);
+    if (isTerminal(latest)) return outcomeForTerminal(job.jobId, latest, requestPersisted);
+    if (escalationFence !== undefined && !matchesEscalationFence(latest, escalationFence)) {
+      return escalationContention(latest, evidence);
+    }
     if (latest.cleanupBlockerCode === 'RUNNER_DISAPPEARED' && latest.cleanupBlocker !== null) {
       return { kind: 'recovery-blocked', jobId: latest.jobId, state: latest.state as ActiveRecoveryState, blockerCode: 'RUNNER_DISAPPEARED', requestPersisted, evidence: latest.cleanupBlocker };
     }
-    if (isTerminal(latest)) return outcomeForTerminal(job.jobId, latest, requestPersisted);
     const retryMinimum = latest.cancellationClockHighWaterAt !== null
       && expectedCancelRequestedAt !== null
       && latest.cancellationClockHighWaterAt > expectedCancelRequestedAt
@@ -546,6 +702,11 @@ function durableBlocker(
       || latest.cancelRequestedAt !== expectedCancelRequestedAt
       || latest.runnerUnit !== expectedRunnerUnit
       || latest.runnerLeaseOwner !== expectedRunnerOwner
+      || (escalationFence !== undefined && (
+        latest.cancellationEscalationOwner !== escalationFence.escalationOwner
+        || latest.cancellationEscalationLeaseExpiresAt !== escalationFence.escalationLeaseExpiresAt
+        || latest.cancellationStopIntentAt !== escalationFence.stopIntentAt
+      ))
       || latest.cleanupFenceGeneration !== null
       || latest.cleanupAdmissionId !== null
       || minimumLeaseExpiresAt === null
@@ -583,6 +744,7 @@ function failedClosed(
   requestPersisted: boolean,
   requestedAt: string,
   reason: string,
+  escalationFence?: CancellationEscalationFence,
 ): ApiCancellationResult {
   return durableBlocker(options, job, requestPersisted, requestedAt, {
     kind: 'api-cancellation-fail-closed',
@@ -593,7 +755,7 @@ function failedClosed(
     observedOwner: job.runnerLeaseOwner,
     observedLeaseExpiresAt: job.runnerLeaseExpiresAt,
     state: job.state,
-  });
+  }, escalationFence);
 }
 
 type ClockBoundary =
@@ -608,6 +770,7 @@ function clockRegression(
   observedAt: string,
   highWaterAt: string,
   phase: string,
+  escalationFence?: CancellationEscalationFence,
 ): ClockBoundary {
   return {
     kind: 'outcome',
@@ -622,7 +785,7 @@ function clockRegression(
       persistedRunnerUnit: job.runnerUnit,
       observedOwner: job.runnerLeaseOwner,
       observedLeaseExpiresAt: job.runnerLeaseExpiresAt,
-    }),
+    }, escalationFence),
   };
 }
 
@@ -632,6 +795,7 @@ function observeCancellationClock(
   requestPersisted: boolean,
   requestedAt: string,
   phase: string,
+  escalationFence?: CancellationEscalationFence,
 ): ClockBoundary {
   let current = job;
   const contentionRunnerUnit = job.runnerUnit;
@@ -646,6 +810,9 @@ function observeCancellationClock(
         kind: 'outcome',
         outcome: { kind: 'late-publishing', jobId: current.jobId, state: 'publishing', late: true, requestPersisted: true },
       };
+    }
+    if (escalationFence !== undefined && !matchesEscalationFence(current, escalationFence)) {
+      return { kind: 'outcome', outcome: escalationContention(current, { kind: 'cancellation-escalation-contention', phase }) };
     }
     if (current.cleanupBlockerCode === 'RUNNER_DISAPPEARED' && current.cleanupBlocker !== null) {
       return {
@@ -668,13 +835,13 @@ function observeCancellationClock(
     ) {
       return {
         kind: 'outcome',
-        outcome: failedClosed(options, current, requestPersisted, requestedAt, 'durable cancellation clock high-water is missing or invalid'),
+        outcome: failedClosed(options, current, requestPersisted, requestedAt, 'durable cancellation clock high-water is missing or invalid', escalationFence),
       };
     }
     if (current.cleanupFenceGeneration !== null || current.cleanupAdmissionId !== null) {
       return {
         kind: 'outcome',
-        outcome: failedClosed(options, current, requestPersisted, requestedAt, 'cancellation clock observation is fenced for cleanup recovery'),
+        outcome: failedClosed(options, current, requestPersisted, requestedAt, 'cancellation clock observation is fenced for cleanup recovery', escalationFence),
       };
     }
 
@@ -689,7 +856,7 @@ function observeCancellationClock(
           requestedAt,
           observedAt,
           highWaterAt: current.cancellationClockHighWaterAt,
-        }),
+        }, escalationFence),
       };
     }
     if (observedAt < current.cancellationClockHighWaterAt) {
@@ -701,6 +868,7 @@ function observeCancellationClock(
         observedAt,
         current.cancellationClockHighWaterAt,
         phase,
+        escalationFence,
       );
     }
 
@@ -713,6 +881,9 @@ function observeCancellationClock(
         expectedState: expectedState as ActiveRecoveryState,
         cancelRequestedAt,
         expectedHighWaterAt: current.cancellationClockHighWaterAt,
+        expectedEscalationOwner: escalationFence?.escalationOwner,
+        expectedEscalationLeaseExpiresAt: escalationFence?.escalationLeaseExpiresAt,
+        expectedStopIntentAt: escalationFence?.stopIntentAt,
         observedAt,
         at: observedAt,
       });
@@ -728,6 +899,9 @@ function observeCancellationClock(
         kind: 'outcome',
         outcome: { kind: 'late-publishing', jobId: latest.jobId, state: 'publishing', late: true, requestPersisted: true },
       };
+    }
+    if (escalationFence !== undefined && !matchesEscalationFence(latest, escalationFence)) {
+      return { kind: 'outcome', outcome: escalationContention(latest, { kind: 'cancellation-escalation-contention', phase }) };
     }
     if (latest.cleanupBlockerCode === 'RUNNER_DISAPPEARED' && latest.cleanupBlocker !== null) {
       return {
@@ -753,7 +927,7 @@ function observeCancellationClock(
     ) {
       return {
         kind: 'outcome',
-        outcome: failedClosed(options, latest, requestPersisted, requestedAt, 'cancellation clock observation lost durable state ownership'),
+        outcome: failedClosed(options, latest, requestPersisted, requestedAt, 'cancellation clock observation lost durable state ownership', escalationFence),
       };
     }
     if (latest.cancellationClockHighWaterAt === observedAt) {
@@ -770,7 +944,7 @@ function observeCancellationClock(
       if (identityIssue !== null) {
         return {
           kind: 'outcome',
-          outcome: failedClosed(options, latest, requestPersisted, requestedAt, identityIssue),
+          outcome: failedClosed(options, latest, requestPersisted, requestedAt, identityIssue, escalationFence),
         };
       }
       contentionMinimumLeaseExpiresAt = latest.runnerLeaseExpiresAt;
@@ -779,7 +953,7 @@ function observeCancellationClock(
     }
     return {
       kind: 'outcome',
-      outcome: failedClosed(options, latest, requestPersisted, requestedAt, 'cancellation clock high-water did not advance durably'),
+      outcome: failedClosed(options, latest, requestPersisted, requestedAt, 'cancellation clock high-water did not advance durably', escalationFence),
     };
   }
   return {
@@ -819,6 +993,7 @@ function writeBlocker(
   signal: JsonObject | null,
   stop: JsonObject | null,
   inspections: JsonObject | null,
+  escalationFence: CancellationEscalationFence,
 ): ApiCancellationResult {
   const evidence: JsonObject = {
     kind: 'api-cancellation-escalation',
@@ -835,23 +1010,16 @@ function writeBlocker(
       inspections,
     },
   };
-  return durableBlocker(options, job, true, requestedAt, evidence);
+  return durableBlocker(options, job, true, requestedAt, evidence, escalationFence);
 }
 
-export async function requestCancellation(
+export function admitCancellation(
   options: ApiCancellationOptions,
   request: ApiCancellationRequest,
-): Promise<ApiCancellationResult> {
+): ApiCancellationResult {
   const clock = options.clock ?? defaultClock;
   const cooperativeTimeoutMs = options.cooperativeTimeoutMs ?? DEFAULT_COOPERATIVE_TIMEOUT_MS;
-  const systemdGraceMs = options.systemdGraceMs ?? DEFAULT_SYSTEMD_GRACE_MS;
-  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   assertNonNegativeInteger(cooperativeTimeoutMs, 'cooperative cancellation timeout');
-  assertNonNegativeInteger(systemdGraceMs, 'systemd grace timeout');
-  assertNonNegativeInteger(pollIntervalMs, 'cancellation poll interval');
-  if (pollIntervalMs === 0) throw new TypeError('cancellation poll interval must be greater than zero');
-  const coordinatorId = options.coordinatorId ?? `api-cancellation-${randomUUID()}`;
-  if (coordinatorId.length === 0 || coordinatorId.length > 128) throw new TypeError('cancellation coordinator id is invalid');
   const requestedCooperativeDeadlineAt = addMilliseconds(request.at, cooperativeTimeoutMs);
 
   let job = readCancellationJob(options.store, request.jobId);
@@ -915,7 +1083,39 @@ export async function requestCancellation(
   if (job.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
   if (!ACTIVE_STATES.has(job.state)) return failedClosed(options, job, true, request.at, 'job changed while cancellation coordination was initialized');
   if (job.cancelRequestedAt === null) return failedClosed(options, job, false, request.at, 'durable cancellation request disappeared');
-  if (job.cancellationCooperativeDeadlineAt === null) return failedClosed(options, job, true, request.at, 'durable cooperative cancellation deadline is missing');
+  if (job.cancellationCooperativeDeadlineAt === null || job.cancellationClockHighWaterAt === null) {
+    return failedClosed(options, job, true, request.at, 'durable cancellation coordination state is incomplete');
+  }
+  return {
+    kind: 'coordination-pending',
+    jobId: job.jobId,
+    state: job.state as ActiveRecoveryState,
+    requestPersisted: true,
+    cancellationClockHighWaterAt: job.cancellationClockHighWaterAt,
+    cooperativeDeadlineAt: job.cancellationCooperativeDeadlineAt,
+  };
+}
+
+export async function requestCancellation(
+  options: ApiCancellationOptions,
+  request: ApiCancellationRequest,
+): Promise<ApiCancellationResult> {
+  const clock = options.clock ?? defaultClock;
+  const cooperativeTimeoutMs = options.cooperativeTimeoutMs ?? DEFAULT_COOPERATIVE_TIMEOUT_MS;
+  const systemdGraceMs = options.systemdGraceMs ?? DEFAULT_SYSTEMD_GRACE_MS;
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  assertNonNegativeInteger(cooperativeTimeoutMs, 'cooperative cancellation timeout');
+  assertNonNegativeInteger(systemdGraceMs, 'systemd grace timeout');
+  assertNonNegativeInteger(pollIntervalMs, 'cancellation poll interval');
+  if (pollIntervalMs === 0) throw new TypeError('cancellation poll interval must be greater than zero');
+  const coordinatorId = options.coordinatorId ?? `api-cancellation-${randomUUID()}`;
+  if (coordinatorId.length === 0 || coordinatorId.length > 128) throw new TypeError('cancellation coordinator id is invalid');
+  const admission = admitCancellation(options, request);
+  if (admission.kind !== 'coordination-pending') return admission;
+  let job = readCancellationJob(options.store, request.jobId);
+  if (job.cancelRequestedAt === null || job.cancellationCooperativeDeadlineAt === null) {
+    return failedClosed(options, job, true, request.at, 'durable cancellation coordination state is incomplete');
+  }
   const initialClock = observeCancellationClock(options, job, true, request.at, 'cooperative-deadline-conversion');
   if (initialClock.kind === 'outcome') return initialClock.outcome;
   job = initialClock.job;
@@ -983,6 +1183,7 @@ export async function requestCancellation(
   let ownsStop = false;
   let claimLeaseExpiresAt!: string;
   let freshEscalationAt: string;
+  let escalationFence: CancellationEscalationFence | undefined;
   for (let postClaimAttempt = 0; postClaimAttempt < MAX_POST_CLAIM_ATTEMPTS; postClaimAttempt += 1) {
     terminal = readCancellationJob(options.store, request.jobId);
     if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
@@ -1032,6 +1233,13 @@ export async function requestCancellation(
           at: freshEscalationAt,
         });
         ownsStop = claim.ok && claim.kind === 'committed';
+        if (ownsStop) {
+          escalationFence = {
+            escalationOwner: coordinatorId,
+            escalationLeaseExpiresAt: graceDeadlineAt,
+            stopIntentAt: freshEscalationAt,
+          };
+        }
       } catch {
         ownsStop = false;
       }
@@ -1059,12 +1267,84 @@ export async function requestCancellation(
         if (postClaimAttempt === MAX_POST_CLAIM_ATTEMPTS - 1) return coordinationPending(terminal);
         continue;
       }
+    } else {
+      const previousEscalationOwner = terminal.cancellationEscalationOwner;
+      const previousEscalationLeaseExpiresAt = terminal.cancellationEscalationLeaseExpiresAt;
+      if (
+        previousEscalationOwner === null
+        || previousEscalationOwner.length === 0
+        || previousEscalationLeaseExpiresAt === null
+        || !isCanonicalInstant(previousEscalationLeaseExpiresAt)
+        || terminal.cancellationGraceDeadlineAt !== previousEscalationLeaseExpiresAt
+      ) {
+        return failedClosed(options, terminal, true, request.at, 'persisted cancellation escalation ownership is incomplete');
+      }
+      if (previousEscalationOwner === coordinatorId && previousEscalationLeaseExpiresAt > freshEscalationAt) {
+        ownsStop = true;
+        escalationFence = {
+          escalationOwner: coordinatorId,
+          escalationLeaseExpiresAt: previousEscalationLeaseExpiresAt,
+          stopIntentAt: terminal.cancellationStopIntentAt,
+        };
+      } else if (previousEscalationLeaseExpiresAt <= freshEscalationAt) {
+        const replacementGraceDeadlineAt = addMilliseconds(freshEscalationAt, systemdGraceMs);
+        try {
+          const takeover = options.ownership.apiWrite({
+            kind: 'takeover-cancellation-escalation',
+            jobId: terminal.jobId,
+            expectedState: terminal.state as ActiveRecoveryState,
+            cancelRequestedAt: terminal.cancelRequestedAt!,
+            cooperativeDeadlineAt,
+            runnerUnit: terminal.runnerUnit!,
+            observedOwner: terminal.runnerLeaseOwner!,
+            observedLeaseExpiresAt: terminal.runnerLeaseExpiresAt!,
+            previousEscalationOwner,
+            previousEscalationLeaseExpiresAt,
+            stopIntentAt: terminal.cancellationStopIntentAt,
+            escalationOwner: coordinatorId,
+            escalationLeaseExpiresAt: replacementGraceDeadlineAt,
+            graceDeadlineAt: replacementGraceDeadlineAt,
+            at: freshEscalationAt,
+          });
+          ownsStop = takeover.ok && takeover.kind === 'committed';
+          if (ownsStop) {
+            escalationFence = {
+              escalationOwner: coordinatorId,
+              escalationLeaseExpiresAt: replacementGraceDeadlineAt,
+              stopIntentAt: terminal.cancellationStopIntentAt,
+            };
+          }
+        } catch {
+          ownsStop = false;
+        }
+        terminal = readCancellationJob(options.store, request.jobId);
+        if (!ownsStop) {
+          if (
+            terminal.cancellationStopIntentAt === preClaimObserved.cancellationStopIntentAt
+            && terminal.cancellationEscalationOwner !== null
+            && terminal.cancellationEscalationLeaseExpiresAt !== null
+            && terminal.cancellationEscalationLeaseExpiresAt > freshEscalationAt
+          ) return coordinationPending(terminal);
+          return failedClosed(options, terminal, true, request.at, 'expired cancellation escalation takeover CAS was lost');
+        }
+      } else {
+        return coordinationPending(terminal);
+      }
     }
     break;
   }
   if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
   if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
-  if (!ACTIVE_STATES.has(terminal.state)) return failedClosed(options, terminal, true, request.at, 'runner state changed before systemd escalation claim');
+  if (!ownsStop || escalationFence === undefined) {
+    if (
+      ACTIVE_STATES.has(terminal.state)
+      && terminal.cancellationStopIntentAt !== null
+      && terminal.cancellationEscalationOwner !== null
+      && terminal.cancellationEscalationLeaseExpiresAt !== null
+    ) return coordinationPending(terminal);
+    return failedClosed(options, terminal, true, request.at, 'systemd escalation ownership was not acquired');
+  }
+  if (!ACTIVE_STATES.has(terminal.state)) return failedClosed(options, terminal, true, request.at, 'runner state changed before systemd escalation claim', escalationFence);
   if (
     !validateRunnerUnit(request.jobId, terminal.runnerUnit)
     || terminal.runnerUnit !== cancellationRunnerUnit
@@ -1073,22 +1353,24 @@ export async function requestCancellation(
     || !isCanonicalInstant(terminal.runnerLeaseExpiresAt)
     || terminal.cancellationStopIntentAt === null
     || terminal.cancellationGraceDeadlineAt === null
-  ) return failedClosed(options, terminal, true, request.at, 'systemd escalation identity or durable stop intent is invalid');
+    || terminal.cancellationEscalationOwner !== coordinatorId
+  ) return failedClosed(options, terminal, true, request.at, 'systemd escalation identity or durable stop intent is invalid', escalationFence);
 
   const escalationUnit = terminal.runnerUnit;
-  const stopIntentAt = terminal.cancellationStopIntentAt;
-  const graceDeadlineAt = terminal.cancellationGraceDeadlineAt;
+  const stopIntentAt = escalationFence.stopIntentAt;
+  const graceDeadlineAt = escalationFence.escalationLeaseExpiresAt;
   if (ownsStop) {
     const escalationState = terminal.state;
     let ownsAuthorization = false;
     let authorizationObservedAt: string | null = null;
+    let stopBudgetObservedAt: string | null = null;
     let authorizedLeaseExpiresAt = claimLeaseExpiresAt;
     let minimumLeaseExpiresAt = claimLeaseExpiresAt;
     for (let attempt = 0; attempt < MAX_STOP_AUTHORIZATION_ATTEMPTS; attempt += 1) {
       terminal = readCancellationJob(options.store, request.jobId);
       if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
       if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
-      const preAuthorizationClock = observeCancellationClock(options, terminal, true, request.at, 'pre-stop-authorization');
+      const preAuthorizationClock = observeCancellationClock(options, terminal, true, request.at, 'pre-stop-authorization', escalationFence);
       if (preAuthorizationClock.kind === 'outcome') return preAuthorizationClock.outcome;
       terminal = preAuthorizationClock.job;
       const authorizationIdentityIssue = runnerIdentityIssue(
@@ -1116,6 +1398,7 @@ export async function requestCancellation(
           true,
           request.at,
           authorizationIdentityIssue ?? 'systemd stop authorization ownership changed before the stop boundary',
+          escalationFence,
         );
       }
       const attemptedLeaseExpiresAt = terminal.runnerLeaseExpiresAt!;
@@ -1146,6 +1429,7 @@ export async function requestCancellation(
       if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
       if (ownsAuthorization) {
         authorizationObservedAt = preAuthorizationClock.observedAt;
+        stopBudgetObservedAt = preAuthorizationClock.observedAt;
         authorizedLeaseExpiresAt = attemptedLeaseExpiresAt;
         break;
       }
@@ -1156,11 +1440,15 @@ export async function requestCancellation(
         if (
           terminal.cancellationStopAuthorizedAt === null
           || terminal.cancellationStopAuthorizedLeaseExpiresAt === null
-        ) return failedClosed(options, terminal, true, request.at, 'durable systemd stop authorization is incomplete');
+        ) return failedClosed(options, terminal, true, request.at, 'durable systemd stop authorization is incomplete', escalationFence);
+        ownsAuthorization = true;
+        authorizationObservedAt = terminal.cancellationStopAuthorizedAt;
+        stopBudgetObservedAt = preAuthorizationClock.observedAt;
+        authorizedLeaseExpiresAt = terminal.cancellationStopAuthorizedLeaseExpiresAt;
         break;
       }
       if (!authorizationReturned) {
-        return failedClosed(options, terminal, true, request.at, 'systemd stop authorization outcome is ambiguous');
+        return failedClosed(options, terminal, true, request.at, 'systemd stop authorization outcome is ambiguous', escalationFence);
       }
       const retryIdentityIssue = runnerIdentityIssue(
         request.jobId,
@@ -1187,17 +1475,19 @@ export async function requestCancellation(
           true,
           request.at,
           retryIdentityIssue ?? 'systemd stop authorization ownership changed during CAS retry',
+          escalationFence,
         );
       }
       minimumLeaseExpiresAt = attemptedLeaseExpiresAt;
       if (attempt === MAX_STOP_AUTHORIZATION_ATTEMPTS - 1) {
-        return failedClosed(options, terminal, true, request.at, 'systemd stop authorization retry budget was exhausted by same-owner lease churn');
+        return failedClosed(options, terminal, true, request.at, 'systemd stop authorization retry budget was exhausted by same-owner lease churn', escalationFence);
       }
     }
     if (
       ownsAuthorization
       && (
         authorizationObservedAt === null
+        || stopBudgetObservedAt === null
         || terminal.cancellationStopAuthorizedAt !== authorizationObservedAt
         || terminal.cancellationStopAuthorizedLeaseExpiresAt !== authorizedLeaseExpiresAt
         || terminal.state !== escalationState
@@ -1216,10 +1506,10 @@ export async function requestCancellation(
         || terminal.cleanupAdmissionId !== null
       )
     ) {
-      return failedClosed(options, terminal, true, request.at, 'durable systemd stop authorization does not match the immediate runner observation');
+      return failedClosed(options, terminal, true, request.at, 'durable systemd stop authorization does not match the immediate runner observation', escalationFence);
     }
-    if (ownsAuthorization) {
-      const stopDeadlineMonotonic = monotonicDeadline(clock, graceDeadlineAt, authorizationObservedAt!);
+    if (ownsAuthorization && terminal.cancellationStopObservation === null) {
+      const stopDeadlineMonotonic = monotonicDeadline(clock, graceDeadlineAt, stopBudgetObservedAt!);
       let stopObservation: ApiCancellationSystemdObservation;
       try {
         stopObservation = await options.systemd.stopRunner(escalationUnit, stopDeadlineMonotonic);
@@ -1229,7 +1519,7 @@ export async function requestCancellation(
       terminal = readCancellationJob(options.store, request.jobId);
       if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
       if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
-      const afterStopClock = observeCancellationClock(options, terminal, true, request.at, 'after-systemd-stop');
+      const afterStopClock = observeCancellationClock(options, terminal, true, request.at, 'after-systemd-stop', escalationFence);
       if (afterStopClock.kind === 'outcome') return afterStopClock.outcome;
       terminal = afterStopClock.job;
       const postStopIdentityIssue = runnerIdentityIssue(
@@ -1241,7 +1531,7 @@ export async function requestCancellation(
         afterStopClock.observedAt,
       );
       if (postStopIdentityIssue !== null) {
-        return failedClosed(options, terminal, true, request.at, postStopIdentityIssue);
+        return failedClosed(options, terminal, true, request.at, postStopIdentityIssue, escalationFence);
       }
       try {
         options.ownership.apiWrite({
@@ -1266,7 +1556,7 @@ export async function requestCancellation(
   if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
   if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
 
-  const graceClock = observeCancellationClock(options, terminal, true, request.at, 'grace-deadline-conversion');
+  const graceClock = observeCancellationClock(options, terminal, true, request.at, 'grace-deadline-conversion', escalationFence);
   if (graceClock.kind === 'outcome') return graceClock.outcome;
   terminal = graceClock.job;
   const graceDeadlineMonotonic = monotonicDeadline(clock, graceDeadlineAt, graceClock.observedAt);
@@ -1275,7 +1565,7 @@ export async function requestCancellation(
     let observed = readCancellationJob(options.store, request.jobId);
     if (isTerminal(observed)) return outcomeForTerminal(request.jobId, observed, true);
     if (observed.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
-    const beforeInspectionClock = observeCancellationClock(options, observed, true, request.at, 'before-systemd-inspection');
+    const beforeInspectionClock = observeCancellationClock(options, observed, true, request.at, 'before-systemd-inspection', escalationFence);
     if (beforeInspectionClock.kind === 'outcome') return beforeInspectionClock.outcome;
     observed = beforeInspectionClock.job;
     let inspection: ApiCancellationSystemdObservation;
@@ -1287,7 +1577,7 @@ export async function requestCancellation(
     observed = readCancellationJob(options.store, request.jobId);
     if (isTerminal(observed)) return outcomeForTerminal(request.jobId, observed, true);
     if (observed.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
-    const afterInspectionClock = observeCancellationClock(options, observed, true, request.at, 'after-systemd-inspection');
+    const afterInspectionClock = observeCancellationClock(options, observed, true, request.at, 'after-systemd-inspection', escalationFence);
     if (afterInspectionClock.kind === 'outcome') return afterInspectionClock.outcome;
     observed = afterInspectionClock.job;
     try {
@@ -1299,6 +1589,8 @@ export async function requestCancellation(
         runnerUnit: escalationUnit,
         observedOwner: observed.runnerLeaseOwner!,
         observedLeaseExpiresAt: observed.runnerLeaseExpiresAt!,
+        escalationOwner: coordinatorId,
+        escalationLeaseExpiresAt: graceDeadlineAt,
         stopIntentAt,
         observation: publicObservation(inspection),
         at: afterInspectionClock.observedAt,
@@ -1318,8 +1610,8 @@ export async function requestCancellation(
   terminal = readCancellationJob(options.store, request.jobId);
   if (isTerminal(terminal)) return outcomeForTerminal(request.jobId, terminal, true);
   if (terminal.state === 'publishing') return { kind: 'late-publishing', jobId: request.jobId, state: 'publishing', late: true, requestPersisted: true };
-  if (!ACTIVE_STATES.has(terminal.state)) return failedClosed(options, terminal, true, request.at, 'runner state changed before recovery blocker persistence');
-  const blockerClock = observeCancellationClock(options, terminal, true, request.at, 'recovery-blocker-persistence');
+  if (!ACTIVE_STATES.has(terminal.state)) return failedClosed(options, terminal, true, request.at, 'runner state changed before recovery blocker persistence', escalationFence);
+  const blockerClock = observeCancellationClock(options, terminal, true, request.at, 'recovery-blocker-persistence', escalationFence);
   if (blockerClock.kind === 'outcome') return blockerClock.outcome;
   terminal = blockerClock.job;
   return writeBlocker(
@@ -1331,6 +1623,7 @@ export async function requestCancellation(
     terminal.cancellationSignalObservation,
     terminal.cancellationStopObservation,
     terminal.cancellationInspectionObservations,
+    escalationFence,
   );
 }
 

@@ -8,6 +8,8 @@ Environment=OSI_IMAGE_BUILDER_BIND_ADDRESS=127.0.0.1
 Environment=OSI_IMAGE_BUILDER_HOST=127.0.0.1
 Restart=on-failure
 RestartSec=2s
+KillMode=control-group
+TimeoutStopSec=20s
 NoNewPrivileges=yes
 PrivateTmp=yes
 UMask=0077

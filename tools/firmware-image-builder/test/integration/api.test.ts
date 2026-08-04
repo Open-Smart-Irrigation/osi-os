@@ -8,6 +8,7 @@ import type { EvidenceIndex } from '../../api/src/evidence-reader.js';
 import { PreflightError } from '../../api/src/preflight.js';
 import { PublishBlockerRecheckError } from '../../api/src/publish-blocker-recheck.js';
 import type { JobRecord } from '../../api/src/store.js';
+import { TEST_BUILDER_IDENTITY } from '../helpers/builder-identity.js';
 
 const sha = 'a'.repeat(40);
 const now = '2026-07-28T10:00:00.000Z';
@@ -73,7 +74,7 @@ function job(id: string) {
     sourceCommitTime: now, sourceAuthor: 'builder', sourceSubject: 'subject',
     request: null,
     sourcePreparation: null, offlineFeedPreparation: null, sourceRunnable: false,
-    targetId: 'rpi-5', rootId: 'release', targetManifestSha256: 'b'.repeat(64), acceptedAt: now,
+    targetId: 'rpi-5', rootId: 'release', targetManifestSha256: 'b'.repeat(64), builderIdentity: TEST_BUILDER_IDENTITY, acceptedAt: now,
     state: 'succeeded', currentStage: 'publish', queueState: 'done', queuePosition: null,
     cancelRequestedAt: null, cancelReason: null, cancellationCooperativeDeadlineAt: null,
     cancellationEscalationOwner: null, cancellationEscalationLeaseExpiresAt: null,
@@ -95,7 +96,7 @@ function job(id: string) {
     artifactSize: 123, artifactMtime: now, checksumPath: 'release/job-1/SHA256SUMS', checksumSha256: 'c'.repeat(64),
     manifestPath: 'release/job-1/manifest.json', manifestSha256: 'c'.repeat(64),
     verificationPath: 'release/job-1/verification.json', verificationSha256: 'c'.repeat(64),
-    publishState: 'published', publishStartedAt: now, publishedAt: now, publishBlockerCode: null, publishBlocker: null,
+    publishState: 'published', releaseSealStatus: 'sealed', publishStartedAt: now, publishedAt: now, publishBlockerCode: null, publishBlocker: null,
     freshnessStatus: 'fresh', freshnessObservedSha: sha, newerSourceAvailable: false,
     freshnessRequestedAt: now, freshnessCheckedAt: now, freshnessErrorCode: null, freshnessError: null,
     freshnessErrorEvidencePath: null, freshnessErrorEvidenceSha256: null,
@@ -122,6 +123,7 @@ function blockedJob(id = 'job-1') {
     manifestPath: `staging/${id}/build-manifest.json`,
     verificationPath: `staging/${id}/verification.json`,
     publishState: 'blocked' as const,
+    releaseSealStatus: null,
     publishStartedAt: null,
     publishedAt: null,
     publishBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' as const,
@@ -165,7 +167,10 @@ function blockedJob(id = 'job-1') {
   };
 }
 
-function recheckProof(resolution: 'cleared_absent' | 'marked_published' | 'retained_blocker') {
+function recheckProof(
+  resolution: 'cleared_absent' | 'marked_published' | 'retained_blocker',
+  sealStatus: 'in_progress' | 'sealed' = 'sealed',
+) {
   const finalDirectory = `main/${sha}/rpi-5`;
   const finalPath = `${finalDirectory}/image`;
   if (resolution === 'cleared_absent') {
@@ -190,14 +195,16 @@ function recheckProof(resolution: 'cleared_absent' | 'marked_published' | 'retai
     checksum: { path: `${finalDirectory}/sha256sums`, sha256: 'c'.repeat(64) },
     manifest: { path: `${finalDirectory}/build-manifest.json`, sha256: 'c'.repeat(64) },
     verification: { path: `${finalDirectory}/verification.json`, sha256: 'c'.repeat(64) },
+    sealStatus,
   };
 }
 
 function recheckAudit(
   blocked: Omit<ReturnType<typeof blockedJob>, 'artifactStagingPath'> & { artifactStagingPath: string | null },
   resolution: 'cleared_absent' | 'marked_published' | 'retained_blocker',
+  sealStatus: 'in_progress' | 'sealed' = 'sealed',
 ) {
-  const proof = recheckProof(resolution);
+  const proof = recheckProof(resolution, sealStatus);
   return {
     jobId: blocked.jobId, attempt: 1, eventSeq: 12, resolution,
     observedAt: now, committedAt: later,
@@ -271,6 +278,12 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
     },
     now: () => now,
     cancellation: {
+      admitCancellation: async (requestValue: { jobId: string }) => ({
+        kind: 'already-terminal',
+        jobId: requestValue.jobId,
+        state: 'succeeded',
+        requestPersisted: false,
+      }),
       requestCancellation: async (requestValue: { jobId: string }) => ({
         kind: 'already-terminal',
         jobId: requestValue.jobId,
@@ -347,8 +360,15 @@ function dependencies(mutator?: (dependencies: ApiRouteDependencies) => void): A
   return result;
 }
 
-async function start(routeDependencies = dependencies()) {
-  const server = createHttpServer({ origin: 'http://127.0.0.1:0', routeHandler: createApiRouteHandler(routeDependencies) });
+async function start(
+  routeDependencies = dependencies(),
+  serverOptions: Readonly<{ readonly routeMutationDeadlineMs?: number }> = {},
+) {
+  const server = createHttpServer({
+    origin: 'http://127.0.0.1:0',
+    routeHandler: createApiRouteHandler(routeDependencies),
+    ...serverOptions,
+  });
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('server did not bind');
@@ -884,7 +904,7 @@ describe('read-only builder API routes', () => {
       terminalError: { reason: 'operator' },
       terminalAt: now,
     };
-    const requestCancellation = vi.fn(async () => ({
+    const admitCancellation = vi.fn(async () => ({
       kind: 'queued-cancelled',
       jobId: 'job-1',
       state: 'cancelled',
@@ -893,7 +913,7 @@ describe('read-only builder API routes', () => {
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
         now: () => now,
-        cancellation: { requestCancellation },
+        cancellation: { admitCancellation, requestCancellation: admitCancellation },
       });
       Object.assign(value.store as object, {
         getJob: (id: string) => id === 'job-1' ? cancelled : (() => { throw new StoreNotFoundError('not found'); })(),
@@ -903,7 +923,7 @@ describe('read-only builder API routes', () => {
 
     const response = await post(started.port, '/api/jobs/job-1/cancel', '{}');
 
-    expect(requestCancellation).toHaveBeenCalledWith({ jobId: 'job-1', reason: 'operator', at: now });
+    expect(admitCancellation).toHaveBeenCalledWith({ jobId: 'job-1', reason: 'operator', at: now });
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({
       id: 'job-1',
@@ -912,12 +932,82 @@ describe('read-only builder API routes', () => {
       cancelRequestedAt: now,
       error: { code: 'CANCELLED' },
     });
+    expect((response.body as { cancellationResult: unknown }).cancellationResult).toEqual({
+      kind: 'queued-cancelled',
+      jobId: 'job-1',
+      state: 'cancelled',
+      requestPersisted: true,
+    });
+  });
+
+  it('returns 202 after durable active cancellation admission without awaiting coordination', async () => {
+    const cooperativeDeadlineAt = '2026-07-28T10:00:30.000Z';
+    const active = {
+      ...job('job-1'),
+      state: 'building' as const,
+      currentStage: 'build' as const,
+      queueState: 'dispatched',
+      cancelRequestedAt: now,
+      cancelReason: 'operator',
+      cancellationCooperativeDeadlineAt: cooperativeDeadlineAt,
+      cancellationClockHighWaterAt: now,
+      runnerLeaseOwner: 'runner-owner',
+      runnerLeaseExpiresAt: '2026-07-28T10:10:00.000Z',
+      terminalErrorCode: null,
+      terminalError: null,
+      terminalAt: null,
+      artifactStagingPath: null,
+      artifactFinalDirectory: null,
+      artifactFinalPath: null,
+      artifactSha256: null,
+      artifactSize: null,
+      artifactMtime: null,
+      checksumPath: null,
+      checksumSha256: null,
+      manifestPath: null,
+      manifestSha256: null,
+      verificationPath: null,
+      verificationSha256: null,
+      publishState: null,
+      publishStartedAt: null,
+      publishedAt: null,
+    };
+    const result = {
+      kind: 'coordination-pending' as const,
+      jobId: 'job-1',
+      state: 'building' as const,
+      requestPersisted: true as const,
+      cancellationClockHighWaterAt: now,
+      cooperativeDeadlineAt,
+    };
+    const admitCancellation = vi.fn(async () => result);
+    const requestCancellation = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      return result;
+    });
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        cancellation: { admitCancellation, requestCancellation },
+      });
+      Object.assign(value.store as object, { getJob: () => active });
+    }));
+    server = started.server;
+
+    const startedAt = performance.now();
+    const response = await post(started.port, '/api/jobs/job-1/cancel', '{}');
+
+    expect(performance.now() - startedAt).toBeLessThan(60);
+    expect(response.status, JSON.stringify(response.body)).toBe(202);
+    expect(response.body).toMatchObject({ id: 'job-1', state: 'building' });
+    expect((response.body as { cancellationResult: unknown }).cancellationResult).toEqual(result);
+    expect(admitCancellation).toHaveBeenCalledWith({ jobId: 'job-1', reason: 'operator', at: now });
+    expect(requestCancellation).not.toHaveBeenCalled();
   });
 
   it.each(['null', '[]', '{"extra":true}', ''])('rejects non-empty-object cancel body %s', async (body) => {
-    const requestCancellation = vi.fn();
+    const admitCancellation = vi.fn();
     const started = await start(dependencies((value) => {
-      Object.assign(value as object, { cancellation: { requestCancellation } });
+      Object.assign(value as object, { cancellation: { admitCancellation } });
     }));
     server = started.server;
 
@@ -925,14 +1015,14 @@ describe('read-only builder API routes', () => {
 
     expect(response.status).toBe(400);
     expect(response.body).toMatchObject({ error: { code: 'INVALID_REQUEST' } });
-    expect(requestCancellation).not.toHaveBeenCalled();
+    expect(admitCancellation).not.toHaveBeenCalled();
   });
 
   it('returns 409 for a terminal cancellation result', async () => {
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
         cancellation: {
-          requestCancellation: async () => ({
+          admitCancellation: async () => ({
             kind: 'already-terminal',
             jobId: 'job-1',
             state: 'succeeded',
@@ -950,26 +1040,27 @@ describe('read-only builder API routes', () => {
   });
 
   it('does not invoke cancellation for an unknown job', async () => {
-    const requestCancellation = vi.fn();
+    const admitCancellation = vi.fn();
     const started = await start(dependencies((value) => {
-      Object.assign(value as object, { cancellation: { requestCancellation } });
+      Object.assign(value as object, { cancellation: { admitCancellation } });
     }));
     server = started.server;
 
     const response = await post(started.port, '/api/jobs/missing/cancel', '{}');
 
     expect(response.status).toBe(404);
-    expect(requestCancellation).not.toHaveBeenCalled();
+    expect(admitCancellation).not.toHaveBeenCalled();
   });
 
   it.each([
-    ['cleared_absent', 'cleared-absent'],
-    ['marked_published', 'marked-published'],
-    ['retained_blocker', 'retained-blocker'],
-  ] as const)('rechecks a publish blocker only after durable %s provenance', async (resolution, resultKind) => {
+    ['cleared_absent', 'cleared-absent', 'sealed'],
+    ['marked_published', 'marked-published', 'sealed'],
+    ['marked_published', 'marked-published', 'in_progress'],
+    ['retained_blocker', 'retained-blocker', 'sealed'],
+  ] as const)('rechecks a publish blocker only after durable %s provenance (%s) with %s release files', async (resolution, resultKind, sealStatus) => {
     const blocked = blockedJob();
-    const audit = recheckAudit(blocked, resolution);
-    const proof = recheckProof(resolution);
+    const audit = recheckAudit(blocked, resolution, sealStatus);
+    const proof = recheckProof(resolution, sealStatus);
     const postJob = resolution === 'cleared_absent'
       ? {
         ...blocked,
@@ -986,6 +1077,7 @@ describe('read-only builder API routes', () => {
           artifactFinalDirectory: `main/${sha}/rpi-5`, artifactFinalPath: `main/${sha}/rpi-5/image`,
           checksumPath: `main/${sha}/rpi-5/sha256sums`, manifestPath: `main/${sha}/rpi-5/build-manifest.json`,
           verificationPath: `main/${sha}/rpi-5/verification.json`, publishState: 'published' as const,
+          releaseSealStatus: sealStatus === 'sealed' ? 'sealed' as const : 'legacy_mutable' as const,
           publishStartedAt: now, publishedAt: later, publishBlockerCode: null, publishBlocker: null,
         }
         : blocked;
@@ -1023,7 +1115,50 @@ describe('read-only builder API routes', () => {
     expect(response.body).toMatchObject({ id: 'job-1', state: 'failed' });
     expect(JSON.stringify(response.body)).not.toMatch(/srv\/images|verify-final|persisted artifact/u);
     expect(recheck).toHaveBeenCalledTimes(1);
-    expect(recheck).toHaveBeenCalledWith({ jobId: 'job-1' });
+    expect(recheck).toHaveBeenCalledWith({
+      jobId: 'job-1',
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('preserves the absolute recheck deadline through the actual route handler', async () => {
+    const blocked = blockedJob();
+    let mutationCommitted = false;
+    const started = await start(dependencies((value) => {
+      Object.assign(value as object, {
+        publishBlockerRecheck: {
+          recheck: async ({ signal }: { signal?: AbortSignal }) => {
+            if (signal === undefined) throw new Error('request signal is missing');
+            await new Promise<void>((_resolve, reject) => {
+              signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+            });
+            signal.throwIfAborted();
+            mutationCommitted = true;
+            throw new Error('unreachable');
+          },
+        },
+      });
+      Object.assign(value.store as object, {
+        getJob: () => blocked,
+        getTerminalEvent: () => ({
+          jobId: 'job-1', seq: 10, eventType: 'terminal' as const, state: 'failed' as const, stage: 'publish' as const,
+          payload: { state: 'failed', errorCode: 'UNVERIFIED_FINAL_PATH_BLOCKER' }, at: now,
+        }),
+        getPublishStartEvent: () => ({
+          jobId: 'job-1', seq: 9, eventType: 'publish' as const, state: 'publishing' as const, stage: 'publish' as const,
+          payload: { state: 'publishing', publishStartedAt: now, finalDirectory: `main/${sha}/rpi-5`, finalPath: `main/${sha}/rpi-5/image` }, at: now,
+        }),
+      });
+    }), { routeMutationDeadlineMs: 40 });
+    server = started.server;
+
+    const response = await post(started.port, '/api/jobs/job-1/publish-blocker/recheck', '{}');
+
+    expect(response.status).toBe(504);
+    expect(response.body).toMatchObject({
+      error: { code: 'REQUEST_DEADLINE_EXCEEDED', retryable: true },
+    });
+    expect(mutationCommitted).toBe(false);
   });
 
   it.each(['null', '[]', '{"extra":true}', ''])('requires an exact empty recheck body: %s', async (body) => {
@@ -1471,7 +1606,7 @@ describe('read-only builder API routes', () => {
   ])('fails closed on cancellation result with %s', async (_description, result) => {
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
-        cancellation: { requestCancellation: async () => result },
+        cancellation: { admitCancellation: async () => result },
       });
     }));
     server = started.server;
@@ -1491,7 +1626,7 @@ describe('read-only builder API routes', () => {
     };
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
-        cancellation: { requestCancellation: async () => result },
+        cancellation: { admitCancellation: async () => result },
       });
     }));
     server = started.server;
@@ -1510,7 +1645,7 @@ describe('read-only builder API routes', () => {
   ])('fails closed on cancellation result/store mismatch: %s', async (_description, result) => {
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
-        cancellation: { requestCancellation: async () => result },
+        cancellation: { admitCancellation: async () => result },
       });
     }));
     server = started.server;
@@ -1536,7 +1671,7 @@ describe('read-only builder API routes', () => {
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
         cancellation: {
-          requestCancellation: async () => ({
+          admitCancellation: async () => ({
             kind: 'queued-cancelled',
             jobId: 'job-1',
             state: 'cancelled',
@@ -1565,13 +1700,14 @@ describe('read-only builder API routes', () => {
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
         cancellation: {
-          requestCancellation: async () => ({
+          admitCancellation: async () => ({
             kind: 'late-publishing',
             jobId: 'job-1',
             state: 'publishing',
             late: true,
             requestPersisted: true,
           }),
+          requestCancellation: async () => { throw new Error('coordination must not run inline'); },
         },
       });
       Object.assign(value.store as object, { getJob: () => publishing });
@@ -1596,20 +1732,30 @@ describe('read-only builder API routes', () => {
       Object.assign(value as object, {
         now: () => later,
         cancellation: {
-          requestCancellation: async () => ({
+          admitCancellation: async () => ({
             kind: 'late-publishing',
             jobId: 'job-1',
             state: 'publishing',
             late: true,
             requestPersisted: true,
           }),
+          requestCancellation: async () => { throw new Error('coordination must not run inline'); },
         },
       });
       Object.assign(value.store as object, { getJob: () => publishing });
     }));
     server = started.server;
 
-    expect((await post(started.port, '/api/jobs/job-1/cancel', '{}')).status).toBe(200);
+    const response = await post(started.port, '/api/jobs/job-1/cancel', '{}');
+
+    expect(response.status).toBe(200);
+    expect((response.body as { cancellationResult: unknown }).cancellationResult).toEqual({
+      kind: 'late-publishing',
+      jobId: 'job-1',
+      state: 'publishing',
+      late: true,
+      requestPersisted: true,
+    });
   });
 
   it('accepts runner-terminal only with the exact durable runner terminal event', async () => {
@@ -1627,12 +1773,13 @@ describe('read-only builder API routes', () => {
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
         cancellation: {
-          requestCancellation: async () => ({
+          admitCancellation: async () => ({
             kind: 'runner-terminal',
             jobId: 'job-1',
             state: 'cancelled',
             runnerOwned: true,
           }),
+          requestCancellation: async () => { throw new Error('coordination must not run inline'); },
         },
       });
       Object.assign(value.store as object, {
@@ -1650,7 +1797,16 @@ describe('read-only builder API routes', () => {
     }));
     server = started.server;
 
-    expect((await post(started.port, '/api/jobs/job-1/cancel', '{}')).status).toBe(200);
+    const response = await post(started.port, '/api/jobs/job-1/cancel', '{}');
+
+    expect(response.status).toBe(200);
+    expect((response.body as { cancellationResult: unknown }).cancellationResult).toEqual({
+      kind: 'runner-terminal',
+      jobId: 'job-1',
+      state: 'cancelled',
+      runnerOwned: true,
+      requestPersisted: true,
+    });
   });
 
   it('rejects an API recovery terminal reported as runner-owned', async () => {
@@ -1668,7 +1824,7 @@ describe('read-only builder API routes', () => {
     const started = await start(dependencies((value) => {
       Object.assign(value as object, {
         cancellation: {
-          requestCancellation: async () => ({
+          admitCancellation: async () => ({
             kind: 'runner-terminal',
             jobId: 'job-1',
             state: 'interrupted',

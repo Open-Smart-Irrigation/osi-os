@@ -43,6 +43,7 @@ describe('startup reconciliation order', () => {
       migrations: phase('migrations'),
       cleanupAdmissions: phase('cleanup-admissions'),
       liveRunnerClassification: phase('live-runner-classification'),
+      cancellationCoordination: phase('cancellation-coordination'),
       stalePublishingRecovery: phase('stale-publishing-recovery'),
       nonPublishingInterruption: phase('non-publishing-interruption'),
       retention: phase('retention'),
@@ -53,7 +54,10 @@ describe('startup reconciliation order', () => {
     await Promise.resolve();
     expect(reentrant).toBe(first);
     await expect(first).resolves.toEqual({ dispatched: true, blockers: [] });
-    expect(calls).toEqual([...STARTUP_PHASES]);
+    expect(calls).toEqual([
+      'migrations', 'cleanup-admissions', 'live-runner-classification', 'cancellation-coordination',
+      'stale-publishing-recovery', 'non-publishing-interruption', 'retention', 'dispatch',
+    ]);
     expect(gate.beginStartupReconciliation).toHaveBeenCalledOnce();
     expect(gate.completeStartupReconciliation).toHaveBeenCalledOnce();
   });
@@ -70,6 +74,7 @@ describe('startup reconciliation order', () => {
       migrations,
       cleanupAdmissions: async () => clear(),
       liveRunnerClassification: async () => clear(),
+      cancellationCoordination: async () => clear(),
       stalePublishingRecovery: async () => clear(),
       nonPublishingInterruption: async () => clear(),
       retention: async () => clear(),
@@ -102,6 +107,7 @@ describe('startup reconciliation order', () => {
       migrations: phase('migrations'),
       cleanupAdmissions: phase('cleanup-admissions'),
       liveRunnerClassification: phase('live-runner-classification'),
+      cancellationCoordination: phase('cancellation-coordination'),
       stalePublishingRecovery: phase('stale-publishing-recovery'),
       nonPublishingInterruption: phase('non-publishing-interruption'),
       retention: phase('retention'),
@@ -147,6 +153,7 @@ describe('startup reconciliation order', () => {
         migrations: phase('migrations'),
         cleanupAdmissions: phase('cleanup-admissions'),
         liveRunnerClassification: phase('live-runner-classification'),
+        cancellationCoordination: phase('cancellation-coordination'),
         stalePublishingRecovery: phase('stale-publishing-recovery'),
         nonPublishingInterruption: phase('non-publishing-interruption'),
         retention: phase('retention'),
@@ -169,6 +176,7 @@ describe('startup reconciliation order', () => {
       migrations: phase('migrations'),
       cleanupAdmissions: phase('cleanup-admissions'),
       liveRunnerClassification: phase('live-runner-classification'),
+      cancellationCoordination: phase('cancellation-coordination'),
       stalePublishingRecovery: phase('stale-publishing-recovery'),
       nonPublishingInterruption: phase('non-publishing-interruption'),
       retention: phase('retention'),
@@ -188,6 +196,7 @@ describe('startup reconciliation order', () => {
       migrations: async () => clear(),
       cleanupAdmissions: async () => clear(),
       liveRunnerClassification: async () => ({ blockers: [{ code: 'CLEANUP_UNIT_STOP_FAILED', details: { jobId: 'job-a' } }] }),
+      cancellationCoordination: async () => clear(),
       stalePublishingRecovery: async () => clear(),
       nonPublishingInterruption: async () => clear(),
       retention: async () => clear(),
@@ -198,7 +207,7 @@ describe('startup reconciliation order', () => {
     expect(dispatch).not.toHaveBeenCalled();
     expect(target.events().map((event) => event.phase)).toEqual([
       'migrations', 'cleanup-admissions', 'live-runner-classification',
-      'stale-publishing-recovery', 'non-publishing-interruption', 'retention',
+      'cancellation-coordination', 'stale-publishing-recovery', 'non-publishing-interruption', 'retention',
     ]);
   });
 
@@ -211,6 +220,7 @@ describe('startup reconciliation order', () => {
       migrations: async () => clear(),
       cleanupAdmissions: async () => clear(),
       liveRunnerClassification: async () => clear(),
+      cancellationCoordination: async () => clear(),
       stalePublishingRecovery: async () => ({ blockers: blocked ? [{ code: 'UNVERIFIED_FINAL_PATH_BLOCKER', details: { jobId: 'job-publish' } }] : [] }),
       nonPublishingInterruption: async () => clear(),
       retention: async () => clear(),

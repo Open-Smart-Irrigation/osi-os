@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { Socket } from 'node:net';
 import { BuilderError } from '../../domain/errors.js';
 import {
   PIPELINE_STAGE_NAMES,
@@ -18,6 +19,9 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const HEADERS_TIMEOUT_MS = 10_000;
 const SOCKET_TIMEOUT_MS = 30_000;
 const KEEP_ALIVE_TIMEOUT_MS = 5_000;
+const JOB_ADMISSION_SOCKET_TIMEOUT_MS = 2 * 60 * 60 * 1_000 + SOCKET_TIMEOUT_MS;
+// Leave room for the 5s SQLite busy bound, child termination, and the HTTP response.
+const ROUTE_MUTATION_DEADLINE_MS = 23_000;
 const BODY_DRAIN_TIMEOUT_MS = 5_000;
 const MAX_EVENT_STREAM_FRAME_BYTES = 64 * 1024;
 const HASH40 = /^[0-9a-f]{40}$/u;
@@ -55,6 +59,7 @@ export interface ApiRouteContext {
   readonly query: Readonly<URLSearchParams>;
   readonly headers: IncomingMessage['headers'];
   readonly body: JsonValue | null;
+  readonly signal: AbortSignal;
 }
 
 export type ApiRouteHandler = (context: ApiRouteContext) => HttpResponse | null | undefined | Promise<HttpResponse | null | undefined>;
@@ -64,6 +69,7 @@ export interface HttpServerOptions {
   readonly routeHandler: ApiRouteHandler;
   readonly maxBodyBytes?: number;
   readonly staticUi?: Pick<StaticUiService, 'resolve'>;
+  readonly routeMutationDeadlineMs?: number;
 }
 
 export class HttpTransportError extends Error {
@@ -576,6 +582,32 @@ export function createHttpServer(options: HttpServerOptions): Server {
   }
   const limit = options.maxBodyBytes ?? MAX_BODY_BYTES;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_BODY_BYTES) throw new Error('HTTP API body limit is invalid');
+  const routeMutationDeadlineMs = options.routeMutationDeadlineMs ?? ROUTE_MUTATION_DEADLINE_MS;
+  if (!Number.isSafeInteger(routeMutationDeadlineMs) || routeMutationDeadlineMs <= 0 || routeMutationDeadlineMs >= SOCKET_TIMEOUT_MS) {
+    throw new Error('HTTP API route mutation deadline is invalid');
+  }
+
+  const jobAdmissionSockets = new WeakMap<Socket, { active: number; originalTimeout: number }>();
+  const beginJobAdmission = (socket: Socket): void => {
+    const current = jobAdmissionSockets.get(socket);
+    if (current !== undefined) {
+      current.active += 1;
+      return;
+    }
+    const originalTimeout = typeof socket.timeout === 'number' ? socket.timeout : 0;
+    jobAdmissionSockets.set(socket, { active: 1, originalTimeout });
+    socket.setTimeout(JOB_ADMISSION_SOCKET_TIMEOUT_MS);
+  };
+  const finishJobAdmission = (socket: Socket): void => {
+    const current = jobAdmissionSockets.get(socket);
+    if (current === undefined) throw new Error('job admission socket timeout state is missing');
+    current.active -= 1;
+    if (current.active > 0) return;
+    jobAdmissionSockets.delete(socket);
+    if (!socket.destroyed) socket.setTimeout(current.originalTimeout);
+  };
+  const hasMutationDeadline = (method: string, path: string): boolean => method === 'POST'
+    && /^\/api\/jobs\/[^/]+\/publish-blocker\/recheck$/u.test(path);
 
   const server = createServer(async (request, response) => {
     const id = requestId();
@@ -601,6 +633,21 @@ export function createHttpServer(options: HttpServerOptions): Server {
       }
       const body = isMutation(method) ? await readBody(request, limit) : null;
       bodyReadSettled = true;
+      const routeAbort = new AbortController();
+      const clientDisconnected = (): void => {
+        if (!response.writableEnded && !routeAbort.signal.aborted) {
+          routeAbort.abort(new Error('HTTP client disconnected before the response completed'));
+        }
+      };
+      request.once('aborted', clientDisconnected);
+      response.once('close', clientDisconnected);
+      const deadline = hasMutationDeadline(method, parsedUrl.pathname)
+        ? setTimeout(() => routeAbort.abort(new HttpTransportError({
+          code: 'REQUEST_DEADLINE_EXCEEDED',
+          status: 504,
+          retryable: true,
+        })), routeMutationDeadlineMs)
+        : undefined;
       const routeContext = {
         request,
         requestId: id,
@@ -609,9 +656,21 @@ export function createHttpServer(options: HttpServerOptions): Server {
         query: parsedUrl.query,
         headers: request.headers,
         body,
+        signal: routeAbort.signal,
       } satisfies ApiRouteContext;
       const apiRequest = parsedUrl.pathname.startsWith(API_PREFIX);
-      const result = apiRequest ? await options.routeHandler(routeContext) : null;
+      const longJobAdmission = method === 'POST' && parsedUrl.pathname === '/api/jobs';
+      if (longJobAdmission) beginJobAdmission(request.socket);
+      let result;
+      try {
+        result = apiRequest ? await options.routeHandler(routeContext) : null;
+        routeAbort.signal.throwIfAborted();
+      } finally {
+        if (deadline !== undefined) clearTimeout(deadline);
+        request.off('aborted', clientDisconnected);
+        response.off('close', clientDisconnected);
+        if (longJobAdmission) finishJobAdmission(request.socket);
+      }
       if (result === null || result === undefined) {
         if (!apiRequest && (method === 'GET' || method === 'HEAD') && options.staticUi !== undefined) {
           const asset = await options.staticUi.resolve(parsedUrl.pathname);

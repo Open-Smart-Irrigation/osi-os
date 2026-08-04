@@ -8,6 +8,7 @@ import { OwnershipStore } from '../../api/src/ownership.js';
 import type { AcceptedPreflightResult, PreflightRequest, PreflightResult } from '../../api/src/preflight.js';
 import { BuilderStore } from '../../api/src/store.js';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
+import { TEST_BUILDER_IDENTITY } from '../helpers/builder-identity.js';
 
 const SHA = 'a'.repeat(40);
 const MANIFEST_SHA = 'b'.repeat(64);
@@ -159,6 +160,7 @@ async function fixture(options: {
     preflight,
     ownership,
     store,
+    builderIdentity: TEST_BUILDER_IDENTITY,
     idFactory: () => `job_enqueue_${++sequence}`,
     now: () => new Date(ACCEPTED_AT),
   } as unknown as EnqueueServiceOptions);
@@ -175,7 +177,7 @@ describe('production enqueue persistence', () => {
     expect(first.job).toMatchObject({ jobId: 'job_enqueue_1', queuePosition: 0, state: 'queued' });
     expect(second.job).toMatchObject({ jobId: 'job_enqueue_2', queuePosition: 1, state: 'queued' });
     expect(target.store.getSourceIdentity('job_enqueue_1')).toMatchObject({
-      sourceRemote: 'origin',
+      sourceRemote: 'ssh://git.example/osi-os',
       sourceRef: 'refs/remotes/origin/main',
       sourceBranch: 'main',
       expectedSha: SHA,

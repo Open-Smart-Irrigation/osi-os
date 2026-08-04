@@ -357,6 +357,40 @@ describe('Task 20 cleanup admission corrections', () => {
     expect(writes.filter((command) => (command as { kind?: string }).kind === 'cleanup-admission-rotate')).toHaveLength(0);
   });
 
+  it('rotates an inactive unexpired admission when its owner belongs to the previous API version', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-owner-upgrade-')); roots.push(root);
+    const events: string[] = [];
+    const active = { value: false };
+    const { recovery, writes } = fakeRecovery({ root, events, active });
+    await recovery.openAdmissions();
+    const first = await recovery.admitAndStart({
+      jobId: 'job-owner-upgrade',
+      owner: 'api-recovery-old',
+      expiresAt: EXPIRES,
+      snapshot: snapshot('job-owner-upgrade'),
+      at: NOW,
+    });
+    active.value = false;
+
+    const result = await recovery.reconcileAndStart({
+      jobId: 'job-owner-upgrade',
+      admissionId: first.admissionId,
+      owner: 'cleanup-worker',
+      expiresAt: EXPIRES,
+      snapshot: snapshot('job-owner-upgrade'),
+      at: NOW,
+    });
+
+    expect(result).toMatchObject({ rotated: true, started: true });
+    expect(result.admissionId).not.toBe(first.admissionId);
+    expect(events.filter((event) => event.startsWith('stop:'))).toHaveLength(0);
+    expect(writes.filter((command) => (command as { kind?: string }).kind === 'cleanup-admission-rotate'))
+      .toEqual([expect.objectContaining({
+        previousOwner: 'api-recovery-old',
+        owner: 'cleanup-worker',
+      })]);
+  });
+
   it('rotates an inactive unexpired lease as an unexpected exit instead of restarting its old fence', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-correction-inactive-fresh-')); roots.push(root);
     const events: string[] = [];

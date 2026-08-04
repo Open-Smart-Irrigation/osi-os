@@ -101,7 +101,11 @@ function cleanupInProgressInspection(state: CleanupSnapshot['state'] = 'building
   };
 }
 
-function fixture(initial = recoveryJob(), inspection: ApiRecoveryInspection = directInspection()) {
+function fixture(
+  initial = recoveryJob(),
+  inspection: ApiRecoveryInspection = directInspection(),
+  owner: (() => string) | null = () => 'api-recovery-test',
+) {
   let current = structuredClone(initial);
   const store = {
     getRecoveryJob: vi.fn(() => structuredClone(current)),
@@ -202,7 +206,7 @@ function fixture(initial = recoveryJob(), inspection: ApiRecoveryInspection = di
     ownership,
     recovery,
     inspector,
-    owner: () => 'api-recovery-test',
+    ...(owner === null ? {} : { owner }),
   });
   return { service, store, ownership, recovery, inspector, current: () => current, setCurrent: (value: RecoveryJobRecord) => { current = value; } };
 }
@@ -260,6 +264,16 @@ describe('API recovery coordinator', () => {
       snapshot: cleanupSnapshot(),
       at: NOW,
     });
+  });
+
+  it('defaults production cleanup admissions to the cleanup worker owner', async () => {
+    const value = fixture(recoveryJob(), cleanupInspection(), null);
+
+    await expect(value.service.recover({ jobId: JOB_ID, retry: false, at: NOW }))
+      .resolves.toMatchObject({ kind: 'cleanup-pending', jobId: JOB_ID });
+    expect(value.recovery.admitAndStart).toHaveBeenCalledWith(expect.objectContaining({
+      owner: 'cleanup-worker',
+    }));
   });
 
   it('reports an unexpired admitted or claimed fence only after physical inspection confirms progress', async () => {

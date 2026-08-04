@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants as fsConstants, type Stats } from 'node:fs';
-import { open, type FileHandle } from 'node:fs/promises';
+import { open, readdir, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
@@ -26,9 +26,8 @@ const DIRECTORY_FLAGS = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConst
 const FILE_INSPECTION_FLAGS = O_PATH | fsConstants.O_NOFOLLOW | O_CLOEXEC;
 const FILE_READ_FLAGS = fsConstants.O_RDONLY | O_CLOEXEC | O_NOATIME;
 const FINAL_PARENT_MODE = 0o750;
-const FINAL_LEAF_MODE = 0o700;
+const FINAL_LEAF_MODES = [0o700, 0o555] as const;
 const MANAGED_DIRECTORY_MODES = [0o700, 0o750] as const;
-const FILE_MODE = 0o600;
 const MAX_SEGMENT_BYTES = 255;
 const MAX_CHECKSUM_BYTES = TEXT_LIMITS.maxChecksumBytes;
 const MAX_MANIFEST_BYTES = Math.min(JSON_LIMITS.maxEncodedBytes, TEXT_LIMITS.maxManifestBytes);
@@ -185,13 +184,20 @@ function assertDirectory(
   ) return fail('UNSAFE_DIRECTORY', field);
 }
 
-function assertFile(stats: Stats, field: string, ownerUid: number, device: number): void {
+function assertFile(
+  stats: Stats,
+  field: string,
+  ownerUid: number,
+  device: number,
+  expectedMode: number | readonly number[],
+): void {
+  const modes = typeof expectedMode === 'number' ? [expectedMode] : expectedMode;
   if (
     stats.isSymbolicLink()
     || !stats.isFile()
     || stats.uid !== ownerUid
     || stats.dev !== device
-    || modeOf(stats) !== FILE_MODE
+    || !modes.includes(modeOf(stats))
     || stats.nlink !== 1
   ) return fail('UNSAFE_FILE', field);
 }
@@ -205,6 +211,14 @@ async function close(handle: FileHandle | null): Promise<void> {
   await handle.close().catch(() => undefined);
 }
 
+async function assertExactMembership(parent: FileHandle, expected: readonly string[]): Promise<void> {
+  const actual = (await readdir(fdPath(parent))).sort();
+  const canonical = [...expected].sort();
+  if (actual.length !== canonical.length || actual.some((name, index) => name !== canonical[index])) {
+    return fail('UNSAFE_FILE', 'final-directory-membership');
+  }
+}
+
 async function openDirectory(parent: FileHandle, name: string, field: string): Promise<HeldDirectory> {
   const handle = await open(fdPath(parent, safeSegment(name, field)), DIRECTORY_FLAGS);
   try {
@@ -216,17 +230,24 @@ async function openDirectory(parent: FileHandle, name: string, field: string): P
   }
 }
 
-async function openFile(parent: FileHandle, name: string, field: string, ownerUid: number, device: number): Promise<HeldFile> {
+async function openFile(
+  parent: FileHandle,
+  name: string,
+  field: string,
+  ownerUid: number,
+  device: number,
+  expectedMode: number | readonly number[],
+): Promise<HeldFile> {
   const safeName = safeSegment(name, field);
   let inspected: FileHandle | null = null;
   let readable: FileHandle | null = null;
   try {
     inspected = await open(fdPath(parent, safeName), FILE_INSPECTION_FLAGS);
     const inspectedStats = await inspected.stat();
-    assertFile(inspectedStats, field, ownerUid, device);
+    assertFile(inspectedStats, field, ownerUid, device, expectedMode);
     readable = await open(fdPath(inspected), FILE_READ_FLAGS);
     const readableStats = await readable.stat();
-    assertFile(readableStats, field, ownerUid, device);
+    assertFile(readableStats, field, ownerUid, device, expectedMode);
     if (!sameStats(inspectedStats, readableStats)) return fail('FILE_CHANGED', field);
     const result = { path: field, name: safeName, handle: readable, stats: readableStats };
     readable = null;
@@ -266,10 +287,13 @@ async function hashFile(
   expectedSize: number | null,
   expectedMtime: string | null,
   maxBytes: number | null,
+  signal?: AbortSignal,
 ): Promise<Readonly<{ sha256: string; size: number; mtime: string }>> {
+  signal?.throwIfAborted();
   const before = await file.handle.stat();
+  signal?.throwIfAborted();
   if (!sameStats(file.stats, before)) return fail('FILE_CHANGED', file.path);
-  assertFile(before, file.path, before.uid, before.dev);
+  assertFile(before, file.path, before.uid, before.dev, modeOf(file.stats));
   if (expectedSize !== null && before.size !== expectedSize) return fail('FILE_CHANGED', file.path);
   if (expectedMtime !== null && before.mtime.toISOString() !== expectedMtime) return fail('FILE_CHANGED', file.path);
   if (maxBytes !== null && before.size > maxBytes) return fail('FILE_CHANGED', file.path);
@@ -277,12 +301,15 @@ async function hashFile(
   const buffer = Buffer.allocUnsafe(1024 * 1024);
   let position = 0;
   while (position < before.size) {
+    signal?.throwIfAborted();
     const result = await file.handle.read(buffer, 0, Math.min(buffer.length, before.size - position), position);
+    signal?.throwIfAborted();
     if (result.bytesRead <= 0) return fail('FILE_CHANGED', file.path);
     digest.update(buffer.subarray(0, result.bytesRead));
     position += result.bytesRead;
   }
   const after = await file.handle.stat();
+  signal?.throwIfAborted();
   if (!sameStats(before, after)) return fail('FILE_CHANGED', file.path);
   if (digest.digest('hex') !== expectedSha256) return fail('HASH_MISMATCH', file.path);
   return { sha256: expectedSha256, size: after.size, mtime: after.mtime.toISOString() };
@@ -295,23 +322,29 @@ async function revalidateChain(
   file: HeldFile,
   ownerUid: number,
   device: number,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   const currentRoot = await root.stat();
+  signal?.throwIfAborted();
   if (!sameRootIdentity(rootStats, currentRoot)) return fail('AUTHORITY_DRIFT', 'root');
   let current = root;
   const opened: FileHandle[] = [];
   try {
     for (const directory of directories) {
+      signal?.throwIfAborted();
       const name = directory.parts[directory.parts.length - 1]!;
       const child = await open(fdPath(current, safeSegment(name, directory.path)), DIRECTORY_FLAGS);
       opened.push(child);
       const stats = await child.stat();
+      signal?.throwIfAborted();
       assertDirectory(stats, directory.path, ownerUid, device, directory.mode);
       if (!sameStats(directory.stats, stats)) return fail('FILE_CHANGED', directory.path);
       current = child;
     }
-    const checked = await openFile(current, file.name, file.path, ownerUid, device);
+    const checked = await openFile(current, file.name, file.path, ownerUid, device, modeOf(file.stats));
     try {
+      signal?.throwIfAborted();
       if (!sameStats(file.stats, checked.stats)) return fail('FILE_CHANGED', file.path);
     } finally {
       await close(checked.handle);
@@ -327,10 +360,12 @@ async function assertStagingAbsent(
   ownerUid: number,
   device: number,
   betweenPasses?: () => void | Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
   let firstBuilder: HeldDirectory | null | undefined;
   let firstStaging: HeldDirectory | null | undefined;
   for (let pass = 0; pass < 2; pass += 1) {
+    signal?.throwIfAborted();
     const builder = await openOptionalDirectory(root, '.osi-image-builder', '.osi-image-builder', ownerUid, device);
     try {
       if (pass === 0) firstBuilder = builder;
@@ -363,7 +398,10 @@ async function assertStagingAbsent(
     } finally {
       await close(builder?.handle ?? null);
     }
-    if (pass === 0) await betweenPasses?.();
+    if (pass === 0) {
+      await betweenPasses?.();
+      signal?.throwIfAborted();
+    }
   }
 }
 
@@ -431,11 +469,13 @@ export function createPublishBlockerFinalVerifier(
 ): FinalDestinationVerifier {
   return Object.freeze({
     async verify(input: FinalDestinationVerificationInput): Promise<FinalDestinationEvidence> {
+      input.signal?.throwIfAborted();
       if (process.platform !== 'linux') return fail('UNSUPPORTED_PLATFORM', 'linux');
       const binding = bindingFor(input.job);
       if (input.finalDirectory !== binding.finalDirectory || input.finalPath !== binding.finalPath) return fail('INVALID_BINDING', 'input');
       try {
         return await withApprovedRootSnapshot(registry, input.job.rootId, async ({ snapshot }) => {
+          input.signal?.throwIfAborted();
           const root = await open(snapshot.path, DIRECTORY_FLAGS);
           let rootStats: Stats;
           const directories: HeldDirectory[] = [];
@@ -448,7 +488,7 @@ export function createPublishBlockerFinalVerifier(
             const finalParts = safeRelative(binding.finalDirectory, 'final-directory');
             for (const [index, part] of finalParts.entries()) {
               const path = finalParts.slice(0, index + 1).join('/');
-              const expectedMode = index === finalParts.length - 1 ? FINAL_LEAF_MODE : FINAL_PARENT_MODE;
+              const expectedMode = index === finalParts.length - 1 ? FINAL_LEAF_MODES : FINAL_PARENT_MODE;
               const directory = await openDirectory(current, part, path);
               try {
                 assertDirectory(directory.stats, path, ownerUid, rootStats.dev, expectedMode);
@@ -456,36 +496,57 @@ export function createPublishBlockerFinalVerifier(
                 await close(directory.handle);
                 throw error;
               }
-              directories.push({ ...directory, parts: path.split('/'), mode: expectedMode });
+              directories.push({ ...directory, parts: path.split('/'), mode: modeOf(directory.stats) });
               current = directory.handle;
             }
             const finalDirectory = directories[directories.length - 1];
             if (finalDirectory === undefined) return fail('INVALID_BINDING', 'final-directory');
-            const artifact = await openFile(finalDirectory.handle, binding.finalPath.slice(binding.finalDirectory.length + 1), binding.finalPath, ownerUid, rootStats.dev);
+            const trackedFileMode = finalDirectory.mode === 0o700 ? [0o600, 0o444] as const : 0o444;
+            const artifactName = binding.finalPath.slice(binding.finalDirectory.length + 1);
+            const trackedNames = [artifactName, 'sha256sums', 'build-manifest.json', 'verification.json'] as const;
+            await assertExactMembership(finalDirectory.handle, trackedNames);
+            const artifact = await openFile(finalDirectory.handle, artifactName, binding.finalPath, ownerUid, rootStats.dev, trackedFileMode);
             files.push(artifact);
-            const checksum = await openFile(finalDirectory.handle, 'sha256sums', `${binding.finalDirectory}/sha256sums`, ownerUid, rootStats.dev);
+            const checksum = await openFile(finalDirectory.handle, 'sha256sums', `${binding.finalDirectory}/sha256sums`, ownerUid, rootStats.dev, trackedFileMode);
             files.push(checksum);
-            const manifest = await openFile(finalDirectory.handle, 'build-manifest.json', `${binding.finalDirectory}/build-manifest.json`, ownerUid, rootStats.dev);
+            const manifest = await openFile(finalDirectory.handle, 'build-manifest.json', `${binding.finalDirectory}/build-manifest.json`, ownerUid, rootStats.dev, trackedFileMode);
             files.push(manifest);
-            const verification = await openFile(finalDirectory.handle, 'verification.json', `${binding.finalDirectory}/verification.json`, ownerUid, rootStats.dev);
+            const verification = await openFile(finalDirectory.handle, 'verification.json', `${binding.finalDirectory}/verification.json`, ownerUid, rootStats.dev, trackedFileMode);
             files.push(verification);
             const identities = new Set(files.map((file) => `${file.stats.dev}:${file.stats.ino}`));
             if (identities.size !== files.length) return fail('UNSAFE_FILE', 'distinct-files');
-            const artifactEvidence = await hashFile(artifact, input.job.artifactSha256!, input.job.artifactSize!, input.job.artifactMtime, null);
-            const checksumEvidence = await hashFile(checksum, input.job.checksumSha256!, null, null, MAX_CHECKSUM_BYTES);
-            const manifestEvidence = await hashFile(manifest, input.job.manifestSha256!, null, null, MAX_MANIFEST_BYTES);
-            const verificationEvidence = await hashFile(verification, input.job.verificationSha256!, null, null, MAX_MANIFEST_BYTES);
+            const artifactEvidence = await hashFile(artifact, input.job.artifactSha256!, input.job.artifactSize!, input.job.artifactMtime, null, input.signal);
+            const checksumEvidence = await hashFile(checksum, input.job.checksumSha256!, null, null, MAX_CHECKSUM_BYTES, input.signal);
+            const manifestEvidence = await hashFile(manifest, input.job.manifestSha256!, null, null, MAX_MANIFEST_BYTES, input.signal);
+            const verificationEvidence = await hashFile(verification, input.job.verificationSha256!, null, null, MAX_MANIFEST_BYTES, input.signal);
             await options.beforeFinalRevalidation?.();
-            for (const file of files) await revalidateChain(root, rootStats, directories, file, ownerUid, rootStats.dev);
+            input.signal?.throwIfAborted();
+            for (const file of files) await revalidateChain(root, rootStats, directories, file, ownerUid, rootStats.dev, input.signal);
             await options.beforeAuthorityRecheck?.();
+            input.signal?.throwIfAborted();
             await withApprovedRootSnapshot(registry, input.job.rootId, async ({ snapshot: current }) => {
+              input.signal?.throwIfAborted();
               if (current.path !== snapshot.path || current.device !== snapshot.device || current.inode !== snapshot.inode) return fail('AUTHORITY_DRIFT', 'root');
             });
-            for (const file of files) await revalidateChain(root, rootStats, directories, file, ownerUid, rootStats.dev);
+            input.signal?.throwIfAborted();
+            for (const file of files) await revalidateChain(root, rootStats, directories, file, ownerUid, rootStats.dev, input.signal);
+            await assertExactMembership(finalDirectory.handle, trackedNames);
+            input.signal?.throwIfAborted();
             await options.afterAuthorityRecheck?.();
+            input.signal?.throwIfAborted();
             await options.beforeStagingRecheck?.();
-            await assertStagingAbsent(root, input.job.jobId, ownerUid, rootStats.dev, options.betweenStagingPasses);
+            input.signal?.throwIfAborted();
+            await assertStagingAbsent(root, input.job.jobId, ownerUid, rootStats.dev, options.betweenStagingPasses, input.signal);
+            input.signal?.throwIfAborted();
+            await withApprovedRootSnapshot(registry, input.job.rootId, async ({ snapshot: current }) => {
+              input.signal?.throwIfAborted();
+              if (current.path !== snapshot.path || current.device !== snapshot.device || current.inode !== snapshot.inode) return fail('AUTHORITY_DRIFT', 'root');
+            });
+            for (const file of files) await revalidateChain(root, rootStats, directories, file, ownerUid, rootStats.dev, input.signal);
+            await assertExactMembership(finalDirectory.handle, trackedNames);
+            input.signal?.throwIfAborted();
             return Object.freeze({
+              sealStatus: finalDirectory.mode === 0o555 ? 'sealed' as const : 'in_progress' as const,
               finalDirectory: binding.finalDirectory,
               finalPath: binding.finalPath,
               artifact: Object.freeze({ sha256: artifactEvidence.sha256, size: artifactEvidence.size, mtime: artifactEvidence.mtime }),
@@ -501,6 +562,7 @@ export function createPublishBlockerFinalVerifier(
           }
         });
       } catch (error) {
+        if (input.signal?.aborted) throw input.signal.reason;
         if (error instanceof PublishBlockerFinalVerifierError) throw error;
         if (error instanceof ConfigAuthorityError) throw new PublishBlockerFinalVerifierError('AUTHORITY_DRIFT', 'approved-root');
         throw new PublishBlockerFinalVerifierError('FILESYSTEM', 'descriptor-verification');

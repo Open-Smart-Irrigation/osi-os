@@ -8,6 +8,8 @@ import { promisify } from 'node:util';
 import { validateBuilderLock, type BuilderLock } from '../domain/builder-lock.js';
 import { BUILDER_LOCK_OPTIONAL_KEYS, BUILDER_LOCK_REQUIRED_KEYS } from '../domain/builder-lock.js';
 import { TRUSTED_OPERATION_IDS } from '../domain/types.js';
+import { DEPENDENCY_EGRESS_OPERATION_HOSTS } from '../domain/dependency-egress-identity.js';
+export { DEPENDENCY_EGRESS_OPERATION_HOSTS } from '../domain/dependency-egress-identity.js';
 import { assertSupportedPackageParity, BuilderSourceError, supportedPackageTokens } from './derive-dockerfile.js';
 import { validateRustToolchain, type RustToolchainConfig } from './validate-rust-toolchain.js';
 
@@ -21,11 +23,26 @@ const IMAGE_ID = /^sha256:[0-9a-f]{64}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const DOCKER_REPOSITORY = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9]\d{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/u;
-const TRUSTED_OPERATION_TOOL_SHA256 = 'c0dece51babce3b3e5707603e6afaaa734859f61705ebe2ec129f854eb24ced3';
+const TRUSTED_OPERATION_TOOL_SHA256 = '950fcbe2149c9d8ae53ed1bebd621d5c6a63f3e291274682bec8b25e89bcb3b5';
 const TRUSTED_MODULE_PROBE_SHA256 = 'da68440c7c0662c9278ed656efe9861cda78cc190643320562066bca2d4ba5e7';
+const TRUSTED_EXECUTION_GUARD_SHA256 = '9d484b8a438ddcab8d35ebf85e4a0cf03cfe167f4919c3057071135ce16c3fe6';
+export const TRUSTED_DEPENDENCY_PROXY_SHA256 = '84832d32bc6c0028218f58ebe392678361fcd2e315dad5af4dbad3b847502ac5';
+const TRUSTED_PROXY_CREDENTIAL_ENV_SHA256 = 'ce6a981786811b9d9f5cc1d86b8b6664900ac29748b6dd9c0a543809d550e684';
+const TRUSTED_WGET_CONFIG_SHA256 = '21610fb0e4cc78052b4e5a4582300bea2affeaf2f1501d14662a8137cdb443aa';
+const PINNED_NODE_VERSION = '22.14.0';
+const PINNED_NODE_TARBALL_SHA256 = '69b09dba5c8dcb05c4e4273a4340db1005abeafe3927efda2bc5b249e80437ec';
+const PINNED_NPM_VERSION = '11.10.1';
+const PINNED_NPM_TARBALL_SHA256 = '2190945151842685142f5085b3c5dd356b1021ab390d7d02c2bb2c580f0c4840';
 export const TRUSTED_OPERATION_TOOL_RELATIVE_PATH = 'operations/osi-image-builder-tool.js';
 export const TRUSTED_MODULE_PROBE_RELATIVE_PATH =
   'operations/osi-image-builder-module-probe.js';
+export const TRUSTED_EXECUTION_GUARD_RELATIVE_PATH =
+  'operations/osi-image-builder-exec-guard.js';
+export const TRUSTED_DEPENDENCY_PROXY_RELATIVE_PATH =
+  'operations/osi-dependency-egress-proxy.cjs';
+export const TRUSTED_PROXY_CREDENTIAL_ENV_RELATIVE_PATH =
+  'operations/osi-proxy-credential-environment.cjs';
+export const TRUSTED_WGET_CONFIG_RELATIVE_PATH = 'operations/osi-wgetrc';
 export const READ_ONLY_OPERATION_IDS = Object.freeze(['verify-image'] as const);
 export const OFFLINE_OPERATION_IDS = Object.freeze([
   'activate-target',
@@ -34,9 +51,21 @@ export const OFFLINE_OPERATION_IDS = Object.freeze([
   'install-feeds',
   'resolve-config',
   'verify-image',
+  'verify-profile-parity',
+  'verify-chameleon',
+  'verify-db-schema',
+  'verify-sync-flow',
+  'verify-strega',
+  'verify-communication',
+  'check-mqtt-topics',
+  'frontend-test',
+  'frontend-typecheck',
+  'frontend-build',
+  'mirror-gui',
 ] as const);
 export const RUST_TARGETS = Object.freeze(['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf'] as const);
 const TARGET_PACKAGE_NAMES = Object.freeze(['musl:arm64', 'musl-dev:arm64', 'musl:armhf', 'musl-dev:armhf'] as const);
+const BUILDER_VALIDATION_PACKAGE_NAMES = Object.freeze(['sqlite3'] as const);
 
 export type BuilderValidationErrorCode = 'BUILDER_SOURCE_DRIFT' | 'BUILDER_DOCKERFILE_INVALID' | 'BUILDER_VALIDATION_EVIDENCE_INVALID' | 'BUILDER_LOCK_INVALID' | 'BUILDER_IMAGE_DIGEST_INVALID' | 'BUILDER_RUNTIME_ENV_INVALID' | 'RUST_BOOTSTRAP_UNAVAILABLE' | 'DOCKER_UNAVAILABLE';
 
@@ -59,11 +88,13 @@ export interface BuilderValidationEvidence {
   readonly polly: string;
   readonly zstd: string;
   readonly node: string;
+  readonly npm: string;
   readonly packages: readonly string[];
   readonly packageVersions: Readonly<Record<string, string>>;
   readonly commands: readonly BuilderEvidenceCommand[];
   readonly rustTargets: readonly RustArtifactEvidence[];
   readonly operationTool: Readonly<{ readonly path: '/opt/osi-image-builder/operations/osi-image-builder-tool.js'; readonly owner: '0:0'; readonly mode: '0555'; readonly user: 'buildbot'; readonly result: 'passed' }>;
+  readonly executionGuard: Readonly<{ readonly path: '/opt/osi-image-builder/operations/osi-image-builder-exec-guard.js'; readonly owner: '0:0'; readonly mode: '0555'; readonly user: 'buildbot'; readonly result: 'passed' }>;
   readonly executionSelfTest: 'passed';
 }
 
@@ -134,13 +165,76 @@ function exactKeys(value: object, expected: readonly string[]): boolean {
   return JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expected].sort());
 }
 
+function dockerfileLogicalInstructions(contents: string): readonly string[] {
+  const uncommentedPhysicalLines = contents
+    .split(/\r?\n/u)
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .join('\n');
+  return uncommentedPhysicalLines
+    .replace(/\\\r?\n[ \t]*/gu, ' ')
+    .split(/\r?\n/u)
+    .map((instruction) => instruction.trim());
+}
+
+function normalizedDockerfileInstructions(contents: string): readonly string[] {
+  return dockerfileLogicalInstructions(contents)
+    .filter((instruction) => instruction.length > 0)
+    .map((instruction) => instruction.replace(/[ \t]+/gu, ' ').trim());
+}
+
+const CANONICAL_POST_NPM_INSTRUCTIONS = Object.freeze([
+  'COPY --chown=root:root --chmod=0555 builder/operations/osi-image-builder-tool.js /opt/osi-image-builder/operations/osi-image-builder-tool.js',
+  'COPY --chown=root:root --chmod=0555 builder/operations/osi-image-builder-module-probe.js /opt/osi-image-builder/operations/osi-image-builder-module-probe.js',
+  'COPY --chown=root:root --chmod=0555 builder/operations/osi-image-builder-exec-guard.js /opt/osi-image-builder/operations/osi-image-builder-exec-guard.js',
+  'COPY --chown=root:root --chmod=0555 builder/operations/osi-dependency-egress-proxy.cjs /opt/osi-image-builder/operations/osi-dependency-egress-proxy.cjs',
+  'COPY --chown=root:root --chmod=0555 builder/operations/osi-proxy-credential-environment.cjs /opt/osi-image-builder/operations/osi-proxy-credential-environment.cjs',
+  'COPY --chown=root:root --chmod=0444 builder/operations/osi-wgetrc /opt/osi-image-builder/operations/osi-wgetrc',
+  `RUN test -f /opt/osi-image-builder/operations/osi-image-builder-tool.js && test -f /opt/osi-image-builder/operations/osi-image-builder-module-probe.js && test -f /opt/osi-image-builder/operations/osi-image-builder-exec-guard.js && test -f /opt/osi-image-builder/operations/osi-dependency-egress-proxy.cjs && test -f /opt/osi-image-builder/operations/osi-proxy-credential-environment.cjs && test -f /opt/osi-image-builder/operations/osi-wgetrc && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-image-builder-tool.js)" = '0:0' && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-image-builder-module-probe.js)" = '0:0' && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-image-builder-exec-guard.js)" = '0:0' && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-dependency-egress-proxy.cjs)" = '0:0' && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-proxy-credential-environment.cjs)" = '0:0' && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-wgetrc)" = '0:0' && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-tool.js)" = '555' && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-module-probe.js)" = '555' && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-exec-guard.js)" = '555' && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-dependency-egress-proxy.cjs)" = '555' && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-proxy-credential-environment.cjs)" = '555' && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-wgetrc)" = '444'`,
+  'RUN useradd --create-home --shell /bin/bash --user-group buildbot && chown --recursive buildbot:buildbot /workdir',
+  'USER buildbot',
+] as const);
+
+function npmInstallCommands(contents: string): readonly string[] | null {
+  const logicalInstructions = dockerfileLogicalInstructions(contents);
+  const candidates = logicalInstructions.filter((instruction) => instruction.startsWith('RUN ') && instruction.includes('npm-${NPM_VERSION}.tgz'));
+  if (candidates.length !== 1) return null;
+  return candidates[0]!
+    .slice('RUN '.length)
+    .split(/\s+&&\s+/u)
+    .map((command) => command.replace(/[ \t]+/gu, ' ').trim());
+}
+
+function hasPinnedNpmInstallSequence(contents: string): boolean {
+  const commands = npmInstallCommands(contents);
+  const expected = [
+    'curl --fail --silent --show-error --location --retry 3 "https://registry.npmjs.org/npm/-/npm-${NPM_VERSION}.tgz" --output /tmp/npm.tgz',
+    `printf '%s %s\\n' "\${NPM_TARBALL_SHA256}" /tmp/npm.tgz | sha256sum --check --status`,
+    'rm -rf /usr/local/lib/node_modules/npm',
+    'mkdir -p /usr/local/lib/node_modules/npm',
+    'tar --extract --gzip --file /tmp/npm.tgz --strip-components=1 --directory /usr/local/lib/node_modules/npm',
+    'rm -f /tmp/npm.tgz',
+    'npm --version | grep -- "^${NPM_VERSION}$"',
+  ];
+  return commands !== null && JSON.stringify(commands) === JSON.stringify(expected);
+}
+
+function hasCanonicalPostNpmSuffix(contents: string): boolean {
+  const instructions = normalizedDockerfileInstructions(contents);
+  const pinnedIndices = instructions
+    .map((instruction, index) => instruction.startsWith('RUN ') && instruction.includes('npm-${NPM_VERSION}.tgz') ? index : -1)
+    .filter((index) => index >= 0);
+  if (pinnedIndices.length !== 1) return false;
+  return JSON.stringify(instructions.slice(pinnedIndices[0]! + 1)) === JSON.stringify(CANONICAL_POST_NPM_INSTRUCTIONS);
+}
+
 function completeEvidence(evidence: BuilderValidationEvidence, expectedPackages: readonly string[], lock?: BuilderLock): void {
   if (!evidence || evidence.executionSelfTest !== 'passed' || !IMAGE_ID.test(evidence.imageId) || !DIGEST.test(evidence.imageDigest) || /^0+$/u.test(evidence.imageDigest) || evidence.architecture !== 'linux/amd64') throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Builder validation evidence is incomplete or unbound');
   if (!evidence.operationTool || evidence.operationTool.path !== '/opt/osi-image-builder/operations/osi-image-builder-tool.js' || evidence.operationTool.owner !== '0:0' || evidence.operationTool.mode !== '0555' || evidence.operationTool.user !== 'buildbot' || evidence.operationTool.result !== 'passed') throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Trusted operation tool evidence is incomplete');
   if (lock !== undefined && (evidence.imageDigest !== lock.imageDigest || (lock.imageId !== undefined && evidence.imageId !== `sha256:${lock.imageId}`))) throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Builder validation evidence is bound to a different image');
-  if (!/^rustc\s+\d+\.\d+\.\d+/u.test(evidence.rustc) || !/^\d+\.\d+\.\d+/u.test(evidence.llvm) || !/^(?:\d+:)?\d+\.\d+\.\d+/u.test(evidence.polly) || !/^\d+\.\d+/u.test(evidence.zstd) || !/^v22\.\d+\.\d+$/u.test(evidence.node)) throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Toolchain version evidence is not semantic');
-  if (!Array.isArray(evidence.packages) || expectedPackages.some((pkg) => !evidence.packages.includes(pkg))) throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Builder validation evidence omits required packages');
-  const evidencePackageKeys = [...expectedPackages, ...TARGET_PACKAGE_NAMES];
+  if (!evidence.executionGuard || evidence.executionGuard.path !== '/opt/osi-image-builder/operations/osi-image-builder-exec-guard.js' || evidence.executionGuard.owner !== '0:0' || evidence.executionGuard.mode !== '0555' || evidence.executionGuard.user !== 'buildbot' || evidence.executionGuard.result !== 'passed') throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Execution guard evidence is incomplete');
+  if (!/^rustc\s+\d+\.\d+\.\d+/u.test(evidence.rustc) || !/^\d+\.\d+\.\d+/u.test(evidence.llvm) || !/^(?:\d+:)?\d+\.\d+\.\d+/u.test(evidence.polly) || !/^\d+\.\d+/u.test(evidence.zstd) || evidence.node !== `v${PINNED_NODE_VERSION}` || evidence.npm !== PINNED_NPM_VERSION) throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Toolchain version evidence is not the pinned compatible identity');
+  if (!Array.isArray(evidence.packages) || [...expectedPackages, ...BUILDER_VALIDATION_PACKAGE_NAMES].some((pkg) => !evidence.packages.includes(pkg))) throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Builder validation evidence omits required packages');
+  const evidencePackageKeys = [...new Set([...expectedPackages, ...BUILDER_VALIDATION_PACKAGE_NAMES, ...TARGET_PACKAGE_NAMES])];
   if (!evidence.packageVersions || !exactKeys(evidence.packageVersions, evidencePackageKeys) || Object.entries(evidence.packageVersions).some(([name, version]) => !evidencePackageKeys.includes(name) || typeof version !== 'string' || (!/^complete-host-tool-set$/u.test(version) && !/^[0-9][A-Za-z0-9.+:~_-]*$/u.test(version)))) throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Package version evidence is incomplete');
   if (!Array.isArray(evidence.commands) || evidence.commands.length < expectedPackages.length || evidence.commands.some((command) => !exactKeys(command, ['argv', 'exitCode', 'stdoutSha256', 'stderrSha256']) || command.exitCode !== 0 || !Array.isArray(command.argv) || command.argv.length === 0 || !command.argv.every((part: unknown) => typeof part === 'string' && part.length > 0) || !DIGEST.test(command.stdoutSha256) || !DIGEST.test(command.stderrSha256))) throw new BuilderValidationError('BUILDER_VALIDATION_EVIDENCE_INVALID', 'Command evidence is incomplete');
   const commandText = evidence.commands.map((command) => command.argv.join('\u0000')).join('\u0001');
@@ -161,7 +255,7 @@ function dockerfileMetadata(contents: string): BuilderSourceMetadata {
   if (baseName.includes(':')) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Mutable base tags are not accepted');
   if (!/ARG DEBIAN_SNAPSHOT=20260715T000000Z/u.test(contents) || !/snapshot\.debian\.org\/archive\/debian\/\$\{DEBIAN_SNAPSHOT\}/u.test(contents) || /(?:deb|security)\.debian\.org/u.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile package source is not the immutable Debian snapshot');
   if (!/ARG RUST_SOURCE_SHA256=2f4f3142ffb7c8402139cfa0796e24baaac8b9fd3f96b2deec3b94b4045c6a8a/u.test(contents) || !/static\.rust-lang\.org\/dist\/rustc-\$\{RUST_SOURCE_VERSION\}-src\.tar\.gz/u.test(contents) || !/jobs\s*=\s*2/u.test(contents) || !/download-ci-llvm\s*=\s*false/u.test(contents) || !/llvm-config\s*=\s*"\/usr\/bin\/llvm-config"/u.test(contents) || /rustup/iu.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile Rust compiler source is not system-LLVM configured');
-  if (!/^ARG BUILDER_PLATFORM=linux\/amd64\s+FROM\s+--platform=\$\{BUILDER_PLATFORM\}/mu.test(contents) || /^FROM\s+--platform=linux\/amd64/mu.test(contents) || !/ARG NODE_ARCH=linux-x64/u.test(contents) || !/node-v\$\{NODE_VERSION\}-\$\{NODE_ARCH\}\.tar\.xz/u.test(contents) || !/ARG NODE_TARBALL_SHA256=[0-9a-f]{64}/u.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile architecture or Node archive pin is incomplete');
+  if (!/^ARG BUILDER_PLATFORM=linux\/amd64\s+FROM\s+--platform=\$\{BUILDER_PLATFORM\}/mu.test(contents) || /^FROM\s+--platform=linux\/amd64/mu.test(contents) || !/ARG NODE_ARCH=linux-x64/u.test(contents) || !new RegExp(`ARG NODE_VERSION=${PINNED_NODE_VERSION}(?:\\s|$)`, 'u').test(contents) || !/node-v\$\{NODE_VERSION\}-\$\{NODE_ARCH\}\.tar\.xz/u.test(contents) || !contents.includes(`ARG NODE_TARBALL_SHA256=${PINNED_NODE_TARBALL_SHA256}`) || !new RegExp(`ARG NPM_VERSION=${PINNED_NPM_VERSION}(?:\\s|$)`, 'u').test(contents) || !contents.includes(`ARG NPM_TARBALL_SHA256=${PINNED_NPM_TARBALL_SHA256}`) || !hasPinnedNpmInstallSequence(contents) || !hasCanonicalPostNpmSuffix(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile architecture, Node, npm archive pin, or post-install suffix is invalid');
   if (!/^ENV PATH=\/usr\/local\/sbin:\/usr\/local\/bin:\/usr\/sbin:\/usr\/bin:\/sbin:\/bin$/mu.test(contents) || /^ENV\s+(?!PATH=\/usr\/local\/sbin:\/usr\/local\/bin:\/usr\/sbin:\/usr\/bin:\/sbin:\/bin$)/mu.test(contents) || /^(?:ENV|ARG)\s+(?:CARGO_HOME|DEBIAN_FRONTEND|CARGO_BUILD_JOBS|RUST_TARGETS)=/mu.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile runtime environment contains build-only values');
   const node = contents.match(NODE_VERSION)?.[1];
   const llvmMajor = Number(contents.match(/LLVM_MAJOR=(\d+)/u)?.[1] ?? contents.match(POLLY_PACKAGE)?.[1] ?? '0');
@@ -173,21 +267,33 @@ function dockerfileMetadata(contents: string): BuilderSourceMetadata {
   if (!rust.ok || /rust-ci-llvm/iu.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile Rust LLVM configuration is unsupported');
   const packages = supportedPackageTokens(contents);
   const packageSet = ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', `libpolly-${llvmMajor}-dev`, 'libzstd-dev'] as const;
-  if (!packages.includes('gcc-14') || !packages.includes('g++-14') || !packages.includes('clang') || !packages.includes('git') || !/apt-get download "musl:arm64=\$\{MUSL_VERSION\}" "musl-dev:arm64=\$\{MUSL_VERSION\}" "musl:armhf=\$\{MUSL_VERSION\}" "musl-dev:armhf=\$\{MUSL_VERSION\}"/u.test(contents) || !/ARG MUSL_ARM64_SHA256=[0-9a-f]{64}/u.test(contents) || !/ARG MUSL_DEV_ARM64_SHA256=[0-9a-f]{64}/u.test(contents) || !/ARG MUSL_ARMHF_SHA256=[0-9a-f]{64}/u.test(contents) || !/ARG MUSL_DEV_ARMHF_SHA256=[0-9a-f]{64}/u.test(contents) || !/musl-libdir\s*=\s*"\/opt\/target-sysroots\/aarch64\/usr\/lib\/aarch64-linux-musl"/u.test(contents) || !/musl-libdir\s*=\s*"\/opt\/target-sysroots\/armv7\/usr\/lib\/arm-linux-musleabihf"/u.test(contents) || !/--sysroot=\/opt\/target-sysroots\/aarch64/u.test(contents) || !/--sysroot=\/opt\/target-sysroots\/armv7/u.test(contents) || !/\/opt\/target-sysroots\/aarch64\/usr\/include\/aarch64-linux-musl/u.test(contents) || !/\/opt\/target-sysroots\/armv7\/usr\/include\/arm-linux-musleabihf/u.test(contents) || /__clang_major__=0/u.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile lacks complete target musl toolchains');
+  if (!packages.includes('gcc-14') || !packages.includes('g++-14') || !packages.includes('clang') || !packages.includes('git') || !packages.includes('sqlite3') || !/apt-get download "musl:arm64=\$\{MUSL_VERSION\}" "musl-dev:arm64=\$\{MUSL_VERSION\}" "musl:armhf=\$\{MUSL_VERSION\}" "musl-dev:armhf=\$\{MUSL_VERSION\}"/u.test(contents) || !/ARG MUSL_ARM64_SHA256=[0-9a-f]{64}/u.test(contents) || !/ARG MUSL_DEV_ARM64_SHA256=[0-9a-f]{64}/u.test(contents) || !/ARG MUSL_ARMHF_SHA256=[0-9a-f]{64}/u.test(contents) || !/ARG MUSL_DEV_ARMHF_SHA256=[0-9a-f]{64}/u.test(contents) || !/musl-libdir\s*=\s*"\/opt\/target-sysroots\/aarch64\/usr\/lib\/aarch64-linux-musl"/u.test(contents) || !/musl-libdir\s*=\s*"\/opt\/target-sysroots\/armv7\/usr\/lib\/arm-linux-musleabihf"/u.test(contents) || !/--sysroot=\/opt\/target-sysroots\/aarch64/u.test(contents) || !/--sysroot=\/opt\/target-sysroots\/armv7/u.test(contents) || !/\/opt\/target-sysroots\/aarch64\/usr\/include\/aarch64-linux-musl/u.test(contents) || !/\/opt\/target-sysroots\/armv7\/usr\/include\/arm-linux-musleabihf/u.test(contents) || /__clang_major__=0/u.test(contents)) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile lacks complete target musl toolchains');
   if (
     !/^COPY --chown=root:root --chmod=0555 builder\/operations\/osi-image-builder-tool\.js \/opt\/osi-image-builder\/operations\/osi-image-builder-tool\.js$/mu.test(contents)
     || !/^COPY --chown=root:root --chmod=0555 builder\/operations\/osi-image-builder-module-probe\.js \/opt\/osi-image-builder\/operations\/osi-image-builder-module-probe\.js$/mu.test(contents)
+    || !/^COPY --chown=root:root --chmod=0555 builder\/operations\/osi-image-builder-exec-guard\.js \/opt\/osi-image-builder\/operations\/osi-image-builder-exec-guard\.js$/mu.test(contents)
+    || !/^COPY --chown=root:root --chmod=0555 builder\/operations\/osi-dependency-egress-proxy\.cjs \/opt\/osi-image-builder\/operations\/osi-dependency-egress-proxy\.cjs$/mu.test(contents)
+    || !/^COPY --chown=root:root --chmod=0555 builder\/operations\/osi-proxy-credential-environment\.cjs \/opt\/osi-image-builder\/operations\/osi-proxy-credential-environment\.cjs$/mu.test(contents)
+    || !/^COPY --chown=root:root --chmod=0444 builder\/operations\/osi-wgetrc \/opt\/osi-image-builder\/operations\/osi-wgetrc$/mu.test(contents)
     || !/stat -c '%u:%g'.*osi-image-builder-tool\.js.*0:0/u.test(contents)
     || !/stat -c '%u:%g'.*osi-image-builder-module-probe\.js.*0:0/u.test(contents)
+    || !/stat -c '%u:%g'.*osi-image-builder-exec-guard\.js.*0:0/u.test(contents)
+    || !/stat -c '%u:%g'.*osi-dependency-egress-proxy\.cjs.*0:0/u.test(contents)
+    || !/stat -c '%u:%g'.*osi-proxy-credential-environment\.cjs.*0:0/u.test(contents)
+    || !/stat -c '%u:%g'.*osi-wgetrc.*0:0/u.test(contents)
     || !/stat -c '%a'.*osi-image-builder-tool\.js.*555/u.test(contents)
     || !/stat -c '%a'.*osi-image-builder-module-probe\.js.*555/u.test(contents)
+    || !/stat -c '%a'.*osi-image-builder-exec-guard\.js.*555/u.test(contents)
+    || !/stat -c '%a'.*osi-dependency-egress-proxy\.cjs.*555/u.test(contents)
+    || !/stat -c '%a'.*osi-proxy-credential-environment\.cjs.*555/u.test(contents)
+    || !/stat -c '%a'.*osi-wgetrc.*444/u.test(contents)
   ) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'Dockerfile does not bake the immutable trusted operation tool and module probe');
   return { baseImage: base[1]!, baseImageDigest: base[2]!, dockerfileSha256: sha256(contents), executionDefinitionSha256: '', packageSet, rustConfig: rust.config, nodeVersion: node, architecture: 'linux/amd64', packageSource: 'snapshot.debian.org/archive/debian/20260715T000000Z' };
 }
 
 export function validateTrustedOperationToolSource(contents: string): void {
   if (!contents.startsWith('#!/usr/bin/env node\n')
-    || !contents.includes("new Set(['copy-feed-config', 'verify-image', 'mirror-gui'])")
+    || !contents.includes("new Set(['activate-target', 'copy-feed-config', 'update-feeds', 'verify-image', 'mirror-gui'])")
     || !contents.includes('args.length !== 1')
     || !contents.includes('feedSource')
     || !contents.includes('guiSource')
@@ -201,6 +307,16 @@ export function validateTrustedOperationToolSource(contents: string): void {
     || !contents.includes('for (let packageIndex = 0; packageIndex < NODE_MODULES.length; packageIndex += 1)')
     || !contents.includes('const [packageName, specifier] = NODE_MODULES[packageIndex];')
     || !contents.includes('const execution = spawn(dependencies.nodeBinary, args, {')
+    || !contents.includes("const FORWARDED_SIGNALS = Object.freeze(['SIGTERM', 'SIGINT', 'SIGHUP']);")
+    || !contents.includes('signalSource.kill(-child.pid, signal)')
+    || !contents.includes('finally { signalForwarder.close(); }')
+    || !contents.includes('detached: true')
+    || !contents.includes("const UPDATE_FEEDS_PATH = '/proc/self/fd/3/scripts/feeds';")
+    || !contents.includes("const UPDATE_FEEDS_TOPDIR = '/proc/self/fd/3';")
+    || !contents.includes("stdio: ['inherit', 'inherit', 'inherit', activeConfig.directory]")
+    || !contents.includes('fstatSync(activeConfig.directory)')
+    || !contents.includes('assertNamedOpenWrtDirectory(activeConfig)')
+    || !contents.includes("throw new AggregateError(anomalies, 'active OpenWrt config restoration encountered anomalies')")
     || !contents.includes("'--package-index',")
     || !contents.includes('String(packageIndex)')
     || !contents.includes('timeout: MODULE_PROBE_TIMEOUT_MS')
@@ -229,6 +345,72 @@ export function validateTrustedOperationToolSource(contents: string): void {
   if (sha256(contents) !== TRUSTED_OPERATION_TOOL_SHA256) {
     throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted operation tool source digest changed');
   }
+}
+
+export function validateTrustedExecutionGuardSource(contents: string): void {
+  if (!contents.startsWith('#!/usr/bin/env node\n')
+    || !contents.includes("const WORKTREE = '/workdir';")
+    || !contents.includes("const TOOL = '/opt/osi-image-builder/operations/osi-image-builder-tool.js';")
+    || !contents.includes("const PROXY_CREDENTIAL_PATH = '/run/osi-image-builder/proxy-credential';")
+    || !contents.includes("createRequire(import.meta.url)('./osi-proxy-credential-environment.cjs')")
+    || !contents.includes('authenticatedProxyEnvironment(process.env, readProxyCredential)')
+    || !contents.includes("readFileSync(path, 'utf8')")
+    || !contents.includes('(stats.mode & 0o777) !== 0o400')
+    || !contents.includes("lstatSync(WORKTREE, { bigint: true })")
+    || !contents.includes('stats.dev !== identity.workspaceDev')
+    || !contents.includes('stats.ino !== identity.workspaceIno')
+    || !contents.includes('const LINK_SPECS = Object.freeze([')
+    || !contents.includes('readlinkSync(path) !== expected')
+    || !contents.includes('spawn(parsed.operationArgv[0], parsed.operationArgv.slice(1)')
+    || !contents.includes('shell: false')
+    || !contents.includes("stdio: 'inherit'")
+    || !contents.includes("process.cwd() !== parsed.workingDirectory")
+    || !contents.includes("import { constants as osConstants } from 'node:os';")
+    || !contents.includes("const FORWARDED_SIGNALS = Object.freeze(['SIGTERM', 'SIGINT', 'SIGHUP']);")
+    || !contents.includes('process.on(signal, listener)')
+    || !contents.includes('process.off(name, listener)')
+    || !contents.includes('process.kill(-child.pid, signal)')
+    || !contents.includes('detached: true')
+    || !contents.includes("child.once('close', (status, signal) =>")
+    || !contents.includes('process.exitCode = signalExitCode(child.requestedSignal)')
+    || !contents.includes('const signalNumber = osConstants.signals[signal];')
+    || !contents.includes('Number.isInteger(signalNumber)')
+    || !contents.includes('128 + signalNumber : 255')
+    || contents.includes('exec(')) {
+    throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'execution guard is not a fixed descriptor identity and link attestation wrapper');
+  }
+  if (sha256(contents) !== TRUSTED_EXECUTION_GUARD_SHA256) {
+    throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'execution guard source digest changed');
+  }
+}
+
+export function validateTrustedDependencyProxySource(contents: string): void {
+  if (
+    !contents.startsWith("'use strict';\n")
+    || !contents.includes("const { BlockList, isIP } = require('node:net');")
+    || !contents.includes("const { timingSafeEqual } = require('node:crypto');")
+    || !contents.includes('function parseTlsClientHelloServerName(value)')
+    || !contents.includes('function createDependencyProxyServer(options)')
+    || !contents.includes('validProxyAuthorization')
+    || !contents.includes('resolveDependencyDestination')
+    || sha256(contents) !== TRUSTED_DEPENDENCY_PROXY_SHA256
+  ) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted dependency proxy source digest changed');
+}
+
+export function validateTrustedProxyCredentialEnvironmentSource(contents: string): void {
+  if (
+    !contents.startsWith("'use strict';\n")
+    || !contents.includes('function authenticatedProxyEnvironment(environment, readCredential)')
+    || !contents.includes("delete child.OSI_EGRESS_PROXY_CREDENTIAL_FILE")
+    || sha256(contents) !== TRUSTED_PROXY_CREDENTIAL_ENV_SHA256
+  ) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted proxy credential environment source digest changed');
+}
+
+export function validateTrustedWgetConfigSource(contents: string): void {
+  if (
+    contents !== 'ca_certificate = /run/osi-image-builder/ca.pem\ncheck_certificate = on\n'
+    || sha256(contents) !== TRUSTED_WGET_CONFIG_SHA256
+  ) throw new BuilderValidationError('BUILDER_DOCKERFILE_INVALID', 'trusted wget CA configuration source digest changed');
 }
 
 export function validateTrustedModuleProbeSource(contents: string): void {
@@ -417,9 +599,17 @@ export function validateExecutionDefinition(value: unknown, imageTemplate = '{{i
   const fail = (message: string): never => { throw new BuilderSourceError('BUILDER_DOCKERFILE_INVALID', message); };
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('Execution definition must be an object');
   const record = value as Record<string, unknown>;
-  const expectedTop = ['architecture', 'environment', 'image', 'mount', 'network', 'offlineOperationIds', 'operationIds', 'readOnlyOperationIds', 'runtime', 'schemaVersion', 'security', 'user', 'workdir'];
+  const expectedTop = ['architecture', 'environment', 'image', 'mount', 'network', 'networkPolicy', 'offlineOperationIds', 'operationIds', 'readOnlyOperationIds', 'runtime', 'schemaVersion', 'security', 'user', 'workdir'];
   if (!exactKeys(record, expectedTop)) fail('Execution definition contains unknown or missing top-level fields');
-  if (record.schemaVersion !== 1 || record.runtime !== 'docker' || record.architecture !== 'linux/amd64' || record.user !== '<uid>:<gid>' || record.workdir !== '/workdir' || record.network !== 'bridge') fail('Execution definition runtime contract is invalid');
+  if (record.schemaVersion !== 1 || record.runtime !== 'docker' || record.architecture !== 'linux/amd64' || record.user !== '<uid>:<gid>' || record.workdir !== '/workdir' || record.network !== 'internal-authenticated-proxy') fail('Execution definition runtime contract is invalid');
+  if (JSON.stringify(record.networkPolicy) !== JSON.stringify({
+    offline: 'none',
+    dependencyEgress: 'internal-authenticated-proxy',
+    proxyPort: 3128,
+    allowedPorts: [80, 443],
+    credentialPath: '/run/osi-image-builder/proxy-credential',
+    operationAllowedHosts: DEPENDENCY_EGRESS_OPERATION_HOSTS,
+  })) fail('Execution definition network policy is invalid');
   if (!record.image || typeof record.image !== 'object' || Array.isArray(record.image) || !exactKeys(record.image as object, ['pullPolicy', 'reference']) || (record.image as Record<string, unknown>).pullPolicy !== 'never' || (record.image as Record<string, unknown>).reference !== imageTemplate) fail('Execution definition image contract is invalid');
   const environment = record.environment;
   if (!environment || typeof environment !== 'object' || Array.isArray(environment) || !exactKeys(environment as object, ['CARGO_BUILD_JOBS', 'HOME', 'PATH', 'SOURCE_DATE_EPOCH', 'TZ']) || JSON.stringify(environment) !== JSON.stringify({ HOME: '/workdir/.builder-home', PATH: IMAGE_PATH, CARGO_BUILD_JOBS: '2', TZ: 'UTC', SOURCE_DATE_EPOCH: '<pinned-commit-time>' })) fail('Execution definition environment is invalid');
@@ -510,6 +700,10 @@ export async function validateBuilderSource(options: { readonly dockerfile: stri
     const dockerfileContents = await readFile(options.dockerfile, 'utf8');
     validateTrustedOperationToolSource(await readFile(join(dirname(options.dockerfile), TRUSTED_OPERATION_TOOL_RELATIVE_PATH), 'utf8'));
     validateTrustedModuleProbeSource(await readFile(join(dirname(options.dockerfile), TRUSTED_MODULE_PROBE_RELATIVE_PATH), 'utf8'));
+    validateTrustedExecutionGuardSource(await readFile(join(dirname(options.dockerfile), TRUSTED_EXECUTION_GUARD_RELATIVE_PATH), 'utf8'));
+    validateTrustedDependencyProxySource(await readFile(join(dirname(options.dockerfile), TRUSTED_DEPENDENCY_PROXY_RELATIVE_PATH), 'utf8'));
+    validateTrustedProxyCredentialEnvironmentSource(await readFile(join(dirname(options.dockerfile), TRUSTED_PROXY_CREDENTIAL_ENV_RELATIVE_PATH), 'utf8'));
+    validateTrustedWgetConfigSource(await readFile(join(dirname(options.dockerfile), TRUSTED_WGET_CONFIG_RELATIVE_PATH), 'utf8'));
     const definitionContents = await readFile(options.executionDefinitionPath, 'utf8');
     const metadata = dockerfileMetadata(dockerfileContents);
     validateExecutionDefinition(JSON.parse(definitionContents), '{{imageRepository}}@sha256:{{imageDigest}}');
@@ -610,19 +804,88 @@ test "$(stat -c '%a' "$tool")" = '555'
 test "$(stat -c '%a' "$probe")" = '555'
 node --check "$tool"
 node --check "$probe"
-rm -rf /workdir/openwrt /workdir/web /workdir/feeds /workdir/feeds.conf.default
-mkdir -p /workdir/openwrt /workdir/web/react-gui/build /workdir/feeds/chirpstack-openwrt-feed/apps/node-red/files
-printf '%s\n' 'src-git local ./feeds/chirpstack-openwrt-feed' > /workdir/feeds.conf.default
+guard="$(dirname "$tool")/osi-image-builder-exec-guard.js"
+proxy="$(dirname "$tool")/osi-dependency-egress-proxy.cjs"
+credential_environment="$(dirname "$tool")/osi-proxy-credential-environment.cjs"
+wget_config="$(dirname "$tool")/osi-wgetrc"
+test -f "$guard"
+test -f "$proxy"
+test -f "$credential_environment"
+test -f "$wget_config"
+test "$(stat -c '%u:%g' "$guard")" = '0:0'
+test "$(stat -c '%u:%g' "$proxy")" = '0:0'
+test "$(stat -c '%u:%g' "$credential_environment")" = '0:0'
+test "$(stat -c '%u:%g' "$wget_config")" = '0:0'
+test "$(stat -c '%a' "$guard")" = '555'
+test "$(stat -c '%a' "$proxy")" = '555'
+test "$(stat -c '%a' "$credential_environment")" = '555'
+test "$(stat -c '%a' "$wget_config")" = '444'
+node --check "$guard"
+node --check "$proxy"
+node --check "$credential_environment"
+test "$(cat "$wget_config")" = 'ca_certificate = /run/osi-image-builder/ca.pem
+check_certificate = on'
+rm -rf /workdir/conf /workdir/openwrt /workdir/web /workdir/feeds /workdir/feeds.conf.default
+mkdir -p /workdir/conf/full_raspberrypi_bcm27xx_bcm2709/files /workdir/conf/full_raspberrypi_bcm27xx_bcm2709/patches /workdir/conf/full_raspberrypi_bcm27xx_bcm2712/files /workdir/conf/full_raspberrypi_bcm27xx_bcm2712/patches /workdir/openwrt /workdir/web/react-gui/build /workdir/feeds/chirpstack-openwrt-feed/apps/node-red/files
+printf '%s\\n' 'CONFIG_TARGET_PROFILE="DEVICE_rpi-2"' > /workdir/conf/full_raspberrypi_bcm27xx_bcm2709/.config
+printf '%s\\n' 'CONFIG_TARGET_PROFILE="DEVICE_rpi-5"' > /workdir/conf/full_raspberrypi_bcm27xx_bcm2712/.config
+printf '%s\n' 'src-link chirpstack feeds/chirpstack-openwrt-feed' > /workdir/feeds.conf.default
 printf '%s\n' '<!doctype html>' > /workdir/web/react-gui/build/index.html
+node "$tool" activate-target full_raspberrypi_bcm27xx_bcm2709 >/tmp/osi-operation-tool-self-test.out 2>/tmp/osi-operation-tool-self-test.err
+test ! -s /tmp/osi-operation-tool-self-test.err
+test "$(cat /tmp/osi-operation-tool-self-test.out)" = '{"operation":"activate-target","environment":"full_raspberrypi_bcm27xx_bcm2709"}'
+test "$(readlink /workdir/conf/.config)" = 'full_raspberrypi_bcm27xx_bcm2709/.config'
+test "$(readlink /workdir/conf/files)" = 'full_raspberrypi_bcm27xx_bcm2709/files'
+test "$(readlink /workdir/conf/patches)" = 'full_raspberrypi_bcm27xx_bcm2709/patches'
+test "$(readlink /workdir/openwrt/.config)" = '../conf/.config'
+test "$(readlink /workdir/openwrt/files)" = '../conf/files'
+test "$(readlink /workdir/openwrt/patches)" = '../conf/patches'
+workspace_dev="$(stat -c '%d' /workdir)"
+workspace_ino="$(stat -c '%i' /workdir)"
+node "$guard" "--workspace-dev=$workspace_dev" "--workspace-ino=$workspace_ino" '--active-target-environment=root' '--operation-id=copy-feed-config' '--operation-environment=full_raspberrypi_bcm27xx_bcm2712' '--working-directory=/workdir' -- node "$tool" copy-feed-config >/tmp/osi-execution-guard-self-test.out
+test -s /tmp/osi-execution-guard-self-test.out
+status=0; node "$guard" '--workspace-dev=0' "--workspace-ino=$workspace_ino" '--active-target-environment=root' '--operation-id=copy-feed-config' '--operation-environment=full_raspberrypi_bcm27xx_bcm2712' '--working-directory=/workdir' -- node "$tool" copy-feed-config >/tmp/osi-execution-guard-self-test.out 2>/tmp/osi-execution-guard-self-test.err || status=$?
+test "$status" -eq 126
+test -s /tmp/osi-execution-guard-self-test.err
+rm -f /workdir/conf/.config /workdir/conf/files /workdir/conf/patches /workdir/openwrt/.config /workdir/openwrt/files /workdir/openwrt/patches
+test ! -e /workdir/conf/.config
+test ! -e /workdir/conf/files
+test ! -e /workdir/conf/patches
+test ! -e /workdir/openwrt/.config
+test ! -e /workdir/openwrt/files
+test ! -e /workdir/openwrt/patches
+node "$tool" activate-target full_raspberrypi_bcm27xx_bcm2712 >/tmp/osi-operation-tool-self-test.out 2>/tmp/osi-operation-tool-self-test.err
+test ! -s /tmp/osi-operation-tool-self-test.err
+test "$(cat /tmp/osi-operation-tool-self-test.out)" = '{"operation":"activate-target","environment":"full_raspberrypi_bcm27xx_bcm2712"}'
+test "$(readlink /workdir/conf/.config)" = 'full_raspberrypi_bcm27xx_bcm2712/.config'
+test "$(readlink /workdir/conf/files)" = 'full_raspberrypi_bcm27xx_bcm2712/files'
+test "$(readlink /workdir/conf/patches)" = 'full_raspberrypi_bcm27xx_bcm2712/patches'
+test "$(readlink /workdir/openwrt/.config)" = '../conf/.config'
+test "$(readlink /workdir/openwrt/files)" = '../conf/files'
+test "$(readlink /workdir/openwrt/patches)" = '../conf/patches'
+for link in conf/.config conf/files conf/patches openwrt/.config openwrt/files openwrt/patches; do
+  target="$(readlink "/workdir/$link")"
+  rm "/workdir/$link"
+  ln -s "$target.invalid" "/workdir/$link"
+  status=0; node "$guard" "--workspace-dev=$workspace_dev" "--workspace-ino=$workspace_ino" '--active-target-environment=full_raspberrypi_bcm27xx_bcm2712' '--operation-id=copy-feed-config' '--operation-environment=full_raspberrypi_bcm27xx_bcm2712' '--working-directory=/workdir' -- node "$tool" copy-feed-config >/tmp/osi-execution-guard-self-test.out 2>/tmp/osi-execution-guard-self-test.err || status=$?
+  test "$status" -eq 126
+  test -s /tmp/osi-execution-guard-self-test.err
+  rm "/workdir/$link"
+  ln -s "$target" "/workdir/$link"
+done
 node "$tool" copy-feed-config >/tmp/osi-operation-tool-self-test.out
 test -s /workdir/openwrt/feeds.conf.default
+set -- $(sha256sum /workdir/feeds.conf.default); source_feed_sha="$1"
+set -- $(sha256sum /workdir/openwrt/feeds.conf.default); destination_feed_sha="$1"
+expected_copy_result="$(printf '{\"operation\":\"copy-feed-config\",\"source\":\"feeds.conf.default\",\"destination\":\"openwrt/feeds.conf.default\",\"sha256\":\"%s\",\"sourceSha256\":\"%s\",\"destinationSha256\":\"%s\"}' "$source_feed_sha" "$source_feed_sha" "$destination_feed_sha")"
+test "$(cat /tmp/osi-operation-tool-self-test.out)" = "$expected_copy_result"
 node "$tool" mirror-gui >/tmp/osi-operation-tool-self-test.out
 test -s /workdir/feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/index.html
 rootfs=/workdir/openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx
 node_red="$rootfs/usr/share/node-red"
 mkdir -p /workdir/openwrt/bin/targets/bcm27xx/bcm2712 "$node_red/node_modules"
-printf '%s\\n' 'CONFIG_TARGET_PROFILE="DEVICE_rpi-5"' > /workdir/openwrt/.config
-truncate -s 67108864 /workdir/openwrt/bin/targets/bcm27xx/bcm2712/validation.img
+truncate -s 67108864 /workdir/openwrt/bin/targets/bcm27xx/bcm2712/chirpstack-gateway-os-self-test-full-bcm27xx-bcm2712-rpi-5-squashfs-factory.img.gz
+truncate -s 67108864 /workdir/openwrt/bin/targets/bcm27xx/bcm2712/chirpstack-gateway-os-self-test-full-bcm27xx-bcm2712-rpi-5-squashfs-sysupgrade.img.gz
 third_party='@grpc/grpc-js @chirpstack/chirpstack-api google-protobuf protobufjs'
 relative_helpers='osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-db-helper osi-dendro-helper osi-health-helper osi-history-helper osi-history-sync-helper osi-lib'
 direct_helpers='osi-command-ledger osi-dendro-analytics osi-zone-env osi-history-router osi-journal osi-device-writer osi-uc512-normalize osi-lsn50-normalize'
@@ -701,7 +964,7 @@ node --input-type=commonjs <<'EOF'
 const { createHash } = require('node:crypto');
 const { readFileSync } = require('node:fs');
 const outputPath = '/tmp/osi-operation-tool-self-test.out';
-const imagePath = '/workdir/openwrt/bin/targets/bcm27xx/bcm2712/validation.img';
+const imagePath = '/workdir/openwrt/bin/targets/bcm27xx/bcm2712/chirpstack-gateway-os-self-test-full-bcm27xx-bcm2712-rpi-5-squashfs-factory.img.gz';
 const actual = JSON.parse(readFileSync(outputPath, 'utf8'));
 const thirdParty = ['@grpc/grpc-js', '@chirpstack/chirpstack-api', 'google-protobuf', 'protobufjs'];
 const relativeHelpers = ['osi-chameleon-helper', 'osi-chirpstack-helper', 'osi-cloud-http', 'osi-db-helper', 'osi-dendro-helper', 'osi-health-helper', 'osi-history-helper', 'osi-history-sync-helper', 'osi-lib'];
@@ -709,7 +972,7 @@ const directHelpers = ['osi-command-ledger', 'osi-dendro-analytics', 'osi-zone-e
 const expected = {
   operation: 'verify-image',
   targetId: 'rpi-5',
-  relativePath: 'openwrt/bin/targets/bcm27xx/bcm2712/validation.img',
+  relativePath: 'openwrt/bin/targets/bcm27xx/bcm2712/chirpstack-gateway-os-self-test-full-bcm27xx-bcm2712-rpi-5-squashfs-factory.img.gz',
   size: 67108864,
   sha256: createHash('sha256').update(readFileSync(imagePath)).digest('hex'),
   nodeResolution: [
@@ -722,6 +985,9 @@ if (JSON.stringify(actual) !== JSON.stringify(expected)) {
   throw new Error('verify-image canonical self-test output changed');
 }
 EOF
+pi4_rootfs=/workdir/openwrt/build_dir/target-arm_cortex-a7+neon-vfpv4_musl_eabi/root-bcm27xx
+mkdir -p "$(dirname "$pi4_rootfs")"
+cp -a "$rootfs" "$pi4_rootfs"
 mkdir -p "$node_red/node_modules/round-nine-native" "$node_red/node_modules/round-nine-builtin"
 printf '%s\n' '{"name":"round-nine-native","main":"index.js"}' > "$node_red/node_modules/round-nine-native/package.json"
 printf '%s\n' '{"name":"round-nine-builtin","main":"index.js"}' > "$node_red/node_modules/round-nine-builtin/package.json"
@@ -880,6 +1146,22 @@ EOF
 status=0; node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?
 test "$status" -eq 2
 test ! -e /tmp/osi-module-probe-nested-sqlite-marker.db
+rm -f /workdir/conf/.config /workdir/conf/files /workdir/conf/patches /workdir/openwrt/.config /workdir/openwrt/files /workdir/openwrt/patches
+node "$tool" activate-target full_raspberrypi_bcm27xx_bcm2709 >/tmp/osi-operation-tool-self-test.out
+mkdir -p /workdir/openwrt/bin/targets/bcm27xx/bcm2709
+truncate -s 67108864 /workdir/openwrt/bin/targets/bcm27xx/bcm2709/chirpstack-gateway-os-self-test-full-bcm27xx-bcm2709-rpi-2-squashfs-factory.img.gz
+truncate -s 67108864 /workdir/openwrt/bin/targets/bcm27xx/bcm2709/chirpstack-gateway-os-self-test-full-bcm27xx-bcm2709-rpi-2-squashfs-sysupgrade.img.gz
+node "$tool" verify-image >/tmp/osi-operation-tool-self-test.out
+node --input-type=commonjs <<'EOF'
+const { readFileSync } = require('node:fs');
+const actual = JSON.parse(readFileSync('/tmp/osi-operation-tool-self-test.out', 'utf8'));
+if (
+  actual.targetId !== 'rpi-2'
+  || actual.relativePath !== 'openwrt/bin/targets/bcm27xx/bcm2709/chirpstack-gateway-os-self-test-full-bcm27xx-bcm2709-rpi-2-squashfs-factory.img.gz'
+  || actual.size !== 67108864
+  || actual.nodeResolution.length !== 21
+) throw new Error('verify-image Pi 4 canonical self-test output changed');
+EOF
 rm -rf /workdir/openwrt /workdir/web /workdir/feeds /workdir/feeds.conf.default
 status=0; node "$tool" unknown-operation >/tmp/osi-operation-tool-self-test.out 2>&1 || status=$?; test "$status" -eq 2
 for operation in copy-feed-config verify-image mirror-gui; do
@@ -954,12 +1236,12 @@ export async function validateBuiltBuilderImage(imageReference: string, options:
     return result;
   };
   await run(['/bin/sh', '-c', OPERATION_TOOL_SELF_TEST]);
-  for (const [name, argv] of Object.entries({ node: ['node', '--version'], npm: ['npm', '--version'], gcc14: ['gcc-14', '--version'], rustc: ['/usr/bin/rustc', '-vV'], llvm: ['/usr/bin/llvm-config', '--version'], polly: ['dpkg-query', '--show', '--showformat=${Version}', 'libpolly-19-dev'], zstd: ['pkg-config', '--modversion', 'libzstd'] })) {
+  for (const [name, argv] of Object.entries({ node: ['node', '--version'], npm: ['npm', '--version'], gcc14: ['gcc-14', '--version'], sqlite3: ['sqlite3', '--version'], rustc: ['/usr/bin/rustc', '-vV'], llvm: ['/usr/bin/llvm-config', '--version'], polly: ['dpkg-query', '--show', '--showformat=${Version}', 'libpolly-19-dev'], zstd: ['pkg-config', '--modversion', 'libzstd'] })) {
     const result = await run(argv);
     versions[name] = result.stdout.trim();
     if (versions[name].length === 0) throw new BuilderValidationError('RUST_BOOTSTRAP_UNAVAILABLE', `${name} self-test returned no output`);
   }
-  const packageResult = await run(['dpkg-query', '--show', '--showformat=${Package}=${Version}\\n', 'gcc-14', 'nodejs', 'npm', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev']);
+  const packageResult = await run(['dpkg-query', '--show', '--showformat=${Package}=${Version}\\n', 'gcc-14', 'nodejs', 'npm', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev', 'sqlite3']);
   for (const line of packageResult.stdout.trim().split(/\r?\n/u)) { const separator = line.indexOf('='); if (separator > 0) packageVersions[line.slice(0, separator)] = line.slice(separator + 1); }
   packageVersions['openwrt-build-tools'] = 'complete-host-tool-set';
   const targetPackageResult = await run(['/bin/sh', '-c', 'cat /opt/target-sysroots/package-versions']);
@@ -975,7 +1257,7 @@ export async function validateBuiltBuilderImage(imageReference: string, options:
     if (fields.length !== 8 || !RUST_TARGETS.includes(fields[0] as (typeof RUST_TARGETS)[number]) || !DIGEST.test(fields[3]!) || !DIGEST.test(fields[6]!)) throw new BuilderValidationError('RUST_BOOTSTRAP_UNAVAILABLE', 'Rust target validation evidence is malformed');
     return { target: fields[0] as (typeof RUST_TARGETS)[number], standardLibraryPath: fields[2]!, standardLibrarySha256: fields[3]!, standardLibraryArchitecture: fields[4]!, compileArtifact: fields[5]!, compileSha256: fields[6]!, compileArchitecture: fields[7]!, result: 'passed' as const };
   });
-  const evidence: BuilderValidationEvidence = { imageId: image.Id, imageDigest, architecture: 'linux/amd64', rustc: versions.rustc!, llvm: systemLines[0]!, polly: packageVersions['libpolly-19-dev']!, zstd: packageVersions['libzstd-dev']!, node: versions.node!, packages: ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev'], packageVersions, commands, rustTargets, operationTool: { path: '/opt/osi-image-builder/operations/osi-image-builder-tool.js', owner: '0:0', mode: '0555', user: 'buildbot', result: 'passed' }, executionSelfTest: 'passed' };
+  const evidence: BuilderValidationEvidence = { imageId: image.Id, imageDigest, architecture: 'linux/amd64', rustc: versions.rustc!, llvm: systemLines[0]!, polly: packageVersions['libpolly-19-dev']!, zstd: packageVersions['libzstd-dev']!, node: versions.node!, npm: versions.npm!, packages: ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev', 'sqlite3'], packageVersions, commands, rustTargets, operationTool: { path: '/opt/osi-image-builder/operations/osi-image-builder-tool.js', owner: '0:0', mode: '0555', user: 'buildbot', result: 'passed' }, executionGuard: { path: '/opt/osi-image-builder/operations/osi-image-builder-exec-guard.js', owner: '0:0', mode: '0555', user: 'buildbot', result: 'passed' }, executionSelfTest: 'passed' };
   completeEvidence(evidence, evidence.packages);
   return { imageId: image.Id, selfTest: 'passed', versions, evidence };
 }

@@ -25,7 +25,14 @@ import {
 } from './recovery.js';
 import type { CleanupPostcondition } from './ownership.js';
 import { JSON_LIMITS, TEXT_LIMITS, canonicalInstant, encodeJson, type JsonObject } from './validation.js';
-import { ACTIVE_RECOVERY_STATES, ADMISSION_ID_PATTERN } from '../../domain/types.js';
+import {
+  DEPENDENCY_EGRESS_OPERATION_HOSTS,
+  type DependencyEgressCleanupPostcondition,
+  type DependencyEgressCredentialAbsenceProof,
+  type DependencyEgressDockerAbsenceProof,
+  type DependencyEgressPersistedDockerAbsenceProof,
+} from '../../domain/dependency-egress-identity.js';
+import { ACTIVE_RECOVERY_STATES, ADMISSION_ID_PATTERN, isDependencyEgressOperationId, type DependencyEgressOperationId } from '../../domain/types.js';
 
 const DIRECTORY_MODE = 0o700;
 const PUBLISHER_DIRECTORY_MODE = 0o750;
@@ -685,8 +692,138 @@ function validateStaging(value: unknown, jobId: string, field: string): Recovery
   return fail(`${field}.kind is invalid`);
 }
 
-function validatePostcondition(value: unknown, jobId: string, field: string): CleanupPostcondition {
-  const postcondition = exactKeys(value, ['runner', 'state', 'container', 'staging', 'logs', 'blocker'], field);
+function egressOperation(value: unknown, field: string): DependencyEgressOperationId {
+  if (typeof value !== 'string' || !isDependencyEgressOperationId(value) || !Object.hasOwn(DEPENDENCY_EGRESS_OPERATION_HOSTS, value)) return fail(`${field} is invalid`);
+  return value;
+}
+
+function egressAttempt(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) return fail(`${field} is invalid`);
+  return value;
+}
+
+function egressExpectedPaths(stateRoot: string, jobId: string, operationId: DependencyEgressOperationId, attempt: number): Readonly<{ readonly credentialHostPath: string; readonly tlsHostDirectory: string }> {
+  const base = join(stateRoot, 'jobs', jobId, 'recovery', 'dependency-egress');
+  return Object.freeze({
+    credentialHostPath: join(base, `${operationId}-${String(attempt)}.proxy-credential`),
+    tlsHostDirectory: join(base, `${operationId}-${String(attempt)}.proxy-tls`),
+  });
+}
+
+function validateEgressCredential(value: unknown, field: string, stateRoot: string, jobId: string): DependencyEgressCredentialAbsenceProof {
+  const credential = exactKeys(value, ['kind', 'operationId', 'attempt', 'hostPath', 'expectedSha256', 'observedSha256', 'tls', 'absent'], field);
+  if (credential.kind !== 'normal' && credential.kind !== 'credential-only' && credential.kind !== 'tls-only') return fail(`${field}.kind is invalid`);
+  const operationId = egressOperation(credential.operationId, `${field}.operationId`);
+  const attempt = egressAttempt(credential.attempt, `${field}.attempt`);
+  const expected = egressExpectedPaths(stateRoot, jobId, operationId, attempt);
+  const hostPath = text(credential.hostPath, `${field}.hostPath`, TEXT_LIMITS.maxPathBytes);
+  if (hostPath !== expected.credentialHostPath) return fail(`${field}.hostPath is outside the configured state root`);
+  const tls = exactKeys(credential.tls, ['hostDirectory', 'absent'], `${field}.tls`);
+  if (tls.hostDirectory !== expected.tlsHostDirectory) return fail(`${field}.tls.hostDirectory is outside the configured state root`);
+  boolean(tls.absent, true, `${field}.tls.absent`);
+  boolean(credential.absent, true, `${field}.absent`);
+  const expectedSha256 = credential.expectedSha256 === null ? null : hash(credential.expectedSha256, `${field}.expectedSha256`);
+  const observedSha256 = credential.observedSha256 === null ? null : hash(credential.observedSha256, `${field}.observedSha256`);
+  if (credential.kind === 'tls-only') {
+    if (observedSha256 !== null) return fail(`${field}.observedSha256 must be null for a TLS-only remnant`);
+    return { kind: 'tls-only', operationId, attempt, hostPath, expectedSha256, observedSha256: null, tls: { hostDirectory: expected.tlsHostDirectory, absent: true }, absent: true };
+  }
+  if (expectedSha256 === null) return fail(`${field}.expectedSha256 is required for a credential remnant`);
+  if (observedSha256 !== null && observedSha256 !== expectedSha256) return fail(`${field}.observedSha256 does not match expectedSha256`);
+  if (credential.kind === 'normal' && observedSha256 === null) return fail(`${field}.normal proof must include an observed credential hash`);
+  return { kind: credential.kind, operationId, attempt, hostPath, expectedSha256, observedSha256, tls: { hostDirectory: expected.tlsHostDirectory, absent: true }, absent: true };
+}
+
+function validateEgressDockerAbsence(
+  value: unknown,
+  field: string,
+  stateRoot: string,
+  jobId: string,
+  nullableProxy: boolean,
+  globalAttestation: boolean,
+): DependencyEgressDockerAbsenceProof | DependencyEgressPersistedDockerAbsenceProof {
+  const proof = exactKeys(value, globalAttestation
+    ? ['operationId', 'attempt', 'proxy', 'network', 'tls', 'credential', 'globalLabelResult']
+    : ['operationId', 'attempt', 'proxy', 'network', 'tls', 'credential'], field);
+  const operationId = egressOperation(proof.operationId, `${field}.operationId`);
+  const attempt = egressAttempt(proof.attempt, `${field}.attempt`);
+  const expected = egressExpectedPaths(stateRoot, jobId, operationId, attempt);
+  let proxy: Readonly<{ readonly id: string; readonly absent: true }> | null = null;
+  if (proof.proxy === null) {
+    if (!nullableProxy) return fail(`${field}.proxy is required`);
+  } else {
+    const valueProxy = exactKeys(proof.proxy, ['id', 'absent'], `${field}.proxy`);
+    const id = hash(valueProxy.id, `${field}.proxy.id`);
+    boolean(valueProxy.absent, true, `${field}.proxy.absent`);
+    proxy = { id, absent: true };
+  }
+  const network = exactKeys(proof.network, ['id', 'absent'], `${field}.network`);
+  const networkId = hash(network.id, `${field}.network.id`);
+  boolean(network.absent, true, `${field}.network.absent`);
+  const tls = exactKeys(proof.tls, ['hostDirectory', 'absent'], `${field}.tls`);
+  if (tls.hostDirectory !== expected.tlsHostDirectory) return fail(`${field}.tls.hostDirectory is outside the configured state root`);
+  boolean(tls.absent, true, `${field}.tls.absent`);
+  const credential = exactKeys(proof.credential, ['hostPath', 'sha256'], `${field}.credential`);
+  if (credential.hostPath !== expected.credentialHostPath) return fail(`${field}.credential.hostPath is outside the configured state root`);
+  const credentialSha256 = hash(credential.sha256, `${field}.credential.sha256`);
+  if (globalAttestation && proof.globalLabelResult !== 'no-match') return fail(`${field}.globalLabelResult is invalid`);
+  const common = {
+    operationId,
+    attempt,
+    proxy,
+    network: { id: networkId, absent: true as const },
+    tls: { hostDirectory: expected.tlsHostDirectory, absent: true as const },
+    credential: { hostPath: expected.credentialHostPath, sha256: credentialSha256 },
+  };
+  return globalAttestation
+    ? { ...common, proxy: proxy!, globalLabelResult: 'no-match' as const }
+    : common;
+}
+
+function validateEgress(value: unknown, field: string, stateRoot: string, jobId: string): DependencyEgressCleanupPostcondition {
+  const egress = exactKeys(value, ['persistedDocker', 'discoveredDocker', 'credentials', 'globalLabelResult'], field);
+  if (egress.globalLabelResult !== 'no-match') return fail(`${field}.globalLabelResult is invalid`);
+  const persistedDocker = egress.persistedDocker === null
+    ? null
+    : validateEgressDockerAbsence(egress.persistedDocker, `${field}.persistedDocker`, stateRoot, jobId, false, true) as DependencyEgressPersistedDockerAbsenceProof;
+  if (!Array.isArray(egress.discoveredDocker) || egress.discoveredDocker.length > 128) return fail(`${field}.discoveredDocker is invalid`);
+  const discoveredDocker = egress.discoveredDocker.map((proof, index) => validateEgressDockerAbsence(proof, `${field}.discoveredDocker[${index}]`, stateRoot, jobId, true, false) as DependencyEgressDockerAbsenceProof);
+  if (!Array.isArray(egress.credentials) || egress.credentials.length > 128) return fail(`${field}.credentials is invalid`);
+  const credentials = egress.credentials.map((credential, index) => validateEgressCredential(credential, `${field}.credentials[${index}]`, stateRoot, jobId));
+  const credentialByOperation = new Map<string, DependencyEgressCredentialAbsenceProof>();
+  for (const credential of credentials) {
+    const key = `${credential.operationId}:${String(credential.attempt)}`;
+    if (credentialByOperation.has(key)) return fail(`${field}.credentials contains a duplicate operation proof`);
+    credentialByOperation.set(key, credential);
+  }
+  const dockerKeys = new Set<string>();
+  const proxyIds = new Set<string>();
+  const networkIds = new Set<string>();
+  const allDocker = persistedDocker === null ? discoveredDocker : [persistedDocker, ...discoveredDocker];
+  for (const [index, proof] of allDocker.entries()) {
+    const key = `${proof.operationId}:${String(proof.attempt)}`;
+    if (dockerKeys.has(key)) return fail(`${field} contains duplicate Docker absence evidence`);
+    dockerKeys.add(key);
+    if (networkIds.has(proof.network.id)) return fail(`${field} contains duplicate network absence evidence`);
+    networkIds.add(proof.network.id);
+    if (proof.proxy !== null) {
+      if (proxyIds.has(proof.proxy.id)) return fail(`${field} contains duplicate proxy absence evidence`);
+      proxyIds.add(proof.proxy.id);
+    }
+    const credential = credentialByOperation.get(key);
+    if (credential === undefined || credential.expectedSha256 === null || credential.hostPath !== proof.credential.hostPath || credential.expectedSha256 !== proof.credential.sha256) return fail(`${field} Docker absence evidence has no matching credential absence`);
+    if (index === 0 && persistedDocker !== null && proof.proxy === null) return fail(`${field}.persistedDocker.proxy is required`);
+  }
+  return {
+    persistedDocker,
+    discoveredDocker,
+    credentials,
+    globalLabelResult: 'no-match',
+  };
+}
+
+function validatePostcondition(value: unknown, jobId: string, stateRoot: string, field: string): CleanupPostcondition {
+  const postcondition = exactKeys(value, ['runner', 'state', 'container', 'staging', 'logs', 'egress', 'blocker'], field);
   const state = postcondition.state;
   const states = [...ACTIVE_RECOVERY_STATES, 'interrupted'] as readonly string[];
   if (typeof state !== 'string' || !states.includes(state)) return fail(`${field}.state is invalid`);
@@ -701,11 +838,12 @@ function validatePostcondition(value: unknown, jobId: string, field: string): Cl
     container: validateContainer(postcondition.container, `${field}.container`),
     staging,
     logs: { runner: logs.runner as 'absent' | 'sealed', docker: logs.docker as 'absent' | 'sealed', verifiedAt: instant(logs.verifiedAt, `${field}.logs.verifiedAt`) },
+    egress: validateEgress(postcondition.egress, `${field}.egress`, stateRoot, jobId),
     blocker: 'none',
   };
 }
 
-function parseCompletion(bytes: Buffer, jobId: string, admissionId: string, maxBytes: number): CleanupPostcondition {
+function parseCompletion(bytes: Buffer, jobId: string, admissionId: string, stateRoot: string, maxBytes: number): CleanupPostcondition {
   if (bytes.length === 0 || bytes.length > maxBytes || bytes.at(-1) !== 0x0a) return fail('cleanup completion evidence framing is invalid');
   let source: string;
   try {
@@ -731,7 +869,7 @@ function parseCompletion(bytes: Buffer, jobId: string, admissionId: string, maxB
   const envelope = exactKeys(parsed, ['schemaVersion', 'kind', 'admissionId', 'jobId', 'postcondition', 'observedAt'], 'cleanup completion evidence');
   if (envelope.schemaVersion !== 1 || envelope.kind !== 'cleanup-complete' || envelope.jobId !== jobId || envelope.admissionId !== admissionId) return fail('cleanup completion evidence identity does not match the admission');
   instant(envelope.observedAt, 'cleanup completion evidence.observedAt');
-  return validatePostcondition(envelope.postcondition, jobId, 'cleanup completion evidence.postcondition');
+  return validatePostcondition(envelope.postcondition, jobId, stateRoot, 'cleanup completion evidence.postcondition');
 }
 
 async function readCompletionEvidence(
@@ -808,7 +946,7 @@ async function readCompletionEvidence(
                               jobId,
                               admissionId,
                               sha256: actualSha256,
-                              postcondition: parseCompletion(bytes, jobId, admissionId, maxBytes),
+                              postcondition: parseCompletion(bytes, jobId, admissionId, snapshot.path, maxBytes),
                             };
                           },
                         );

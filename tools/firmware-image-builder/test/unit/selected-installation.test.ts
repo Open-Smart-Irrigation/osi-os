@@ -62,6 +62,7 @@ describe('selected production installation', () => {
       nodeVersion: '22.14.0',
       executionDefinitionSha256: digest('execution'),
       validationEvidenceSha256: digest('validation'),
+      dependencyEgressProxySha256: digest('proxy'),
       publisherSha256: digest('publisher'),
       imageId: digest('image-id'),
     });

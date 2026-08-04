@@ -19,6 +19,7 @@ import {
   previewStagingPath,
   withHeldParentUnderRoot,
   withNoFollowFileUnderRoot,
+  withNoFollowFileUnderStateRoot,
   type ReadCapability,
 } from '../../domain/paths.js';
 
@@ -221,6 +222,74 @@ describe('deterministic path previews', () => {
 });
 
 describe('held no-follow read capabilities', () => {
+  it('reads and streams a hash beneath the issued state-root authority', async () => {
+    const fixture = await createRoot();
+    const path = join(fixture.statePath, 'jobs', 'job-1', 'evidence', '08-verify.json');
+    await mkdir(join(fixture.statePath, 'jobs', 'job-1', 'evidence'), { recursive: true });
+    const bytes = Buffer.from('state evidence\n');
+    await writeFile(path, bytes);
+    const observed = await withNoFollowFileUnderStateRoot(
+      fixture.stateRoot,
+      'jobs/job-1/evidence/08-verify.json',
+      async (reader) => ({
+        bytes: await reader.readFile(),
+        sha256: await reader.hashSha256(),
+      }),
+    );
+    expect(observed).toEqual({
+      bytes,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    });
+  });
+
+  it('rejects symlink and hardlink targets beneath the state root', async () => {
+    const fixture = await createRoot();
+    const evidence = join(fixture.statePath, 'jobs', 'job-1', 'evidence');
+    await mkdir(evidence, { recursive: true });
+    const source = join(evidence, 'source.json');
+    await writeFile(source, '{}\n');
+    await symlink(source, join(evidence, 'symlink.json'));
+    await link(source, join(evidence, 'hardlink.json'));
+    await expect(withNoFollowFileUnderStateRoot(
+      fixture.stateRoot,
+      'jobs/job-1/evidence/symlink.json',
+      async () => undefined,
+    )).rejects.toMatchObject({ code: 'NON_REGULAR_TARGET' });
+    await expect(withNoFollowFileUnderStateRoot(
+      fixture.stateRoot,
+      'jobs/job-1/evidence/hardlink.json',
+      async () => undefined,
+    )).rejects.toMatchObject({ code: 'HARDLINK_TARGET' });
+  });
+
+  it('rejects state-root mount crossings and root replacement revalidation', async () => {
+    let mountCalls = 0;
+    const crossing = await createRoot({
+      mountId: async () => {
+        mountCalls += 1;
+        return mountCalls === 4 ? 22 : 11;
+      },
+    });
+    const crossingEvidence = join(crossing.statePath, 'jobs', 'job-1', 'evidence');
+    await mkdir(crossingEvidence, { recursive: true });
+    await writeFile(join(crossingEvidence, '08-verify.json'), '{}\n');
+    await expect(withNoFollowFileUnderStateRoot(
+      crossing.stateRoot,
+      'jobs/job-1/evidence/08-verify.json',
+      async () => undefined,
+    )).rejects.toMatchObject({ code: 'MOUNT_CROSSING' });
+
+    const replaced = await createRoot();
+    const moved = join(replaced.base, 'held-state-root');
+    await rename(replaced.statePath, moved);
+    await mkdir(replaced.statePath);
+    await expect(withNoFollowFileUnderStateRoot(
+      replaced.stateRoot,
+      'jobs/job-1/evidence/08-verify.json',
+      async () => undefined,
+    )).rejects.toMatchObject({ code: 'INVALID_PATH', cause: expect.any(ConfigAuthorityError) });
+  });
+
   it('reads and hashes original bytes after directory and final-file swaps', async () => {
     const { root, base, registry } = await createRoot();
     const payload = join(root.path, 'payload');

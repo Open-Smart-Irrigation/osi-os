@@ -1038,8 +1038,7 @@ async function verifyConfig(
       'target',
     ])
     || (targetSetupObservations as Record<string, unknown>).target !== input.target.id
-    || ((targetSetupObservations as Record<string, unknown>).patchDecision !== 'applied'
-      && (targetSetupObservations as Record<string, unknown>).patchDecision !== 'already-present')
+    || (targetSetupObservations as Record<string, unknown>).patchDecision !== 'applied'
     || !configObservations
     || typeof configObservations !== 'object'
     || Array.isArray(configObservations)

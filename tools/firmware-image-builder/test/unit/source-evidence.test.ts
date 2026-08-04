@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { chmod, link, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -295,6 +295,79 @@ describe('stage evidence', () => {
     const evidenceDirectory = join(authority.statePath, 'jobs/job-read-existing/evidence');
     await chmod(evidenceDirectory, 0o755);
     await expect(writer.read(published.path)).rejects.toThrow(/ancestor identity is unsafe/);
+  });
+
+  it('rejects an acceptance evidence pathname replacement after publication', async () => {
+    const contents = Buffer.from('{"status":"passed"}\n');
+    let published = false;
+    let replaced = false;
+    const raceAuthority = await authorityFixture({
+      beforeDirectoryAccess: async (handle) => {
+        if (!published || replaced) return;
+        const heldPath = await readlink(`/proc/self/fd/${handle.fd}`);
+        if (!heldPath.endsWith('/evidence')) return;
+        await rename(finalPath, `${finalPath}.published`);
+        await writeFile(finalPath, Buffer.alloc(contents.length, 0x78), { mode: 0o600 });
+        replaced = true;
+      },
+    });
+    const finalPath = join(raceAuthority.statePath, 'jobs', 'job-acceptance-race', 'evidence', 'real-acceptance-report.json');
+    const fileSystem: EvidenceFileSystem = {
+      publishExclusive: async (_root, relativePath, bytes) => {
+        const path = join(raceAuthority.statePath, relativePath);
+        await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+        await writeFile(path, bytes, { flag: 'wx', mode: 0o600 });
+        const metadata = await stat(path);
+        published = true;
+        return {
+          regular: true,
+          singleLink: true,
+          device: metadata.dev,
+          inode: metadata.ino,
+          mode: metadata.mode & 0o7777,
+          size: metadata.size,
+        };
+      },
+    };
+    const writer = createEvidenceWriter({ stateRoot: raceAuthority.stateRoot, fileSystem });
+
+    await expect(writer.writeAcceptanceEvidence({
+      jobId: 'job-acceptance-race',
+      basename: 'real-acceptance-report.json',
+      contents,
+    })).rejects.toMatchObject({ code: 'EVIDENCE_PUBLICATION_FAILED' });
+    expect(replaced).toBe(true);
+  });
+
+  it('rejects replacement of existing acceptance evidence immediately after reconciliation', async () => {
+    const jobId = 'job-acceptance-existing-race';
+    const basename = 'real-acceptance-report.json';
+    const contents = Buffer.from('{"status":"passed"}\n');
+    let armed = false;
+    let validations = 0;
+    let replaced = false;
+    let finalPath = '';
+    const authority = await authorityFixture({
+      beforeDirectoryAccess: async (handle) => {
+        if (!armed || replaced) return;
+        const heldPath = await readlink(`/proc/self/fd/${handle.fd}`);
+        if (!heldPath.endsWith('/evidence')) return;
+        validations += 1;
+        if (validations !== 3) return;
+        await rename(finalPath, `${finalPath}.reconciled`);
+        await writeFile(finalPath, contents, { mode: 0o600 });
+        replaced = true;
+      },
+    });
+    finalPath = join(authority.statePath, 'jobs', jobId, 'evidence', basename);
+    const writer = createEvidenceWriter({ stateRoot: authority.stateRoot });
+    const input = { jobId, basename, contents };
+    await writer.writeAcceptanceEvidence(input);
+    armed = true;
+
+    await expect(writer.writeAcceptanceEvidence(input))
+      .rejects.toMatchObject({ code: 'EVIDENCE_PUBLICATION_FAILED' });
+    expect(replaced).toBe(true);
   });
 
   it('rejects evidence traversal that crosses the state-root mount', async () => {

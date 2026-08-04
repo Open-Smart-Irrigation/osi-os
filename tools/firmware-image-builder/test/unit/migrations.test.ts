@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,13 +12,25 @@ import {
   CANCELLATION_PROTOCOL_EVENT_QUERY,
 } from '../../api/src/store.js';
 import { OwnershipStore } from '../../api/src/ownership.js';
+import { parseBuilderIdentity, type BuilderIdentity } from '../../domain/builder-identity.js';
 
 const repoMigrationDir = fileURLToPath(new URL('../../api/migrations/', import.meta.url));
 const tempPaths: string[] = [];
 const SHA40 = 'a'.repeat(40);
 const HASH64 = 'b'.repeat(64);
 const HISTORICAL_V6_SHA256 = 'c6334dd0fd03b34b8261e5b34bc0b09501e35a02ee4b57f81c98fd62af6e54a0';
+const HISTORICAL_V21_SHA256 = '5390ec094daa621818ac14d8e0ea424100bae0cc6f839a926e1a5e6dcdb0f70b';
 const ADMISSION_ID = `cln_0${'a'.repeat(25)}`;
+const SECOND_ADMISSION_ID = `cln_0${'c'.repeat(25)}`;
+const LEGACY_RUNNER_OWNER = 'runner-5a53c150-02e8-4436-9862-6c874575a988';
+type GenerationIdentity = Readonly<{
+  readonly runner: readonly Readonly<{ readonly generation: number; readonly path: string; readonly startedAt: string }>[];
+  readonly docker: readonly Readonly<{ readonly generation: number; readonly path: string; readonly startedAt: string }>[];
+}>;
+const DEFAULT_GENERATION_IDENTITY: GenerationIdentity = {
+  runner: [{ generation: 0, path: 'logs/runner-0.log', startedAt: '2026-08-01T12:24:40.000Z' }],
+  docker: [{ generation: 0, path: 'logs/docker-0.log', startedAt: '2026-08-01T12:24:40.000Z' }],
+};
 
 function sourcePreparationJson(sourceSha = SHA40): string {
   return JSON.stringify({
@@ -93,6 +106,18 @@ async function copyMigrations(): Promise<string> {
   return directory;
 }
 
+async function applyRegisteredMigrations(
+  db: DatabaseSync,
+  count: number,
+  appliedAt = '2026-08-03T00:00:00.000Z',
+): Promise<void> {
+  for (const migration of MIGRATION_REGISTRY.slice(0, count)) {
+    db.exec(await readFile(join(repoMigrationDir, migration.filename), 'utf8'));
+    db.prepare('INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)')
+      .run(migration.version, migration.filename, migration.sha256, appliedAt);
+  }
+}
+
 function tableInfo(db: DatabaseSync, table: string): Set<string> {
   return new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((row) => row.name));
 }
@@ -127,16 +152,54 @@ function expectMigrationError(action: () => unknown, message: RegExp, causeMessa
   }
 }
 
-function insertValidJob(db: DatabaseSync, jobId = 'job-valid', state = 'queued'): void {
+function insertValidJob(
+  db: DatabaseSync,
+  jobId = 'job-valid',
+  state = 'queued',
+  admittedIdentity = true,
+  identityOverrides: Partial<BuilderIdentity> = {},
+): void {
+  const hasCompleteIdentitySchema = tableInfo(db, 'jobs').has('builder_identity_status');
+  const hasProxyIdentitySchema = tableInfo(db, 'jobs').has('builder_dependency_egress_proxy_sha256');
+  const identityColumns = hasCompleteIdentitySchema && admittedIdentity
+    ? `, builder_identity_status, builder_package_version, builder_package_root, builder_lock_sha256,
+       builder_execution_definition_sha256, builder_target_manifest_sha256,
+       builder_runner_sha256, builder_cleanup_worker_sha256, builder_image_reference,
+       builder_image_id, builder_image_digest${hasProxyIdentitySchema ? ', builder_dependency_egress_proxy_sha256' : ''}`
+    : '';
+  const identityPlaceholders = hasCompleteIdentitySchema && admittedIdentity
+    ? `, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${hasProxyIdentitySchema ? ', ?' : ''}`
+    : '';
+  const identity = {
+    packageVersion: '0.1.24',
+    packageRoot: '/home/builder/.local/lib/osi-image-builder/0.1.24',
+    lockSha256: '1'.repeat(64),
+    executionDefinitionSha256: '2'.repeat(64),
+    targetManifestSha256: HASH64,
+    runnerSha256: '5'.repeat(64),
+    cleanupWorkerSha256: '6'.repeat(64),
+    dependencyEgressProxySha256: '7'.repeat(64),
+    imageReference: `registry.example.invalid/osi-image-builder@sha256:${'3'.repeat(64)}`,
+    imageId: `sha256:${'4'.repeat(64)}`,
+    imageDigest: '3'.repeat(64),
+    ...identityOverrides,
+  } satisfies BuilderIdentity;
+  const identityValues = hasCompleteIdentitySchema && admittedIdentity ? [
+    'admitted', identity.packageVersion, identity.packageRoot,
+    identity.lockSha256, identity.executionDefinitionSha256, identity.targetManifestSha256,
+    identity.runnerSha256, identity.cleanupWorkerSha256,
+    identity.imageReference, identity.imageId, identity.imageDigest,
+    ...(hasProxyIdentitySchema ? [identity.dependencyEgressProxySha256] : []),
+  ] : [];
   db.prepare(`INSERT INTO jobs (
     job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id,
     target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at,
-    source_preparation_json, offline_feed_preparation_json
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    source_preparation_json, offline_feed_preparation_json${identityColumns}
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${identityPlaceholders})`).run(
     jobId, `request-${jobId}`, 'git@example:repo.git', 'refs/remotes/origin/main', 'main', 'main', SHA40, SHA40,
     'rpi-5', 'release', HASH64, '2026-07-23T00:00:00.000Z', 'author', 'subject', '2026-07-23T00:00:00.000Z',
     state, state === 'queued' ? 'queued' : 'dispatched', '2026-07-23T00:00:00.000Z', '2026-07-23T00:00:00.000Z',
-    sourcePreparationJson(), offlineFeedPreparationJson(jobId),
+    sourcePreparationJson(), offlineFeedPreparationJson(jobId), ...identityValues,
   );
 }
 
@@ -148,6 +211,388 @@ function insertAdmittedLease(db: DatabaseSync, jobId = 'job-valid'): void {
     ADMISSION_ID, jobId, `osi-image-builder-cleanup@${ADMISSION_ID}.service`, 'builder', '2026-07-23T01:00:00.000Z',
     `recovery/cleanup-credentials/${ADMISSION_ID}.token`, HASH64, 1, 'c'.repeat(64), '{}', '2026-07-23T00:00:00.000Z',
   );
+}
+
+interface HandedBackCleanupProofOptions {
+  readonly admissionId?: string;
+  readonly fenceGeneration?: number;
+  readonly eventSeqBase?: number;
+  readonly recoveryEventSeq?: number;
+  readonly updateJob?: boolean;
+  readonly eventRunnerOwner?: string;
+  readonly eventRunnerLeaseExpiresAt?: string;
+  readonly runnerInactiveAt?: string;
+  readonly runnerObservedAt?: string;
+  readonly eventContainerId?: string;
+  readonly eventContainerName?: string;
+  readonly eventContainerImageDigest?: string;
+  readonly eventContainerLabels?: Record<string, string>;
+  readonly eventContainerObservedAt?: string;
+  readonly eventContainerKind?: 'already-absent' | 'removed';
+  readonly generationIdentity?: GenerationIdentity;
+  readonly persistedGenerationIdentity?: GenerationIdentity;
+  readonly admissionStaging?: 'absent' | 'present' | 'physical-present';
+  readonly admissionStagingSha256?: string | null;
+  readonly admissionStagingSize?: number | null;
+  readonly completionStaging?: 'absent' | 'quarantined';
+  readonly completionStagingSourcePath?: string;
+  readonly completionStagingDestinationPath?: string;
+  readonly completionStagingSha256?: string | null;
+  readonly completionStagingSize?: number | null;
+  readonly currentStagingState?: 'absent' | 'pre-handback' | 'quarantined';
+  readonly currentStagingIdentity?: 'tracked' | 'unknown';
+  readonly admissionLogs?: Readonly<{ readonly runner: 'absent' | 'sealed'; readonly docker: 'absent' | 'sealed' }>;
+  readonly completionLogs?: Readonly<{ readonly runner: 'absent' | 'sealed'; readonly docker: 'absent' | 'sealed' }>;
+  readonly runnerStartedAt?: string;
+  readonly runnerLeaseExpiresAt?: string;
+  readonly dispatchedAt?: string;
+  readonly admittedAt?: string;
+  readonly claimAt?: string;
+  readonly completeAt?: string;
+  readonly handbackAt?: string;
+  readonly terminalAt?: string;
+  readonly cleanupLeaseExpiresAt?: string;
+  readonly snapshotRunnerInactiveAt?: string;
+  readonly snapshotRunnerObservedAt?: string;
+  readonly snapshotContainerObservedAt?: string;
+  readonly snapshotStagingObservedAt?: string;
+  readonly snapshotLogsVerifiedAt?: string;
+  readonly completionRunnerInactiveAt?: string;
+  readonly completionRunnerObservedAt?: string;
+  readonly completionContainerObservedAt?: string;
+  readonly completionContainerStoppedAt?: string;
+  readonly completionContainerRemovedAt?: string;
+  readonly completionStagingVerifiedAt?: string;
+  readonly completionLogsVerifiedAt?: string;
+  readonly globalLabelResult?: string;
+  readonly includeEgress?: boolean;
+  readonly extraEgressField?: boolean;
+  readonly snapshotBlocker?: 'none' | 'container' | 'staging-or-log';
+  readonly extraSnapshotField?: 'root' | 'runner' | 'container' | 'staging' | 'logs';
+  readonly extraCompletionField?: 'container' | 'staging' | 'logs';
+}
+
+interface PersistedLogCoverage {
+  readonly stream: 'runner' | 'docker';
+  readonly generation: number;
+  readonly byteLengths: readonly number[];
+}
+
+const JOB_EVENTS_APPEND_GUARD_SQL = `CREATE TRIGGER job_events_append_guard
+BEFORE INSERT ON job_events
+WHEN NEW.seq <> COALESCE((SELECT MAX(seq) + 1 FROM job_events WHERE job_id = NEW.job_id), 0)
+  OR (NEW.stream IS NOT NULL AND (
+    NEW.byte_offset <> COALESCE((SELECT MAX(byte_offset + byte_length) FROM job_events WHERE job_id = NEW.job_id AND stream = NEW.stream AND file_generation = NEW.file_generation), 0)
+    OR NEW.byte_offset + NEW.byte_length > (SELECT size_bytes FROM job_log_generations WHERE job_id = NEW.job_id AND stream = NEW.stream AND generation = NEW.file_generation)
+    OR EXISTS (SELECT 1 FROM job_log_generations WHERE job_id = NEW.job_id AND stream = NEW.stream AND generation = NEW.file_generation AND sealed_at IS NOT NULL)))
+BEGIN
+  SELECT RAISE(ABORT, 'job events must append within an open log generation');
+END`;
+
+const JOB_EVENTS_IMMUTABLE_UPDATE_GUARD_SQL = `CREATE TRIGGER job_events_immutable_update_guard
+BEFORE UPDATE ON job_events
+BEGIN
+  SELECT RAISE(ABORT, 'job events are immutable');
+END`;
+
+const JOB_LOG_GENERATIONS_SIZE_GUARD_SQL = `CREATE TRIGGER job_log_generations_size_guard
+BEFORE UPDATE OF size_bytes ON job_log_generations
+WHEN NEW.size_bytes < OLD.size_bytes OR OLD.sealed_at IS NOT NULL
+BEGIN
+  SELECT RAISE(ABORT, 'log generation size is not append-only');
+END`;
+
+function replacePersistedLogCoverage(
+  db: DatabaseSync,
+  jobId: string,
+  coverage: readonly PersistedLogCoverage[],
+): void {
+  const eventCount = coverage.reduce((count, generation) => count + generation.byteLengths.length, 0);
+  if (eventCount <= 1) throw new TypeError('persisted log coverage fixture requires at least two events');
+
+  db.exec('DROP TRIGGER job_events_append_guard');
+  db.exec('DROP TRIGGER job_events_immutable_update_guard');
+  db.exec('DROP TRIGGER job_log_generations_size_guard');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare('UPDATE job_events SET seq=seq+? WHERE job_id=?').run(eventCount, jobId);
+    const updateGeneration = db.prepare(`UPDATE job_log_generations SET size_bytes=?
+      WHERE job_id=? AND stream=? AND generation=?`);
+    const insertEvent = db.prepare(`INSERT INTO job_events (
+      job_id, seq, event_type, state, stage, payload_json, at,
+      stream, file_generation, byte_offset, byte_length, partial
+    ) VALUES (?, ?, 'log', 'release_gates', NULL, '{}', ?, ?, ?, ?, ?, 0)`);
+    let seq = 0;
+    for (const generation of coverage) {
+      const size = generation.byteLengths.reduce((sum, length) => sum + length, 0);
+      const updated = updateGeneration.run(size, jobId, generation.stream, generation.generation);
+      if (Number(updated.changes) !== 1) throw new Error('persisted log coverage generation is missing');
+      let offset = 0;
+      for (const length of generation.byteLengths) {
+        insertEvent.run(
+          jobId,
+          seq,
+          '2026-08-01T12:24:40.050Z',
+          generation.stream,
+          generation.generation,
+          offset,
+          length,
+        );
+        seq += 1;
+        offset += length;
+      }
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  } finally {
+    db.exec(JOB_EVENTS_APPEND_GUARD_SQL);
+    db.exec(JOB_EVENTS_IMMUTABLE_UPDATE_GUARD_SQL);
+    db.exec(JOB_LOG_GENERATIONS_SIZE_GUARD_SQL);
+  }
+}
+
+function boundedLogFixture(extraEvent = false): Readonly<{
+  generationIdentity: GenerationIdentity;
+  coverage: readonly PersistedLogCoverage[];
+}> {
+  const generationIdentity: GenerationIdentity = {
+    runner: Array.from({ length: 64 }, (_, generation) => ({
+      generation,
+      path: `logs/runner-${generation}.log`,
+      startedAt: '2026-08-01T12:24:40.000Z',
+    })),
+    docker: Array.from({ length: 64 }, (_, generation) => ({
+      generation,
+      path: `logs/docker-${generation}.log`,
+      startedAt: '2026-08-01T12:24:40.000Z',
+    })),
+  };
+  const coverage = (['runner', 'docker'] as const).flatMap((stream) =>
+    generationIdentity[stream].map(({ generation }) => ({
+      stream,
+      generation,
+      byteLengths: Array.from({
+        length: 64 + (extraEvent && stream === 'runner' && generation === 0 ? 1 : 0),
+      }, () => 1),
+    })),
+  );
+  return { generationIdentity, coverage };
+}
+
+function mutatePersistedLogEvent(db: DatabaseSync, sql: string, jobId: string): void {
+  db.exec('DROP TRIGGER job_events_immutable_update_guard');
+  try {
+    db.prepare(sql).run(jobId);
+  } finally {
+    db.exec(JOB_EVENTS_IMMUTABLE_UPDATE_GUARD_SQL);
+  }
+}
+
+function insertHandedBackCleanupProof(
+  db: DatabaseSync,
+  jobId: string,
+  options: HandedBackCleanupProofOptions = {},
+): void {
+  const admissionId = options.admissionId ?? ADMISSION_ID;
+  const fenceGeneration = options.fenceGeneration ?? 1;
+  const eventSeqBase = options.eventSeqBase ?? 0;
+  const recoveryEventSeq = options.recoveryEventSeq ?? eventSeqBase + 1;
+  const runnerUnit = `osi-image-builder-runner@${jobId}.service`;
+  const cleanupUnit = `osi-image-builder-cleanup@${admissionId}.service`;
+  const runnerLeaseExpiresAt = options.runnerLeaseExpiresAt ?? '2026-07-30T16:49:26.626Z';
+  const runnerStartedAt = options.runnerStartedAt ?? '2026-07-30T16:47:40.685Z';
+  const dispatchedAt = options.dispatchedAt ?? '2026-07-30T16:47:40.600Z';
+  const inactiveAt = options.runnerInactiveAt ?? '2026-08-01T12:24:40.953Z';
+  const observedAt = options.runnerObservedAt ?? '2026-08-01T12:24:40.953Z';
+  const completeAt = options.completeAt ?? '2026-08-01T12:24:41.520Z';
+  const handbackAt = options.handbackAt ?? '2026-08-01T12:24:49.169Z';
+  const admittedAt = options.admittedAt ?? '2026-08-01T12:24:41.000Z';
+  const claimAt = options.claimAt ?? '2026-08-01T12:24:41.100Z';
+  const containerId = '29e1762f42b19d3bdb2fb7c47521c32d66b398241f9325089e2853ab19866096';
+  const containerName = 'osi-image-builder-365205a0300e78e467742294e80bc2a3a31b1678e48520ad';
+  const containerImageDigest = 'b3fa88f84f6815db4b55ac12c4ef14064a18d60f7c4eb3d636f10695ba3ba337';
+  const containerLabels = {
+    'org.osi.image-builder.job-id': jobId,
+    'org.osi.image-builder.manifest-sha': HASH64,
+  };
+  const evidencePath = `jobs/${jobId}/evidence/cleanup/${admissionId}.complete.json`;
+  const generationIdentity = options.generationIdentity ?? DEFAULT_GENERATION_IDENTITY;
+  const persistedGenerationIdentity = options.persistedGenerationIdentity ?? generationIdentity;
+  const admissionStaging = options.admissionStaging ?? 'absent';
+  const completionStaging = options.completionStaging ?? 'absent';
+  const admissionStagingSha256 = options.admissionStagingSha256 === undefined ? HASH64 : options.admissionStagingSha256;
+  const admissionStagingSize = options.admissionStagingSize === undefined ? 100 : options.admissionStagingSize;
+  const admissionLogs = options.admissionLogs ?? { runner: 'sealed' as const, docker: 'sealed' as const };
+  const completionLogs = options.completionLogs ?? { runner: 'sealed' as const, docker: 'sealed' as const };
+  const snapshotObservedAt = options.snapshotRunnerObservedAt ?? observedAt;
+  const snapshotInactiveAt = options.snapshotRunnerInactiveAt ?? inactiveAt;
+  const snapshotContainerObservedAt = options.snapshotContainerObservedAt ?? observedAt;
+  const snapshotStagingObservedAt = options.snapshotStagingObservedAt ?? observedAt;
+  const snapshotLogsVerifiedAt = options.snapshotLogsVerifiedAt ?? observedAt;
+  const completionContainerObservedAt = options.completionContainerObservedAt ?? '2026-08-01T12:24:41.470Z';
+  const completionStagingVerifiedAt = options.completionStagingVerifiedAt ?? completeAt;
+  const completionLogsVerifiedAt = options.completionLogsVerifiedAt ?? completeAt;
+  const admissionStagingValue = admissionStaging === 'absent'
+    ? { kind: 'absent', path: null }
+    : admissionStaging === 'physical-present'
+      ? { kind: 'physical-present', path: `staging/${jobId}`, sha256: null, size: null, observedAt: snapshotStagingObservedAt }
+      : { kind: 'present', path: `staging/${jobId}`, sha256: admissionStagingSha256, size: admissionStagingSize };
+  const completionStagingValue = completionStaging === 'quarantined'
+    ? {
+      kind: 'quarantined', sourcePath: `staging/${jobId}`, destinationPath: `quarantine/${jobId}`,
+      sourceAbsent: true, destinationPresent: true,
+      sha256: options.completionStagingSha256 === undefined ? (admissionStaging === 'present' ? admissionStagingSha256 : null) : options.completionStagingSha256,
+      size: options.completionStagingSize === undefined ? (admissionStaging === 'present' ? admissionStagingSize : null) : options.completionStagingSize, verifiedAt: completionStagingVerifiedAt,
+    }
+    : { kind: 'absent', path: null, sourcePath: `staging/${jobId}`, sourceAbsent: true, verifiedAt: completionStagingVerifiedAt };
+  const snapshot = {
+    runner: { unit: runnerUnit, owner: LEGACY_RUNNER_OWNER, leaseExpiresAt: runnerLeaseExpiresAt, inactiveAt: snapshotInactiveAt, observedAt: snapshotObservedAt, ...(options.extraSnapshotField === 'runner' ? { unsafeExtra: true } : {}) },
+    state: 'release_gates',
+    container: { kind: 'present', id: containerId, name: containerName, imageDigest: containerImageDigest, labels: containerLabels, globalLabelResult: 'no-match', observedAt: snapshotContainerObservedAt, ...(options.extraSnapshotField === 'container' ? { unsafeExtra: true } : {}) },
+    staging: { ...admissionStagingValue, ...(options.extraSnapshotField === 'staging' ? { unsafeExtra: true } : {}) },
+    logs: { runner: admissionLogs.runner, docker: admissionLogs.docker, verifiedAt: snapshotLogsVerifiedAt, generationIdentity, ...(options.extraSnapshotField === 'logs' ? { unsafeExtra: true } : {}) },
+    ...(options.extraSnapshotField === 'root' ? { unsafeExtra: true } : {}),
+    blocker: options.snapshotBlocker ?? 'container',
+  };
+  const eventContainerObservedAt = options.completionContainerObservedAt ?? options.eventContainerObservedAt ?? '2026-08-01T12:24:41.470Z';
+  const postcondition = {
+    runner: {
+      ...snapshot.runner,
+      inactiveAt: options.completionRunnerInactiveAt ?? snapshot.runner.inactiveAt,
+      observedAt: options.completionRunnerObservedAt ?? snapshot.runner.observedAt,
+      owner: options.eventRunnerOwner ?? snapshot.runner.owner,
+      leaseExpiresAt: options.eventRunnerLeaseExpiresAt ?? snapshot.runner.leaseExpiresAt,
+    },
+    state: snapshot.state,
+    container: options.eventContainerKind === 'removed'
+      ? {
+        kind: 'removed',
+        id: options.eventContainerId ?? containerId,
+        name: options.eventContainerName ?? containerName,
+        imageDigest: options.eventContainerImageDigest ?? containerImageDigest,
+        labels: options.eventContainerLabels ?? containerLabels,
+        exactIdAbsent: true,
+        globalLabelResult: options.globalLabelResult ?? 'no-match',
+        stoppedAt: options.completionContainerStoppedAt ?? '2026-08-01T12:24:41.450Z',
+        removedAt: options.completionContainerRemovedAt ?? '2026-08-01T12:24:41.460Z',
+        observedAt: eventContainerObservedAt,
+        ...(options.extraCompletionField === 'container' ? { unsafeExtra: true } : {}),
+      }
+      : {
+        kind: 'already-absent',
+        id: options.eventContainerId ?? containerId,
+        name: options.eventContainerName ?? containerName,
+        imageDigest: options.eventContainerImageDigest ?? containerImageDigest,
+        labels: options.eventContainerLabels ?? containerLabels,
+        exactIdAbsent: true,
+        dockerAction: 'none',
+        globalLabelResult: options.globalLabelResult ?? 'no-match',
+        observedAt: eventContainerObservedAt,
+        ...(options.extraCompletionField === 'container' ? { unsafeExtra: true } : {}),
+      },
+    staging: {
+      ...completionStagingValue,
+      ...(options.completionStagingSourcePath === undefined ? {} : { sourcePath: options.completionStagingSourcePath }),
+      ...(options.completionStagingDestinationPath === undefined ? {} : { destinationPath: options.completionStagingDestinationPath }),
+      ...(options.extraCompletionField === 'staging' ? { unsafeExtra: true } : {}),
+    },
+    logs: { runner: completionLogs.runner, docker: completionLogs.docker, verifiedAt: completionLogsVerifiedAt, ...(options.extraCompletionField === 'logs' ? { unsafeExtra: true } : {}) },
+    ...(options.includeEgress === false ? {} : {
+      egress: {
+        persistedDocker: null,
+        discoveredDocker: [],
+        credentials: [],
+        globalLabelResult: 'no-match',
+        ...(options.extraEgressField === true ? { unsafeExtra: true } : {}),
+      },
+    }),
+    blocker: 'none',
+  };
+  if (options.updateJob !== false) {
+    db.prepare(`UPDATE jobs SET state='interrupted', queue_state='complete', queue_position=NULL,
+      dispatched_at=?, runner_unit=?, runner_lease_owner=?, runner_lease_expires_at=?, runner_started_at=?,
+      terminal_error_code='RUNNER_DISAPPEARED', terminal_error_json='{}', terminal_at=?
+      WHERE job_id=?`).run(
+      dispatchedAt, runnerUnit, LEGACY_RUNNER_OWNER, runnerLeaseExpiresAt, runnerStartedAt, options.terminalAt ?? handbackAt, jobId,
+    );
+  }
+  if (options.currentStagingState === 'pre-handback') {
+    db.prepare(`UPDATE jobs SET publish_state='staged', artifact_staging_path=?, artifact_sha256=?, artifact_size=?, artifact_mtime=?,
+      checksum_path=?, checksum_sha256=?, manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=? WHERE job_id=?`).run(
+      `staging/${jobId}`, HASH64, 100, '2026-08-01T12:00:00.000Z',
+      `staging/${jobId}/sha256sums`, HASH64, `staging/${jobId}/build-manifest.json`, HASH64,
+      `staging/${jobId}/verification.json`, HASH64, jobId,
+    );
+  } else if (options.currentStagingState === 'quarantined') {
+    const trackedIdentity = options.currentStagingIdentity === undefined
+      ? admissionStaging === 'present'
+      : options.currentStagingIdentity === 'tracked';
+    db.prepare(`UPDATE jobs SET publish_state='quarantined', artifact_staging_path=NULL, artifact_quarantine_path=?,
+      artifact_sha256=?, artifact_size=?, artifact_mtime=?, checksum_path=?, checksum_sha256=?,
+      manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=? WHERE job_id=?`).run(
+      `quarantine/${jobId}`,
+      trackedIdentity ? HASH64 : null,
+      trackedIdentity ? 100 : null,
+      trackedIdentity ? '2026-08-01T12:00:00.000Z' : null,
+      trackedIdentity ? `staging/${jobId}/sha256sums` : null,
+      trackedIdentity ? HASH64 : null,
+      trackedIdentity ? `staging/${jobId}/build-manifest.json` : null,
+      trackedIdentity ? HASH64 : null,
+      trackedIdentity ? `staging/${jobId}/verification.json` : null,
+      trackedIdentity ? HASH64 : null,
+      jobId,
+    );
+  }
+  for (const stream of ['runner', 'docker'] as const) {
+    for (const generation of persistedGenerationIdentity[stream]) {
+      if (!db.prepare('SELECT 1 FROM job_log_generations WHERE job_id=? AND stream=? AND generation=?').get(jobId, stream, generation.generation)) {
+        db.prepare(`INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, sealed_at, size_bytes, sha256)
+          VALUES (?, ?, ?, ?, ?, ?, 0, ?)`).run(jobId, stream, generation.generation, generation.path, generation.startedAt, '2026-08-01T12:24:40.100Z', HASH64);
+      }
+    }
+  }
+  db.prepare(`INSERT INTO cleanup_leases (
+    admission_id, job_id, unit_name, owner, expires_at, status, credential_relative_path, credential_sha256,
+    fence_generation, fence_token_hash, stale_runner_unit, stale_runner_owner, stale_runner_lease_expires_at,
+    stale_state, stale_container_id, stale_container_name, stale_container_labels_json, proof_json,
+    completion_evidence_path, completion_evidence_sha256, admitted_at, claim_at, complete_at, handback_at
+  ) VALUES (?, ?, ?, 'cleanup-worker', ?, 'handed_back', ?, ?, ?, ?, ?, ?, ?, 'release_gates', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    admissionId, jobId, cleanupUnit, options.cleanupLeaseExpiresAt ?? '2026-08-03T01:00:00.000Z',
+    `recovery/cleanup-credentials/${admissionId}.token`, HASH64, fenceGeneration, fenceGeneration === 1 ? 'c'.repeat(64) : 'e'.repeat(64),
+    runnerUnit, LEGACY_RUNNER_OWNER, runnerLeaseExpiresAt, containerId, containerName, JSON.stringify(containerLabels), JSON.stringify(snapshot),
+    evidencePath, HASH64, admittedAt, claimAt, completeAt, handbackAt,
+  );
+  if (options.recoveryEventSeq !== undefined) {
+    db.exec('DROP TRIGGER job_events_append_guard');
+  }
+  db.prepare(`INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at)
+    VALUES (?, ?, 'cleanup_complete', 'release_gates', NULL, ?, ?),
+           (?, ?, 'recovery', 'interrupted', NULL, ?, ?)`).run(
+    jobId, eventSeqBase, JSON.stringify({ admissionId, evidencePath, postcondition }), completeAt,
+    jobId, recoveryEventSeq, JSON.stringify({ admissionId, state: 'interrupted' }), handbackAt,
+  );
+  if (options.recoveryEventSeq !== undefined) {
+    db.exec(JOB_EVENTS_APPEND_GUARD_SQL);
+  }
+}
+
+function expectMigration21Rollback(path: string, jobId: string): void {
+  expectMigrationError(
+    () => openBuilderDatabase(path),
+    /legacy builder identity is active or dispatched before migration 021/u,
+  );
+  const unchanged = new DatabaseSync(path);
+  expect(unchanged.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()).toEqual({ version: 20 });
+  expect(unchanged.prepare(`SELECT builder_identity_status, runner_lease_owner, runner_finished_at
+    FROM jobs WHERE job_id=?`).get(jobId)).toEqual({
+    builder_identity_status: 'admitted',
+    runner_lease_owner: LEGACY_RUNNER_OWNER,
+    runner_finished_at: null,
+  });
+  expect(unchanged.prepare("SELECT 1 AS present FROM pragma_table_info('jobs') WHERE name='builder_dependency_egress_proxy_sha256'").get()).toBeUndefined();
+  unchanged.close();
 }
 
 function containerLabels(jobId: string, manifestSha = HASH64): string {
@@ -222,6 +667,11 @@ describe('versioned builder database migrations', () => {
       { version: 15, filename: '015_retention_prune_target_identity.sql' },
       { version: 16, filename: '016_log_gap_source_seq_unique.sql' },
       { version: 17, filename: '017_publish_blocker_recheck.sql' },
+      { version: 18, filename: '018_release_seal_status.sql' },
+      { version: 19, filename: '019_job_builder_identity.sql' },
+      { version: 20, filename: '020_complete_builder_identity.sql' },
+      { version: 21, filename: '021_dependency_egress_proxy_identity.sql' },
+      { version: 22, filename: '022_audit_dependency_egress_recovery.sql' },
     ]);
     expect((db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name))
       .toEqual(['cleanup_credential_reservations', 'cleanup_leases', 'cleanup_stop_authorization_heads', 'cleanup_stop_authorization_outcomes', 'cleanup_stop_authorizations', 'job_events', 'job_log_generations', 'job_operations', 'job_stages', 'jobs', 'legacy_blocked_publish_evidence', 'publish_blocker_rechecks', 'queue_dispatch_claims', 'queue_entries', 'retention_prune_intents', 'retention_prunes', 'retention_purge_authorizations', 'schema_migrations', 'sqlite_sequence']);
@@ -248,6 +698,12 @@ describe('versioned builder database migrations', () => {
       'cancellation_stop_observation_json', 'cancellation_inspection_observations_json',
       'cancellation_clock_high_water_at', 'cancellation_stop_authorized_at',
       'cancellation_stop_authorized_lease_expires_at',
+      'release_seal_status',
+      'builder_package_version', 'builder_image_reference', 'builder_image_id', 'builder_image_digest',
+      'builder_identity_status', 'builder_package_root', 'builder_lock_sha256',
+      'builder_execution_definition_sha256', 'builder_target_manifest_sha256',
+      'builder_runner_sha256', 'builder_cleanup_worker_sha256',
+      'builder_dependency_egress_proxy_sha256',
     ]);
     expectColumns(db, 'job_stages', [
       'job_id', 'stage', 'outcome', 'started_at', 'finished_at', 'evidence_path', 'evidence_sha256', 'error_code',
@@ -374,12 +830,1201 @@ describe('versioned builder database migrations', () => {
       'jobs_freshness_null_guard', 'jobs_freshness_null_guard_update', 'jobs_freshness_timestamp_guard',
       'jobs_freshness_timestamp_guard_update', 'jobs_publish_guard', 'jobs_publish_guard_insert', 'jobs_publish_null_guard',
       'jobs_publish_null_guard_update', 'jobs_publish_pairs_guard', 'jobs_publish_pairs_guard_update',
+      'jobs_release_seal_status_guard', 'jobs_release_seal_status_guard_update',
+      'jobs_release_seal_status_legacy_sealed_guard',
+      'jobs_builder_identity_guard', 'jobs_builder_identity_guard_update',
+      'jobs_builder_proxy_identity_guard',
       'jobs_request_immutable_guard', 'jobs_runner_lease_guard', 'jobs_runner_lease_guard_update',
       'jobs_offline_feed_preparation_immutable_guard', 'jobs_offline_feed_preparation_insert_guard',
       'jobs_source_preparation_immutable_guard', 'jobs_source_preparation_insert_guard', 'jobs_terminal_guard',
       'jobs_terminal_guard_update',
     ].sort());
     db.close();
+  });
+
+  it('migrates legacy jobs with a null builder identity into an immutable blocked identity', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    for (const migration of MIGRATION_REGISTRY.slice(0, 18)) {
+      historical.exec(await readFile(join(repoMigrationDir, migration.filename), 'utf8'));
+      historical.prepare('INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)')
+        .run(migration.version, migration.filename, migration.sha256, '2026-07-23T00:00:00.000Z');
+    }
+    insertValidJob(historical, 'legacy-builder');
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare(`SELECT builder_identity_status, builder_package_version, builder_image_reference, builder_image_id, builder_image_digest
+      FROM jobs WHERE job_id='legacy-builder'`).get()).toEqual({
+      builder_identity_status: 'legacy_blocked',
+      builder_package_version: null,
+      builder_image_reference: null,
+      builder_image_id: null,
+      builder_image_digest: null,
+    });
+    expect(() => upgraded.prepare("UPDATE jobs SET builder_package_version='0.1.24' WHERE job_id='legacy-builder'").run())
+      .toThrow(/builder identity/iu);
+    expect(() => upgraded.prepare(`UPDATE jobs SET builder_identity_status='admitted', builder_package_version='0.1.24',
+      builder_package_root='/home/builder/.local/lib/osi-image-builder/0.1.24', builder_lock_sha256='${'1'.repeat(64)}',
+      builder_execution_definition_sha256='${'2'.repeat(64)}', builder_target_manifest_sha256='${HASH64}',
+      builder_runner_sha256='${'5'.repeat(64)}', builder_cleanup_worker_sha256='${'6'.repeat(64)}',
+      builder_image_reference='registry.example.invalid/osi-image-builder@sha256:${'c'.repeat(64)}',
+      builder_image_id='sha256:${'d'.repeat(64)}', builder_image_digest='${'c'.repeat(64)}'
+      WHERE job_id='legacy-builder'`).run())
+      .toThrow(/builder identity.*immutable/iu);
+    upgraded.close();
+  });
+
+  it('blocks legacy incomplete identities during upgrade and requires complete identity on every new insert', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    for (const migration of MIGRATION_REGISTRY.slice(0, 19)) {
+      historical.exec(await readFile(join(repoMigrationDir, migration.filename), 'utf8'));
+      historical.prepare('INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)')
+        .run(migration.version, migration.filename, migration.sha256, '2026-08-03T00:00:00.000Z');
+    }
+    insertValidJob(historical, 'legacy-null-builder');
+    historical.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)')
+      .run('legacy-null-builder', 0, '2026-08-03T00:00:00.000Z');
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path, { now: () => '2026-08-03T00:01:00.000Z' });
+    expect(upgraded.prepare(`SELECT state, queue_state, queue_position, terminal_error_code, terminal_error_json
+      FROM jobs WHERE job_id='legacy-null-builder'`).get()).toEqual({
+      state: 'interrupted',
+      queue_state: 'complete',
+      queue_position: null,
+      terminal_error_code: 'BUILDER_DIGEST_MISMATCH',
+      terminal_error_json: JSON.stringify({
+        reason: 'legacy job has no complete admitted builder identity',
+        recovery: 'reenqueue-required',
+      }),
+    });
+    expect(upgraded.prepare("SELECT COUNT(*) AS count FROM queue_entries WHERE job_id='legacy-null-builder'").get())
+      .toEqual({ count: 0 });
+    expect(() => insertValidJob(upgraded, 'new-null-builder', 'queued', false)).toThrow(/builder identity/iu);
+    upgraded.close();
+  });
+
+  it('normalizes a populated migration-019 four-field identity into the canonical legacy-blocked shape', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 19);
+    insertValidJob(historical, 'migration-019-four-field');
+    historical.prepare(`UPDATE jobs SET
+      builder_package_version=?, builder_image_reference=?, builder_image_id=?, builder_image_digest=?
+      WHERE job_id=?`).run(
+      '0.1.23',
+      `registry.example.invalid/osi-image-builder@sha256:${'3'.repeat(64)}`,
+      `sha256:${'4'.repeat(64)}`,
+      '3'.repeat(64),
+      'migration-019-four-field',
+    );
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare(`SELECT builder_identity_status, builder_package_version, builder_package_root,
+      builder_lock_sha256, builder_execution_definition_sha256, builder_target_manifest_sha256,
+      builder_runner_sha256, builder_cleanup_worker_sha256, builder_image_reference,
+      builder_image_id, builder_image_digest
+      FROM jobs WHERE job_id='migration-019-four-field'`).get()).toEqual({
+      builder_identity_status: 'legacy_blocked',
+      builder_package_version: null,
+      builder_package_root: null,
+      builder_lock_sha256: null,
+      builder_execution_definition_sha256: null,
+      builder_target_manifest_sha256: null,
+      builder_runner_sha256: null,
+      builder_cleanup_worker_sha256: null,
+      builder_image_reference: null,
+      builder_image_id: null,
+      builder_image_digest: null,
+    });
+    upgraded.close();
+  });
+
+  it('blocks migration-020 identities that do not bind the dependency egress proxy runtime', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    insertValidJob(historical, 'migration-020-unbound-proxy');
+    historical.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)')
+      .run('migration-020-unbound-proxy', 0, '2026-08-03T00:00:00.000Z');
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare(`SELECT builder_identity_status, builder_dependency_egress_proxy_sha256,
+      state, queue_state, terminal_error_code FROM jobs WHERE job_id='migration-020-unbound-proxy'`).get())
+      .toEqual({
+        builder_identity_status: 'legacy_blocked',
+        builder_dependency_egress_proxy_sha256: null,
+        state: 'interrupted',
+        queue_state: 'complete',
+        terminal_error_code: 'BUILDER_DIGEST_MISMATCH',
+      });
+    upgraded.close();
+  });
+
+  it('opens a database with the historically applied v21 bytes without checksum drift', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const migration = MIGRATION_REGISTRY[20]!;
+    const bytes = await readFile(join(repoMigrationDir, migration.filename));
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(HISTORICAL_V21_SHA256);
+    historical.exec(bytes.toString());
+    historical.prepare('INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)')
+      .run(migration.version, migration.filename, HISTORICAL_V21_SHA256, '2026-08-03T00:00:00.000Z');
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare('SELECT MAX(version) AS version FROM schema_migrations').get())
+      .toEqual({ version: MIGRATION_REGISTRY.length });
+    upgraded.close();
+  });
+
+  it('fails closed on a historical v21 candidate that was weakly reconciled', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-021-weakly-reconciled-candidate';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      admittedAt: '2026-08-01T12:24:41Z',
+    });
+    historical.close();
+
+    const v21 = new DatabaseSync(path);
+    const migration = MIGRATION_REGISTRY[20]!;
+    v21.exec(await readFile(join(repoMigrationDir, migration.filename), 'utf8'));
+    v21.prepare('INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)')
+      .run(migration.version, migration.filename, migration.sha256, '2026-08-03T00:00:00.000Z');
+    expect(v21.prepare(`SELECT runner_finished_at, runner_lease_owner, builder_identity_status
+      FROM jobs WHERE job_id=?`).get(jobId)).toEqual({
+      runner_finished_at: '2026-08-01T12:24:41.520Z',
+      runner_lease_owner: null,
+      builder_identity_status: 'legacy_blocked',
+    });
+    v21.close();
+
+    expectMigrationError(
+      () => openBuilderDatabase(path),
+      /unproven historical dependency-egress recovery/u,
+    );
+    const unchanged = new DatabaseSync(path);
+    expect(unchanged.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()).toEqual({ version: 21 });
+    unchanged.close();
+  });
+
+  it('rejects active v20 work before migration 021 can null its builder identity', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    insertValidJob(historical, 'migration-020-active-runner', 'building');
+    historical.prepare(`UPDATE jobs SET queue_state='dispatched', dispatched_at=?, runner_unit=?,
+      runner_lease_owner=?, runner_lease_expires_at=?, runner_started_at=? WHERE job_id=?`).run(
+      '2026-08-03T00:00:01.000Z',
+      'osi-image-builder-runner@migration-020-active-runner.service',
+      'runner-live',
+      '2026-08-03T01:00:00.000Z',
+      '2026-08-03T00:00:02.000Z',
+      'migration-020-active-runner',
+    );
+    historical.close();
+
+    expectMigrationError(
+      () => openBuilderDatabase(path),
+      /legacy builder identity is active or dispatched/u,
+    );
+    const unchanged = new DatabaseSync(path);
+    expect(unchanged.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()).toEqual({ version: 20 });
+    expect(unchanged.prepare(`SELECT builder_identity_status, builder_package_version
+      FROM jobs WHERE job_id='migration-020-active-runner'`).get()).toEqual({
+      builder_identity_status: 'admitted',
+      builder_package_version: '0.1.24',
+    });
+    expect(unchanged.prepare("SELECT 1 AS present FROM pragma_table_info('jobs') WHERE name='builder_dependency_egress_proxy_sha256'").get()).toBeUndefined();
+    unchanged.close();
+  });
+
+  it('reconciles a terminal v20 job whose handed-back cleanup proof proves runner and exact container absence', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    insertValidJob(historical, 'migration-020-handed-back');
+    insertHandedBackCleanupProof(historical, 'migration-020-handed-back');
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare(`SELECT builder_identity_status, state, queue_state, runner_unit,
+      runner_lease_owner, runner_lease_expires_at, runner_started_at, runner_finished_at
+      FROM jobs WHERE job_id='migration-020-handed-back'`).get()).toEqual({
+      builder_identity_status: 'legacy_blocked',
+      state: 'interrupted',
+      queue_state: 'complete',
+      runner_unit: 'osi-image-builder-runner@migration-020-handed-back.service',
+      runner_lease_owner: null,
+      runner_lease_expires_at: null,
+      runner_started_at: '2026-07-30T16:47:40.685Z',
+      runner_finished_at: '2026-08-01T12:24:41.520Z',
+    });
+    expect(upgraded.prepare('SELECT status, complete_at, handback_at, completion_evidence_path, completion_evidence_sha256 FROM cleanup_leases WHERE job_id=?').get('migration-020-handed-back')).toMatchObject({
+      status: 'handed_back',
+      complete_at: '2026-08-01T12:24:41.520Z',
+      handback_at: '2026-08-01T12:24:49.169Z',
+      completion_evidence_path: `jobs/migration-020-handed-back/evidence/cleanup/${ADMISSION_ID}.complete.json`,
+      completion_evidence_sha256: HASH64,
+    });
+    upgraded.close();
+  });
+
+  it('accepts the real persisted snapshot and removed-container completion shapes', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-real-production-shapes';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, { eventContainerKind: 'removed' });
+
+    historical.close();
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare('SELECT runner_finished_at FROM jobs WHERE job_id=?').get(jobId)).toEqual({ runner_finished_at: '2026-08-01T12:24:41.520Z' });
+    upgraded.close();
+  });
+
+  it('accepts a populated persisted generation identity and removed-container completion', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-generation-identity';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      eventContainerKind: 'removed',
+      generationIdentity: {
+        runner: [{ generation: 0, path: 'logs/runner-0.log', startedAt: '2026-08-01T12:24:40.000Z' }],
+        docker: [{ generation: 0, path: 'logs/docker-0.log', startedAt: '2026-08-01T12:24:40.000Z' }],
+      },
+    });
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare('SELECT runner_finished_at FROM jobs WHERE job_id=?').get(jobId)).toEqual({ runner_finished_at: '2026-08-01T12:24:41.520Z' });
+    upgraded.close();
+  });
+
+  it('accepts non-empty sealed log generations with contiguous event coverage', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-nonempty-log-coverage';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId);
+    replacePersistedLogCoverage(historical, jobId, [
+      { stream: 'runner', generation: 0, byteLengths: [2, 3] },
+      { stream: 'docker', generation: 0, byteLengths: [4, 1] },
+    ]);
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare('SELECT runner_finished_at FROM jobs WHERE job_id=?').get(jobId))
+      .toEqual({ runner_finished_at: '2026-08-01T12:24:41.520Z' });
+    upgraded.close();
+  });
+
+  it.each([
+    ['gap', "UPDATE job_events SET byte_offset=byte_offset+1 WHERE job_id=? AND stream='runner' AND seq=1"],
+    ['overlap', "UPDATE job_events SET byte_offset=byte_offset-1 WHERE job_id=? AND stream='runner' AND seq=1"],
+    ['event before generation', "UPDATE job_events SET at='2026-08-01T12:24:39.999Z' WHERE job_id=? AND stream='runner' AND seq=0"],
+    ['log gap event', "UPDATE job_events SET event_type='log-gap' WHERE job_id=? AND stream='runner' AND seq=0"],
+  ])('rejects non-empty sealed log coverage with a %s', async (caseName, mutation) => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = `migration-020-invalid-log-coverage-${caseName.replaceAll(' ', '-')}`;
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId);
+    replacePersistedLogCoverage(historical, jobId, [
+      { stream: 'runner', generation: 0, byteLengths: [2, 3] },
+      { stream: 'docker', generation: 0, byteLengths: [4, 1] },
+    ]);
+    mutatePersistedLogEvent(historical, mutation, jobId);
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('rejects a duplicate-offset overlap balanced by a later gap', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-balanced-overlap-gap';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId);
+    replacePersistedLogCoverage(historical, jobId, [
+      { stream: 'runner', generation: 0, byteLengths: [2, 3, 1] },
+      { stream: 'docker', generation: 0, byteLengths: [4, 1] },
+    ]);
+    mutatePersistedLogEvent(
+      historical,
+      "UPDATE job_events SET byte_offset=0 WHERE job_id=? AND stream='runner' AND seq=1",
+      jobId,
+    );
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('accepts a present staging admission only when the tracked identity is quarantined unchanged', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-present-staging-valid';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      admissionStaging: 'present',
+      completionStaging: 'quarantined',
+      currentStagingState: 'quarantined',
+    });
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare('SELECT runner_finished_at FROM jobs WHERE job_id=?').get(jobId)).toEqual({ runner_finished_at: '2026-08-01T12:24:41.520Z' });
+    upgraded.close();
+  });
+
+  it('accepts a preparation-intent staging admission whose identity was cleared during hand-back', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-present-staging-null-identity';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      admissionStaging: 'present',
+      admissionStagingSha256: null,
+      admissionStagingSize: null,
+      completionStaging: 'quarantined',
+      completionStagingSha256: null,
+      completionStagingSize: null,
+      currentStagingState: 'quarantined',
+      currentStagingIdentity: 'unknown',
+    });
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare(`SELECT runner_finished_at, publish_state, artifact_staging_path,
+      artifact_quarantine_path, artifact_sha256, artifact_size, manifest_path, verification_path
+      FROM jobs WHERE job_id=?`).get(jobId)).toEqual({
+      runner_finished_at: '2026-08-01T12:24:41.520Z',
+      publish_state: 'quarantined',
+      artifact_staging_path: null,
+      artifact_quarantine_path: `quarantine/${jobId}`,
+      artifact_sha256: null,
+      artifact_size: null,
+      manifest_path: null,
+      verification_path: null,
+    });
+    upgraded.close();
+  });
+
+  it('rejects a preparation-intent hand-back row that retained artifact identity', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-preparation-intent-retained-identity';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      admissionStaging: 'present',
+      admissionStagingSha256: null,
+      admissionStagingSize: null,
+      completionStaging: 'quarantined',
+      completionStagingSha256: null,
+      completionStagingSize: null,
+      currentStagingState: 'quarantined',
+      currentStagingIdentity: 'unknown',
+    });
+    historical.prepare('UPDATE jobs SET manifest_path=?, manifest_sha256=? WHERE job_id=?')
+      .run(`staging/${jobId}/build-manifest.json`, HASH64, jobId);
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('accepts a physical-present staging admission only when it is quarantined without invented identity', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-physical-staging-valid';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      admissionStaging: 'physical-present',
+      completionStaging: 'quarantined',
+      currentStagingState: 'quarantined',
+    });
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare('SELECT runner_finished_at FROM jobs WHERE job_id=?').get(jobId)).toEqual({ runner_finished_at: '2026-08-01T12:24:41.520Z' });
+    upgraded.close();
+  });
+
+  it('accepts true absence for both cleanup log streams when persisted identity is empty', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-logs-absent-valid';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      admissionLogs: { runner: 'absent', docker: 'absent' },
+      completionLogs: { runner: 'absent', docker: 'absent' },
+      generationIdentity: { runner: [], docker: [] },
+    });
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare('SELECT runner_finished_at FROM jobs WHERE job_id=?').get(jobId)).toEqual({ runner_finished_at: '2026-08-01T12:24:41.520Z' });
+    upgraded.close();
+  });
+
+  it.each([
+    ['absent admission quarantined', { admissionStaging: 'absent' as const, completionStaging: 'quarantined' as const, currentStagingState: 'quarantined' as const }],
+    ['present admission absent', { admissionStaging: 'present' as const, completionStaging: 'absent' as const }],
+    ['present admission wrong hash', { admissionStaging: 'present' as const, completionStaging: 'quarantined' as const, completionStagingSha256: 'c'.repeat(64), currentStagingState: 'quarantined' as const }],
+    ['present admission wrong size', { admissionStaging: 'present' as const, completionStaging: 'quarantined' as const, completionStagingSize: 101, currentStagingState: 'quarantined' as const }],
+    ['present admission null identity', { admissionStaging: 'present' as const, completionStaging: 'quarantined' as const, completionStagingSha256: null, completionStagingSize: null, currentStagingState: 'quarantined' as const }],
+    ['physical admission absent', { admissionStaging: 'physical-present' as const, completionStaging: 'absent' as const }],
+    ['physical admission invented identity', { admissionStaging: 'physical-present' as const, completionStaging: 'quarantined' as const, completionStagingSha256: HASH64, completionStagingSize: 100, currentStagingState: 'quarantined' as const }],
+  ] satisfies ReadonlyArray<readonly [string, HandedBackCleanupProofOptions]>)('rejects an invalid staging pair: %s', async (caseName, options) => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = `migration-020-staging-invalid-${caseName.replaceAll(' ', '-')}`;
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, options);
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('rejects a pre-handback staging row after durable hand-back evidence', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-pre-handback-staging-invalid';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      admissionStaging: 'present',
+      completionStaging: 'quarantined',
+      currentStagingState: 'pre-handback',
+    });
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it.each([
+    ['sealed state with empty runner identity', {
+      admissionLogs: { runner: 'sealed' as const, docker: 'absent' as const },
+      completionLogs: { runner: 'sealed' as const, docker: 'absent' as const },
+      generationIdentity: { runner: [], docker: [] },
+    }],
+    ['absent state with persisted runner identity', {
+      admissionLogs: { runner: 'absent' as const, docker: 'absent' as const },
+      completionLogs: { runner: 'absent' as const, docker: 'absent' as const },
+    }],
+    ['sealed runner with absent docker', {
+      admissionLogs: { runner: 'sealed' as const, docker: 'absent' as const },
+      completionLogs: { runner: 'sealed' as const, docker: 'absent' as const },
+      generationIdentity: { runner: DEFAULT_GENERATION_IDENTITY.runner, docker: [] },
+    }],
+    ['absent runner with sealed docker', {
+      admissionLogs: { runner: 'absent' as const, docker: 'sealed' as const },
+      completionLogs: { runner: 'absent' as const, docker: 'sealed' as const },
+      generationIdentity: { runner: [], docker: DEFAULT_GENERATION_IDENTITY.docker },
+    }],
+    ['completion state differs from admission', {
+      completionLogs: { runner: 'absent' as const, docker: 'sealed' as const },
+    }],
+  ] satisfies ReadonlyArray<readonly [string, HandedBackCleanupProofOptions]>)('rejects inconsistent persisted or completion log state: %s', async (caseName, options) => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = `migration-020-log-state-invalid-${caseName.replaceAll(' ', '-')}`;
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, options);
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it.each([
+    ['proof/table path mismatch', {
+      generationIdentity: { runner: [{ generation: 0, path: 'logs/runner-proof.log', startedAt: '2026-08-01T12:24:40.000Z' }], docker: DEFAULT_GENERATION_IDENTITY.docker },
+      persistedGenerationIdentity: DEFAULT_GENERATION_IDENTITY,
+    }],
+    ['extra persisted generation', {
+      persistedGenerationIdentity: {
+        runner: [
+          { generation: 0, path: 'logs/runner-0.log', startedAt: '2026-08-01T12:24:40.000Z' },
+          { generation: 1, path: 'logs/runner-1.log', startedAt: '2026-08-01T12:24:40.000Z' },
+        ],
+        docker: DEFAULT_GENERATION_IDENTITY.docker,
+      },
+    }],
+    ['missing persisted generation', {
+      generationIdentity: {
+        runner: [
+          { generation: 0, path: 'logs/runner-0.log', startedAt: '2026-08-01T12:24:40.000Z' },
+          { generation: 1, path: 'logs/runner-1.log', startedAt: '2026-08-01T12:24:40.000Z' },
+        ],
+        docker: DEFAULT_GENERATION_IDENTITY.docker,
+      },
+      persistedGenerationIdentity: DEFAULT_GENERATION_IDENTITY,
+    }],
+  ] satisfies ReadonlyArray<readonly [string, HandedBackCleanupProofOptions]>)('rejects a persisted generation identity mismatch: %s', async (caseName, options) => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = `migration-020-generation-mismatch-${caseName.replaceAll(' ', '-')}`;
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, options);
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('rejects 129 persisted log generations split across runner and docker', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-generation-total-overflow';
+    const generations = {
+      runner: Array.from({ length: 65 }, (_, generation) => ({
+        generation,
+        path: `logs/runner-${generation}.log`,
+        startedAt: '2026-08-01T12:24:40.000Z',
+      })),
+      docker: Array.from({ length: 64 }, (_, generation) => ({
+        generation,
+        path: `logs/docker-${generation}.log`,
+        startedAt: '2026-08-01T12:24:40.000Z',
+      })),
+    } satisfies GenerationIdentity;
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, { generationIdentity: generations });
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('accepts exactly 8192 persisted log events across the bounded generations', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-log-event-boundary';
+    const fixture = boundedLogFixture();
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      generationIdentity: fixture.generationIdentity,
+    });
+    replacePersistedLogCoverage(historical, jobId, fixture.coverage);
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare('SELECT runner_finished_at FROM jobs WHERE job_id=?').get(jobId))
+      .toEqual({ runner_finished_at: '2026-08-01T12:24:41.520Z' });
+    upgraded.close();
+  }, 120_000);
+
+  it('rejects 8193 persisted log events across the bounded generations', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-log-event-overflow';
+    const fixture = boundedLogFixture(true);
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      generationIdentity: fixture.generationIdentity,
+    });
+    replacePersistedLogCoverage(historical, jobId, fixture.coverage);
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  }, 120_000);
+
+  it('rejects a persisted container admission without blocker=container', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-container-blocker-mismatch';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, { snapshotBlocker: 'none' });
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it.each([
+    ['admitted after claim', { admittedAt: '2026-08-01T12:24:41.200Z' }],
+    ['noncanonical admission time', { admittedAt: '2026-08-01T12:24:41Z' }],
+    ['dispatch after runner start', { dispatchedAt: '2026-07-30T16:47:40.700Z' }],
+    ['runner snapshot after admission', { snapshotRunnerInactiveAt: '2026-08-01T12:24:41.010Z', snapshotRunnerObservedAt: '2026-08-01T12:24:41.020Z' }],
+    ['container snapshot after admission', { snapshotContainerObservedAt: '2026-08-01T12:24:41.010Z' }],
+    ['log snapshot after admission', { snapshotLogsVerifiedAt: '2026-08-01T12:24:41.010Z' }],
+    ['physical staging snapshot after admission', { admissionStaging: 'physical-present' as const, completionStaging: 'quarantined' as const, currentStagingState: 'quarantined' as const, snapshotStagingObservedAt: '2026-08-01T12:24:41.010Z' }],
+    ['completion staging verification after completion', { completionStagingVerifiedAt: '2026-08-01T12:24:41.521Z' }],
+    ['completion log verification after completion', { completionLogsVerifiedAt: '2026-08-01T12:24:41.521Z' }],
+  ] satisfies ReadonlyArray<readonly [string, HandedBackCleanupProofOptions]>)('rejects cleanup chronology inversion or future bound: %s', async (caseName, options) => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = `migration-020-chronology-invalid-${caseName.replaceAll(' ', '-')}`;
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, options);
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('rejects cleanup admission when runner lease expiry equals admitted_at', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-lease-expiry-equals-admission';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      runnerLeaseExpiresAt: '2026-08-01T12:24:41.000Z',
+      snapshotRunnerInactiveAt: '2026-08-01T12:24:41.000Z',
+      snapshotRunnerObservedAt: '2026-08-01T12:24:41.000Z',
+    });
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('accepts delayed hand-back after cleanup lease expiry', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-handback-after-cleanup-expiry';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      cleanupLeaseExpiresAt: '2026-08-01T12:24:45.000Z',
+    });
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare('SELECT runner_finished_at FROM jobs WHERE job_id=?').get(jobId))
+      .toEqual({ runner_finished_at: '2026-08-01T12:24:41.520Z' });
+    upgraded.close();
+  });
+
+  it.each([
+    ['completion at cleanup expiry', {
+      completeAt: '2026-08-01T12:24:41.520Z',
+      cleanupLeaseExpiresAt: '2026-08-01T12:24:41.520Z',
+    }],
+    ['completion after cleanup expiry', {
+      completeAt: '2026-08-01T12:24:41.521Z',
+      cleanupLeaseExpiresAt: '2026-08-01T12:24:41.520Z',
+    }],
+  ] satisfies ReadonlyArray<readonly [string, HandedBackCleanupProofOptions]>)('rejects cleanup completion %s', async (caseName, options) => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = `migration-020-completion-expiry-${caseName.replaceAll(' ', '-')}`;
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, options);
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('rejects recovery recorded before cleanup completion', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-recovery-before-cleanup-completion';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, { eventSeqBase: 1, recoveryEventSeq: 0 });
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('accepts cleanup completion before a non-adjacent recovery event', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-non-adjacent-cleanup-order';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, { eventSeqBase: 0, recoveryEventSeq: 2 });
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare('SELECT runner_finished_at FROM jobs WHERE job_id=?').get(jobId))
+      .toEqual({ runner_finished_at: '2026-08-01T12:24:41.520Z' });
+    upgraded.close();
+  });
+
+  it('rejects a handed-back lease whose terminal timestamp no longer matches its recovery event', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-event-time-mismatch';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, { terminalAt: '2026-08-01T12:24:49.168Z' });
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('rejects malformed persisted generation identity entries', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = 'migration-020-malformed-generation';
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, {
+      generationIdentity: {
+        runner: [{ generation: 1, path: 'logs/runner-0.log', startedAt: '2026-08-01T12:24:40.000Z' }],
+        docker: [],
+      },
+      persistedGenerationIdentity: {
+        runner: [{ generation: 0, path: 'logs/runner-0.log', startedAt: '2026-08-01T12:24:40.000Z' }],
+        docker: [],
+      },
+    });
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it.each(['container', 'staging', 'logs'] as const)('rejects a completion %s shape with an extra field', async (field) => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = `migration-020-extra-completion-${field}`;
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, { extraCompletionField: field });
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('rejects a terminal v20 job when the handed-back cleanup proof is incomplete', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    insertValidJob(historical, 'migration-020-incomplete-handback');
+    insertHandedBackCleanupProof(historical, 'migration-020-incomplete-handback');
+    historical.prepare("DELETE FROM job_events WHERE job_id=? AND event_type='cleanup_complete'").run('migration-020-incomplete-handback');
+    historical.close();
+
+    expectMigration21Rollback(path, 'migration-020-incomplete-handback');
+  });
+
+  it('rejects a terminal v20 job when handed-back cleanup evidence is tampered', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    insertValidJob(historical, 'migration-020-tampered-handback');
+    insertHandedBackCleanupProof(historical, 'migration-020-tampered-handback', { globalLabelResult: 'match' });
+    historical.close();
+
+    expectMigration21Rollback(path, 'migration-020-tampered-handback');
+  });
+
+  it('rejects multiple fully handed-back cleanup generations for one terminal v20 job', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    insertValidJob(historical, 'migration-020-multiple-handbacks');
+    insertHandedBackCleanupProof(historical, 'migration-020-multiple-handbacks');
+    insertHandedBackCleanupProof(historical, 'migration-020-multiple-handbacks', {
+      admissionId: SECOND_ADMISSION_ID,
+      fenceGeneration: 2,
+      eventSeqBase: 2,
+      updateJob: false,
+    });
+    historical.close();
+
+    expectMigration21Rollback(path, 'migration-020-multiple-handbacks');
+  });
+
+  it.each([
+    ['owner', { eventRunnerOwner: 'runner-different-owner' }],
+    ['lease expiry', { eventRunnerLeaseExpiresAt: '2026-07-30T16:49:27.626Z' }],
+  ] satisfies ReadonlyArray<readonly [string, HandedBackCleanupProofOptions]>)('rejects a terminal v20 cleanup proof with mismatched runner %s', async (_field, options) => {
+    const path = await temporaryDatabase();
+    const jobId = `migration-020-runner-${_field.replace(' ', '-')}`;
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, options);
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it.each([
+    ['id', { eventContainerId: 'different-container-id' }],
+    ['name', { eventContainerName: 'different-container-name' }],
+    ['digest', { eventContainerImageDigest: 'f'.repeat(64) }],
+    ['labels', { eventContainerLabels: { 'org.osi.image-builder.job-id': 'different-job', 'org.osi.image-builder.manifest-sha': HASH64 } }],
+  ] satisfies ReadonlyArray<readonly [string, HandedBackCleanupProofOptions]>)('rejects a terminal v20 cleanup proof with mismatched container %s', async (field, options) => {
+    const path = await temporaryDatabase();
+    const jobId = `migration-020-container-${field}`;
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, options);
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it.each([
+    ['malformed runner observation', { runnerInactiveAt: 'not-a-timestamp', runnerObservedAt: 'not-a-timestamp' }],
+    ['runner observation before inactivity', { runnerInactiveAt: '2026-08-01T12:24:40.954Z', runnerObservedAt: '2026-08-01T12:24:40.953Z' }],
+    ['runner observation after completion', { runnerObservedAt: '2026-08-01T12:24:41.521Z' }],
+    ['container observation after completion', { eventContainerObservedAt: '2026-08-01T12:24:41.521Z' }],
+  ] satisfies ReadonlyArray<readonly [string, HandedBackCleanupProofOptions]>)('rejects a terminal v20 cleanup proof with %s', async (caseName, options) => {
+    const path = await temporaryDatabase();
+    const jobId = `migration-020-time-${caseName.replaceAll(' ', '-')}`;
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, options);
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('rejects a terminal v20 cleanup proof without dependency-egress absence evidence', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    insertValidJob(historical, 'migration-020-missing-egress');
+    insertHandedBackCleanupProof(historical, 'migration-020-missing-egress', { includeEgress: false });
+    historical.close();
+
+    expectMigration21Rollback(path, 'migration-020-missing-egress');
+  });
+
+  it('rejects a terminal v20 cleanup proof with an extra dependency-egress field', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    insertValidJob(historical, 'migration-020-extra-egress-field');
+    insertHandedBackCleanupProof(historical, 'migration-020-extra-egress-field', { extraEgressField: true });
+    historical.close();
+
+    expectMigration21Rollback(path, 'migration-020-extra-egress-field');
+  });
+
+  it.each(['root', 'runner', 'container', 'staging', 'logs'] as const)('rejects a terminal v20 cleanup proof with an extra %s snapshot field', async (field) => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    const jobId = `migration-020-extra-snapshot-${field}`;
+    insertValidJob(historical, jobId);
+    insertHandedBackCleanupProof(historical, jobId, { extraSnapshotField: field });
+    historical.close();
+
+    expectMigration21Rollback(path, jobId);
+  });
+
+  it('upgrades v19 through v20 but rejects active admitted work before migration 021', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 19);
+    let migrationBoundaryCalls = 0;
+
+    expectMigrationError(
+      () => openBuilderDatabase(path, {
+        beforeMigration: ({ version }) => {
+          migrationBoundaryCalls += 1;
+          if (version === 21) {
+            insertValidJob(historical, 'migration-019-to-020-active', 'building');
+            historical.prepare(`UPDATE jobs SET dispatched_at=?, runner_unit=?,
+              runner_lease_owner=?, runner_lease_expires_at=?, runner_started_at=? WHERE job_id=?`).run(
+              '2026-08-03T00:00:01.000Z',
+              'osi-image-builder-runner@migration-019-to-020-active.service',
+              'runner-live',
+              '2026-08-03T01:00:00.000Z',
+              '2026-08-03T00:00:02.000Z',
+              'migration-019-to-020-active',
+            );
+            insertAdmittedLease(historical, 'migration-019-to-020-active');
+          }
+        },
+      }),
+      /legacy builder identity is active or dispatched before migration 021/u,
+    );
+
+    expect(migrationBoundaryCalls).toBe(2);
+    const unchanged = new DatabaseSync(path);
+    expect(unchanged.prepare('SELECT COUNT(*) AS count, MAX(version) AS version FROM schema_migrations').get())
+      .toEqual({ count: 20, version: 20 });
+    expect(unchanged.prepare(`SELECT builder_identity_status, builder_package_version, builder_package_root,
+      builder_lock_sha256, builder_execution_definition_sha256, builder_target_manifest_sha256,
+      builder_runner_sha256, builder_cleanup_worker_sha256, builder_image_reference,
+      builder_image_id, builder_image_digest, state, queue_state, dispatched_at, runner_unit,
+      runner_lease_owner, runner_lease_expires_at, runner_started_at, runner_finished_at
+      FROM jobs WHERE job_id='migration-019-to-020-active'`).get()).toEqual({
+      builder_identity_status: 'admitted',
+      builder_package_version: '0.1.24',
+      builder_package_root: '/home/builder/.local/lib/osi-image-builder/0.1.24',
+      builder_lock_sha256: '1'.repeat(64),
+      builder_execution_definition_sha256: '2'.repeat(64),
+      builder_target_manifest_sha256: HASH64,
+      builder_runner_sha256: '5'.repeat(64),
+      builder_cleanup_worker_sha256: '6'.repeat(64),
+      builder_image_reference: `registry.example.invalid/osi-image-builder@sha256:${'3'.repeat(64)}`,
+      builder_image_id: `sha256:${'4'.repeat(64)}`,
+      builder_image_digest: '3'.repeat(64),
+      state: 'building',
+      queue_state: 'dispatched',
+      dispatched_at: '2026-08-03T00:00:01.000Z',
+      runner_unit: 'osi-image-builder-runner@migration-019-to-020-active.service',
+      runner_lease_owner: 'runner-live',
+      runner_lease_expires_at: '2026-08-03T01:00:00.000Z',
+      runner_started_at: '2026-08-03T00:00:02.000Z',
+      runner_finished_at: null,
+    });
+    expect(unchanged.prepare(`SELECT admission_id, owner, status, credential_relative_path,
+      credential_sha256, fence_generation, fence_token_hash FROM cleanup_leases
+      WHERE job_id='migration-019-to-020-active'`).get()).toEqual({
+      admission_id: ADMISSION_ID,
+      owner: 'builder',
+      status: 'admitted',
+      credential_relative_path: `recovery/cleanup-credentials/${ADMISSION_ID}.token`,
+      credential_sha256: HASH64,
+      fence_generation: 1,
+      fence_token_hash: 'c'.repeat(64),
+    });
+    expect(unchanged.prepare("SELECT 1 AS present FROM pragma_table_info('jobs') WHERE name='builder_dependency_egress_proxy_sha256'").get()).toBeUndefined();
+    unchanged.close();
+  });
+
+  it('fails closed when migration-020 left an active cross-version cleanup lease', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 20);
+    insertValidJob(historical, 'migration-020-active-cleanup');
+    historical.prepare(`UPDATE jobs SET state='interrupted', queue_state='complete', queue_position=NULL,
+      terminal_error_code='RUNNER_DISAPPEARED', terminal_error_json='{}', terminal_at=updated_at
+      WHERE job_id='migration-020-active-cleanup'`).run();
+    insertAdmittedLease(historical, 'migration-020-active-cleanup');
+    historical.close();
+
+    expectMigrationError(
+      () => openBuilderDatabase(path),
+      /legacy.*(?:cleanup|active)|(?:cleanup|active).*legacy/iu,
+    );
+  });
+
+  it.each([
+    'starting',
+    'preflight',
+    'source',
+    'release_gates',
+    'frontend',
+    'target_setup',
+    'feeds',
+    'config',
+    'building',
+    'verifying',
+    'publishing',
+    'cancel_requested',
+  ] as const)('fails closed during upgrade when a legacy-null %s job has a live dispatched runner', async (state) => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 19);
+    insertValidJob(historical, `legacy-live-${state}`, state);
+    historical.prepare(`UPDATE jobs SET dispatched_at=?, runner_unit=?, runner_lease_owner=?,
+      runner_lease_expires_at=?, runner_started_at=? WHERE job_id=?`).run(
+      '2026-08-03T00:00:01.000Z',
+      `osi-image-builder-runner@legacy-live-${state}.service`,
+      'runner-live',
+      '2026-08-03T01:00:00.000Z',
+      '2026-08-03T00:00:02.000Z',
+      `legacy-live-${state}`,
+    );
+    historical.close();
+
+    let opened: DatabaseSync | undefined;
+    let error: unknown;
+    try {
+      opened = openBuilderDatabase(path);
+    } catch (caught) {
+      error = caught;
+    } finally {
+      opened?.close();
+    }
+    expect(error).toBeInstanceOf(MigrationError);
+    expect((error as Error).message).toMatch(/legacy.*(?:dispatched|active)|(?:dispatched|active).*legacy/iu);
+  });
+
+  it('preserves a terminal legacy job with a fully finished historical runner record', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    await applyRegisteredMigrations(historical, 19);
+    insertValidJob(historical, 'legacy-finished-runner');
+    historical.prepare(`UPDATE jobs SET state='failed', queue_state='complete', queue_position=NULL,
+      dispatched_at=?, runner_unit=?, runner_started_at=?, runner_finished_at=?, terminal_at=?,
+      terminal_error_code='BUILD_FAILED', terminal_error_json='{"legacy":true}'
+      WHERE job_id=?`).run(
+      '2026-08-03T00:00:01.000Z',
+      'osi-image-builder-runner@legacy-finished-runner.service',
+      '2026-08-03T00:00:02.000Z',
+      '2026-08-03T00:00:03.000Z',
+      '2026-08-03T00:00:03.000Z',
+      'legacy-finished-runner',
+    );
+    historical.close();
+
+    const upgraded = openBuilderDatabase(path);
+    expect(upgraded.prepare(`SELECT state, queue_state, runner_unit, runner_finished_at,
+      builder_identity_status FROM jobs WHERE job_id='legacy-finished-runner'`).get()).toEqual({
+      state: 'failed',
+      queue_state: 'complete',
+      runner_unit: 'osi-image-builder-runner@legacy-finished-runner.service',
+      runner_finished_at: '2026-08-03T00:00:03.000Z',
+      builder_identity_status: 'legacy_blocked',
+    });
+    upgraded.close();
+  });
+
+  it('makes direct SQL builder-identity acceptance exactly match the runtime parser', async () => {
+    const path = await temporaryDatabase();
+    const db = openBuilderDatabase(path);
+    const digest = '3'.repeat(64);
+    const base: BuilderIdentity = {
+      packageVersion: '0.1.24',
+      packageRoot: '/home/builder/.local/lib/osi-image-builder/0.1.24',
+      lockSha256: '1'.repeat(64),
+      executionDefinitionSha256: '2'.repeat(64),
+      targetManifestSha256: HASH64,
+      runnerSha256: '5'.repeat(64),
+      cleanupWorkerSha256: '6'.repeat(64),
+      dependencyEgressProxySha256: '7'.repeat(64),
+      imageReference: `registry.example.invalid/osi-image-builder@sha256:${digest}`,
+      imageId: `sha256:${'4'.repeat(64)}`,
+      imageDigest: digest,
+    };
+    const valid = [
+      base,
+      { ...base, packageVersion: 'v1.2.3', packageRoot: '/opt/osi-image-builder/v1.2.3' },
+      { ...base, packageVersion: '2026.08.03', packageRoot: '/opt/osi-image-builder/2026.08.03' },
+      { ...base, packageVersion: '2026.08.03.1', packageRoot: '/opt/osi-image-builder/2026.08.03.1' },
+      { ...base, imageReference: `localhost:5000/org/osi.builder-v1@sha256:${digest}` },
+    ];
+    const invalid = [
+      { ...base, packageVersion: 'latest', packageRoot: '/opt/osi-image-builder/latest' },
+      { ...base, packageVersion: '1.2', packageRoot: '/opt/osi-image-builder/1.2' },
+      { ...base, packageVersion: 'v1.2.3.4', packageRoot: '/opt/osi-image-builder/v1.2.3.4' },
+      { ...base, lockSha256: '0'.repeat(64) },
+      { ...base, executionDefinitionSha256: '0'.repeat(64) },
+      { ...base, targetManifestSha256: '0'.repeat(64) },
+      { ...base, runnerSha256: '0'.repeat(64) },
+      { ...base, cleanupWorkerSha256: '0'.repeat(64) },
+      { ...base, dependencyEgressProxySha256: '0'.repeat(64) },
+      { ...base, imageId: `sha256:${'0'.repeat(64)}` },
+      { ...base, imageDigest: '0'.repeat(64), imageReference: `registry.example.invalid/osi-image-builder@sha256:${'0'.repeat(64)}` },
+      { ...base, imageReference: `Registry.example.invalid/osi-image-builder@sha256:${digest}` },
+      { ...base, imageReference: `registry.example.invalid:01/osi-image-builder@sha256:${digest}` },
+      { ...base, imageReference: `registry.example.invalid/osi..image-builder@sha256:${digest}` },
+      { ...base, imageReference: `registry.example.invalid/-osi-image-builder@sha256:${digest}` },
+      {
+        ...base,
+        packageRoot: `/opt/${'😀'.repeat(600)}/0.1.24`,
+      },
+    ];
+
+    valid.forEach((identity, index) => {
+      expect(parseBuilderIdentity(identity)).toEqual(identity);
+      expect(() => insertValidJob(db, `sql-valid-${index}`, 'queued', true, identity)).not.toThrow();
+    });
+    invalid.forEach((identity, index) => {
+      expect(() => parseBuilderIdentity(identity)).toThrow(/builder identity|image reference/iu);
+      expect(() => insertValidJob(db, `sql-invalid-${index}`, 'queued', true, identity)).toThrow(/builder identity/iu);
+    });
+    db.close();
+  });
+
+  it('classifies historical published releases as legacy mutable and active publication as in progress', async () => {
+    const path = await temporaryDatabase();
+    const historical = new DatabaseSync(path);
+    for (const migration of MIGRATION_REGISTRY.slice(0, 17)) {
+      historical.exec(await readFile(join(repoMigrationDir, migration.filename), 'utf8'));
+      historical.prepare('INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)')
+        .run(migration.version, migration.filename, migration.sha256, '2026-07-30T00:00:00.000Z');
+    }
+    const artifact = {
+      artifact_sha256: HASH64,
+      artifact_size: 100,
+      artifact_mtime: '2026-07-30T00:00:01.000Z',
+      checksum_path: 'staging/sha256sums',
+      checksum_sha256: HASH64,
+      manifest_path: 'staging/build-manifest.json',
+      manifest_sha256: HASH64,
+      verification_path: 'staging/verification.json',
+      verification_sha256: HASH64,
+    };
+    insertValidJob(historical, 'legacy-published');
+    historical.prepare(`UPDATE jobs SET
+      state='succeeded', current_stage='publish', queue_state='complete', queue_position=NULL,
+      terminal_at=?, artifact_staging_path=NULL, artifact_final_directory=?, artifact_final_path=?,
+      artifact_sha256=?, artifact_size=?, artifact_mtime=?, checksum_path=?, checksum_sha256=?,
+      manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=?,
+      publish_state='published', publish_started_at=?, published_at=?, updated_at=?
+      WHERE job_id=?`).run(
+      '2026-07-30T00:00:04.000Z', 'main/sha/rpi-5', 'main/sha/rpi-5/image.gz',
+      artifact.artifact_sha256, artifact.artifact_size, artifact.artifact_mtime,
+      artifact.checksum_path, artifact.checksum_sha256, artifact.manifest_path,
+      artifact.manifest_sha256, artifact.verification_path, artifact.verification_sha256,
+      '2026-07-30T00:00:02.000Z', '2026-07-30T00:00:03.000Z',
+      '2026-07-30T00:00:04.000Z', 'legacy-published',
+    );
+    insertValidJob(historical, 'interrupted-seal');
+    historical.prepare(`UPDATE jobs SET
+      state='publishing', current_stage='publish', queue_state='dispatched', queue_position=NULL,
+      artifact_staging_path=?, artifact_final_directory=?, artifact_final_path=?,
+      artifact_sha256=?, artifact_size=?, artifact_mtime=?, checksum_path=?, checksum_sha256=?,
+      manifest_path=?, manifest_sha256=?, verification_path=?, verification_sha256=?,
+      publish_state='publishing', publish_started_at=?, updated_at=?
+      WHERE job_id=?`).run(
+      'staging/interrupted-seal/image.gz', 'main/sha/rpi-5', 'main/sha/rpi-5/image.gz',
+      artifact.artifact_sha256, artifact.artifact_size, artifact.artifact_mtime,
+      artifact.checksum_path, artifact.checksum_sha256, artifact.manifest_path,
+      artifact.manifest_sha256, artifact.verification_path, artifact.verification_sha256,
+      '2026-07-30T00:00:02.000Z', '2026-07-30T00:00:02.000Z', 'interrupted-seal',
+    );
+    historical.prepare(`UPDATE jobs SET
+      state='cancel_requested', cancel_requested_at=?, cancel_reason=?, updated_at=?
+      WHERE job_id=?`).run(
+      '2026-07-30T00:00:03.000Z', 'operator cancellation',
+      '2026-07-30T00:00:03.000Z', 'interrupted-seal',
+    );
+    historical.close();
+
+    expectMigrationError(
+      () => openBuilderDatabase(path),
+      /legacy.*(?:dispatched|active)|(?:dispatched|active).*legacy/iu,
+    );
+    const upgraded = new DatabaseSync(path);
+    expect(upgraded.prepare('SELECT job_id, release_seal_status FROM jobs ORDER BY job_id').all()).toEqual([
+      { job_id: 'interrupted-seal', release_seal_status: 'in_progress' },
+      { job_id: 'legacy-published', release_seal_status: 'legacy_mutable' },
+    ]);
+    expect(() => upgraded.prepare("UPDATE jobs SET release_seal_status='sealed' WHERE job_id='interrupted-seal'").run())
+      .toThrow(/release seal status is incoherent/u);
+    expect(() => upgraded.prepare("UPDATE jobs SET release_seal_status=NULL WHERE job_id='interrupted-seal'").run())
+      .toThrow(/release seal status is incoherent/u);
+    expect(() => upgraded.prepare("UPDATE jobs SET release_seal_status='sealed' WHERE job_id='legacy-published'").run())
+      .toThrow(/legacy mutable release requires audited sealing/u);
+    upgraded.close();
   });
 
   it('backfills an active historical cancellation deadline without inventing escalation ownership', async () => {
@@ -405,7 +2050,11 @@ describe('versioned builder database migrations', () => {
     );
     historical.close();
 
-    const upgraded = openBuilderDatabase(path);
+    expectMigrationError(
+      () => openBuilderDatabase(path),
+      /legacy.*(?:dispatched|active)|(?:dispatched|active).*legacy/iu,
+    );
+    const upgraded = new DatabaseSync(path);
     expect(upgraded.prepare(`SELECT
       cancellation_cooperative_deadline_at AS deadline,
       cancellation_escalation_owner AS owner,
@@ -522,7 +2171,7 @@ describe('versioned builder database migrations', () => {
     const second = openBuilderDatabase(path);
     expect(second.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name").all())
       .toEqual(schema);
-    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 17 });
+    expect(second.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 22 });
     second.close();
   });
 
@@ -977,7 +2626,11 @@ describe('versioned builder database migrations', () => {
     insertValidJob(historical, 'preserved-v16-job', 'building');
     historical.close();
 
-    const upgraded = openBuilderDatabase(path);
+    expectMigrationError(
+      () => openBuilderDatabase(path),
+      /legacy.*(?:dispatched|active)|(?:dispatched|active).*legacy/iu,
+    );
+    const upgraded = new DatabaseSync(path);
     expect(upgraded.prepare('SELECT version, filename FROM schema_migrations WHERE version=17').get())
       .toEqual({ version: 17, filename: '017_publish_blocker_recheck.sql' });
     expect(upgraded.prepare("SELECT job_id, state FROM jobs WHERE job_id='preserved-v16-job'").get())
@@ -1015,15 +2668,7 @@ describe('versioned builder database migrations', () => {
     const path = await temporaryDatabase();
     const migrationDir = await copyMigrations();
     const db = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
-    db.prepare(`INSERT INTO jobs (
-      job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id,
-      target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at,
-      source_preparation_json, offline_feed_preparation_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      'job-existing', 'request-existing', 'git@example:repo.git', 'refs/remotes/origin/main', 'main', 'main', 'a'.repeat(40), 'a'.repeat(40),
-      'rpi-5', 'release', 'b'.repeat(64), '2026-07-23T00:00:00.000Z', 'author', 'subject', '2026-07-23T00:00:00.000Z', 'queued', 'queued', '2026-07-23T00:00:00.000Z', '2026-07-23T00:00:00.000Z',
-      sourcePreparationJson(), offlineFeedPreparationJson('job-existing'),
-    );
+    insertValidJob(db, 'job-existing');
     db.close();
 
     await writeFile(join(migrationDir, '003_freshness_and_logs.sql'), `${await readFile(join(migrationDir, '003_freshness_and_logs.sql'), 'utf8')}\n-- drift\n`);
@@ -1110,7 +2755,7 @@ describe('versioned builder database migrations', () => {
     physicalOrderDb.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(1, '001_initial.sql', MIGRATION_REGISTRY[0].sha256, 'x');
     physicalOrderDb.close();
     const accepted = openBuilderDatabase(physicalOrderPath);
-    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 17 });
+    expect(accepted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 22 });
     accepted.close();
   });
 
@@ -1215,20 +2860,19 @@ describe('versioned builder database migrations', () => {
   it('enforces foreign keys, domain enums, hashes, ranges, event sequences, and log ranges', async () => {
     const path = await temporaryDatabase();
     const db = openBuilderDatabase(path);
-    const job = ['job-1', 'req-1', 'git@example:repo.git', 'refs/remotes/origin/main', 'main', 'main', 'a'.repeat(40), 'a'.repeat(40), 'rpi-5', 'release', 'b'.repeat(64), '2026-07-23T00:00:00.000Z', 'author', 'subject', '2026-07-23T00:00:00.000Z', 'queued', 'queued', '2026-07-23T00:00:00.000Z', '2026-07-23T00:00:00.000Z'] as const;
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(...job, sourcePreparationJson(), offlineFeedPreparationJson('job-1'));
-    db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run('job-1', 0, job[17]);
+    insertValidJob(db, 'job-1');
+    db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run('job-1', 0, '2026-07-23T00:00:00.000Z');
     check(db, "INSERT INTO queue_entries VALUES ('unknown', 1, 'x', NULL)", /FOREIGN KEY constraint failed/);
     insertValidJob(db, 'bad-state');
     check(db, "UPDATE jobs SET state='not-a-state' WHERE job_id='bad-state'", /CHECK constraint failed: state IN/);
     check(db, "UPDATE jobs SET cleanup_fence_generation=-1 WHERE job_id='job-1'", /invalid cleanup fence/);
     check(db, "UPDATE jobs SET pinned_sha='A' WHERE job_id='job-1'", /accepted job identity is immutable/);
-    db.prepare(`INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, ?, ?, ?, ?, ?)`).run('job-1', 0, 'state', 'queued', '{}', job[11]);
+    db.prepare(`INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, ?, ?, ?, ?, ?)`).run('job-1', 0, 'state', 'queued', '{}', '2026-07-23T00:00:00.000Z');
     check(db, "INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES ('job-1', 0, 'state', 'queued', '{}', 'x')", /job events must append within an open log generation/);
     check(db, "INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at, stream) VALUES ('job-1', 1, 'log', 'queued', '{}', 'x', 'runner')", /CHECK constraint failed/);
     db.prepare(`INSERT INTO job_log_generations (job_id, stream, generation, path, started_at) VALUES ('job-1', 'runner', 0, 'logs/runner.0', 'x')`).run();
     db.prepare("UPDATE job_log_generations SET size_bytes=5 WHERE job_id='job-1' AND stream='runner' AND generation=0").run();
-    db.prepare(`INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at, stream, file_generation, byte_offset, byte_length, partial) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('job-1', 1, 'log', 'queued', '{}', job[11], 'runner', 0, 0, 5, 0);
+    db.prepare(`INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at, stream, file_generation, byte_offset, byte_length, partial) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('job-1', 1, 'log', 'queued', '{}', '2026-07-23T00:00:00.000Z', 'runner', 0, 0, 5, 0);
     check(db, "INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at, stream, file_generation, byte_offset, byte_length, partial) VALUES ('job-1', 2, 'state', 'queued', '{}', 'x', 'runner', 0, 0, 1, 0)", /job events must append within an open log generation/);
     expect(() => db.prepare("DELETE FROM jobs WHERE job_id='job-1'").run()).toThrow(/FOREIGN KEY constraint failed/);
     db.close();
@@ -1270,7 +2914,7 @@ describe('versioned builder database migrations', () => {
     const store = new BuilderStore(upgraded);
     expect(store.getJob('preserve-me')).toMatchObject({
       jobId: 'preserve-me',
-      state: 'queued',
+      state: 'interrupted',
       sourceRunnable: false,
       sourcePreparation: null,
       offlineFeedPreparation: null,
@@ -1290,8 +2934,8 @@ describe('versioned builder database migrations', () => {
       conflict: { kind: 'stale-predecessor' },
     });
     expect(store.getJob('preserve-me')).toMatchObject({
-      state: 'queued',
-      queueState: 'queued',
+      state: 'interrupted',
+      queueState: 'complete',
       sourceRunnable: false,
     });
     store.close();
@@ -1352,8 +2996,13 @@ describe('versioned builder database migrations', () => {
     ).run(6, historicalV6.filename, HISTORICAL_V6_SHA256, '2026-07-23T00:00:00.000Z');
     legacy.close();
 
-    const upgraded = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
-    const fresh = openBuilderDatabase(freshPath, { migrationsDirectory: migrationDir });
+    expectMigrationError(
+      () => openBuilderDatabase(path, { migrationsDirectory: migrationDir }),
+      /legacy.*(?:dispatched|active)|(?:dispatched|active).*legacy/iu,
+    );
+    const upgraded = new DatabaseSync(path);
+    const fresh = new DatabaseSync(freshPath);
+    await applyRegisteredMigrations(fresh, 20);
     expect(schemaSnapshot(upgraded)).toEqual(schemaSnapshot(fresh));
 
     const rows = upgraded.prepare(`
@@ -1452,8 +3101,12 @@ describe('versioned builder database migrations', () => {
     upgraded.close();
     fresh.close();
 
-    const reopened = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
-    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 17 });
+    expectMigrationError(
+      () => openBuilderDatabase(path, { migrationsDirectory: migrationDir }),
+      /legacy.*(?:dispatched|active)|(?:dispatched|active).*legacy/iu,
+    );
+    const reopened = new DatabaseSync(path);
+    expect(reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 20 });
     expect(reopened.prepare('SELECT COUNT(*) AS count FROM legacy_blocked_publish_evidence').get()).toEqual({ count: 2 });
     expect(reopened.prepare("SELECT terminal_error_json FROM jobs WHERE job_id='legacy-terminal'").get())
       .toEqual({ terminal_error_json: terminalSentinel });
@@ -1536,7 +3189,11 @@ describe('versioned builder database migrations', () => {
     ).run();
     legacy.close();
 
-    const upgraded = openBuilderDatabase(path, { migrationsDirectory: migrationDir });
+    expectMigrationError(
+      () => openBuilderDatabase(path, { migrationsDirectory: migrationDir }),
+      /legacy.*(?:dispatched|active)|(?:dispatched|active).*legacy/iu,
+    );
+    const upgraded = new DatabaseSync(path);
     const store = new BuilderStore(upgraded);
     expect(store.getJob('legacy-null-preparation')).toMatchObject({
       state: 'verifying',
@@ -1897,11 +3554,11 @@ describe('versioned builder database migrations', () => {
     const staged = stagingEvidence();
     db.prepare(`UPDATE jobs SET ${Object.keys(staged).map((key) => `${key}=?`).join(', ')}, publish_state='staged' WHERE job_id='evidence-job'`).run(...Object.values(staged));
     check(db, "UPDATE jobs SET publish_state='quarantined', artifact_quarantine_path='quarantine/image.gz' WHERE job_id='evidence-job'", /publish result is incoherent/);
-    db.prepare(`UPDATE jobs SET artifact_final_directory='release', artifact_final_path='release/image.gz', publish_started_at='2026-07-23T00:01:00.000Z', publish_state='publishing' WHERE job_id='evidence-job'`).run();
-    check(db, "UPDATE jobs SET publish_state='published', artifact_staging_path='staging/image.gz' WHERE job_id='evidence-job'", /publish result is incoherent/);
-    db.prepare(`UPDATE jobs SET artifact_staging_path=NULL, artifact_final_directory='release', artifact_final_path='release/image.gz', publish_state='published', published_at='2026-07-23T00:02:00.000Z' WHERE job_id='evidence-job'`).run();
+    db.prepare(`UPDATE jobs SET state='publishing', artifact_final_directory='release', artifact_final_path='release/image.gz', publish_started_at='2026-07-23T00:01:00.000Z', publish_state='publishing', release_seal_status='in_progress' WHERE job_id='evidence-job'`).run();
+    check(db, "UPDATE jobs SET publish_state='published', release_seal_status='legacy_mutable', artifact_staging_path='staging/image.gz' WHERE job_id='evidence-job'", /publish result is incoherent/);
+    db.prepare(`UPDATE jobs SET artifact_staging_path=NULL, artifact_final_directory='release', artifact_final_path='release/image.gz', publish_state='published', release_seal_status='legacy_mutable', published_at='2026-07-23T00:02:00.000Z' WHERE job_id='evidence-job'`).run();
     check(db, "UPDATE jobs SET artifact_quarantine_path='quarantine/image.gz', publish_state='published' WHERE job_id='evidence-job'", /publish result is incoherent/);
-    db.prepare(`UPDATE jobs SET publish_state='quarantined', artifact_quarantine_path='quarantine/image.gz', artifact_final_directory=NULL, artifact_final_path=NULL, artifact_staging_path=NULL, artifact_sha256=NULL, artifact_size=NULL, artifact_mtime=NULL, checksum_path=NULL, checksum_sha256=NULL, manifest_path=NULL, manifest_sha256=NULL, verification_path=NULL, verification_sha256=NULL, publish_started_at=NULL, published_at=NULL WHERE job_id='evidence-job'`).run();
+    db.prepare(`UPDATE jobs SET publish_state='quarantined', release_seal_status=NULL, artifact_quarantine_path='quarantine/image.gz', artifact_final_directory=NULL, artifact_final_path=NULL, artifact_staging_path=NULL, artifact_sha256=NULL, artifact_size=NULL, artifact_mtime=NULL, checksum_path=NULL, checksum_sha256=NULL, manifest_path=NULL, manifest_sha256=NULL, verification_path=NULL, verification_sha256=NULL, publish_started_at=NULL, published_at=NULL WHERE job_id='evidence-job'`).run();
     check(db, "UPDATE jobs SET publish_started_at='x' WHERE job_id='evidence-job'", /publish result is incoherent/);
     check(db, "UPDATE jobs SET publish_state='blocked', publish_blocker_code='PUBLISH_FAILED' WHERE job_id='evidence-job'", /publish result is incoherent/);
     db.prepare(`UPDATE jobs SET ${Object.keys(staged).map((key) => `${key}=?`).join(', ')}, publish_state='blocked', publish_blocker_code='PUBLISH_FAILED', publish_blocker_json='{}', artifact_quarantine_path=NULL, artifact_final_directory=NULL, artifact_final_path=NULL, publish_started_at=NULL, published_at=NULL WHERE job_id='evidence-job'`).run(...Object.values(staged));
@@ -1920,7 +3577,7 @@ describe('versioned builder database migrations', () => {
     check(db, `UPDATE jobs SET freshness_status='advanced', freshness_observed_sha='${SHA40}', newer_source_available=1 WHERE job_id='evidence-job'`, /freshness result is incoherent/);
     check(db, "UPDATE jobs SET freshness_status='unknown', freshness_observed_sha=NULL, newer_source_available=0 WHERE job_id='evidence-job'", /freshness result is incoherent/);
     db.prepare(`UPDATE jobs SET freshness_status='unknown', freshness_observed_sha=NULL, newer_source_available=0, freshness_error_code='FRESHNESS_UNKNOWN', freshness_error_json='{}', freshness_error_evidence_path='evidence/freshness.json', freshness_error_evidence_sha256=?, freshness_checked_at='2026-07-23T00:04:00.000Z' WHERE job_id='evidence-job'`).run(HASH64);
-    check(db, "UPDATE jobs SET publish_state='published' WHERE job_id='evidence-job'", /publish result is incoherent/);
+    check(db, "UPDATE jobs SET publish_state='published' WHERE job_id='evidence-job'", /publish result is incoherent|release seal status is incoherent/);
     db.close();
   });
 

@@ -21,6 +21,7 @@ import {
   withEffectiveHomeAuthority,
 } from '../shared/effective-home.mjs';
 import { holdDirectoryAuthority } from '../shared/held-directory-authority.mjs';
+import { loadManifestBytes } from '../manifest/validate-core.mjs';
 
 export { resolveEffectiveHome, withEffectiveHomeAuthority };
 export const resolveTrustedServiceHome = resolveEffectiveHome;
@@ -443,7 +444,7 @@ function validateLock(lock, packageVersion) {
   const required = [
     'schemaVersion', 'packageVersion', 'imageRepository', 'imageDigest', 'baseImage',
     'baseImageDigest', 'dockerfileSha256', 'packageSet', 'rustConfig', 'nodeVersion',
-    'executionDefinitionSha256', 'validationEvidenceSha256',
+    'executionDefinitionSha256', 'validationEvidenceSha256', 'dependencyEgressProxySha256',
   ];
   const optional = ['installable', 'publisherSha256', 'imageId'];
   const keys = Object.keys(lock);
@@ -458,7 +459,7 @@ function validateLock(lock, packageVersion) {
     return components.slice(1).every((component) => DOCKER_REPOSITORY_COMPONENT.test(component));
   };
   if (!dockerRepository(lock.imageRepository)) return false;
-  for (const key of ['imageDigest', 'baseImageDigest', 'dockerfileSha256', 'executionDefinitionSha256', 'validationEvidenceSha256']) if (typeof lock[key] !== 'string' || !SHA256.test(lock[key]) || /^0+$/u.test(lock[key])) return false;
+  for (const key of ['imageDigest', 'baseImageDigest', 'dockerfileSha256', 'executionDefinitionSha256', 'validationEvidenceSha256', 'dependencyEgressProxySha256']) if (typeof lock[key] !== 'string' || !SHA256.test(lock[key]) || /^0+$/u.test(lock[key])) return false;
   if (typeof lock.baseImage !== 'string' || !lock.baseImage.endsWith(`@sha256:${lock.baseImageDigest}`)) return false;
   const baseSeparator = lock.baseImage.lastIndexOf('@');
   if (baseSeparator < 1 || !dockerRepository(lock.baseImage.slice(0, baseSeparator)) || !/^sha256:[0-9a-f]{64}$/u.test(lock.baseImage.slice(baseSeparator + 1))) return false;
@@ -575,21 +576,37 @@ export async function withSelectedInstallation(options = {}, callback = async (i
     directories.push(manifestDirectory);
     const binDirectory = await openSelectedDirectory(version, 'bin', ownerUid, device, 0o555, options.hooks);
     directories.push(binDirectory);
+    const operationsDirectory = await openSelectedDirectory(version, 'operations', ownerUid, device, 0o555, options.hooks);
+    directories.push(operationsDirectory);
     const lockFile = await openSelectedFile(version, 'builder.lock.json', ownerUid, device, 0o600, MAX_JSON_BYTES, options.hooks);
     files.push(lockFile);
     const manifestFile = await openSelectedFile(manifestDirectory, 'targets.json', ownerUid, device, 0o444, MAX_JSON_BYTES, options.hooks);
     files.push(manifestFile);
     const publisherFile = await openSelectedFile(binDirectory, 'osi-image-publish', ownerUid, device, 0o555, 16 * 1024 * 1024, options.hooks);
     files.push(publisherFile);
+    const dependencyEgressProxyFile = await openSelectedFile(
+      operationsDirectory,
+      'osi-dependency-egress-proxy.cjs',
+      ownerUid,
+      device,
+      0o444,
+      MAX_JSON_BYTES,
+      options.hooks,
+    );
+    files.push(dependencyEgressProxyFile);
     const lock = parseCanonicalJson(await readHeldBytes(lockFile, MAX_JSON_BYTES), 'builder lock');
     if (!validateLock(lock.value, selection.value.packageVersion)) throw new Error('generated builder lock is invalid');
-    const manifest = parseCanonicalJson(await readHeldBytes(manifestFile, MAX_JSON_BYTES), 'target manifest');
+    const manifestBytes = await readHeldBytes(manifestFile, MAX_JSON_BYTES);
+    const manifestText = manifestBytes.toString('utf8');
+    const manifest = loadManifestBytes(manifestBytes, 'target manifest');
     const publisherSha256 = await hashHeldFile(publisherFile, 16 * 1024 * 1024);
+    const dependencyEgressProxySha256 = await hashHeldFile(dependencyEgressProxyFile, MAX_JSON_BYTES);
     if (createHash('sha256').update(lock.text).digest('hex') !== selection.value.lockSha256
-      || createHash('sha256').update(manifest.text).digest('hex') !== selection.value.manifestSha256
+      || createHash('sha256').update(manifestBytes).digest('hex') !== selection.value.manifestSha256
       || publisherSha256 !== selection.value.publisherSha256
       || lock.value.publisherSha256 !== selection.value.publisherSha256
-      || lock.value.executionDefinitionSha256 !== selection.value.executionDefinitionSha256) throw new Error('selected installation evidence does not match generated files');
+      || lock.value.executionDefinitionSha256 !== selection.value.executionDefinitionSha256
+      || dependencyEgressProxySha256 !== lock.value.dependencyEgressProxySha256) throw new Error('selected installation evidence does not match generated files');
     const context = { rootAuthority, directories, files };
     if (typeof options.hooks?.beforeFinalRevalidation === 'function') await options.hooks.beforeFinalRevalidation();
     await revalidateSelectedInstallation(context);
@@ -597,12 +614,17 @@ export async function withSelectedInstallation(options = {}, callback = async (i
     const installation = Object.freeze({
       versionRoot,
       lockPath: join(versionRoot, 'builder.lock.json'),
-      publisherPath: join(versionRoot, 'bin', 'osi-image-publish'),
       lockText: lock.text,
       lock: lock.value,
+      manifestPath: join(versionRoot, 'manifest', 'targets.json'),
+      manifestText,
+      manifestBytes,
+      manifest,
+      publisherPath: join(versionRoot, 'bin', 'osi-image-publish'),
       selection: selection.value,
       publisher: publisherFile.before,
       publisherSha256,
+      dependencyEgressProxySha256,
     });
     const output = await callback(installation, Object.freeze({ installRoot: root, publisherFile }));
     await revalidateSelectedInstallation(context);

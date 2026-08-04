@@ -908,6 +908,7 @@ export function createStartupBootstrap(options: StartupBootstrapOptions): Startu
     const services = [
       options.services.cleanupAdmissions,
       options.services.liveRunnerClassification,
+      options.services.cancellationCoordination,
       options.services.stalePublishingRecovery,
       options.services.nonPublishingInterruption,
     ] as const;

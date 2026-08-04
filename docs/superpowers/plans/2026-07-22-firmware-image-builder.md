@@ -1242,9 +1242,69 @@ git commit -m "test: add deterministic workstation acceptance guards"
 - Modify: `tools/firmware-image-builder/package.json`
 - Modify: `tools/firmware-image-builder/README.md`
 
-- [ ] **Step 1: Write the failing test.** Test that `accept:all` requires a generated installed production lock and image, `OSI_IMAGE_BUILDER_REAL=1`, an approved root, a pinned full SHA, and a real SSH origin. Test that a lock with `schemaVersion: "1"`, `schemaVersion: 0`, or any non-integer schema version is rejected. For each target, the report supplies `release_dir`, the canonical non-symlink `job_evidence_root` at `<state-root>/jobs/<job-id>/evidence`, `worktree`, `rootfs`, `target_output`, `target_id`, `target_manifest_json`, `build_start_epoch`, `source_flows`, `source_db`, `source_gui`, `feed_gui`, `build_manifest`, `installed_lock`, `docker_inspection_json`, `published_verification_json`, `published_sha256sums`, and `report_json`; `published_verification_json` must be the aggregation at `release_dir/verification.json`. Derive the ten evidence paths from that published aggregation and the fixed stage schema, never from a caller-provided list. Test exact rejection vectors for an absolute path, empty path, `.`, `..`, backslash, unexpected filename, unexpected stage, duplicate stage/path, symlink component, and root escape; test acceptance only for the ten exact stage/path pairs. Test a directory/file-component swap between validation and callback read/hash: `withNoFollowFileUnderRoot()` must either read the original bytes through handles opened before the swap or reject the swap, and must never reopen a returned pathname. Test that the one-process evidence validator parses the aggregation, opens every accepted path under `job_evidence_root` with held handles, validates and hashes all ten files, compares the report's stable relative keys, and emits only observation/digest JSON. Derive the exact artifact pattern from the target manifest and run these independent commands, capturing each result:
+- [ ] **Production contract correction.** The runner, not an acceptance
+  fixture, defines the persisted contract. Acceptance reads the selected
+  installation's full `manifest/targets.json`, validates it with
+  `loadManifest()`, selects the requested target, and hashes the full file.
+  There is no `<worktree>/manifest/<target>.json`. It validates
+  `build-manifest.json` against the exact object emitted by
+  `runner/src/pipeline.ts`: the twelve shared lock fields plus
+  `builderLockSha256`, `canonicalImageRef`, `targetManifestSha256`, job and
+  source identity, `rootIdentity`, `config`, `tool`, and artifact fields.
+  `artifactMtime` is a canonical instant.
+
+  Stage files are decoded with `decodeStoredStageEvidence()`. Their real
+  operation IDs, command arrays, inputs, and observations are retained.
+  The terminal aggregation must bind the exact job, branch, root, pinned SHA,
+  ten ordered stage records, and
+  `publishEvidence.path=jobs/<job-id>/evidence/09-publish.json`. Acceptance
+  derives state, workspace, and release paths from held configuration,
+  selected-installation, job DTO, and target identities. Caller-supplied
+  absolute report paths are not an authority.
+
+  `docker-inspection.json` and `real-acceptance-report.json` are acceptance
+  evidence under the job's held state evidence directory. They are never added
+  to the published release. Report generation has three ordered phases:
+  collect and validate runner plus independent evidence, durably write the
+  report, then reopen and validate the stored bytes. The published target
+  directory contains only the
+  image, `build-manifest.json`, `verification.json`, and `sha256sums`.
+
+  The local API performs each real build. Acceptance refreshes
+  `origin/main`, requires the advertised `main` SHA to equal the pinned SHA,
+  runs preflight, enqueues one target, and polls the exact job until terminal.
+  Every mutation request is sent only to `http://127.0.0.1:43120`, with
+  `Origin: http://127.0.0.1:43120`, JSON content type, and a bounded request
+  timeout. A transport failure, non-2xx status, malformed JSON, or request
+  timeout is a hard acceptance failure.
+  `accept:all` runs `rpi-5` first and `rpi-2` second. After the publish stage
+  has written terminal `verification.json`, acceptance independently verifies
+  the release, seals its four files read-only and the target directory
+  non-writable, then reopens and re-hashes the sealed release. Any failed,
+  writable, replaced, or malformed final result blocks the second target and
+  returns nonzero.
+
+- [x] **Step 1: Write the failing test.** Test that `accept:all` requires a generated installed production lock and image, `OSI_IMAGE_BUILDER_REAL=1`, an approved root, a pinned full SHA, and a real SSH origin. Test that a lock with `schemaVersion: "1"`, `schemaVersion: 0`, or any non-integer schema version is rejected. For each target, fixtures supply held selected-installation, configuration, state, repository, workspace, and approved-output authorities plus the exact API job DTO. Production code derives all report paths from those identities. `published_verification_json` must resolve to the aggregation at `<release-dir>/verification.json`; the selected target comes from the installed full `manifest/targets.json`. Derive the ten evidence paths from that published aggregation and the fixed stage schema, never from a caller-provided list. Test exact rejection vectors for an absolute path, empty path, `.`, `..`, backslash, unexpected filename, unexpected stage, duplicate stage/path, symlink component, and root escape; test acceptance only for the ten exact stage/path pairs. Test a directory/file-component swap between validation and callback read/hash: `withNoFollowFileUnderRoot()` must either read the original bytes through handles opened before the swap or reject the swap, and must never reopen a returned pathname. Test that the one-process evidence validator parses the aggregation, opens every accepted path under `job_evidence_root` with held handles, validates and hashes all ten files, compares the report's stable relative keys, and emits only observation/digest JSON. Derive the exact artifact pattern from the selected target and run these independent commands, capturing each result:
+
+  Evidence recorded 2026-08-02:
+  `cd tools/firmware-image-builder && npx vitest run --config vitest.config.ts test/integration/real-acceptance.test.ts --pool=forks --maxWorkers=1`
+  passed one file and 224 tests. Published job and release evidence is in
+  `tools/firmware-image-builder/test/integration/release-report.md`.
+
+  Every independent file read, stat, hash, and command working directory is
+  derived from and held beneath the selected installation, state, repository,
+  workspace, or approved-output authority. Acceptance revalidates the held
+  identity before and after each command group and rejects directory, file,
+  mount, symlink, or link-count changes. The stored report uses exact relative
+  identity fields and digests; it does not persist caller-supplied absolute
+  paths as authority.
 
 After both target jobs, the aggregate report supplies `rpi5_report_json` and `rpi2_report_json` for the cross-target identity check below.
+
+The shell below is a check-coverage inventory. Its path variables are derived
+values, not caller inputs, and the production implementation uses the held
+readers named in the contract correction wherever this sketch calls
+`readFileSync`, `find`, `stat`, or `sha256sum`.
 
 ```bash
 test "$build_manifest" = "$release_dir/build-manifest.json"
@@ -1312,7 +1372,7 @@ verify_evidence_sha256="$(node -e "const o = JSON.parse(process.argv[1]).observa
 
 # Release cardinality, freshness, size, checksum, and gzip. The image is
 # directly under the release root and both locations use the exact manifest glob.
-artifact_pattern="$(node -e "const m = JSON.parse(require('fs').readFileSync(process.argv[1])); process.stdout.write(m.artifactGlob);" "$target_manifest_json")"
+artifact_pattern="$(node -e "const m = JSON.parse(require('fs').readFileSync(process.argv[1])); const t = m.targets.find(value => value.id === process.argv[2]); if (!t) process.exit(1); process.stdout.write(t.artifactGlob);" "$target_manifest_json" "$target_id")"
 mapfile -t images < <(find "$release_dir" -maxdepth 1 -type f -name "$artifact_pattern" -print)
 mapfile -t target_images < <(find "$target_output" -maxdepth 1 -type f -name "$artifact_pattern" -print)
 test "${#images[@]}" -eq 1
@@ -1433,6 +1493,11 @@ Expected: FAIL until the real acceptance command and its complete verification r
 - [ ] **Step 3: Implement and execute real acceptance.** Replace the Task 34 guard-only `REAL_ACCEPTANCE_NOT_IMPLEMENTED` path. `accept-real-target.mjs` must verify the installed generated lock and image digest, require the real approval variables, and exit nonzero before mutation when any prerequisite is absent. It must run Pi 5 first with `accept:pi5`, verify its immutable release directory and all independent commands above, then run Pi 4/400/3/2 with `accept:pi4` and verify its corresponding target/rootfs commands. The stage-evidence command must remain one process: it parses `release_dir/verification.json`, validates the fixed ten stage/path pairs, uses `withNoFollowFileUnderRoot()` for every read/validation/hash while handles remain held, compares stable relative report keys, and emits only observation/digest JSON; no pathname from that process may be reopened by shell, `sha256sum`, or another Node process. It must capture the generated lock hash, image digest, canonical image reference, optional image ID, Docker inspection identity, build-manifest hash, target-manifest hash, published checksum and verification hashes, source and verify evidence hashes, every stage-evidence hash, source/rootfs flow and database hashes, feed/source/rootfs GUI-tree hashes, source SHA, target/profile/config hashes, image size/mtime/SHA, freshness status, `observations.targetOutputAbsent`, and every stage evidence file in `release-report.md`; the two target reports must prove the same installed lock hash, image digest, canonical reference, and optional image ID. `accept:all` must return zero only after both real image builds pass, all checks pass for both images, both target manifests agree on the installed lock/image, and both immutable verified release directories exist. Do not flash, format, or write any block device.
 
 - [ ] **Step 4: Run the identical tests and mandatory acceptance.**
+
+  Status recorded 2026-08-02: open pending a new hardened `accept:all` run.
+  The Pi 5 release is mode `0700` with `0600` files, while the Pi 4 release is
+  sealed at `0555` with `0444` files. The two jobs also used different builder
+  locks and Docker digests.
 
 Run: `cd tools/firmware-image-builder && npm run check && npm exec vitest run -- test/integration/real-acceptance.test.ts && npm run accept:all`
 

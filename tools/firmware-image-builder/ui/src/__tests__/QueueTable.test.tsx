@@ -51,4 +51,17 @@ describe('QueueTable', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel job job-queued' }));
     expect(onCancel).toHaveBeenCalledWith('job-queued');
   });
+
+  it('labels publishing cancellation as a late request that may still publish', () => {
+    const publishingJob: JobSummary = {
+      ...jobs[0]!,
+      id: 'job-publishing',
+      state: 'publishing',
+      currentStage: 'publish',
+    };
+
+    render(<QueueTable jobs={[publishingJob]} selectedJobId={null} now="2026-07-28T10:05:00.000Z" onSelect={vi.fn()} onCancel={vi.fn()} onBuildNewer={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Request cancellation; publication may complete for job-publishing' })).toBeInTheDocument();
+  });
 });

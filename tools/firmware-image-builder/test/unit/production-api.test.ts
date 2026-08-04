@@ -33,6 +33,7 @@ describe('production API assembly contract', () => {
       'migrations',
       'cleanupAdmissions',
       'liveRunnerClassification',
+      'cancellationCoordination',
       'stalePublishingRecovery',
       'nonPublishingInterruption',
     ]) {
@@ -42,6 +43,19 @@ describe('production API assembly contract', () => {
     }
 
     expect(services).not.toMatch(/async\s*\(\)\s*=>\s*\(\{\s*blockers\s*:\s*\[\]\s*\}\)/u);
+  });
+
+  it('routes cancellation audit persistence failures to a named process reporter', async () => {
+    const source = await productionSource();
+    const start = source.indexOf('createApiCancellationService(');
+    const end = source.indexOf('const blockerVerifier', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const cancellation = source.slice(start, end);
+
+    expect(cancellation).toMatch(/reportError\s*:\s*[A-Za-z_$][\w$]*/u);
+    expect(cancellation).not.toMatch(/reportError\s*:\s*\([^)]*\)\s*=>/u);
+    expect(source).toMatch(/function\s+reportCancellationProcessError[\s\S]*?stderr\.write/u);
   });
 
   it('builds health from live filesystem capacity and the installed lock identity', async () => {

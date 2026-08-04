@@ -181,6 +181,12 @@ function exactJson(left: unknown, right: unknown): boolean {
     && leftKeys.every((key) => exactJson(leftRecord[key], rightRecord[key]));
 }
 
+function retainsDependencyEgress(job: CancellationJob): boolean {
+  return job.containerSecurity !== null
+    && !Array.isArray(job.containerSecurity)
+    && Object.hasOwn(job.containerSecurity, 'egress');
+}
+
 function exactLogBinding(
   left: CancellationLogProof,
   right: CancellationLogProof,
@@ -718,6 +724,12 @@ export function createRunnerCancellation(options: RunnerCancellationOptions): {
 
         blockedPhase = 'Docker container identity';
         blockedCode = 'DOCKER_CONTAINER_ORPHANED';
+        if (retainsDependencyEgress(current)) {
+          throw new CancellationBlockedError(
+            'generic cancellation cannot clear operation-owned dependency egress identity',
+            'DOCKER_CONTAINER_ORPHANED',
+          );
+        }
         const expectedLabels = labels(current);
         const identity = assertExactPersistedIdentity(current, expectedLabels);
         let stopped: CancellationContainer | null = null;

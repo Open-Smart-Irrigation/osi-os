@@ -21,6 +21,7 @@ import { loadConfig } from '../../config/load.js';
 import { GitCommand } from '../../api/src/git/git-command.js';
 import { SourceResolver } from '../../api/src/git/source-resolver.js';
 import { createProductionEnqueueService } from '../../api/src/enqueue.js';
+import { createTestBuilderIdentity } from '../helpers/builder-identity.js';
 import { OwnershipStore } from '../../api/src/ownership.js';
 import { PreflightService, TRUSTED_PREFLIGHT_EXECUTABLES } from '../../api/src/preflight.js';
 import { BuilderStore } from '../../api/src/store.js';
@@ -34,6 +35,8 @@ import {
 } from '../../runner/src/operation-registry.js';
 import {
   classifyTargetSetupOperationResult,
+  CANONICAL_MAIN_APPLIED_PATCHES,
+  CANONICAL_MAIN_QUILT_FILES,
   createTargetSetupConfigObservations,
   createTargetSetupSourceObservations,
   createLockedTargetSetupOperations,
@@ -71,7 +74,50 @@ function configFor(target: (typeof manifest.targets)[number]): string {
 }
 
 describe('feed configuration integration boundary', () => {
-  it('runs the exact repository switch-env recipe to the approved rootfs state for both profiles', async () => {
+  it('uses the literal active ChirpStack src-link location from the destination config', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-feed-fixture-'));
+    temporaryDirectories.push(root);
+    const gitEnvironment = {
+      PATH: '/usr/bin:/bin',
+      HOME: join(root, 'git-home'),
+      LANG: 'C',
+      LC_ALL: 'C',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_SYSTEM: '/dev/null',
+    };
+    await mkdir(gitEnvironment.HOME, { recursive: true });
+    await mkdir(join(root, 'openwrt/scripts'), { recursive: true });
+    await copyFile(join(fixtureRoot, 'feeds.sh'), join(root, 'openwrt/scripts/feeds'));
+    await chmod(join(root, 'openwrt/scripts/feeds'), 0o755);
+    for (const feed of ['packages', 'luci', 'routing']) {
+      const directory = join(root, 'openwrt/feeds', feed);
+      await mkdir(directory, { recursive: true });
+      await execFile('/usr/bin/git', ['init', '--quiet'], { cwd: directory, env: gitEnvironment });
+    }
+    await mkdir(join(root, 'openwrt/feeds/packages/lang/rust'), { recursive: true });
+    await writeFile(join(root, 'openwrt/feeds/packages/lang/rust/Makefile'), 'rust fixture\n');
+    await mkdir(join(root, 'feeds/chirpstack-openwrt-feed'), { recursive: true });
+    await writeFile(join(root, 'feeds/chirpstack-openwrt-feed/marker'), 'repository-local feed\n');
+
+    const runUpdate = () => execFile(join(root, 'openwrt/scripts/feeds'), ['update', '-a'], {
+      cwd: root,
+      env: { ...gitEnvironment, OSI_FIXTURE_LOG: join(root, 'fixture.log') },
+    });
+    const link = join(root, 'openwrt/feeds/chirpstack');
+    await writeFile(join(root, 'openwrt/feeds.conf.default'), 'src-link chirpstack feeds/chirpstack-openwrt-feed\n');
+    await runUpdate();
+    expect(await readlink(link)).toBe('feeds/chirpstack-openwrt-feed');
+    await expect(readFile(join(link, 'marker'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    await rm(link);
+    await writeFile(join(root, 'openwrt/feeds.conf.default'), 'src-link chirpstack ../../feeds/chirpstack-openwrt-feed\n');
+    await runUpdate();
+    expect(await readlink(link)).toBe('../../feeds/chirpstack-openwrt-feed');
+    await expect(readFile(join(link, 'marker'), 'utf8')).resolves.toBe('repository-local feed\n');
+  });
+
+  it('runs the immutable activation operation against the canonical prepatched state for both profiles', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-switch-env-reality-'));
     temporaryDirectories.push(root);
     expect((await readFile(join(repositoryFixtureRoot, 'openwrt/.gitignore'), 'utf8'))
@@ -83,9 +129,11 @@ describe('feed configuration integration boundary', () => {
       join(repositoryFixtureRoot, 'openwrt/.gitignore'),
       join(root, 'openwrt/.gitignore'),
     );
-    await expect(lstat(join(root, 'openwrt/.pc'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
+    await mkdir(join(root, 'openwrt/.pc'), { recursive: true });
+    await writeFile(join(root, 'openwrt/.pc/.quilt_patches'), CANONICAL_MAIN_QUILT_FILES.patches);
+    await writeFile(join(root, 'openwrt/.pc/.quilt_series'), CANONICAL_MAIN_QUILT_FILES.series);
+    await writeFile(join(root, 'openwrt/.pc/.version'), CANONICAL_MAIN_QUILT_FILES.version);
+    await writeFile(join(root, 'openwrt/.pc/applied-patches'), CANONICAL_MAIN_APPLIED_PATCHES);
     for (const relativePath of [
       'openwrt/target/linux/bcm27xx/image/cmdline.txt',
       'openwrt/target/linux/bcm27xx/image/config.txt',
@@ -95,7 +143,7 @@ describe('feed configuration integration boundary', () => {
       await mkdir(dirname(join(root, relativePath)), { recursive: true });
       await copyFile(join(repositoryFixtureRoot, relativePath), join(root, relativePath));
     }
-    for (const target of manifest.targets) {
+    for (const [index, target] of manifest.targets.entries()) {
       const sourceProfile = join(repositoryFixtureRoot, 'conf', target.environment);
       const targetProfile = join(root, 'conf', target.environment);
       await mkdir(join(targetProfile, 'files'), { recursive: true });
@@ -129,35 +177,35 @@ describe('feed configuration integration boundary', () => {
     ]) {
       await execFile('/usr/bin/git', argv, { cwd: root, env: gitEnvironment });
     }
-    const executor = createCommandExecutor();
-    for (const target of manifest.targets) {
+    const operationToolModule = await import(operationTool) as {
+      createOperationHandlersForTesting(rootPath: string): {
+        activateTarget(environment: string): Promise<{ operation: string; environment: string }>;
+      };
+    };
+    for (const [index, target] of manifest.targets.entries()) {
       const definition = createOperationDefinition('activate-target', {
         environment: target.environment,
       });
-      const command = await executor.run(definition.argv, {
-        cwd: root,
-        env: gitEnvironment,
-        timeoutMs: 10_000,
-        maxCaptureBytes: 64 * 1024,
-      });
+      await operationToolModule.createOperationHandlersForTesting(root).activateTarget(target.environment);
+      const command = {
+        argv: definition.argv,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        stdout: `${JSON.stringify({ operation: 'activate-target', environment: target.environment })}\n`,
+        stderr: '',
+        startedAt: '2026-07-26T10:00:00.000Z',
+        finishedAt: '2026-07-26T10:00:01.000Z',
+      } as const;
       expect(classifyTargetSetupOperationResult(
         'activate-target',
         definition,
         command,
-      )).toMatchObject({ disposition: 'expected-rootfs-already-present' });
-      expect(command.stdout).not.toContain('Applying patch patches/no-uart-console.patch');
-      expect(command.stdout.includes('Applying patch patches/boot-config.patch'))
-        .toBe(target.id === 'rpi-5');
-      expect(command.stdout.trimEnd()).toMatch(
-        /Patch patches\/image-with-padded-rootfs\.patch can be reverse-applied$/u,
-      );
+      )).toMatchObject({ disposition: 'passed' });
+      expect(JSON.parse(command.stdout)).toEqual({ operation: 'activate-target', environment: target.environment });
       expect(await readFile(join(root, 'openwrt/.pc/.quilt_series'), 'utf8')).toBe('series\n');
       const appliedPatches = join(root, 'openwrt/.pc/applied-patches');
-      if (target.id === 'rpi-5') {
-        expect(await readFile(appliedPatches, 'utf8')).toBe('boot-config.patch\n');
-      } else {
-        await expect(lstat(appliedPatches)).rejects.toMatchObject({ code: 'ENOENT' });
-      }
+      expect(await readFile(appliedPatches, 'utf8')).toBe(CANONICAL_MAIN_APPLIED_PATCHES);
       expect(await readFile(
         join(root, 'openwrt/target/linux/bcm27xx/image/cmdline.txt'),
         'utf8',
@@ -175,7 +223,17 @@ describe('feed configuration integration boundary', () => {
       ]) {
         expect(bootConfig.split(/\r?\n/u)).toContain(setting);
       }
-      expect(bootConfig.includes('dtparam=cooling_fan=okay')).toBe(target.id === 'rpi-5');
+      expect(bootConfig.includes('dtparam=cooling_fan=okay')).toBe(false);
+      if (index < manifest.targets.length - 1) {
+        for (const relativePath of [
+          'conf/.config',
+          'conf/files',
+          'conf/patches',
+          'openwrt/.config',
+          'openwrt/files',
+          'openwrt/patches',
+        ]) await rm(join(root, relativePath), { force: true });
+      }
     }
     const pi5KernelConfig = await readFile(
       join(root, 'openwrt/target/linux/bcm27xx/bcm2712/config-6.6'),
@@ -237,15 +295,22 @@ describe('feed configuration integration boundary', () => {
     await copyFile(join(fixtureRoot, 'feeds.sh'), join(workspace, 'openwrt/scripts/feeds'));
     await chmod(join(workspace, 'test-support/switch-env.sh'), 0o755);
     await chmod(join(workspace, 'openwrt/scripts/feeds'), 0o755);
-    await expect(lstat(join(workspace, 'openwrt/.pc'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
+    await mkdir(join(workspace, 'openwrt/.pc'), { recursive: true });
+    await writeFile(join(workspace, 'openwrt/.pc/.quilt_patches'), CANONICAL_MAIN_QUILT_FILES.patches);
+    await writeFile(join(workspace, 'openwrt/.pc/.quilt_series'), CANONICAL_MAIN_QUILT_FILES.series);
+    await writeFile(join(workspace, 'openwrt/.pc/.version'), CANONICAL_MAIN_QUILT_FILES.version);
+    await writeFile(join(workspace, 'openwrt/.pc/applied-patches'), CANONICAL_MAIN_APPLIED_PATCHES);
+    await mkdir(join(workspace, 'openwrt/target/linux/bcm27xx/image'), { recursive: true });
+    await copyFile(rootfsFixture, join(workspace, 'openwrt/target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh'));
     for (const target of manifest.targets) {
       const directory = join(workspace, 'conf', target.environment);
+      await mkdir(join(directory, 'files'), { recursive: true });
       await mkdir(join(directory, 'patches'), { recursive: true });
       await writeFile(join(directory, '.config'), configFor(target));
       await writeFile(join(directory, 'patches/series'), [
-        ...(target.id === 'rpi-5' ? ['boot-config.patch'] : []),
+        'no-uart-console.patch',
+        'boot-config.patch',
+        ...(target.id === 'rpi-5' ? ['add_designware_spi_kmod.patch'] : []),
         'image-with-padded-rootfs.patch',
         '',
       ].join('\n'));
@@ -389,14 +454,18 @@ describe('feed configuration integration boundary', () => {
         const workingDirectory = typeof options.cwd === 'string' && options.cwd.startsWith('/proc/')
           ? await readlink(options.cwd)
           : String(options.cwd);
-        const executed = argv.map((value) => {
-          const donor = donorByUrl.get(value);
-          return donor === undefined ? value : `file://${donor}`;
-        });
-        const separator = executed.indexOf('--');
-        const cloningPackages = executed[0] === 'clone' && argv.at(-2) === feeds[0]!.location;
-        if (cloningPackages && separator >= 0) {
-          executed.splice(separator, 0, '--filter=blob:none', '--depth=1', '--sparse');
+        const executed = argv[0] === 'remote' && argv[1] === 'add'
+          ? [...argv]
+          : argv.map((value) => {
+            const donor = donorByUrl.get(value);
+            return donor === undefined ? value : `file://${donor}`;
+          });
+        if (
+          executed[0] === 'fetch'
+          && workingDirectory.endsWith('/packages')
+          && argv.at(-2) === feeds[0]!.location
+        ) {
+          executed.splice(2, 0, '--filter=blob:none');
         }
         try {
           const command = await execFile('/usr/bin/git', executed, {
@@ -405,25 +474,16 @@ describe('feed configuration integration boundary', () => {
             timeout: options.timeout as number | undefined,
             maxBuffer: 128 * 1024,
           });
-          if (argv[0] === 'clone') {
-            const location = argv.at(-2)!;
-            const checkout = join(options.cwd as string, argv.at(-1)!);
-            if (location === feeds[0]!.location) {
-              await fixtureGit(checkout, [
+          if (argv[0] === 'init' && workingDirectory.endsWith('/packages')) {
+            await fixtureGit(
+              workingDirectory,
+              [
                 'sparse-checkout',
                 'set',
                 '--no-cone',
                 '.gitignore',
                 'lang/rust/Makefile',
-              ]);
-            } else {
-              await fixtureGit(checkout, ['remote', 'set-url', 'origin', location]);
-            }
-          }
-          if (argv[0] === 'checkout' && workingDirectory.endsWith('/packages')) {
-            await fixtureGit(
-              workingDirectory,
-              ['remote', 'set-url', 'origin', feeds[0]!.location],
+              ],
             );
           }
           return { exitCode: 0, signal: null, stdout: command.stdout, stderr: command.stderr };
@@ -518,6 +578,7 @@ describe('feed configuration integration boundary', () => {
             nodeVersion: '22.5.0',
             executionDefinitionSha256: 'e'.repeat(64),
             validationEvidenceSha256: 'f'.repeat(64),
+            dependencyEgressProxySha256: '1'.repeat(64),
             installable: true,
           }),
         },
@@ -529,6 +590,7 @@ describe('feed configuration integration boundary', () => {
     const store = new BuilderStore(database);
     const enqueue = createProductionEnqueueService({
       manifest: loadedManifest,
+      builderIdentity: createTestBuilderIdentity(loadedManifest.sha256),
       preflight,
       ownership: new OwnershipStore(database, { maxQueueLength: loaded.config.maxQueueLength }),
       store,
@@ -693,16 +755,13 @@ describe('feed configuration integration boundary', () => {
     });
 
     expect(calls).toEqual([
-      'activate-target', 'activate-target',
+      'activate-target',
       'copy-feed-config', 'update-feeds', 'install-feeds',
-      'resolve-config', 'resolve-config',
+      'resolve-config',
     ]);
     expect(await readFile(join(workspace, 'operation.log'), 'utf8')).toBe([
-      `switch-env:${manifest.targets[0]!.environment}`,
-      `switch-env:${manifest.targets[1]!.environment}`,
       'feeds:update',
       'feeds:install',
-      'defconfig:DEVICE_rpi-5',
       'defconfig:DEVICE_rpi-2',
       '',
     ].join('\n'));

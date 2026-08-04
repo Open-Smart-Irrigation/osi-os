@@ -5,6 +5,7 @@ import {
   ACTOR_NAMES,
   ACTIVE_RECOVERY_STATES,
   CLEANUP_ADMISSION_STATES,
+  DEPENDENCY_EGRESS_OPERATION_IDS,
   EVIDENCE_OUTCOMES,
   FRESHNESS_STATES,
   JOB_STATES,
@@ -15,6 +16,7 @@ import {
   TRUSTED_OPERATION_IDS,
   isActorName,
   isCleanupAdmissionState,
+  isDependencyEgressOperationId,
   isFreshnessState,
   isPipelineStageName,
   isTargetId,
@@ -23,6 +25,7 @@ import {
   type FreshnessResult,
   type CommandResult,
   type CleanupAdmissionState,
+  type DependencyEgressOperationId,
   type OperationResult,
   type FreshnessState,
   type ActorName,
@@ -225,6 +228,9 @@ const invalidTarget: import('../../domain/types.js').TargetId = 'rpi-6';
 const invalidStage: PipelineStageName = 'compile';
 // @ts-expect-error TrustedOperationId is closed to the installed operation registry.
 const invalidOperationId: TrustedOperationId = 'run-shell';
+const dependencyEgressOperationId: DependencyEgressOperationId = 'build-image';
+// @ts-expect-error Offline operations cannot be used as dependency egress operation identities.
+const invalidDependencyEgressOperationId: DependencyEgressOperationId = 'frontend-test';
 // @ts-expect-error JobState is closed to the state machine vocabulary.
 const invalidJobState: JobState = 'running';
 // @ts-expect-error FreshnessState is closed to fresh, advanced, and unknown.
@@ -258,9 +264,22 @@ const invalidUnknownFreshness: FreshnessResult = {
 void [EVIDENCE_OUTCOMES, passedOperation, passedEvidence, freshResult, unknownFreshnessResult,
   invalidTarget, invalidStage, invalidOperationId, invalidJobState, invalidFreshnessState,
   invalidCleanupState, invalidActor, invalidOperation, invalidPassedOperation, invalidEvidence,
-  invalidUnknownFreshness];
+  invalidUnknownFreshness, dependencyEgressOperationId, invalidDependencyEgressOperationId];
 
 describe('builder domain vocabulary', () => {
+  it('owns the dependency egress operation identity and predicate', () => {
+    expect(DEPENDENCY_EGRESS_OPERATION_IDS).toEqual([
+      'frontend-install',
+      'build-image',
+    ]);
+    expect(Object.isFrozen(DEPENDENCY_EGRESS_OPERATION_IDS)).toBe(true);
+    for (const operationId of TRUSTED_OPERATION_IDS) {
+      expect(isDependencyEgressOperationId(operationId), operationId)
+        .toBe(operationId === 'frontend-install' || operationId === 'build-image');
+    }
+    expect(isDependencyEgressOperationId('not-an-operation')).toBe(false);
+  });
+
   it('exposes exhaustive readonly runtime vocabularies', () => {
     expect(TARGET_IDS).toEqual(expectedTargets);
     expect(PIPELINE_STAGE_NAMES).toEqual(expectedStages);

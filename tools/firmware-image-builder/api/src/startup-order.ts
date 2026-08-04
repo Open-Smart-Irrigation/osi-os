@@ -4,6 +4,7 @@ export const STARTUP_PHASES = [
   'migrations',
   'cleanup-admissions',
   'live-runner-classification',
+  'cancellation-coordination',
   'stale-publishing-recovery',
   'non-publishing-interruption',
   'retention',
@@ -26,6 +27,7 @@ export interface StartupCoordinatorPhases {
   readonly migrations: () => Promise<StartupPhaseResult>;
   readonly cleanupAdmissions: () => Promise<StartupPhaseResult>;
   readonly liveRunnerClassification: () => Promise<StartupPhaseResult>;
+  readonly cancellationCoordination: () => Promise<StartupPhaseResult>;
   readonly stalePublishingRecovery: () => Promise<StartupPhaseResult>;
   readonly nonPublishingInterruption: () => Promise<StartupPhaseResult>;
   /** Injected until the retention implementation is delivered by Task 27. */
@@ -47,6 +49,7 @@ export interface StartupProductionServices {
   readonly migrations: StartupService;
   readonly cleanupAdmissions: StartupService;
   readonly liveRunnerClassification: StartupService;
+  readonly cancellationCoordination: StartupService;
   readonly stalePublishingRecovery: StartupService;
   readonly nonPublishingInterruption: StartupService;
   readonly retention: StartupService;
@@ -95,6 +98,7 @@ export function createStartupCoordinator(options: StartupCoordinatorOptions): St
     await run('migrations', options.migrations);
     await run('cleanup-admissions', options.cleanupAdmissions);
     await run('live-runner-classification', options.liveRunnerClassification);
+    await run('cancellation-coordination', options.cancellationCoordination);
     await run('stale-publishing-recovery', options.stalePublishingRecovery);
     await run('non-publishing-interruption', options.nonPublishingInterruption);
     await run('retention', options.retention);

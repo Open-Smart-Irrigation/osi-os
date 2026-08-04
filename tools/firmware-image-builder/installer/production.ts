@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFile as execFileCallback, spawn } from 'node:child_process';
 import {
   chmod,
+  constants as fsConstants,
   lstat,
   mkdir,
   mkdtemp,
@@ -29,6 +30,7 @@ import { build } from 'esbuild';
 
 import {
   parseCanonicalBuilderImageReference,
+  TRUSTED_DEPENDENCY_PROXY_SHA256,
   validateBuilderSource,
   validateBuiltBuilderImage,
   validationEvidenceSha256,
@@ -62,7 +64,7 @@ const MAX_COMMAND_OUTPUT_BYTES = 256 * 1024;
 const MAX_UI_FILES = 10_000;
 const MAX_UI_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_UI_TOTAL_BYTES = 256 * 1024 * 1024;
-const INSTALL_LOCK_NAME = '.osi-image-builder-install.lock';
+export const INSTALL_LOCK_NAME = '.osi-image-builder-install.lock';
 const DOCKER = '/usr/bin/docker';
 const GCC = '/usr/bin/gcc';
 const PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
@@ -75,6 +77,20 @@ const FIXED_ENV = Object.freeze({
 });
 
 type ArtifactContents = string | Uint8Array;
+const O_CLOEXEC = (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC ?? 0x80000;
+const PROXY_CAPTURE_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK | O_CLOEXEC;
+
+export interface ProductionRuntimeArtifacts {
+  readonly uiIndex: string;
+  readonly dependencyEgressProxy: Uint8Array;
+  readonly additionalArtifacts: Readonly<Record<string, ArtifactContents>>;
+}
+
+export interface ProductionRuntimeArtifactOptions {
+  readonly beforeDependencyEgressProxyCapture?: (context: Readonly<{ readonly proxyPath: string }>) => Promise<void> | void;
+  readonly beforeDependencyEgressProxyOpen?: (context: Readonly<{ readonly proxyPath: string }>) => Promise<void> | void;
+  readonly afterDependencyEgressProxyOpen?: (context: Readonly<{ readonly proxyPath: string; readonly fd: number }>) => Promise<void> | void;
+}
 
 export interface InstallerCoreCliDependencies {
   readonly install: () => Promise<Readonly<{
@@ -406,6 +422,7 @@ async function bundleEntrypoint(path: string): Promise<Uint8Array> {
     platform: 'node',
     format: 'esm',
     target: 'node22',
+    mainFields: ['module', 'main'],
     write: false,
     sourcemap: false,
     legalComments: 'none',
@@ -447,16 +464,83 @@ async function collectFiles(
   await visit(canonicalRoot);
 }
 
-async function collectRuntimeArtifacts(
+export async function collectProductionRuntimeArtifacts(
   packageRoot: string,
-): Promise<Readonly<Record<string, ArtifactContents>>> {
+  options: ProductionRuntimeArtifactOptions = {},
+): Promise<Readonly<ProductionRuntimeArtifacts>> {
   const result: Record<string, ArtifactContents> = {};
-  await collectFiles(join(packageRoot, 'dist'), 'ui', result);
+  await collectFiles(join(packageRoot, 'ui', 'dist'), 'ui', result);
+  const uiIndex = result['ui/index.html'];
+  if (!(uiIndex instanceof Uint8Array)) {
+    throw new Error('built UI index is missing');
+  }
   delete result['ui/index.html'];
   await collectFiles(join(packageRoot, 'api', 'migrations'), 'api/migrations', result);
   await collectFiles(join(packageRoot, 'systemd'), 'systemd', result);
   result['manifest/targets.json'] = await readFile(join(packageRoot, 'manifest', 'targets.json'));
-  return Object.freeze(result);
+  const proxyPath = join(packageRoot, 'builder', 'operations', 'osi-dependency-egress-proxy.cjs');
+  if (options.beforeDependencyEgressProxyCapture !== undefined) {
+    await options.beforeDependencyEgressProxyCapture({ proxyPath });
+  }
+  const dependencyEgressProxy = await captureTrustedDependencyEgressProxy(proxyPath, options);
+  return Object.freeze({
+    uiIndex: Buffer.from(uiIndex).toString('utf8'),
+    dependencyEgressProxy,
+    additionalArtifacts: Object.freeze(result),
+  });
+}
+
+function sameSourceIdentity(left: Awaited<ReturnType<typeof lstat>>, right: Awaited<ReturnType<typeof lstat>>): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.nlink === right.nlink
+    && left.uid === right.uid
+    && left.gid === right.gid
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
+}
+
+async function captureTrustedDependencyEgressProxy(
+  proxyPath: string,
+  options: ProductionRuntimeArtifactOptions,
+): Promise<Buffer> {
+  const operationsPath = dirname(proxyPath);
+  const ownerUid = typeof process.geteuid === 'function' ? process.geteuid() : process.getuid?.();
+  if (ownerUid === undefined) throw new Error('trusted dependency egress proxy owner identity is unavailable');
+  const operations = await lstat(operationsPath);
+  if (!operations.isDirectory() || operations.uid !== ownerUid || operations.nlink < 1 || (operations.mode & 0o022) !== 0) {
+    throw new Error('trusted dependency egress proxy operations directory identity is unsafe');
+  }
+  const before = await lstat(proxyPath);
+  if (!before.isFile() || before.isSymbolicLink() || before.uid !== ownerUid || before.nlink !== 1 || before.dev !== operations.dev || (before.mode & 0o022) !== 0) {
+    throw new Error('trusted dependency egress proxy source file identity is unsafe');
+  }
+
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    if (options.beforeDependencyEgressProxyOpen !== undefined) {
+      await options.beforeDependencyEgressProxyOpen({ proxyPath });
+    }
+    handle = await open(proxyPath, PROXY_CAPTURE_FLAGS);
+    if (options.afterDependencyEgressProxyOpen !== undefined) {
+      await options.afterDependencyEgressProxyOpen({ proxyPath, fd: handle.fd });
+    }
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.isSymbolicLink() || opened.uid !== ownerUid || opened.nlink !== 1 || opened.dev !== operations.dev || (opened.mode & 0o022) !== 0 || !sameSourceIdentity(before, opened)) {
+      throw new Error('trusted dependency egress proxy source changed during capture');
+    }
+    const bytes = await handle.readFile();
+    const after = await lstat(proxyPath);
+    if (!sameSourceIdentity(opened, after)) throw new Error('trusted dependency egress proxy source changed after capture');
+    if (sha256(bytes) !== TRUSTED_DEPENDENCY_PROXY_SHA256) {
+      throw new Error('trusted dependency egress proxy source digest mismatch');
+    }
+    return bytes;
+  } finally {
+    if (handle !== undefined) await handle.close();
+  }
 }
 
 async function prepareBuilder(
@@ -731,7 +815,7 @@ async function installProductionVersionWithHome(
           bundleEntrypoint(join(packageRoot, 'api', 'src', 'cli.ts')),
           bundleEntrypoint(join(packageRoot, 'runner', 'src', 'cli.ts')),
           bundleEntrypoint(join(packageRoot, 'cleanup-worker', 'src', 'cli.ts')),
-          collectRuntimeArtifacts(packageRoot),
+          collectProductionRuntimeArtifacts(packageRoot),
           readFile(join(packageRoot, 'builder', 'execution-definition.json'), 'utf8'),
         ]);
         const executionDefinitionSha256 = sha256(executionDefinition);
@@ -769,9 +853,10 @@ async function installProductionVersionWithHome(
             cleanupWorker,
             publisher: publisher.bytes,
             executionDefinition,
-            ui: await readFile(join(packageRoot, 'dist', 'index.html'), 'utf8'),
+            dependencyEgressProxy: runtimeArtifacts.dependencyEgressProxy,
+            ui: runtimeArtifacts.uiIndex,
           },
-          additionalArtifacts: runtimeArtifacts,
+          additionalArtifacts: runtimeArtifacts.additionalArtifacts,
           publisherSha256: publisher.sha256,
           executionDefinitionSha256,
           manifestSha256: manifest.sha256,

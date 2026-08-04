@@ -33,6 +33,7 @@ export class PublishBlockerRecheckError extends Error {
 }
 
 export interface FinalDestinationEvidence {
+  readonly sealStatus: 'in_progress' | 'sealed';
   readonly finalDirectory: string;
   readonly finalPath: string;
   readonly artifact: Readonly<{ readonly sha256: string; readonly size: number; readonly mtime: string }>;
@@ -46,6 +47,7 @@ export interface FinalDestinationVerificationInput {
   readonly job: JobRecord;
   readonly finalDirectory: string;
   readonly finalPath: string;
+  readonly signal?: AbortSignal;
 }
 
 export interface FinalDestinationVerifier {
@@ -61,7 +63,7 @@ export type PublishBlockerRecheckResult =
     }>;
 
 export interface PublishBlockerRecheckService {
-  readonly recheck: (input: Readonly<{ readonly jobId: string }>) => Promise<PublishBlockerRecheckResult>;
+  readonly recheck: (input: Readonly<{ readonly jobId: string; readonly signal?: AbortSignal }>) => Promise<PublishBlockerRecheckResult>;
 }
 
 export interface PublishBlockerRecheckServiceOptions {
@@ -214,7 +216,8 @@ function publisherObservation(response: PublisherResponse): PublisherObservation
 }
 
 function matchingEvidence(job: JobRecord, binding: DurableBinding, evidence: FinalDestinationEvidence): boolean {
-  return evidence.finalDirectory === binding.finalDirectory
+  return (evidence.sealStatus === 'in_progress' || evidence.sealStatus === 'sealed')
+    && evidence.finalDirectory === binding.finalDirectory
     && evidence.finalPath === binding.finalPath
     && evidence.artifact.sha256 === job.artifactSha256
     && evidence.artifact.size === job.artifactSize
@@ -266,7 +269,8 @@ function ownershipResult(
 
 export function createPublishBlockerRecheckService(options: PublishBlockerRecheckServiceOptions): PublishBlockerRecheckService {
   return Object.freeze({
-    async recheck(input: Readonly<{ readonly jobId: string }>): Promise<PublishBlockerRecheckResult> {
+    async recheck(input: Readonly<{ readonly jobId: string; readonly signal?: AbortSignal }>): Promise<PublishBlockerRecheckResult> {
+      input.signal?.throwIfAborted();
       if (!JOB_ID.test(input.jobId)) {
         throw new PublishBlockerRecheckError('NOT_ELIGIBLE', 'job ID is invalid');
       }
@@ -277,11 +281,17 @@ export function createPublishBlockerRecheckService(options: PublishBlockerRechec
       const binding = durableBinding(job);
       let observation: PublisherObservation | null;
       try {
-        observation = publisherObservation(await options.publisher.recheck(publisherRequest(job)));
+        const request = publisherRequest(job);
+        const response = input.signal === undefined
+          ? await options.publisher.recheck(request)
+          : await options.publisher.recheck(request, { signal: input.signal });
+        observation = publisherObservation(response);
       } catch (error) {
+        input.signal?.throwIfAborted();
         if (error instanceof PublishBlockerRecheckError) throw error;
         observation = null;
       }
+      input.signal?.throwIfAborted();
       const publisherObservedAt = clockInstant(options, 'publisher recheck observation time');
       const common = (at: string) => ({
         kind: 'publish-blocker-recheck' as const,
@@ -299,6 +309,7 @@ export function createPublishBlockerRecheckService(options: PublishBlockerRechec
           reason: 'publisher-unavailable',
           publisher: { destination: 'unknown', staging: 'unknown', mutationCount: 0 },
         };
+        input.signal?.throwIfAborted();
         return ownershipResult(options.ownership.apiWrite({ ...common(at), resolution: 'retain-blocker', proof }), job.jobId, 'retained-blocker');
       }
       if (observation.destination === 'absent' && observation.staging === 'absent') {
@@ -311,6 +322,7 @@ export function createPublishBlockerRecheckService(options: PublishBlockerRechec
           finalDirectory: binding.finalDirectory,
           finalPath: binding.finalPath,
         };
+        input.signal?.throwIfAborted();
         return ownershipResult(options.ownership.apiWrite({ ...common(at), resolution: 'clear-absent', proof }), job.jobId, 'cleared-absent');
       }
       if (observation.destination === 'candidate' && observation.staging === 'absent') {
@@ -321,11 +333,14 @@ export function createPublishBlockerRecheckService(options: PublishBlockerRechec
             job,
             finalDirectory: binding.finalDirectory,
             finalPath: binding.finalPath,
+            signal: input.signal,
           });
           if (matchingEvidence(job, binding, candidate)) evidence = candidate;
         } catch {
+          input.signal?.throwIfAborted();
           evidence = null;
         }
+        input.signal?.throwIfAborted();
         const verifierObservedAt = clockInstant(options, 'final destination observation time');
         if (publisherObservedAt > verifierObservedAt) {
           throw new PublishBlockerRecheckError('INVALID_CLOCK', 'final destination observation predates publisher observation');
@@ -334,6 +349,7 @@ export function createPublishBlockerRecheckService(options: PublishBlockerRechec
         if (evidence !== null) {
           const proof: Extract<PublishBlockerRecheckProof, { kind: 'destination-matches' }> = {
             kind: 'destination-matches',
+            sealStatus: evidence.sealStatus,
             observedAt: verifierObservedAt,
             publisher,
             finalDirectory: evidence.finalDirectory,
@@ -344,6 +360,7 @@ export function createPublishBlockerRecheckService(options: PublishBlockerRechec
             manifest: evidence.manifest,
             verification: evidence.verification,
           };
+          input.signal?.throwIfAborted();
           return ownershipResult(options.ownership.apiWrite({ ...common(at), resolution: 'mark-published', proof }), job.jobId, 'marked-published');
         }
         const proof: Extract<PublishBlockerRecheckProof, { kind: 'retained-blocker' }> = {
@@ -352,6 +369,7 @@ export function createPublishBlockerRecheckService(options: PublishBlockerRechec
           reason: 'incomplete-evidence',
           publisher,
         };
+        input.signal?.throwIfAborted();
         return ownershipResult(options.ownership.apiWrite({ ...common(at), resolution: 'retain-blocker', proof }), job.jobId, 'retained-blocker');
       }
       const at = commandInstant(options, publisherObservedAt, 'publish blocker recheck commit time');
@@ -362,6 +380,7 @@ export function createPublishBlockerRecheckService(options: PublishBlockerRechec
         reason,
         publisher: observation,
       };
+      input.signal?.throwIfAborted();
       return ownershipResult(options.ownership.apiWrite({ ...common(at), resolution: 'retain-blocker', proof }), job.jobId, 'retained-blocker');
     },
   });

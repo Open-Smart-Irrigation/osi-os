@@ -161,6 +161,7 @@ describe('publish blocker final destination verifier', () => {
       manifest: { path: `${FINAL_DIRECTORY}/build-manifest.json`, sha256: fixture.job.manifestSha256 },
       verification: { path: `${FINAL_DIRECTORY}/verification.json`, sha256: fixture.job.verificationSha256 },
       staging: { path: `staging/${JOB_ID}`, state: 'absent' },
+      sealStatus: 'in_progress',
     });
     const result = await verifier(fixture).verify({ job: fixture.job, finalDirectory: FINAL_DIRECTORY, finalPath: FINAL_PATH });
     expect(Object.isFrozen(result)).toBe(true);
@@ -170,6 +171,91 @@ describe('publish blocker final destination verifier', () => {
     expect(Object.isFrozen(result.verification)).toBe(true);
     expect(Object.isFrozen(result.staging)).toBe(true);
     await expect(treeSnapshot(fixture.root)).resolves.toEqual(before);
+  });
+
+  it('accepts an already sealed release without mutating it', async () => {
+    const fixture = await createFixture();
+    try {
+      await chmod(fixture.finalDirectory, 0o555);
+      for (const name of [ARTIFACT_NAME, 'sha256sums', 'build-manifest.json', 'verification.json']) {
+        await chmod(join(fixture.finalDirectory, name), 0o444);
+      }
+
+      await expect(verifier(fixture).verify({
+        job: fixture.job,
+        finalDirectory: FINAL_DIRECTORY,
+        finalPath: FINAL_PATH,
+      })).resolves.toMatchObject({
+        finalDirectory: FINAL_DIRECTORY,
+        finalPath: FINAL_PATH,
+        sealStatus: 'sealed',
+      });
+      expect((await stat(fixture.finalDirectory)).mode & 0o777).toBe(0o555);
+      for (const name of [ARTIFACT_NAME, 'sha256sums', 'build-manifest.json', 'verification.json']) {
+        expect((await stat(join(fixture.finalDirectory, name))).mode & 0o777).toBe(0o444);
+      }
+    } finally {
+      await chmod(fixture.finalDirectory, 0o700);
+    }
+  });
+
+  it.each([
+    ['sealed directory with writable files', 0o555, 0o600],
+    ['writable directory with an untracked file mode', 0o700, 0o640],
+  ] as const)('rejects the incoherent mode tuple: %s', async (_name, directoryMode, fileMode) => {
+    const fixture = await createFixture();
+    try {
+      for (const name of [ARTIFACT_NAME, 'sha256sums', 'build-manifest.json', 'verification.json']) {
+        await chmod(join(fixture.finalDirectory, name), fileMode);
+      }
+      await chmod(fixture.finalDirectory, directoryMode);
+
+      await expect(verifier(fixture).verify({
+        job: fixture.job,
+        finalDirectory: FINAL_DIRECTORY,
+        finalPath: FINAL_PATH,
+      })).rejects.toBeInstanceOf(PublishBlockerFinalVerifierError);
+    } finally {
+      await chmod(fixture.finalDirectory, 0o700);
+    }
+  });
+
+  it('accepts tracked mixed file modes while the release directory records an interrupted seal', async () => {
+    const fixture = await createFixture();
+    await chmod(join(fixture.finalDirectory, ARTIFACT_NAME), 0o444);
+    await chmod(join(fixture.finalDirectory, 'build-manifest.json'), 0o444);
+
+    await expect(verifier(fixture).verify({
+      job: fixture.job,
+      finalDirectory: FINAL_DIRECTORY,
+      finalPath: FINAL_PATH,
+    })).resolves.toMatchObject({ finalDirectory: FINAL_DIRECTORY, finalPath: FINAL_PATH, sealStatus: 'in_progress' });
+  });
+
+  it('rejects an otherwise valid release with an untracked directory member', async () => {
+    const fixture = await createFixture();
+    await writeFile(join(fixture.finalDirectory, 'unexpected.txt'), 'not part of the release\n', { mode: 0o600 });
+
+    await expect(verifier(fixture).verify({
+      job: fixture.job,
+      finalDirectory: FINAL_DIRECTORY,
+      finalPath: FINAL_PATH,
+    })).rejects.toBeInstanceOf(PublishBlockerFinalVerifierError);
+  });
+
+  it('rejects a member added during the final staging-absence check', async () => {
+    const fixture = await createFixture();
+    const finalVerifier = verifier(fixture, {
+      beforeStagingRecheck: async () => {
+        await writeFile(join(fixture.finalDirectory, 'late-member.txt'), 'late member\n', { mode: 0o600 });
+      },
+    });
+
+    await expect(finalVerifier.verify({
+      job: fixture.job,
+      finalDirectory: FINAL_DIRECTORY,
+      finalPath: FINAL_PATH,
+    })).rejects.toBeInstanceOf(PublishBlockerFinalVerifierError);
   });
 
   it.each([
@@ -237,6 +323,21 @@ describe('publish blocker final destination verifier', () => {
     await expect(verifier(fixture, {
       afterAuthorityRecheck: async () => { await mkdir(join(fixture.root, '.osi-image-builder', 'staging', JOB_ID), { recursive: true, mode: 0o700 }); },
     }).verify({ job: fixture.job, finalDirectory: FINAL_DIRECTORY, finalPath: FINAL_PATH })).rejects.toBeInstanceOf(PublishBlockerFinalVerifierError);
+  });
+
+  it('propagates an absolute-deadline abort before final revalidation completes', async () => {
+    const fixture = await createFixture();
+    const controller = new AbortController();
+    const reason = new Error('request deadline exceeded');
+
+    await expect(verifier(fixture, {
+      beforeFinalRevalidation: () => controller.abort(reason),
+    }).verify({
+      job: fixture.job,
+      finalDirectory: FINAL_DIRECTORY,
+      finalPath: FINAL_PATH,
+      signal: controller.signal,
+    })).rejects.toBe(reason);
   });
 
   it('closes staging descriptors across repeated between-pass replacement failures', async () => {

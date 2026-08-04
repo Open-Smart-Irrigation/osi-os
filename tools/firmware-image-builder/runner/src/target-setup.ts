@@ -13,7 +13,7 @@ import {
 } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { join, posix } from 'node:path';
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual, TextDecoder } from 'node:util';
 
 import {
   withStateRootSnapshot,
@@ -45,6 +45,12 @@ export type {
 
 export const ROOTFS_PADDING_PATCH = 'image-with-padded-rootfs.patch';
 export const APPROVED_ROOTFS_SCRIPT_SHA256 = 'c1a646a136a4ccd3ddd279ec8d861c8c1768ab4a9b2cdbe8a681ab6fb9310817';
+export const CANONICAL_MAIN_APPLIED_PATCHES = 'no-uart-console.patch\nboot-config.patch\nadd_designware_spi_kmod.patch\n';
+export const CANONICAL_MAIN_QUILT_FILES = Object.freeze({
+  patches: 'patches\n',
+  series: 'series\n',
+  version: '2\n',
+});
 
 const PACKAGES_COMMIT = OPENWRT_RUST_FEED_CONTRACT.sourceCommit;
 const REQUIRED_LINKS = Object.freeze(['node-red', 'node-red-contrib-chirpstack', 'node-red-node-sqlite', 'chirpstack'] as const);
@@ -58,69 +64,22 @@ const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const SHA40 = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const HTTPS_FEED = /^https:\/\/[^\s^]+$/u;
-const ROOTFS_REVERSE_LINES = Object.freeze([
-  'Applying patch patches/image-with-padded-rootfs.patch',
-  'patching file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
-  'Hunk #1 FAILED at 24.',
-  '1 out of 1 hunk FAILED -- rejects in file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
-  'Patch patches/image-with-padded-rootfs.patch can be reverse-applied',
-]);
-const EXPECTED_MAKE_REVERSE_ERROR = 'make: *** [Makefile:60: switch-env] Error 1\n';
-const EXPECTED_FRESH_MAKE_REVERSE_ERROR = `No series file found\n${EXPECTED_MAKE_REVERSE_ERROR}`;
-const EXPECTED_FRESH_MAKE_SUCCESS_ERROR = 'No series file found\n';
-const PATCH_TRANSCRIPTS = Object.freeze({
-  'boot-config.patch': Object.freeze({
-    apply: Object.freeze([
-      'Applying patch patches/boot-config.patch',
-      'patching file target/linux/bcm27xx/image/config.txt',
-      '',
-    ]),
-    remove: Object.freeze([
-      'Removing patch patches/boot-config.patch',
-      'Restoring target/linux/bcm27xx/image/config.txt',
-      '',
-    ]),
-  }),
-  [ROOTFS_PADDING_PATCH]: Object.freeze({
-    apply: Object.freeze([
-      `Applying patch patches/${ROOTFS_PADDING_PATCH}`,
-      'patching file target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
-      '',
-    ]),
-    remove: Object.freeze([
-      `Removing patch patches/${ROOTFS_PADDING_PATCH}`,
-      'Restoring target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh',
-      '',
-    ]),
-  }),
-});
-type ApprovedPatch = keyof typeof PATCH_TRANSCRIPTS;
-const TARGET_PATCH_PRELUDES = Object.freeze({
+const CANONICAL_PROFILE_SERIES = Object.freeze({
   full_raspberrypi_bcm27xx_bcm2712: Object.freeze([
+    'no-uart-console.patch',
     'boot-config.patch',
-  ] as const),
-  full_raspberrypi_bcm27xx_bcm2709: Object.freeze([] as const),
-});
-type ApprovedTargetEnvironment = keyof typeof TARGET_PATCH_PRELUDES;
-const TARGET_PATCH_SERIES = Object.freeze({
-  full_raspberrypi_bcm27xx_bcm2712: Object.freeze([
-    ...TARGET_PATCH_PRELUDES.full_raspberrypi_bcm27xx_bcm2712,
+    'add_designware_spi_kmod.patch',
     ROOTFS_PADDING_PATCH,
   ]),
   full_raspberrypi_bcm27xx_bcm2709: Object.freeze([
-    ...TARGET_PATCH_PRELUDES.full_raspberrypi_bcm27xx_bcm2709,
+    'no-uart-console.patch',
+    'boot-config.patch',
     ROOTFS_PADDING_PATCH,
   ]),
 });
-type ActivateTargetCleanupState = 'fresh' | 'existing-stack';
-type ActivateTargetPatchOutcome = 'applied' | 'rootfs-reverse';
-interface ParsedActivateTargetTranscript {
-  readonly cleanupState: ActivateTargetCleanupState;
-  readonly patchOutcome: ActivateTargetPatchOutcome;
-}
-
+type ApprovedTargetEnvironment = keyof typeof CANONICAL_PROFILE_SERIES;
 export type TargetSetupOperationId = (typeof TARGET_SETUP_OPERATIONS)[number];
-export type TargetSetupOperationDisposition = 'passed' | 'expected-rootfs-already-present';
+export type TargetSetupOperationDisposition = 'passed';
 
 export interface ClassifiedTargetSetupOperationResult {
   readonly disposition: TargetSetupOperationDisposition;
@@ -211,14 +170,47 @@ export function createLockedTargetSetupOperations(execute: TargetSetupCommandExe
   return operations;
 }
 
-export interface RootfsPatchStateInput {
+export interface CanonicalRootfsPatchStateInput {
+  readonly profile: string;
   readonly series: readonly string[];
   readonly applied: readonly string[];
-  readonly output: string;
+  readonly quiltFiles: Readonly<{
+    readonly patches: string;
+    readonly series: string;
+    readonly version: string;
+  }>;
   readonly rootfsScript: string;
 }
 
-export type RootfsPatchDecision = 'applied' | 'already-present';
+export type RootfsPatchDecision = 'applied';
+
+export function decideCanonicalRootfsPatchState(
+  input: CanonicalRootfsPatchStateInput,
+  requestId = 'target-setup',
+): RootfsPatchDecision {
+  const expectedSeries = CANONICAL_PROFILE_SERIES[input.profile as keyof typeof CANONICAL_PROFILE_SERIES];
+  const series = parsePatchNames(input.series);
+  const applied = parsePatchNames(input.applied);
+  const expectedApplied = CANONICAL_MAIN_APPLIED_PATCHES.trimEnd().split('\n');
+  const quiltKeys = Object.keys(input.quiltFiles).sort();
+  if (
+    expectedSeries === undefined
+    || series === null
+    || applied === null
+    || !hasExactList(series, expectedSeries)
+    || !hasExactList(applied, expectedApplied)
+    || !hasExactList(input.series, [...expectedSeries, ''])
+    || !hasExactList(input.applied, [...expectedApplied, ''])
+    || JSON.stringify(quiltKeys) !== JSON.stringify(['patches', 'series', 'version'])
+    || input.quiltFiles.patches !== CANONICAL_MAIN_QUILT_FILES.patches
+    || input.quiltFiles.series !== CANONICAL_MAIN_QUILT_FILES.series
+    || input.quiltFiles.version !== CANONICAL_MAIN_QUILT_FILES.version
+    || sha256(input.rootfsScript) !== APPROVED_ROOTFS_SCRIPT_SHA256
+  ) {
+    fail('PATCH_STATE_AMBIGUOUS', 'The tracked main Quilt metadata or prepatched rootfs is not the approved canonical state.', requestId);
+  }
+  return 'applied';
+}
 
 interface HeldDirectory {
   readonly handle: FileHandle;
@@ -568,7 +560,15 @@ async function readTextFile(
   code: BuilderErrorCode,
   diagnosis: string,
 ): Promise<string> {
-  return (await readRegularFile(parent, name, dependencies, requestId, code, diagnosis)).toString('utf8');
+  const contents = await readRegularFile(parent, name, dependencies, requestId, code, diagnosis);
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(contents);
+  } catch (error) {
+    fail(code, diagnosis, requestId, {
+      path: `${parent.relativePath}/${name}`,
+      cause: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 async function readOptionalTextFile(
@@ -703,63 +703,8 @@ function isCanonicalInstant(value: unknown): value is string {
   return Number.isFinite(time) && new Date(time).toISOString() === value;
 }
 
-function reversedPatchAttributions(
-  output: string,
-  series: readonly string[],
-): readonly string[] | null {
-  const attributions: string[] = [];
-  let applyingPatch: string | null = null;
-  let applyingIndex = -1;
-  for (const rawLine of output.split(/\r?\n/u)) {
-    const line = rawLine.trim();
-    if (line.length === 0) continue;
-    const applying = /^Applying patch (patches\/[^\s]+)$/u.exec(line);
-    if (applying) {
-      const quiltPath = applying[1]!;
-      const path = quiltPath.slice('patches/'.length);
-      const index = series.indexOf(path);
-      if (
-        !validPatchPath(path)
-        || quiltPath !== `patches/${path}`
-        || index < 0
-        || index <= applyingIndex
-      ) return null;
-      applyingPatch = path;
-      applyingIndex = index;
-      continue;
-    }
-    if (line === 'Applying patches') continue;
-    if (/^Applying\b/u.test(line)) return null;
-    if (!/revers(?:ed|e)|previously applied/iu.test(line)) continue;
-    const reversed = /^Patch (patches\/[^\s]+) can be reverse-applied$/u.exec(line);
-    if (!reversed || applyingPatch === null) return null;
-    const quiltPath = reversed[1]!;
-    const path = quiltPath.slice('patches/'.length);
-    if (
-      !validPatchPath(path)
-      || quiltPath !== `patches/${path}`
-      || !series.includes(path)
-      || path !== applyingPatch
-    ) return null;
-    attributions.push(path);
-  }
-  return Object.freeze(attributions);
-}
-
-function consumeExactLines(
-  lines: readonly string[],
-  start: number,
-  expected: readonly string[],
-): number | null {
-  if (start + expected.length > lines.length) return null;
-  for (let index = 0; index < expected.length; index += 1) {
-    if (lines[start + index] !== expected[index]) return null;
-  }
-  return start + expected.length;
-}
-
 function isApprovedTargetEnvironment(value: string): value is ApprovedTargetEnvironment {
-  return Object.prototype.hasOwnProperty.call(TARGET_PATCH_PRELUDES, value);
+  return Object.prototype.hasOwnProperty.call(CANONICAL_PROFILE_SERIES, value);
 }
 
 function approvedActivateTargetEnvironment(
@@ -767,208 +712,65 @@ function approvedActivateTargetEnvironment(
 ): ApprovedTargetEnvironment | null {
   if (
     definition.workingDirectory !== '/workdir'
-    || definition.argv.length !== 3
-    || definition.argv[0] !== 'make'
-    || definition.argv[1] !== 'switch-env'
-    || !definition.argv[2]!.startsWith('ENV=')
+    || definition.argv.length !== 4
+    || definition.argv[0] !== 'node'
+    || definition.argv[1] !== '/opt/osi-image-builder/operations/osi-image-builder-tool.js'
+    || definition.argv[2] !== 'activate-target'
   ) return null;
-  const environment = definition.argv[2]!.slice('ENV='.length);
+  const environment = definition.argv[3]!;
   return isApprovedTargetEnvironment(environment) ? environment : null;
 }
 
-function validRemovedPatchStack(removed: readonly ApprovedPatch[]): boolean {
-  if (removed.length === 0) return true;
-  return Object.values(TARGET_PATCH_SERIES).some((series) => {
-    if (removed.length > series.length) return false;
-    return hasExactList(removed, series.slice(0, removed.length).reverse());
-  });
-}
-
-function consumeCleanupTranscript(
-  lines: readonly string[],
-  start: number,
-): Readonly<{ nextIndex: number; state: ActivateTargetCleanupState }> | null {
-  let index = start;
-  const removed: ApprovedPatch[] = [];
-  while (true) {
-    let matched = false;
-    for (const patch of Object.keys(PATCH_TRANSCRIPTS) as ApprovedPatch[]) {
-      const next = consumeExactLines(lines, index, PATCH_TRANSCRIPTS[patch].remove);
-      if (next === null) continue;
-      removed.push(patch);
-      index = next;
-      matched = true;
-      break;
-    }
-    if (!matched) break;
-  }
-  if (!validRemovedPatchStack(removed)) return null;
-  if (removed.length > 0 || lines[index] === 'No patches applied') {
-    if (lines[index] !== 'No patches applied') return null;
-    index += 1;
-    return Object.freeze({ nextIndex: index, state: 'existing-stack' as const });
-  }
-  return Object.freeze({ nextIndex: index, state: 'fresh' as const });
-}
-
-function parseExactFullMakeTranscript(
-  lines: readonly string[],
-  environment: ApprovedTargetEnvironment,
-): ParsedActivateTargetTranscript | null {
-  let index = consumeExactLines(lines, 0, [
-    'Cleaning patch state',
-    'cd openwrt && quilt pop -af || true',
-  ]);
-  if (index === null) return null;
-  const cleanup = consumeCleanupTranscript(lines, index);
-  if (cleanup === null) return null;
-  index = cleanup.nextIndex;
-  index = consumeExactLines(lines, index, [
-    'Restoring clean source tree',
-    'cd openwrt && git checkout -- . || true',
-    'cd openwrt && git clean -fd || true',
-    'rm -rf openwrt/.pc',
-  ]);
-  if (index === null) return null;
-  index = consumeExactLines(lines, index, [
-    'Switching configuration',
-    'rm -f conf/files conf/patches conf/.config',
-    `ln -s ${environment}/files conf/files`,
-    `ln -s ${environment}/patches conf/patches`,
-    `ln -s ${environment}/.config conf/.config`,
-    'Recreating openwrt symlinks',
-    'rm -f openwrt/.config openwrt/files openwrt/patches',
-    'ln -s ../conf/.config openwrt/.config',
-    'ln -s ../conf/files openwrt/files',
-    'ln -s ../conf/patches openwrt/patches',
-    'Initializing quilt',
-    'mkdir -p openwrt/.pc',
-    'echo "patches" > openwrt/.pc/.quilt_patches',
-    'cd openwrt && quilt upgrade || true',
-    'Converting meta-data to version 2',
-  ]);
-  if (index === null) return null;
-  index = consumeExactLines(lines, index, [
-    'Applying patches',
-    'cd openwrt && quilt push -a || [ $? -eq 2 ]',
-  ]);
-  if (index === null) return null;
-  for (const patch of TARGET_PATCH_PRELUDES[environment]) {
-    index = consumeExactLines(lines, index, PATCH_TRANSCRIPTS[patch].apply);
-    if (index === null) return null;
-  }
-  const reverseEnd = consumeExactLines(lines, index, ROOTFS_REVERSE_LINES);
-  if (reverseEnd === lines.length) {
-    return Object.freeze({
-      cleanupState: cleanup.state,
-      patchOutcome: 'rootfs-reverse' as const,
-    });
-  }
-  index = consumeExactLines(lines, index, PATCH_TRANSCRIPTS[ROOTFS_PADDING_PATCH].apply);
-  if (index === null) return null;
-  index = consumeExactLines(lines, index, [
-    `Now at patch patches/${ROOTFS_PADDING_PATCH}`,
-  ]);
-  if (index !== lines.length) return null;
-  return Object.freeze({
-    cleanupState: cleanup.state,
-    patchOutcome: 'applied' as const,
-  });
-}
-
-function parseExactActivateTargetTranscript(
-  stdout: string,
-  expectedEnvironment?: ApprovedTargetEnvironment,
-): ParsedActivateTargetTranscript | null {
-  if (!stdout.endsWith('\n') || stdout.includes('\r')) return null;
-  const lines = stdout.slice(0, -1).split('\n');
-  const environments = expectedEnvironment === undefined
-    ? Object.keys(TARGET_PATCH_PRELUDES) as ApprovedTargetEnvironment[]
-    : [expectedEnvironment];
-  for (const environment of environments) {
-    const parsed = parseExactFullMakeTranscript(lines, environment);
-    if (parsed !== null) return parsed;
-  }
-  return null;
-}
-
-function expectedActivateTargetStderr(
-  transcript: ParsedActivateTargetTranscript,
-): string {
-  if (transcript.patchOutcome === 'applied') {
-    return transcript.cleanupState === 'fresh'
-      ? EXPECTED_FRESH_MAKE_SUCCESS_ERROR
-      : '';
-  }
-  return transcript.cleanupState === 'fresh'
-    ? EXPECTED_FRESH_MAKE_REVERSE_ERROR
-    : EXPECTED_MAKE_REVERSE_ERROR;
-}
-
-function hasExactActivateTargetResult(
+function hasExactTargetActivationResult(
   stdout: string,
   stderr: string,
-  expectedEnvironment: ApprovedTargetEnvironment | undefined,
-  expectedOutcome: ActivateTargetPatchOutcome,
+  expectedEnvironment: ApprovedTargetEnvironment | null,
 ): boolean {
-  const transcript = parseExactActivateTargetTranscript(stdout, expectedEnvironment);
-  return transcript !== null
-    && transcript.patchOutcome === expectedOutcome
-    && stderr === expectedActivateTargetStderr(transcript);
+  if (expectedEnvironment === null || stderr !== '') return false;
+  return stdout === `${JSON.stringify({ operation: 'activate-target', environment: expectedEnvironment })}\n`;
 }
 
-function hasExactRootfsReverseResult(
-  stdout: string,
-  stderr: string,
-  expectedEnvironment?: ApprovedTargetEnvironment,
-): boolean {
-  return hasExactActivateTargetResult(
-    stdout,
-    stderr,
-    expectedEnvironment,
-    'rootfs-reverse',
-  );
+interface CopyFeedConfigResult {
+  readonly operation: 'copy-feed-config';
+  readonly source: 'feeds.conf.default';
+  readonly destination: 'openwrt/feeds.conf.default';
+  readonly sha256: string;
+  readonly sourceSha256: string;
+  readonly destinationSha256: string;
 }
 
-function hasExactCombinedRootfsReverseOutput(output: string): boolean {
-  for (const stderr of [
-    EXPECTED_FRESH_MAKE_REVERSE_ERROR,
-    EXPECTED_MAKE_REVERSE_ERROR,
-  ]) {
-    if (
-      output.endsWith(stderr)
-      && hasExactRootfsReverseResult(output.slice(0, -stderr.length), stderr)
-    ) return true;
-  }
-  return false;
-}
-
-export function decideRootfsPatchState(input: RootfsPatchStateInput, requestId = 'target-setup'): RootfsPatchDecision {
-  const series = parsePatchNames(input.series);
-  const applied = parsePatchNames(input.applied);
+function exactCopyFeedConfigResult(stdout: string, stderr: string): CopyFeedConfigResult | null {
   if (
-    series === null
-    || applied === null
-    || series.length === 0
-    || !series.includes(ROOTFS_PADDING_PATCH)
-    || sha256(input.rootfsScript) !== APPROVED_ROOTFS_SCRIPT_SHA256
-  ) {
-    fail('PATCH_STATE_AMBIGUOUS', 'The rootfs padding patch series or implementation hash is not approved.', requestId);
-  }
-  const reversed = reversedPatchAttributions(input.output, series);
-  if (reversed === null) {
-    fail('PATCH_STATE_AMBIGUOUS', 'OpenWrt patch output cannot be bound to the exact ordered patch series.', requestId);
-  }
-  if (reversed.length > 0 && !hasExactCombinedRootfsReverseOutput(input.output)) {
-    fail('PATCH_STATE_AMBIGUOUS', 'OpenWrt reverse-applicable output is not the exact approved quilt transcript.', requestId);
-  }
-  const expectedApplied = series.filter((patch) => patch !== ROOTFS_PADDING_PATCH);
-  if (reversed.length === 1 && reversed[0] === ROOTFS_PADDING_PATCH && hasExactList(applied, expectedApplied)) return 'already-present';
-  if (reversed.length > 0) {
-    fail('PATCH_STATE_AMBIGUOUS', 'OpenWrt reported an unapproved reverse-applicable patch state.', requestId, { patch: ROOTFS_PADDING_PATCH });
-  }
-  if (hasExactList(applied, series)) return 'applied';
-  fail('PATCH_STATE_AMBIGUOUS', 'OpenWrt reported an incomplete rootfs patch stack.', requestId, { patch: ROOTFS_PADDING_PATCH });
+    stderr !== ''
+    || stdout.includes('\r')
+    || !stdout.endsWith('\n')
+    || stdout.indexOf('\n') !== stdout.length - 1
+  ) return null;
+  const text = stdout.slice(0, -1);
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); }
+  catch { return null; }
+  if (
+    parsed === null
+    || typeof parsed !== 'object'
+    || Array.isArray(parsed)
+    || JSON.stringify(parsed) !== text
+  ) return null;
+  const result = parsed as Partial<CopyFeedConfigResult>;
+  if (
+    Object.keys(result).join('\0') !== 'operation\0source\0destination\0sha256\0sourceSha256\0destinationSha256'
+    || result.operation !== 'copy-feed-config'
+    || result.source !== 'feeds.conf.default'
+    || result.destination !== 'openwrt/feeds.conf.default'
+    || typeof result.sha256 !== 'string'
+    || typeof result.sourceSha256 !== 'string'
+    || typeof result.destinationSha256 !== 'string'
+    || !SHA256.test(result.sha256)
+    || !SHA256.test(result.sourceSha256)
+    || !SHA256.test(result.destinationSha256)
+    || result.sha256 !== result.sourceSha256
+  ) return null;
+  return Object.freeze(result as CopyFeedConfigResult);
 }
 
 function parseFeedConfig(contents: string, requestId: string): {
@@ -1004,6 +806,32 @@ function parseFeedConfig(contents: string, requestId: string): {
     fail('RUST_BOOTSTRAP_UNAVAILABLE', 'The packages feed is not pinned to the approved Rust contract commit.', requestId, { expectedCommit: PACKAGES_COMMIT });
   }
   return { gitFeeds, chirpstackLocation };
+}
+
+const CANONICAL_CHIRPSTACK_SOURCE = 'src-link chirpstack feeds/chirpstack-openwrt-feed';
+const CANONICAL_CHIRPSTACK_DESTINATION = 'src-link chirpstack ../../feeds/chirpstack-openwrt-feed';
+
+function deriveCanonicalFeedConfig(source: string, requestId: string): string {
+  const bom = source.startsWith('\uFEFF') ? '\uFEFF' : '';
+  const body = bom.length === 0 ? source : source.slice(1);
+  let matches = 0;
+  const derived = body.replace(
+    /^([ \t]*)src-link chirpstack feeds\/chirpstack-openwrt-feed([ \t]*)(\r?)$/gmu,
+    (_line, leading: string, trailing: string, carriageReturn: string) => {
+      matches += 1;
+      return `${leading}${CANONICAL_CHIRPSTACK_DESTINATION}${trailing}${carriageReturn}`;
+    },
+  );
+  if (matches !== 1) {
+    fail(
+      'FEED_INSTALL_FAILED',
+      'The pinned repository feed configuration is not the exact supported source.',
+      requestId,
+      { source: CANONICAL_CHIRPSTACK_SOURCE },
+      'copy-feed-config',
+    );
+  }
+  return `${bom}${derived}`;
 }
 
 function validatePreparedInput(
@@ -1618,7 +1446,6 @@ async function verifyPreparedAndMaterializedFeeds(
 async function patchState(
   workspace: HeldDirectory,
   target: TargetManifest,
-  activationOutput: string,
   requestId: string,
   dependencies: PathAuthorityDependencies,
 ): Promise<RootfsPatchDecision> {
@@ -1633,6 +1460,14 @@ async function patchState(
   const quilt = await openDirectoryPath(workspace, ['openwrt', '.pc'], dependencies, requestId, 'PATCH_STATE_AMBIGUOUS', 'The OpenWrt Quilt metadata directory is unavailable or unsafe.');
   let applied: string | null;
   try {
+    const quiltPatches = await readTextFile(
+      quilt.directory,
+      '.quilt_patches',
+      dependencies,
+      requestId,
+      'PATCH_STATE_AMBIGUOUS',
+      'The OpenWrt Quilt patch directory metadata is unavailable or unsafe.',
+    );
     const quiltSeries = await readTextFile(
       quilt.directory,
       '.quilt_series',
@@ -1641,16 +1476,24 @@ async function patchState(
       'PATCH_STATE_AMBIGUOUS',
       'The OpenWrt Quilt series metadata is unavailable or unsafe.',
     );
-    if (quiltSeries !== 'series\n') {
-      fail('PATCH_STATE_AMBIGUOUS', 'The OpenWrt Quilt series metadata does not name the canonical series file exactly.', requestId);
+    const quiltVersion = await readTextFile(
+      quilt.directory,
+      '.version',
+      dependencies,
+      requestId,
+      'PATCH_STATE_AMBIGUOUS',
+      'The OpenWrt Quilt version metadata is unavailable or unsafe.',
+    );
+    if (quiltPatches !== CANONICAL_MAIN_QUILT_FILES.patches || quiltSeries !== CANONICAL_MAIN_QUILT_FILES.series || quiltVersion !== CANONICAL_MAIN_QUILT_FILES.version) {
+      fail('PATCH_STATE_AMBIGUOUS', 'The tracked OpenWrt Quilt metadata is not the canonical main state.', requestId);
     }
-    applied = await readOptionalTextFile(
+    applied = await readTextFile(
       quilt.directory,
       'applied-patches',
       dependencies,
       requestId,
       'PATCH_STATE_AMBIGUOUS',
-      'The OpenWrt applied patch list is unavailable or unsafe.',
+      'The tracked OpenWrt applied patch list is unavailable or unsafe.',
     );
   } finally {
     await closeHandles(quilt.handles);
@@ -1663,10 +1506,11 @@ async function patchState(
     'PATCH_STATE_AMBIGUOUS',
     'The approved rootfs image implementation is unavailable or unsafe.',
   );
-  return decideRootfsPatchState({
+  return decideCanonicalRootfsPatchState({
+    profile: target.environment,
     series: series.split(/\r?\n/u),
-    applied: applied === null ? [] : applied.split(/\r?\n/u),
-    output: activationOutput,
+    applied: applied.split(/\r?\n/u),
+    quiltFiles: CANONICAL_MAIN_QUILT_FILES,
     rootfsScript,
   }, requestId);
 }
@@ -1737,10 +1581,19 @@ async function verifySelectedConfigLinks(
   const conf = await openDirectoryPath(workspace, ['conf'], dependencies, requestId, 'TARGET_CONFIG_MISMATCH', 'The selected profile config directory is unavailable.');
   const openwrt = await openDirectoryPath(workspace, ['openwrt'], dependencies, requestId, 'TARGET_CONFIG_MISMATCH', 'The OpenWrt config directory is unavailable.');
   try {
-    const confTarget = await readLink(conf.directory, '.config', requestId, 'TARGET_CONFIG_MISMATCH', 'The selected profile config link is unavailable or unsafe.');
-    const openwrtTarget = await readLink(openwrt.directory, '.config', requestId, 'TARGET_CONFIG_MISMATCH', 'The OpenWrt config link is unavailable or unsafe.');
-    if (confTarget !== `${target.environment}/.config` || openwrtTarget !== '../conf/.config') {
-      fail('TARGET_CONFIG_MISMATCH', 'The active OpenWrt config links do not bind the selected manifest profile.', requestId, { environment: target.environment });
+    const links = [
+      [conf.directory, '.config', `${target.environment}/.config`],
+      [conf.directory, 'files', `${target.environment}/files`],
+      [conf.directory, 'patches', `${target.environment}/patches`],
+      [openwrt.directory, '.config', '../conf/.config'],
+      [openwrt.directory, 'files', '../conf/files'],
+      [openwrt.directory, 'patches', '../conf/patches'],
+    ] as const;
+    for (const [directory, name, expected] of links) {
+      const actual = await readLink(directory, name, requestId, 'TARGET_CONFIG_MISMATCH', `The active OpenWrt link ${name} is unavailable or unsafe.`);
+      if (actual !== expected) {
+        fail('TARGET_CONFIG_MISMATCH', `The active OpenWrt link ${name} does not bind the selected manifest profile.`, requestId, { environment: target.environment, link: name, expected, observed: actual });
+      }
     }
   } finally {
     await closeHandles(openwrt.handles);
@@ -1748,47 +1601,28 @@ async function verifySelectedConfigLinks(
   }
 }
 
-async function selectConfigProfile(
-  workspace: HeldDirectory,
-  target: TargetManifest,
-  dependencies: PathAuthorityDependencies,
-  requestId: string,
+export async function assertActiveTargetLinks(
+  workspacePath: string | FileHandle,
+  environment: string,
 ): Promise<void> {
-  const conf = await openDirectoryPath(
-    workspace,
-    ['conf'],
-    dependencies,
-    requestId,
-    'TARGET_CONFIG_MISMATCH',
-    'The selected profile config directory is unavailable.',
-  );
-  try {
-    const expected = `${target.environment}/.config`;
-    const current = await readLink(
-      conf.directory,
-      '.config',
-      requestId,
-      'TARGET_CONFIG_MISMATCH',
-      'The active profile config link is unavailable or unsafe.',
-    );
-    if (current !== expected) {
-      await unlink(fdPath(conf.directory.handle, '.config'));
-      await symlink(expected, fdPath(conf.directory.handle, '.config'));
-      await conf.directory.handle.sync();
+  if (!isApprovedTargetEnvironment(environment)) throw new Error('active target environment is not trusted');
+  const links = [
+    ['conf', '.config', `${environment}/.config`],
+    ['conf', 'files', `${environment}/files`],
+    ['conf', 'patches', `${environment}/patches`],
+    ['openwrt', '.config', '../conf/.config'],
+    ['openwrt', 'files', '../conf/files'],
+    ['openwrt', 'patches', '../conf/patches'],
+  ] as const;
+  for (const [parent, name, expected] of links) {
+    const path = typeof workspacePath === 'string'
+      ? join(workspacePath, parent, name)
+      : fdPath(workspacePath, join(parent, name));
+    const entry = await lstat(path);
+    if (!entry.isSymbolicLink() || await readlink(path) !== expected) {
+      throw new Error(`active target link ${parent}/${name} does not match ${environment}`);
     }
-  } catch (error) {
-    if (error instanceof BuilderError) throw error;
-    fail(
-      'TARGET_CONFIG_MISMATCH',
-      'The active profile config could not be selected through held authority.',
-      requestId,
-      { target: target.id, cause: error instanceof Error ? error.message : String(error) },
-      'resolve-config',
-    );
-  } finally {
-    await closeHandles(conf.handles);
   }
-  await verifySelectedConfigLinks(workspace, target, dependencies, requestId);
 }
 
 async function verifyLinks(
@@ -1870,34 +1704,15 @@ export function classifyTargetSetupOperationResult(
       operationId !== 'activate-target'
       || (
         targetEnvironment !== null
-        && hasExactActivateTargetResult(
-          command.stdout,
-          command.stderr,
-          targetEnvironment,
-          'applied',
-        )
+        && hasExactTargetActivationResult(command.stdout, command.stderr, targetEnvironment)
       )
+    )
+    && (
+      operationId !== 'copy-feed-config'
+      || exactCopyFeedConfigResult(command.stdout, command.stderr) !== null
     )
   ) {
     return Object.freeze({ disposition: 'passed' as const, command });
-  }
-  if (
-    operationId === 'activate-target'
-    && command.exitCode === 2
-    && command.signal === null
-    && command.timedOut === false
-    && exactArgv
-    && targetEnvironment !== null
-    && hasExactRootfsReverseResult(
-      command.stdout,
-      command.stderr,
-      targetEnvironment,
-    )
-  ) {
-    return Object.freeze({
-      disposition: 'expected-rootfs-already-present' as const,
-      command,
-    });
   }
   fail(operationFailureCode(operationId), operationFailureMessage(operationId), requestId, {
     exitCode: command.exitCode,
@@ -2172,6 +1987,7 @@ export async function resolveTargetSetup(
 
       const sourceFeed = await readTextFile(workspace, 'feeds.conf.default', dependencies, input.requestId, 'FEED_INSTALL_FAILED', 'The pinned repository feed configuration is unavailable or unsafe.');
       const parsedFeeds = parseFeedConfig(sourceFeed, input.requestId);
+      const expectedDestinationFeed = deriveCanonicalFeedConfig(sourceFeed, input.requestId);
       const preparedRecords = validatePreparedInput(
         input.preparedFeeds,
         parsedFeeds.gitFeeds,
@@ -2248,20 +2064,6 @@ export async function resolveTargetSetup(
           const profiles = new Map<TargetManifest['id'], SourceProfileResolution>();
           for (const target of targetState.ordered) {
             const definitions = targetState.definitions.get(target.id)!;
-            const activation = await runOperation(
-              input.operations,
-              'activate-target',
-              definitions.get('activate-target')!,
-              workspaceCapability,
-              verifyWorkspaceBinding,
-              input.requestId,
-            );
-            await verifySelectedConfigLinks(
-              workspace,
-              target,
-              dependencies,
-              input.requestId,
-            );
             const sourceConfigBytes = await readProfileConfigBytes(
               workspace,
               target,
@@ -2291,7 +2093,6 @@ export async function resolveTargetSetup(
             const decision = await patchState(
               workspace,
               target,
-              `${activation.stdout}${activation.stderr}`,
               input.requestId,
               dependencies,
             );
@@ -2306,6 +2107,39 @@ export async function resolveTargetSetup(
               patchDecision: decision,
             }));
           }
+          const selectedDefinitions = targetState.definitions.get(targetState.selected.id)!;
+          await runOperation(
+            input.operations,
+            'activate-target',
+            selectedDefinitions.get('activate-target')!,
+            workspaceCapability,
+            verifyWorkspaceBinding,
+            input.requestId,
+          );
+          await verifySelectedConfigLinks(
+            workspace,
+            targetState.selected,
+            dependencies,
+            input.requestId,
+          );
+          const selectedSourceBytes = await readProfileConfigBytes(
+            workspace,
+            targetState.selected,
+            dependencies,
+            input.requestId,
+          );
+          if (sha256(selectedSourceBytes) !== profiles.get(targetState.selected.id)!.sourceSha256) {
+            fail('TARGET_CONFIG_MISMATCH', 'The selected profile config changed during immutable activation.', input.requestId, { target: targetState.selected.id }, 'activate-target');
+          }
+          profiles.set(targetState.selected.id, Object.freeze({
+            ...profiles.get(targetState.selected.id)!,
+            patchDecision: await patchState(
+              workspace,
+              targetState.selected,
+              input.requestId,
+              dependencies,
+            ),
+          }));
           await assertBindings(bindings, dependencies, input.requestId);
           const selectedProfile = profiles.get(targetState.selected.id)!;
           return Object.freeze({
@@ -2328,7 +2162,7 @@ export async function resolveTargetSetup(
             input.requestId,
           );
           const definitions = targetState.definitions.get(targetState.selected.id)!;
-          await runOperation(
+          const copyCommand = await runOperation(
             input.operations,
             'copy-feed-config',
             definitions.get('copy-feed-config')!,
@@ -2354,10 +2188,18 @@ export async function resolveTargetSetup(
           );
           const sourceSha256 = sha256(immediateSourceFeed);
           const destinationSha256 = sha256(immediateDestinationFeed);
-          if (immediateSourceFeed !== sourceFeed || sourceSha256 !== destinationSha256) {
+          const copyResult = exactCopyFeedConfigResult(copyCommand.stdout, copyCommand.stderr);
+          if (
+            immediateSourceFeed !== sourceFeed
+            || immediateDestinationFeed !== expectedDestinationFeed
+            || copyResult === null
+            || copyResult.sha256 !== sourceSha256
+            || copyResult.sourceSha256 !== sourceSha256
+            || copyResult.destinationSha256 !== destinationSha256
+          ) {
             fail(
               'FEED_INSTALL_FAILED',
-              'The copied feed configuration hash differs from the pinned repository source.',
+              'The copied feed configuration does not match the exact canonical derivation or the repository source changed.',
               input.requestId,
               { sourceSha256, destinationSha256 },
               'copy-feed-config',
@@ -2460,6 +2302,12 @@ export async function resolveTargetSetup(
           );
         }
         const profileResults = new Map<TargetManifest['id'], ProfileResolution>();
+        await verifySelectedConfigLinks(
+          workspace,
+          targetState.selected,
+          dependencies,
+          input.requestId,
+        );
         for (const target of targetState.ordered) {
           const prior = input.profiles[target.id];
           if (
@@ -2474,7 +2322,15 @@ export async function resolveTargetSetup(
               { target: target.id },
             );
           }
-          await selectConfigProfile(workspace, target, dependencies, input.requestId);
+          if (target.id !== targetState.selected.id) {
+            profileResults.set(target.id, Object.freeze({
+              ...prior,
+              profile: prior.profile,
+              rootfsPartSize: prior.rootfsPartSize,
+              resolvedSha256: prior.sourceSha256,
+            }));
+            continue;
+          }
           const sourceConfigBytes = await readProfileConfigBytes(
             workspace,
             target,
@@ -2566,11 +2422,6 @@ export async function resolveTargetSetup(
         const definitions = targetState.definitions.get(target.id)!;
         const verifyWorkspaceBinding = () => assertBindings(bindings, dependencies, input.requestId);
         await assertBindings(bindings, dependencies, input.requestId);
-        await cleanupMaterializedFeeds(openwrt, dependencies, input.requestId);
-        await assertBindings(bindings, dependencies, input.requestId);
-        const activation = await runOperation(input.operations, 'activate-target', definitions.get('activate-target')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
-        await assertBindings(bindings, dependencies, input.requestId);
-        await verifySelectedConfigLinks(workspace, target, dependencies, input.requestId);
         const sourceConfigBytes = await readProfileConfigBytes(workspace, target, dependencies, input.requestId);
         const sourceConfig = sourceConfigBytes.toString('utf8');
         checkConfig(sourceConfig, target, input.requestId, `${target.id} source`);
@@ -2602,21 +2453,50 @@ export async function resolveTargetSetup(
           });
         }
 
-        await runOperation(input.operations, 'copy-feed-config', definitions.get('copy-feed-config')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
+        let patchDecision = await patchState(workspace, target, input.requestId, dependencies);
+        if (target.id !== targetState.selected.id) {
+          profileResults.set(target.id, Object.freeze({
+            target: target.id,
+            environment: target.environment,
+            selectedTarget: target.openwrtTarget,
+            profile: target.profile,
+            rootfsPartSize: target.rootfsPartSize,
+            sourceSha256: sourceConfigSha256,
+            sourceConfigEvidencePath,
+            resolvedSha256: sourceConfigSha256,
+            patchDecision,
+          }));
+          continue;
+        }
+
+        await cleanupMaterializedFeeds(openwrt, dependencies, input.requestId);
+        await assertBindings(bindings, dependencies, input.requestId);
+        await runOperation(input.operations, 'activate-target', definitions.get('activate-target')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
+        await assertBindings(bindings, dependencies, input.requestId);
+        await verifySelectedConfigLinks(workspace, target, dependencies, input.requestId);
+        const selectedSourceBytes = await readProfileConfigBytes(workspace, target, dependencies, input.requestId);
+        if (sha256(selectedSourceBytes) !== sourceConfigSha256) {
+          fail('TARGET_CONFIG_MISMATCH', 'The selected profile config changed during immutable activation.', input.requestId, { target: target.id }, 'activate-target');
+        }
+        patchDecision = await patchState(workspace, target, input.requestId, dependencies);
+
+        const copyCommand = await runOperation(input.operations, 'copy-feed-config', definitions.get('copy-feed-config')!, workspaceCapability, verifyWorkspaceBinding, input.requestId);
         await assertBindings(bindings, dependencies, input.requestId);
         const immediateSourceFeed = await readTextFile(workspace, 'feeds.conf.default', dependencies, input.requestId, 'FEED_INSTALL_FAILED', 'The repository feed configuration changed after target activation.');
         const immediateDestinationFeed = await readTextFile(openwrt, 'feeds.conf.default', dependencies, input.requestId, 'FEED_INSTALL_FAILED', 'The copied feed configuration is missing or unsafe.');
         const sourceSha256 = sha256(immediateSourceFeed);
         const destinationSha256 = sha256(immediateDestinationFeed);
-        if (immediateSourceFeed !== sourceFeed || sourceSha256 !== destinationSha256) {
-          fail('FEED_INSTALL_FAILED', 'The copied feed configuration hash differs from the pinned repository source.', input.requestId, { sourceSha256, destinationSha256 }, 'copy-feed-config');
+        const copyResult = exactCopyFeedConfigResult(copyCommand.stdout, copyCommand.stderr);
+        if (
+          immediateSourceFeed !== sourceFeed
+          || immediateDestinationFeed !== expectedDestinationFeed
+          || copyResult === null
+          || copyResult.sha256 !== sourceSha256
+          || copyResult.sourceSha256 !== sourceSha256
+          || copyResult.destinationSha256 !== destinationSha256
+        ) {
+          fail('FEED_INSTALL_FAILED', 'The copied feed configuration does not match the exact canonical derivation or the repository source changed.', input.requestId, { sourceSha256, destinationSha256 }, 'copy-feed-config');
         }
-        const activationOutput = activation.stderr.length === 0
-          ? activation.stdout
-          : activation.stdout.length === 0
-            ? activation.stderr
-            : `${activation.stdout}${activation.stdout.endsWith('\n') ? '' : '\n'}${activation.stderr}`;
-        const patchDecision = await patchState(workspace, target, activationOutput, input.requestId, dependencies);
         const preparedEvidence = await materializeFeeds(openwrt, prepared, dependencies, input.requestId);
         const rust = await rustFeed(openwrt, input.requestId, dependencies);
         const materializedFeedHashes = await captureMaterializedFeedHashes(openwrt, prepared, dependencies, input.requestId);

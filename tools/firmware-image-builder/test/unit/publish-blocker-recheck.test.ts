@@ -81,6 +81,7 @@ function publisher(overrides: Partial<PublisherResponse> = {}): PublisherRespons
 
 function finalEvidence(overrides: Partial<FinalDestinationEvidence> = {}): FinalDestinationEvidence {
   return {
+    sealStatus: 'sealed',
     finalDirectory: FINAL_DIRECTORY,
     finalPath: FINAL_PATH,
     artifact: { sha256: ARTIFACT_SHA, size: 123, mtime: ARTIFACT_MTIME },
@@ -102,6 +103,7 @@ function fixture(options: {
   readonly publisherError?: Error;
   readonly evidence?: FinalDestinationEvidence;
   readonly verifierError?: Error;
+  readonly beforeVerify?: () => void;
   readonly ownershipResult?: OwnershipResult;
   readonly clockTimes?: readonly string[];
 } = {}) {
@@ -114,6 +116,7 @@ function fixture(options: {
     return options.response ?? publisher();
   });
   const verify = vi.fn(async () => {
+    options.beforeVerify?.();
     if (options.verifierError) throw options.verifierError;
     return options.evidence ?? finalEvidence();
   });
@@ -185,12 +188,26 @@ describe('publish blocker recheck service', () => {
       resolution: 'mark-published',
       proof: expect.objectContaining({
         kind: 'destination-matches',
+        sealStatus: 'sealed',
         artifact: { sha256: ARTIFACT_SHA, size: 123, mtime: ARTIFACT_MTIME },
         checksum: { path: `${FINAL_DIRECTORY}/sha256sums`, sha256: CHECKSUM_SHA },
         manifest: { path: `${FINAL_DIRECTORY}/build-manifest.json`, sha256: MANIFEST_SHA },
         verification: { path: `${FINAL_DIRECTORY}/verification.json`, sha256: VERIFICATION_SHA },
         staging: { path: `staging/${JOB_ID}`, state: 'absent' },
       }),
+    }));
+  });
+
+  it('propagates an interrupted writable candidate without claiming it is sealed', async () => {
+    const target = fixture({
+      response: publisher({ destination: 'candidate', staging: 'absent', errorCode: undefined }),
+      evidence: finalEvidence({ sealStatus: 'in_progress' }),
+    });
+
+    await expect(target.service.recheck({ jobId: JOB_ID })).resolves.toMatchObject({ kind: 'marked-published' });
+    expect(target.apiWrite).toHaveBeenCalledWith(expect.objectContaining({
+      resolution: 'mark-published',
+      proof: expect.objectContaining({ kind: 'destination-matches', sealStatus: 'in_progress' }),
     }));
   });
 
@@ -284,6 +301,22 @@ describe('publish blocker recheck service', () => {
       resolution: 'retain-blocker',
       proof: expect.objectContaining({ reason: 'incomplete-evidence' }),
     }));
+  });
+
+  it('does not commit a retained blocker after the request deadline aborts verification', async () => {
+    const controller = new AbortController();
+    const deadline = new Error('request deadline exceeded');
+    const target = fixture({
+      response: publisher({ destination: 'candidate', staging: 'absent', errorCode: undefined }),
+      beforeVerify: () => controller.abort(deadline),
+      verifierError: new Error('verification interrupted'),
+    });
+
+    await expect(target.service.recheck({
+      jobId: JOB_ID,
+      signal: controller.signal,
+    })).rejects.toBe(deadline);
+    expect(target.apiWrite).not.toHaveBeenCalled();
   });
 
   it.each([

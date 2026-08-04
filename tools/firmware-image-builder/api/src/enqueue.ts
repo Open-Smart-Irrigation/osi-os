@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { LoadedManifest } from '../../manifest/schema.js';
+import { validateOriginUrl } from '../../config/origin-policy.js';
 import {
   OwnershipTransactionError,
   type ApiWriteCommand,
@@ -17,6 +18,7 @@ import type { ApiEnqueueRequest, ApiEnqueueService, PersistedEnqueueAcceptance }
 import type { BuilderStore, JobRecord } from './store.js';
 import { HttpTransportError } from './server.js';
 import { canonicalInstant } from './validation.js';
+import { parseBuilderIdentity, type BuilderIdentity } from '../../domain/builder-identity.js';
 
 const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/u;
@@ -60,6 +62,7 @@ export interface EnqueueStoreCapability {
 
 export interface EnqueueServiceOptions {
   readonly manifest: LoadedManifest;
+  readonly builderIdentity: BuilderIdentity;
   readonly preflight: EnqueuePreflightCapability;
   readonly ownership: EnqueueOwnershipCapability;
   readonly store: EnqueueStoreCapability;
@@ -102,6 +105,7 @@ function acceptanceMatches(
   jobId: string,
 ): void {
   try {
+    validateOriginUrl(accepted.source.originUrl);
     const checkedAt = canonicalInstant(accepted.checkedAt, 'enqueue preflight checked time');
     const createdAt = canonicalInstant(accepted.createdAt, 'enqueue preflight creation time');
     const expiresAt = canonicalInstant(accepted.expiresAt, 'enqueue preflight expiry');
@@ -169,6 +173,9 @@ export function createProductionEnqueueService(options: EnqueueServiceOptions): 
   if (!SHA256.test(options.manifest.sha256)) {
     throw new EnqueueError('ENQUEUE_ACCEPTANCE_INVALID', 500, true);
   }
+  let builderIdentity: BuilderIdentity;
+  try { builderIdentity = parseBuilderIdentity(options.builderIdentity); }
+  catch { throw new EnqueueError('ENQUEUE_ACCEPTANCE_INVALID', 500, true); }
   const idFactory = options.idFactory ?? (() => `job_${randomUUID().replaceAll('-', '')}`);
   const now = options.now ?? (() => new Date());
 
@@ -192,7 +199,7 @@ export function createProductionEnqueueService(options: EnqueueServiceOptions): 
             jobId,
             requestId,
             request: acceptedSelection,
-            sourceRemote: accepted.source.remote,
+            sourceRemote: accepted.source.originUrl,
             sourceRef: accepted.source.ref,
             sourceBranch: accepted.source.branch,
             branch: accepted.branch,
@@ -203,6 +210,7 @@ export function createProductionEnqueueService(options: EnqueueServiceOptions): 
             targetId: accepted.target.id,
             rootId: accepted.outputRoot.id,
             targetManifestSha256: options.manifest.sha256,
+            builderIdentity,
             sourceCommitTime: accepted.source.commitTime,
             sourceAuthor: accepted.source.author,
             sourceSubject: accepted.source.subject,

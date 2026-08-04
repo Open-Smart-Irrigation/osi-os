@@ -4,6 +4,7 @@ import type {
   ApiErrorBody,
   BranchSnapshot,
   BuilderConfig,
+  CancelJobResponse,
   ConnectionState,
   EventPage,
   EvidenceDocument,
@@ -106,7 +107,7 @@ export const builderApi = Object.freeze({
   job: (jobId: string): Promise<JobDetail> => request(`/api/jobs/${encodeURIComponent(jobId)}`),
   events: (jobId: string, after = -1): Promise<EventPage> => request(`/api/jobs/${encodeURIComponent(jobId)}/events?after=${after}`),
   evidence: (jobId: string, stage: StageName): Promise<EvidenceDocument> => request(`/api/jobs/${encodeURIComponent(jobId)}/evidence/${encodeURIComponent(stage)}`),
-  cancel: (jobId: string): Promise<JobDetail> => post(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, {}),
+  cancel: (jobId: string): Promise<CancelJobResponse> => post(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, {}),
   recover: (jobId: string, retry = false): Promise<JobDetail | Readonly<{ job: JobDetail; recovery: 'cleanup_pending'; cleanupLeaseId: string }>> => (
     post(`/api/jobs/${encodeURIComponent(jobId)}/recover`, retry ? { retry: true } : {})
   ),

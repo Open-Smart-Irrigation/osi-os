@@ -15,7 +15,7 @@ export class BuilderSourceError extends Error {
 
 const PACKAGE_ALIASES: Readonly<Record<string, string>> = Object.freeze({ 'libncurses5-dev': 'libncurses-dev' });
 export const BUILDER_ONLY_PACKAGES = Object.freeze([
-  'gcc-14', 'g++-14', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev', 'rustc', 'cargo', 'rust-src', 'rust-llvm', 'xz-utils',
+  'gcc-14', 'g++-14', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev', 'rustc', 'cargo', 'rust-src', 'rust-llvm', 'xz-utils', 'sqlite3',
   'musl:arm64', 'musl-dev:arm64', 'musl:armhf', 'musl-dev:armhf',
 ] as const);
 

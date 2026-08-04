@@ -16,11 +16,37 @@ import {
   type RetentionPruneRecord,
 } from '../../api/src/retention.js';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
+import {
+  createTestBuilderIdentity,
+  TEST_BUILDER_IDENTITY_COLUMNS,
+  testBuilderIdentityValues,
+} from '../helpers/builder-identity.js';
 
 const roots: string[] = [];
 const databases: Array<{ close: () => void }> = [];
 const NOW = '2026-07-28T12:00:00.000Z';
 const OLD = '2025-12-01T12:00:00.000Z';
+
+function prepareJobInsert(db: ReturnType<typeof openBuilderDatabase>, sql: string): { run: (...values: unknown[]) => unknown } {
+  const columns = TEST_BUILDER_IDENTITY_COLUMNS.join(', ');
+  const placeholders = TEST_BUILDER_IDENTITY_COLUMNS.map(() => '?').join(', ');
+  const withColumns = sql.replace('target_manifest_sha256,', `target_manifest_sha256, ${columns},`);
+  const withValues = withColumns.replace("'rpi-5', 'root', ?,", `'rpi-5', 'root', ?, ${placeholders},`);
+  if (withValues === sql) throw new Error('test job insert did not expose the canonical identity insertion point');
+  const statement = db.prepare(withValues);
+  return {
+    run: (...values: unknown[]) => {
+      const targetManifestSha256 = values[4];
+      if (typeof targetManifestSha256 !== 'string') throw new Error('test job insert target manifest is missing');
+      const bound = [
+        ...values.slice(0, 5),
+        ...testBuilderIdentityValues(createTestBuilderIdentity(targetManifestSha256)),
+        ...values.slice(5),
+      ];
+      return statement.run(...bound as never[]);
+    },
+  };
+}
 
 afterEach(async () => {
   for (const db of databases.splice(0)) db.close();
@@ -138,9 +164,9 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
       .run('terminal-old', 'request-terminal-old', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'building', 'dispatched', ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'building', 'dispatched', ?, ?, '{}', '{}')`)
       .run('active-old', 'request-active-old', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD);
     await mkdir(join(paths.stateRoot, 'jobs'), { recursive: true });
     const external = await mkdtemp(join(tmpdir(), 'osi-image-builder-retention-external-'));
@@ -173,7 +199,7 @@ describe('startup retention', () => {
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
     await writeFile(join(paths.worktreeRoot!, 'recovery-owned'), 'recovery-owned');
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, cleanup_blocker_code, cleanup_blocker_json, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, cleanup_blocker_code, cleanup_blocker_json, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, ?, ?, '{}', '{}')`)
       .run('recovery-owned', 'request-recovery-owned', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD, 'CLEANUP_ADMISSION_BLOCKED', '{"owner":"recovery"}');
 
     const records: RetentionPruneRecord[] = [];
@@ -202,7 +228,7 @@ describe('startup retention', () => {
     databases.push(db);
     const quarantineRoot = paths.approvedQuarantineRoots[0]!;
     const insertJob = (jobId: string, state: string, blocker: string | null = null, artifactPath: string | null = `quarantine/${jobId}`) => {
-      db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, ?, 'complete', ?, ?, ?, '{}', '{}')`)
+      prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, ?, 'complete', ?, ?, ?, '{}', '{}')`)
         .run(jobId, `request-${jobId}`, 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, state, OLD, OLD, state === 'succeeded' ? OLD : null);
       if (blocker !== null) db.prepare('UPDATE jobs SET cleanup_blocker_code=?, cleanup_blocker_json=? WHERE job_id=?').run(blocker, '{}', jobId);
       if (artifactPath !== null) db.prepare("UPDATE jobs SET publish_state='quarantined', artifact_quarantine_path=? WHERE job_id=?").run(artifactPath, jobId);
@@ -353,7 +379,7 @@ describe('startup retention', () => {
     databases.push(db);
     const jobId = 'ownership-race';
     const quarantineRoot = join(paths.approvedQuarantineRoots[0]!, jobId);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
       .run(jobId, `request-${jobId}`, 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD, `quarantine/${jobId}`);
     await mkdir(quarantineRoot, { recursive: true });
     await Promise.all(Array.from({ length: 512 }, (_, index) => writeFile(
@@ -513,7 +539,7 @@ describe('startup retention', () => {
     const jobId = `interrupted-${status}`;
     const quarantineRoot = join(paths.approvedQuarantineRoots[0]!, jobId);
     const relativePath = `.osi-image-builder/quarantine/${jobId}`;
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
       .run(jobId, `request-${jobId}`, 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD, `quarantine/${jobId}`);
     await mkdir(quarantineRoot, { recursive: true });
     await writeFile(join(quarantineRoot, 'remaining.bin'), 'remaining');
@@ -698,7 +724,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
       .run('replayable', 'request-replayable', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
     const logPath = join(paths.stateRoot, 'jobs', 'replayable', 'logs');
     await mkdir(logPath, { recursive: true });
@@ -715,7 +741,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'building', 'dispatched', ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'building', 'dispatched', ?, ?, '{}', '{}')`)
       .run('active-log', 'request-active-log', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD);
     const generation = join(paths.stateRoot, 'jobs', 'active-log', 'logs', 'runner-0.log');
     await mkdir(join(paths.stateRoot, 'jobs', 'active-log', 'logs'), { recursive: true });
@@ -775,7 +801,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
       .run('planned-absent', 'request-planned-absent', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
     await mkdir(join(paths.stateRoot, 'jobs', 'planned-absent', 'evidence'), { recursive: true });
     db.prepare(`INSERT INTO retention_prune_intents (category, relative_path, status, planned_at, updated_at, bytes)
@@ -795,7 +821,7 @@ describe('startup retention', () => {
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
     const terminalAt = '2026-07-18T12:00:00.000Z';
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
       .run('young-worktree', 'request-young-worktree', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), terminalAt, terminalAt, terminalAt, terminalAt, terminalAt);
     db.prepare(`INSERT INTO retention_prune_intents (category, relative_path, status, planned_at, updated_at, bytes)
       VALUES ('worktree', ?, 'planned', ?, ?, 12)`).run('jobs/young-worktree/workspace/source', NOW, NOW);
@@ -813,7 +839,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
       .run('planned-present', 'request-planned-present', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
     const target = join(paths.stateRoot, 'jobs', 'planned-present', 'evidence', 'present.json');
     await mkdir(join(paths.stateRoot, 'jobs', 'planned-present', 'evidence'), { recursive: true });
@@ -840,7 +866,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
       .run('planned-failure', 'request-planned-failure', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
     const target = join(paths.stateRoot, 'jobs', 'planned-failure', 'evidence', 'failure.json');
     await mkdir(join(paths.stateRoot, 'jobs', 'planned-failure', 'evidence'), { recursive: true });
@@ -870,7 +896,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
       .run('retryable', 'request-retryable', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
     await mkdir(join(paths.stateRoot, 'jobs', 'retryable', 'evidence'), { recursive: true });
     await writeFile(join(paths.stateRoot, 'jobs', 'retryable', 'evidence', 'terminal.json'), 'evidence');
@@ -891,7 +917,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, terminal_error_code, terminal_error_json, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'failed', 'complete', ?, ?, ?, 'PUBLISH_FAILED', '{"reason":"publish recovery failed"}', '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, terminal_error_code, terminal_error_json, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'failed', 'complete', ?, ?, ?, 'PUBLISH_FAILED', '{"reason":"publish recovery failed"}', '{}', '{}')`)
       .run('purgeable', 'request-purgeable', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
     await mkdir(join(paths.stateRoot, 'jobs', 'purgeable', 'nested'), { recursive: true });
     await writeFile(join(paths.stateRoot, 'jobs', 'purgeable', 'nested', 'state.json'), '{}');
@@ -966,7 +992,7 @@ describe('startup retention', () => {
     const jobId = 'quarantined-old';
     const quarantinePath = `.osi-image-builder/quarantine/${jobId}`;
     const quarantineRoot = join(paths.approvedQuarantineRoots[0]!, jobId);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
       .run(jobId, 'request-quarantined-old', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD, quarantinePath);
     await mkdir(join(paths.stateRoot, 'jobs', jobId, 'child'), { recursive: true });
     await writeFile(join(paths.stateRoot, 'jobs', jobId, 'child', 'state.json'), '{}');
@@ -992,7 +1018,7 @@ describe('startup retention', () => {
     const jobId = 'quarantined-young';
     const quarantinePath = `quarantine/${jobId}`;
     const quarantineRoot = join(paths.approvedQuarantineRoots[0]!, jobId);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
       .run(jobId, 'request-quarantined-young', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD, quarantinePath);
     await mkdir(join(paths.stateRoot, 'jobs', jobId), { recursive: true });
     await mkdir(quarantineRoot, { recursive: true });
@@ -1010,7 +1036,7 @@ describe('startup retention', () => {
     databases.push(db);
     const jobId = 'quarantined-malformed';
     const quarantinePath = `quarantine/${jobId}/extra`;
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, publish_state, artifact_quarantine_path, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, 'quarantined', ?, '{}', '{}')`)
       .run(jobId, 'request-quarantined-malformed', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD, quarantinePath);
     await mkdir(join(paths.stateRoot, 'jobs', jobId, 'child'), { recursive: true });
     await writeFile(join(paths.stateRoot, 'jobs', jobId, 'child', 'state.json'), '{}');
@@ -1027,7 +1053,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
       .run('forged', 'request-forged', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
     await mkdir(join(paths.stateRoot, 'jobs', 'forged'), { recursive: true });
     db.prepare(`INSERT INTO retention_prune_intents (category, relative_path, status, planned_at, updated_at, bytes)
@@ -1042,7 +1068,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
       .run('cross-startup', 'request-cross-startup', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
     await mkdir(join(paths.stateRoot, 'jobs'), { recursive: true });
     db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run('cross-startup', 902, OLD);
@@ -1075,7 +1101,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
       .run('missing-root', 'request-missing-root', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
 
     await expect(createRetentionStartupHook({ paths, db, now: NOW, freeBytes: 25 * 1024 ** 3 })()).resolves.toEqual({ blockers: [] });
@@ -1088,7 +1114,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
       .run('blocked-before-purge', 'request-blocked-before-purge', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
     db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, 0, 'terminal', 'succeeded', '{}', ?)")
       .run('blocked-before-purge', OLD);
@@ -1115,7 +1141,7 @@ describe('startup retention', () => {
     const paths = await retentionWorkspace();
     const db = openBuilderDatabase(join(paths.stateRoot, 'jobs.sqlite'));
     databases.push(db);
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    prepareJobInsert(db, `INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
       .run('race-root', 'request-race-root', 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), OLD, OLD, OLD, OLD, OLD);
     await mkdir(join(paths.stateRoot, 'jobs'), { recursive: true });
     db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run('race-root', 901, OLD);

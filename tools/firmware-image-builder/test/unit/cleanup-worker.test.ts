@@ -10,6 +10,7 @@ import { OwnershipStore, type CleanupSnapshot } from '../../api/src/ownership.js
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import type { JsonObject } from '../../api/src/validation.js';
 import { createCleanupWorker, type CleanupDockerContainer, type CleanupWorkerOptions } from '../../cleanup-worker/src/main.js';
+import { createTestBuilderIdentity } from '../helpers/builder-identity.js';
 
 const NOW = '2026-07-27T12:00:00.000Z';
 const STOPPED = NOW;
@@ -108,34 +109,26 @@ function snapshot(jobId: string, scenario: Scenario, runnerExpiresAt = RUNNER_EX
 }
 
 function seedJob(db: Db, jobId: string, scenario: Scenario, state = 'starting', runnerExpiresAt = RUNNER_EXPIRES): void {
+  const identity = createTestBuilderIdentity(MANIFEST_SHA);
+  const values = [
+    jobId, `request-${jobId}`, JSON.stringify({ branch: 'main', target: 'rpi-5' }), 'git@example.com:osi-os.git',
+    'refs/remotes/origin/main', 'main', 'main', 'd'.repeat(40), 'd'.repeat(40), JSON.stringify(sourcePreparation()),
+    JSON.stringify(offlineFeedPreparation(jobId)), 'rpi-5', 'release', MANIFEST_SHA, 'admitted', identity.packageVersion,
+    identity.packageRoot, identity.lockSha256, identity.executionDefinitionSha256, identity.targetManifestSha256,
+    identity.runnerSha256, identity.cleanupWorkerSha256, identity.dependencyEgressProxySha256,
+    identity.imageReference, identity.imageId, identity.imageDigest,
+    NOW, 'test', 'cleanup test', NOW, state, 'dispatched', null, NOW, NOW,
+  ];
   db.prepare(`INSERT INTO jobs (
     job_id, request_id, request_json, source_remote, source_ref, source_branch, branch,
     expected_sha, pinned_sha, source_preparation_json, offline_feed_preparation_json, target_id, root_id, target_manifest_sha256,
+    builder_identity_status, builder_package_version, builder_package_root, builder_lock_sha256,
+    builder_execution_definition_sha256, builder_target_manifest_sha256, builder_runner_sha256,
+    builder_cleanup_worker_sha256, builder_dependency_egress_proxy_sha256,
+    builder_image_reference, builder_image_id, builder_image_digest,
     source_commit_time, source_author, source_subject, accepted_at, state, queue_state,
     queue_position, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'dispatched', NULL, ?, ?)`).run(
-    jobId,
-    `request-${jobId}`,
-    JSON.stringify({ branch: 'main', target: 'rpi-5' }),
-    'git@example.com:osi-os.git',
-    'refs/remotes/origin/main',
-    'main',
-    'main',
-    'd'.repeat(40),
-    'd'.repeat(40),
-    JSON.stringify(sourcePreparation()),
-    JSON.stringify(offlineFeedPreparation(jobId)),
-    'rpi-5',
-    'release',
-    MANIFEST_SHA,
-    NOW,
-    'test',
-    'cleanup test',
-    NOW,
-    state,
-    NOW,
-    NOW,
-  );
+  ) VALUES (${values.map(() => '?').join(', ')})`).run(...values);
   db.prepare(`UPDATE jobs SET dispatched_at=?, runner_unit=?, runner_lease_owner='runner-owner', runner_lease_expires_at=?, runner_started_at=? WHERE job_id=?`).run(
     NOW,
     `osi-image-builder-runner@${jobId}.service`,
@@ -281,7 +274,7 @@ function baseOptions(db: Db, root: string, docker: ReturnType<typeof createDocke
     ownerUid: OWNER_UID,
     workerOwner: 'cleanup-worker',
     clock,
-    ownership: new OwnershipStore(db, { now: () => NOW }),
+    ownership: new OwnershipStore(db, { now: () => NOW, stateRoot: root }),
     fileSystem: createRecoveryFileSystem(),
     systemd: {
       inspect: vi.fn(async (unit: string) => ({ unit, active: false, observedAt: clock.now() })),
@@ -298,6 +291,7 @@ function baseOptions(db: Db, root: string, docker: ReturnType<typeof createDocke
       })),
     },
     evidenceWriter: { write: vi.fn(async () => ({ path: `jobs/${jobId}/evidence/cleanup.json`, sha256: SHA256 })) },
+    dependencyEgress: { cleanup: vi.fn(async () => ({ persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' as const })) },
     timeouts: { dockerMs: 1_000, systemdMs: 1_000 },
   };
 }
@@ -374,6 +368,10 @@ describe('cleanup worker argument and admission fence', () => {
     expect(await readFile(value.credential.path).catch(() => null)).toBeNull();
     expect((value.db.prepare('SELECT status FROM cleanup_leases WHERE admission_id=?').get(value.admissionId) as { status: string }).status).toBe('completed');
     expect((value.db.prepare('SELECT container_id, cleanup_fence_generation, state, queue_state FROM jobs WHERE job_id=?').get(value.jobId) as Record<string, unknown>)).toMatchObject({ container_id: null, cleanup_fence_generation: 1, state: 'starting', queue_state: 'dispatched' });
+    const cleanup = value.options.dependencyEgress!.cleanup as ReturnType<typeof vi.fn>;
+    const seal = value.options.logSealer.seal as ReturnType<typeof vi.fn>;
+    expect(cleanup).toHaveBeenCalledWith(expect.objectContaining({ jobId: value.jobId }));
+    expect(cleanup.mock.invocationCallOrder[0]).toBeLessThan(seal.mock.invocationCallOrder[0]);
   });
 
   it.each([
@@ -550,6 +548,45 @@ describe('cleanup worker argument and admission fence', () => {
 });
 
 describe('cleanup worker exact container protocol', () => {
+  it('persists state-root-bound discovered dependency-egress absence evidence', async () => {
+    const value = await fixture('staging-log');
+    value.db.prepare('INSERT INTO job_operations (job_id, operation_id, attempt, argv_hash, argv_json, started_at, lifecycle_phase, timed_out) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+      value.jobId,
+      'frontend-install',
+      1,
+      'a'.repeat(64),
+      '[]',
+      NOW,
+      'not_created',
+      0,
+    );
+    const credentialRoot = join(value.root, 'jobs', value.jobId, 'recovery', 'dependency-egress');
+    const hostPath = join(credentialRoot, 'frontend-install-1.proxy-credential');
+    vi.spyOn(value.options.dependencyEgress!, 'cleanup').mockResolvedValueOnce({
+      persistedDocker: null,
+      discoveredDocker: [{
+        operationId: 'frontend-install',
+        attempt: 1,
+        proxy: null,
+        network: { id: 'b'.repeat(64), absent: true },
+        tls: { hostDirectory: join(credentialRoot, 'frontend-install-1.proxy-tls'), absent: true },
+        credential: { hostPath, sha256: 'c'.repeat(64) },
+      }],
+      credentials: [{ kind: 'normal', operationId: 'frontend-install', attempt: 1, hostPath, expectedSha256: 'c'.repeat(64), observedSha256: 'c'.repeat(64), tls: { hostDirectory: join(credentialRoot, 'frontend-install-1.proxy-tls'), absent: true }, absent: true }],
+      globalLabelResult: 'no-match',
+    });
+
+    await expect(value.worker.run([value.admissionId])).resolves.toMatchObject({ status: 'completed' });
+    const evidence = (value.options.evidenceWriter.write as ReturnType<typeof vi.fn>).mock.calls[0]?.[0].evidence as {
+      postcondition: { egress: Record<string, unknown> };
+    };
+    expect(evidence.postcondition.egress).toMatchObject({
+      persistedDocker: null,
+      discoveredDocker: [{ operationId: 'frontend-install', attempt: 1 }],
+      globalLabelResult: 'no-match',
+    });
+  });
+
   it('handles an already-absent exact container without stop or remove', async () => {
     const value = await fixture('absent');
     value.docker.setPresent(false);

@@ -13,6 +13,8 @@ const SHA = 'd92fabc2f778324ee9db4ddfb8dd46e3234fb4cb';
 const FIXED_NOW = '2026-07-28T10:00:00.000Z';
 const FIXED_LATER = '2026-07-28T10:18:42.000Z';
 const SEED_ID = 'osi-builder-browser-v1';
+const SCENARIO_COOKIE = 'osi-builder-fixture-scenario';
+const SCENARIO_PATTERN = /^[A-Za-z0-9._-]{1,256}$/u;
 const JSON_HEADERS = Object.freeze({
   'cache-control': 'no-store',
   'content-type': 'application/json; charset=utf-8',
@@ -22,6 +24,23 @@ interface FixtureState {
   jobs: Array<Record<string, unknown>>;
   details: Map<string, Record<string, unknown>>;
   events: Map<string, Array<Record<string, unknown>>>;
+  eventHistoryFailuresRemaining: number;
+  sseEventPending: boolean;
+}
+
+interface FixtureMetrics {
+  eventHistoryRequests: number;
+  eventHistoryFailures: number;
+  sseStreamsOpened: number;
+  sseStreamsClosed: number;
+  sseEventsEmitted: number;
+  maxConcurrentSseStreams: number;
+}
+
+interface FixtureScenario {
+  state: FixtureState;
+  streams: Set<ServerResponse>;
+  metrics: FixtureMetrics;
 }
 
 function stageEvidence(stage: string, index: number): Record<string, unknown> {
@@ -52,7 +71,7 @@ function jobSummary(input: Readonly<{
   };
 }
 
-function createSeed(): FixtureState {
+function createSeed(eventHistoryFailures = 0, emitSseEvent = false): FixtureState {
   const pi5 = jobSummary({
     id: 'job-pi5-success',
     state: 'succeeded',
@@ -160,6 +179,42 @@ function createSeed(): FixtureState {
         { seq: 2, event: 'terminal', state: 'interrupted', stage: 'build', at: '2026-07-28T09:44:00.000Z', data: { reason: 'RUNNER_DISAPPEARED' } },
       ]],
     ]),
+    eventHistoryFailuresRemaining: eventHistoryFailures,
+    sseEventPending: emitSseEvent,
+  };
+}
+
+function createScenario(eventHistoryFailures: number, emitSseEvent: boolean): FixtureScenario {
+  return {
+    state: createSeed(eventHistoryFailures, emitSseEvent),
+    streams: new Set<ServerResponse>(),
+    metrics: {
+      eventHistoryRequests: 0,
+      eventHistoryFailures: 0,
+      sseStreamsOpened: 0,
+      sseStreamsClosed: 0,
+      sseEventsEmitted: 0,
+      maxConcurrentSseStreams: 0,
+    },
+  };
+}
+
+function scenarioId(request: IncomingMessage, url: URL): string | null {
+  const query = url.searchParams.get('scenario');
+  if (query !== null) return SCENARIO_PATTERN.test(query) ? query : null;
+  for (const part of (request.headers.cookie ?? '').split(';')) {
+    const separator = part.indexOf('=');
+    if (separator < 0 || part.slice(0, separator).trim() !== SCENARIO_COOKIE) continue;
+    const value = part.slice(separator + 1).trim();
+    return SCENARIO_PATTERN.test(value) ? value : null;
+  }
+  return null;
+}
+
+function scenarioDiagnostics(fixture: FixtureScenario): Record<string, number> {
+  return {
+    ...fixture.metrics,
+    activeSseStreams: fixture.streams.size,
   };
 }
 
@@ -222,8 +277,7 @@ async function start(): Promise<void> {
   if (process.env.NODE_ENV !== 'test') throw new Error('fixture server requires NODE_ENV=test');
   if (!Number.isSafeInteger(PORT) || PORT < 1 || PORT > 65_535) throw new Error('invalid fixture port');
 
-  let state = createSeed();
-  const streams = new Set<ServerResponse>();
+  const scenarios = new Map<string, FixtureScenario>();
   const uiRoot = new URL('../../ui/', import.meta.url).pathname;
   const signals = ['SIGINT', 'SIGTERM'] as const;
   let signalRequested = false;
@@ -299,14 +353,75 @@ async function start(): Promise<void> {
     void (async () => {
       const method = request.method ?? 'GET';
       const url = new URL(request.url ?? '/', `http://${LOOPBACK}:${PORT}`);
+      const requestedScenarioId = scenarioId(request, url);
 
       if (method === 'POST' && url.pathname === '/test/reset') {
-        state = createSeed();
-        json(response, 200, { seed: SEED_ID, jobs: state.jobs.map((job) => job.id) });
+        if (requestedScenarioId === null) {
+          apiError(response, 400, 'FIXTURE_SCENARIO_INVALID');
+          return;
+        }
+        const body = await readJson(request);
+        const eventHistoryFailures = body.eventHistoryFailures;
+        const emitSseEvent = body.emitSseEvent;
+        if (
+          !Number.isSafeInteger(eventHistoryFailures)
+          || Number(eventHistoryFailures) < 0
+          || Number(eventHistoryFailures) > 1
+          || typeof emitSseEvent !== 'boolean'
+        ) {
+          apiError(response, 400, 'FIXTURE_SCENARIO_INVALID');
+          return;
+        }
+        const previous = scenarios.get(requestedScenarioId);
+        if (previous !== undefined) {
+          for (const stream of previous.streams) stream.end();
+        }
+        const fixture = createScenario(Number(eventHistoryFailures), emitSseEvent);
+        scenarios.set(requestedScenarioId, fixture);
+        json(response, 200, { seed: SEED_ID, jobs: fixture.state.jobs.map((job) => job.id) });
+        return;
+      }
+      if (method === 'GET' && url.pathname === '/test/diagnostics') {
+        const fixture = requestedScenarioId === null ? undefined : scenarios.get(requestedScenarioId);
+        if (fixture === undefined) apiError(response, 404, 'FIXTURE_SCENARIO_NOT_FOUND');
+        else json(response, 200, scenarioDiagnostics(fixture));
         return;
       }
       if (method === 'GET' && url.pathname === '/api/health') {
         json(response, 200, { status: 'ok', version: '0.1.0-fixture', activeJobId: null });
+        return;
+      }
+      if ((method === 'GET' || method === 'HEAD') && !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/test/')) {
+        const asset = await staticUi.resolve(url.pathname);
+        if (asset !== null) {
+          response.writeHead(asset.status, {
+            'cache-control': asset.cacheControl,
+            'content-length': asset.bytes.byteLength,
+            'content-type': asset.contentType,
+          });
+          response.end(method === 'HEAD' ? undefined : asset.bytes);
+        } else {
+          response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+          response.end('Not found');
+        }
+        return;
+      }
+      const fixture = requestedScenarioId === null ? undefined : scenarios.get(requestedScenarioId);
+      if (fixture === undefined) {
+        apiError(response, 409, 'FIXTURE_SCENARIO_NOT_FOUND');
+        return;
+      }
+      const state = fixture.state;
+      if (method === 'POST' && url.pathname === '/test/prepare-late-cancellation') {
+        const summary = state.jobs.find((job) => job.id === 'job-pi4-interrupted');
+        const detail = state.details.get('job-pi4-interrupted');
+        if (summary === undefined || detail === undefined) {
+          apiError(response, 404, 'JOB_NOT_FOUND');
+          return;
+        }
+        Object.assign(summary, { state: 'publishing', currentStage: 'publish', terminalAt: null });
+        Object.assign(detail, { state: 'publishing', stage: 'publish', currentStage: 'publish', terminalAt: null });
+        json(response, 200, { ok: true });
         return;
       }
       if (method === 'GET' && url.pathname === '/api/config') {
@@ -412,8 +527,36 @@ async function start(): Promise<void> {
         return;
       }
 
+      const cancelMatch = /^\/api\/jobs\/([^/]+)\/cancel$/u.exec(url.pathname);
+      if (cancelMatch !== null && method === 'POST') {
+        const id = decodeURIComponent(cancelMatch[1]!);
+        const detail = state.details.get(id);
+        if (detail === undefined) {
+          apiError(response, 404, 'JOB_NOT_FOUND');
+          return;
+        }
+        json(response, 200, {
+          ...detail,
+          cancellationResult: {
+            kind: 'late-publishing',
+            jobId: id,
+            state: 'publishing',
+            late: true,
+            requestPersisted: true,
+          },
+        });
+        return;
+      }
+
       const eventMatch = /^\/api\/jobs\/([^/]+)\/events$/u.exec(url.pathname);
       if (eventMatch !== null && method === 'GET') {
+        fixture.metrics.eventHistoryRequests += 1;
+        if (state.eventHistoryFailuresRemaining > 0) {
+          state.eventHistoryFailuresRemaining -= 1;
+          fixture.metrics.eventHistoryFailures += 1;
+          apiError(response, 503, 'EVENT_HISTORY_TEMPORARILY_UNAVAILABLE');
+          return;
+        }
         const events = state.events.get(decodeURIComponent(eventMatch[1]!));
         if (events === undefined) apiError(response, 404, 'JOB_NOT_FOUND');
         else json(response, 200, { events, next: events.at(-1)?.seq ?? -1 });
@@ -433,8 +576,42 @@ async function start(): Promise<void> {
           'content-type': 'text/event-stream',
         });
         response.write(': fixture-stream\n\n');
-        streams.add(response);
-        request.once('close', () => streams.delete(response));
+        fixture.metrics.sseStreamsOpened += 1;
+        fixture.streams.add(response);
+        fixture.metrics.maxConcurrentSseStreams = Math.max(
+          fixture.metrics.maxConcurrentSseStreams,
+          fixture.streams.size,
+        );
+        if (state.sseEventPending) {
+          state.sseEventPending = false;
+          const events = state.events.get(id)!;
+          const lastSequence = events.at(-1)?.seq;
+          const sequence = (typeof lastSequence === 'number' ? lastSequence : -1) + 1;
+          const text = `Retry fixture SSE event sequence ${sequence}`;
+          events.push({
+            seq: sequence,
+            event: 'log',
+            state: 'succeeded',
+            stage: 'publish',
+            at: FIXED_LATER,
+            data: { text },
+          });
+          response.write(`id: ${sequence}\nevent: log\ndata: ${JSON.stringify({
+            state: 'succeeded',
+            stage: 'publish',
+            at: FIXED_LATER,
+            text,
+          })}\n\n`);
+          fixture.metrics.sseEventsEmitted += 1;
+        }
+        let closeRecorded = false;
+        const recordClose = (): void => {
+          if (closeRecorded) return;
+          closeRecorded = true;
+          if (fixture.streams.delete(response)) fixture.metrics.sseStreamsClosed += 1;
+        };
+        request.once('close', recordClose);
+        response.once('close', recordClose);
         return;
       }
 
@@ -459,18 +636,6 @@ async function start(): Promise<void> {
       if (url.pathname.startsWith('/api/')) {
         apiError(response, 404, 'ROUTE_NOT_FOUND');
         return;
-      }
-      if (method === 'GET' || method === 'HEAD') {
-        const asset = await staticUi.resolve(url.pathname);
-        if (asset !== null) {
-          response.writeHead(asset.status, {
-            'cache-control': asset.cacheControl,
-            'content-length': asset.bytes.byteLength,
-            'content-type': asset.contentType,
-          });
-          response.end(method === 'HEAD' ? undefined : asset.bytes);
-          return;
-        }
       }
       response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
       response.end('Not found');
@@ -499,8 +664,11 @@ async function start(): Promise<void> {
   const shutdown = (): Promise<void> => {
     if (shutdownPromise !== null) return shutdownPromise;
     shutdownPromise = (async () => {
-      for (const stream of streams) stream.end();
-      streams.clear();
+      for (const fixture of scenarios.values()) {
+        for (const stream of fixture.streams) stream.end();
+        fixture.streams.clear();
+      }
+      scenarios.clear();
       try {
         await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
       } finally {

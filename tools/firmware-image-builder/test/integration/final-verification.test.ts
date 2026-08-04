@@ -30,6 +30,7 @@ function productionLock(packageVersion: string): Readonly<Record<string, unknown
     nodeVersion: '22.17.0',
     executionDefinitionSha256: 'd'.repeat(64),
     validationEvidenceSha256: 'e'.repeat(64),
+    dependencyEgressProxySha256: '1'.repeat(64),
     installable: true,
     publisherSha256: 'f'.repeat(64),
   };

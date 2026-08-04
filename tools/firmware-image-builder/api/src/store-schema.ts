@@ -4,6 +4,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { MIGRATION_021_STRONG_RECOVERY_QUERY, migration021PostRecoveryQuery } from './migration-021-recovery-proof.js';
+
 export interface MigrationDescriptor {
   readonly version: number;
   readonly filename: string;
@@ -28,6 +30,11 @@ const migrationRegistry = [
   { version: 15, filename: '015_retention_prune_target_identity.sql', sha256: '7ce5f98e5a6b373b6d934816373e6bae87de756e443d890b2da399b972d3c317' },
   { version: 16, filename: '016_log_gap_source_seq_unique.sql', sha256: 'a2b204916583b2f8ee3bce3b633ee8b1bf477df1b9f27b829b14fcc24833436e' },
   { version: 17, filename: '017_publish_blocker_recheck.sql', sha256: '80a4c6c4ad4c2d63eff82cabedd6750b7d3eb06767e7bac6e1c56c5baf61b947' },
+  { version: 18, filename: '018_release_seal_status.sql', sha256: 'e8c20bd286c10c790499336aca351be7da182aad800fad3a9d9868f0e5d56841' },
+  { version: 19, filename: '019_job_builder_identity.sql', sha256: 'b8a3086a265cc9f61e45fb884dbf3498faade567cef04100603c5b5371dc6805' },
+  { version: 20, filename: '020_complete_builder_identity.sql', sha256: '9a3a9e119ff5a329ca899d66e2642733a0a5d75cc1597e712ec48074bb1f77f2' },
+  { version: 21, filename: '021_dependency_egress_proxy_identity.sql', sha256: '5390ec094daa621818ac14d8e0ea424100bae0cc6f839a926e1a5e6dcdb0f70b' },
+  { version: 22, filename: '022_audit_dependency_egress_recovery.sql', sha256: '46458f17e00b3aa8b15ff805fb51f4789e41d8bcb14865c7c266aa721fbb69b8' },
 ] as const;
 
 export const MIGRATION_REGISTRY: readonly MigrationDescriptor[] = Object.freeze(
@@ -47,6 +54,7 @@ export interface OpenBuilderDatabaseOptions {
   readonly migrationsDirectory?: string;
   readonly busyTimeoutMs?: number;
   readonly now?: () => string;
+  readonly beforeMigration?: (migration: MigrationDescriptor) => void;
 }
 
 const DEFAULT_BUSY_TIMEOUT_MS = 5_000;
@@ -224,6 +232,169 @@ function validateAppliedMigrations(db: DatabaseSync): number {
   }
 }
 
+function assertNoActiveLegacyBuilderIdentity(db: DatabaseSync): void {
+  const blocked = db.prepare(`SELECT job_id, state, queue_state
+    FROM jobs
+    WHERE builder_identity_status = 'legacy_blocked'
+      AND (
+        queue_state = 'dispatched'
+        OR state IN ('starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup',
+          'feeds', 'config', 'building', 'verifying', 'publishing', 'cancel_requested')
+        OR (runner_finished_at IS NULL AND (
+          runner_lease_owner IS NOT NULL
+          OR runner_lease_expires_at IS NOT NULL
+          OR runner_started_at IS NOT NULL
+        ))
+        OR EXISTS (
+          SELECT 1 FROM cleanup_leases
+          WHERE cleanup_leases.job_id = jobs.job_id
+            AND cleanup_leases.status IN ('admitted', 'claimed')
+        )
+      )
+    LIMIT 1`).get() as { job_id: string; state: string; queue_state: string } | undefined;
+  if (blocked !== undefined) {
+    throw new MigrationError(
+      `legacy builder identity is active or dispatched: ${blocked.job_id}`,
+    );
+  }
+}
+
+function assertNoActiveUnboundBuilderIdentity(db: DatabaseSync): void {
+  const blocked = db.prepare(`SELECT job_id, state, queue_state
+    FROM jobs
+    WHERE builder_identity_status IN ('admitted', 'legacy_blocked')
+      AND (
+        queue_state = 'dispatched'
+        OR state IN ('starting', 'preflight', 'source', 'release_gates', 'frontend', 'target_setup',
+          'feeds', 'config', 'building', 'verifying', 'publishing', 'cancel_requested')
+        OR (runner_finished_at IS NULL AND (
+          runner_lease_owner IS NOT NULL
+          OR runner_lease_expires_at IS NOT NULL
+          OR runner_started_at IS NOT NULL
+        ))
+        OR EXISTS (
+          SELECT 1 FROM cleanup_leases
+          WHERE cleanup_leases.job_id = jobs.job_id
+            AND cleanup_leases.status IN ('admitted', 'claimed')
+        )
+      )
+    LIMIT 1`).get() as { job_id: string; state: string; queue_state: string } | undefined;
+  if (blocked !== undefined) {
+    throw new MigrationError(
+      `legacy builder identity is active or dispatched before migration 021: ${blocked.job_id}`,
+    );
+  }
+}
+
+interface RecoveryCandidate {
+  readonly job_id: string;
+  readonly complete_at: string;
+}
+
+const RECONCILED_RECOVERY_CANDIDATES_SQL = `
+  SELECT job.job_id
+  FROM jobs AS job
+  JOIN cleanup_leases AS lease
+    ON lease.job_id = job.job_id
+   AND lease.status = 'handed_back'
+  JOIN job_events AS completion
+    ON completion.job_id = job.job_id
+   AND completion.event_type = 'cleanup_complete'
+   AND completion.at = lease.complete_at
+   AND completion.state = lease.stale_state
+  JOIN job_events AS handback
+    ON handback.job_id = job.job_id
+   AND handback.event_type = 'recovery'
+   AND handback.at = lease.handback_at
+   AND handback.state = 'interrupted'
+  WHERE job.builder_identity_status = 'legacy_blocked'
+    AND job.state = 'interrupted'
+    AND job.queue_state = 'complete'
+    AND job.terminal_at IS NOT NULL
+    AND job.runner_unit IS NOT NULL
+    AND job.runner_started_at IS NOT NULL
+    AND job.runner_finished_at = lease.complete_at
+    AND job.runner_lease_owner IS NULL
+    AND job.runner_lease_expires_at IS NULL
+    AND job.cleanup_admission_id IS NULL
+    AND job.cleanup_fence_generation IS NULL
+    AND job.cleanup_fence_token_hash IS NULL
+    AND job.cleanup_blocker_code IS NULL
+    AND job.cleanup_blocker_json IS NULL
+    AND job.container_id IS NULL
+    AND job.container_name IS NULL
+    AND job.container_image_digest IS NULL
+    AND job.container_label_job_id IS NULL
+    AND job.container_label_manifest_sha IS NULL
+    AND job.container_labels_json IS NULL
+    AND job.container_mount_json IS NULL
+    AND job.container_env_json IS NULL
+    AND job.container_security_json IS NULL
+    AND job.container_inspection_json IS NULL
+    AND job.container_created_at IS NULL
+    AND job.container_started_at IS NULL
+    AND job.container_stopped_at IS NULL
+    AND job.container_removed_at IS NULL
+    AND job.container_cleanup_outcome IS NULL
+    AND lease.handback_at = job.terminal_at
+  GROUP BY job.job_id
+  HAVING COUNT(*) = 1`;
+
+function readRecoveryCandidates(db: DatabaseSync, query: string): RecoveryCandidate[] {
+  try {
+    return db.prepare(query).all() as unknown as RecoveryCandidate[];
+  } catch (error) {
+    throw new MigrationError('dependency-egress recovery qualification query failed', { cause: error });
+  }
+}
+
+function reconcileStrongV20RecoveryCandidates(db: DatabaseSync, candidates: readonly RecoveryCandidate[]): void {
+  const reconcile = db.prepare(`
+    UPDATE jobs
+    SET runner_finished_at = ?,
+        runner_lease_owner = NULL,
+        runner_lease_expires_at = NULL
+    WHERE job_id = ?
+      AND runner_finished_at IS NULL
+      AND runner_lease_owner IS NOT NULL
+      AND runner_lease_expires_at IS NOT NULL`);
+  for (const candidate of candidates) {
+    reconcile.run(candidate.complete_at, candidate.job_id);
+    const row = db.prepare(`SELECT runner_finished_at, runner_lease_owner, runner_lease_expires_at
+      FROM jobs WHERE job_id=?`).get(candidate.job_id) as {
+        runner_finished_at: string | null;
+        runner_lease_owner: string | null;
+        runner_lease_expires_at: string | null;
+      } | undefined;
+    if (row?.runner_finished_at !== candidate.complete_at || row.runner_lease_owner !== null || row.runner_lease_expires_at !== null) {
+      throw new MigrationError(`dependency-egress recovery reconciliation failed: ${candidate.job_id}`);
+    }
+  }
+}
+
+function assertNoUnprovenDependencyEgressRecovery(
+  db: DatabaseSync,
+  migrationVersion: 21 | 22,
+  strongPreCandidates?: readonly RecoveryCandidate[],
+): void {
+  const reconciled = readRecoveryCandidates(db, RECONCILED_RECOVERY_CANDIDATES_SQL);
+  const proven = readRecoveryCandidates(db, migration021PostRecoveryQuery());
+  const provenIds = new Set(proven.map((candidate) => candidate.job_id));
+  const strongPreIds = strongPreCandidates === undefined
+    ? undefined
+    : new Set(strongPreCandidates.map((candidate) => candidate.job_id));
+  const unproven = reconciled.find((candidate) => !provenIds.has(candidate.job_id) || (strongPreIds !== undefined && !strongPreIds.has(candidate.job_id)))
+    ?? strongPreCandidates?.find((candidate) => !provenIds.has(candidate.job_id));
+  if (unproven !== undefined) {
+    if (migrationVersion === 21) {
+      throw new MigrationError(
+        `legacy builder identity is active or dispatched before migration 021: ${unproven.job_id}`,
+      );
+    }
+    throw new MigrationError(`unproven historical dependency-egress recovery: ${unproven.job_id}`);
+  }
+}
+
 export function openBuilderDatabase(databasePath: string, options: OpenBuilderDatabaseOptions = {}): DatabaseSync {
   validateMigrationRegistry(MIGRATION_REGISTRY);
   const migrationsDirectory = options.migrationsDirectory ?? fileURLToPath(new URL('../migrations/', import.meta.url));
@@ -248,18 +419,30 @@ export function openBuilderDatabase(databasePath: string, options: OpenBuilderDa
     for (const migration of MIGRATION_REGISTRY.slice(appliedCount)) {
       const sql = migrationContents.get(migration.version);
       if (sql === undefined) throw new MigrationError(`missing migration contents: ${migration.filename}`);
+      options.beforeMigration?.(migration);
       try {
         db.exec('BEGIN IMMEDIATE');
+        const strongPreCandidates = migration.version === 21
+          ? readRecoveryCandidates(db, MIGRATION_021_STRONG_RECOVERY_QUERY)
+          : undefined;
         db.exec(sql);
+        if (migration.version === 21) {
+          reconcileStrongV20RecoveryCandidates(db, strongPreCandidates!);
+          assertNoUnprovenDependencyEgressRecovery(db, migration.version, strongPreCandidates);
+          assertNoActiveUnboundBuilderIdentity(db);
+        }
+        if (migration.version === 22) assertNoUnprovenDependencyEgressRecovery(db, migration.version);
         db.prepare('INSERT INTO schema_migrations (version, filename, sha256, applied_at) VALUES (?, ?, ?, ?)')
           .run(migration.version, migration.filename, migration.sha256, now());
         db.exec('COMMIT');
       } catch (error) {
         try { db.exec('ROLLBACK'); } catch (rollbackError) { void rollbackError; }
+        if (error instanceof MigrationError) throw error;
         throw new MigrationError(`migration ${migration.filename} failed`, { cause: error });
       }
     }
     verifyLiveSchema(db, migrationContents, MIGRATION_REGISTRY.length);
+    assertNoActiveLegacyBuilderIdentity(db);
     return db;
   } catch (error) {
     return closeAfterError(db, error);

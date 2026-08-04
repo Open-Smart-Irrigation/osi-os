@@ -3,6 +3,7 @@ import type { CancellationJobRecord, JobRecord, JsonObject } from '../../api/src
 import type { ApiWriteCommand, OwnershipResult } from '../../api/src/ownership.js';
 import type { CommandResult } from '../../runner/src/command-executor.js';
 import {
+  admitCancellation,
   createApiCancellationService,
   createSystemdCancellationAdapter,
   requestCancellation,
@@ -171,7 +172,14 @@ function coordinatorFixture(initial: MutableJob, systemd: TestSystemd, clock: Ap
           cancellationClockHighWaterAt: current.cancellationClockHighWaterAt ?? command.at,
         };
       } else if (command.kind === 'observe-cancellation-clock') {
-        if (current.cancellationClockHighWaterAt !== command.expectedHighWaterAt) {
+        if (
+          current.cancellationClockHighWaterAt !== command.expectedHighWaterAt
+          || (command.expectedEscalationOwner !== undefined && (
+            current.cancellationEscalationOwner !== command.expectedEscalationOwner
+            || current.cancellationEscalationLeaseExpiresAt !== command.expectedEscalationLeaseExpiresAt
+            || current.cancellationStopIntentAt !== command.expectedStopIntentAt
+          ))
+        ) {
           return { ok: false as const, conflict: { kind: 'cas-lost' as const, message: 'clock high-water changed' } };
         }
         current = { ...current, cancellationClockHighWaterAt: command.observedAt };
@@ -204,6 +212,11 @@ function coordinatorFixture(initial: MutableJob, systemd: TestSystemd, clock: Ap
       } else if (command.kind === 'record-cancellation-stop') {
         current = { ...current, cancellationStopObservation: command.observation };
       } else if (command.kind === 'record-cancellation-inspection') {
+        if (
+          current.cancellationEscalationOwner !== command.escalationOwner
+          || current.cancellationEscalationLeaseExpiresAt !== command.escalationLeaseExpiresAt
+          || current.cancellationStopIntentAt !== command.stopIntentAt
+        ) return { ok: false as const, conflict: { kind: 'identity-mismatch' as const, message: 'stale escalation observation' } };
         const observations = current.cancellationInspectionObservations?.observations;
         current = {
           ...current,
@@ -218,6 +231,11 @@ function coordinatorFixture(initial: MutableJob, systemd: TestSystemd, clock: Ap
           || current.runnerUnit !== command.observedRunnerUnit
           || current.runnerLeaseOwner !== command.observedOwner
           || current.runnerLeaseExpiresAt !== command.observedLeaseExpiresAt
+          || (command.expectedEscalationOwner !== undefined && (
+            current.cancellationEscalationOwner !== command.expectedEscalationOwner
+            || current.cancellationEscalationLeaseExpiresAt !== command.expectedEscalationLeaseExpiresAt
+            || current.cancellationStopIntentAt !== command.expectedStopIntentAt
+          ))
         ) return { ok: false as const, conflict: { kind: 'identity-mismatch' as const, message: 'stale observation' } };
         if (current.cleanupBlocker !== null) return result(writes.length);
         current = { ...current, cleanupBlockerCode: 'RUNNER_DISAPPEARED', cleanupBlocker: command.blocker };
@@ -237,6 +255,169 @@ function coordinatorFixture(initial: MutableJob, systemd: TestSystemd, clock: Ap
 }
 
 describe('API cancellation coordination', () => {
+  it('durably admits active cancellation without waiting for runner coordination', () => {
+    const fixture = coordinatorFixture(job({ state: 'building' }), fakeSystemd(), fakeClock());
+
+    const outcome = admitCancellation({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      systemd: fixture.systemd,
+      clock: fixture.clock,
+    }, { jobId: JOB_ID, reason: 'operator', at: AT });
+
+    expect(outcome).toEqual({
+      kind: 'coordination-pending',
+      jobId: JOB_ID,
+      state: 'building',
+      requestPersisted: true,
+      cancellationClockHighWaterAt: AT,
+      cooperativeDeadlineAt: '2026-07-27T12:00:30.000Z',
+    });
+    expect(fixture.getJob()).toMatchObject({
+      cancelRequestedAt: AT,
+      cancelReason: 'operator',
+      cancellationClockHighWaterAt: AT,
+      cancellationCooperativeDeadlineAt: '2026-07-27T12:00:30.000Z',
+    });
+    expect(fixture.writes).toEqual([
+      expect.objectContaining({ kind: 'request-cancellation', jobId: JOB_ID }),
+    ]);
+    expect(fixture.systemd.signals).toEqual([]);
+    expect(fixture.systemd.stops).toEqual([]);
+    expect(fixture.systemd.statuses).toEqual([]);
+  });
+
+  it('keeps durable admission authoritative when background scheduling fails', async () => {
+    const fixture = coordinatorFixture(job({ state: 'building' }), fakeSystemd(), fakeClock());
+    const schedule = vi.fn(() => { throw new Error('scheduler unavailable'); });
+    const service = createApiCancellationService({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      commandExecutor: { run: vi.fn(async () => { throw new Error('must not run inline'); }) },
+      systemdBusEnvironment: {
+        XDG_RUNTIME_DIR: '/run/user/1000',
+        DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      },
+      clock: fixture.clock,
+      schedule,
+    });
+
+    await expect(service.admitCancellation({ jobId: JOB_ID, reason: 'operator', at: AT }))
+      .resolves.toMatchObject({ kind: 'coordination-pending', requestPersisted: true });
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(fixture.getJob()).toMatchObject({ cancelRequestedAt: AT, cancelReason: 'operator' });
+    expect(fixture.writes.at(-1)).toEqual({
+      kind: 'record-cancellation-coordination-failure',
+      jobId: JOB_ID,
+      expectedState: 'building',
+      cancelRequestedAt: AT,
+      phase: 'scheduler',
+      failure: { kind: 'scheduler-rejected' },
+      at: AT,
+    });
+  });
+
+  it('keeps a durable admission retryable when scheduler failure auditing is temporarily unavailable', async () => {
+    const fixture = coordinatorFixture(job({ state: 'building' }), fakeSystemd(), fakeClock());
+    const write = fixture.ownership.apiWrite.getMockImplementation()!;
+    fixture.ownership.apiWrite.mockImplementation((command) => {
+      if (command.kind === 'record-cancellation-coordination-failure') throw new Error('audit write unavailable');
+      return write(command);
+    });
+    const schedule = vi.fn(() => { throw new Error('scheduler unavailable'); });
+    const reportError = vi.fn();
+    const service = createApiCancellationService({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      commandExecutor: { run: vi.fn(async () => { throw new Error('must not run inline'); }) },
+      systemdBusEnvironment: {
+        XDG_RUNTIME_DIR: '/run/user/1000',
+        DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      },
+      clock: fixture.clock,
+      schedule,
+      reportError,
+    });
+
+    await expect(service.admitCancellation({ jobId: JOB_ID, reason: 'operator', at: AT }))
+      .resolves.toMatchObject({ kind: 'coordination-pending', requestPersisted: true });
+    await expect(service.admitCancellation({ jobId: JOB_ID, reason: 'operator', at: AT }))
+      .resolves.toMatchObject({ kind: 'coordination-pending', requestPersisted: true });
+    expect(schedule).toHaveBeenCalledTimes(2);
+    expect(reportError).toHaveBeenCalledTimes(2);
+    expect(reportError).toHaveBeenLastCalledWith(expect.objectContaining({
+      name: 'CancellationCoordinationAuditError',
+      message: expect.stringMatching(/scheduler.*audit/i),
+    }));
+  });
+
+  it('records a rejected background coordinator without losing the admitted cancellation', async () => {
+    const fixture = coordinatorFixture(job({ state: 'building' }), fakeSystemd(), fakeClock());
+    let scheduledWork: (() => void) | undefined;
+    const service = createApiCancellationService({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      commandExecutor: { run: vi.fn(async () => { throw new Error('must not reach systemd'); }) },
+      systemdBusEnvironment: {
+        XDG_RUNTIME_DIR: '/run/user/1000',
+        DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      },
+      clock: fixture.clock,
+      coordinatorId: '',
+      schedule: (work) => { scheduledWork = work; },
+    });
+
+    await expect(service.admitCancellation({ jobId: JOB_ID, reason: 'operator', at: AT }))
+      .resolves.toMatchObject({ kind: 'coordination-pending', requestPersisted: true });
+    expect(scheduledWork).toBeTypeOf('function');
+    scheduledWork?.();
+
+    await vi.waitFor(() => {
+      expect(fixture.writes.at(-1)).toEqual({
+        kind: 'record-cancellation-coordination-failure',
+        jobId: JOB_ID,
+        expectedState: 'building',
+        cancelRequestedAt: AT,
+        phase: 'coordinator',
+        failure: { kind: 'coordinator-rejected' },
+        at: AT,
+      });
+    });
+    expect(fixture.getJob()).toMatchObject({ cancelRequestedAt: AT, cancelReason: 'operator' });
+  });
+
+  it('keeps startup reconciliation blocked when durable cancellation coordination remains blocked', async () => {
+    const pending = job({
+      state: 'building',
+      cancelRequestedAt: AT,
+      cancelReason: 'operator',
+      cancellationCooperativeDeadlineAt: '2026-07-27T12:00:30.000Z',
+      cancellationClockHighWaterAt: AT,
+      cleanupBlockerCode: 'RUNNER_DISAPPEARED',
+      cleanupBlocker: { kind: 'api-cancellation-escalation' },
+    });
+    const fixture = coordinatorFixture(pending, fakeSystemd(), fakeClock());
+    Object.assign(fixture.store, {
+      listPendingCancellations: () => [fixture.getJob() as unknown as CancellationJobRecord],
+    });
+    const service = createApiCancellationService({
+      store: fixture.store,
+      ownership: fixture.ownership,
+      commandExecutor: { run: vi.fn(async () => { throw new Error('must not reach systemd'); }) },
+      systemdBusEnvironment: {
+        XDG_RUNTIME_DIR: '/run/user/1000',
+        DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+      },
+      clock: fixture.clock,
+    });
+
+    await expect(service.resumePending()).resolves.toEqual({
+      examined: 1,
+      resumed: 0,
+      failures: [{ jobId: JOB_ID, kind: 'recovery-blocked' }],
+    });
+  });
+
   it('persists an active request before signalling the exact runner unit', async () => {
     const fixture = coordinatorFixture(job({ state: 'building' }), fakeSystemd(), fakeClock());
     fixture.systemd.signalCancellation = async (unit) => {

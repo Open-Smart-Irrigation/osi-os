@@ -5,12 +5,14 @@ import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createCleanupAdmissionRecovery, reconcileCleanupAdmissionAtStartup, type RecoverySystemd } from '../../api/src/recovery.js';
+import { createApiRecoveryService } from '../../api/src/recovery-service.js';
+import { TEST_BUILDER_IDENTITY } from '../helpers/builder-identity.js';
 import { OwnershipStore, type CleanupSnapshot, type DirectInterruptionProof, type PublishRecoveryEvidence, type RunnerWriteCommand } from '../../api/src/ownership.js';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { createStartupBootstrap, type QueueSystemd } from '../../api/src/queue.js';
 import type { StartupPhaseResult } from '../../api/src/startup-order.js';
 import { encodeJson } from '../../api/src/validation.js';
-import type { CreateJobInput, JsonObject } from '../../api/src/store.js';
+import { BuilderStore, type CreateJobInput, type JsonObject } from '../../api/src/store.js';
 
 const NOW = '2026-07-28T12:00:00.000Z';
 const EXPIRED = '2026-07-28T11:59:00.000Z';
@@ -46,7 +48,7 @@ function input(jobId: string): CreateJobInput {
     jobId, requestId: `request-${jobId}`, request: { branch: 'main', target: 'rpi-5' },
     sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main',
     expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: preparation, offlineFeedPreparation: feeds,
-    targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'test', sourceSubject: 'test', acceptedAt: NOW,
+    targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, builderIdentity: TEST_BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'test', sourceSubject: 'test', acceptedAt: NOW,
   };
 }
 
@@ -199,17 +201,26 @@ function sealPublishLogs(db: ReturnType<typeof openBuilderDatabase>, jobId: stri
 
 function seedDirectStartingRow(db: ReturnType<typeof openBuilderDatabase>, jobId: string): void {
   const job = input(jobId);
+  const identity = job.builderIdentity;
+  const values = [
+    job.jobId, job.requestId, JSON.stringify(job.request), job.sourceRemote, job.sourceRef, job.sourceBranch, job.branch,
+    job.expectedSha, job.pinnedSha, JSON.stringify(job.sourcePreparation), JSON.stringify(job.offlineFeedPreparation), job.targetId,
+    job.rootId, job.targetManifestSha256, 'admitted', identity.packageVersion, identity.packageRoot, identity.lockSha256,
+    identity.executionDefinitionSha256, identity.targetManifestSha256, identity.runnerSha256, identity.cleanupWorkerSha256,
+    identity.dependencyEgressProxySha256,
+    identity.imageReference, identity.imageId, identity.imageDigest, job.sourceCommitTime, job.sourceAuthor, job.sourceSubject,
+    job.acceptedAt, 'starting', 'dispatched', null, NOW, NOW, NOW, `osi-image-builder-runner@${jobId}.service`,
+  ];
   db.prepare(`INSERT INTO jobs (
     job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha,
     source_preparation_json, offline_feed_preparation_json, target_id, root_id, target_manifest_sha256,
+    builder_identity_status, builder_package_version, builder_package_root, builder_lock_sha256,
+    builder_execution_definition_sha256, builder_target_manifest_sha256, builder_runner_sha256,
+    builder_cleanup_worker_sha256, builder_dependency_egress_proxy_sha256,
+    builder_image_reference, builder_image_id, builder_image_digest,
     source_commit_time, source_author, source_subject, accepted_at, state, queue_state, queue_position,
     created_at, updated_at, dispatched_at, runner_unit
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'starting', 'dispatched', NULL, ?, ?, ?, ?)`).run(
-    job.jobId, job.requestId, JSON.stringify(job.request), job.sourceRemote, job.sourceRef, job.sourceBranch, job.branch,
-    job.expectedSha, job.pinnedSha, JSON.stringify(job.sourcePreparation), JSON.stringify(job.offlineFeedPreparation), job.targetId,
-    job.rootId, job.targetManifestSha256, job.sourceCommitTime, job.sourceAuthor, job.sourceSubject, job.acceptedAt, NOW, NOW, NOW,
-    `osi-image-builder-runner@${jobId}.service`,
-  );
+  ) VALUES (${values.map(() => '?').join(', ')})`).run(...values);
   db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at) VALUES (?, 0, 'state', 'starting', NULL, '{}', ?)").run(jobId, NOW);
   db.prepare("INSERT INTO queue_dispatch_claims (claim_id, job_id, owner, claimed_at, lease_expires_at, phase, start_attempted_at, unit_inactive_at) VALUES (1, ?, ?, ?, ?, 'start-attempted', ?, ?)").run(jobId, `dispatcher-${jobId}`, NOW, DIRECT_CLAIM_EXPIRES, NOW, PUBLISH_FINISHED);
 }
@@ -220,6 +231,58 @@ afterEach(async () => {
 });
 
 describe('startup recovery with real SQLite stores', () => {
+  it('rotates a same-owner admission when the API requests a fresh lease expiry', async () => {
+    const value = await fixture();
+    const jobId = 'fresh-expiry';
+    seedStarting(value.ownership, jobId);
+    const snapshot = cleanupSnapshot(jobId);
+    const recovery = createCleanupAdmissionRecovery({
+      stateRoot: value.root,
+      db: value.db,
+      ownership: value.ownership,
+      systemd: value.systemd.recovery,
+      clock: { now: () => NOW },
+      crypto: { randomBytes: (size) => Buffer.alloc(size, 9) },
+      ownerUid: process.getuid?.() ?? 0,
+    });
+    await recovery.openAdmissions();
+    const first = await recovery.admitAndStart({
+      jobId,
+      owner: 'cleanup-worker',
+      expiresAt: REPLACEMENT_EXPIRES,
+      at: NOW,
+      snapshot,
+    });
+    value.systemd.active.delete(first.unitName);
+    const service = createApiRecoveryService({
+      store: new BuilderStore(value.db),
+      ownership: value.ownership,
+      recovery,
+      inspector: {
+        inspect: async ({ job, at }) => ({
+          kind: 'cleanup',
+          jobId,
+          state: job.state as CleanupSnapshot['state'],
+          at,
+          snapshot,
+        }),
+      },
+    });
+
+    await expect(service.recover({ jobId, retry: false, at: NOW })).resolves.toMatchObject({
+      kind: 'cleanup-pending',
+      jobId,
+      generation: 2,
+    });
+    const leases = value.db.prepare(
+      'SELECT admission_id, owner, status, expires_at FROM cleanup_leases WHERE job_id=? ORDER BY fence_generation',
+    ).all(jobId) as Array<{ admission_id: string; owner: string; status: string; expires_at: string }>;
+    expect(leases).toEqual([
+      expect.objectContaining({ admission_id: first.admissionId, owner: 'cleanup-worker', status: 'expired', expires_at: REPLACEMENT_EXPIRES }),
+      expect.objectContaining({ owner: 'cleanup-worker', status: 'admitted', expires_at: '2026-07-28T12:05:00.000Z' }),
+    ]);
+  });
+
   it('stops an active expired cleanup worker, rotates its lease, and starts exactly one replacement', async () => {
     const value = await fixture();
     const cleanup = await seedClaimedCleanup(value, 'expired-cleanup');
@@ -235,6 +298,7 @@ describe('startup recovery with real SQLite stores', () => {
           return clear();
         },
         liveRunnerClassification: async () => { value.db.prepare('SELECT COUNT(*) FROM jobs').get(); return clear(); },
+        cancellationCoordination: async () => clear(),
         stalePublishingRecovery: async () => clear(),
         nonPublishingInterruption: async () => clear(),
         retention: async () => clear(),
@@ -267,7 +331,7 @@ describe('startup recovery with real SQLite stores', () => {
             return { blockers: [{ code: blocker.cleanup_blocker_code ?? 'CLEANUP_UNIT_STOP_FAILED', details: blocker.cleanup_blocker_json ? JSON.parse(blocker.cleanup_blocker_json) : {} }] };
           }
         },
-        liveRunnerClassification: async () => clear(), stalePublishingRecovery: async () => clear(), nonPublishingInterruption: async () => clear(), retention: async () => clear(),
+        liveRunnerClassification: async () => clear(), cancellationCoordination: async () => clear(), stalePublishingRecovery: async () => clear(), nonPublishingInterruption: async () => clear(), retention: async () => clear(),
       },
     });
 
@@ -290,6 +354,7 @@ describe('startup recovery with real SQLite stores', () => {
         migrations: async () => { value.db.prepare('SELECT 1').get(); return clear(); },
         cleanupAdmissions: async () => { value.db.prepare('SELECT COUNT(*) FROM cleanup_leases').get(); return clear(); },
         liveRunnerClassification: async () => { value.db.prepare("SELECT COUNT(*) FROM jobs WHERE state='publishing'").get(); return clear(); },
+        cancellationCoordination: async () => clear(),
         stalePublishingRecovery: async () => {
           const row = value.db.prepare("SELECT state FROM jobs WHERE job_id=? AND state='publishing'").get('publishing-recovery');
           if (row === undefined) throw new Error('publishing recovery row was not found');
@@ -320,7 +385,7 @@ describe('startup recovery with real SQLite stores', () => {
     }]);
     expect(value.db.prepare('SELECT state FROM jobs WHERE job_id=?').get('publishing-recovery')).toEqual({ state: 'failed' });
     expect(value.db.prepare('SELECT state, queue_state FROM jobs WHERE job_id=?').get('direct-interruption')).toEqual({ state: 'interrupted', queue_state: 'complete' });
-    expect(bootstrap.events().map((event) => event.phase)).toEqual(['migrations', 'cleanup-admissions', 'live-runner-classification', 'stale-publishing-recovery', 'non-publishing-interruption', 'retention', 'dispatch']);
+    expect(bootstrap.events().map((event) => event.phase)).toEqual(['migrations', 'cleanup-admissions', 'live-runner-classification', 'cancellation-coordination', 'stale-publishing-recovery', 'non-publishing-interruption', 'retention', 'dispatch']);
     expect(value.systemd.queue.start).not.toHaveBeenCalled();
   });
 });

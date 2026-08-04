@@ -9,6 +9,7 @@ import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { BuilderStore, type CreateJobInput, type JsonObject } from '../../api/src/store.js';
 import { encodeJson } from '../../api/src/validation.js';
 import { createRunnerCancellation } from '../../runner/src/cancellation.js';
+import { TEST_BUILDER_IDENTITY } from '../helpers/builder-identity.js';
 
 const NOW = '2026-07-27T09:00:00.000Z';
 const LATER = '2026-07-27T09:00:01.000Z';
@@ -68,6 +69,7 @@ async function fixture(options: { readonly cancellation?: boolean } = {}) {
     targetId: 'rpi-5',
     rootId: 'release',
     targetManifestSha256: SHA64,
+    builderIdentity: TEST_BUILDER_IDENTITY,
     sourceCommitTime: NOW,
     sourceAuthor: 'Builder',
     sourceSubject: 'cancellation integration',
@@ -89,7 +91,11 @@ afterEach(async () => {
   await Promise.all(tempDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-function persistContainer(fixtureValue: Awaited<ReturnType<typeof fixture>>, lifecycle: 'created' | 'started' | 'stopped'): void {
+function persistContainer(
+  fixtureValue: Awaited<ReturnType<typeof fixture>>,
+  lifecycle: 'created' | 'started' | 'stopped',
+  security: JsonObject = { user: '1000:1000' },
+): void {
   const started = lifecycle !== 'created';
   const stopped = lifecycle === 'stopped';
   expect(fixtureValue.ownership.runnerWrite({
@@ -109,7 +115,7 @@ function persistContainer(fixtureValue: Awaited<ReturnType<typeof fixture>>, lif
     },
     mount: { source: '/tmp', destination: '/work' },
     environment: { CI: '1' },
-    security: { user: '1000:1000' },
+    security,
     inspection: { running: !stopped, status: stopped ? 'exited' : started ? 'running' : 'created' },
     occurredAt: stopped ? '2026-07-27T09:00:02.000Z' : LATER,
     createdAt: LATER,
@@ -637,6 +643,62 @@ describe('runner cancellation with the persisted ownership store', () => {
     expect(evidence).toHaveLength(1);
     expect(fixtureValue.store.getJob(fixtureValue.input.jobId)).toMatchObject({ state: 'cancelled', containerId: null, terminalErrorCode: 'CANCELLED' });
     expect(fixtureValue.db.prepare("SELECT json_extract(payload_json, '$.kind') AS kind FROM job_events WHERE job_id=? AND event_type='cleanup' ORDER BY seq LIMIT 1").get(fixtureValue.input.jobId)).toEqual({ kind: 'cancellation-evidence' });
+    fixtureValue.db.close();
+  });
+
+  it('refuses generic cancellation cleanup while dependency egress identity remains persisted', async () => {
+    const fixtureValue = await fixture({ cancellation: false });
+    persistContainer(fixtureValue, 'created', {
+      user: '1000:1000',
+      egress: { durableLifecycleIdentity: true },
+    });
+    expect(fixtureValue.ownership.apiWrite({
+      kind: 'request-cancellation',
+      jobId: fixtureValue.input.jobId,
+      reason: 'operator',
+      at: '2026-07-27T09:00:03.000Z',
+    }).ok).toBe(true);
+    const inspect = vi.fn(async () => { throw new Error('egress-owned container must not be inspected by generic cancellation'); });
+    const remove = vi.fn(async () => { throw new Error('egress-owned container must not be removed by generic cancellation'); });
+    const controller = createRunnerCancellation({
+      jobId: fixtureValue.input.jobId,
+      runnerUnit: `osi-image-builder-runner@${fixtureValue.input.jobId}.service`,
+      owner: 'runner-integration',
+      leaseExpiresAt: () => '2026-07-27T09:10:00.000Z',
+      store: fixtureValue.store,
+      ownership: fixtureValue.ownership,
+      docker: {
+        inspect,
+        stop: async () => { throw new Error('egress-owned container must not be stopped by generic cancellation'); },
+        waitForStopped: async () => { throw new Error('egress-owned container must not be waited by generic cancellation'); },
+        remove,
+        listByLabels: async () => [],
+      },
+      evidence: async () => { throw new Error('egress-owned cancellation must not publish generic evidence'); },
+      cleanup: {
+        staging: async () => { throw new Error('egress-owned cancellation must not clean staging'); },
+        logs: async () => { throw new Error('egress-owned cancellation must not finalize logs'); },
+      },
+      clock: () => '2026-07-27T09:00:05.000Z',
+      signals: { on: () => undefined, off: () => undefined },
+    });
+
+    await expect(controller.cancelIfRequested()).rejects.toMatchObject({
+      blockerCode: 'DOCKER_CONTAINER_ORPHANED',
+    });
+    expect(inspect).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(fixtureValue.store.getJob(fixtureValue.input.jobId)).toMatchObject({
+      state: 'cancel_requested',
+      containerId: CONTAINER_ID,
+      containerSecurity: {
+        user: '1000:1000',
+        egress: { durableLifecycleIdentity: true },
+      },
+    });
+    expect(fixtureValue.store.listEvents(fixtureValue.input.jobId).events.some(
+      (event) => event.eventType === 'cleanup' && event.payload.kind === 'cancellation-cleanup',
+    )).toBe(false);
     fixtureValue.db.close();
   });
 

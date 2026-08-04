@@ -6,8 +6,10 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  rename,
   rm,
   stat,
+  unlink,
   utimes,
   writeFile,
 } from 'node:fs/promises';
@@ -22,6 +24,7 @@ import type {
 } from '../../api/src/ownership.js';
 import type { PublishingRecoveryArtifactObservation } from '../../api/src/publishing-recovery.js';
 import type { JobRecord, JsonObject } from '../../api/src/store.js';
+import { TEST_BUILDER_IDENTITY } from '../helpers/builder-identity.js';
 import {
   loadConfig,
   type LoadedConfig,
@@ -34,6 +37,8 @@ import {
 } from '../../runner/src/terminal-verification.js';
 import {
   completeRecoveredPublication,
+  createPublicationFiles,
+  type PublicationSealingDependencies,
 } from '../../runner/src/main.js';
 
 const JOB_ID = 'recovered-publication';
@@ -61,13 +66,26 @@ const EVIDENCE_PATH = `jobs/${JOB_ID}/evidence/09-publish.json`;
 
 const temporaryDirectories: string[] = [];
 
-afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
-});
-
 function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
+
+async function makeTreeWritable(path: string): Promise<void> {
+  const entries = await readdir(path, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const child = join(path, entry.name);
+    await chmod(child, 0o700);
+    await makeTreeWritable(child);
+  }
+}
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map(async (path) => {
+    await makeTreeWritable(path);
+    await rm(path, { recursive: true, force: true });
+  }));
+});
 
 function runningVerification(): JsonObject {
   return {
@@ -114,6 +132,7 @@ function job(): JobRecord {
     targetId: TARGET_ID,
     rootId: ROOT_ID,
     targetManifestSha256: 'b'.repeat(64),
+    builderIdentity: TEST_BUILDER_IDENTITY,
     acceptedAt: STAGE_STARTED_AT,
     state: 'publishing',
     currentStage: 'publish',
@@ -171,6 +190,7 @@ function job(): JobRecord {
     verificationPath: VERIFICATION_PATH,
     verificationSha256: 'd'.repeat(64),
     publishState: 'publishing',
+    releaseSealStatus: 'in_progress',
     publishStartedAt: STAGE_STARTED_AT,
     publishedAt: null,
     publishBlockerCode: null,
@@ -233,7 +253,8 @@ async function fixture(options: Readonly<{
 
   const finalDirectory = join(outputRoot, FINAL_DIRECTORY);
   await mkdir(finalDirectory, { recursive: true, mode: 0o750 });
-  await writeFile(join(finalDirectory, ARTIFACT_BASENAME), ARTIFACT_BYTES, { mode: 0o640 });
+  await chmod(finalDirectory, 0o700);
+  await writeFile(join(finalDirectory, ARTIFACT_BASENAME), ARTIFACT_BYTES, { mode: 0o600 });
   await utimes(join(finalDirectory, ARTIFACT_BASENAME), new Date(ARTIFACT_MTIME), new Date(ARTIFACT_MTIME));
   const checksumBytes = `${ARTIFACT_SHA256}  ${ARTIFACT_BASENAME}\n`;
   const manifest = {
@@ -250,9 +271,9 @@ async function fixture(options: Readonly<{
   const manifestBytes = encodeJson(manifest, 'build manifest fixture', true);
   const terminal = terminalVerification();
   const runningBytes = encodeJson(runningVerification(), 'running verification fixture', true);
-  await writeFile(join(finalDirectory, 'sha256sums'), checksumBytes, { mode: 0o640 });
-  await writeFile(join(finalDirectory, 'build-manifest.json'), manifestBytes, { mode: 0o640 });
-  await writeFile(join(finalDirectory, 'verification.json'), runningBytes, { mode: 0o640 });
+  await writeFile(join(finalDirectory, 'sha256sums'), checksumBytes, { mode: 0o600 });
+  await writeFile(join(finalDirectory, 'build-manifest.json'), manifestBytes, { mode: 0o600 });
+  await writeFile(join(finalDirectory, 'verification.json'), runningBytes, { mode: 0o600 });
 
   const persistedJob = {
     ...job(),
@@ -285,6 +306,47 @@ function logs(verifiedAt = AT) {
     verifiedAt,
     noGap: true as const,
   };
+}
+
+async function finalizationInput(value: Awaited<ReturnType<typeof fixture>>) {
+  const root = await stat(value.paths.outputRoot);
+  const artifact = {
+    stagingPath: value.persistedJob.artifactStagingPath!,
+    artifactSha256: value.persistedJob.artifactSha256!,
+    artifactSize: value.persistedJob.artifactSize!,
+    artifactMtime: value.persistedJob.artifactMtime!,
+    checksumPath: value.persistedJob.checksumPath!,
+    checksumSha256: value.persistedJob.checksumSha256!,
+    manifestPath: value.persistedJob.manifestPath!,
+    manifestSha256: value.persistedJob.manifestSha256!,
+    verificationPath: value.persistedJob.verificationPath!,
+    verificationSha256: value.persistedJob.verificationSha256!,
+  };
+  const binding = {
+    jobId: value.persistedJob.jobId,
+    rootId: value.persistedJob.rootId,
+    rootPath: value.paths.outputRoot,
+    rootDevice: root.dev,
+    rootInode: root.ino,
+    branch: value.persistedJob.branch,
+    branchSlug: BRANCH,
+    pinnedSha: value.persistedJob.pinnedSha,
+    targetId: value.persistedJob.targetId,
+    stagingDirectory: STAGING_DIRECTORY,
+    stagingPath: artifact.stagingPath,
+    finalDirectory: FINAL_DIRECTORY,
+    finalPath: FINAL_PATH,
+    artifactSha256: artifact.artifactSha256,
+    artifactSize: artifact.artifactSize,
+  } as const;
+  return {
+    binding,
+    artifact,
+    verificationManifest: value.terminal.manifest,
+    verificationManifestBytes: value.terminal.bytes,
+    publishEvidencePath: EVIDENCE_PATH,
+    publishEvidenceSha256: sha256('publish evidence'),
+  } as const;
 }
 
 function expectedStageEvidence(
@@ -411,6 +473,142 @@ describe('recovered publication filesystem completion', () => {
         artifactSha256: null,
       },
     });
+    expect((await stat(value.paths.finalDirectory)).mode & 0o777).toBe(0o555);
+    for (const name of [ARTIFACT_BASENAME, 'sha256sums', 'build-manifest.json', 'verification.json']) {
+      expect((await stat(join(value.paths.finalDirectory, name))).mode & 0o777).toBe(0o444);
+    }
+  });
+
+  it('seals the normal runner publication before returning and makes sealing idempotent', async () => {
+    const value = await fixture();
+    const finalizeVerification = createPublicationFiles(value.loaded, () => {
+      throw new Error('workspace is not needed for final publication sealing');
+    }).finalizeVerification;
+    const input = await finalizationInput(value);
+
+    await finalizeVerification(input);
+    await finalizeVerification(input);
+
+    expect((await stat(value.paths.finalDirectory)).mode & 0o777).toBe(0o555);
+    for (const name of [ARTIFACT_BASENAME, 'sha256sums', 'build-manifest.json', 'verification.json']) {
+      expect((await stat(join(value.paths.finalDirectory, name))).mode & 0o777).toBe(0o444);
+    }
+  });
+
+  it('rejects a canonical named-inode replacement after the held artifact is chmodded and synced', async () => {
+    const value = await fixture();
+    let replaced = false;
+    const finalizeVerification = createPublicationFiles(value.loaded, () => {
+      throw new Error('workspace is not needed for final publication sealing');
+    }, {
+      afterFileSync: async (name) => {
+        if (name !== ARTIFACT_BASENAME || replaced) return;
+        replaced = true;
+        const artifactPath = join(value.paths.finalDirectory, ARTIFACT_BASENAME);
+        await unlink(artifactPath);
+        await writeFile(artifactPath, ARTIFACT_BYTES, { mode: 0o444 });
+        await utimes(artifactPath, new Date(ARTIFACT_MTIME), new Date(ARTIFACT_MTIME));
+      },
+    }).finalizeVerification;
+
+    await expect(finalizeVerification(await finalizationInput(value))).rejects.toThrow(/inode|canonical|metadata/i);
+    expect(replaced).toBe(true);
+  });
+
+  it('rejects a member injected after sealing but before canonical revalidation', async () => {
+    const value = await fixture();
+    let injected = false;
+
+    await expect(completeRecoveredPublication({
+      loaded: value.loaded,
+      job: value.persistedJob,
+      stageStartedAt: STAGE_STARTED_AT,
+      at: AT,
+      logs: logs(),
+      sealingDependencies: {
+        beforeCanonicalRevalidation: async () => {
+          injected = true;
+          await chmod(value.paths.finalDirectory, 0o700);
+          await writeFile(join(value.paths.finalDirectory, 'injected.txt'), 'unexpected\n', { mode: 0o600 });
+          await chmod(value.paths.finalDirectory, 0o555);
+        },
+      },
+    })).rejects.toThrow(/member|directory|release/i);
+
+    expect(injected).toBe(true);
+    await expect(access(value.paths.evidence)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects replacement of the approved root pathname after sealing', async () => {
+    const value = await fixture();
+    const displacedRoot = `${value.paths.outputRoot}.displaced`;
+    let replaced = false;
+
+    await expect(completeRecoveredPublication({
+      loaded: value.loaded,
+      job: value.persistedJob,
+      stageStartedAt: STAGE_STARTED_AT,
+      at: AT,
+      logs: logs(),
+      sealingDependencies: {
+        beforeCanonicalRevalidation: async () => {
+          replaced = true;
+          await rename(value.paths.outputRoot, displacedRoot);
+          await mkdir(value.paths.outputRoot, { mode: 0o700 });
+        },
+      },
+    })).rejects.toThrow(/root|authority|identity/i);
+
+    expect(replaced).toBe(true);
+    await expect(access(value.paths.evidence)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each([
+    {
+      label: 'named inode replacement',
+      mutate: async (value: Awaited<ReturnType<typeof fixture>>) => {
+        const artifactPath = join(value.paths.finalDirectory, ARTIFACT_BASENAME);
+        await chmod(value.paths.finalDirectory, 0o700);
+        await unlink(artifactPath);
+        await writeFile(artifactPath, ARTIFACT_BYTES, { mode: 0o444 });
+        await utimes(artifactPath, new Date(ARTIFACT_MTIME), new Date(ARTIFACT_MTIME));
+        await chmod(value.paths.finalDirectory, 0o555);
+      },
+    },
+    {
+      label: 'tracked file mode drift',
+      mutate: async (value: Awaited<ReturnType<typeof fixture>>) => {
+        await chmod(join(value.paths.finalDirectory, ARTIFACT_BASENAME), 0o600);
+      },
+    },
+    {
+      label: 'late directory member',
+      mutate: async (value: Awaited<ReturnType<typeof fixture>>) => {
+        await chmod(value.paths.finalDirectory, 0o700);
+        await writeFile(join(value.paths.finalDirectory, 'late-member.txt'), 'late member\n', { mode: 0o600 });
+        await chmod(value.paths.finalDirectory, 0o555);
+      },
+    },
+  ])('rejects $label at the final canonical identity boundary', async ({ mutate }) => {
+    const value = await fixture();
+    let injected = false;
+
+    await expect(completeRecoveredPublication({
+      loaded: value.loaded,
+      job: value.persistedJob,
+      stageStartedAt: STAGE_STARTED_AT,
+      at: AT,
+      logs: logs(),
+      sealingDependencies: {
+        beforeFinalCanonicalIdentityWalk: async () => {
+          injected = true;
+          await mutate(value);
+        },
+      },
+    })).rejects.toThrow(/inode|mode|member|metadata|canonical|sealed/i);
+
+    expect(injected).toBe(true);
+    await expect(access(value.paths.evidence)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('adopts exact persisted evidence across a later clock and regenerated log proof', async () => {
@@ -472,6 +670,178 @@ describe('recovered publication filesystem completion', () => {
     expect(await readFile(value.paths.finalVerification, 'utf8')).toBe(value.terminal.bytes);
   });
 
+  it.each([
+    { label: 'terminal bytes', bytes: null },
+    { label: 'partial bytes', bytes: '{"schema_version":1' },
+  ])('recovers an owned deterministic verification temp with $label', async ({ bytes }) => {
+    const value = await fixture();
+    const temporaryPath = join(value.paths.finalDirectory, `.verification-${JOB_ID}.tmp`);
+    await writeFile(temporaryPath, bytes ?? value.terminal.bytes, { mode: 0o600 });
+
+    await completeRecoveredPublication({
+      loaded: value.loaded,
+      job: value.persistedJob,
+      stageStartedAt: STAGE_STARTED_AT,
+      at: AT,
+      logs: logs(),
+    });
+
+    expect(await readFile(value.paths.finalVerification, 'utf8')).toBe(value.terminal.bytes);
+    await expect(access(temporaryPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readdir(value.paths.finalDirectory)).toEqual([
+      'build-manifest.json',
+      ARTIFACT_BASENAME,
+      'sha256sums',
+      'verification.json',
+    ]);
+  });
+
+  it('rejects a deterministic verification temp with a non-recoverable mode', async () => {
+    const value = await fixture();
+    const temporaryPath = join(value.paths.finalDirectory, `.verification-${JOB_ID}.tmp`);
+    await writeFile(temporaryPath, value.terminal.bytes, { mode: 0o640 });
+
+    await expect(completeRecoveredPublication({
+      loaded: value.loaded,
+      job: value.persistedJob,
+      stageStartedAt: STAGE_STARTED_AT,
+      at: AT,
+      logs: logs(),
+    })).rejects.toThrow(/temporary|verification|mode|candidate/i);
+
+    expect(await readFile(value.paths.finalVerification, 'utf8')).toBe(value.runningBytes);
+    await expect(access(value.paths.evidence)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('recovers after a crash once partial verification temp removal is durable', async () => {
+    const value = await fixture();
+    const temporaryPath = join(value.paths.finalDirectory, `.verification-${JOB_ID}.tmp`);
+    await writeFile(temporaryPath, '{"schema_version":1', { mode: 0o600 });
+    let injected = false;
+    const sealingDependencies: PublicationSealingDependencies = {
+      afterVerificationTempRemovalSync: () => {
+        if (injected) return;
+        injected = true;
+        throw new Error('injected crash after verification temp removal sync');
+      },
+    };
+    const input = {
+      loaded: value.loaded,
+      job: value.persistedJob,
+      stageStartedAt: STAGE_STARTED_AT,
+      at: AT,
+      logs: logs(),
+      sealingDependencies,
+    } as const;
+
+    await expect(completeRecoveredPublication(input)).rejects.toThrow(
+      'injected crash after verification temp removal sync',
+    );
+    await expect(access(temporaryPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(value.paths.finalVerification, 'utf8')).toBe(value.runningBytes);
+    await expect(access(value.paths.evidence)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    await completeRecoveredPublication(input);
+    expect(await readFile(value.paths.finalVerification, 'utf8')).toBe(value.terminal.bytes);
+    expect((await stat(value.paths.finalDirectory)).mode & 0o777).toBe(0o555);
+  });
+
+  it('rejects a non-deterministic verification temp as an untracked member', async () => {
+    const value = await fixture();
+    await writeFile(
+      join(value.paths.finalDirectory, `.verification-${JOB_ID}-random.tmp`),
+      value.terminal.bytes,
+      { mode: 0o600 },
+    );
+
+    await expect(completeRecoveredPublication({
+      loaded: value.loaded,
+      job: value.persistedJob,
+      stageStartedAt: STAGE_STARTED_AT,
+      at: AT,
+      logs: logs(),
+    })).rejects.toThrow(/member|directory|release/i);
+
+    expect(await readFile(value.paths.finalVerification, 'utf8')).toBe(value.runningBytes);
+    await expect(access(value.paths.evidence)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('recovers after a crash once the deterministic verification temp is durable', async () => {
+    const value = await fixture();
+    let injected = false;
+    const sealingDependencies: PublicationSealingDependencies = {
+      afterVerificationTempSync: () => {
+        if (injected) return;
+        injected = true;
+        throw new Error('injected crash after verification temp sync');
+      },
+    };
+    const input = {
+      loaded: value.loaded,
+      job: value.persistedJob,
+      stageStartedAt: STAGE_STARTED_AT,
+      at: AT,
+      logs: logs(),
+      sealingDependencies,
+    } as const;
+    const temporaryPath = join(value.paths.finalDirectory, `.verification-${JOB_ID}.tmp`);
+
+    await expect(completeRecoveredPublication(input)).rejects.toThrow('injected crash after verification temp sync');
+    expect(await readFile(temporaryPath, 'utf8')).toBe(value.terminal.bytes);
+    expect(await readFile(value.paths.finalVerification, 'utf8')).toBe(value.runningBytes);
+    await expect(access(value.paths.evidence)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    await completeRecoveredPublication(input);
+    await expect(access(temporaryPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await stat(value.paths.finalDirectory)).mode & 0o777).toBe(0o555);
+  });
+
+  it.each([
+    'afterFileChmod',
+    'afterFileSync',
+    'afterDirectoryChmod',
+    'afterDirectorySync',
+  ] as const)('recovers a publication interrupted at the %s boundary', async (boundary) => {
+    const value = await fixture();
+    let injected = false;
+    const failOnce = () => {
+      if (injected) return;
+      injected = true;
+      throw new Error(`injected crash at ${boundary}`);
+    };
+    const sealingDependencies = { [boundary]: failOnce } as PublicationSealingDependencies;
+    const input = {
+      loaded: value.loaded,
+      job: value.persistedJob,
+      stageStartedAt: STAGE_STARTED_AT,
+      at: AT,
+      logs: logs(),
+      sealingDependencies,
+    } as const;
+
+    await expect(completeRecoveredPublication(input)).rejects.toThrow(`injected crash at ${boundary}`);
+    expect(injected).toBe(true);
+    await expect(access(value.paths.evidence)).rejects.toMatchObject({ code: 'ENOENT' });
+    const interruptedDirectoryMode = (await stat(value.paths.finalDirectory)).mode & 0o777;
+    const interruptedFileModes = await Promise.all(
+      [ARTIFACT_BASENAME, 'sha256sums', 'build-manifest.json', 'verification.json']
+        .map(async (name) => (await stat(join(value.paths.finalDirectory, name))).mode & 0o777),
+    );
+    if (interruptedDirectoryMode === 0o700) {
+      expect(interruptedFileModes.every((mode) => mode === 0o600 || mode === 0o444)).toBe(true);
+    } else {
+      expect(interruptedDirectoryMode).toBe(0o555);
+      expect(interruptedFileModes).toEqual([0o444, 0o444, 0o444, 0o444]);
+    }
+
+    await completeRecoveredPublication(input);
+    expect((await stat(value.paths.finalDirectory)).mode & 0o777).toBe(0o555);
+    for (const name of [ARTIFACT_BASENAME, 'sha256sums', 'build-manifest.json', 'verification.json']) {
+      expect((await stat(join(value.paths.finalDirectory, name))).mode & 0o777).toBe(0o444);
+    }
+    await expect(access(value.paths.evidence)).resolves.toBeUndefined();
+  });
+
   it('rejects an existing evidence file whose durable log binding is incomplete', async () => {
     const value = await fixture();
     const input = {
@@ -510,13 +880,29 @@ describe('recovered publication filesystem completion', () => {
       await expect(access(value.paths.evidence)).rejects.toMatchObject({ code: 'ENOENT' });
       await expect(readFile(value.paths.finalVerification, 'utf8')).resolves.toBe(value.runningBytes);
     } finally {
-      await chmod(value.paths.finalDirectory, 0o750);
+      await chmod(value.paths.finalDirectory, 0o700);
     }
+  });
+
+  it('rejects an untracked final-directory member before changing verification or evidence', async () => {
+    const value = await fixture();
+    await writeFile(join(value.paths.finalDirectory, 'unexpected.txt'), 'not release evidence\n', { mode: 0o600 });
+
+    await expect(completeRecoveredPublication({
+      loaded: value.loaded,
+      job: value.persistedJob,
+      stageStartedAt: STAGE_STARTED_AT,
+      at: AT,
+      logs: logs(),
+    })).rejects.toThrow(/member|directory|release/i);
+
+    expect(await readFile(value.paths.finalVerification, 'utf8')).toBe(value.runningBytes);
+    await expect(access(value.paths.evidence)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('rejects a mismatched final artifact without mutating verification or evidence', async () => {
     const value = await fixture();
-    await writeFile(join(value.paths.finalDirectory, ARTIFACT_BASENAME), Buffer.from('tampered image\n'), { mode: 0o640 });
+    await writeFile(join(value.paths.finalDirectory, ARTIFACT_BASENAME), Buffer.from('tampered image\n'), { mode: 0o600 });
 
     await expect(completeRecoveredPublication({
       loaded: value.loaded,

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 
 import { getNodeValue, parseTree, type Node, type ParseError } from 'jsonc-parser';
+import trustedManifest from './targets.json' with { type: 'json' };
 
 import {
   PIPELINE_STAGE_NAMES,
@@ -88,60 +89,13 @@ const DEFAULT_MANIFEST_FILE_SYSTEM: ManifestFileSystem = {
   close: (fd) => closeSync(fd),
 };
 
-const STAGE_DEFINITIONS: Readonly<Record<PipelineStageName, StageDefinition>> = Object.freeze({
-  preflight: Object.freeze({ required: true, timeoutSeconds: 300 }),
-  source: Object.freeze({ required: true, timeoutSeconds: 300 }),
-  'release-gates': Object.freeze({ required: true, timeoutSeconds: 1800 }),
-  frontend: Object.freeze({ required: true, timeoutSeconds: 1800 }),
-  'target-setup': Object.freeze({ required: true, timeoutSeconds: 900 }),
-  feeds: Object.freeze({ required: true, timeoutSeconds: 1800 }),
-  config: Object.freeze({ required: true, timeoutSeconds: 900 }),
-  build: Object.freeze({ required: true, timeoutSeconds: 21600 }),
-  verify: Object.freeze({ required: true, timeoutSeconds: 1800 }),
-  publish: Object.freeze({ required: true, timeoutSeconds: 300 }),
-});
-
-const OPERATIONS = Object.freeze([
-  'activate-target', 'copy-feed-config', 'update-feeds', 'install-feeds',
-  'resolve-config', 'build-image', 'verify-image',
-] as const);
-
-const TARGET_CONTRACTS: Readonly<Record<TargetId, TargetManifest>> = Object.freeze({
-  'rpi-5': Object.freeze({
-    id: 'rpi-5', label: 'Pi 5', environment: 'full_raspberrypi_bcm27xx_bcm2712',
-    openwrtTarget: 'bcm27xx/bcm2712', profile: 'DEVICE_rpi-5',
-    rootfs: 'build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx',
-    artifactGlob: 'chirpstack-gateway-os-*-full-bcm27xx-bcm2712-rpi-5-squashfs-factory.img.gz',
-    rootfsPartSize: 14336, minimumArtifactBytes: 67108864,
-    configSymbols: Object.freeze([
-      Object.freeze({ name: 'CONFIG_TARGET_bcm27xx_bcm2712', type: 'bool', value: true }),
-      Object.freeze({ name: 'CONFIG_TARGET_PROFILE', type: 'string', value: 'DEVICE_rpi-5' }),
-      Object.freeze({ name: 'CONFIG_TARGET_ROOTFS_PARTSIZE', type: 'number', value: 14336 }),
-      Object.freeze({ name: 'CONFIG_PACKAGE_node-red', type: 'bool', value: true }),
-      Object.freeze({ name: 'CONFIG_PACKAGE_node-red-contrib-chirpstack', type: 'bool', value: true }),
-      Object.freeze({ name: 'CONFIG_PACKAGE_chirpstack', type: 'bool', value: true }),
-      Object.freeze({ name: 'CONFIG_PACKAGE_node-red-node-sqlite', type: 'bool', value: true }),
-    ]),
-    operations: OPERATIONS,
-  }),
-  'rpi-2': Object.freeze({
-    id: 'rpi-2', label: 'Pi 4 / 400 / 3 / 2', environment: 'full_raspberrypi_bcm27xx_bcm2709',
-    openwrtTarget: 'bcm27xx/bcm2709', profile: 'DEVICE_rpi-2',
-    rootfs: 'build_dir/target-arm_cortex-a7+neon-vfpv4_musl_eabi/root-bcm27xx',
-    artifactGlob: 'chirpstack-gateway-os-*-full-bcm27xx-bcm2709-rpi-2-squashfs-factory.img.gz',
-    rootfsPartSize: 14336, minimumArtifactBytes: 67108864,
-    configSymbols: Object.freeze([
-      Object.freeze({ name: 'CONFIG_TARGET_bcm27xx_bcm2709', type: 'bool', value: true }),
-      Object.freeze({ name: 'CONFIG_TARGET_PROFILE', type: 'string', value: 'DEVICE_rpi-2' }),
-      Object.freeze({ name: 'CONFIG_TARGET_ROOTFS_PARTSIZE', type: 'number', value: 14336 }),
-      Object.freeze({ name: 'CONFIG_PACKAGE_node-red', type: 'bool', value: true }),
-      Object.freeze({ name: 'CONFIG_PACKAGE_node-red-contrib-chirpstack', type: 'bool', value: true }),
-      Object.freeze({ name: 'CONFIG_PACKAGE_chirpstack', type: 'bool', value: true }),
-      Object.freeze({ name: 'CONFIG_PACKAGE_node-red-node-sqlite', type: 'bool', value: true }),
-    ]),
-    operations: OPERATIONS,
-  }),
-});
+const TRUSTED_MANIFEST = trustedManifest as Manifest;
+const STAGE_DEFINITIONS: Readonly<Record<PipelineStageName, StageDefinition>> = Object.freeze(
+  TRUSTED_MANIFEST.stageDefinitions,
+);
+const TARGET_CONTRACTS: Readonly<Record<TargetId, TargetManifest>> = Object.freeze(
+  Object.fromEntries(TARGET_IDS.map((targetId, index) => [targetId, TRUSTED_MANIFEST.targets[index]])) as Record<TargetId, TargetManifest>,
+);
 
 const MANIFEST_KEYS = ['schemaVersion', 'repository', 'stages', 'stageDefinitions', 'targets'];
 const REPOSITORY_KEYS = ['name', 'remote'];
@@ -272,7 +226,7 @@ function validateStageDefinitions(value: unknown): asserts value is Readonly<Rec
   for (const stage of PIPELINE_STAGE_NAMES) {
     const definition = value[stage];
     exactKeys(definition, STAGE_DEFINITION_KEYS, STAGE_DEFINITION_OBJECT_CONTEXT);
-    if (definition.required !== true || typeof definition.timeoutSeconds !== 'number'
+    if (definition.required !== STAGE_DEFINITIONS[stage].required || typeof definition.timeoutSeconds !== 'number'
       || !Number.isInteger(definition.timeoutSeconds) || definition.timeoutSeconds <= 0
       || definition.timeoutSeconds !== STAGE_DEFINITIONS[stage].timeoutSeconds) {
       fail('STAGE_DEFINITION_INVALID', `Invalid definition for stage ${stage}.`);
@@ -300,8 +254,8 @@ function validateTarget(value: unknown, expected: TargetManifest): TargetManifes
   if (typeof value.profile !== 'string' || value.profile.length === 0) fail('MISSING_PROFILE', 'Target profile is required.');
   if (!safeRelativePosixPath(value.rootfs)) fail('UNSAFE_PATH', 'Rootfs path is not a safe relative POSIX path.');
   if (!validateArtifactGlob(value.artifactGlob)) fail('ARTIFACT_GLOB_INVALID', 'Artifact glob is not a factory image filename pattern.');
-  if (value.rootfsPartSize !== 14336) fail('ROOTFS_PART_SIZE', 'Rootfs partition size must be 14336.');
-  if (value.minimumArtifactBytes !== 67108864) fail('MINIMUM_ARTIFACT_BYTES', 'Minimum artifact size must be 67108864 bytes.');
+  if (value.rootfsPartSize !== expected.rootfsPartSize) fail('ROOTFS_PART_SIZE', `Rootfs partition size must be ${String(expected.rootfsPartSize)}.`);
+  if (value.minimumArtifactBytes !== expected.minimumArtifactBytes) fail('MINIMUM_ARTIFACT_BYTES', `Minimum artifact size must be ${String(expected.minimumArtifactBytes)} bytes.`);
   if (!Array.isArray(value.configSymbols) || value.configSymbols.length !== expected.configSymbols.length) fail('CONFIG_SYMBOL_INVALID', 'Configuration symbol list is invalid.');
   for (let index = 0; index < expected.configSymbols.length; index += 1) validateSymbol(value.configSymbols[index], expected.configSymbols[index]);
   if (!Array.isArray(value.operations)) fail('UNKNOWN_OPERATION', 'Operations must be an array.');
@@ -463,19 +417,19 @@ export function loadManifest(path: string, fileSystem: ManifestFileSystem = DEFA
     fail('MANIFEST_JSON_INVALID', INVALID_JSON_MESSAGE);
   }
   exactKeys(parsed, MANIFEST_KEYS, ROOT_OBJECT_CONTEXT);
-  if (parsed.schemaVersion !== 1) fail('SCHEMA_VERSION_INVALID', 'Manifest schemaVersion must be 1.');
+  if (parsed.schemaVersion !== TRUSTED_MANIFEST.schemaVersion) fail('SCHEMA_VERSION_INVALID', `Manifest schemaVersion must be ${String(TRUSTED_MANIFEST.schemaVersion)}.`);
   exactKeys(parsed.repository, REPOSITORY_KEYS, REPOSITORY_OBJECT_CONTEXT);
-  if (parsed.repository.name !== 'osi-os' || parsed.repository.remote !== 'origin') fail('REPOSITORY_INVALID', 'Manifest repository does not match osi-os/origin.');
+  if (parsed.repository.name !== TRUSTED_MANIFEST.repository.name || parsed.repository.remote !== TRUSTED_MANIFEST.repository.remote) fail('REPOSITORY_INVALID', 'Manifest repository does not match the authenticated repository.');
   if (!Array.isArray(parsed.stages) || parsed.stages.some((stage) => !isPipelineStageName(stage))) fail('UNKNOWN_STAGE', 'Manifest contains an unknown stage.');
-  exactArray(parsed.stages, PIPELINE_STAGE_NAMES, 'STAGE_ORDER_MISMATCH');
+  exactArray(parsed.stages, TRUSTED_MANIFEST.stages, 'STAGE_ORDER_MISMATCH');
   validateStageDefinitions(parsed.stageDefinitions);
   if (!Array.isArray(parsed.targets)) fail('TARGETS_INVALID', 'Manifest must contain exactly two targets.');
   const authenticatedTargets = authenticateTargetManifests(parsed.targets as unknown as readonly TargetManifest[]);
   const targets = TARGET_IDS.map((targetId) => authenticatedTargets[targetId]);
   const manifest: Manifest = {
-    schemaVersion: 1,
-    repository: { name: 'osi-os', remote: 'origin' },
-    stages: PIPELINE_STAGE_NAMES,
+    schemaVersion: TRUSTED_MANIFEST.schemaVersion,
+    repository: TRUSTED_MANIFEST.repository,
+    stages: TRUSTED_MANIFEST.stages,
     stageDefinitions: STAGE_DEFINITIONS,
     targets,
   };

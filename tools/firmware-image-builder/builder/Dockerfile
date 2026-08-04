@@ -5,6 +5,8 @@ ARG DEBIAN_SNAPSHOT=20260715T000000Z
 ARG NODE_VERSION=22.14.0
 ARG NODE_ARCH=linux-x64
 ARG NODE_TARBALL_SHA256=69b09dba5c8dcb05c4e4273a4340db1005abeafe3927efda2bc5b249e80437ec
+ARG NPM_VERSION=11.10.1
+ARG NPM_TARBALL_SHA256=2190945151842685142f5085b3c5dd356b1021ab390d7d02c2bb2c580f0c4840
 ARG RUST_SOURCE_VERSION=1.85.0
 ARG RUST_SOURCE_SHA256=2f4f3142ffb7c8402139cfa0796e24baaac8b9fd3f96b2deec3b94b4045c6a8a
 ARG MUSL_VERSION=1.2.5-3.1~deb13u1
@@ -37,7 +39,7 @@ RUN export DEBIAN_FRONTEND=noninteractive GCC_COLORS='error=01;31:warning=01;35:
     build-essential ca-certificates clang flex bison g++ gawk gcc-multilib g++-multilib \
     gettext git libncurses-dev libssl-dev python3 python3-setuptools rsync unzip zlib1g-dev nodejs npm \
     file wget curl quilt nano diffutils pkg-config gcc-14 g++-14 llvm-dev libpolly-19-dev \
-    libzstd-dev rustc cargo rust-src rust-llvm xz-utils \
+    libzstd-dev rustc cargo rust-src rust-llvm xz-utils sqlite3 \
   && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140 \
   && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140 \
   && ln -s /usr/lib/x86_64-linux-gnu/libz3.so /usr/lib/llvm-19/lib/liblibz3.so.so \
@@ -119,16 +121,46 @@ RUN curl --fail --silent --show-error --location --retry 3 \
   && node --version | grep -- "^v${NODE_VERSION%%.*}\." \
   && npm --version
 
+# Node bundles Debian's npm 10, which cannot consume the current lockfile.
+# Replace it with the exact npm release required by the OSI workspace.
+RUN curl --fail --silent --show-error --location --retry 3 \
+      "https://registry.npmjs.org/npm/-/npm-${NPM_VERSION}.tgz" \
+      --output /tmp/npm.tgz \
+  && printf '%s  %s\n' \
+      "${NPM_TARBALL_SHA256}" \
+      /tmp/npm.tgz | sha256sum --check --status \
+  && rm -rf /usr/local/lib/node_modules/npm \
+  && mkdir -p /usr/local/lib/node_modules/npm \
+  && tar --extract --gzip --file /tmp/npm.tgz --strip-components=1 --directory /usr/local/lib/node_modules/npm \
+  && rm -f /tmp/npm.tgz \
+  && npm --version | grep -- "^${NPM_VERSION}$"
+
 # The runner invokes only this fixed, image-owned operation entry. It is not
 # reachable through the worktree bind mount and is executable by buildbot.
 COPY --chown=root:root --chmod=0555 builder/operations/osi-image-builder-tool.js /opt/osi-image-builder/operations/osi-image-builder-tool.js
 COPY --chown=root:root --chmod=0555 builder/operations/osi-image-builder-module-probe.js /opt/osi-image-builder/operations/osi-image-builder-module-probe.js
+COPY --chown=root:root --chmod=0555 builder/operations/osi-image-builder-exec-guard.js /opt/osi-image-builder/operations/osi-image-builder-exec-guard.js
+COPY --chown=root:root --chmod=0555 builder/operations/osi-dependency-egress-proxy.cjs /opt/osi-image-builder/operations/osi-dependency-egress-proxy.cjs
+COPY --chown=root:root --chmod=0555 builder/operations/osi-proxy-credential-environment.cjs /opt/osi-image-builder/operations/osi-proxy-credential-environment.cjs
+COPY --chown=root:root --chmod=0444 builder/operations/osi-wgetrc /opt/osi-image-builder/operations/osi-wgetrc
 RUN test -f /opt/osi-image-builder/operations/osi-image-builder-tool.js \
   && test -f /opt/osi-image-builder/operations/osi-image-builder-module-probe.js \
+  && test -f /opt/osi-image-builder/operations/osi-image-builder-exec-guard.js \
+  && test -f /opt/osi-image-builder/operations/osi-dependency-egress-proxy.cjs \
+  && test -f /opt/osi-image-builder/operations/osi-proxy-credential-environment.cjs \
+  && test -f /opt/osi-image-builder/operations/osi-wgetrc \
   && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-image-builder-tool.js)" = '0:0' \
   && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-image-builder-module-probe.js)" = '0:0' \
+  && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-image-builder-exec-guard.js)" = '0:0' \
+  && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-dependency-egress-proxy.cjs)" = '0:0' \
+  && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-proxy-credential-environment.cjs)" = '0:0' \
+  && test "$(stat -c '%u:%g' /opt/osi-image-builder/operations/osi-wgetrc)" = '0:0' \
   && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-tool.js)" = '555' \
-  && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-module-probe.js)" = '555'
+  && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-module-probe.js)" = '555' \
+  && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-image-builder-exec-guard.js)" = '555' \
+  && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-dependency-egress-proxy.cjs)" = '555' \
+  && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-proxy-credential-environment.cjs)" = '555' \
+  && test "$(stat -c '%a' /opt/osi-image-builder/operations/osi-wgetrc)" = '444'
 
 # OpenWrt invokes the same non-interactive host toolchain for all operations.
 RUN useradd --create-home --shell /bin/bash --user-group buildbot \

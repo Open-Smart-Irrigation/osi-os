@@ -11,6 +11,7 @@ import {
   type CleanupAdmissionRecovery,
   type RecoveryDatabase,
 } from '../../api/src/recovery.js';
+import { TEST_BUILDER_IDENTITY_COLUMNS, testBuilderIdentityValues } from '../helpers/builder-identity.js';
 
 const JOB_ID = 'job-reservation-race';
 const OWNER = 'owner-reservation-race';
@@ -21,11 +22,11 @@ function seedJob(db: ReturnType<typeof openBuilderDatabase>): void {
   db.prepare(
     `INSERT INTO jobs (
        job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha,
-       target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject,
+       target_id, root_id, target_manifest_sha256, ${TEST_BUILDER_IDENTITY_COLUMNS.join(', ')}, source_commit_time, source_author, source_subject,
        accepted_at, state, queue_state, created_at, updated_at, source_preparation_json,
        offline_feed_preparation_json, runner_unit
-     ) VALUES (?, ?, 'origin', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'release', ?, ?, 'owner', 'cleanup race', ?, 'starting', 'dispatched', ?, ?, '{}', '{}', ?)`,
-  ).run(JOB_ID, `${JOB_ID}-request`, 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), NOW, NOW, NOW, NOW, UNIT_NAME);
+     ) VALUES (?, ?, 'origin', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'release', ?, ${TEST_BUILDER_IDENTITY_COLUMNS.map(() => '?').join(', ')}, ?, 'owner', 'cleanup race', ?, 'starting', 'dispatched', ?, ?, '{}', '{}', ?)`,
+  ).run(JOB_ID, `${JOB_ID}-request`, 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), ...testBuilderIdentityValues(), NOW, NOW, NOW, NOW, UNIT_NAME);
 }
 
 function runnerSnapshot() {

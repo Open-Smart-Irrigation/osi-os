@@ -7,6 +7,7 @@ import * as ts from 'typescript';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { DurableLogStream } from '../../api/src/log-stream.js';
+import { TEST_BUILDER_IDENTITY } from '../helpers/builder-identity.js';
 
 const roots: string[] = [];
 const dbs: Array<ReturnType<typeof openBuilderDatabase>> = [];
@@ -59,9 +60,22 @@ function expectIdentifier(node: ts.Node | undefined, name: string): void {
 
 function seed(db: ReturnType<typeof openBuilderDatabase>): void {
   db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json, offline_feed_preparation_json,
-    target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at)
-    VALUES ('job-sse', 'request-sse', '{}', 'ssh://example/repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, '{}', '{}', 'rpi-5', 'release', ?, ?, 'test', 'sse', ?, 'building', 'released', ?, ?)`)
-    .run('a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), NOW, NOW, NOW, NOW);
+    target_id, root_id, target_manifest_sha256, builder_identity_status, builder_package_version, builder_package_root,
+    builder_lock_sha256, builder_execution_definition_sha256, builder_target_manifest_sha256, builder_runner_sha256,
+    builder_cleanup_worker_sha256, builder_dependency_egress_proxy_sha256,
+    builder_image_reference, builder_image_id, builder_image_digest,
+    source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at)
+    VALUES ('job-sse', 'request-sse', '{}', 'ssh://example/repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, '{}', '{}', 'rpi-5', 'release', ?, 'admitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test', 'sse', ?, 'building', 'released', ?, ?)`)
+    .run(
+      'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64),
+      TEST_BUILDER_IDENTITY.packageVersion, TEST_BUILDER_IDENTITY.packageRoot,
+      TEST_BUILDER_IDENTITY.lockSha256, TEST_BUILDER_IDENTITY.executionDefinitionSha256,
+      TEST_BUILDER_IDENTITY.targetManifestSha256, TEST_BUILDER_IDENTITY.runnerSha256,
+      TEST_BUILDER_IDENTITY.cleanupWorkerSha256, TEST_BUILDER_IDENTITY.dependencyEgressProxySha256,
+      TEST_BUILDER_IDENTITY.imageReference,
+      TEST_BUILDER_IDENTITY.imageId, TEST_BUILDER_IDENTITY.imageDigest,
+      NOW, NOW, NOW, NOW,
+    );
 }
 
 afterEach(async () => {
@@ -104,6 +118,21 @@ describe('SSE durable replay', () => {
     const productionFunction = descendants<ts.FunctionDeclaration>(file, ts.SyntaxKind.FunctionDeclaration)
       .find((fn) => fn.name?.text === 'createProductionComposition');
     expect(productionFunction).toBeDefined();
+    const productionText = productionFunction!.getText();
+    expect(productionText).toContain('const packageDirectory = builderIdentity.packageRoot');
+    expect(productionText).not.toContain('loaded.config.builderLockPath');
+    const admittedPackageChecks = callsNamed(productionFunction!, 'validateAdmittedBuilderPackage');
+    expect(admittedPackageChecks).toHaveLength(2);
+    const initialPackageEvidence = objectArgument(admittedPackageChecks[0]!, 'validateAdmittedBuilderPackage');
+    expect(initialPackageEvidence.properties.map((candidate) => candidate.getText())).toEqual([
+      'identity: builderIdentity',
+      'lockBytes',
+      'executionDefinition: executionDefinitionBytes',
+      'runner: runnerBytes',
+      'cleanupWorker: cleanupWorkerBytes',
+      'dependencyEgressProxy: dependencyEgressProxy.bytes',
+      'manifestSha256: manifest.sha256',
+    ]);
 
     const coordinatorAssignment = descendants<ts.BinaryExpression>(productionFunction!, ts.SyntaxKind.BinaryExpression)
       .find((assignment) => (
@@ -124,7 +153,34 @@ describe('SSE durable replay', () => {
 
     const executorCalls = callsNamed(productionFunction!, 'createDockerExecutor');
     expect(executorCalls).toHaveLength(1);
+    expect(admittedPackageChecks[0]!.pos).toBeLessThan(executorCalls[0]!.pos);
     const executorOptions = objectArgument(executorCalls[0]!, 'createDockerExecutor');
+    const containerName = property(executorOptions, 'containerName').initializer;
+    expect(ts.isCallExpression(containerName)).toBe(true);
+    const containerNameCall = containerName as ts.CallExpression;
+    expectIdentifier(containerNameCall.expression, 'createDockerContainerName');
+    expect(containerNameCall.arguments.map((argument) => argument.getText())).toEqual([
+      'context.job.jobId',
+      'operationId',
+      'attempt',
+    ]);
+    expect(property(executorOptions, 'worktreePath').initializer.getText()).toBe('workspacePath');
+    expect(property(executorOptions, 'revalidateWorktreeBeforeCreate').initializer.getText())
+      .toBe('revalidateWorkspace');
+    expect(property(executorOptions, 'revalidateWorktreeBeforeStart').initializer.getText())
+      .toBe('revalidateWorkspace');
+    const targetSetupAdapters = callsNamed(productionFunction!, 'createLockedTargetSetupOperations');
+    expect(targetSetupAdapters).toHaveLength(1);
+    const targetSetupAdapter = targetSetupAdapters[0]!.arguments[0];
+    expect(targetSetupAdapter && ts.isArrowFunction(targetSetupAdapter)).toBe(true);
+    const targetSetupParameter = (targetSetupAdapter as ts.ArrowFunction).parameters[0]?.name.getText();
+    expect(targetSetupParameter).toContain('workspaceIdentity: operationWorkspaceIdentity');
+    const workspaceIdentityChecks = callsNamed(targetSetupAdapter!, 'assertTargetSetupWorkspaceIdentity');
+    expect(workspaceIdentityChecks).toHaveLength(1);
+    expect(workspaceIdentityChecks[0]!.arguments.map((argument) => argument.getText())).toEqual([
+      'workspaceIdentity',
+      'operationWorkspaceIdentity',
+    ]);
     for (const [callbackName, captureName] of [['onStdoutBytes', 'stdout'], ['onStderrBytes', 'stderr']] as const) {
       const callback = property(executorOptions, callbackName).initializer;
       expect(ts.isArrowFunction(callback), `${callbackName} callback`).toBe(true);
@@ -223,6 +279,21 @@ describe('SSE durable replay', () => {
     const compositionCall = callsNamed(composeProperty!.initializer, 'createProductionComposition')[0];
     expect(compositionCall).toBeDefined();
     expect(compositionCall!.arguments[2]!.getText()).toBe('database');
+  });
+
+  it('accepts only the exact retained target-setup workspace identity', async () => {
+    const runnerMain = await import('../../runner/src/main.js') as unknown as Record<string, unknown>;
+    const assertIdentity = runnerMain.assertTargetSetupWorkspaceIdentity;
+    expect(typeof assertIdentity).toBe('function');
+    const check = assertIdentity as (
+      expected: Readonly<{ device: number; inode: number }> | null,
+      observed: Readonly<{ device: number; inode: number }>,
+    ) => void;
+
+    expect(() => check({ device: 8, inode: 13 }, { device: 8, inode: 13 })).not.toThrow();
+    expect(() => check(null, { device: 8, inode: 13 })).toThrow(/workspace identity/i);
+    expect(() => check({ device: 8, inode: 13 }, { device: 9, inode: 13 })).toThrow(/workspace identity/i);
+    expect(() => check({ device: 8, inode: 13 }, { device: 8, inode: 14 })).toThrow(/workspace identity/i);
   });
 
   it('replays stage, exact log, terminal, and keepalive-compatible frames without duplicates', async () => {

@@ -7,6 +7,7 @@ import { loadConfig, withStateRootSnapshot, type LoadedConfig } from '../../conf
 import { loadManifest } from '../../manifest/validate.js';
 import type { LoadedManifest } from '../../manifest/schema.js';
 import { validateBuilderLock, type BuilderLock } from '../../domain/builder-lock.js';
+import { parseBuilderIdentity, type BuilderIdentity } from '../../domain/builder-identity.js';
 import { createInstalledLockReader } from '../../domain/installed-lock.js';
 import { encodeBranchSlug } from '../../domain/paths.js';
 import type { BuilderErrorCode, BuilderErrorContract } from '../../domain/types.js';
@@ -30,7 +31,7 @@ import {
   type QueueSafetyChecks,
   type QueueSystemd,
 } from './queue.js';
-import { createApiCancellationService } from './cancellation.js';
+import { createApiCancellationService, type ApiCancellationService } from './cancellation.js';
 import {
   createCleanupAdmissionRecovery,
   type RecoveryPersistedLogEvent,
@@ -84,6 +85,7 @@ import { completeRecoveredPublication } from '../../runner/src/main.js';
 import { canonicalInstant, encodeJson } from './validation.js';
 import { deriveSystemdBusEnvironment } from './preflight.js';
 import { createDockerCancellationControls } from '../../runner/src/docker-executor.js';
+import { loadInstalledDependencyEgressPolicy } from '../../runner/src/network-policy.js';
 import {
   createApiProcess,
   type ApiProcess,
@@ -100,11 +102,21 @@ const FIXED_ENV = Object.freeze({
   LC_ALL: 'C',
 });
 const SYSTEMD_EXECUTABLE = '/usr/bin/systemctl';
+const SYSTEMD_RUN_EXECUTABLE = '/usr/bin/systemd-run';
 const DOCKER_EXECUTABLE = '/usr/bin/docker';
 const RUNNER_UNIT = /^osi-image-builder-runner@[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.service$/u;
 const HASH64 = /^[0-9a-f]{64}$/u;
 const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const MAX_JOB_PAGE_SIZE = 100;
+const CLEANUP_UNIT = /^osi-image-builder-cleanup@(cln_[0-7][0-9a-hj-km-np-tv-z]{25})\.service$/u;
+const SYSTEMD_SAFE_PATH = /^\/[A-Za-z0-9._/ -]+$/u;
+
+export interface CleanupSystemdSandbox {
+  readonly configRoot: string;
+  readonly stateRoot: string;
+  readonly repositoryPath: string;
+  readonly approvedOutputRoots: readonly string[];
+}
 
 export interface ProductionApiAssemblyOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -167,7 +179,7 @@ function installedVersion(root: string): string {
   return value;
 }
 
-async function readLock(path: string, version: string): Promise<BuilderLock> {
+async function readLock(path: string, version: string): Promise<Readonly<{ lock: BuilderLock; sha256: string }>> {
   const directory = dirname(path);
   const installed = await createInstalledLockReader().read(directory);
   if (installed.identity.lockPath !== path) {
@@ -176,7 +188,10 @@ async function readLock(path: string, version: string): Promise<BuilderLock> {
   const raw: unknown = JSON.parse(installed.text);
   const validated = validateBuilderLock(raw, version);
   if (!validated.ok) throw new Error(`installed builder lock is invalid: ${validated.reason}`);
-  return validated.lock;
+  return Object.freeze({
+    lock: validated.lock,
+    sha256: createHash('sha256').update(installed.bytes).digest('hex'),
+  });
 }
 
 function commandEnvironment(
@@ -209,13 +224,21 @@ function resultJson(stdout: string, operation: string): Record<string, unknown> 
   return value as Record<string, unknown>;
 }
 
-function systemdAdapter(
+export function createProductionSystemdAdapter(
   executor: CommandExecutor,
   bus: Readonly<{ XDG_RUNTIME_DIR: string; DBUS_SESSION_BUS_ADDRESS: string }>,
   now: () => string,
+  cleanupSandbox?: CleanupSystemdSandbox,
 ): QueueSystemd & {
   readonly isActive: (unit: string) => Promise<boolean>;
   readonly stop: (unit: string) => Promise<void>;
+  readonly startCleanup: (unit: string, identity: BuilderIdentity) => Promise<Readonly<{
+    unit: string;
+    argv: readonly string[];
+    exitCode: number | null;
+    timedOut: boolean;
+    signal: NodeJS.Signals | null;
+  }>>;
   readonly inspectRecovery: (
     unit: string,
   ) => Promise<{ readonly unit: string; readonly active: boolean; readonly observedAt: string }>;
@@ -269,6 +292,93 @@ function systemdAdapter(
     });
   };
 
+  const startCleanup = async (unit: string, identityValue: BuilderIdentity) => {
+    const match = unit.match(CLEANUP_UNIT);
+    if (match === null || cleanupSandbox === undefined) {
+      throw new Error('cleanup systemd admission sandbox is unavailable');
+    }
+    const identity = parseBuilderIdentity(identityValue);
+    const canonicalPath = (path: string, field: string): string => {
+      if (!SYSTEMD_SAFE_PATH.test(path) || resolve(path) !== path) {
+        throw new Error(`cleanup systemd ${field} is invalid`);
+      }
+      return path;
+    };
+    const unitPath = (path: string, prefix = ''): string => `"${prefix}${path}"`;
+    const configRoot = canonicalPath(cleanupSandbox.configRoot, 'config root');
+    const stateRoot = canonicalPath(cleanupSandbox.stateRoot, 'state root');
+    const repositoryPath = canonicalPath(cleanupSandbox.repositoryPath, 'repository path');
+    const runtimeRoot = canonicalPath(bus.XDG_RUNTIME_DIR, 'runtime root');
+    if (cleanupSandbox.approvedOutputRoots.length === 0) {
+      throw new Error('cleanup systemd approved output roots are unavailable');
+    }
+    const outputRoots = cleanupSandbox.approvedOutputRoots.map((path) => canonicalPath(path, 'output root'));
+    if (new Set(outputRoots).size !== outputRoots.length) {
+      throw new Error('cleanup systemd approved output roots are not unique');
+    }
+    const outputWorkRoots = outputRoots.map((path) => join(path, '.osi-image-builder'));
+    const cleanupExecutable = join(identity.packageRoot, 'bin', 'osi-image-builder-cleanup');
+    const publisherExecutable = join(identity.packageRoot, 'bin', 'osi-image-publish');
+    const visibleReadOnly = [identity.packageRoot, configRoot, ...outputRoots, runtimeRoot]
+      .map((path) => unitPath(path)).join(' ');
+    const visibleWritable = [stateRoot, ...outputWorkRoots]
+      .map((path) => unitPath(path)).join(' ');
+    const executablePaths = [
+      cleanupExecutable,
+      publisherExecutable,
+      '/usr/bin/env',
+      '/usr/bin/node',
+      '/usr/bin/systemctl',
+      '/usr/bin/docker',
+      '/usr/lib',
+      '/usr/lib64',
+    ].map((path) => unitPath(path)).join(' ');
+    const args = [
+      '--user',
+      `--unit=${unit}`,
+      '--expand-environment=no',
+      '--collect',
+      '--no-block',
+      '--service-type=exec',
+      '--property=KillMode=control-group',
+      '--property=Restart=no',
+      '--property=NoNewPrivileges=yes',
+      '--property=PrivateTmp=yes',
+      '--property=ProtectSystem=strict',
+      '--property=ProtectHome=tmpfs',
+      `--property=BindReadOnlyPaths=${visibleReadOnly}`,
+      `--property=BindPaths=${visibleWritable}`,
+      `--property=InaccessiblePaths=${unitPath(repositoryPath, '-')}`,
+      '--property=NoExecPaths=/',
+      `--property=ExecPaths=${executablePaths}`,
+      '--property=PrivateDevices=yes',
+      '--property=ProtectControlGroups=yes',
+      '--property=ProtectKernelModules=yes',
+      '--property=ProtectKernelTunables=yes',
+      '--property=ProtectKernelLogs=yes',
+      '--property=RestrictAddressFamilies=AF_UNIX',
+      '--property=RestrictNamespaces=yes',
+      '--property=RestrictRealtime=yes',
+      '--property=RestrictSUIDSGID=yes',
+      '--property=LockPersonality=yes',
+      '--property=CapabilityBoundingSet=',
+      '--property=UMask=0077',
+      `--setenv=XDG_CONFIG_HOME=${dirname(configRoot)}`,
+      `--setenv=XDG_STATE_HOME=${dirname(stateRoot)}`,
+      '--',
+      cleanupExecutable,
+      match[1]!,
+    ] as const;
+    const result = await run([SYSTEMD_RUN_EXECUTABLE, ...args]);
+    return Object.freeze({
+      unit,
+      argv: ['systemd-run', ...args],
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      signal: result.signal,
+    });
+  };
+
   const listActive: NonNullable<QueueSystemd['listActive']> = async () => {
     const result = requireSuccessful(await run([
       SYSTEMD_EXECUTABLE,
@@ -299,6 +409,7 @@ function systemdAdapter(
   return Object.freeze({
     inspect,
     start,
+    startCleanup,
     listActive,
     isActive: async (unit: string) => {
       const observation = await inspect(unit);
@@ -313,6 +424,29 @@ function systemdAdapter(
         observedAt: observation.observedAt,
       });
     },
+  });
+}
+
+export function createProductionCleanupSystemd(
+  systemd: Pick<ReturnType<typeof createProductionSystemdAdapter>, 'startCleanup' | 'isActive' | 'stop' | 'inspectRecovery'>,
+  resolveIdentity: (unit: string) => Promise<BuilderIdentity>,
+): {
+  readonly start: (unit: string) => Promise<void>;
+  readonly isActive: (unit: string) => Promise<boolean>;
+  readonly stop: (unit: string) => Promise<void>;
+  readonly inspect: (unit: string) => Promise<{ readonly unit: string; readonly active: boolean; readonly observedAt: string }>;
+} {
+  return Object.freeze({
+    start: async (unit: string): Promise<void> => {
+      const identity = await resolveIdentity(unit);
+      const result = await systemd.startCleanup(unit, identity);
+      if (result.exitCode !== 0 || result.timedOut || result.signal !== null) {
+        throw new Error('cleanup systemd unit start failed');
+      }
+    },
+    isActive: systemd.isActive,
+    stop: systemd.stop,
+    inspect: systemd.inspectRecovery,
   });
 }
 
@@ -720,6 +854,11 @@ function cleanupAdmissionsStartupService(
   };
 }
 
+function reportCancellationProcessError(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`cancellation coordination failed: ${message.replace(/[\r\n\t]+/gu, ' ').slice(0, 512)}\n`);
+}
+
 function liveRunnerStartupService(
   database: DatabaseSync,
   systemd: QueueSystemd,
@@ -756,6 +895,20 @@ function liveRunnerStartupService(
       }
     }
     return Object.freeze({ blockers: Object.freeze(blockers) });
+  };
+}
+
+function cancellationCoordinationStartupService(
+  cancellation: Pick<ApiCancellationService, 'resumePending'>,
+): StartupService {
+  return async () => {
+    const report = await cancellation.resumePending();
+    return Object.freeze({
+      blockers: Object.freeze(report.failures.map((failure) => ({
+        code: 'CANCELLATION_COORDINATION_PENDING',
+        details: { jobId: failure.jobId, reason: failure.kind },
+      }))),
+    });
   };
 }
 
@@ -1892,7 +2045,7 @@ async function startFailureRecoveryProof(
 }
 
 export function physicalRecoveryProbe(
-  systemd: ReturnType<typeof systemdAdapter>,
+  systemd: ReturnType<typeof createProductionSystemdAdapter>,
   database: DatabaseSync,
   store: BuilderStore,
   docker: DockerCancellationControls,
@@ -2017,15 +2170,26 @@ export async function assembleProductionApi(
   if (resolve(loaded.config.builderLockPath) !== lockPath) {
     throw new Error('configured builder lock does not match the selected installation');
   }
-  const lock = await readLock(lockPath, version);
+  const lockAuthority = await readLock(lockPath, version);
+  const lock = lockAuthority.lock;
+  await loadInstalledDependencyEgressPolicy(packageDirectory, lock.dependencyEgressProxySha256);
   const manifest = loadManifest(join(packageDirectory, 'manifest', 'targets.json'));
+  const [executionDefinitionBytes, runnerBytes, cleanupWorkerBytes] = await Promise.all([
+    readFile(join(packageDirectory, 'execution-definition.json')),
+    readFile(join(packageDirectory, 'bin', 'osi-image-builder-runner')),
+    readFile(join(packageDirectory, 'bin', 'osi-image-builder-cleanup')),
+  ]);
+  const executionDefinitionSha256 = createHash('sha256').update(executionDefinitionBytes).digest('hex');
+  if (executionDefinitionSha256 !== lock.executionDefinitionSha256 || lock.imageId === undefined) {
+    throw new Error('selected installation has no complete admitted builder identity');
+  }
   const database = openBuilderDatabase(join(loaded.stateRoot, 'jobs.sqlite'), {
     migrationsDirectory: join(packageDirectory, 'api', 'migrations'),
   });
   try {
   const store = new BuilderStore(database);
   const apiStore = createApiStore(database, store);
-  const ownership = new OwnershipStore(database, { now });
+  const ownership = new OwnershipStore(database, { now, stateRoot: loaded.stateRoot });
   const executor = options.commandExecutor ?? createCommandExecutor();
   const publisher = await createPublisher(packageDirectory, lock, loaded, executor);
   const source = new SourceResolver({
@@ -2047,12 +2211,30 @@ export async function assembleProductionApi(
   });
   const enqueue = createProductionEnqueueService({
     manifest,
+    builderIdentity: {
+      packageVersion: lock.packageVersion,
+      packageRoot: packageDirectory,
+      lockSha256: lockAuthority.sha256,
+      executionDefinitionSha256,
+      targetManifestSha256: manifest.sha256,
+      runnerSha256: createHash('sha256').update(runnerBytes).digest('hex'),
+      cleanupWorkerSha256: createHash('sha256').update(cleanupWorkerBytes).digest('hex'),
+      dependencyEgressProxySha256: lock.dependencyEgressProxySha256,
+      imageReference: `${lock.imageRepository}@sha256:${lock.imageDigest}`,
+      imageId: `sha256:${lock.imageId}`,
+      imageDigest: lock.imageDigest,
+    },
     preflight,
     ownership,
     store,
   });
   const bus = await deriveSystemdBusEnvironment();
-  const systemd = systemdAdapter(executor, bus, now);
+  const systemd = createProductionSystemdAdapter(executor, bus, now, {
+    configRoot: loaded.configRoot,
+    stateRoot: loaded.stateRoot,
+    repositoryPath: loaded.config.repository.path,
+    approvedOutputRoots: loaded.config.approvedOutputRoots.map((root) => root.path),
+  });
   const docker = dockerRecoveryAdapter(executor, now);
   const recoveryDocker = createDockerCancellationControls({
     commandExecutor: executor,
@@ -2068,19 +2250,39 @@ export async function assembleProductionApi(
     stateRoot: loaded.stateRoot,
     db: database,
     ownership,
-    systemd: {
-      start: async (unit) => {
-        const result = await systemd.start(unit);
-        if (
-          result.exitCode !== 0
-          || result.timedOut
-          || result.signal !== null
-        ) throw new Error('cleanup systemd unit start failed');
-      },
-      isActive: systemd.isActive,
-      stop: systemd.stop,
-      inspect: systemd.inspectRecovery,
-    },
+    systemd: createProductionCleanupSystemd(systemd, async (unit) => {
+      const match = unit.match(CLEANUP_UNIT);
+      if (match === null) throw new Error('cleanup systemd unit is invalid');
+      const row = database.prepare(`SELECT lease.unit_name, lease.status,
+        job.builder_identity_status, job.builder_package_version, job.builder_package_root,
+        job.builder_lock_sha256, job.builder_execution_definition_sha256,
+        job.builder_target_manifest_sha256, job.builder_runner_sha256,
+        job.builder_cleanup_worker_sha256, job.builder_image_reference,
+        job.builder_dependency_egress_proxy_sha256,
+        job.builder_image_id, job.builder_image_digest
+        FROM cleanup_leases AS lease
+        JOIN jobs AS job ON job.job_id=lease.job_id
+        WHERE lease.admission_id=?`).get(match[1]!) as Record<string, unknown> | undefined;
+      if (
+        row === undefined
+        || row.unit_name !== unit
+        || (row.status !== 'admitted' && row.status !== 'claimed')
+        || row.builder_identity_status !== 'admitted'
+      ) throw new Error('cleanup admission has no complete admitted builder identity');
+      return parseBuilderIdentity({
+        packageVersion: row.builder_package_version,
+        packageRoot: row.builder_package_root,
+        lockSha256: row.builder_lock_sha256,
+        executionDefinitionSha256: row.builder_execution_definition_sha256,
+        targetManifestSha256: row.builder_target_manifest_sha256,
+        runnerSha256: row.builder_runner_sha256,
+        cleanupWorkerSha256: row.builder_cleanup_worker_sha256,
+        dependencyEgressProxySha256: row.builder_dependency_egress_proxy_sha256,
+        imageReference: row.builder_image_reference,
+        imageId: row.builder_image_id,
+        imageDigest: row.builder_image_digest,
+      });
+    }),
     handBack: recoveryHandBack(docker, physical),
   });
   const recoveryService = createApiRecoveryService({
@@ -2103,6 +2305,7 @@ export async function assembleProductionApi(
     ownership,
     systemdBusEnvironment: bus,
     commandExecutor: executor,
+    reportError: reportCancellationProcessError,
   });
   const blockerVerifier = createPublishBlockerFinalVerifier(
     loaded.pathAuthorities.approvedRoots,
@@ -2160,6 +2363,7 @@ export async function assembleProductionApi(
   const migrations = migrationStartupService(database);
   const cleanupAdmissions = cleanupAdmissionsStartupService(recovery);
   const liveRunnerClassification = liveRunnerStartupService(database, systemd, now);
+  const cancellationCoordination = cancellationCoordinationStartupService(cancellation);
   const stalePublishingRecovery = createPublishingRecoveryStartupService({
     database,
     store,
@@ -2203,6 +2407,7 @@ export async function assembleProductionApi(
       migrations: migrations,
       cleanupAdmissions: cleanupAdmissions,
       liveRunnerClassification: liveRunnerClassification,
+      cancellationCoordination: cancellationCoordination,
       stalePublishingRecovery: stalePublishingRecovery,
       nonPublishingInterruption: nonPublishingInterruption,
       retention,

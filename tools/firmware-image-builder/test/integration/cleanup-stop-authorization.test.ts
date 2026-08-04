@@ -8,6 +8,7 @@ import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { OwnershipStore } from '../../api/src/ownership.js';
 import { createCleanupAdmissionRecovery, type CleanupAdmissionRecovery, type RecoveryDatabase, type RecoverySystemd } from '../../api/src/recovery.js';
 import type { JsonObject } from '../../api/src/store.js';
+import { createTestBuilderIdentity } from '../helpers/builder-identity.js';
 
 const NOW = '2026-07-27T12:00:00.000Z';
 const EXPIRES = '2026-07-27T12:05:00.000Z';
@@ -30,14 +31,28 @@ function snapshot() {
 }
 
 function seedJob(db: ReturnType<typeof openBuilderDatabase>): void {
+  const identity = createTestBuilderIdentity(SHA);
+  const values = [
+    JOB_ID, `${JOB_ID}-request`, 'origin', 'refs/remotes/origin/main', 'main', 'main', 'a'.repeat(40), 'a'.repeat(40),
+    'rpi-5', 'release', SHA, 'admitted', identity.packageVersion, identity.packageRoot, identity.lockSha256,
+    identity.executionDefinitionSha256, identity.targetManifestSha256, identity.runnerSha256,
+    identity.cleanupWorkerSha256, identity.dependencyEgressProxySha256,
+    identity.imageReference, identity.imageId, identity.imageDigest,
+    NOW, 'owner', 'stop authorization', NOW, 'starting', 'dispatched', NOW, NOW, '{}', '{}',
+    `osi-image-builder-runner@${JOB_ID}.service`,
+  ];
   db.prepare(
     `INSERT INTO jobs (
        job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha,
-       target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject,
+       target_id, root_id, target_manifest_sha256, builder_identity_status, builder_package_version,
+       builder_package_root, builder_lock_sha256, builder_execution_definition_sha256,
+       builder_target_manifest_sha256, builder_runner_sha256, builder_cleanup_worker_sha256,
+       builder_dependency_egress_proxy_sha256,
+       builder_image_reference, builder_image_id, builder_image_digest, source_commit_time, source_author, source_subject,
        accepted_at, state, queue_state, created_at, updated_at, source_preparation_json,
        offline_feed_preparation_json, runner_unit
-     ) VALUES (?, ?, 'origin', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'release', ?, ?, 'owner', 'stop authorization', ?, 'starting', 'dispatched', ?, ?, '{}', '{}', ?)`,
-  ).run(JOB_ID, `${JOB_ID}-request`, 'a'.repeat(40), 'a'.repeat(40), SHA, NOW, NOW, NOW, NOW, `osi-image-builder-runner@${JOB_ID}.service`);
+     ) VALUES (${values.map(() => '?').join(', ')})`,
+  ).run(...values);
 }
 
 function systemd(active: { value: boolean }, stopCalls: string[]): RecoverySystemd {

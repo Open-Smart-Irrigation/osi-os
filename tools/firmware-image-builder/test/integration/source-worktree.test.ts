@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { access, chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -80,6 +80,7 @@ async function createFixture(options: {
   readonly checkoutFilter?: 'smudge' | 'process';
   readonly coreSymlinks?: boolean;
   readonly declaredGitlink?: boolean;
+  readonly infoAttributes?: string;
   readonly race?: RaceControl;
   readonly pathAuthorityDependencies?: Partial<PathAuthorityDependencies>;
 } = {}) {
@@ -134,6 +135,9 @@ async function createFixture(options: {
   await gitRaw(active, 'commit', '-m', 'pinned vendored source');
   const sha = await git(active, 'rev-parse', 'HEAD');
   await gitRaw(active, 'update-ref', 'refs/remotes/origin/main', sha);
+  if (options.infoAttributes !== undefined) {
+    await writeFile(join(active, '.git', 'info', 'attributes'), options.infoAttributes);
+  }
   const commitTime = new Date(Number(await git(active, 'show', '-s', '--format=%ct', sha)) * 1_000).toISOString();
   const authorName = await git(active, 'show', '-s', '--format=%an', sha);
   const authorEmail = await git(active, 'show', '-s', '--format=%ae', sha);
@@ -286,7 +290,105 @@ describe('source worktree integration', () => {
     expect(SOURCE_GIT_ENV.GIT_CONFIG_VALUE_1).toBe('never');
     expect(await git(workspacePath, 'symbolic-ref', '--quiet', '--short', 'HEAD').catch(() => '')).toBe('');
     expect(await git(workspacePath, 'rev-parse', 'HEAD')).toBe(fixture.sha);
+    expect(await git(workspacePath, 'remote', 'get-url', 'origin'))
+      .toBe('ssh://git.example/Open-Smart-Irrigation/osi-os.git');
     expect(await git(fixture.active, 'status', '--porcelain=v1', '--untracked-files=all')).toBe(fixture.dirtyStatusBefore);
+  });
+
+  it('isolates materialization from repository-local merge attributes without changing the active checkout', async () => {
+    const fixture = await createFixture({ infoAttributes: '.superpowers/sdd/progress.md merge=ours\n' });
+    const workspacePath = join(fixture.statePath, 'jobs', 'job-info-attributes', 'workspace', 'source');
+
+    await expect(setupSourceWorktree({
+      repositoryPath: fixture.active,
+      stateRoot: fixture.stateRoot,
+      jobId: 'job-info-attributes',
+      source: fixture.source!,
+      target: { openwrtTarget: 'bcm27xx/bcm2712' },
+    })).resolves.toMatchObject({ workspacePath });
+
+    expect(await readFile(join(fixture.active, '.git', 'info', 'attributes'), 'utf8'))
+      .toBe('.superpowers/sdd/progress.md merge=ours\n');
+    expect(await git(fixture.active, 'status', '--porcelain=v1', '--untracked-files=all'))
+      .toBe(fixture.dirtyStatusBefore);
+  });
+
+  it('creates an object-independent workspace when the configured repository borrows objects', async () => {
+    const fixture = await createFixture();
+    const backing = join(fixture.root, 'backing');
+    await rename(fixture.active, backing);
+    await execFile('/usr/bin/git', ['clone', '--shared', backing, fixture.active], {
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' },
+    });
+    await gitRaw(fixture.active, 'remote', 'set-url', 'origin', 'ssh://git.example/Open-Smart-Irrigation/osi-os.git');
+    expect(await readFile(join(fixture.active, '.git', 'objects', 'info', 'alternates'), 'utf8'))
+      .toContain(backing);
+    const workspacePath = join(fixture.statePath, 'jobs', 'job-shared-source', 'workspace', 'source');
+
+    await expect(setupSourceWorktree({
+      repositoryPath: fixture.active,
+      stateRoot: fixture.stateRoot,
+      jobId: 'job-shared-source',
+      source: fixture.source!,
+      target: { openwrtTarget: 'bcm27xx/bcm2712' },
+    })).resolves.toMatchObject({ workspacePath });
+
+    await rm(backing, { recursive: true });
+    await expect(access(join(workspacePath, '.git', 'objects', 'info', 'alternates')))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(gitRaw(workspacePath, 'fsck', '--connectivity-only')).resolves.toBeUndefined();
+  });
+
+  it('materializes the exact pinned commit after every source ref stops advertising it', async () => {
+    const fixture = await createFixture();
+    const tree = await git(fixture.active, 'rev-parse', 'HEAD^{tree}');
+    const replacement = await git(fixture.active, 'commit-tree', tree, '-m', 'replacement root');
+    await gitRaw(fixture.active, 'update-ref', 'HEAD', replacement);
+    await gitRaw(fixture.active, 'update-ref', 'refs/remotes/origin/main', replacement);
+    expect((await git(fixture.active, 'rev-list', '--all')).split('\n')).not.toContain(fixture.sha);
+    await expect(gitRaw(fixture.active, 'cat-file', '-e', `${fixture.sha}^{commit}`)).resolves.toBeUndefined();
+    const workspacePath = join(fixture.statePath, 'jobs', 'job-dangling-pinned', 'workspace', 'source');
+
+    await expect(setupSourceWorktree({
+      repositoryPath: fixture.active,
+      stateRoot: fixture.stateRoot,
+      jobId: 'job-dangling-pinned',
+      source: fixture.source!,
+      target: { openwrtTarget: 'bcm27xx/bcm2712' },
+    })).resolves.toMatchObject({
+      workspacePath,
+      observations: { worktreeHead: fixture.sha },
+    });
+  });
+
+  it('rejects replacement of the configured repository path while Git inspection is in progress', async () => {
+    const fixture = await createFixture();
+    const realGit = createSourceGitCommand();
+    const heldRepository = `${fixture.active}-held`;
+    let swapped = false;
+
+    await expect(setupSourceWorktree({
+      repositoryPath: fixture.active,
+      stateRoot: fixture.stateRoot,
+      jobId: 'job-repository-race',
+      source: fixture.source!,
+      target: { openwrtTarget: 'bcm27xx/bcm2712' },
+      git: {
+        async run(args, options) {
+          const result = await realGit.run(args, options);
+          if (!swapped && args[0] === 'cat-file') {
+            swapped = true;
+            await rename(fixture.active, heldRepository);
+            await symlink(heldRepository, fixture.active, 'dir');
+          }
+          return result;
+        },
+      },
+    })).rejects.toMatchObject({ code: 'SOURCE_NOT_COMMIT' });
+
+    expect(swapped).toBe(true);
+    await expect(access(join(fixture.statePath, 'jobs', 'job-repository-race', 'workspace', 'source')))
+      .rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it.each(['smudge', 'process'] as const)(
@@ -486,18 +588,24 @@ describe('source worktree integration', () => {
   it.each([
     ['after worktree add', { trigger: 5 }],
     ['during target inspection', { heldPathSuffix: '/workspace/source/openwrt' }],
-    ['during final verification', { trigger: 19 }],
+    ['during final verification', { trigger: 35 }],
   ] as const)('retains every ancestor binding %s', async (_phase, injection) => {
     for (const ancestor of ['state', 'jobs', 'job', 'workspace'] as const) {
       const race: RaceControl = { ancestor, ...injection, statePath: '', validations: 0, swapped: false };
       const fixture = await createFixture({ race });
-      await expect(setupSourceWorktree({
-        repositoryPath: fixture.active,
-        stateRoot: fixture.stateRoot,
-        jobId: 'job-race',
-        source: fixture.source!,
-        target: { openwrtTarget: 'bcm27xx/bcm2712' },
-      })).rejects.toMatchObject({ code: 'WORKTREE_CREATE_FAILED' });
+      let failure: unknown;
+      try {
+        await setupSourceWorktree({
+          repositoryPath: fixture.active,
+          stateRoot: fixture.stateRoot,
+          jobId: 'job-race',
+          source: fixture.source!,
+          target: { openwrtTarget: 'bcm27xx/bcm2712' },
+        });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure, `${_phase}: ${ancestor}`).toMatchObject({ code: 'WORKTREE_CREATE_FAILED' });
       expect(race.swapped).toBe(true);
       await expect(access(join(fixture.statePath, 'jobs', 'job-race', 'workspace', 'source'))).rejects.toMatchObject({ code: 'ENOENT' });
     }

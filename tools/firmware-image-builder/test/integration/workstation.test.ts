@@ -92,12 +92,16 @@ async function writeSelectedInstallation(installRoot: string): Promise<{
   const versionRoot = join(installRoot, packageVersion);
   const manifestDirectory = join(versionRoot, 'manifest');
   const binDirectory = join(versionRoot, 'bin');
+  const operationsDirectory = join(versionRoot, 'operations');
   await mkdir(manifestDirectory, { recursive: true });
   await mkdir(binDirectory);
+  await mkdir(operationsDirectory);
   const publisher = Buffer.from(`#!/bin/sh
 printf '%s\\n' '{"available":true,"published":false,"quarantined":false,"selfTest":true,"mutationCount":0}'
 `);
   const publisherSha256 = createHash('sha256').update(publisher).digest('hex');
+  const dependencyEgressProxy = await readFile(new URL('../../builder/operations/osi-dependency-egress-proxy.cjs', import.meta.url));
+  const dependencyEgressProxySha256 = createHash('sha256').update(dependencyEgressProxy).digest('hex');
   const executionDefinitionSha256 = '1'.repeat(64);
   const lock = {
     schemaVersion: 1,
@@ -112,24 +116,27 @@ printf '%s\\n' '{"available":true,"published":false,"quarantined":false,"selfTes
     nodeVersion: '22.17.0',
     executionDefinitionSha256,
     validationEvidenceSha256: '5'.repeat(64),
+    dependencyEgressProxySha256,
     installable: true,
     publisherSha256,
   };
   const lockText = `${JSON.stringify(lock)}\n`;
-  const manifestText = `${JSON.stringify({ schemaVersion: 1, targets: ['rpi-5', 'rpi-2'] })}\n`;
+  const manifestBytes = await readFile(new URL('../../manifest/targets.json', import.meta.url));
   const selection = {
     executionDefinitionSha256,
     lockSha256: createHash('sha256').update(lockText).digest('hex'),
-    manifestSha256: createHash('sha256').update(manifestText).digest('hex'),
+    manifestSha256: createHash('sha256').update(manifestBytes).digest('hex'),
     packageVersion,
     publisherSha256,
   };
   await writeFile(join(installRoot, 'selected.json'), `${JSON.stringify(selection)}\n`, { mode: 0o600 });
   await writeFile(join(versionRoot, 'builder.lock.json'), lockText, { mode: 0o600 });
-  await writeFile(join(manifestDirectory, 'targets.json'), manifestText, { mode: 0o444 });
+  await writeFile(join(manifestDirectory, 'targets.json'), manifestBytes, { mode: 0o444 });
   await writeFile(join(binDirectory, 'osi-image-publish'), publisher, { mode: 0o555 });
+  await writeFile(join(operationsDirectory, 'osi-dependency-egress-proxy.cjs'), dependencyEgressProxy, { mode: 0o444 });
   await chmod(manifestDirectory, 0o555);
   await chmod(binDirectory, 0o555);
+  await chmod(operationsDirectory, 0o555);
   await chmod(versionRoot, 0o555);
   await chmod(installRoot, 0o700);
   return { packageVersion, lock };
@@ -151,6 +158,7 @@ function productionLock(packageVersion: string): Readonly<Record<string, unknown
     nodeVersion: '22.17.0',
     executionDefinitionSha256: 'd'.repeat(64),
     validationEvidenceSha256: 'e'.repeat(64),
+    dependencyEgressProxySha256: '1'.repeat(64),
     installable: true,
     publisherSha256: 'f'.repeat(64),
   };
@@ -273,6 +281,89 @@ describe('deterministic workstation prerequisite adapters', () => {
     });
   });
 
+  it('holds and hashes the installed dependency egress proxy through its selected lock', async () => {
+    const installRoot = await mkdtemp(join(tmpdir(), 'osi-selected-proxy-positive-'));
+    temporaryDirectories.push(installRoot);
+    const fixture = await writeSelectedInstallation(installRoot);
+
+    await expect(readSelectedInstallation({ installRoot })).resolves.toMatchObject({
+      lock: { dependencyEgressProxySha256: expect.stringMatching(/^[a-f0-9]{64}$/u) },
+    });
+    expect(fixture.lock.dependencyEgressProxySha256).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it('rejects a selected installation when its dependency egress proxy is missing', async () => {
+    const installRoot = await mkdtemp(join(tmpdir(), 'osi-selected-proxy-missing-'));
+    temporaryDirectories.push(installRoot);
+    const fixture = await writeSelectedInstallation(installRoot);
+
+    await chmod(join(installRoot, fixture.packageVersion, 'operations'), 0o755);
+    await rm(join(installRoot, fixture.packageVersion, 'operations', 'osi-dependency-egress-proxy.cjs'));
+    await chmod(join(installRoot, fixture.packageVersion, 'operations'), 0o555);
+
+    await expect(readSelectedInstallation({ installRoot })).rejects.toThrow(/proxy|not found|unsafe/u);
+  });
+
+  it('rejects a selected installation when its dependency egress proxy hash differs from the lock', async () => {
+    const installRoot = await mkdtemp(join(tmpdir(), 'osi-selected-proxy-hash-'));
+    temporaryDirectories.push(installRoot);
+    const fixture = await writeSelectedInstallation(installRoot);
+    const proxyPath = join(installRoot, fixture.packageVersion, 'operations', 'osi-dependency-egress-proxy.cjs');
+    await chmod(dirname(proxyPath), 0o755);
+    await chmod(proxyPath, 0o644);
+    await writeFile(proxyPath, `${await readFile(proxyPath, 'utf8')}\n`);
+    await chmod(proxyPath, 0o444);
+    await chmod(dirname(proxyPath), 0o555);
+
+    await expect(readSelectedInstallation({ installRoot })).rejects.toThrow(/proxy|hash|evidence/u);
+  });
+
+  it('rejects a writable or symlinked dependency egress proxy', async () => {
+    const writableRoot = await mkdtemp(join(tmpdir(), 'osi-selected-proxy-writable-'));
+    temporaryDirectories.push(writableRoot);
+    const writableFixture = await writeSelectedInstallation(writableRoot);
+    const writablePath = join(writableRoot, writableFixture.packageVersion, 'operations', 'osi-dependency-egress-proxy.cjs');
+    await chmod(writablePath, 0o644);
+    await expect(readSelectedInstallation({ installRoot: writableRoot })).rejects.toThrow(/proxy|unsafe/u);
+
+    const symlinkRoot = await mkdtemp(join(tmpdir(), 'osi-selected-proxy-symlink-'));
+    temporaryDirectories.push(symlinkRoot);
+    const symlinkFixture = await writeSelectedInstallation(symlinkRoot);
+    const symlinkPath = join(symlinkRoot, symlinkFixture.packageVersion, 'operations', 'osi-dependency-egress-proxy.cjs');
+    const movedPath = `${symlinkPath}.real`;
+    await chmod(dirname(symlinkPath), 0o755);
+    await rename(symlinkPath, movedPath);
+    await symlink(movedPath, symlinkPath);
+    await chmod(dirname(symlinkPath), 0o555);
+    await chmod(movedPath, 0o444);
+    await expect(readSelectedInstallation({ installRoot: symlinkRoot })).rejects.toThrow(/proxy|unsafe/u);
+  });
+
+  it('rejects a dependency egress proxy pathname swap after opening it', async () => {
+    const installRoot = await mkdtemp(join(tmpdir(), 'osi-selected-proxy-swap-'));
+    temporaryDirectories.push(installRoot);
+    const fixture = await writeSelectedInstallation(installRoot);
+    const proxyPath = join(installRoot, fixture.packageVersion, 'operations', 'osi-dependency-egress-proxy.cjs');
+    const proxyBytes = await readFile(proxyPath);
+    let swapped = false;
+
+    await expect(readSelectedInstallation({
+      installRoot,
+      hooks: {
+        afterFileOpen: async ({ name }: { name: string }) => {
+          if (swapped || name !== 'osi-dependency-egress-proxy.cjs') return;
+          swapped = true;
+          const operations = dirname(proxyPath);
+          await chmod(operations, 0o755);
+          await rename(proxyPath, `${proxyPath}.old`);
+          await writeFile(proxyPath, proxyBytes, { mode: 0o444 });
+          await chmod(operations, 0o555);
+        },
+      },
+    })).rejects.toThrow(/changed|identity|proxy/u);
+    expect(swapped).toBe(true);
+  });
+
   it('holds effective-home authority through default selected-installation access', async () => {
     const trustedHome = await mkdtemp(join(tmpdir(), 'osi-selected-effective-home-'));
     temporaryDirectories.push(trustedHome);
@@ -373,8 +464,25 @@ describe('deterministic workstation prerequisite adapters', () => {
     await expect(readSelectedInstallation({ installRoot })).rejects.toThrow(/generated builder lock is invalid/u);
   });
 
+  it('rejects a lock that omits the dependency egress proxy digest', async () => {
+    const installRoot = await mkdtemp(join(tmpdir(), 'osi-selected-proxy-lock-missing-'));
+    temporaryDirectories.push(installRoot);
+    const { packageVersion } = await writeSelectedInstallation(installRoot);
+    const lockPath = join(installRoot, packageVersion, 'builder.lock.json');
+    const selectionPath = join(installRoot, 'selected.json');
+    const lock = JSON.parse(await readFile(lockPath, 'utf8')) as Record<string, unknown>;
+    delete lock.dependencyEgressProxySha256;
+    const lockText = `${JSON.stringify(lock)}\n`;
+    const selection = JSON.parse(await readFile(selectionPath, 'utf8')) as Record<string, unknown>;
+    selection.lockSha256 = createHash('sha256').update(lockText).digest('hex');
+    await writeFile(lockPath, lockText, { mode: 0o600 });
+    await writeFile(selectionPath, `${JSON.stringify(selection)}\n`, { mode: 0o600 });
+
+    await expect(readSelectedInstallation({ installRoot })).rejects.toThrow(/generated builder lock is invalid/u);
+  });
+
   it('rejects hardlinked selected-installation files', async () => {
-    for (const relative of ['selected.json', '2026.07.29.1/builder.lock.json', '2026.07.29.1/manifest/targets.json', '2026.07.29.1/bin/osi-image-publish']) {
+    for (const relative of ['selected.json', '2026.07.29.1/builder.lock.json', '2026.07.29.1/manifest/targets.json', '2026.07.29.1/bin/osi-image-publish', '2026.07.29.1/operations/osi-dependency-egress-proxy.cjs']) {
       const installRoot = await mkdtemp(join(tmpdir(), 'osi-selected-hardlink-'));
       temporaryDirectories.push(installRoot);
       await writeSelectedInstallation(installRoot);
@@ -401,6 +509,7 @@ describe('deterministic workstation prerequisite adapters', () => {
     ['2026.07.29.1/builder.lock.json', 0o600],
     ['2026.07.29.1/manifest/targets.json', 0o444],
     ['2026.07.29.1/bin/osi-image-publish', 0o555],
+    ['2026.07.29.1/operations/osi-dependency-egress-proxy.cjs', 0o444],
   ] as const)('rejects a symlinked selected-installation file: %s', async (relative, finalMode) => {
     const installRoot = await mkdtemp(join(tmpdir(), 'osi-selected-file-symlink-'));
     temporaryDirectories.push(installRoot);

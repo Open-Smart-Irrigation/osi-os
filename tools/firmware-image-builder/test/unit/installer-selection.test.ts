@@ -19,6 +19,7 @@ const IMAGE_DIGEST = digest('a');
 const BASE_IMAGE_DIGEST = digest('b');
 const DOCKERFILE_SHA256 = digest('c');
 const EXECUTION_DEFINITION_SHA256 = digest('d');
+const DEPENDENCY_EGRESS_PROXY_SHA256 = digest('8');
 const EVIDENCE_SHA256 = digest('e');
 const IMAGE_ID = digest('f');
 const DOCKER_IMAGE_ID = `sha256:${IMAGE_ID}`;
@@ -45,6 +46,7 @@ function validLock(): Record<string, unknown> {
     rustConfig: { llvmConfig: '/usr/bin/llvm-config', channel: 'stable', version: '1.85.0', llvmMajor: 19 },
     nodeVersion: '22.14.0',
     executionDefinitionSha256: EXECUTION_DEFINITION_SHA256,
+    dependencyEgressProxySha256: DEPENDENCY_EGRESS_PROXY_SHA256,
     validationEvidenceSha256: EVIDENCE_SHA256,
     installable: true,
     imageId: IMAGE_ID,
@@ -133,7 +135,7 @@ describe('versioned installer selection', () => {
       delete candidate[field];
       await rejectSelection(candidate, {}, 'BUILDER_LOCK_INVALID');
     }
-    for (const field of ['imageDigest', 'baseImageDigest', 'dockerfileSha256', 'executionDefinitionSha256', 'validationEvidenceSha256', 'imageId']) {
+    for (const field of ['imageDigest', 'baseImageDigest', 'dockerfileSha256', 'executionDefinitionSha256', 'dependencyEgressProxySha256', 'validationEvidenceSha256', 'imageId']) {
       for (const value of ['bad', digest('A'), `${digest('a')}0`, '0'.repeat(64)]) {
         await rejectSelection({ ...validLock(), [field]: value }, {}, 'BUILDER_LOCK_INVALID');
       }
@@ -202,6 +204,7 @@ describe('versioned installer selection', () => {
       rustConfig: validLock().rustConfig,
       nodeVersion: '22.14.0',
       executionDefinitionSha256: EXECUTION_DEFINITION_SHA256,
+      dependencyEgressProxySha256: DEPENDENCY_EGRESS_PROXY_SHA256,
       validationEvidenceSha256: EVIDENCE_SHA256,
       publisherSha256: digest('9'),
       imageId: IMAGE_ID,

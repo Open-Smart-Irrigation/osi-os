@@ -20,6 +20,10 @@ import {
 const SHA256 = /^[0-9a-f]{64}$/u;
 const MAX_CAPTURED_COMMANDS = 256;
 const MAX_FRAMED_EVIDENCE_BYTES = JSON_LIMITS.maxEncodedBytes + 1;
+const ACCEPTANCE_EVIDENCE_BASENAMES = Object.freeze([
+  'docker-inspection.json',
+  'real-acceptance-report.json',
+]);
 const PROC_FD = '/proc/self/fd';
 const O_CLOEXEC = (fsConstants as typeof fsConstants & { readonly O_CLOEXEC?: number }).O_CLOEXEC ?? 0;
 const O_PATH = (fsConstants as typeof fsConstants & { readonly O_PATH?: number }).O_PATH ?? 0x200000;
@@ -96,6 +100,41 @@ export interface EvidencePublication {
   readonly bytes: string;
 }
 
+export interface AcceptanceEvidenceIdentity {
+  readonly regular: boolean;
+  readonly singleLink: boolean;
+  readonly device: number;
+  readonly mode: number;
+  readonly size: number;
+}
+
+interface StableAcceptanceEvidenceIdentity extends AcceptanceEvidenceIdentity {
+  readonly inode: number;
+}
+
+export interface AcceptanceEvidencePublication {
+  readonly path: string;
+  readonly sha256: string;
+  readonly bytes: Buffer;
+  readonly regular: boolean;
+  readonly singleLink: boolean;
+  readonly device: number;
+  readonly mode: number;
+  readonly size: number;
+}
+
+export interface AcceptanceEvidenceInput {
+  readonly jobId: string;
+  readonly basename: string;
+  readonly contents: Buffer;
+}
+
+interface AcceptanceEvidenceExpectation {
+  readonly identity: StableAcceptanceEvidenceIdentity;
+  readonly sha256: string;
+  readonly bytes: Buffer;
+}
+
 export interface TargetSetupSourceConfigInput {
   readonly jobId: string;
   readonly targetId: 'rpi-5' | 'rpi-2';
@@ -103,7 +142,7 @@ export interface TargetSetupSourceConfigInput {
 }
 
 export interface EvidenceFileSystem {
-  readonly publishExclusive: (root: StateRootAuthority, relativePath: string, contents: Buffer) => Promise<void>;
+  readonly publishExclusive: (root: StateRootAuthority, relativePath: string, contents: Buffer) => Promise<StableAcceptanceEvidenceIdentity | void>;
 }
 
 export class EvidenceError extends Error {
@@ -448,6 +487,32 @@ function assertReadableEvidenceFile(
   }
 }
 
+function evidenceIdentity(snapshot: FileSnapshot): StableAcceptanceEvidenceIdentity {
+  return Object.freeze({
+    regular: snapshot.stats.isFile() && !snapshot.stats.isSymbolicLink(),
+    singleLink: snapshot.stats.nlink === 1,
+    device: snapshot.stats.dev,
+    inode: snapshot.stats.ino,
+    mode: snapshot.stats.mode & 0o7777,
+    size: snapshot.stats.size,
+  });
+}
+
+function assertExpectedAcceptanceEvidence(
+  snapshot: FileSnapshot,
+  expected: AcceptanceEvidenceExpectation,
+): void {
+  const actual = evidenceIdentity(snapshot);
+  if (actual.regular !== expected.identity.regular
+    || actual.singleLink !== expected.identity.singleLink
+    || actual.device !== expected.identity.device
+    || actual.inode !== expected.identity.inode
+    || actual.mode !== expected.identity.mode
+    || actual.size !== expected.identity.size) {
+    throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence publication identity changed');
+  }
+}
+
 async function assertMountIdentity(
   handle: FileHandle,
   expectedMountId: number,
@@ -674,9 +739,9 @@ async function reconcileExisting(
   contents: Buffer,
   dependencies: PathAuthorityDependencies,
   excludedTemporary = '',
-): Promise<boolean> {
+): Promise<StableAcceptanceEvidenceIdentity | null> {
   const finalHandle = await bindFinalExact(parent, basename, contents);
-  if (finalHandle === null) return false;
+  if (finalHandle === null) return null;
   try {
     await validateBindings(bindings, rootPath, dependencies);
     await reconcileTemporaryLinks(parent, basename, finalHandle, contents, excludedTemporary);
@@ -684,13 +749,13 @@ async function reconcileExisting(
     await verifyFinalBinding(parent, basename, finalHandle, contents);
     await assertNoTemporaryEntries(parent, basename);
     await validateBindings(bindings, rootPath, dependencies);
-    return true;
+    return evidenceIdentity(await snapshotFile(finalHandle, dependencies));
   } finally {
     await finalHandle.close().catch(() => undefined);
   }
 }
 
-async function publishExclusive(root: StateRootAuthority, relativePath: string, contents: Buffer): Promise<void> {
+async function publishExclusive(root: StateRootAuthority, relativePath: string, contents: Buffer): Promise<StableAcceptanceEvidenceIdentity | void> {
   if (process.platform !== 'linux' || typeof fsConstants.O_NOFOLLOW !== 'number' || typeof fsConstants.O_DIRECTORY !== 'number') {
     throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'descriptor publication requires Linux no-follow support');
   }
@@ -700,7 +765,7 @@ async function publishExclusive(root: StateRootAuthority, relativePath: string, 
     throw new EvidenceError('EVIDENCE_PATH_INVALID', 'evidence path is not stable');
   }
   try {
-    await withStateRootSnapshot(root, async ({ snapshot, dependencies }) => {
+    return await withStateRootSnapshot(root, async ({ snapshot, dependencies }) => {
       const handles: FileHandle[] = [];
       const bindings: DirectoryBinding[] = [];
       let temporary = '';
@@ -708,6 +773,7 @@ async function publishExclusive(root: StateRootAuthority, relativePath: string, 
       let temporaryBinding: FileBinding | undefined;
       let finalHandle: FileHandle | undefined;
       let primaryError: unknown;
+      let publishedIdentity: StableAcceptanceEvidenceIdentity | undefined;
       try {
         let current = await open(snapshot.path, DIR_FLAGS);
         handles.push(current);
@@ -731,7 +797,15 @@ async function publishExclusive(root: StateRootAuthority, relativePath: string, 
         const existing = await bindFinalExact(parent, basename, contents);
         if (existing !== null) {
           await existing.close();
-          if (await reconcileExisting(bindings, snapshot.path, parent, basename, contents, dependencies)) return;
+          const reconciledIdentity = await reconcileExisting(
+            bindings,
+            snapshot.path,
+            parent,
+            basename,
+            contents,
+            dependencies,
+          );
+          if (reconciledIdentity !== null) return reconciledIdentity;
           throw new EvidenceError('EVIDENCE_EXISTS', 'canonical evidence already exists');
         }
         try {
@@ -754,8 +828,18 @@ async function publishExclusive(root: StateRootAuthority, relativePath: string, 
         try {
           await link(procChild(parent, temporary), procChild(parent, basename));
         } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'EEXIST'
-            && await reconcileExisting(bindings, snapshot.path, parent, basename, contents, dependencies, temporary)) return;
+          if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+            const reconciledIdentity = await reconcileExisting(
+              bindings,
+              snapshot.path,
+              parent,
+              basename,
+              contents,
+              dependencies,
+              temporary,
+            );
+            if (reconciledIdentity !== null) return reconciledIdentity;
+          }
           if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new EvidenceError('EVIDENCE_EXISTS', 'canonical evidence already exists', { cause: error });
           throw error;
         }
@@ -799,6 +883,13 @@ async function publishExclusive(root: StateRootAuthority, relativePath: string, 
           } catch (error) {
             cleanupError ??= error;
           }
+          try {
+            if (cleanupError === undefined && primaryError === undefined && finalHandle !== undefined) {
+              publishedIdentity = evidenceIdentity(await snapshotFile(finalHandle, dependencies));
+            }
+          } catch (error) {
+            cleanupError ??= error;
+          }
         }
         await finalHandle?.close().catch(() => undefined);
         await temporaryHandle?.close().catch(() => undefined);
@@ -806,6 +897,7 @@ async function publishExclusive(root: StateRootAuthority, relativePath: string, 
         if (cleanupError !== undefined) throw cleanupError;
         if (primaryError !== undefined) throw primaryError;
       }
+      return publishedIdentity;
     });
   } catch (error) {
     if (error instanceof EvidenceError) throw error;
@@ -825,17 +917,27 @@ export class EvidenceWriter {
     this.#fileSystem = options.fileSystem ?? DEFAULT_FILE_SYSTEM;
   }
 
-  async #publish(path: string, contents: Buffer): Promise<EvidencePublication> {
+  async #publish(path: string, contents: Buffer): Promise<{
+    readonly publication: EvidencePublication;
+    readonly identity: StableAcceptanceEvidenceIdentity | null;
+  }> {
     const sha256 = createHash('sha256').update(contents).digest('hex');
     if (!SHA256.test(sha256)) throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'evidence hash could not be calculated');
     try {
-      await this.#fileSystem.publishExclusive(this.#stateRoot, path, contents);
+      const publishedIdentity = await this.#fileSystem.publishExclusive(this.#stateRoot, path, contents);
+      return Object.freeze({
+        publication: Object.freeze({ path, sha256, bytes: contents.toString('utf8') }),
+        identity: publishedIdentity && typeof publishedIdentity === 'object' ? publishedIdentity : null,
+      });
     } catch (error) {
       if (error instanceof EvidenceError) throw error;
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new EvidenceError('EVIDENCE_EXISTS', 'canonical evidence already exists', { cause: error });
       throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'evidence publication failed', { cause: error });
     }
-    return Object.freeze({ path, sha256, bytes: contents.toString('utf8') });
+    return Object.freeze({
+      publication: Object.freeze({ path, sha256, bytes: contents.toString('utf8') }),
+      identity: null,
+    });
   }
 
   async writeTargetSetupSourceConfig(input: TargetSetupSourceConfigInput): Promise<EvidencePublication> {
@@ -849,7 +951,8 @@ export class EvidenceWriter {
       throw new EvidenceError('EVIDENCE_PATH_INVALID', 'target-setup source config identity is invalid');
     }
     const path = `jobs/${jobId}/evidence/target-setup/${input.targetId}.source.config`;
-    return this.#publish(path, Buffer.from(input.contents));
+    const published = await this.#publish(path, Buffer.from(input.contents));
+    return published.publication;
   }
 
   prepare(input: StageEvidenceInput): EvidencePublication {
@@ -878,10 +981,11 @@ export class EvidenceWriter {
 
   async write(input: StageEvidenceInput): Promise<EvidencePublication> {
     const prepared = this.prepare(input);
-    return this.#publish(prepared.path, Buffer.from(prepared.bytes, 'utf8'));
+    const published = await this.#publish(prepared.path, Buffer.from(prepared.bytes, 'utf8'));
+    return published.publication;
   }
 
-  async read(path: string): Promise<EvidencePublication | null> {
+  async #readStored(path: string, expected?: AcceptanceEvidenceExpectation): Promise<AcceptanceEvidencePublication | null> {
     if (process.platform !== 'linux') {
       throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence reading requires Linux descriptor support');
     }
@@ -937,6 +1041,7 @@ export class EvidenceWriter {
         await assertMountIdentity(inspection, mountId, dependencies);
         const before = await snapshotFile(inspection, dependencies);
         assertReadableEvidenceFile(before, ownerUid, snapshot.device, false);
+        if (expected !== undefined) assertExpectedAcceptanceEvidence(before, expected);
 
         let readable: FileHandle;
         try {
@@ -967,6 +1072,11 @@ export class EvidenceWriter {
         }
 
         const bytes = await readBoundedFile(readable, before.stats.size, dependencies);
+        if (expected !== undefined
+          && (!expected.bytes.equals(bytes)
+            || createHash('sha256').update(bytes).digest('hex') !== expected.sha256)) {
+          throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence bytes changed after publication');
+        }
         const afterRead = await snapshotFile(readable, dependencies);
         assertReadableEvidenceFile(afterRead, ownerUid, snapshot.device, false);
         if (!sameStableFile(before, afterRead)) {
@@ -990,6 +1100,7 @@ export class EvidenceWriter {
         }
         const finalSnapshot = await snapshotFile(readable, dependencies);
         assertReadableEvidenceFile(finalSnapshot, ownerUid, snapshot.device, true);
+        if (expected !== undefined) assertExpectedAcceptanceEvidence(finalSnapshot, expected);
         if (!sameStableFile(afterReconciliation, finalSnapshot)) {
           throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence changed during final verification');
         }
@@ -1013,15 +1124,58 @@ export class EvidenceWriter {
         if (finalParentStats.dev !== parentStats.dev || finalParentStats.ino !== parentStats.ino) {
           throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'stored evidence parent changed during final verification');
         }
+        const identity = evidenceIdentity(finalSnapshot);
+        const { inode: _inode, ...publicIdentity } = identity;
         return Object.freeze({
           path: relativePath,
           sha256: createHash('sha256').update(bytes).digest('hex'),
-          bytes: bytes.toString('utf8'),
+          bytes,
+          ...publicIdentity,
         });
       } finally {
         await closeHandles(handles);
       }
     });
+  }
+
+  async read(path: string): Promise<EvidencePublication | null> {
+    const stored = await this.#readStored(path);
+    if (stored === null) return null;
+    return Object.freeze({
+      path: stored.path,
+      sha256: stored.sha256,
+      bytes: stored.bytes.toString('utf8'),
+    });
+  }
+
+  async writeAcceptanceEvidence(input: AcceptanceEvidenceInput): Promise<AcceptanceEvidencePublication> {
+    let jobId: string;
+    try {
+      jobId = stableRelativePath(input.jobId, 'jobId');
+    } catch (error) {
+      throw new EvidenceError('EVIDENCE_PATH_INVALID', 'jobId is not a stable path segment', { cause: error });
+    }
+    if (jobId.includes('/')
+      || typeof input.basename !== 'string'
+      || !ACCEPTANCE_EVIDENCE_BASENAMES.includes(input.basename)
+      || !Buffer.isBuffer(input.contents)
+      || input.contents.length < 1
+      || input.contents.length > MAX_FRAMED_EVIDENCE_BYTES) {
+      throw new EvidenceError('EVIDENCE_PATH_INVALID', 'acceptance evidence identity is invalid');
+    }
+    const path = `jobs/${jobId}/evidence/${input.basename}`;
+    const published = await this.#publish(path, Buffer.from(input.contents));
+    if (published.identity === null) {
+      throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'acceptance evidence publication did not return a stable identity');
+    }
+    const expected: AcceptanceEvidenceExpectation = {
+      identity: published.identity,
+      sha256: createHash('sha256').update(input.contents).digest('hex'),
+      bytes: Buffer.from(input.contents),
+    };
+    const stored = await this.#readStored(path, expected);
+    if (stored === null) throw new EvidenceError('EVIDENCE_PUBLICATION_FAILED', 'acceptance evidence disappeared after publication');
+    return stored;
   }
 }
 

@@ -880,20 +880,30 @@ export class SourceResolver {
           for (const feed of feeds) {
             const verifyPreparedRoot = () => assertHeldChain(preparedRoot, dependencies);
             await verifyPreparedRoot();
-            await this.#runPreparedGit([
-              'clone',
-              '--quiet',
-              '--no-checkout',
-              '--no-tags',
-              '--origin',
-              REMOTE_NAME,
-              '--',
-              feed.location,
-              feed.name,
-            ], descriptorPath(preparedRoot.handle), verifyPreparedRoot);
-            const checkout = await openHeldDirectory(preparedRoot, feed.name, dependencies);
+            const checkout = await createHeldDirectory(preparedRoot, feed.name, dependencies, true);
             handles.push(checkout.handle);
             const verifyCheckout = () => assertHeldChain(checkout, dependencies);
+            await this.#runPreparedGit([
+              'init',
+              '--quiet',
+            ], descriptorPath(checkout.handle), verifyCheckout);
+            await this.#runPreparedGit([
+              'remote',
+              'add',
+              REMOTE_NAME,
+              feed.location,
+            ], descriptorPath(checkout.handle), verifyCheckout);
+            await this.#runPreparedGit([
+              'fetch',
+              '--quiet',
+              '--depth=1',
+              '--no-tags',
+              '--no-recurse-submodules',
+              '--no-write-fetch-head',
+              '--no-auto-maintenance',
+              feed.location,
+              feed.commit,
+            ], descriptorPath(checkout.handle), verifyCheckout);
             await this.#runPreparedGit([
               'checkout',
               '--quiet',
@@ -910,6 +920,9 @@ export class SourceResolver {
               '--init',
               '--recursive',
               '--force',
+              '--depth=1',
+              '--no-recommend-shallow',
+              '--filter=blob:none',
             ], descriptorPath(checkout.handle), verifyCheckout);
 
             const head = (await this.#runPreparedGit([

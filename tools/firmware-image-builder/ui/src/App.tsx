@@ -22,6 +22,7 @@ import type {
 
 type FormBusy = 'refresh' | 'preflight' | 'enqueue' | null;
 type DetailBusy = 'cancel' | 'recover' | 'retry' | 'recheck' | null;
+type CancellationNotice = Readonly<{ jobId: string; message: string }>;
 
 function errorCode(error: unknown): string {
   return error instanceof BuilderApiError ? error.code : 'UNEXPECTED_UI_ERROR';
@@ -62,6 +63,7 @@ export function App() {
   const [detailBusy, setDetailBusy] = useState<DetailBusy>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [cancellationNotice, setCancellationNotice] = useState<CancellationNotice | null>(null);
   const [now, setNow] = useState(() => new Date().toISOString());
   const [loading, setLoading] = useState(true);
   const selectedJobIdRef = useRef<string | null>(null);
@@ -117,16 +119,49 @@ export function App() {
     setConnection('connecting');
     let active = true;
     let stream: ReturnType<typeof openJobEventStream> | null = null;
+    let eventRetryTimer: number | undefined;
+    let bootstrapRequestGeneration = 0;
+    let detailRequestGeneration = 0;
+    let queueRequestGeneration = 0;
+    let healthRequestGeneration = 0;
+    const refreshDetail = (): void => {
+      const generation = ++detailRequestGeneration;
+      void builderApi.job(selectedJobId).then((detail) => {
+        if (active && generation === detailRequestGeneration) setJob(detail);
+      }).catch((error: unknown) => {
+        if (active && generation === detailRequestGeneration) setPageError(errorCode(error));
+      });
+    };
+    const refreshQueue = (): void => {
+      const generation = ++queueRequestGeneration;
+      void builderApi.jobs().then((page) => {
+        if (active && generation === queueRequestGeneration) setJobs(page.jobs);
+      }).catch((error: unknown) => {
+        if (active && generation === queueRequestGeneration) setPageError(errorCode(error));
+      });
+    };
+    const refreshHealth = (): void => {
+      const generation = ++healthRequestGeneration;
+      void builderApi.health().then((nextHealth) => {
+        if (active && generation === healthRequestGeneration) setHealth(nextHealth);
+      }).catch((error: unknown) => {
+        if (active && generation === healthRequestGeneration) setPageError(errorCode(error));
+      });
+    };
     const refresh = async (): Promise<void> => {
+      const bootstrapGeneration = ++bootstrapRequestGeneration;
+      const detailGeneration = ++detailRequestGeneration;
       try {
         const [nextJob, eventPage] = await Promise.all([
           builderApi.job(selectedJobId),
           builderApi.events(selectedJobId),
         ]);
-        if (!active) return;
-        setJob(nextJob);
+        if (!active || bootstrapGeneration !== bootstrapRequestGeneration) return;
+        setPageError(null);
+        if (detailGeneration === detailRequestGeneration) setJob(nextJob);
         setEvents(eventPage.events);
         setEvidence(null);
+        stream?.close();
         stream = openJobEventStream({
           jobId: selectedJobId,
           after: eventPage.next,
@@ -136,33 +171,40 @@ export function App() {
           onEvent: (event) => {
             if (!active) return;
             setEvents((current) => mergeEvent(current, event));
-            void builderApi.job(selectedJobId).then((detail) => {
-              if (active) setJob(detail);
-            }).catch((error: unknown) => setPageError(errorCode(error)));
-            void reloadJobs().catch((error: unknown) => setPageError(errorCode(error)));
+            refreshDetail();
+            refreshQueue();
           },
         });
       } catch (error) {
-        if (active) {
+        if (active && bootstrapGeneration === bootstrapRequestGeneration) {
           setPageError(errorCode(error));
           setConnection('reconnecting');
+          if (eventRetryTimer === undefined) {
+            eventRetryTimer = window.setTimeout(() => {
+              eventRetryTimer = undefined;
+              void refresh();
+            }, 1_000);
+          }
         }
       }
     };
     void refresh();
     const poller = window.setInterval(() => {
-      void builderApi.job(selectedJobId).then((detail) => {
-        if (active) setJob(detail);
-      }).catch((error: unknown) => setPageError(errorCode(error)));
-      void reloadJobs().catch((error: unknown) => setPageError(errorCode(error)));
-      void builderApi.health().then(setHealth).catch((error: unknown) => setPageError(errorCode(error)));
+      refreshDetail();
+      refreshQueue();
+      refreshHealth();
     }, 5_000);
     return () => {
       active = false;
+      bootstrapRequestGeneration += 1;
+      detailRequestGeneration += 1;
+      queueRequestGeneration += 1;
+      healthRequestGeneration += 1;
       window.clearInterval(poller);
+      if (eventRetryTimer !== undefined) window.clearTimeout(eventRetryTimer);
       stream?.close();
     };
-  }, [reloadJobs, selectedJobId]);
+  }, [selectedJobId]);
 
   const updateSelection = (next: SourceSelection): void => {
     setSelection(next);
@@ -222,12 +264,18 @@ export function App() {
   };
 
   const cancelJob = async (jobId: string): Promise<void> => {
-    if (!window.confirm('Cancel this build? The image will not be published.')) return;
+    if (!window.confirm('Request cancellation? If publication has started, publication may complete.')) return;
     setDetailBusy('cancel');
     setPageError(null);
     try {
-      const detail = await builderApi.cancel(jobId);
-      if (selectedJobIdRef.current === jobId) setJob(detail);
+      const response = await builderApi.cancel(jobId);
+      setCancellationNotice(response.cancellationResult.kind === 'late-publishing'
+        ? {
+            jobId: response.cancellationResult.jobId,
+            message: 'Cancellation was recorded after publication started. Publication may complete.',
+          }
+        : null);
+      if (selectedJobIdRef.current === jobId) setJob(response);
       await reloadJobs();
     } catch (error) {
       setPageError(errorCode(error));
@@ -342,6 +390,13 @@ export function App() {
           <CircleAlert size={17} aria-hidden="true" />
           <strong>{pageError}</strong>
           <button type="button" onClick={() => setPageError(null)}>Dismiss</button>
+        </div>
+      )}
+
+      {cancellationNotice !== null && cancellationNotice.jobId === selectedJobId && (
+        <div className="accepted-strip" role="status">
+          <CircleAlert size={17} aria-hidden="true" />
+          <span>{cancellationNotice.message}</span>
         </div>
       )}
 

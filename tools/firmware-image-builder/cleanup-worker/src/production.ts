@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { constants as fsConstants, type Stats } from 'node:fs';
-import { open, type FileHandle } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
+import { open, readFile, type FileHandle } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { deriveSystemdBusEnvironment, FIXED_PREFLIGHT_ENV } from '../../api/src/preflight.js';
 import {
@@ -15,14 +15,31 @@ import {
   type RootFileSystem,
 } from '../../config/load.js';
 import { validateBuilderLock } from '../../domain/builder-lock.js';
+import { parseBuilderIdentity } from '../../domain/builder-identity.js';
+import type { BuilderIdentity } from '../../domain/builder-identity.js';
+import { validateAdmittedBuilderPackage } from '../../domain/admitted-builder-package.js';
 import { createInstalledLockReader } from '../../domain/installed-lock.js';
+import { createInstalledDependencyEgressProxyReader } from '../../domain/installed-dependency-egress-proxy.js';
 import { installedMigrationsDirectory } from '../../domain/installed-layout.js';
+import { CLEANUP_WORKER_OWNER, isDependencyEgressOperationId } from '../../domain/types.js';
+import {
+  DEPENDENCY_EGRESS_CREDENTIAL_PATH,
+  EGRESS_ATTEMPT_LABEL,
+  EGRESS_JOB_LABEL,
+  EGRESS_MANIFEST_LABEL,
+  EGRESS_OPERATION_LABEL,
+  type DependencyEgressCleanupPostcondition,
+  type DependencyEgressCredentialAbsenceProof,
+  type DependencyEgressCredentialRemnant,
+} from '../../domain/dependency-egress-identity.js';
+import { selectExactRepositoryDigest } from '../../builder/validate-builder.js';
 import {
   createCleanupWorker,
   CLEANUP_ADMISSION_ID_PATTERN,
   CleanupWorkerError,
   type CleanupDocker,
   type CleanupDockerContainer,
+  type CleanupDependencyEgress,
   type CleanupEvidenceWriter,
   type CleanupLogSeal,
   type CleanupLogSealer,
@@ -33,6 +50,17 @@ import {
   type CleanupWorkerResult,
   validateCleanupWorkerArgv,
 } from './main.js';
+import {
+  discoverDependencyEgressCredentials,
+  destroyDependencyEgressCredential,
+} from '../../runner/src/dependency-egress-credential.js';
+import { destroyDependencyEgressTlsMaterial } from '../../runner/src/dependency-egress-tls.js';
+import {
+  destroyDependencyEgressNetwork,
+  parseDependencyEgressNetwork,
+  recoverDependencyEgressForJob,
+  type DependencyCredentialIdentity,
+} from '../../runner/src/dependency-egress-proxy.js';
 import {
   createRecoveryFileSystem,
   type RecoveryDescriptorFileSystem,
@@ -48,6 +76,7 @@ import { encodeJson, canonicalInstant, type JsonObject } from '../../api/src/val
 import { createCommandExecutor, type CommandExecutor, type CommandResult } from '../../runner/src/command-executor.js';
 import { holdInstalledPublisher, validateInstalledPublisherAuthority } from '../../runner/src/main.js';
 import { createPublisherClient, type PublisherClient, type PublisherResponse } from '../../publisher/client.js';
+import { loadManifest } from '../../manifest/validate.js';
 
 const SYSTEMCTL = '/usr/bin/systemctl';
 const DOCKER = '/usr/bin/docker';
@@ -56,7 +85,6 @@ const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const HASH64 = /^[0-9a-f]{64}$/u;
 const FIXED_MAX_CAPTURE_BYTES = 64 * 1024;
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
-const DEFAULT_OWNER = 'cleanup-worker';
 const DIRECTORY_MODE = 0o700;
 const PUBLISHER_DIRECTORY_MODE = 0o750;
 const EVIDENCE_MODE = 0o600;
@@ -126,6 +154,12 @@ export interface CleanupProductionDependencies {
   readonly commandTimeoutMs?: number;
   readonly approvedRootSnapshot?: ApprovedRootSnapshotRunner;
   readonly stateRootSnapshot?: StateRootSnapshotRunner;
+  readonly dependencyEgressCleanup?: CleanupDependencyEgress;
+  readonly currentExecutablePath?: string;
+  readonly resolveAdmittedCleanup?: (admissionId: string) => Promise<BuilderIdentity | null>;
+  readonly invokeAdmittedCleanup?: (input: Readonly<{ admissionId: string; identity: BuilderIdentity }>) => Promise<CleanupWorkerResult>;
+  readonly validateAdmittedCleanup?: (identity: BuilderIdentity) => Promise<void>;
+  readonly admittedBuilderIdentity?: BuilderIdentity;
 }
 
 export interface CleanupProductionAdapters {
@@ -134,6 +168,7 @@ export interface CleanupProductionAdapters {
   readonly logSealer: CleanupLogSealer;
   readonly quarantine: CleanupQuarantine;
   readonly evidenceWriter: CleanupEvidenceWriter;
+  readonly dependencyEgress: CleanupDependencyEgress;
 }
 
 export interface CleanupProductionComposition {
@@ -321,7 +356,8 @@ function createDockerAdapter(policy: CommandPolicy, executable: string): Cleanup
     const argv = [executable, 'inspect', '--type=container', '--format', '{{json .}}', containerId] as const;
     const result = await runTrusted({ ...policy, timeoutMs: Math.min(timeoutMs, policy.timeoutMs) }, argv, [0, 1]);
     if (result.exitCode === 1) {
-      if (result.stdout !== '' || !/no such object|no such container/iu.test(result.stderr)) throw new Error('Docker missing-container evidence is invalid');
+      const expectedError = `Error response from daemon: No such container: ${containerId}\n`;
+      if ((result.stdout !== '' && result.stdout !== '\n') || result.stderr !== expectedError) throw new Error('Docker missing-container evidence is invalid');
       return null;
     }
     const text = parseSingleLine(result.stdout, 'Docker inspect');
@@ -1129,10 +1165,170 @@ async function defaultPublisherAuthority(loaded: LoadedCleanupConfig, executor: 
   }
 }
 
+export function createDefaultDependencyEgressCleanup(input: Readonly<{
+  loaded: LoadedCleanupConfig;
+  stateRoot: string;
+  ownerUid: number;
+  dockerPath: string;
+  policy: CommandPolicy;
+}>): CleanupDependencyEgress {
+  const runDocker = async (argv: readonly string[]) => runTrusted(input.policy, argv, [0, 1]);
+  const credentialBinding = (credentialDirectory: string, credential: DependencyCredentialIdentity): Readonly<{
+    readonly operationId: 'frontend-install' | 'build-image';
+    readonly attempt: number;
+  }> => {
+    const name = relative(credentialDirectory, credential.hostPath);
+    const nameParts = (() => {
+      if (!name.endsWith('.proxy-credential')) return null;
+      const stem = name.slice(0, -'.proxy-credential'.length);
+      const separator = stem.lastIndexOf('-');
+      if (separator <= 0) return null;
+      const operation = stem.slice(0, separator);
+      const attempt = stem.slice(separator + 1);
+      if (!/^[1-9][0-9]*$/u.test(attempt)) return null;
+      return [operation, attempt] as const;
+    })();
+    if (nameParts === null || join(credentialDirectory, name) !== credential.hostPath) throw new Error('dependency egress credential identity is not bound to the canonical job directory');
+    const operationValue = nameParts[0];
+    if (!isDependencyEgressOperationId(operationValue)) throw new Error('dependency egress credential operation is unknown');
+    const attempt = Number(nameParts[1]);
+    if (!Number.isSafeInteger(attempt) || attempt <= 0) throw new Error('dependency egress credential attempt is invalid');
+    if (credential.containerPath !== DEPENDENCY_EGRESS_CREDENTIAL_PATH || !HASH64.test(credential.sha256)) throw new Error('dependency egress credential identity is invalid');
+    return { operationId: operationValue, attempt };
+  };
+  return {
+    async cleanup(job) {
+      safeJobId(job.jobId);
+      if (!HASH64.test(job.targetManifestSha256)) throw new Error('cleanup job manifest identity is invalid');
+      let builderIdentity;
+      try { builderIdentity = parseBuilderIdentity(job.builderIdentity); }
+      catch (error) { throw new Error('cleanup job has no valid admitted builder identity', { cause: error }); }
+      const imageReference = builderIdentity.imageReference;
+      const imageArgv = [input.dockerPath, 'image', 'inspect', '--format={{json .}}', imageReference] as const;
+      const imageResult = await runTrusted(input.policy, imageArgv);
+      let image: unknown;
+      try { image = JSON.parse(imageResult.stdout.trim()) as unknown; }
+      catch (error) { throw new Error('cleanup builder image inspect JSON is malformed', { cause: error }); }
+      if (image === null || typeof image !== 'object' || Array.isArray(image)) throw new Error('cleanup builder image inspect is invalid');
+      const imageRecord = image as Record<string, unknown>;
+      if (
+        typeof imageRecord.Id !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(imageRecord.Id)
+        || imageRecord.Architecture !== 'amd64' || imageRecord.Os !== 'linux'
+        || !Array.isArray(imageRecord.RepoDigests)
+        || selectExactRepositoryDigest(imageReference, imageRecord.RepoDigests) !== builderIdentity.imageDigest
+        || imageRecord.Id !== builderIdentity.imageId
+      ) throw new Error('cleanup builder image identity does not match the admitted job');
+
+      const credentialDirectory = join(input.stateRoot, 'jobs', job.jobId, 'recovery', 'dependency-egress');
+      const persistedValue = job.containerSecurity === null
+        ? undefined
+        : (job.containerSecurity as Record<string, unknown>).egress;
+      const persisted = persistedValue === undefined ? null : parseDependencyEgressNetwork(persistedValue);
+      const persistedBinding = persisted === null ? null : credentialBinding(credentialDirectory, persisted.credential);
+      if (persisted !== null) {
+        if (persistedBinding === null) throw new Error('persisted dependency egress operation identity is missing');
+        const binding = persistedBinding;
+        const networkLabels = persisted.network.labels as Record<string, unknown>;
+        if (
+          networkLabels[EGRESS_JOB_LABEL] !== job.jobId
+          || networkLabels[EGRESS_MANIFEST_LABEL] !== job.targetManifestSha256
+          || networkLabels[EGRESS_OPERATION_LABEL] !== binding.operationId
+          || networkLabels[EGRESS_ATTEMPT_LABEL] !== String(binding.attempt)
+          || dirname(persisted.credential.hostPath) !== credentialDirectory
+          || persisted.tls.hostDirectory !== join(credentialDirectory, `${binding.operationId}-${String(binding.attempt)}.proxy-tls`)
+          || persisted.proxy.imageReference !== imageReference
+          || persisted.proxy.imageId !== imageRecord.Id
+          || persisted.proxy.imageDigest !== builderIdentity.imageDigest
+          || persisted.proxy.labels[EGRESS_JOB_LABEL] !== job.jobId
+          || persisted.proxy.labels[EGRESS_MANIFEST_LABEL] !== job.targetManifestSha256
+          || persisted.proxy.labels[EGRESS_OPERATION_LABEL] !== binding.operationId
+          || persisted.proxy.labels[EGRESS_ATTEMPT_LABEL] !== String(binding.attempt)
+        ) throw new Error('persisted dependency egress identity does not bind the cleanup job');
+      }
+
+      const destroyedPersisted = persisted === null
+        ? null
+        : await destroyDependencyEgressNetwork({ dockerPath: input.dockerPath, run: runDocker }, persisted);
+      const persistedDocker = destroyedPersisted === null || persisted === null || persistedBinding === null
+        ? null
+        : {
+          operationId: persistedBinding.operationId,
+          attempt: persistedBinding.attempt,
+          proxy: destroyedPersisted.proxy,
+          network: destroyedPersisted.network,
+          tls: { hostDirectory: destroyedPersisted.tls.hostDirectory, absent: true as const },
+          credential: { hostPath: persisted.credential.hostPath, sha256: persisted.credential.sha256 },
+          globalLabelResult: destroyedPersisted.globalLabelResult,
+        };
+      const recovered = await recoverDependencyEgressForJob({
+        dockerPath: input.dockerPath,
+        imageReference,
+        imageId: imageRecord.Id,
+        imageDigest: builderIdentity.imageDigest,
+        jobId: job.jobId,
+        uid: input.ownerUid,
+        gid: typeof process.getgid === 'function' ? process.getgid() : input.ownerUid,
+        manifestSha256: job.targetManifestSha256,
+        credentialDirectory,
+        run: runDocker,
+      });
+
+      let discovered: readonly DependencyEgressCredentialRemnant[] = [];
+      try { discovered = await discoverDependencyEgressCredentials(credentialDirectory); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      const credentials = new Map<string, DependencyCredentialIdentity>();
+      const tlsOnlyRemnants = new Map<string, Extract<DependencyEgressCredentialRemnant, { readonly kind: 'tls-only' }>>();
+      for (const remnant of discovered) {
+        if (remnant.kind === 'tls-only') {
+          const key = `${remnant.operationId}:${String(remnant.attempt)}`;
+          if (tlsOnlyRemnants.has(key)) throw new Error('dependency egress TLS-only remnant is duplicated');
+          tlsOnlyRemnants.set(key, remnant);
+          continue;
+        }
+        const previous = credentials.get(remnant.identity.hostPath);
+        if (previous !== undefined && previous.sha256 !== remnant.identity.sha256) throw new Error('dependency egress credential identity is ambiguous');
+        credentials.set(remnant.identity.hostPath, remnant.identity);
+      }
+      for (const credential of [
+        ...(persisted === null ? [] : [persisted.credential]),
+        ...recovered.credentials,
+      ]) {
+        const previous = credentials.get(credential.hostPath);
+        if (previous !== undefined && previous.sha256 !== credential.sha256) throw new Error('dependency egress credential identity is ambiguous');
+        credentials.set(credential.hostPath, credential);
+      }
+      const credentialProofs: DependencyEgressCredentialAbsenceProof[] = [];
+      const sortedCredentials = [...credentials.values()].sort((left, right) => left.hostPath.localeCompare(right.hostPath));
+      for (const credential of sortedCredentials) {
+        const binding = credentialBinding(credentialDirectory, credential);
+        const absence = await destroyDependencyEgressCredential(credential);
+        if (absence.kind === 'tls-only') {
+          credentialProofs.push({ kind: 'tls-only', ...binding, hostPath: absence.hostPath, expectedSha256: absence.expectedSha256, observedSha256: absence.observedSha256, tls: absence.tls, absent: true });
+        } else {
+          credentialProofs.push({ kind: absence.kind, ...binding, hostPath: absence.hostPath, expectedSha256: absence.expectedSha256, observedSha256: absence.observedSha256, tls: absence.tls, absent: true });
+        }
+      }
+      for (const remnant of [...tlsOnlyRemnants.values()].sort((left, right) => left.hostDirectory.localeCompare(right.hostDirectory))) {
+        const tls = await destroyDependencyEgressTlsMaterial({ hostDirectory: remnant.hostDirectory });
+        credentialProofs.push({ kind: 'tls-only', operationId: remnant.operationId, attempt: remnant.attempt, hostPath: remnant.credentialHostPath, expectedSha256: null, observedSha256: null, tls, absent: true });
+      }
+      const postcondition: DependencyEgressCleanupPostcondition = {
+        persistedDocker,
+        discoveredDocker: recovered.docker,
+        credentials: credentialProofs,
+        globalLabelResult: recovered.globalLabelResult,
+      };
+      return postcondition;
+    },
+  };
+}
+
 export async function createCleanupProduction(options: CleanupProductionDependencies = {}): Promise<CleanupProductionComposition> {
   const env = process.env;
   const ownerUid = options.ownerUid ?? process.getuid?.() ?? 0;
-  const workerOwner = options.workerOwner ?? DEFAULT_OWNER;
+  const workerOwner = options.workerOwner ?? CLEANUP_WORKER_OWNER;
   const clock = options.clock ?? { now: () => new Date().toISOString() };
   const loadState = options.loadStateRoot ?? ((input: { readonly env?: NodeJS.ProcessEnv }) => loadStateRootAuthority(input));
   const loadConfiguration = options.loadConfiguration ?? ((input: { readonly env?: NodeJS.ProcessEnv }) => loadCleanupConfig({
@@ -1146,14 +1342,23 @@ export async function createCleanupProduction(options: CleanupProductionDependen
   try {
     const loaded = await loadConfiguration({ env });
     if (loaded.stateRoot !== state.stateRoot) throw new Error('configured state root differs from guarded cleanup state');
+    const authorityLoaded = options.admittedBuilderIdentity === undefined
+      ? loaded
+      : Object.freeze({
+        ...loaded,
+        config: Object.freeze({
+          ...loaded.config,
+          builderLockPath: join(options.admittedBuilderIdentity.packageRoot, 'builder.lock.json'),
+        }),
+      });
     db = openDatabase(join(state.stateRoot, 'jobs.sqlite'), {
-      migrationsDirectory: installedMigrationsDirectory(loaded.config.builderLockPath),
+      migrationsDirectory: installedMigrationsDirectory(authorityLoaded.config.builderLockPath),
     });
     const executor = options.commandExecutor ?? createCommandExecutor();
     const timeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     const systemdEnv = options.systemdEnvironment ?? (() => deriveSystemdBusEnvironment({ uid: ownerUid }));
     const commandEnv = Object.freeze({ ...FIXED_PREFLIGHT_ENV, ...(await systemdEnv()) });
-    const publisherAuthority = options.publisherAuthority ?? await defaultPublisherAuthority(loaded, executor, ownerUid);
+    const publisherAuthority = options.publisherAuthority ?? await defaultPublisherAuthority(authorityLoaded, executor, ownerUid);
     const approvedRootSnapshot = options.approvedRootSnapshot ?? ((rootId: string, callback: (snapshot: ApprovedRootSnapshot) => Promise<unknown>) => (
       withApprovedRootAuthoritySnapshot(loaded.pathAuthorities.approvedRoots, rootId, async ({ snapshot }) => callback(snapshot))
     )) as ApprovedRootSnapshotRunner;
@@ -1170,24 +1375,29 @@ export async function createCleanupProduction(options: CleanupProductionDependen
       commandExecutor: executor,
       timeoutMs,
     });
+    const dockerPath = options.dockerExecutable ?? DOCKER;
+    const dockerPolicy = { executor, env: Object.freeze({ ...FIXED_PREFLIGHT_ENV }), timeoutMs };
+    const dependencyEgress = options.dependencyEgressCleanup ?? createDefaultDependencyEgressCleanup({ loaded: authorityLoaded, stateRoot: state.stateRoot, ownerUid, dockerPath, policy: dockerPolicy });
     const adapters: CleanupProductionAdapters = {
       systemd: createSystemdAdapter({ executor, env: commandEnv, timeoutMs }, options.systemdExecutable ?? SYSTEMCTL),
-      docker: createDockerAdapter({ executor, env: Object.freeze({ ...FIXED_PREFLIGHT_ENV }), timeoutMs }, options.dockerExecutable ?? DOCKER),
+      docker: createDockerAdapter(dockerPolicy, dockerPath),
       logSealer: await createLogSealer(db, clock, stateRootSnapshot, ownerUid),
       quarantine: createQuarantineAdapter(loaded, publisher, clock, approvedRootSnapshot, ownerUid),
       evidenceWriter: createEvidenceWriter(state.stateRoot, ownerUid, options.fileSystem ?? createRecoveryFileSystem()),
+      dependencyEgress,
     };
     const workerOptions: CleanupWorkerOptions = {
       db,
       stateRoot: state.stateRoot,
       ownerUid,
       workerOwner,
-      ownership: new OwnershipStore(db, { now: clock.now }),
+      ownership: new OwnershipStore(db, { now: clock.now, stateRoot: state.stateRoot }),
       systemd: adapters.systemd,
       docker: adapters.docker,
       logSealer: adapters.logSealer,
       quarantine: adapters.quarantine,
       evidenceWriter: adapters.evidenceWriter,
+      dependencyEgress: adapters.dependencyEgress,
       clock,
       timeouts: { dockerMs: timeoutMs, systemdMs: timeoutMs },
     };
@@ -1217,8 +1427,105 @@ export async function createCleanupProduction(options: CleanupProductionDependen
   }
 }
 
+async function validateAdmittedCleanupPackage(identity: BuilderIdentity): Promise<void> {
+  const [lockBytes, executionDefinition, runner, cleanupWorker, dependencyEgressProxy] = await Promise.all([
+    readFile(join(identity.packageRoot, 'builder.lock.json')),
+    readFile(join(identity.packageRoot, 'execution-definition.json')),
+    readFile(join(identity.packageRoot, 'bin', 'osi-image-builder-runner')),
+    readFile(join(identity.packageRoot, 'bin', 'osi-image-builder-cleanup')),
+    createInstalledDependencyEgressProxyReader()
+      .read(identity.packageRoot, identity.dependencyEgressProxySha256),
+  ]);
+  const manifest = loadManifest(join(identity.packageRoot, 'manifest', 'targets.json'));
+  validateAdmittedBuilderPackage({
+    identity,
+    lockBytes,
+    executionDefinition,
+    runner,
+    cleanupWorker,
+    dependencyEgressProxy: dependencyEgressProxy.bytes,
+    manifestSha256: manifest.sha256,
+  });
+}
+
+async function defaultResolveAdmittedCleanup(admissionId: string): Promise<BuilderIdentity | null> {
+  const state = await loadStateRootAuthority();
+  const db = new DatabaseSync(join(state.stateRoot, 'jobs.sqlite'), { readOnly: true });
+  try {
+    const row = db.prepare(`SELECT j.builder_identity_status, j.builder_package_version,
+      j.builder_package_root, j.builder_lock_sha256, j.builder_execution_definition_sha256,
+      j.builder_target_manifest_sha256, j.builder_runner_sha256, j.builder_cleanup_worker_sha256,
+      j.builder_dependency_egress_proxy_sha256,
+      j.builder_image_reference, j.builder_image_id, j.builder_image_digest
+      FROM cleanup_leases AS lease JOIN jobs AS j ON j.job_id=lease.job_id
+      WHERE lease.admission_id=?`).get(admissionId) as Record<string, unknown> | undefined;
+    if (row === undefined || row.builder_identity_status !== 'admitted') return null;
+    return parseBuilderIdentity({
+      packageVersion: row.builder_package_version,
+      packageRoot: row.builder_package_root,
+      lockSha256: row.builder_lock_sha256,
+      executionDefinitionSha256: row.builder_execution_definition_sha256,
+      targetManifestSha256: row.builder_target_manifest_sha256,
+      runnerSha256: row.builder_runner_sha256,
+      cleanupWorkerSha256: row.builder_cleanup_worker_sha256,
+      dependencyEgressProxySha256: row.builder_dependency_egress_proxy_sha256,
+      imageReference: row.builder_image_reference,
+      imageId: row.builder_image_id,
+      imageDigest: row.builder_image_digest,
+    });
+  } finally {
+    db.close();
+  }
+}
+
+function delegatedEnvironment(identity: BuilderIdentity): Readonly<Record<string, string>> {
+  const inherited = Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  );
+  return Object.freeze({ ...inherited, OSI_ADMITTED_CLEANUP_SHA256: identity.cleanupWorkerSha256 });
+}
+
+async function defaultInvokeAdmittedCleanup(input: Readonly<{ admissionId: string; identity: BuilderIdentity }>): Promise<CleanupWorkerResult> {
+  await validateAdmittedCleanupPackage(input.identity);
+  const held = await holdInstalledPublisher(join(input.identity.packageRoot, 'bin', 'osi-image-builder-cleanup'));
+  try {
+    if (held.sha256 !== input.identity.cleanupWorkerSha256) throw new Error('admitted cleanup implementation hash changed');
+    const argv = [held.executable, input.admissionId] as const;
+    const result = await createCommandExecutor().run(argv, {
+      env: delegatedEnvironment(input.identity),
+      timeoutMs: DEFAULT_COMMAND_TIMEOUT_MS,
+      maxCaptureBytes: FIXED_MAX_CAPTURE_BYTES,
+    });
+    boundedResult(result, argv, [0]);
+    let parsed: unknown;
+    try { parsed = JSON.parse(result.stdout.trim()) as unknown; }
+    catch (error) { throw new Error('admitted cleanup implementation returned invalid evidence', { cause: error }); }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('admitted cleanup implementation returned invalid evidence');
+    const record = parsed as Record<string, unknown>;
+    if (record.admissionId !== input.admissionId || (record.status !== 'completed' && record.status !== 'blocked')) throw new Error('admitted cleanup implementation returned mismatched evidence');
+    return parsed as CleanupWorkerResult;
+  } finally {
+    await held.close();
+  }
+}
+
 export async function runCleanupWorker(argv: readonly string[], options: CleanupProductionDependencies = {}): Promise<CleanupWorkerResult> {
-  validateCleanupWorkerArgv(argv);
-  const composition = await createCleanupProduction(options);
+  const admissionId = validateCleanupWorkerArgv(argv);
+  const resolveAdmittedCleanup = options.resolveAdmittedCleanup ?? defaultResolveAdmittedCleanup;
+  const identity = await resolveAdmittedCleanup(admissionId);
+  if (identity === null) throw new Error('cleanup admission belongs to a legacy job without a complete admitted builder identity');
+  await (options.validateAdmittedCleanup ?? validateAdmittedCleanupPackage)(identity);
+  const currentExecutable = resolve(options.currentExecutablePath ?? process.argv[1] ?? process.execPath);
+  const admittedExecutable = join(identity.packageRoot, 'bin', 'osi-image-builder-cleanup');
+  const delegatedMarker = process.env.OSI_ADMITTED_CLEANUP_SHA256;
+  const currentBytes = delegatedMarker === undefined ? null : await readFile(currentExecutable);
+  const executingAdmittedImplementation = currentExecutable === admittedExecutable
+    || delegatedMarker === identity.cleanupWorkerSha256
+      && currentBytes !== null
+      && createHash('sha256').update(currentBytes).digest('hex') === identity.cleanupWorkerSha256;
+  if (!executingAdmittedImplementation) {
+    return (options.invokeAdmittedCleanup ?? defaultInvokeAdmittedCleanup)({ admissionId, identity });
+  }
+  const composition = await createCleanupProduction({ ...options, admittedBuilderIdentity: identity });
   try { return await composition.run(argv); } finally { await composition.close(); }
 }

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { assertOrphanLogLivenessProof, DurableLogStream, type LogStreamEvent, type LogStreamIo } from '../../api/src/log-stream.js';
+import { TEST_BUILDER_IDENTITY_COLUMNS, testBuilderIdentityValues } from '../helpers/builder-identity.js';
 
 const NOW = '2026-07-28T10:00:00.000Z';
 const roots: string[] = [];
@@ -13,9 +14,9 @@ const dbs: Array<ReturnType<typeof openBuilderDatabase>> = [];
 
 function seedJob(db: ReturnType<typeof openBuilderDatabase>, jobId = 'job-log'): void {
   db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json, offline_feed_preparation_json,
-    target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, queue_position, created_at, updated_at)
-    VALUES (?, ?, '{}', 'ssh://example/repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, '{}', '{}', 'rpi-5', 'release', ?, ?, 'test', 'log', ?, 'building', 'released', NULL, ?, ?)`)
-    .run(jobId, `${jobId}-request`, 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), NOW, NOW, NOW, NOW);
+    target_id, root_id, target_manifest_sha256, ${TEST_BUILDER_IDENTITY_COLUMNS.join(', ')}, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, queue_position, created_at, updated_at)
+    VALUES (?, ?, '{}', 'ssh://example/repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, '{}', '{}', 'rpi-5', 'release', ?, ${TEST_BUILDER_IDENTITY_COLUMNS.map(() => '?').join(', ')}, ?, 'test', 'log', ?, 'building', 'released', NULL, ?, ?)`)
+    .run(jobId, `${jobId}-request`, 'a'.repeat(40), 'a'.repeat(40), 'b'.repeat(64), ...testBuilderIdentityValues(), NOW, NOW, NOW, NOW);
 }
 
 async function fixture(options: { readonly io?: Partial<LogStreamIo> } = {}): Promise<{ root: string; db: ReturnType<typeof openBuilderDatabase>; stream: DurableLogStream }> {

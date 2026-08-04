@@ -8,7 +8,25 @@
   },
   "user": "<uid>:<gid>",
   "workdir": "/workdir",
-  "network": "bridge",
+  "network": "internal-authenticated-proxy",
+  "networkPolicy": {
+    "offline": "none",
+    "dependencyEgress": "internal-authenticated-proxy",
+    "proxyPort": 3128,
+    "allowedPorts": [80, 443],
+    "credentialPath": "/run/osi-image-builder/proxy-credential",
+    "operationAllowedHosts": {
+      "frontend-install": ["registry.npmjs.org"],
+      "build-image": [
+        "busybox.net", "cdn.kernel.org", "codeload.github.com", "crates.io",
+        "download.savannah.gnu.org", "downloads.openwrt.org", "ftp.gnu.org",
+        "git.kernel.org", "git.openwrt.org", "github.com", "mirror2.openwrt.org",
+        "nodejs.org", "objects.githubusercontent.com", "raw.githubusercontent.com",
+        "registry.npmjs.org", "sources.cdn.openwrt.org", "static.crates.io",
+        "static.rust-lang.org", "www.kernel.org"
+      ]
+    }
+  },
   "environment": {
     "HOME": "/workdir/.builder-home",
     "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -22,7 +40,11 @@
     "destination": "/workdir",
     "readOnly": false
   },
-  "offlineOperationIds": ["activate-target", "copy-feed-config", "update-feeds", "install-feeds", "resolve-config", "verify-image"],
+  "offlineOperationIds": [
+    "activate-target", "copy-feed-config", "update-feeds", "install-feeds", "resolve-config", "verify-image",
+    "verify-profile-parity", "verify-chameleon", "verify-db-schema", "verify-sync-flow", "verify-strega",
+    "verify-communication", "check-mqtt-topics", "frontend-test", "frontend-typecheck", "frontend-build", "mirror-gui"
+  ],
   "readOnlyOperationIds": ["verify-image"],
   "security": {
     "capDrop": ["ALL"],

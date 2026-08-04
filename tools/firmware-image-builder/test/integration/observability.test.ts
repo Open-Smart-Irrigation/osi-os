@@ -7,6 +7,7 @@ import { buildHealthSnapshot, collectHealthSnapshot, createStructuredRecord } fr
 import { createRetentionStartupHook, type RetentionPaths } from '../../api/src/retention.js';
 import { openBuilderDatabase } from '../../api/src/store-schema.js';
 import { createStartupCoordinator } from '../../api/src/startup-order.js';
+import { TEST_BUILDER_IDENTITY } from '../helpers/builder-identity.js';
 
 const pathsToRemove: string[] = [];
 const SHA40 = 'a'.repeat(40);
@@ -14,8 +15,39 @@ const SHA64 = 'b'.repeat(64);
 const NOW = '2026-07-28T12:00:00.000Z';
 
 function insertTerminalJob(db: ReturnType<typeof openBuilderDatabase>, jobId: string, terminalAt: string): void {
-  db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
-    .run(jobId, `request-${jobId}`, SHA40, SHA40, SHA64, terminalAt, terminalAt, terminalAt, terminalAt, terminalAt);
+  db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256,
+    builder_identity_status, builder_package_version, builder_package_root, builder_lock_sha256,
+    builder_execution_definition_sha256, builder_target_manifest_sha256, builder_runner_sha256,
+    builder_cleanup_worker_sha256, builder_dependency_egress_proxy_sha256,
+    builder_image_reference, builder_image_id, builder_image_digest,
+    source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at,
+    source_preparation_json, offline_feed_preparation_json)
+    VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?,
+      'admitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
+    .run(
+      jobId,
+      `request-${jobId}`,
+      SHA40,
+      SHA40,
+      SHA64,
+      TEST_BUILDER_IDENTITY.packageVersion,
+      TEST_BUILDER_IDENTITY.packageRoot,
+      TEST_BUILDER_IDENTITY.lockSha256,
+      TEST_BUILDER_IDENTITY.executionDefinitionSha256,
+      TEST_BUILDER_IDENTITY.targetManifestSha256,
+      TEST_BUILDER_IDENTITY.runnerSha256,
+      TEST_BUILDER_IDENTITY.cleanupWorkerSha256,
+      TEST_BUILDER_IDENTITY.dependencyEgressProxySha256,
+      TEST_BUILDER_IDENTITY.imageReference,
+      TEST_BUILDER_IDENTITY.imageId,
+      TEST_BUILDER_IDENTITY.imageDigest,
+      terminalAt,
+      terminalAt,
+      terminalAt,
+      terminalAt,
+      terminalAt,
+    );
 }
 
 afterEach(async () => {
@@ -62,6 +94,7 @@ describe('observability integration', () => {
       migrations: phase('migrations'),
       cleanupAdmissions: phase('cleanup-admissions'),
       liveRunnerClassification: phase('live-runner-classification'),
+      cancellationCoordination: phase('cancellation-coordination'),
       stalePublishingRecovery: phase('stale-publishing-recovery'),
       nonPublishingInterruption: phase('non-publishing-interruption'),
       retention: async () => { order.push('retention'); return hook(); },
@@ -69,7 +102,7 @@ describe('observability integration', () => {
     });
 
     await expect(startup.start()).resolves.toMatchObject({ dispatched: true, blockers: [] });
-    expect(order).toEqual(['migrations', 'cleanup-admissions', 'live-runner-classification', 'stale-publishing-recovery', 'non-publishing-interruption', 'retention', 'dispatch']);
+    expect(order).toEqual(['migrations', 'cleanup-admissions', 'live-runner-classification', 'cancellation-coordination', 'stale-publishing-recovery', 'non-publishing-interruption', 'retention', 'dispatch']);
     expect(db.prepare('SELECT job_id FROM jobs WHERE job_id IN (?, ?) ORDER BY job_id').all('row-old', 'replayable-log')).toEqual([{ job_id: 'replayable-log' }]);
     expect(db.prepare('SELECT COUNT(*) AS count FROM queue_entries WHERE job_id=?').get('row-old')).toEqual({ count: 0 });
     expect(db.prepare('SELECT category, relative_path, action, at FROM retention_prunes ORDER BY prune_id').all()).toEqual([
@@ -102,8 +135,7 @@ describe('observability integration', () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-image-builder-health-'));
     pathsToRemove.push(root);
     const db = openBuilderDatabase(join(root, 'jobs.sqlite'));
-    db.prepare(`INSERT INTO jobs (job_id, request_id, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, created_at, updated_at, terminal_at, source_preparation_json, offline_feed_preparation_json) VALUES (?, ?, 'ssh://repo', 'refs/remotes/origin/main', 'main', 'main', ?, ?, 'rpi-5', 'root', ?, ?, 'author', 'subject', ?, 'succeeded', 'complete', ?, ?, ?, '{}', '{}')`)
-      .run('health-terminal', 'request-health-terminal', SHA40, SHA40, SHA64, '2026-07-28T11:00:00.000Z', '2026-07-28T11:00:00.000Z', '2026-07-28T11:00:00.000Z', '2026-07-28T11:00:00.000Z', '2026-07-28T11:00:00.000Z');
+    insertTerminalJob(db, 'health-terminal', '2026-07-28T11:00:00.000Z');
     db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, payload_json, at) VALUES (?, 0, 'terminal', 'succeeded', '{}', ?)").run('health-terminal', '2026-07-28T11:59:00.000Z');
     const snapshot = (await import('../../api/src/health.js')).collectHealthSnapshot({ db, now: NOW, diskFreeBytes: 25 * 1024 ** 3, builderImage: null });
     expect(snapshot.lastEventAt).toBe('2026-07-28T11:59:00.000Z');

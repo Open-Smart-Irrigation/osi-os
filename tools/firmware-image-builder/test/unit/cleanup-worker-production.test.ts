@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile as nodeExecFile } from 'node:child_process';
-import { chmod, link, lstat, mkdir, open, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, open, readFile, readdir, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,8 +10,11 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { LoadedCleanupConfig } from '../../config/load.js';
 
 import { createRecoveryFileSystem } from '../../api/src/recovery.js';
+import type { JobRecord } from '../../api/src/store.js';
 import { runCleanupWorkerCli } from '../../cleanup-worker/src/cli.js';
-import { createCleanupProduction, runCleanupWorker } from '../../cleanup-worker/src/production.js';
+import { createCleanupProduction, createDefaultDependencyEgressCleanup, runCleanupWorker } from '../../cleanup-worker/src/production.js';
+import { createDependencyEgressCredential } from '../../runner/src/dependency-egress-credential.js';
+import { TEST_BUILDER_IDENTITY } from '../helpers/builder-identity.js';
 
 const execFile = promisify(nodeExecFile);
 
@@ -23,6 +26,129 @@ const ROOT_ID = 'release';
 const ADMISSION = 'cln_0123456789abcdefghjkmnpqrs';
 
 const roots: string[] = [];
+
+describe('cross-version cleanup authority', () => {
+  it('delegates to the admitted immutable cleanup implementation before current composition', async () => {
+    const resolveAdmittedCleanup = vi.fn(async () => TEST_BUILDER_IDENTITY);
+    const invokeAdmittedCleanup = vi.fn(async () => ({
+      status: 'completed' as const,
+      jobId: JOB,
+      admissionId: ADMISSION,
+      exactContainerId: null,
+    }));
+    const validateAdmittedCleanup = vi.fn(async () => undefined);
+    const result = await runCleanupWorker([ADMISSION], {
+      currentExecutablePath: '/home/builder/.local/lib/osi-image-builder/0.1.25/bin/osi-image-builder-cleanup',
+      resolveAdmittedCleanup,
+      invokeAdmittedCleanup,
+      validateAdmittedCleanup,
+      loadStateRoot: vi.fn(async () => { throw new Error('current cleanup composition must not start'); }),
+    });
+
+    expect(result).toMatchObject({ status: 'completed', admissionId: ADMISSION });
+    expect(resolveAdmittedCleanup).toHaveBeenCalledWith(ADMISSION);
+    expect(validateAdmittedCleanup).toHaveBeenCalledWith(TEST_BUILDER_IDENTITY);
+    expect(invokeAdmittedCleanup).toHaveBeenCalledWith({
+      admissionId: ADMISSION,
+      identity: TEST_BUILDER_IDENTITY,
+    });
+  });
+
+  it('blocks cleanup dispatch when the persisted job identity is legacy-null', async () => {
+    await expect(runCleanupWorker([ADMISSION], {
+      currentExecutablePath: '/home/builder/.local/lib/osi-image-builder/0.1.25/bin/osi-image-builder-cleanup',
+      resolveAdmittedCleanup: vi.fn(async () => null),
+      invokeAdmittedCleanup: vi.fn(),
+      validateAdmittedCleanup: vi.fn(async () => undefined),
+      loadStateRoot: vi.fn(async () => { throw new Error('current cleanup composition must not start'); }),
+    })).rejects.toThrow(/admitted builder identity|legacy/iu);
+  });
+
+  it('validates and invokes the exact pre-upgrade cleanup executable', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'osi-admitted-cleanup-')); roots.push(parent);
+    const packageRoot = join(parent, '0.1.24');
+    const manifest = await readFile(join(process.cwd(), 'manifest', 'targets.json'));
+    const executionDefinition = Buffer.from('{"schemaVersion":1}\n');
+    const runner = Buffer.from('#!/bin/sh\nexit 0\n');
+    const cleanupWorker = Buffer.from(`#!/bin/sh\nprintf '{"status":"completed","jobId":"${JOB}","admissionId":"%s","exactContainerId":null}\\n' "$1"\n`);
+    const dependencyEgressProxy = await readFile(join(process.cwd(), 'builder', 'operations', 'osi-dependency-egress-proxy.cjs'));
+    const imageDigest = '4'.repeat(64);
+    const imageId = '5'.repeat(64);
+    const lock = {
+      schemaVersion: 1,
+      packageVersion: '0.1.24',
+      imageRepository: 'registry.example.invalid/osi-image-builder',
+      imageDigest,
+      baseImage: `ubuntu@sha256:${'6'.repeat(64)}`,
+      baseImageDigest: '6'.repeat(64),
+      dockerfileSha256: '7'.repeat(64),
+      packageSet: ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', 'libzstd-dev', 'libpolly-18-dev'],
+      rustConfig: { llvmConfig: '/usr/bin/llvm-config', channel: 'stable', version: '1.80.0', llvmMajor: 18 },
+      nodeVersion: '22.12.0',
+      executionDefinitionSha256: createHash('sha256').update(executionDefinition).digest('hex'),
+      dependencyEgressProxySha256: createHash('sha256').update(dependencyEgressProxy).digest('hex'),
+      validationEvidenceSha256: '8'.repeat(64),
+      installable: true,
+      publisherSha256: '9'.repeat(64),
+      imageId,
+    } as const;
+    const lockBytes = Buffer.from(`${JSON.stringify(lock)}\n`);
+    const identity = {
+      packageVersion: '0.1.24',
+      packageRoot,
+      lockSha256: createHash('sha256').update(lockBytes).digest('hex'),
+      executionDefinitionSha256: lock.executionDefinitionSha256,
+      targetManifestSha256: createHash('sha256').update(manifest).digest('hex'),
+      runnerSha256: createHash('sha256').update(runner).digest('hex'),
+      cleanupWorkerSha256: createHash('sha256').update(cleanupWorker).digest('hex'),
+      dependencyEgressProxySha256: lock.dependencyEgressProxySha256,
+      imageReference: `${lock.imageRepository}@sha256:${imageDigest}`,
+      imageId: `sha256:${imageId}`,
+      imageDigest,
+    } as const;
+    await Promise.all([
+      mkdir(join(packageRoot, 'bin'), { recursive: true }),
+      mkdir(join(packageRoot, 'manifest'), { recursive: true }),
+      mkdir(join(packageRoot, 'operations'), { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(join(packageRoot, 'builder.lock.json'), lockBytes),
+      writeFile(join(packageRoot, 'execution-definition.json'), executionDefinition),
+      writeFile(join(packageRoot, 'bin', 'osi-image-builder-runner'), runner),
+      writeFile(join(packageRoot, 'bin', 'osi-image-builder-cleanup'), cleanupWorker, { mode: 0o555 }),
+      writeFile(join(packageRoot, 'manifest', 'targets.json'), manifest),
+      writeFile(join(packageRoot, 'operations', 'osi-dependency-egress-proxy.cjs'), dependencyEgressProxy, { mode: 0o444 }),
+    ]);
+    await chmod(join(packageRoot, 'operations'), 0o555);
+    await chmod(packageRoot, 0o555);
+
+    await expect(runCleanupWorker([ADMISSION], {
+      currentExecutablePath: '/home/builder/.local/lib/osi-image-builder/0.1.25/bin/osi-image-builder-cleanup',
+      resolveAdmittedCleanup: vi.fn(async () => identity),
+    })).resolves.toEqual({ status: 'completed', jobId: JOB, admissionId: ADMISSION, exactContainerId: null });
+
+    const proxyPath = join(packageRoot, 'operations', 'osi-dependency-egress-proxy.cjs');
+    await chmod(proxyPath, 0o644);
+    await writeFile(proxyPath, 'changed proxy runtime\n');
+    await chmod(proxyPath, 0o444);
+    await expect(runCleanupWorker([ADMISSION], {
+      currentExecutablePath: '/home/builder/.local/lib/osi-image-builder/0.1.25/bin/osi-image-builder-cleanup',
+      resolveAdmittedCleanup: vi.fn(async () => identity),
+    })).rejects.toThrow(/proxy|hash/iu);
+    await chmod(proxyPath, 0o644);
+    await writeFile(proxyPath, dependencyEgressProxy);
+    await chmod(proxyPath, 0o444);
+
+    const cleanupPath = join(packageRoot, 'bin', 'osi-image-builder-cleanup');
+    await chmod(cleanupPath, 0o755);
+    await writeFile(cleanupPath, `${cleanupWorker.toString()}# tampered\n`);
+    await chmod(cleanupPath, 0o555);
+    await expect(runCleanupWorker([ADMISSION], {
+      currentExecutablePath: '/home/builder/.local/lib/osi-image-builder/0.1.25/bin/osi-image-builder-cleanup',
+      resolveAdmittedCleanup: vi.fn(async () => identity),
+    })).rejects.toThrow(/admitted builder package|identity/iu);
+  });
+});
 
 function commandResult(argv: readonly string[], stdout: string, exitCode = 0) {
   return {
@@ -117,6 +243,7 @@ function deps(root: string, executor: { run: ReturnType<typeof vi.fn> }, publish
     ownerUid: process.getuid?.() ?? 0,
     approvedRootSnapshot,
     stateRootSnapshot,
+    dependencyEgressCleanup: { cleanup: vi.fn(async () => ({ persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' as const })) },
   };
 }
 
@@ -182,10 +309,116 @@ function logDatabase(rows: LogFixtureRow[], events: LogFixtureEvent[]) {
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map(async (root) => {
+    await chmod(join(root, '0.1.24', 'operations'), 0o700).catch(() => undefined);
+    await chmod(join(root, '0.1.24'), 0o700).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }));
 });
 
 describe('cleanup production composition', () => {
+  it('recovers egress with the admitted job image identity instead of the current installed lock', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const oldDigest = '1'.repeat(64);
+    const oldImageId = `sha256:${'2'.repeat(64)}`;
+    const oldReference = `registry.example.invalid/osi-image-builder@sha256:${oldDigest}`;
+    const run = vi.fn(async (argv: readonly string[]) => {
+      if (argv[1] === 'image' && argv[2] === 'inspect') return commandResult(argv, `${JSON.stringify({ Id: oldImageId, Architecture: 'amd64', Os: 'linux', RepoDigests: [oldReference] })}\n`);
+      if (argv[1] === 'ps') return commandResult(argv, '');
+      if (argv[1] === 'network' && argv[2] === 'ls') return commandResult(argv, '');
+      throw new Error(`unexpected command: ${argv.join(' ')}`);
+    });
+    const executor = { run };
+    const cleanup = createDefaultDependencyEgressCleanup({
+      loaded: loaded(root),
+      stateRoot: root,
+      ownerUid: process.getuid?.() ?? 0,
+      dockerPath: '/usr/bin/docker',
+      policy: { executor: executor as never, env: {}, timeoutMs: 1_000 },
+    });
+    const job = {
+      jobId: JOB,
+      targetManifestSha256: HASH,
+      builderIdentity: {
+        ...TEST_BUILDER_IDENTITY,
+        packageVersion: '0.1.23',
+        packageRoot: '/home/builder/.local/lib/osi-image-builder/0.1.23',
+        imageReference: oldReference,
+        imageId: oldImageId,
+        imageDigest: oldDigest,
+      },
+      containerSecurity: null,
+    } as unknown as JobRecord;
+
+    await expect(cleanup.cleanup(job)).resolves.toMatchObject({ globalLabelResult: 'no-match' });
+    expect(run).toHaveBeenCalledWith(
+      ['/usr/bin/docker', 'image', 'inspect', '--format={{json .}}', oldReference],
+      expect.any(Object),
+    );
+  });
+
+  it('produces an exact physical credential-only remnant proof', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const credentialDirectory = join(root, 'jobs', JOB, 'recovery', 'dependency-egress');
+    await mkdir(credentialDirectory, { recursive: true, mode: 0o700 });
+    const credential = await createDependencyEgressCredential({ directory: credentialDirectory, jobId: JOB, operationId: 'frontend-install', attempt: 1 });
+    const run = vi.fn(async (argv: readonly string[]) => {
+      if (argv[1] === 'image' && argv[2] === 'inspect') return commandResult(argv, `${JSON.stringify({ Id: TEST_BUILDER_IDENTITY.imageId, Architecture: 'amd64', Os: 'linux', RepoDigests: [TEST_BUILDER_IDENTITY.imageReference] })}\n`);
+      if (argv[1] === 'ps' || argv[1] === 'network' && argv[2] === 'ls') return commandResult(argv, '');
+      throw new Error(`unexpected command: ${argv.join(' ')}`);
+    });
+    const cleanup = createDefaultDependencyEgressCleanup({ loaded: loaded(root), stateRoot: root, ownerUid: process.getuid?.() ?? 0, dockerPath: '/usr/bin/docker', policy: { executor: { run } as never, env: {}, timeoutMs: 1_000 } });
+    const proof = await cleanup.cleanup({ jobId: JOB, targetManifestSha256: TEST_BUILDER_IDENTITY.targetManifestSha256, builderIdentity: TEST_BUILDER_IDENTITY, containerSecurity: null } as unknown as JobRecord);
+    expect(proof.credentials).toEqual([{
+      kind: 'credential-only', operationId: 'frontend-install', attempt: 1, hostPath: credential.hostPath, expectedSha256: credential.sha256, observedSha256: credential.sha256,
+      tls: { hostDirectory: join(credentialDirectory, 'frontend-install-1.proxy-tls'), absent: true }, absent: true,
+    }]);
+    await expect(readdir(credentialDirectory)).resolves.toEqual([]);
+  });
+
+  it('produces an exact physical TLS-only remnant proof without a credential hash', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const credentialDirectory = join(root, 'jobs', JOB, 'recovery', 'dependency-egress');
+    const hostDirectory = join(credentialDirectory, 'build-image-2.proxy-tls');
+    await mkdir(hostDirectory, { recursive: true, mode: 0o700 });
+    const run = vi.fn(async (argv: readonly string[]) => {
+      if (argv[1] === 'image' && argv[2] === 'inspect') return commandResult(argv, `${JSON.stringify({ Id: TEST_BUILDER_IDENTITY.imageId, Architecture: 'amd64', Os: 'linux', RepoDigests: [TEST_BUILDER_IDENTITY.imageReference] })}\n`);
+      if (argv[1] === 'ps' || argv[1] === 'network' && argv[2] === 'ls') return commandResult(argv, '');
+      throw new Error(`unexpected command: ${argv.join(' ')}`);
+    });
+    const cleanup = createDefaultDependencyEgressCleanup({ loaded: loaded(root), stateRoot: root, ownerUid: process.getuid?.() ?? 0, dockerPath: '/usr/bin/docker', policy: { executor: { run } as never, env: {}, timeoutMs: 1_000 } });
+    const proof = await cleanup.cleanup({ jobId: JOB, targetManifestSha256: TEST_BUILDER_IDENTITY.targetManifestSha256, builderIdentity: TEST_BUILDER_IDENTITY, containerSecurity: null } as unknown as JobRecord);
+    expect(proof.credentials).toEqual([{
+      kind: 'tls-only', operationId: 'build-image', attempt: 2, hostPath: join(credentialDirectory, 'build-image-2.proxy-credential'), expectedSha256: null, observedSha256: null,
+      tls: { hostDirectory, absent: true }, absent: true,
+    }]);
+    await expect(readdir(credentialDirectory)).resolves.toEqual([]);
+  });
+  it('accepts Docker 29.6 missing-container evidence with newline-only stdout', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const containerId = 'a'.repeat(12);
+    const executor = { run: vi.fn(async (argv: readonly string[]) => ({
+      ...commandResult(argv, '\n', 1),
+      stderr: `Error response from daemon: No such container: ${containerId}\n`,
+    })) };
+    const composition = await createCleanupProduction(deps(root, executor, vi.fn()));
+    await expect(composition.adapters.docker.inspect(containerId, 1000)).resolves.toBeNull();
+    await composition.close();
+  });
+
+  it.each([
+    ['arbitrary stdout', 'unexpected\n', `Error response from daemon: No such container: ${'a'.repeat(12)}\n`],
+    ['multiple stdout line breaks', '\n\n', `Error response from daemon: No such container: ${'a'.repeat(12)}\n`],
+    ['unrelated stderr', '\n', 'permission denied\n'],
+    ['wrong container identity', '\n', `Error response from daemon: No such container: ${'b'.repeat(12)}\n`],
+  ])('rejects Docker missing-container evidence with %s', async (_name, stdout, stderr) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
+    const containerId = 'a'.repeat(12);
+    const executor = { run: vi.fn(async (argv: readonly string[]) => ({ ...commandResult(argv, stdout, 1), stderr })) };
+    const composition = await createCleanupProduction(deps(root, executor, vi.fn()));
+    await expect(composition.adapters.docker.inspect(containerId, 1000)).rejects.toThrow(/missing-container evidence is invalid/);
+    await composition.close();
+  });
   it('uses repository-free configuration in the default cleanup composition', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-cleanup-production-')); roots.push(root);
     const configHome = join(root, 'config-home');
@@ -239,6 +472,7 @@ describe('cleanup production composition', () => {
     expect(composition.adapters.logSealer).toBeDefined();
     expect(composition.adapters.quarantine).toBeDefined();
     expect(composition.adapters.evidenceWriter).toBeDefined();
+    expect(composition.adapters.dependencyEgress).toBe(options.dependencyEgressCleanup);
     await composition.adapters.systemd.inspect(`osi-image-builder-runner@${JOB}.service`, 1000);
     await composition.adapters.docker.listByJobId(JOB, 1000);
     expect(run).toHaveBeenCalledWith(

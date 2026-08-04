@@ -7,6 +7,7 @@ export const BUILDER_LOCK_REQUIRED_KEYS = Object.freeze([
   'schemaVersion', 'packageVersion', 'imageRepository', 'imageDigest', 'baseImage',
   'baseImageDigest', 'dockerfileSha256', 'packageSet', 'rustConfig', 'nodeVersion',
   'executionDefinitionSha256', 'validationEvidenceSha256',
+  'dependencyEgressProxySha256',
 ] as const);
 
 export const BUILDER_LOCK_OPTIONAL_KEYS = Object.freeze(['installable', 'publisherSha256', 'imageId'] as const);
@@ -24,6 +25,7 @@ export interface BuilderLock {
   readonly nodeVersion: string;
   readonly executionDefinitionSha256: string;
   readonly validationEvidenceSha256: string;
+  readonly dependencyEgressProxySha256: string;
   readonly installable?: boolean;
   readonly publisherSha256?: string;
   readonly imageId?: string;
@@ -76,7 +78,8 @@ export function validateBuilderLock(value: unknown, installedVersion: string): B
   if (lock.packageVersion !== installedVersion || typeof lock.packageVersion !== 'string' || !PRODUCTION_VERSION.test(lock.packageVersion)) return { ok: false, reason: 'package version is not production metadata' };
   if (!dockerRepository(lock.imageRepository)) return { ok: false, reason: 'image repository is invalid' };
   if (!digest(lock.imageDigest) || !digest(lock.baseImageDigest) || !digest(lock.dockerfileSha256)
-    || !digest(lock.executionDefinitionSha256) || !digest(lock.validationEvidenceSha256)) return { ok: false, reason: 'lock digest is invalid' };
+    || !digest(lock.executionDefinitionSha256) || !digest(lock.validationEvidenceSha256)
+    || !digest(lock.dependencyEgressProxySha256)) return { ok: false, reason: 'lock digest is invalid' };
   if (typeof lock.baseImage !== 'string' || !lock.baseImage.endsWith(`@sha256:${lock.baseImageDigest}`)
     || !dockerRepository(lock.baseImage.slice(0, lock.baseImage.lastIndexOf('@'))) || !/^sha256:[0-9a-f]{64}$/u.test(lock.baseImage.slice(lock.baseImage.lastIndexOf('@') + 1))) return { ok: false, reason: 'base image is not digest bound' };
   if (typeof lock.nodeVersion !== 'string' || !SEMVER.test(lock.nodeVersion)) return { ok: false, reason: 'Node version is unsupported' };

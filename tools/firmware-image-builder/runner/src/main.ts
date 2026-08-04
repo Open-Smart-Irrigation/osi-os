@@ -1,18 +1,23 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { constants as fsConstants } from 'node:fs';
-import type { DatabaseSync } from 'node:sqlite';
+import { spawn } from 'node:child_process';
+import { constants as fsConstants, type Stats } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import {
   lstat,
   mkdir,
   open,
+  readFile,
+  readdir,
   rename,
   rm,
+  unlink,
 } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import {
   basename,
   dirname,
   join,
+  resolve,
 } from 'node:path';
 
 import {
@@ -55,7 +60,10 @@ import {
   type StateRootAuthority,
 } from '../../config/load.js';
 import { validateBuilderLock, type BuilderLock } from '../../domain/builder-lock.js';
+import { validateAdmittedBuilderPackage } from '../../domain/admitted-builder-package.js';
+import { parseBuilderIdentity, type BuilderIdentity } from '../../domain/builder-identity.js';
 import { createInstalledLockReader } from '../../domain/installed-lock.js';
+import { createInstalledDependencyEgressProxyReader } from '../../domain/installed-dependency-egress-proxy.js';
 import { installedMigrationsDirectory } from '../../domain/installed-layout.js';
 import { encodeBranchSlug } from '../../domain/paths.js';
 import type {
@@ -70,12 +78,14 @@ import {
   type ManifestFileSystem,
 } from '../../manifest/validate.js';
 import type { TargetManifest } from '../../manifest/schema.js';
+import { loadInstalledDependencyEgressPolicy } from './network-policy.js';
 import {
   createRunnerPublisherClient,
   type RunnerPublisherClient,
 } from './publisher-client.js';
 import {
   DockerCancellationRequestedError,
+  createDockerContainerName,
   createDockerCancellationControls,
   createDockerExecutor,
 } from './docker-executor.js';
@@ -125,6 +135,7 @@ import {
   createLockedTargetSetupOperations,
   createTargetSetupConfigObservations,
   createTargetSetupSourceObservations,
+  assertActiveTargetLinks,
   resolveTargetSetup,
   type OfflineFeedPreparation,
   type TargetSetupConfigObservations,
@@ -196,6 +207,26 @@ interface TrustedOperationRequest {
   readonly environment: string;
 }
 
+interface WorkspaceIdentity {
+  readonly device: number;
+  readonly inode: number;
+}
+
+export function assertTargetSetupWorkspaceIdentity(
+  expected: WorkspaceIdentity | null,
+  observed: WorkspaceIdentity,
+): void {
+  if (
+    expected === null
+    || !Number.isSafeInteger(observed.device)
+    || !Number.isSafeInteger(observed.inode)
+    || expected.device !== observed.device
+    || expected.inode !== observed.inode
+  ) {
+    throw new Error('target-setup workspace identity does not match the retained workspace identity');
+  }
+}
+
 function sameOperationDefinition(
   actual: OperationDefinition,
   expected: OperationDefinition,
@@ -205,6 +236,22 @@ function sameOperationDefinition(
     && Array.isArray(actual.argv)
     && actual.argv.length === expected.argv.length
     && actual.argv.every((value, index) => value === expected.argv[index]);
+}
+
+export function resolveTargetSetupConfigEnvironment(input: Readonly<{
+  readonly definition: OperationDefinition;
+  readonly activeTargetSetupEnvironment: string | null;
+  readonly manifestEnvironments: readonly string[];
+}>): string {
+  const active = input.activeTargetSetupEnvironment;
+  if (active === null || !input.manifestEnvironments.includes(active)) {
+    throw new Error('config phase has no active target environment from activate-target');
+  }
+  const expected = createOperationDefinition('resolve-config', { environment: active });
+  if (!sameOperationDefinition(input.definition, expected)) {
+    throw new Error('config phase definition does not match the active target environment');
+  }
+  return active;
 }
 
 export function resolveTrustedOperationRequest(
@@ -296,6 +343,17 @@ interface DirectoryChain {
   readonly handles: readonly FileHandle[];
 }
 
+export interface PublicationSealingDependencies {
+  readonly afterVerificationTempRemovalSync?: (name: string) => void | Promise<void>;
+  readonly afterVerificationTempSync?: (name: string) => void | Promise<void>;
+  readonly afterFileChmod?: (name: string) => void | Promise<void>;
+  readonly afterFileSync?: (name: string) => void | Promise<void>;
+  readonly afterDirectoryChmod?: () => void | Promise<void>;
+  readonly afterDirectorySync?: () => void | Promise<void>;
+  readonly beforeCanonicalRevalidation?: () => void | Promise<void>;
+  readonly beforeFinalCanonicalIdentityWalk?: () => void | Promise<void>;
+}
+
 function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -353,6 +411,25 @@ function safeSegment(value: string, field: string): string {
     throw new Error(`${field} is not a safe path segment`);
   }
   return value;
+}
+
+async function assertPublicationMembership(
+  parent: FileHandle,
+  trackedNames: readonly string[],
+  temporaryName: string | null,
+): Promise<boolean> {
+  const actual = (await readdir(fdPath(parent))).sort();
+  const tracked = [...trackedNames].sort();
+  if (actual.length === tracked.length && actual.every((name, index) => name === tracked[index])) {
+    return false;
+  }
+  if (temporaryName !== null) {
+    const recoverable = [...trackedNames, temporaryName].sort();
+    if (actual.length === recoverable.length && actual.every((name, index) => name === recoverable[index])) {
+      return true;
+    }
+  }
+  throw new Error('accepted publication directory has an untracked member');
 }
 
 async function closeHandles(handles: readonly FileHandle[]): Promise<void> {
@@ -478,6 +555,40 @@ async function readHeldFile(
   }
 }
 
+async function removeOwnedVerificationTemp(
+  parent: FileHandle,
+  name: string,
+  expectedOwnerUid: number,
+  expectedDevice: bigint | number,
+): Promise<void> {
+  const path = fdPath(parent, safeSegment(name, 'verification temp name'));
+  const handle = await open(path, READ_FLAGS);
+  try {
+    const before = await handle.stat();
+    if (
+      !before.isFile()
+      || before.nlink !== 1
+      || before.uid !== expectedOwnerUid
+      || before.dev !== expectedDevice
+      || (before.mode & 0o7777) !== 0o600
+    ) {
+      throw new Error('recoverable verification temp has unsafe metadata');
+    }
+    await unlink(path);
+    const afterUnlink = await handle.stat();
+    if (
+      before.dev !== afterUnlink.dev
+      || before.ino !== afterUnlink.ino
+      || afterUnlink.nlink !== 0
+    ) {
+      throw new Error('recoverable verification temp path changed before unlink');
+    }
+    await parent.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 async function hashHeldFile(
   parent: FileHandle,
   name: string,
@@ -536,6 +647,365 @@ async function writeHeldFile(
   }
 }
 
+interface AcceptedPublicationExpectation {
+  readonly name: string;
+  readonly sha256: string;
+  readonly size: number | null;
+  readonly mtime: string | null;
+}
+
+interface HeldAcceptedPublicationFile extends AcceptedPublicationExpectation {
+  readonly handle: FileHandle;
+  readonly identity: Readonly<{ dev: number; ino: number }>;
+}
+
+function modeOf(stats: Stats): number {
+  return stats.mode & 0o7777;
+}
+
+async function validateAcceptedPublicationHandle(
+  handle: FileHandle,
+  expectation: AcceptedPublicationExpectation,
+  allowedModes: readonly number[],
+  ownerUid: number,
+  device: number,
+): Promise<Stats> {
+  const before = await handle.stat();
+  if (
+    !before.isFile()
+    || before.nlink !== 1
+    || before.uid !== ownerUid
+    || before.dev !== device
+    || !allowedModes.includes(modeOf(before))
+  ) {
+    throw new Error('accepted publication file has unsafe metadata');
+  }
+  if (expectation.size !== null && before.size !== expectation.size) {
+    throw new Error('accepted publication file size changed before sealing');
+  }
+  if (expectation.mtime !== null && before.mtime.toISOString() !== expectation.mtime) {
+    throw new Error('accepted publication file mtime changed before sealing');
+  }
+  const digest = await hashHandle(handle);
+  const after = await handle.stat();
+  if (
+    after.dev !== before.dev
+    || after.ino !== before.ino
+    || after.nlink !== before.nlink
+    || after.size !== before.size
+    || after.mtimeMs !== before.mtimeMs
+    || modeOf(after) !== modeOf(before)
+    || digest !== expectation.sha256
+  ) {
+    throw new Error('accepted publication file changed while held');
+  }
+  return after;
+}
+
+async function holdAcceptedPublicationFile(
+  parent: FileHandle,
+  expectation: AcceptedPublicationExpectation,
+  allowedModes: readonly number[],
+  ownerUid: number,
+  device: number,
+): Promise<HeldAcceptedPublicationFile> {
+  const handle = await open(
+    fdPath(parent, safeSegment(expectation.name, 'accepted publication file name')),
+    READ_FLAGS,
+  );
+  try {
+    const stats = await validateAcceptedPublicationHandle(
+      handle,
+      expectation,
+      allowedModes,
+      ownerUid,
+      device,
+    );
+    return { ...expectation, handle, identity: { dev: stats.dev, ino: stats.ino } };
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function assertFinalCanonicalPublicationIdentity(input: Readonly<{
+  readonly registry: ApprovedRootRegistry;
+  readonly rootId: string;
+  readonly rootPath: string;
+  readonly rootDevice: number;
+  readonly rootInode: number;
+  readonly finalParts: readonly string[];
+  readonly chainIdentities: readonly Readonly<{ dev: number; ino: number }>[];
+  readonly finalIdentity: Readonly<{ dev: number; ino: number; uid: number }>;
+  readonly files: readonly HeldAcceptedPublicationFile[];
+}>): Promise<void> {
+  await withApprovedRootSnapshot(input.registry, input.rootId, async ({ snapshot }) => {
+    if (
+      snapshot.path !== input.rootPath
+      || snapshot.device !== input.rootDevice
+      || snapshot.inode !== input.rootInode
+    ) {
+      throw new Error('accepted publication approved-root authority changed at final identity walk');
+    }
+    const root = await open(snapshot.path, DIRECTORY_FLAGS);
+    let final: DirectoryChain | null = null;
+    const named: FileHandle[] = [];
+    try {
+      const rootStats = await root.stat();
+      if (
+        !rootStats.isDirectory()
+        || rootStats.dev !== input.rootDevice
+        || rootStats.ino !== input.rootInode
+      ) {
+        throw new Error('accepted publication canonical root changed at final identity walk');
+      }
+      final = await openDirectoryChain(root, input.finalParts, false);
+      if (final.handles.length !== input.chainIdentities.length) {
+        throw new Error('accepted publication canonical chain is incomplete at final identity walk');
+      }
+      for (const [index, handle] of final.handles.entries()) {
+        const stats = await handle.stat();
+        const expected = input.chainIdentities[index]!;
+        if (!stats.isDirectory() || stats.dev !== expected.dev || stats.ino !== expected.ino) {
+          throw new Error('accepted publication canonical directory changed at final identity walk');
+        }
+      }
+      const leaf = await final.directory.stat();
+      if (
+        !leaf.isDirectory()
+        || leaf.nlink < 1
+        || leaf.dev !== input.finalIdentity.dev
+        || leaf.ino !== input.finalIdentity.ino
+        || leaf.uid !== input.finalIdentity.uid
+        || modeOf(leaf) !== 0o555
+      ) {
+        throw new Error('accepted publication canonical leaf is not sealed at final identity walk');
+      }
+      const names = input.files.map(({ name }) => name);
+      await assertPublicationMembership(final.directory, names, null);
+      for (const file of input.files) {
+        named.push(await open(
+          fdPath(final.directory, safeSegment(file.name, 'final canonical publication file name')),
+          READ_FLAGS,
+        ));
+      }
+      await assertPublicationMembership(final.directory, names, null);
+      for (const [index, canonical] of named.entries()) {
+        const file = input.files[index]!;
+        const [canonicalStats, heldStats] = await Promise.all([
+          canonical.stat(),
+          file.handle.stat(),
+        ]);
+        if (
+          !canonicalStats.isFile()
+          || canonicalStats.nlink !== 1
+          || canonicalStats.uid !== input.finalIdentity.uid
+          || canonicalStats.dev !== file.identity.dev
+          || canonicalStats.ino !== file.identity.ino
+          || modeOf(canonicalStats) !== 0o444
+          || heldStats.dev !== file.identity.dev
+          || heldStats.ino !== file.identity.ino
+          || heldStats.nlink !== 1
+          || modeOf(heldStats) !== 0o444
+        ) {
+          throw new Error('accepted publication named inode changed at final identity walk');
+        }
+      }
+    } finally {
+      await closeHandles(named);
+      if (final !== null) await closeHandles(final.handles);
+      await root.close().catch(() => undefined);
+    }
+  });
+}
+
+async function sealAcceptedPublication(input: Readonly<{
+  readonly registry: ApprovedRootRegistry;
+  readonly rootId: string;
+  readonly root: FileHandle;
+  readonly rootPath: string;
+  readonly rootDevice: number;
+  readonly rootInode: number;
+  readonly final: DirectoryChain;
+  readonly finalParts: readonly string[];
+  readonly artifact: ArtifactInput;
+  readonly terminalVerificationSha256: string;
+  readonly dependencies: PublicationSealingDependencies;
+}>): Promise<void> {
+  const finalStats = await input.final.directory.stat();
+  const rootStats = await input.root.stat();
+  const chainIdentities = await Promise.all(input.final.handles.map(async (handle) => {
+    const stats = await handle.stat();
+    return Object.freeze({ dev: stats.dev, ino: stats.ino });
+  }));
+  const finalMode = modeOf(finalStats);
+  if (
+    !finalStats.isDirectory()
+    || finalStats.nlink < 1
+    || finalStats.dev !== input.rootDevice
+    || (finalMode !== 0o700 && finalMode !== 0o555)
+  ) {
+    throw new Error('accepted publication directory has an invalid seal state');
+  }
+  const allowedFileModes = finalMode === 0o700 ? [0o600, 0o444] as const : [0o444] as const;
+  const expectations: readonly AcceptedPublicationExpectation[] = [
+    {
+      name: basename(input.artifact.stagingPath),
+      sha256: input.artifact.artifactSha256,
+      size: input.artifact.artifactSize,
+      mtime: input.artifact.artifactMtime,
+    },
+    { name: 'sha256sums', sha256: input.artifact.checksumSha256, size: null, mtime: null },
+    { name: 'build-manifest.json', sha256: input.artifact.manifestSha256, size: null, mtime: null },
+    { name: 'verification.json', sha256: input.terminalVerificationSha256, size: null, mtime: null },
+  ];
+  await assertPublicationMembership(input.final.directory, expectations.map(({ name }) => name), null);
+  const held: HeldAcceptedPublicationFile[] = [];
+  try {
+    for (const expectation of expectations) {
+      held.push(await holdAcceptedPublicationFile(
+        input.final.directory,
+        expectation,
+        allowedFileModes,
+        finalStats.uid,
+        finalStats.dev,
+      ));
+    }
+    if (new Set(held.map(({ identity }) => `${identity.dev}:${identity.ino}`)).size !== held.length) {
+      throw new Error('accepted publication files do not have distinct inodes');
+    }
+    for (const file of held) {
+      await file.handle.chmod(0o444);
+      await input.dependencies.afterFileChmod?.(file.name);
+      await file.handle.sync();
+      await input.dependencies.afterFileSync?.(file.name);
+      const sealed = await file.handle.stat();
+      if (
+        sealed.dev !== file.identity.dev
+        || sealed.ino !== file.identity.ino
+        || modeOf(sealed) !== 0o444
+      ) {
+        throw new Error('accepted publication held inode did not seal read-only');
+      }
+    }
+    await assertPublicationMembership(input.final.directory, expectations.map(({ name }) => name), null);
+    await input.final.directory.chmod(0o555);
+    await input.dependencies.afterDirectoryChmod?.();
+    await input.final.directory.sync();
+    await input.dependencies.afterDirectorySync?.();
+    const sealedDirectory = await input.final.directory.stat();
+    if (
+      sealedDirectory.dev !== finalStats.dev
+      || sealedDirectory.ino !== finalStats.ino
+      || modeOf(sealedDirectory) !== 0o555
+    ) {
+      throw new Error('accepted publication directory did not seal read-only');
+    }
+
+    await input.dependencies.beforeCanonicalRevalidation?.();
+    await withApprovedRootSnapshot(input.registry, input.rootId, async ({ snapshot }) => {
+      if (
+        snapshot.path !== input.rootPath
+        || snapshot.device !== input.rootDevice
+        || snapshot.inode !== input.rootInode
+      ) {
+        throw new Error('accepted publication approved-root authority changed after sealing');
+      }
+      const canonicalRoot = await open(snapshot.path, DIRECTORY_FLAGS);
+      let canonicalFinal: DirectoryChain | null = null;
+      try {
+        const currentRoot = await canonicalRoot.stat();
+        const heldRoot = await input.root.stat();
+        if (
+          currentRoot.dev !== rootStats.dev
+          || currentRoot.ino !== rootStats.ino
+          || heldRoot.dev !== rootStats.dev
+          || heldRoot.ino !== rootStats.ino
+        ) {
+          throw new Error('accepted publication canonical root inode changed after sealing');
+        }
+        canonicalFinal = await openDirectoryChain(canonicalRoot, input.finalParts, false);
+        if (canonicalFinal.handles.length !== chainIdentities.length) {
+          throw new Error('accepted publication canonical directory chain changed after sealing');
+        }
+        for (const [index, handle] of canonicalFinal.handles.entries()) {
+          const stats = await handle.stat();
+          const expected = chainIdentities[index]!;
+          if (stats.dev !== expected.dev || stats.ino !== expected.ino) {
+            throw new Error('accepted publication canonical directory inode changed after sealing');
+          }
+        }
+        const canonicalFinalStats = await canonicalFinal.directory.stat();
+        if (
+          canonicalFinalStats.dev !== finalStats.dev
+          || canonicalFinalStats.ino !== finalStats.ino
+          || modeOf(canonicalFinalStats) !== 0o555
+        ) {
+          throw new Error('accepted publication canonical directory is not sealed');
+        }
+        await assertPublicationMembership(
+          canonicalFinal.directory,
+          expectations.map(({ name }) => name),
+          null,
+        );
+        for (const file of held) {
+          const canonical = await open(
+            fdPath(canonicalFinal.directory, safeSegment(file.name, 'canonical publication file name')),
+            READ_FLAGS,
+          );
+          try {
+            const canonicalStats = await validateAcceptedPublicationHandle(
+              canonical,
+              file,
+              [0o444],
+              finalStats.uid,
+              finalStats.dev,
+            );
+            const heldStats = await validateAcceptedPublicationHandle(
+              file.handle,
+              file,
+              [0o444],
+              finalStats.uid,
+              finalStats.dev,
+            );
+            if (
+              canonicalStats.dev !== file.identity.dev
+              || canonicalStats.ino !== file.identity.ino
+              || heldStats.dev !== file.identity.dev
+              || heldStats.ino !== file.identity.ino
+            ) {
+              throw new Error('accepted publication canonical named inode changed after sealing');
+            }
+          } finally {
+            await canonical.close().catch(() => undefined);
+          }
+        }
+      } finally {
+        if (canonicalFinal !== null) await closeHandles(canonicalFinal.handles);
+        await canonicalRoot.close().catch(() => undefined);
+      }
+    });
+    await input.dependencies.beforeFinalCanonicalIdentityWalk?.();
+    await assertFinalCanonicalPublicationIdentity({
+      registry: input.registry,
+      rootId: input.rootId,
+      rootPath: input.rootPath,
+      rootDevice: input.rootDevice,
+      rootInode: input.rootInode,
+      finalParts: input.finalParts,
+      chainIdentities,
+      finalIdentity: {
+        dev: finalStats.dev,
+        ino: finalStats.ino,
+        uid: finalStats.uid,
+      },
+      files: held,
+    });
+  } finally {
+    await closeHandles(held.map(({ handle }) => handle));
+  }
+}
+
 export async function stageVerifiedArtifact(
   workspaceAuthority: string | FileHandle,
   relativePath: string,
@@ -557,10 +1027,11 @@ export async function stageVerifiedArtifact(
     const source = await open(fdPath(chain.directory, sourceName), READ_FLAGS);
     try {
       const stats = await source.stat();
+      const sourceMtime = new Date(stats.mtimeMs).toISOString();
       if (
         !stats.isFile()
         || stats.size !== expected.size
-        || stats.mtime.toISOString() !== expected.mtime
+        || sourceMtime !== expected.mtime
       ) {
         throw new Error('verified artifact metadata changed before staging');
       }
@@ -592,10 +1063,11 @@ export async function stageVerifiedArtifact(
         await destinationHandle.sync();
         const copied = await destinationHandle.stat();
         const copiedHash = await hashHandle(destinationHandle);
+        const copiedMtime = new Date(copied.mtimeMs).toISOString();
         if (
           !copied.isFile()
           || copied.size !== expected.size
-          || copied.mtime.toISOString() !== expected.mtime
+          || copiedMtime !== expected.mtime
           || copiedHash !== expected.sha256
         ) {
           throw new Error('staged artifact differs from verified source');
@@ -603,7 +1075,7 @@ export async function stageVerifiedArtifact(
         return {
           sha256: copiedHash,
           size: copied.size,
-          mtime: copied.mtime.toISOString(),
+          mtime: copiedMtime,
         };
       } finally {
         await destinationHandle.close();
@@ -846,7 +1318,6 @@ function mapOperation(
       evidenceSha256: operation.evidenceSha256,
       lifecyclePhase: operation.lifecyclePhase,
       containerId: operation.containerId,
-      acceptedDisposition: operation.acceptedDisposition,
       stdout,
       stderr,
     }),
@@ -1269,9 +1740,10 @@ async function reopenPublication(
   });
 }
 
-function createPublicationFiles(
+export function createPublicationFiles(
   loaded: LoadedConfig,
   workspace: () => FileHandle,
+  sealingDependencies: PublicationSealingDependencies = {},
 ): PipelineInput['services']['publicationFiles'] {
   return Object.freeze({
     async prepare(input): Promise<PreparedPublication> {
@@ -1475,7 +1947,7 @@ function createPublicationFiles(
           }
           const root = await open(snapshot.path, DIRECTORY_FLAGS);
           let final: DirectoryChain | null = null;
-          const temporaryName = `.verification-${safeSegment(input.binding.jobId, 'job ID')}-${randomUUID()}.tmp`;
+          const temporaryName = `.verification-${safeSegment(input.binding.jobId, 'job ID')}.tmp`;
           try {
             final = await openDirectoryChain(
               root,
@@ -1486,6 +1958,17 @@ function createPublicationFiles(
               ],
               false,
             );
+            const trackedNames = [
+              basename(input.binding.finalPath),
+              'sha256sums',
+              'build-manifest.json',
+              'verification.json',
+            ] as const;
+            const hasTemporary = await assertPublicationMembership(final.directory, trackedNames, temporaryName);
+            const finalDirectoryStats = await final.directory.stat();
+            if (!finalDirectoryStats.isDirectory() || finalDirectoryStats.nlink < 1) {
+              throw new Error('published release directory identity is invalid');
+            }
             const running = await readHeldFile(final.directory, 'verification.json');
             const terminalSha256 = sha256(input.verificationManifestBytes);
             const alreadyTerminal = (
@@ -1496,18 +1979,38 @@ function createPublicationFiles(
               throw new Error('published verification input differs from staged authority');
             }
             if (!alreadyTerminal) {
+              if (hasTemporary) {
+                await removeOwnedVerificationTemp(
+                  final.directory,
+                  temporaryName,
+                  finalDirectoryStats.uid,
+                  finalDirectoryStats.dev,
+                );
+                await sealingDependencies.afterVerificationTempRemovalSync?.(temporaryName);
+              }
               await writeHeldFile(
                 final.directory,
                 temporaryName,
                 input.verificationManifestBytes,
               );
+              await final.directory.sync();
+              await sealingDependencies.afterVerificationTempSync?.(temporaryName);
               await rename(
                 fdPath(final.directory, temporaryName),
                 fdPath(final.directory, 'verification.json'),
               );
+            } else if (hasTemporary) {
+              await removeOwnedVerificationTemp(
+                final.directory,
+                temporaryName,
+                finalDirectoryStats.uid,
+                finalDirectoryStats.dev,
+              );
+              await sealingDependencies.afterVerificationTempRemovalSync?.(temporaryName);
             }
             await dependencies.beforeDirectorySync?.(final.directory);
             await final.directory.sync();
+            await assertPublicationMembership(final.directory, trackedNames, null);
             const [image, checksum, manifest, verification] = await Promise.all([
               readHeldFile(final.directory, basename(input.binding.finalPath)),
               readHeldFile(final.directory, 'sha256sums'),
@@ -1524,6 +2027,23 @@ function createPublicationFiles(
             ) {
               throw new Error('terminal publication files failed held revalidation');
             }
+            await sealAcceptedPublication({
+              registry: loaded.pathAuthorities.approvedRoots,
+              rootId: input.binding.rootId,
+              root,
+              rootPath: snapshot.path,
+              rootDevice: snapshot.device,
+              rootInode: snapshot.inode,
+              final,
+              finalParts: [
+                input.binding.branchSlug,
+                input.binding.pinnedSha,
+                input.binding.targetId,
+              ],
+              artifact: input.artifact,
+              terminalVerificationSha256: terminalSha256,
+              dependencies: sealingDependencies,
+            });
             return Object.freeze({
               verified: true,
               finalPath: input.binding.finalPath,
@@ -1538,10 +2058,6 @@ function createPublicationFiles(
               staging: 'absent',
             });
           } finally {
-            if (final !== null) {
-              await rm(fdPath(final.directory, temporaryName), { force: true })
-                .catch(() => undefined);
-            }
             if (final !== null) await closeHandles(final.handles);
             await root.close();
           }
@@ -1863,6 +2379,7 @@ export async function completeRecoveredPublication(input: Readonly<{
   readonly stageStartedAt: string;
   readonly at: string;
   readonly logs: PublishingRecoveryLogProof;
+  readonly sealingDependencies?: PublicationSealingDependencies;
 }>): Promise<Readonly<{
   readonly observed: PublishingRecoveryArtifactObservation;
   readonly stageEvidence: ObservedJsonEvidence;
@@ -1931,7 +2448,7 @@ export async function completeRecoveredPublication(input: Readonly<{
   const evidenceIdentity = evidence ?? preparedEvidence;
   await createPublicationFiles(input.loaded, () => {
     throw new Error('publishing recovery has no workspace authority');
-  }).finalizeVerification({
+  }, input.sealingDependencies).finalizeVerification({
     binding: inspected.binding,
     artifact,
     verificationManifest: terminal.manifest,
@@ -2315,13 +2832,22 @@ async function createProductionComposition(
   store: BuilderStore,
   ownership: OwnershipStore,
 ): Promise<ProductionComposition> {
-  const packageDirectory = dirname(loaded.config.builderLockPath);
+  const job = store.getJob(args.jobId);
+  if (job.builderIdentity === null) throw new Error('runner job has no complete admitted builder identity');
+  const builderIdentity = job.builderIdentity;
+  const packageDirectory = builderIdentity.packageRoot;
+  const lockPath = join(packageDirectory, 'builder.lock.json');
   const installedLockReader = createInstalledLockReader();
   const readInstalledLock = async (): Promise<Buffer> => (
     await installedLockReader.read(packageDirectory)
   ).bytes;
   const manifestPath = join(packageDirectory, 'manifest', 'targets.json');
   const publisherPath = join(packageDirectory, 'bin', 'osi-image-publish');
+  const runnerPath = join(packageDirectory, 'bin', 'osi-image-builder-runner');
+  const cleanupWorkerPath = join(packageDirectory, 'bin', 'osi-image-builder-cleanup');
+  const executionDefinitionPath = join(packageDirectory, 'execution-definition.json');
+  let packageHandle: FileHandle | null = null;
+  let packageIdentity: Readonly<{ device: number; inode: number }> | null = null;
   let workspaceHandle: FileHandle | null = null;
   let stateRootHandle: FileHandle | null = null;
   let stateRootIdentity: Readonly<{ path: string; device: number; inode: number }> | null = null;
@@ -2329,24 +2855,44 @@ async function createProductionComposition(
   let heldPublisher: Awaited<ReturnType<typeof holdInstalledPublisher>> | null = null;
   let coordinator: RunnerLogCoordinator | null = null;
   try {
-    heldPublisher = await holdInstalledPublisher(publisherPath);
-    const [lockBytes, manifestBytes] = await Promise.all([
+    const namedPackage = await lstat(packageDirectory);
+    packageHandle = await open(packageDirectory, DIRECTORY_FLAGS);
+    const heldPackage = await packageHandle.stat();
+    const ownerUid = typeof process.geteuid === 'function' ? process.geteuid() : heldPackage.uid;
+    if (
+      !namedPackage.isDirectory() || namedPackage.isSymbolicLink()
+      || !heldPackage.isDirectory()
+      || namedPackage.dev !== heldPackage.dev || namedPackage.ino !== heldPackage.ino
+      || heldPackage.uid !== ownerUid || (heldPackage.mode & 0o777) !== 0o555
+    ) throw new Error('admitted builder package directory authority is unsafe');
+    packageIdentity = Object.freeze({ device: heldPackage.dev, inode: heldPackage.ino });
+    const [lockBytes, manifestBytes, executionDefinitionBytes, runnerBytes, cleanupWorkerBytes, dependencyEgressProxy] = await Promise.all([
       readInstalledLock(),
       readStableFile(manifestPath),
+      readStableFile(executionDefinitionPath),
+      readStableFile(runnerPath),
+      readStableFile(cleanupWorkerPath),
+      createInstalledDependencyEgressProxyReader({ ownerUid })
+        .read(packageDirectory, builderIdentity.dependencyEgressProxySha256),
     ]);
-    const lock = parseInstalledLock(loaded.config.builderLockPath, lockBytes);
-    const installedVersion = dirname(loaded.config.builderLockPath).split('/').at(-1);
-    if (installedVersion === undefined) {
-      throw new Error('installed publisher package version is unavailable');
-    }
+    const manifest = loadManifestFromBytes(manifestPath, manifestBytes);
+    const lock = validateAdmittedBuilderPackage({
+      identity: builderIdentity,
+      lockBytes,
+      executionDefinition: executionDefinitionBytes,
+      runner: runnerBytes,
+      cleanupWorker: cleanupWorkerBytes,
+      dependencyEgressProxy: dependencyEgressProxy.bytes,
+      manifestSha256: manifest.sha256,
+    });
+    if (manifest.sha256 !== job.targetManifestSha256) throw new Error('admitted builder package manifest does not match the job');
+    heldPublisher = await holdInstalledPublisher(publisherPath);
     const publisherAuthority = validateInstalledPublisherAuthority(
       lock,
-      installedVersion,
+      builderIdentity.packageVersion,
       heldPublisher.bytes,
       await readHeldPublisherVersion(heldPublisher.executable),
     );
-    const manifest = loadManifestFromBytes(manifestPath, manifestBytes);
-    const job = store.getJob(args.jobId);
     const target = manifest.manifest.targets.find(
       (candidate) => candidate.id === job.targetId,
     );
@@ -2370,6 +2916,27 @@ async function createProductionComposition(
       }),
     );
     stateRootHandle = await open(stateRootIdentity.path, DIRECTORY_FLAGS);
+    const dependencyEgressCredentialDirectory = join(
+      stateRootIdentity.path,
+      'jobs',
+      args.jobId,
+      'recovery',
+      'dependency-egress',
+    );
+    const dependencyEgressCredentialChain = await openDirectoryChain(
+      stateRootHandle,
+      ['jobs', args.jobId, 'recovery', 'dependency-egress'],
+      true,
+    );
+    try {
+      const metadata = await dependencyEgressCredentialChain.directory.stat();
+      const uid = typeof process.getuid === 'function' ? process.getuid() : metadata.uid;
+      if (!metadata.isDirectory() || metadata.uid !== uid || (metadata.mode & 0o777) !== 0o700) {
+        throw new Error('dependency egress credential directory authority is unsafe');
+      }
+    } finally {
+      await closeHandles(dependencyEgressCredentialChain.handles);
+    }
     approvedRootHandle = await open(approvedRoot.path, DIRECTORY_FLAGS);
     coordinator = createRunnerLogCoordinator({
       db: database,
@@ -2406,10 +2973,6 @@ async function createProductionComposition(
       if (workspaceHandle === null) throw new Error('held source workspace is unavailable');
       return workspaceHandle;
     };
-    const requireWorkspaceDescriptor = (): string => {
-      const handle = requireWorkspace();
-      return `/proc/${String(process.pid)}/fd/${String(handle.fd)}`;
-    };
     const revalidateWorkspace = async (): Promise<void> => {
       if (workspacePath === null || workspaceHandle === null || workspaceIdentity === null) {
         throw new Error('held source workspace chain is unavailable');
@@ -2429,23 +2992,53 @@ async function createProductionComposition(
       ) {
         throw new Error('held source workspace chain was replaced');
       }
+      if (activeTargetSetupEnvironment !== null) {
+        await assertActiveTargetLinks(workspaceHandle, activeTargetSetupEnvironment);
+        const [heldAfter, namedAfter] = await Promise.all([
+          workspaceHandle.stat(),
+          lstat(workspacePath),
+        ]);
+        if (
+          !heldAfter.isDirectory()
+          || !namedAfter.isDirectory()
+          || namedAfter.isSymbolicLink()
+          || heldAfter.dev !== workspaceIdentity.device
+          || heldAfter.ino !== workspaceIdentity.inode
+          || namedAfter.dev !== workspaceIdentity.device
+          || namedAfter.ino !== workspaceIdentity.inode
+        ) {
+          throw new Error('held source workspace chain changed during active-link validation');
+        }
+      }
     };
     const revalidateRoots = async (): Promise<void> => {
       if (
-        stateRootHandle === null
+        packageHandle === null
+        || packageIdentity === null
+        || stateRootHandle === null
         || stateRootIdentity === null
         || approvedRootHandle === null
       ) {
         throw new Error('held runner root authority is unavailable');
       }
-      const [heldState, namedState, heldApproved, namedApproved] = await Promise.all([
+      const [heldPackage, namedPackage, heldState, namedState, heldApproved, namedApproved] = await Promise.all([
+        packageHandle.stat(),
+        lstat(packageDirectory),
         stateRootHandle.stat(),
         lstat(stateRootIdentity.path),
         approvedRootHandle.stat(),
         lstat(approvedRoot.path),
       ]);
       if (
-        !heldState.isDirectory()
+        !heldPackage.isDirectory()
+        || !namedPackage.isDirectory()
+        || namedPackage.isSymbolicLink()
+        || heldPackage.dev !== packageIdentity.device
+        || heldPackage.ino !== packageIdentity.inode
+        || namedPackage.dev !== packageIdentity.device
+        || namedPackage.ino !== packageIdentity.inode
+        || (heldPackage.mode & 0o777) !== 0o555
+        || !heldState.isDirectory()
         || !namedState.isDirectory()
         || namedState.isSymbolicLink()
         || heldState.dev !== stateRootIdentity.device
@@ -2462,6 +3055,24 @@ async function createProductionComposition(
       ) {
         throw new Error('held runner root authority was replaced');
       }
+      const [currentLock, currentManifest, currentExecutionDefinition, currentRunner, currentCleanupWorker, currentDependencyEgressProxy] = await Promise.all([
+        readInstalledLock(),
+        readStableFile(manifestPath),
+        readStableFile(executionDefinitionPath),
+        readStableFile(runnerPath),
+        readStableFile(cleanupWorkerPath),
+        createInstalledDependencyEgressProxyReader({ ownerUid })
+          .read(packageDirectory, builderIdentity.dependencyEgressProxySha256),
+      ]);
+      validateAdmittedBuilderPackage({
+        identity: builderIdentity,
+        lockBytes: currentLock,
+        executionDefinition: currentExecutionDefinition,
+        runner: currentRunner,
+        cleanupWorker: currentCleanupWorker,
+        dependencyEgressProxy: currentDependencyEgressProxy.bytes,
+        manifestSha256: sha256(currentManifest),
+      });
     };
 
     const operations: PipelineInput['services']['operations'] = Object.freeze({
@@ -2488,6 +3099,13 @@ async function createProductionComposition(
           activeTargetSetupEnvironment,
         });
         const { definition } = operation;
+        if (workspacePath === null) {
+          throw new Error('canonical source workspace path is unavailable');
+        }
+        if (workspaceIdentity === null) {
+          throw new Error('held source workspace identity is unavailable');
+        }
+        const heldWorkspaceIdentity = workspaceIdentity;
         const stdout = createByteBoundedTextCapture(MAX_OPERATION_CAPTURE_BYTES);
         const stderr = createByteBoundedTextCapture(MAX_OPERATION_CAPTURE_BYTES);
         const stageTimeout = manifest.manifest.stageDefinitions[context.stage]
@@ -2495,20 +3113,30 @@ async function createProductionComposition(
         const executor = createDockerExecutor({
           dockerPath: TRUSTED_PREFLIGHT_EXECUTABLES.docker,
           imageReference: canonicalBuilderImageReference(lock),
+          imageId: builderIdentity.imageId,
           imageDigest: lock.imageDigest,
           jobId: context.job.jobId,
           manifestSha256: manifest.sha256,
           attempt,
-          worktreePath: heldOperationWorkspacePath ?? requireWorkspaceDescriptor(),
+          worktreePath: workspacePath,
+          dependencyEgressCredentialDirectory,
+          workspaceIdentity: heldWorkspaceIdentity,
+          activeTargetEnvironment: operationId === 'activate-target'
+            ? null
+            : activeTargetSetupEnvironment,
+          revalidateWorktreeBeforeCreate: revalidateWorkspace,
+          revalidateWorktreeBeforeStart: revalidateWorkspace,
           uid: typeof process.getuid === 'function' ? process.getuid() : 1000,
           gid: typeof process.getgid === 'function' ? process.getgid() : 1000,
           operationId,
           operationContext: { environment: operation.environment },
           operationTimeoutMs: stageTimeout,
           maxCaptureBytes: MAX_OPERATION_CAPTURE_BYTES,
-          containerName: `osi-${sha256(
-            `${context.job.jobId}\0${operationId}\0${String(attempt)}`,
-          ).slice(0, 48)}`,
+          containerName: createDockerContainerName(
+            context.job.jobId,
+            operationId,
+            attempt,
+          ),
           store,
           ownership,
           cancellationBudget: () => cancellation?.cancellationBudget?.() ?? {
@@ -2565,24 +3193,6 @@ async function createProductionComposition(
             if (coordinator === null) throw new Error('runner log coordinator is unavailable');
             return coordinator.finalize(operationFinishedAt);
           },
-          ...(requestedDefinition !== undefined && operationId === 'activate-target'
-            ? {
-                classifyAcceptedResult(result: CommandResult) {
-                  const classified = classifyTargetSetupOperationResult(
-                    operationId,
-                    requestedDefinition,
-                    {
-                      ...result,
-                      argv: definition.argv,
-                    },
-                    context.job.requestId,
-                  );
-                  return classified.disposition === 'expected-rootfs-already-present'
-                    ? classified.disposition
-                    : null;
-                },
-              }
-            : {}),
           onStdoutBytes: (chunk) => {
             if (coordinator === null) throw new Error('runner log coordinator is unavailable');
             coordinator.appendDockerBytes(chunk);
@@ -2596,10 +3206,19 @@ async function createProductionComposition(
         });
         let executorError: unknown;
         try {
+          await revalidateWorkspace();
           const result = await executor.run();
           if (!result.available) throw new Error('locked Docker runtime is unavailable');
         } catch (error) {
           executorError = error;
+        } finally {
+          try {
+            await revalidateWorkspace();
+          } catch (error) {
+            executorError = executorError === undefined
+              ? error
+              : new AggregateError([executorError, error], 'Docker worktree identity validation failed');
+          }
         }
         if (executorError instanceof DockerCancellationRequestedError) {
           throw executorError;
@@ -2632,13 +3251,7 @@ async function createProductionComposition(
             targetSetupCommand(execution),
             context.job.requestId,
           );
-          if (
-            classified.disposition === 'expected-rootfs-already-present'
-              ? execution.outcome !== 'accepted'
-                || execution.observations.acceptedDisposition
-                  !== 'expected-rootfs-already-present'
-              : execution.outcome !== 'passed'
-          ) {
+          if (classified.disposition !== 'passed' || execution.outcome !== 'passed') {
             throw new Error('persisted activate-target outcome differs from the trusted classifier');
           }
           activeTargetSetupEnvironment = operation.environment;
@@ -2674,23 +3287,27 @@ async function createProductionComposition(
         phase,
         ...(profiles === undefined ? {} : { profiles }),
         operations: createLockedTargetSetupOperations(
-          async ({ operationId, definition, cwd }) => {
+          async ({
+            operationId,
+            definition,
+            cwd,
+            workspaceIdentity: operationWorkspaceIdentity,
+          }) => {
             if (heldOperationWorkspacePath !== null) {
               throw new Error('target setup attempted concurrent operations');
             }
+            assertTargetSetupWorkspaceIdentity(
+              workspaceIdentity,
+              operationWorkspaceIdentity,
+            );
             if (phase === 'config' && operationId === 'resolve-config') {
-              const selected = manifest.manifest.targets.find((candidate) => (
-                sameOperationDefinition(
-                  definition,
-                  createOperationDefinition(operationId, {
-                    environment: candidate.environment,
-                  }),
-                )
-              ));
-              if (selected === undefined) {
-                throw new Error('config phase definition is outside the target manifest');
-              }
-              activeTargetSetupEnvironment = selected.environment;
+              activeTargetSetupEnvironment = resolveTargetSetupConfigEnvironment({
+                definition,
+                activeTargetSetupEnvironment,
+                manifestEnvironments: manifest.manifest.targets.map(
+                  (candidate) => candidate.environment,
+                ),
+              });
             }
             heldOperationWorkspacePath = cwd;
             let execution: PipelineOperationExecution;
@@ -3027,7 +3644,7 @@ async function createProductionComposition(
         target,
         approvedRoot,
         authoritativeFiles: {
-          builderLockPath: loaded.config.builderLockPath,
+          builderLockPath: lockPath,
           readBuilderLock: readInstalledLock,
           targetManifestPath: manifestPath,
           readTargetManifest: () => readStableFile(manifestPath),
@@ -3047,6 +3664,7 @@ async function createProductionComposition(
           () => workspaceHandle?.close(),
           () => approvedRootHandle?.close(),
           () => stateRootHandle?.close(),
+          () => packageHandle?.close(),
           () => heldPublisher?.close(),
         ]) {
           try { await close(); } catch (error) { errors.push(error); }
@@ -3058,6 +3676,7 @@ async function createProductionComposition(
     try { coordinator?.close(); } catch { /* preserve composition error */ }
     await approvedRootHandle?.close().catch(() => undefined);
     await stateRootHandle?.close().catch(() => undefined);
+    await packageHandle?.close().catch(() => undefined);
     await heldPublisher?.close().catch(() => undefined);
     throw error;
   }
@@ -3069,6 +3688,105 @@ export function parseRunnerArguments(argv: readonly string[]): RunnerLaunchArgum
   if (!SAFE_JOB.test(jobId)) throw new Error('runner job ID is invalid');
   const runnerUnit = `osi-image-builder-runner@${jobId}.service`;
   return Object.freeze({ jobId, runnerUnit });
+}
+
+export interface RunnerProductionDependencies {
+  readonly currentExecutablePath?: string;
+  readonly resolveAdmittedRunner?: (jobId: string) => Promise<BuilderIdentity | null>;
+  readonly validateAdmittedRunner?: (identity: BuilderIdentity) => Promise<void>;
+  readonly invokeAdmittedRunner?: (input: Readonly<{
+    jobId: string;
+    identity: BuilderIdentity;
+  }>) => Promise<PipelineResult>;
+  readonly loadStateRoot?: typeof loadStateRootAuthority;
+  readonly loadRunnerConfig?: typeof loadConfig;
+}
+
+async function validateAdmittedRunnerPackage(identity: BuilderIdentity): Promise<void> {
+  const [lockBytes, executionDefinition, runner, cleanupWorker, dependencyEgressPolicy] = await Promise.all([
+    readFile(join(identity.packageRoot, 'builder.lock.json')),
+    readFile(join(identity.packageRoot, 'execution-definition.json')),
+    readFile(join(identity.packageRoot, 'bin', 'osi-image-builder-runner')),
+    readFile(join(identity.packageRoot, 'bin', 'osi-image-builder-cleanup')),
+    loadInstalledDependencyEgressPolicy(identity.packageRoot, identity.dependencyEgressProxySha256),
+  ]);
+  const manifest = loadManifest(join(identity.packageRoot, 'manifest', 'targets.json'));
+  validateAdmittedBuilderPackage({
+    identity,
+    lockBytes,
+    executionDefinition,
+    runner,
+    cleanupWorker,
+    dependencyEgressProxy: dependencyEgressPolicy.bytes,
+    manifestSha256: manifest.sha256,
+  });
+}
+
+async function defaultResolveAdmittedRunner(jobId: string): Promise<BuilderIdentity | null> {
+  const state = await loadStateRootAuthority();
+  const db = new DatabaseSync(join(state.stateRoot, 'jobs.sqlite'), { readOnly: true });
+  try {
+    const row = db.prepare(`SELECT builder_identity_status, builder_package_version,
+      builder_package_root, builder_lock_sha256, builder_execution_definition_sha256,
+      builder_target_manifest_sha256, builder_runner_sha256, builder_cleanup_worker_sha256,
+      builder_dependency_egress_proxy_sha256,
+      builder_image_reference, builder_image_id, builder_image_digest
+      FROM jobs WHERE job_id=?`).get(jobId) as Record<string, unknown> | undefined;
+    if (row === undefined || row.builder_identity_status !== 'admitted') return null;
+    return parseBuilderIdentity({
+      packageVersion: row.builder_package_version,
+      packageRoot: row.builder_package_root,
+      lockSha256: row.builder_lock_sha256,
+      executionDefinitionSha256: row.builder_execution_definition_sha256,
+      targetManifestSha256: row.builder_target_manifest_sha256,
+      runnerSha256: row.builder_runner_sha256,
+      cleanupWorkerSha256: row.builder_cleanup_worker_sha256,
+      dependencyEgressProxySha256: row.builder_dependency_egress_proxy_sha256,
+      imageReference: row.builder_image_reference,
+      imageId: row.builder_image_id,
+      imageDigest: row.builder_image_digest,
+    });
+  } finally {
+    db.close();
+  }
+}
+
+function delegatedRunnerEnvironment(identity: BuilderIdentity): NodeJS.ProcessEnv {
+  return Object.freeze({ ...process.env, OSI_ADMITTED_RUNNER_SHA256: identity.runnerSha256 });
+}
+
+async function defaultInvokeAdmittedRunner(input: Readonly<{
+  jobId: string;
+  identity: BuilderIdentity;
+}>): Promise<PipelineResult> {
+  await validateAdmittedRunnerPackage(input.identity);
+  const held = await holdInstalledPublisher(
+    join(input.identity.packageRoot, 'bin', 'osi-image-builder-runner'),
+  );
+  try {
+    if (held.sha256 !== input.identity.runnerSha256) {
+      throw new Error('admitted runner implementation hash changed');
+    }
+    await new Promise<void>((resolveExit, rejectExit) => {
+      const child = spawn(held.executable, [input.jobId], {
+        env: delegatedRunnerEnvironment(input.identity),
+        stdio: 'inherit',
+      });
+      child.once('error', rejectExit);
+      child.once('exit', (code, signal) => {
+        if (code === 0 && signal === null) resolveExit();
+        else rejectExit(new Error('admitted runner implementation failed'));
+      });
+    });
+    return Object.freeze({
+      state: 'succeeded',
+      buildManifest: {},
+      verificationManifest: {},
+      blockerCode: null,
+    });
+  } finally {
+    await held.close();
+  }
 }
 
 function createLocalRunnerArguments(
@@ -3085,10 +3803,32 @@ function createLocalRunnerArguments(
   return Object.freeze({ ...launch, owner, leaseExpiresAt });
 }
 
-export async function runRunner(argv: readonly string[]): Promise<PipelineResult> {
+export async function runRunner(
+  argv: readonly string[],
+  options: RunnerProductionDependencies = {},
+): Promise<PipelineResult> {
   const launch = parseRunnerArguments(argv);
-  const state = await loadStateRootAuthority();
-  const loaded = await loadConfig();
+  const resolveAdmittedRunner = options.resolveAdmittedRunner ?? defaultResolveAdmittedRunner;
+  const identity = await resolveAdmittedRunner(launch.jobId);
+  if (identity === null) {
+    throw new Error('runner job is legacy or has no complete admitted builder identity');
+  }
+  await (options.validateAdmittedRunner ?? validateAdmittedRunnerPackage)(identity);
+  const currentExecutable = resolve(options.currentExecutablePath ?? process.argv[1] ?? process.execPath);
+  const currentBytes = await readFile(currentExecutable);
+  const currentSha256 = createHash('sha256').update(currentBytes).digest('hex');
+  const admittedExecutable = join(identity.packageRoot, 'bin', 'osi-image-builder-runner');
+  const delegatedMarker = process.env.OSI_ADMITTED_RUNNER_SHA256;
+  const executingAdmittedRunner = currentSha256 === identity.runnerSha256
+    && (currentExecutable === admittedExecutable || delegatedMarker === identity.runnerSha256);
+  if (!executingAdmittedRunner) {
+    return (options.invokeAdmittedRunner ?? defaultInvokeAdmittedRunner)({
+      jobId: launch.jobId,
+      identity,
+    });
+  }
+  const state = await (options.loadStateRoot ?? loadStateRootAuthority)();
+  const loaded = await (options.loadRunnerConfig ?? loadConfig)();
   if (loaded.stateRoot !== state.stateRoot) {
     throw new Error('configured state root differs from guarded runner state');
   }
@@ -3096,7 +3836,7 @@ export async function runRunner(argv: readonly string[]): Promise<PipelineResult
     migrationsDirectory: installedMigrationsDirectory(loaded.config.builderLockPath),
   });
   const store = new BuilderStore(database);
-  const ownership = new OwnershipStore(database);
+  const ownership = new OwnershipStore(database, { stateRoot: state.stateRoot });
   const clock: PipelineClock = { now: () => new Date().toISOString() };
   try {
     const args = createLocalRunnerArguments(launch, clock.now());

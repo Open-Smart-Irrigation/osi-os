@@ -1,0 +1,2 @@
+ca_certificate = /run/osi-image-builder/ca.pem
+check_certificate = on

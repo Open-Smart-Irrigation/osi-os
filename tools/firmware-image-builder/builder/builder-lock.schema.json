@@ -6,7 +6,7 @@
   "required": [
     "schemaVersion", "packageVersion", "imageRepository", "imageDigest", "baseImage",
     "baseImageDigest", "dockerfileSha256", "packageSet", "rustConfig", "nodeVersion",
-    "executionDefinitionSha256", "validationEvidenceSha256"
+    "executionDefinitionSha256", "validationEvidenceSha256", "dependencyEgressProxySha256"
   ],
   "properties": {
     "schemaVersion": { "type": "integer", "const": 1 },
@@ -33,6 +33,7 @@
     "nodeVersion": { "type": "string", "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$" },
     "executionDefinitionSha256": { "$ref": "#/$defs/digest" },
     "validationEvidenceSha256": { "$ref": "#/$defs/digest" },
+    "dependencyEgressProxySha256": { "$ref": "#/$defs/digest" },
     "installable": { "type": "boolean" },
     "publisherSha256": { "$ref": "#/$defs/digest" },
     "imageId": { "$ref": "#/$defs/digest" }

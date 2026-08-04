@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { tmpdir } from 'node:os';
@@ -15,12 +15,14 @@ import {
 } from '../../domain/types.js';
 import {
   MAX_QUEUE_LENGTH, OwnershipStore, OwnershipTransactionError, OwnershipValidationError, OwnershipViolationError,
-  type ApiWriteCommand, type CleanupPostcondition, type CleanupSnapshot, type CleanupWriteCommand, type DirectInterruptionProof, type DirectLogProof, type StagingCleanupProof,
+  type ApiWriteCommand, type CleanupPostcondition, type CleanupSnapshot, type CleanupWriteCommand, type DependencyEgressCleanupProof, type DirectInterruptionProof, type DirectLogProof, type StagingCleanupProof,
   type OwnershipResult, type PublishBlockerRecheckProof, type PublishRecoveryEvidence, type RunnerWriteCommand,
 } from '../../api/src/ownership.js';
 import { SharedValidationError } from '../../api/src/validation.js';
+import { operationNetworkPolicy } from '../../runner/src/network-policy.js';
 
 const SHA40 = 'a'.repeat(40); const SHA64 = 'c'.repeat(64); const SHA64_B = 'd'.repeat(64);
+const BUILDER_IDENTITY = Object.freeze({ packageVersion: '0.1.24', packageRoot: '/home/builder/.local/lib/osi-image-builder/0.1.24', lockSha256: 'e'.repeat(64), executionDefinitionSha256: 'f'.repeat(64), targetManifestSha256: SHA64, runnerSha256: '1'.repeat(64), cleanupWorkerSha256: '2'.repeat(64), dependencyEgressProxySha256: '3'.repeat(64), imageReference: `registry.example.invalid/osi-image-builder@sha256:${SHA64_B}`, imageId: `sha256:${SHA64_B}`, imageDigest: SHA64_B });
 const NOW = '2026-07-23T10:00:00.000Z'; const LATER = '2026-07-23T10:01:00.000Z';
 const BEFORE = '2026-07-23T09:59:00.000Z';
 const ACTIVE = '2026-07-23T10:02:00.000Z'; const RECOVERY = '2026-07-23T10:03:00.000Z'; const EXPIRY = '2026-07-23T10:04:00.000Z';
@@ -129,12 +131,22 @@ const CHECKSUM_CONTENT = `${SHA64}  image\n`;
 function checksumHash(): string { return createHash('sha256').update(CHECKSUM_CONTENT).digest('hex'); }
 
 function seedJob(db: ReturnType<typeof openBuilderDatabase>, jobId: string): void {
-  db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json, offline_feed_preparation_json,
-    target_id, root_id, target_manifest_sha256, source_commit_time, source_author, source_subject, accepted_at, state, queue_state, queue_position, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', 0, ?, ?)`).run(
+  const values = [
     jobId, `request-${jobId}`, JSON.stringify({ branch: 'main', target: 'rpi-5' }), 'git@example.com:osi-os.git', 'refs/remotes/origin/main', 'main', 'main', SHA40, SHA40,
-    JSON.stringify(SOURCE_PREPARATION), JSON.stringify(offlineFeedPreparation(jobId)), 'rpi-5', 'release', SHA64, NOW, 'Phil', 'build', NOW, NOW, NOW,
-  );
+    JSON.stringify(SOURCE_PREPARATION), JSON.stringify(offlineFeedPreparation(jobId)), 'rpi-5', 'release', SHA64, 'admitted',
+    BUILDER_IDENTITY.packageVersion, BUILDER_IDENTITY.packageRoot, BUILDER_IDENTITY.lockSha256,
+    BUILDER_IDENTITY.executionDefinitionSha256, BUILDER_IDENTITY.targetManifestSha256,
+    BUILDER_IDENTITY.runnerSha256, BUILDER_IDENTITY.cleanupWorkerSha256,
+    BUILDER_IDENTITY.dependencyEgressProxySha256, BUILDER_IDENTITY.imageReference,
+    BUILDER_IDENTITY.imageId, BUILDER_IDENTITY.imageDigest, NOW, 'Phil', 'build', NOW, 'queued', 'queued', 0, NOW, NOW,
+  ];
+  db.prepare(`INSERT INTO jobs (job_id, request_id, request_json, source_remote, source_ref, source_branch, branch, expected_sha, pinned_sha, source_preparation_json, offline_feed_preparation_json,
+    target_id, root_id, target_manifest_sha256, builder_identity_status, builder_package_version, builder_package_root,
+    builder_lock_sha256, builder_execution_definition_sha256, builder_target_manifest_sha256, builder_runner_sha256,
+    builder_cleanup_worker_sha256, builder_dependency_egress_proxy_sha256,
+    builder_image_reference, builder_image_id, builder_image_digest,
+    source_commit_time, source_author, source_subject, accepted_at, state, queue_state, queue_position, created_at, updated_at)
+    VALUES (${values.map(() => '?').join(', ')})`).run(...values);
   db.prepare('INSERT INTO queue_entries (job_id, fifo_seq, enqueued_at) VALUES (?, ?, ?)').run(jobId, 0, NOW);
   db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at) VALUES (?, 0, 'enqueue', 'queued', NULL, ?, ?)").run(jobId, JSON.stringify({ requestId: `request-${jobId}` }), NOW);
 }
@@ -145,7 +157,7 @@ async function fixture(jobId = 'job-1'): Promise<{ store: BuilderStore; ownershi
   const admissionId = 'cln_0123456789abcdefghjkmnpqrs';
   db.prepare(`INSERT INTO cleanup_credential_reservations (job_id, admission_id, owner, credential_relative_path, created_at, expires_at)
     VALUES (?, ?, 'cleanup-a', ?, ?, ?)`).run(jobId, admissionId, `recovery/cleanup-credentials/${admissionId}.token`, RECOVERY, EXPIRY);
-  const store = new BuilderStore(db); const ownership = new OwnershipStore(db, { now: () => NOW }); closers.push(() => store.close()); return { store, ownership, path, db };
+  const store = new BuilderStore(db); const ownership = new OwnershipStore(db, { now: () => NOW, stateRoot: dependencyEgressPrefix }); closers.push(() => store.close()); return { store, ownership, path, db };
 }
 function eventCount(store: BuilderStore): number { return store.listEvents('job-1').events.length; }
 function dispatch(jobId = 'job-1'): Extract<ApiWriteCommand, { kind: 'dispatch' }> { return { kind: 'dispatch', jobId, runnerUnit: `osi-image-builder-runner@${jobId}.service`, claimOwner: `dispatcher-${jobId}`, claimExpiresAt: EXPIRY, at: NOW }; }
@@ -165,6 +177,7 @@ function container(jobId = 'job-1'): Extract<RunnerWriteCommand, { kind: 'contai
 }; }
 const absent = (observedAt = NOW) => ({ kind: 'absent' as const, globalLabelResult: 'no-match' as const, observedAt });
 const logs: DirectLogProof = { runner: 'absent', docker: 'absent', verifiedAt: NOW, generationIdentity: { runner: [], docker: [] } };
+const operationLogs = { runner: 'absent' as const, docker: 'absent' as const, verifiedAt: NOW };
 const staging = { kind: 'absent' as const, path: null };
 function cancellationEvidence(jobId = 'job-1', withContainer = false): Extract<RunnerWriteCommand, { kind: 'cancellation-evidence' }>['evidence'] {
   return {
@@ -194,36 +207,37 @@ function sealedDirectLogs(path: string, jobId: string): DirectLogProof {
 }
 function snapshot(containerState: 'present' | 'absent' = 'present', jobId = 'job-1'): CleanupSnapshot { return {
   runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', leaseExpiresAt: ACTIVE, inactiveAt: LATER, observedAt: RECOVERY },
-  state: 'starting', container: containerState === 'present' ? { kind: 'present', id: `container-${jobId}`, name: `osi-${jobId}`, imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 }, globalLabelResult: 'single-exact-match', observedAt: RECOVERY } : absent(RECOVERY), staging, logs, blocker: containerState === 'present' ? 'container' : 'none',
+  state: 'starting', container: containerState === 'present' ? { kind: 'present', id: `container-${jobId}`, name: `osi-${jobId}`, imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 }, globalLabelResult: 'single-exact-match', observedAt: RECOVERY } : absent(RECOVERY), staging, logs: operationLogs, blocker: containerState === 'present' ? 'container' : 'none',
 }; }
 function postcondition(s: CleanupSnapshot): CleanupPostcondition {
   const sealedLog = (value: 'absent' | 'sealed' | 'unsealed'): 'absent' | 'sealed' => value === 'unsealed' ? 'sealed' : value;
   const jobId = s.runner.unit.slice('osi-image-builder-runner@'.length, -'.service'.length);
   const postContainer = s.container.kind === 'present' ? { kind: 'removed' as const, id: s.container.id, name: s.container.name, imageDigest: s.container.imageDigest, labels: s.container.labels, exactIdAbsent: true as const, globalLabelResult: 'no-match' as const, stoppedAt: NOW, removedAt: LATER, observedAt: RECOVERY } : { kind: 'null-identity' as const, dockerAction: 'none' as const, globalLabelResult: 'no-match' as const, observedAt: RECOVERY };
-  return { ...s, container: postContainer, staging: s.staging.kind === 'absent' ? { kind: 'absent', path: null, sourcePath: `staging/${jobId}`, sourceAbsent: true, verifiedAt: RECOVERY } : { kind: 'quarantined', sourcePath: `staging/${jobId}`, destinationPath: `quarantine/${jobId}`, sourceAbsent: true, destinationPresent: true, sha256: s.staging.sha256, size: s.staging.size, verifiedAt: RECOVERY }, logs: { runner: sealedLog(s.logs.runner), docker: sealedLog(s.logs.docker), verifiedAt: s.logs.verifiedAt }, blocker: 'none' };
+  return { ...s, container: postContainer, staging: s.staging.kind === 'absent' ? { kind: 'absent', path: null, sourcePath: `staging/${jobId}`, sourceAbsent: true, verifiedAt: RECOVERY } : { kind: 'quarantined', sourcePath: `staging/${jobId}`, destinationPath: `quarantine/${jobId}`, sourceAbsent: true, destinationPresent: true, sha256: s.staging.sha256, size: s.staging.size, verifiedAt: RECOVERY }, logs: { runner: sealedLog(s.logs.runner), docker: sealedLog(s.logs.docker), verifiedAt: s.logs.verifiedAt }, egress: { persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' }, blocker: 'none' };
 }
 function nullLeaseSnapshot(jobId = 'job-1'): CleanupSnapshot { return {
   runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: null, leaseExpiresAt: null, inactiveAt: LATER, observedAt: RECOVERY },
-  state: 'starting', container: absent(RECOVERY), staging, logs, blocker: 'none',
+  state: 'starting', container: absent(RECOVERY), staging, logs: operationLogs, blocker: 'none',
 }; }
 function stagedSnapshot(jobId = 'job-1'): CleanupSnapshot { return {
   runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', leaseExpiresAt: ACTIVE, inactiveAt: LATER, observedAt: RECOVERY },
-  state: 'starting', container: absent(RECOVERY), staging: { kind: 'present', path: `staging/${jobId}/image`, sha256: SHA64, size: 10 }, logs, blocker: 'staging-or-log',
+  state: 'starting', container: absent(RECOVERY), staging: { kind: 'present', path: `staging/${jobId}/image`, sha256: SHA64, size: 10 }, logs: operationLogs, blocker: 'staging-or-log',
 }; }
 function stagedPostcondition(destinationPath = 'quarantine/job-1', jobId = 'job-1'): CleanupPostcondition { const admission = stagedSnapshot(jobId); return {
-  ...admission, container: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt: RECOVERY }, logs, staging: { kind: 'quarantined', sourcePath: `staging/${jobId}`, destinationPath, sourceAbsent: true, destinationPresent: true, sha256: SHA64, size: 10, verifiedAt: RECOVERY }, blocker: 'none',
+  ...admission, container: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt: RECOVERY }, logs: operationLogs, staging: { kind: 'quarantined', sourcePath: `staging/${jobId}`, destinationPath, sourceAbsent: true, destinationPresent: true, sha256: SHA64, size: 10, verifiedAt: RECOVERY }, egress: { persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' }, blocker: 'none',
 }; }
 function physicalStagingSnapshot(jobId = 'job-1'): CleanupSnapshot { return {
   runner: { unit: `osi-image-builder-runner@${jobId}.service`, owner: 'runner-a', leaseExpiresAt: ACTIVE, inactiveAt: LATER, observedAt: RECOVERY },
   state: 'starting', container: absent(RECOVERY),
   staging: { kind: 'physical-present', path: `staging/${jobId}`, sha256: null, size: null, observedAt: RECOVERY },
-  logs, blocker: 'staging-or-log',
+  logs: operationLogs, blocker: 'staging-or-log',
 }; }
 function physicalStagingPostcondition(jobId = 'job-1'): CleanupPostcondition { const admission = physicalStagingSnapshot(jobId); return {
   ...admission,
   container: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt: RECOVERY },
   staging: { kind: 'quarantined', sourcePath: `staging/${jobId}`, destinationPath: `quarantine/${jobId}`, sourceAbsent: true, destinationPresent: true, sha256: null, size: null, verifiedAt: RECOVERY },
-  logs,
+  logs: operationLogs,
+  egress: { persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' },
   blocker: 'none',
 }; }
 function blockedCleanupSnapshot(containerState: 'present' | 'absent', jobId: string): CleanupSnapshot {
@@ -321,9 +335,129 @@ function authorizeCleanupStop(target: Awaited<ReturnType<typeof claimedCleanup>>
   return { attemptId: options.attemptId, authorizationOwner, authorizationAt: options.at, authorizationExpiresAt };
 }
 function failingOwnership(path: string): OwnershipStore {
-  const db = openBuilderDatabase(path); const ownership = new OwnershipStore(db, { now: () => NOW, failBeforeCommit: () => { throw new Error('injected rollback'); } }); closers.push(() => db.close()); return ownership;
+  const db = openBuilderDatabase(path); const ownership = new OwnershipStore(db, { now: () => NOW, stateRoot: dependencyEgressPrefix, failBeforeCommit: () => { throw new Error('injected rollback'); } }); closers.push(() => db.close()); return ownership;
 }
 function runnerBase(jobId = 'job-1'): { jobId: string; owner: string; runnerUnit: string; leaseExpiresAt: string; at: string } { return { jobId, owner: 'runner-a', runnerUnit: `osi-image-builder-runner@${jobId}.service`, leaseExpiresAt: ACTIVE, at: LATER }; }
+const dependencyEgressPrefix = '/var/lib/osi-image-builder-test';
+function dependencyEgressCredentialPath(jobId: string, operationId: string, attempt = 1): string {
+  return `${dependencyEgressPrefix}/jobs/${jobId}/recovery/dependency-egress/${operationId}-${String(attempt)}.proxy-credential`;
+}
+function operationCleanupEgressProof(jobId: string, operationId: string, hostPath = dependencyEgressCredentialPath(jobId, operationId)): DependencyEgressCleanupProof {
+  const hostDirectory = hostPath.slice(0, -'.proxy-credential'.length) + '.proxy-tls';
+  return {
+    proxy: { id: SHA64, absent: true },
+    network: { id: SHA64_B, absent: true },
+    tls: { hostDirectory, absent: true },
+    credential: { hostPath, sha256: SHA64, absent: true },
+    globalLabelResult: 'no-match',
+  };
+}
+function rebaseDependencyEgressPaths(egress: Record<string, any>, operationId: string, attempt: number): void {
+  const jobId = egress.network.labels['org.osi.image-builder.egress-job-id'];
+  const hostPath = dependencyEgressCredentialPath(jobId, operationId, attempt);
+  const tlsDirectory = hostPath.slice(0, -'.proxy-credential'.length) + '.proxy-tls';
+  const leafCertificates = egress.tls.leafCertificates as Record<string, Record<string, any>>;
+  egress.credential = { ...egress.credential, hostPath };
+  egress.tls = {
+    ...egress.tls,
+    hostDirectory: tlsDirectory,
+    caCertificateHostPath: `${tlsDirectory}/ca.pem`,
+    leafCertificates: Object.fromEntries(Object.entries(leafCertificates).map(([host, leaf]) => [host, {
+      ...leaf,
+      certificateHostPath: `${tlsDirectory}/${host.replaceAll('.', '_')}.pem`,
+      keyHostPath: `${tlsDirectory}/${host.replaceAll('.', '_')}.key`,
+    }])),
+  };
+}
+function appendCleanupEvent(db: ReturnType<typeof openBuilderDatabase>, jobId: string, payload: Record<string, unknown>): void {
+  const row = db.prepare('SELECT state, stage, COALESCE(MAX(seq) + 1, 0) AS seq FROM job_events WHERE job_id=?').get(jobId) as { state: string; stage: string | null; seq: number };
+  db.prepare("INSERT INTO job_events (job_id, seq, event_type, state, stage, payload_json, at) VALUES (?, ?, 'cleanup', ?, ?, ?, ?)").run(jobId, row.seq, row.state, row.stage, JSON.stringify(payload), LATER);
+}
+function dependencyEgressSecurity(jobId: string, operationId: 'frontend-install' | 'build-image'): JsonObject {
+  const suffix = createHash('sha256').update(`${jobId}:${operationId}:1`).digest('hex').slice(0, 16);
+  const networkName = `osi-image-builder-egress-${suffix}`;
+  const proxyName = `osi-image-builder-egress-proxy-${suffix}`;
+  const hostPath = dependencyEgressCredentialPath(jobId, operationId);
+  const tlsDirectory = hostPath.slice(0, -'.proxy-credential'.length) + '.proxy-tls';
+  const labels = (role: 'network' | 'proxy') => ({
+    'org.osi.image-builder.egress-job-id': jobId,
+    'org.osi.image-builder.egress-manifest-sha': SHA64,
+    'org.osi.image-builder.egress-operation-id': operationId,
+    'org.osi.image-builder.egress-attempt': '1',
+    'org.osi.image-builder.egress-credential-sha': SHA64,
+    'org.osi.image-builder.egress-role': role,
+  });
+  const tlsDirectoryMetadata = (mode: number, inode: number) => ({ mode, uid: 1000, gid: 1000, device: 1, inode });
+  const tlsFileMetadata = (mode: number, inode: number, hash: string) => ({ ...tlsDirectoryMetadata(mode, inode), sha256: hash, bytes: 1024, links: 1 });
+  const leafCertificates = Object.fromEntries(operationNetworkPolicy(operationId).allowedHosts.map((host, index) => [host, {
+    certificateHostPath: `${tlsDirectory}/${host.replaceAll('.', '_')}.pem`,
+    keyHostPath: `${tlsDirectory}/${host.replaceAll('.', '_')}.key`,
+    certificateMetadata: tlsFileMetadata(0o444, 4 + index * 2, SHA64),
+    keyMetadata: tlsFileMetadata(0o400, 5 + index * 2, SHA64_B),
+  }]));
+  return {
+    capDrop: ['ALL'], capAdd: [], devices: [], sockets: [], privileged: false, noNewPrivileges: true,
+    readonlyRootfs: true, pidsLimit: 4096, nanoCpus: 2_000_000_000, memoryBytes: 2_147_483_648, memorySwapBytes: 2_147_483_648,
+    ulimit: 'nofile=1024:4096', user: '1000:1000', workdir: '/work', network: 'internal-authenticated-proxy',
+    egress: {
+      network: { id: SHA64_B, name: networkName, internal: true, labels: labels('network'), proxyEndpointId: SHA64, proxyAddress: '172.28.0.2' },
+      proxy: {
+        id: SHA64, name: proxyName, imageReference: BUILDER_IDENTITY.imageReference, imageId: `sha256:${SHA64_B}`, imageDigest: SHA64_B,
+        user: '1000:1000', labels: labels('proxy'), command: ['node', '/opt/osi-image-builder/operations/osi-dependency-egress-proxy.cjs'],
+        internalEndpointId: SHA64, internalAddress: '172.28.0.2', bridgeNetworkId: SHA64_B, bridgeEndpointId: SHA64, bridgeAddress: '172.17.0.8',
+      },
+      credential: { hostPath, containerPath: '/run/osi-image-builder/proxy-credential', sha256: SHA64 },
+      tls: {
+        hostDirectory: tlsDirectory, directoryMetadata: tlsDirectoryMetadata(0o700, 2),
+        caCertificateHostPath: `${tlsDirectory}/ca.pem`, caCertificateMetadata: tlsFileMetadata(0o444, 3, SHA64), leafCertificates,
+      },
+      readiness: { authenticated: true, unauthenticatedStatus: 407, authenticatedStatus: 204, bridgeEndpointDenied: true },
+      allowedHosts: [...operationNetworkPolicy(operationId).allowedHosts], networkName, proxyName,
+    },
+  };
+}
+async function completedContainerOperation(jobId: string, operationId: 'frontend-install' | 'build-image' | 'activate-target'): Promise<{ ownership: OwnershipStore; path: string; store: BuilderStore; db: ReturnType<typeof openBuilderDatabase> }> {
+  const target = await fixture(jobId);
+  dispatchAndStart(target.ownership, jobId);
+  target.ownership.runnerWrite(lease(ACTIVE, jobId));
+  target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-begin', expectedState: 'starting', operationId, attempt: 1, argvHash: SHA64, argv: ['operation'], startedAt: NOW });
+  const security = operationId === 'activate-target' ? { user: '1000:1000' } : dependencyEgressSecurity(jobId, operationId);
+  target.ownership.runnerWrite({ ...container(jobId), security, leaseExpiresAt: ACTIVE, at: NOW });
+  target.ownership.runnerWrite({
+    ...runnerBase(jobId),
+    kind: 'operation-complete',
+    expectedState: 'starting',
+    operationId,
+    attempt: 1,
+    input: {
+      operationId,
+      attempt: 1,
+      argvHash: SHA64,
+      argv: ['operation'],
+      startedAt: NOW,
+      finishedAt: LATER,
+      timedOut: false,
+      lifecyclePhase: 'started',
+      containerId: `container-${jobId}`,
+      containerName: `osi-${jobId}`,
+      containerImageDigest: SHA64_B,
+      containerLabelJobId: jobId,
+      containerLabelManifestSha: SHA64,
+      containerMount: { source: '/tmp', destination: '/work' },
+      containerEnvironment: { CI: '1' },
+      containerSecurity: security,
+      inspection: { running: true },
+      exitCode: 1,
+      signal: null,
+      outcome: 'failed',
+      evidencePath: 'evidence/operation',
+      evidenceSha256: SHA64,
+      errorCode: 'BUILD_FAILED',
+      error: { reason: 'operation failed' },
+    },
+  });
+  return target;
+}
 function seedLogs(path: string, jobId: string): void {
   const db = openBuilderDatabase(path);
   for (const stream of ['runner', 'docker']) db.prepare('INSERT INTO job_log_generations (job_id, stream, generation, path, started_at, sealed_at, size_bytes, sha256) VALUES (?, ?, 0, ?, ?, ?, 0, ?)').run(jobId, stream, `logs/${stream}-0.log`, NOW, LATER, SHA64);
@@ -622,7 +756,7 @@ describe('actor-owned compare-and-set writes', () => {
         state: 'verifying',
         container: absent(RECOVERY),
         staging: stagingSnapshot,
-        logs,
+        logs: operationLogs,
         blocker: 'staging-or-log',
       };
       const admission = cleanupAdmission(snapshotValue, jobId);
@@ -712,19 +846,37 @@ describe('actor-owned compare-and-set writes', () => {
     expect(beginAttempts).toBe(0); expect(store.listEvents('prevalidation').events).toHaveLength(events);
   });
 
+  it('accepts empty generic environment values while retaining command and identifier bounds', async () => {
+    const { ownership } = await fixture('empty-environment');
+    dispatchAndStart(ownership, 'empty-environment');
+    expect(ownership.runnerWrite(lease(ACTIVE, 'empty-environment')).ok).toBe(true);
+    expect(ownership.runnerWrite({
+      ...container('empty-environment'),
+      environment: { NO_PROXY: '', no_proxy: '' },
+    }).ok).toBe(true);
+    expect(() => ownership.runnerWrite({
+      ...container('empty-environment'),
+      environment: { oversized: 'x'.repeat(65_537) },
+    })).toThrow(OwnershipValidationError);
+    expect(() => ownership.runnerWrite({
+      ...container('empty-environment'),
+      jobId: '',
+    })).toThrow(OwnershipValidationError);
+  });
+
   it('rejects malformed command shape and aggregate payloads before the writer lock', async () => {
     const { ownership, store, db } = await fixture('aggregate-validation'); let beginAttempts = 0;
     const guarded = new OwnershipStore(db, { now: () => NOW, beforeBegin: () => { beginAttempts += 1; } });
     const before = store.listEvents('aggregate-validation').events.length;
     expect(() => guarded.apiWrite({ kind: 'dispatch', runnerUnit: 'osi-image-builder-runner@aggregate-validation.service', at: NOW } as never)).toThrow(OwnershipValidationError);
-    const input = { jobId: 'aggregate-validation-2', requestId: 'aggregate-validation-2', request: { first: 'x'.repeat(40_000), second: 'y'.repeat(40_000) }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('aggregate-validation-2'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'aggregate', acceptedAt: NOW };
+    const input = { jobId: 'aggregate-validation-2', requestId: 'aggregate-validation-2', request: { first: 'x'.repeat(40_000), second: 'y'.repeat(40_000) }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('aggregate-validation-2'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'aggregate', acceptedAt: NOW };
     expect(() => guarded.apiWrite({ kind: 'enqueue', input })).toThrow(OwnershipValidationError);
     expect(beginAttempts).toBe(0); expect(store.listEvents('aggregate-validation').events).toHaveLength(before);
   });
 
   it('does not apply command semantics to arbitrary nested request JSON', async () => {
     const { ownership, store } = await fixture('json-semantic-isolation');
-    const input = { jobId: 'json-semantic-isolation-2', requestId: 'json-semantic-isolation-2', request: { lastSeenAt: 'yesterday', artifactPath: 'free text' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('json-semantic-isolation-2'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'json', acceptedAt: NOW };
+    const input = { jobId: 'json-semantic-isolation-2', requestId: 'json-semantic-isolation-2', request: { lastSeenAt: 'yesterday', artifactPath: 'free text' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('json-semantic-isolation-2'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'json', acceptedAt: NOW };
     expect(ownership.apiWrite({ kind: 'enqueue', input }).ok).toBe(true);
     expect(store.getJob('json-semantic-isolation-2').request).toEqual({ lastSeenAt: 'yesterday', artifactPath: 'free text' });
   });
@@ -807,14 +959,37 @@ describe('actor-owned compare-and-set writes', () => {
     expect(ownership.apiWrite(dispatch()).ok).toBe(false); expect(eventCount(store)).toBe(2);
   });
 
+  it('never dispatches a queued job whose admitted builder identity is legacy-null', async () => {
+    const target = await fixture('legacy-null-dispatch');
+    target.db.exec('DROP TRIGGER jobs_builder_identity_guard_update');
+    target.db.prepare(`UPDATE jobs SET builder_identity_status='legacy_blocked', builder_package_version=NULL,
+      builder_package_root=NULL, builder_lock_sha256=NULL, builder_execution_definition_sha256=NULL,
+      builder_target_manifest_sha256=NULL, builder_runner_sha256=NULL, builder_cleanup_worker_sha256=NULL,
+      builder_dependency_egress_proxy_sha256=NULL,
+      builder_image_reference=NULL, builder_image_id=NULL,
+      builder_image_digest=NULL WHERE job_id=?`).run('legacy-null-dispatch');
+
+    expect(target.ownership.apiWrite(dispatch('legacy-null-dispatch'))).toMatchObject({
+      ok: false,
+      conflict: { kind: 'stale-predecessor' },
+    });
+    expect(target.store.getJob('legacy-null-dispatch')).toMatchObject({
+      state: 'queued',
+      queueState: 'queued',
+      builderIdentity: null,
+    });
+  });
+
   it('enforces FIFO dispatch atomically', async () => {
     const { ownership, store } = await fixture();
     expect(ownership.apiWrite({ kind: 'enqueue', input: {
       jobId: 'job-2', requestId: 'request-job-2', request: { branch: 'main', target: 'rpi-5' },
       sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main',
       expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64,
+      builderIdentity: BUILDER_IDENTITY,
       sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'build', acceptedAt: NOW,
     } }).ok).toBe(true);
+    expect(store.getJob('job-2').builderIdentity).toEqual(BUILDER_IDENTITY);
     expect(ownership.apiWrite(dispatch('job-2'))).toMatchObject({ ok: false, conflict: { kind: 'stale-predecessor' } });
     expect(store.getJob('job-2').state).toBe('queued');
     expect(ownership.apiWrite(dispatch('job-1')).ok).toBe(true);
@@ -833,7 +1008,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(target.ownership.apiWrite(dispatch(jobId)).ok).toBe(true);
     target.db.prepare(`UPDATE jobs SET ${column}=?, cleanup_blocker_json=? WHERE job_id=?`).run(value, JSON.stringify({ reason: 'global blocker' }), jobId);
     const second = target.ownership.apiWrite({ kind: 'enqueue', input: {
-      jobId: 'job-2', requestId: 'request-job-2', request: { branch: 'main', target: 'rpi-5' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'global', acceptedAt: NOW,
+      jobId: 'job-2', requestId: 'request-job-2', request: { branch: 'main', target: 'rpi-5' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'global', acceptedAt: NOW,
     } });
     expect(second.ok).toBe(true);
     expect(target.ownership.apiWrite(dispatch('job-2'))).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
@@ -845,7 +1020,7 @@ describe('actor-owned compare-and-set writes', () => {
     ['publish blocker code half', ["DROP TRIGGER jobs_publish_null_guard_update", "UPDATE jobs SET publish_blocker_code='PUBLISH_FAILED' WHERE job_id=?"]],
     ['publish blocker JSON half', ["DROP TRIGGER jobs_publish_null_guard_update", "UPDATE jobs SET publish_blocker_json='{}' WHERE job_id=?"]],
     ['blocked publish state', ["DROP TRIGGER jobs_publish_guard", "UPDATE jobs SET publish_state='blocked' WHERE job_id=?"]],
-    ['publishing publish state', ["DROP TRIGGER jobs_publish_guard", "UPDATE jobs SET publish_state='publishing' WHERE job_id=?"]],
+    ['publishing publish state', ["DROP TRIGGER jobs_publish_guard", "DROP TRIGGER jobs_release_seal_status_guard_update", "UPDATE jobs SET publish_state='publishing' WHERE job_id=?"]],
   ])('fails closed for the malformed or blocked global %s predicate', async (_label, statements) => {
     const jobId = `global-${String(_label).replaceAll(' ', '-')}`;
     const target = await fixture(jobId);
@@ -855,7 +1030,7 @@ describe('actor-owned compare-and-set writes', () => {
       else target.db.prepare(statement).run(jobId);
     }
     expect(target.ownership.apiWrite({ kind: 'enqueue', input: {
-      jobId: 'job-2', requestId: 'request-global-predicate-job-2', request: { branch: 'main', target: 'rpi-5' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'global predicate', acceptedAt: NOW,
+      jobId: 'job-2', requestId: 'request-global-predicate-job-2', request: { branch: 'main', target: 'rpi-5' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'global predicate', acceptedAt: NOW,
     } }).ok).toBe(true);
     expect(target.ownership.apiWrite({ kind: 'dispatch', jobId: 'job-2', runnerUnit: 'osi-image-builder-runner@job-2.service', claimOwner: 'dispatcher-job-2', claimExpiresAt: EXPIRY, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
   });
@@ -864,7 +1039,7 @@ describe('actor-owned compare-and-set writes', () => {
     const target = await fixture('terminal-clearance');
     expect(target.ownership.apiWrite(dispatch('terminal-clearance')).ok).toBe(true);
     expect(target.ownership.apiWrite({ kind: 'enqueue', input: {
-      jobId: 'job-2', requestId: 'request-job-2', request: { branch: 'main', target: 'rpi-5' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'clearance', acceptedAt: NOW,
+      jobId: 'job-2', requestId: 'request-job-2', request: { branch: 'main', target: 'rpi-5' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('job-2'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'clearance', acceptedAt: NOW,
     } }).ok).toBe(true);
     expect(target.ownership.apiWrite(dispatch('job-2'))).toMatchObject({ ok: false, conflict: { kind: 'fenced' } });
     expect(target.ownership.apiWrite(dispatchStart('terminal-clearance')).ok).toBe(true); expect(target.ownership.runnerWrite(lease(ACTIVE, 'terminal-clearance')).ok).toBe(true);
@@ -878,11 +1053,11 @@ describe('actor-owned compare-and-set writes', () => {
     for (let index = 0; index < 49; index += 1) {
       const jobId = `queue-${index}`;
       expect(ownership.apiWrite({ kind: 'enqueue', input: {
-        jobId, requestId: jobId, request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation(jobId), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'queue', acceptedAt: NOW,
+        jobId, requestId: jobId, request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation(jobId), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'queue', acceptedAt: NOW,
       } }).ok).toBe(true);
     }
     const events = store.listEvents('queue-48').events.length;
-    expect(ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'queue-overflow', requestId: 'queue-overflow', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('queue-overflow'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'queue', acceptedAt: NOW } })).toMatchObject({ ok: false, conflict: { kind: 'queue-full' } });
+    expect(ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'queue-overflow', requestId: 'queue-overflow', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('queue-overflow'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'queue', acceptedAt: NOW } })).toMatchObject({ ok: false, conflict: { kind: 'queue-full' } });
     expect(store.listEvents('queue-48').events).toHaveLength(events); expect(() => store.getJob('queue-overflow')).toThrow();
   });
 
@@ -908,6 +1083,7 @@ describe('actor-owned compare-and-set writes', () => {
         targetId: 'rpi-5',
         rootId: 'release',
         targetManifestSha256: SHA64,
+        builderIdentity: BUILDER_IDENTITY,
         sourceCommitTime: NOW,
         sourceAuthor: 'Phil',
         sourceSubject: 'configured queue',
@@ -936,6 +1112,7 @@ describe('actor-owned compare-and-set writes', () => {
         targetId: 'rpi-5',
         rootId: 'release',
         targetManifestSha256: SHA64,
+        builderIdentity: BUILDER_IDENTITY,
         sourceCommitTime: BEFORE,
         sourceAuthor: 'Phil',
         sourceSubject: 'expired preflight',
@@ -1052,10 +1229,18 @@ describe('actor-owned compare-and-set writes', () => {
 
     const valid = await fixture('acquire-valid');
     expect(valid.ownership.apiWrite(dispatch('acquire-valid')).ok).toBe(true);
-    expect(valid.ownership.apiWrite(dispatchStart('acquire-valid')).ok).toBe(true);
-    expect(valid.ownership.runnerWrite(lease(ACTIVE, 'acquire-valid')).ok).toBe(true);
+    expect(valid.ownership.apiWrite({
+      ...dispatchStart('acquire-valid'),
+      unitInactiveAt: NOW,
+      startAttemptedAt: LATER,
+      at: LATER,
+    }).ok).toBe(true);
+    expect(valid.ownership.runnerWrite({
+      ...lease(EXPIRY, 'acquire-valid'),
+      at: ACTIVE,
+    }).ok).toBe(true);
     expect(valid.db.prepare('SELECT 1 AS present FROM queue_dispatch_claims WHERE claim_id=1').get()).toBeUndefined();
-    expect(valid.store.getJob('acquire-valid')).toMatchObject({ runnerLeaseOwner: 'runner-a', runnerLeaseExpiresAt: ACTIVE });
+    expect(valid.store.getJob('acquire-valid')).toMatchObject({ runnerLeaseOwner: 'runner-a', runnerLeaseExpiresAt: EXPIRY });
   });
 
   it('rejects expired and malformed dispatch evidence without changing the runner row or claim', async () => {
@@ -1100,7 +1285,7 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('accepts only canonical real instants and bounded JSON values', async () => {
     const { ownership } = await fixture('validation');
-    const base = { jobId: 'bad-date', requestId: 'bad-date', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('bad-date'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: '2026-02-30T10:00:00.000Z', sourceAuthor: 'Phil', sourceSubject: 'date', acceptedAt: NOW };
+    const base = { jobId: 'bad-date', requestId: 'bad-date', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('bad-date'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: '2026-02-30T10:00:00.000Z', sourceAuthor: 'Phil', sourceSubject: 'date', acceptedAt: NOW };
     expect(() => ownership.apiWrite({ kind: 'enqueue', input: base })).toThrow(OwnershipValidationError);
     expect(() => ownership.apiWrite({ kind: 'enqueue', input: { ...base, jobId: 'bad-offset', requestId: 'bad-offset', sourceCommitTime: '2026-07-23T10:00:00+00:00' } })).toThrow(OwnershipValidationError);
     expect(() => encodeJson(['x'.repeat(100_004)], 'root array')).toThrow();
@@ -1112,10 +1297,10 @@ describe('actor-owned compare-and-set writes', () => {
 
   it('separates malformed validation, stale CAS, and unknown SQLite faults', async () => {
     const malformed = await fixture('malformed-target');
-    expect(() => malformed.ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'bad-target', requestId: 'bad-target', request: {}, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('bad-target'), targetId: 'invalid' as never, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'bad', acceptedAt: NOW } })).toThrow(OwnershipValidationError);
+    expect(() => malformed.ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'bad-target', requestId: 'bad-target', request: {}, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('bad-target'), targetId: 'invalid' as never, rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'bad', acceptedAt: NOW } })).toThrow(OwnershipValidationError);
     expect(malformed.ownership.apiWrite(dispatch('missing-job'))).toMatchObject({ ok: false, conflict: { kind: 'stale-predecessor' } });
     malformed.db.exec("CREATE TRIGGER unknown_check BEFORE INSERT ON jobs WHEN NEW.job_id='unknown-check' BEGIN SELECT RAISE(ABORT, 'CHECK constraint failed: injected'); END");
-    const input = { jobId: 'unknown-check', requestId: 'unknown-check', request: {}, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('unknown-check'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'check', acceptedAt: NOW };
+    const input = { jobId: 'unknown-check', requestId: 'unknown-check', request: {}, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('unknown-check'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'check', acceptedAt: NOW };
     expect(() => malformed.ownership.apiWrite({ kind: 'enqueue', input })).toThrow(OwnershipTransactionError);
     expect(malformed.store.listEvents('malformed-target').events).toHaveLength(1);
   });
@@ -1135,6 +1320,92 @@ describe('actor-owned compare-and-set writes', () => {
     const containerCleanup = withContainer.ownership.runnerWrite({ ...runnerBase('job-2'), at: RECOVERY, leaseExpiresAt: EXPIRY, kind: 'cancellation-cleanup', expectedState: 'cancel_requested', evidenceEventSeq: eventSeq(containerEvidence), proof: { ...proof, unitInactiveAt: null } });
     expect(containerCleanup.ok).toBe(true);
     expect(withContainer.ownership.runnerWrite({ ...runnerBase('job-2'), at: RECOVERY, leaseExpiresAt: EXPIRY, kind: 'cancellation-terminal', expectedState: 'cancel_requested', terminalAt: RECOVERY, cleanupEventSeq: eventSeq(containerCleanup) }).ok).toBe(true);
+  });
+
+  it('fails closed on trailing pre-container identity residue through cancellation', async () => {
+    const jobId = 'cancellation-pre-container-residue';
+    const target = await fixture(jobId);
+    dispatchAndStart(target.ownership, jobId);
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    target.db.exec('DROP TRIGGER jobs_container_guard_update');
+    const residue = JSON.stringify({ source: '/outside' });
+    target.db.prepare('UPDATE jobs SET container_mount_json=? WHERE job_id=?').run(residue, jobId);
+    const evidenceEvents = target.store.listEvents(jobId).events.length;
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-evidence', expectedState: 'cancel_requested', evidence: cancellationEvidence(jobId) })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.listEvents(jobId).events).toHaveLength(evidenceEvents);
+    expect((target.db.prepare('SELECT container_mount_json FROM jobs WHERE job_id=?').get(jobId) as { container_mount_json: string }).container_mount_json).toBe(residue);
+
+    target.db.prepare('UPDATE jobs SET container_mount_json=NULL WHERE job_id=?').run(jobId);
+    const evidence = target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-evidence', expectedState: 'cancel_requested', evidence: cancellationEvidence(jobId) });
+    expect(evidence.ok).toBe(true);
+    target.db.prepare('UPDATE jobs SET container_mount_json=? WHERE job_id=?').run(residue, jobId);
+    const cleanupEvents = target.store.listEvents(jobId).events.length;
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), at: RECOVERY, leaseExpiresAt: EXPIRY, kind: 'cancellation-cleanup', expectedState: 'cancel_requested', evidenceEventSeq: eventSeq(evidence), proof: { kind: 'pre-container', runnerUnit: runnerBase(jobId).runnerUnit, unitInactiveAt: null, container: absent(), staging, logs } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.listEvents(jobId).events).toHaveLength(cleanupEvents);
+    expect((target.db.prepare('SELECT state FROM jobs WHERE job_id=?').get(jobId) as { state: string }).state).toBe('cancel_requested');
+
+    target.db.prepare('UPDATE jobs SET container_mount_json=NULL WHERE job_id=?').run(jobId);
+    const cleanup = target.ownership.runnerWrite({ ...runnerBase(jobId), at: RECOVERY, leaseExpiresAt: EXPIRY, kind: 'cancellation-cleanup', expectedState: 'cancel_requested', evidenceEventSeq: eventSeq(evidence), proof: { kind: 'pre-container', runnerUnit: runnerBase(jobId).runnerUnit, unitInactiveAt: null, container: absent(), staging, logs } });
+    expect(cleanup.ok).toBe(true);
+    target.db.prepare('UPDATE jobs SET container_mount_json=? WHERE job_id=?').run(residue, jobId);
+    const terminalEvents = target.store.listEvents(jobId).events.length;
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), at: RECOVERY, leaseExpiresAt: EXPIRY, kind: 'cancellation-terminal', expectedState: 'cancel_requested', terminalAt: RECOVERY, cleanupEventSeq: eventSeq(cleanup) })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.listEvents(jobId).events).toHaveLength(terminalEvents);
+    expect((target.db.prepare('SELECT state FROM jobs WHERE job_id=?').get(jobId) as { state: string }).state).toBe('cancel_requested');
+    expect((target.db.prepare('SELECT container_mount_json FROM jobs WHERE job_id=?').get(jobId) as { container_mount_json: string }).container_mount_json).toBe(residue);
+  });
+
+  it('rejects dependency-egress residue during container cancellation and preserves state', async () => {
+    const jobId = 'cancellation-container-egress-residue';
+    const target = await fixture(jobId);
+    dispatchAndStart(target.ownership, jobId);
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.runnerWrite({ ...container(jobId), leaseExpiresAt: EXPIRY, at: NOW });
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    target.db.exec('DROP TRIGGER jobs_container_guard_update');
+    const egressSecurity = JSON.stringify({ user: '1000:1000', egress: { proxy: { id: 'proxy-residue' }, network: { id: 'network-residue' } } });
+    target.db.prepare('UPDATE jobs SET container_security_json=? WHERE job_id=?').run(egressSecurity, jobId);
+    const evidenceEvents = target.store.listEvents(jobId).events.length;
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-evidence', expectedState: 'cancel_requested', evidence: cancellationEvidence(jobId, true) })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.listEvents(jobId).events).toHaveLength(evidenceEvents);
+    expect((target.db.prepare('SELECT container_security_json FROM jobs WHERE job_id=?').get(jobId) as { container_security_json: string }).container_security_json).toBe(egressSecurity);
+
+    target.db.prepare('UPDATE jobs SET container_security_json=? WHERE job_id=?').run(JSON.stringify({ user: '1000:1000' }), jobId);
+    const evidence = target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-evidence', expectedState: 'cancel_requested', evidence: cancellationEvidence(jobId, true) });
+    expect(evidence.ok).toBe(true);
+    target.db.prepare('UPDATE jobs SET container_security_json=? WHERE job_id=?').run(egressSecurity, jobId);
+    const proof = { kind: 'container' as const, runnerUnit: runnerBase(jobId).runnerUnit, unitInactiveAt: null, container: { kind: 'removed' as const, id: `container-${jobId}`, name: `osi-${jobId}`, imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: LATER, removedAt: LATER, globalLabelResult: 'no-match' as const, observedAt: RECOVERY }, staging, logs };
+    const cleanupEvents = target.store.listEvents(jobId).events.length;
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), at: RECOVERY, leaseExpiresAt: EXPIRY, kind: 'cancellation-cleanup', expectedState: 'cancel_requested', evidenceEventSeq: eventSeq(evidence), proof })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.listEvents(jobId).events).toHaveLength(cleanupEvents);
+    expect(target.store.getJob(jobId).state).toBe('cancel_requested');
+    expect((target.db.prepare('SELECT container_security_json FROM jobs WHERE job_id=?').get(jobId) as { container_security_json: string }).container_security_json).toBe(egressSecurity);
+  });
+
+  it('binds cancellation container cleanup to the complete persisted identity tuple', async () => {
+    const jobId = 'cancellation-container-full-cas';
+    const target = await fixture(jobId);
+    dispatchAndStart(target.ownership, jobId);
+    target.ownership.runnerWrite(lease(EXPIRY, jobId));
+    target.ownership.runnerWrite({ ...container(jobId), leaseExpiresAt: EXPIRY, at: NOW });
+    target.ownership.apiWrite({ kind: 'request-cancellation', jobId, reason: 'stop', at: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-transition', expectedState: 'starting' });
+    const evidence = target.ownership.runnerWrite({ ...runnerBase(jobId), leaseExpiresAt: EXPIRY, kind: 'cancellation-evidence', expectedState: 'cancel_requested', evidence: cancellationEvidence(jobId, true) });
+    expect(evidence.ok).toBe(true);
+    const originalInspection = JSON.stringify({ running: true });
+    const changedInspection = JSON.stringify({ running: false, residue: true });
+    target.db.exec('DROP TRIGGER jobs_container_guard_update');
+    target.db.prepare('UPDATE jobs SET container_inspection_json=? WHERE job_id=?').run(changedInspection, jobId);
+    const proof = { kind: 'container' as const, runnerUnit: runnerBase(jobId).runnerUnit, unitInactiveAt: null, container: { kind: 'removed' as const, id: `container-${jobId}`, name: `osi-${jobId}`, imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: LATER, removedAt: LATER, globalLabelResult: 'no-match' as const, observedAt: RECOVERY }, staging, logs };
+    const beforeEvents = target.store.listEvents(jobId).events.length;
+    const beforeIdentity = target.db.prepare('SELECT container_id, container_name, container_image_digest, container_labels_json, container_mount_json, container_env_json, container_security_json, container_inspection_json, container_created_at, container_started_at, container_stopped_at, container_removed_at, container_cleanup_outcome FROM jobs WHERE job_id=?').get(jobId);
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), at: RECOVERY, leaseExpiresAt: EXPIRY, kind: 'cancellation-cleanup', expectedState: 'cancel_requested', evidenceEventSeq: eventSeq(evidence), proof })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.listEvents(jobId).events).toHaveLength(beforeEvents);
+    expect(target.db.prepare('SELECT container_id, container_name, container_image_digest, container_labels_json, container_mount_json, container_env_json, container_security_json, container_inspection_json, container_created_at, container_started_at, container_stopped_at, container_removed_at, container_cleanup_outcome FROM jobs WHERE job_id=?').get(jobId)).toEqual({ ...beforeIdentity as Record<string, unknown>, container_inspection_json: changedInspection });
+    expect(originalInspection).not.toBe(changedInspection);
   });
 
   it('rejects cancellation evidence that claims sealed logs over persisted generation gaps', async () => {
@@ -1877,6 +2148,422 @@ describe('actor-owned compare-and-set writes', () => {
     expect(store.getJob('job-1').state).toBe('interrupted');
   });
 
+  it('rejects null-container completion while any non-primary container identity column remains', async () => {
+    const target = await fixture('null-container-residual');
+    target.ownership.apiWrite(dispatch('null-container-residual'));
+    const admission = cleanupAdmission(nullLeaseSnapshot('null-container-residual'), 'null-container-residual');
+    expect(target.ownership.apiWrite(admission).ok).toBe(true);
+    const claim: CleanupWriteCommand = {
+      kind: 'claim-lease',
+      jobId: 'null-container-residual',
+      admissionId: admission.admissionId,
+      owner: 'cleanup-a',
+      unitName: admission.unitName,
+      fenceGeneration: 1,
+      fenceTokenHash: SHA64_B,
+      snapshot: nullLeaseSnapshot('null-container-residual'),
+      at: RECOVERY,
+    };
+    expect(target.ownership.cleanupWrite(claim).ok).toBe(true);
+    target.db.exec('DROP TRIGGER jobs_container_guard_update');
+    target.db.prepare('UPDATE jobs SET container_mount_json=? WHERE job_id=?').run(JSON.stringify({ source: '/outside' }), 'null-container-residual');
+    const beforeEvents = target.store.listEvents('null-container-residual').events.length;
+    expect(target.ownership.cleanupWrite({
+      kind: 'complete',
+      jobId: 'null-container-residual',
+      admissionId: admission.admissionId,
+      owner: 'cleanup-a',
+      unitName: admission.unitName,
+      fenceGeneration: 1,
+      fenceTokenHash: SHA64_B,
+      snapshot: nullLeaseSnapshot('null-container-residual'),
+      postcondition: postcondition(nullLeaseSnapshot('null-container-residual')),
+      exactContainerId: null,
+      containerAbsent: true,
+      evidencePath: 'recovery/cleanup.json',
+      evidenceSha256: SHA64,
+      at: RECOVERY,
+    })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.listEvents('null-container-residual').events).toHaveLength(beforeEvents);
+    expect((target.db.prepare('SELECT container_mount_json FROM jobs WHERE job_id=?').get('null-container-residual') as { container_mount_json: string }).container_mount_json).toBe(JSON.stringify({ source: '/outside' }));
+  });
+
+  it('accepts a persisted dependency-egress completion only with the exact durable lifecycle identity', async () => {
+    const jobId = 'cleanup-persisted-egress';
+    const target = await completedContainerOperation(jobId, 'frontend-install');
+    const snapshotValue = snapshot('present', jobId);
+    const admission = cleanupAdmission(snapshotValue, jobId);
+    expect(target.ownership.apiWrite(admission).ok).toBe(true);
+    const claim: CleanupWriteCommand = {
+      kind: 'claim-lease',
+      jobId,
+      admissionId: admission.admissionId,
+      owner: 'cleanup-a',
+      unitName: admission.unitName,
+      fenceGeneration: 1,
+      fenceTokenHash: SHA64_B,
+      snapshot: snapshotValue,
+      at: RECOVERY,
+    };
+    expect(target.ownership.cleanupWrite(claim).ok).toBe(true);
+    const security = dependencyEgressSecurity(jobId, 'frontend-install').egress as Record<string, any>;
+    const egress = {
+      persistedDocker: {
+        operationId: 'frontend-install' as const,
+        attempt: 1,
+        proxy: { id: security.proxy.id, absent: true as const },
+        network: { id: security.network.id, absent: true as const },
+        tls: { hostDirectory: security.tls.hostDirectory, absent: true as const },
+        credential: { hostPath: security.credential.hostPath, sha256: security.credential.sha256 },
+        globalLabelResult: 'no-match' as const,
+      },
+      discoveredDocker: [],
+      credentials: [{ kind: 'normal' as const, operationId: 'frontend-install' as const, attempt: 1, hostPath: security.credential.hostPath, expectedSha256: security.credential.sha256, observedSha256: security.credential.sha256, tls: { hostDirectory: security.tls.hostDirectory, absent: true as const }, absent: true as const }],
+      globalLabelResult: 'no-match' as const,
+    };
+    const complete: CleanupWriteCommand = {
+      kind: 'complete',
+      jobId,
+      admissionId: admission.admissionId,
+      owner: 'cleanup-a',
+      unitName: admission.unitName,
+      fenceGeneration: 1,
+      fenceTokenHash: SHA64_B,
+      snapshot: snapshotValue,
+      postcondition: { ...postcondition(snapshotValue), egress },
+      exactContainerId: `container-${jobId}`,
+      containerAbsent: true,
+      evidencePath: 'recovery/cleanup.json',
+      evidenceSha256: SHA64,
+      at: RECOVERY,
+    };
+    const tampered = {
+      ...complete,
+      postcondition: {
+        ...complete.postcondition,
+        egress: {
+          ...egress,
+          persistedDocker: { ...egress.persistedDocker, tls: { hostDirectory: `${dependencyEgressPrefix}/jobs/other-job/recovery/dependency-egress/frontend-install-1.proxy-tls`, absent: true as const } },
+        },
+      },
+    };
+    const beforeEvents = target.store.listEvents(jobId).events.length;
+    expect(target.ownership.cleanupWrite(tampered)).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.listEvents(jobId).events).toHaveLength(beforeEvents);
+    expect(target.store.getJob(jobId).containerSecurity).toMatchObject({ egress: security });
+    expect(() => failingOwnership(target.path).cleanupWrite(complete)).toThrow(OwnershipTransactionError);
+    expect(target.store.listEvents(jobId).events).toHaveLength(beforeEvents);
+    const reopenedDb = openBuilderDatabase(target.path);
+    const reopened = new OwnershipStore(reopenedDb, { now: () => NOW, stateRoot: dependencyEgressPrefix });
+    closers.push(() => reopenedDb.close());
+    expect(reopened.cleanupWrite(complete)).toMatchObject({ ok: true, kind: 'committed' });
+  });
+
+  it('recovers persisted dependency egress after a crash before operation completion', async () => {
+    const jobId = 'cleanup-unfinished-egress';
+    const target = await fixture(jobId);
+    dispatchAndStart(target.ownership, jobId);
+    target.ownership.runnerWrite(lease(ACTIVE, jobId));
+    target.ownership.runnerWrite({
+      ...runnerBase(jobId), kind: 'operation-begin', expectedState: 'starting', operationId: 'frontend-install',
+      attempt: 1, argvHash: SHA64, argv: ['operation'], startedAt: NOW,
+    });
+    const security = dependencyEgressSecurity(jobId, 'frontend-install');
+    target.ownership.runnerWrite({ ...container(jobId), security, leaseExpiresAt: ACTIVE, at: NOW });
+    const snapshotValue = snapshot('present', jobId);
+    const admission = cleanupAdmission(snapshotValue, jobId);
+    expect(target.ownership.apiWrite(admission).ok).toBe(true);
+    expect(target.ownership.cleanupWrite({
+      kind: 'claim-lease', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+      fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, at: RECOVERY,
+    }).ok).toBe(true);
+    const persisted = security.egress as Record<string, any>;
+    const egress = {
+      persistedDocker: {
+        operationId: 'frontend-install' as const,
+        attempt: 1,
+        proxy: { id: persisted.proxy.id, absent: true as const },
+        network: { id: persisted.network.id, absent: true as const },
+        tls: { hostDirectory: persisted.tls.hostDirectory, absent: true as const },
+        credential: { hostPath: persisted.credential.hostPath, sha256: persisted.credential.sha256 },
+        globalLabelResult: 'no-match' as const,
+      },
+      discoveredDocker: [],
+      credentials: [{ kind: 'normal' as const, operationId: 'frontend-install' as const, attempt: 1, hostPath: persisted.credential.hostPath, expectedSha256: persisted.credential.sha256, observedSha256: persisted.credential.sha256, tls: { hostDirectory: persisted.tls.hostDirectory, absent: true as const }, absent: true as const }],
+      globalLabelResult: 'no-match' as const,
+    };
+    const result = target.ownership.cleanupWrite({
+      kind: 'complete', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+      fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue,
+      postcondition: { ...postcondition(snapshotValue), egress }, exactContainerId: `container-${jobId}`,
+      containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY,
+    });
+    expect(result).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.store.getJob(jobId)).toMatchObject({ containerId: null, containerSecurity: null });
+    expect(target.store.getOperation(jobId, 'frontend-install', 1)).toMatchObject({ outcome: null, lifecyclePhase: 'not_created' });
+  });
+
+  it.each([
+    ['credential-only', 'frontend-install', 1, SHA64] as const,
+    ['tls-only', 'build-image', 2, null] as const,
+  ])('completes an exact %s unfinished dependency-egress remnant', async (kind, operationId, attempt, sha256) => {
+    const jobId = `cleanup-${kind}-egress`;
+    const target = await fixture(jobId);
+    dispatchAndStart(target.ownership, jobId);
+    target.ownership.runnerWrite(lease(ACTIVE, jobId));
+    target.ownership.runnerWrite({
+      ...runnerBase(jobId), kind: 'operation-begin', expectedState: 'starting', operationId, attempt,
+      argvHash: SHA64, argv: ['operation'], startedAt: NOW,
+    });
+    const snapshotValue = snapshot('absent', jobId);
+    const admission = cleanupAdmission(snapshotValue, jobId);
+    expect(target.ownership.apiWrite(admission).ok).toBe(true);
+    expect(target.ownership.cleanupWrite({
+      kind: 'claim-lease', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+      fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, at: RECOVERY,
+    }).ok).toBe(true);
+    const hostPath = dependencyEgressCredentialPath(jobId, operationId, attempt);
+    const hostDirectory = hostPath.replace(/\.proxy-credential$/u, '.proxy-tls');
+    const egress = {
+      persistedDocker: null,
+      discoveredDocker: [],
+      credentials: [{ kind, operationId, attempt, hostPath, expectedSha256: sha256, observedSha256: null, tls: { hostDirectory, absent: true as const }, absent: true as const }],
+      globalLabelResult: 'no-match' as const,
+    };
+    expect(target.ownership.cleanupWrite({
+      kind: 'complete', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+      fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue,
+      postcondition: { ...postcondition(snapshotValue), egress: egress as unknown as CleanupPostcondition['egress'] }, exactContainerId: null,
+      containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY,
+    })).toMatchObject({ ok: true, kind: 'committed' });
+  });
+
+  it('completes an exact discovered Docker remnant bound to its unfinished operation', async () => {
+    const jobId = 'cleanup-discovered-egress';
+    const target = await fixture(jobId);
+    dispatchAndStart(target.ownership, jobId);
+    target.ownership.runnerWrite(lease(ACTIVE, jobId));
+    target.ownership.runnerWrite({
+      ...runnerBase(jobId), kind: 'operation-begin', expectedState: 'starting', operationId: 'frontend-install', attempt: 1,
+      argvHash: SHA64, argv: ['operation'], startedAt: NOW,
+    });
+    const snapshotValue = snapshot('absent', jobId);
+    const admission = cleanupAdmission(snapshotValue, jobId);
+    expect(target.ownership.apiWrite(admission).ok).toBe(true);
+    expect(target.ownership.cleanupWrite({
+      kind: 'claim-lease', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+      fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, at: RECOVERY,
+    }).ok).toBe(true);
+    const security = dependencyEgressSecurity(jobId, 'frontend-install').egress as Record<string, any>;
+    const hostPath = security.credential.hostPath as string;
+    const hostDirectory = security.tls.hostDirectory as string;
+    const discovered = {
+      operationId: 'frontend-install' as const,
+      attempt: 1,
+      proxy: null,
+      network: { id: security.network.id, absent: true as const },
+      tls: { hostDirectory, absent: true as const },
+      credential: { hostPath, sha256: security.credential.sha256 },
+    };
+    const egress = {
+      persistedDocker: null,
+      discoveredDocker: [discovered],
+      credentials: [{ kind: 'normal' as const, operationId: 'frontend-install' as const, attempt: 1, hostPath, expectedSha256: security.credential.sha256, observedSha256: security.credential.sha256, tls: { hostDirectory, absent: true as const }, absent: true as const }],
+      globalLabelResult: 'no-match' as const,
+    };
+    expect(target.ownership.cleanupWrite({
+      kind: 'complete', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+      fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue,
+      postcondition: { ...postcondition(snapshotValue), egress }, exactContainerId: null,
+      containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY,
+    })).toMatchObject({ ok: true, kind: 'committed' });
+  });
+
+  it('binds a discovered Docker remnant to an expected credential hash without inventing observation', async () => {
+    const jobId = 'cleanup-discovered-tls-only-egress';
+    const target = await fixture(jobId);
+    dispatchAndStart(target.ownership, jobId);
+    target.ownership.runnerWrite(lease(ACTIVE, jobId));
+    target.ownership.runnerWrite({
+      ...runnerBase(jobId), kind: 'operation-begin', expectedState: 'starting', operationId: 'frontend-install', attempt: 1,
+      argvHash: SHA64, argv: ['operation'], startedAt: NOW,
+    });
+    const snapshotValue = snapshot('absent', jobId);
+    const admission = cleanupAdmission(snapshotValue, jobId);
+    expect(target.ownership.apiWrite(admission).ok).toBe(true);
+    expect(target.ownership.cleanupWrite({
+      kind: 'claim-lease', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+      fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, at: RECOVERY,
+    }).ok).toBe(true);
+    const security = dependencyEgressSecurity(jobId, 'frontend-install').egress as Record<string, any>;
+    const hostPath = security.credential.hostPath as string;
+    const hostDirectory = security.tls.hostDirectory as string;
+    const discovered = {
+      operationId: 'frontend-install' as const,
+      attempt: 1,
+      proxy: null,
+      network: { id: security.network.id, absent: true as const },
+      tls: { hostDirectory, absent: true as const },
+      credential: { hostPath, sha256: security.credential.sha256 },
+    };
+    const result = target.ownership.cleanupWrite({
+      kind: 'complete', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+      fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue,
+      postcondition: {
+        ...postcondition(snapshotValue),
+        egress: {
+          persistedDocker: null,
+          discoveredDocker: [discovered],
+          credentials: [{ kind: 'tls-only' as const, operationId: 'frontend-install' as const, attempt: 1, hostPath, expectedSha256: security.credential.sha256, observedSha256: null, tls: { hostDirectory, absent: true as const }, absent: true as const }],
+          globalLabelResult: 'no-match' as const,
+        },
+      },
+      exactContainerId: null,
+      containerAbsent: true,
+      evidencePath: 'recovery/cleanup.json',
+      evidenceSha256: SHA64,
+      at: RECOVERY,
+    });
+    expect(result).toMatchObject({ ok: true, kind: 'committed' });
+  });
+
+  it.each([
+    ['cross-root', (egress: Record<string, any>, _jobId: string) => ({
+      ...egress,
+      credentials: [{ ...egress.credentials[0], hostPath: dependencyEgressCredentialPath('other-job', 'frontend-install'), tls: { hostDirectory: dependencyEgressCredentialPath('other-job', 'frontend-install').replace(/\.proxy-credential$/u, '.proxy-tls'), absent: true } }],
+    })],
+    ['unknown-operation', (egress: Record<string, any>) => ({ ...egress, credentials: [{ ...egress.credentials[0], operationId: 'unknown-operation' }] })],
+    ['duplicate', (egress: Record<string, any>) => ({ ...egress, credentials: [egress.credentials[0], { ...egress.credentials[0] }] })],
+    ['unpaired-Docker', (egress: Record<string, any>, _jobId: string, discovered: Record<string, any>) => ({ ...egress, credentials: [], discoveredDocker: [discovered] })],
+    ['TLS-only-Docker-pair', (egress: Record<string, any>, _jobId: string, discovered: Record<string, any>) => ({ ...egress, credentials: [{ ...egress.credentials[0], kind: 'tls-only', expectedSha256: null, observedSha256: null }], discoveredDocker: [discovered] })],
+  ] as const)('rejects %s recovery egress evidence before changing the transaction', async (_label, mutate) => {
+    const jobId = `cleanup-invalid-egress-${_label.toLowerCase().replaceAll(/[^a-z0-9]+/gu, '-')}`;
+    const target = await fixture(jobId);
+    dispatchAndStart(target.ownership, jobId);
+    target.ownership.runnerWrite(lease(ACTIVE, jobId));
+    target.ownership.runnerWrite({
+      ...runnerBase(jobId), kind: 'operation-begin', expectedState: 'starting', operationId: 'frontend-install', attempt: 1,
+      argvHash: SHA64, argv: ['operation'], startedAt: NOW,
+    });
+    const snapshotValue = snapshot('absent', jobId);
+    const admission = cleanupAdmission(snapshotValue, jobId);
+    expect(target.ownership.apiWrite(admission).ok).toBe(true);
+    expect(target.ownership.cleanupWrite({
+      kind: 'claim-lease', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+      fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, at: RECOVERY,
+    }).ok).toBe(true);
+    const security = dependencyEgressSecurity(jobId, 'frontend-install').egress as Record<string, any>;
+    const hostPath = security.credential.hostPath as string;
+    const hostDirectory = security.tls.hostDirectory as string;
+    const discovered = {
+      operationId: 'frontend-install' as const,
+      attempt: 1,
+      proxy: null,
+      network: { id: security.network.id, absent: true as const },
+      tls: { hostDirectory, absent: true as const },
+      credential: { hostPath, sha256: security.credential.sha256 },
+    };
+    const egress = {
+      persistedDocker: null,
+      discoveredDocker: [],
+      credentials: [{ kind: 'normal' as const, operationId: 'frontend-install' as const, attempt: 1, hostPath, expectedSha256: security.credential.sha256, observedSha256: security.credential.sha256, tls: { hostDirectory, absent: true as const }, absent: true as const }],
+      globalLabelResult: 'no-match' as const,
+    };
+    const malformed = mutate(egress, jobId, discovered) as unknown as CleanupPostcondition['egress'];
+    const beforeEvents = target.store.listEvents(jobId).events.length;
+    let threw = false;
+    let result: ReturnType<OwnershipStore['cleanupWrite']> | undefined;
+    try {
+      result = target.ownership.cleanupWrite({
+        kind: 'complete', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+        fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue,
+        postcondition: { ...postcondition(snapshotValue), egress: malformed }, exactContainerId: null,
+        containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY,
+      });
+    } catch {
+      threw = true;
+    }
+    expect(threw || result?.ok === false).toBe(true);
+    expect(target.store.listEvents(jobId).events).toHaveLength(beforeEvents);
+  });
+
+  it('rejects discovered dependency egress proof without its unfinished operation', async () => {
+    const jobId = 'cleanup-invented-egress';
+    const target = await fixture(jobId);
+    dispatchAndStart(target.ownership, jobId);
+    target.ownership.runnerWrite(lease(ACTIVE, jobId));
+    const snapshotValue = snapshot('absent', jobId);
+    const admission = cleanupAdmission(snapshotValue, jobId);
+    expect(target.ownership.apiWrite(admission).ok).toBe(true);
+    expect(target.ownership.cleanupWrite({
+      kind: 'claim-lease', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+      fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, at: RECOVERY,
+    }).ok).toBe(true);
+    const hostPath = dependencyEgressCredentialPath(jobId, 'frontend-install');
+    const discovered = {
+      operationId: 'frontend-install' as const,
+      attempt: 1,
+      proxy: { id: SHA64, absent: true as const },
+      network: { id: SHA64_B, absent: true as const },
+      tls: { hostDirectory: hostPath.replace(/\.proxy-credential$/u, '.proxy-tls'), absent: true as const },
+      credential: { hostPath, sha256: SHA64 },
+    };
+    const beforeEvents = target.store.listEvents(jobId).events.length;
+    expect(target.ownership.cleanupWrite({
+      kind: 'complete', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+      fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue,
+      postcondition: {
+        ...postcondition(snapshotValue),
+        egress: {
+          persistedDocker: null,
+          discoveredDocker: [discovered],
+          credentials: [{ kind: 'normal', operationId: 'frontend-install', attempt: 1, hostPath, expectedSha256: SHA64, observedSha256: SHA64, tls: { hostDirectory: `${dependencyEgressPrefix}/jobs/${jobId}/recovery/dependency-egress/frontend-install-1.proxy-tls`, absent: true }, absent: true }],
+          globalLabelResult: 'no-match',
+        },
+      },
+      exactContainerId: null, containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY,
+    })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.listEvents(jobId).events).toHaveLength(beforeEvents);
+  });
+
+  it('rejects non-exact recovery cleanup proof shapes before mutation', async () => {
+    const jobId = 'cleanup-postcondition-shape';
+    const target = await fixture(jobId);
+    target.ownership.apiWrite(dispatch(jobId));
+    const snapshotValue = nullLeaseSnapshot(jobId);
+    const admission = cleanupAdmission(snapshotValue, jobId);
+    expect(target.ownership.apiWrite(admission).ok).toBe(true);
+    expect(target.ownership.cleanupWrite({
+      kind: 'claim-lease', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+      fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, at: RECOVERY,
+    }).ok).toBe(true);
+    const base = postcondition(snapshotValue);
+    const malformed = [
+      { ...base, unexpected: true },
+      { ...base, runner: { ...base.runner, unexpected: true } },
+      { ...base, container: { ...base.container, unexpected: true } },
+      { ...base, staging: { ...base.staging, unexpected: true } },
+      { ...base, logs: { ...base.logs, unexpected: true } },
+    ] as unknown as CleanupPostcondition[];
+    const beforeEvents = target.store.listEvents(jobId).events.length;
+    for (const candidate of malformed) {
+      expect(() => target.ownership.cleanupWrite({
+        kind: 'complete', jobId, admissionId: admission.admissionId, owner: 'cleanup-a', unitName: admission.unitName,
+        fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshotValue, postcondition: candidate,
+        exactContainerId: null, containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY,
+      })).toThrow(OwnershipValidationError);
+    }
+    expect(target.store.listEvents(jobId).events).toHaveLength(beforeEvents);
+  });
+
+  it('uses the complete identity-null predicate in the null cleanup SQL CAS', async () => {
+    const source = await readFile(new URL('../../api/src/ownership.ts', import.meta.url), 'utf8');
+    const nullBranchStart = source.indexOf(": this.#db.prepare(`UPDATE jobs SET cleanup_blocker_code=NULL");
+    const nullBranchEnd = source.indexOf('if (Number(result.changes)', nullBranchStart);
+    expect(nullBranchStart).toBeGreaterThan(0);
+    expect(source.slice(nullBranchStart, nullBranchEnd)).toContain('${JOB_CONTAINER_IDENTITY_NULL_SQL}');
+  });
+
   it('admits a pre-cleanup staging source and completes with a separate quarantine postcondition', async () => {
     const { ownership, store } = await fixture(); dispatchAndStart(ownership); ownership.runnerWrite(lease(ACTIVE));
     ownership.runnerWrite({ ...runnerBase(), kind: 'artifact', expectedState: 'starting', state: 'starting', stagingPath: 'staging/job-1/image', artifactSha256: SHA64, artifactSize: 10, artifactMtime: NOW, checksumPath: 'staging/job-1/sha256sums', checksumSha256: checksumHash(), manifestPath: 'staging/job-1/build-manifest.json', manifestSha256: manifestHash('job-1'), verificationPath: 'staging/job-1/verification.json', verificationSha256: verificationHash('job-1') });
@@ -2272,7 +2959,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(falseSealed.ownership.apiWrite(cleanupAdmission(sealedSnapshot, 'cleanup-false-sealed'))).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
     const completion = await fixture('cleanup-false-completion'); dispatchAndStart(completion.ownership, 'cleanup-false-completion'); completion.ownership.runnerWrite(lease(ACTIVE, 'cleanup-false-completion')); completion.ownership.runnerWrite(container('cleanup-false-completion')); seedUnsealedLogs(completion.path, 'cleanup-false-completion');
     const admittedSnapshot = { ...snapshot('present', 'cleanup-false-completion'), logs: { runner: 'unsealed' as const, docker: 'unsealed' as const, verifiedAt: RECOVERY }, blocker: 'container' as const }; const admitted = cleanupAdmission(admittedSnapshot, 'cleanup-false-completion'); expect(completion.ownership.apiWrite(admitted).ok).toBe(true); completion.ownership.cleanupWrite({ kind: 'claim-lease', jobId: 'cleanup-false-completion', admissionId: admitted.admissionId, owner: 'cleanup-a', unitName: admitted.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: admittedSnapshot, at: RECOVERY });
-    const falseClaim = { ...admittedSnapshot, logs, blocker: 'none' as const };
+    const falseClaim = { ...admittedSnapshot, logs: operationLogs, blocker: 'none' as const };
     expect(completion.ownership.cleanupWrite({ kind: 'complete', jobId: 'cleanup-false-completion', admissionId: admitted.admissionId, owner: 'cleanup-a', unitName: admitted.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: falseClaim, postcondition: postcondition(admittedSnapshot), exactContainerId: 'container-cleanup-false-completion', containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
     expect(completion.ownership.cleanupWrite({ kind: 'complete', jobId: 'cleanup-false-completion', admissionId: admitted.admissionId, owner: 'cleanup-a', unitName: admitted.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: admittedSnapshot, postcondition: postcondition(admittedSnapshot), exactContainerId: 'container-cleanup-false-completion', containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
   });
@@ -2440,6 +3127,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(value.store.getJob(jobId)).toMatchObject({
       state: 'publishing',
       publishState: 'publishing',
+      releaseSealStatus: 'in_progress',
       publishStartedAt: NOW,
     });
     expect(value.store.getStage(jobId, 'publish')).toMatchObject({
@@ -2478,6 +3166,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(value.store.getJob(jobId)).toMatchObject({
       state: 'publishing',
       publishState: 'publishing',
+      releaseSealStatus: 'in_progress',
       artifactStagingPath: 'staging/image',
       terminalAt: null,
     });
@@ -2487,6 +3176,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(value.store.getJob(jobId)).toMatchObject({
       state: 'succeeded',
       publishState: 'published',
+      releaseSealStatus: 'sealed',
       artifactStagingPath: null,
       artifactFinalPath: `release/${jobId}/image`,
       terminalAt: LATER,
@@ -2717,8 +3407,10 @@ describe('actor-owned compare-and-set writes', () => {
       evidencePath: 'jobs/job-2/evidence/09-publish.json',
       evidenceSha256: recoveryEvidence('job-2').stage.evidenceSha256,
     });
-    expect(success.store.getJob('job-2').verificationSha256)
-      .toBe(terminalVerification('job-2').sha256);
+    expect(success.store.getJob('job-2')).toMatchObject({
+      verificationSha256: terminalVerification('job-2').sha256,
+      releaseSealStatus: 'sealed',
+    });
     const failed = await fixture('job-3'); toPublishing(failed.ownership, 'job-3'); seedLogs(failed.path, 'job-3');
     const failedResult = failed.ownership.apiWrite({ kind: 'publish-recovery', jobId: 'job-3', expectedState: 'publishing', at: RECOVERY, state: 'failed', evidence: recoveryEvidence('job-3', 'failed'), errorCode: 'PUBLISH_FAILED', error: { reason: 'final verification failed' } });
     expect(failedResult).toMatchObject({ ok: true });
@@ -2730,7 +3422,7 @@ describe('actor-owned compare-and-set writes', () => {
     });
     const incomplete = await fixture('job-4'); toPublishing(incomplete.ownership, 'job-4'); seedLogs(incomplete.path, 'job-4');
     expect(incomplete.ownership.apiWrite({ kind: 'publish-recovery', jobId: 'job-4', expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence: { ...recoveryEvidence('job-4'), artifact: { ...recoveryEvidence('job-4').artifact, manifestSha256: SHA64_B } } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
-    expect(failed.store.getJob('job-3')).toMatchObject({ state: 'failed', artifactStagingPath: 'staging/image', publishState: 'blocked' });
+    expect(failed.store.getJob('job-3')).toMatchObject({ state: 'failed', artifactStagingPath: 'staging/image', publishState: 'blocked', releaseSealStatus: null });
   });
 
   it('validates the complete recovered final-path blocker binding before persistence', async () => {
@@ -3031,7 +3723,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(ownership.runnerWrite(complete)).toMatchObject({ ok: true, kind: 'committed' });
     expect(ownership.runnerWrite(complete)).toMatchObject({ ok: true, kind: 'idempotent' });
     expect(ownership.runnerWrite({ ...complete, input: { ...complete.input, evidencePath: 'evidence/changed' } })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
-    expect(ownership.runnerWrite({ ...runnerBase(), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'null-identity', container: absent(LATER), logs: { ...logs, verifiedAt: LATER } } })).toMatchObject({ ok: true });
+    expect(ownership.runnerWrite({ ...runnerBase(), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'null-identity', container: absent(LATER), logs: { ...operationLogs, verifiedAt: LATER } } })).toMatchObject({ ok: true });
     const verifyDb = openBuilderDatabase(path); try { expect(verifyDb.prepare('SELECT COUNT(*) AS count FROM job_events WHERE event_type=\'operation\'').get()).toBeDefined(); } finally { verifyDb.close(); }
   });
 
@@ -3045,8 +3737,585 @@ describe('actor-owned compare-and-set writes', () => {
     const resultEvents = store.listEvents('job-1').events.length;
     expect(ownership.runnerWrite({ ...runnerBase(), at: LATER, leaseExpiresAt: ACTIVE, kind: 'operation-begin', expectedState: 'starting', operationId: 'copy-feed-config', attempt: 1, argvHash: SHA64, argv: ['copy'], startedAt: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
     expect(store.listEvents('job-1').events).toHaveLength(resultEvents);
-    expect(ownership.runnerWrite({ ...runnerBase(), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'container-removed', id: 'container-job-1', name: 'osi-job-1', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'job-1', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match', logs } }).ok).toBe(true);
+    expect(ownership.runnerWrite({ ...runnerBase(), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'container-removed', id: 'container-job-1', name: 'osi-job-1', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'job-1', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match', logs: operationLogs } }).ok).toBe(true);
     expect(store.getJob('job-1').containerId).toBeNull();
+  });
+
+  it('reconstructs a frontend operation cleanup with its absolute canonical credential path', async () => {
+    const jobId = 'absolute-credential-frontend';
+    const target = await completedContainerOperation(jobId, 'frontend-install');
+    const reopenedDb = openBuilderDatabase(target.path);
+    const reopened = new OwnershipStore(reopenedDb, { now: () => NOW, stateRoot: dependencyEgressPrefix });
+    closers.push(() => reopenedDb.close());
+    const proof = {
+      kind: 'container-removed' as const,
+      id: `container-${jobId}`,
+      name: `osi-${jobId}`,
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW,
+      removedAt: LATER,
+      observedAt: LATER,
+      globalLabelResult: 'no-match' as const,
+      logs: operationLogs,
+      egress: operationCleanupEgressProof(jobId, 'frontend-install'),
+    };
+    expect(reopened.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.store.getJob(jobId).containerId).toBeNull();
+  });
+
+  it('accepts a canonical build-image dependency egress cleanup path after reopening', async () => {
+    for (const [index, operationId] of (['build-image'] as const).entries()) {
+      const jobId = `absolute-credential-valid-${String(index)}`;
+      const target = await completedContainerOperation(jobId, operationId);
+      const reopenedDb = openBuilderDatabase(target.path);
+      const reopened = new OwnershipStore(reopenedDb, { now: () => NOW, stateRoot: dependencyEgressPrefix });
+      closers.push(() => reopenedDb.close());
+      const proof = {
+        kind: 'container-removed' as const,
+        id: `container-${jobId}`,
+        name: `osi-${jobId}`,
+        imageDigest: SHA64_B,
+        labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+        stoppedAt: NOW,
+        removedAt: LATER,
+        observedAt: LATER,
+        globalLabelResult: 'no-match' as const,
+        logs: operationLogs,
+        egress: operationCleanupEgressProof(jobId, operationId),
+      };
+      expect(reopened.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId, attempt: 1, proof, at: LATER })).toMatchObject({ ok: true, kind: 'committed' });
+      expect(target.store.getJob(jobId).containerId).toBeNull();
+    }
+  });
+
+  it('accepts recovered container-absent cleanup with dependency egress proof after reopening', async () => {
+    const jobId = 'recovered-container-absent-egress';
+    const target = await completedContainerOperation(jobId, 'build-image');
+    const reopenedDb = openBuilderDatabase(target.path);
+    const reopened = new OwnershipStore(reopenedDb, { now: () => NOW, stateRoot: dependencyEgressPrefix });
+    closers.push(() => reopenedDb.close());
+    const proof = {
+      kind: 'container-absent' as const,
+      id: `container-${jobId}`,
+      name: `osi-${jobId}`,
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW,
+      observedAt: LATER,
+      globalLabelResult: 'no-match' as const,
+      logs: operationLogs,
+      egress: operationCleanupEgressProof(jobId, 'build-image'),
+    };
+
+    expect(target.store.getJob(jobId)).toMatchObject({
+      containerId: `container-${jobId}`,
+      containerName: `osi-${jobId}`,
+      containerImageDigest: SHA64_B,
+      containerLabelJobId: jobId,
+      containerLabelManifestSha: SHA64,
+    });
+    expect(reopened.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'build-image', attempt: 1, proof, at: LATER })).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.store.getJob(jobId)).toMatchObject({
+      containerId: null,
+      containerName: null,
+      containerImageDigest: null,
+      containerLabelJobId: null,
+      containerLabelManifestSha: null,
+      containerLabels: null,
+      containerMount: null,
+      containerEnvironment: null,
+      containerSecurity: null,
+      containerInspection: null,
+      containerCreatedAt: null,
+      containerStartedAt: null,
+      containerStoppedAt: null,
+      containerRemovedAt: null,
+      containerCleanupOutcome: null,
+    });
+  });
+
+  it('binds every dependency egress cleanup identity to persisted security before mutation', async () => {
+    const mismatches = [
+      ['proxy id', (egress: DependencyEgressCleanupProof) => ({ ...egress, proxy: { ...egress.proxy, id: 'e'.repeat(64) } })],
+      ['network id', (egress: DependencyEgressCleanupProof) => ({ ...egress, network: { ...egress.network, id: 'e'.repeat(64) } })],
+      ['credential path', (egress: DependencyEgressCleanupProof) => ({ ...egress, credential: { ...egress.credential, hostPath: egress.credential.hostPath.replace(dependencyEgressPrefix, '/var/lib/other-builder') } })],
+      ['credential hash', (egress: DependencyEgressCleanupProof) => ({ ...egress, credential: { ...egress.credential, sha256: 'e'.repeat(64) } })],
+    ] as const;
+    for (const [label, mutate] of mismatches) {
+      const jobId = `egress-mismatch-${label.replaceAll(' ', '-')}`;
+      const target = await completedContainerOperation(jobId, 'build-image');
+      const before = target.store.getJob(jobId);
+      const eventCountBefore = target.store.listEvents(jobId).events.length;
+      const proof = {
+        kind: 'container-removed' as const,
+        id: `container-${jobId}`,
+        name: `osi-${jobId}`,
+        imageDigest: SHA64_B,
+        labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+        stoppedAt: NOW,
+        removedAt: LATER,
+        observedAt: LATER,
+        globalLabelResult: 'no-match' as const,
+        logs: operationLogs,
+        egress: mutate(operationCleanupEgressProof(jobId, 'build-image')),
+      };
+      expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'build-image', attempt: 1, proof, at: LATER }), label).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+      expect(target.store.getJob(jobId)).toMatchObject({
+        containerId: before.containerId,
+        containerSecurity: before.containerSecurity,
+      });
+      expect(target.store.listEvents(jobId).events).toHaveLength(eventCountBefore);
+    }
+  });
+
+  it.each([
+    ['job label', (egress: Record<string, any>) => {
+      const operationId = egress.network.labels['org.osi.image-builder.egress-operation-id'];
+      const attempt = egress.network.labels['org.osi.image-builder.egress-attempt'];
+      const suffix = createHash('sha256').update(`foreign-egress-job:${operationId}:${attempt}`).digest('hex').slice(0, 16);
+      const labels = { ...egress.network.labels, 'org.osi.image-builder.egress-job-id': 'foreign-egress-job' };
+      egress.network = { ...egress.network, name: `osi-image-builder-egress-${suffix}`, labels };
+      egress.proxy = { ...egress.proxy, name: `osi-image-builder-egress-proxy-${suffix}`, labels: { ...egress.proxy.labels, 'org.osi.image-builder.egress-job-id': 'foreign-egress-job' } };
+      egress.networkName = egress.network.name;
+      egress.proxyName = egress.proxy.name;
+    }],
+    ['manifest label', (egress: Record<string, any>) => {
+      egress.network.labels = { ...egress.network.labels, 'org.osi.image-builder.egress-manifest-sha': SHA64_B };
+      egress.proxy.labels = { ...egress.proxy.labels, 'org.osi.image-builder.egress-manifest-sha': SHA64_B };
+    }],
+    ['operation label', (egress: Record<string, any>) => {
+      const jobId = egress.network.labels['org.osi.image-builder.egress-job-id'];
+      const suffix = createHash('sha256').update(`${jobId}:frontend-install:1`).digest('hex').slice(0, 16);
+      const labels = { ...egress.network.labels, 'org.osi.image-builder.egress-operation-id': 'frontend-install' };
+      egress.network = { ...egress.network, name: `osi-image-builder-egress-${suffix}`, labels };
+      egress.proxy = { ...egress.proxy, name: `osi-image-builder-egress-proxy-${suffix}`, labels: { ...egress.proxy.labels, 'org.osi.image-builder.egress-operation-id': 'frontend-install' } };
+      egress.networkName = egress.network.name;
+      egress.proxyName = egress.proxy.name;
+      egress.allowedHosts = ['registry.npmjs.org'];
+      egress.tls.leafCertificates = { 'registry.npmjs.org': egress.tls.leafCertificates['registry.npmjs.org'] };
+      rebaseDependencyEgressPaths(egress, 'frontend-install', 1);
+    }],
+    ['attempt label', (egress: Record<string, any>) => {
+      const jobId = egress.network.labels['org.osi.image-builder.egress-job-id'];
+      const suffix = createHash('sha256').update(`${jobId}:build-image:2`).digest('hex').slice(0, 16);
+      const labels = { ...egress.network.labels, 'org.osi.image-builder.egress-attempt': '2' };
+      egress.network = { ...egress.network, name: `osi-image-builder-egress-${suffix}`, labels };
+      egress.proxy = { ...egress.proxy, name: `osi-image-builder-egress-proxy-${suffix}`, labels: { ...egress.proxy.labels, 'org.osi.image-builder.egress-attempt': '2' } };
+      egress.networkName = egress.network.name;
+      egress.proxyName = egress.proxy.name;
+      rebaseDependencyEgressPaths(egress, 'build-image', 2);
+    }],
+    ['builder image digest', (egress: Record<string, any>) => {
+      egress.proxy = { ...egress.proxy, imageReference: `registry.example.invalid/osi-image-builder@sha256:${SHA64}`, imageDigest: SHA64 };
+    }],
+    ['container user', (egress: Record<string, any>) => {
+      egress.proxy = { ...egress.proxy, user: '2000:2000' };
+    }],
+  ] as const)('rejects persisted egress with a cross-lifecycle %s', async (_label, mutate) => {
+    const jobId = `egress-lifecycle-${_label.replaceAll(' ', '-')}`;
+    const target = await completedContainerOperation(jobId, 'build-image');
+    const before = target.store.getJob(jobId);
+    const persistedSecurity = JSON.parse(JSON.stringify(before.containerSecurity)) as Record<string, any>;
+    mutate(persistedSecurity.egress);
+    target.db.prepare('UPDATE jobs SET container_security_json=? WHERE job_id=?').run(JSON.stringify(persistedSecurity), jobId);
+    const proof = {
+      kind: 'container-removed' as const,
+      id: `container-${jobId}`,
+      name: `osi-${jobId}`,
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match' as const, logs: operationLogs,
+      egress: operationCleanupEgressProof(jobId, 'build-image'),
+    };
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'build-image', attempt: 1, proof, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.getJob(jobId).containerId).toBe(before.containerId);
+  });
+
+  it('requires exactly one egress proof according to persisted dependency security', async () => {
+    const missing = await completedContainerOperation('egress-proof-missing', 'frontend-install');
+    const missingBefore = missing.store.getJob('egress-proof-missing');
+    const missingEvents = missing.store.listEvents('egress-proof-missing').events.length;
+    const missingProof = {
+      kind: 'container-removed' as const,
+      id: 'container-egress-proof-missing',
+      name: 'osi-egress-proof-missing',
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': 'egress-proof-missing', 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match' as const, logs: operationLogs,
+    };
+    expect(missing.ownership.runnerWrite({ ...runnerBase('egress-proof-missing'), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof: missingProof, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(missing.store.getJob('egress-proof-missing')).toMatchObject({ containerId: missingBefore.containerId, containerSecurity: missingBefore.containerSecurity });
+    expect(missing.store.listEvents('egress-proof-missing').events).toHaveLength(missingEvents);
+
+    const bothMissing = await completedContainerOperation('egress-proof-both-missing', 'build-image');
+    bothMissing.db.prepare('UPDATE jobs SET container_security_json=? WHERE job_id=?').run(JSON.stringify({ user: '1000:1000' }), 'egress-proof-both-missing');
+    const bothMissingBefore = bothMissing.store.getJob('egress-proof-both-missing');
+    const bothMissingEvents = bothMissing.store.listEvents('egress-proof-both-missing').events.length;
+    const bothMissingProof = {
+      kind: 'container-removed' as const,
+      id: 'container-egress-proof-both-missing',
+      name: 'osi-egress-proof-both-missing',
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': 'egress-proof-both-missing', 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match' as const, logs: operationLogs,
+    };
+    expect(bothMissing.ownership.runnerWrite({ ...runnerBase('egress-proof-both-missing'), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'build-image', attempt: 1, proof: bothMissingProof, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(bothMissing.store.getJob('egress-proof-both-missing')).toMatchObject({ containerId: bothMissingBefore.containerId, containerSecurity: bothMissingBefore.containerSecurity });
+    expect(bothMissing.store.listEvents('egress-proof-both-missing').events).toHaveLength(bothMissingEvents);
+
+    const unexpected = await completedContainerOperation('egress-proof-unexpected', 'build-image');
+    unexpected.db.prepare('UPDATE jobs SET container_security_json=? WHERE job_id=?').run(JSON.stringify({ user: '1000:1000' }), 'egress-proof-unexpected');
+    const unexpectedBefore = unexpected.store.getJob('egress-proof-unexpected');
+    const unexpectedEvents = unexpected.store.listEvents('egress-proof-unexpected').events.length;
+    const unexpectedProof = {
+      kind: 'container-removed' as const,
+      id: 'container-egress-proof-unexpected',
+      name: 'osi-egress-proof-unexpected',
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': 'egress-proof-unexpected', 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match' as const, logs: operationLogs,
+      egress: operationCleanupEgressProof('egress-proof-unexpected', 'build-image'),
+    };
+    expect(unexpected.ownership.runnerWrite({ ...runnerBase('egress-proof-unexpected'), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'build-image', attempt: 1, proof: unexpectedProof, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(unexpected.store.getJob('egress-proof-unexpected')).toMatchObject({ containerId: unexpectedBefore.containerId, containerSecurity: { user: '1000:1000' } });
+    expect(unexpected.store.listEvents('egress-proof-unexpected').events).toHaveLength(unexpectedEvents);
+
+    const malformed = await completedContainerOperation('egress-security-malformed', 'build-image');
+    malformed.db.prepare('UPDATE jobs SET container_security_json=? WHERE job_id=?').run(JSON.stringify({ user: '1000:1000', egress: { proxy: { id: SHA64 } } }), 'egress-security-malformed');
+    const malformedEvents = malformed.store.listEvents('egress-security-malformed').events.length;
+    const malformedProof = {
+      kind: 'container-removed' as const,
+      id: 'container-egress-security-malformed',
+      name: 'osi-egress-security-malformed',
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': 'egress-security-malformed', 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match' as const, logs: operationLogs,
+      egress: operationCleanupEgressProof('egress-security-malformed', 'build-image'),
+    };
+    expect(() => malformed.ownership.runnerWrite({ ...runnerBase('egress-security-malformed'), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'build-image', attempt: 1, proof: malformedProof, at: LATER })).toThrow(OwnershipValidationError);
+    expect(malformed.store.listEvents('egress-security-malformed').events).toHaveLength(malformedEvents);
+  });
+
+  it('accepts an exact persisted egress proof and clears the durable identity', async () => {
+    const jobId = 'egress-proof-exact';
+    const target = await completedContainerOperation(jobId, 'frontend-install');
+    const beforeEvents = target.store.listEvents(jobId).events.length;
+    const proof = {
+      kind: 'container-removed' as const,
+      id: `container-${jobId}`,
+      name: `osi-${jobId}`,
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match' as const, logs: operationLogs,
+      egress: operationCleanupEgressProof(jobId, 'frontend-install'),
+    };
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.store.getJob(jobId)).toMatchObject({ containerId: null, containerSecurity: null });
+    expect(target.store.listEvents(jobId).events).toHaveLength(beforeEvents + 1);
+
+    const replay = target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER });
+    expect(replay).toMatchObject({ ok: true, kind: 'idempotent' });
+    const changedProof = { ...proof, egress: { ...proof.egress, credential: { ...proof.egress!.credential, sha256: SHA64_B } } };
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof: changedProof, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.listEvents(jobId).events).toHaveLength(beforeEvents + 1);
+  });
+
+  it('rejects a conflicting or loosely shaped duplicate cleanup marker instead of accepting the first replay', async () => {
+    for (const [label, mutate] of [
+      ['extra outer field', (payload: Record<string, unknown>) => ({ ...payload, unexpected: true })],
+      ['string attempt', (payload: Record<string, unknown>) => ({ ...payload, attempt: '1' })],
+    ] as const) {
+      const jobId = `cleanup-replay-${label.replaceAll(' ', '-')}`;
+      const target = await completedContainerOperation(jobId, 'frontend-install');
+      const proof = {
+        kind: 'container-removed' as const,
+        id: `container-${jobId}`,
+        name: `osi-${jobId}`,
+        imageDigest: SHA64_B,
+        labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+        stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match' as const, logs: operationLogs,
+        egress: operationCleanupEgressProof(jobId, 'frontend-install'),
+      };
+      expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toMatchObject({ ok: true, kind: 'committed' });
+      const original = target.store.listEvents(jobId).events.find((event) => event.eventType === 'cleanup')!;
+      appendCleanupEvent(target.db, jobId, mutate(original.payload as Record<string, unknown>));
+      if (label === 'extra outer field') {
+        expect(() => target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toThrow(OwnershipValidationError);
+      } else {
+        expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+      }
+    }
+  });
+
+  it('rejects an exact duplicate operation cleanup marker without changing the row or event count', async () => {
+    const jobId = 'cleanup-replay-exact-duplicate';
+    const target = await completedContainerOperation(jobId, 'frontend-install');
+    const proof = {
+      kind: 'container-removed' as const,
+      id: `container-${jobId}`,
+      name: `osi-${jobId}`,
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW,
+      removedAt: LATER,
+      observedAt: LATER,
+      globalLabelResult: 'no-match' as const,
+      logs: operationLogs,
+      egress: operationCleanupEgressProof(jobId, 'frontend-install'),
+    };
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toMatchObject({ ok: true, kind: 'committed' });
+    const marker = target.store.listEvents(jobId).events.find((event) => event.eventType === 'cleanup')!;
+    appendCleanupEvent(target.db, jobId, marker.payload as Record<string, unknown>);
+    const before = target.store.getJob(jobId);
+    const beforeLease = { owner: before.runnerLeaseOwner, expiresAt: before.runnerLeaseExpiresAt };
+    const events = target.store.listEvents(jobId).events.length;
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.getJob(jobId)).toEqual(before);
+    expect(target.store.getJob(jobId)).toMatchObject({ runnerLeaseOwner: beforeLease.owner, runnerLeaseExpiresAt: beforeLease.expiresAt });
+    expect(target.store.listEvents(jobId).events).toHaveLength(events);
+  });
+
+  it('rejects a replay marker with an extra nested operation log key', async () => {
+    const jobId = 'cleanup-replay-extra-log-key';
+    const target = await completedContainerOperation(jobId, 'frontend-install');
+    const proof = {
+      kind: 'container-removed' as const,
+      id: `container-${jobId}`,
+      name: `osi-${jobId}`,
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW,
+      removedAt: LATER,
+      observedAt: LATER,
+      globalLabelResult: 'no-match' as const,
+      logs: operationLogs,
+      egress: operationCleanupEgressProof(jobId, 'frontend-install'),
+    };
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toMatchObject({ ok: true, kind: 'committed' });
+    const marker = target.store.listEvents(jobId).events.find((event) => event.eventType === 'cleanup')!;
+    const corrupt = JSON.parse(JSON.stringify(marker.payload)) as Record<string, any>;
+    corrupt.proof.logs.unexpected = true;
+    appendCleanupEvent(target.db, jobId, corrupt);
+    const before = target.store.getJob(jobId);
+    const beforeEvents = target.store.listEvents(jobId).events.length;
+    expect(() => target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toThrow(OwnershipValidationError);
+    expect(target.store.getJob(jobId)).toEqual(before);
+    expect(target.store.listEvents(jobId).events).toHaveLength(beforeEvents);
+  });
+
+  it('rejects a dependency egress path under a fake state-root prefix and without configured authority', async () => {
+    const jobId = 'cleanup-state-root-binding';
+    const target = await completedContainerOperation(jobId, 'frontend-install');
+    const beforeEvents = target.store.listEvents(jobId).events.length;
+    const before = target.store.getJob(jobId);
+    const fakeRoot = `${dependencyEgressPrefix}-attacker`;
+    const toFakeRoot = (value: string): string => value.replace(dependencyEgressPrefix, fakeRoot);
+    const persistedSecurity = JSON.parse(JSON.stringify(before.containerSecurity)) as Record<string, any>;
+    const egress = persistedSecurity.egress as Record<string, any>;
+    const leafCertificates = egress.tls.leafCertificates as Record<string, Record<string, any>>;
+    const hostDirectory = toFakeRoot(egress.tls.hostDirectory);
+    egress.credential = { ...egress.credential, hostPath: toFakeRoot(egress.credential.hostPath) };
+    egress.tls = {
+      ...egress.tls,
+      hostDirectory,
+      caCertificateHostPath: `${hostDirectory}/ca.pem`,
+      leafCertificates: Object.fromEntries(Object.entries(leafCertificates).map(([host, leaf]) => [host, {
+        ...leaf,
+        certificateHostPath: toFakeRoot(leaf.certificateHostPath),
+        keyHostPath: toFakeRoot(leaf.keyHostPath),
+      }])),
+    };
+    target.db.prepare('UPDATE jobs SET container_security_json=? WHERE job_id=?').run(JSON.stringify(persistedSecurity), jobId);
+    const spoofed = target.store.getJob(jobId);
+    const spoofedLease = { owner: spoofed.runnerLeaseOwner, expiresAt: spoofed.runnerLeaseExpiresAt };
+    const proof = {
+      kind: 'container-removed' as const,
+      id: `container-${jobId}`,
+      name: `osi-${jobId}`,
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW,
+      removedAt: LATER,
+      observedAt: LATER,
+      globalLabelResult: 'no-match' as const,
+      logs: operationLogs,
+      egress: operationCleanupEgressProof(jobId, 'frontend-install', egress.credential.hostPath),
+    };
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.getJob(jobId)).toEqual(spoofed);
+    expect(target.store.getJob(jobId)).toMatchObject({ runnerLeaseOwner: spoofedLease.owner, runnerLeaseExpiresAt: spoofedLease.expiresAt });
+    expect(target.store.listEvents(jobId).events).toHaveLength(beforeEvents);
+
+    const noAuthority = await completedContainerOperation('cleanup-state-root-missing', 'frontend-install');
+    const noAuthorityDb = openBuilderDatabase(noAuthority.path);
+    const noAuthorityOwnership = new OwnershipStore(noAuthorityDb, { now: () => NOW });
+    closers.push(() => noAuthorityDb.close());
+    const noAuthorityProof = {
+      kind: 'container-removed' as const,
+      id: 'container-cleanup-state-root-missing',
+      name: 'osi-cleanup-state-root-missing',
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': 'cleanup-state-root-missing', 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW,
+      removedAt: LATER,
+      observedAt: LATER,
+      globalLabelResult: 'no-match' as const,
+      logs: operationLogs,
+      egress: operationCleanupEgressProof('cleanup-state-root-missing', 'frontend-install'),
+    };
+    const noAuthorityEvents = noAuthority.store.listEvents('cleanup-state-root-missing').events.length;
+    expect(noAuthorityOwnership.runnerWrite({ ...runnerBase('cleanup-state-root-missing'), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof: noAuthorityProof, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(noAuthority.store.getJob('cleanup-state-root-missing').containerId).toBe('container-cleanup-state-root-missing');
+    expect(noAuthority.store.listEvents('cleanup-state-root-missing').events).toHaveLength(noAuthorityEvents);
+  });
+
+  it('rejects a mutable active container digest that differs from the admitted builder digest', async () => {
+    const jobId = 'cleanup-builder-digest-mismatch';
+    const target = await completedContainerOperation(jobId, 'activate-target');
+    target.db.exec('DROP TRIGGER job_operations_committed_update_guard');
+    target.db.prepare('UPDATE jobs SET container_image_digest=? WHERE job_id=?').run(SHA64, jobId);
+    target.db.prepare('UPDATE job_operations SET container_image_digest=? WHERE job_id=? AND operation_id=? AND attempt=?').run(SHA64, jobId, 'activate-target', 1);
+    const before = target.store.getJob(jobId);
+    const beforeLease = { owner: before.runnerLeaseOwner, expiresAt: before.runnerLeaseExpiresAt };
+    const beforeOperation = target.store.getOperation(jobId, 'activate-target', 1);
+    const beforeEvents = target.store.listEvents(jobId).events.length;
+    const proof = {
+      kind: 'container-removed' as const,
+      id: `container-${jobId}`,
+      name: `osi-${jobId}`,
+      imageDigest: SHA64,
+      labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW,
+      removedAt: LATER,
+      observedAt: LATER,
+      globalLabelResult: 'no-match' as const,
+      logs: operationLogs,
+    };
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    expect(target.store.getJob(jobId)).toEqual(before);
+    expect(target.store.getJob(jobId)).toMatchObject({ runnerLeaseOwner: beforeLease.owner, runnerLeaseExpiresAt: beforeLease.expiresAt });
+    expect(target.store.getOperation(jobId, 'activate-target', 1)).toEqual(beforeOperation);
+    expect(target.store.listEvents(jobId).events).toHaveLength(beforeEvents);
+  });
+
+  it('allows a pre-container dependency operation to use null cleanup without egress identity', async () => {
+    const jobId = 'pre-container-egress-null';
+    const target = await fixture(jobId);
+    dispatchAndStart(target.ownership, jobId);
+    target.ownership.runnerWrite(lease(ACTIVE, jobId));
+    target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-begin', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, argvHash: SHA64, argv: ['operation'], startedAt: NOW });
+    target.ownership.runnerWrite({
+      ...runnerBase(jobId), kind: 'operation-complete', expectedState: 'starting', operationId: 'frontend-install', attempt: 1,
+      input: { operationId: 'frontend-install', attempt: 1, argvHash: SHA64, argv: ['operation'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'not_created',
+        exitCode: 1, signal: null, outcome: 'failed', evidencePath: 'evidence/operation', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED', error: { reason: 'create failed' } },
+    });
+    const proof = { kind: 'null-identity' as const, container: absent(LATER), logs: operationLogs };
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toMatchObject({ ok: true, kind: 'idempotent' });
+    expect(target.store.listEvents(jobId).events.filter((event) => event.eventType === 'cleanup')).toHaveLength(1);
+  });
+
+  it('rejects supporting identity in null cleanup and rejects container proof for not_created', async () => {
+    const jobId = 'null-supporting-identity';
+    const target = await fixture(jobId);
+    dispatchAndStart(target.ownership, jobId);
+    target.ownership.runnerWrite(lease(ACTIVE, jobId));
+    target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['operation'], startedAt: NOW });
+    target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: { operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['operation'], startedAt: NOW, finishedAt: LATER, timedOut: false, lifecyclePhase: 'not_created', exitCode: 1, signal: null, outcome: 'failed', evidencePath: 'evidence/operation', evidenceSha256: SHA64, errorCode: 'BUILD_FAILED', error: { reason: 'create failed' } } });
+    // Bypass the database invariant only to exercise the ownership guard against a corrupted reopened row.
+    target.db.exec('DROP TRIGGER jobs_container_guard_update');
+    target.db.prepare('UPDATE jobs SET container_security_json=? WHERE job_id=?').run(JSON.stringify({ user: '1000:1000' }), jobId);
+    const nullProof = { kind: 'null-identity' as const, container: absent(LATER), logs: operationLogs };
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: nullProof, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+    const containerProof = { kind: 'container-removed' as const, id: `container-${jobId}`, name: `osi-${jobId}`, imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': jobId, 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match' as const, logs: operationLogs };
+    expect(target.ownership.runnerWrite({ ...runnerBase(jobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: containerProof, at: LATER })).toMatchObject({ ok: false, conflict: { kind: 'identity-mismatch' } });
+  });
+
+  it('rejects extra operation cleanup proof fields before the transaction', async () => {
+    const target = await completedContainerOperation('operation-cleanup-exact-shape', 'frontend-install');
+    const base = { kind: 'container-removed' as const, id: 'container-operation-cleanup-exact-shape', name: 'osi-operation-cleanup-exact-shape', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'operation-cleanup-exact-shape', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match' as const, logs: operationLogs, egress: operationCleanupEgressProof('operation-cleanup-exact-shape', 'frontend-install') };
+    const extraOuter = { ...base, extra: true } as unknown as typeof base;
+    const extraProxy = { ...base, egress: { ...base.egress, proxy: { ...base.egress.proxy, extra: true } } } as unknown as typeof base;
+    expect(() => target.ownership.runnerWrite({ ...runnerBase('operation-cleanup-exact-shape'), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof: extraOuter, at: LATER })).toThrow(OwnershipValidationError);
+    expect(() => target.ownership.runnerWrite({ ...runnerBase('operation-cleanup-exact-shape'), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof: extraProxy, at: LATER })).toThrow(OwnershipValidationError);
+  });
+
+  it('rolls back egress cleanup state, security, and event on injected pre-commit failure', async () => {
+    const target = await completedContainerOperation('egress-cleanup-rollback', 'frontend-install');
+    const before = target.store.getJob('egress-cleanup-rollback');
+    const events = target.store.listEvents('egress-cleanup-rollback').events.length;
+    const injected = failingOwnership(target.path);
+    const proof = { kind: 'container-removed' as const, id: 'container-egress-cleanup-rollback', name: 'osi-egress-cleanup-rollback', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'egress-cleanup-rollback', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match' as const, logs: operationLogs, egress: operationCleanupEgressProof('egress-cleanup-rollback', 'frontend-install') };
+    expect(() => injected.runnerWrite({ ...runnerBase('egress-cleanup-rollback'), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER })).toThrow(OwnershipTransactionError);
+    expect(target.store.getJob('egress-cleanup-rollback')).toMatchObject({ containerId: before.containerId, containerSecurity: before.containerSecurity });
+    expect(target.store.listEvents('egress-cleanup-rollback').events).toHaveLength(events);
+  });
+
+  it('rejects dependency egress credential path substitution and egress proof on an unrelated operation', async () => {
+    const invalidPaths = [
+      ['relative', (canonical: string) => canonical.slice(1), /canonical/],
+      ['wrong-job', (canonical: string, jobId: string) => canonical.replace(`/jobs/${jobId}/`, '/jobs/other-job/'), /bound/],
+      ['wrong-operation', (canonical: string) => canonical.replace('frontend-install-1.proxy-credential', 'build-image-1.proxy-credential'), /bound/],
+      ['wrong-attempt', (canonical: string) => canonical.replace('frontend-install-1.proxy-credential', 'frontend-install-2.proxy-credential'), /bound/],
+      ['wrong-suffix', (canonical: string) => canonical.replace('.proxy-credential', '.token'), /bound/],
+    ] as const;
+    const malformedPrefixes = [
+      ['dot-segment', (canonical: string) => canonical.replace(dependencyEgressPrefix, `${dependencyEgressPrefix}/../osi-image-builder-test`)],
+      ['duplicate-slash', (canonical: string) => canonical.replace(dependencyEgressPrefix, `${dependencyEgressPrefix}//`)],
+      ['backslash', (canonical: string) => canonical.replace(dependencyEgressPrefix, `${dependencyEgressPrefix}\\`)],
+      ['nul', (canonical: string) => canonical.replace(dependencyEgressPrefix, `${dependencyEgressPrefix}\0`)],
+    ] as const;
+    for (const [label, mutate] of malformedPrefixes) {
+      const caseJobId = `path-${label}`;
+      const canonical = dependencyEgressCredentialPath(caseJobId, 'frontend-install');
+      const target = await completedContainerOperation(caseJobId, 'frontend-install');
+      const proof = {
+        kind: 'container-removed' as const,
+        id: `container-${caseJobId}`, name: `osi-${caseJobId}`, imageDigest: SHA64_B,
+        labels: { 'org.osi.image-builder.job-id': caseJobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+        stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match' as const, logs: operationLogs,
+        egress: operationCleanupEgressProof(caseJobId, 'frontend-install', mutate(canonical)),
+      };
+      expect(() => target.ownership.runnerWrite({ ...runnerBase(caseJobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER }), label).toThrow(/canonical/);
+    }
+    for (const [label, mutate, expected] of invalidPaths) {
+      const caseJobId = `path-${label}`;
+      const canonical = dependencyEgressCredentialPath(caseJobId, 'frontend-install');
+      const hostPath = mutate(canonical, caseJobId);
+      const target = await completedContainerOperation(caseJobId, 'frontend-install');
+      const proof = {
+        kind: 'container-removed' as const,
+        id: `container-${caseJobId}`,
+        name: `osi-${caseJobId}`,
+        imageDigest: SHA64_B,
+        labels: { 'org.osi.image-builder.job-id': caseJobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+        stoppedAt: NOW,
+        removedAt: LATER,
+        observedAt: LATER,
+        globalLabelResult: 'no-match' as const,
+        logs: operationLogs,
+        egress: operationCleanupEgressProof(caseJobId, 'frontend-install', hostPath),
+      };
+      expect(() => target.ownership.runnerWrite({ ...runnerBase(caseJobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'frontend-install', attempt: 1, proof, at: LATER }), label).toThrow(expected);
+    }
+
+    const unrelatedJobId = 'egress-no-policy';
+    const unrelated = await completedContainerOperation(unrelatedJobId, 'activate-target');
+    const proof = {
+      kind: 'container-removed' as const,
+      id: `container-${unrelatedJobId}`,
+      name: `osi-${unrelatedJobId}`,
+      imageDigest: SHA64_B,
+      labels: { 'org.osi.image-builder.job-id': unrelatedJobId, 'org.osi.image-builder.manifest-sha': SHA64 },
+      stoppedAt: NOW,
+      removedAt: LATER,
+      observedAt: LATER,
+      globalLabelResult: 'no-match' as const,
+      logs: operationLogs,
+      egress: operationCleanupEgressProof(unrelatedJobId, 'activate-target'),
+    };
+    expect(() => unrelated.ownership.runnerWrite({ ...runnerBase(unrelatedJobId), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof, at: LATER })).toThrow(OwnershipValidationError);
   });
 
   it('reopens cleanly between an operation result and its container cleanup', async () => {
@@ -3057,7 +4326,7 @@ describe('actor-owned compare-and-set writes', () => {
     ownership.runnerWrite({ ...runnerBase('operation-reopen'), kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input });
     const reopenedDb = openBuilderDatabase(path); const reopened = new OwnershipStore(reopenedDb, { now: () => NOW }); closers.push(() => reopenedDb.close());
     expect(store.getJob('operation-reopen').containerId).toBe('container-operation-reopen');
-    expect(reopened.runnerWrite({ ...runnerBase('operation-reopen'), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'container-removed', id: 'container-operation-reopen', name: 'osi-operation-reopen', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'operation-reopen', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match', logs } }).ok).toBe(true);
+    expect(reopened.runnerWrite({ ...runnerBase('operation-reopen'), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'container-removed', id: 'container-operation-reopen', name: 'osi-operation-reopen', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'operation-reopen', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match', logs: operationLogs } }).ok).toBe(true);
     const postCleanupDb = openBuilderDatabase(path); const postCleanup = new OwnershipStore(postCleanupDb, { now: () => NOW }); closers.push(() => postCleanupDb.close());
     expect(postCleanup.runnerWrite({ ...runnerBase('operation-reopen'), at: LATER, kind: 'operation-begin', expectedState: 'starting', operationId: 'copy-feed-config', attempt: 1, argvHash: SHA64_B, argv: ['copy'], startedAt: LATER }).ok).toBe(true);
     expect(store.getJob('operation-reopen').containerId).toBeNull(); expect(store.getOperation('operation-reopen', 'activate-target', 1)).toMatchObject({ outcome: 'failed' });
@@ -3076,7 +4345,7 @@ describe('actor-owned compare-and-set writes', () => {
     expect(store.getJob('operation-external-absence').containerId).toBe('container-operation-external-absence');
 
     const cleanupDb = openBuilderDatabase(path); const cleanup = new OwnershipStore(cleanupDb, { now: () => NOW }); closers.push(() => cleanupDb.close());
-    expect(cleanup.runnerWrite({ ...runnerBase('operation-external-absence'), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'container-removed', id: 'container-operation-external-absence', name: 'osi-operation-external-absence', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'operation-external-absence', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match', logs } }).ok).toBe(true);
+    expect(cleanup.runnerWrite({ ...runnerBase('operation-external-absence'), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'container-removed', id: 'container-operation-external-absence', name: 'osi-operation-external-absence', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'operation-external-absence', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match', logs: operationLogs } }).ok).toBe(true);
     const afterCleanupDb = openBuilderDatabase(path); const afterCleanup = new OwnershipStore(afterCleanupDb, { now: () => NOW }); closers.push(() => afterCleanupDb.close());
     expect(afterCleanup.runnerWrite({ ...runnerBase('operation-external-absence'), at: LATER, kind: 'operation-begin', expectedState: 'starting', operationId: 'copy-feed-config', attempt: 1, argvHash: SHA64_B, argv: ['copy'], startedAt: LATER }).ok).toBe(true);
     expect(store.getJob('operation-external-absence').containerId).toBeNull();
@@ -3273,9 +4542,9 @@ describe('actor-owned compare-and-set writes', () => {
     expect(() => rollback(operationCompleteCase.path).runnerWrite(operationComplete)).toThrow(OwnershipTransactionError); expect(operationCompleteCase.store.getOperation('rollback-operation-complete', 'activate-target', 1)).toMatchObject({ outcome: null }); expect(operationCompleteCase.store.listEvents('rollback-operation-complete').events).toHaveLength(operationCompleteEvents);
 
     const operationCleanupCase = await fixture('rollback-operation-cleanup'); dispatchAndStart(operationCleanupCase.ownership, 'rollback-operation-cleanup'); operationCleanupCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-operation-cleanup')); operationCleanupCase.ownership.runnerWrite({ ...runnerBase('rollback-operation-cleanup'), kind: 'operation-begin', expectedState: 'starting', operationId: 'activate-target', attempt: 1, argvHash: SHA64, argv: ['make'], startedAt: NOW }); operationCleanupCase.ownership.runnerWrite({ ...container('rollback-operation-cleanup'), leaseExpiresAt: ACTIVE, at: NOW }); const cleanupInput = { ...operationInput, containerId: 'container-rollback-operation-cleanup', containerName: 'osi-rollback-operation-cleanup', containerImageDigest: SHA64_B, containerLabelJobId: 'rollback-operation-cleanup', containerLabelManifestSha: SHA64, containerMount: { source: '/tmp', destination: '/work' }, containerEnvironment: { CI: '1' }, containerSecurity: { user: '1000:1000' }, inspection: { running: true }, lifecyclePhase: 'started' as const }; operationCleanupCase.ownership.runnerWrite({ ...runnerBase('rollback-operation-cleanup'), kind: 'operation-complete', expectedState: 'starting', operationId: 'activate-target', attempt: 1, input: cleanupInput });
-    const operationCleanup: RunnerWriteCommand = { ...runnerBase('rollback-operation-cleanup'), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'container-removed', id: 'container-rollback-operation-cleanup', name: 'osi-rollback-operation-cleanup', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'rollback-operation-cleanup', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match', logs } }; const operationCleanupEvents = operationCleanupCase.store.listEvents('rollback-operation-cleanup').events.length;
+    const operationCleanup: RunnerWriteCommand = { ...runnerBase('rollback-operation-cleanup'), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'container-removed', id: 'container-rollback-operation-cleanup', name: 'osi-rollback-operation-cleanup', imageDigest: SHA64_B, labels: { 'org.osi.image-builder.job-id': 'rollback-operation-cleanup', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: NOW, removedAt: LATER, observedAt: LATER, globalLabelResult: 'no-match', logs: operationLogs } }; const operationCleanupEvents = operationCleanupCase.store.listEvents('rollback-operation-cleanup').events.length;
     expect(() => rollback(operationCleanupCase.path).runnerWrite(operationCleanup)).toThrow(OwnershipTransactionError); expect(operationCleanupCase.store.getJob('rollback-operation-cleanup').containerId).toBe('container-rollback-operation-cleanup'); expect(operationCleanupCase.store.listEvents('rollback-operation-cleanup').events).toHaveLength(operationCleanupEvents);
-  });
+  }, 30_000);
 
   it('rolls back cancellation request, runner lease, container, artifact, live publish, and direct interruption independently', async () => {
     const cancellation = await fixture('rollback-cancellation-request'); cancellation.ownership.apiWrite(dispatch('rollback-cancellation-request')); const cancellationEvents = cancellation.store.listEvents('rollback-cancellation-request').events.length;
@@ -3302,14 +4571,14 @@ describe('actor-owned compare-and-set writes', () => {
     const directCase = await fixture('rollback-direct-interrupt'); directCase.ownership.apiWrite(dispatch('rollback-direct-interrupt')); directCase.ownership.apiWrite(dispatchStart('rollback-direct-interrupt')); const directEvents = directCase.store.listEvents('rollback-direct-interrupt').events.length;
     expect(() => failingOwnership(directCase.path).apiWrite({ kind: 'direct-interrupt', jobId: 'rollback-direct-interrupt', expectedState: 'starting', at: RECOVERY, proof: direct('start-failure', 'rollback-direct-interrupt'), dispatchClaimOwner: 'dispatcher-rollback-direct-interrupt', expectedClaimExpiresAt: EXPIRY, expectedStartAttemptedAt: NOW, expectedUnitInactiveAt: NOW, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'rollback' } })).toThrow(OwnershipTransactionError);
     expect(directCase.store.getJob('rollback-direct-interrupt').state).toBe('starting'); expect(directCase.store.listEvents('rollback-direct-interrupt').events).toHaveLength(directEvents);
-  });
+  }, 30_000);
 
   it('composes actor writes inside a caller transaction using an isolated savepoint', async () => {
     const { path, store } = await fixture();
     const db = openBuilderDatabase(path); const ownership = new OwnershipStore(db, { now: () => NOW }); closers.push(() => db.close());
     db.exec('BEGIN IMMEDIATE');
     expect(ownership.apiWrite({ kind: 'enqueue', input: {
-      jobId: 'nested-job', requestId: 'nested-request', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('nested-job'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'nested', acceptedAt: NOW,
+      jobId: 'nested-job', requestId: 'nested-request', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('nested-job'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'nested', acceptedAt: NOW,
     } }).ok).toBe(true);
     expect(db.isTransaction).toBe(true); db.exec('COMMIT'); expect(store.getJob('nested-job').state).toBe('queued');
   });
@@ -3317,7 +4586,7 @@ describe('actor-owned compare-and-set writes', () => {
   it('rolls back each actor command family without an orphan event', async () => {
     const inject = (path: string): OwnershipStore => { const db = openBuilderDatabase(path); const ownership = new OwnershipStore(db, { now: () => NOW, failBeforeCommit: () => { throw new Error('injected rollback'); } }); closers.push(() => db.close()); return ownership; };
     const enqueue = await fixture('rollback-enqueue'); const enqueueBefore = enqueue.store.listEvents('rollback-enqueue').events.length;
-    expect(() => inject(enqueue.path).apiWrite({ kind: 'enqueue', input: { jobId: 'rollback-enqueued', requestId: 'rollback-enqueued', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('rollback-enqueued'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'rollback', acceptedAt: NOW } })).toThrow(OwnershipTransactionError); expect(enqueue.store.listEvents('rollback-enqueue').events).toHaveLength(enqueueBefore);
+    expect(() => inject(enqueue.path).apiWrite({ kind: 'enqueue', input: { jobId: 'rollback-enqueued', requestId: 'rollback-enqueued', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('rollback-enqueued'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'rollback', acceptedAt: NOW } })).toThrow(OwnershipTransactionError); expect(enqueue.store.listEvents('rollback-enqueue').events).toHaveLength(enqueueBefore);
 
     const dispatchCase = await fixture('rollback-dispatch'); expect(() => inject(dispatchCase.path).apiWrite(dispatch('rollback-dispatch'))).toThrow(OwnershipTransactionError); expect(dispatchCase.store.getJob('rollback-dispatch').state).toBe('queued');
     const stageCase = await fixture('rollback-stage'); dispatchAndStart(stageCase.ownership, 'rollback-stage'); stageCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-stage')); const stageEvents = stageCase.store.listEvents('rollback-stage').events.length; expect(() => inject(stageCase.path).runnerWrite({ ...runnerBase('rollback-stage'), kind: 'stage', expectedState: 'starting', state: 'preflight', stage: 'preflight', outcome: 'running', startedAt: NOW })).toThrow(OwnershipTransactionError); expect(stageCase.store.listEvents('rollback-stage').events).toHaveLength(stageEvents);
@@ -3327,20 +4596,20 @@ describe('actor-owned compare-and-set writes', () => {
     const admissionCase = await fixture('rollback-admission'); dispatchAndStart(admissionCase.ownership, 'rollback-admission'); admissionCase.ownership.runnerWrite(lease(ACTIVE, 'rollback-admission')); const admissionSnapshot = snapshot('absent', 'rollback-admission'); expect(() => inject(admissionCase.path).apiWrite({ ...cleanupAdmission(admissionSnapshot, 'rollback-admission'), at: RECOVERY })).toThrow(OwnershipTransactionError); { const db = openBuilderDatabase(admissionCase.path); expect((db.prepare('SELECT cleanup_fence_generation FROM jobs WHERE job_id=?').get('rollback-admission') as { cleanup_fence_generation: number | null }).cleanup_fence_generation).toBeNull(); db.close(); }
     const completionCase = await claimedCleanup('rollback-completion'); const completion: CleanupWriteCommand = { kind: 'complete', jobId: 'rollback-completion', admissionId: completionCase.admission.admissionId, owner: 'cleanup-a', unitName: completionCase.admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: completionCase.snapshot, postcondition: postcondition(completionCase.snapshot), exactContainerId: 'container-rollback-completion', containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY }; expect(() => inject(completionCase.path).cleanupWrite(completion)).toThrow(OwnershipTransactionError); expect(completionCase.store.getJob('rollback-completion').containerId).toBe('container-rollback-completion');
     completionCase.ownership.cleanupWrite(completion); expect(() => inject(completionCase.path).apiWrite({ kind: 'hand-back', jobId: 'rollback-completion', admissionId: completionCase.admission.admissionId, owner: 'cleanup-a', unitName: completionCase.admission.unitName, fenceGeneration: 1, fenceTokenHash: SHA64_B, at: RECOVERY, proof: { runner: completionCase.snapshot.runner, container: absent(RECOVERY), blocker: 'none' } })).toThrow(OwnershipTransactionError); { const db = openBuilderDatabase(completionCase.path); expect((db.prepare('SELECT cleanup_fence_generation FROM jobs WHERE job_id=?').get('rollback-completion') as { cleanup_fence_generation: number }).cleanup_fence_generation).toBe(1); db.close(); }
-  });
+  }, 30_000);
 
   it('rolls back only the nested savepoint when a caller transaction write fails', async () => {
     const { path } = await fixture();
     const db = openBuilderDatabase(path); let fail = true; const ownership = new OwnershipStore(db, { now: () => NOW, failBeforeCommit: () => { if (fail) throw new Error('nested failure'); } }); closers.push(() => db.close());
     db.exec('BEGIN IMMEDIATE');
-    expect(() => ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'nested-fail', requestId: 'nested-fail', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('nested-fail'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'nested', acceptedAt: NOW } })).toThrow(OwnershipTransactionError);
+    expect(() => ownership.apiWrite({ kind: 'enqueue', input: { jobId: 'nested-fail', requestId: 'nested-fail', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('nested-fail'), targetId: 'rpi-5', rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'nested', acceptedAt: NOW } })).toThrow(OwnershipTransactionError);
     expect(db.isTransaction).toBe(true); db.exec('COMMIT'); expect(db.prepare('SELECT 1 FROM jobs WHERE job_id=?').get('nested-fail')).toBeUndefined(); fail = false;
   });
 
   it('returns one conflict shape for duplicate admission, stale CAS, and busy locks', async () => {
     const { path, ownership } = await fixture();
     const duplicate = { kind: 'enqueue' as const, input: {
-      jobId: 'duplicate', requestId: 'duplicate-request', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('duplicate'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'duplicate', acceptedAt: NOW,
+      jobId: 'duplicate', requestId: 'duplicate-request', request: { branch: 'main' }, sourceRemote: 'git@example.com:osi-os.git', sourceRef: 'refs/remotes/origin/main', sourceBranch: 'main', branch: 'main', expectedSha: SHA40, pinnedSha: SHA40, sourcePreparation: SOURCE_PREPARATION, offlineFeedPreparation: offlineFeedPreparation('duplicate'), targetId: 'rpi-5' as const, rootId: 'release', targetManifestSha256: SHA64, builderIdentity: BUILDER_IDENTITY, sourceCommitTime: NOW, sourceAuthor: 'Phil', sourceSubject: 'duplicate', acceptedAt: NOW,
     } };
     expect(ownership.apiWrite(duplicate).ok).toBe(true); expect(ownership.apiWrite(duplicate)).toMatchObject({ ok: false, conflict: { kind: 'admission-mismatch' } });
     expect(ownership.apiWrite(dispatch('missing'))).toMatchObject({ ok: false });
@@ -3384,12 +4653,38 @@ describe('Task 7 recovery proof chronology', () => {
 
     expectPureReject({ kind: 'direct-interrupt', jobId: 'proof-chronology', expectedState: 'starting', at: RECOVERY, proof: { ...direct('start-failure', 'proof-chronology'), startAttemptedAt: LATER, unitInactiveAt: NOW }, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'start' } });
     expectPureReject({ kind: 'direct-interrupt', jobId: 'proof-chronology', expectedState: 'starting', at: RECOVERY, proof: { ...direct('start-failure', 'proof-chronology'), container: absent(BEFORE), logs: { ...logs, verifiedAt: BEFORE } }, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'physical evidence predates start' } });
-    expectPureReject({ actor: 'runner', ...runnerBase('proof-chronology'), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'null-identity', container: absent(), logs: { ...logs, verifiedAt: RECOVERY } } });
+    expectPureReject({ actor: 'runner', ...runnerBase('proof-chronology'), at: LATER, kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'null-identity', container: absent(), logs: { ...operationLogs, verifiedAt: RECOVERY } } });
     expectPureReject({ actor: 'runner', ...runnerBase('proof-chronology'), at: RECOVERY, kind: 'cancellation-cleanup', expectedState: 'cancel_requested', evidenceEventSeq: 0, proof: { kind: 'container', runnerUnit: runnerBase('proof-chronology').runnerUnit, unitInactiveAt: LATER, container: { kind: 'removed', id: 'id', name: 'name', imageDigest: SHA64, labels: { 'org.osi.image-builder.job-id': 'proof-chronology', 'org.osi.image-builder.manifest-sha': SHA64 }, stoppedAt: LATER, removedAt: NOW, observedAt: LATER, globalLabelResult: 'no-match' }, staging, logs } });
     expectPureReject({ kind: 'publish-recovery', jobId: 'proof-chronology', expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence: { ...recoveryEvidence('proof-chronology'), runner: { ...recoveryEvidence('proof-chronology').runner, inactiveAt: RECOVERY, observedAt: LATER } } });
     expectPureReject({ kind: 'cleanup-admission', jobId: 'proof-chronology', admissionId: 'cln_0123456789abcdefghjkmnpqrs', owner: 'cleanup-a', unitName: 'osi-image-builder-cleanup@cln_0123456789abcdefghjkmnpqrs.service', expiresAt: EXPIRY, credentialRelativePath: 'recovery/cleanup-credentials/cln_0123456789abcdefghjkmnpqrs.token', credentialSha256: SHA64, fenceTokenHash: SHA64_B, snapshot: { ...snapshot('absent', 'proof-chronology'), runner: { ...snapshot('absent', 'proof-chronology').runner, inactiveAt: RECOVERY, observedAt: LATER } }, at: RECOVERY });
     expect(beginAttempts).toBe(0);
     expect(store.listEvents('proof-chronology').events).toHaveLength(1);
+  });
+
+  it('rejects incomplete dependency egress cleanup evidence before BEGIN', async () => {
+    const target = await fixture('cleanup-egress-shape');
+    let beginAttempts = 0;
+    const guarded = new OwnershipStore(target.db, { now: () => NOW, beforeBegin: () => { beginAttempts += 1; } });
+    const admitted = snapshot('present', 'cleanup-egress-shape');
+    const malformed = { ...postcondition(admitted), egress: { globalLabelResult: 'no-match' } } as unknown as CleanupPostcondition;
+    expect(() => guarded.cleanupWrite({ kind: 'complete', jobId: 'cleanup-egress-shape', admissionId: 'cln_0123456789abcdefghjkmnpqrs', owner: 'cleanup-a', unitName: 'osi-image-builder-cleanup@cln_0123456789abcdefghjkmnpqrs.service', fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: admitted, postcondition: malformed, exactContainerId: 'container-cleanup-egress-shape', containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY })).toThrow(OwnershipValidationError);
+    expect(beginAttempts).toBe(0);
+  });
+
+  it.each([
+    ['root', (value: CleanupSnapshot) => ({ ...value, extra: true })],
+    ['runner', (value: CleanupSnapshot) => ({ ...value, runner: { ...value.runner, extra: true } })],
+    ['container', (value: CleanupSnapshot) => ({ ...value, container: { ...value.container, extra: true } })],
+    ['staging', (value: CleanupSnapshot) => ({ ...value, staging: { ...value.staging, extra: true } })],
+    ['logs', (value: CleanupSnapshot) => ({ ...value, logs: { ...value.logs, extra: true } })],
+  ])('rejects extra %s cleanup snapshot fields before BEGIN', async (_part, mutate) => {
+    const target = await fixture(`cleanup-snapshot-extra-${String(_part)}`);
+    let beginAttempts = 0;
+    const guarded = new OwnershipStore(target.db, { now: () => NOW, beforeBegin: () => { beginAttempts += 1; } });
+    const jobId = `cleanup-snapshot-extra-${String(_part)}`;
+    const malformed = mutate(snapshot('absent', jobId)) as unknown as CleanupSnapshot;
+    expect(() => guarded.apiWrite({ ...cleanupAdmission(malformed, jobId), at: RECOVERY })).toThrow(OwnershipValidationError);
+    expect(beginAttempts).toBe(0);
   });
 
   it('requires the exact live dispatch claim expiry and consumes that claim with a recovery blocker', async () => {
@@ -3421,7 +4716,7 @@ describe('Task 7 recovery proof chronology', () => {
       ['direct interruption container', (guarded) => guarded.apiWrite({ kind: 'direct-interrupt', jobId: 'proof-future-direct', expectedState: 'starting', at: RECOVERY, proof: { ...direct('start-failure', 'proof-future-direct'), container: absent(AFTER) }, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'future' } })],
       ['direct interruption logs', (guarded) => guarded.apiWrite({ kind: 'direct-interrupt', jobId: 'proof-future-direct-logs', expectedState: 'starting', at: RECOVERY, proof: { ...direct('start-failure', 'proof-future-direct-logs'), logs: { ...logs, verifiedAt: AFTER } }, errorCode: 'RUNNER_DISAPPEARED', error: { reason: 'future' } })],
       ['cancellation cleanup', (guarded) => guarded.runnerWrite({ ...runnerBase('proof-future-cancel'), kind: 'cancellation-cleanup', expectedState: 'cancel_requested', evidenceEventSeq: 0, proof: { kind: 'pre-container', runnerUnit: runnerBase('proof-future-cancel').runnerUnit, unitInactiveAt: LATER, container: absent(AFTER), staging, logs } })],
-      ['operation cleanup logs', (guarded) => guarded.runnerWrite({ ...runnerBase('proof-future-operation'), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'null-identity', container: absent(), logs: { ...logs, verifiedAt: AFTER } } })],
+      ['operation cleanup logs', (guarded) => guarded.runnerWrite({ ...runnerBase('proof-future-operation'), kind: 'operation-cleanup', expectedState: 'starting', operationId: 'activate-target', attempt: 1, proof: { kind: 'null-identity', container: absent(), logs: { ...operationLogs, verifiedAt: AFTER } } })],
       ['cleanup admission snapshot', (guarded) => guarded.apiWrite(cleanupAdmission({ ...snapshot('absent', 'proof-future-admission'), container: absent(AFTER) }, 'proof-future-admission'))],
       ['cleanup completion postcondition', (guarded) => guarded.cleanupWrite({ kind: 'complete', jobId: 'proof-future-complete', admissionId: 'cln_0123456789abcdefghjkmnpqrs', owner: 'cleanup-a', unitName: 'osi-image-builder-cleanup@cln_0123456789abcdefghjkmnpqrs.service', fenceGeneration: 1, fenceTokenHash: SHA64_B, snapshot: snapshot('present', 'proof-future-complete'), postcondition: { ...postcondition(snapshot('present', 'proof-future-complete')), container: { ...postcondition(snapshot('present', 'proof-future-complete')).container, observedAt: AFTER } }, exactContainerId: 'container-proof-future-complete', containerAbsent: true, evidencePath: 'recovery/cleanup.json', evidenceSha256: SHA64, at: RECOVERY })],
       ['hand-back proof', (guarded) => guarded.apiWrite({ kind: 'hand-back', jobId: 'proof-future-handback', admissionId: 'cln_0123456789abcdefghjkmnpqrs', owner: 'cleanup-a', unitName: 'osi-image-builder-cleanup@cln_0123456789abcdefghjkmnpqrs.service', fenceGeneration: 1, fenceTokenHash: SHA64_B, at: RECOVERY, proof: { runner: snapshot('absent', 'proof-future-handback').runner, container: absent(AFTER), blocker: 'none' } })],
@@ -3518,9 +4813,9 @@ function destinationAbsentProof(jobId: string, observedAt = AFTER): Extract<Publ
   return { kind: 'destination-absent', observedAt, publisher: { destination: 'absent', staging: 'absent', mutationCount: 0 }, finalDirectory: `main/${SHA40}/rpi-5`, finalPath: `main/${SHA40}/rpi-5/image` };
 }
 
-function destinationMatchesProof(jobId: string, observedAt = AFTER): Extract<PublishBlockerRecheckProof, { kind: 'destination-matches' }> {
+function destinationMatchesProof(jobId: string, observedAt = AFTER, sealStatus: 'in_progress' | 'sealed' = 'sealed'): Extract<PublishBlockerRecheckProof, { kind: 'destination-matches' }> {
   return {
-    kind: 'destination-matches', observedAt,
+    kind: 'destination-matches', sealStatus, observedAt,
     publisher: { destination: 'candidate', staging: 'absent', mutationCount: 0 },
     finalDirectory: `main/${SHA40}/rpi-5`, finalPath: `main/${SHA40}/rpi-5/image`,
     staging: { path: `staging/${jobId}`, state: 'absent' },
@@ -3599,7 +4894,7 @@ describe('publish blocker recheck ownership transaction', () => {
     expect(target.store.getJob('recheck-match')).toMatchObject({ state: 'failed', publishState: 'blocked', publishBlockerCode: 'UNVERIFIED_FINAL_PATH_BLOCKER', artifactStagingPath: beforeJob.artifactStagingPath });
     const marked = target.ownership.apiWrite(recheckCommand('recheck-match', 'mark-published', destinationMatchesProof('recheck-match')));
     expect(marked).toMatchObject({ ok: true, kind: 'committed' });
-    expect(target.store.getJob('recheck-match')).toMatchObject({ state: 'failed', publishState: 'published', terminalAt: beforeJob.terminalAt, terminalErrorCode: beforeJob.terminalErrorCode, artifactStagingPath: null, artifactFinalDirectory: `main/${SHA40}/rpi-5`, artifactFinalPath: `main/${SHA40}/rpi-5/image`, checksumPath: `main/${SHA40}/rpi-5/sha256sums`, manifestPath: `main/${SHA40}/rpi-5/build-manifest.json`, verificationPath: `main/${SHA40}/rpi-5/verification.json`, publishStartedAt: NOW, publishedAt: AFTER, publishBlockerCode: null, publishBlocker: null });
+    expect(target.store.getJob('recheck-match')).toMatchObject({ state: 'failed', publishState: 'published', releaseSealStatus: 'sealed', terminalAt: beforeJob.terminalAt, terminalErrorCode: beforeJob.terminalErrorCode, artifactStagingPath: null, artifactFinalDirectory: `main/${SHA40}/rpi-5`, artifactFinalPath: `main/${SHA40}/rpi-5/image`, checksumPath: `main/${SHA40}/rpi-5/sha256sums`, manifestPath: `main/${SHA40}/rpi-5/build-manifest.json`, verificationPath: `main/${SHA40}/rpi-5/verification.json`, publishStartedAt: NOW, publishedAt: AFTER, publishBlockerCode: null, publishBlocker: null });
     expect(target.store.getStage('recheck-match', 'publish')).toEqual(beforeStage);
     const auditRows = target.db.prepare('SELECT attempt, resolution, event_seq, final_directory, final_path, published_at FROM publish_blocker_rechecks WHERE job_id=? ORDER BY attempt').all('recheck-match') as Array<Record<string, unknown>>;
     expect(auditRows).toHaveLength(2); expect(auditRows[0]).toMatchObject({ attempt: 1, resolution: 'retained_blocker', final_directory: null, final_path: null, published_at: null }); expect(auditRows[1]).toMatchObject({ attempt: 2, resolution: 'marked_published', final_directory: `main/${SHA40}/rpi-5`, final_path: `main/${SHA40}/rpi-5/image`, published_at: AFTER });
@@ -3621,6 +4916,24 @@ describe('publish blocker recheck ownership transaction', () => {
       proof: destinationMatchesProof('recheck-match'),
     });
     expect(target.store.getPublishBlockerRecheck('recheck-match', markedEventSeq + 1)).toBeNull();
+  });
+
+  it('classifies a writable blocker-recheck candidate as legacy mutable', async () => {
+    const jobId = 'recheck-in-progress';
+    const target = await blockedPublishFixture(jobId);
+
+    const marked = target.ownership.apiWrite(recheckCommand(
+      jobId,
+      'mark-published',
+      destinationMatchesProof(jobId, AFTER, 'in_progress'),
+    ));
+
+    expect(marked).toMatchObject({ ok: true, kind: 'committed' });
+    expect(target.store.getJob(jobId)).toMatchObject({
+      state: 'failed',
+      publishState: 'published',
+      releaseSealStatus: 'legacy_mutable',
+    });
   });
 
   it('retains and reads back a valid blocker with the prior staging file still present', async () => {

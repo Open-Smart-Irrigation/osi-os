@@ -14,6 +14,7 @@ import {
 import { assertOrphanLogLivenessProof } from '../../api/src/log-stream.js';
 import {
   OwnershipStore,
+  parsePersistedCleanupSnapshot,
   type CleanupPostcondition,
   type CleanupSnapshot,
   type CleanupStagingPostcondition,
@@ -21,6 +22,7 @@ import {
 } from '../../api/src/ownership.js';
 import { BuilderStore, type JobRecord, type JsonObject } from '../../api/src/store.js';
 import { canonicalInstant, encodeJson, parseJson, stableRelativePath, type JsonValue } from '../../api/src/validation.js';
+import type { DependencyEgressCleanupPostcondition } from '../../domain/dependency-egress-identity.js';
 import {
   ACTIVE_RECOVERY_STATES,
   CLEANUP_CREDENTIAL_TOKEN_MAX_CHARS,
@@ -93,6 +95,10 @@ export interface CleanupEvidenceWriter {
   readonly write: (input: Readonly<{ jobId: string; admissionId: string; evidence: JsonObject }>) => Promise<Readonly<{ path: string; sha256: string }>>;
 }
 
+export interface CleanupDependencyEgress {
+  readonly cleanup: (job: JobRecord) => Promise<DependencyEgressCleanupPostcondition>;
+}
+
 export interface CleanupWorkerClock {
   readonly now: () => string;
 }
@@ -114,6 +120,7 @@ export interface CleanupWorkerOptions {
   readonly logSealer: CleanupLogSealer;
   readonly quarantine: CleanupQuarantine;
   readonly evidenceWriter: CleanupEvidenceWriter;
+  readonly dependencyEgress?: CleanupDependencyEgress;
   readonly clock: CleanupWorkerClock;
   readonly timeouts: CleanupWorkerTimeouts;
 }
@@ -324,14 +331,18 @@ function validateTimeouts(timeouts: CleanupWorkerTimeouts): void {
   if (!Number.isSafeInteger(timeouts.systemdMs) || timeouts.systemdMs <= 0 || timeouts.systemdMs > 120_000) throw new CleanupWorkerError('CLEANUP_ADMISSION_BLOCKED', 'cleanup systemd timeout is invalid');
 }
 
-function parseSnapshot(raw: unknown): CleanupSnapshot {
+function parseSnapshot(raw: unknown, admittedAt: string): CleanupSnapshot {
   let parsed: JsonValue;
   try {
     parsed = typeof raw === 'string' ? parseJson(raw, 'cleanup proof', true) : raw as JsonValue;
   } catch (error) {
     throw new CleanupWorkerError('CLEANUP_ADMISSION_BLOCKED', 'persisted cleanup proof is invalid', { cause: error });
   }
-  return requireRecord(parsed, 'persisted cleanup proof') as CleanupSnapshot;
+  try {
+    return parsePersistedCleanupSnapshot(requireRecord(parsed, 'persisted cleanup proof'), 'persisted cleanup proof', admittedAt);
+  } catch (error) {
+    throw new CleanupWorkerError('CLEANUP_ADMISSION_BLOCKED', 'persisted cleanup proof shape is invalid', { cause: error });
+  }
 }
 
 async function openCredential(
@@ -410,7 +421,7 @@ function parseAdmission(row: Row, admissionId: string): PersistedAdmission {
     credentialSha256: validateHash(rowString(row, 'credential_sha256'), 'cleanup credential SHA-256'),
     fenceGeneration: rowInteger(row, 'fence_generation'),
     fenceTokenHash: validateHash(rowString(row, 'fence_token_hash'), 'cleanup fence token hash'),
-    snapshot: parseSnapshot(row.proof_json),
+    snapshot: parseSnapshot(row.proof_json, canonicalInstant(rowString(row, 'admitted_at'), 'cleanup admission time')),
   };
 }
 
@@ -751,6 +762,8 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
         claimed = true;
         await claimedAction(resolved.admission, 'credential unlink', credential.unlinkAfterClaim);
         const containerProof = await proveContainer(resolved.admission, resolved.job);
+        if (options.dependencyEgress === undefined) throw new CleanupActionGuardError('dependency egress cleanup authority is unavailable');
+        const egress = await claimedAction(resolved.admission, 'dependency egress cleanup', () => options.dependencyEgress!.cleanup(resolved.job));
         const logs = await sealLogs(resolved.admission, containerProof.post);
         const staging = await quarantineStaging(resolved.admission, resolved.job);
         const postcondition: CleanupPostcondition = {
@@ -759,6 +772,7 @@ export function createCleanupWorker(options: CleanupWorkerOptions) {
           container: containerProof.post,
           staging,
           logs,
+          egress,
           blocker: 'none',
         };
         const completionAt = canonicalInstant(options.clock.now(), 'cleanup completion time');

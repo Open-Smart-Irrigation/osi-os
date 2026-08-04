@@ -17,6 +17,19 @@ const ACCEPTED_AT = '2026-07-26T10:01:01.000Z';
 const EXPIRES_AT = '2026-07-26T10:10:00.000Z';
 const JOB_ID = 'job_enqueue_01';
 const REQUEST_ID = 'req_enqueue_01';
+const BUILDER_IDENTITY = Object.freeze({
+  packageVersion: '0.1.24',
+  packageRoot: '/home/builder/.local/lib/osi-image-builder/0.1.24',
+  lockSha256: 'e'.repeat(64),
+  executionDefinitionSha256: 'f'.repeat(64),
+  targetManifestSha256: MANIFEST_SHA,
+  runnerSha256: '1'.repeat(64),
+  cleanupWorkerSha256: '2'.repeat(64),
+  dependencyEgressProxySha256: '3'.repeat(64),
+  imageReference: `registry.example.invalid/osi-image-builder@sha256:${'c'.repeat(64)}`,
+  imageId: `sha256:${'d'.repeat(64)}`,
+  imageDigest: 'c'.repeat(64),
+});
 const REQUEST = Object.freeze({
   branch: 'main',
   expectedSha: SHA,
@@ -111,7 +124,7 @@ function persistedJob(jobId = JOB_ID): JobRecord {
     jobId,
     requestId: REQUEST_ID,
     request: REQUEST,
-    sourceRemote: 'origin',
+    sourceRemote: 'ssh://git.example/osi-os',
     sourceRef: 'refs/remotes/origin/main',
     sourceBranch: 'main',
     branch: 'main',
@@ -123,6 +136,7 @@ function persistedJob(jobId = JOB_ID): JobRecord {
     targetId: 'rpi-5',
     rootId: 'images',
     targetManifestSha256: MANIFEST_SHA,
+    builderIdentity: BUILDER_IDENTITY,
     sourceCommitTime: CREATED_AT,
     sourceAuthor: 'Builder',
     sourceSubject: 'Current source',
@@ -174,6 +188,7 @@ function fixture(overrides: {
         targets: [],
       },
     },
+    builderIdentity: BUILDER_IDENTITY,
     preflight: { run, accept, discardAcceptedJob: discard },
     ownership: { apiWrite: write },
     store: { getJob },
@@ -205,7 +220,7 @@ describe('production enqueue service', () => {
         jobId: JOB_ID,
         requestId: REQUEST_ID,
         request: REQUEST,
-        sourceRemote: 'origin',
+        sourceRemote: 'ssh://git.example/osi-os',
         sourceRef: 'refs/remotes/origin/main',
         sourceBranch: 'main',
         branch: 'main',
@@ -216,6 +231,7 @@ describe('production enqueue service', () => {
         targetId: 'rpi-5',
         rootId: 'images',
         targetManifestSha256: MANIFEST_SHA,
+        builderIdentity: BUILDER_IDENTITY,
         sourceCommitTime: CREATED_AT,
         sourceAuthor: 'Builder',
         sourceSubject: 'Current source',
@@ -300,6 +316,26 @@ describe('production enqueue service', () => {
     expect(target.discard).toHaveBeenCalledWith(JOB_ID);
   });
 
+  it('rejects a malformed accepted origin URL before persistence', async () => {
+    const target = fixture({
+      accept: async (_preflightId, _request, jobId) => ({
+        ...accepted(jobId),
+        source: {
+          ...accepted(jobId).source,
+          originUrl: 'https://github.com/Open-Smart-Irrigation/osi-os.git',
+        },
+      }),
+    });
+
+    await expect(target.service.acceptAfterRefetchAndPersist(REQUEST, REQUEST_ID)).rejects.toMatchObject({
+      name: 'EnqueueError',
+      code: 'ENQUEUE_ACCEPTANCE_INVALID',
+      status: 500,
+    });
+    expect(target.write).not.toHaveBeenCalled();
+    expect(target.discard).toHaveBeenCalledWith(JOB_ID);
+  });
+
   it('fails closed when prepared-feed rollback cannot be verified', async () => {
     const target = fixture({
       write: () => ({ ok: false, conflict: { kind: 'queue-full', message: 'full' } }),
@@ -322,6 +358,7 @@ describe('production enqueue service', () => {
         sha256: MANIFEST_SHA,
         manifest: {} as never,
       },
+      builderIdentity: BUILDER_IDENTITY,
       preflight: {
         run: target.run,
         accept: target.accept,

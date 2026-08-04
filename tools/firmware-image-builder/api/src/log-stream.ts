@@ -535,7 +535,7 @@ export class DurableLogStream {
     if (this.#logsFd !== null) return this.#logsFd;
     let created = false;
     try {
-      mkdirSync(descriptorChild(this.#rootFd, 'logs'), { mode: 0o750 });
+      mkdirSync(descriptorChild(this.#rootFd, 'logs'), { mode: 0o700 });
       created = true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
@@ -750,7 +750,7 @@ export class DurableLogStream {
 function openGenerationForAppend(path: string): { readonly fd: number; readonly created: boolean } {
   const existingFlags = constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW | O_CLOEXEC;
   try {
-    const fd = openSync(path, existingFlags | constants.O_CREAT | constants.O_EXCL, 0o640);
+    const fd = openSync(path, existingFlags | constants.O_CREAT | constants.O_EXCL, 0o600);
     return { fd, created: true };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;

@@ -21,6 +21,7 @@ import {
   parseRunnerArguments,
   holdInstalledPublisher,
   readHeldPublisherVersion,
+  resolveTargetSetupConfigEnvironment,
   resolveTrustedOperationRequest,
   runRunner,
   stageVerifiedArtifact,
@@ -250,6 +251,66 @@ describe('production runner composition', () => {
     }
   });
 
+  it('accepts fractional-millisecond source mtime when staging against the verifier canonical mtime', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'osi-pipeline-fractional-mtime-'));
+    const workspace = join(directory, 'workspace');
+    const staging = join(directory, 'staging');
+    const artifactPath = join(workspace, 'factory.img.gz');
+    const bytes = Buffer.from('fractional-millisecond artifact bytes');
+    await Promise.all([
+      import('node:fs/promises').then(({ mkdir }) => mkdir(workspace)),
+      import('node:fs/promises').then(({ mkdir }) => mkdir(staging)),
+    ]);
+    await writeFile(artifactPath, bytes);
+    await execFile('/usr/bin/touch', [
+      '--date=2026-07-26T12:00:00.123866699Z',
+      '--',
+      artifactPath,
+    ]);
+    const sourceHandle = await open(artifactPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    let sourceStats;
+    let preciseSourceStats;
+    try {
+      sourceStats = await sourceHandle.stat();
+      preciseSourceStats = await sourceHandle.stat({ bigint: true });
+    } finally {
+      await sourceHandle.close();
+    }
+    const canonicalMtime = new Date(sourceStats.mtimeMs).toISOString();
+    expect(preciseSourceStats.mtimeNs % 1_000_000n).toBeGreaterThan(0n);
+    expect(sourceStats.mtime.toISOString()).not.toBe(canonicalMtime);
+    expect(sourceStats.mtime.toISOString()).toBe('2026-07-26T12:00:00.124Z');
+    expect(canonicalMtime).toBe('2026-07-26T12:00:00.123Z');
+    const stagingHandle = await open(
+      staging,
+      fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW,
+    );
+    try {
+      await expect(stageVerifiedArtifact(
+        workspace,
+        'factory.img.gz',
+        stagingHandle,
+        'factory.img.gz',
+        {
+          path: 'factory.img.gz',
+          basename: 'factory.img.gz',
+          size: bytes.byteLength,
+          mtime: canonicalMtime,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+          gzip: true,
+        },
+      )).resolves.toMatchObject({
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        size: bytes.byteLength,
+        mtime: canonicalMtime,
+      });
+      await expect(readFile(join(staging, 'factory.img.gz'))).resolves.toEqual(bytes);
+    } finally {
+      await stagingHandle.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('derives the runner contract from exactly one systemd job ID', () => {
     expect(parseRunnerArguments([JOB_ID])).toEqual({
       jobId: JOB_ID,
@@ -309,6 +370,19 @@ describe('production runner composition', () => {
       allowedEnvironments,
       activeTargetSetupEnvironment: null,
     })).toThrow(/active target profile/i);
+  });
+
+  it('keeps the activated Pi 4 environment for config when Pi 5 is first in the manifest', () => {
+    const pi5Environment = 'full_raspberrypi_bcm27xx_bcm2712';
+    const pi4Environment = 'full_raspberrypi_bcm27xx_bcm2709';
+
+    expect(resolveTargetSetupConfigEnvironment({
+      definition: createOperationDefinition('resolve-config', {
+        environment: pi4Environment,
+      }),
+      activeTargetSetupEnvironment: pi4Environment,
+      manifestEnvironments: [pi5Environment, pi4Environment],
+    })).toBe(pi4Environment);
   });
 });
 

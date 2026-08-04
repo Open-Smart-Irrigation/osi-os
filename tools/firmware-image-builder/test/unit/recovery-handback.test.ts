@@ -43,6 +43,7 @@ function postcondition(): CleanupPostcondition {
     container: { kind: 'null-identity', dockerAction: 'none', globalLabelResult: 'no-match', observedAt: NOW },
     staging: { kind: 'absent', path: null, sourcePath: `staging/${JOB_ID}`, sourceAbsent: true, verifiedAt: NOW },
     logs: { runner: 'absent', docker: 'absent', verifiedAt: NOW },
+    egress: { persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' },
     blocker: 'none',
   };
 }

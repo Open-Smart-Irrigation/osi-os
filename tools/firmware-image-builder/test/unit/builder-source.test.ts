@@ -1,12 +1,14 @@
-import { readFile, mkdtemp, writeFile, mkdir, rm, symlink, access, truncate, lstat, rename } from 'node:fs/promises';
+import { readFile, mkdtemp, writeFile, mkdir, rm, symlink, access, truncate, lstat, rename, chmod, realpath, readlink } from 'node:fs/promises';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
 import { BUILDER_LOCK_OPTIONAL_KEYS, BUILDER_LOCK_REQUIRED_KEYS, validateBuilderLock } from '../../domain/builder-lock.js';
-import { BuilderSourceError, deriveDockerfile, supportedPackageTokens } from '../../builder/derive-dockerfile.js';
+import { BUILDER_ONLY_PACKAGES, BuilderSourceError, deriveDockerfile, supportedPackageTokens } from '../../builder/derive-dockerfile.js';
 import {
   builderImageReference,
   builderRuntimeArguments,
@@ -22,6 +24,10 @@ import {
   validationEvidenceSha256,
   validateExecutionDefinition,
   validateTrustedModuleProbeSource,
+  validateTrustedDependencyProxySource,
+  validateTrustedProxyCredentialEnvironmentSource,
+  validateTrustedWgetConfigSource,
+  validateTrustedExecutionGuardSource,
   validateTrustedOperationToolSource,
   type BuilderValidationEvidence,
 } from '../../builder/validate-builder.js';
@@ -39,12 +45,15 @@ const targetNames = ['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-musl', '
 const execFileAsync = promisify(execFile);
 const operationToolPath = new URL('../../builder/operations/osi-image-builder-tool.js', import.meta.url).pathname;
 const moduleProbePath = new URL('../../builder/operations/osi-image-builder-module-probe.js', import.meta.url).pathname;
-const operationToolModule = async () => await import(operationToolPath) as unknown as { readonly createOperationHandlersForTesting: (root: string, hooks?: { readonly onStep?: (point: string, path: string) => void | Promise<void> }) => { readonly copyFeedConfig: () => Promise<{ readonly sha256: string }>; readonly mirrorGui: () => Promise<{ readonly fileCount: number }>; readonly verifyImage: () => Promise<{ readonly sha256: string; readonly targetId: string; readonly nodeResolution: readonly { readonly packageName: string; readonly specifier: string; readonly resolvedRelativePath: string; readonly exportType: 'function' | 'object' | 'incompatible' }[] }> } };
+const pi5Environment = 'full_raspberrypi_bcm27xx_bcm2712';
+const pi5FactoryImage = 'chirpstack-gateway-os-2026.07-full-bcm27xx-bcm2712-rpi-5-squashfs-factory.img.gz';
+type TestSignalSource = EventEmitter & { kill: (pid: number, signal: string) => void };
+const operationToolModule = async () => await import(operationToolPath) as unknown as { readonly createOperationHandlersForTesting: (root: string, hooks?: { readonly onStep?: (point: string, path: string) => void | Promise<void> }) => { readonly copyFeedConfig: () => Promise<{ readonly sha256: string }>; readonly mirrorGui: () => Promise<{ readonly fileCount: number }>; readonly verifyImage: () => Promise<{ readonly sha256: string; readonly targetId: string; readonly nodeResolution: readonly { readonly packageName: string; readonly specifier: string; readonly resolvedRelativePath: string; readonly exportType: 'function' | 'object' | 'incompatible' }[] }> }; readonly runUpdateFeedsForTesting: (root: string, spawn?: (file: string, args: readonly string[], options: Record<string, unknown>) => unknown, hooks?: { readonly onStep?: (point: string, path: string) => void | Promise<void> }, signalSource?: TestSignalSource) => Promise<{ readonly operation: 'update-feeds' }> };
 const evidence: BuilderValidationEvidence = {
   imageId: `sha256:${digest('f')}`, imageDigest: digest('a'), architecture: 'linux/amd64',
-  rustc: 'rustc 1.85.0', llvm: '19.1.7', polly: '19.1.7', zstd: '1.5.7', node: 'v22.14.0',
-  packages: ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev'],
-  packageVersions: { 'gcc-14': '14.2.0-19', nodejs: '22.14.0-1', npm: '10.9.2', 'openwrt-build-tools': 'complete-host-tool-set', 'llvm-dev': '1:19.0-63', 'libpolly-19-dev': '1.5.0-1', 'libzstd-dev': '1.5.7-1', 'musl:arm64': '1.2.5-3.1~deb13u1', 'musl-dev:arm64': '1.2.5-3.1~deb13u1', 'musl:armhf': '1.2.5-3.1~deb13u1', 'musl-dev:armhf': '1.2.5-3.1~deb13u1' },
+  rustc: 'rustc 1.85.0', llvm: '19.1.7', polly: '19.1.7', zstd: '1.5.7', node: 'v22.14.0', npm: '11.10.1',
+  packages: ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', 'libpolly-19-dev', 'libzstd-dev', 'sqlite3'],
+  packageVersions: { 'gcc-14': '14.2.0-19', nodejs: '22.14.0-1', npm: '10.9.2', 'openwrt-build-tools': 'complete-host-tool-set', 'llvm-dev': '1:19.0-63', 'libpolly-19-dev': '1.5.0-1', 'libzstd-dev': '1.5.7-1', sqlite3: '3.46.1-1', 'musl:arm64': '1.2.5-3.1~deb13u1', 'musl-dev:arm64': '1.2.5-3.1~deb13u1', 'musl:armhf': '1.2.5-3.1~deb13u1', 'musl-dev:armhf': '1.2.5-3.1~deb13u1' },
   commands: [
     { argv: ['/bin/sh', '-c', '/usr/bin/llvm-config --version; pkg-config --modversion libzstd'], exitCode: 0 as const, stdoutSha256: digest('1'), stderrSha256: digest('2') },
     { argv: ['/bin/sh', '-c', '/usr/bin/rustc --target x86_64-unknown-linux-gnu; ar t libstd.rlib; file -b target.o'], exitCode: 0 as const, stdoutSha256: digest('1'), stderrSha256: digest('2') },
@@ -52,6 +61,7 @@ const evidence: BuilderValidationEvidence = {
   ],
     rustTargets: targetNames.map((target, index) => ({ target, standardLibraryPath: `/opt/rust-system/toolchains/1.85.0-x86_64-unknown-linux-gnu/lib/rustlib/${target}/lib/libstd-${index}.rlib`, standardLibrarySha256: digest('3'), standardLibraryArchitecture: target === 'x86_64-unknown-linux-gnu' ? 'ELF 64-bit LSB relocatable, x86-64' : target === 'aarch64-unknown-linux-musl' ? 'ELF 64-bit LSB relocatable, ARM aarch64' : 'ELF 32-bit LSB relocatable, ARM, EABI5', compileArtifact: `/tmp/osi-rust-validation/${index}.o`, compileSha256: digest('4'), compileArchitecture: target === 'x86_64-unknown-linux-gnu' ? 'ELF 64-bit LSB relocatable, x86-64' : target === 'aarch64-unknown-linux-musl' ? 'ELF 64-bit LSB relocatable, ARM aarch64' : 'ELF 32-bit LSB relocatable, ARM, EABI5', result: 'passed' as const })),
   operationTool: { path: '/opt/osi-image-builder/operations/osi-image-builder-tool.js', owner: '0:0', mode: '0555', user: 'buildbot', result: 'passed' },
+  executionGuard: { path: '/opt/osi-image-builder/operations/osi-image-builder-exec-guard.js', owner: '0:0', mode: '0555', user: 'buildbot', result: 'passed' },
   executionSelfTest: 'passed',
 };
 
@@ -59,15 +69,44 @@ function lock() {
   return {
     schemaVersion: 1, packageVersion: '2026.07.23.1', imageRepository: 'registry.example.invalid/osi-builder', imageDigest: digest('a'),
     baseImage: `docker.io/library/debian@sha256:${digest('b')}`, baseImageDigest: digest('b'), dockerfileSha256: digest('c'),
-    packageSet: [...evidence.packages], rustConfig: { llvmConfig: '/usr/bin/llvm-config', channel: 'stable', version: '1.85.0', llvmMajor: 19 }, nodeVersion: '22.14.0',
-    executionDefinitionSha256: digest('d'), validationEvidenceSha256: digest('e'), installable: true, imageId: digest('f'),
+    packageSet: [...evidence.packages].filter((packageName) => packageName !== 'sqlite3'), rustConfig: { llvmConfig: '/usr/bin/llvm-config', channel: 'stable', version: '1.85.0', llvmMajor: 19 }, nodeVersion: '22.14.0',
+    executionDefinitionSha256: digest('d'), validationEvidenceSha256: digest('e'), dependencyEgressProxySha256: digest('1'), installable: true, imageId: digest('f'),
   };
+}
+
+async function configurePi5(root: string): Promise<void> {
+  await mkdir(join(root, 'conf', pi5Environment), { recursive: true });
+  await writeFile(
+    join(root, 'conf', pi5Environment, '.config'),
+    'CONFIG_TARGET_PROFILE="DEVICE_rpi-5"\n',
+  );
+  await symlink(`${pi5Environment}/.config`, join(root, 'conf/.config'));
+  await symlink('../conf/.config', join(root, 'openwrt/.config'));
 }
 
 describe('locked builder source', () => {
   it('accepts only the closed direct-runtime definition and rejects nested unknown or unsafe values', async () => {
     const definition = JSON.parse(await readFile(definitionPath, 'utf8')) as Record<string, unknown>;
     expect(() => validateExecutionDefinition(definition)).not.toThrow();
+    expect(definition.network).toBe('internal-authenticated-proxy');
+    expect(definition.networkPolicy).toEqual({
+      offline: 'none',
+      dependencyEgress: 'internal-authenticated-proxy',
+      proxyPort: 3128,
+      allowedPorts: [80, 443],
+      credentialPath: '/run/osi-image-builder/proxy-credential',
+      operationAllowedHosts: {
+        'frontend-install': ['registry.npmjs.org'],
+        'build-image': [
+          'busybox.net', 'cdn.kernel.org', 'codeload.github.com', 'crates.io',
+          'download.savannah.gnu.org', 'downloads.openwrt.org', 'ftp.gnu.org',
+          'git.kernel.org', 'git.openwrt.org', 'github.com', 'mirror2.openwrt.org',
+          'nodejs.org', 'objects.githubusercontent.com', 'raw.githubusercontent.com',
+          'registry.npmjs.org', 'sources.cdn.openwrt.org', 'static.crates.io',
+          'static.rust-lang.org', 'www.kernel.org',
+        ],
+      },
+    });
     expect(definition.readOnlyOperationIds).toEqual(READ_ONLY_OPERATION_IDS);
     expect(definition.offlineOperationIds).toEqual([
       'activate-target',
@@ -76,6 +115,17 @@ describe('locked builder source', () => {
       'install-feeds',
       'resolve-config',
       'verify-image',
+      'verify-profile-parity',
+      'verify-chameleon',
+      'verify-db-schema',
+      'verify-sync-flow',
+      'verify-strega',
+      'verify-communication',
+      'check-mqtt-topics',
+      'frontend-test',
+      'frontend-typecheck',
+      'frontend-build',
+      'mirror-gui',
     ]);
     const mutations: Array<(candidate: Record<string, unknown>) => void> = [
       (candidate) => { (candidate.environment as Record<string, unknown>).HOME = '/home/buildbot'; },
@@ -94,6 +144,7 @@ describe('locked builder source', () => {
       (candidate) => { candidate.offlineOperationIds = ['activate-target', 'copy-feed-config', 'update-feeds', 'install-feeds', 'resolve-config']; },
       (candidate) => { candidate.offlineOperationIds = ['activate-target', 'copy-feed-config', 'update-feeds', 'install-feeds', 'resolve-config', 'verify-image', 'build-image']; },
       (candidate) => { candidate.offlineOperationIds = ['verify-image', 'activate-target', 'copy-feed-config', 'update-feeds', 'install-feeds', 'resolve-config']; },
+      (candidate) => { ((candidate.networkPolicy as Record<string, unknown>).operationAllowedHosts as Record<string, unknown>)['frontend-install'] = ['example.com']; },
       (candidate) => { (candidate as Record<string, unknown>).operations = { 'build-image': ['make'] }; },
     ];
     for (const mutate of mutations) {
@@ -101,6 +152,14 @@ describe('locked builder source', () => {
       mutate(candidate);
       expect(() => validateExecutionDefinition(candidate), JSON.stringify(mutate)).toThrow(BuilderSourceError);
     }
+  });
+
+  it('declares package version 0.1.35 consistently before installation', async () => {
+    const packageJson = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
+    const packageLock = JSON.parse(await readFile(new URL('../../package-lock.json', import.meta.url), 'utf8')) as { version: string; packages: Record<string, { version?: string }> };
+    expect(packageJson.version).toBe('0.1.35');
+    expect(packageLock.version).toBe('0.1.35');
+    expect(packageLock.packages['']?.version).toBe('0.1.35');
   });
 
   it('binds definition operation IDs to manifest operations without executable argv', async () => {
@@ -146,6 +205,11 @@ describe('locked builder source', () => {
     const contents = await readFile(dockerfile, 'utf8');
     expect(validateBuilderDockerfile(contents).ok).toBe(true);
     expect(contents).toContain('ARG BUILDER_PLATFORM=linux/amd64\nFROM --platform=${BUILDER_PLATFORM}');
+    expect(contents).toContain('ARG NODE_VERSION=22.14.0');
+    expect(contents).toContain('ARG NODE_TARBALL_SHA256=69b09dba5c8dcb05c4e4273a4340db1005abeafe3927efda2bc5b249e80437ec');
+    expect(contents).toContain('ARG NPM_VERSION=11.10.1');
+    expect(contents).toContain('ARG NPM_TARBALL_SHA256=2190945151842685142f5085b3c5dd356b1021ab390d7d02c2bb2c580f0c4840');
+    expect(contents).toContain('npm-${NPM_VERSION}.tgz');
     expect(contents).toContain('ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin');
     expect(contents).not.toMatch(/^ENV .*\b(?:CARGO_HOME|DEBIAN_FRONTEND|CARGO_BUILD_JOBS|RUST_TARGETS)=/mu);
     expect(contents).toContain('liblibz3.so.so');
@@ -157,6 +221,8 @@ describe('locked builder source', () => {
     const destination = join(directory, 'Dockerfile');
     await expect(deriveDockerfile({ rootDockerfilePath: rootDockerfile, destinationPath: destination })).resolves.toMatchObject({ destinationPath: destination });
     const original = await readFile(destination, 'utf8');
+    expect(validateBuilderDockerfile(original).ok).toBe(true);
+    expect(validateBuilderDockerfile(`${original}\nRUN true\n`).ok).toBe(false);
     const driftedRoot = join(directory, 'Dockerfile-devel');
     await writeFile(driftedRoot, `${await readFile(rootDockerfile, 'utf8')}\nRUN apt-get install unsupported-drift-tool\n`);
     await expect(deriveDockerfile({ rootDockerfilePath: driftedRoot, destinationPath: destination })).rejects.toMatchObject({ code: 'BUILDER_SOURCE_DRIFT' });
@@ -173,6 +239,216 @@ describe('locked builder source', () => {
       expect(await readFile(destination, 'utf8')).toBe(original);
     }
     expect(supportedPackageTokens(rootContents)).toContain('libncurses-dev');
+  });
+
+  it('validates the immutable execution guard source and rejects guard drift', async () => {
+    const source = await readFile(new URL('../../builder/operations/osi-image-builder-exec-guard.js', import.meta.url), 'utf8');
+    expect(() => validateTrustedExecutionGuardSource(source)).not.toThrow();
+    expect(source).toContain("createRequire(import.meta.url)('./osi-proxy-credential-environment.cjs')");
+    expect(source).toContain('authenticatedProxyEnvironment(process.env, readProxyCredential)');
+    expect(source).toContain("const PROXY_CREDENTIAL_PATH = '/run/osi-image-builder/proxy-credential';");
+    expect(() => validateTrustedExecutionGuardSource(source.replace('shell: false', 'shell: true'))).toThrow(/guard source digest|guard/i);
+  });
+
+  it('bakes and digest-pins the tool-owned proxy runtime and credential helper', async () => {
+    const proxy = await readFile(new URL('../../builder/operations/osi-dependency-egress-proxy.cjs', import.meta.url), 'utf8');
+    const credential = await readFile(new URL('../../builder/operations/osi-proxy-credential-environment.cjs', import.meta.url), 'utf8');
+    const wgetConfig = await readFile(new URL('../../builder/operations/osi-wgetrc', import.meta.url), 'utf8');
+    expect(() => validateTrustedDependencyProxySource(proxy)).not.toThrow();
+    expect(() => validateTrustedProxyCredentialEnvironmentSource(credential)).not.toThrow();
+    expect(() => validateTrustedWgetConfigSource(wgetConfig)).not.toThrow();
+    expect(() => validateTrustedDependencyProxySource(`${proxy}\n`)).toThrow(/proxy|digest/u);
+    expect(() => validateTrustedProxyCredentialEnvironmentSource(`${credential}\n`)).toThrow(/credential|digest/u);
+    expect(() => validateTrustedWgetConfigSource(`${wgetConfig}\n`)).toThrow(/wget|digest|trust/u);
+    const contents = await readFile(dockerfile, 'utf8');
+    expect(contents).toContain('COPY --chown=root:root --chmod=0555 builder/operations/osi-dependency-egress-proxy.cjs /opt/osi-image-builder/operations/osi-dependency-egress-proxy.cjs');
+    expect(contents).toContain('COPY --chown=root:root --chmod=0555 builder/operations/osi-proxy-credential-environment.cjs /opt/osi-image-builder/operations/osi-proxy-credential-environment.cjs');
+    expect(contents).toContain('COPY --chown=root:root --chmod=0444 builder/operations/osi-wgetrc /opt/osi-image-builder/operations/osi-wgetrc');
+  });
+
+  it('allows and immutably proves the builder-only sqlite3 CLI dependency', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    expect(BUILDER_ONLY_PACKAGES).toContain('sqlite3');
+    expect(supportedPackageTokens(contents)).toContain('sqlite3');
+
+    const canonical = `registry.example.invalid/osi-builder@sha256:${digest('a')}`;
+    const inspect = JSON.stringify({ Id: `sha256:${digest('b')}`, Architecture: 'amd64', Os: 'linux', Size: 1, RepoDigests: [canonical], Config: { Env: [`PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`] } });
+    const calls: string[][] = [];
+    const result = await validateBuiltBuilderImage(canonical, { run: async (argv) => {
+      calls.push([...argv]);
+      if (argv[0] === 'image') return { stdout: inspect, stderr: '' };
+      const command = argv.join(' ');
+      const runtime = argv.slice(7);
+      if (argv.includes('/opt/osi-image-builder/operations/osi-image-builder-tool.js')) return { stdout: 'helper self-test passed\n', stderr: '' };
+      if (runtime[0] === 'node') return { stdout: 'v22.14.0\n', stderr: '' };
+      if (runtime[0] === 'npm') return { stdout: '11.10.1\n', stderr: '' };
+      if (runtime[0] === 'gcc-14') return { stdout: 'gcc (Debian 14.2.0) 14.2.0\n', stderr: '' };
+      if (runtime[0] === 'sqlite3') return { stdout: '3.46.1 2024-08-13 09:16:08\n', stderr: '' };
+      if (runtime[0] === '/usr/bin/rustc' && runtime[1] === '-vV') return { stdout: 'rustc 1.85.0\nLLVM version: 19.1.7\n', stderr: '' };
+      if (runtime[0] === '/usr/bin/llvm-config') return { stdout: '19.1.7\n', stderr: '' };
+      if (command.includes('--showformat=${Package}=${Version')) return { stdout: 'gcc-14=14.2.0\nnodejs=22.14.0\nnpm=10.9.2\nllvm-dev=19.1.7\nlibpolly-19-dev=19.1.7\nlibzstd-dev=1.5.7\nsqlite3=3.46.1-1\n', stderr: '' };
+      if (runtime[0] === 'dpkg-query' && command.includes('libpolly-19-dev')) return { stdout: '19.1.7\n', stderr: '' };
+      if (runtime[0] === 'pkg-config') return { stdout: '1.5.7\n', stderr: '' };
+      if (command.includes('cat /opt/target-sysroots/package-versions')) return { stdout: 'musl:arm64=1.2.5\nmusl-dev:arm64=1.2.5\nmusl:armhf=1.2.5\nmusl-dev:armhf=1.2.5\n', stderr: '' };
+      if (command.includes('/usr/bin/rustc --target')) return { stdout: ['x86_64-unknown-linux-gnu|/opt/rust-system/toolchains/1.85.0-x86_64-unknown-linux-gnu|/opt/rust-system/toolchains/std|'.concat(digest('1'), '|x86-64|/tmp/osi-rust-validation/x.o|', digest('2'), '|x86-64'), 'aarch64-unknown-linux-musl|/opt/rust-system/toolchains/1.85.0-x86_64-unknown-linux-gnu|/opt/rust-system/toolchains/std|'.concat(digest('1'), '|aarch64|/tmp/osi-rust-validation/a.o|', digest('2'), '|aarch64'), 'armv7-unknown-linux-musleabihf|/opt/rust-system/toolchains/1.85.0-x86_64-unknown-linux-gnu|/opt/rust-system/toolchains/std|'.concat(digest('1'), '|ARM|/tmp/osi-rust-validation/arm.o|', digest('2'), '|ARM')].join('\n') + '\n', stderr: '' };
+      if (command.includes('llvm_version=')) return { stdout: '19.1.7\nrustc 1.85.0\nLLVM version: 19.1.7\n/usr/lib/llvm-19/lib/libPolly.a /usr/lib/llvm-19/lib/libPollyISL.a\n1.5.7\n', stderr: '' };
+      return { stdout: 'ok\n', stderr: '' };
+    } });
+    expect(calls.some((argv) => argv.slice(7).join(' ') === 'sqlite3 --version')).toBe(true);
+    expect(result.evidence.packageVersions.sqlite3).toBe('3.46.1-1');
+  });
+
+  it('rejects an npm archive checksum bypass', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const bypassed = contents.replace('sha256sum --check --status \\\n  && rm -rf /usr/local/lib/node_modules/npm', 'true \\\n  && rm -rf /usr/local/lib/node_modules/npm');
+    expect(bypassed).not.toBe(contents);
+    expect(validateBuilderDockerfile(bypassed).ok).toBe(false);
+  });
+
+  it('rejects removal of the npm archive checksum command', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const checksum = `  && printf '%s  %s\\n' \\\n      "\${NPM_TARBALL_SHA256}" \\\n      /tmp/npm.tgz | sha256sum --check --status \\\n`;
+    const removed = contents.replace(checksum, '');
+    expect(removed).not.toBe(contents);
+    expect(validateBuilderDockerfile(removed).ok).toBe(false);
+  });
+
+  it('rejects substitution of the pinned npm archive URL', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const substituted = contents.replace('https://registry.npmjs.org/npm/-/npm-${NPM_VERSION}.tgz', 'https://example.invalid/npm-${NPM_VERSION}.tgz');
+    expect(substituted).not.toBe(contents);
+    expect(validateBuilderDockerfile(substituted).ok).toBe(false);
+  });
+
+  it('rejects extracting npm from a different archive', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const substituted = contents.replace('--file /tmp/npm.tgz --strip-components=1 --directory /usr/local/lib/node_modules/npm', '--file /tmp/unchecked-npm.tgz --strip-components=1 --directory /usr/local/lib/node_modules/npm');
+    expect(substituted).not.toBe(contents);
+    expect(validateBuilderDockerfile(substituted).ok).toBe(false);
+  });
+
+  it('rejects extracting npm to a different installation path', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const substituted = contents.replace('--strip-components=1 --directory /usr/local/lib/node_modules/npm', '--strip-components=1 --directory /usr/local/lib/node_modules/npm-staging');
+    expect(substituted).not.toBe(contents);
+    expect(validateBuilderDockerfile(substituted).ok).toBe(false);
+  });
+
+  it('rejects extracting npm before its archive checksum succeeds', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const checksum = `printf '%s  %s\\n' \\\n      "\${NPM_TARBALL_SHA256}" \\\n      /tmp/npm.tgz | sha256sum --check --status`;
+    const extraction = 'tar --extract --gzip --file /tmp/npm.tgz --strip-components=1 --directory /usr/local/lib/node_modules/npm';
+    const reordered = contents
+      .replace(checksum, '__OSI_NPM_CHECKSUM__')
+      .replace(extraction, checksum)
+      .replace('__OSI_NPM_CHECKSUM__', extraction);
+    expect(reordered).not.toBe(contents);
+    expect(reordered).not.toContain('__OSI_NPM_CHECKSUM__');
+    expect(validateBuilderDockerfile(reordered).ok).toBe(false);
+  });
+
+  it('accepts harmless whitespace changes in the pinned npm sequence', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const reformatted = contents
+      .replace('RUN curl --fail --silent --show-error --location --retry 3 \\\n', 'RUN    curl   --fail --silent --show-error --location --retry 3 \\\n')
+      .replace('      --output /tmp/npm.tgz \\\n', '          --output    /tmp/npm.tgz \\\n');
+    expect(reformatted).not.toBe(contents);
+    expect(validateBuilderDockerfile(reformatted).ok).toBe(true);
+  });
+
+  it('rejects a post-pin RUN heredoc', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const replaced = `${contents}\nRUN <<'EOF'\nnpm --version\nEOF\n`;
+    expect(validateBuilderDockerfile(replaced).ok).toBe(false);
+  });
+
+  it('rejects RUN after a continued physical comment line', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const replaced = `${contents}\n${[
+      '# audit comment \\',
+      'RUN npm install --global npm@11.10.1',
+      '',
+    ].join('\n')}`;
+    expect(validateBuilderDockerfile(replaced).ok).toBe(false);
+  });
+
+  it('rejects every added post-pin Docker instruction by default', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    for (const instruction of [
+      'RUN true',
+      'COPY builder/Dockerfile /tmp/Dockerfile',
+      'ADD builder/Dockerfile /tmp/Dockerfile',
+      'CMD ["true"]',
+      'ENTRYPOINT ["true"]',
+      'HEALTHCHECK CMD true',
+      'ONBUILD RUN true',
+      'SHELL ["/bin/bash", "-c"]',
+      'LABEL audit.note="unexpected"',
+    ]) {
+      expect(validateBuilderDockerfile(`${contents}\n${instruction}\n`).ok, instruction).toBe(false);
+    }
+  });
+
+  it('rejects a later global npm installation', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const replaced = `${contents}\nRUN npm install --global npm@11.10.1\n`;
+    expect(validateBuilderDockerfile(replaced).ok).toBe(false);
+  });
+
+  it('rejects npm global mode through command environment configuration', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const replaced = `${contents}\nRUN npm_config_global=true npm install npm@11.10.1\n`;
+    expect(validateBuilderDockerfile(replaced).ok).toBe(false);
+  });
+
+  it('rejects npm global location mode', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const replaced = `${contents}\nRUN npm install --location=global npm@11.10.1\n`;
+    expect(validateBuilderDockerfile(replaced).ok).toBe(false);
+  });
+
+  it('rejects corepack activation after the pinned npm install', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const replaced = `${contents}\nRUN corepack enable npm\n`;
+    expect(validateBuilderDockerfile(replaced).ok).toBe(false);
+  });
+
+  it('rejects npx invocation after the pinned npm install', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const replaced = `${contents}\nRUN npx --version\n`;
+    expect(validateBuilderDockerfile(replaced).ok).toBe(false);
+  });
+
+  it('rejects a later npm global-mode environment', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const replaced = `${contents}\nENV npm_config_global=true\n`;
+    expect(validateBuilderDockerfile(replaced).ok).toBe(false);
+  });
+
+  it('rejects a later write to the installed npm CLI', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const replaced = `${contents}\nRUN printf '%s\\n' tampered > /usr/local/lib/node_modules/npm/bin/npm-cli.js\n`;
+    expect(validateBuilderDockerfile(replaced).ok).toBe(false);
+  });
+
+  it('rejects later replacement of npm and npx entrypoints', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    for (const entrypoint of ['/usr/local/bin/npm', '/usr/local/bin/npx']) {
+      const replaced = `${contents}\nRUN ln -sfn /tmp/replacement-cli ${entrypoint}\n`;
+      expect(validateBuilderDockerfile(replaced).ok, entrypoint).toBe(false);
+    }
+  });
+
+  it('accepts harmless post-pin comments and whitespace', async () => {
+    const contents = await readFile(dockerfile, 'utf8');
+    const reformatted = contents
+      .replace(
+        '# The runner invokes only this fixed, image-owned operation entry.',
+        '# Audit-only comment.\n\n# The runner invokes only this fixed, image-owned operation entry.',
+      )
+      .replace('USER buildbot\n', 'USER   buildbot   \n\n# Trailing audit-only comment.\n');
+    expect(reformatted).not.toBe(contents);
+    expect(validateBuilderDockerfile(reformatted).ok).toBe(true);
   });
 
   it('bakes and validates the immutable operation tool with a closed runtime surface', async () => {
@@ -318,27 +594,460 @@ describe('locked builder source', () => {
     ]) {
       expect(() => validateTrustedModuleProbeSource(drift)).toThrow();
     }
-    for (const operation of ['copy-feed-config', 'verify-image', 'mirror-gui']) {
+    for (const operation of ['copy-feed-config', 'update-feeds', 'verify-image', 'mirror-gui']) {
       await expect(execFileAsync(process.execPath, [operationToolPath, operation], { cwd: new URL('../../../../', import.meta.url).pathname, maxBuffer: 32 * 1024 })).rejects.toMatchObject({ code: 2 });
     }
     await expect(execFileAsync(process.execPath, [operationToolPath, 'verify-image', '/workdir/evil.js'], { maxBuffer: 32 * 1024 })).rejects.toMatchObject({ code: 2 });
     await expect(execFileAsync(process.execPath, [operationToolPath, 'unknown-operation'], { maxBuffer: 32 * 1024 })).rejects.toMatchObject({ code: 2 });
   });
 
-  it('copies feed config by exact hash and rejects symlink escapes', async () => {
+  it('derives the OpenWrt feed link path, attests both hashes, and rejects symlink escapes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-feed-'));
     try {
-      await mkdir(join(root, 'openwrt'), { recursive: true });
-      await writeFile(join(root, 'feeds.conf.default'), 'src-git local ./feeds/chirpstack-openwrt-feed\n');
+      await mkdir(join(root, 'openwrt/feeds'), { recursive: true });
+      await mkdir(join(root, 'feeds/chirpstack-openwrt-feed'), { recursive: true });
+      const source = 'src-link chirpstack feeds/chirpstack-openwrt-feed\n';
+      const expectedDestination = 'src-link chirpstack ../../feeds/chirpstack-openwrt-feed\n';
+      await writeFile(join(root, 'feeds.conf.default'), source);
       const handlers = (await operationToolModule()).createOperationHandlersForTesting(root);
       const result = await handlers.copyFeedConfig();
-      expect(result.sha256).toBe(sha256(await readFile(join(root, 'openwrt/feeds.conf.default'))));
+      const destination = await readFile(join(root, 'openwrt/feeds.conf.default'), 'utf8');
+      expect(destination).toBe(expectedDestination);
+      expect(result).toMatchObject({
+        sourceSha256: sha256(source),
+        destinationSha256: sha256(expectedDestination),
+        sha256: sha256(source),
+      });
+      await symlink('../../feeds/chirpstack-openwrt-feed', join(root, 'openwrt/feeds/chirpstack'));
+      expect(await realpath(join(root, 'openwrt/feeds/chirpstack'))).toBe(await realpath(join(root, 'feeds/chirpstack-openwrt-feed')));
       await rm(join(root, 'feeds.conf.default'));
       await symlink('/etc/passwd', join(root, 'feeds.conf.default'));
       await expect(handlers.copyFeedConfig()).rejects.toThrow(/symbolic|symlink|escape/i);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it('masks refresh_config by removing and restoring only the exact active config link', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-update-feeds-'));
+    try {
+      await mkdir(join(root, 'openwrt/scripts'), { recursive: true });
+      await mkdir(join(root, 'conf'), { recursive: true });
+      const config = join(root, 'conf/.config');
+      const activeConfig = join(root, 'openwrt/.config');
+      await writeFile(config, 'CONFIG_ORIGINAL=y\n');
+      await symlink('../conf/.config', activeConfig);
+      const spawnCalls: Array<{ readonly file: string; readonly args: readonly string[]; readonly options: Record<string, unknown> }> = [];
+      const result = await (await operationToolModule()).runUpdateFeedsForTesting(root, (file, args, options) => {
+        spawnCalls.push({ file, args, options });
+        expect(existsSync(activeConfig)).toBe(false);
+        return { status: 0, signal: null };
+      });
+      expect(result).toEqual({ operation: 'update-feeds' });
+      expect(spawnCalls).toHaveLength(1);
+      expect(spawnCalls[0]).toMatchObject({
+        file: '/proc/self/fd/3/scripts/feeds',
+        args: ['update', '-a'],
+        options: {
+          cwd: expect.stringMatching(/^\/proc\/self\/fd\/\d+$/u),
+          detached: true,
+          env: expect.objectContaining({ TOPDIR: '/proc/self/fd/3' }),
+          shell: false,
+          stdio: ['inherit', 'inherit', 'inherit', expect.any(Number)],
+        },
+      });
+      expect(await readlink(activeConfig)).toBe('../conf/.config');
+      expect(await readFile(config, 'utf8')).toBe('CONFIG_ORIGINAL=y\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['missing active config link', async (root: string) => undefined],
+    ['wrong active config link', async (root: string) => symlink('../conf/wrong.config', join(root, 'openwrt/.config'))],
+  ])('rejects %s before spawning and does not create a replacement', async (_case, setup) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-update-feeds-invalid-'));
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await mkdir(join(root, 'conf'), { recursive: true });
+      await setup(root);
+      const spawn = () => { throw new Error('spawn must not be called'); };
+      await expect((await operationToolModule()).runUpdateFeedsForTesting(root, spawn)).rejects.toThrow(/exact.*config link|config link/i);
+      if (_case === 'missing active config link') await expect(lstat(join(root, 'openwrt/.config'))).rejects.toMatchObject({ code: 'ENOENT' });
+      else expect(await readlink(join(root, 'openwrt/.config'))).toBe('../conf/wrong.config');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['nonzero', { status: 17, signal: null }, /17/u],
+    ['signal', { status: null, signal: 'SIGTERM' }, /SIGTERM/u],
+    ['spawn error', { status: null, signal: null, error: new Error('ENOENT') }, /spawn/u],
+  ] as const)('restores the exact config link after %s update failure', async (_case, child, message) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-update-feeds-failure-'));
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await mkdir(join(root, 'conf'), { recursive: true });
+      await writeFile(join(root, 'conf/.config'), 'CONFIG_ORIGINAL=y\n');
+      await symlink('../conf/.config', join(root, 'openwrt/.config'));
+      await expect((await operationToolModule()).runUpdateFeedsForTesting(root, () => child)).rejects.toThrow(message);
+      expect(await readlink(join(root, 'openwrt/.config'))).toBe('../conf/.config');
+      expect(await readFile(join(root, 'conf/.config'), 'utf8')).toBe('CONFIG_ORIGINAL=y\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('removes a child-created config replacement and restores the exact active link', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-update-feeds-replacement-'));
+    const activeConfig = join(root, 'openwrt/.config');
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await mkdir(join(root, 'conf'), { recursive: true });
+      await writeFile(join(root, 'conf/.config'), 'CONFIG_ORIGINAL=y\n');
+      await symlink('../conf/.config', activeConfig);
+
+      await expect((await operationToolModule()).runUpdateFeedsForTesting(root, () => {
+        writeFileSync(activeConfig, 'CONFIG_UNTRUSTED=y\n');
+        return { status: 0, signal: null };
+      })).rejects.toThrow(/config link changed/u);
+
+      expect(await readlink(activeConfig)).toBe('../conf/.config');
+      expect(await readFile(join(root, 'conf/.config'), 'utf8')).toBe('CONFIG_ORIGINAL=y\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers the exact active link when both child replacement paths are occupied', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-update-feeds-collision-'));
+    const activeConfig = join(root, 'openwrt/.config');
+    const mask = join(root, 'openwrt/.osi-image-builder-active-config-mask');
+    const replacement = join(root, 'openwrt/.osi-image-builder-active-config-replacement');
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await mkdir(join(root, 'conf'), { recursive: true });
+      await writeFile(join(root, 'conf/.config'), 'CONFIG_ORIGINAL=y\n');
+      await symlink('../conf/.config', activeConfig);
+
+      await expect((await operationToolModule()).runUpdateFeedsForTesting(root, () => {
+        writeFileSync(activeConfig, 'CONFIG_UNTRUSTED=y\n');
+        mkdirSync(replacement);
+        writeFileSync(join(replacement, 'occupied'), 'untrusted\n');
+        return { status: 0, signal: null };
+      })).rejects.toThrow(/config link changed|restoration.*anomal/u);
+
+      expect(await readlink(activeConfig)).toBe('../conf/.config');
+      expect(await readFile(join(root, 'conf/.config'), 'utf8')).toBe('CONFIG_ORIGINAL=y\n');
+      expect(existsSync(mask)).toBe(false);
+      expect(existsSync(replacement)).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails before spawning when the active config changes during atomic masking', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-update-feeds-mask-race-'));
+    const activeConfig = join(root, 'openwrt/.config');
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await mkdir(join(root, 'conf'), { recursive: true });
+      await writeFile(join(root, 'conf/.config'), 'CONFIG_ORIGINAL=y\n');
+      await symlink('../conf/.config', activeConfig);
+      let spawned = false;
+
+      await expect((await operationToolModule()).runUpdateFeedsForTesting(
+        root,
+        () => { spawned = true; return { status: 0, signal: null }; },
+        { onStep: async (point) => {
+          if (point !== 'before-config-mask-rename') return;
+          await rename(activeConfig, `${activeConfig}.original`);
+          await symlink('../conf/wrong.config', activeConfig);
+        } },
+      )).rejects.toThrow(/restoration failed|changed.*mask|identity|exact active config/u);
+
+      expect(spawned).toBe(false);
+      expect(await readlink(activeConfig)).toBe('../conf/.config');
+      expect(await readFile(join(root, 'conf/.config'), 'utf8')).toBe('CONFIG_ORIGINAL=y\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('cleans an occupied mask after the atomic masking rename fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-update-feeds-mask-collision-'));
+    const activeConfig = join(root, 'openwrt/.config');
+    const mask = join(root, 'openwrt/.osi-image-builder-active-config-mask');
+    const replacement = join(root, 'openwrt/.osi-image-builder-active-config-replacement');
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await mkdir(join(root, 'conf'), { recursive: true });
+      await writeFile(join(root, 'conf/.config'), 'CONFIG_ORIGINAL=y\n');
+      await symlink('../conf/.config', activeConfig);
+      let spawned = false;
+
+      await expect((await operationToolModule()).runUpdateFeedsForTesting(
+        root,
+        () => { spawned = true; return { status: 0, signal: null }; },
+        { onStep: async (point) => {
+          if (point !== 'before-config-mask-rename') return;
+          await mkdir(mask);
+          await writeFile(join(mask, 'occupied'), 'untrusted\n');
+        } },
+      )).rejects.toThrow(/rename|directory|EISDIR/u);
+
+      expect(spawned).toBe(false);
+      expect(await readlink(activeConfig)).toBe('../conf/.config');
+      expect(await readFile(join(root, 'conf/.config'), 'utf8')).toBe('CONFIG_ORIGINAL=y\n');
+      expect(existsSync(mask)).toBe(false);
+      expect(existsSync(replacement)).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('detects a quarantined-link swap during restoration and leaves the exact active link', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-update-feeds-restore-race-'));
+    const activeConfig = join(root, 'openwrt/.config');
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await mkdir(join(root, 'conf'), { recursive: true });
+      await writeFile(join(root, 'conf/.config'), 'CONFIG_ORIGINAL=y\n');
+      await symlink('../conf/.config', activeConfig);
+
+      await expect((await operationToolModule()).runUpdateFeedsForTesting(
+        root,
+        () => ({ status: 0, signal: null }),
+        { onStep: async (point, path) => {
+          if (point !== 'before-config-restore-rename') return;
+          await rename(path, `${path}.original`);
+          await symlink('../conf/wrong.config', path);
+        } },
+      )).rejects.toThrow(/changed.*restore|identity|quarantined|restoration.*anomal/u);
+
+      expect(await readlink(activeConfig)).toBe('../conf/.config');
+      expect(await readFile(join(root, 'conf/.config'), 'utf8')).toBe('CONFIG_ORIGINAL=y\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports both operation and restoration failures while recovering the exact active link', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-update-feeds-aggregate-'));
+    const activeConfig = join(root, 'openwrt/.config');
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await mkdir(join(root, 'conf'), { recursive: true });
+      await writeFile(join(root, 'conf/.config'), 'CONFIG_ORIGINAL=y\n');
+      await symlink('../conf/.config', activeConfig);
+
+      const failure = (await operationToolModule()).runUpdateFeedsForTesting(
+        root,
+        () => ({ status: 17, signal: null }),
+        { onStep: async (point, path) => {
+          if (point !== 'before-config-restore-rename') return;
+          await rename(path, `${path}.original`);
+          await symlink('../conf/wrong.config', path);
+        } },
+      );
+      await expect(failure).rejects.toBeInstanceOf(AggregateError);
+      await expect(failure).rejects.toThrow(/feeds update failed.*restoration failed/u);
+      expect(await readlink(activeConfig)).toBe('../conf/.config');
+      expect(await readFile(join(root, 'conf/.config'), 'utf8')).toBe('CONFIG_ORIGINAL=y\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['after-config-mask-rename', 'before-config-restore-rename'])('retains signal handling through %s and restores the exact active link', async (signalPoint) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-update-feeds-signal-window-'));
+    const activeConfig = join(root, 'openwrt/.config');
+    const signalSource = new EventEmitter() as TestSignalSource;
+    signalSource.kill = () => undefined;
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await mkdir(join(root, 'conf'), { recursive: true });
+      await writeFile(join(root, 'conf/.config'), 'CONFIG_ORIGINAL=y\n');
+      await symlink('../conf/.config', activeConfig);
+      let spawned = false;
+
+      await expect((await operationToolModule()).runUpdateFeedsForTesting(
+        root,
+        () => { spawned = true; return { status: 0, signal: null }; },
+        { onStep: async (point) => {
+          if (point === signalPoint) signalSource.emit('SIGTERM');
+        } },
+        signalSource,
+      )).rejects.toThrow(/SIGTERM/u);
+
+      expect(spawned).toBe(signalPoint === 'before-config-restore-rename');
+      expect(await readlink(activeConfig)).toBe('../conf/.config');
+      expect(await readFile(join(root, 'conf/.config'), 'utf8')).toBe('CONFIG_ORIGINAL=y\n');
+      expect(signalSource.listenerCount('SIGTERM')).toBe(0);
+      expect(signalSource.listenerCount('SIGINT')).toBe(0);
+      expect(signalSource.listenerCount('SIGHUP')).toBe(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('signals the complete detached feeds process group', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-update-feeds-process-group-'));
+    const activeConfig = join(root, 'openwrt/.config');
+    const signalSource = new EventEmitter() as TestSignalSource;
+    const child = new EventEmitter() as EventEmitter & { pid: number; exitCode: number | null; signalCode: string | null };
+    child.pid = 4242;
+    child.exitCode = null;
+    child.signalCode = null;
+    const kills: Array<{ readonly pid: number; readonly signal: string }> = [];
+    signalSource.kill = (pid, signal) => {
+      kills.push({ pid, signal });
+      queueMicrotask(() => child.emit('close', 0, null));
+    };
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await mkdir(join(root, 'conf'), { recursive: true });
+      await writeFile(join(root, 'conf/.config'), 'CONFIG_ORIGINAL=y\n');
+      await symlink('../conf/.config', activeConfig);
+
+      await expect((await operationToolModule()).runUpdateFeedsForTesting(
+        root,
+        (_file, _args, options) => {
+          expect(options).toMatchObject({
+            detached: true,
+            env: expect.objectContaining({ TOPDIR: '/proc/self/fd/3' }),
+            shell: false,
+            stdio: ['inherit', 'inherit', 'inherit', expect.any(Number)],
+          });
+          queueMicrotask(() => signalSource.emit('SIGTERM'));
+          return child;
+        },
+        {},
+        signalSource,
+      )).rejects.toThrow(/SIGTERM/u);
+
+      expect(kills).toEqual([{ pid: -4242, signal: 'SIGTERM' }]);
+      expect(await readlink(activeConfig)).toBe('../conf/.config');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('executes feeds through the held OpenWrt descriptor and rejects a named-directory swap', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-update-feeds-directory-swap-'));
+    const heldOpenWrt = join(root, 'openwrt-held');
+    try {
+      await mkdir(join(root, 'openwrt/scripts'), { recursive: true });
+      await mkdir(join(root, 'conf'), { recursive: true });
+      await writeFile(join(root, 'conf/.config'), 'CONFIG_ORIGINAL=y\n');
+      await symlink('../conf/.config', join(root, 'openwrt/.config'));
+      const trustedFeeds = join(root, 'openwrt/scripts/feeds');
+      await writeFile(trustedFeeds, [
+        '#!/bin/sh',
+        '[ "$1" = update ] && [ "$2" = -a ] || exit 90',
+        '[ "$TOPDIR" = /proc/self/fd/3 ] || exit 91',
+        '[ "$(pwd -P)" = "$(cd /proc/self/fd/3 && pwd -P)" ] || exit 92',
+        "printf 'trusted\\n' > /proc/self/fd/3/trusted-feed-ran",
+        '',
+      ].join('\n'));
+      await chmod(trustedFeeds, 0o755);
+
+      await expect((await operationToolModule()).runUpdateFeedsForTesting(
+        root,
+        undefined,
+        { onStep: async (point) => {
+          if (point !== 'after-config-mask-rename') return;
+          await rename(join(root, 'openwrt'), heldOpenWrt);
+          await mkdir(join(root, 'openwrt/scripts'), { recursive: true });
+          const replacementFeeds = join(root, 'openwrt/scripts/feeds');
+          await writeFile(replacementFeeds, `#!/bin/sh\nprintf 'untrusted\\n' > ${JSON.stringify(join(root, 'untrusted-feed-ran'))}\n`);
+          await chmod(replacementFeeds, 0o755);
+        } },
+      )).rejects.toThrow(/named OpenWrt directory identity changed/u);
+
+      expect(await readFile(join(heldOpenWrt, 'trusted-feed-ran'), 'utf8')).toBe('trusted\n');
+      expect(existsSync(join(root, 'untrusted-feed-ran'))).toBe(false);
+      expect(await readlink(join(heldOpenWrt, '.config'))).toBe('../conf/.config');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('derives the ChirpStack feed link with source-parser-compatible whitespace and CRLF', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-feed-whitespace-'));
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      const source = 'src-git packages https://example.test/packages.git^0123456789012345678901234567890123456789\r\n  src-link chirpstack feeds/chirpstack-openwrt-feed  \r\n';
+      const expectedDestination = 'src-git packages https://example.test/packages.git^0123456789012345678901234567890123456789\r\n  src-link chirpstack ../../feeds/chirpstack-openwrt-feed  \r\n';
+      await writeFile(join(root, 'feeds.conf.default'), source);
+
+      const result = await (await operationToolModule()).createOperationHandlersForTesting(root).copyFeedConfig();
+
+      expect(await readFile(join(root, 'openwrt/feeds.conf.default'), 'utf8')).toBe(expectedDestination);
+      expect(result).toMatchObject({
+        sourceSha256: sha256(source),
+        destinationSha256: sha256(expectedDestination),
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves a UTF-8 BOM before a first-line canonical ChirpStack entry', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-feed-bom-'));
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      const source = '\uFEFFsrc-link chirpstack feeds/chirpstack-openwrt-feed\n';
+      const expectedDestination = '\uFEFFsrc-link chirpstack ../../feeds/chirpstack-openwrt-feed\n';
+      await writeFile(join(root, 'feeds.conf.default'), source);
+
+      await (await operationToolModule()).createOperationHandlersForTesting(root).copyFeedConfig();
+
+      expect(await readFile(join(root, 'openwrt/feeds.conf.default'), 'utf8')).toBe(expectedDestination);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['missing entry', 'src-git packages https://example.test/packages.git^0123456789012345678901234567890123456789\n'],
+    ['duplicate canonical entry', 'src-link chirpstack feeds/chirpstack-openwrt-feed\nsrc-link chirpstack feeds/chirpstack-openwrt-feed\n'],
+    ['canonical plus noncanonical entry', 'src-link chirpstack feeds/chirpstack-openwrt-feed\nsrc-link chirpstack /tmp/attacker\n'],
+    ['canonical plus malformed entry', 'src-link chirpstack feeds/chirpstack-openwrt-feed\nsrc-link chirpstack\n'],
+  ])('rejects a %s in the trusted feed derivation', async (_case, source) => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-feed-invalid-'));
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await writeFile(join(root, 'feeds.conf.default'), source);
+      await expect((await operationToolModule()).createOperationHandlersForTesting(root).copyFeedConfig())
+        .rejects.toThrow(/exactly one supported ChirpStack src-link/u);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects invalid UTF-8 instead of rewriting unrelated feed-config bytes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-feed-utf8-'));
+    try {
+      await mkdir(join(root, 'openwrt'), { recursive: true });
+      await writeFile(join(root, 'feeds.conf.default'), Buffer.concat([
+        Buffer.from('src-link chirpstack feeds/chirpstack-openwrt-feed\n# '),
+        Buffer.from([0xff]),
+        Buffer.from('\n'),
+      ]));
+      await expect((await operationToolModule()).createOperationHandlersForTesting(root).copyFeedConfig())
+        .rejects.toThrow(/UTF-8/u);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('continues staging writes from the first unwritten buffer byte', async () => {
+    const source = await readFile(operationToolPath, 'utf8');
+    expect(source).toContain('destination.write(contents, position, contents.length - position, position)');
+    expect(source).not.toContain('destination.write(contents, 0, contents.length - position, position)');
   });
 
   it('mirrors GUI through a clean staging replacement, compares exact files, and rejects symlinks', async () => {
@@ -399,6 +1108,7 @@ describe('locked builder source', () => {
         await symlink(outside, join(root, 'openwrt'));
       } else {
         await mkdir(join(root, 'openwrt'), { recursive: true });
+        await configurePi5(root);
         await symlink(outsideBin, join(root, 'openwrt/bin'));
       }
       const handlers = (await operationToolModule()).createOperationHandlersForTesting(root);
@@ -418,7 +1128,7 @@ describe('locked builder source', () => {
       'openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx',
     );
     const nodeRed = join(rootfs, 'usr/share/node-red');
-    const image = join(root, 'openwrt/bin/targets/bcm27xx/bcm2712/image.img.gz');
+    const image = join(root, 'openwrt/bin/targets/bcm27xx/bcm2712', pi5FactoryImage);
     const packaged = [
       '@grpc/grpc-js',
       '@chirpstack/chirpstack-api',
@@ -447,10 +1157,7 @@ describe('locked builder source', () => {
     try {
       await mkdir(join(root, 'openwrt/bin/targets/bcm27xx/bcm2712'), { recursive: true });
       await mkdir(join(nodeRed, 'node_modules'), { recursive: true });
-      await writeFile(
-        join(root, 'openwrt/.config'),
-        'CONFIG_TARGET_PROFILE="DEVICE_rpi-5"\n',
-      );
+      await configurePi5(root);
       await writeFile(image, '');
       await truncate(image, 64 * 1024 * 1024);
       for (const [index, packageName] of packaged.entries()) {
@@ -538,14 +1245,15 @@ describe('locked builder source', () => {
     const outside = await mkdtemp(join(tmpdir(), 'osi-operation-tool-image-race-outside-'));
     let swapped = false;
     try {
-      const image = join(root, 'openwrt/bin/targets/self/profile/race.img');
-      await mkdir(join(root, 'openwrt/bin/targets/self/profile'), { recursive: true });
+      const image = join(root, 'openwrt/bin/targets/bcm27xx/bcm2712', pi5FactoryImage);
+      await mkdir(join(root, 'openwrt/bin/targets/bcm27xx/bcm2712'), { recursive: true });
+      await configurePi5(root);
       await writeFile(image, '');
       await truncate(image, 64 * 1024 * 1024);
       const outsideImage = join(outside, 'outside.img');
       await writeFile(outsideImage, 'outside');
       const handlers = (await operationToolModule()).createOperationHandlersForTesting(root, { onStep: async (point, path) => {
-        if (!swapped && point === 'before-file-open' && path.endsWith('/race.img')) {
+        if (!swapped && point === 'before-file-open' && path.endsWith(`/${pi5FactoryImage}`)) {
           swapped = true;
           await rename(image, `${image}.original`);
           await symlink(outsideImage, image);
@@ -655,7 +1363,7 @@ describe('locked builder source', () => {
     const staging = join(root, '.osi-image-builder-feed-config-staging');
     try {
       await mkdir(join(root, 'openwrt'), { recursive: true });
-      await writeFile(join(root, 'feeds.conf.default'), 'src-git local ./feeds/chirpstack-openwrt-feed\n');
+      await writeFile(join(root, 'feeds.conf.default'), 'src-link chirpstack feeds/chirpstack-openwrt-feed\n');
       await writeFile(destination, 'stale\n');
       await writeFile(join(outside, 'outside.conf'), 'outside\n');
       let swapped = false;
@@ -684,7 +1392,7 @@ describe('locked builder source', () => {
     const destination = join(root, 'openwrt/feeds.conf.default');
     try {
       await mkdir(join(root, 'openwrt'), { recursive: true });
-      await writeFile(join(root, 'feeds.conf.default'), 'src-git local ./feeds/chirpstack-openwrt-feed\n');
+      await writeFile(join(root, 'feeds.conf.default'), 'src-link chirpstack feeds/chirpstack-openwrt-feed\n');
       await writeFile(destination, 'stale\n');
       await writeFile(join(outside, 'outside.conf'), 'outside\n');
       let swapped = false;
@@ -731,6 +1439,11 @@ describe('locked builder source', () => {
     expect(result.reason).toMatch(/No such image|manifest unknown|reference not found/u);
   });
 
+  it('rejects evidence from the incompatible Debian npm runtime', async () => {
+    const incompatibleEvidence = { ...evidence, npm: '10.9.2' } as BuilderValidationEvidence & { readonly npm: string };
+    await expect(validateBuilderSource({ dockerfile, rootDockerfile, executionDefinitionPath, evidence: incompatibleEvidence })).rejects.toMatchObject({ code: 'BUILDER_VALIDATION_EVIDENCE_INVALID' });
+  });
+
   it('requires the canonical image validator to execute the installed helper self-test', async () => {
     const canonical = `registry.example.invalid/osi-builder@sha256:${digest('a')}`;
     const inspect = JSON.stringify({ Id: `sha256:${digest('b')}`, Architecture: 'amd64', Os: 'linux', Size: 1, RepoDigests: [canonical], Config: { Env: [`PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`] } });
@@ -742,11 +1455,11 @@ describe('locked builder source', () => {
       if (argv.includes('/opt/osi-image-builder/operations/osi-image-builder-tool.js')) return { stdout: 'helper self-test passed\n', stderr: '' };
       const runtime = argv.slice(7);
       if (runtime[0] === 'node') return { stdout: 'v22.14.0\n', stderr: '' };
-      if (runtime[0] === 'npm') return { stdout: '10.9.2\n', stderr: '' };
+      if (runtime[0] === 'npm') return { stdout: '11.10.1\n', stderr: '' };
       if (runtime[0] === 'gcc-14') return { stdout: 'gcc (Debian 14.2.0) 14.2.0\n', stderr: '' };
       if (runtime[0] === '/usr/bin/rustc' && runtime[1] === '-vV') return { stdout: 'rustc 1.85.0\nLLVM version: 19.1.7\n', stderr: '' };
       if (runtime[0] === '/usr/bin/llvm-config') return { stdout: '19.1.7\n', stderr: '' };
-      if (command.includes('--showformat=${Package}=${Version')) return { stdout: 'gcc-14=14.2.0\nnodejs=22.14.0\nnpm=10.9.2\nllvm-dev=19.1.7\nlibpolly-19-dev=19.1.7\nlibzstd-dev=1.5.7\n', stderr: '' };
+      if (command.includes('--showformat=${Package}=${Version')) return { stdout: 'gcc-14=14.2.0\nnodejs=22.14.0\nnpm=10.9.2\nllvm-dev=19.1.7\nlibpolly-19-dev=19.1.7\nlibzstd-dev=1.5.7\nsqlite3=3.46.1-1\n', stderr: '' };
       if (runtime[0] === 'dpkg-query' && command.includes('libpolly-19-dev')) return { stdout: '19.1.7\n', stderr: '' };
       if (runtime[0] === 'pkg-config') return { stdout: '1.5.7\n', stderr: '' };
       if (command.includes('cat /opt/target-sysroots/package-versions')) return { stdout: 'musl:arm64=1.2.5\nmusl-dev:arm64=1.2.5\nmusl:armhf=1.2.5\nmusl-dev:armhf=1.2.5\n', stderr: '' };
@@ -763,6 +1476,19 @@ describe('locked builder source', () => {
     expect(helperCall.join(' ')).toContain('node "$tool" mirror-gui');
     expect(helperCall.join(' ')).toContain('node "$tool" verify-image');
     const helperScript = helperCall.at(-1)!;
+    const pi4Activation = 'node "$tool" activate-target full_raspberrypi_bcm27xx_bcm2709';
+    const pi5Activation = 'node "$tool" activate-target full_raspberrypi_bcm27xx_bcm2712';
+    expect(helperScript).toContain(pi4Activation);
+    expect(helperScript).toContain(pi5Activation);
+    expect(helperScript.indexOf(pi4Activation)).toBeLessThan(helperScript.indexOf(pi5Activation));
+    for (const assertion of [
+      `test "$(readlink /workdir/conf/.config)" = 'full_raspberrypi_bcm27xx_bcm2712/.config'`,
+      `test "$(readlink /workdir/conf/files)" = 'full_raspberrypi_bcm27xx_bcm2712/files'`,
+      `test "$(readlink /workdir/conf/patches)" = 'full_raspberrypi_bcm27xx_bcm2712/patches'`,
+      `test "$(readlink /workdir/openwrt/.config)" = '../conf/.config'`,
+      `test "$(readlink /workdir/openwrt/files)" = '../conf/files'`,
+      `test "$(readlink /workdir/openwrt/patches)" = '../conf/patches'`,
+    ]) expect(helperScript).toContain(assertion);
     expect(helperScript).toContain('CONFIG_TARGET_PROFILE="DEVICE_rpi-5"');
     expect(helperScript).toContain(
       'openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx',
@@ -798,7 +1524,14 @@ describe('locked builder source', () => {
     try {
       const localTool = join(localSelfTest, 'osi-image-builder-tool.js');
       const localProbe = join(localSelfTest, 'osi-image-builder-module-probe.js');
+      const localGuard = join(localSelfTest, 'osi-image-builder-exec-guard.js');
+      const localProxy = join(localSelfTest, 'osi-dependency-egress-proxy.cjs');
+      const localCredentialEnvironment = join(localSelfTest, 'osi-proxy-credential-environment.cjs');
+      const localWgetConfig = join(localSelfTest, 'osi-wgetrc');
       await writeFile(localProbe, await readFile(moduleProbePath, 'utf8'));
+      await writeFile(localProxy, await readFile(new URL('../../builder/operations/osi-dependency-egress-proxy.cjs', import.meta.url), 'utf8'));
+      await writeFile(localCredentialEnvironment, await readFile(new URL('../../builder/operations/osi-proxy-credential-environment.cjs', import.meta.url), 'utf8'));
+      await writeFile(localWgetConfig, await readFile(new URL('../../builder/operations/osi-wgetrc', import.meta.url), 'utf8'));
       const localToolSource = (await readFile(operationToolPath, 'utf8')).replace(
         "const WORKTREE = '/workdir';",
         `const WORKTREE = '${localSelfTest}';`,
@@ -810,18 +1543,53 @@ describe('locked builder source', () => {
         `  '${localProbe}';`,
       );
       await writeFile(localTool, localToolSource);
+      await writeFile(localGuard, (await readFile(new URL('../../builder/operations/osi-image-builder-exec-guard.js', import.meta.url), 'utf8')).replace(
+        "const WORKTREE = '/workdir';",
+        `const WORKTREE = '${localSelfTest}';`,
+      ).replace(
+        "const TOOL = '/opt/osi-image-builder/operations/osi-image-builder-tool.js';",
+        `const TOOL = '${localTool}';`,
+      ).replace(
+        "const WORKING_DIRECTORIES = new Set(['/workdir', '/workdir/web/react-gui']);",
+        `const WORKING_DIRECTORIES = new Set(['${localSelfTest}', '${localSelfTest}/web/react-gui']);`,
+      ));
+      await chmod(localGuard, 0o555);
+      await chmod(localProxy, 0o555);
+      await chmod(localCredentialEnvironment, 0o555);
+      await chmod(localWgetConfig, 0o444);
       const functionalStart = helperScript.indexOf('node --check "$tool"');
       expect(functionalStart).toBeGreaterThan(0);
       const functionalScript = [
         'set -eu',
         `tool='${localTool}'`,
         `probe='${localProbe}'`,
+        `cd '${localSelfTest}'`,
         helperScript
           .slice(functionalStart)
           .replaceAll('/workdir', localSelfTest)
           .replaceAll(
             '/opt/osi-image-builder/operations/osi-image-builder-module-probe.js',
             localProbe,
+          )
+          .replaceAll('/opt/osi-image-builder/operations/osi-image-builder-exec-guard.js', localGuard)
+          .replaceAll('/opt/osi-image-builder/operations/osi-dependency-egress-proxy.cjs', localProxy)
+          .replaceAll('/opt/osi-image-builder/operations/osi-proxy-credential-environment.cjs', localCredentialEnvironment)
+          .replaceAll('/opt/osi-image-builder/operations/osi-wgetrc', localWgetConfig)
+          .replaceAll(
+            `test "$(stat -c '%u:%g' "$guard")" = '0:0'`,
+            `test "$(stat -c '%u:%g' "$guard")" = "$(id -u):$(id -g)"`,
+          )
+          .replaceAll(
+            `test "$(stat -c '%u:%g' "$proxy")" = '0:0'`,
+            `test "$(stat -c '%u:%g' "$proxy")" = "$(id -u):$(id -g)"`,
+          )
+          .replaceAll(
+            `test "$(stat -c '%u:%g' "$credential_environment")" = '0:0'`,
+            `test "$(stat -c '%u:%g' "$credential_environment")" = "$(id -u):$(id -g)"`,
+          )
+          .replaceAll(
+            `test "$(stat -c '%u:%g' "$wget_config")" = '0:0'`,
+            `test "$(stat -c '%u:%g' "$wget_config")" = "$(id -u):$(id -g)"`,
           ),
       ].join('\n');
       await expect(execFileAsync('/bin/sh', ['-c', functionalScript], {

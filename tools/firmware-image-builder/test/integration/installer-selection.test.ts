@@ -8,7 +8,7 @@ import { runVersionedInstaller } from '../../installer/install.js';
 
 type Entry = Readonly<{ kind: 'file' | 'directory'; contents?: string | Uint8Array; immutable?: boolean }>;
 type Unavailable = Readonly<{ available: false; code: string; detail: string; mutation: 'none' }>;
-type ArtifactName = 'api' | 'runner' | 'cleanupWorker' | 'publisher' | 'executionDefinition' | 'ui';
+type ArtifactName = 'api' | 'runner' | 'cleanupWorker' | 'publisher' | 'executionDefinition' | 'dependencyEgressProxy' | 'ui';
 
 type InstallerFileSystem = Readonly<{
   mkdir(path: string): Promise<void>;
@@ -89,6 +89,7 @@ const HASHES = Object.freeze({
   image: 'd'.repeat(64),
   imageId: 'e'.repeat(64),
   evidence: 'f'.repeat(64),
+  dependencyEgressProxy: createHash('sha256').update('proxy-runtime\n').digest('hex'),
 });
 const CANONICAL_IMAGE = `${IMAGE_REPOSITORY}@sha256:${HASHES.image}`;
 const DOCKER_IMAGE_ID = `sha256:${HASHES.imageId}`;
@@ -108,6 +109,7 @@ const ARTIFACTS: Readonly<Record<ArtifactName, string>> = Object.freeze({
   cleanupWorker: 'cleanup-worker-entrypoint\n',
   publisher: 'native-publisher\n',
   executionDefinition: '{"name":"osi-image-build"}\n',
+  dependencyEgressProxy: 'proxy-runtime\n',
   ui: '<!doctype html><title>OSI Image Builder</title>\n',
 });
 
@@ -117,6 +119,7 @@ const ARTIFACT_PATHS: Readonly<Record<ArtifactName, string>> = Object.freeze({
   cleanupWorker: 'bin/osi-image-builder-cleanup',
   publisher: 'bin/osi-image-publish',
   executionDefinition: 'execution-definition.json',
+  dependencyEgressProxy: 'operations/osi-dependency-egress-proxy.cjs',
   ui: 'ui/index.html',
 });
 
@@ -316,11 +319,21 @@ describe('versioned installer transaction', () => {
       imageDigest: HASHES.image,
       ...BUILDER_SOURCE,
       executionDefinitionSha256: HASHES.executionDefinition,
+      dependencyEgressProxySha256: HASHES.dependencyEgressProxy,
       validationEvidenceSha256: HASHES.evidence,
       installable: true,
       publisherSha256: HASHES.publisher,
       imageId: HASHES.imageId,
     });
+  });
+
+  it('requires the proxy runtime as a first-class artifact and lock-binds the copied bytes', async () => {
+    const fixture = createFixture();
+    const { dependencyEgressProxy: _missing, ...incomplete } = fixture.input.dependencies.artifacts;
+
+    await expect(run(fixture, { artifacts: incomplete as InstallerDependencies['artifacts'] }))
+      .rejects.toThrow(/artifact dependencyEgressProxy is missing/u);
+    expect(fixture.fs.exists(`${INSTALL_ROOT}/${VERSION}`)).toBe(false);
   });
 
   it('proves every rename follows fsync and selection changes only after version commit', async () => {

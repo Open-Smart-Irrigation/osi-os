@@ -21,6 +21,7 @@ import { BuilderStore, type CreateJobInput, type JobRecord, type JsonObject } fr
 import { encodeJson } from '../../api/src/validation.js';
 import { createCleanupWorker, type CleanupDockerContainer } from '../../cleanup-worker/src/main.js';
 import { PIPELINE_STAGE_NAMES, type TargetId } from '../../domain/types.js';
+import { TEST_BUILDER_IDENTITY } from '../helpers/builder-identity.js';
 
 const ACCEPTED = '2026-07-29T10:00:00.000Z';
 const DISPATCHED = '2026-07-29T10:00:01.000Z';
@@ -90,6 +91,7 @@ function input(jobId: string, targetId: TargetId): CreateJobInput {
     targetId,
     rootId: 'release',
     targetManifestSha256: SHA64,
+    builderIdentity: TEST_BUILDER_IDENTITY,
     sourceCommitTime: ACCEPTED,
     sourceAuthor: 'scenario test',
     sourceSubject: `scenario ${jobId}`,
@@ -432,6 +434,7 @@ async function runCleanupWorker(
         };
       }),
     },
+    dependencyEgress: { cleanup: vi.fn(async () => ({ persistedDocker: null, discoveredDocker: [], credentials: [], globalLabelResult: 'no-match' as const })) },
   });
   if (crashPhase === undefined) await worker.run([admission.admissionId]);
   else await expect(worker.run([admission.admissionId])).rejects.toThrow(`simulated ${crashPhase} crash`);

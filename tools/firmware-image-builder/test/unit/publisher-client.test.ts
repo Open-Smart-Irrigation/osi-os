@@ -191,6 +191,24 @@ describe('publisher client', () => {
     ]);
   });
 
+  it('propagates the request abort signal to the native recheck command', async () => {
+    const executor = fakeExecutor(result(JSON.stringify({
+      available: true,
+      published: false,
+      quarantined: false,
+      selfTest: false,
+      destination: 'absent',
+      staging: 'absent',
+      mutationCount: 0,
+      errorCode: 'PUBLISH_RECOVERY_FAILED',
+    })));
+    const controller = new AbortController();
+
+    await client(executor).recheck(request, { signal: controller.signal });
+
+    expect(executor.options[0]?.abortSignal).toBe(controller.signal);
+  });
+
   it('keeps the runner adapter on the same production client contract', async () => {
     const executor = fakeExecutor(result(validPublishOutput()));
     const published = await createRunnerPublisherClient({

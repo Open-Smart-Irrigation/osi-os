@@ -135,6 +135,7 @@ type PipelineRunnerWriteCommand = RunnerWriteCommand extends infer Command
   : never;
 
 export interface PipelineEvidenceWriter {
+  readonly prepare: (input: StageEvidenceInput) => EvidencePublication;
   readonly write: (input: StageEvidenceInput) => Promise<EvidencePublication>;
 }
 
@@ -150,7 +151,7 @@ export interface PipelineLogWriter {
 export interface PipelineOperationExecution {
   readonly operationId: TrustedOperationId;
   readonly attempt: number;
-  readonly outcome: 'passed' | 'failed' | 'accepted';
+  readonly outcome: 'passed' | 'failed';
   readonly command: EvidenceCommand;
   readonly observations: Readonly<Record<string, unknown>>;
   readonly error?: BuilderErrorContract;
@@ -394,7 +395,8 @@ export type PipelineResult =
         | 'RUNNER_DISAPPEARED'
         | 'QUARANTINE_PENDING'
         | 'RECOVERY_LOG_GAP'
-        | 'DOCKER_CONTAINER_ORPHANED';
+        | 'DOCKER_CONTAINER_ORPHANED'
+        | 'PUBLISH_RECOVERY_FAILED';
       reason: string;
     }>
   | Readonly<{
@@ -490,7 +492,12 @@ class PipelineOwnershipLostError extends Error {
 }
 
 class PipelineRecoveryRequiredError extends Error {
-  readonly blockerCode: 'RUNNER_DISAPPEARED' | 'QUARANTINE_PENDING' | 'RECOVERY_LOG_GAP' | 'DOCKER_CONTAINER_ORPHANED';
+  readonly blockerCode:
+    | 'RUNNER_DISAPPEARED'
+    | 'QUARANTINE_PENDING'
+    | 'RECOVERY_LOG_GAP'
+    | 'DOCKER_CONTAINER_ORPHANED'
+    | 'PUBLISH_RECOVERY_FAILED';
 
   constructor(
     reason: string,
@@ -558,6 +565,30 @@ function operationIdFor(
   executions: readonly PipelineOperationExecution[] = [],
 ): TrustedOperationId | null {
   return executions.at(-1)?.operationId ?? null;
+}
+
+function operationStageObservations(
+  execution: PipelineOperationExecution,
+): JsonObject {
+  const observations = execution.observations;
+  const result: Record<string, JsonObject[string]> = {
+    operationId: execution.operationId,
+    attempt: execution.attempt,
+    outcome: execution.outcome,
+  };
+  if (typeof observations.evidencePath === 'string') {
+    result.evidencePath = observations.evidencePath;
+  }
+  if (typeof observations.evidenceSha256 === 'string') {
+    result.evidenceSha256 = observations.evidenceSha256;
+  }
+  if (typeof observations.lifecyclePhase === 'string') {
+    result.lifecyclePhase = observations.lifecyclePhase;
+  }
+  if (typeof observations.containerId === 'string' || observations.containerId === null) {
+    result.containerId = observations.containerId;
+  }
+  return Object.freeze(result);
 }
 
 function summaryError(contract: BuilderErrorContract): BuilderErrorContract {
@@ -1498,12 +1529,7 @@ export function createPipeline(input: PipelineInput): {
       operationId: operationIdFor(executions),
       commands: executions.map(({ command }) => command),
       observations: {
-        operations: executions.map((execution) => ({
-          operationId: execution.operationId,
-          attempt: execution.attempt,
-          outcome: execution.outcome,
-          ...execution.observations,
-        })),
+        operations: executions.map(operationStageObservations),
       },
     };
   };
@@ -1558,6 +1584,7 @@ export function createPipeline(input: PipelineInput): {
       nodeVersion: lock.nodeVersion,
       executionDefinitionSha256: lock.executionDefinitionSha256,
       validationEvidenceSha256: lock.validationEvidenceSha256,
+      dependencyEgressProxySha256: lock.dependencyEgressProxySha256,
     };
     const shared = canonicalObject({
       ...exactLock,
@@ -1599,7 +1626,7 @@ export function createPipeline(input: PipelineInput): {
           exitCode: execution.command.exitCode,
           startedAt: execution.command.startedAt,
           finishedAt: execution.command.finishedAt,
-          observations: execution.observations,
+          observations: operationStageObservations(execution),
         })),
       },
       artifactSha256: artifact.artifact.sha256,
@@ -2229,7 +2256,7 @@ export function createPipeline(input: PipelineInput): {
         };
         result = evidenceResult;
       }
-      const evidence = await withLeaseHeartbeat(() => input.evidenceWriter.write({
+      const evidenceInput: StageEvidenceInput = {
         jobId: job.jobId,
         stage,
         startedAt,
@@ -2245,8 +2272,11 @@ export function createPipeline(input: PipelineInput): {
         },
         observations: evidenceResult.observations,
         error: null,
-      }));
-      renewLease();
+      };
+      let evidence = stage === 'publish'
+        ? input.evidenceWriter.prepare(evidenceInput)
+        : await withLeaseHeartbeat(() => input.evidenceWriter.write(evidenceInput));
+      if (stage !== 'publish') renewLease();
       if (stage === 'publish') {
         if (publicationBinding === null || publishStartedAt === null) {
           throw new Error('publication terminal binding is incomplete');
@@ -2261,19 +2291,50 @@ export function createPipeline(input: PipelineInput): {
         ) {
           throw new Error('publication evidence path is not the fixed terminal path');
         }
-        const finalProof = validateFinalProof(await withLeaseHeartbeat(
-          () => input.services.publicationFiles.finalizeVerification({
-            binding: publicationBinding!,
-            artifact: preparedArtifact!,
-            verificationManifest: terminal.manifest,
-            verificationManifestBytes: terminal.bytes,
-            publishEvidencePath: evidence.path,
-            publishEvidenceSha256: evidence.sha256,
-          }),
-        ), publicationBinding);
-        if (finalProof.verificationSha256 !== sha256(terminal.bytes)) {
-          throw new Error('terminal verification replacement hash is invalid');
+        let finalProof: FinalPublicationProof;
+        try {
+          finalProof = validateFinalProof(await withLeaseHeartbeat(
+            () => input.services.publicationFiles.finalizeVerification({
+              binding: publicationBinding!,
+              artifact: preparedArtifact!,
+              verificationManifest: terminal.manifest,
+              verificationManifestBytes: terminal.bytes,
+              publishEvidencePath: evidence.path,
+              publishEvidenceSha256: evidence.sha256,
+            }),
+          ), publicationBinding);
+        } catch (error) {
+          if (
+            error instanceof PipelineCancelled
+            || error instanceof PipelineOwnershipLostError
+            || error instanceof PipelineRecoveryRequiredError
+          ) throw error;
+          throw new PipelineRecoveryRequiredError(
+            `publication sealing requires recovery: ${error instanceof Error ? error.message : String(error)}`,
+            'PUBLISH_RECOVERY_FAILED',
+          );
         }
+        if (finalProof.verificationSha256 !== sha256(terminal.bytes)) {
+          throw new PipelineRecoveryRequiredError(
+            'publication sealing requires recovery: terminal verification replacement hash is invalid',
+            'PUBLISH_RECOVERY_FAILED',
+          );
+        }
+        const publishedEvidence = await withLeaseHeartbeat(
+          () => input.evidenceWriter.write(evidenceInput),
+        );
+        if (
+          publishedEvidence.path !== evidence.path
+          || publishedEvidence.sha256 !== evidence.sha256
+          || publishedEvidence.bytes !== evidence.bytes
+        ) {
+          throw new PipelineRecoveryRequiredError(
+            'published terminal evidence differs from its prepared identity',
+            'PUBLISH_RECOVERY_FAILED',
+          );
+        }
+        evidence = publishedEvidence;
+        renewLease();
         verificationManifest = terminal.manifest;
         const publishedAt = now();
         const terminalAt = now();

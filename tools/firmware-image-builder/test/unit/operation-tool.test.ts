@@ -7,6 +7,7 @@ import {
   rm,
   symlink,
   truncate,
+  unlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -55,40 +56,73 @@ const shippedNodeRedPath = new URL(
   import.meta.url,
 ).pathname;
 const temporaryRoots: string[] = [];
-
-type OperationResult = Readonly<{
-  operation: 'verify-image';
-  targetId: 'rpi-5';
-  relativePath: string;
-  size: number;
-  sha256: string;
-  nodeResolution: readonly Readonly<{
-    packageName: string;
-    specifier: string;
-    resolvedRelativePath: string;
-    exportType: 'function' | 'object' | 'incompatible';
-  }>[];
+type OperationTarget = Readonly<{
+  id: 'rpi-5' | 'rpi-2';
+  environment: string;
+  imageDirectory: 'bcm27xx/bcm2712' | 'bcm27xx/bcm2709';
+  nodeRedDirectory:
+    | 'openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx/usr/share/node-red'
+    | 'openwrt/build_dir/target-arm_cortex-a7+neon-vfpv4_musl_eabi/root-bcm27xx/usr/share/node-red';
+  profile: 'DEVICE_rpi-5' | 'DEVICE_rpi-2';
+  factoryImage: string;
 }>;
 
-async function runOperation(
+type OperationHooks = Readonly<{
+  onStep?: (point: string, path: string) => void | Promise<void>;
+}>;
+
+const operationTargets = [
+  {
+    id: 'rpi-5',
+    environment: 'full_raspberrypi_bcm27xx_bcm2712',
+    imageDirectory: 'bcm27xx/bcm2712',
+    nodeRedDirectory:
+      'openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx/usr/share/node-red',
+    profile: 'DEVICE_rpi-5',
+    factoryImage:
+      'chirpstack-gateway-os-2026.07-full-bcm27xx-bcm2712-rpi-5-squashfs-factory.img.gz',
+  },
+  {
+    id: 'rpi-2',
+    environment: 'full_raspberrypi_bcm27xx_bcm2709',
+    imageDirectory: 'bcm27xx/bcm2709',
+    nodeRedDirectory:
+      'openwrt/build_dir/target-arm_cortex-a7+neon-vfpv4_musl_eabi/root-bcm27xx/usr/share/node-red',
+    profile: 'DEVICE_rpi-2',
+    factoryImage:
+      'chirpstack-gateway-os-2026.07-full-bcm27xx-bcm2709-rpi-2-squashfs-factory.img.gz',
+  },
+] as const satisfies readonly OperationTarget[];
+
+const pi5Target = operationTargets[0];
+
+async function configureTarget(root: string, target: OperationTarget): Promise<void> {
+  await mkdir(join(root, 'conf', target.environment), { recursive: true });
+  await writeFile(
+    join(root, 'conf', target.environment, '.config'),
+    `CONFIG_TARGET_PROFILE="${target.profile}"\n`,
+  );
+  await symlink(`${target.environment}/.config`, join(root, 'conf/.config'));
+  await symlink('../conf/.config', join(root, 'openwrt/.config'));
+}
+
+async function createOperationFixture(
+  target: OperationTarget = pi5Target,
   overrides: Readonly<Record<string, string>> = {},
   extraPackages: Readonly<Record<string, string>> = {},
-): Promise<OperationResult> {
+  imageNames: readonly string[] = [target.factoryImage],
+): Promise<Readonly<{ root: string; nodeRed: string }>> {
   const root = await mkdtemp(join(tmpdir(), 'osi-operation-tool-modules-'));
   temporaryRoots.push(root);
-  const nodeRed = join(
-    root,
-    'openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx/usr/share/node-red',
-  );
-  const image = join(root, 'openwrt/bin/targets/bcm27xx/bcm2712/image.img.gz');
-  await mkdir(join(root, 'openwrt/bin/targets/bcm27xx/bcm2712'), { recursive: true });
+  const nodeRed = join(root, target.nodeRedDirectory);
+  await mkdir(join(root, 'openwrt/bin/targets', target.imageDirectory), { recursive: true });
   await mkdir(join(nodeRed, 'node_modules'), { recursive: true });
-  await writeFile(
-    join(root, 'openwrt/.config'),
-    'CONFIG_TARGET_PROFILE="DEVICE_rpi-5"\n',
-  );
-  await writeFile(image, '');
-  await truncate(image, 64 * 1024 * 1024);
+  await configureTarget(root, target);
+  for (const imageName of imageNames) {
+    const image = join(root, 'openwrt/bin/targets', target.imageDirectory, imageName);
+    await writeFile(image, '');
+    await truncate(image, 64 * 1024 * 1024);
+  }
   for (const [index, packageName] of [...packages, ...direct].entries()) {
     const packageRoot = packages.includes(packageName as typeof packages[number])
       ? join(nodeRed, 'node_modules', packageName)
@@ -125,12 +159,37 @@ async function runOperation(
     overrides['@chirpstack/chirpstack-api']
       ?? 'module.exports = function compatible() {};\n',
   );
+  return { root, nodeRed };
+}
+
+type OperationResult = Readonly<{
+  operation: 'verify-image';
+  targetId: 'rpi-5' | 'rpi-2';
+  relativePath: string;
+  size: number;
+  sha256: string;
+  nodeResolution: readonly Readonly<{
+    packageName: string;
+    specifier: string;
+    resolvedRelativePath: string;
+    exportType: 'function' | 'object' | 'incompatible';
+  }>[];
+}>;
+
+async function runOperation(
+  overrides: Readonly<Record<string, string>> = {},
+  extraPackages: Readonly<Record<string, string>> = {},
+  imageNames: readonly string[] = [pi5Target.factoryImage],
+  target: OperationTarget = pi5Target,
+  hooks: OperationHooks = {},
+): Promise<OperationResult> {
+  const { root } = await createOperationFixture(target, overrides, extraPackages, imageNames);
   const module = await import(operationToolPath) as {
-    createOperationHandlersForTesting(rootPath: string): {
+    createOperationHandlersForTesting(rootPath: string, hooks?: OperationHooks): {
       verifyImage(): Promise<OperationResult>;
     };
   };
-  return module.createOperationHandlersForTesting(root).verifyImage();
+  return module.createOperationHandlersForTesting(root, hooks).verifyImage();
 }
 
 async function runProbeWithFakeChildren(
@@ -165,13 +224,10 @@ async function runShippedOperation(options: Readonly<{
     root,
     'openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx/usr/share/node-red',
   );
-  const image = join(root, 'openwrt/bin/targets/bcm27xx/bcm2712/image.img.gz');
+  const image = join(root, 'openwrt/bin/targets', pi5Target.imageDirectory, pi5Target.factoryImage);
   await mkdir(join(root, 'openwrt/bin/targets/bcm27xx/bcm2712'), { recursive: true });
   await mkdir(join(nodeRed, 'node_modules'), { recursive: true });
-  await writeFile(
-    join(root, 'openwrt/.config'),
-    'CONFIG_TARGET_PROFILE="DEVICE_rpi-5"\n',
-  );
+  await configureTarget(root, pi5Target);
   await writeFile(image, '');
   await truncate(image, 64 * 1024 * 1024);
 
@@ -288,6 +344,74 @@ afterEach(async () => {
 });
 
 describe('trusted verify-image Node compatibility record', () => {
+  it.each(operationTargets)(
+    'selects the active $id factory image when sysupgrade output also exists',
+    async (operationTarget) => {
+      const sysupgradeImage = operationTarget.factoryImage.replace(
+        '-factory.img.gz',
+        '-sysupgrade.img.gz',
+      );
+
+      const result = await runOperation(
+        {},
+        {},
+        [operationTarget.factoryImage, sysupgradeImage],
+        operationTarget,
+      );
+
+      expect(result.targetId).toBe(operationTarget.id);
+      expect(result.relativePath).toBe(
+        `openwrt/bin/targets/${operationTarget.imageDirectory}/${operationTarget.factoryImage}`,
+      );
+    },
+  );
+
+  it.each(operationTargets)(
+    'fails closed when the active $id output contains duplicate factory images',
+    async (operationTarget) => {
+      const duplicateFactoryImage = operationTarget.factoryImage.replace(
+        '2026.07-',
+        '2026.07.1-',
+      );
+
+      await expect(runOperation(
+        {},
+        {},
+        [operationTarget.factoryImage, duplicateFactoryImage],
+        operationTarget,
+      )).rejects.toThrow(/expected exactly one firmware image, found 2/u);
+    },
+  );
+
+  it.each([
+    ['openwrt/.config', 'openwrt/.config', '../conf/raced.config'],
+    ['conf/.config', 'conf/.config', 'raced-profile/.config'],
+  ] as const)(
+    'rejects a changed %s link at before-active-config-attestation',
+    async (_label, relativePath, replacementTarget) => {
+      const { root } = await createOperationFixture(pi5Target);
+
+      let swapped = false;
+      const module = await import(operationToolPath) as {
+        createOperationHandlersForTesting(rootPath: string, hooks?: OperationHooks): {
+          verifyImage(): Promise<OperationResult>;
+        };
+      };
+      await expect(module.createOperationHandlersForTesting(root, {
+        async onStep(point) {
+          if (swapped || point !== 'before-active-config-attestation') return;
+          swapped = true;
+          const link = join(root, relativePath);
+          await unlink(link);
+          await symlink(replacementTarget, link);
+        },
+      }).verifyImage()).rejects.toThrow(
+        /not the exact .* symbolic link|changed while resolving the active target/u,
+      );
+      expect(swapped).toBe(true);
+    },
+  );
+
   it('loads the exact shipped third-party versions and actual helper entrypoints', async () => {
     const { nodeRed, result } = await runShippedOperation({
       productionThirdParty: true,

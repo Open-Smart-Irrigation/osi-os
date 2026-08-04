@@ -796,7 +796,9 @@ async function verifyMaterializedTree(
   for (const child of children) {
     if (child.name === '.git') {
       const metadata = await lstat(procChild(source, child.name));
-      if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('detached worktree metadata is unsafe');
+      if ((!metadata.isFile() && !metadata.isDirectory()) || metadata.isSymbolicLink()) {
+        throw new Error('detached worktree metadata is unsafe');
+      }
       continue;
     }
     const entry = manifest.get(child.name);
@@ -825,6 +827,9 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
   const git = input.git ?? createSourceGitCommand({ now: input.now });
   const commands: SourceCommandEvidence[] = [];
   let phase: SourcePhase = 'identity';
+  let repositoryHandle: FileHandle | undefined;
+  let repositoryCwd = repositoryPath;
+  let validateRepository = async (): Promise<void> => undefined;
 
   const run = async (
     args: readonly string[],
@@ -862,8 +867,31 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
   };
 
   try {
-    await run(['cat-file', '-e', '--end-of-options', `${input.source.pinnedSha}^{commit}`], repositoryPath, 'identity');
-    const remoteUrl = outputLine(await run(['remote', 'get-url', 'origin'], repositoryPath, 'identity'), 'origin URL', requestId, commands);
+    if (process.platform !== 'linux' || typeof fsConstants.O_NOFOLLOW !== 'number' || typeof fsConstants.O_DIRECTORY !== 'number') {
+      throw new Error('host lacks Linux no-follow directory support');
+    }
+    repositoryHandle = await open(repositoryPath, DIR_FLAGS);
+    const repositoryIdentity = await repositoryHandle.stat();
+    if (!repositoryIdentity.isDirectory()) throw new Error('repository binding is not a directory');
+    repositoryCwd = join(PROC_FD, String(repositoryHandle.fd));
+    validateRepository = async (): Promise<void> => {
+      const [named, held] = await Promise.all([lstat(repositoryPath), repositoryHandle!.stat()]);
+      if (
+        !named.isDirectory()
+        || named.isSymbolicLink()
+        || !held.isDirectory()
+        || named.dev !== repositoryIdentity.dev
+        || named.ino !== repositoryIdentity.ino
+        || held.dev !== repositoryIdentity.dev
+        || held.ino !== repositoryIdentity.ino
+      ) {
+        throw new Error('repository binding changed');
+      }
+    };
+    await validateRepository();
+
+    await run(['cat-file', '-e', '--end-of-options', `${input.source.pinnedSha}^{commit}`], repositoryCwd, 'identity', validateRepository);
+    const remoteUrl = outputLine(await run(['remote', 'get-url', 'origin'], repositoryCwd, 'identity', validateRepository), 'origin URL', requestId, commands);
     if (remoteUrl !== input.source.sourceRemote) {
       throw sourceError({ code: 'SOURCE_NOT_COMMIT', diagnosis: 'The active checkout origin URL differs from the persisted source record.', recovery: 'Restore the configured origin and queue a new pinned source.', requestId, details: { expected: input.source.sourceRemote, observed: remoteUrl }, commands });
     }
@@ -873,7 +901,7 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
       '--format=format:%H%x00%ct%x00%an%x00%ae%x00%s%x00',
       '--end-of-options',
       input.source.pinnedSha,
-    ], repositoryPath, 'identity'), requestId, commands);
+    ], repositoryCwd, 'identity', validateRepository), requestId, commands);
     const observedAuthor = `${authorName} <${authorEmail}>`;
     if (fullSha !== input.source.pinnedSha || commitTime !== input.source.sourceCommitTime || observedAuthor !== input.source.sourceAuthor || subject !== input.source.sourceSubject) {
       throw sourceError({ code: 'SOURCE_NOT_COMMIT', diagnosis: 'Pinned commit identity differs from the persisted source record.', recovery: 'Re-run source selection and queue a commit whose metadata is unchanged.', requestId, details: { expectedSha: input.source.pinnedSha, observedSha: fullSha }, commands });
@@ -888,7 +916,7 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
       '.gitmodules',
       'feeds/chirpstack-openwrt-feed',
       'openwrt',
-    ], repositoryPath, 'preparation')).stdout;
+    ], repositoryCwd, 'preparation', validateRepository)).stdout;
     if (observedTree !== expectedSourceTree(preparation)) {
       throw sourceError({ code: 'SOURCE_NOT_COMMIT', diagnosis: 'The pinned source tree differs from the API preparation record.', recovery: 'Re-run API source preparation and queue a new job.', requestId, details: { phase: 'preparation' }, commands });
     }
@@ -899,7 +927,7 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
       '-z',
       '--full-tree',
       input.source.pinnedSha,
-    ], repositoryPath, 'preparation', undefined, [0], SOURCE_TREE_MAX_OUTPUT_BYTES)).stdout, preparation);
+    ], repositoryCwd, 'preparation', validateRepository, [0], SOURCE_TREE_MAX_OUTPUT_BYTES)).stdout, preparation);
     const attributes = await run([
       'grep',
       '-a',
@@ -910,7 +938,7 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
       '--',
       '.gitattributes',
       '*/.gitattributes',
-    ], repositoryPath, 'preparation', undefined, [0, 1]);
+    ], repositoryCwd, 'preparation', validateRepository, [0, 1]);
     const configuredFilters = await run([
       'config',
       '--local',
@@ -918,27 +946,7 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
       '--name-only',
       '--get-regexp',
       '^filter\\..*\\.(clean|smudge|process|required)$',
-    ], repositoryPath, 'preparation', undefined, [0, 1]);
-    const infoAttributesPath = outputLine(await run([
-      'rev-parse',
-      '--path-format=absolute',
-      '--git-path',
-      'info/attributes',
-    ], repositoryPath, 'preparation'), 'repository info attributes path', requestId, commands);
-    try {
-      await lstat(infoAttributesPath);
-      throw sourceError({
-        code: 'SOURCE_NOT_COMMIT',
-        diagnosis: 'Repository-local info attributes are not allowed for source checkout.',
-        recovery: 'Remove the repository info attributes file and prepare the source again.',
-        requestId,
-        details: { phase: 'preparation' },
-        commands,
-      });
-    } catch (error) {
-      if (error instanceof BuilderError) throw error;
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
+    ], repositoryCwd, 'preparation', validateRepository, [0, 1]);
     const conversionConfig = checkoutConfig([
       ...new Set([
         ...checkoutFilterDrivers(attributes.stdout),
@@ -946,16 +954,76 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
       ]),
     ].sort());
 
+    phase = 'workspace';
     return await withWorkspaceAuthority(input.stateRoot, jobId, requestId, async (workspace) => {
-      phase = 'workspace';
-      await run(['worktree', 'add', '--no-checkout', '--detach', workspace.destination, input.source.pinnedSha], repositoryPath, 'workspace', workspace.validate);
+      const validateSourceAndWorkspace = async (): Promise<void> => {
+        await validateRepository();
+        await workspace.validate();
+        await validateRepository();
+      };
+      await run([
+        'init',
+        '--quiet',
+        '--template=',
+        '--',
+        workspace.destination,
+      ], repositoryCwd, 'workspace', validateSourceAndWorkspace);
       const sourceHandle = await workspace.bindSource();
       const sourceCwd = join(PROC_FD, String(sourceHandle.fd));
-      await run([...conversionConfig, 'read-tree', '--reset', input.source.pinnedSha], sourceCwd, 'workspace', workspace.validate);
-      await run([...conversionConfig, 'checkout-index', '--all', '--force', '--ignore-skip-worktree-bits'], sourceCwd, 'workspace', workspace.validate);
+      await run([
+        '-c',
+        'protocol.file.allow=always',
+        '-c',
+        'uploadpack.allowAnySHA1InWant=true',
+        'fetch',
+        '--no-tags',
+        '--no-recurse-submodules',
+        '--no-write-fetch-head',
+        '--no-auto-maintenance',
+        '--',
+        repositoryCwd,
+        input.source.pinnedSha,
+      ], sourceCwd, 'workspace', validateSourceAndWorkspace);
+      const isolatedInfoAttributesPath = outputLine(await run([
+        'rev-parse',
+        '--path-format=absolute',
+        '--git-path',
+        'info/attributes',
+      ], sourceCwd, 'workspace', validateSourceAndWorkspace), 'isolated info attributes path', requestId, commands);
+      try {
+        await lstat(isolatedInfoAttributesPath);
+        throw new Error('isolated source clone inherited repository info attributes');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      const isolatedAlternatesPath = outputLine(await run([
+        'rev-parse',
+        '--path-format=absolute',
+        '--git-path',
+        'objects/info/alternates',
+      ], sourceCwd, 'workspace', validateSourceAndWorkspace), 'isolated object alternates path', requestId, commands);
+      try {
+        await lstat(isolatedAlternatesPath);
+        throw new Error('isolated source clone inherited object alternates');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      await run(['remote', 'add', 'origin', input.source.sourceRemote], sourceCwd, 'workspace', validateSourceAndWorkspace);
+      const isolatedRemoteUrl = outputLine(
+        await run(['remote', 'get-url', 'origin'], sourceCwd, 'workspace', validateSourceAndWorkspace),
+        'isolated origin URL',
+        requestId,
+        commands,
+      );
+      if (isolatedRemoteUrl !== input.source.sourceRemote) {
+        throw new Error('isolated source clone origin differs from the persisted source');
+      }
+      await run(['update-ref', '--no-deref', 'HEAD', input.source.pinnedSha], sourceCwd, 'workspace', validateSourceAndWorkspace);
+      await run([...conversionConfig, 'read-tree', '--reset', input.source.pinnedSha], sourceCwd, 'workspace', validateSourceAndWorkspace);
+      await run([...conversionConfig, 'checkout-index', '--all', '--force', '--ignore-skip-worktree-bits'], sourceCwd, 'workspace', validateSourceAndWorkspace);
       const components: SourceComponentObservation[] = [];
       for (const component of preparation.components) {
-        const observed = outputLine(await run(['rev-parse', '--verify', `HEAD:${component.path}`], sourceCwd, 'preparation', workspace.validate), `${component.path} tree`, requestId, commands);
+        const observed = outputLine(await run(['rev-parse', '--verify', `HEAD:${component.path}`], sourceCwd, 'preparation', validateSourceAndWorkspace), `${component.path} tree`, requestId, commands);
         if (observed !== component.objectId) {
           throw sourceError({ code: 'WORKTREE_CREATE_FAILED', diagnosis: 'A prepared source component differs from its API-attested tree.', recovery: 'Remove the incomplete worktree and prepare the source again.', requestId, details: { path: component.path, expected: component.objectId, observed }, commands });
         }
@@ -964,16 +1032,16 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
       phase = 'target';
       await workspace.inspectTargetAbsent(target.segments, target.path);
       phase = 'verification';
-      const worktreeHead = outputLine(await run(['rev-parse', '--verify', 'HEAD'], sourceCwd, 'verification', workspace.validate), 'worktree HEAD', requestId, commands);
+      const worktreeHead = outputLine(await run(['rev-parse', '--verify', 'HEAD'], sourceCwd, 'verification', validateSourceAndWorkspace), 'worktree HEAD', requestId, commands);
       if (worktreeHead !== input.source.pinnedSha) {
         throw sourceError({ code: 'WORKTREE_CREATE_FAILED', diagnosis: 'The detached worktree HEAD differs from the pinned SHA.', recovery: 'Remove the incomplete job-owned worktree and retry.', requestId, commands });
       }
-      const statusResult = await run([...conversionConfig, 'status', '--porcelain=v1', '--untracked-files=all', '--ignore-submodules=none'], sourceCwd, 'verification', workspace.validate);
+      const statusResult = await run([...conversionConfig, 'status', '--porcelain=v1', '--untracked-files=all', '--ignore-submodules=none'], sourceCwd, 'verification', validateSourceAndWorkspace);
       if (statusResult.stdout !== '') {
         throw sourceError({ code: 'WORKTREE_CREATE_FAILED', diagnosis: 'The detached recursive source worktree is dirty.', recovery: 'Use a clean API-prepared source commit and retry.', requestId, details: { status: statusResult.stdout }, commands });
       }
-      await verifyMaterializedTree(sourceHandle, pinnedTree, workspace.validate);
-      await workspace.validate();
+      await verifyMaterializedTree(sourceHandle, pinnedTree, validateSourceAndWorkspace);
+      await validateSourceAndWorkspace();
       return Object.freeze({
         workspacePath: workspace.path,
         commands: Object.freeze(commands),
@@ -1005,5 +1073,7 @@ export async function setupSourceWorktree(input: SourceSetupInput): Promise<Sour
       throw sourceError({ code, diagnosis: `The trusted Git ${error.phase} phase failed.`, recovery: 'Restore the API-prepared source and retry the job.', requestId, details: commandDetails(error), commands });
     }
     throw sourceError({ code: phase === 'identity' || phase === 'preparation' ? 'SOURCE_NOT_COMMIT' : 'WORKTREE_CREATE_FAILED', diagnosis: `The source ${phase} phase failed.`, recovery: 'Restore the API-prepared source and retry the job.', requestId, details: { phase }, commands });
+  } finally {
+    await repositoryHandle?.close().catch(() => undefined);
   }
 }

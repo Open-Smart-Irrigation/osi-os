@@ -29,7 +29,7 @@ export const FIXED_GIT_ENV = Object.freeze({
 } as const);
 
 const FIXED_SSH_ENV = Object.freeze({
-  GIT_SSH_COMMAND: '/usr/bin/ssh -oBatchMode=yes -oIdentitiesOnly=no',
+  GIT_SSH_COMMAND: '/usr/bin/ssh -F /dev/null -oBatchMode=yes -oIdentitiesOnly=no',
   GIT_SSH_VARIANT: 'ssh',
 } as const);
 

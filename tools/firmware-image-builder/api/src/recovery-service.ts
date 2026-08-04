@@ -1,6 +1,9 @@
-import { randomUUID } from 'node:crypto';
-
-import { ACTIVE_RECOVERY_STATES, type ActiveRecoveryState, type JobState } from '../../domain/types.js';
+import {
+  ACTIVE_RECOVERY_STATES,
+  CLEANUP_WORKER_OWNER,
+  type ActiveRecoveryState,
+  type JobState,
+} from '../../domain/types.js';
 import type { ApiRecoveryRequest, ApiRecoveryResult, ApiRecoveryService } from './routes.js';
 import type { ApiWriteCommand, CleanupSnapshot, OwnershipResult, OwnershipStore } from './ownership.js';
 import type { CleanupAdmissionRecovery, CleanupAdmissionResult } from './recovery.js';
@@ -220,7 +223,7 @@ export function createApiRecoveryService(options: ApiRecoveryServiceOptions): Ap
   if (!Number.isSafeInteger(cleanupLeaseMs) || cleanupLeaseMs <= 0 || cleanupLeaseMs > MAX_CLEANUP_LEASE_MS) {
     throw new TypeError(`cleanupLeaseMs must be a positive safe integer no greater than ${MAX_CLEANUP_LEASE_MS}`);
   }
-  const ownerFactory = options.owner ?? (() => `api-recovery-${randomUUID()}`);
+  const ownerFactory = options.owner ?? (() => CLEANUP_WORKER_OWNER);
 
   return {
     async recover(request: ApiRecoveryRequest): Promise<ApiRecoveryResult> {

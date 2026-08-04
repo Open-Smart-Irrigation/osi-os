@@ -67,7 +67,7 @@ function validLock(): Record<string, unknown> {
     schemaVersion: 1, packageVersion: '2026.07.23.1', imageRepository: 'registry.osi.invalid/builder', imageDigest: digest,
     baseImage: `debian@sha256:${baseDigest}`, baseImageDigest: baseDigest, dockerfileSha256: 'd'.repeat(64),
     packageSet: ['gcc-14', 'nodejs', 'npm', 'openwrt-build-tools', 'llvm-dev', 'libpolly-18-dev', 'libzstd-dev'], rustConfig: { llvmConfig: '/usr/bin/llvm-config', channel: 'stable', version: '1.86.0', llvmMajor: 18 }, nodeVersion: '22.5.0',
-    executionDefinitionSha256: 'e'.repeat(64), validationEvidenceSha256: 'f'.repeat(64), installable: true,
+    executionDefinitionSha256: 'e'.repeat(64), validationEvidenceSha256: 'f'.repeat(64), dependencyEgressProxySha256: '1'.repeat(64), installable: true,
   };
 }
 

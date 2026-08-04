@@ -47,6 +47,7 @@ const LOCK = Object.freeze({
   nodeVersion: '22.14.0',
   executionDefinitionSha256: 'e'.repeat(64),
   validationEvidenceSha256: 'f'.repeat(64),
+  dependencyEgressProxySha256: '2'.repeat(64),
   installable: true,
   publisherSha256: '1'.repeat(64),
 });
@@ -103,6 +104,7 @@ async function fixture(): Promise<{
       publisherSha256: LOCK.publisherSha256,
       executionDefinitionSha256: LOCK.executionDefinitionSha256,
     },
+    dependencyEgressProxySha256: LOCK.dependencyEgressProxySha256,
   };
   const dependencies: AcceptanceDependencies = {
     workstation: { available: true, mutation: 'none', prerequisites: availablePrerequisites() },

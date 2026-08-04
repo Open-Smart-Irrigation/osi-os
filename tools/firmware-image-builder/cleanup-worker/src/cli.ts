@@ -25,7 +25,10 @@ export async function runCleanupWorkerCli(
   const run = options.run ?? ((args: readonly string[]) => runCleanupWorker(args));
   const writeStderr = options.writeStderr ?? ((text: string) => process.stderr.write(text));
   try {
-    await run([validateCleanupWorkerArgv(argv)]);
+    const result = await run([validateCleanupWorkerArgv(argv)]);
+    if (process.env.OSI_ADMITTED_CLEANUP_SHA256 !== undefined) {
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+    }
     return 0;
   } catch (error) {
     writeStderr(`cleanup worker failed: ${errorText(error)}\n`);

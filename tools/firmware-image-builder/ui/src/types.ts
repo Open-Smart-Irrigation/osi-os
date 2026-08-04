@@ -174,6 +174,14 @@ export interface JobDetail extends JobSummary {
   readonly evidence: readonly StageEvidence[];
 }
 
+export type CancellationResult =
+  | Readonly<{ kind: 'queued-cancelled'; jobId: string; state: 'cancelled'; requestPersisted: true }>
+  | Readonly<{ kind: 'late-publishing'; jobId: string; state: 'publishing'; late: true; requestPersisted: true }>
+  | Readonly<{ kind: 'runner-terminal'; jobId: string; state: Extract<JobState, 'succeeded' | 'failed' | 'cancelled' | 'interrupted'>; runnerOwned: true; requestPersisted: true }>
+  | Readonly<{ kind: 'coordination-pending'; jobId: string; state: Exclude<JobState, 'queued' | 'publishing' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'>; requestPersisted: true; cancellationClockHighWaterAt: string; cooperativeDeadlineAt: string }>;
+
+export type CancelJobResponse = JobDetail & Readonly<{ cancellationResult: CancellationResult }>;
+
 export interface JobPage {
   readonly jobs: readonly JobSummary[];
   readonly nextCursor: string | null;

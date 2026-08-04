@@ -38,6 +38,17 @@ export const TRUSTED_OPERATION_IDS = Object.freeze([
 ] as const);
 export type TrustedOperationId = (typeof TRUSTED_OPERATION_IDS)[number];
 
+export const DEPENDENCY_EGRESS_OPERATION_IDS = Object.freeze([
+  'frontend-install',
+  'build-image',
+] as const satisfies readonly TrustedOperationId[]);
+export type DependencyEgressOperationId = (typeof DEPENDENCY_EGRESS_OPERATION_IDS)[number];
+
+export function isDependencyEgressOperationId(value: unknown): value is DependencyEgressOperationId {
+  return typeof value === 'string'
+    && (DEPENDENCY_EGRESS_OPERATION_IDS as readonly string[]).includes(value);
+}
+
 export const BUILDER_ERROR_CODES = Object.freeze([
   'INVALID_BRANCH', 'INVALID_SHA', 'PREFLIGHT_INVALID_TARGET', 'PREFLIGHT_INVALID_OUTPUT_ROOT',
   'PREFLIGHT_NOT_FOUND', 'PREFLIGHT_REQUEST_MISMATCH', 'PREFLIGHT_INVALID_ID',
@@ -114,6 +125,7 @@ export type CleanupAdmissionState = (typeof CLEANUP_ADMISSION_STATES)[number];
 
 export const ACTOR_NAMES = Object.freeze(['api', 'runner', 'cleanup-worker'] as const);
 export type ActorName = (typeof ACTOR_NAMES)[number];
+export const CLEANUP_WORKER_OWNER: ActorName = 'cleanup-worker';
 
 export const ACTIVE_RECOVERY_STATES = Object.freeze([
   'starting',
