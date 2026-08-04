@@ -70,7 +70,14 @@ Edge adoption is import-path moves plus deleting the superseded local styles.
 Gate: the edge production bundle before and after adoption differs only in
 hashed asset names (verified by building both and diffing rendered CSS/JS
 content), and the full edge GUI suite (94 node tests + 1,671 Vitest at the time
-of writing) stays green.
+of writing) stays green. One sanctioned exception class exists beyond the
+`--error-*` fix: Tailwind's content scan covers `src/**`, so a ui-core
+primitive whose class string is new to the repo emits its CSS atom the moment
+the file lands, before any call site imports it. Such atoms are unused rules
+(additive bytes, no rendered change) and each must be an explicit allowlist
+entry in the gate, commented with the primitive that introduced it — never a
+baseline change, which would blind the gate to unintended drift (adjudicated
+2026-08-04, T6 blocker).
 
 ## Gateway context (cloud)
 
