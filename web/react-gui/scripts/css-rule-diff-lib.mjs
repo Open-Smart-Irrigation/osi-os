@@ -14,11 +14,11 @@ function escapeForExactMatch(literal) {
 // Three categories, all exact-match only:
 // 1. The --error-bg/--error-text token fix (light + dark theme rows).
 // 2. Exactly one Tailwind JIT-scan artifact, introduced by ui-core
-//    Chip.tsx (T3/T4): its className string references
+//    Chip.tsx and Banner.tsx (T3/T4): both className strings reference
 //    `border-[var(--danger-fg)]`, a class not used anywhere else in the
-//    repo before Chip.tsx existed. Tailwind's `src/**` content scan is
+//    repo before these files existed. Tailwind's `src/**` content scan is
 //    purely textual, so it emits this rule the moment the file lands on
-//    disk, before any call site imports Chip — unrelated to index.css's
+//    disk, before any call site imports Chip/Banner — unrelated to index.css's
 //    own edits. Unused, additive-only rule. Do NOT loosen this to a
 //    pattern; any other atom must still fail the gate.
 // 3. --header-bg/--header-text/--header-subtext (light + dark). Wave-3
