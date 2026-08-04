@@ -41,6 +41,7 @@ versioned-command and sync layer; this program adds no new sync surface.
 | D4 | Capability-gated rendering | A page renders only what the selected gateway's capability handshake advertises; older gateways get an explicit "not available on this gateway" state, never a broken page |
 | D5 | Fail-closed scope UX ported from edge | The cloud pages adopt the edge `ScopeContext` pattern (deny-while-loading, closed scope on profile-fetch failure) mapped to the cloud's 403-on-dormant convention |
 | D6 | The cloud login screen keeps its current design (Swiss-cross badge, commit `5280da76`) and is excluded from visual parity | Maintainer decision 2026-08-04: the compact badge reads better than the edge login's letterhead treatment. The edge login stays as it is |
+| D7 | Cohesion beats replication: cloud pages may deviate slightly from the edge design where that produces a more cohesive look across the cloud app — the zones, history/analysis, and journal pages especially | Maintainer decision 2026-08-04. Reviewers judge page-level visual deviations against cross-page cohesion, not pixel fidelity to the edge. Token and primitive parity (ui-core) still binds; the freedom is at page composition level |
 
 ## The design core: `ui-core`
 
