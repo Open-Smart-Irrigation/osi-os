@@ -1,0 +1,46 @@
+name: UI Core Vendor Parity
+on:
+  push:
+    branches: [ AgroLink ]
+  pull_request:
+    branches: [ AgroLink ]
+jobs:
+  vendor-parity:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Open-Smart-Irrigation/osi-server
+          token: ${{ secrets.OSI_SERVER_RO_TOKEN }}
+          ref: AgroLink
+          path: .vendor/osi-server
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Prefer matching osi-server branch
+        env:
+          OSI_SERVER_RO_TOKEN: ${{ secrets.OSI_SERVER_RO_TOKEN }}
+          OSI_SERVER_REF: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd .vendor/osi-server
+          auth_header="$(printf 'x-access-token:%s' "$OSI_SERVER_RO_TOKEN" | base64 | tr -d '\n')"
+          if git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
+              ls-remote --exit-code --heads origin "$OSI_SERVER_REF" >/dev/null; then
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
+              fetch --depth=1 origin "refs/heads/${OSI_SERVER_REF}"
+            git checkout --detach FETCH_HEAD
+            echo "Using osi-server branch ${OSI_SERVER_REF}"
+          else
+            echo "No osi-server branch ${OSI_SERVER_REF}; using AgroLink checkout"
+          fi
+      - name: Reject stale vendored ui-core
+        env:
+          OSI_SERVER_ROOT: ${{ github.workspace }}/.vendor/osi-server
+        run: |
+          sh scripts/verify-ui-core-vendor.test.sh
+          sh scripts/verify-ui-core-vendor.sh
