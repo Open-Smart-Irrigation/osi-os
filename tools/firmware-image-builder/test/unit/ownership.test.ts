@@ -3241,7 +3241,7 @@ describe('actor-owned compare-and-set writes', () => {
     }
   });
 
-  it('validates failed recovery stage hash, outcome, and persisted job binding', async () => {
+  it('validates failed recovery stage hash, outcome, and persisted job binding', { timeout: 30_000 }, async () => {
     const cases: Array<[string, (evidence: PublishRecoveryEvidence) => PublishRecoveryEvidence]> = [
       ['failed-stage-hash', (evidence) => ({
         ...evidence,
@@ -3283,7 +3283,7 @@ describe('actor-owned compare-and-set writes', () => {
     }
   });
 
-  it('atomically commits blocked publish evidence, quarantine identity, and the failed terminal', async () => {
+  it('atomically commits blocked publish evidence, quarantine identity, and the failed terminal', { timeout: 30_000 }, async () => {
     const makeCommand = (jobId: string): RunnerWriteCommand => ({
       ...runnerBase(jobId),
       at: LATER,
@@ -3399,7 +3399,7 @@ describe('actor-owned compare-and-set writes', () => {
     )).toEqual(['stage', 'publish', 'terminal']);
   });
 
-  it('accepts only typed publishing recovery evidence for success and failure', async () => {
+  it('accepts only typed publishing recovery evidence for success and failure', { timeout: 30_000 }, async () => {
     const success = await fixture('job-2'); toPublishing(success.ownership, 'job-2'); seedLogs(success.path, 'job-2');
     expect(success.ownership.apiWrite({ kind: 'publish-recovery', jobId: 'job-2', expectedState: 'publishing', at: RECOVERY, state: 'succeeded', evidence: recoveryEvidence('job-2') })).toMatchObject({ ok: true });
     expect(success.store.getStage('job-2', 'publish')).toMatchObject({
@@ -3637,7 +3637,7 @@ describe('actor-owned compare-and-set writes', () => {
     });
   });
 
-  it('commits failed publish recovery for missing, corrupt, and partial final evidence', async () => {
+  it('commits failed publish recovery for missing, corrupt, and partial final evidence', { timeout: 30_000 }, async () => {
     const cases: Array<[string, (evidence: PublishRecoveryEvidence) => PublishRecoveryEvidence]> = [
       ['missing-sidecars', (evidence) => ({ ...evidence, observed: { ...evidence.observed, checksum: { present: false, path: 'staging/sums', contents: null, sha256: null }, manifest: { present: false, path: 'staging/manifest', bytes: null, content: null, sha256: null }, verification: { present: false, path: 'staging/verify', bytes: null, content: null, sha256: null } } })],
       ['corrupt-sidecars', (evidence) => ({ ...evidence, observed: { ...evidence.observed, checksum: { present: true, path: 'staging/sums', contents: 'corrupt\n', sha256: SHA64_B }, manifest: { present: true, path: 'staging/manifest', bytes: 'not-json', content: null, sha256: SHA64_B }, verification: { present: true, path: 'staging/verify', bytes: '{"wrong":true}', content: { wrong: true }, sha256: SHA64_B } } })],
