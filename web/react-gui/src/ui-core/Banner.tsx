@@ -19,6 +19,7 @@ export function Banner({ tone = 'warn', className = '', children }: BannerProps)
   return (
     <div
       role={role}
+      aria-live={role === 'alert' ? 'assertive' : 'polite'}
       className={`border-b px-4 py-3 text-center text-sm font-semibold ${TONE_CLASSES[tone]} ${className}`.trim()}
     >
       {children}
