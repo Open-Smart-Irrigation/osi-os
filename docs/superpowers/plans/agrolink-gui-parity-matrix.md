@@ -50,8 +50,8 @@ is real, checked against the commits that shipped it.
 | App header (glass chrome) | `web/react-gui/src/components/AppHeader.tsx` (`glass-chrome`/`glass-tabs` classes) | missing; confirmed: cloud's `components/DashboardHeader.tsx` has no `AppHeader` import and no `glass`-prefixed class anywhere; it is a standalone header with no shared glass-chrome primitive | pending | 2026-08-04 verified (S0 self-review) |
 | Gateway restart banner | `web/react-gui/src/components/GatewayRestartBanner.tsx` | missing | pending | 2026-08-04 seeded (S0) |
 | Scope status banner | `web/react-gui/src/components/ScopeStatusBanner.tsx` (on ui-core `Banner` since S1 T3, fixing its undefined `--danger-*` classes) | partial (pending walkthrough): cloud `components/GatewayScopeBanner.tsx` ports the D5 fail-closed pattern over `useGateway()` with retry (S1 T4); both banners announce via explicit `aria-live` (S1 T2) | pending | 2026-08-05 verified (S1) |
-| Valve card (STREGA) | `web/react-gui/src/components/farming/StregaValveCard.tsx` (867 lines) | partial (pending walkthrough): cloud card actuates via `OPEN_FOR_DURATION` with a 1–255 min duration control, no bare CLOSE (S2 T6, matching edge + STREGA rules); actor-carrying `VALVE_COMMAND` denials render legibly on both paths — immediate 403 `scope_denied` (S2 T2) and async edge `scope_denied`/`scope_actor_required` via `PendingStateNotice` (S2 T5); `readOnly` required (S2 T4). Deviations: no cancel-queued-open button (edge cancel is an edge-local route; no cloud→edge cancel command exists) and no today-liters line. Live `OPEN_FOR_DURATION` against `agrolink-test-01` still required before this row may flip (spec S2 gate) | pending | 2026-08-05 verified (S2) |
-| Weather card (S2120) | `web/react-gui/src/components/farming/SenseCapWeatherCard.tsx` (420 lines) | partial (pending walkthrough): shared-read stations now appear in the cloud device list for scoped members (S2 T1 backend merge + T8 gateway-EUI scoping, matching the edge C6 behavior); ledger M3 (`text-[var(--error-bg)]` as text) and the pale error border fixed (S2 T7); card body still hardcodes English strings (i18n follow-up). Shared-read rows render read-only for every scoped role (weather writes are owner-only), so the card affordance matches the backend authority (S2 T8) | pending | 2026-08-05 verified (S2) |
+| Valve card (STREGA) | `web/react-gui/src/components/farming/StregaValveCard.tsx` (867 lines) | partial (pending walkthrough): cloud card (832 lines) actuates via `OPEN_FOR_DURATION` with a 1–255 min duration control, no bare CLOSE (S2 T6, matching edge + STREGA rules); actor-carrying `VALVE_COMMAND` denials render legibly on both paths — immediate 403 `scope_denied` (S2 T2) and async edge `scope_denied`/`scope_actor_required` via `PendingStateNotice` (S2 T5); `readOnly` required (S2 T4). Deviations: no cancel-queued-open button (edge cancel is an edge-local route; no cloud→edge cancel command exists) and no today-liters line. Live `OPEN_FOR_DURATION` against `agrolink-test-01` still required before this row may flip (spec S2 gate) | pending | 2026-08-05 verified (S2) |
+| Weather card (S2120) | `web/react-gui/src/components/farming/SenseCapWeatherCard.tsx` (420 lines) | partial (pending walkthrough): cloud card (434 lines); shared-read stations now appear in the cloud device list for scoped members (S2 T1 backend merge + T8 gateway-EUI scoping, matching the edge C6 behavior); ledger M3 (`text-[var(--error-bg)]` as text) and the pale error border fixed (S2 T7); card body still hardcodes English strings (i18n follow-up). Shared-read rows render read-only for every scoped non-owner (weather writes are owner-only), so the card affordance matches the backend authority (S2 T8) | pending | 2026-08-05 verified (S2) |
 | Dendrometer monitor | `web/react-gui/src/components/farming/DendrometerMonitor.tsx` (359 lines) | partial (S2/S4), corrected from `missing`. Cloud has both `components/farming/DendrometerMonitor.tsx` (317 lines) and `components/farming/dendrometer/DendrometerMonitor.tsx`, referenced from `DraginoCard.tsx` and `dendrometer/DendrometerSection.tsx`; live, not stubs | pending | 2026-08-04 corrected (S0 self-review) |
 | Zone / device modals | `web/react-gui/src/components/farming/CreateZoneModal.tsx` (on ui-core since S1 T9), `AddDeviceModal.tsx` (196 lines) | partial (pending walkthrough): cloud `CreateZoneModal` on ui-core targeting the active gateway (S1 T8); cloud `AddDeviceModal` likewise on the ui-core `Modal`/`FormField`/`Button` shell, registers on the active gateway with a Settings-switcher pointer, owner-gated fail-closed (S2 T9); cloud `ClaimGatewayModal.tsx` is orphaned dead code (admin-era direct claim, unmounted since the Dashboard rewrites — account linking owns gateway acquisition) | pending | 2026-08-05 verified (S2) |
 | Journal entry table | `web/react-gui/src/components/journal/desktop/EntryTable.tsx` | missing (S3); confirmed: no `EntryTable` file or reference exists anywhere under cloud `frontend/src`; cloud's only journal-adjacent component is `components/journal/JournalReferencePanel.tsx`, unrelated | pending | 2026-08-04 verified (S0 self-review) |
@@ -124,6 +124,10 @@ belongs to the slice that next touches the named file.
   component test exercises that inline copy — duplicated and untested is the
   shape that drifts into a bug. Collapse via a `weatherRowReadOnly(device)`
   callback prop or by passing `gatewayScope` down.
+- `Dashboard.tsx:34`'s `const identity = { username, isSuperAdmin }` is a
+  fresh object literal every render — harmless today (nothing memoizes on
+  it) but only matters if a card in this tree is ever wrapped in
+  `React.memo`.
 - `AddDeviceModal`'s permission-denial box and its informational-hint box
   share byte-identical styling, so a denial reads as a hint; its `FormField`
   also sets `htmlFor` on a non-labelable `<p>`. Separately,
@@ -149,3 +153,11 @@ Note: the S1-ledgered pale border on `ScheduleSection.tsx:423`
 (`border-[var(--error-bg)]` paired with the error wash) was closed by S2 T7 —
 the line now reads `border-[var(--danger-fg)]`, confirmed by inspection. It
 is not carried forward here.
+
+Note: the T8 triage's "`weatherRowReadOnly` exported without restating its
+fail-closed caveat" is also closed, not open — the function's docstring at
+`gatewayCapabilities.ts:142-149` already states it ("the actual device
+owner is never caught by the false positive documented on
+weatherRowsReadOnly above ... A super-admin ... is likewise never forced
+read-only"), confirmed by inspection. It is not carried forward here
+either.
