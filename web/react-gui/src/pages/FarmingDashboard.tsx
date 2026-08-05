@@ -24,6 +24,7 @@ import {
 } from '../components/farming/IrrigationOutcomesPanel';
 import { useDisplayPreferences } from '../utils/displayPreferences';
 import type { Device, IrrigationZone, ValveSummary } from '../types/farming';
+import { Button, EmptyState } from '../ui-core';
 import type { IrrigationActuationsResponse } from '../services/api';
 
 const devicesFetcher = () => devicesAPI.getAll();
@@ -235,28 +236,24 @@ export const FarmingDashboard: React.FC = () => {
           <>
             {/* Empty State */}
             {devices.length === 0 && allZones.length === 0 && (
-              <div className="text-center py-12 bg-[var(--surface)] rounded-xl border-2 border-[var(--border)]">
-                <p className="text-[var(--text)] text-2xl font-bold mb-4">{t('emptyState.title')}</p>
-                <p className="text-[var(--text-tertiary)] text-lg mb-6">
-                  {t('emptyState.subtitle')}
-                </p>
+              <EmptyState title={t('emptyState.title')} subtitle={t('emptyState.subtitle')}>
                 {canWrite && (
-                  <div className="flex gap-4 justify-center">
-                    <button
+                  <>
+                    <Button
                       onClick={() => setIsCreateZoneModalOpen(true)}
-                      className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-8 py-4 touch-target rounded-lg transition-colors shadow-lg"
+                      className="text-lg px-8 py-4 shadow-lg"
                     >
                       {t('emptyState.createZone')}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       onClick={() => setIsAddDeviceModalOpen(true)}
-                      className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-8 py-4 touch-target rounded-lg transition-colors shadow-lg"
+                      className="text-lg px-8 py-4 shadow-lg"
                     >
                       {t('emptyState.addDevice')}
-                    </button>
-                  </div>
+                    </Button>
+                  </>
                 )}
-              </div>
+              </EmptyState>
             )}
 
             {/* Irrigation Zones Section */}
