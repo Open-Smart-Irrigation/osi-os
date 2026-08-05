@@ -80,7 +80,7 @@ function expectedOperation(operationId, environment) {
     case 'update-feeds': return ['node', TOOL, 'update-feeds'];
     case 'install-feeds': return ['openwrt/scripts/feeds', 'install', '-a'];
     case 'resolve-config': return ['make', '-C', 'openwrt', 'defconfig'];
-    case 'build-image': return ['make', '-C', 'openwrt', '-j4'];
+    case 'build-image': return ['make', '-C', 'openwrt', '-j2'];
     case 'verify-image': return ['node', TOOL, operationId];
     case 'verify-profile-parity': return ['node', 'scripts/verify-profile-parity.js'];
     case 'verify-chameleon': return ['node', 'scripts/verify-chameleon-calibration.js'];

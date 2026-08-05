@@ -50,7 +50,7 @@ const DOCKER_PATH = /^\/(?:[A-Za-z0-9._-]+\/)*docker$/u;
 const CONTAINER_NAME = /^osi-image-builder-[a-z0-9-]{8,64}$/u;
 const DOCKER_CONTROL_TIMEOUT_MS = 30_000;
 const BUILDER_NANO_CPUS = 8_000_000_000;
-const BUILDER_MEMORY_BYTES = 12 * 1024 * 1024 * 1024;
+const BUILDER_MEMORY_BYTES = 16 * 1024 * 1024 * 1024;
 
 export interface DockerCommandExecutor {
   run(argv: readonly string[], options: CommandRunOptions): Promise<CommandResult>;
