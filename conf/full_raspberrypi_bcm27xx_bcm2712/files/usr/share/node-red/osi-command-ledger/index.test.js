@@ -180,6 +180,31 @@ test('validEffectBinding recognizes the built-in non-journal grammar', async () 
     false,
     'physical action effect must match the command type'
   );
+
+  const valveCommandEnvelope = {
+    commandType: 'VALVE_COMMAND',
+    payload: {
+      effect_key: 'action:' + DEVICE_EUI +
+        ':valve_action:55555555-5555-4555-8555-555555555555',
+      deviceEui: DEVICE_EUI,
+    },
+  };
+  assert.equal(
+    await ledger.validEffectBinding(valveCommandEnvelope, { command_type_recognized: true }),
+    true
+  );
+  assert.equal(
+    await ledger.validEffectBinding(
+      Object.assign({}, valveCommandEnvelope, {
+        payload: Object.assign({}, valveCommandEnvelope.payload, {
+          effect_key: valveCommandEnvelope.payload.effect_key.replace('valve_action', 'timed_action'),
+        }),
+      }),
+      { command_type_recognized: true }
+    ),
+    false,
+    'VALVE_COMMAND effect must not accept a sibling physical action setting'
+  );
 });
 
 test('validEffectBinding binds protected zone commands to UUID and base version', async () => {
@@ -465,6 +490,66 @@ test('deduplicatePendingCommand terminalizes an elapsed physical action before d
   );
 });
 
+test('deduplicatePendingCommand terminalizes an elapsed VALVE_COMMAND action before dispatch', async () => {
+  const db = new TestDb();
+  const now = '2026-07-29T10:00:00.000Z';
+  const envelope = {
+    commandId: 724,
+    commandType: 'VALVE_COMMAND',
+    expiresAt: now,
+    payload: {
+      effect_key:
+        'action:' + DEVICE_EUI +
+        ':valve_action:66666666-6666-4666-8666-666666666666',
+      deviceEui: DEVICE_EUI,
+      expires_at: now,
+    },
+  };
+
+  const result = await ledger.deduplicatePendingCommand(db, envelope, {
+    gateway_device_eui: GATEWAY_EUI,
+    command_type_recognized: true,
+    now,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.ack.result, 'EXPIRED');
+  assert.equal(result.ack.reason, 'effect_expired');
+  assert.equal(result.ack.duplicate, false);
+  assert.equal(
+    (await db.get('SELECT result FROM applied_commands WHERE command_id=?', ['724'])).result,
+    'EXPIRED'
+  );
+});
+
+test('deduplicatePendingCommand keeps a future VALVE_COMMAND action eligible for dispatch', async () => {
+  const db = new TestDb();
+  const result = await ledger.deduplicatePendingCommand(
+    db,
+    {
+      commandId: 725,
+      commandType: 'VALVE_COMMAND',
+      expiresAt: '2026-07-29T10:00:00.001Z',
+      payload: {
+        effect_key:
+          'action:' + DEVICE_EUI +
+          ':valve_action:77777777-7777-4777-8777-777777777777',
+        deviceEui: DEVICE_EUI,
+        expires_at: '2026-07-29T10:00:00.001Z',
+      },
+    },
+    {
+      gateway_device_eui: GATEWAY_EUI,
+      command_type_recognized: true,
+      now: '2026-07-29T10:00:00.000Z',
+    }
+  );
+
+  assert.deepEqual(result, { handled: false });
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
+});
+
 test('deduplicatePendingCommand rejects malformed physical-action expiry without dispatch', async () => {
   const db = new TestDb();
   const result = await ledger.deduplicatePendingCommand(
@@ -588,6 +673,43 @@ test('deduplicatePendingCommand finds a non-journal duplicate by effect key + co
 
   assert.equal(replay.handled, true);
   assert.equal(replay.ack.commandId, 703);
+  assert.equal(replay.ack.result, 'APPLIED');
+  assert.equal(replay.ack.duplicate, true);
+});
+
+test('deduplicatePendingCommand finds a VALVE_COMMAND duplicate by effect key + command type', async () => {
+  const db = new TestDb();
+  const effectKey = 'action:' + DEVICE_EUI + ':valve_action:88888888-8888-4888-8888-888888888888';
+  insertAppliedCommand(db, {
+    commandId: '726', deviceEui: DEVICE_EUI, commandType: 'VALVE_COMMAND',
+    effectKey,
+    appliedAt: '2026-07-29T10:00:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 726, commandType: 'VALVE_COMMAND', result: 'APPLIED', status: 'ACKED', duplicate: false },
+  });
+
+  const replay = await ledger.deduplicatePendingCommand(
+    db,
+    {
+      commandId: 727,
+      commandType: 'VALVE_COMMAND',
+      // Physical actions require a not-yet-elapsed expiry to reach the
+      // effect-key duplicate lookup at all (physicalActionExpiry runs first).
+      expiresAt: '2026-07-29T10:05:00.000Z',
+      payload: {
+        effect_key: effectKey,
+        deviceEui: DEVICE_EUI,
+        expires_at: '2026-07-29T10:05:00.000Z',
+      },
+    },
+    {
+      gateway_device_eui: GATEWAY_EUI,
+      command_type_recognized: true,
+      now: '2026-07-29T10:00:00.000Z',
+    }
+  );
+
+  assert.equal(replay.handled, true);
+  assert.equal(replay.ack.commandId, 727);
   assert.equal(replay.ack.result, 'APPLIED');
   assert.equal(replay.ack.duplicate, true);
 });

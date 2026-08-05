@@ -25,6 +25,10 @@ Ad-hoc operator irrigation. `originator` is `cloud` or `edge`. `command_uuid` is
 
 Device configuration commands. `config_version` is a monotonically increasing integer per `(device_eui, config_key)` pair.
 
+### `action:{device_eui}:{action_setting}:{command_uuid}`
+
+Physical hardware actions — commands that move actuator hardware rather than change a stored setting. `action_setting` identifies the effect: `timed_action` (`SET_STREGA_TIMED_ACTION`), `partial_opening` (`SET_STREGA_PARTIAL_OPENING`), `flushing` (`SET_STREGA_FLUSHING`), `valve_action` (`VALVE_COMMAND`). `command_uuid` is the command's UUID, so each intentional issuance is distinct — as with `irrigation:manual`, a retry is a new command with a new UUID, not a coalesced duplicate. Unlike the `config:` and versioned-resource families, these commands are never rewritten in place; each issuance also carries a short expiry (5 minutes) after which the edge fences it as `EXPIRED` before dispatch instead of applying it late.
+
 ### `journal_entry:{entry_uuid}:{base_sync_version}`
 
 Entry upsert and void commands. `base_sync_version` is the version the originator read before issuing the mutation; creates use `0`. Optimistic concurrency permits only one mutation to win for an entry at a given base version. A new intentional mutation after that result must read the current version and generate a new key.

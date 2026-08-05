@@ -97,6 +97,7 @@ const physicalActionEffects = {
   SET_STREGA_TIMED_ACTION: 'timed_action',
   SET_STREGA_PARTIAL_OPENING: 'partial_opening',
   SET_STREGA_FLUSHING: 'flushing',
+  VALVE_COMMAND: 'valve_action',
 };
 
 function physicalActionExpiry(envelope, type, runtime) {
