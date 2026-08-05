@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { useScope } from '../contexts/ScopeContext';
+import { Banner } from '../ui-core';
 
 export function ScopeStatusBanner() {
   const { t } = useTranslation('common');
@@ -8,10 +9,7 @@ export function ScopeStatusBanner() {
   if (!error) return null;
 
   return (
-    <div
-      role="alert"
-      className="flex items-center justify-center gap-3 border-b border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 text-center text-sm font-semibold text-[var(--danger-text)]"
-    >
+    <Banner tone="error" className="flex items-center justify-center gap-3">
       <span>{t('scope.loadError')}</span>
       <button
         type="button"
@@ -20,6 +18,6 @@ export function ScopeStatusBanner() {
       >
         {t('retry')}
       </button>
-    </div>
+    </Banner>
   );
 }
