@@ -32,6 +32,13 @@ describe('Banner', () => {
     render(<Banner tone="error">Failed</Banner>);
     expect(screen.getByRole('alert').className).toContain('bg-[var(--error-bg)]');
   });
+  it('declares its politeness level explicitly', () => {
+    render(<Banner>Restarting</Banner>);
+    expect(screen.getByRole('status').getAttribute('aria-live')).toBe('polite');
+    cleanup();
+    render(<Banner tone="error">Failed</Banner>);
+    expect(screen.getByRole('alert').getAttribute('aria-live')).toBe('assertive');
+  });
 });
 
 describe('FormField', () => {
