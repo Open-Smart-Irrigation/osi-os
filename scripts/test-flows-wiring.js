@@ -802,6 +802,27 @@ assertWires('5974306566e99a92',
     [['072f29aa8760340a', 'write-strega-expectation']],
     'C5: from-scheduler/manual → write-strega-expectation');
 
+// C5b (Fix A): Route Command output 0 (cloud-dispatched commands) must reach
+// write-strega-expectation exactly once, via the "to Actuator_STREGA" link-out
+// (745b6db588017e56) only — not also via a direct wire. A direct wire in
+// addition to the link double-invokes write-strega-expectation for every
+// cloud-dispatched command (idempotency-key PRIMARY KEY collision on the
+// second pass, and two identical downlinks published for command types that
+// early-return before writing). This must stay in lockstep with the
+// scheduler ('To Actuator' -> b64b9e8c1a0e2c77) and manual
+// ('To Actuator (same as scheduler)' -> 1ef83e7d26a33d6c) paths, which enter
+// the same link-in solely through their own link-out and are never wired
+// directly to write-strega-expectation.
+assertWires('934bf2bc19a8ce22',
+    [
+        ['745b6db588017e56'],
+        ['4f4a765f36cee6f3'],
+        ['9d5e3035c3d069c4', 'command-ack-queue-rest'],
+        ['cs-reg-cloud-fn'],
+        ['lsn50-mode-link-out-sync'],
+    ],
+    'C5b: Route Command output 0 reaches write-strega-expectation only via link-out (no double-invoke)');
+
 // C5: write-strega-expectation must wire directly to Build STREGA downlink
 assertWires('write-strega-expectation',
     [['cdbaa3891d40d7a1']],
