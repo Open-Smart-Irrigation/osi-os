@@ -29,6 +29,7 @@ import {
 
 const SHA40 = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
+const BRANCH_NAME = /^(?!.*\.\.)(?!.*\s)(?!.*[\\%^~?*[])(?!.*\.lock$)(?!.*@\{)[^/]?(?:[^\x00-\x1f\x7f])[^/]*$/u;
 const TARGETS = Object.freeze({ pi5: 'rpi-5', pi4: 'rpi-2' });
 const MAX_CONFIG_BYTES = 65_536;
 const MAX_PUBLISHER_BYTES = 4 * 1024 * 1024;
@@ -143,6 +144,10 @@ const REQUIRED_RUNTIME_FILES = Object.freeze([
 
 function fail(code, detail, mutation = 'none') {
   return Object.freeze({ ok: false, code, detail, mutation: mutation === 'none' ? 'none' : 'unknown' });
+}
+
+function isValidBranchName(name) {
+  return typeof name === 'string' && name.length >= 1 && name.length <= 255 && BRANCH_NAME.test(name);
 }
 
 function mutationOf(value) {
@@ -1122,7 +1127,7 @@ function validateGeneratedLock(lock, packageVersion) {
 function validateJobAndDerivePaths(context) {
   if (context === null || typeof context !== 'object' || Array.isArray(context)) throw new Error('acceptance context is invalid');
   if (Object.keys(context).sort().join(',') !== 'branch,job,loadedConfig,outputRootId,pinnedSha,selectedInstallation,targetId') throw new Error('acceptance context fields are not exact');
-  if (context.branch !== 'main' || !ROOT_ID_PATTERN.test(context.outputRootId) || !SHA40.test(context.pinnedSha) || (context.targetId !== 'rpi-5' && context.targetId !== 'rpi-2')) throw new Error('acceptance context identity is invalid');
+  if (!isValidBranchName(context.branch) || !ROOT_ID_PATTERN.test(context.outputRootId) || !SHA40.test(context.pinnedSha) || (context.targetId !== 'rpi-5' && context.targetId !== 'rpi-2')) throw new Error('acceptance context identity is invalid');
   const loaded = context.loadedConfig;
   const selected = context.selectedInstallation;
   if (loaded === null || typeof loaded !== 'object' || selected === null || typeof selected !== 'object') throw new Error('acceptance authorities are missing');
@@ -1772,7 +1777,7 @@ async function readBuildManifest(state, dependencies, artifact, stage) {
     || build.jobId !== state.job.id || build.branch !== state.context.branch || build.pinnedSha !== state.context.pinnedSha || build.targetId !== state.context.targetId || build.rootId !== state.context.outputRootId
     || build.artifactSha256 !== artifact.sha256 || build.artifactSize !== state.job.artifact.size || build.artifactMtime !== state.job.artifact.mtime || build.artifactBasename !== state.imageName) throw new Error('build manifest is not bound to held acceptance identity');
   if (!sameJson(build.rootIdentity, state.rootIdentity)) throw new Error('build manifest root identity differs');
-  if (build.source?.branch !== state.context.branch || build.source?.pinnedSha !== state.context.pinnedSha || build.source?.ref !== 'refs/remotes/origin/main') throw new Error('build manifest source identity differs');
+  if (build.source?.branch !== state.context.branch || build.source?.pinnedSha !== state.context.pinnedSha || build.source?.ref !== `refs/remotes/origin/${state.context.branch}`) throw new Error('build manifest source identity differs');
   if (build.config?.selectedTarget !== state.target.openwrtTarget || build.config?.profile !== state.target.profile || build.config?.rootfsPartSize !== state.target.rootfsPartSize) throw new Error('build manifest configuration differs');
   if (build.tool?.nodeVersion !== state.selected.lock.nodeVersion || build.tool?.preflight?.evidenceSha256 !== stage.observations.stageEvidenceSha256['00-preflight.json']) throw new Error('build manifest tool evidence differs');
   return Object.freeze({ build, buildBytes: buildRead.bytes });
@@ -2002,7 +2007,7 @@ function validateRealEnvironment(env, context) {
 
 function validateAcceptanceContext(context) {
   exactKeys(context, ['branch', 'job', 'loadedConfig', 'outputRootId', 'pinnedSha', 'selectedInstallation', 'targetId'], 'acceptance context');
-  if (context.branch !== 'main' || !ROOT_ID_PATTERN.test(context.outputRootId) || !SHA40.test(context.pinnedSha)
+  if (!isValidBranchName(context.branch) || !ROOT_ID_PATTERN.test(context.outputRootId) || !SHA40.test(context.pinnedSha)
     || (context.targetId !== 'rpi-5' && context.targetId !== 'rpi-2')) throw new Error('acceptance context identity is invalid');
   const selected = context.selectedInstallation;
   const loaded = context.loadedConfig;
@@ -2272,18 +2277,19 @@ function canonicalInstant(value, label) {
   return Date.parse(value);
 }
 
-function validateBranchRefresh(body, pinnedSha) {
+function validateBranchRefresh(body, pinnedSha, branch) {
   exactKeys(body, ['branches', 'fetchedAt'], 'branch refresh response');
   canonicalInstant(body.fetchedAt, 'branch refresh fetchedAt');
   if (!Array.isArray(body.branches)) throw new Error('branch refresh branches are malformed');
-  const mains = [];
-  for (const branch of body.branches) {
-    exactKeys(branch, ['commitTime', 'name', 'sha', 'subject'], 'branch refresh entry');
-    if (typeof branch.name !== 'string' || branch.name.length === 0 || !SHA40.test(branch.sha) || typeof branch.subject !== 'string') throw new Error('branch refresh entry is malformed');
-    canonicalInstant(branch.commitTime, 'branch refresh commitTime');
-    if (branch.name === 'main') mains.push(branch);
+  const targetBranch = branch ?? 'main';
+  const candidates = [];
+  for (const entry of body.branches) {
+    exactKeys(entry, ['commitTime', 'name', 'sha', 'subject'], 'branch refresh entry');
+    if (typeof entry.name !== 'string' || entry.name.length === 0 || !SHA40.test(entry.sha) || typeof entry.subject !== 'string') throw new Error('branch refresh entry is malformed');
+    canonicalInstant(entry.commitTime, 'branch refresh commitTime');
+    if (entry.name === targetBranch) candidates.push(entry);
   }
-  if (mains.length !== 1 || mains[0].sha !== pinnedSha) throw new Error('refreshed main does not match the pinned SHA');
+  if (candidates.length !== 1 || candidates[0].sha !== pinnedSha) throw new Error(`refreshed ${targetBranch} does not match the pinned SHA`);
 }
 
 async function loadPreflightCheckIds() {
@@ -3384,6 +3390,7 @@ export async function withProductionAcceptanceRuntime(input, callback) {
   if (target !== 'pi5' && target !== 'pi4' && target !== 'all') throw new Error('production acceptance target is invalid');
   const outputRootId = env.OSI_IMAGE_BUILDER_APPROVED_ROOT_ID;
   const pinnedSha = env.OSI_IMAGE_BUILDER_PINNED_SHA;
+  const branch = (typeof env.OSI_IMAGE_BUILDER_BRANCH === 'string' && isValidBranchName(env.OSI_IMAGE_BUILDER_BRANCH)) ? env.OSI_IMAGE_BUILDER_BRANCH : 'main';
   if (env.OSI_IMAGE_BUILDER_REAL !== '1' || typeof outputRootId !== 'string' || !ROOT_ID_PATTERN.test(outputRootId)
     || typeof pinnedSha !== 'string' || !SHA40.test(pinnedSha)) throw new Error('production acceptance environment is invalid');
   const apis = await loadProductionCompositionApis();
@@ -3449,7 +3456,7 @@ export async function withProductionAcceptanceRuntime(input, callback) {
         const targetIds = target === 'all' ? ['rpi-5', 'rpi-2'] : [TARGETS[target]];
         const contexts = Object.fromEntries(targetIds.map((targetId) => [targetId, Object.freeze({
           targetId,
-          branch: 'main',
+          branch,
           pinnedSha,
           outputRootId,
           selectedInstallation,
@@ -3547,7 +3554,7 @@ export async function acceptTarget(input) {
       outputRootId: context.outputRootId,
     };
     const refresh = await requestApi(dependencies, apiRequest('POST', '/api/branches/refresh', {}), 'branch refresh');
-    validateBranchRefresh(refresh, context.pinnedSha);
+    validateBranchRefresh(refresh, context.pinnedSha, context.branch);
     const checkIds = await loadPreflightCheckIds();
     const now = clockMilliseconds(dependencies);
     const preflight = await requestApi(dependencies, apiRequest('POST', '/api/preflight', selection), 'preflight');
