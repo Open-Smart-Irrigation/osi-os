@@ -206,3 +206,26 @@ describe('FarmingDashboard header wiring', () => {
     },
   );
 });
+
+describe('FarmingDashboard empty-state canWrite guard', () => {
+  it('hides the create-zone/add-device actions for a read-only scoped viewer', async () => {
+    scopeState.canWrite = false;
+
+    renderDashboard();
+
+    expect(await screen.findByText('Welcome to your farm!')).toBeInTheDocument();
+    expect(screen.getByText('Get started')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create Zone' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add Device' })).not.toBeInTheDocument();
+  });
+
+  it('shows the create-zone/add-device actions when the viewer can write', async () => {
+    scopeState.canWrite = true;
+
+    renderDashboard();
+
+    expect(await screen.findByText('Welcome to your farm!')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create Zone' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add Device' })).toBeInTheDocument();
+  });
+});
