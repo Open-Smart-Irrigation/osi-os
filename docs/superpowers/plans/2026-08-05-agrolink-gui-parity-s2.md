@@ -1857,14 +1857,16 @@ In `frontend/src/services/api.ts`:
 
 Replace `frontend/src/components/farming/AddDeviceModal.tsx`, keeping the existing catalog load, validation regexes, submit flow and `t(key, 'fallback')` strings, with these structural changes:
 
-1. Imports: `import { Button, FormField, INPUT_CLASS, Modal } from '../../ui-core';`, `import { useGateway } from '../../contexts/GatewayContext';`, `import { canOperateGateway } from '../../contexts/gatewayCapabilities';`.
+1. Imports: `import { Button, FormField, INPUT_CLASS, Modal } from '../../ui-core';`, `import { useGateway } from '../../contexts/GatewayContext';`. (T3 amendment: `canOperateGateway` is now `(state, device, identity)` and the modal holds no device row — ownership is computed in Dashboard and arrives as the required `operable: boolean` prop below.)
 2. Shell: the hand-rolled `fixed inset-0 … bg-black/50` overlay becomes `<Modal isOpen={isOpen} title={t('addModal.title', 'Register Device')} onClose={onClose}>`; each labeled field moves onto `FormField` (ids `add-device-type`, `add-device-name`, `add-device-eui`, `add-device-appkey`) with `INPUT_CLASS` on the `input`/`select` elements; the footer buttons become ui-core `Button` (`variant="secondary"` cancel / submit), matching S1 T9's edge `CreateZoneModal` structure. The device-name field splits its inline "(optional)" suffix into `FormField`'s hint slot — exactly `label={t('addModal.deviceName', 'Device Name')}` and `hint={t('addModal.optional', '(optional)')}` — so `getByLabelText('Device Name')` resolves cleanly.
 3. Error box: `bg-red-50 border border-red-200 text-red-800` → `bg-[var(--error-bg)] border border-[var(--danger-fg)] text-[var(--error-text)]`; the blue gateway-hint box → `border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]`.
 4. Gateway targeting and gating:
 
 ```tsx
   const gatewayScope = useGateway();
-  const operable = canOperateGateway(gatewayScope);
+  // T3 amendment: `operable` is a new REQUIRED prop on AddDeviceModalProps,
+  // computed by Dashboard (which holds both the hub device rows and the auth
+  // identity) — see the Dashboard wiring in item 5.
   const targetGatewayEui = gatewayScope.gateways.length > 0
     ? gatewayScope.activeGateway?.gatewayDeviceEui ?? null
     : null;
@@ -1883,9 +1885,17 @@ Replace `frontend/src/components/farming/AddDeviceModal.tsx`, keeping the existi
           )}
 ```
 
-   When the context resolves to a scoped role (`gatewayScope.gateways.length > 0 && gatewayScope.activeGateway?.gatewayRole != null`), render `{t('addModal.notAvailableForRole')}` in the hint box. Submit button: `disabled={loading || gatewayScope.loading || !operable || !selectedType || …existing length checks}`. Submit call: `devicesAPI.register(deviceEui, selectedType, deviceName.trim() || deviceEui, appKey || undefined, targetGatewayEui ?? undefined)`.
+   When gateways exist but the caller is not operable (`!operable && gatewayScope.gateways.length > 0`), render `{t('addModal.notAvailableForRole')}` in the hint box. (T3 amendment: do NOT derive this from `gatewayRole != null` — a scoped-hub owner carries `gatewayRole: 'admin'` and must remain operable; ownership is the signal, and it lives in the `operable` prop.) Submit button: `disabled={loading || gatewayScope.loading || !operable || !selectedType || …existing length checks}`. Submit call: `devicesAPI.register(deviceEui, selectedType, deviceName.trim() || deviceEui, appKey || undefined, targetGatewayEui ?? undefined)`.
 
-5. Header entry point (M5): registration being owner-only, the Dashboard header's Add-device menu item must not render for scoped roles. `frontend/src/components/DashboardHeader.tsx` gains a `canAddDevice: boolean` prop; its `addMenuItems` includes the device entry only when `canAddDevice`, the zone entry stays on `canMutate`. `Dashboard.tsx` passes `canAddDevice={gatewayOperable}` (T3's const). Update the header's mocked props in any Dashboard test that pins them, and the empty-state Add-device button gains the same `gatewayOperable` condition.
+5. Header entry point (M5, amended per T3's identity reshape): registration is owner-only. `Dashboard.tsx` computes the single source of truth:
+
+```tsx
+  const canAddDevice = gatewayScope.gateways.length === 0
+    ? deviceWritable
+    : gatewayDevices.some((device) => canOperateGateway(gatewayScope, device, identity));
+```
+
+   (`gatewayDevices` is already filtered to the active gateway; a non-owner has no operable hub row and correctly resolves false; zero-gateway cloud-local accounts keep registration per the standing adjudication.) `frontend/src/components/DashboardHeader.tsx` gains a `canAddDevice: boolean` prop; its `addMenuItems` includes the device entry only when `canAddDevice`, the zone entry stays on `canMutate`. `Dashboard.tsx` passes `canAddDevice={canAddDevice}` and threads the same value into `<AddDeviceModal operable={canAddDevice} …>` (new required prop). Update the header's mocked props in any Dashboard test that pins them, and the empty-state Add-device button gains the same `canAddDevice` condition.
 
 Run the Step 1 command. Expected: PASS (3 tests).
 
