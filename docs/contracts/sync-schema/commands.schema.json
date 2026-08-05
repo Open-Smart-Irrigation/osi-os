@@ -134,7 +134,7 @@
         "duration_minutes": {"type": ["integer", "null"], "minimum": 1},
         "amount": {"type": ["integer", "null"], "minimum": 1},
         "unit": {"type": ["string", "null"], "enum": ["SECONDS", "MINUTES", "HOURS", null]},
-        "action": {"type": ["string", "null"], "enum": ["OPEN", "CLOSE", null]},
+        "action": {"type": ["string", "null"], "enum": ["OPEN", "CLOSE", "OPEN_FOR_DURATION", null]},
         "effect_key": {"type": ["string", "null"]},
         "issued_at": {"type": "string", "format": "date-time"},
         "expires_at": {"type": ["string", "null"], "format": "date-time"},
