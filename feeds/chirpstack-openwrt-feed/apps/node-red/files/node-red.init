@@ -122,8 +122,12 @@ start_service() {
     esac
 
     # Auto-provision flows_cred.json with MQTT broker credentials.
-    # Node-RED does not expand env vars in credential fields or MQTT client IDs,
-    # so we write credential entries and concrete broker runtime values here.
+    # Node-RED does not expand env vars in credential fields, MQTT client IDs,
+    # or plain config-node properties like "broker" (mapEnvVarProperties only
+    # substitutes a property whose entire value is a literal "${VAR}" and, on
+    # a missing/empty var, leaves that literal string in place rather than
+    # falling back) -- so we write credential entries and concrete broker
+    # runtime values here, same as the Agroscope broker below.
     local cred_file="/srv/$PACKAGE_NAME/flows_cred.json"
     local flow_file="/srv/$PACKAGE_NAME/flows.json"
     local cloud_broker_node_id="ec43625ea99685a6"
@@ -134,6 +138,7 @@ start_service() {
         CLOUD_BROKER_NODE_ID="$cloud_broker_node_id" \
         DEVICE_EUI_VALUE="$device_eui" \
         DEVICE_MQTT_PASSWORD_VALUE="$mqtt_password" \
+        CLOUD_BROKER_HOST_VALUE="$server_host" \
         AGROSCOPE_BROKER_NODE_ID="$agroscope_broker_node_id" \
         AGROSCOPE_MQTT_HOST_VALUE="$agroscope_runtime_mqtt_host" \
         AGROSCOPE_MQTT_PORT_VALUE="$agroscope_runtime_mqtt_port" \
@@ -146,6 +151,18 @@ const credFile = process.env.CRED_FILE;
 const cloudBrokerNodeId = process.env.CLOUD_BROKER_NODE_ID;
 const deviceEui = process.env.DEVICE_EUI_VALUE;
 const deviceMqttPassword = process.env.DEVICE_MQTT_PASSWORD_VALUE;
+// osi-server.cloud.server_host is populated at account-link time from the
+// linked cloud's delivered MQTT broker URL host (preferred) or its server
+// URL host (fallback) -- see the account-link finalize handler in flows.json.
+// Only the host survives into UCI/env today (the link response's full
+// mqttBrokerUrl scheme+path is not persisted), so we can only reconstruct a
+// "wss://<host>/mqtt" URL, not honor an arbitrary scheme/path from the cloud.
+// A gateway that has never linked, or is linked to the original cloud, keeps
+// server_host empty or equal to the shipped default host, in which case we
+// leave the broker field at its hardcoded flows.json default untouched.
+const cloudBrokerHostRaw = String(process.env.CLOUD_BROKER_HOST_VALUE || '').trim();
+const CLOUD_BROKER_HOST_RE = /^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d{1,5})?$/;
+const cloudBrokerHost = CLOUD_BROKER_HOST_RE.test(cloudBrokerHostRaw) ? cloudBrokerHostRaw : '';
 const agroscopeBrokerNodeId = process.env.AGROSCOPE_BROKER_NODE_ID;
 const agroscopeHost = process.env.AGROSCOPE_MQTT_HOST_VALUE || '127.0.0.1';
 const agroscopePort = process.env.AGROSCOPE_MQTT_PORT_VALUE || '1883';
@@ -185,6 +202,21 @@ try {
   if (cloudBroker && deviceEui && cloudBroker.clientid !== `device_${deviceEui}`) {
     cloudBroker.clientid = `device_${deviceEui}`;
     flowsChanged = true;
+  }
+
+  // Fix B: point the cloud MQTT broker at the linked cloud's host instead of
+  // the hardcoded default, when a linked host is known. cloudBrokerHost is
+  // only set once account-link has persisted osi-server.cloud.server_host;
+  // until then (or if it somehow holds an invalid value) this is a no-op and
+  // the shipped default ("wss://server.opensmartirrigation.org/mqtt") stays,
+  // which is also exactly what a gateway linked to that same default cloud
+  // computes here, so the update is idempotent and behavior-preserving.
+  if (cloudBroker && cloudBrokerHost) {
+    const desiredBrokerUrl = `wss://${cloudBrokerHost}/mqtt`;
+    if (cloudBroker.broker !== desiredBrokerUrl) {
+      cloudBroker.broker = desiredBrokerUrl;
+      flowsChanged = true;
+    }
   }
 
   const agroscopeBroker = flows.find((node) => node && node.id === agroscopeBrokerNodeId);
