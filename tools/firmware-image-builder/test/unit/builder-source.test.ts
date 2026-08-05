@@ -154,12 +154,12 @@ describe('locked builder source', () => {
     }
   });
 
-  it('declares package version 0.1.35 consistently before installation', async () => {
+  it('declares package version 0.1.36 consistently before installation', async () => {
     const packageJson = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
     const packageLock = JSON.parse(await readFile(new URL('../../package-lock.json', import.meta.url), 'utf8')) as { version: string; packages: Record<string, { version?: string }> };
-    expect(packageJson.version).toBe('0.1.35');
-    expect(packageLock.version).toBe('0.1.35');
-    expect(packageLock.packages['']?.version).toBe('0.1.35');
+    expect(packageJson.version).toBe('0.1.36');
+    expect(packageLock.version).toBe('0.1.36');
+    expect(packageLock.packages['']?.version).toBe('0.1.36');
   });
 
   it('binds definition operation IDs to manifest operations without executable argv', async () => {
