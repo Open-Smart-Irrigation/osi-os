@@ -76,6 +76,13 @@ Carried forward from the S2 execution ledger's own close-out triage
 (`.superpowers/sdd/2026-08-05-agrolink-gui-parity-s2/progress.md`); each item
 belongs to the slice that next touches the named file.
 
+**Walkthrough-evidence caveat:** until the double-downlink (HIGH, below) and
+the MQTT broker hardcode (below) are both fixed, any `agrolink-test-01`
+walkthrough will show distorted online/telemetry state (wrong-broker
+heartbeats) and doubled config downlinks on partial-open/flush actions.
+Evidence gathered before those fixes land does not establish real parity
+for the affected rows.
+
 - **HIGH — confirmed edge defect, pre-existing, affects live behavior:** in
   `flows.json` (both bcm2712/bcm2709 profiles), Route Command output 0 wires
   to `write-strega-expectation` *and* a link round-trip that re-enters the
@@ -87,6 +94,17 @@ belongs to the slice that next touches the named file.
   failed" every time. Scheduler/manual paths enter via other link-outs and
   are unaffected. Needs a dedicated edge `flows.json` fix — candidate for S2
   close-out or the S3 edge budget.
+- **MQTT broker hardcoded to the wrong environment:** both edge profile
+  mirrors (`conf/full_raspberrypi_bcm27xx_bcm2712/.../flows.json` and the
+  bcm2709 mirror) hardcode the MQTT node's broker URL to
+  `wss://server.opensmartirrigation.org/mqtt`. A gateway linked to
+  `agro-link.ch` still sends heartbeat/telemetry/status/command_ack over
+  MQTT to the production/test-server broker instead of AgroLink's, so
+  those signals arrive at the wrong environment. REST sync (pending-commands
+  polling) and the valve/command path are unaffected — command
+  acknowledgement rides the REST queue, not MQTT. Needs an edge fix in both
+  profiles; schedule it *before* the walkthrough backfill so the matrix's
+  evidence isn't collected against a misdirected broker.
 - Cloud/edge classification asymmetry on STREGA partial-open/flush: the edge
   treats them as config (`scoped-device-config-guard`), the cloud treats them
   as physical actuation (T6b). Which side is canonical is undecided.
@@ -95,6 +113,15 @@ belongs to the slice that next touches the named file.
   which forges the edge's originator/audit trail. Deliberately exempt today
   (`ROLE_ADMIN` + `claimedBy` only) but needs an explicit decision, not just
   an exemption.
+- **Edge has no defense-in-depth `VALVE_COMMAND` action fence:** the edge
+  does not itself reject a `VALVE_COMMAND` whose inner `action` isn't
+  `OPEN_FOR_DURATION` — today the cloud's `CommandService` boundary is the
+  only place that narrows the action set (S2 T6). Kept as a separate item
+  from the ADMIN-passthrough bullet above rather than folded in: both are
+  "single enforcement point" gaps, but the fixes live in different
+  codebases (an edge `flows.json` action check here vs. a cloud endpoint
+  decision there), so collapsing them would obscure that they need two
+  independent fixes.
 - `claimedBy`-only CONFIG downlinks (`strega/interval|model|magnet`,
   `lsn50/*`, `kiwi/*`) are unusable by granted scoped users — a parity gap
   for a later slice.
@@ -161,3 +188,15 @@ owner is never caught by the false positive documented on
 weatherRowsReadOnly above ... A super-admin ... is likewise never forced
 read-only"), confirmed by inspection. It is not carried forward here
 either.
+
+Note on the live `agrolink-test-01` valve command pairing: the edge already
+runs the S2 command-ledger commit (`c8168986`, hash-identical to branch
+head — deployed on-site mid-slice), ahead of the not-yet-deployed cloud
+side. That live pair is currently **half-deployed and fail-closed**: any
+valve command the still-old cloud sends is rejected (`invalid_expires_at`),
+never mis-actuated. The pending cloud deploy completes the pair; no further
+edge redeploy is needed for S2. The "cloud-first" deploy ordering (deploy
+cloud before edge) only binds for *future* gateways being brought onto a
+matching edge/cloud pair from scratch — it does not describe
+`agrolink-test-01`'s current state, which is edge-ahead by design of the
+on-site deployment.
