@@ -29,7 +29,7 @@ export const DEPENDENCY_EGRESS_OPERATION_HOSTS = Object.freeze({
   'frontend-install': Object.freeze(['registry.npmjs.org']),
   'build-image': Object.freeze([
     'busybox.net', 'cdn.kernel.org', 'codeload.github.com', 'crates.io', 'download.savannah.gnu.org',
-    'downloads.openwrt.org', 'ftp.gnu.org', 'git.kernel.org', 'git.openwrt.org', 'github.com',
+    'downloads.openwrt.org', 'ftp.gnu.org', 'ftpmirror.gnu.org', 'git.kernel.org', 'git.openwrt.org', 'github.com',
     'mirror2.openwrt.org', 'nodejs.org', 'objects.githubusercontent.com', 'raw.githubusercontent.com',
     'registry.npmjs.org', 'sources.cdn.openwrt.org', 'static.crates.io', 'static.rust-lang.org', 'www.kernel.org',
   ]),
