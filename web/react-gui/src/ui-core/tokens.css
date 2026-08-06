@@ -37,6 +37,9 @@
   --warn-bg: #FEF3C7;
   --warn-text: #92400E;
   --warn-border: #F59E0B;
+  --info-bg: #DBEAFE;
+  --info-text: #1E3A8A;
+  --info-border: #3B82F6;
   /* error pair follows the success/warn convention (wash bg + dark text) so
      bare text-[var(--error-text)] reads on light surfaces; the old
      #DC2626/#FFFFFF pair rendered white-on-white in ~30 files. */
@@ -87,6 +90,9 @@ html[data-theme='dark'] {
   --warn-bg: #3A2B0B;
   --warn-text: #FDE68A;
   --warn-border: #F59E0B;
+  --info-bg: #172B48;
+  --info-text: #DBEAFE;
+  --info-border: #60A5FA;
   --error-bg: #7F1D1D;
   --error-text: #FEE2E2;
   --danger-fg: #F87171;

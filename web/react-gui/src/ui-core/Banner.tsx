@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
 
-export type BannerTone = 'warn' | 'error' | 'success';
+export type BannerTone = 'warn' | 'error' | 'success' | 'info';
 
 const TONE_CLASSES: Record<BannerTone, string> = {
   warn: 'border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-text)]',
   error: 'border-[var(--danger-fg)] bg-[var(--error-bg)] text-[var(--error-text)]',
   success: 'border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-text)]',
+  info: 'border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-text)]',
 };
 
 export interface BannerProps {
