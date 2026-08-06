@@ -183,17 +183,17 @@ function normalizeSeverity(severity: unknown): IrrigationSeverity {
 }
 
 function severityTone(severity: IrrigationSeverity): string {
-  if (severity === 'warning') return 'border-amber-300 bg-amber-50 text-amber-900';
-  if (severity === 'critical') return 'border-red-300 bg-red-50 text-red-900';
-  if (severity === 'success') return 'border-emerald-300 bg-emerald-50 text-emerald-900';
+  if (severity === 'warning') return 'border-[var(--cal-warn-border)] bg-[var(--cal-warn-bg)] text-[var(--cal-warn-text)]';
+  if (severity === 'critical') return 'border-[var(--cal-bad-border)] bg-[var(--cal-bad-bg)] text-[var(--cal-bad-text)]';
+  if (severity === 'success') return 'border-[var(--cal-good-border)] bg-[var(--cal-good-bg)] text-[var(--cal-good-text)]';
   return 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)]';
 }
 
 function markerTone(severity: IrrigationSeverity): string {
-  if (severity === 'warning') return 'bg-amber-500 ring-amber-100';
-  if (severity === 'critical') return 'bg-red-600 ring-red-100';
-  if (severity === 'success') return 'bg-emerald-600 ring-emerald-100';
-  return 'bg-sky-600 ring-sky-100';
+  if (severity === 'warning') return 'bg-[var(--cal-warn-solid)] ring-[var(--cal-warn-bg)]';
+  if (severity === 'critical') return 'bg-[var(--cal-bad-solid)] ring-[var(--cal-bad-bg)]';
+  if (severity === 'success') return 'bg-[var(--cal-good-solid)] ring-[var(--cal-good-bg)]';
+  return 'bg-[var(--cal-cool-solid)] ring-[var(--cal-cool-bg)]';
 }
 
 function normalizeEvent(
@@ -313,7 +313,7 @@ export const IrrigationEventTimelineView: React.FC<IrrigationEventTimelineViewPr
                   {event.details.map((detail) => (
                     <span
                       key={detail}
-                      className="rounded-md border border-current/30 bg-white/50 px-2 py-1 text-xs font-medium"
+                      className="rounded-md border border-current/30 bg-[color-mix(in_srgb,var(--card)_50%,transparent)] px-2 py-1 text-xs font-medium"
                     >
                       {detail}
                     </span>
